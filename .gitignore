@@ -1,0 +1,9 @@
+# build output
+/bin/
+# local config (mirrors config.example.yaml; env-indirected so not secret, but local anyway)
+/config.yaml
+# ledger
+/data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

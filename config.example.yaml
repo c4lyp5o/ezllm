@@ -1,0 +1,37 @@
+# ezllm — example config. Copy to config.yaml and set the referenced env vars.
+# Secrets are NEVER written here: only env-var names (indirection at load time).
+
+listen: "127.0.0.1:20129"
+
+client_tokens:
+  - name: hermes
+    token_env: EZLLM_TOKEN_HERMES
+
+providers:
+  opencode-go:
+    # OpenCode Go. REQUIRES x-opencode-session header (adapter adds it in M3).
+    # `/v1/chat/completions` models only; `/responses` models (grok/gpt-luna) are Phase 2.
+    base_url: https://opencode.ai/zen/go/v1
+    keys:
+      - env: OPENCODE_GO_API_KEY
+
+  bailian-coding:
+    # Alibaba Cloud Token Plan (INTL). Verified endpoint — do NOT use
+    # coding-intl.dashscope.aliyuncs.com/v1 with this key (it 401s).
+    base_url: https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+    keys:
+      - env: BAILIAN_CODING_API_KEY
+
+aliases:
+  ez/omen:        { provider: opencode-go,    model: omen-alpha }
+  ez/qwen-flash:  { provider: bailian-coding, model: qwen3.8-flash,
+                    fallback: [ { provider: opencode-go, model: qwen3.8-flash } ] }
+  ez/glm:         { provider: opencode-go,    model: glm-5.2 }
+
+ledger:
+  path: data/ezllm.sqlite
+
+cooldown:
+  on_429: 300s
+  on_5xx: 60s
+  max_per_key: 3

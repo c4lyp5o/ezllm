@@ -1,13 +1,17 @@
 // Package config loads and validates ezllm's YAML configuration.
 //
-// Secrets NEVER live in the config file: every credential is an env-var
-// indirection (`token_env`, `keys[].env`) resolved at load time. Load fails
-// fast with the names of missing env vars (never their values).
+// The config file is BOOTSTRAP ONLY: it seeds accounts, provider keys and
+// client tokens into SQLite on first boot. Everything after that is managed
+// through the admin API (M3+). Secrets NEVER live in the file — every
+// credential is an env-var indirection (`token_env`, `keys[].env`) resolved at
+// load time, and Load reports missing env vars by NAME, never by value.
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -18,34 +22,55 @@ import (
 // DefaultListen is loopback-only unless EZLLM_ADDR / -addr says otherwise.
 const DefaultListen = "127.0.0.1:20129"
 
+// DefaultDataDir is repo-relative so Docker can bind-mount ./data (Calypso #5).
+const DefaultDataDir = "data"
+
+// namespaceRE constrains account namespaces: lowercase alnum plus _ and -,
+// 1-32 chars, and crucially NO '/' (a slash would collide with the
+// "<namespace>/<model>" routing form).
+var namespaceRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
+
+// validKinds mirrors provider.ValidKinds, duplicated as strings so the config
+// package does not import provider (keeps validation dependency-free).
+var validKinds = []string{"opencode-go", "openai-compatible", "anthropic-compatible"}
+
 type TokenRef struct {
 	Name     string `yaml:"name"`
 	TokenEnv string `yaml:"token_env"`
+	Roles    string `yaml:"roles"` // csv: infer,admin (default "infer")
 }
 
 type KeyRef struct {
-	Env string `yaml:"env"`
+	Env   string `yaml:"env"`
+	Label string `yaml:"label"`
 }
 
+// Provider seeds one account. `namespace` is how clients address it:
+// "<namespace>/<model>".
 type Provider struct {
-	BaseURL string   `yaml:"base_url"`
-	Keys    []KeyRef `yaml:"keys"`
+	Namespace             string            `yaml:"namespace"`
+	Kind                  string            `yaml:"kind"` // opencode-go | openai-compatible | anthropic-compatible
+	BaseURL               string            `yaml:"base_url"`
+	Keys                  []KeyRef          `yaml:"keys"`
+	RequiresSessionHeader *bool             `yaml:"requires_session_header,omitempty"`
+	ProbeDelayMs          int               `yaml:"probe_delay_ms"`
+	QuotaMode             string            `yaml:"quota_mode"`
+	CustomHeaders         map[string]string `yaml:"custom_headers"`
 }
 
-// Hop is one provider/model step in a request's routing chain.
-type Hop struct {
-	Provider string `yaml:"provider"`
-	Model    string `yaml:"model"`
-}
-
-type Alias struct {
-	Provider string `yaml:"provider"`
-	Model    string `yaml:"model"`
-	Fallback []Hop  `yaml:"fallback,omitempty"`
+// RequiresSession reports whether the adapter must inject x-opencode-session.
+// Defaults to true for opencode-go (verified: missing header -> 400
+// MissingSessionID) and false otherwise.
+func (p Provider) RequiresSession() bool {
+	if p.RequiresSessionHeader != nil {
+		return *p.RequiresSessionHeader
+	}
+	return p.Kind == "opencode-go"
 }
 
 type Ledger struct {
-	Path string `yaml:"path"`
+	BatchSize int    `yaml:"batch_size"`
+	BatchWait string `yaml:"batch_wait"`
 }
 
 type Cooldown struct {
@@ -55,16 +80,19 @@ type Cooldown struct {
 }
 
 type Config struct {
-	Listen       string              `yaml:"listen"`
-	ClientTokens []TokenRef          `yaml:"client_tokens"`
-	Providers    map[string]Provider `yaml:"providers"`
-	Aliases      map[string]Alias    `yaml:"aliases"`
-	Ledger       Ledger              `yaml:"ledger"`
-	Cooldown     Cooldown            `yaml:"cooldown"`
+	Listen             string              `yaml:"listen"`
+	DataDir            string              `yaml:"data_dir"`
+	MasterKeyFile      string              `yaml:"master_key_file"`
+	MaxBodyMiB         int                 `yaml:"max_body_mib"`
+	UpstreamTimeoutStr string              `yaml:"upstream_timeout"`
+	ClientTokens       []TokenRef          `yaml:"client_tokens"`
+	Providers          map[string]Provider `yaml:"providers"`
+	Ledger             Ledger              `yaml:"ledger"`
+	Cooldown           Cooldown            `yaml:"cooldown"`
 
-	// tokenValues maps resolved token value -> client name (in-memory only,
-	// never logged). Built by Validate.
-	tokenValues map[string]string
+	// derived
+	UpstreamTimeout time.Duration
+	LedgerBatchWait time.Duration
 }
 
 // Load reads, parses and validates the config file at path.
@@ -83,9 +111,8 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-// Validate checks structural integrity, resolves env indirections and applies
-// defaults. It collects every problem into one error so a fresh checkout
-// reports all missing env vars in a single run.
+// Validate checks structural integrity and applies defaults. It collects every
+// problem into one error so a fresh checkout reports all issues in a single run.
 func (c *Config) Validate() error {
 	var errs []string
 
@@ -96,36 +123,93 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Sprintf("listen: %q must be host:port", c.Listen))
 	}
 
+	// --- data dir / master key ---
+	if c.DataDir == "" {
+		c.DataDir = DefaultDataDir
+	}
+	// master_key_file may be empty (env or default path is used); only validate
+	// its SHAPE when given, and never read it here — main.go owns key loading.
+	if c.MasterKeyFile != "" && strings.ContainsAny(c.MasterKeyFile, "\n\t") {
+		errs = append(errs, "master_key_file: must be a single path")
+	}
+
+	// --- body cap ---
+	if c.MaxBodyMiB <= 0 {
+		c.MaxBodyMiB = 32
+	} else if c.MaxBodyMiB > 256 {
+		errs = append(errs, "max_body_mib: above 256 is almost certainly a mistake")
+	}
+
+	// --- upstream timeout ---
+	if c.UpstreamTimeoutStr == "" {
+		c.UpstreamTimeout = 0 // unbounded: streaming responses have no natural deadline
+	} else if d, err := time.ParseDuration(c.UpstreamTimeoutStr); err != nil {
+		errs = append(errs, fmt.Sprintf("upstream_timeout: %v", err))
+	} else {
+		c.UpstreamTimeout = d
+	}
+
 	// --- client tokens ---
-	c.tokenValues = make(map[string]string, len(c.ClientTokens))
 	if len(c.ClientTokens) == 0 {
 		errs = append(errs, "client_tokens: at least one required")
 	}
+	seenNames := map[string]bool{}
+	seenEnvs := map[string]bool{}
 	for _, t := range c.ClientTokens {
 		if t.Name == "" || t.TokenEnv == "" {
 			errs = append(errs, "client_tokens: each entry needs name + token_env")
 			continue
 		}
-		v := os.Getenv(t.TokenEnv)
-		if v == "" {
+		if seenNames[t.Name] {
+			errs = append(errs, fmt.Sprintf("client_tokens: duplicate name %q", t.Name))
+		}
+		seenNames[t.Name] = true
+		// Two tokens sharing one env var would make attribution ambiguous.
+		if seenEnvs[t.TokenEnv] {
+			errs = append(errs, fmt.Sprintf("client_tokens: env %s reused by %q (attribution would be ambiguous)", t.TokenEnv, t.Name))
+		}
+		seenEnvs[t.TokenEnv] = true
+		if os.Getenv(t.TokenEnv) == "" {
 			errs = append(errs, fmt.Sprintf("client_tokens[%s]: env %s is not set", t.Name, t.TokenEnv))
-			continue
 		}
-		if _, dup := c.tokenValues[v]; dup {
-			errs = append(errs, fmt.Sprintf("client_tokens[%s]: duplicate token value", t.Name))
-			continue
+		for _, role := range strings.Split(orDefault(t.Roles, "infer"), ",") {
+			switch strings.TrimSpace(role) {
+			case "infer", "admin":
+			default:
+				errs = append(errs, fmt.Sprintf("client_tokens[%s]: unknown role %q (want infer|admin)", t.Name, role))
+			}
 		}
-		c.tokenValues[v] = t.Name
 	}
 
 	// --- providers ---
 	if len(c.Providers) == 0 {
 		errs = append(errs, "providers: at least one required")
 	}
+	seenNS := map[string]string{} // namespace -> provider name
 	for name, p := range c.Providers {
 		if !strings.HasPrefix(p.BaseURL, "https://") && !strings.HasPrefix(p.BaseURL, "http://") {
 			errs = append(errs, fmt.Sprintf("providers[%s]: base_url must be an absolute http(s) URL, got %q", name, p.BaseURL))
 		}
+		if strings.HasSuffix(p.BaseURL, "/") {
+			errs = append(errs, fmt.Sprintf("providers[%s]: base_url must not end in '/' (adapter appends paths)", name))
+		}
+		if p.Kind == "" {
+			errs = append(errs, fmt.Sprintf("providers[%s]: kind is required (one of %s)", name, strings.Join(validKinds, ", ")))
+		} else if !contains(validKinds, p.Kind) {
+			errs = append(errs, fmt.Sprintf("providers[%s]: unknown kind %q (want one of %s)", name, p.Kind, strings.Join(validKinds, ", ")))
+		}
+		ns := p.Namespace
+		if ns == "" {
+			ns = name // default: the provider map key
+		}
+		if !namespaceRE.MatchString(ns) {
+			errs = append(errs, fmt.Sprintf("providers[%s]: namespace %q invalid — want ^[a-z0-9][a-z0-9_-]{0,31}$ and no '/'", name, ns))
+		}
+		if prev, dup := seenNS[ns]; dup {
+			errs = append(errs, fmt.Sprintf("providers[%s]: namespace %q already used by %q", name, ns, prev))
+		}
+		seenNS[ns] = name
+
 		if len(p.Keys) == 0 {
 			errs = append(errs, fmt.Sprintf("providers[%s]: at least one key required", name))
 		}
@@ -138,32 +222,30 @@ func (c *Config) Validate() error {
 				errs = append(errs, fmt.Sprintf("providers[%s].keys[%d]: env %s is not set", name, i, k.Env))
 			}
 		}
-	}
-
-	// --- aliases ---
-	if len(c.Aliases) == 0 {
-		errs = append(errs, "aliases: at least one required")
-	}
-	for name, a := range c.Aliases {
-		if a.Model == "" {
-			errs = append(errs, fmt.Sprintf("aliases[%s]: model is required", name))
+		if p.ProbeDelayMs < 0 || p.ProbeDelayMs > 10000 {
+			errs = append(errs, fmt.Sprintf("providers[%s]: probe_delay_ms %d out of range 0..10000", name, p.ProbeDelayMs))
 		}
-		if _, ok := c.Providers[a.Provider]; !ok {
-			errs = append(errs, fmt.Sprintf("aliases[%s]: unknown provider %q", name, a.Provider))
-		}
-		for i, h := range a.Fallback {
-			if _, ok := c.Providers[h.Provider]; !ok {
-				errs = append(errs, fmt.Sprintf("aliases[%s].fallback[%d]: unknown provider %q", name, i, h.Provider))
-			}
-			if h.Model == "" {
-				errs = append(errs, fmt.Sprintf("aliases[%s].fallback[%d]: model is required", name, i))
-			}
+		switch p.QuotaMode {
+		case "", "probe", "percent", "money", "tokens", "none":
+		default:
+			errs = append(errs, fmt.Sprintf("providers[%s]: quota_mode %q invalid (want probe|percent|money|tokens|none)", name, p.QuotaMode))
 		}
 	}
 
-	// --- ledger defaults ---
-	if c.Ledger.Path == "" {
-		c.Ledger.Path = "data/ezllm.sqlite"
+	// --- ledger defaults + validation ---
+	if c.Ledger.BatchSize <= 0 {
+		c.Ledger.BatchSize = 32
+	} else if c.Ledger.BatchSize > 1000 {
+		errs = append(errs, "ledger.batch_size: above 1000 delays visibility for no benefit")
+	}
+	if c.Ledger.BatchWait == "" {
+		c.LedgerBatchWait = 250 * time.Millisecond
+	} else if d, err := time.ParseDuration(c.Ledger.BatchWait); err != nil {
+		errs = append(errs, fmt.Sprintf("ledger.batch_wait: %v", err))
+	} else if d < 10*time.Millisecond {
+		errs = append(errs, "ledger.batch_wait: below 10ms defeats batching")
+	} else {
+		c.LedgerBatchWait = d
 	}
 
 	// --- cooldown defaults + validation ---
@@ -176,9 +258,9 @@ func (c *Config) Validate() error {
 	if c.Cooldown.MaxPerKey == 0 {
 		c.Cooldown.MaxPerKey = 3
 	}
-	for label, d := range map[string]string{"on_429": c.Cooldown.On429, "on_5xx": c.Cooldown.On5xx} {
-		if _, err := time.ParseDuration(d); err != nil {
-			errs = append(errs, fmt.Sprintf("cooldown.%s: %v", label, err))
+	for _, d := range []struct{ label, v string }{{"on_429", c.Cooldown.On429}, {"on_5xx", c.Cooldown.On5xx}} {
+		if _, err := time.ParseDuration(d.v); err != nil {
+			errs = append(errs, fmt.Sprintf("cooldown.%s: %v", d.label, err))
 		}
 	}
 	if c.Cooldown.MaxPerKey < 1 {
@@ -192,31 +274,19 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// Authenticate resolves a bearer token to its client name (constant-time per
-// candidate). Returns "" when the token is unknown.
-func (c *Config) Authenticate(token string) string {
-	name := ""
-	for v, n := range c.tokenValues {
-		if len(v) == len(token) && constantTimeEq(v, token) {
-			name = n // keep scanning: no early exit on match
-		}
+// Namespace returns the effective namespace for a provider (explicit or the map key).
+func (c *Config) Namespace(providerName string) string {
+	p, ok := c.Providers[providerName]
+	if !ok || p.Namespace == "" {
+		return providerName
 	}
-	return name
+	return p.Namespace
 }
 
-// constantTimeEq compares equal-length strings without early exit.
-func constantTimeEq(a, b string) bool {
-	var v byte
-	for i := 0; i < len(a); i++ {
-		v |= a[i] ^ b[i]
-	}
-	return v == 0
-}
-
-// AliasNames returns sorted alias names (stable /v1/models output).
-func (c *Config) AliasNames() []string {
-	names := make([]string, 0, len(c.Aliases))
-	for n := range c.Aliases {
+// ProviderNames returns sorted provider names (stable seeding/logging order).
+func (c *Config) ProviderNames() []string {
+	names := make([]string, 0, len(c.Providers))
+	for n := range c.Providers {
 		names = append(names, n)
 	}
 	sort.Strings(names)
@@ -232,3 +302,22 @@ func (c *Config) ClientNames() []string {
 	sort.Strings(names)
 	return names
 }
+
+func contains(list []string, v string) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+func orDefault(v, def string) string {
+	if strings.TrimSpace(v) == "" {
+		return def
+	}
+	return v
+}
+
+// ErrNoProviders is returned by helpers that require at least one provider.
+var ErrNoProviders = errors.New("config: no providers configured")

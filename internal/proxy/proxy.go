@@ -1,0 +1,510 @@
+// Package proxy forwards a client request upstream and copies the response back
+// byte-for-byte, tapping usage for the ledger.
+//
+// THE INVARIANT: for streaming responses we never buffer, never re-serialize,
+// and never add latency. Bytes go upstream->client via io.Copy semantics with a
+// Flush per chunk; the usage tap is a read-only observer on a tee.
+package proxy
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/provider"
+	"github.com/c4lyp5o/ezllm/internal/store"
+)
+
+// maxBodyBytes caps the request body we will read into memory (we must read it
+// to swap `model`). 32 MiB is generous for chat payloads and bounds abuse.
+const maxBodyBytes = 32 << 20
+
+// maxStreamBytes bounds what the usage tap inspects. The response itself is
+// NOT bounded (it is streamed), only the per-line scan buffer.
+const maxScanToken = 4 << 20
+
+// UsageTapper accumulates usage across an SSE stream.
+//
+// A single stream can carry usage in SEVERAL events, and the later ones are
+// authoritative:
+//
+//	anthropic  message_start gives input/cache breakdown with output_tokens=0,
+//	           then message_delta gives the FINAL input+output totals. Tapping
+//	           only the first event records out=0 (observed live).
+//	responses  usage arrives on response.completed OR, when the response is
+//	           truncated by max_output_tokens, on response.incomplete. Tapping
+//	           only .completed records all-zero usage (observed live).
+//
+// So we merge rather than take the first hit.
+type UsageTapper struct {
+	surface provider.Surface
+	cur     *store.Usage
+}
+
+// NewUsageTapper builds a tapper for one surface.
+func NewUsageTapper(surface provider.Surface) *UsageTapper {
+	return &UsageTapper{surface: surface}
+}
+
+// Observe inspects one SSE data line (read-only; bytes are forwarded untouched).
+func (t *UsageTapper) Observe(line []byte) {
+	if len(line) < 6 || !bytes.HasPrefix(line, []byte("data:")) {
+		return
+	}
+	if u := tapSSELine(line, t.surface); u != nil {
+		t.cur = MergeUsage(t.cur, u)
+	}
+}
+
+// Usage returns the merged result, or nil when the stream carried none.
+func (t *UsageTapper) Usage() *store.Usage { return t.cur }
+
+// ErrUnknownModel is returned when the requested model cannot be resolved.
+var ErrUnknownModel = errors.New("proxy: unknown model")
+
+// Route is a resolved destination: one account + one key + the model to send.
+type Route struct {
+	Account  provider.Account
+	KeyID    int64
+	KeyPlain string // decrypted; NEVER logged
+	KeyHint  string
+	Model    string // model id to send upstream
+	Alias    string // what the client asked for (combo name or namespace/model)
+	Surface  provider.Surface
+}
+
+// Result carries what the ledger needs after a dispatch.
+type Result struct {
+	Status        int
+	Stream        bool
+	TTFTms        *int64
+	Totalms       *int64
+	Usage         *store.Usage
+	EndpointID    string
+	UpstreamModel string
+	Err           string
+}
+
+// Rewriter resolves the client's requested model into a Route. The router
+// package implements it (M4); M2 wires a direct single-account resolver.
+type Rewriter interface {
+	Resolve(ctx context.Context, requestedModel string, surface provider.Surface, client string) (Route, error)
+}
+
+// Dispatcher performs the actual upstream call.
+type Dispatcher struct {
+	client   *http.Client
+	registry *provider.Registry
+}
+
+// NewDispatcher builds a Dispatcher. timeout governs connection/response-header
+// time only; streaming bodies are unbounded by design.
+func NewDispatcher(client *http.Client, registry *provider.Registry) *Dispatcher {
+	return &Dispatcher{client: client, registry: registry}
+}
+
+// SwapModel rewrites the `model` field of a JSON request body, preserving every
+// other field byte-for-byte in meaning (unknown provider-specific fields such
+// as extra_body, thinking, enable_thinking, tools, reasoning,
+// previous_response_id all survive because we round-trip through a map).
+func SwapModel(body []byte, newModel string) ([]byte, string, error) {
+	if len(body) == 0 {
+		return nil, "", errors.New("proxy: empty body")
+	}
+	var m map[string]any
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.UseNumber() // avoid float64 mangling of large ints
+	if err := dec.Decode(&m); err != nil {
+		return nil, "", fmt.Errorf("proxy: body is not a JSON object: %w", err)
+	}
+	// `null`, `[]`, `"str"` etc. decode without error into a nil/non-object map;
+	// assigning into a nil map panics, so reject explicitly.
+	if m == nil {
+		return nil, "", errors.New("proxy: body is not a JSON object")
+	}
+	old, _ := m["model"].(string)
+	m["model"] = newModel
+	out, err := json.Marshal(m)
+	if err != nil {
+		return nil, old, fmt.Errorf("proxy: re-marshal: %w", err)
+	}
+	return out, old, nil
+}
+
+// IsStream reports whether the body asks for streaming (without mutating it).
+func IsStream(body []byte) bool {
+	var m struct {
+		Stream bool `json:"stream"`
+	}
+	if err := json.Unmarshal(body, &m); err != nil {
+		return false
+	}
+	return m.Stream
+}
+
+// Forward sends the (already model-swapped) body upstream and copies the
+// response to w. It returns the ledger Result.
+func (d *Dispatcher) Forward(ctx context.Context, w http.ResponseWriter, r *http.Request, rt Route, body []byte) (Result, error) {
+	ad, err := d.registry.Get(rt.Account.Kind)
+	if err != nil {
+		return Result{}, err
+	}
+	url := strings.TrimSuffix(rt.Account.BaseURL, "/") + provider.SurfacePath(rt.Surface)
+
+	upReq, err := http.NewRequestWithContext(ctx, r.Method, url, bytes.NewReader(body))
+	if err != nil {
+		return Result{}, err
+	}
+	// Copy safe client headers, then let the adapter apply auth + strip its own.
+	copyClientHeaders(upReq, r, ad.StripHeaders())
+	if err := ad.PrepareRequest(ctx, upReq, rt.Account, rt.KeyPlain, rt.Surface); err != nil {
+		return Result{}, err
+	}
+	// Content-Length must match the rewritten body.
+	upReq.ContentLength = int64(len(body))
+	upReq.Header.Set("Content-Type", "application/json")
+
+	start := time.Now()
+	resp, err := d.client.Do(upReq)
+	if err != nil {
+		return Result{Stream: IsStream(body), Totalms: msPtr(time.Since(start)), Err: err.Error()}, err
+	}
+	defer resp.Body.Close()
+
+	res := Result{
+		Status:        resp.StatusCode,
+		Stream:        IsStream(body),
+		EndpointID:    resp.Header.Get("x-opencode-endpoint-id"),
+		UpstreamModel: resp.Header.Get("x-opencode-upstream-model-id"),
+	}
+	// Propagate response headers that matter, minus hop-by-hop and identity.
+	copyResponseHeaders(w, resp)
+
+	isSSE := strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")
+	if res.Stream && isSSE {
+		ttft, usage, copyErr := d.streamCopy(ctx, w, resp, rt.Surface)
+		res.TTFTms = msAtLeastOne(ttft)
+		if usage != nil {
+			res.Usage = usage
+		}
+		if copyErr != nil {
+			// The client has already received a 200 + partial stream, so we
+			// cannot change the status. Record the truncation instead: a
+			// half-delivered stream must never look like a clean success in
+			// the ledger.
+			res.Err = "stream truncated: " + copyErr.Error()
+		}
+	} else {
+		// Non-streamed: read the body once, tap usage, then write it out.
+		raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
+		if err != nil {
+			res.Err = err.Error()
+			return res, err
+		}
+		// A 200 with a completely empty body is not a valid provider response
+		// for any of our three surfaces (all return JSON). It means the
+		// upstream died after headers were written. Record it so a truncated
+		// call never looks like a clean success in the ledger, and tell the
+		// client with a 502 rather than an empty 200.
+		if resp.StatusCode == http.StatusOK && len(bytes.TrimSpace(raw)) == 0 {
+			res.Status = http.StatusBadGateway
+			res.Err = "upstream returned an empty body"
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`{"error":{"type":"upstream_error","message":"upstream returned an empty body","code":502}}`))
+			res.Totalms = msPtr(time.Since(start))
+			return res, nil
+		}
+		if u := tapJSONUsage(raw, rt.Surface); u != nil {
+			res.Usage = u
+		}
+		w.WriteHeader(resp.StatusCode)
+		if _, werr := w.Write(raw); werr != nil {
+			res.Err = "client write: " + werr.Error()
+		}
+	}
+	res.Totalms = msPtr(time.Since(start))
+	return res, nil
+}
+
+// streamCopy copies SSE upstream->client with a Flush per chunk, observing
+// usage events without altering a single byte. Returns (ttft, usage, err) where
+// err is non-nil when the stream was truncated — the caller records it, since
+// the 200 status has already been sent and cannot be changed.
+func (d *Dispatcher) streamCopy(ctx context.Context, w http.ResponseWriter, resp *http.Response, surface provider.Surface) (time.Duration, *store.Usage, error) {
+	start := time.Now()
+	var ttft time.Duration
+	var firstByte bool
+
+	flusher, _ := w.(http.Flusher)
+	// Headers already copied; write status now so the client starts receiving.
+	w.WriteHeader(resp.StatusCode)
+	if flusher != nil {
+		flusher.Flush()
+	}
+
+	br := bufio.NewReaderSize(resp.Body, 64*1024)
+	sc := bufio.NewScanner(br)
+	sc.Buffer(make([]byte, 0, 64*1024), maxScanToken)
+
+	// We must forward EXACT bytes. Scanner strips the trailing newline, so we
+	// re-emit "\n" per line — SSE lines are newline-terminated, which makes this
+	// lossless for well-formed streams. Anything unusual (bare \r) is handled by
+	// falling back to a raw copy if the scanner errors.
+	// Read-only usage tap. Merges across events: Anthropic's message_start
+	// carries the input/cache breakdown while message_delta carries the final
+	// output totals, so taking only the first hit would record out=0.
+	tapper := NewUsageTapper(surface)
+	for sc.Scan() {
+		line := sc.Bytes()
+		if !firstByte {
+			ttft = time.Since(start)
+			firstByte = true
+		}
+		if _, err := w.Write(line); err != nil {
+			return ttft, tapper.Usage(), fmt.Errorf("client write: %w", err)
+		}
+		if _, err := w.Write([]byte("\n")); err != nil {
+			return ttft, tapper.Usage(), fmt.Errorf("client write: %w", err)
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+		tapper.Observe(line)
+	}
+	if err := sc.Err(); err != nil {
+		// Scanner hit an over-long line or a read error: drain the rest raw so
+		// the client still gets a complete (if untapped) stream.
+		if _, cerr := io.Copy(w, br); cerr != nil {
+			if flusher != nil {
+				flusher.Flush()
+			}
+			if !firstByte {
+				ttft = time.Since(start)
+			}
+			return ttft, tapper.Usage(), fmt.Errorf("upstream read: %w (scanner: %v)", cerr, err)
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+		if !firstByte {
+			ttft = time.Since(start)
+		}
+		// An over-long line is survivable (bytes still forwarded); a genuine
+		// upstream read error means the stream was truncated.
+		if errors.Is(err, bufio.ErrTooLong) {
+			return ttft, tapper.Usage(), nil
+		}
+		return ttft, tapper.Usage(), fmt.Errorf("upstream read: %w", err)
+	}
+	if !firstByte {
+		ttft = time.Since(start)
+	}
+	return ttft, tapper.Usage(), nil
+}
+
+// tapSSELine extracts usage from one SSE data line for the given surface.
+//
+//	openai     : final chunk carries "usage"
+//	anthropic  : message_start + message_delta both carry usage (delta has the
+//	             authoritative output_tokens), so we merge
+//	responses  : response.completed carries the full response incl. usage
+func tapSSELine(line []byte, surface provider.Surface) *store.Usage {
+	payload := bytes.TrimSpace(bytes.TrimPrefix(bytes.TrimSpace(line), []byte("data:")))
+	if len(payload) == 0 || bytes.Equal(payload, []byte("[DONE]")) {
+		return nil
+	}
+	var ev map[string]any
+	if err := json.Unmarshal(payload, &ev); err != nil {
+		return nil
+	}
+	switch surface {
+	case provider.SurfaceAnthropic:
+		typ, _ := ev["type"].(string)
+		switch typ {
+		case "message_start":
+			if msg, ok := ev["message"].(map[string]any); ok {
+				if u, ok := msg["usage"].(map[string]any); ok {
+					n := store.NormalizeUsage(store.SurfaceAnthropic, u)
+					return &n
+				}
+			}
+		case "message_delta":
+			if u, ok := ev["usage"].(map[string]any); ok {
+				n := store.NormalizeUsage(store.SurfaceAnthropic, u)
+				return &n
+			}
+		}
+	case provider.SurfaceResponses:
+		typ, _ := ev["type"].(string)
+		// Usage rides on the TERMINAL event — which is response.completed on
+		// success but response.incomplete when max_output_tokens truncated the
+		// response (observed live). Also accept response.failed rather than
+		// silently recording zero usage for a truncated stream.
+		switch typ {
+		case "response.completed", "response.incomplete", "response.failed":
+			if r, ok := ev["response"].(map[string]any); ok {
+				if u, ok := r["usage"].(map[string]any); ok {
+					n := store.NormalizeUsage(store.SurfaceResponses, u)
+					return &n
+				}
+			}
+		}
+		if u, ok := ev["usage"].(map[string]any); ok {
+			n := store.NormalizeUsage(store.SurfaceResponses, u)
+			return &n
+		}
+	default: // openai
+		if u, ok := ev["usage"].(map[string]any); ok {
+			n := store.NormalizeUsage(store.SurfaceOpenAI, u)
+			return &n
+		}
+	}
+	return nil
+}
+
+// tapJSONUsage extracts usage from a complete (non-streamed) JSON body.
+func tapJSONUsage(body []byte, surface provider.Surface) *store.Usage {
+	var ev map[string]any
+	if err := json.Unmarshal(body, &ev); err != nil {
+		return nil
+	}
+	if u, ok := ev["usage"].(map[string]any); ok {
+		n := store.NormalizeUsage(store2surface(surface), u)
+		return &n
+	}
+	return nil
+}
+
+// MergeUsage combines an earlier (message_start) and later (message_delta)
+// Anthropic usage object: the delta carries authoritative output totals, the
+// start carries the input/cache breakdown.
+func MergeUsage(base, delta *store.Usage) *store.Usage {
+	if base == nil {
+		return delta
+	}
+	if delta == nil {
+		return base
+	}
+	out := *base
+	if delta.Out > 0 {
+		out.Out = delta.Out
+	}
+	if delta.CachedRead > 0 {
+		out.CachedRead = delta.CachedRead
+	}
+	if delta.CachedWrite > 0 {
+		out.CachedWrite = delta.CachedWrite
+	}
+	if delta.Reasoning > 0 {
+		out.Reasoning = delta.Reasoning
+	}
+	if delta.In > 0 {
+		out.In = delta.In
+	}
+	out.Raw = delta.Raw
+	return &out
+}
+
+// --- header plumbing ---
+
+var hopByHop = map[string]bool{
+	"Connection": true, "Keep-Alive": true, "Proxy-Authenticate": true,
+	"Proxy-Authorization": true, "Te": true, "Trailer": true,
+	"Transfer-Encoding": true, "Upgrade": true,
+	// identity/length are recomputed by net/http for the client side
+	"Content-Length": true,
+}
+
+// stripAlways are request headers that must never reach upstream: they describe
+// the client's connection to US, not its intent toward the provider.
+var stripAlways = map[string]bool{
+	"Authorization":   true, // adapter re-applies the provider's own credential
+	"X-Api-Key":       true,
+	"Cookie":          true,
+	"Host":            true,
+	"Content-Length":  true,
+	"Accept-Encoding": true, // let the upstream decide; we must see plain bytes
+}
+
+func copyClientHeaders(dst, src *http.Request, extraStrip []string) {
+	strip := make(map[string]bool, len(stripAlways)+len(extraStrip))
+	for k := range stripAlways {
+		strip[strings.ToLower(k)] = true
+	}
+	for _, k := range extraStrip {
+		strip[strings.ToLower(k)] = true
+	}
+	for k, vs := range src.Header {
+		if strip[strings.ToLower(k)] {
+			continue
+		}
+		for _, v := range vs {
+			dst.Header.Add(k, v)
+		}
+	}
+}
+
+func copyResponseHeaders(w http.ResponseWriter, resp *http.Response) {
+	for k, vs := range resp.Header {
+		if hopByHop[http.CanonicalHeaderKey(k)] {
+			continue
+		}
+		for _, v := range vs {
+			w.Header().Add(k, v)
+		}
+	}
+}
+
+// --- small utils ---
+
+func msPtr(d time.Duration) *int64 {
+	v := d.Milliseconds()
+	return &v
+}
+
+// msAtLeastOne renders a duration in whole milliseconds with a floor of 1.
+//
+// TTFT against a fast upstream is routinely sub-millisecond, and Milliseconds()
+// truncates that to 0 — which the dashboard cannot distinguish from "never
+// measured". Clamping to 1 keeps the value honest: it means "under 1ms", and
+// the ttft<total streaming invariant stays meaningful.
+func msAtLeastOne(d time.Duration) *int64 {
+	v := d.Milliseconds()
+	if v < 1 {
+		v = 1
+	}
+	return &v
+}
+
+// store2surface maps the wire surface onto the ledger's surface enum.
+func store2surface(s provider.Surface) store.Surface {
+	switch s {
+	case provider.SurfaceAnthropic:
+		return store.SurfaceAnthropic
+	case provider.SurfaceResponses:
+		return store.SurfaceResponses
+	default:
+		return store.SurfaceOpenAI
+	}
+}
+
+// StatusText renders an upstream error body for logging without leaking keys.
+func StatusText(status int, body []byte) string {
+	return "HTTP " + strconv.Itoa(status) + ": " + truncate(string(body), 200)
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}

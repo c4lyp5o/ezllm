@@ -41,8 +41,12 @@ curl -s localhost:20129/v1/models | python3 -m json.tool
 # real call (streaming, watch it print incrementally):
 curl -N localhost:20129/v1/chat/completions \
   -H "Authorization: Bearer $EZLLM_TOKEN_HERMES" -H "Content-Type: application/json" \
-  -d '{"model":"ez/qwen-flash","messages":[{"role":"user","content":"count 1-5"}],"stream":true}'
-sqlite3 data/ezllm.sqlite 'SELECT ts,alias,provider,status,ttft_ms,total_ms,prompt_tokens,completion_tokens FROM calls ORDER BY id DESC LIMIT 5;'
+  -d '{"model":"opengo/qwen3.8-flash","messages":[{"role":"user","content":"count 1-5"}],"stream":true}'
+go run ./cmd/m2verify    # acceptance checker: prints PASS/FAIL per invariant
+# raw SQL equivalent (note: no sqlite3 CLI on this box — use `go run ./cmd/m2verify`):
+#   SELECT ts,client,surface,account,model,status,ttft_ms,total_ms,
+#          tokens_in,tokens_out,tokens_cached_read,tokens_cached_write
+#   FROM calls ORDER BY id DESC LIMIT 5;
 ```
 
 **Expect:** `ttft_ms` noticeably smaller than `total_ms` (that gap = streaming working; if they're
@@ -53,7 +57,7 @@ equal, something is buffering — go read `proxy/sse.go` and find out why).
 | # | Read first | Then | Ask yourself |
 |---|-----------|------|--------------|
 | M1 | `cmd/ezllm/main.go` → `internal/config` → `internal/server` | `config.example.yaml` | Where would I add a third provider? (config shape should make it obvious) |
-| M2 | `internal/proxy/chat.go` → `internal/proxy/sse.go` → `internal/ledger` | `git show` of M2 | Does ANY code path touch response bytes besides `io.Copy`? |
+| M2 | `internal/proxy/proxy.go` (`Forward` → `streamCopy` → `tapSSELine`) → `internal/store/ledger.go` (`NormalizeUsage`) | `git show` of M2 | Does ANY code path touch response bytes besides the scanner+Write+Flush loop? |
 | M3 | `internal/router` | alias table in config | Can I trace `ez/omen` → opencode-go → model swap in 3 hops of reading? |
 | M4 | `internal/router` cooldown + key selection | unit tests | What happens on 429 with 1 key left? (answer must be in a test) |
 | M5 | `internal/ledger` queries → `internal/admin` | run `make usage` | Do the numbers match omniroute's dashboard roughly? |
@@ -87,7 +91,76 @@ half a screen per milestone. No narration, just landmarks.)*
 - **M1 invariants proven:** #1 no-secrets-in-logs (grep: 0 hits) · #6 graceful shutdown ·
   #7 loopback default. (#2 SSE, #3 passthrough, #4 retry policy, #5 ledger async = M2/M4)
 
-### M2 — bailian passthrough + ledger write
+### M2 — store + crypto + 3-surface passthrough ✅ (2026-10-06, LIVE-verified vs 2 real providers)
+**Where to look first:** `internal/proxy/proxy.go:155 Forward` — it is the whole request path in
+one function. Then `store.NormalizeUsage` (`ledger.go`) for the accounting rules.
+
+- `internal/store/schema.sql` — 11 tables, embedded via `go:embed`. **FK order matters**:
+  `compression_profiles` is declared *before* `combos` (combos references it). `calls` and
+  `quota_snapshots` are append-only/immutable; `account`+`key_hint` are denormalized onto `calls`
+  so history survives key/account deletion (proved by `TestLedgerRowsAreImmutableHistory`).
+- `internal/store/store.go:66 Open` — WAL, `busy_timeout=5000`, `foreign_keys=ON`,
+  **single writer conn (`SetMaxOpenConns(1)`) + read pool**. A write pool would only manufacture
+  `SQLITE_BUSY`. `migrate()` at `:129` is idempotent and refuses to start on a *newer* schema.
+- `internal/store/crypto.go:36 NewFieldCrypto` — scrypt(N=32768,r=8,p=1) → AES-256-GCM,
+  wire format `enc:v1:<iv>:<ct>:<tag>`. `KeyHint` (`:121`) masks anything ≤8 chars rather than
+  truncating, so a hint can never reconstruct its key. Master key is loaded from OUTSIDE `data/`.
+- `internal/store/ledger.go:206 RecordCall` — **non-blocking by design** (drops + counts rather
+  than adding latency to a stream; invariant #5). `Flush()` (`:281`) uses an **in-band barrier on
+  the same FIFO channel** so it's deterministic — an earlier 2-channel version let `select` serve a
+  flush while rows were still queued, silently losing ledger rows.
+- `internal/store/ledger.go:110 NormalizeUsage` — **THE accounting decision.** Three surfaces
+  disagree about cache: OpenAI includes `cached_tokens` in `prompt_tokens`; Anthropic EXCLUDES
+  `cache_read` from `input_tokens`; Responses includes cached and is the only one reporting
+  `cache_write`. Read the doc comment before touching this.
+- `internal/provider/provider.go:78 Adapter` — the 4-method contract (`PrepareRequest`,
+  `StripHeaders`, `ReadQuota`, `ListModels`). Adding a provider = one file + one `Kind`.
+- `internal/provider/adapters.go:44 openCodeGo.PrepareRequest` — injects a **per-request**
+  `x-opencode-session` (a shared one grows server-side until it blows context) and strips any
+  client-supplied copy. `:135 anthropicCompatible` is its own kind because auth is `x-api-key`,
+  not Bearer.
+- `internal/provider/quota.go:22 parsePercentQuota` / `:60 parseMoneyQuota` / `:107 ClassifyQuota`
+  — quota shapes differ per provider, so the result is discriminated (`percent|money|tokens|none`)
+  and the verbatim JSON is always kept.
+- `internal/proxy/proxy.go:118 SwapModel` — `map[string]any` round-trip with `UseNumber()`;
+  only `model` changes, all 16 observed provider fields survive, big ints don't become floats.
+  Rejects `null` explicitly (assigning into a nil map panics — a client could have crashed us).
+- `internal/proxy/proxy.go:242 streamCopy` — scanner + `Flush()` per line, re-emitting the `\n`
+  the scanner strips so forwarding stays byte-exact. Over-long lines fall back to a raw `io.Copy`.
+- `internal/proxy/proxy.go:320 tapSSELine` + `:48 UsageTapper` — **merges** usage across events
+  rather than taking the first hit. Two live-only bugs hid here: Anthropic's `message_start` has
+  `output_tokens:0` (final totals come in `message_delta`), and a `max_output_tokens`-truncated
+  Responses stream ends on `response.incomplete`, not `.completed`.
+- `internal/router/router.go:66 Resolve` — combo name → `<namespace>/<model>` → else 404 **with
+  hints** listing which namespaces serve that model. **No default account** (a bare model id is
+  ambiguous: `gpt-6-luna` exists on both his providers).
+- `internal/server/server.go:120 routes` — three POSTs + `/v1/models` (+`?protocol=anthropic`
+  shape) + `/admin/health` + `/admin/usage`. `inference()` (`:207`) is one shared body for all
+  three surfaces. `bearerToken` (`:474`) accepts Bearer *and* `x-api-key` (Claude Code).
+- `cmd/m2verify/main.go` — acceptance checker that queries the live DB and prints PASS/FAIL per
+  invariant. Run `go run ./cmd/m2verify` after any live soak.
+
+**Live-verified 2026-10-06** (opencode-go 36 models + ssn-gpt 11 models synced at boot, 0 warnings):
+- `/v1/chat/completions` → 200, and streamed: **TTFB 1.28s vs total 4.08s** = unbuffered
+- `/v1/messages` with `x-api-key` → 200 **tool use** (`stop_reason: tool_use`, real `tool_use` block)
+- `/v1/responses` → 200 `status: completed` with full usage incl. `cache_write_tokens`
+- `super-ssn/gpt-6.1-sol` → 200 (second provider, second adapter kind)
+- Cached repeat: raw `prompt=2496 cached=2048` → ledger **`tokens_in=448 + cached_read=2048`** ✅
+- Bare `gpt-6-luna` → 404 listing **both** `opengo/` and `super-ssn/` ✅
+- Keys at rest `enc:v1:…` (199 chars), hints only; `dropped_rows=0`; `CGO_ENABLED=0` static build ✅
+
+**M2 invariants proven:** #1 no secrets in logs/responses (grep + `TestNoSecretsInResponses`) ·
+#2 SSE unbuffered (flush-count + staggered-arrival test, live TTFB) · #3 unknown fields survive ·
+#5 ledger never blocks (`TestRecordCallIsNonBlocking`, 5000-row flood) · #7 loopback default.
+(#4 4xx-never-retried and #6 graceful-shutdown-under-load land in M4/M7.)
+
+**Bugs found & fixed while building M2** (all had passing unit tests at the time — they only showed
+up live or under `-count=3`): `Flush()` losing rows · usage window `ts < now` dropping fresh rows ·
+empty-200 on upstream death (now 502 + ledgered) · `UpsertAccount` returning id 0 on the upsert path
+· boot seeding passing `ID=0` into `PickKey` (silently hid the catalog) · Anthropic/Responses
+streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
+
+### M3 — namespaces, registration + paced key test, protocol sync, smart quota
 ⏳
 
 ### M3 — opencode-go adapter + aliases

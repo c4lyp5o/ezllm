@@ -1,35 +1,67 @@
-# ezllm — example config. Copy to config.yaml and set the referenced env vars.
-# Secrets are NEVER written here: only env-var names (indirection at load time).
+# ezllm — bootstrap config. Copy to config.yaml, set the referenced env vars.
+#
+# This file is BOOTSTRAP ONLY: it seeds accounts, provider keys and client
+# tokens into SQLite on first boot. After that everything is managed through
+# the admin API / dashboard. Secrets are NEVER written here — only env-var
+# names, resolved at load time. A missing env var fails the boot with the NAME
+# of the variable, never its value.
 
-listen: "127.0.0.1:20129"
+listen: "127.0.0.1:20129"     # loopback by default; EZLLM_ADDR=0.0.0.0:20129 for LAN
+data_dir: ./data               # repo-relative so Docker can bind-mount ./data
+# master_key_file: ~/.hermes/secrets/ezllm-master.key   # or set EZLLM_MASTER_KEY
+
+max_body_mib: 32
+# upstream_timeout: 0 = unbounded (streaming responses have no natural deadline)
 
 client_tokens:
   - name: hermes
     token_env: EZLLM_TOKEN_HERMES
+    roles: infer,admin
+  - name: claude-code
+    token_env: EZLLM_TOKEN_CLAUDE
+    roles: infer
 
 providers:
-  opencode-go:
-    # OpenCode Go. REQUIRES x-opencode-session header (adapter adds it in M3).
-    # `/v1/chat/completions` models only; `/responses` models (grok/gpt-luna) are Phase 2.
+  # ── OpenCode Go ────────────────────────────────────────────────────────────
+  # Clients address it as "<namespace>/<model>", e.g. opengo/qwen3.8-flash.
+  # REQUIRES x-opencode-session (defaults on for kind: opencode-go); a missing
+  # header yields 400 MissingSessionID upstream. Serves all three surfaces, but
+  # per-model: /v1/messages 400s ModelProtocolUnsupported on some models
+  # (glm-5.2, omen-alpha, kimi-k2.6) while qwen/deepseek/minimax work.
+  opencode-main:
+    namespace: opengo
+    kind: opencode-go
     base_url: https://opencode.ai/zen/go/v1
     keys:
       - env: OPENCODE_GO_API_KEY
+        label: primary
 
-  bailian-coding:
-    # Alibaba Cloud Token Plan (INTL). Verified endpoint — do NOT use
-    # coding-intl.dashscope.aliyuncs.com/v1 with this key (it 401s).
-    base_url: https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+  # ── Generic OpenAI-compatible (ssn-gpt = space.stationine.com) ─────────────
+  # Its GET /v1/usage reports a MONEY shape (balance/remaining in USD plus
+  # usage.today / usage.total cost), which the dashboard renders as a balance
+  # card rather than percentage bars.
+  ssn-gpt:
+    namespace: super-ssn
+    kind: openai-compatible
+    base_url: https://space.stationine.com/v1
     keys:
-      - env: BAILIAN_CODING_API_KEY
+      - env: SSN_GPT_API_KEY
+        label: primary
+    # This host sits behind Cloudflare: probing too fast returns 403 "error
+    # code: 1010", which would make the key test FAIL ON A PERFECTLY GOOD KEY.
+    # Keep probe_delay_ms >= 400.
+    probe_delay_ms: 500
 
-aliases:
-  ez/omen:        { provider: opencode-go,    model: omen-alpha }
-  ez/qwen-flash:  { provider: bailian-coding, model: qwen3.8-flash,
-                    fallback: [ { provider: opencode-go, model: qwen3.8-flash } ] }
-  ez/glm:         { provider: opencode-go,    model: glm-5.2 }
+  # ── Anthropic-compatible (x-api-key + anthropic-version, not Bearer) ───────
+  # anthropic-main:
+  #   namespace: anth
+  #   kind: anthropic-compatible
+  #   base_url: https://api.anthropic.com/v1
+  #   keys: [{ env: ANTHROPIC_API_KEY, label: primary }]
 
 ledger:
-  path: data/ezllm.sqlite
+  batch_size: 32
+  batch_wait: 250ms
 
 cooldown:
   on_429: 300s

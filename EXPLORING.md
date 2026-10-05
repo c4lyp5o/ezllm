@@ -193,17 +193,39 @@ These are the "if it's broken here, the project failed" spots — each must be v
 7. **Loopback by default** — binds `127.0.0.1` unless `EZLLM_ADDR` says otherwise; token gate on
    `/admin/*` with nothing rendered pre-auth.
 
-## 6. Key facts you'll need while exploring (verified 2026-10-05)
+## 6. Key facts you'll need while exploring (verified 2026-10-05/06)
 
 - Go **1.27.1** at `~/.local/go/bin/go` (PATH wired; apt's 1.22 is shadowed fallback)
 - Keys (0600, never in repo/config): `~/.hermes/secrets/opencode-go.txt`,
-  `~/.hermes/secrets/bailian-coding-plan.txt`
-- opencode-go **requires** `x-opencode-session` (else 400 `MissingSessionID`); `/v1/models` needs
-  no session header; 36 models incl. `omen-alpha`
+  `~/.hermes/secrets/ssn-gpt.txt`, `~/.hermes/secrets/bailian-coding-plan.txt`;
+  field-encryption master key `~/.hermes/secrets/ezllm-master.key`
+- opencode-go **requires** `x-opencode-session` for generation (+`x-opencode-request` recommended).
+  Missing → `400 MissingSessionID`. **But `/v1/models` and `/v1/usage` need NO session header.**
+- ⚠️ **`GET /v1/models` on opencode-go is UNAUTHENTICATED** — it returns 200 + the full catalog for
+  an empty key, `not-a-key`, even `sk-`. Never use it as a credential check. The auth oracle is
+  **`GET /v1/usage`** (401 on a bad key, 200 on a good one, no session header, ~0.75 s, 0 tokens).
+  ssn-gpt's `/models` *does* 401 — **auth behaviour is per-provider, so never assume.**
+- ⚠️ Cloudflare `403 "error code: 1010"` on space.stationine.com is a **User-Agent block on
+  `python urllib`**, not a rate limit. Go's default UA is fine (200 everywhere), and 12 rapid curls
+  were never blocked. Practical rule: **403 = bad credentials → fail fast**; retry/backoff only for
+  429/5xx/timeout. Don't write probing scripts in Python against that host.
 - bailian base: `https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1`
-  (NOT `coding-intl.dashscope…` — that 401s with this key)
-- Both upstreams emit OpenAI `usage` in the final SSE chunk (verified) — ledger has real numbers
-- Anthropic-format bonus surface on Alibaba: `/apps/anthropic/v1/messages` + `x-api-key` (Phase 2)
+  (NOT `coding-intl.dashscope…` — that 401s with this key). Also speaks Anthropic format at
+  `/apps/anthropic/v1/messages` with `x-api-key`.
+- `/v1/responses` and `/v1/messages` both signal an unsupported model with the **same** error type:
+  `400 {"error":{"type":"ModelProtocolUnsupported"}}` — one classifier covers both surfaces.
+- `max_tokens: 1` does **not** bound cost on reasoning models (`qwen3.8-flash` returned
+  `completion_tokens: 25` anyway). Cheapest measured inference proof: `deepseek-v4.1-flash`
+  (1689 ms, prompt=31, compl=1).
+- All three surfaces emit usage: OpenAI in the final `data:` chunk, Anthropic across
+  `message_start` **+** `message_delta` (merge them — start reports `output_tokens: 0`), Responses
+  on `response.completed` **or `response.incomplete`** when `max_output_tokens` truncates.
+- Quota shapes differ per provider on the *same* path: opencode-go → `percent`
+  (`{usage:{rolling,weekly,monthly}{percent,resetsAt}}`), ssn-gpt → `money`
+  (`{balance: 0.2563, unit: "USD", planName: 钱包余额, usage:{today,total}, daily_usage[], model_stats[]}`).
+
+**M3 design doc:** `~/workspace/.hermes/plans/2026-10-06_070000-ezllm-m3-keytest-design.md`
+(probes N1–N12, the corrected 7-step key test, acceptance criteria).
 
 ## 7. Deliberate non-goals (don't go looking for them in the code)
 

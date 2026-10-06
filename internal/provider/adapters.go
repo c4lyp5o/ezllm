@@ -64,6 +64,17 @@ func (a *openCodeGo) ListModels(ctx context.Context, acct Account, key string) (
 	return listModelsGeneric(ctx, a.client, acct, key, nil)
 }
 
+// AuthOracle: GET /usage proved 401 on a bad key and 200 on a good one, needs
+// no session header, costs ~0.75s and zero tokens. It is the gate.
+// (N1: GET /models on this provider is PUBLIC — 200 for any string — so it can
+// never prove auth.)
+func (a *openCodeGo) AuthOracle() AuthProbe {
+	return AuthProbe{Method: http.MethodGet, Path: "/usage"}
+}
+
+// CatalogIsPublic: verified live with empty/garbage/sk- keys → all 200.
+func (a *openCodeGo) CatalogIsPublic() bool { return true }
+
 // ReadQuota parses opencode-go's percent-shaped /usage.
 func (a *openCodeGo) ReadQuota(ctx context.Context, acct Account, key string) (Quota, error) {
 	body, err := getJSON(ctx, a.client, acct.BaseURL+"/usage", map[string]string{
@@ -116,6 +127,21 @@ func (a *openAICompatible) ListModels(ctx context.Context, acct Account, key str
 		"Authorization": "Bearer " + key,
 	})
 }
+
+// AuthOracle: GET /usage — verified live on ssn-gpt: 401 INVALID_API_KEY on a
+// bad key, 401 API_KEY_REQUIRED with no header, 200 on a good one. Costs zero
+// tokens. Some OpenAI-shaped gateways lack /usage entirely; registration treats
+// a 404 here as "no oracle" and falls back to the inference step as the auth
+// proof (see registration.go), so a provider without /usage is still testable.
+func (a *openAICompatible) AuthOracle() AuthProbe {
+	return AuthProbe{Method: http.MethodGet, Path: "/usage"}
+}
+
+// CatalogIsPublic: false on ssn-gpt (bad key → 401 INVALID_API_KEY), which is
+// the common case for OpenAI-shaped gateways. Registration still records the
+// catalog as informational and gates on the oracle, so a provider that flips
+// to a public catalog can't cause a false pass.
+func (a *openAICompatible) CatalogIsPublic() bool { return false }
 
 // ReadQuota classifies whatever shape the gateway exposes. Verified against
 // ssn-gpt (space.stationine.com): balance/remaining in USD plus usage.today and
@@ -187,6 +213,23 @@ func (a *anthropicCompatible) ReadQuota(ctx context.Context, acct Account, key s
 	return Quota{}, ErrQuotaUnsupported
 }
 
+// AuthOracle: GET /models with x-api-key — on the real Anthropic API that
+// endpoint 401s on an invalid key and costs nothing (no tokens, no generation).
+// The M3 design assumed Anthropic had no cheap GET oracle and defaulted to
+// POST /messages; GET /models is strictly cheaper and registration's
+// calibration probe (a deliberate bad-key call) proves at runtime whether this
+// endpoint actually discriminates. If a gateway serves /models publicly,
+// calibration detects it and the flow falls back to the inference step as the
+// credential gate — so a wrong guess here cannot produce a false pass.
+func (a *anthropicCompatible) AuthOracle() AuthProbe {
+	return AuthProbe{Method: http.MethodGet, Path: "/models"}
+}
+
+// CatalogIsPublic: unknown for Anthropic-shaped gateways (nobody has claimed
+// one either way). Registration never trusts this flag as proof anyway — the
+// calibration probe decides at runtime.
+func (a *anthropicCompatible) CatalogIsPublic() bool { return false }
+
 // ─────────────────────────────────────────────────────────────────────────────
 // shared helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -204,6 +247,25 @@ func getJSON(ctx context.Context, c *http.Client, url string, hdrs map[string]st
 	b, _, err := getJSONStatus(ctx, c, url, hdrs)
 	return b, err
 }
+
+// HTTPError is a non-200 provider response. It carries the status so callers
+// can classify it (401/403 = bad key, 429 = retryable) instead of parsing the
+// message — registration.isAuthErr relies on this to quote the provider's own
+// verdict. The message keeps the exact "provider: URL -> HTTP n: body" form
+// that step details and error bodies preserve verbatim.
+type HTTPError struct {
+	URL    string
+	Status int
+	Body   string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("provider: %s -> HTTP %d: %s", e.URL, e.Status, truncate(e.Body, 200))
+}
+
+// StatusCode lets callers unwrap the status through an interface, so nothing
+// has to depend on this concrete type.
+func (e *HTTPError) StatusCode() int { return e.Status }
 
 func getJSONStatus(ctx context.Context, c *http.Client, url string, hdrs map[string]string) ([]byte, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -225,8 +287,9 @@ func getJSONStatus(ctx context.Context, c *http.Client, url string, hdrs map[str
 		return nil, resp.StatusCode, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return body, resp.StatusCode, fmt.Errorf("provider: %s -> HTTP %d: %s",
-			url, resp.StatusCode, truncate(string(body), 200))
+		return body, resp.StatusCode, &HTTPError{
+			URL: url, Status: resp.StatusCode, Body: string(body),
+		}
 	}
 	return body, resp.StatusCode, nil
 }

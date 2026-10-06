@@ -95,6 +95,15 @@ type Adapter interface {
 
 	// ListModels fetches the upstream catalog.
 	ListModels(ctx context.Context, acct Account, key string) ([]ModelInfo, error)
+
+	// AuthOracle returns the cheapest call that fails on a bad credential
+	// (see probe.go). Registration gates the key test on this — never on
+	// ListModels, which is public on some providers.
+	AuthOracle() AuthProbe
+
+	// CatalogIsPublic reports whether ListModels answers 200 for an invalid
+	// key (true for opencode-go). A public catalog is recorded as info only.
+	CatalogIsPublic() bool
 }
 
 // ModelInfo is one catalog entry.

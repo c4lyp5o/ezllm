@@ -17,7 +17,7 @@ import {
   RANGE_LABEL, GRANULARITY_GROUP,
 } from '../api';
 import { Chip, SectionLabel, SkeletonCards, SkeletonRows, cx, formatTokens, Mono } from '../ui';
-
+import RecentFeed from './RecentFeed';
 
 const GRAN: { key: Granularity; label: string }[] = [
   { key: 'global', label: 'Global' },
@@ -243,6 +243,8 @@ export default function Stats() {
           )}
         </>
       )}
+
+      <RecentFeed />
     </div>
   );
 }

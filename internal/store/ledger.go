@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync/atomic"
 	"time"
 )
@@ -229,6 +230,10 @@ func (d *DB) ledgerLoop(batchSize int, batchWait time.Duration) {
 		defer cancel()
 		if err := d.insertCalls(ctx, buf); err != nil {
 			slog.Error("ledger flush failed", "rows", len(buf), "err", err)
+		} else {
+			// Copy under the loop's lock (buf is reused after this tick), then
+			// hand the snapshot to live consumers.
+			d.publish(slices.Clone(buf))
 		}
 		buf = buf[:0]
 	}

@@ -39,6 +39,10 @@ type DB struct {
 	closeCh chan struct{}
 	wg      sync.WaitGroup
 	crypto  *FieldCrypto
+
+	// committed-batch fan-out for live consumers (see events.go)
+	sinkMu sync.Mutex
+	subs   []chan []Call
 }
 
 // Options configures Open.

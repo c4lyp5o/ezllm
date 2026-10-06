@@ -119,6 +119,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /admin/health", s.admin(s.handleAdminHealth))
 	s.mux.HandleFunc("GET /admin/usage", s.admin(s.handleUsage))
 	s.mux.HandleFunc("GET /admin/overview", s.admin(s.handleOverview))
+	s.mux.HandleFunc("GET /admin/stream", s.admin(s.handleStream))
 
 	s.mux.HandleFunc("GET /admin/accounts", s.admin(s.handleAccounts))
 	s.mux.HandleFunc("POST /admin/accounts", s.admin(s.handleAccounts))

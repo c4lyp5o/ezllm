@@ -139,6 +139,44 @@ export type Overview = {
   recent_calls: RecentCall[];
 };
 
+// ── Usage granularity (M5) ─────────────────────────────────────────────────
+export type UsageResp = {
+  from: string;
+  to: string;
+  group_by: string;
+  groups: UsageRow[];
+  totals: UsageRow;
+};
+
+// Ranges the dashboard offers. 1y uses 365d (not a calendar year) so the
+// label matches the window exactly.
+export type RangeKey = '24h' | '7d' | '30d' | '365d';
+export const RANGE_HOURS: Record<RangeKey, number> = { '24h': 24, '7d': 168, '30d': 720, '365d': 8760 };
+export const RANGE_LABEL: Record<RangeKey, string> = { '24h': '24h', '7d': '7d', '30d': '30d', '365d': '1y' };
+
+// The six granularities the user can select.
+export type Granularity = 'global' | 'provider' | 'model' | 'cache' | 'compression' | 'savings';
+
+// group_by the endpoint needs for a given granularity (null = use totals only).
+export const GRANULARITY_GROUP: Record<Granularity, string | null> = {
+  global: null,
+  provider: 'account',
+  model: 'model',
+  cache: 'account',     // cache cols are per-row; group by account to attribute them
+  compression: 'account',
+  savings: 'account',
+};
+
+// usage fetches the /admin/usage report for a range + granularity.
+export function usage(range: RangeKey, gran: Granularity): Promise<UsageResp> {
+  const hours = RANGE_HOURS[range];
+  const from = new Date(Date.now() - hours * 3600_000).toISOString();
+  const g = GRANULARITY_GROUP[gran];
+  const params = new URLSearchParams({ from });
+  if (g) params.set('group_by', g);
+  return get<UsageResp>(`/admin/usage?${params.toString()}`);
+}
+
 export type TestStep = { step: string; ok?: boolean; ms?: number; detail?: string; error?: string };
 export type TestResult = { ok: boolean; steps: TestStep[]; catalog?: { id: string; owned_by?: string }[]; quota?: QuotaSnapshot | null; deferred?: string[] };
 export type TestOutcome = { key: KeyRow; test: TestResult };

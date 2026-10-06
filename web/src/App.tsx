@@ -9,9 +9,11 @@ import Providers from './pages/Providers';
 import Combos from './pages/Combos';
 import Compression from './pages/Compression';
 import Connect from './pages/Connect';
+import Stats from './pages/Stats';
 
 const NAV = [
   { to: '/', label: 'Dashboard', hint: 'overview · health · ledger' },
+  { to: '/stats', label: 'Stats', hint: 'granularity · range' },
   { to: '/providers', label: 'Providers', hint: 'accounts · keys · models' },
   { to: '/combos', label: 'Combos', hint: 'routing chains' },
   { to: '/compression', label: 'Compression', hint: 'M5 preview' },
@@ -186,6 +188,7 @@ export default function App() {
         <div className="mt-8">
           <Routes>
             <Route path="/" element={<Dashboard />} />
+      <Route path="/stats" element={<Stats />} />
             <Route path="/providers" element={<Providers />} />
             <Route path="/combos" element={<Combos />} />
             <Route path="/compression" element={<Compression />} />

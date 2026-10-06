@@ -31,18 +31,22 @@ const (
 // and Responses reports its own details object. Use NormalizeUsage rather than
 // copying fields by hand.
 type Call struct {
-	TS      time.Time
-	Client  string
-	Surface Surface
-	Alias   string // combo name, or "namespace/model" for a direct route
-	Account string // denormalized: survives key/account deletion
-	KeyID   int64  // 0 when unknown
-	KeyHint string // denormalized
-	Model   string // model actually sent upstream
-	Status  int
-	Stream  bool
-	TTFTms  *int64
-	Totalms *int64
+	TS time.Time
+	// AccountID is the M5 metering key. The denormalized Account NAME below
+	// survives key deletion (and can be re-pointed at a different account), so
+	// a cap keyed by name would merge two accounts' budgets — meter by ID.
+	AccountID int64 // 0 when unknown (pre-M5 rows, or unresolved identity)
+	Client    string
+	Surface   Surface
+	Alias     string // combo name, or "namespace/model" for a direct route
+	Account   string // denormalized: survives key/account deletion
+	KeyID     int64  // 0 when unknown
+	KeyHint   string // denormalized
+	Model     string // model actually sent upstream
+	Status    int
+	Stream    bool
+	TTFTms    *int64
+	Totalms   *int64
 
 	TokensIn          int64
 	TokensOut         int64
@@ -302,13 +306,13 @@ func (d *DB) insertCalls(ctx context.Context, rows []Call) error {
 
 	stmt, err := tx.PrepareContext(ctx, `
 INSERT INTO calls (
-  ts, client, surface, alias, account, provider_key_id, key_hint, model,
+  ts, account_id, client, surface, alias, account, provider_key_id, key_hint, model,
   status, stream, ttft_ms, total_ms,
   tokens_in, tokens_out, tokens_cached_read, tokens_cached_write, reasoning_tokens, raw_usage,
   endpoint_id, upstream_model,
   compression_profile, compression_applied, prompt_tokens_pre, tokens_saved, compression_ms,
   err
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
@@ -319,8 +323,13 @@ INSERT INTO calls (
 		if c.KeyID != 0 {
 			keyID = c.KeyID
 		}
+		var acctID any
+		if c.AccountID != 0 {
+			acctID = c.AccountID
+		}
 		_, err := stmt.ExecContext(ctx,
 			c.TS.UTC().Format("2006-01-02T15:04:05.000Z"),
+			acctID,
 			c.Client, string(c.Surface), c.Alias, c.Account, keyID, c.KeyHint, c.Model,
 			c.Status, boolInt(c.Stream), c.TTFTms, c.Totalms,
 			c.TokensIn, c.TokensOut, c.TokensCachedRead, c.TokensCachedWrite, c.ReasoningTokens, c.RawUsage,
@@ -332,7 +341,30 @@ INSERT INTO calls (
 			return fmt.Errorf("insert call: %w", err)
 		}
 	}
+
+	// M5: advance the usage meter in the SAME transaction as the calls rows so
+	// the meter and the ledger can never disagree about what counted. Metering
+	// is best-effort here: a failed bump must not fail the insert (losing a
+	// dashboard row is worse than a briefly stale counter, and counters are
+	// rebuildable from `calls` if they ever drift).
+	if err := d.meterInTx(ctx, tx, rows); err != nil {
+		slog.Warn("usage meter bump failed", "err", err)
+	}
 	return tx.Commit()
+}
+
+// meterInTx resolves each model's meter window (from its rule) then folds the
+// batch into per-bucket increments. A model with no rule is not metered —
+// nothing caps it, so a bucket for it would be a wasted write on every call.
+func (d *DB) meterInTx(ctx context.Context, tx *sql.Tx, rows []Call) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	windows, err := d.ruleWindowsFor(ctx, rows)
+	if err != nil {
+		return err
+	}
+	return bumpUsageCounters(ctx, tx, groupForCounter(rows, windows))
 }
 
 func boolInt(b bool) int {

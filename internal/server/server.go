@@ -22,6 +22,7 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/proxy"
 	"github.com/c4lyp5o/ezllm/internal/registration"
 	"github.com/c4lyp5o/ezllm/internal/router"
+	"github.com/c4lyp5o/ezllm/internal/rules"
 	"github.com/c4lyp5o/ezllm/internal/store"
 )
 
@@ -45,12 +46,16 @@ type Auth interface {
 }
 
 type Server struct {
-	auth        Auth
-	resolver    *router.Resolver
-	dispatcher  *proxy.Dispatcher
-	db          *store.DB
-	registry    *provider.Registry
-	tester      *registration.Tester
+	auth       Auth
+	resolver   *router.Resolver
+	dispatcher *proxy.Dispatcher
+	db         *store.DB
+	registry   *provider.Registry
+	tester     *registration.Tester
+	// rulesEngine is the eligibility engine (M5). Admin writes to model_rules
+	// reload it so a new cap/window applies on the next request instead of
+	// waiting for the background ticker. Nil in unit tests that don't care.
+	rulesEngine *rules.Engine
 	log         *slog.Logger
 	mux         *http.ServeMux
 	started     time.Time
@@ -67,6 +72,7 @@ type Options struct {
 	DB          *store.DB
 	Registry    *provider.Registry // key tests + sync (optional in unit tests)
 	Tester      *registration.Tester
+	Rules       *rules.Engine // M5: reload after model_rules writes (optional)
 	Log         *slog.Logger
 	MaxBodyMiB  int      // request body cap; default 32
 	CORSOrigins []string // EZLLM_CORS_ORIGINS: empty = any origin, /v1 only
@@ -83,7 +89,7 @@ func New(opts Options) *Server {
 	s := &Server{
 		auth: opts.Auth, resolver: opts.Resolver, dispatcher: opts.Dispatcher,
 		db: opts.DB, registry: opts.Registry, tester: opts.Tester,
-		log: opts.Log, mux: http.NewServeMux(),
+		log: opts.Log, mux: http.NewServeMux(), rulesEngine: opts.Rules,
 		started: time.Now(), maxBody: maxBody,
 		web: webFS(), corsOrigins: opts.CORSOrigins,
 	}
@@ -137,6 +143,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /admin/combos/{id}", s.admin(s.handleCombo))
 	s.mux.HandleFunc("POST /admin/combos/{id}/hops", s.admin(s.handleComboHops))
 	s.mux.HandleFunc("PUT /admin/combos/{id}/hops", s.admin(s.handleComboHops))
+
+	s.mux.HandleFunc("GET /admin/model-rules", s.admin(s.handleModelRules))
+	s.mux.HandleFunc("POST /admin/model-rules", s.admin(s.handleModelRules))
+	s.mux.HandleFunc("GET /admin/model-rules/{id}", s.admin(s.handleModelRule))
+	s.mux.HandleFunc("PATCH /admin/model-rules/{id}", s.admin(s.handleModelRule))
+	s.mux.HandleFunc("DELETE /admin/model-rules/{id}", s.admin(s.handleModelRule))
 
 	s.mux.HandleFunc("GET /admin/tokens", s.admin(s.handleTokens))
 	s.mux.HandleFunc("POST /admin/tokens", s.admin(s.handleTokens))
@@ -354,8 +366,23 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 					map[string]any{"available": nf.Hints})
 			case errors.As(err, &nu):
 				// A rule (cap / allowed hours) says no — not a routing miss.
-				writeErrExtra(w, http.StatusTooManyRequests, "model_unavailable", err.Error(),
-					map[string]any{"reason": nu.Reason})
+				// The cause (when it is a *rules.Refusal) carries the
+				// structured fields a client can act on: WHICH kind of rule
+				// refused, and (for windows) when the model opens next, so it
+				// can sleep until then instead of blind-retrying.
+				extra := map[string]any{"reason": nu.Reason}
+				var ref *rules.Refusal
+				if errors.As(err, &ref) {
+					extra["rule"] = map[string]any{
+						"kind":   ref.Reason.Kind,
+						"detail": ref.Reason.Detail,
+					}
+					if !ref.Reason.NextAllowed.IsZero() {
+						extra["rule"].(map[string]any)["next_allowed"] =
+							ref.Reason.NextAllowed.Format(time.RFC3339)
+					}
+				}
+				writeErrExtra(w, http.StatusTooManyRequests, "model_unavailable", err.Error(), extra)
 			default:
 				writeErr(w, http.StatusBadGateway, "upstream_error", err.Error())
 			}

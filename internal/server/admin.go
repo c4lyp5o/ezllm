@@ -83,10 +83,23 @@ func pathID2(w http.ResponseWriter, r *http.Request, a, b string) (int64, int64,
 }
 
 // writeStoreErr maps store errors onto HTTP status codes.
+// reloadRules republishes the rules engine after a model_rules write so the
+// change takes effect on the next request. Best-effort: a failed reload keeps
+// the last-good rule set (the background ticker retries), and never fails the
+// admin write itself — the row is already committed.
+func (s *Server) reloadRules() {
+	if s.rulesEngine == nil {
+		return
+	}
+	if err := s.rulesEngine.Reload(context.Background()); err != nil {
+		s.log.Warn("rules reload after admin write failed", "err", err)
+	}
+}
+
 func (s *Server) writeStoreErr(w http.ResponseWriter, err error) {
 	var conflict *store.ErrConflict
 	switch {
-	case errors.Is(err, store.ErrNotFound):
+	case errors.Is(err, store.ErrNotFound), errors.Is(err, store.ErrRuleNotFound):
 		writeErr(w, http.StatusNotFound, "not_found_error", err.Error())
 	case errors.As(err, &conflict):
 		extra := conflict.Details
@@ -1128,4 +1141,138 @@ func errText(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+// ── M5 model rules ─────────────────────────────────────────────────────────
+
+// handleModelRules serves GET (list, ?account_id= filter) and POST (upsert).
+// A POST is an upsert keyed on (account_id, model_id), so re-sending a rule
+// updates it rather than duplicating — the same key the router looks up.
+func (s *Server) handleModelRules(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		var accountID int64
+		if v := r.URL.Query().Get("account_id"); v != "" {
+			accountID, _ = strconv.ParseInt(v, 10, 64)
+		}
+		rules, err := s.db.ListModelRules(r.Context(), accountID)
+		if err != nil {
+			s.writeStoreErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, rules)
+	case http.MethodPost:
+		// Two-step decode so an omitted `enabled` means the schema default
+		// (enabled=1), not Go's false zero-value — the same trap handleCombos
+		// avoids: a rule saved disabled-but-reading-back-enabled would never
+		// refuse anything, with no visible symptom until traffic arrives.
+		var raw struct {
+			store.ModelRule
+			Enabled *bool `json:"enabled"`
+		}
+		if !decodeBody(w, r, &raw) {
+			return
+		}
+		rule := raw.ModelRule
+		rule.Enabled = raw.Enabled == nil || *raw.Enabled
+		id, err := s.db.UpsertModelRule(r.Context(), rule)
+		if err != nil {
+			s.writeStoreErr(w, err)
+			return
+		}
+		s.reloadRules() // apply immediately, not on the next ticker tick
+		saved, err := s.db.GetModelRule(r.Context(), id)
+		if err != nil {
+			writeJSON(w, http.StatusCreated, map[string]any{"id": id})
+			return
+		}
+		writeJSON(w, http.StatusCreated, saved)
+	default:
+		writeErr(w, http.StatusMethodNotAllowed, "invalid_request_error", "method not allowed")
+	}
+}
+
+// handleModelRule serves GET / PATCH / DELETE for one rule by id. DELETE
+// lifts the restriction entirely (no rule = no cap, no window).
+func (s *Server) handleModelRule(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		rule, err := s.db.GetModelRule(r.Context(), id)
+		if err != nil {
+			s.writeStoreErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, rule)
+	case http.MethodPatch:
+		existing, err := s.db.GetModelRule(r.Context(), id)
+		if err != nil {
+			s.writeStoreErr(w, err)
+			return
+		}
+		// Merge onto the existing row so a partial PATCH does not zero the
+		// fields it omitted (Go's zero-value would silently clear win_start,
+		// cap_tokens, etc.).
+		var raw struct {
+			store.ModelRule
+			Enabled *bool `json:"enabled"`
+		}
+		if !decodeBody(w, r, &raw) {
+			return
+		}
+		merged := *existing
+		in := raw.ModelRule
+		if in.ModelID != "" {
+			merged.ModelID = in.ModelID
+		}
+		if in.AccountID != 0 {
+			merged.AccountID = in.AccountID
+		}
+		merged.CapTokens = in.CapTokens
+		if in.CapWindow != "" {
+			merged.CapWindow = in.CapWindow
+		}
+		// Window fields: a PATCH that omits them ("" everywhere) means "clear
+		// the window"; one that sets any of them replaces the window. This is
+		// deliberately explicit — partial window updates would produce a
+		// half-specified window that validation (correctly) rejects.
+		if in.WinStart != "" || in.WinEnd != "" || in.WinDays != "" {
+			merged.WinStart, merged.WinEnd, merged.WinDays = in.WinStart, in.WinEnd, in.WinDays
+			if in.WinTZ != "" {
+				merged.WinTZ = in.WinTZ
+			}
+		} else {
+			merged.WinStart, merged.WinEnd, merged.WinDays = "", "", ""
+		}
+		if raw.Enabled != nil {
+			merged.Enabled = *raw.Enabled
+		}
+		if in.Note != "" {
+			merged.Note = in.Note
+		}
+		newID, err := s.db.UpsertModelRule(r.Context(), merged)
+		if err != nil {
+			s.writeStoreErr(w, err)
+			return
+		}
+		s.reloadRules()
+		saved, err := s.db.GetModelRule(r.Context(), newID)
+		if err != nil {
+			s.writeStoreErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, saved)
+	case http.MethodDelete:
+		if err := s.db.DeleteModelRule(r.Context(), id); err != nil {
+			s.writeStoreErr(w, err)
+			return
+		}
+		s.reloadRules()
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": id})
+	default:
+		writeErr(w, http.StatusMethodNotAllowed, "invalid_request_error", "method not allowed")
+	}
 }

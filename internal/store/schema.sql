@@ -141,6 +141,7 @@ CREATE TABLE IF NOT EXISTS client_tokens (
 CREATE TABLE IF NOT EXISTS calls (
   id             INTEGER PRIMARY KEY,
   ts             TEXT NOT NULL,
+  account_id     INTEGER,                       -- M5: denormalized NAME survives key deletion, this is the id for metering
   client         TEXT NOT NULL DEFAULT '',
   surface        TEXT NOT NULL,                  -- openai|anthropic|responses
   alias          TEXT NOT NULL DEFAULT '',       -- combo name or namespace/model requested
@@ -172,6 +173,7 @@ CREATE INDEX IF NOT EXISTS idx_calls_acct_ts   ON calls(account, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_calls_client_ts ON calls(client, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_calls_key_ts    ON calls(provider_key_id, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_calls_alias_ts  ON calls(alias, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_calls_acct_model ON calls(account_id, model, ts DESC);
 
 -- ── key_cooldowns: reactive backoff; persisted so it survives restart ────────
 CREATE TABLE IF NOT EXISTS key_cooldowns (
@@ -179,3 +181,38 @@ CREATE TABLE IF NOT EXISTS key_cooldowns (
   until_ts        TEXT NOT NULL,
   reason          TEXT NOT NULL                  -- 429|5xx|timeout|auth|protocol
 );
+
+-- ── M5: rules engine ────────────────────────────────────────────────────────
+-- One row per (account, model) — mirrors models' UNIQUE(account_id, model_id),
+-- so a rule is looked up with exactly the key the router's Eligible seam passes.
+-- cap_tokens 0 = unlimited. win_* NULL/empty = the model is always allowed.
+CREATE TABLE IF NOT EXISTS model_rules (
+  id          INTEGER PRIMARY KEY,
+  account_id  INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  model_id    TEXT    NOT NULL,
+  cap_tokens  INTEGER NOT NULL DEFAULT 0,               -- 0 = unlimited
+  cap_window  TEXT    NOT NULL DEFAULT 'monthly',       -- 5h|daily|weekly|monthly
+  win_start   TEXT,                                     -- 'HH:MM' local to win_tz
+  win_end     TEXT,                                     -- end<start wraps midnight
+  win_days    TEXT,                                     -- csv 0-6 (Sun=0); NULL/e'' = every day
+  win_tz      TEXT    NOT NULL DEFAULT 'Asia/Kuala_Lumpur',
+  enabled     INTEGER NOT NULL DEFAULT 1,
+  note        TEXT    NOT NULL DEFAULT '',
+  updated_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  UNIQUE(account_id, model_id)
+);
+
+-- O(1) usage meter. WITHOUT ROWID makes the PK the physical index, so an
+-- increment is one row touch and the read is a single PK lookup — no SUM()
+-- over calls anywhere near the hot path.
+-- Rotation is implicit: a new window writes a new bucket key, so there is no
+-- reset job and no "forgot to reset the counter" class of bug.
+CREATE TABLE IF NOT EXISTS usage_counters (
+  account_id INTEGER NOT NULL,
+  model_id   TEXT    NOT NULL,
+  bucket     TEXT    NOT NULL,   -- 2026-10-06 | 2026-W41 | 2026-10 | 2026-10-06T2
+  tokens     INTEGER NOT NULL DEFAULT 0,
+  calls      INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT    NOT NULL,
+  PRIMARY KEY (account_id, model_id, bucket)
+) WITHOUT ROWID;

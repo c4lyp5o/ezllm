@@ -24,7 +24,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 1
+const schemaVersion = 2
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -128,6 +128,42 @@ func (d *DB) Ping(ctx context.Context) error {
 	return nil
 }
 
+// hasColumn reports whether a table already has the named column, so the
+// non-idempotent ALTER below can be guarded. (schema.sql is re-applied
+// wholesale and IS idempotent; ALTER is not, hence this check.)
+func hasColumn(ctx context.Context, db *sql.DB, table, col string) (bool, error) {
+	rows, err := db.QueryContext(ctx, `SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return false, err
+		}
+		if name == col {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
+// hasTable reports whether a table exists — lets a guarded ALTER no-op (and
+// defer to CREATE TABLE) on databases where the table is not there yet.
+func hasTable(ctx context.Context, db *sql.DB, table string) (bool, error) {
+	var name string
+	err := db.QueryRowContext(ctx,
+		`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&name)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (d *DB) migrate() error {
 	d.writeMu.Lock()
 	defer d.writeMu.Unlock()
@@ -139,6 +175,9 @@ func (d *DB) migrate() error {
 		if _, err := d.w.Exec(schemaSQL); err != nil {
 			return fmt.Errorf("store: apply schema: %w", err)
 		}
+		if err := d.alterCallsAccountID(context.Background()); err != nil {
+			return fmt.Errorf("store: alter calls: %w", err)
+		}
 		if _, err := d.w.Exec(`INSERT INTO schema_version(version) VALUES(?)`, schemaVersion); err != nil {
 			return fmt.Errorf("store: stamp version: %w", err)
 		}
@@ -148,14 +187,51 @@ func (d *DB) migrate() error {
 		return fmt.Errorf("store: database schema version %d is newer than this binary (%d) — refusing to start", cur, schemaVersion)
 	}
 	if cur < schemaVersion {
-		// Idempotent schema (CREATE TABLE IF NOT EXISTS) makes re-application safe
-		// for v1; future versions add explicit numbered migrations here.
+		// Order matters: the M5 column must exist BEFORE schema.sql re-runs.
+		// schema.sql creates idx_calls_acct_model ON calls(account_id, ...),
+		// and on a pre-M5 database CREATE TABLE IF NOT EXISTS is a no-op (the
+		// old table lacks account_id) while CREATE INDEX still executes — so
+		// running schema.sql first fails with "no such column: account_id"
+		// and boot aborts. Adding the column first, then re-applying the
+		// idempotent schema, migrates v1 databases cleanly; fresh databases
+		// take the branch above, where calls already carries the column.
+		if err := d.alterCallsAccountID(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate %d->%d alter: %w", cur, schemaVersion, err)
+		}
 		if _, err := d.w.Exec(schemaSQL); err != nil {
 			return fmt.Errorf("store: migrate %d->%d: %w", cur, schemaVersion, err)
 		}
 		if _, err := d.w.Exec(`INSERT INTO schema_version(version) VALUES(?)`, schemaVersion); err != nil {
 			return fmt.Errorf("store: stamp version: %w", err)
 		}
+	}
+	return nil
+}
+
+// alterCallsAccountID adds calls.account_id (M5 metering key) on databases
+// created before it. Guarded by a pragma check because ALTER TABLE ADD COLUMN
+// errors if the column already exists — unlike schema.sql, it is not
+// idempotent. New databases get the column straight from schema.sql and this
+// is a no-op there.
+func (d *DB) alterCallsAccountID(ctx context.Context) error {
+	// calls not created yet: schema.sql will create it WITH the column, so
+	// there is nothing to add and ALTER would fail ("no such table").
+	exists, err := hasTable(ctx, d.w, "calls")
+	if err != nil {
+		return fmt.Errorf("check calls table: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+	ok, err := hasColumn(ctx, d.w, "calls", "account_id")
+	if err != nil {
+		return fmt.Errorf("check calls.account_id: %w", err)
+	}
+	if ok {
+		return nil
+	}
+	if _, err := d.w.ExecContext(ctx, `ALTER TABLE calls ADD COLUMN account_id INTEGER`); err != nil {
+		return fmt.Errorf("add calls.account_id: %w", err)
 	}
 	return nil
 }

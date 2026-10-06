@@ -23,6 +23,7 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/provider"
 	"github.com/c4lyp5o/ezllm/internal/proxy"
 	"github.com/c4lyp5o/ezllm/internal/router"
+	"github.com/c4lyp5o/ezllm/internal/rules"
 	"github.com/c4lyp5o/ezllm/internal/server"
 	"github.com/c4lyp5o/ezllm/internal/store"
 )
@@ -98,9 +99,30 @@ func run() error {
 	dispatcher := proxy.NewDispatcher(client, registry)
 	resolver := router.New(db)
 
+	// ── M5 rules engine ──
+	// The eligibility predicate behind router's WithEligibility seam: token
+	// caps and allowed-hours windows. Built once, refreshed on a ticker and
+	// after any admin write (the server calls Engine.Reload).
+	// A failure to load rules at boot must not abort startup: routing with no
+	// rules is the M2 behaviour (allow everything), which is safe, whereas a
+	// crash here would take the gateway down over a transient store error. So
+	// on a load failure we log it and fall back to a permissive engine — the
+	// background ticker keeps retrying via Reload, so rules reappear once the
+	// store recovers.
+	ruleEngine, err := rules.NewEngine(
+		storeAdapter{db}, storeAdapter{db}, rules.SystemClock, 30*time.Second, true)
+	if err != nil {
+		log.Warn("rules engine failed to load at boot; running unrestricted (ticker will retry)", "err", err)
+		ruleEngine, err = rules.NewEngine(emptyRuleSource{}, storeAdapter{db}, rules.SystemClock, 30*time.Second, true)
+		if err != nil {
+			return fmt.Errorf("rules engine: %w", err) // permissive engine failing = real bug
+		}
+	}
+	resolver = resolver.WithEligibility(ruleEngine.Eligible)
+
 	srv := server.New(server.Options{
 		Auth: db, Resolver: resolver, Dispatcher: dispatcher, DB: db,
-		Registry: registry, Log: log,
+		Registry: registry, Log: log, Rules: ruleEngine,
 		MaxBodyMiB:  cfg.MaxBodyMiB,
 		CORSOrigins: corsOriginsFromEnv(),
 	})
@@ -140,7 +162,9 @@ func run() error {
 	if err := httpSrv.Shutdown(shutCtx); err != nil {
 		log.Error("http shutdown", "err", err)
 	}
-	// db.Close() drains the ledger queue and flushes before closing the pools.
+	// Stop the rules-engine ticker first so it cannot reload against a closing
+	// store, then db.Close() drains the ledger queue and flushes the pools.
+	ruleEngine.Close()
 	if err := db.Close(); err != nil {
 		return fmt.Errorf("store close: %w", err)
 	}

@@ -63,6 +63,12 @@ type Catalog interface {
 type ErrUnavailable struct {
 	Requested string
 	Reason    string
+	// cause is the original eligibility error (a *rules.Refusal when the rules
+	// engine said no). It is unwrapped so the server can errors.As into the
+	// structured type and recover kind/next_allowed for the 429 body, without
+	// this package importing the rules package (no cycle). Reason stays the
+	// flat human string for the message and for anything that only reads it.
+	cause error
 }
 
 func (e *ErrUnavailable) Error() string {
@@ -71,6 +77,9 @@ func (e *ErrUnavailable) Error() string {
 	}
 	return fmt.Sprintf("%q is not available right now: %s", e.Requested, e.Reason)
 }
+
+// Unwrap exposes the underlying eligibility error so errors.As can reach it.
+func (e *ErrUnavailable) Unwrap() error { return e.cause }
 
 // Eligible reports whether a hop may be used RIGHT NOW. Returning an error
 // removes the hop from the candidate list (and, for a direct route, becomes
@@ -168,7 +177,7 @@ func (r *Resolver) ResolveCandidates(ctx context.Context, requested string, surf
 	// A direct route has nowhere to fail over to, so an ineligible model is a
 	// hard stop rather than a dropped candidate.
 	if err := r.eligibleHere(ctx, acct.ID, model); err != nil {
-		return nil, &ErrUnavailable{Requested: requested, Reason: err.Error()}
+		return nil, &ErrUnavailable{Requested: requested, Reason: err.Error(), cause: err}
 	}
 
 	key, err := r.catalog.PickKey(ctx, acct.ID)

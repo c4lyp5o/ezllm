@@ -1,0 +1,199 @@
+// App shell: token unlock gate → sidebar layout → routes.
+// Nothing renders or fetches before the unlock screen hands back a token.
+import { useCallback, useEffect, useState } from 'react';
+import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
+import { clearToken, getToken, setToken } from './api';
+import { Spinner, cx } from './ui';
+import Dashboard from './pages/Dashboard';
+import Providers from './pages/Providers';
+import Combos from './pages/Combos';
+import Compression from './pages/Compression';
+import Connect from './pages/Connect';
+
+const NAV = [
+  { to: '/', label: 'Dashboard', hint: 'overview · health · ledger' },
+  { to: '/providers', label: 'Providers', hint: 'accounts · keys · models' },
+  { to: '/combos', label: 'Combos', hint: 'routing chains' },
+  { to: '/compression', label: 'Compression', hint: 'M5 preview' },
+  { to: '/connect', label: 'Connect', hint: 'routes · API keys' },
+] as const;
+
+const LOGO = (
+  <svg viewBox="0 0 24 24" className="h-5 w-5 text-accent" fill="none" stroke="currentColor" strokeWidth="1.8"
+    strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M4 18V6h4.5a3.5 3.5 0 0 1 0 7H4m4.5 0L13 18" />
+  </svg>
+);
+
+function Unlock({ onUnlock }: { onUnlock: () => void }) {
+  const [value, setValue] = useState('');
+  const [err, setErr] = useState<string>(() => {
+    try {
+      if (sessionStorage.getItem('ezllm.admin.rejected')) {
+        sessionStorage.removeItem('ezllm.admin.rejected');
+        return 'last token was rejected by the API (invalid token) — unlock again';
+      }
+    } catch { /* noop */ }
+    return '';
+  });
+  const [busy, setBusy] = useState(false);
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const t = value.trim();
+    if (!t) { setErr('enter the admin token'); return; }
+    setBusy(true);
+    // Store first, then probe /admin/overview — feedback decides whether to keep it.
+    fetch('/admin/overview', { headers: { Authorization: `Bearer ${t}` } })
+      .then((r) => {
+        if (r.status === 401) { setErr('invalid token'); return; }
+        if (r.status === 403) { setErr('this token lacks the admin role'); return; }
+        if (!r.ok) { setErr(`upstream error (HTTP ${r.status})`); return; }
+        setToken(t);
+        onUnlock();
+      })
+      .catch(() => setErr('upstream unreachable — token saved anyway, will retry on demand'))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <div className="flex min-h-dvh items-center justify-center bg-bg px-4">
+      <div className="w-full max-w-sm rounded-xl border border-line bg-surface p-8 animate-fade-up">
+        <div className="flex items-center gap-2.5">
+          {LOGO}
+          <span className="text-[15px] font-semibold tracking-tight">ezllm</span>
+        </div>
+        <h1 className="mt-6 text-lg font-semibold">Unlock dashboard</h1>
+        <p className="mt-1 text-[13px] text-mute">Paste the admin bearer token to reach the control plane.</p>
+        <form onSubmit={submit} className="mt-6">
+          <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-mute" htmlFor="admin-token">
+            Admin token
+          </label>
+          <input
+            id="admin-token" autoFocus type="password" autoComplete="off" spellCheck={false}
+            value={value} onChange={(e) => { setValue(e.target.value); setErr(''); }}
+            placeholder="ezllm_…"
+            className={cx('w-full rounded-lg border bg-raised px-3 py-2.5 font-mono text-[13px] transition-colors',
+              err ? 'border-bad' : 'border-line hover:border-line-strong focus:border-accent focus:outline-none')}
+          />
+          {err && <p className="mt-2 text-xs text-bad">{err}</p>}
+          <button type="submit" disabled={busy}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-accent/60 bg-accent py-2.5 text-[13px] font-semibold text-[#082a3d] transition-all hover:brightness-110 active:brightness-95 disabled:opacity-50">
+            {busy ? <Spinner /> : null} Unlock dashboard
+          </button>
+        </form>
+        <p className="mt-5 border-t border-line pt-4 text-[11px] leading-relaxed text-mute">
+          Stored locally in this browser only. The Go binary serves this SPA and the <span className="font-mono">/admin</span> API on one origin.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
+  const location = useLocation();
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center gap-2.5 px-5 py-5">
+        {LOGO}
+        <span className="text-[15px] font-semibold tracking-tight">ezllm</span>
+        <span className="ml-auto rounded-full border border-line bg-raised px-2 py-0.5 font-mono text-[10px] text-mute">M3</span>
+      </div>
+      <nav className="flex-1 space-y-1 px-3">
+        {NAV.map((item) => {
+          const active = item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to);
+          return (
+            <NavLink key={item.to} to={item.to} onClick={onNavigate} end={item.to === '/'}
+              className={cx('block rounded-lg px-3 py-2 transition-colors', active ? 'bg-accent-dim text-ink' : 'text-dim hover:bg-hover hover:text-ink')}>
+              <div className="text-[13px] font-medium">{item.label}</div>
+              <div className={cx('text-[10.5px]', active ? 'text-accent/70' : 'text-mute')}>{item.hint}</div>
+            </NavLink>
+          );
+        })}
+      </nav>
+      <div className="border-t border-line px-5 py-4">
+        <button
+          type="button"
+          className="text-[11.5px] text-mute transition-colors hover:text-bad"
+          onClick={() => { clearToken(); onNavigate?.(); window.location.reload(); }}
+        >
+          Lock dashboard ⇥
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const PAGE_HEADERS: Record<string, { title: string; sub: string }> = {
+  '/': { title: 'Dashboard', sub: 'traffic, health and the last 20 calls' },
+  '/providers': { title: 'Providers', sub: 'accounts, keys, catalogs and quota' },
+  '/combos': { title: 'Combos', sub: 'ordered routing chains' },
+  '/compression': { title: 'Compression', sub: 'profiles land in M5' },
+  '/connect': { title: 'Connect', sub: 'point clients at this gateway' },
+};
+
+export default function App() {
+  const [token, setTokenState] = useState<string | null>(() => getToken());
+  const [drawer, setDrawer] = useState(false);
+
+  const closeDrawer = useCallback(() => setDrawer(false), []);
+
+  useEffect(() => {
+    document.body.classList.toggle('overflow-hidden', drawer);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setDrawer(false); };
+    if (drawer) { document.addEventListener('keydown', onKey); return () => document.removeEventListener('keydown', onKey); }
+  }, [drawer]);
+
+  if (!token) return <Unlock onUnlock={() => setTokenState(getToken())} />;
+
+  const header = PAGE_HEADERS[location.pathname] ?? PAGE_HEADERS['/'];
+
+  return (
+    <div className="flex min-h-dvh">
+      {/* Top bar — mobile only */}
+      <header className="fixed inset-x-0 top-0 z-30 flex items-center gap-3 border-b border-line bg-surface/95 px-4 py-3 backdrop-blur lg:hidden">
+        <button type="button" aria-label="Open menu" onClick={() => setDrawer(true)}
+          className="rounded-md border border-line p-1.5 text-dim hover:bg-hover hover:text-ink">
+          <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+            <path d="M3 5.5h14M3 10h14M3 14.5h14" />
+          </svg>
+        </button>
+        {LOGO}
+        <span className="text-[14px] font-semibold tracking-tight">ezllm</span>
+        <span className="ml-auto text-[12px] font-medium text-dim">{header.title}</span>
+      </header>
+
+      {/* Sidebar — desktop */}
+      <aside className="fixed bottom-0 left-0 top-0 z-30 hidden w-60 flex-col border-r border-line bg-surface lg:flex">
+        <SidebarContent />
+      </aside>
+
+      {/* Sidebar — mobile drawer */}
+      {drawer && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-fade-in" onClick={closeDrawer} />
+          <aside className="absolute bottom-0 left-0 top-0 w-64 border-r border-line bg-surface animate-fade-in">
+            <SidebarContent onNavigate={closeDrawer} />
+          </aside>
+        </div>
+      )}
+
+      <main className="min-w-0 flex-1 px-4 pb-16 pt-20 lg:ml-60 lg:pl-8 lg:pr-8 lg:pt-8 xl:px-10">
+        <div className="hidden items-baseline gap-3 lg:flex">
+          <h1 className="text-[20px] font-semibold tracking-tight">{header.title}</h1>
+          <p className="text-[13px] text-mute">{header.sub}</p>
+        </div>
+        <div className="mt-8">
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/providers" element={<Providers />} />
+            <Route path="/combos" element={<Combos />} />
+            <Route path="/compression" element={<Compression />} />
+            <Route path="/connect" element={<Connect />} />
+            <Route path="*" element={<Dashboard />} />
+          </Routes>
+        </div>
+      </main>
+    </div>
+  );
+}

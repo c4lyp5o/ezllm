@@ -14,6 +14,7 @@ import (
 
 	"github.com/c4lyp5o/ezllm/internal/provider"
 	"github.com/c4lyp5o/ezllm/internal/proxy"
+	"github.com/c4lyp5o/ezllm/internal/registration"
 	"github.com/c4lyp5o/ezllm/internal/router"
 	"github.com/c4lyp5o/ezllm/internal/store"
 )
@@ -67,6 +68,7 @@ func newHarness(t *testing.T, upstream http.HandlerFunc) *harness {
 		Auth: db, Resolver: router.New(db),
 		Dispatcher: proxy.NewDispatcher(client, registry),
 		DB:         db, MaxBodyMiB: 1,
+		Registry: registry, Tester: registration.NewTester(client, registry, db),
 	})
 	h := &harness{handler: s.Handler(), db: db, upstream: up, t: t}
 	t.Cleanup(func() { db.Close(); up.Close() })

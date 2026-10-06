@@ -99,8 +99,10 @@ func run() error {
 	resolver := router.New(db)
 
 	srv := server.New(server.Options{
-		Auth: db, Resolver: resolver, Dispatcher: dispatcher, DB: db, Log: log,
-		MaxBodyMiB: cfg.MaxBodyMiB,
+		Auth: db, Resolver: resolver, Dispatcher: dispatcher, DB: db,
+		Registry: registry, Log: log,
+		MaxBodyMiB:  cfg.MaxBodyMiB,
+		CORSOrigins: corsOriginsFromEnv(),
 	})
 
 	addr := cfg.Listen
@@ -282,4 +284,22 @@ func upstreamClient(cfg *config.Config) *http.Client {
 		IdleConnTimeout:     90 * time.Second,
 	}
 	return &http.Client{Transport: tr, Timeout: cfg.UpstreamTimeout}
+}
+
+// corsOriginsFromEnv reads EZLLM_CORS_ORIGINS (comma-separated). Unset or empty
+// means "any origin" for /v1 only — see internal/server/cors.go for why that is
+// safe there and why /admin never gets a grant.
+func corsOriginsFromEnv() []string {
+	raw := strings.TrimSpace(os.Getenv("EZLLM_CORS_ORIGINS"))
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

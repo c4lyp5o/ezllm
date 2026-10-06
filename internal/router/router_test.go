@@ -20,6 +20,7 @@ type fakeCatalog struct {
 	namespaces []string
 
 	pickKeyErr error
+	combos     map[string]*store.Combo // by name
 }
 
 func newFake() *fakeCatalog {
@@ -49,6 +50,36 @@ func (f *fakeCatalog) AccountByNamespace(_ context.Context, ns string) (*provide
 		return a, nil
 	}
 	return nil, store.ErrNotFound
+}
+
+func (f *fakeCatalog) AccountByID(_ context.Context, id int64) (*provider.Account, error) {
+	for _, a := range f.accounts {
+		if a.ID == id {
+			return a, nil
+		}
+	}
+	return nil, store.ErrNotFound
+}
+
+func (f *fakeCatalog) ComboByName(_ context.Context, name string) (*store.Combo, error) {
+	if f.combos == nil {
+		return nil, store.ErrNotFound
+	}
+	if c, ok := f.combos[name]; ok {
+		cp := *c
+		return &cp, nil
+	}
+	return nil, store.ErrNotFound
+}
+
+func (f *fakeCatalog) AllComboNames(_ context.Context) ([]string, error) {
+	out := []string{}
+	for n, c := range f.combos {
+		if c.Enabled {
+			out = append(out, n)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeCatalog) PickKey(_ context.Context, id int64) (store.KeyPick, error) {

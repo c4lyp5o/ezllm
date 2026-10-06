@@ -150,23 +150,28 @@ func IsStream(body []byte) bool {
 	return m.Stream
 }
 
-// Forward sends the (already model-swapped) body upstream and copies the
-// response to w. It returns the ledger Result.
-func (d *Dispatcher) Forward(ctx context.Context, w http.ResponseWriter, r *http.Request, rt Route, body []byte) (Result, error) {
+// attempt runs the upstream call and returns the response WITHOUT touching w.
+//
+// Split out of Forward so failover can inspect the status before anything is
+// committed to the client. This is the whole trick: w.Header() is only a map
+// until WriteHeader fires, and WriteHeader is what makes the status
+// irrevocable. Keeping the two phases apart is what lets us try hop 2 after
+// hop 1 answers 429 — see ForwardCandidates.
+func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, body []byte) (*http.Response, Result, time.Time, error) {
 	ad, err := d.registry.Get(rt.Account.Kind)
 	if err != nil {
-		return Result{}, err
+		return nil, Result{}, time.Time{}, err
 	}
 	url := strings.TrimSuffix(rt.Account.BaseURL, "/") + provider.SurfacePath(rt.Surface)
 
 	upReq, err := http.NewRequestWithContext(ctx, r.Method, url, bytes.NewReader(body))
 	if err != nil {
-		return Result{}, err
+		return nil, Result{}, time.Time{}, err
 	}
 	// Copy safe client headers, then let the adapter apply auth + strip its own.
 	copyClientHeaders(upReq, r, ad.StripHeaders())
 	if err := ad.PrepareRequest(ctx, upReq, rt.Account, rt.KeyPlain, rt.Surface); err != nil {
-		return Result{}, err
+		return nil, Result{}, time.Time{}, err
 	}
 	// Content-Length must match the rewritten body.
 	upReq.ContentLength = int64(len(body))
@@ -175,9 +180,8 @@ func (d *Dispatcher) Forward(ctx context.Context, w http.ResponseWriter, r *http
 	start := time.Now()
 	resp, err := d.client.Do(upReq)
 	if err != nil {
-		return Result{Stream: IsStream(body), Totalms: msPtr(time.Since(start)), Err: err.Error()}, err
+		return nil, Result{Stream: IsStream(body), Totalms: msPtr(time.Since(start)), Err: err.Error()}, time.Time{}, err
 	}
-	defer resp.Body.Close()
 
 	res := Result{
 		Status:        resp.StatusCode,
@@ -185,6 +189,15 @@ func (d *Dispatcher) Forward(ctx context.Context, w http.ResponseWriter, r *http
 		EndpointID:    resp.Header.Get("x-opencode-endpoint-id"),
 		UpstreamModel: resp.Header.Get("x-opencode-upstream-model-id"),
 	}
+	return resp, res, start, nil
+}
+
+// commit streams one upstream response to the client and closes resp.Body.
+// Nothing here may be called twice for one request — after the first
+// WriteHeader the status can no longer change.
+func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *http.Response, rt Route, res Result, start time.Time) (Result, error) {
+	defer resp.Body.Close()
+
 	// Propagate response headers that matter, minus hop-by-hop and identity.
 	copyResponseHeaders(w, resp)
 
@@ -233,6 +246,99 @@ func (d *Dispatcher) Forward(ctx context.Context, w http.ResponseWriter, r *http
 	}
 	res.Totalms = msPtr(time.Since(start))
 	return res, nil
+}
+
+// Forward sends the (already model-swapped) body upstream and copies the
+// response to w. It returns the ledger Result. Single-candidate form: nothing
+// to fail over to, so attempt and commit happen back to back.
+func (d *Dispatcher) Forward(ctx context.Context, w http.ResponseWriter, r *http.Request, rt Route, body []byte) (Result, error) {
+	resp, res, start, err := d.attempt(ctx, r, rt, body)
+	if err != nil {
+		return res, err
+	}
+	return d.commit(ctx, w, resp, rt, res, start)
+}
+
+// failoverStatus reports whether an upstream answer means "that hop couldn't
+// serve it, another one might" rather than "the request itself is wrong".
+//
+// 400/413/422 are deliberately excluded: they describe the BODY, which we are
+// about to replay byte-identical to the next hop — retrying would burn every
+// key in the combo to get the same rejection. 401/403/404/429 and 5xx are
+// hop-specific (bad key, model absent on that account, quota, outage) and are
+// exactly what failover exists to survive.
+func failoverStatus(code int) bool {
+	switch code {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound,
+		http.StatusRequestTimeout, http.StatusTooEarly, http.StatusTooManyRequests,
+		http.StatusInternalServerError, http.StatusBadGateway,
+		http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	return code >= 500
+}
+
+// drainClose releases an abandoned response so its connection can be reused.
+func drainClose(resp *http.Response) {
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxBodyBytes))
+	_ = resp.Body.Close()
+}
+
+// ForwardCandidates tries routes in order and commits the first one that the
+// client may see. This is combo failover.
+//
+// The invariant that makes it safe: attempt() never touches w, so until
+// commit() calls WriteHeader the status is still changeable and no byte has
+// reached the client. A hop abandoned here is therefore invisible — the client
+// sees only the hop that ultimately commits. Once commit runs we stop, because
+// a partially streamed response cannot be handed to a second upstream.
+//
+// The LAST candidate always commits, even when its status is failover-able:
+// if every hop fails, the client gets the real upstream error rather than a
+// plausible-looking invention of ours.
+func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWriter, r *http.Request, routes []Route, body []byte) (Route, Result, error) {
+	if len(routes) == 0 {
+		return Route{}, Result{}, errors.New("proxy: no candidate routes")
+	}
+	// The last candidate is final: it is always committed, so the client sees
+	// a real upstream answer instead of an invented one. Everything before it
+	// may be abandoned. Splitting the two cases here (rather than one loop
+	// with an index guard) is what keeps the "no candidate left" return from
+	// being unreachable dead code.
+	for i := 0; i < len(routes)-1; i++ {
+		rt := routes[i]
+		swapped, _, err := SwapModel(body, rt.Model)
+		if err != nil {
+			return Route{}, Result{}, err
+		}
+		resp, res, start, err := d.attempt(ctx, r, rt, swapped)
+		if err != nil {
+			// Transport failure — nothing written, safe to try the next hop.
+			continue
+		}
+		if failoverStatus(res.Status) {
+			drainClose(resp)
+			continue
+		}
+		res2, err2 := d.commit(ctx, w, resp, rt, res, start)
+		// The committed route travels back with the result: the ledger must
+		// credit the hop that ACTUALLY served the call. Reporting routes[0]
+		// would attribute a failed hop's spend — and, worse, would make a
+		// per-account cap meter the wrong budget entirely.
+		return rt, res2, err2
+	}
+
+	rt := routes[len(routes)-1]
+	swapped, _, err := SwapModel(body, rt.Model)
+	if err != nil {
+		return Route{}, Result{}, err
+	}
+	resp, res, start, err := d.attempt(ctx, r, rt, swapped)
+	if err != nil {
+		return rt, res, err
+	}
+	res2, err2 := d.commit(ctx, w, resp, rt, res, start)
+	return rt, res2, err2
 }
 
 // streamCopy copies SSE upstream->client with a Flush per chunk, observing

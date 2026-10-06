@@ -343,15 +343,18 @@ func boolInt(b bool) int {
 }
 
 // UsageRow is one aggregate group returned by UsageReport.
+// JSON names are the CONTRACT (docs/API.md §overview) and must match what the
+// dashboard reads — a tag rename silently blanks the stat cards, because the
+// frontend's types are hand-written from that doc. TestUsageRowJSONKeys pins it.
 type UsageRow struct {
-	Key         string `json:"key"`
+	Key         string `json:"k"`
 	Calls       int64  `json:"calls"`
-	TokensIn    int64  `json:"tokens_in"`
-	TokensOut   int64  `json:"tokens_out"`
-	CachedRead  int64  `json:"tokens_cached_read"`
-	CachedWrite int64  `json:"tokens_cached_write"`
-	Reasoning   int64  `json:"reasoning_tokens"`
-	TokensSaved int64  `json:"tokens_saved"`
+	TokensIn    int64  `json:"tin"`
+	TokensOut   int64  `json:"tout"`
+	CachedRead  int64  `json:"cread"`
+	CachedWrite int64  `json:"cwrite"`
+	Reasoning   int64  `json:"reasoning"`
+	TokensSaved int64  `json:"saved"`
 	Errors      int64  `json:"errors"`
 	P50TTFTms   int64  `json:"p50_ttft_ms"`
 }
@@ -385,7 +388,7 @@ ORDER BY calls DESC`, col)
 	}
 	defer rows.Close()
 
-	var out []UsageRow
+	out := []UsageRow{}
 	for rows.Next() {
 		var r UsageRow
 		if err := rows.Scan(&r.Key, &r.Calls, &r.TokensIn, &r.TokensOut, &r.CachedRead, &r.CachedWrite, &r.Reasoning, &r.TokensSaved, &r.Errors); err != nil {
@@ -473,7 +476,7 @@ FROM calls ORDER BY id DESC LIMIT ?`, limit)
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Call
+	out := []Call{}
 	for rows.Next() {
 		var c Call
 		var ts string

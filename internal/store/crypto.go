@@ -7,6 +7,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -146,4 +147,16 @@ func KeyHint(plain string) string {
 func HashToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
+}
+
+// GenerateToken mints a client token: `ezllm_` + 32 bytes of CSPRNG output,
+// base64url without padding (43 chars — long enough to never be guessed,
+// short enough to paste). Returned plaintext exists only in the caller's
+// hands: the store keeps its hash.
+func GenerateToken() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("store: generate token: %w", err)
+	}
+	return "ezllm_" + base64.RawURLEncoding.EncodeToString(buf), nil
 }

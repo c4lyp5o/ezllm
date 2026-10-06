@@ -276,7 +276,7 @@ ORDER BY a.namespace, m.model_id`)
 		return nil, err
 	}
 	defer rows.Close()
-	var out []string
+	out := []string{}
 	for rows.Next() {
 		var ns string
 		var model sql.NullString
@@ -318,7 +318,7 @@ ORDER BY a.namespace, m.model_id`)
 		return nil, err
 	}
 	defer rows.Close()
-	var out []ModelEntry
+	out := []ModelEntry{}
 	for rows.Next() {
 		var ns, model, owned, display string
 		var po, pa, pr sql.NullInt64
@@ -415,12 +415,31 @@ func (d *DB) UpsertClientToken(ctx context.Context, name, plaintextToken, roles 
 	if roles == "" {
 		roles = "infer"
 	}
+	hash := HashToken(plaintextToken)
 	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		// token_hash is UNIQUE alongside name, so ON CONFLICT(name) alone is not
+		// enough: when the incoming plaintext already belongs to a DIFFERENT row
+		// (token not rotated, or two config names seeded the same value) the hash
+		// index rejects the write BEFORE ON CONFLICT(name) can apply, and boot
+		// died with "UNIQUE constraint failed: client_tokens.token_hash".
+		//
+		// Step 1 releases the hash. It is only ever held by a row whose OWN name
+		// is not `name` — that row's token is being reassigned to `name`, so it
+		// is unreachable by definition and safe to delete. Nothing else is
+		// touched: an unrelated row's token keeps its name and its row.
+		// (Doing this as a DELETE rather than a rename avoids inventing a
+		// placeholder name that could itself collide, and a UNIQUE index has no
+		// deferred mode to lean on.)
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM client_tokens WHERE token_hash = ? AND name <> ?`,
+			hash, name); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx, `
 INSERT INTO client_tokens (name, token_hash, roles, enabled) VALUES (?,?,?,1)
 ON CONFLICT(name) DO UPDATE SET
   token_hash=excluded.token_hash, roles=excluded.roles, enabled=1`,
-			name, HashToken(plaintextToken), roles)
+			name, hash, roles)
 		return err
 	})
 }

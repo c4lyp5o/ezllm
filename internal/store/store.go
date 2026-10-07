@@ -24,7 +24,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 3
+const schemaVersion = 4
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -116,6 +116,10 @@ func Open(ctx context.Context, opts Options) (*DB, error) {
 		db.closeConns()
 		return nil, err
 	}
+	if err := db.EnsureDashboardPassword(ctx); err != nil {
+		db.closeConns()
+		return nil, fmt.Errorf("store: initialize dashboard password: %w", err)
+	}
 	db.wg.Add(1)
 	go db.ledgerLoop(opts.BatchSize, opts.BatchWait)
 	return db, nil
@@ -185,6 +189,12 @@ func (d *DB) migrate() error {
 		if err := d.alterCallsRulesFired(context.Background()); err != nil {
 			return fmt.Errorf("store: alter calls rules_fired: %w", err)
 		}
+		if err := d.alterDashboardAuth(context.Background()); err != nil {
+			return fmt.Errorf("store: alter dashboard auth: %w", err)
+		}
+		if _, err := d.w.Exec(schemaSQL); err != nil {
+			return fmt.Errorf("store: reapply schema: %w", err)
+		}
 		if _, err := d.w.Exec(`INSERT INTO schema_version(version) VALUES(?)`, schemaVersion); err != nil {
 			return fmt.Errorf("store: stamp version: %w", err)
 		}
@@ -194,7 +204,7 @@ func (d *DB) migrate() error {
 		return fmt.Errorf("store: database schema version %d is newer than this binary (%d) — refusing to start", cur, schemaVersion)
 	}
 	if cur < schemaVersion {
-		// Order matters: the M5 column must exist BEFORE schema.sql re-runs.
+		// Order matters: legacy columns must exist BEFORE schema.sql re-runs.
 		// schema.sql creates idx_calls_acct_model ON calls(account_id, ...),
 		// and on a pre-M5 database CREATE TABLE IF NOT EXISTS is a no-op (the
 		// old table lacks account_id) while CREATE INDEX still executes — so
@@ -207,6 +217,9 @@ func (d *DB) migrate() error {
 		}
 		if err := d.alterCallsRulesFired(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate %d->%d alter rules_fired: %w", cur, schemaVersion, err)
+		}
+		if err := d.alterDashboardAuth(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate dashboard auth: %w", err)
 		}
 		if _, err := d.w.Exec(schemaSQL); err != nil {
 			return fmt.Errorf("store: migrate %d->%d: %w", cur, schemaVersion, err)
@@ -250,6 +263,25 @@ func (d *DB) alterCallsAccountID(ctx context.Context) error {
 // attribution) on databases created before it. Same guard as
 // alterCallsAccountID: ALTER TABLE ADD COLUMN is not idempotent, and a fresh
 // database already has the column from schema.sql.
+// alterDashboardAuth creates password/session tables for existing databases.
+// schema.sql is re-applied after migrations, so these CREATE statements are
+// idempotent and keep the standalone version reset straightforward.
+func (d *DB) alterDashboardAuth(ctx context.Context) error {
+	_, err := d.w.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS dashboard_auth (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    password_hash TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE IF NOT EXISTS dashboard_sessions (
+    token_hash TEXT PRIMARY KEY,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_dashboard_sessions_expiry ON dashboard_sessions(expires_at);`)
+	return err
+}
+
 func (d *DB) alterCallsRulesFired(ctx context.Context) error {
 	exists, err := hasTable(ctx, d.w, "calls")
 	if err != nil {

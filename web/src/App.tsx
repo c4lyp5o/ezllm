@@ -2,7 +2,7 @@
 // Nothing renders or fetches before the unlock screen hands back a token.
 import { useCallback, useEffect, useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
-import { clearToken, getToken, setToken } from './api';
+import { clearToken, dashboardLogin, getToken, setToken } from './api';
 import { Spinner, cx } from './ui';
 import Dashboard from './pages/Dashboard';
 import Providers from './pages/Providers';
@@ -12,6 +12,7 @@ import Connect from './pages/Connect';
 import Rules from './pages/Rules';
 import Stats from './pages/Stats';
 import Requests from './pages/Requests';
+import Settings from './pages/Settings';
 
 const NAV = [
   { to: '/', label: 'Dashboard', hint: 'overview · health · ledger' },
@@ -22,6 +23,7 @@ const NAV = [
   { to: '/rules', label: 'Rules', hint: 'caps · windows' },
   { to: '/compression', label: 'Compression', hint: 'profiles · engines' },
   { to: '/connect', label: 'Connect', hint: 'routes · API keys' },
+  { to: '/settings', label: 'Settings', hint: 'dashboard password' },
 ] as const;
 
 const LOGO = (
@@ -33,32 +35,16 @@ const LOGO = (
 
 function Unlock({ onUnlock }: { onUnlock: () => void }) {
   const [value, setValue] = useState('');
-  const [err, setErr] = useState<string>(() => {
-    try {
-      if (sessionStorage.getItem('ezllm.admin.rejected')) {
-        sessionStorage.removeItem('ezllm.admin.rejected');
-        return 'last token was rejected by the API (invalid token) — unlock again';
-      }
-    } catch { /* noop */ }
-    return '';
-  });
+  const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    const t = value.trim();
-    if (!t) { setErr('enter the admin token'); return; }
+    if (!value) { setErr('enter the dashboard password'); return; }
     setBusy(true);
-    // Store first, then probe /admin/overview — feedback decides whether to keep it.
-    fetch('/admin/overview', { headers: { Authorization: `Bearer ${t}` } })
-      .then((r) => {
-        if (r.status === 401) { setErr('invalid token'); return; }
-        if (r.status === 403) { setErr('this token lacks the admin role'); return; }
-        if (!r.ok) { setErr(`upstream error (HTTP ${r.status})`); return; }
-        setToken(t);
-        onUnlock();
-      })
-      .catch(() => setErr('upstream unreachable — token saved anyway, will retry on demand'))
+    dashboardLogin(value)
+      .then((token) => { setToken(token); onUnlock(); })
+      .catch((error: unknown) => setErr(error instanceof Error ? error.message : 'login failed'))
       .finally(() => setBusy(false));
   };
 
@@ -70,15 +56,18 @@ function Unlock({ onUnlock }: { onUnlock: () => void }) {
           <span className="text-[15px] font-semibold tracking-tight">ezllm</span>
         </div>
         <h1 className="mt-6 text-lg font-semibold">Unlock dashboard</h1>
-        <p className="mt-1 text-[13px] text-mute">Paste the admin bearer token to reach the control plane.</p>
+        <p className="mt-1 text-[13px] text-mute">Sign in with your dashboard password to reach the control plane.</p>
+        <p className="mt-3 rounded-lg border border-line bg-raised px-3 py-2 text-xs text-mute">
+          First-run password: <code className="font-mono text-ink">STRONGPASSWORD</code>
+        </p>
         <form onSubmit={submit} className="mt-6">
-          <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-mute" htmlFor="admin-token">
-            Admin token
+          <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-mute" htmlFor="dashboard-password">
+            Dashboard password
           </label>
           <input
-            id="admin-token" autoFocus type="password" autoComplete="off" spellCheck={false}
+            id="dashboard-password" autoFocus type="password" autoComplete="current-password" spellCheck={false}
             value={value} onChange={(e) => { setValue(e.target.value); setErr(''); }}
-            placeholder="ezllm_…"
+            placeholder="Enter dashboard password"
             className={cx('w-full rounded-lg border bg-raised px-3 py-2.5 font-mono text-[13px] transition-colors',
               err ? 'border-bad' : 'border-line hover:border-line-strong focus:border-accent focus:outline-none')}
           />
@@ -89,7 +78,7 @@ function Unlock({ onUnlock }: { onUnlock: () => void }) {
           </button>
         </form>
         <p className="mt-5 border-t border-line pt-4 text-[11px] leading-relaxed text-mute">
-          Stored locally in this browser only. The Go binary serves this SPA and the <span className="font-mono">/admin</span> API on one origin.
+          Change the password any time in Settings. Dashboard sessions expire after 12 hours.
         </p>
       </div>
     </div>
@@ -139,6 +128,7 @@ const PAGE_HEADERS: Record<string, { title: string; sub: string }> = {
   '/rules': { title: 'Rules', sub: 'usage caps and allowed-use windows' },
   '/compression': { title: 'Compression', sub: 'profiles, engines and savings' },
   '/connect': { title: 'Connect', sub: 'point clients at this gateway' },
+  '/settings': { title: 'Settings', sub: 'dashboard account security' },
 };
 
 export default function App() {
@@ -202,6 +192,7 @@ export default function App() {
             <Route path="/rules" element={<Rules />} />
             <Route path="/compression" element={<Compression />} />
             <Route path="/connect" element={<Connect />} />
+            <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<Dashboard />} />
           </Routes>
         </div>

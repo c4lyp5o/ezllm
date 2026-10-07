@@ -32,8 +32,11 @@ func TestUpsertAccountReturnsUsableID(t *testing.T) {
 	if _, _, err := db.AddKey(ctx, id1, "primary", "sk-a…ef01"); err != nil {
 		t.Fatalf("AddKey with returned id: %v", err)
 	}
-	if _, err := db.PickKey(ctx, id1); err != nil {
+	pick, err := db.PickKey(ctx, id1)
+	if err != nil {
 		t.Errorf("PickKey(returned id) failed — the id is not usable: %v", err)
+	} else if pick.Plaintext != "sk-a…ef01" {
+		t.Errorf("PickKey plaintext = %q, want stored test key", pick.Plaintext)
 	}
 
 	// Update path (same namespace) must return the SAME id, still usable.

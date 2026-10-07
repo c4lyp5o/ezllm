@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
-	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -135,23 +134,24 @@ func main() {
 		fail++
 	}
 
-	section("INVARIANT: keys encrypted at rest (ciphertext, never plaintext)")
-	r3, _ := db.Query(`SELECT k.id, a.namespace, k.label, k.key_hint, k.key_ct
+	section("INVARIANT: provider credentials are stored plaintext")
+	r3, err := db.Query(`SELECT k.id, a.namespace, k.label, k.key_hint, k.key_plain
 		FROM provider_keys k JOIN accounts a ON a.id=k.account_id`)
+	if err != nil {
+		fmt.Println("query:", err)
+		os.Exit(1)
+	}
 	for r3.Next() {
 		var id int
-		var ns, label, hint, ct string
-		r3.Scan(&id, &ns, &label, &hint, &ct)
-		verdict := "FAIL PLAINTEXT"
-		if strings.HasPrefix(ct, "enc:v1:") && strings.Count(ct, ":") == 4 {
-			verdict = "PASS enc:v1 iv:ct:tag"
-		}
-		fmt.Printf("  %-10s %-8s hint=%-10s ct_len=%-4d %s\n", ns, label, hint, len(ct), verdict)
-		if !strings.HasPrefix(ct, "enc:v1:") {
+		var ns, label, hint, plaintext string
+		if err := r3.Scan(&id, &ns, &label, &hint, &plaintext); err != nil {
+			fmt.Println("scan:", err)
 			fail++
+			continue
 		}
-		if strings.Contains(ct, hint) && len(hint) > 4 {
-			fmt.Println("    WARN: hint appears inside ciphertext")
+		fmt.Printf("  %-10s %-8s hint=%-10s key_len=%-4d plaintext-present=%t\n", ns, label, hint, len(plaintext), plaintext != "")
+		if plaintext == "" {
+			fail++
 		}
 	}
 	r3.Close()

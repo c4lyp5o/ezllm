@@ -58,7 +58,7 @@ func TestOpenMigratesAndIsIdempotent(t *testing.T) {
 		}
 	}
 	// FK order is valid: a child insert must fail without its parent
-	if _, err := db.Writer().Exec(`INSERT INTO provider_keys(account_id,label,key_hint,key_ct) VALUES(999,'x','h','c')`); err == nil {
+	if _, err := db.Writer().Exec(`INSERT INTO provider_keys(account_id,label,key_hint,key_plain) VALUES(999,'x','h','c')`); err == nil {
 		t.Error("foreign_keys must be ON — orphan provider_keys insert should fail")
 	}
 }
@@ -330,7 +330,7 @@ func TestLedgerRowsAreImmutableHistory(t *testing.T) {
 	if _, err := db.Writer().Exec(`INSERT INTO accounts(id,name,namespace,kind,base_url) VALUES(1,'SSN GPT','super-ssn','openai-compatible','https://example.com/v1')`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Writer().Exec(`INSERT INTO provider_keys(id,account_id,label,key_hint,key_ct) VALUES(1,1,'primary','sk…def0','enc:v1:aa:bb:cc')`); err != nil {
+	if _, err := db.Writer().Exec(`INSERT INTO provider_keys(id,account_id,label,key_hint,key_plain) VALUES(1,1,'primary','sk…def0','sk-test-plain')`); err != nil {
 		t.Fatal(err)
 	}
 	db.RecordCall(Call{TS: now, Client: "hermes", Surface: SurfaceOpenAI, Alias: "super-ssn/gpt-6-luna",

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -103,13 +102,12 @@ FROM accounts WHERE id = ?`, id)
 
 // ── keys ────────────────────────────────────────────────────────────────────
 
-// PickKey returns the first enabled, non-cooled-down key for an account,
-// decrypting it. M2 uses simple ordering; M4 replaces this with rotation +
-// cooldown + quota exclusion (the interface stays identical).
+// PickKey returns the first enabled, non-cooled-down key for an account.
+// M2 uses simple ordering; M4 replaces this with rotation + cooldown + quota exclusion.
 func (d *DB) PickKey(ctx context.Context, accountID int64) (KeyPick, error) {
 	now := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 	rows, err := d.r.QueryContext(ctx, `
-SELECT k.id, k.key_hint, k.key_ct
+SELECT k.id, k.key_hint, k.key_plain
 FROM provider_keys k
 LEFT JOIN key_cooldowns c ON c.provider_key_id = k.id
 WHERE k.account_id = ? AND k.enabled = 1
@@ -121,28 +119,15 @@ LIMIT 8`, accountID, now)
 	}
 	defer rows.Close()
 
-	var lastErr error
 	for rows.Next() {
 		var p KeyPick
-		var ct string
-		if err := rows.Scan(&p.ID, &p.Hint, &ct); err != nil {
+		if err := rows.Scan(&p.ID, &p.Hint, &p.Plaintext); err != nil {
 			return KeyPick{}, err
 		}
-		plain, err := d.crypto.Decrypt(ct)
-		if err != nil {
-			// A key we cannot decrypt is unusable (rotated master key, corrupt
-			// row). Skip it rather than failing the whole request.
-			lastErr = fmt.Errorf("key %d: %w", p.ID, err)
-			continue
-		}
-		p.Plaintext = plain
 		return p, nil
 	}
 	if err := rows.Err(); err != nil {
 		return KeyPick{}, err
-	}
-	if lastErr != nil {
-		return KeyPick{}, lastErr
 	}
 	return KeyPick{}, ErrNotFound
 }
@@ -191,22 +176,18 @@ ON CONFLICT(namespace) DO UPDATE SET
 	return id, nil
 }
 
-// AddKey encrypts and stores a provider key. Callers MUST have tested it first
-// (the registration flow does); this only persists.
+// AddKey stores a provider key in plaintext by explicit operator choice.
+// Callers MUST have tested it first (the registration flow does); this only persists.
 func (d *DB) AddKey(ctx context.Context, accountID int64, label, plaintext string) (int64, string, error) {
 	if strings.TrimSpace(plaintext) == "" {
 		return 0, "", errors.New("store: empty api key")
 	}
-	ct, err := d.crypto.Encrypt(plaintext)
-	if err != nil {
-		return 0, "", err
-	}
 	hint := KeyHint(plaintext)
 	var id int64
-	err = d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+	err := d.WithWriteTx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `
-INSERT INTO provider_keys (account_id, label, key_hint, key_ct, enabled)
-VALUES (?,?,?,?,1)`, accountID, label, hint, ct)
+INSERT INTO provider_keys (account_id, label, key_hint, key_plain, enabled)
+VALUES (?,?,?,?,1)`, accountID, label, hint, plaintext)
 		if err != nil {
 			return err
 		}

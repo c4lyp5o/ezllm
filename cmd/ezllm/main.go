@@ -1,6 +1,6 @@
 // Command ezllm is Calypso's lightweight LLM router.
 //
-// M2: config + SQLite store (WAL, single writer) + encrypted provider keys +
+// M2: config + SQLite store (WAL, single writer) +
 // three passthrough surfaces (OpenAI chat, Anthropic messages, OpenAI
 // Responses) with normalized usage ledgering, and graceful shutdown.
 package main
@@ -172,8 +172,8 @@ func run() error {
 	return nil
 }
 
-// seed registers accounts, their keys, and client tokens from config on first
-// boot. Idempotent: re-running updates in place and never duplicates.
+// seed registers accounts and client tokens from config on first boot.
+// Provider API keys are entered through the dashboard, never environment variables.
 func seed(ctx context.Context, db *store.DB, cfg *config.Config, log *slog.Logger) error {
 	for name, p := range cfg.Providers {
 		kind, err := provider.ParseKind(p.Kind)
@@ -195,26 +195,6 @@ func seed(ctx context.Context, db *store.DB, cfg *config.Config, log *slog.Logge
 		id, err := db.UpsertAccount(ctx, acct)
 		if err != nil {
 			return fmt.Errorf("account %q: %w", name, err)
-		}
-		for _, k := range p.Keys {
-			plain := strings.TrimSpace(os.Getenv(k.Env))
-			if plain == "" {
-				log.Warn("provider key env not set — skipping", "provider", name, "env", k.Env)
-				continue
-			}
-			label := k.Label
-			if label == "" {
-				label = k.Env
-			}
-			// Only add when this key isn't already stored for the account
-			// (compare by hint, so a restart never duplicates rows).
-			if exists, err := db.HasKeyByHint(ctx, id, store.KeyHint(plain)); err == nil && exists {
-				continue
-			}
-			if _, _, err := db.AddKey(ctx, id, label, plain); err != nil {
-				return fmt.Errorf("key for %q: %w", name, err)
-			}
-			log.Info("seeded provider key", "provider", name, "label", label, "hint", store.KeyHint(plain))
 		}
 		// Sync the catalog so /v1/models and namespace resolution work.
 		// NOTE: pass the PERSISTED id — the local struct's ID is zero here, and

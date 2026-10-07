@@ -110,10 +110,14 @@ func New(opts Options) *Server {
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
+	s.mux.HandleFunc("POST /admin/login", s.handleDashboardLogin)
 	s.mux.HandleFunc("GET /v1/models", s.authed(s.handleModels))
 	s.mux.HandleFunc("POST /v1/chat/completions", s.authed(s.inference(provider.SurfaceOpenAI)))
 	s.mux.HandleFunc("POST /v1/messages", s.authed(s.inference(provider.SurfaceAnthropic)))
 	s.mux.HandleFunc("POST /v1/responses", s.authed(s.inference(provider.SurfaceResponses)))
+
+	// ── Dashboard account settings ──
+	s.mux.HandleFunc("POST /admin/settings/password", s.admin(s.handleDashboardPassword))
 
 	// ── M3 admin API (docs/API.md) ──
 	s.mux.HandleFunc("GET /admin/health", s.admin(s.handleAdminHealth))

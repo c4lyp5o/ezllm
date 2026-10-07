@@ -1,10 +1,9 @@
 // Package config loads and validates ezllm's YAML configuration.
 //
-// The config file is BOOTSTRAP ONLY: it seeds accounts, provider keys and
-// client tokens into SQLite on first boot. Everything after that is managed
-// through the admin API (M3+). Secrets NEVER live in the file — every
-// credential is an env-var indirection (`token_env`, `keys[].env`) resolved at
-// load time, and Load reports missing env vars by NAME, never by value.
+// The config file is BOOTSTRAP ONLY: it seeds accounts and client tokens into
+// SQLite on first boot. Provider keys are entered through the dashboard; client
+// tokens continue to use env-var indirection and Load reports missing vars by
+// NAME, never by value.
 package config
 
 import (
@@ -41,7 +40,6 @@ type TokenRef struct {
 }
 
 type KeyRef struct {
-	Env   string `yaml:"env"`
 	Label string `yaml:"label"`
 }
 
@@ -210,18 +208,6 @@ func (c *Config) Validate() error {
 		}
 		seenNS[ns] = name
 
-		if len(p.Keys) == 0 {
-			errs = append(errs, fmt.Sprintf("providers[%s]: at least one key required", name))
-		}
-		for i, k := range p.Keys {
-			if k.Env == "" {
-				errs = append(errs, fmt.Sprintf("providers[%s].keys[%d]: env is required", name, i))
-				continue
-			}
-			if os.Getenv(k.Env) == "" {
-				errs = append(errs, fmt.Sprintf("providers[%s].keys[%d]: env %s is not set", name, i, k.Env))
-			}
-		}
 		if p.ProbeDelayMs < 0 || p.ProbeDelayMs > 10000 {
 			errs = append(errs, fmt.Sprintf("providers[%s]: probe_delay_ms %d out of range 0..10000", name, p.ProbeDelayMs))
 		}

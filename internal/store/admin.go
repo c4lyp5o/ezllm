@@ -471,7 +471,7 @@ UPDATE provider_keys SET last_test_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),
 }
 
 // ListKeys returns an account's keys (hints only — plaintext never leaves
-// the crypto layer).
+// the store/API boundary).
 func (d *DB) ListKeys(ctx context.Context, accountID int64) ([]KeySummary, error) {
 	rows, err := d.r.QueryContext(ctx, `
 SELECT id, label, key_hint, enabled, last_test_at, last_test_ok,
@@ -500,23 +500,18 @@ FROM provider_keys WHERE account_id=? ORDER BY id`, accountID)
 	return out, rows.Err()
 }
 
-// KeyForTest decrypts a stored key so a retest can run against the provider.
+// KeyForTest reads a stored key so a retest can run against the provider.
 // The plaintext returns to memory only — never to a response body.
 func (d *DB) KeyForTest(ctx context.Context, keyID int64) (accountID int64, plaintext string, err error) {
 	row := d.r.QueryRowContext(ctx, `
-SELECT account_id, key_ct FROM provider_keys WHERE id=?`, keyID)
-	var ct string
-	if err := row.Scan(&accountID, &ct); err != nil {
+SELECT account_id, key_plain FROM provider_keys WHERE id=?`, keyID)
+	if err := row.Scan(&accountID, &plaintext); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, "", ErrNotFound
 		}
 		return 0, "", err
 	}
-	pt, err := d.crypto.Decrypt(ct)
-	if err != nil {
-		return 0, "", fmt.Errorf("store: decrypt key %d: %w", keyID, err)
-	}
-	return accountID, pt, nil
+	return accountID, plaintext, nil
 }
 
 // DeleteKey removes one credential.
@@ -1235,7 +1230,7 @@ func (d *DB) ListCompressionProfiles(ctx context.Context) ([]CompressionProfile,
 // ── export ──────────────────────────────────────────────────────────────────
 
 // Export is the disaster-recovery dump: everything needed to re-seed a fresh
-// instance EXCEPT credentials (hints only — key_ct is deliberately absent).
+// instance EXCEPT credentials (hints only — key_plain is deliberately absent).
 type Export struct {
 	ExportedAt    string               `json:"exported_at"`
 	SchemaVersion int                  `json:"schema_version"`

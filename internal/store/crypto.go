@@ -1,4 +1,4 @@
-// Package store owns ezllm's SQLite state: schema, migrations, field crypto,
+// Package store owns ezllm's SQLite state, dashboard and client authentication,
 // and the writer/reader connection split.
 package store
 

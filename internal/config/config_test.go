@@ -94,7 +94,6 @@ providers:
 		"MISSING_TOK is not set",
 		"base_url must be an absolute",
 		`unknown kind "not-a-kind"`,
-		"at least one key required",
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error missing %q\ngot:\n%s", want, msg)

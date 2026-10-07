@@ -3,6 +3,20 @@
 -- Ledger rows (`calls`) and quota snapshots are IMMUTABLE / append-only: history
 -- must survive key or account deletion, so attribution fields are denormalized.
 
+-- Browser-only dashboard login; admin sessions are stored by token digest only.
+CREATE TABLE IF NOT EXISTS dashboard_auth (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    password_hash TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
+CREATE TABLE IF NOT EXISTS dashboard_sessions (
+    token_hash TEXT PRIMARY KEY,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_dashboard_sessions_expiry ON dashboard_sessions(expires_at);
+
 CREATE TABLE IF NOT EXISTS schema_version (
   version    INTEGER PRIMARY KEY,
   applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
@@ -28,15 +42,15 @@ CREATE TABLE IF NOT EXISTS accounts (
   updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
--- ── provider_keys: credentials, ENCRYPTED AT REST, tested before enabled ──────
+-- ── provider_keys: plaintext credential per explicit operator choice ────────
 --    Rows are inserted ONLY after a passing key test, so enabled=0 is a
 --    disabled-by-user state, never an untested key.
 CREATE TABLE IF NOT EXISTS provider_keys (
   id           INTEGER PRIMARY KEY,
   account_id   INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   label        TEXT NOT NULL,
-  key_hint     TEXT NOT NULL,                   -- 'sk-…abcd' — the only plaintext form
-  key_ct       TEXT NOT NULL,                   -- 'enc:v1:<iv>:<ct>:<tag>' AES-256-GCM
+  key_hint     TEXT NOT NULL,
+  key_plain    TEXT NOT NULL,
   enabled      INTEGER NOT NULL DEFAULT 1,
   last_test_at TEXT,
   last_test_ok INTEGER,

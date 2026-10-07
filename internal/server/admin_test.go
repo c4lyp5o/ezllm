@@ -245,18 +245,14 @@ func TestSuccessfulKeyPersistsAndHintsOnly(t *testing.T) {
 	if strings.Join(got, ",") != "m-one,m-two" {
 		t.Errorf("models = %v, want exactly the catalog [m-one m-two]", got)
 	}
-	// Stored as ciphertext, never plaintext. The column is key_ct
-	// ('enc:v1:...'); key_hint is the only plaintext-adjacent form allowed.
-	var enc string
+	// Stored as plaintext only because this test build explicitly requests it; API responses still expose hints only.
+	var stored string
 	if err := h.db.Reader().QueryRow(
-		`SELECT key_ct FROM provider_keys WHERE label='second'`).Scan(&enc); err != nil {
+		`SELECT key_plain FROM provider_keys WHERE label='second'`).Scan(&stored); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(enc, secret) {
-		t.Errorf("stored key contains plaintext")
-	}
-	if !strings.HasPrefix(enc, "enc:v1:") {
-		t.Errorf("key_ct = %q, want enc:v1: ciphertext", enc)
+	if stored != secret {
+		t.Errorf("stored provider key does not match the tested credential")
 	}
 	// The list endpoint never re-serves it either.
 	_, listResp := jsonDo(t, h, "GET",

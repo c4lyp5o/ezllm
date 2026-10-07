@@ -32,9 +32,7 @@ providers:
     namespace: opengo
     kind: opencode-go
     base_url: https://opencode.ai/zen/go/v1
-    keys:
-      - env: OPENCODE_GO_API_KEY
-        label: primary
+    # Add keys through Providers → Add provider in the dashboard.
 
   # ── Generic OpenAI-compatible (ssn-gpt = space.stationine.com) ─────────────
   # Its GET /v1/usage reports a MONEY shape (balance/remaining in USD plus
@@ -44,9 +42,7 @@ providers:
     namespace: super-ssn
     kind: openai-compatible
     base_url: https://space.stationine.com/v1
-    keys:
-      - env: SSN_GPT_API_KEY
-        label: primary
+    # Add keys through Providers → Add provider in the dashboard.
     # This host sits behind Cloudflare: probing too fast returns 403 "error
     # code: 1010", which would make the key test FAIL ON A PERFECTLY GOOD KEY.
     # Keep probe_delay_ms >= 400.
@@ -57,7 +53,7 @@ providers:
   #   namespace: anth
   #   kind: anthropic-compatible
   #   base_url: https://api.anthropic.com/v1
-  #   keys: [{ env: ANTHROPIC_API_KEY, label: primary }]
+  #   # Add the account and key through the dashboard.
 
 ledger:
   batch_size: 32

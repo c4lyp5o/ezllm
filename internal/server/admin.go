@@ -29,13 +29,23 @@ import (
 // admin wraps a handler in auth + the admin role. 403 without the role, so a
 // token that can only infer never sees account/key surfaces.
 func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
-	return s.authed(func(w http.ResponseWriter, r *http.Request) {
-		if !hasRole(r, "admin") {
-			writeErr(w, http.StatusForbidden, "forbidden", "admin role required")
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Dashboard sessions are admin-only and are deliberately accepted only
+		// on /admin routes, never on the inference surfaces.
+		if s.db != nil && s.db.DashboardSession(r.Context(), bearerToken(r)) {
+			ctx := context.WithValue(r.Context(), rolesKey{}, []string{"admin"})
+			ctx = context.WithValue(ctx, clientKey{}, "dashboard")
+			next(w, r.WithContext(ctx))
 			return
 		}
-		next(w, r)
-	})
+		s.authed(func(w http.ResponseWriter, r *http.Request) {
+			if !hasRole(r, "admin") {
+				writeErr(w, http.StatusForbidden, "forbidden", "admin role required")
+				return
+			}
+			next(w, r)
+		})(w, r)
+	}
 }
 
 // decodeBody reads a bounded JSON body into dst. Unknown fields are rejected:

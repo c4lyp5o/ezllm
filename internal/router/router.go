@@ -262,10 +262,17 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 			continue
 		}
 		// The rules engine's veto. In a combo this is a skip, never an error:
-		// that is the entire day/night mechanism.
+		// that is the entire day/night mechanism. But when EVERY hop ends up
+		// skipped by rules this must surface as ErrUnavailable (429 "try
+		// later"), exactly like resolveDirect's hard stop — a raw refusal
+		// would fall through errorStatus to 502 and read as a gateway fault.
 		if err := r.eligibleHere(ctx, acct.ID, h.ModelID); err != nil {
 			if first == nil {
-				first = fmt.Errorf("hop %s/%s: %w", acct.Namespace, h.ModelID, err)
+				first = &ErrUnavailable{
+					Requested: name,
+					Reason:    fmt.Sprintf("hop %s/%s: %s", acct.Namespace, h.ModelID, err.Error()),
+					cause:     err,
+				}
 			}
 			continue
 		}
@@ -289,6 +296,13 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 
 	if len(routes) == 0 {
 		if first != nil {
+			// A rules veto arrives pre-typed and pre-worded ("X is not
+			// available right now: hop …"); re-wrapping it would print the
+			// combo name twice and bury the cause under boilerplate.
+			var ru *ErrUnavailable
+			if errors.As(first, &ru) {
+				return nil, first
+			}
 			return nil, fmt.Errorf("router: combo %q has no usable hops: %w", name, first)
 		}
 		return nil, fmt.Errorf("router: combo %q has no usable hops", name)

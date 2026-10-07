@@ -1,5 +1,5 @@
-// COMPRESSION — live profiles (M5): session dedup + RTK shipping today,
-// Caveman + headroom land in M6.5. Profiles attach two ways: a combo's
+// COMPRESSION — live profiles: session dedup + RTK (M5), headroom + lite
+// (M6.5 phase 2); Caveman waits on its safety design. Profiles attach two ways: a combo's
 // compression_profile_id, or per-request via the x-ezllm-compression header
 // ("<name>", "off" to skip, anything else falls back to the combo).
 import { useEffect, useState } from 'react';
@@ -11,8 +11,11 @@ const ENGINES = [
     note: 'drops exact duplicate system / user / assistant turns' },
   { id: 'rtk', label: 'RTK', live: true,
     note: 'filters CLI / tool output; errors and failures are never dropped' },
-  { id: 'caveman', label: 'Caveman', live: false, note: 'M6.5' },
-  { id: 'headroom', label: 'headroom', live: false, note: 'M6.5' },
+  { id: 'headroom', label: 'headroom', live: true,
+    note: 'lossless columnar compaction of homogeneous JSON tool payloads' },
+  { id: 'lite', label: 'lite', live: true,
+    note: 'whitespace cleanup only — fences and words untouched' },
+  { id: 'caveman', label: 'Caveman', live: false, note: 'M6.5 — safety design first' },
 ];
 
 export default function Compression() {
@@ -70,7 +73,7 @@ export default function Compression() {
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {(p.stages ?? []).map((s, i) => (
                 <span key={i} className={cx('flex items-center gap-1.5',
-                  !s.engine.match(/^(session_dedup|rtk)$/) && 'opacity-50')}>
+                  !s.engine.match(/^(session_dedup|rtk|headroom|lite)$/) && 'opacity-50')}>
                   {i > 0 && <span className="text-mute">→</span>}
                   <Chip tone="neutral"><Mono>{s.engine}</Mono></Chip>
                 </span>

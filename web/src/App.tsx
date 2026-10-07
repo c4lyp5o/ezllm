@@ -9,6 +9,7 @@ import Providers from './pages/Providers';
 import Combos from './pages/Combos';
 import Compression from './pages/Compression';
 import Connect from './pages/Connect';
+import Rules from './pages/Rules';
 import Stats from './pages/Stats';
 
 const NAV = [
@@ -16,7 +17,8 @@ const NAV = [
   { to: '/stats', label: 'Stats', hint: 'granularity · range' },
   { to: '/providers', label: 'Providers', hint: 'accounts · keys · models' },
   { to: '/combos', label: 'Combos', hint: 'routing chains' },
-  { to: '/compression', label: 'Compression', hint: 'M5 preview' },
+  { to: '/rules', label: 'Rules', hint: 'caps · windows' },
+  { to: '/compression', label: 'Compression', hint: 'profiles · engines' },
   { to: '/connect', label: 'Connect', hint: 'routes · API keys' },
 ] as const;
 
@@ -128,9 +130,11 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
 const PAGE_HEADERS: Record<string, { title: string; sub: string }> = {
   '/': { title: 'Dashboard', sub: 'traffic, health and the last 20 calls' },
+  '/stats': { title: 'Stats', sub: 'usage by granularity and range' },
   '/providers': { title: 'Providers', sub: 'accounts, keys, catalogs and quota' },
   '/combos': { title: 'Combos', sub: 'ordered routing chains' },
-  '/compression': { title: 'Compression', sub: 'profiles land in M5' },
+  '/rules': { title: 'Rules', sub: 'usage caps and allowed-use windows' },
+  '/compression': { title: 'Compression', sub: 'profiles, engines and savings' },
   '/connect': { title: 'Connect', sub: 'point clients at this gateway' },
 };
 
@@ -191,6 +195,7 @@ export default function App() {
       <Route path="/stats" element={<Stats />} />
             <Route path="/providers" element={<Providers />} />
             <Route path="/combos" element={<Combos />} />
+            <Route path="/rules" element={<Rules />} />
             <Route path="/compression" element={<Compression />} />
             <Route path="/connect" element={<Connect />} />
             <Route path="*" element={<Dashboard />} />

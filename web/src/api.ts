@@ -224,6 +224,94 @@ export type Combo = {
   hops: Hop[];
 };
 
+// ── model rules: eligibility (usage cap + allowed-use window) ──
+export type ModelRule = {
+  id: number; account_id: number; model_id: string;
+  cap_tokens: number; cap_window: string;
+  win_start?: string; win_end?: string; win_days?: string;
+  win_tz: string; enabled: boolean; note?: string; updated_at: string;
+};
+
+export const modelRules = () => get<ModelRule[]>('/admin/model-rules');
+export const accountModels = (id: number) => get<ModelRow[]>(`/admin/accounts/${id}/models`);
+export const createModelRule = (r: Partial<ModelRule> & { account_id: number; model_id: string }) =>
+  post<ModelRule>('/admin/model-rules', r);
+// PATCH merges onto the stored row, but window fields are all-or-nothing —
+// a payload without them CLEARS the window, so callers always send the full row.
+export const updateModelRule = (id: number, r: Partial<ModelRule>) =>
+  patch<ModelRule>(`/admin/model-rules/${id}`, r);
+export const deleteModelRule = (id: number) => del(`/admin/model-rules/${id}`);
+
+// Mirror of internal/rules Window.InWindow — kept byte-for-byte in spirit:
+// no window = always; half window / start==end = fail closed; overnight
+// windows attribute the weekday filter to the day the window OPENED.
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+
+function tzParts(tz: string, d: Date): { h: number; m: number; date: string } {
+  try {
+    const fmt = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    });
+    const p: Record<string, string> = {};
+    for (const part of fmt.formatToParts(d)) if (part.type !== 'literal') p[part.type] = part.value;
+    return { h: Number(p.hour), m: Number(p.minute), date: `${p.year}-${p.month}-${p.day}` };
+  } catch {
+    const p2 = (n: number) => String(n).padStart(2, '0');
+    return {
+      h: d.getHours(), m: d.getMinutes(),
+      date: `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`,
+    };
+  }
+}
+const dowOfDate = (date: string) => new Date(`${date}T00:00:00Z`).getUTCDay();
+const dayBefore = (date: string) =>
+  new Date(new Date(`${date}T00:00:00Z`).getTime() - 86400000).toISOString().slice(0, 10);
+
+export function formatDays(csv: string | undefined): string {
+  const days = (csv ?? '').split(',').map((x) => x.trim()).filter(Boolean).map(Number);
+  if (!days.length) return 'any day';
+  const sorted = [...new Set(days)].sort((a, b) => a - b);
+  const runs: string[] = [];
+  for (let i = 0; i < sorted.length; ) {
+    let j = i;
+    while (j + 1 < sorted.length && sorted[j + 1] === sorted[j] + 1) j++;
+    runs.push(j - i >= 2 ? `${DAY_NAMES[sorted[i]]}–${DAY_NAMES[sorted[j]]}` : sorted.slice(i, j + 1).map((d) => DAY_NAMES[d]).join(','));
+    i = j + 1;
+  }
+  return runs.join(', ');
+}
+
+export function windowState(
+  r: Pick<ModelRule, 'win_start' | 'win_end' | 'win_days' | 'win_tz'>,
+  now: Date = new Date(),
+): { open: boolean; label: string } {
+  const s = r.win_start ?? '';
+  const e = r.win_end ?? '';
+  if (!s && !e) return { open: true, label: 'always' };
+  if (!s || !e) return { open: false, label: 'invalid (half window)' };
+  const [sh, sm] = s.split(':').map(Number);
+  const [eh, em] = e.split(':').map(Number);
+  const startM = sh * 60 + sm;
+  const endM = eh * 60 + em;
+  if (!Number.isFinite(startM) || !Number.isFinite(endM)) return { open: false, label: 'invalid time' };
+  if (startM === endM) return { open: false, label: 'invalid (start==end)' };
+
+  const { h, m, date } = tzParts(r.win_tz || 'UTC', now);
+  const nowM = h * 60 + m;
+  let open: boolean;
+  let anchor = date;
+  if (startM < endM) {
+    open = nowM >= startM && nowM < endM;
+  } else {
+    open = nowM >= startM || nowM < endM;
+    if (nowM < endM) anchor = dayBefore(date); // overnight tail: window opened yesterday
+  }
+  const days = (r.win_days ?? '').split(',').map((x) => x.trim()).filter(Boolean).map(Number);
+  if (open && days.length && !days.includes(dowOfDate(anchor))) open = false;
+  return { open, label: `${s}–${e}` };
+}
+
 // ── compression profiles (M5) ──
 export type CompressionStage = { engine: string; options?: Record<string, unknown> };
 export type CompressionProfile = {

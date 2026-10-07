@@ -11,6 +11,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -194,18 +195,17 @@ func (s *Server) healthSnapshot() map[string]any {
 	}
 }
 
-// recentCalls returns the newest ledger rows for the dashboard table.
-func (s *Server) recentCalls(ctx context.Context, limit int) ([]map[string]any, error) {
-	rows, err := s.db.Reader().QueryContext(ctx, `
-SELECT ts, client, surface, alias, account, model, status, ttft_ms, total_ms,
+// callsCols is the canonical projection for every calls-ledger list view
+// (the dashboard tail, the requests explorer), so both return identical JSON
+// keys — tin/tout/cread/... are ledger names in the emitted row maps.
+const callsCols = `ts, client, surface, alias, account, model, status, ttft_ms, total_ms,
        tokens_in, tokens_out, tokens_cached_read, tokens_cached_write, reasoning_tokens,
        COALESCE(tokens_saved, 0), COALESCE(compression_profile, ''),
-       COALESCE(compression_applied, 0)
-FROM calls ORDER BY id DESC LIMIT ?`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+       COALESCE(compression_applied, 0)`
+
+// scanCalls maps rows projected with callsCols into the row shape the
+// dashboard and the requests explorer share.
+func scanCalls(rows *sql.Rows) ([]map[string]any, error) {
 	out := []map[string]any{}
 	for rows.Next() {
 		var ts, client, surface, alias, account, model string
@@ -233,6 +233,25 @@ FROM calls ORDER BY id DESC LIMIT ?`, limit)
 		})
 	}
 	return out, rows.Err()
+}
+
+// queryCalls runs one filtered/ordered projection over the calls ledger.
+// where/args are caller-built; orderBy must be a trusted literal (whitelisted
+// by the caller — never interpolated from raw user input).
+func (s *Server) queryCalls(ctx context.Context, where string, args []any, orderBy string, limit int) ([]map[string]any, error) {
+	q := `SELECT ` + callsCols + ` FROM calls` + where +
+		` ORDER BY ` + orderBy + ` LIMIT ?`
+	rows, err := s.db.Reader().QueryContext(ctx, q, append(args, limit)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanCalls(rows)
+}
+
+// recentCalls returns the newest ledger rows for the dashboard table.
+func (s *Server) recentCalls(ctx context.Context, limit int) ([]map[string]any, error) {
+	return s.queryCalls(ctx, "", nil, "id DESC", limit)
 }
 
 // ── /admin/accounts ─────────────────────────────────────────────────────────

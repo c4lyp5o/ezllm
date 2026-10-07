@@ -347,6 +347,7 @@ func TestAdminRoleGuardsNewRoutes(t *testing.T) {
 	for _, path := range []string{
 		"/admin/accounts", "/admin/combos", "/admin/tokens",
 		"/admin/overview", "/admin/export", "/admin/quota", "/admin/compression-profiles",
+		"/admin/requests",
 	} {
 		code, _, _ := h.do("GET", path, "tok-infer", "")
 		if code != http.StatusForbidden {

@@ -51,6 +51,23 @@ Dashboard payload. One call so the first paint is a single round trip.
 }
 ```
 
+### `GET /admin/requests`
+Token dissection explorer: filter the calls ledger by tokens-in / tokens-out, bound the
+window, sort by either axis. `summary` covers the WHOLE matching set — not just the
+returned page — so the totals answer "how much lives behind this filter".
+```jsonc
+{
+  "rows": [ RecentCall … ],   // same projection as recent_calls (tin/tout/cread/reasoning)
+  "summary": { "count":23, "tin":966, "tout":69, "cread":0, "reasoning":0,
+               "max_tin":42, "max_tout":3 },
+  "filter": { "from":"…","to":"…","limit":50,"sort":"ts_desc" }
+}
+```
+Params: `min_tin` `max_tin` `min_tout` `max_tout` (non-negative integers);
+`from`/`to` (RFC3339, `[from,to)` like `/admin/usage`, default last 24h with the same
++1min grace); `limit` (1-500, default 50); `sort` = `ts_desc` (default) | `tin_desc` |
+`tout_desc`. Anything invalid → `400`.
+
 ### `POST /admin/accounts` → `201`
 ```jsonc
 // request

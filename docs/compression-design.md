@@ -14,7 +14,8 @@ records every design decision where the plan left latitude.
 | Resolution: request header → combo → off | ✅ | client default, global default (M6.5) |
 | Ledger metrics (`prompt_tokens_pre`, `tokens_saved`, `compression_ms`, `compression_applied`) | ✅ | |
 | Stats: compression/savings granularities | ✅ (already summed by `UsageReport`) | |
-| `caveman` lite/standard, `headroom` gate | | M6.5 |
+| `headroom` + `lite` engines | ✅ (M6.5 phase 2, shipped) | |
+| `caveman` (prose condensation) | | after its safety design pass (pro) |
 | Profile editor page (drag-order stages) | | M6.5 (Compression page stays a read-only preview) |
 | Anthropic `/v1/messages` rtk scoping | | M6.5 (shape passes through unchanged today) |
 
@@ -26,6 +27,9 @@ records every design decision where the plan left latitude.
    assistant messages are never read or written; `role:"tool"` messages are never dropped
    or structurally changed (pairing stays intact); `rtk` may filter *text lines* inside
    tool results only, never mid-JSON (content that parses as JSON is skipped whole).
+   `headroom` is the single sanctioned exception: it may rewrite a *whole* pure JSON-array
+   payload into the lossless columnar form — never a partial edit, never a drop, pairing
+   intact, every value round-tripping (`json.Number`).
 3. **Structural integrity post-compression** — fenced regions (` ``` `) are atomic units:
    rtk never splits one. An unclosed fence anywhere ⇒ that content is skipped entirely.
    Any engine failure or integrity miss ⇒ the ORIGINAL body bytes are sent, unchanged.
@@ -80,6 +84,45 @@ This is what takes `tsc` 7771 → 20 style output down without touching the erro
 Non-noise middle lines drop too — that is the point (line 2000 of a build log is noise);
 the error-class always wins, so a wall-of-errors output simply fails the ratio floor and
 passes through untouched.
+
+### `headroom` — lossless columnar JSON, `scope: tool_only`
+
+SmartCrusher-style tabular compaction (omniroute reference): a homogeneous JSON-array
+payload pays each key **once** instead of once per row. Applies to `role:"tool"` messages
+whose trimmed content is a pure JSON array of objects sharing **one key set**.
+
+Wire form — marker line + columnar JSON, together the whole content:
+
+```
+[ezllm/headroom: 10 rows columnar, lossless — row i = i-th element of each column]
+{"id":[1,2,3],"name":["inventory-row-001",...]}
+```
+
+- **Lossless by construction**: zip the columns back to recover each row. Values are
+  exact — the encoder round-trips numbers through `json.Number`, so 64-bit ids never take
+  a float64 detour. Key order may differ from the input (JSON objects are unordered);
+  nothing else changes.
+- **Skips (original bytes sent)**: not a JSON array, rows that aren't objects, ragged key
+  sets, fewer than `min_rows` rows (option, default 4), or a result not strictly smaller
+  than the input — the ~85-byte teaching marker is real cost, so small payloads are
+  correctly refused rather than "compressed" into something bigger.
+- Options: `min_rows` (default 4).
+
+### `lite` — whitespace-only cleanup
+
+Omniroute's safe Lite tier: zero semantic change, always-on. It never rewrites words —
+filler stripping and phrase condensation belong to `caveman`, which stays gated on its
+safety design. To string content of any role it:
+
+1. strips trailing spaces/tabs on lines **outside** fences,
+2. collapses blank-line runs down to `blank_lines` (option, default 1),
+3. trims blank lines at the content's edges.
+
+Fence interiors are byte-identical (same atomic rule as `rtk`; an unclosed fence skips the
+content whole) and pure-JSON content is skipped, so `headroom` owns payloads. Not strictly
+smaller ⇒ original kept.
+
+- Options: `blank_lines` (default 1).
 
 ### Token estimates
 

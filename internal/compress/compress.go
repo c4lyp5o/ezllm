@@ -22,8 +22,9 @@ type Stage struct {
 	Options map[string]any `json:"options,omitempty"`
 }
 
-// KnownEngines is the M5 registry (rev4 cut: session_dedup + rtk only).
-var KnownEngines = map[string]bool{"session_dedup": true, "rtk": true}
+// KnownEngines is the shipped engine registry (M5: session_dedup + rtk,
+// M6.5 phase 2: headroom + lite; caveman waits on its safety design).
+var KnownEngines = map[string]bool{"session_dedup": true, "rtk": true, "headroom": true, "lite": true}
 
 // Profile is the runtime view of a compression_profiles row.
 type Profile struct {
@@ -164,6 +165,10 @@ func runEngine(st Stage, msgs []any) ([]any, error) {
 		return sessionDedup(msgs), nil
 	case "rtk":
 		return rtk(msgs, st.Options), nil
+	case "headroom":
+		return headroom(msgs, st.Options), nil
+	case "lite":
+		return lite(msgs, st.Options), nil
 	}
 	return nil, fmt.Errorf("unknown engine %q", st.Engine)
 }

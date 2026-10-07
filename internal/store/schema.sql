@@ -166,6 +166,9 @@ CREATE TABLE IF NOT EXISTS calls (
   prompt_tokens_pre   INTEGER NOT NULL DEFAULT 0,
   tokens_saved        INTEGER NOT NULL DEFAULT 0,
   compression_ms      INTEGER,
+  -- caveman attribution: how many prose rules actually fired. 0 for every
+  -- other engine, so a surprising saving is traceable to condensation.
+  compression_rules_fired INTEGER NOT NULL DEFAULT 0,
   err            TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_calls_ts        ON calls(ts DESC);

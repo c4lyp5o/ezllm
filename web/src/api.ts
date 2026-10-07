@@ -139,7 +139,7 @@ export type FeedRow = {
   ts: string; client: string; surface: string; alias?: string; account: string; model: string;
   status: number; stream?: boolean; ttft_ms?: number; total_ms?: number;
   tin: number; tout: number; cread?: number; reasoning?: number; saved: number;
-  compression: string; applied: boolean; error?: string;
+  compression: string; applied: boolean; rulesFired?: number; error?: string;
 };
 const num = (v: unknown): number => (typeof v === 'number' ? v : 0);
 export function normalizeFeedRow(raw: any): FeedRow {
@@ -153,6 +153,7 @@ export function normalizeFeedRow(raw: any): FeedRow {
     tin: num(raw.tin ?? raw.tokens_in), tout: num(raw.tout ?? raw.tokens_out),
     cread: num(raw.cread ?? raw.tokens_cached_read),
     reasoning: num(raw.reasoning ?? raw.reasoning_tokens),
+    rulesFired: num(raw.rules_fired ?? raw.compression_rules_fired),
     saved: num(raw.saved ?? raw.tokens_saved),
     compression: String(raw.compression ?? ''), applied: Boolean(raw.applied),
     error: raw.error ? String(raw.error) : undefined,

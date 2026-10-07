@@ -61,9 +61,12 @@ type Call struct {
 
 	CompressionProfile string
 	CompressionApplied bool
-	PromptTokensPre    int64
-	TokensSaved        int64
-	CompressionMs      *int64
+	// CompressionRulesFired is caveman attribution: the number of prose rules
+	// that rewrote something. Always 0 for session_dedup/rtk/headroom/lite.
+	CompressionRulesFired int
+	PromptTokensPre       int64
+	TokensSaved           int64
+	CompressionMs         *int64
 
 	Err string
 }
@@ -316,8 +319,8 @@ INSERT INTO calls (
   tokens_in, tokens_out, tokens_cached_read, tokens_cached_write, reasoning_tokens, raw_usage,
   endpoint_id, upstream_model,
   compression_profile, compression_applied, prompt_tokens_pre, tokens_saved, compression_ms,
-  err
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+  compression_rules_fired, err
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
@@ -340,7 +343,7 @@ INSERT INTO calls (
 			c.TokensIn, c.TokensOut, c.TokensCachedRead, c.TokensCachedWrite, c.ReasoningTokens, c.RawUsage,
 			c.EndpointID, c.UpstreamModel,
 			c.CompressionProfile, boolInt(c.CompressionApplied), c.PromptTokensPre, c.TokensSaved, c.CompressionMs,
-			c.Err,
+			c.CompressionRulesFired, c.Err,
 		)
 		if err != nil {
 			return fmt.Errorf("insert call: %w", err)
@@ -507,7 +510,7 @@ SELECT ts, client, surface, alias, account, COALESCE(provider_key_id,0), key_hin
        tokens_in, tokens_out, tokens_cached_read, tokens_cached_write, reasoning_tokens,
        COALESCE(raw_usage,''), COALESCE(endpoint_id,''), COALESCE(upstream_model,''),
        compression_profile, compression_applied, prompt_tokens_pre, tokens_saved, compression_ms,
-       COALESCE(err,'')
+       compression_rules_fired, COALESCE(err,'')
 FROM calls ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -523,7 +526,8 @@ FROM calls ORDER BY id DESC LIMIT ?`, limit)
 			&c.Status, &c.Stream, &ttft, &total,
 			&c.TokensIn, &c.TokensOut, &c.TokensCachedRead, &c.TokensCachedWrite, &c.ReasoningTokens,
 			&c.RawUsage, &c.EndpointID, &c.UpstreamModel,
-			&c.CompressionProfile, &applied, &c.PromptTokensPre, &c.TokensSaved, &cms, &c.Err); err != nil {
+			&c.CompressionProfile, &applied, &c.PromptTokensPre, &c.TokensSaved, &cms,
+			&c.CompressionRulesFired, &c.Err); err != nil {
 			return nil, err
 		}
 		if t, err := time.Parse("2006-01-02T15:04:05.000Z", ts); err == nil {

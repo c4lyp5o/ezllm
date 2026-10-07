@@ -24,7 +24,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 2
+const schemaVersion = 3
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -182,6 +182,9 @@ func (d *DB) migrate() error {
 		if err := d.alterCallsAccountID(context.Background()); err != nil {
 			return fmt.Errorf("store: alter calls: %w", err)
 		}
+		if err := d.alterCallsRulesFired(context.Background()); err != nil {
+			return fmt.Errorf("store: alter calls rules_fired: %w", err)
+		}
 		if _, err := d.w.Exec(`INSERT INTO schema_version(version) VALUES(?)`, schemaVersion); err != nil {
 			return fmt.Errorf("store: stamp version: %w", err)
 		}
@@ -201,6 +204,9 @@ func (d *DB) migrate() error {
 		// take the branch above, where calls already carries the column.
 		if err := d.alterCallsAccountID(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate %d->%d alter: %w", cur, schemaVersion, err)
+		}
+		if err := d.alterCallsRulesFired(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate %d->%d alter rules_fired: %w", cur, schemaVersion, err)
 		}
 		if _, err := d.w.Exec(schemaSQL); err != nil {
 			return fmt.Errorf("store: migrate %d->%d: %w", cur, schemaVersion, err)
@@ -236,6 +242,32 @@ func (d *DB) alterCallsAccountID(ctx context.Context) error {
 	}
 	if _, err := d.w.ExecContext(ctx, `ALTER TABLE calls ADD COLUMN account_id INTEGER`); err != nil {
 		return fmt.Errorf("add calls.account_id: %w", err)
+	}
+	return nil
+}
+
+// alterCallsRulesFired adds calls.compression_rules_fired (v3, caveman
+// attribution) on databases created before it. Same guard as
+// alterCallsAccountID: ALTER TABLE ADD COLUMN is not idempotent, and a fresh
+// database already has the column from schema.sql.
+func (d *DB) alterCallsRulesFired(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "calls")
+	if err != nil {
+		return fmt.Errorf("check calls table: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+	ok, err := hasColumn(ctx, d.w, "calls", "compression_rules_fired")
+	if err != nil {
+		return fmt.Errorf("check calls.compression_rules_fired: %w", err)
+	}
+	if ok {
+		return nil
+	}
+	if _, err := d.w.ExecContext(ctx,
+		`ALTER TABLE calls ADD COLUMN compression_rules_fired INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return fmt.Errorf("add calls.compression_rules_fired: %w", err)
 	}
 	return nil
 }

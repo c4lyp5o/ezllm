@@ -179,13 +179,15 @@ export default function Requests() {
                 <th className="px-4 py-2 text-right font-medium">out</th>
                 <th className="px-4 py-2 text-right font-medium">cached</th>
                 <th className="px-4 py-2 text-right font-medium">reasoning</th>
+                <th className="px-4 py-2 text-right font-medium">saved</th>
+                <th className="px-4 py-2 text-right font-medium">rules</th>
                 <th className="px-4 py-2 text-right font-medium">ms</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-6 text-center text-mute">
+                  <td colSpan={11} className="px-4 py-6 text-center text-mute">
                     No calls match this filter.
                   </td>
                 </tr>
@@ -204,6 +206,15 @@ export default function Requests() {
                   <td className={cx('px-4 py-2 text-right font-mono tabular-nums',
                     (r.reasoning ?? 0) > 0 ? 'text-warn' : 'text-mute')}>
                     {nfmt(r.reasoning ?? 0)}
+                  </td>
+                  <td className={cx('px-4 py-2 text-right font-mono tabular-nums',
+                    r.saved > 0 ? 'text-ok' : 'text-mute')}>
+                    {r.saved > 0 ? nfmt(r.saved) : '—'}
+                  </td>
+                  {/* caveman attribution: non-zero only when prose rules fired */}
+                  <td className={cx('px-4 py-2 text-right font-mono tabular-nums',
+                    (r.rulesFired ?? 0) > 0 ? 'text-warn' : 'text-mute')}>
+                    {(r.rulesFired ?? 0) > 0 ? nfmt(r.rulesFired ?? 0) : '—'}
                   </td>
                   <td className="px-4 py-2 text-right font-mono tabular-nums text-mute">
                     {r.total_ms == null ? '—' : nfmt(r.total_ms)}

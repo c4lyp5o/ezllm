@@ -201,7 +201,7 @@ func (s *Server) healthSnapshot() map[string]any {
 const callsCols = `ts, client, surface, alias, account, model, status, ttft_ms, total_ms,
        tokens_in, tokens_out, tokens_cached_read, tokens_cached_write, reasoning_tokens,
        COALESCE(tokens_saved, 0), COALESCE(compression_profile, ''),
-       COALESCE(compression_applied, 0)`
+       COALESCE(compression_applied, 0), COALESCE(compression_rules_fired, 0)`
 
 // scanCalls maps rows projected with callsCols into the row shape the
 // dashboard and the requests explorer share.
@@ -211,11 +211,11 @@ func scanCalls(rows *sql.Rows) ([]map[string]any, error) {
 		var ts, client, surface, alias, account, model string
 		var status int
 		var ttft, total, tin, tout, cread, cwrite, reasoning any
-		var saved, applied int
+		var saved, applied, rulesFired int
 		var profile string
 		if err := rows.Scan(&ts, &client, &surface, &alias, &account, &model, &status,
 			&ttft, &total, &tin, &tout, &cread, &cwrite, &reasoning,
-			&saved, &profile, &applied); err != nil {
+			&saved, &profile, &applied, &rulesFired); err != nil {
 			return nil, err
 		}
 		out = append(out, map[string]any{
@@ -230,6 +230,8 @@ func scanCalls(rows *sql.Rows) ([]map[string]any, error) {
 			// otherwise the profile name (applied says whether bytes moved).
 			"compression": profile,
 			"applied":     applied != 0,
+			// non-zero only when caveman prose rules rewrote something
+			"rules_fired": rulesFired,
 		})
 	}
 	return out, rows.Err()

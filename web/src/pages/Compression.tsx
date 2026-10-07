@@ -15,7 +15,8 @@ const ENGINES = [
     note: 'lossless columnar compaction of homogeneous JSON tool payloads' },
   { id: 'lite', label: 'lite', live: true,
     note: 'whitespace cleanup only — fences and words untouched' },
-  { id: 'caveman', label: 'Caveman', live: false, note: 'M6.5 — safety design first' },
+  { id: 'caveman', label: 'Caveman', live: true,
+    note: 'prose condensation via deterministic rule packs — lossy, so it is gated: text-only, fences/paths/URLs/identifiers protected verbatim, intensity lite|standard' },
 ];
 
 export default function Compression() {

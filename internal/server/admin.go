@@ -198,7 +198,9 @@ func (s *Server) healthSnapshot() map[string]any {
 func (s *Server) recentCalls(ctx context.Context, limit int) ([]map[string]any, error) {
 	rows, err := s.db.Reader().QueryContext(ctx, `
 SELECT ts, client, surface, alias, account, model, status, ttft_ms, total_ms,
-       tokens_in, tokens_out, tokens_cached_read, tokens_cached_write, reasoning_tokens
+       tokens_in, tokens_out, tokens_cached_read, tokens_cached_write, reasoning_tokens,
+       COALESCE(tokens_saved, 0), COALESCE(compression_profile, ''),
+       COALESCE(compression_applied, 0)
 FROM calls ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -209,8 +211,11 @@ FROM calls ORDER BY id DESC LIMIT ?`, limit)
 		var ts, client, surface, alias, account, model string
 		var status int
 		var ttft, total, tin, tout, cread, cwrite, reasoning any
+		var saved, applied int
+		var profile string
 		if err := rows.Scan(&ts, &client, &surface, &alias, &account, &model, &status,
-			&ttft, &total, &tin, &tout, &cread, &cwrite, &reasoning); err != nil {
+			&ttft, &total, &tin, &tout, &cread, &cwrite, &reasoning,
+			&saved, &profile, &applied); err != nil {
 			return nil, err
 		}
 		out = append(out, map[string]any{
@@ -219,6 +224,12 @@ FROM calls ORDER BY id DESC LIMIT ?`, limit)
 			"ttft_ms": ttft, "total_ms": total,
 			"tin": tin, "tout": tout, "cread": cread, "cwrite": cwrite,
 			"reasoning": reasoning,
+			"saved":     saved,
+			// empty = the request never mentioned compression; "off" /
+			// "unknown-profile" / "disabled" = it asked and got no change;
+			// otherwise the profile name (applied says whether bytes moved).
+			"compression": profile,
+			"applied":     applied != 0,
 		})
 	}
 	return out, rows.Err()

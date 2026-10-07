@@ -20,6 +20,10 @@ type CallEvent struct {
 	CachedWrite int64  `json:"tokens_cached_write"`
 	Reasoning   int64  `json:"reasoning_tokens"`
 	Saved       int64  `json:"tokens_saved"`
+	// Compression is the ledger stamp: "" (never mentioned), "off" /
+	// "unknown-profile" / "disabled" (asked, no change), or the profile name.
+	Compression string `json:"compression"`
+	Applied     bool   `json:"applied"`
 	Err         string `json:"error,omitempty"`
 }
 
@@ -70,6 +74,7 @@ func EventFromCall(c Call) CallEvent {
 		TokensIn: c.TokensIn, TokensOut: c.TokensOut,
 		CachedRead: c.TokensCachedRead, CachedWrite: c.TokensCachedWrite,
 		Reasoning: c.ReasoningTokens, Saved: c.TokensSaved,
+		Compression: c.CompressionProfile, Applied: c.CompressionApplied,
 		Err: c.Err,
 	}
 	if c.TTFTms != nil {

@@ -129,7 +129,34 @@ export type Account = {
 export type RecentCall = {
   ts: string; client: string; surface: string; account: string; model: string;
   status: number; ttft_ms: number; total_ms: number; tin: number; tout: number; cread: number;
+  saved: number; compression: string; applied: boolean;
 };
+
+// The feed's snapshot rows come from recentCalls (ledger names: tin, saved);
+// live rows come from store.CallEvent (tokens_in, tokens_saved). Read
+// whichever the row actually carries so both render with the same fields.
+export type FeedRow = {
+  ts: string; client: string; surface: string; alias?: string; account: string; model: string;
+  status: number; stream?: boolean; ttft_ms?: number; total_ms?: number;
+  tin: number; tout: number; cread?: number; saved: number;
+  compression: string; applied: boolean; error?: string;
+};
+const num = (v: unknown): number => (typeof v === 'number' ? v : 0);
+export function normalizeFeedRow(raw: any): FeedRow {
+  return {
+    ts: String(raw.ts ?? ''), client: String(raw.client ?? ''),
+    surface: String(raw.surface ?? ''), alias: raw.alias ? String(raw.alias) : undefined,
+    account: String(raw.account ?? ''), model: String(raw.model ?? ''),
+    status: num(raw.status), stream: raw.stream ? true : undefined,
+    ttft_ms: raw.ttft_ms == null ? undefined : num(raw.ttft_ms),
+    total_ms: raw.total_ms == null ? undefined : num(raw.total_ms),
+    tin: num(raw.tin ?? raw.tokens_in), tout: num(raw.tout ?? raw.tokens_out),
+    cread: num(raw.cread ?? raw.tokens_cached_read),
+    saved: num(raw.saved ?? raw.tokens_saved),
+    compression: String(raw.compression ?? ''), applied: Boolean(raw.applied),
+    error: raw.error ? String(raw.error) : undefined,
+  };
+}
 
 export type Overview = {
   health: Health;
@@ -197,7 +224,24 @@ export type Combo = {
   hops: Hop[];
 };
 
-export type CompressionProfile = { id: number; name: string } & Record<string, unknown>;
+// ── compression profiles (M5) ──
+export type CompressionStage = { engine: string; options?: Record<string, unknown> };
+export type CompressionProfile = {
+  id: number;
+  name: string;
+  enabled: boolean;
+  stages: CompressionStage[];
+  exempt_last_turn: boolean;
+  min_compress_ratio: number;
+  fail_open: boolean;
+  auto_trigger_tokens: number;
+  notes?: string | null;
+  created_at?: string | null;
+} & Record<string, unknown>;
+
+export function compressionProfiles(): Promise<CompressionProfile[]> {
+  return get<CompressionProfile[]>('/admin/compression-profiles');
+}
 
 export const STEPS = ['format', 'catalog', 'auth', 'quota', 'inference', 'protocol'] as const;
 

@@ -4,7 +4,7 @@
 //
 // Returns a close() that stops the reader AND the reconnect loop.
 
-import { getToken } from "./api";
+import { getToken, normalizeFeedRow, type FeedRow } from "./api";
 
 export interface CallEvent {
   ts: string;
@@ -23,6 +23,14 @@ export interface CallEvent {
   tokens_cached_write: number;
   reasoning_tokens: number;
   tokens_saved: number;
+  // ledger stamp: "" | "off" | "unknown-profile" | "disabled" | profile name
+  compression: string;
+  applied: boolean;
+  // snapshot rows (GET /admin/stream/snapshot) carry the LEDGER column names
+  // instead of the CallEvent names — both shapes land in the feed.
+  tin?: number;
+  tout?: number;
+  saved?: number;
   error?: string;
 }
 
@@ -33,8 +41,8 @@ interface StreamPayload {
 }
 
 type Handlers = {
-  onSnapshot: (payload: StreamPayload) => void;
-  onCalls: (calls: CallEvent[]) => void;
+  onSnapshot: (payload: { calls: FeedRow[]; ts?: string; dropped?: number }) => void;
+  onCalls: (calls: FeedRow[]) => void;
   onError?: (why: string) => void;
 };
 
@@ -86,10 +94,17 @@ export function openCallStream(handlers: Handlers): () => void {
             buf = buf.slice(idx + 2);
             const frame = parseFrame(block);
             if (!frame) continue;
-            const calls = (frame.payload.calls ?? []) as CallEvent[];
-            if (frame.event === "snapshot") handlers.onSnapshot(frame.payload);
-            else if (frame.event === "calls" && calls.length)
-              handlers.onCalls(calls);
+            const raw = (frame.payload.calls ?? []) as any[];
+            if (frame.event === "snapshot")
+              handlers.onSnapshot({
+                calls: raw.map(normalizeFeedRow),
+                ts: frame.payload.ts,
+                dropped: frame.payload.dropped,
+              });
+            else if (frame.event === "calls") {
+              const calls = raw.map(normalizeFeedRow);
+              if (calls.length) handlers.onCalls(calls);
+            }
           }
         }
       } catch (err) {

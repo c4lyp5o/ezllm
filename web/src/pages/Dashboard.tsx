@@ -147,6 +147,8 @@ function RecentCalls({ o }: { o: Overview }) {
                 <th className="px-3 py-2 text-right font-medium">total</th>
                 <th className="px-3 py-2 text-right font-medium">in</th>
                 <th className="px-3 py-2 text-right font-medium">out</th>
+                <th className="px-3 py-2 text-right font-medium">saved</th>
+                <th className="px-3 py-2 text-right font-medium">compression</th>
               </tr>
             </thead>
             <tbody className="font-mono tabular-nums">
@@ -162,6 +164,24 @@ function RecentCalls({ o }: { o: Overview }) {
                   <td className="px-3 py-2 text-right text-dim">{fmtMs(r.total_ms)}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-dim">{r.tin}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-dim">{r.tout}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-dim">
+                    {r.saved > 0 ? <span className="text-emerald-300/80">−{formatTokens(r.saved)}</span> : '–'}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    {r.compression ? (
+                      <span
+                        title={r.applied ? `compressed by ${r.compression}` : `asked ${r.compression}, no change`}
+                        className={cx(
+                          'rounded px-1 py-0.5 font-mono text-[10px]',
+                          r.applied ? 'bg-emerald-500/10 text-emerald-300/90' : 'bg-[rgba(255,255,255,0.06)] text-mute',
+                        )}
+                      >
+                        {r.compression === 'off' ? 'off' : r.compression}
+                      </span>
+                    ) : (
+                      <span className="text-mute">–</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

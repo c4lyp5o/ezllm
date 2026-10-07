@@ -7,13 +7,16 @@
 //  - capped at 60 rows: this is a pulse monitor, not an archive
 //  - status >= 400 renders red; streaming rows show a live dot until done
 import { useEffect, useRef, useState } from 'react';
-import { openCallStream, type CallEvent } from '../stream';
+import { openCallStream } from '../stream';
+import type { FeedRow } from '../api';
 import { SectionLabel, cx, formatTokens } from '../ui';
 
+// rows arrive normalized (stream.ts maps every snapshot + live row through
+// normalizeFeedRow), so the renderer reads the ledger names: tin/tout/saved.
 const CAP = 60;
 
-const rowKey = (c: CallEvent) =>
-  `${c.ts}|${c.model}|${c.tokens_in}|${c.tokens_out}|${c.status}`;
+const rowKey = (c: FeedRow) =>
+  `${c.ts}|${c.model}|${c.tin}|${c.tout}|${c.status}`;
 
 function timeAgo(ts: string): string {
   const ms = Date.now() - new Date(ts).getTime();
@@ -29,7 +32,7 @@ function timeAgo(ts: string): string {
 }
 
 export default function RecentFeed() {
-  const [rows, setRows] = useState<CallEvent[]>([]);
+  const [rows, setRows] = useState<FeedRow[]>([]);
   const [live, setLive] = useState(false);
   const [dropped, setDropped] = useState(0);
   const seen = useRef(new Set<string>());
@@ -39,8 +42,8 @@ export default function RecentFeed() {
   useEffect(() => {
     const stop = openCallStream({
       onSnapshot: (p) => {
-        const list = (p.calls ?? []) as CallEvent[];
-        const fresh: CallEvent[] = [];
+        const list = p.calls ?? [];
+        const fresh: FeedRow[] = [];
         for (const c of list) {
           const k = rowKey(c);
           if (!seen.current.has(k)) {
@@ -60,7 +63,7 @@ export default function RecentFeed() {
         setLive(true);
       },
       onCalls: (calls) => {
-        const fresh: CallEvent[] = [];
+        const fresh: FeedRow[] = [];
         for (const c of calls) {
           const k = rowKey(c);
           if (!seen.current.has(k)) {
@@ -132,12 +135,41 @@ export default function RecentFeed() {
                     {c.alias && c.alias !== c.model && (
                       <span className="text-mute"> · {c.alias}</span>
                     )}
+                    {c.compression && (
+                      <span
+                        title={
+                          c.applied
+                            ? `compressed by ${c.compression}`
+                            : `asked ${c.compression}, no change`
+                        }
+                        className={cx(
+                          'ml-1.5 rounded px-1 py-0.5 font-mono text-[10px] align-middle',
+                          c.applied && c.saved > 0
+                            ? 'bg-emerald-500/10 text-emerald-300/90'
+                            : 'bg-[rgba(255,255,255,0.06)] text-mute',
+                        )}
+                      >
+                        {c.compression === 'off'
+                          ? 'off'
+                          : c.applied && c.saved > 0
+                            ? `↓${formatTokens(c.saved)}`
+                            : c.applied
+                              ? 'ok 0'
+                              : c.compression.replace('-profile', '')}
+                      </span>
+                    )}
                   </span>
                   <span className="text-mute w-24 shrink-0 hidden sm:block truncate">
                     {c.account}
                   </span>
                   <span className="font-mono tabular-nums text-mute w-28 shrink-0 text-right">
-                    {formatTokens(c.tokens_in)}↑ {formatTokens(c.tokens_out)}↓
+                    {formatTokens(c.tin)}↑ {formatTokens(c.tout)}↓
+                    {c.saved > 0 && (
+                      <span className="text-emerald-300/80" title="tokens saved by compression">
+                        {' '}
+                        −{formatTokens(c.saved)}
+                      </span>
+                    )}
                   </span>
                   <span className="font-mono tabular-nums text-mute w-14 shrink-0 text-right">
                     {c.total_ms != null ? `${c.total_ms}ms` : '—'}

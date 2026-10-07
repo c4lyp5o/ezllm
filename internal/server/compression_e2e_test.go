@@ -68,7 +68,7 @@ func TestCompressionProfileCRUD(t *testing.T) {
 
 	// unknown engine rejected at the door (not silently fail-open forever)
 	code, _, body = postProfile(t, h, "tok-admin",
-		`{"name":"bad","stages":[{"engine":"caveman"}]}`)
+		`{"name":"bad","stages":[{"engine":"llmlingua"}]}`)
 	if code != http.StatusBadRequest || !strings.Contains(body, "unknown engine") {
 		t.Errorf("unknown engine = %d %s, want 400 mentioning it", code, body)
 	}

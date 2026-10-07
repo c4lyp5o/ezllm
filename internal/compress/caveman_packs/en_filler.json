@@ -1,0 +1,133 @@
+{
+  "language": "en",
+  "category": "filler",
+  "description": "Cleanup class: hedging, politeness padding and filler that carries no information. Fires at lite intensity. Every rule here must be one a reviewer can agree cannot change meaning — if a rule could drop a fact, a number or a name, it does not belong in this pack.",
+  "rules": [
+    {
+      "name": "drop_i_wonder_if",
+      "pattern": "\\bI was wondering if\\s+",
+      "replacement": "",
+      "flags": "gi",
+      "category": "filler",
+      "minIntensity": "lite",
+      "description": "\"I was wondering if X\" → \"X\". The hedge adds no content."
+    },
+    {
+      "name": "drop_i_just_want_to",
+      "pattern": "\\bI just want to\\s+",
+      "replacement": "",
+      "flags": "gi",
+      "category": "filler",
+      "minIntensity": "lite",
+      "description": "\"I just want to check\" → \"check\"."
+    },
+    {
+      "name": "drop_please_note_that",
+      "pattern": "\\bplease note that\\s+",
+      "replacement": "",
+      "flags": "gi",
+      "category": "filler",
+      "minIntensity": "lite",
+      "description": "\"please note that X\" → \"X\". The framing is pure padding."
+    },
+    {
+      "name": "drop_it_is_important_to_note",
+      "pattern": "\\bit is important to (?:note|mention) that\\s+",
+      "replacement": "",
+      "flags": "gi",
+      "category": "filler",
+      "minIntensity": "lite",
+      "description": "Six words of throat-clearing before the actual point."
+    },
+    {
+      "name": "drop_at_the_end_of_the_day",
+      "pattern": "\\bat the end of the day,?\\s+",
+      "replacement": "",
+      "flags": "gi",
+      "category": "filler",
+      "minIntensity": "lite",
+      "description": "Idiomatic filler with no semantic payload."
+    },
+    {
+      "name": "drop_in_order_to",
+      "pattern": "\\bin order to\\s+",
+      "replacement": "to ",
+      "flags": "gi",
+      "category": "filler",
+      "minIntensity": "lite",
+      "description": "\"in order to run\" → \"to run\". Identical meaning."
+    },
+    {
+      "name": "drop_due_to_the_fact_that",
+      "pattern": "\\bdue to the fact that\\s+",
+      "replacement": "because ",
+      "flags": "gi",
+      "category": "filler",
+      "minIntensity": "lite",
+      "description": "Seven words for one. Meaning preserved exactly."
+    },
+    {
+      "name": "collapse_a_number_of",
+      "pattern": "\\ba (?:large |small )?number of\\s+",
+      "replacement": "many ",
+      "flags": "gi",
+      "category": "filler",
+      "minIntensity": "lite",
+      "description": "\"a large number of files\" → \"many files\"."
+    },
+    {
+      "name": "drop_as_a_matter_of_fact",
+      "pattern": "\\bas a matter of fact,?\\s+",
+      "replacement": "",
+      "flags": "gi",
+      "category": "filler",
+      "minIntensity": "lite",
+      "description": "Discourse marker, no content."
+    },
+    {
+      "name": "drop_for_all_intents",
+      "pattern": "\\bfor all intents and purposes,?\\s+",
+      "replacement": "",
+      "flags": "gi",
+      "category": "filler",
+      "minIntensity": "lite",
+      "description": "Idiomatic filler."
+    },
+    {
+      "name": "shrink_basic_fundamentally",
+      "pattern": "\\b(?:basically|fundamentally|essentially),?\\s+",
+      "replacement": "",
+      "flags": "gi",
+      "category": "filler",
+      "minIntensity": "lite",
+      "description": "Hedging adverbs that qualify nothing."
+    },
+    {
+      "name": "drop_i_think_that",
+      "pattern": "\\bI think that\\s+",
+      "replacement": "",
+      "flags": "gi",
+      "category": "filler",
+      "minIntensity": "lite",
+      "description": "\"I think that X is wrong\" → \"X is wrong\". The assertion survives; only the hedge goes."
+    },
+    {
+      "name": "drop_very_really_quite",
+      "pattern": "\\b(?:very|really|quite|actually)\\s+",
+      "replacement": "",
+      "flags": "gi",
+      "category": "filler",
+      "minIntensity": "lite",
+      "description": "Intensifiers. Removing them cannot change a factual claim."
+    },
+    {
+      "name": "collapse_whitespace_runs",
+      "pattern": "[ \\t]{3,}",
+      "replacement": " ",
+      "flags": "g",
+      "category": "filler",
+      "minIntensity": "lite",
+      "description": "Runs of 3+ spaces collapse to one. Prose formatting, not content."
+    }
+  ]
+}

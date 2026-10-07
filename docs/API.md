@@ -57,7 +57,9 @@ window, sort by either axis. `summary` covers the WHOLE matching set — not jus
 returned page — so the totals answer "how much lives behind this filter".
 ```jsonc
 {
-  "rows": [ RecentCall … ],   // same projection as recent_calls (tin/tout/cread/reasoning)
+  "rows": [ RecentCall … ],   // same projection as recent_calls: tin/tout/cread/
+                              // reasoning/saved/compression/applied/rules_fired
+                              // (rules_fired = caveman prose rules that fired; 0 otherwise)
   "summary": { "count":23, "tin":966, "tout":69, "cread":0, "reasoning":0,
                "max_tin":42, "max_tout":3 },
   "filter": { "from":"…","to":"…","limit":50,"sort":"ts_desc" }

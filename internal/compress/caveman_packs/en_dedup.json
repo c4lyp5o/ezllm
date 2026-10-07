@@ -1,0 +1,79 @@
+{
+  "language": "en",
+  "category": "dedup",
+  "description": "Collapses repeated framing WITHIN a single message (never across messages — cross-message dedup is session_dedup's job, which is lossless by construction). Standard intensity. These rules target duplicated connective tissue, not duplicated facts.",
+  "rules": [
+    {
+      "name": "collapse_repeated_and_then",
+      "pattern": "(?:,?\\s*and then){2,}",
+      "replacement": ", then",
+      "flags": "gi",
+      "category": "dedup",
+      "minIntensity": "standard",
+      "description": "\"and then and then and then\" → \", then\". Repetition of a connective carries no extra sequence information."
+    },
+    {
+      "name": "collapse_repeated_so",
+      "pattern": "(?:\\bso,?\\s+){2,}",
+      "replacement": "so ",
+      "flags": "gi",
+      "category": "dedup",
+      "minIntensity": "standard",
+      "description": "Stacked discourse markers collapse to one."
+    },
+    {
+      "name": "collapse_repeated_but",
+      "pattern": "(?:\\bbut,?\\s+){2,}",
+      "replacement": "but ",
+      "flags": "gi",
+      "category": "dedup",
+      "minIntensity": "standard",
+      "description": "Repeated contrast marker collapses to one."
+    },
+    {
+      "name": "collapse_repeated_basically",
+      "pattern": "(?:\\bbasically,?\\s+){2,}",
+      "replacement": "",
+      "flags": "gi",
+      "category": "dedup",
+      "minIntensity": "standard",
+      "description": "A repeated filler word is filler squared."
+    },
+    {
+      "name": "collapse_duplicate_spaces_after_punct",
+      "pattern": "([.,;:!?])\\s{2,}",
+      "replacement": "$1 ",
+      "flags": "g",
+      "category": "dedup",
+      "minIntensity": "standard",
+      "description": "Whitespace normalisation after punctuation. NOTE: this is the only rule using a capture reference, and it re-emits exactly the punctuation it matched — no protected content can ride through it, because punctuation is never inside a protected span."
+    },
+    {
+      "name": "collapse_trailing_politeness",
+      "pattern": "(?:,?\\s*(?:thanks|thank you|cheers|appreciate it)(?:\\s+(?:so much|a lot|very much))?[.!]?){2,}\\s*$",
+      "replacement": ", thanks.",
+      "flags": "gi",
+      "category": "dedup",
+      "minIntensity": "standard",
+      "description": "Repeated closing thanks collapse to one. Anchored at end-of-text so it can never eat sentence content."
+    },
+    {
+      "name": "collapse_repeated_i_mean",
+      "pattern": "(?:\\bI mean,?\\s+){2,}",
+      "replacement": "",
+      "flags": "gi",
+      "category": "dedup",
+      "minIntensity": "standard",
+      "description": "Stacked self-correction markers are noise."
+    },
+    {
+      "name": "collapse_repeated_you_know",
+      "pattern": "(?:,?\\s*you know,?){2,}",
+      "replacement": "",
+      "flags": "gi",
+      "category": "dedup",
+      "minIntensity": "standard",
+      "description": "Repeated filler phrase."
+    }
+  ]
+}

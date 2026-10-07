@@ -23,8 +23,8 @@ type Stage struct {
 }
 
 // KnownEngines is the shipped engine registry (M5: session_dedup + rtk,
-// M6.5 phase 2: headroom + lite; caveman waits on its safety design).
-var KnownEngines = map[string]bool{"session_dedup": true, "rtk": true, "headroom": true, "lite": true}
+// M6.5 phase 2: headroom + lite, M7: caveman).
+var KnownEngines = map[string]bool{"session_dedup": true, "rtk": true, "headroom": true, "lite": true, "caveman": true}
 
 // Profile is the runtime view of a compression_profiles row.
 type Profile struct {
@@ -46,7 +46,11 @@ type Result struct {
 	Pre     int64 // estimated prompt tokens before compression
 	Saved   int64 // estimated tokens saved (0 on any skip)
 	MS      int64
-	Err     string // diagnostics for tests/logs; never fails the request
+	// RulesFired is caveman attribution: how many pack rules rewrote
+	// something. Zero for every other engine. Recorded so a surprising
+	// saving can be traced to prose condensation rather than guessed at.
+	RulesFired int
+	Err        string // diagnostics for tests/logs; never fails the request
 }
 
 // EstimateTokens is the shared pure-Go estimator (no tokenizer dependency:
@@ -108,11 +112,12 @@ func Apply(body []byte, p *Profile) ([]byte, Result) {
 			res.Err = "unknown engine " + st.Engine
 			return body, res // fail-open
 		}
-		next, err := runEngine(st, cur)
+		next, fired, err := runEngine(st, cur)
 		if err != nil {
 			res.Err = st.Engine + ": " + err.Error()
 			return body, res // contract rule 5
 		}
+		res.RulesFired += fired
 		cur = next
 	}
 
@@ -159,18 +164,25 @@ func Apply(body []byte, p *Profile) ([]byte, Result) {
 	return out, res
 }
 
-func runEngine(st Stage, msgs []any) ([]any, error) {
+// runEngine applies one stage. fired is only meaningful for caveman (the count
+// of rules that actually rewrote something); every other engine reports 0.
+func runEngine(st Stage, msgs []any) ([]any, int, error) {
 	switch st.Engine {
 	case "session_dedup":
-		return sessionDedup(msgs), nil
+		return sessionDedup(msgs), 0, nil
 	case "rtk":
-		return rtk(msgs, st.Options), nil
+		return rtk(msgs, st.Options), 0, nil
 	case "headroom":
-		return headroom(msgs, st.Options), nil
+		return headroom(msgs, st.Options), 0, nil
 	case "lite":
-		return lite(msgs, st.Options), nil
+		return lite(msgs, st.Options), 0, nil
+	case "caveman":
+		// caveman also reports how many rules fired, so a surprising saving
+		// is attributable to a rule rather than a mystery.
+		out, fired := caveman(msgs, st.Options)
+		return out, fired, nil
 	}
-	return nil, fmt.Errorf("unknown engine %q", st.Engine)
+	return nil, 0, fmt.Errorf("unknown engine %q", st.Engine)
 }
 
 // integrityFailure returns a non-empty reason if any text inside msgs has an

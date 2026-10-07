@@ -1,0 +1,145 @@
+{
+  "language": "en",
+  "category": "context",
+  "description": "Rewrites verbose request framing into directives. Standard intensity only — these change WORDS, not just delete padding, so they are opt-in. All rules are framing-level: none may touch the substance of what is being asked about.",
+  "rules": [
+    {
+      "name": "can_you_explain_why",
+      "pattern": "\\bcan you explain why\\s+",
+      "replacementMap": {
+        "can you explain why": "Explain why "
+      },
+      "replacement": "Explain why ",
+      "flags": "gi",
+      "category": "context",
+      "minIntensity": "standard",
+      "description": "Verbose question → directive. The topic after it is untouched."
+    },
+    {
+      "name": "could_you_show_me_how",
+      "pattern": "\\bcould you show me how to\\s+",
+      "replacement": "Show how to ",
+      "flags": "gi",
+      "category": "context",
+      "minIntensity": "standard",
+      "description": "\"Could you show me how to fix X\" → \"Show how to fix X\"."
+    },
+    {
+      "name": "would_you_mind",
+      "pattern": "\\bwould you mind (?:please )?",
+      "replacement": "Please ",
+      "flags": "gi",
+      "category": "context",
+      "minIntensity": "standard",
+      "description": "Polite framing → single polite marker."
+    },
+    {
+      "name": "i_would_like_you_to",
+      "pattern": "\\bI would like you to\\s+",
+      "replacement": "",
+      "flags": "gi",
+      "category": "context",
+      "minIntensity": "standard",
+      "description": "\"I would like you to review\" → \"review\"."
+    },
+    {
+      "name": "could_you_please",
+      "pattern": "\\bcould you please\\s+",
+      "replacement": "Please ",
+      "flags": "gi",
+      "category": "context",
+      "minIntensity": "standard",
+      "description": "Question framing → directive, keeping one politeness marker."
+    },
+    {
+      "name": "is_there_a_way_to",
+      "pattern": "\\bis there a way (?:to|that we can)\\s+",
+      "replacement": "Can we ",
+      "flags": "gi",
+      "category": "context",
+      "minIntensity": "standard",
+      "description": "\"Is there a way to avoid X\" → \"Can we avoid X\"."
+    },
+    {
+      "name": "what_is_the_best_way_to",
+      "pattern": "\\bwhat (?:is|'s) the best way to\\s+",
+      "replacement": "Best way to ",
+      "flags": "gi",
+      "category": "context",
+      "minIntensity": "standard",
+      "description": "Interrogative framing → directive."
+    },
+    {
+      "name": "i_need_help_with",
+      "pattern": "\\bI need (?:some )?help with\\s+",
+      "replacement": "Help with ",
+      "flags": "gi",
+      "category": "context",
+      "minIntensity": "standard",
+      "description": "\"I need help with the parser\" → \"Help with the parser\"."
+    },
+    {
+      "name": "please_could_you_tell_me",
+      "pattern": "\\bplease could you tell me (?:what|why|how|whether|if)\\s+",
+      "replacement": "Tell me ",
+      "flags": "gi",
+      "category": "context",
+      "minIntensity": "standard",
+      "description": "Double politeness collapses; the question word is preserved by the capture-free rewrite."
+    },
+    {
+      "name": "drop_i_am_currently",
+      "pattern": "\\bI am currently\\s+",
+      "replacement": "I'm ",
+      "flags": "gi",
+      "category": "context",
+      "minIntensity": "standard",
+      "description": "\"I am currently running\" → \"I'm running\"."
+    },
+    {
+      "name": "drop_there_seems_to_be",
+      "pattern": "\\bthere seems to be\\s+",
+      "replacement": "there is ",
+      "flags": "gi",
+      "category": "context",
+      "minIntensity": "standard",
+      "description": "Hedged existence claim → plain one. Weaker assertion is acceptable framing loss; the subject and its state survive."
+    },
+    {
+      "name": "shrink_it_looks_like",
+      "pattern": "\\bit looks like\\s+",
+      "replacement": "seems ",
+      "flags": "gi",
+      "category": "context",
+      "minIntensity": "standard",
+      "description": "\"It looks like the test fails\" → \"seems the test fails\"."
+    },
+    {
+      "name": "drop_at_the_moment",
+      "pattern": "\\b(?:at the moment|right now|currently),?\\s+",
+      "replacement": "now ",
+      "flags": "gi",
+      "category": "context",
+      "minIntensity": "standard",
+      "description": "Temporal framing compresses to one word."
+    },
+    {
+      "name": "collapse_in_terms_of",
+      "pattern": "\\bin terms of\\s+",
+      "replacement": "in ",
+      "flags": "gi",
+      "category": "context",
+      "minIntensity": "standard",
+      "description": "\"in terms of performance\" → \"in performance\"."
+    },
+    {
+      "name": "collapse_with_regard_to",
+      "pattern": "\\bwith regard to\\s+",
+      "replacement": "about ",
+      "flags": "gi",
+      "category": "context",
+      "minIntensity": "standard",
+      "description": "\"with regard to the schema\" → \"about the schema\"."
+    }
+  ]
+}

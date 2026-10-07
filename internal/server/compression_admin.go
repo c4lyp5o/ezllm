@@ -45,7 +45,7 @@ func validateStages(raw json.RawMessage) (json.RawMessage, error) {
 	}
 	for i, st := range stages {
 		if !compress.KnownEngines[st.Engine] {
-			return nil, errStrf("stage %d: unknown engine %q (supported: session_dedup, rtk, headroom, lite)", i, st.Engine)
+			return nil, errStrf("stage %d: unknown engine %q (supported: session_dedup, rtk, headroom, lite, caveman)", i, st.Engine)
 		}
 	}
 	return json.Marshal(stages)

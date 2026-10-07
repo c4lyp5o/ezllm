@@ -15,7 +15,7 @@ records every design decision where the plan left latitude.
 | Ledger metrics (`prompt_tokens_pre`, `tokens_saved`, `compression_ms`, `compression_applied`) | ✅ | |
 | Stats: compression/savings granularities | ✅ (already summed by `UsageReport`) | |
 | `headroom` + `lite` engines | ✅ (M6.5 phase 2, shipped) | |
-| `caveman` (prose condensation) | | after its safety design pass (pro) |
+| `caveman` (prose condensation) | ✅ (M7, shipped) | deterministic rule packs, text-only, protected spans + span-integrity gate, `lite`/`standard`; aggressive+ultra = stage composition |
 | Profile editor page (drag-order stages) | | M6.5 (Compression page stays a read-only preview) |
 | Anthropic `/v1/messages` rtk scoping | | M6.5 (shape passes through unchanged today) |
 
@@ -111,8 +111,8 @@ Wire form — marker line + columnar JSON, together the whole content:
 ### `lite` — whitespace-only cleanup
 
 Omniroute's safe Lite tier: zero semantic change, always-on. It never rewrites words —
-filler stripping and phrase condensation belong to `caveman`, which stays gated on its
-safety design. To string content of any role it:
+filler stripping and phrase condensation belong to `caveman` (M7, shipped — see its own
+section below). To string content of any role it:
 
 1. strips trailing spaces/tabs on lines **outside** fences,
 2. collapses blank-line runs down to `blank_lines` (option, default 1),
@@ -123,6 +123,105 @@ content whole) and pure-JSON content is skipped, so `headroom` owns payloads. No
 smaller ⇒ original kept.
 
 - Options: `blank_lines` (default 1).
+
+### `caveman` — prose condensation, `scope: text_only`
+
+The only **lossy** engine in the set, and the reason it waited for a safety design pass.
+Lossy here means *words can disappear*, so the whole design is about proving nothing
+semantic disappears.
+
+**Mechanism — deterministic rule packs, never a model.** Caveman applies curated regex
+substitutions (`verbose request → directive`) to **prose only**. No LLM, no tokenizer, no
+embedding: the same input always yields the same output, byte-for-byte. That is what makes
+it testable and auditable. An LLM rewriter would fail contract rule 5 (fail-open must be
+*byte-identical*, and an LLM cannot promise determinism).
+
+**Intensity — one knob for prose aggressiveness.**
+
+| Intensity | Packs that fire | Risk | When |
+| --- | --- | --- | --- |
+| `lite` | filler/cleanup class only | near-zero (whitespace-adjacent) | always-on default |
+| `standard` | + context + dedup packs | low, but *words change* | long sessions, opt-in |
+
+omniroute's `aggressive` and `ultra` are **not strengths of caveman** — they are caveman
+plus *other engines* (history/tool summarizers, pruning). ezllm already ships those as
+first-class stages, so the equivalent is **composition, not a flag**:
+
+```jsonc
+{"stages":[{"engine":"session_dedup"},{"engine":"rtk","options":{"keep_lines":6}},
+           {"engine":"headroom"},{"engine":"caveman","options":{"intensity":"standard"}}]}
+```
+
+One knob governs prose; the pipeline governs structure. Inventing a `caveman:ultra` that
+secretly also ran dedup/rtk would make the ledger lie about what compressed the prompt.
+
+**Protection layers — prose is the *only* editable surface.**
+
+1. `exempt_last_turn` (contract rule 1) — the live question is never rewritten. Caveman
+   condensing the user's actual ask is the worst possible failure mode, so the newest
+   message is out of scope by construction.
+2. `scope: text_only` — **only** `content` strings on plain text messages. Never
+   `role:"tool"` (headroom owns payloads), never assistant `tool_calls`, never the `model`
+   field or any non-message key.
+3. Fenced regions are **atomic and untouched** (contract rule 3) — `splitUnits` groups each
+   ``` block as one unit and caveman skips it whole. Code, diffs, JSON samples and command
+   output survive verbatim even inside a prose message.
+4. **Inline protection spans** — the text is segmented before any rule runs, and protected
+   spans are re-inserted verbatim afterwards:
+   - inline `code`, fenced blocks (above)
+   - URLs, absolute/relative **file paths**, `identifiers_like_this`, camelCase/`snake_case`
+   - numbers with units, quoted strings, email addresses, IP:port, version strings
+   - anything matching a rule pack's `preserve` patterns
+5. **Whole-content skip** — content that parses as JSON is skipped (the same guard rtk and
+   lite use); an unclosed fence anywhere ⇒ that content is skipped entirely.
+
+**Rule packs — data, validated at load.**
+
+Pack shape mirrors the reference format so packs stay portable:
+`{language, category, rules:[{name, pattern, replacement, replacementMap?, flags?,
+context?, category?, minIntensity?, description?}]}`.
+
+- **Load-time validation** (`caveman_rules.go`): every pattern must compile, every rule
+  needs `name` + `pattern`, `minIntensity` must be a known level. A bad rule **disables its
+  pack with a diagnostic** — it never half-applies. (Reference behaviour: untrusted/custom
+  packs are skipped with diagnostics rather than failing the request.)
+- **Built-in packs are embedded** in the binary (`go:embed`) so a deployment cannot be
+  silently weakened by a missing file; external packs are opt-in and untrusted by default.
+- **Rule hygiene gate** — a rule whose replacement *adds* length is rejected at load.
+  Caveman must only ever shrink.
+
+**Savings gates (the "can only ever help" promise, enforced per-content).**
+
+- Skip content where caveman yields **no strict byte reduction**.
+- **Emptied-segment guard**: a prose segment that carried words cannot be reduced to
+  nothing. Whitespace-only segments may vanish (that is just cleanup).
+
+  > A message-level **word-loss ceiling** (`max_word_loss_pct`) was implemented and then
+  > REMOVED, and the reason matters: it cannot tell "deleted five filler words" from "ate a
+  > paragraph". On a genuinely verbose prompt it false-rejected the exact messages worth
+  > compressing — measured 62% word loss on a message that was 5/8ths padding, with a
+  > *correct* rewrite. Segment granularity plus span integrity is the honest signal; a
+  > percentage-of-words threshold is not.
+- Skip when a **protected-span integrity check** fails: every protected span present in the
+  input must still be present in the output, in order. Any missing span ⇒ keep the original.
+  This is the check that makes a *lossy* engine safe enough to run unattended.
+- Then the profile-level `min_compress_ratio` floor applies as usual (contract rule 4).
+
+**Observability — you must be able to see what it did.**
+
+- Ledger gains `calls.compression_rules_fired` (schema v3) — the count of prose rules that
+  actually rewrote something, so a surprising saving is attributable instead of mysterious.
+  Always 0 for the other four engines. `tokens_saved` records the size.
+- The dashboard Compression page shows intensity per profile and the fired-rule count for
+  recent calls — "what changed my prompt" is one click away, never a mystery.
+
+**Language packs.** English built-ins only at first. Pack loading is per-language, so
+`id`/`ms` packs can be added later as data without touching engine code. Non-English prose
+simply matches fewer rules and degrades to *less* compression — never to damage.
+
+**Explicitly out of scope for v1** (each needs its own design + pro review): history
+summarization, LLM-assisted condensation, tool-result pruning beyond rtk, and any pack that
+rewrites inside fenced regions.
 
 ### Token estimates
 

@@ -157,6 +157,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /admin/tokens/{id}", s.admin(s.handleToken))
 
 	s.mux.HandleFunc("GET /admin/compression-profiles", s.admin(s.handleProfiles))
+	s.mux.HandleFunc("POST /admin/compression-profiles", s.admin(s.handleProfiles))
+	s.mux.HandleFunc("GET /admin/compression-profiles/{id}", s.admin(s.handleProfile))
+	s.mux.HandleFunc("PATCH /admin/compression-profiles/{id}", s.admin(s.handleProfile))
+	s.mux.HandleFunc("DELETE /admin/compression-profiles/{id}", s.admin(s.handleProfile))
 	s.mux.HandleFunc("GET /admin/quota", s.admin(s.handleQuotas))
 	s.mux.HandleFunc("POST /admin/keys/{keyId}/quota", s.admin(s.handleKeyQuota))
 	s.mux.HandleFunc("GET /admin/export", s.admin(s.handleExport))
@@ -390,6 +394,10 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			s.ledger(store.Call{
 				TS: start, Client: client, Surface: store2surface(surface), Alias: requested,
 				Model: requested, Status: errorStatus(err), Err: err.Error(),
+				// Compression never ran (the request died at resolution), but
+				// the stamp still says what WOULD have happened — "off" or the
+				// profile name — so the feed never has to guess.
+				CompressionProfile: s.compressionProfileOf(r, requested),
 			})
 			return
 		}
@@ -397,6 +405,11 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			info.account = routes[0].Account.Namespace
 			info.model = routes[0].Model
 		}
+
+		// Compression (M5): resolve the profile (header → combo), run the
+		// pipeline ONCE over the body — every candidate then receives the
+		// same compressed body, because hops only swap `model`.
+		body, compRes := s.applyCompression(r, requested, body)
 
 		// served is the route that ACTUALLY committed a response — it may be
 		// hop 2 or 3 after failover. Every ledger field below (account, key,
@@ -432,6 +445,7 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			Status: status, Stream: res.Stream, TTFTms: res.TTFTms, Totalms: res.Totalms,
 			EndpointID: res.EndpointID, UpstreamModel: res.UpstreamModel,
 		}
+		attachCompressionMetrics(&call, compRes)
 		if res.Usage != nil {
 			call.TokensIn = res.Usage.In
 			call.TokensOut = res.Usage.Out

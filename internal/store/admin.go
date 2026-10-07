@@ -1196,32 +1196,38 @@ func (d *DB) DeleteToken(ctx context.Context, id int64) error {
 	})
 }
 
-// ── compression profiles (read-only until M5) ───────────────────────────────
+// ── compression profiles ─────────────────────────────────────────────────────
 
-// CompressionProfile is the M5 surface, exposed read-only so the combo editor
-// can bind a profile id today.
+// CompressionProfile is a full pipeline row: stages JSON plus the safety
+// gates (docs/compression-design.md). CRUD lives in compression.go.
 type CompressionProfile struct {
-	ID      int64  `json:"id"`
-	Name    string `json:"name"`
-	Enabled bool   `json:"enabled"`
-	Notes   string `json:"notes,omitempty"`
+	ID                int64           `json:"id"`
+	Name              string          `json:"name"`
+	Enabled           bool            `json:"enabled"`
+	Stages            json.RawMessage `json:"stages"`
+	ExemptLastTurn    bool            `json:"exempt_last_turn"`
+	MinCompressRatio  float64         `json:"min_compress_ratio"`
+	FailOpen          bool            `json:"fail_open"`
+	AutoTriggerTokens int64           `json:"auto_trigger_tokens"`
+	Notes             string          `json:"notes,omitempty"`
+	CreatedAt         string          `json:"created_at,omitempty"`
 }
 
-// ListCompressionProfiles returns all profiles (M5 owns writing them).
+// ListCompressionProfiles returns every profile with its full pipeline —
+// the combo editor and the Compression page read the same row.
 func (d *DB) ListCompressionProfiles(ctx context.Context) ([]CompressionProfile, error) {
-	rows, err := d.r.QueryContext(ctx,
-		`SELECT id, name, enabled, COALESCE(notes,'') FROM compression_profiles ORDER BY name`)
+	rows, err := d.r.QueryContext(ctx, profileSelect+` ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []CompressionProfile{}
 	for rows.Next() {
-		var p CompressionProfile
-		if err := rows.Scan(&p.ID, &p.Name, &p.Enabled, &p.Notes); err != nil {
+		p, err := scanProfile(rows)
+		if err != nil {
 			return nil, err
 		}
-		out = append(out, p)
+		out = append(out, *p)
 	}
 	return out, rows.Err()
 }

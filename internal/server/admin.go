@@ -987,8 +987,17 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 
 // ── profiles + export + quota ───────────────────────────────────────────────
 
-// handleProfiles exposes compression profiles read-only (M5 owns writes).
+// handleProfiles lists compression profiles; POST creates one (CRUD in
+// compression_admin.go).
 func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		s.handleProfileCreate(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeErr(w, http.StatusMethodNotAllowed, "invalid_request_error", "method not allowed")
+		return
+	}
 	profiles, err := s.db.ListCompressionProfiles(r.Context())
 	if err != nil {
 		s.writeStoreErr(w, err)

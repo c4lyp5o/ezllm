@@ -11,10 +11,12 @@ import Compression from './pages/Compression';
 import Connect from './pages/Connect';
 import Rules from './pages/Rules';
 import Stats from './pages/Stats';
+import Requests from './pages/Requests';
 
 const NAV = [
   { to: '/', label: 'Dashboard', hint: 'overview · health · ledger' },
   { to: '/stats', label: 'Stats', hint: 'granularity · range' },
+  { to: '/requests', label: 'Requests', hint: 'filter · tokens' },
   { to: '/providers', label: 'Providers', hint: 'accounts · keys · models' },
   { to: '/combos', label: 'Combos', hint: 'routing chains' },
   { to: '/rules', label: 'Rules', hint: 'caps · windows' },
@@ -131,6 +133,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 const PAGE_HEADERS: Record<string, { title: string; sub: string }> = {
   '/': { title: 'Dashboard', sub: 'traffic, health and the last 20 calls' },
   '/stats': { title: 'Stats', sub: 'usage by granularity and range' },
+  '/requests': { title: 'Requests', sub: 'dissect tokens in and out' },
   '/providers': { title: 'Providers', sub: 'accounts, keys, catalogs and quota' },
   '/combos': { title: 'Combos', sub: 'ordered routing chains' },
   '/rules': { title: 'Rules', sub: 'usage caps and allowed-use windows' },
@@ -193,6 +196,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
       <Route path="/stats" element={<Stats />} />
+      <Route path="/requests" element={<Requests />} />
             <Route path="/providers" element={<Providers />} />
             <Route path="/combos" element={<Combos />} />
             <Route path="/rules" element={<Rules />} />

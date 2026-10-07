@@ -138,7 +138,7 @@ export type RecentCall = {
 export type FeedRow = {
   ts: string; client: string; surface: string; alias?: string; account: string; model: string;
   status: number; stream?: boolean; ttft_ms?: number; total_ms?: number;
-  tin: number; tout: number; cread?: number; saved: number;
+  tin: number; tout: number; cread?: number; reasoning?: number; saved: number;
   compression: string; applied: boolean; error?: string;
 };
 const num = (v: unknown): number => (typeof v === 'number' ? v : 0);
@@ -152,6 +152,7 @@ export function normalizeFeedRow(raw: any): FeedRow {
     total_ms: raw.total_ms == null ? undefined : num(raw.total_ms),
     tin: num(raw.tin ?? raw.tokens_in), tout: num(raw.tout ?? raw.tokens_out),
     cread: num(raw.cread ?? raw.tokens_cached_read),
+    reasoning: num(raw.reasoning ?? raw.reasoning_tokens),
     saved: num(raw.saved ?? raw.tokens_saved),
     compression: String(raw.compression ?? ''), applied: Boolean(raw.applied),
     error: raw.error ? String(raw.error) : undefined,
@@ -202,6 +203,38 @@ export function usage(range: RangeKey, gran: Granularity): Promise<UsageResp> {
   const params = new URLSearchParams({ from });
   if (g) params.set('group_by', g);
   return get<UsageResp>(`/admin/usage?${params.toString()}`);
+}
+
+// ── Requests explorer (token dissection) ──────────────────────────────────
+// Filter the calls ledger by tokens-in / tokens-out over a range. The mimo
+// token plan kept raising the same question — is the CLIENT sending too much,
+// or is the MODEL burning it on output/reasoning? — and aggregates hide the
+// outliers that answer it. summary covers the WHOLE matching set, not just
+// the returned page.
+export type RequestsSummary = {
+  count: number; tin: number; tout: number; cread: number;
+  reasoning: number; max_tin: number; max_tout: number;
+};
+export type RequestsResp = {
+  rows: FeedRow[];
+  summary: RequestsSummary;
+  filter: { from: string; to: string; limit: number; sort: string };
+};
+export type RequestSort = 'ts_desc' | 'tin_desc' | 'tout_desc';
+export type RequestFilter = {
+  minTin?: number; maxTin?: number; minTout?: number; maxTout?: number;
+  range?: RangeKey; sort?: RequestSort; limit?: number;
+};
+export function requests(f: RequestFilter = {}): Promise<RequestsResp> {
+  const hours = RANGE_HOURS[f.range ?? '24h'];
+  const params = new URLSearchParams({ from: new Date(Date.now() - hours * 3600_000).toISOString() });
+  if (f.minTin != null) params.set('min_tin', String(f.minTin));
+  if (f.maxTin != null) params.set('max_tin', String(f.maxTin));
+  if (f.minTout != null) params.set('min_tout', String(f.minTout));
+  if (f.maxTout != null) params.set('max_tout', String(f.maxTout));
+  if (f.sort) params.set('sort', f.sort);
+  if (f.limit) params.set('limit', String(f.limit));
+  return get<RequestsResp>(`/admin/requests?${params.toString()}`);
 }
 
 export type TestStep = { step: string; ok?: boolean; ms?: number; detail?: string; error?: string };

@@ -200,6 +200,7 @@ export default function Combos() {
   const [profiles, setProfiles] = useState<{ id: number; name: string }[]>([]);
   const [modal, setModal] = useState<{ open: boolean; editing: Combo | null }>({ open: false, editing: null });
   const [err, setErr] = useState<string | null>(null);
+  const [busyID, setBusyID] = useState<number | null>(null);
 
   const load = useCallback(() => {
     get<Combo[]>('/admin/combos').then((c) => { setCombos(c); setErr(null); }).catch((e) => setErr(e instanceof Error ? e.message : 'failed to load'));
@@ -215,6 +216,17 @@ export default function Combos() {
     setErr(null);
     try { await del(`/admin/combos/${c.id}`); load(); }
     catch (e) { setErr(e instanceof ApiError ? e.detail.message : e instanceof Error ? e.message : String(e)); }
+  };
+
+  // One-field PATCH: the server merges the rest, so this cannot clobber hops or
+  // strategy. Optimistic so the switch answers the tap immediately; the reload
+  // in `finally` puts the server's truth back on screen either way.
+  const setEnabled = async (c: Combo, next: boolean) => {
+    setErr(null); setBusyID(c.id);
+    setCombos((prev) => prev?.map((x) => (x.id === c.id ? { ...x, enabled: next } : x)) ?? prev);
+    try { await patch<Combo>(`/admin/combos/${c.id}`, { enabled: next }); }
+    catch (e) { setErr(e instanceof ApiError ? e.detail.message : e instanceof Error ? e.message : String(e)); }
+    finally { setBusyID(null); load(); }
   };
 
   return (
@@ -243,11 +255,18 @@ export default function Combos() {
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                 <span className="text-[14px] font-semibold">{c.name}</span>
                 <Chip><span className="font-mono">{c.strategy}</span></Chip>
-                {!c.enabled && <Chip tone="warn">disabled</Chip>}
                 {c.compression_profile_id != null && <Chip tone="accent">profile #{c.compression_profile_id}</Chip>}
-                <span className="ml-auto flex items-center gap-2">
-                  <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')} onClick={() => setModal({ open: true, editing: c })}>Edit</button>
-                  <button type="button" className={cx(btn.base, btn.danger, 'px-3 py-1.5 text-[12px]')} onClick={() => void remove(c)}>Delete</button>
+                <span className="ml-auto flex items-center gap-3">
+                  <label className="flex items-center gap-2 text-[12px] text-dim">
+                    <Toggle checked={c.enabled} disabled={busyID === c.id}
+                      label={`${c.enabled ? 'Disable' : 'Enable'} combo ${c.name}`}
+                      onChange={(v) => void setEnabled(c, v)} />
+                    <span>{c.enabled ? 'Enabled' : 'Disabled'}</span>
+                  </label>
+                  <span className="flex items-center gap-2">
+                    <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')} onClick={() => setModal({ open: true, editing: c })}>Edit</button>
+                    <button type="button" className={cx(btn.base, btn.danger, 'px-3 py-1.5 text-[12px]')} onClick={() => void remove(c)}>Delete</button>
+                  </span>
                 </span>
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-2 font-mono text-[11.5px]">

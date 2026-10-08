@@ -30,7 +30,7 @@ func newCORSHarness(t *testing.T, origins []string) http.Handler {
 	}))
 	dir := t.TempDir()
 	db, err := store.Open(context.Background(), store.Options{
-		Path: filepath.Join(dir, "t.sqlite"), MasterKey: "test-master",
+		Path:      filepath.Join(dir, "t.sqlite"),
 		BatchSize: 4, BatchWait: 20 * time.Millisecond,
 	})
 	if err != nil {

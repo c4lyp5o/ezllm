@@ -11,7 +11,6 @@ func openEventsDB(t *testing.T, batchSize int) *DB {
 	t.Helper()
 	db, err := Open(context.Background(), Options{
 		Path:      filepath.Join(t.TempDir(), "e.sqlite"),
-		MasterKey: "0123456789abcdef0123456789abcdef",
 		BatchSize: batchSize,
 		BatchWait: time.Hour, // flush on size or explicit Flush(), so batches are deterministic
 	})

@@ -37,7 +37,7 @@ func TestComboAllHopsRuleRefused429(t *testing.T) {
 	t.Cleanup(up.Close)
 
 	dir := t.TempDir()
-	db, err := store.Open(context.Background(), store.Options{Path: dir + "/t.sqlite", MasterKey: "k"})
+	db, err := store.Open(context.Background(), store.Options{Path: dir + "/t.sqlite"})
 	if err != nil {
 		t.Fatal(err)
 	}

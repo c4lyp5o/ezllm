@@ -20,15 +20,7 @@ compression (M5) and the dashboard (M6) are still ahead.
 
 ```bash
 make check                          # fmt + vet + test + build
-cp config.example.yaml config.yaml  # then export the env vars it names
-
-# master key protects every provider key at rest; lives OUTSIDE data/
-umask 077 && openssl rand -hex 32 > ~/.hermes/secrets/ezllm-master.key && chmod 600 ~/.hermes/secrets/ezllm-master.key
-
-export EZLLM_TOKEN_HERMES=...       # any random string: your client token
-export EZLLM_TOKEN_CLAUDE=...
-export OPENCODE_GO_API_KEY="$(cat ~/.hermes/secrets/opencode-go.txt)"
-export SSN_GPT_API_KEY="$(cat ~/.hermes/secrets/ssn-gpt.txt)"
+cp config.example.yaml config.yaml  # provider metadata only; add credentials through the dashboard
 
 make run
 go run ./cmd/m2verify               # acceptance check against the live ledger
@@ -84,17 +76,19 @@ lands as `tokens_in=448 + cached_read=2048`.
 
 ## Config precedence
 
-flags > `EZLLM_*` env > `config.yaml` > defaults. `config.yaml` is **bootstrap
-only** — it seeds accounts/keys/tokens into SQLite on first boot; after that the
-admin API owns the state. Loopback by default; `EZLLM_ADDR=0.0.0.0:20129` for
-phone-on-LAN testing (same token gate).
+Command-line flags override `config.yaml`; the global upstream retry policy defaults to
+3 retries after the initial attempt per combo hop. A hop is retried only for transient
+transport failures, timeouts, `429`, or `5xx`; then combo failover advances to the next
+hop with a fresh retry budget. Credentials are managed in SQLite via admin APIs and
+dashboard settings. Keep `data/ezllm.sqlite` private and include it in protected
+backups. For phone-on-LAN access, use `-addr 0.0.0.0:20129`.
 
 ## Security notes
 
-- Provider keys: AES-256-GCM at rest (`enc:v1:<iv>:<ct>:<tag>`), master key in a
-  separate 0600 file outside `data/`. Boot **refuses** a world-readable master key.
-- Client tokens: sha256-hashed, never stored in plaintext; `infer` vs `admin` roles.
-- Only a masked hint (`sk…5E5i`) is ever persisted or logged.
+- Provider keys are stored in SQLite as plaintext per the operator's explicit
+  testing-build choice; protect the database and its backups with filesystem access controls.
+- Client tokens are SHA-256 hashed and dashboard passwords bcrypt-hashed in SQLite; plaintext credentials are never returned after creation/login.
+- Only a masked provider-key hint is ever exposed in admin responses or logs.
 - The upstream's own credentials replace the client's: `Authorization`, `x-api-key`
   and `Cookie` are stripped from client requests before forwarding.
 

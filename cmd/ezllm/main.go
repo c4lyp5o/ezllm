@@ -15,7 +15,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -37,18 +36,10 @@ func main() {
 
 func run() error {
 	cfgPath := flag.String("config", "config.yaml", "path to config file")
-	addrOverride := flag.String("addr", "", "listen address override (precedence: -addr > EZLLM_ADDR > config.listen)")
+	addrOverride := flag.String("addr", "", "listen address override (precedence: -addr > config.listen)")
 	flag.Parse()
 
 	level := slog.LevelInfo
-	switch os.Getenv("EZLLM_LOG_LEVEL") {
-	case "debug":
-		level = slog.LevelDebug
-	case "warn":
-		level = slog.LevelWarn
-	case "error":
-		level = slog.LevelError
-	}
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 
 	cfg, err := config.Load(*cfgPath)
@@ -56,18 +47,8 @@ func run() error {
 		return err
 	}
 
-	// ── master key: lives OUTSIDE data/ so copying the DB alone leaks nothing ──
-	master, err := loadMasterKey(cfg)
-	if err != nil {
-		return err
-	}
-
 	// ── data dir + store ──
-	dataDir := cfg.DataDir
-	if v := os.Getenv("EZLLM_DATA_DIR"); v != "" {
-		dataDir = v
-	}
-	dbPath := filepath.Join(dataDir, "ezllm.sqlite")
+	dbPath := filepath.Join(cfg.DataDir, "ezllm.sqlite")
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -77,7 +58,6 @@ func run() error {
 
 	db, err := store.Open(openCtx, store.Options{
 		Path:      dbPath,
-		MasterKey: master,
 		BatchSize: cfg.Ledger.BatchSize,
 		BatchWait: cfg.LedgerBatchWait,
 	})
@@ -97,6 +77,7 @@ func run() error {
 	client := upstreamClient(cfg)
 	registry := provider.NewRegistry(client)
 	dispatcher := proxy.NewDispatcher(client, registry)
+	dispatcher.SetRetries(cfg.Retry.Retries)
 	resolver := router.New(db)
 
 	// ── M5 rules engine ──
@@ -120,17 +101,16 @@ func run() error {
 	}
 	resolver = resolver.WithEligibility(ruleEngine.Eligible)
 
+	go refreshProviderModels(ctx, db, registry, cfg.ModelRefresh.Interval, log)
+
 	srv := server.New(server.Options{
 		Auth: db, Resolver: resolver, Dispatcher: dispatcher, DB: db,
 		Registry: registry, Log: log, Rules: ruleEngine,
 		MaxBodyMiB:  cfg.MaxBodyMiB,
-		CORSOrigins: corsOriginsFromEnv(),
+		CORSOrigins: nil,
 	})
 
 	addr := cfg.Listen
-	if v := os.Getenv("EZLLM_ADDR"); v != "" {
-		addr = v
-	}
 	if *addrOverride != "" {
 		addr = *addrOverride
 	}
@@ -172,7 +152,82 @@ func run() error {
 	return nil
 }
 
-// seed registers accounts and client tokens from config on first boot.
+func refreshProviderModels(ctx context.Context, db *store.DB, registry *provider.Registry, interval string, log *slog.Logger) {
+	d, err := time.ParseDuration(interval)
+	if err != nil || d < time.Minute {
+		log.Warn("model refresh disabled: invalid interval", "interval", interval)
+		return
+	}
+	refresh := func() {
+		accounts, err := db.ListAccounts(ctx)
+		if err != nil {
+			log.Warn("model refresh: list accounts failed", "err", err)
+			return
+		}
+		for _, summary := range accounts {
+			if !summary.Enabled {
+				continue
+			}
+			keys, err := db.ListKeys(ctx, summary.ID)
+			if err != nil {
+				log.Warn("model refresh: list keys failed", "account", summary.Namespace, "err", err)
+				continue
+			}
+			var key string
+			for _, k := range keys {
+				if k.Enabled {
+					_, key, err = db.KeyForTest(ctx, k.ID)
+					if err == nil {
+						break
+					}
+				}
+			}
+			if key == "" {
+				continue
+			}
+			kind, err := provider.ParseKind(summary.Kind)
+			if err != nil {
+				log.Warn("model refresh: unknown provider kind", "account", summary.Namespace, "err", err)
+				continue
+			}
+			adapter, err := registry.Get(kind)
+			if err != nil {
+				log.Warn("model refresh: adapter unavailable", "account", summary.Namespace, "err", err)
+				continue
+			}
+			acct := provider.Account{
+				ID: summary.ID, Name: summary.Name, Namespace: summary.Namespace,
+				Kind: kind, BaseURL: summary.BaseURL, Enabled: summary.Enabled,
+				RequiresSessionHeader: summary.RequiresSession,
+				ProbeDelay:            time.Duration(summary.ProbeDelayMS) * time.Millisecond,
+				QuotaMode:             summary.QuotaMode, CapWindow: summary.CapWindow,
+				CapTokens: summary.CapTokens, Notes: summary.Notes,
+			}
+			models, err := adapter.ListModels(ctx, acct, key)
+			if err != nil {
+				log.Warn("model refresh failed; keeping last catalog", "account", summary.Namespace, "err", err)
+				continue
+			}
+			if err := db.UpsertModels(ctx, summary.ID, models); err != nil {
+				log.Warn("model refresh: persist failed", "account", summary.Namespace, "err", err)
+				continue
+			}
+			log.Info("model catalog refreshed", "account", summary.Namespace, "models", len(models))
+		}
+	}
+	refresh()
+	ticker := time.NewTicker(d)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			refresh()
+		}
+	}
+}
+
 // Provider API keys are entered through the dashboard, never environment variables.
 func seed(ctx context.Context, db *store.DB, cfg *config.Config, log *slog.Logger) error {
 	for name, p := range cfg.Providers {
@@ -209,19 +264,7 @@ func seed(ctx context.Context, db *store.DB, cfg *config.Config, log *slog.Logge
 		}
 	}
 
-	for _, t := range cfg.ClientTokens {
-		plain := strings.TrimSpace(os.Getenv(t.TokenEnv))
-		if plain == "" {
-			return fmt.Errorf("client_tokens[%s]: env %s is not set", t.Name, t.TokenEnv)
-		}
-		roles := t.Roles
-		if roles == "" {
-			roles = "infer"
-		}
-		if err := db.UpsertClientToken(ctx, t.Name, plain, roles); err != nil {
-			return fmt.Errorf("client token %q: %w", t.Name, err)
-		}
-	}
+	// Client tokens and provider credentials are managed in SQLite through admin APIs.
 	return nil
 }
 
@@ -248,36 +291,6 @@ func syncModels(ctx context.Context, db *store.DB, cfg *config.Config, acct prov
 	return models, nil
 }
 
-// loadMasterKey resolves the field-encryption master key.
-// Precedence: EZLLM_MASTER_KEY env > master_key_file > ~/.hermes/secrets/ezllm-master.key
-// The file may carry a trailing newline; it is trimmed (a footgun hit while
-// reverse-engineering omniroute's equivalent scheme).
-func loadMasterKey(cfg *config.Config) (string, error) {
-	if v := strings.TrimSpace(os.Getenv("EZLLM_MASTER_KEY")); v != "" {
-		return v, nil
-	}
-	path := cfg.MasterKeyFile
-	if path == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", errors.New("no master key: set EZLLM_MASTER_KEY or master_key_file")
-		}
-		path = filepath.Join(home, ".hermes", "secrets", "ezllm-master.key")
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("master key %s: %w\n  create it with: umask 077 && openssl rand -hex 32 > %s", path, err, path)
-	}
-	key := strings.TrimSpace(string(raw))
-	if key == "" {
-		return "", fmt.Errorf("master key file %s is empty", path)
-	}
-	if fi, err := os.Stat(path); err == nil && fi.Mode().Perm()&0o077 != 0 {
-		return "", fmt.Errorf("master key %s must be 0600 (got %04o) — it protects every provider key", path, fi.Mode().Perm())
-	}
-	return key, nil
-}
-
 // upstreamClient builds the HTTP client for provider calls. No client-level
 // Timeout by default: streaming responses are unbounded, and per-request
 // deadlines come from the caller's context.
@@ -288,22 +301,4 @@ func upstreamClient(cfg *config.Config) *http.Client {
 		IdleConnTimeout:     90 * time.Second,
 	}
 	return &http.Client{Transport: tr, Timeout: cfg.UpstreamTimeout}
-}
-
-// corsOriginsFromEnv reads EZLLM_CORS_ORIGINS (comma-separated). Unset or empty
-// means "any origin" for /v1 only — see internal/server/cors.go for why that is
-// safe there and why /admin never gets a grant.
-func corsOriginsFromEnv() []string {
-	raw := strings.TrimSpace(os.Getenv("EZLLM_CORS_ORIGINS"))
-	if raw == "" {
-		return nil
-	}
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
 }

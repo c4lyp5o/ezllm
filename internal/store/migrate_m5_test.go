@@ -46,7 +46,7 @@ func openAt(t *testing.T, path string) *DB {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	db, err := Open(ctx, Options{Path: path, MasterKey: "test-master-key"})
+	db, err := Open(ctx, Options{Path: path})
 	if err != nil {
 		t.Fatalf("open %s: %v", path, err)
 	}

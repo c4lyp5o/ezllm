@@ -37,7 +37,7 @@ func TestRuleRefusal429WithNextAllowed(t *testing.T) {
 	t.Cleanup(up.Close)
 
 	dir := t.TempDir()
-	db, err := store.Open(context.Background(), store.Options{Path: dir + "/t.sqlite", MasterKey: "k"})
+	db, err := store.Open(context.Background(), store.Options{Path: dir + "/t.sqlite"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestRuleRefusalCapNoNextAllowed(t *testing.T) {
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	t.Cleanup(up.Close)
 	dir := t.TempDir()
-	db, err := store.Open(context.Background(), store.Options{Path: dir + "/t.sqlite", MasterKey: "k"})
+	db, err := store.Open(context.Background(), store.Options{Path: dir + "/t.sqlite"})
 	if err != nil {
 		t.Fatal(err)
 	}

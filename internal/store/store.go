@@ -38,7 +38,6 @@ type DB struct {
 	callCh  chan ledgerItem
 	closeCh chan struct{}
 	wg      sync.WaitGroup
-	crypto  *FieldCrypto
 
 	// committed-batch fan-out for live consumers (see events.go)
 	sinkMu sync.Mutex
@@ -48,7 +47,6 @@ type DB struct {
 // Options configures Open.
 type Options struct {
 	Path       string        // sqlite file; parent dirs created
-	MasterKey  string        // for FieldCrypto (required)
 	BatchSize  int           // ledger flush threshold (default 32)
 	BatchWait  time.Duration // ledger flush interval (default 250ms)
 	MaxReaders int           // read pool size (default 4)
@@ -56,9 +54,6 @@ type Options struct {
 
 // Open creates/migrates the database and starts the ledger writer goroutine.
 func Open(ctx context.Context, opts Options) (*DB, error) {
-	if opts.MasterKey == "" {
-		return nil, errors.New("store: MasterKey is required")
-	}
 	if opts.Path == "" {
 		opts.Path = filepath.Join("data", "ezllm.sqlite")
 	}
@@ -95,15 +90,8 @@ func Open(ctx context.Context, opts Options) (*DB, error) {
 	r.SetMaxOpenConns(opts.MaxReaders)
 	r.SetMaxIdleConns(opts.MaxReaders)
 
-	crypto, err := NewFieldCrypto(opts.MasterKey)
-	if err != nil {
-		w.Close()
-		r.Close()
-		return nil, err
-	}
-
 	db := &DB{
-		w: w, r: r, path: opts.Path, crypto: crypto,
+		w: w, r: r, path: opts.Path,
 		callCh: make(chan ledgerItem, 512),
 
 		closeCh: make(chan struct{}),
@@ -315,9 +303,6 @@ func (d *DB) SchemaVersion() int {
 
 // Path returns the database file path.
 func (d *DB) Path() string { return d.path }
-
-// Crypto exposes field encryption (used by the key-registration flow).
-func (d *DB) Crypto() *FieldCrypto { return d.crypto }
 
 // Reader returns the read pool (queries).
 func (d *DB) Reader() *sql.DB { return d.r }

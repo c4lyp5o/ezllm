@@ -16,7 +16,6 @@ func openTest(t *testing.T) *DB {
 	defer cancel()
 	db, err := Open(ctx, Options{
 		Path:      filepath.Join(dir, "test.sqlite"),
-		MasterKey: "test-master-key",
 		BatchSize: 4,
 		BatchWait: 20 * time.Millisecond,
 	})
@@ -32,7 +31,7 @@ func TestOpenMigratesAndIsIdempotent(t *testing.T) {
 	path := filepath.Join(dir, "nested", "ez.sqlite") // parent must be created
 	ctx := context.Background()
 	for i := 0; i < 3; i++ { // reopen twice: migration must be idempotent
-		db, err := Open(ctx, Options{Path: path, MasterKey: "k"})
+		db, err := Open(ctx, Options{Path: path})
 		if err != nil {
 			t.Fatalf("open #%d: %v", i, err)
 		}
@@ -47,7 +46,7 @@ func TestOpenMigratesAndIsIdempotent(t *testing.T) {
 		t.Fatalf("db file missing: %v", err)
 	}
 	// every expected table exists
-	db, _ := Open(ctx, Options{Path: path, MasterKey: "k"})
+	db, _ := Open(ctx, Options{Path: path})
 	defer db.Close()
 	want := []string{"accounts", "provider_keys", "quota_snapshots", "models", "compression_profiles",
 		"combos", "combo_hops", "client_tokens", "calls", "key_cooldowns", "schema_version"}
@@ -60,12 +59,6 @@ func TestOpenMigratesAndIsIdempotent(t *testing.T) {
 	// FK order is valid: a child insert must fail without its parent
 	if _, err := db.Writer().Exec(`INSERT INTO provider_keys(account_id,label,key_hint,key_plain) VALUES(999,'x','h','c')`); err == nil {
 		t.Error("foreign_keys must be ON — orphan provider_keys insert should fail")
-	}
-}
-
-func TestOpenRequiresMasterKey(t *testing.T) {
-	if _, err := Open(context.Background(), Options{Path: filepath.Join(t.TempDir(), "x.sqlite")}); err == nil {
-		t.Error("Open without MasterKey must fail")
 	}
 }
 

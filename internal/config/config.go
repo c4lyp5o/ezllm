@@ -1,9 +1,6 @@
 // Package config loads and validates ezllm's YAML configuration.
 //
-// The config file is BOOTSTRAP ONLY: it seeds accounts and client tokens into
-// SQLite on first boot. Provider keys are entered through the dashboard; client
-// tokens continue to use env-var indirection and Load reports missing vars by
-// NAME, never by value.
+// Provider definitions are non-secret bootstrap metadata. Credentials are managed in SQLite.
 package config
 
 import (
@@ -18,7 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// DefaultListen is loopback-only unless EZLLM_ADDR / -addr says otherwise.
+// DefaultListen is loopback-only unless overridden with -addr.
 const DefaultListen = "127.0.0.1:20129"
 
 // DefaultDataDir is repo-relative so Docker can bind-mount ./data (Calypso #5).
@@ -32,12 +29,6 @@ var namespaceRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 // validKinds mirrors provider.ValidKinds, duplicated as strings so the config
 // package does not import provider (keeps validation dependency-free).
 var validKinds = []string{"opencode-go", "openai-compatible", "anthropic-compatible"}
-
-type TokenRef struct {
-	Name     string `yaml:"name"`
-	TokenEnv string `yaml:"token_env"`
-	Roles    string `yaml:"roles"` // csv: infer,admin (default "infer")
-}
 
 type KeyRef struct {
 	Label string `yaml:"label"`
@@ -77,16 +68,24 @@ type Cooldown struct {
 	MaxPerKey int    `yaml:"max_per_key"`
 }
 
+type Retry struct {
+	Retries int `yaml:"retries"`
+}
+
+type ModelRefresh struct {
+	Interval string `yaml:"interval"`
+}
+
 type Config struct {
 	Listen             string              `yaml:"listen"`
 	DataDir            string              `yaml:"data_dir"`
-	MasterKeyFile      string              `yaml:"master_key_file"`
 	MaxBodyMiB         int                 `yaml:"max_body_mib"`
 	UpstreamTimeoutStr string              `yaml:"upstream_timeout"`
-	ClientTokens       []TokenRef          `yaml:"client_tokens"`
 	Providers          map[string]Provider `yaml:"providers"`
 	Ledger             Ledger              `yaml:"ledger"`
 	Cooldown           Cooldown            `yaml:"cooldown"`
+	Retry              Retry               `yaml:"retry"`
+	ModelRefresh       ModelRefresh        `yaml:"model_refresh"`
 
 	// derived
 	UpstreamTimeout time.Duration
@@ -125,11 +124,6 @@ func (c *Config) Validate() error {
 	if c.DataDir == "" {
 		c.DataDir = DefaultDataDir
 	}
-	// master_key_file may be empty (env or default path is used); only validate
-	// its SHAPE when given, and never read it here — main.go owns key loading.
-	if c.MasterKeyFile != "" && strings.ContainsAny(c.MasterKeyFile, "\n\t") {
-		errs = append(errs, "master_key_file: must be a single path")
-	}
 
 	// --- body cap ---
 	if c.MaxBodyMiB <= 0 {
@@ -147,42 +141,20 @@ func (c *Config) Validate() error {
 		c.UpstreamTimeout = d
 	}
 
-	// --- client tokens ---
-	if len(c.ClientTokens) == 0 {
-		errs = append(errs, "client_tokens: at least one required")
+	// --- retry policy ---
+	if c.Retry.Retries <= 0 {
+		c.Retry.Retries = 3
+	} else if c.Retry.Retries > 9 {
+		errs = append(errs, "retry.retries: must be between 1 and 9")
 	}
-	seenNames := map[string]bool{}
-	seenEnvs := map[string]bool{}
-	for _, t := range c.ClientTokens {
-		if t.Name == "" || t.TokenEnv == "" {
-			errs = append(errs, "client_tokens: each entry needs name + token_env")
-			continue
-		}
-		if seenNames[t.Name] {
-			errs = append(errs, fmt.Sprintf("client_tokens: duplicate name %q", t.Name))
-		}
-		seenNames[t.Name] = true
-		// Two tokens sharing one env var would make attribution ambiguous.
-		if seenEnvs[t.TokenEnv] {
-			errs = append(errs, fmt.Sprintf("client_tokens: env %s reused by %q (attribution would be ambiguous)", t.TokenEnv, t.Name))
-		}
-		seenEnvs[t.TokenEnv] = true
-		if os.Getenv(t.TokenEnv) == "" {
-			errs = append(errs, fmt.Sprintf("client_tokens[%s]: env %s is not set", t.Name, t.TokenEnv))
-		}
-		for _, role := range strings.Split(orDefault(t.Roles, "infer"), ",") {
-			switch strings.TrimSpace(role) {
-			case "infer", "admin":
-			default:
-				errs = append(errs, fmt.Sprintf("client_tokens[%s]: unknown role %q (want infer|admin)", t.Name, role))
-			}
-		}
+	if c.ModelRefresh.Interval == "" {
+		c.ModelRefresh.Interval = "6h"
+	} else if d, err := time.ParseDuration(c.ModelRefresh.Interval); err != nil || d < time.Minute {
+		errs = append(errs, "model_refresh.interval: must be a duration of at least 1m")
 	}
 
-	// --- providers ---
-	if len(c.Providers) == 0 {
-		errs = append(errs, "providers: at least one required")
-	}
+	// Providers are managed in SQLite through the dashboard; an empty bootstrap
+	// map is valid for a fresh install.
 	seenNS := map[string]string{} // namespace -> provider name
 	for name, p := range c.Providers {
 		if !strings.HasPrefix(p.BaseURL, "https://") && !strings.HasPrefix(p.BaseURL, "http://") {
@@ -274,16 +246,6 @@ func (c *Config) ProviderNames() []string {
 	names := make([]string, 0, len(c.Providers))
 	for n := range c.Providers {
 		names = append(names, n)
-	}
-	sort.Strings(names)
-	return names
-}
-
-// ClientNames returns the configured client token names (for logs/status).
-func (c *Config) ClientNames() []string {
-	names := make([]string, 0, len(c.ClientTokens))
-	for _, t := range c.ClientTokens {
-		names = append(names, t.Name)
 	}
 	sort.Strings(names)
 	return names

@@ -34,7 +34,7 @@ func newHarness(t *testing.T, upstream http.HandlerFunc) *harness {
 	up := httptest.NewServer(upstream)
 	dir := t.TempDir()
 	db, err := store.Open(context.Background(), store.Options{
-		Path: filepath.Join(dir, "t.sqlite"), MasterKey: "test-master",
+		Path:      filepath.Join(dir, "t.sqlite"),
 		BatchSize: 4, BatchWait: 20 * time.Millisecond,
 	})
 	if err != nil {

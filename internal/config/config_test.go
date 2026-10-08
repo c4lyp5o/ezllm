@@ -18,19 +18,10 @@ func writeTemp(t *testing.T, body string) string {
 	return p
 }
 
-// setEnv sets env vars for the duration of a test.
-func setEnv(t *testing.T, kv map[string]string) {
-	t.Helper()
-	for k, v := range kv {
-		t.Setenv(k, v)
-	}
-}
-
 const validYAML = `
 listen: "127.0.0.1:20129"
 data_dir: ./data
 client_tokens:
-  - { name: hermes, token_env: EZLLM_TOK, roles: "infer,admin" }
 providers:
   opencode-main:
     namespace: opengo
@@ -43,7 +34,6 @@ ledger:
 `
 
 func TestLoadValid(t *testing.T) {
-	setEnv(t, map[string]string{"EZLLM_TOK": "tok-abc", "P1_KEY": "pk"})
 	cfg, err := Load(writeTemp(t, validYAML))
 	if err != nil {
 		t.Fatalf("expected valid config, got: %v", err)
@@ -53,6 +43,9 @@ func TestLoadValid(t *testing.T) {
 	}
 	if cfg.MaxBodyMiB != 32 {
 		t.Errorf("max_body_mib default = %d, want 32", cfg.MaxBodyMiB)
+	}
+	if cfg.Retry.Retries != 3 {
+		t.Errorf("retry defaults = %d, want 3", cfg.Retry.Retries)
 	}
 	if cfg.UpstreamTimeout != 0 {
 		t.Errorf("upstream_timeout default = %v, want 0 (unbounded for streaming)", cfg.UpstreamTimeout)
@@ -74,11 +67,9 @@ func TestLoadValid(t *testing.T) {
 	}
 }
 
-func TestLoadReportsEveryProblemAtOnce(t *testing.T) {
-	setEnv(t, map[string]string{}) // nothing set
+func TestLoadReportsEveryProblemAtOnce(t *testing.T) { // nothing set
 	yaml := `
 client_tokens:
-  - { name: hermes, token_env: MISSING_TOK }
 providers:
   p1:
     kind: not-a-kind
@@ -91,7 +82,6 @@ providers:
 	}
 	msg := err.Error()
 	for _, want := range []string{
-		"MISSING_TOK is not set",
 		"base_url must be an absolute",
 		`unknown kind "not-a-kind"`,
 	} {
@@ -109,10 +99,8 @@ providers:
 // A namespace containing '/' would collide with the <namespace>/<model> routing
 // form — it must be rejected, not silently accepted.
 func TestNamespaceRejectsSlashAndBadForm(t *testing.T) {
-	setEnv(t, map[string]string{"T": "t", "K": "k"})
 	for _, ns := range []string{"has/slash", "UPPER", "-leading", "a b", strings.Repeat("x", 33)} {
 		yaml := `
-client_tokens: [{ name: c, token_env: T }]
 providers:
   p1:
     namespace: "` + ns + `"
@@ -132,10 +120,8 @@ providers:
 }
 
 func TestNamespaceAcceptsValidForms(t *testing.T) {
-	setEnv(t, map[string]string{"T": "t", "K": "k"})
 	for _, ns := range []string{"opengo", "super-ssn", "a", "x_1", "abc-123_x", strings.Repeat("y", 32)} {
 		yaml := `
-client_tokens: [{ name: c, token_env: T }]
 providers:
   p1:
     namespace: "` + ns + `"
@@ -151,9 +137,7 @@ providers:
 
 // Two accounts claiming one namespace would make routing ambiguous.
 func TestDuplicateNamespaceRejected(t *testing.T) {
-	setEnv(t, map[string]string{"T": "t", "K": "k"})
 	yaml := `
-client_tokens: [{ name: c, token_env: T }]
 providers:
   p1: { namespace: same, kind: openai-compatible, base_url: https://a/v1, keys: [{env: K}] }
   p2: { namespace: same, kind: openai-compatible, base_url: https://b/v1, keys: [{env: K}] }
@@ -164,52 +148,9 @@ providers:
 	}
 }
 
-// Two client tokens sharing one env var makes attribution ambiguous.
-func TestDuplicateTokenEnvRejected(t *testing.T) {
-	setEnv(t, map[string]string{"T_A": "same", "K": "k"})
-	yaml := `
-client_tokens:
-  - { name: a, token_env: T_A }
-  - { name: b, token_env: T_A }
-providers: { p1: { kind: openai-compatible, base_url: https://x/v1, keys: [{env: K}] } }
-`
-	_, err := Load(writeTemp(t, yaml))
-	if err == nil || !strings.Contains(err.Error(), "attribution would be ambiguous") {
-		t.Fatalf("shared token env must be rejected, got %v", err)
-	}
-}
-
-func TestDuplicateClientNameRejected(t *testing.T) {
-	setEnv(t, map[string]string{"A": "1", "B": "2", "K": "k"})
-	yaml := `
-client_tokens:
-  - { name: same, token_env: A }
-  - { name: same, token_env: B }
-providers: { p1: { kind: openai-compatible, base_url: https://x/v1, keys: [{env: K}] } }
-`
-	_, err := Load(writeTemp(t, yaml))
-	if err == nil || !strings.Contains(err.Error(), "duplicate name") {
-		t.Fatalf("duplicate client name must be rejected, got %v", err)
-	}
-}
-
-func TestUnknownRoleRejected(t *testing.T) {
-	setEnv(t, map[string]string{"T": "t", "K": "k"})
-	yaml := `
-client_tokens: [{ name: c, token_env: T, roles: "infer,superuser" }]
-providers: { p1: { kind: openai-compatible, base_url: https://x/v1, keys: [{env: K}] } }
-`
-	_, err := Load(writeTemp(t, yaml))
-	if err == nil || !strings.Contains(err.Error(), `unknown role "superuser"`) {
-		t.Fatalf("bad role must be rejected, got %v", err)
-	}
-}
-
 func TestKindValidation(t *testing.T) {
-	setEnv(t, map[string]string{"T": "t", "K": "k"})
 	for _, kind := range []string{"opencode-go", "openai-compatible", "anthropic-compatible"} {
 		yaml := `
-client_tokens: [{ name: c, token_env: T }]
 providers: { p1: { kind: ` + kind + `, base_url: https://x/v1, keys: [{env: K}] } }
 `
 		if _, err := Load(writeTemp(t, yaml)); err != nil {
@@ -218,7 +159,6 @@ providers: { p1: { kind: ` + kind + `, base_url: https://x/v1, keys: [{env: K}] 
 	}
 	for _, kind := range []string{"", "github-copilot", "openai", "OpenAI-Compatible"} {
 		yaml := `
-client_tokens: [{ name: c, token_env: T }]
 providers: { p1: { kind: "` + kind + `", base_url: https://x/v1, keys: [{env: K}] } }
 `
 		if _, err := Load(writeTemp(t, yaml)); err == nil {
@@ -230,9 +170,7 @@ providers: { p1: { kind: "` + kind + `", base_url: https://x/v1, keys: [{env: K}
 // base_url must not end in '/' — the adapter appends paths, so a trailing slash
 // would produce '//chat/completions'.
 func TestBaseURLTrailingSlashRejected(t *testing.T) {
-	setEnv(t, map[string]string{"T": "t", "K": "k"})
 	yaml := `
-client_tokens: [{ name: c, token_env: T }]
 providers: { p1: { kind: openai-compatible, base_url: https://x/v1/, keys: [{env: K}] } }
 `
 	if _, err := Load(writeTemp(t, yaml)); err == nil || !strings.Contains(err.Error(), "must not end in '/'") {
@@ -241,10 +179,8 @@ providers: { p1: { kind: openai-compatible, base_url: https://x/v1/, keys: [{env
 }
 
 func TestRequiresSessionDefaultsPerKind(t *testing.T) {
-	setEnv(t, map[string]string{"T": "t", "K": "k"})
 	// opencode-go defaults to true (verified: missing header -> 400 MissingSessionID)
 	cfg, err := Load(writeTemp(t, `
-client_tokens: [{ name: c, token_env: T }]
 providers: { p1: { kind: opencode-go, base_url: https://x/v1, keys: [{env: K}] } }
 `))
 	if err != nil {
@@ -255,7 +191,6 @@ providers: { p1: { kind: opencode-go, base_url: https://x/v1, keys: [{env: K}] }
 	}
 	// others default false
 	cfg, err = Load(writeTemp(t, `
-client_tokens: [{ name: c, token_env: T }]
 providers: { p1: { kind: openai-compatible, base_url: https://x/v1, keys: [{env: K}] } }
 `))
 	if err != nil {
@@ -266,7 +201,6 @@ providers: { p1: { kind: openai-compatible, base_url: https://x/v1, keys: [{env:
 	}
 	// explicit override wins
 	cfg, err = Load(writeTemp(t, `
-client_tokens: [{ name: c, token_env: T }]
 providers: { p1: { kind: openai-compatible, base_url: https://x/v1, requires_session_header: true, keys: [{env: K}] } }
 `))
 	if err != nil {
@@ -278,9 +212,7 @@ providers: { p1: { kind: openai-compatible, base_url: https://x/v1, requires_ses
 }
 
 func TestUpstreamTimeoutAndBodyCap(t *testing.T) {
-	setEnv(t, map[string]string{"T": "t", "K": "k"})
 	yaml := `
-client_tokens: [{ name: c, token_env: T }]
 providers: { p1: { kind: openai-compatible, base_url: https://x/v1, keys: [{env: K}] } }
 upstream_timeout: 90s
 max_body_mib: 8
@@ -304,9 +236,7 @@ max_body_mib: 8
 }
 
 func TestLedgerValidation(t *testing.T) {
-	setEnv(t, map[string]string{"T": "t", "K": "k"})
 	prov := `
-client_tokens: [{ name: c, token_env: T }]
 providers: { p1: { kind: openai-compatible, base_url: https://x/v1, keys: [{env: K}] } }
 `
 	if _, err := Load(writeTemp(t, prov+"ledger:\n  batch_size: 99999\n")); err == nil {
@@ -321,10 +251,8 @@ providers: { p1: { kind: openai-compatible, base_url: https://x/v1, keys: [{env:
 }
 
 func TestQuotaModeValidation(t *testing.T) {
-	setEnv(t, map[string]string{"T": "t", "K": "k"})
 	for _, m := range []string{"probe", "percent", "money", "tokens", "none"} {
 		yaml := `
-client_tokens: [{ name: c, token_env: T }]
 providers: { p1: { kind: openai-compatible, base_url: https://x/v1, quota_mode: ` + m + `, keys: [{env: K}] } }
 `
 		if _, err := Load(writeTemp(t, yaml)); err != nil {
@@ -332,7 +260,6 @@ providers: { p1: { kind: openai-compatible, base_url: https://x/v1, quota_mode: 
 		}
 	}
 	yaml := `
-client_tokens: [{ name: c, token_env: T }]
 providers: { p1: { kind: openai-compatible, base_url: https://x/v1, quota_mode: bogus, keys: [{env: K}] } }
 `
 	if _, err := Load(writeTemp(t, yaml)); err == nil {
@@ -341,9 +268,7 @@ providers: { p1: { kind: openai-compatible, base_url: https://x/v1, quota_mode: 
 }
 
 func TestProbeDelayRange(t *testing.T) {
-	setEnv(t, map[string]string{"T": "t", "K": "k"})
 	yaml := `
-client_tokens: [{ name: c, token_env: T }]
 providers: { p1: { kind: openai-compatible, base_url: https://x/v1, probe_delay_ms: 99999, keys: [{env: K}] } }
 `
 	if _, err := Load(writeTemp(t, yaml)); err == nil {
@@ -352,9 +277,7 @@ providers: { p1: { kind: openai-compatible, base_url: https://x/v1, probe_delay_
 }
 
 func TestListenValidation(t *testing.T) {
-	setEnv(t, map[string]string{"T": "t", "K": "k"})
 	prov := `
-client_tokens: [{ name: c, token_env: T }]
 providers: { p1: { kind: openai-compatible, base_url: https://x/v1, keys: [{env: K}] } }
 `
 	for _, bad := range []string{"nohostport", "127.0.0.1:"} {

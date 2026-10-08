@@ -1,25 +1,10 @@
-# ezllm — bootstrap config. Copy to config.yaml, set the referenced env vars.
-#
-# This file is BOOTSTRAP ONLY: it seeds accounts, provider keys and client
-# tokens into SQLite on first boot. After that everything is managed through
-# the admin API / dashboard. Secrets are NEVER written here — only env-var
-# names, resolved at load time. A missing env var fails the boot with the NAME
-# of the variable, never its value.
+# ezllm — non-secret provider metadata. All credentials are managed in SQLite.
 
-listen: "127.0.0.1:20129"     # loopback by default; EZLLM_ADDR=0.0.0.0:20129 for LAN
+listen: "127.0.0.1:20129"     # loopback by default; override with -addr for LAN
 data_dir: ./data               # repo-relative so Docker can bind-mount ./data
-# master_key_file: ~/.hermes/secrets/ezllm-master.key   # or set EZLLM_MASTER_KEY
 
 max_body_mib: 32
 # upstream_timeout: 0 = unbounded (streaming responses have no natural deadline)
-
-client_tokens:
-  - name: hermes
-    token_env: EZLLM_TOKEN_HERMES
-    roles: infer,admin
-  - name: claude-code
-    token_env: EZLLM_TOKEN_CLAUDE
-    roles: infer
 
 providers:
   # ── OpenCode Go ────────────────────────────────────────────────────────────
@@ -63,3 +48,11 @@ cooldown:
   on_429: 300s
   on_5xx: 60s
   max_per_key: 3
+
+# Global upstream retries per combo hop: 3 retries after the initial attempt.
+retry:
+  retries: 3
+
+# Refresh each provider's model catalog at startup and on this interval.
+model_refresh:
+  interval: 6h

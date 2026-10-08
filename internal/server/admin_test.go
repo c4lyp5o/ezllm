@@ -372,6 +372,31 @@ func TestUnknownFieldRejected(t *testing.T) {
 	}
 }
 
+func TestAccountEndpointPresetAndCompatibilityRequirement(t *testing.T) {
+	h := newHarness(t, (&fakeUpstream{models: []string{"m"}}).handler())
+
+	code, body := jsonDo(t, h, http.MethodPost, "/admin/accounts", "tok-admin", map[string]any{
+		"name": "preset", "namespace": "preset", "kind": "opencode-go",
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("OpenCode account without URL = %d: %s", code, body)
+	}
+	var account map[string]any
+	if err := json.Unmarshal([]byte(body), &account); err != nil {
+		t.Fatal(err)
+	}
+	if account["base_url"] != "https://opencode.ai/zen/go/v1" {
+		t.Fatalf("preset base_url = %v", account["base_url"])
+	}
+
+	code, body = jsonDo(t, h, http.MethodPost, "/admin/accounts", "tok-admin", map[string]any{
+		"name": "compat", "namespace": "compat", "kind": "openai-compatible",
+	})
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("compat account without URL = %d, want 422: %s", code, body)
+	}
+}
+
 func TestAccountDeleteGuard(t *testing.T) {
 	fake := &fakeUpstream{models: []string{"m"}}
 	h := newHarness(t, fake.handler())

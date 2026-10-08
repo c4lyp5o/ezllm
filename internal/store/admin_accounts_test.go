@@ -3,8 +3,41 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 )
+
+func TestCreateAccountConflictIdentifiesDuplicateField(t *testing.T) {
+	ctx := context.Background()
+	db := openEventsDB(t, 4)
+	defer db.Close()
+
+	if _, err := db.CreateAccount(ctx, AccountInput{
+		Name: "Existing Provider", Namespace: "existing", Kind: "openai-compatible",
+		BaseURL: "https://provider.example/v1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name, namespace, want string
+	}{
+		{"Existing Provider", "another", "account name already in use"},
+		{"Another Provider", "existing", "account namespace already in use"},
+		{"Existing Provider", "existing", "account name and namespace already in use"},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			_, err := db.CreateAccount(ctx, AccountInput{
+				Name: tc.name, Namespace: tc.namespace, Kind: "openai-compatible",
+				BaseURL: "https://provider.example/v1",
+			})
+			var conflict *ErrConflict
+			if !errors.As(err, &conflict) || conflict.What != tc.want {
+				t.Fatalf("CreateAccount() error = %v, want conflict %q", err, tc.want)
+			}
+		})
+	}
+}
 
 func TestListAccountsEmptyKeysSerializeAsArray(t *testing.T) {
 	db := openEventsDB(t, 4)

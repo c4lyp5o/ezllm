@@ -242,8 +242,11 @@ func ValidateAccountInput(in AccountInput) error {
 	if _, err := provider.ParseKind(in.Kind); err != nil {
 		return err
 	}
+	if in.Kind == string(provider.KindOpenCodeGo) && strings.TrimSpace(in.BaseURL) == "" {
+		in.BaseURL = "https://opencode.ai/zen/go/v1"
+	}
 	if strings.TrimSpace(in.BaseURL) == "" {
-		return errors.New("base_url is required")
+		return errors.New("base_url is required for compatibility providers")
 	}
 	if !strings.HasPrefix(in.BaseURL, "http://") && !strings.HasPrefix(in.BaseURL, "https://") {
 		return errors.New("base_url must start with http:// or https://")
@@ -268,6 +271,9 @@ func ValidateAccountInput(in AccountInput) error {
 // CreateAccount inserts a new account and returns its id. Conflicts →
 // *ErrConflict (the server maps it to 409).
 func (d *DB) CreateAccount(ctx context.Context, in AccountInput) (int64, error) {
+	if in.Kind == string(provider.KindOpenCodeGo) && strings.TrimSpace(in.BaseURL) == "" {
+		in.BaseURL = "https://opencode.ai/zen/go/v1"
+	}
 	if err := ValidateAccountInput(in); err != nil {
 		return 0, err
 	}
@@ -277,9 +283,27 @@ func (d *DB) CreateAccount(ctx context.Context, in AccountInput) (int64, error) 
 	}
 	id, err := d.writeAccount(ctx, 0, in, kind)
 	if err != nil && isUniqueViolation(err) {
-		return 0, &ErrConflict{What: "namespace or name already in use"}
+		return 0, &ErrConflict{What: accountConflictMessage(ctx, d, in)}
 	}
 	return id, err
+}
+
+func accountConflictMessage(ctx context.Context, d *DB, in AccountInput) string {
+	var nameExists, namespaceExists int
+	if err := d.w.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM accounts WHERE name = ?),
+		EXISTS(SELECT 1 FROM accounts WHERE namespace = ?)`, in.Name, in.Namespace).Scan(&nameExists, &namespaceExists); err != nil {
+		return "account name or namespace already in use"
+	}
+	switch {
+	case nameExists != 0 && namespaceExists != 0:
+		return "account name and namespace already in use"
+	case nameExists != 0:
+		return "account name already in use"
+	case namespaceExists != 0:
+		return "account namespace already in use"
+	default:
+		return "account name or namespace already in use"
+	}
 }
 
 // UpdateAccount patches an existing account (partial update). Namespace changes

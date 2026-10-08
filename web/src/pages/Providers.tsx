@@ -72,202 +72,197 @@ function StepList({ steps, running }: { steps: TestStep[] | null; running: boole
 // ── add provider modal ──────────────────────────────────────────────────
 
 type Draft = {
-  name: string; namespace: string; nsTouched: boolean; kind: string; base_url: string;
-  probe_delay_ms: number; notes: string;
-  keyLabel: string; apiKey: string; skipInference: boolean;
+  name: string; namespace: string; nsTouched: boolean; kind: string; preset: string;
+  base_url: string; keyLabel: string; apiKey: string;
+  probe_delay_ms: number; notes: string; skipInference: boolean;
   advOpen: boolean; requiresSessionHeader: boolean; customHeaders: string;
   quotaMode: string; capWindow: string; capTokens: number;
 };
 
 const emptyDraft: Draft = {
-  name: '', namespace: '', nsTouched: false, kind: 'openai-compatible', base_url: '',
-  probe_delay_ms: 400, notes: '',
-  keyLabel: 'primary', apiKey: '', skipInference: false,
-  advOpen: false, requiresSessionHeader: false, customHeaders: '',
+  name: '', namespace: '', nsTouched: false, kind: 'opencode-go', preset: 'opencode-go',
+  base_url: 'https://opencode.ai/zen/go/v1', keyLabel: 'primary', apiKey: '',
+  probe_delay_ms: 400, notes: '', skipInference: false,
+  advOpen: false, requiresSessionHeader: true, customHeaders: '',
   quotaMode: 'probe', capWindow: 'monthly', capTokens: 0,
 };
 
+const PROVIDER_PRESETS: Record<string, { label: string; kind: string; baseURL?: string; sessionHeader?: boolean }> = {
+  'opencode-go': { label: 'OpenCode Go', kind: 'opencode-go', baseURL: 'https://opencode.ai/zen/go/v1', sessionHeader: true },
+  'xiaomi-mimo-token-plan': { label: 'Xiaomi MiMo token plan', kind: 'openai-compatible', baseURL: 'https://token-plan-sgp.xiaomimimo.com/v1' },
+  'alibaba-model-studio-token-plan': { label: 'Alibaba Cloud Model Studio token plan', kind: 'openai-compatible', baseURL: 'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1' },
+  'openai-compatible': { label: 'OpenAI-compatible (custom URL)', kind: 'openai-compatible' },
+  'anthropic-compatible': { label: 'Anthropic-compatible', kind: 'anthropic-compatible' },
+};
+const PRESET_IDS = Object.keys(PROVIDER_PRESETS);
+
 function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: () => void }) {
-  const [step, setStep] = useState<1 | 2>(1);
   const [d, setD] = useState<Draft>(emptyDraft);
   const [busy, setBusy] = useState(false);
-  const [createdId, setCreatedId] = useState<number | null>(null);
   const [result, setResult] = useState<TestResult | null>(null);
   const [err, setErr] = useState<ApiErrorDetail | null>(null);
 
   useEffect(() => {
-    if (open) { setStep(1); setD(emptyDraft); setBusy(false); setCreatedId(null); setResult(null); setErr(null); }
+    if (open) { setD(emptyDraft); setBusy(false); setResult(null); setErr(null); }
   }, [open]);
 
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setD((p) => ({ ...p, [k]: v }));
 
-  const createAccount = async (): Promise<number | null> => {
-    if (createdId != null) return createdId;
-    const customHeaders = d.customHeaders.trim() ? JSON.parse(d.customHeaders) as Record<string, unknown> : null;
-    const body: Record<string, unknown> = {
-      name: d.name.trim(), namespace: d.namespace.trim(), kind: d.kind,
-      base_url: d.base_url.trim() || null, probe_delay_ms: d.probe_delay_ms,
-      requires_session_header: d.requiresSessionHeader, custom_headers: customHeaders,
-      notes: d.notes.trim(),
-    };
-    if (d.quotaMode !== 'probe') {
-      body.quota_mode = d.quotaMode;
-      if (d.quotaMode === 'tokens') { body.cap_window = d.capWindow; body.cap_tokens = d.capTokens; }
-    }
-    const acc = await post<Account>('/admin/accounts', body);
-    setCreatedId(acc.id);
-    return acc.id;
-  };
-
-  const testAndAdd = async () => {
+  const saveAndValidate = async () => {
     setBusy(true); setErr(null); setResult(null);
+    let createdAccountID: number | null = null;
     try {
-      const id = await createAccount();
-      const res = await post<{ key: KeyRow; test: TestResult }>(`/admin/accounts/${id}/keys`, {
-        label: d.keyLabel.trim() || 'primary', api_key: d.apiKey, skip_inference: d.skipInference,
+      const customHeaders = d.customHeaders.trim() ? JSON.parse(d.customHeaders) as Record<string, unknown> : null;
+      const preset = PROVIDER_PRESETS[d.preset];
+      const payload = {
+        name: d.name.trim(), namespace: d.namespace.trim(), kind: preset.kind,
+        base_url: preset.baseURL ?? d.base_url.trim(), probe_delay_ms: d.probe_delay_ms,
+        requires_session_header: preset.sessionHeader ?? d.requiresSessionHeader,
+        custom_headers: customHeaders, notes: d.notes.trim(),
+        quota_mode: d.quotaMode,
+        ...(d.quotaMode === 'tokens' ? { cap_window: d.capWindow, cap_tokens: d.capTokens } : {}),
+      };
+      const account = await post<Account>('/admin/accounts', payload);
+      createdAccountID = account.id;
+      const response = await post<{ key: KeyRow; test: TestResult }>(`/admin/accounts/${account.id}/keys`, {
+        label: d.keyLabel.trim() || 'primary', api_key: d.apiKey.trim(), skip_inference: d.skipInference,
       });
-      setResult(res.test);
-      setTimeout(() => onDone(), 900);
+      setResult(response.test);
+      onDone();
+      onClose();
     } catch (e) {
-      if (e instanceof ApiError) {
-        setErr(e.detail);
-        // 409 on create / account exists → surface message, stay on the form
-      } else setErr({ status: 0, type: 'error', message: e instanceof Error ? e.message : String(e) });
+      if (createdAccountID != null) {
+        try { await del(`/admin/accounts/${createdAccountID}?force=true`); }
+        catch { /* preserve the original validation failure; user can resolve the account conflict in the UI */ }
+      }
+      if (e instanceof ApiError) setErr(e.detail);
+      else setErr({ status: 0, type: 'error', message: e instanceof Error ? e.message : String(e) });
     } finally { setBusy(false); }
   };
 
-  const step1Valid = d.name.trim().length > 0 && /^[a-z0-9][a-z0-9._-]{0,62}$/.test(d.namespace.trim()) && d.base_url.trim().length > 0;
+  const isCompat = PROVIDER_PRESETS[d.preset]?.kind === 'openai-compatible' || PROVIDER_PRESETS[d.preset]?.kind === 'anthropic-compatible';
+  const valid = d.name.trim().length > 0
+    && /^[a-z0-9][a-z0-9._-]{0,62}$/.test(d.namespace.trim())
+    && (!isCompat || /^https?:\/\//i.test(d.base_url.trim()))
+    && d.apiKey.trim().length > 0;
 
   return (
     <Modal open={open} onClose={onClose} wide title="Add provider"
-      subtitle={step === 1 ? 'account definition — the key is added and tested in the next step' : `testing the key against ${d.name || 'the account'}`}
-      footer={step === 1 ? (
+      subtitle="Add the account and validate its API key before the key is saved."
+      footer={(
         <>
-          <button type="button" className={cx(btn.base, btn.ghost)} onClick={onClose}>Cancel</button>
-          <button type="button" disabled={!step1Valid} className={cx(btn.base, btn.primary)} onClick={() => setStep(2)}>Next: API key →</button>
-        </>
-      ) : (
-        <>
-          <button type="button" className={cx(btn.base, btn.ghost)} disabled={busy} onClick={() => setStep(1)}>← Back</button>
-          <button type="button" disabled={busy || d.apiKey.length === 0} className={cx(btn.base, btn.primary)} onClick={() => void testAndAdd()}>
-            {busy ? <Spinner /> : null} Test & add
+          <button type="button" className={cx(btn.base, btn.ghost)} onClick={onClose} disabled={busy}>Cancel</button>
+          <button type="button" disabled={busy || !valid} className={cx(btn.base, btn.primary)} onClick={() => void saveAndValidate()}>
+            {busy ? <Spinner /> : null} {busy ? 'Validating key…' : 'Save & validate key'}
           </button>
         </>
       )}>
-      {step === 1 ? (
-        <div className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className={labelCls} htmlFor="ap-name">Name</label>
-              <input id="ap-name" className={inputCls} value={d.name} placeholder="OpenCode Go"
-                onChange={(e) => {
-                  const name = e.target.value;
-                  setD((p) => ({ ...p, name, namespace: p.nsTouched ? p.namespace : slugify(name) }));
-                }} />
-            </div>
-            <div>
-              <label className={labelCls} htmlFor="ap-ns">Namespace</label>
-              <input id="ap-ns" className={cx(inputCls, 'font-mono')} value={d.namespace} placeholder="opengo" spellCheck={false}
-                onChange={(e) => setD((p) => ({ ...p, namespace: slugify(e.target.value), nsTouched: true }))} />
-              <p className="mt-1 text-[11px] text-mute">lowercase · <span className="font-mono">^[a-z0-9][a-z0-9._-]{'{0,62}'}$</span></p>
-            </div>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className={labelCls} htmlFor="ap-kind">Kind</label>
-              <select id="ap-kind" className={inputCls} value={d.kind} onChange={(e) => set('kind', e.target.value)}>
-                {KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className={labelCls} htmlFor="ap-delay">Probe delay (ms)</label>
-              <input id="ap-delay" type="number" min={0} className={cx(inputCls, 'font-mono tabular-nums')} value={d.probe_delay_ms}
-                onChange={(e) => set('probe_delay_ms', Number(e.target.value) || 0)} />
-            </div>
+      <div className="space-y-4">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className={labelCls} htmlFor="ap-name">Name</label>
+            <input id="ap-name" className={inputCls} value={d.name} placeholder="OpenCode Go"
+              onChange={(e) => {
+                const name = e.target.value;
+                setD((p) => ({ ...p, name, namespace: p.nsTouched ? p.namespace : slugify(name) }));
+              }} />
           </div>
           <div>
-            <label className={labelCls} htmlFor="ap-url">Base URL</label>
-            <input id="ap-url" className={cx(inputCls, 'font-mono')} value={d.base_url} placeholder="https://provider.example/v1" spellCheck={false}
+            <label className={labelCls} htmlFor="ap-ns">Namespace</label>
+            <input id="ap-ns" className={cx(inputCls, 'font-mono')} value={d.namespace} placeholder="opengo" spellCheck={false}
+              onChange={(e) => setD((p) => ({ ...p, namespace: slugify(e.target.value), nsTouched: true }))} />
+            <p className="mt-1 text-[11px] text-mute">lowercase slug used in model ids</p>
+          </div>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className={labelCls} htmlFor="ap-kind">Provider type</label>
+            <select id="ap-kind" className={inputCls} value={d.preset} onChange={(e) => {
+              const presetID = e.target.value;
+              const preset = PROVIDER_PRESETS[presetID];
+              setD((p) => ({ ...p, preset: presetID, kind: preset.kind, base_url: preset.baseURL ?? '', requiresSessionHeader: preset.sessionHeader ?? false }));
+            }}>
+              {PRESET_IDS.map((presetID) => <option key={presetID} value={presetID}>{PROVIDER_PRESETS[presetID].label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={labelCls} htmlFor="ap-delay">Probe delay (ms)</label>
+            <input id="ap-delay" type="number" min={0} className={cx(inputCls, 'font-mono tabular-nums')} value={d.probe_delay_ms}
+              onChange={(e) => set('probe_delay_ms', Number(e.target.value) || 0)} />
+          </div>
+        </div>
+        {isCompat ? (
+          <div>
+            <label className={labelCls} htmlFor="ap-url">Provider API base URL</label>
+            <input id="ap-url" className={cx(inputCls, 'font-mono')} value={d.base_url}
+              placeholder="https://api.provider.com/v1" spellCheck={false}
               onChange={(e) => set('base_url', e.target.value.trim())} />
+            <p className="mt-1 text-[11px] text-mute">Required for compatibility providers. Use the base URL ending at the API version, e.g. /v1.</p>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-line bg-raised/60 px-3.5 py-2.5 text-[12px] text-dim">
+            Endpoint preset: <Mono>{d.base_url}</Mono>
+          </div>
+        )}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className={labelCls} htmlFor="ap-key">API key</label>
+            <input id="ap-key" type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
+              placeholder="Paste provider API key" value={d.apiKey} onChange={(e) => set('apiKey', e.target.value)} />
           </div>
           <div>
-            <label className={labelCls} htmlFor="ap-notes">Notes</label>
-            <input id="ap-notes" className={inputCls} value={d.notes} onChange={(e) => set('notes', e.target.value)} placeholder="optional" />
+            <label className={labelCls} htmlFor="ap-kl">Key label</label>
+            <input id="ap-kl" className={inputCls} value={d.keyLabel} onChange={(e) => set('keyLabel', e.target.value)} placeholder="primary" />
           </div>
-
-          <div className="rounded-lg border border-line bg-raised/60">
-            <button type="button" className="flex w-full items-center justify-between px-4 py-3 text-[13px] font-medium text-dim hover:text-ink"
-              onClick={() => set('advOpen', !d.advOpen)}>
-              Advanced
-              <span className="text-mute">{d.advOpen ? '−' : '+'}</span>
-            </button>
-            {d.advOpen && (
-              <div className="space-y-4 border-t border-line px-4 py-4">
-                <div className="flex items-center gap-3">
-                  <Toggle checked={d.requiresSessionHeader} onChange={(v) => set('requiresSessionHeader', v)} label="requires_session_header" />
-                  <span className="text-[12.5px] text-dim">requires <span className="font-mono">session</span> header upstream</span>
-                </div>
-                <div>
-                  <label className={labelCls} htmlFor="ap-cH">Custom headers (JSON)</label>
-                  <textarea id="ap-cH" rows={3} spellCheck={false} className={cx(inputCls, 'font-mono text-[12px]')} placeholder={'{"x-team":"ops"}'}
-                    value={d.customHeaders} onChange={(e) => set('customHeaders', e.target.value)} />
-                </div>
-                <div className="grid gap-4 sm:grid-cols-3">
-                  <div>
-                    <label className={labelCls} htmlFor="ap-qm">Quota mode</label>
-                    <select id="ap-qm" className={inputCls} value={d.quotaMode} onChange={(e) => set('quotaMode', e.target.value)}>
-                      {['probe', 'percent', 'money', 'tokens', 'none'].map((m) => <option key={m} value={m}>{m}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className={labelCls} htmlFor="ap-cw">Cap window</label>
-                    <select id="ap-cw" className={inputCls} value={d.capWindow} disabled={d.quotaMode !== 'tokens'} onChange={(e) => set('capWindow', e.target.value)}>
-                      {['weekly', 'monthly'].map((w) => <option key={w} value={w}>{w}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className={labelCls} htmlFor="ap-ct">Cap tokens</label>
-                    <input id="ap-ct" type="number" min={0} className={cx(inputCls, 'font-mono tabular-nums')} value={d.capTokens}
-                      disabled={d.quotaMode !== 'tokens'} onChange={(e) => set('capTokens', Number(e.target.value) || 0)} />
-                  </div>
-                </div>
+        </div>
+        <div>
+          <label className={labelCls} htmlFor="ap-notes">Notes</label>
+          <input id="ap-notes" className={inputCls} value={d.notes} onChange={(e) => set('notes', e.target.value)} placeholder="optional" />
+        </div>
+        <div className="flex items-center gap-3">
+          <Toggle checked={d.skipInference} onChange={(v) => set('skipInference', v)} label="skip inference probe" />
+          <span className="text-[12.5px] text-dim">Skip inference probe <span className="text-mute">(saves a token spend)</span></span>
+        </div>
+        <div className="rounded-lg border border-line bg-raised/60 px-4 py-3">
+          <SectionLabel className="mb-2">Validation</SectionLabel>
+          <StepList steps={result?.steps ?? null} running={busy} />
+          {result?.ok && <p className="mt-2 font-mono text-[11.5px] text-ok">✓ Key validated and stored.</p>}
+        </div>
+        <details className="rounded-lg border border-line bg-raised/40 px-4 py-3">
+          <summary className="cursor-pointer text-[12px] font-medium text-dim">Advanced settings</summary>
+          <div className="mt-4 space-y-4">
+            <div className="flex items-center gap-3">
+              <Toggle checked={d.requiresSessionHeader} onChange={(v) => set('requiresSessionHeader', v)} label="requires_session_header" />
+              <span className="text-[12.5px] text-dim">requires session header upstream</span>
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="ap-cH">Custom headers (JSON)</label>
+              <textarea id="ap-cH" rows={3} spellCheck={false} className={cx(inputCls, 'font-mono text-[12px]')}
+                placeholder={'{"x-team":"ops"}'} value={d.customHeaders} onChange={(e) => set('customHeaders', e.target.value)} />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div>
+                <label className={labelCls} htmlFor="ap-qm">Quota mode</label>
+                <select id="ap-qm" className={inputCls} value={d.quotaMode} onChange={(e) => set('quotaMode', e.target.value)}>
+                  {['probe', 'percent', 'money', 'tokens', 'none'].map((mode) => <option key={mode} value={mode}>{mode}</option>)}
+                </select>
               </div>
-            )}
-          </div>
-          <ErrBox e={err} onDismiss={() => setErr(null)} />
-        </div>
-      ) : (
-        <div className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className={labelCls} htmlFor="ap-kl">Key label</label>
-              <input id="ap-kl" className={inputCls} value={d.keyLabel} onChange={(e) => set('keyLabel', e.target.value)} placeholder="primary" />
-            </div>
-            <div>
-              <label className={labelCls} htmlFor="ap-key">API key</label>
-              <input id="ap-key" type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
-                placeholder="sk-…" value={d.apiKey} onChange={(e) => set('apiKey', e.target.value)} />
+              <div>
+                <label className={labelCls} htmlFor="ap-cw">Cap window</label>
+                <select id="ap-cw" className={inputCls} value={d.capWindow} disabled={d.quotaMode !== 'tokens'} onChange={(e) => set('capWindow', e.target.value)}>
+                  {['weekly', 'monthly'].map((window) => <option key={window} value={window}>{window}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={labelCls} htmlFor="ap-ct">Cap tokens</label>
+                <input id="ap-ct" type="number" min={0} className={cx(inputCls, 'font-mono tabular-nums')} value={d.capTokens}
+                  disabled={d.quotaMode !== 'tokens'} onChange={(e) => set('capTokens', Number(e.target.value) || 0)} />
+              </div>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <Toggle checked={d.skipInference} onChange={(v) => set('skipInference', v)} label="skip inference probe" />
-            <span className="text-[12.5px] text-dim">Skip inference probe <span className="text-mute">(saves a token spend)</span></span>
-          </div>
-
-          <div className="rounded-lg border border-line bg-raised/60 px-4 py-3">
-            <SectionLabel className="mb-2">Key test — format → catalog → auth → quota → inference → protocol</SectionLabel>
-            <StepList steps={result?.steps ?? null} running={busy} />
-            {result?.ok && <p className="mt-2 font-mono text-[11.5px] text-ok">✓ key stored</p>}
-          </div>
-          <ErrBox e={err} onDismiss={() => setErr(null)} />
-          {err?.step && (
-            <p className="text-[12px] text-bad">
-              failed at <Chip tone="bad"><span className="font-mono">{err.step}</span></Chip>
-              {err.upstream_status ? <span className="ml-2 text-mute">upstream HTTP {err.upstream_status}</span> : null}
-            </p>
-          )}
-        </div>
-      )}
+        </details>
+        <ErrBox e={err} onDismiss={() => setErr(null)} />
+      </div>
     </Modal>
   );
 }

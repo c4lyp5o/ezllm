@@ -1,4 +1,5 @@
 // Tiny shared UI primitives — hand-built with Tailwind, no component library.
+import { createPortal } from 'react-dom';
 import { useEffect, useRef, type ReactNode } from 'react';
 
 export const cx = (...xs: Array<string | false | null | undefined>) => xs.filter(Boolean).join(' ');
@@ -120,11 +121,11 @@ export function Modal({ open, onClose, title, subtitle, children, footer, wide }
 
   const overlay = (e: React.MouseEvent) => { if (e.target === e.currentTarget) onClose(); };
 
-  return (
+  return createPortal((
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6" onMouseDown={overlay}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-fade-in" onClick={onClose} />
       <div ref={ref} role="dialog" aria-modal="true" aria-label={title}
-        className="relative z-10 flex max-h-[90vh] w-full flex-col overflow-hidden rounded-xl border border-line-strong bg-surface shadow-2xl shadow-black/60 animate-fade-up"
+        className="relative z-10 flex max-h-[90dvh] w-full flex-col overflow-hidden rounded-xl border border-line-strong bg-surface shadow-2xl shadow-black/60 animate-fade-up"
         style={{ maxWidth: wide ? '56rem' : '44rem' }}>
         <div className="flex items-start justify-between gap-6 border-b border-line px-6 py-4">
           <div>
@@ -142,7 +143,7 @@ export function Modal({ open, onClose, title, subtitle, children, footer, wide }
         )}
       </div>
     </div>
-  );
+  ), document.body);
 }
 
 // ── form controls ───────────────────────────────────────────────────────

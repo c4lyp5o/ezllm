@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -36,15 +37,33 @@ func main() {
 
 func run() error {
 	cfgPath := flag.String("config", "config.yaml", "path to config file")
-	addrOverride := flag.String("addr", "", "listen address override (precedence: -addr > config.listen)")
+	addrOverride := flag.String("addr", "", "listen address override (precedence: -addr > EZLLM_ADDR > config.listen)")
 	flag.Parse()
 
+	// Log level: EZLLM_LOG_LEVEL is the only knob that has to work before the
+	// config is readable, so it is env-only (and container-friendly).
 	level := slog.LevelInfo
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("EZLLM_LOG_LEVEL"))) {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	}
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
 		return err
+	}
+
+	// Precedence: flag > EZLLM_* env > config.yaml > built-in default. The two
+	// env overrides exist because the shipped defaults are repo-relative
+	// (`data`) and loopback-only — both wrong inside a container, where the
+	// Dockerfile sets EZLLM_DATA_DIR=/data and EZLLM_ADDR=0.0.0.0:20129.
+	if v := strings.TrimSpace(os.Getenv("EZLLM_DATA_DIR")); v != "" {
+		cfg.DataDir = v
 	}
 
 	// ── data dir + store ──
@@ -111,6 +130,9 @@ func run() error {
 	})
 
 	addr := cfg.Listen
+	if env := strings.TrimSpace(os.Getenv("EZLLM_ADDR")); env != "" {
+		addr = env
+	}
 	if *addrOverride != "" {
 		addr = *addrOverride
 	}

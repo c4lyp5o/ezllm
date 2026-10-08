@@ -76,7 +76,15 @@ lands as `tokens_in=448 + cached_read=2048`.
 
 ## Config precedence
 
-Command-line flags override `config.yaml`; the global upstream retry policy defaults to
+Command-line flags override `EZLLM_*` environment overrides, which override
+`config.yaml`, which overrides the built-in defaults. The two overrides that
+matter operationally are `EZLLM_ADDR` (listening address — always set inside a
+container, where the config default is loopback) and `EZLLM_DATA_DIR` (ledger
+location — always set inside a container, where the config default `data` is
+repo-relative); `EZLLM_LOG_LEVEL` accepts `debug`, `warn` or `error`, and is
+env-only because it must work before the config is read.
+
+The global upstream retry policy defaults to
 3 retries after the initial attempt per combo hop. A hop is retried only for transient
 transport failures, timeouts, `429`, or `5xx`; then combo failover advances to the next
 hop with a fresh retry budget. Credentials are managed in SQLite via admin APIs and

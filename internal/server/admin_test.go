@@ -529,6 +529,69 @@ func TestComboHopsReplaceNotAppend(t *testing.T) {
 	}
 }
 
+// Toggling a combo must be a one-field PATCH that takes effect in BOTH
+// directions: the body's `enabled` wins (it used to be dropped on the floor, so
+// a toggle silently did nothing), a body that omits it keeps the current value,
+// and a disabled combo disappears from /v1/models.
+func TestComboEnableToggle(t *testing.T) {
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
+	acct := seededAccount(t, h)
+	code, resp := jsonDo(t, h, "POST", "/admin/combos", "tok-admin", map[string]any{
+		"name": "daily", "strategy": "failover",
+		"hops": []any{map[string]any{"account_id": acct, "model_id": "gpt-6-luna", "weight": 1}},
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create combo: %d %s", code, resp)
+	}
+	created := mustJSON(t, resp)
+	id := int64(created["id"].(float64))
+	if !created["enabled"].(bool) {
+		t.Fatalf("a combo created without `enabled` must default to enabled: %s", resp)
+	}
+
+	listed := func() bool {
+		t.Helper()
+		_, _, body := h.do("GET", "/v1/models", "tok-infer", "")
+		return strings.Contains(body, `"daily"`)
+	}
+	if !listed() {
+		t.Fatalf("/v1/models should advertise an enabled combo")
+	}
+
+	// body toggle off
+	if code, resp = jsonDo(t, h, "PATCH", fmt.Sprintf("/admin/combos/%d", id), "tok-admin",
+		map[string]any{"enabled": false}); code != http.StatusOK {
+		t.Fatalf("patch enabled=false: %d %s", code, resp)
+	}
+	if mustJSON(t, resp)["enabled"].(bool) {
+		t.Fatalf(`PATCH {"enabled":false} must disable the combo: %s`, resp)
+	}
+	if listed() {
+		t.Errorf("a disabled combo must not be advertised in /v1/models")
+	}
+
+	// an unrelated patch must leave it off (absent = unchanged)
+	if code, resp = jsonDo(t, h, "PATCH", fmt.Sprintf("/admin/combos/%d", id), "tok-admin",
+		map[string]any{"notes": "parked"}); code != http.StatusOK {
+		t.Fatalf("patch notes: %d %s", code, resp)
+	}
+	if mustJSON(t, resp)["enabled"].(bool) {
+		t.Fatalf("a patch that omits `enabled` must leave it disabled: %s", resp)
+	}
+
+	// ... and the query form still works for existing callers
+	if code, resp = jsonDo(t, h, "PATCH", fmt.Sprintf("/admin/combos/%d?enabled=true", id), "tok-admin",
+		map[string]any{}); code != http.StatusOK {
+		t.Fatalf("patch ?enabled=true: %d %s", code, resp)
+	}
+	if !mustJSON(t, resp)["enabled"].(bool) {
+		t.Fatalf("?enabled=true must re-enable the combo: %s", resp)
+	}
+	if !listed() {
+		t.Errorf("a re-enabled combo must be back in /v1/models")
+	}
+}
+
 func TestComboHopUnknownAccount(t *testing.T) {
 	fake := &fakeUpstream{models: []string{"m"}}
 	h := newHarness(t, fake.handler())

@@ -896,10 +896,19 @@ func (s *Server) handleCombo(w http.ResponseWriter, r *http.Request) {
 		}
 		writeErr(w, http.StatusNotFound, "not_found_error", "combo not found")
 	case http.MethodPatch:
-		var c store.Combo
-		if !decodeBody(w, r, &c) {
+		// `enabled` is decoded separately because a bool cannot say "absent":
+		// the old shape dropped the BODY's enabled on the floor (it was
+		// overwritten by the current value and only `?enabled=` could change
+		// it), so PATCH {"enabled":false} silently left the combo routing.
+		// Pointer = tri-state: nil keeps the current value.
+		var body struct {
+			store.Combo
+			Enabled *bool `json:"enabled"`
+		}
+		if !decodeBody(w, r, &body) {
 			return
 		}
+		c := body.Combo
 		combos, err := s.db.ListCombos(r.Context())
 		if err != nil {
 			s.writeStoreErr(w, err)
@@ -933,6 +942,9 @@ func (s *Server) handleCombo(w http.ResponseWriter, r *http.Request) {
 			c.Hops = cur.Hops
 		}
 		c.Enabled = cur.Enabled
+		if body.Enabled != nil {
+			c.Enabled = *body.Enabled
+		}
 		if r.URL.Query().Get("enabled") != "" {
 			c.Enabled = r.URL.Query().Get("enabled") == "true"
 		}

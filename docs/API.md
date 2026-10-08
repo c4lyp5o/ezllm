@@ -168,6 +168,10 @@ Live `ReadQuota` → classified shape + `raw`. `{"kind":"none"}` when the provid
 ```
 `strategy` ∈ `failover|true_round_robin|strict_round_robin|sticky_last_good|least_used`.
 `POST` upserts by name (idempotent). `hops` replace the whole ordered list (positions = array order).
+`PATCH` is a partial update — only the fields you send change, `enabled` included, so the one-field
+toggle is `PATCH /admin/combos/{id}` `{"enabled":false}` (the `?enabled=true|false` query form is
+still honored). A disabled combo refuses inference with `combo "x" is disabled` and drops out of
+`/v1/models`.
 
 ### `POST /admin/combos/{id}/hops` → `200`
 Replaces the hop list atomically (same body shape, `hops` only).

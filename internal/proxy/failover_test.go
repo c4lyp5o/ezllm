@@ -40,6 +40,19 @@ func reqWithBody(body string) (*http.Request, []byte) {
 // THE core failover claim: hop 1 answers 429, hop 2 answers 200, and the client
 // must see ONLY hop 2 — the 429 is never observable. If this breaks, failover
 // is not failover, it is a leak of an error the caller did nothing to deserve.
+func TestRetryableUpstreamStatus(t *testing.T) {
+	for _, code := range []int{http.StatusTooManyRequests, http.StatusRequestTimeout, http.StatusTooEarly, 500, 502, 503, 504} {
+		if !retryableUpstreamStatus(code) {
+			t.Errorf("%d should be retryable", code)
+		}
+	}
+	for _, code := range []int{400, 401, 403, 404, 422} {
+		if retryableUpstreamStatus(code) {
+			t.Errorf("%d should not be retryable", code)
+		}
+	}
+}
+
 func TestFailoverHidesFailedHopFromClient(t *testing.T) {
 	bad := upstub(t, http.StatusTooManyRequests, `{"error":"quota"}`)
 	defer bad.Close()

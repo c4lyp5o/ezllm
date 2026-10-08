@@ -121,9 +121,16 @@ func newTwoUpstream(t *testing.T, badQuota bool) *twoUpstream {
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	registry := provider.NewRegistry(client)
+	// Retries are pinned OFF here on purpose: this harness asserts ONE hit per
+	// hop so a failover bug cannot hide behind the retry loop. The retry policy
+	// itself (attempts, backoff, which statuses qualify) is covered in
+	// internal/proxy — keeping that counter out of this test means a change to
+	// retry.retries cannot silently rewrite what "failover worked" means.
+	dispatcher := proxy.NewDispatcher(client, registry)
+	dispatcher.SetRetries(0)
 	s := New(Options{
 		Auth: db, Resolver: router.New(db),
-		Dispatcher: proxy.NewDispatcher(client, registry),
+		Dispatcher: dispatcher,
 		DB:         db, MaxBodyMiB: 1,
 		Registry: registry, Tester: registration.NewTester(client, registry, db),
 	})

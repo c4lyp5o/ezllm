@@ -121,7 +121,9 @@ Runs the **7-step test** (design: `2026-10-06_070000-ezllm-m3-keytest-design.md`
 Steps: `format`(no network) → `catalog` → `auth`(oracle; **gate**) → `quota`(non-fatal) →
 `inference`(unless `skip_inference`) → `protocol` (≤ `probe_max_models`, default 6, async-flagged
 in response when deferred) → persist.
-`429`/`5xx`/timeout → retried with backoff; **`401`/`403` → fail immediately, no retry.**
+`429`/`5xx`/timeout/transport failure → retried with exponential backoff, using the global
+`retry.retries` setting (default `3` retries after the initial attempt) per combo hop.
+Retries set to 3 after the initial call per hop. When all four total attempts fail retryably, combo failover advances and grants the next hop its own budget. For `n` hops, worst-case network attempts are `4n`; use `retry.retries: 0` to disable extra tries. **`400`/`401`/`403`/`404`/`422` → no retry.** Streaming responses are never replayed after bytes reach the client.
 
 ### `POST /admin/accounts/{id}/keys/{keyId}/retest` → `200` | `422`
 Same flow against an already-stored key. On failure the row is **kept** but marked

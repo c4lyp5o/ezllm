@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -101,14 +102,25 @@ type Rewriter interface {
 
 // Dispatcher performs the actual upstream call.
 type Dispatcher struct {
-	client   *http.Client
-	registry *provider.Registry
+	client        *http.Client
+	registry      *provider.Registry
+	retryAttempts int
 }
 
 // NewDispatcher builds a Dispatcher. timeout governs connection/response-header
 // time only; streaming bodies are unbounded by design.
 func NewDispatcher(client *http.Client, registry *provider.Registry) *Dispatcher {
-	return &Dispatcher{client: client, registry: registry}
+	return &Dispatcher{client: client, registry: registry, retryAttempts: 3}
+}
+
+func (d *Dispatcher) SetRetries(retries int) {
+	if retries < 0 {
+		retries = 0
+	}
+	if retries > 9 {
+		retries = 9
+	}
+	d.retryAttempts = retries
 }
 
 // SwapModel rewrites the `model` field of a JSON request body, preserving every
@@ -252,11 +264,55 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 // response to w. It returns the ledger Result. Single-candidate form: nothing
 // to fail over to, so attempt and commit happen back to back.
 func (d *Dispatcher) Forward(ctx context.Context, w http.ResponseWriter, r *http.Request, rt Route, body []byte) (Result, error) {
-	resp, res, start, err := d.attempt(ctx, r, rt, body)
+	resp, res, start, err := d.retryAttempt(ctx, r, rt, body)
 	if err != nil {
 		return res, err
 	}
 	return d.commit(ctx, w, resp, rt, res, start)
+}
+
+func (d *Dispatcher) retryAttempt(ctx context.Context, r *http.Request, rt Route, body []byte) (*http.Response, Result, time.Time, error) {
+	maxAttempts := d.retryAttempts + 1
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+	var lastResp *http.Response
+	var lastResult Result
+	var lastStart time.Time
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		resp, result, start, err := d.attempt(ctx, r, rt, body)
+		lastResp, lastResult, lastStart = resp, result, start
+		if err == nil && (result.Status < 500 && result.Status != http.StatusTooManyRequests) {
+			return resp, result, start, nil
+		}
+		if attempt+1 == maxAttempts || ctx.Err() != nil || (err == nil && !retryableUpstreamStatus(result.Status)) || (err != nil && !retryableUpstreamError(err)) {
+			return resp, result, start, err
+		}
+		if resp != nil {
+			drainClose(resp)
+		}
+		delay := time.Duration(1<<attempt) * time.Second
+		if delay > 8*time.Second {
+			delay = 8 * time.Second
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, lastResult, lastStart, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return lastResp, lastResult, lastStart, errors.New("proxy: retry budget exhausted")
+}
+
+func retryableUpstreamStatus(code int) bool {
+	return code == http.StatusTooManyRequests || code == http.StatusRequestTimeout || code == http.StatusTooEarly || code >= 500
+}
+
+func retryableUpstreamError(err error) bool {
+	var netErr net.Error
+	return errors.Is(err, context.DeadlineExceeded) || errors.As(err, &netErr)
 }
 
 // failoverStatus reports whether an upstream answer means "that hop couldn't
@@ -311,7 +367,7 @@ func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWrite
 		if err != nil {
 			return Route{}, Result{}, err
 		}
-		resp, res, start, err := d.attempt(ctx, r, rt, swapped)
+		resp, res, start, err := d.retryAttempt(ctx, r, rt, swapped)
 		if err != nil {
 			// Transport failure — nothing written, safe to try the next hop.
 			continue
@@ -333,7 +389,7 @@ func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWrite
 	if err != nil {
 		return Route{}, Result{}, err
 	}
-	resp, res, start, err := d.attempt(ctx, r, rt, swapped)
+	resp, res, start, err := d.retryAttempt(ctx, r, rt, swapped)
 	if err != nil {
 		return rt, res, err
 	}

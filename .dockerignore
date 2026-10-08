@@ -1,0 +1,39 @@
+# Build context hygiene — keeps secrets and junk out of the image layer cache.
+#
+# The two that actually matter: config.yaml names live env vars and data/ holds
+# the request ledger (and backups/). Neither may ever reach an image.
+
+# secrets / live config (config.example.yaml IS needed — it is copied in)
+/config.yaml
+/.env
+**/.env
+*.key
+*.pem
+
+# ledger + backups
+/data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# build output (rebuilt inside the image)
+/bin/
+web/dist/*.map
+
+# frontend tooling — web/dist is EMBEDDED, so it stays; node_modules does not.
+# (Do not exclude web/dist: cmd/ezllm fails to compile without it.)
+web/node_modules/
+web/.vite/
+
+# VCS / CI / docs — not needed to compile, and .git is heavy
+.git/
+.github/
+.gitignore
+.dockerignore
+Dockerfile
+*.md
+docs/
+
+# local tooling: proof scripts and screenshot harnesses are dev-only
+scripts/
+web/*.mjs

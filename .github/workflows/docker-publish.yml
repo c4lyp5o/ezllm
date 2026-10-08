@@ -1,0 +1,84 @@
+# Build and publish the ezllm image to GHCR.
+#
+# Follows the ezjot/eziarr convention (buildx -> GHCR login -> build-push ->
+# ntfy), adapted for Go:
+#   * version comes from the git tag, not package.json (Go has no package.json)
+#   * multi-arch (linux/amd64 + linux/arm64) — the build is a static CGO-free
+#     binary, so cross-compiling is free; arm64 matters for home servers
+#
+# Requires: this repo to EXIST on GitHub (it currently has no remote) and a
+# `packages: write` permission, granted inline below.
+name: Build & Push Docker Image
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build_and_push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: 🧾 Checkout source
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0          # git describe needs history
+
+    - name: 🏷️ Version from git
+      id: version
+      # tag build -> "1.2.3"; branch build -> short sha. Both give `latest`.
+      run: |
+        V=$(git describe --tags --always 2>/dev/null || echo dev)
+        echo "version=$V" >> "$GITHUB_OUTPUT"
+        echo "Using version: $V"
+
+    - name: 🐳 Setup QEMU (arm64)
+      uses: docker/setup-qemu-action@v3
+
+    - name: 🐳 Setup Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: 🐳 Docker Login (GHCR)
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: 🛠️ Build & Push Docker Image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        platforms: linux/amd64,linux/arm64
+        # ghcr requires lowercase; the owner is already lowercase but this
+        # guards against a future uppercase org name.
+        tags: |
+          ghcr.io/${{ github.repository_owner }}/ezllm:${{ steps.version.outputs.version }}
+          ghcr.io/${{ github.repository_owner }}/ezllm:latest
+        labels: |
+          org.opencontainers.image.title=ezllm
+          org.opencontainers.image.description=OpenAI/Anthropic-compatible LLM router with a request ledger
+          org.opencontainers.image.revision=${{ github.sha }}
+          org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+    - name: 🔔 Notify ntfy
+      if: always()
+      env:
+        NTFY_URL: ${{ secrets.NTFY_URL }}
+      run: |
+        if [ -n "$NTFY_URL" ]; then
+          curl \
+            -H "Title: Build ${{ job.status }}: ezllm:${{ steps.version.outputs.version }}" \
+            -H "Priority: ${{ job.status == 'success' && 'default' || 'high' }}" \
+            -H "Tags: ${{ job.status == 'success' && 'white_check_mark' || 'x' }},rocket" \
+            -d "Branch: ${{ github.ref_name }} | Status: ${{ job.status }}" \
+            "$NTFY_URL"
+        fi

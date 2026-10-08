@@ -1,0 +1,79 @@
+# Build standalone binaries and attach them to a GitHub Release.
+#
+# This is the "give them something to download" path, alongside the GHCR image.
+# The build is CGO-free (modernc.org/sqlite is pure Go), so cross-compiling
+# needs no toolchains, no cross-C compilers and no Docker — GOOS/GOARCH alone.
+#
+# Artifact layout per platform:  ezllm_<version>_<os>_<arch>.tar.gz
+#   bin/ezllm                 static binary
+#   config.example.yaml       bootstrap config (provider keys are entered in dashboard)
+#   README.md
+# plus SHA256SUMS for verification.
+#
+# Trigger:  git tag v1.0.0 && git push --tags
+name: Release binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write        # required to create the release and upload assets
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+    - name: 🧾 Checkout source
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: 🟢 Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod        # stays in lockstep with the project
+        cache: true
+
+    - name: 🔨 Build release binaries
+      env:
+        VERSION: ${{ github.ref_name }}
+      run: |
+        set -euo pipefail
+        mkdir -p dist
+        # CGO_ENABLED=0 for every target: static, so it runs on any distro
+        # without libc version worries.
+        while read -r os arch; do
+          out="dist/ezllm_${VERSION}_${os}_${arch}"
+          echo "--- building ${os}/${arch}"
+          # Windows needs the .exe suffix or the artifact is unusable there.
+          exe="ezllm"; [ "$os" = "windows" ] && exe="ezllm.exe"
+          CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
+            go build -trimpath -ldflags="-s -w" \
+            -o "$out/$exe" ./cmd/ezllm
+          cp config.example.yaml README.md "$out/"
+          if [ "$os" = "windows" ]; then
+            # python3 -m zipfile, not the zip(1) binary: no external package
+            # dependency, and it is verifiable on any box with Python.
+            (cd dist && python3 -m zipfile -c "ezllm_${VERSION}_${os}_${arch}.zip" "ezllm_${VERSION}_${os}_${arch}")
+          else
+            tar -C dist -czf "dist/ezllm_${VERSION}_${os}_${arch}.tar.gz" "ezllm_${VERSION}_${os}_${arch}"
+          fi
+          rm -rf "$out"
+        done <<'TARGETS'
+        linux amd64
+        linux arm64
+        darwin amd64
+        darwin arm64
+        windows amd64
+        TARGETS
+        (cd dist && sha256sum *.tar.gz *.zip > SHA256SUMS)
+        echo "--- artifacts ---"; ls -la dist
+
+    - name: 📦 Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        generate_release_notes: true
+        files: dist/*

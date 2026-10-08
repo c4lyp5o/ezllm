@@ -1,0 +1,42 @@
+# Run ezllm in Docker.
+#
+#   cp config.example.yaml config.yaml
+#   docker compose up -d
+#
+# Both paths work: `build: .` compiles from source, or drop it and use
+# `image:` to pull the published GHCR build.
+services:
+  ezllm:
+    image: ghcr.io/c4lyp5o/ezllm:latest
+    build: .
+    container_name: ezllm
+    restart: unless-stopped
+
+    # Run the service as the current user for private DB ownership; secrets live only in SQLite.
+    user: "${UID:-1000}:${GID:-1000}"
+
+    ports:
+      # host port is overridable so a second instance (staging, a test) does
+      # not have to edit this file:  EZLLM_PORT=20130 docker compose up -d
+      - "${EZLLM_PORT:-20129}:20129"
+
+    environment:
+      TZ: Asia/Kuala_Lumpur
+
+    # All credentials are dashboard-managed and persisted in the SQLite volume.
+
+    volumes:
+      # Non-secret provider metadata; credentials stay in SQLite.
+      - ./config.yaml:/app/config.yaml:ro
+      # The ledger. Without this, every restart loses all token accounting.
+      # Overridable because ./data IS your live ledger when run from the repo
+      # root — pointing a staging instance at it would open prod's SQLite from
+      # a second process:  EZLLM_DATA=./data-staging docker compose up -d
+      - "${EZLLM_DATA:-./data}:/data"
+
+# Optional: front the dashboard with traefik (uncomment and adjust the host).
+#   networks: { traefik_default: { external: true } }
+#   labels:
+#     - "traefik.enable=true"
+#     - "traefik.http.routers.ezllm.rule=Host(`${EZLLM_HOST:-llm.example.com}`)"
+#     - "traefik.http.services.ezllm.loadbalancer.server.port=20129"

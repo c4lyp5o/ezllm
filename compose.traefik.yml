@@ -1,0 +1,43 @@
+# Home-box overlay: puts ezllm behind the shared traefik (traefik_default).
+#
+#   EZLLM_HOST=llm.calypso.dedyn.io \
+#     docker compose -f compose.yml -f compose.traefik.yml up -d
+#
+# Base compose.yml stays portable (build + 20129 on the host). This overlay only
+# adds the external network, the traefik labels, and the /admin guard — so the
+# public hostname lives in the deployment invocation, not in the portable file.
+#
+# TLS is global: the traefik `websecure` entrypoint already sets
+# certResolver=leresolver, so NO tls/certresolver labels belong here (adding them
+# is redundant, and `tls: true` on the router breaks the ACME defaults).
+#
+# Two routers, deliberately:
+#   * ezllm-admin  — /admin/* is the CONTROL PLANE (dashboard password, provider
+#     keys). It is restricted to the LAN + loopback: this deployment runs the
+#     dashboard with the documented default password, and the internet must not
+#     be able to reach it. Add your own egress IP here if you want it from outside.
+#   * ezllm        — /v1/* + the SPA, public. Every inference call still needs a
+#     client token, and /healthz is intentionally public.
+services:
+  ezllm:
+    networks:
+      - traefik_default
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik_default"
+
+      # public surface: /v1, /healthz, the dashboard shell
+      - "traefik.http.routers.ezllm.rule=Host(`${EZLLM_HOST:-llm.calypso.dedyn.io}`)"
+      - "traefik.http.routers.ezllm.entrypoints=websecure"
+      - "traefik.http.routers.ezllm.middlewares=enhanced-security@file"
+      - "traefik.http.services.ezllm.loadbalancer.server.port=20129"
+
+      # control plane: LAN only (longer rule wins in traefik, no priority hacks)
+      - "traefik.http.routers.ezllm-admin.rule=Host(`${EZLLM_HOST:-llm.calypso.dedyn.io}`) && PathPrefix(`/admin`)"
+      - "traefik.http.routers.ezllm-admin.entrypoints=websecure"
+      - "traefik.http.routers.ezllm-admin.middlewares=ezllm-admin-allowlist@file,enhanced-security@file"
+      - "traefik.http.routers.ezllm-admin.service=ezllm"
+
+networks:
+  traefik_default:
+    external: true

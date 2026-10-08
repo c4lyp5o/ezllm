@@ -14,10 +14,16 @@ Errors are OpenAI-shaped: `{"error":{"type":"...","message":"...","code":422}}`.
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/healthz` | no auth |
-| GET | `/v1/models?protocol=` | `openai` (default) / `anthropic` shape; ids are `<namespace>/<model>` |
+| GET | `/v1/models?protocol=` | `openai` (default) / `anthropic` shape; ids are `<namespace>/<model>`, plus one bare id per **enabled** combo |
 | POST | `/v1/chat/completions` | OpenAI stream + non-stream |
 | POST | `/v1/messages` | Anthropic (`x-api-key` or Bearer) |
 | POST | `/v1/responses` | OpenAI Responses |
+
+`/v1/models` rows: namespaced ids carry the upstream's `owned_by` and, once probed, a `protocol`
+map. A combo row is bare (`owned_by: "ezllm"`) and adds a non-standard `combo` key —
+`{"strategy":"failover","hops":[{"account_id":1,"model":"mimo-v2.6-flash","enabled":true}]}` — so a
+picker can say what the name routes to; OpenAI clients that don't know the key ignore it. Combo names
+can never contain `/`, so a bare id is unambiguous. Disabled combos are never listed.
 
 ## M3 — accounts, keys, models, quota
 

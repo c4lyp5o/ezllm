@@ -291,6 +291,42 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		}
 		data = append(data, m)
 	}
+
+	// Enabled combos are routable ids too: a bare name (combos have no
+	// namespace, and ValidateCombo rejects any '/' in a name) resolves through
+	// the combo path, so it can never collide with a "<ns>/<model>" id. Without
+	// them here, a client that builds its picker from /v1/models can never
+	// select one — the combo is invisible to that UI even though it routes.
+	// Disabled combos are omitted: the resolver refuses them, so listing one
+	// would be a lie.
+	combos, err := s.db.ListCombos(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "server_error", err.Error())
+		return
+	}
+	for _, c := range combos {
+		if !c.Enabled {
+			continue
+		}
+		if protocol == "anthropic" {
+			// Anthropic's shape stays exactly {type,id,display_name}; the
+			// "combo" marker below is an OpenAI-side convenience only.
+			data = append(data, map[string]any{"type": "model", "id": c.Name, "display_name": c.Name})
+			continue
+		}
+		hops := make([]map[string]any, 0, len(c.Hops))
+		for _, h := range c.Hops {
+			hops = append(hops, map[string]any{
+				"account_id": h.AccountID, "model": h.ModelID,
+				"enabled": h.Enabled == nil || *h.Enabled,
+			})
+		}
+		data = append(data, map[string]any{
+			"id": c.Name, "object": "model", "created": 0, "owned_by": "ezllm",
+			"combo": map[string]any{"strategy": c.Strategy, "hops": hops},
+		})
+	}
+
 	if protocol == "anthropic" {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"data": data, "has_more": false,

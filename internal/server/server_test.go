@@ -543,6 +543,101 @@ func TestModelsAnthropicShape(t *testing.T) {
 	}
 }
 
+// A combo is a routable model id, so it has to appear in the discovery surface:
+// a client that builds its picker from /v1/models otherwise cannot select one.
+// Disabled combos stay out — the resolver refuses them, so listing one would be
+// a lie.
+func TestModelsListsEnabledCombos(t *testing.T) {
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
+	acct := seededAccount(t, h)
+	for _, c := range []map[string]any{
+		{"name": "daily", "strategy": "failover",
+			"hops": []any{map[string]any{"account_id": acct, "model_id": "gpt-6-luna", "weight": 1}}},
+		{"name": "off", "strategy": "failover", "enabled": false,
+			"hops": []any{map[string]any{"account_id": acct, "model_id": "gpt-6-luna", "weight": 1}}},
+	} {
+		if code, resp := jsonDo(t, h, "POST", "/admin/combos", "tok-admin", c); code != http.StatusCreated {
+			t.Fatalf("create combo %v: %d %s", c["name"], code, resp)
+		}
+	}
+
+	code, _, body := h.do("GET", "/v1/models", "tok-infer", "")
+	if code != 200 {
+		t.Fatalf("status %d", code)
+	}
+	var resp struct {
+		Data []struct {
+			ID    string `json:"id"`
+			Combo struct {
+				Strategy string `json:"strategy"`
+				Hops     []struct {
+					Model string `json:"model"`
+				} `json:"hops"`
+			} `json:"combo"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(body), &resp); err != nil {
+		t.Fatalf("decode %q: %v", body, err)
+	}
+	seen := map[string]bool{}
+	for _, d := range resp.Data {
+		seen[d.ID] = true
+	}
+	if !seen["daily"] {
+		t.Errorf("enabled combo missing from /v1/models: %s", body)
+	}
+	if seen["off"] {
+		t.Errorf("disabled combo must not be advertised: %s", body)
+	}
+	if !seen["up/gpt-6-luna"] {
+		t.Errorf("namespaced ids must survive: %s", body)
+	}
+	// the combo row describes its own chain, so a UI can say WHAT the name routes to
+	for _, d := range resp.Data {
+		if d.ID != "daily" {
+			continue
+		}
+		if d.Combo.Strategy != "failover" || len(d.Combo.Hops) != 1 || d.Combo.Hops[0].Model != "gpt-6-luna" {
+			t.Errorf("combo row should carry strategy + hops: %+v", d)
+		}
+	}
+}
+
+// Anthropic clients get combos in THEIR shape ({type,id,display_name}); a bare
+// id is the same selectable name on that surface.
+func TestModelsCombosInAnthropicShape(t *testing.T) {
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
+	acct := seededAccount(t, h)
+	if code, resp := jsonDo(t, h, "POST", "/admin/combos", "tok-admin", map[string]any{
+		"name": "daily", "strategy": "failover",
+		"hops": []any{map[string]any{"account_id": acct, "model_id": "gpt-6-luna", "weight": 1}},
+	}); code != http.StatusCreated {
+		t.Fatalf("create combo: %d %s", code, resp)
+	}
+	code, _, body := h.do("GET", "/v1/models?protocol=anthropic", "tok-infer", "")
+	if code != 200 {
+		t.Fatalf("status %d", code)
+	}
+	var resp struct {
+		Data []struct {
+			Type string `json:"type"`
+			ID   string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(body), &resp); err != nil {
+		t.Fatalf("decode %q: %v", body, err)
+	}
+	for _, d := range resp.Data {
+		if d.ID == "daily" {
+			if d.Type != "model" {
+				t.Errorf("anthropic combo row type = %q, want model", d.Type)
+			}
+			return
+		}
+	}
+	t.Errorf("combo missing from the anthropic listing: %s", body)
+}
+
 // ── admin ───────────────────────────────────────────────────────────────────
 
 func TestAdminRequiresAdminRole(t *testing.T) {

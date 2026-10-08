@@ -88,10 +88,11 @@ const emptyDraft: Draft = {
 };
 
 const PROVIDER_PRESETS: Record<string, { label: string; kind: string; baseURL?: string; sessionHeader?: boolean }> = {
+  'claude-platform': { label: 'Claude Platform', kind: 'anthropic-compatible', baseURL: 'https://api.anthropic.com' },
   'opencode-go': { label: 'OpenCode Go', kind: 'opencode-go', baseURL: 'https://opencode.ai/zen/go/v1', sessionHeader: true },
   'xiaomi-mimo-token-plan': { label: 'Xiaomi MiMo token plan', kind: 'openai-compatible', baseURL: 'https://token-plan-sgp.xiaomimimo.com/v1' },
   'alibaba-model-studio-token-plan': { label: 'Alibaba Cloud Model Studio token plan', kind: 'openai-compatible', baseURL: 'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1' },
-  'openai-compatible': { label: 'OpenAI-compatible (custom URL)', kind: 'openai-compatible' },
+  'openai-compatible': { label: 'OpenAI-compatible', kind: 'openai-compatible' },
   'anthropic-compatible': { label: 'Anthropic-compatible', kind: 'anthropic-compatible' },
 };
 const PRESET_IDS = Object.keys(PROVIDER_PRESETS);
@@ -141,6 +142,7 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
   };
 
   const isCompat = PROVIDER_PRESETS[d.preset]?.kind === 'openai-compatible' || PROVIDER_PRESETS[d.preset]?.kind === 'anthropic-compatible';
+  const isAnthropicKind = PROVIDER_PRESETS[d.preset]?.kind === 'anthropic-compatible';
   const valid = d.name.trim().length > 0
     && /^[a-z0-9][a-z0-9._-]{0,62}$/.test(d.namespace.trim())
     && (!isCompat || /^https?:\/\//i.test(d.base_url.trim()))
@@ -195,9 +197,11 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
           <div>
             <label className={labelCls} htmlFor="ap-url">Provider API base URL</label>
             <input id="ap-url" className={cx(inputCls, 'font-mono')} value={d.base_url}
-              placeholder="https://api.provider.com/v1" spellCheck={false}
+              placeholder={isAnthropicKind ? 'https://api.anthropic.com' : 'https://api.provider.com/v1'} spellCheck={false}
               onChange={(e) => set('base_url', e.target.value.trim())} />
-            <p className="mt-1 text-[11px] text-mute">Required for compatibility providers. Use the base URL ending at the API version, e.g. /v1.</p>
+            <p className="mt-1 text-[11px] text-mute">{isAnthropicKind
+              ? 'Required for compatibility providers. Enter the host only — /v1 paths are added automatically.'
+              : 'Required for compatibility providers. Use the base URL ending at the API version, e.g. /v1.'}</p>
           </div>
         ) : (
           <div className="rounded-lg border border-line bg-raised/60 px-3.5 py-2.5 text-[12px] text-dim">

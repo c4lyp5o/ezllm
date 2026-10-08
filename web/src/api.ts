@@ -103,7 +103,7 @@ export const del = (p: string) => apiFetch<null>(p, { method: 'DELETE' });
 
 // ── Shapes ───────────────────────────────────────────────────────────────
 
-export type UsageRow = { k: string; calls: number; tin: number; tout: number; cread: number; cwrite: number; reasoning: number; saved: number; errors: number };
+export type UsageRow = { k: string; calls: number; tin: number; tout: number; cread: number; cwrite: number; reasoning: number; saved: number; errors: number; context_pre: number; context_saved: number };
 
 export type Health = {
   status: string; schema_version: number; accounts: number; provider_keys: number;
@@ -144,7 +144,7 @@ export type Account = {
 export type RecentCall = {
   ts: string; client: string; surface: string; account: string; model: string;
   status: number; ttft_ms: number; total_ms: number; tin: number; tout: number; cread: number;
-  saved: number; compression: string; applied: boolean;
+  saved: number; compression: string; applied: boolean; contextPre?: number; contextSaved?: number;
 };
 
 // The feed's snapshot rows come from recentCalls (ledger names: tin, saved);
@@ -154,6 +154,7 @@ export type FeedRow = {
   ts: string; client: string; surface: string; alias?: string; account: string; model: string;
   status: number; stream?: boolean; ttft_ms?: number; total_ms?: number;
   tin: number; tout: number; cread?: number; reasoning?: number; saved: number;
+  contextPre?: number; contextSaved?: number;
   compression: string; applied: boolean; rulesFired?: number; error?: string;
 };
 const num = (v: unknown): number => (typeof v === 'number' ? v : 0);
@@ -170,6 +171,7 @@ export function normalizeFeedRow(raw: any): FeedRow {
     reasoning: num(raw.reasoning ?? raw.reasoning_tokens),
     rulesFired: num(raw.rules_fired ?? raw.compression_rules_fired),
     saved: num(raw.saved ?? raw.tokens_saved),
+    contextPre: num(raw.context_tokens_pre), contextSaved: num(raw.context_tokens_saved),
     compression: String(raw.compression ?? ''), applied: Boolean(raw.applied),
     error: raw.error ? String(raw.error) : undefined,
   };
@@ -229,7 +231,9 @@ export function usage(range: RangeKey, gran: Granularity): Promise<UsageResp> {
 // the returned page.
 export type RequestsSummary = {
   count: number; tin: number; tout: number; cread: number;
+  cached_read?: number; tokens_in?: number; tokens_out?: number;
   reasoning: number; max_tin: number; max_tout: number;
+  context_pre: number; context_saved: number; compression_saved: number;
 };
 export type RequestsResp = {
   rows: FeedRow[];
@@ -283,6 +287,8 @@ export type ModelRule = {
 
 export const modelRules = () => get<ModelRule[]>('/admin/model-rules');
 export const accountModels = (id: number) => get<ModelRow[]>(`/admin/accounts/${id}/models`);
+export const chat = (model: string, messages: { role: string; content: string }[]) =>
+  post<any>('/admin/chat', { model, messages });
 export const createModelRule = (r: Partial<ModelRule> & { account_id: number; model_id: string }) =>
   post<ModelRule>('/admin/model-rules', r);
 // PATCH merges onto the stored row, but window fields are all-or-nothing —

@@ -111,6 +111,8 @@ func attachCompressionMetrics(call *store.Call, res compress.Result) {
 	// caveman attribution: non-zero only when prose rules actually rewrote
 	// something, so "why did this prompt shrink?" is answerable from the row.
 	call.CompressionRulesFired = res.RulesFired
+	call.ContextTokensPre = res.ContextPre
+	call.ContextTokensSaved = res.ContextSaved
 }
 
 // compressionProfileOf is the ledger stamp for rows that never reached

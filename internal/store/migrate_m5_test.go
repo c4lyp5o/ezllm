@@ -36,6 +36,8 @@ CREATE TABLE calls (
   raw_usage TEXT, endpoint_id INTEGER, upstream_model TEXT,
   compression_profile TEXT, compression_applied INTEGER,
   prompt_tokens_pre INTEGER, tokens_saved INTEGER, compression_ms INTEGER,
+  compression_rules_fired INTEGER DEFAULT 0,
+  context_tokens_pre INTEGER DEFAULT 0, context_tokens_saved INTEGER DEFAULT 0,
   err TEXT
 );
 CREATE INDEX idx_calls_ts ON calls(ts DESC);
@@ -85,6 +87,13 @@ func TestMigrateV1AddsAccountIDAndKeepsRows(t *testing.T) {
 
 	if got := db.SchemaVersion(); got != schemaVersion {
 		t.Errorf("SchemaVersion = %d, want %d", got, schemaVersion)
+	}
+	var contextCols int
+	if err := db.Reader().QueryRow(`SELECT COUNT(*) FROM pragma_table_info('calls') WHERE name IN ('context_tokens_pre','context_tokens_saved')`).Scan(&contextCols); err != nil {
+		t.Fatal(err)
+	}
+	if contextCols != 2 {
+		t.Fatalf("context token columns = %d, want 2", contextCols)
 	}
 
 	// account_id column now exists (the M5 metering key)

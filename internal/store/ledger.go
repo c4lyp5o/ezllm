@@ -64,6 +64,8 @@ type Call struct {
 	// CompressionRulesFired is caveman attribution: the number of prose rules
 	// that rewrote something. Always 0 for session_dedup/rtk/headroom/lite.
 	CompressionRulesFired int
+	ContextTokensPre      int64
+	ContextTokensSaved    int64
 	PromptTokensPre       int64
 	TokensSaved           int64
 	CompressionMs         *int64
@@ -319,8 +321,8 @@ INSERT INTO calls (
   tokens_in, tokens_out, tokens_cached_read, tokens_cached_write, reasoning_tokens, raw_usage,
   endpoint_id, upstream_model,
   compression_profile, compression_applied, prompt_tokens_pre, tokens_saved, compression_ms,
-  compression_rules_fired, err
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+  compression_rules_fired, context_tokens_pre, context_tokens_saved, err
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
@@ -343,7 +345,7 @@ INSERT INTO calls (
 			c.TokensIn, c.TokensOut, c.TokensCachedRead, c.TokensCachedWrite, c.ReasoningTokens, c.RawUsage,
 			c.EndpointID, c.UpstreamModel,
 			c.CompressionProfile, boolInt(c.CompressionApplied), c.PromptTokensPre, c.TokensSaved, c.CompressionMs,
-			c.CompressionRulesFired, c.Err,
+			c.CompressionRulesFired, c.ContextTokensPre, c.ContextTokensSaved, c.Err,
 		)
 		if err != nil {
 			return fmt.Errorf("insert call: %w", err)
@@ -387,16 +389,18 @@ func boolInt(b bool) int {
 // dashboard reads — a tag rename silently blanks the stat cards, because the
 // frontend's types are hand-written from that doc. TestUsageRowJSONKeys pins it.
 type UsageRow struct {
-	Key         string `json:"k"`
-	Calls       int64  `json:"calls"`
-	TokensIn    int64  `json:"tin"`
-	TokensOut   int64  `json:"tout"`
-	CachedRead  int64  `json:"cread"`
-	CachedWrite int64  `json:"cwrite"`
-	Reasoning   int64  `json:"reasoning"`
-	TokensSaved int64  `json:"saved"`
-	Errors      int64  `json:"errors"`
-	P50TTFTms   int64  `json:"p50_ttft_ms"`
+	Key          string `json:"k"`
+	Calls        int64  `json:"calls"`
+	TokensIn     int64  `json:"tin"`
+	TokensOut    int64  `json:"tout"`
+	CachedRead   int64  `json:"cread"`
+	CachedWrite  int64  `json:"cwrite"`
+	Reasoning    int64  `json:"reasoning"`
+	TokensSaved  int64  `json:"saved"`
+	ContextPre   int64  `json:"context_pre"`
+	ContextSaved int64  `json:"context_saved"`
+	Errors       int64  `json:"errors"`
+	P50TTFTms    int64  `json:"p50_ttft_ms"`
 }
 
 // UsageReport aggregates the ledger. group_by: account|key|alias|client|model|surface|day.
@@ -416,6 +420,8 @@ SELECT %s AS k,
        COALESCE(SUM(tokens_cached_write),0)       AS cwrite,
        COALESCE(SUM(reasoning_tokens),0)          AS reasoning,
        COALESCE(SUM(tokens_saved),0)              AS saved,
+       COALESCE(SUM(context_tokens_pre),0)        AS context_pre,
+       COALESCE(SUM(context_tokens_saved),0)      AS context_saved,
        COALESCE(SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END),0) AS errors
 FROM calls
 WHERE ts >= ? AND ts < ?
@@ -431,7 +437,7 @@ ORDER BY calls DESC`, col)
 	out := []UsageRow{}
 	for rows.Next() {
 		var r UsageRow
-		if err := rows.Scan(&r.Key, &r.Calls, &r.TokensIn, &r.TokensOut, &r.CachedRead, &r.CachedWrite, &r.Reasoning, &r.TokensSaved, &r.Errors); err != nil {
+		if err := rows.Scan(&r.Key, &r.Calls, &r.TokensIn, &r.TokensOut, &r.CachedRead, &r.CachedWrite, &r.Reasoning, &r.TokensSaved, &r.ContextPre, &r.ContextSaved, &r.Errors); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -510,7 +516,7 @@ SELECT ts, client, surface, alias, account, COALESCE(provider_key_id,0), key_hin
        tokens_in, tokens_out, tokens_cached_read, tokens_cached_write, reasoning_tokens,
        COALESCE(raw_usage,''), COALESCE(endpoint_id,''), COALESCE(upstream_model,''),
        compression_profile, compression_applied, prompt_tokens_pre, tokens_saved, compression_ms,
-       compression_rules_fired, COALESCE(err,'')
+       compression_rules_fired, context_tokens_pre, context_tokens_saved, COALESCE(err,'')
 FROM calls ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -527,7 +533,7 @@ FROM calls ORDER BY id DESC LIMIT ?`, limit)
 			&c.TokensIn, &c.TokensOut, &c.TokensCachedRead, &c.TokensCachedWrite, &c.ReasoningTokens,
 			&c.RawUsage, &c.EndpointID, &c.UpstreamModel,
 			&c.CompressionProfile, &applied, &c.PromptTokensPre, &c.TokensSaved, &cms,
-			&c.CompressionRulesFired, &c.Err); err != nil {
+			&c.CompressionRulesFired, &c.ContextTokensPre, &c.ContextTokensSaved, &c.Err); err != nil {
 			return nil, err
 		}
 		if t, err := time.Parse("2006-01-02T15:04:05.000Z", ts); err == nil {

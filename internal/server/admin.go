@@ -211,7 +211,8 @@ func (s *Server) healthSnapshot() map[string]any {
 const callsCols = `ts, client, surface, alias, account, model, status, ttft_ms, total_ms,
        tokens_in, tokens_out, tokens_cached_read, tokens_cached_write, reasoning_tokens,
        COALESCE(tokens_saved, 0), COALESCE(compression_profile, ''),
-       COALESCE(compression_applied, 0), COALESCE(compression_rules_fired, 0)`
+       COALESCE(compression_applied, 0), COALESCE(compression_rules_fired, 0),
+       COALESCE(context_tokens_pre, 0), COALESCE(context_tokens_saved, 0)`
 
 // scanCalls maps rows projected with callsCols into the row shape the
 // dashboard and the requests explorer share.
@@ -221,11 +222,11 @@ func scanCalls(rows *sql.Rows) ([]map[string]any, error) {
 		var ts, client, surface, alias, account, model string
 		var status int
 		var ttft, total, tin, tout, cread, cwrite, reasoning any
-		var saved, applied, rulesFired int
+		var saved, applied, rulesFired, contextPre, contextSaved int
 		var profile string
 		if err := rows.Scan(&ts, &client, &surface, &alias, &account, &model, &status,
 			&ttft, &total, &tin, &tout, &cread, &cwrite, &reasoning,
-			&saved, &profile, &applied, &rulesFired); err != nil {
+			&saved, &profile, &applied, &rulesFired, &contextPre, &contextSaved); err != nil {
 			return nil, err
 		}
 		out = append(out, map[string]any{
@@ -233,9 +234,10 @@ func scanCalls(rows *sql.Rows) ([]map[string]any, error) {
 			"account": account, "model": model, "status": status,
 			"ttft_ms": ttft, "total_ms": total,
 			"tin": tin, "tout": tout, "cread": cread, "cwrite": cwrite,
-			"reasoning": reasoning,
-			"saved":     saved,
-			// empty = the request never mentioned compression; "off" /
+			"reasoning":            reasoning,
+			"saved":                saved,
+			"context_tokens_pre":   contextPre,
+			"context_tokens_saved": contextSaved, // empty = the request never mentioned compression; "off" /
 			// "unknown-profile" / "disabled" = it asked and got no change;
 			// otherwise the profile name (applied says whether bytes moved).
 			"compression": profile,

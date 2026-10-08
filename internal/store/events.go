@@ -4,22 +4,24 @@ import "slices"
 
 // CallEvent is one committed ledger row, shaped for the dashboard feed.
 type CallEvent struct {
-	TS          string `json:"ts"`
-	Client      string `json:"client"`
-	Surface     string `json:"surface"`
-	Alias       string `json:"alias"`
-	Account     string `json:"account"`
-	Model       string `json:"model"`
-	Status      int    `json:"status"`
-	Stream      bool   `json:"stream"`
-	TTFTMs      *int64 `json:"ttft_ms,omitempty"`
-	TotalMs     *int64 `json:"total_ms,omitempty"`
-	TokensIn    int64  `json:"tokens_in"`
-	TokensOut   int64  `json:"tokens_out"`
-	CachedRead  int64  `json:"tokens_cached_read"`
-	CachedWrite int64  `json:"tokens_cached_write"`
-	Reasoning   int64  `json:"reasoning_tokens"`
-	Saved       int64  `json:"tokens_saved"`
+	TS           string `json:"ts"`
+	Client       string `json:"client"`
+	Surface      string `json:"surface"`
+	Alias        string `json:"alias"`
+	Account      string `json:"account"`
+	Model        string `json:"model"`
+	Status       int    `json:"status"`
+	Stream       bool   `json:"stream"`
+	TTFTMs       *int64 `json:"ttft_ms,omitempty"`
+	TotalMs      *int64 `json:"total_ms,omitempty"`
+	TokensIn     int64  `json:"tokens_in"`
+	TokensOut    int64  `json:"tokens_out"`
+	CachedRead   int64  `json:"tokens_cached_read"`
+	CachedWrite  int64  `json:"tokens_cached_write"`
+	Reasoning    int64  `json:"reasoning_tokens"`
+	Saved        int64  `json:"tokens_saved"`
+	ContextPre   int64  `json:"context_tokens_pre"`
+	ContextSaved int64  `json:"context_tokens_saved"`
 	// Compression is the ledger stamp: "" (never mentioned), "off" /
 	// "unknown-profile" / "disabled" (asked, no change), or the profile name.
 	Compression string `json:"compression"`
@@ -74,6 +76,7 @@ func EventFromCall(c Call) CallEvent {
 		TokensIn: c.TokensIn, TokensOut: c.TokensOut,
 		CachedRead: c.TokensCachedRead, CachedWrite: c.TokensCachedWrite,
 		Reasoning: c.ReasoningTokens, Saved: c.TokensSaved,
+		ContextPre: c.ContextTokensPre, ContextSaved: c.ContextTokensSaved,
 		Compression: c.CompressionProfile, Applied: c.CompressionApplied,
 		Err: c.Err,
 	}

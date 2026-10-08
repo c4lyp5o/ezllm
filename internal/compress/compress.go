@@ -24,7 +24,7 @@ type Stage struct {
 
 // KnownEngines is the shipped engine registry (M5: session_dedup + rtk,
 // M6.5 phase 2: headroom + lite, M7: caveman).
-var KnownEngines = map[string]bool{"session_dedup": true, "rtk": true, "headroom": true, "lite": true, "caveman": true}
+var KnownEngines = map[string]bool{"session_dedup": true, "rtk": true, "headroom": true, "lite": true, "caveman": true, "budget": true}
 
 // Profile is the runtime view of a compression_profiles row.
 type Profile struct {
@@ -49,8 +49,10 @@ type Result struct {
 	// RulesFired is caveman attribution: how many pack rules rewrote
 	// something. Zero for every other engine. Recorded so a surprising
 	// saving can be traced to prose condensation rather than guessed at.
-	RulesFired int
-	Err        string // diagnostics for tests/logs; never fails the request
+	RulesFired   int
+	ContextPre   int64
+	ContextSaved int64
+	Err          string // diagnostics for tests/logs; never fails the request
 }
 
 // EstimateTokens is the shared pure-Go estimator (no tokenizer dependency:
@@ -112,10 +114,18 @@ func Apply(body []byte, p *Profile) ([]byte, Result) {
 			res.Err = "unknown engine " + st.Engine
 			return body, res // fail-open
 		}
+		beforeStage := EstimateTokens(string(mustMarshal(cur)))
 		next, fired, err := runEngine(st, cur)
 		if err != nil {
 			res.Err = st.Engine + ": " + err.Error()
 			return body, res // contract rule 5
+		}
+		if st.Engine == "budget" {
+			res.ContextPre = beforeStage
+			postStage := EstimateTokens(string(mustMarshal(next)))
+			if beforeStage > postStage {
+				res.ContextSaved = beforeStage - postStage
+			}
 		}
 		res.RulesFired += fired
 		cur = next
@@ -181,6 +191,8 @@ func runEngine(st Stage, msgs []any) ([]any, int, error) {
 		// is attributable to a rule rather than a mystery.
 		out, fired := caveman(msgs, st.Options)
 		return out, fired, nil
+	case "budget":
+		return budget(msgs, st.Options), 0, nil
 	}
 	return nil, 0, fmt.Errorf("unknown engine %q", st.Engine)
 }

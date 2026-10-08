@@ -24,7 +24,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 4
+const schemaVersion = 5
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -177,6 +177,9 @@ func (d *DB) migrate() error {
 		if err := d.alterCallsRulesFired(context.Background()); err != nil {
 			return fmt.Errorf("store: alter calls rules_fired: %w", err)
 		}
+		if err := d.alterCallsContextTokens(context.Background()); err != nil {
+			return fmt.Errorf("store: alter calls context tokens: %w", err)
+		}
 		if err := d.alterDashboardAuth(context.Background()); err != nil {
 			return fmt.Errorf("store: alter dashboard auth: %w", err)
 		}
@@ -204,7 +207,10 @@ func (d *DB) migrate() error {
 			return fmt.Errorf("store: migrate %d->%d alter: %w", cur, schemaVersion, err)
 		}
 		if err := d.alterCallsRulesFired(context.Background()); err != nil {
-			return fmt.Errorf("store: migrate %d->%d alter rules_fired: %w", cur, schemaVersion, err)
+			return fmt.Errorf("store: alter calls rules_fired: %w", err)
+		}
+		if err := d.alterCallsContextTokens(context.Background()); err != nil {
+			return fmt.Errorf("store: alter calls context tokens: %w", err)
 		}
 		if err := d.alterDashboardAuth(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate dashboard auth: %w", err)
@@ -251,7 +257,29 @@ func (d *DB) alterCallsAccountID(ctx context.Context) error {
 // attribution) on databases created before it. Same guard as
 // alterCallsAccountID: ALTER TABLE ADD COLUMN is not idempotent, and a fresh
 // database already has the column from schema.sql.
-// alterDashboardAuth creates password/session tables for existing databases.
+func (d *DB) alterCallsContextTokens(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "calls")
+	if err != nil {
+		return fmt.Errorf("check calls table: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+	for _, column := range []string{"context_tokens_pre", "context_tokens_saved"} {
+		ok, err := hasColumn(ctx, d.w, "calls", column)
+		if err != nil {
+			return fmt.Errorf("check calls.%s: %w", column, err)
+		}
+		if ok {
+			continue
+		}
+		if _, err := d.w.ExecContext(ctx, fmt.Sprintf("ALTER TABLE calls ADD COLUMN %s INTEGER NOT NULL DEFAULT 0", column)); err != nil {
+			return fmt.Errorf("add calls.%s: %w", column, err)
+		}
+	}
+	return nil
+}
+
 // schema.sql is re-applied after migrations, so these CREATE statements are
 // idempotent and keep the standalone version reset straightforward.
 func (d *DB) alterDashboardAuth(ctx context.Context) error {

@@ -41,6 +41,24 @@ func fullProfile(stages ...Stage) *Profile {
 	}
 }
 
+func TestBudgetStageReportsContextSavings(t *testing.T) {
+	body := bodyOf(
+		textMsg("system", "keep these instructions"),
+		textMsg("user", strings.Repeat("old context ", 30)),
+		textMsg("assistant", strings.Repeat("old answer ", 30)),
+		textMsg("user", "latest question"),
+	)
+	profile := fullProfile(Stage{Engine: "budget", Options: map[string]any{"max_tokens": 20}})
+	profile.ExemptLastTurn = false
+	out, res := Apply(body, profile)
+	if res.ContextPre <= 0 || res.ContextSaved <= 0 {
+		t.Fatalf("context metrics = pre %d saved %d", res.ContextPre, res.ContextSaved)
+	}
+	if string(out) == string(body) {
+		t.Fatal("budget stage did not rewrite oversized history")
+	}
+}
+
 // Contract rule 1: the final message is never modified, even when it is an
 // exact duplicate of an earlier one.
 func TestExemptFinalMessage(t *testing.T) {

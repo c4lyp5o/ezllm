@@ -16,6 +16,7 @@ records every design decision where the plan left latitude.
 | Stats: compression/savings granularities | ✅ (already summed by `UsageReport`) | |
 | `headroom` + `lite` engines | ✅ (M6.5 phase 2, shipped) | |
 | `caveman` (prose condensation) | ✅ (M7, shipped) | deterministic rule packs, text-only, protected spans + span-integrity gate, `lite`/`standard`; aggressive+ultra = stage composition |
+| `budget` engine | ✅ | Opt-in whole-message context budgeting with tool-pair preservation |
 | Profile editor page (drag-order stages) | | M6.5 (Compression page stays a read-only preview) |
 | Anthropic `/v1/messages` rtk scoping | | M6.5 (shape passes through unchanged today) |
 

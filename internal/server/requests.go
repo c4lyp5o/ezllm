@@ -112,7 +112,7 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 	// Summary first: over the WHOLE matching set, so the numbers answer
 	// "how much lives behind this filter" regardless of the page size.
 	var sum struct {
-		Count, Tin, Tout, Cread, Reasoning, MaxTin, MaxTout int64
+		Count, Tin, Tout, Cread, Reasoning, ContextPre, ContextSaved, CompressionSaved, MaxTin, MaxTout int64
 	}
 	var sargs []any
 	for _, a := range args {
@@ -121,10 +121,12 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 	row := s.db.Reader().QueryRowContext(r.Context(), `
 SELECT COUNT(*), COALESCE(SUM(tokens_in),0), COALESCE(SUM(tokens_out),0),
        COALESCE(SUM(tokens_cached_read),0), COALESCE(SUM(reasoning_tokens),0),
+       COALESCE(SUM(context_tokens_pre),0), COALESCE(SUM(context_tokens_saved),0),
+       COALESCE(SUM(tokens_saved),0),
        COALESCE(MAX(tokens_in),0), COALESCE(MAX(tokens_out),0)
 FROM calls`+where, sargs...)
 	if err := row.Scan(&sum.Count, &sum.Tin, &sum.Tout, &sum.Cread,
-		&sum.Reasoning, &sum.MaxTin, &sum.MaxTout); err != nil {
+		&sum.Reasoning, &sum.ContextPre, &sum.ContextSaved, &sum.CompressionSaved, &sum.MaxTin, &sum.MaxTout); err != nil {
 		writeErr(w, http.StatusInternalServerError, "api_error", err.Error())
 		return
 	}
@@ -140,7 +142,8 @@ FROM calls`+where, sargs...)
 		"summary": map[string]any{
 			"count": sum.Count, "tin": sum.Tin, "tout": sum.Tout,
 			"cread": sum.Cread, "reasoning": sum.Reasoning,
-			"max_tin": sum.MaxTin, "max_tout": sum.MaxTout,
+			"context_pre": sum.ContextPre, "context_saved": sum.ContextSaved,
+			"compression_saved": sum.CompressionSaved, "max_tin": sum.MaxTin, "max_tout": sum.MaxTout,
 		},
 		"filter": map[string]any{
 			"from": from.Format(time.RFC3339), "to": to.Format(time.RFC3339),

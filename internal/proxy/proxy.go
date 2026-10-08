@@ -174,7 +174,7 @@ func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, bod
 	if err != nil {
 		return nil, Result{}, time.Time{}, err
 	}
-	url := strings.TrimSuffix(rt.Account.BaseURL, "/") + provider.SurfacePath(rt.Surface)
+	url := provider.UpstreamURL(rt.Account.BaseURL, rt.Account.Kind, provider.SurfacePath(rt.Surface))
 
 	upReq, err := http.NewRequestWithContext(ctx, r.Method, url, bytes.NewReader(body))
 	if err != nil {

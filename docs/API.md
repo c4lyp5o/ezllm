@@ -85,6 +85,8 @@ Params: `min_tin` `max_tin` `min_tout` `max_tout` (non-negative integers);
 ```
 `kind` ∈ `opencode-go|openai-compatible|anthropic-compatible`. `namespace`:
 `^[a-z0-9][a-z0-9._-]{0,62}$` and must not contain `/`. Unique → `409`.
+For `anthropic-compatible`, `base_url` is the host only (e.g. `https://api.anthropic.com`) —
+the `/v1` version segment is appended automatically (`/v1/messages`, `/v1/models`).
 Returns the `AccountSummary`.
 
 ### `GET /admin/accounts` → `200` → `[AccountSummary, …]`

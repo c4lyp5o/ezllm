@@ -691,7 +691,7 @@ func doProbe(
 	if method == "" {
 		method = http.MethodGet
 	}
-	url := strings.TrimSuffix(acct.BaseURL, "/") + spec.Path
+	url := provider.UpstreamURL(acct.BaseURL, acct.Kind, spec.Path)
 
 	payload := spec.Body
 	if len(body) > 0 && body[0] != nil && body[0].body != "" {

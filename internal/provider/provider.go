@@ -44,6 +44,21 @@ func SurfacePath(s Surface) string {
 	}
 }
 
+// UpstreamURL joins an account's base URL with an upstream path for one call.
+// Every kind except anthropic-compatible stores a base that already ends at the
+// API version (e.g. https://host/v1) and appends the path verbatim.
+// Anthropic-compatible accounts follow the Anthropic SDK convention: base_url is
+// the bare host (https://api.anthropic.com) and the /v1 version segment is
+// added HERE, version-anchoring every path (/v1/messages, /v1/models). A base
+// that already ends in /v1 is tolerated — the suffix is not doubled.
+func UpstreamURL(baseURL string, kind Kind, path string) string {
+	b := strings.TrimSuffix(baseURL, "/")
+	if kind == KindAnthropicCompat && !strings.HasSuffix(b, "/v1") {
+		b += "/v1"
+	}
+	return b + path
+}
+
 // ValidKinds lists the kinds this build can register (used by config/admin validation).
 func ValidKinds() []Kind { return []Kind{KindOpenCodeGo, KindOpenAICompatible, KindAnthropicCompat} }
 

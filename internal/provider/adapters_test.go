@@ -44,6 +44,29 @@ func TestOpenCodeGoInjectsSessionHeaders(t *testing.T) {
 	}
 }
 
+// UpstreamURL anchors /v1 for anthropic-compatible bases (and tolerates a /v1
+// already in the base), leaving every other kind's join untouched.
+func TestUpstreamURL(t *testing.T) {
+	cases := []struct {
+		base string
+		kind Kind
+		path string
+		want string
+	}{
+		{"https://api.anthropic.com", KindAnthropicCompat, "/messages", "https://api.anthropic.com/v1/messages"},
+		{"https://api.anthropic.com/v1", KindAnthropicCompat, "/messages", "https://api.anthropic.com/v1/messages"},
+		{"https://api.anthropic.com/v1/", KindAnthropicCompat, "/models", "https://api.anthropic.com/v1/models"},
+		{"https://gateway.example.com/anthropic", KindAnthropicCompat, "/messages", "https://gateway.example.com/anthropic/v1/messages"},
+		{"https://token-plan-sgp.xiaomimimo.com/v1", KindOpenAICompatible, "/chat/completions", "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions"},
+		{"https://opencode.ai/zen/go/v1", KindOpenCodeGo, "/chat/completions", "https://opencode.ai/zen/go/v1/chat/completions"},
+	}
+	for _, c := range cases {
+		if got := UpstreamURL(c.base, c.kind, c.path); got != c.want {
+			t.Errorf("UpstreamURL(%q, %s, %q) = %q, want %q", c.base, c.kind, c.path, got, c.want)
+		}
+	}
+}
+
 // Anthropic surface must also carry x-api-key + anthropic-version (verified live).
 func TestOpenCodeGoAnthropicSurfaceAuth(t *testing.T) {
 	a := NewOpenCodeGo(http.DefaultClient)

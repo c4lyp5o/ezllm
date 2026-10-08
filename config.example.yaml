@@ -37,7 +37,7 @@ providers:
   # anthropic-main:
   #   namespace: anth
   #   kind: anthropic-compatible
-  #   base_url: https://api.anthropic.com/v1
+  #   base_url: https://api.anthropic.com     # host only — /v1 is appended automatically
   #   # Add the account and key through the dashboard.
 
 ledger:

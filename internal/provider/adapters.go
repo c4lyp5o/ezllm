@@ -190,7 +190,7 @@ func (a *anthropicCompatible) PrepareRequest(_ context.Context, req *http.Reques
 // implement it, so a 404/405 degrades to an empty catalog rather than an error —
 // registration can still proceed via an explicit model list.
 func (a *anthropicCompatible) ListModels(ctx context.Context, acct Account, key string) ([]ModelInfo, error) {
-	body, status, err := getJSONStatus(ctx, a.client, acct.BaseURL+"/models", map[string]string{
+	body, status, err := getJSONStatus(ctx, a.client, UpstreamURL(acct.BaseURL, acct.Kind, "/models"), map[string]string{
 		"x-api-key":         key,
 		"anthropic-version": "2023-06-01",
 	})

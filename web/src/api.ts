@@ -83,15 +83,20 @@ export async function apiFetch<T = unknown>(path: string, init: RequestInit = {}
   } catch {
     throw new ApiError({ status: 0, type: 'network', message: 'upstream unreachable — is ezllm running?' });
   }
-  if (res.status === 401) {
+  const text = await res.text();
+  let parsed: unknown;
+  try { parsed = JSON.parse(text) as unknown; } catch { parsed = undefined; }
+  // Upstream 401s pass through with the PROVIDER's body (string error.code, e.g.
+  // anthropic's "authentication_error" — the provider rejecting ITS key). Only
+  // our own auth 401 (numeric code from writeErr) may clear the session:
+  // treating a provider 401 as a dead session logged the user out mid-chat.
+  if (res.status === 401 && parseOpenAIError(parsed, res.status).code === 401) {
     clearToken();
     try { sessionStorage.setItem('ezllm.admin.rejected', '1'); } catch { /* noop */ }
     window.location.reload();
     throw new AuthError(401, 'invalid token');
   }
   if (res.status === 403) throw new AuthError(403, 'this token lacks the admin role');
-  const text = await res.text();
-  const parsed = JSON.parse(text) as unknown;
   if (!res.ok) throw new ApiError(parseOpenAIError(parsed, res.status));
   return parsed as T;
 }

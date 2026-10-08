@@ -595,6 +595,11 @@ var stripAlways = map[string]bool{
 	"Host":            true,
 	"Content-Length":  true,
 	"Accept-Encoding": true, // let the upstream decide; we must see plain bytes
+	// Browsers attach Origin to every same-origin POST; forwarding it made
+	// Anthropic-shaped upstreams read the proxied call as a CORS/direct-browser
+	// request and answer 401 ("dangerous-direct-browser-access" gate). The
+	// header describes the browser->dashboard hop and must die here.
+	"Origin": true,
 }
 
 func copyClientHeaders(dst, src *http.Request, extraStrip []string) {

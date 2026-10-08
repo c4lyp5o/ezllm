@@ -287,6 +287,42 @@ func TestForwardNonStreamedWritesBodyAndTapsUsage(t *testing.T) {
 	}
 }
 
+// Browsers attach Origin to every same-origin POST. If it reaches an
+// Anthropic-shaped upstream, the call reads as CORS/direct-browser and is
+// rejected 401 ("dangerous-direct-browser-access" gate). The strip must live
+// in the header copy so every adapter is covered — regression for the
+// dashboard chat logging users out on claude-platform accounts.
+func TestForwardStripsClientOrigin(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Origin"); got != "" {
+			t.Errorf("upstream saw Origin %q — must be stripped", got)
+		}
+		if got := r.Header.Get("X-Keep"); got != "1" {
+			t.Errorf("non-stripped client header lost: X-Keep = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"x","model":"resolved-model","choices":[{"message":{"content":"OK"}}]}`))
+	}))
+	defer upstream.Close()
+
+	d := newDispatcher()
+	reqBody, _, _ := SwapModel([]byte(`{"model":"whatever","messages":[{"role":"user","content":"hi"}]}`), "resolved-model")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(string(reqBody)))
+	req.Header.Set("Origin", "https://llm.calypso.dedyn.io")
+	req.Header.Set("Referer", "https://llm.calypso.dedyn.io/chat")
+	req.Header.Set("X-Keep", "1")
+
+	res, err := d.Forward(context.Background(), rec, req, testRoute(upstream.URL, provider.SurfaceOpenAI), reqBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != 200 {
+		t.Errorf("status = %d, body = %s", res.Status, rec.Body.String())
+	}
+}
+
 // THE streaming invariant: bytes arrive incrementally, unbuffered, and the
 // client sees exactly what upstream sent.
 func TestForwardStreamedIsIncrementalAndLossless(t *testing.T) {

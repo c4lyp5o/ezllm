@@ -6,7 +6,10 @@ import {
 import { get, type Overview } from '../api';
 import { Chip, SectionLabel, SkeletonCards, SkeletonRows, cx, formatTokens, Mono, clockTime, StaleBadge } from '../ui';
 
-const fmtMs = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}s` : `${n}ms`);
+// ttft_ms is null on non-streaming calls (no first token to time) — render the
+// app-wide en-dash "not measured" cue instead of the raw `null` ("nullms").
+const fmtMs = (n: number | null | undefined) =>
+  n == null ? '–' : n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}s` : `${n}ms`;
 
 function statusTone(s: number): string {
   return s >= 500 ? 'text-bad' : s >= 400 ? 'text-warn' : 'text-ok';

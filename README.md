@@ -2,15 +2,22 @@
 
 Calypso's lightweight LLM router. Single static Go binary, **three passthrough
 surfaces** (OpenAI chat · Anthropic messages · OpenAI Responses), namespace
-routing across multiple provider accounts, encrypted key storage, and a SQLite
-usage ledger that normalizes token accounting across all three protocols.
+routing across provider accounts, combo failover, per-model rules, request
+compression, and a SQLite usage ledger that normalizes token accounting across
+all three protocols — with a token-gated dashboard on top.
 
-**Status: M2** — store + crypto + three-surface passthrough, live-verified against
-two real providers. Combos/strategies/caps (M4), admin registration API (M3),
-compression (M5) and the dashboard (M6) are still ahead.
+**Status: M1–M7 shipped — live.** Deployed on the home box: dashboard + admin
+API at `https://llm.calypso.dedyn.io`, local clients at `http://127.0.0.1:20129`.
+Claude Code talks to it as a native Anthropic endpoint (`POST /v1/messages`).
+Latest post-ship fixes (2026-10-09): upstream `Origin` stripping (Anthropic
+treats browser `Origin` as CORS and rejects with 401) and dashboard
+401-vs-provider-401 handling.
 
 ## Read this first
 
+- `docs/API.md` — the admin API contract (v1): every endpoint, shapes, semantics.
+- `docs/compression-design.md` — the compression subsystem as shipped (M5–M7).
+- `docs/rules-engine-design.md` — caps + allowed-hours rules (design record).
 - `EXPLORING.md` — the codebase tour: what to read, in what order, which
   invariants to verify, and per-milestone file/line landmarks.
 - `~/workspace/.hermes/plans/2026-10-05_223000-ezllm-v1-rev4-namespace-compression.md`
@@ -30,17 +37,18 @@ Requires **Go 1.27** (`~/.local/go/bin/go`); SQLite is pure-Go
 (`modernc.org/sqlite`) so `CGO_ENABLED=0` static builds work — that's what makes
 the Docker image distroless-able.
 
-## Endpoints (M2)
+## Endpoints (full contract: docs/API.md)
 
-| Route | Auth | State |
-|---|---|---|
-| `GET /healthz` | none | ✅ |
-| `GET /v1/models` | bearer or `x-api-key` | ✅ namespaced ids; `?protocol=anthropic` for Anthropic shape |
-| `POST /v1/chat/completions` | bearer | ✅ stream + non-stream |
-| `POST /v1/messages` | `x-api-key` (or bearer) | ✅ tool use verified live |
-| `POST /v1/responses` | bearer | ✅ incl. `response.incomplete` usage |
-| `GET /admin/health` | **admin role** | ✅ |
-| `GET /admin/usage?group_by=account\|key\|alias\|client\|model\|surface\|day` | **admin role** | ✅ |
+| Layer | Route | Auth | Notes |
+|---|---|---|---|
+| Surface | `GET /healthz` | none | liveness |
+| Surface | `GET /v1/models` | client token | namespaced ids + bare combo ids; `?protocol=anthropic` for the Claude shape |
+| Surface | `POST /v1/chat/completions` · `/v1/messages` · `/v1/responses` | client token (`x-api-key` ok on messages) | stream + non-stream; all three live-verified |
+| Admin | `GET /admin/health` · `/admin/overview` · `/admin/usage` · `/admin/requests` | admin | rollups (`group_by=account\|key\|alias\|client\|model\|surface\|day`), token dissection, dashboard payload |
+| Admin | `GET /admin/stream` | admin | SSE live call feed |
+| Admin | `POST /admin/chat` | admin | in-dashboard chat via the normal inference path |
+| Admin | `/admin/accounts` · `/admin/combos` · `/admin/model-rules` · `/admin/compression-profiles` · `/admin/tokens` · `/admin/export` | admin | lifecycle CRUD + disaster-recovery dump |
+| Admin | `POST /admin/login` · `/admin/settings/password` | password / admin | dashboard session gate |
 
 ## Addressing models
 
@@ -58,6 +66,39 @@ A bare model id is **404 by design** — there is no default account, and the sa
 model id can exist on several of your accounts (`gpt-6-luna` lives on both
 `opengo` and `super-ssn`), so guessing would mis-attribute spend. The 404 lists
 every namespace that does serve it.
+
+## Combos & strategies
+
+- A **combo** is a bare name (`daily`, `fallback`) → ordered hops `[{account, model}, …]`
+  + a strategy. Combo names can't contain `/`.
+- Strategies: `failover` (default), `true_round_robin`, `strict_round_robin`,
+  `sticky_last_good`, `least_used`.
+- Failover: transient failures (429, 5xx, timeout, transport) → retry budget per hop →
+  next hop. 4xx goes straight back to the client — never retried.
+- Keys: every account owns a pool; keys in cooldown after 429/failure are skipped until
+  they expire.
+
+## Rules engine
+
+Per-(account, model) **token caps** and **allowed-hours** windows. Inside a combo, an
+out-of-window hop is skipped silently (the next hop serves); a direct call to a restricted
+model → `429` naming the rule and its window. Design + semantics:
+`docs/rules-engine-design.md`.
+
+## Compression
+
+Ordered stages over six engines — `session_dedup`, `rtk`, `headroom`, `lite`, `caveman`,
+`budget` — configured as profiles and selected per request (`x-ezllm-compression` header →
+the combo's default profile → off). Contract: never touch the final user message, tool
+calls, or structured tool results; fail-open on any engine error. Design + measured
+numbers: `docs/compression-design.md`.
+
+## Dashboard
+
+Same binary, served at `/`; the UI renders and fetches nothing until unlocked. First login
+uses the seeded dashboard password (`internal/store/dashboard_auth.go`) — **change it
+immediately in Settings**. Everything under `/admin/*` requires an admin session or an
+admin client token.
 
 ## Token accounting (the reason the ledger exists)
 
@@ -95,10 +136,24 @@ backups. For phone-on-LAN access, use `-addr 0.0.0.0:20129`.
 
 - Provider keys are stored in SQLite as plaintext per the operator's explicit
   testing-build choice; protect the database and its backups with filesystem access controls.
+  AES-GCM field crypto (`internal/store/crypto.go`, master-key file) is implemented and
+  test-covered but intentionally not wired in v1.
 - Client tokens are SHA-256 hashed and dashboard passwords bcrypt-hashed in SQLite; plaintext credentials are never returned after creation/login.
 - Only a masked provider-key hint is ever exposed in admin responses or logs.
-- The upstream's own credentials replace the client's: `Authorization`, `x-api-key`
-  and `Cookie` are stripped from client requests before forwarding.
+- The upstream's own credentials replace the client's: `Authorization`, `x-api-key`, `Cookie` —
+  and **`Origin`** (Anthropic reads any browser `Origin` as CORS and rejects with a 401;
+  regression-tested) — are stripped from client requests before forwarding.
+- Loopback by default (`127.0.0.1`); the dashboard hides all data pre-auth.
+
+## Testing & verification
+
+- `make check` — fmt + vet + tests + build; `go run ./cmd/m2verify` — acceptance checker
+  against the live ledger (PASS/FAIL per invariant, run after any soak).
+- `web/*.mjs` — Playwright drivers (screenshots `shot-*.mjs`, checks `verify-*.mjs`);
+  `scripts/prove_*.py` — live proofs (compression phases, caveman, day/night rules,
+  requests, lmeval).
+- GitHub Actions: `docker-publish.yml` builds & pushes `ghcr.io/c4lyp5o/ezllm` on master;
+  `release.yml` cuts tagged releases.
 
 ## Non-goals (v1)
 

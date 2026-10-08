@@ -1,35 +1,39 @@
 # EXPLORING ezllm — Calypso's codebase tour notes
 
-> **How to use this file:** it's your map for reading ezllm's code. Sections marked `⏳ FILL` get
-> completed by fast as each milestone lands (that's a standing rule in the plan — if a milestone
-> ships without updating its `⏳ FILL` section, it's not done). Read in "Reading order" below.
+> **How to use this file:** it's your map for reading ezllm's code — reading order, invariants
+> to verify, and per-milestone file landmarks (§4). M1–M7 are all filled in; keep a milestone's
+> landmarks updated as its code evolves (that's the standing rule from the plan).
 >
-> **Source of truth:** `~/workspace/.hermes/plans/2026-10-05_151500-ezllm-v0-opencode-alibaba.md`
-> (incl. its RECON CORRECTION block). This file = navigation; that file = decisions.
+> **Source of truth:** the v1 rev4 plan
+> `~/workspace/.hermes/plans/2026-10-05_223000-ezllm-v1-rev4-namespace-compression.md` (it
+> supersedes the v0 plan; the M3 key-test design lives beside it in
+> `2026-10-06_070000-ezllm-m3-keytest-design.md`). This file = navigation; those = decisions.
 
 ---
 
 ## 1. 60-second mental model
 
 ```
-client (Hermes / curl / anything OpenAI-speaking)
-   │  POST /v1/chat/completions        (bearer token = one of client_tokens)
+client (Claude Code / Hermes / curl / anything OpenAI- or Anthropic-speaking)
+   │  /v1/chat/completions · /v1/messages · /v1/responses   (bearer or x-api-key = client token)
    ▼
-┌─────────────────────── ezllm (Go, 127.0.0.1:20129) ───────────────────────┐
-│ server  → auth → router(alias → provider chain → key + cooldown)          │
-│        → proxy(model swap, byte-passthrough SSE, usage sniff)             │
-│        → ledger(async SQLite row)                                         │
-└───────────────────────────────────────────────────────────────────────────┘
-   │                                    │
-   ▼                                    ▼
-opencode-go                        bailian-coding
-opencode.ai/zen/go/v1              token-plan.ap-southeast-1.maas.aliyuncs.com
-Bearer + x-opencode-session        /compatible-mode/v1
+┌──────────────────────── ezllm (Go, 127.0.0.1:20129) ──────────────────────┐
+│ server  → auth → router (combo name OR namespace/model → ordered hops,     │
+│            strategy + rules eligibility + key pick + cooldown)             │
+│        → compression (profile stages, fail-open, final turn exempt)        │
+│        → proxy (model swap, byte-passthrough SSE, usage sniff, failover)   │
+│        → ledger (async SQLite row) + dashboard feed (SSE)                  │
+└────────────────────────────────────────────────────────────────────────────┘
+   │                           │
+   ▼                           ▼
+provider accounts (one namespace each): opencode-go · openai-compatible ·
+anthropic-compatible — each ships an adapter (PrepareRequest, StripHeaders,
+ReadQuota, ListModels); the account row carries the base URL + key pool.
 ```
 
-Two upstreams only. No 359-provider ambition. The whole point: **SSE bytes flow through untouched** —
-ezllm reads a request, swaps `model`, and copies the response stream while tapping the final
-`usage` chunk for the ledger.
+Several real upstreams, not 359. The whole point: **SSE bytes flow back untouched** — ezllm swaps
+`model` upstream and copies the response stream while tapping the `usage` frames for the ledger.
+Compression is the only thing that ever rewrites the request body (when a profile is active).
 
 ## 2. Quick start (run these before reading code — read after seeing it live)
 
@@ -56,17 +60,18 @@ equal, something is buffering — go read `proxy/sse.go` and find out why).
 
 | # | Read first | Then | Ask yourself |
 |---|-----------|------|--------------|
-| M1 | `cmd/ezllm/main.go` → `internal/config` → `internal/server` | `config.example.yaml` | Where would I add a third provider? (config shape should make it obvious) |
+| M1 | `cmd/ezllm/main.go` → `internal/config` → `internal/server` | `config.example.yaml` | Where would I add a fourth account? (config seeds; the DB is runtime truth) |
 | M2 | `internal/proxy/proxy.go` (`Forward` → `streamCopy` → `tapSSELine`) → `internal/store/ledger.go` (`NormalizeUsage`) | `git show` of M2 | Does ANY code path touch response bytes besides the scanner+Write+Flush loop? |
-| M3 | `internal/router` | alias table in config | Can I trace `ez/omen` → opencode-go → model swap in 3 hops of reading? |
-| M4 | `internal/router` cooldown + key selection | unit tests | What happens on 429 with 1 key left? (answer must be in a test) |
-| M5 | `internal/ledger` queries → `internal/admin` | run `make usage` | Do the numbers match omniroute's dashboard roughly? |
-| M6 | `cmd/ezllm/main.go` (shutdown), timeouts in `server.go` | `ezllm.service`, README | Can I kill -9 it and restart without corrupting the ledger? |
+| M3 | `internal/registration` + `internal/provider/adapters.go` + admin handlers in `internal/server` | `docs/API.md` | Can I trace an account from DB row → adapter → first upstream byte? |
+| M4 | `internal/router` (hops → strategies → key pick/cooldown) + `internal/rules` | `go test ./internal/router ./internal/rules` | What happens on 429 with 1 key left? (answer must be in a test) |
+| M5 | `internal/compress` (engines + stage pipeline) + `internal/server/compression.go` | `docs/compression-design.md` | Where is "never touch final turn / tool results" enforced, and where does fail-open live? |
+| M6 | `internal/store/usage.go` → `/admin/usage` · `/admin/requests` · `/admin/stream` + `web/src` | `docs/API.md` + a dashboard login | Can I kill -9 it and restart without corrupting the ledger? Does the dashboard render anything pre-auth? (it must not) |
+| M7 | `internal/compress/rtk.go`, `caveman.go` + `internal/rules` windows/caps | `scripts/prove_*.py` (live proofs) | After compression, do ledger rows still carry faithful pre/saved token counts? |
 
-## 4. ⏳ FILL — milestone landmarks
+## 4. Milestone landmarks
 
-*(fast: for each milestone, add 5–10 bullets: file → line range → what's there. Keep it under
-half a screen per milestone. No narration, just landmarks.)*
+*(5–10 bullets per milestone: file → line range → what's there. Half a screen each max.
+No narration, just landmarks. M1–M7 are all filled — keep them current as the code evolves.)*
 
 ### M1 — skeleton + health ✅ (2026-10-05, verified)
 - `cmd/ezllm/main.go:30-97` — flags (`-config`, `-addr`), slog level via `EZLLM_LOG_LEVEL`,
@@ -105,6 +110,8 @@ one function. Then `store.NormalizeUsage` (`ledger.go`) for the accounting rules
 - `internal/store/crypto.go:36 NewFieldCrypto` — scrypt(N=32768,r=8,p=1) → AES-256-GCM,
   wire format `enc:v1:<iv>:<ct>:<tag>`. `KeyHint` (`:121`) masks anything ≤8 chars rather than
   truncating, so a hint can never reconstruct its key. Master key is loaded from OUTSIDE `data/`.
+  **Not wired in v1** — provider keys ship plaintext by explicit choice (commit `dfe323c`); this
+  path is kept for a future hardening pass.
 - `internal/store/ledger.go:206 RecordCall` — **non-blocking by design** (drops + counts rather
   than adding latency to a stream; invariant #5). `Flush()` (`:281`) uses an **in-band barrier on
   the same FIFO channel** so it's deterministic — an earlier 2-channel version let `select` serve a
@@ -147,7 +154,9 @@ one function. Then `store.NormalizeUsage` (`ledger.go`) for the accounting rules
 - `super-ssn/gpt-6.1-sol` → 200 (second provider, second adapter kind)
 - Cached repeat: raw `prompt=2496 cached=2048` → ledger **`tokens_in=448 + cached_read=2048`** ✅
 - Bare `gpt-6-luna` → 404 listing **both** `opengo/` and `super-ssn/` ✅
-- Keys at rest `enc:v1:…` (199 chars), hints only; `dropped_rows=0`; `CGO_ENABLED=0` static build ✅
+- Keys at rest: **plaintext** (`key_plain`) — explicit operator choice; the crypto path
+  (`internal/store/crypto.go`) is implemented + test-covered but deliberately unwired — hints only;
+  `dropped_rows=0`; `CGO_ENABLED=0` static build ✅
 
 **M2 invariants proven:** #1 no secrets in logs/responses (grep + `TestNoSecretsInResponses`) ·
 #2 SSE unbuffered (flush-count + staggered-arrival test, live TTFB) · #3 unknown fields survive ·
@@ -160,20 +169,60 @@ empty-200 on upstream death (now 502 + ledgered) · `UpsertAccount` returning id
 · boot seeding passing `ID=0` into `PickKey` (silently hid the catalog) · Anthropic/Responses
 streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
 
-### M3 — namespaces, registration + paced key test, protocol sync, smart quota
-⏳
+### M3 — namespaces, registration + paced key test, protocol sync, smart quota ✅
+- `internal/store/schema.sql` — `accounts`, `provider_keys`, `models`, `client_tokens`, `calls`;
+  keys stored plaintext in `key_plain` (explicit operator choice, commit `dfe323c`); `key_hint`
+  is the only key material any API returns.
+- `internal/registration/registration.go` — paced registration flow (step chain + `oracle`);
+  a new key is tested before it joins a pool.
+- Namespaces: model ids are `<account-slug>/<model>`; the account slug is the routing key;
+  the same upstream model on two accounts = two distinct ids.
+- Protocol sync: `/v1/messages` + `/v1/responses` mirror the chat catalog and auth; one router
+  behind three surfaces; `?protocol=anthropic` on `/v1/models` for the Claude-shaped list.
 
-### M3 — opencode-go adapter + aliases
-⏳
+### M3.5 — opencode-go adapter + aliases ✅ (superseded by namespaces)
+- `internal/provider/adapters.go` — `Kind` switch: `opencode-go`, `openai-compatible`,
+  `anthropic-compatible`; adapter contract: `PrepareRequest`, `StripHeaders`, `ReadQuota`,
+  `ListModels`.
+- Aliases (`ez/omen` → account+model) were the M3-era routing shortcut; **superseded by
+  namespace routing in M4** — legacy fields linger in the ledger; routing never guesses.
 
-### M4 — key pool + cooldown
-⏳
+### M4 — combos, strategies, key pool + cooldown ✅
+- `internal/router/router.go` — combo OR `ns/model` resolution → ordered hops; strategy switch:
+  `failover` / `true_round_robin` / `strict_round_robin` / `sticky_last_good` / `least_used`;
+  failover retry budget; 4xx passthrough (never retried).
+- Key pool: per-account key selection + cooldown after 429/failure (skipped until expiry).
+- `internal/rules/engine.go` — token caps (rolling window) + allowed-hours; combo hops that
+  violate a rule are skipped silently; direct calls get a 429 naming the rule.
+- Admin surface: `/admin/accounts` (incl. key pools), `/admin/combos`, `/admin/model-rules` CRUD.
 
-### M5 — usage queries + admin endpoint
-⏳
+### M5 — compression: engines, stages, profiles ✅
+- `internal/compress/compress.go` — engine registry: `session_dedup`, `rtk`, `headroom`, `lite`,
+  `caveman`, `budget`; ordered stage pipeline with per-stage options; fail-open + final-turn /
+  tool-result exemption enforced here (see §6).
+- `internal/server/compression.go` — `/admin/compression-profiles` CRUD; per-request profile
+  resolution (`x-ezllm-compression` header → combo default → off).
+- `internal/compress/caveman.go`, `rtk.go` — the aggressive pair (levels / surface-aware);
+  live proof scripts in `scripts/prove_*.py` (real runs, not unit mocks).
 
-### M6 — hardening + systemd
-⏳
+### M6 — dashboard + live surfaces ✅
+- `internal/server/dashboard_auth.go` — bcrypt dashboard password + sessions; seeded default
+  password must be changed on first login; `/admin/login`, `/admin/settings/password`.
+- `internal/server/spa.go` — `go:embed`-served SPA; nothing renders or fetches pre-auth.
+- `internal/server/stream.go` — `/admin/stream` SSE (snapshot + call events); dashboard pages:
+  Dashboard, Providers, Combos, Rules, Compression, Requests, RecentFeed, Chat, Connect,
+  Economics, Stats, Settings.
+- `/admin/usage` + `/admin/requests` + `/admin/export` — rollups (group_by …), token-dissection
+  explorer, disaster-recovery dump.
+
+### M7 — shipped, hardened, live ✅
+- Post-ship fixes (2026-10-09): `Origin` added to `stripAlways` in the proxy (Anthropic 401s on
+  browser origins; regression-tested — commit `8c832ef`); SPA clears session only on our
+  numeric-code 401, provider 401s surface inline (commit `358cda3`).
+- Deployment: `ghcr.io/c4lyp5o/ezllm` image; compose base (port 20129) + `compose.traefik.yml`
+  overlay (`llm.calypso.dedyn.io`, `/admin` guard); served bundle verified against `web/dist`.
+- `cmd/m2verify` remains the end-to-end acceptance checker against live traffic; every landmark
+  in this file re-verified against code on 2026-10-09.
 
 ## 5. Invariants to check while reading (review checklist)
 
@@ -193,12 +242,13 @@ These are the "if it's broken here, the project failed" spots — each must be v
 7. **Loopback by default** — binds `127.0.0.1` unless `EZLLM_ADDR` says otherwise; token gate on
    `/admin/*` with nothing rendered pre-auth.
 
-## 6. Key facts you'll need while exploring (verified 2026-10-05/06)
+## 6. Key facts you'll need while exploring (verified through 2026-10-09)
 
 - Go **1.27.1** at `~/.local/go/bin/go` (PATH wired; apt's 1.22 is shadowed fallback)
 - Keys (0600, never in repo/config): `~/.hermes/secrets/opencode-go.txt`,
   `~/.hermes/secrets/ssn-gpt.txt`, `~/.hermes/secrets/bailian-coding-plan.txt`;
-  field-encryption master key `~/.hermes/secrets/ezllm-master.key`
+  ezllm client/admin tokens: `ezllm-infer.token`, `ezllm-admin.token`;
+  field-encryption master key `ezllm-master.key` (present, unwired — see M2 landmarks)
 - opencode-go **requires** `x-opencode-session` for generation (+`x-opencode-request` recommended).
   Missing → `400 MissingSessionID`. **But `/v1/models` and `/v1/usage` need NO session header.**
 - ⚠️ **`GET /v1/models` on opencode-go is UNAUTHENTICATED** — it returns 200 + the full catalog for
@@ -229,8 +279,10 @@ These are the "if it's broken here, the project failed" spots — each must be v
 
 ## 7. Deliberate non-goals (don't go looking for them in the code)
 
-- No Anthropic↔OpenAI translation (Phase 2 — that's the Claude Code unlock)
-- No quota-cookie scraping — exhaustion is *detected reactively* from 429s (cooldown), not polled
-- No `/responses` API (Grok/GPT-Luna on opencode-go stay unreachable in v0)
-- No dashboard UI yet — `/admin/usage` returns JSON only
-- No Docker image — systemd user unit first
+- No Anthropic↔OpenAI translation — all three surfaces are **native passthrough**; Claude Code
+  runs on the native Anthropic surface (`/v1/messages`). Translation stays out of scope.
+- No quota-cookie scraping — quotas come from provider usage endpoints where they exist;
+  otherwise exhaustion is *detected reactively* on 429s (cooldown).
+- No multi-node / Postgres — single-writer SQLite, one home box.
+- No OAuth provider kinds beyond the three adapters (`opencode-go`, `openai-compatible`,
+  `anthropic-compatible`).

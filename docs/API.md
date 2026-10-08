@@ -1,4 +1,4 @@
-# ezllm admin API — contract (v1, M3)
+# ezllm admin API — contract (v1 · M1–M7 shipped)
 
 Status codes: `200` ok · `201` created · `401` no/invalid client token · `403` token lacks `admin` ·
 `404` unknown id · `409` conflict (refs exist) · `422` **key test failed** (with `step`) · `429` at cap.
@@ -197,6 +197,49 @@ This is the disaster-recovery file; it must re-seed a fresh instance minus crede
 ### `GET /admin/quota?keys=1,2` → `200`
 Latest snapshot per key (or all keys when `keys` omitted) — the poller's read side.
 Also `POST /admin/keys/{keyId}/quota` → `200` to force a live read + snapshot now.
+
+---
+
+## M4 — model rules (caps + allowed-use windows)
+
+### `GET|POST /admin/model-rules` · `GET|PATCH|DELETE /admin/model-rules/{id}` → `200`
+One rule per `(account_id, model_id)`: a rolling **token cap** and/or an **allowed-use window**.
+
+- `cap_tokens` — `0` = unlimited; `cap_window` — `5h | daily | weekly | monthly` (default `monthly`).
+- `win_start` / `win_end` — `HH:MM` local to `win_tz`; `end < start` wraps midnight; both empty =
+  always allowed; an identical pair is rejected (empty window, not all-day).
+- `win_days` — CSV of `0–6` (Sun=0), `""` = every day; `win_tz` — IANA name or fixed offset.
+- `enabled`, `note` optional.
+
+Enforcement: inside a combo, a hop whose rule says "not now" is **skipped silently** (the next
+hop serves); a direct call returns `429` naming the rule and its window; a combo refused on
+every hop returns `429`, not `502`.
+
+## M5–M7 — compression profiles
+
+### `GET|POST /admin/compression-profiles` · `GET|PATCH|DELETE /admin/compression-profiles/{id}` → `200`
+`stages` is an ordered engine pipeline over `session_dedup`, `rtk`, `headroom`, `lite`, `caveman`,
+`budget`, validated against the engine registry on write. Stage options are engine-specific
+(e.g. `{"engine":"rtk","keep_lines":6}`); `budget` carries its own context-token accounting.
+
+- `exempt_last_turn` (default true) · `min_compress_ratio` (0.05) · `fail_open` (true) ·
+  `auto_trigger_tokens` (0 = off) · `enabled` · `notes`.
+- Selection: per-request `x-ezllm-compression` header → the combo's `compression_profile_id` →
+  off. Fail-open: an engine error passes the original request through untouched.
+
+## M6 — dashboard session & live feed
+
+### `POST /admin/login` → `200` + session · `POST /admin/settings/password`
+bcrypt dashboard password; the SPA renders and fetches nothing pre-auth.
+
+### `GET /admin/stream` → SSE
+Two event types: `snapshot` (last 20 calls on connect, newest first) and `calls` (each committed
+ledger batch).
+
+### `GET /admin/health` · `POST /admin/chat`
+`health` counts the same rows the dashboard headline uses; `chat` executes through the **normal
+inference path** (router → rules → compression → proxy → ledger) under an admin session — it is
+the dashboard's own Chat page.
 
 ---
 

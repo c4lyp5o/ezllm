@@ -148,6 +148,7 @@ function RecentCalls({ o }: { o: Overview }) {
                 <th className="px-3 py-2 text-right font-medium">in</th>
                 <th className="px-3 py-2 text-right font-medium">out</th>
                 <th className="px-3 py-2 text-right font-medium">saved</th>
+                <th className="px-3 py-2 text-right font-medium">context</th>
                 <th className="px-3 py-2 text-right font-medium">compression</th>
               </tr>
             </thead>
@@ -166,6 +167,9 @@ function RecentCalls({ o }: { o: Overview }) {
                   <td className="px-3 py-2 text-right tabular-nums text-dim">{r.tout}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-dim">
                     {r.saved > 0 ? <span className="text-emerald-300/80">−{formatTokens(r.saved)}</span> : '–'}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-dim" title={r.contextPre ? `before: ${formatTokens(r.contextPre)}` : undefined}>
+                    {r.contextSaved ? <span className="text-sky-300/80">−{formatTokens(r.contextSaved)}</span> : '–'}
                   </td>
                   <td className="px-3 py-2 text-right">
                     {r.compression ? (

@@ -95,7 +95,7 @@ export default function Stats() {
     switch (gran) {
       case 'cache': return r.cread + r.cwrite;
       case 'compression': return r.saved;
-      case 'savings': return r.saved;
+      case 'savings': return r.context_saved + r.saved;
       case 'provider': case 'model': return r.tin + r.tout;
       default: return r.tin + r.tout;
     }

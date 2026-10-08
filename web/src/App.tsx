@@ -11,14 +11,18 @@ import Compression from './pages/Compression';
 import Connect from './pages/Connect';
 import Rules from './pages/Rules';
 import Stats from './pages/Stats';
+import Economics from './pages/Economics';
 import Requests from './pages/Requests';
 import Settings from './pages/Settings';
+import Chat from './pages/Chat';
 
 const NAV = [
   { to: '/', label: 'Dashboard', hint: 'overview · health · ledger' },
   { to: '/stats', label: 'Stats', hint: 'granularity · range' },
+  { to: '/economics', label: 'Token Economics', hint: 'savings · cache · outliers' },
   { to: '/requests', label: 'Requests', hint: 'filter · tokens' },
   { to: '/providers', label: 'Providers', hint: 'accounts · keys · models' },
+  { to: '/chat', label: 'Chat', hint: 'test a model' },
   { to: '/combos', label: 'Combos', hint: 'routing chains' },
   { to: '/rules', label: 'Rules', hint: 'caps · windows' },
   { to: '/compression', label: 'Compression', hint: 'profiles · engines' },
@@ -122,8 +126,10 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 const PAGE_HEADERS: Record<string, { title: string; sub: string }> = {
   '/': { title: 'Dashboard', sub: 'traffic, health and the last 20 calls' },
   '/stats': { title: 'Stats', sub: 'usage by granularity and range' },
+  '/economics': { title: 'Token Economics', sub: 'optimization savings and large requests' },
   '/requests': { title: 'Requests', sub: 'dissect tokens in and out' },
   '/providers': { title: 'Providers', sub: 'accounts, keys, catalogs and quota' },
+  '/chat': { title: 'Chat', sub: 'test a routed provider model' },
   '/combos': { title: 'Combos', sub: 'ordered routing chains' },
   '/rules': { title: 'Rules', sub: 'usage caps and allowed-use windows' },
   '/compression': { title: 'Compression', sub: 'profiles, engines and savings' },
@@ -186,8 +192,10 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
       <Route path="/stats" element={<Stats />} />
+      <Route path="/economics" element={<Economics />} />
       <Route path="/requests" element={<Requests />} />
             <Route path="/providers" element={<Providers />} />
+            <Route path="/chat" element={<Chat />} />
             <Route path="/combos" element={<Combos />} />
             <Route path="/rules" element={<Rules />} />
             <Route path="/compression" element={<Compression />} />

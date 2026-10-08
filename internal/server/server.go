@@ -140,6 +140,7 @@ func (s *Server) routes() {
 
 	s.mux.HandleFunc("POST /admin/accounts/{id}/sync", s.admin(s.handleSync))
 	s.mux.HandleFunc("GET /admin/accounts/{id}/models", s.admin(s.handleListModels))
+	s.mux.HandleFunc("POST /admin/chat", s.admin(s.inference(provider.SurfaceOpenAI)))
 	s.mux.HandleFunc("GET /admin/accounts/{id}/quota", s.admin(s.handleAccountQuota))
 
 	s.mux.HandleFunc("GET /admin/combos", s.admin(s.handleCombos))

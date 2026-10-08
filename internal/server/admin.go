@@ -792,8 +792,47 @@ func (s *Server) anyKey(ctx context.Context, accountID int64) (string, int64, er
 	return "", 0, store.ErrNotFound
 }
 
-// ── combos ──────────────────────────────────────────────────────────────────
+func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, http.StatusMethodNotAllowed, "invalid_request_error", "method not allowed")
+		return
+	}
+	var body struct {
+		Model    string `json:"model"`
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	if strings.TrimSpace(body.Model) == "" || len(body.Messages) == 0 {
+		writeErr(w, http.StatusBadRequest, "invalid_request_error", "model and at least one message are required")
+		return
+	}
+	payload := map[string]any{"model": body.Model, "messages": body.Messages, "stream": false}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "server_error", "could not encode chat request")
+		return
+	}
+	requested := body.Model
+	routes, err := s.resolver.ResolveCandidates(r.Context(), requested, provider.SurfaceOpenAI, "dashboard")
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "model_not_found", err.Error())
+		return
+	}
+	// The dispatcher writes the upstream answer to w itself. Nothing may be
+	// written here afterwards: a second body would be appended to the first
+	// (surviving only while the upstream sets Content-Length, and corrupting
+	// the JSON the moment it streams chunked).
+	if _, _, ferr := s.dispatcher.ForwardCandidates(r.Context(), w, r, routes, raw); ferr != nil {
+		writeErr(w, http.StatusBadGateway, "upstream_error", "chat request failed: "+ferr.Error())
+	}
+}
 
+// ── combos ──────────────────────────────────────────────────────────────────
 func (s *Server) handleCombos(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:

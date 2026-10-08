@@ -124,6 +124,7 @@ func (d *DB) GetAccount(ctx context.Context, id int64) (*AccountSummary, error) 
 
 // hydrateAccount fills keys / quota / protocol counts for one account.
 func (d *DB) hydrateAccount(ctx context.Context, a *AccountSummary) error {
+	a.Keys = []KeySummary{} // API contract: collections are arrays, including when empty.
 	a.ProtocolSupport = map[string]int{"openai": 0, "anthropic": 0, "responses": 0, "untested": 0}
 
 	// keys

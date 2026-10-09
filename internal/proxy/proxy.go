@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/c4lyp5o/ezllm/internal/provider"
@@ -105,12 +106,78 @@ type Dispatcher struct {
 	client        *http.Client
 	registry      *provider.Registry
 	retryAttempts int
+	cooldownMu    sync.Mutex
+	cooldowns     map[string]cooldownState
+}
+
+type cooldownState struct {
+	until       time.Time
+	probeActive bool
+}
+
+const deadHopCooldown = 5 * time.Minute
+
+func hopKey(rt Route) string {
+	return fmt.Sprintf("%d|%s", rt.Account.ID, strings.TrimRight(rt.Account.BaseURL, "/"))
+}
+
+// acquireHop grants one request the right to try an endpoint. A cooled endpoint
+// has exactly one half-open probe after the five-minute window; concurrent
+// callers skip it until that probe succeeds or fails.
+func (d *Dispatcher) acquireHop(rt Route, now time.Time) (allowed, probe bool) {
+	key := hopKey(rt)
+	d.cooldownMu.Lock()
+	defer d.cooldownMu.Unlock()
+	if d.cooldowns == nil {
+		return true, false
+	}
+	state, exists := d.cooldowns[key]
+	if !exists {
+		return true, false
+	}
+	if state.until.After(now) || state.probeActive {
+		return false, false
+	}
+	state.probeActive = true
+	d.cooldowns[key] = state
+	return true, true
+}
+
+func (d *Dispatcher) releaseProbe(rt Route) {
+	key := hopKey(rt)
+	d.cooldownMu.Lock()
+	defer d.cooldownMu.Unlock()
+	if state, ok := d.cooldowns[key]; ok && state.probeActive {
+		state.probeActive = false
+		d.cooldowns[key] = state
+	}
+}
+
+func cooldownFailure(err error, status int) bool {
+	if err != nil {
+		return retryableUpstreamError(err)
+	}
+	return status == http.StatusRequestTimeout || status == http.StatusTooEarly || status >= http.StatusInternalServerError
+}
+
+func (d *Dispatcher) recordHop(rt Route, failed bool, now time.Time) {
+	key := hopKey(rt)
+	d.cooldownMu.Lock()
+	defer d.cooldownMu.Unlock()
+	if failed {
+		if d.cooldowns == nil {
+			d.cooldowns = make(map[string]cooldownState)
+		}
+		d.cooldowns[key] = cooldownState{until: now.Add(deadHopCooldown)}
+	} else if d.cooldowns != nil {
+		delete(d.cooldowns, key)
+	}
 }
 
 // NewDispatcher builds a Dispatcher. timeout governs connection/response-header
 // time only; streaming bodies are unbounded by design.
 func NewDispatcher(client *http.Client, registry *provider.Registry) *Dispatcher {
-	return &Dispatcher{client: client, registry: registry, retryAttempts: 3}
+	return &Dispatcher{client: client, registry: registry, retryAttempts: 3, cooldowns: make(map[string]cooldownState)}
 }
 
 func (d *Dispatcher) SetRetries(retries int) {
@@ -349,32 +416,61 @@ func drainClose(resp *http.Response) {
 // sees only the hop that ultimately commits. Once commit runs we stop, because
 // a partially streamed response cannot be handed to a second upstream.
 //
-// The LAST candidate always commits, even when its status is failover-able:
-// if every hop fails, the client gets the real upstream error rather than a
-// plausible-looking invention of ours.
+// Failover-able responses stay buffered until a later candidate succeeds; if
+// every eligible route fails, the last real upstream error is committed. Routes
+// still cooling down are never called merely to manufacture a final response.
 func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWriter, r *http.Request, routes []Route, body []byte) (Route, Result, error) {
 	if len(routes) == 0 {
 		return Route{}, Result{}, errors.New("proxy: no candidate routes")
 	}
-	// The last candidate is final: it is always committed, so the client sees
-	// a real upstream answer instead of an invented one. Everything before it
-	// may be abandoned. Splitting the two cases here (rather than one loop
-	// with an index guard) is what keeps the "no candidate left" return from
-	// being unreachable dead code.
-	for i := 0; i < len(routes)-1; i++ {
+	// Try candidates in the resolver's strategy order, skipping cooled endpoints.
+	var fallbackRoute *Route
+	var fallbackResp *http.Response
+	var fallbackResult Result
+	var fallbackStart time.Time
+	var fallbackTransportErr error
+	for i := 0; i < len(routes); i++ {
 		rt := routes[i]
+		allowed, probe := d.acquireHop(rt, time.Now())
+		if !allowed {
+			continue
+		}
+		// If all later candidates are cooling down, hold this eligible route as
+		// the final response fallback. This preserves an actual upstream error
+		// without making an extra request that circumvents cooldown.
+		if i == len(routes)-1 && len(routes) == 1 {
+			// A sole eligible endpoint is attempted normally below.
+		}
 		swapped, _, err := SwapModel(body, rt.Model)
 		if err != nil {
+			if probe {
+				d.releaseProbe(rt)
+			}
 			return Route{}, Result{}, err
 		}
 		resp, res, start, err := d.retryAttempt(ctx, r, rt, swapped)
+		d.recordHop(rt, cooldownFailure(err, res.Status), time.Now())
+		if probe {
+			d.releaseProbe(rt)
+		}
 		if err != nil {
-			// Transport failure — nothing written, safe to try the next hop.
+			if fallbackResp != nil {
+				drainClose(fallbackResp)
+				fallbackResp = nil
+			}
+			fallbackTransportErr = err
 			continue
 		}
 		if failoverStatus(res.Status) {
-			drainClose(resp)
+			if fallbackResp != nil {
+				drainClose(fallbackResp)
+			}
+			rtCopy, resCopy, startCopy := rt, res, start
+			fallbackRoute, fallbackResp, fallbackResult, fallbackStart = &rtCopy, resp, resCopy, startCopy
 			continue
+		}
+		if fallbackResp != nil {
+			drainClose(fallbackResp)
 		}
 		res2, err2 := d.commit(ctx, w, resp, rt, res, start)
 		// The committed route travels back with the result: the ledger must
@@ -384,17 +480,17 @@ func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWrite
 		return rt, res2, err2
 	}
 
-	rt := routes[len(routes)-1]
-	swapped, _, err := SwapModel(body, rt.Model)
-	if err != nil {
-		return Route{}, Result{}, err
+	// Preserve the final upstream error response for compatibility, but never
+	// issue another request to an endpoint that's cooling down. A stored response
+	// is safe to commit: it was obtained by a prior, permitted attempt.
+	if fallbackResp != nil {
+		result, err := d.commit(ctx, w, fallbackResp, *fallbackRoute, fallbackResult, fallbackStart)
+		return *fallbackRoute, result, err
 	}
-	resp, res, start, err := d.retryAttempt(ctx, r, rt, swapped)
-	if err != nil {
-		return rt, res, err
+	if fallbackTransportErr != nil {
+		return Route{}, Result{}, fallbackTransportErr
 	}
-	res2, err2 := d.commit(ctx, w, resp, rt, res, start)
-	return rt, res2, err2
+	return Route{}, Result{}, errors.New("proxy: all combo endpoints are in five-minute cooldown")
 }
 
 // streamCopy copies SSE upstream->client with a Flush per chunk, observing

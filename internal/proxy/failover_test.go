@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/c4lyp5o/ezllm/internal/provider"
 )
@@ -143,8 +144,77 @@ func TestAllHopsFailingReturnsRealStatus(t *testing.T) {
 	}
 }
 
-// Transport-level failure (upstream unreachable) must also advance to the next
-// hop — nothing was written, so there is nothing to protect.
+func TestEndpointCooldownSkipsFailedHopOnNextRequest(t *testing.T) {
+	var deadHits, goodHits int
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		deadHits++
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, `{"error":"down"}`)
+	}))
+	defer bad.Close()
+	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		goodHits++
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	defer good.Close()
+
+	d := newDispatcher()
+	d.SetRetries(0)
+	routes := []Route{textRoute(bad.URL, "day"), textRoute(good.URL, "night")}
+	for i := 0; i < 2; i++ {
+		req, body := reqWithBody(`{"model":"day","messages":[]}`)
+		rec := httptest.NewRecorder()
+		_, _, err := d.ForwardCandidates(context.Background(), rec, req, routes, body)
+		if err != nil || rec.Code != http.StatusOK {
+			t.Fatalf("request %d: status=%d err=%v body=%s", i, rec.Code, err, rec.Body.String())
+		}
+	}
+	if deadHits != 1 || goodHits != 2 {
+		t.Fatalf("hits bad=%d good=%d, want 1 and 2 (bad endpoint should cool down)", deadHits, goodHits)
+	}
+}
+
+func TestAllCooldownRoutesReturnErrorWithoutUpstreamCall(t *testing.T) {
+	var hits int
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer up.Close()
+	d := newDispatcher()
+	rt := textRoute(up.URL, "model")
+	d.recordHop(rt, true, time.Now())
+	req, body := reqWithBody(`{"model":"model","messages":[]}`)
+	rec := httptest.NewRecorder()
+	_, _, err := d.ForwardCandidates(context.Background(), rec, req, []Route{rt}, body)
+	if err == nil || !strings.Contains(err.Error(), "cooldown") {
+		t.Fatalf("error=%v, want cooldown error", err)
+	}
+	if hits != 0 || rec.Body.Len() != 0 {
+		t.Fatalf("cooldown bypassed: hits=%d body=%q", hits, rec.Body.String())
+	}
+}
+
+func TestHalfOpenAllowsExactlyOneProbe(t *testing.T) {
+	d := newDispatcher()
+	rt := textRoute("http://upstream.invalid", "model")
+	now := time.Now()
+	d.recordHop(rt, true, now.Add(-deadHopCooldown-time.Second))
+	ok, probe := d.acquireHop(rt, now)
+	if !ok || !probe {
+		t.Fatalf("first expired-cooldown caller=(%v,%v), want (true,true)", ok, probe)
+	}
+	ok, probe = d.acquireHop(rt, now)
+	if ok || probe {
+		t.Fatalf("concurrent caller=(%v,%v), want (false,false)", ok, probe)
+	}
+	d.recordHop(rt, false, now)
+	ok, probe = d.acquireHop(rt, now)
+	if !ok || probe {
+		t.Fatalf("recovered endpoint caller=(%v,%v), want (true,false)", ok, probe)
+	}
+}
+
 func TestTransportFailureFailsOver(t *testing.T) {
 	dead := "http://127.0.0.1:1" // nothing listens here
 	ok := upstub(t, http.StatusOK, `{"ok":true}`)

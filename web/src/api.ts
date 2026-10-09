@@ -278,7 +278,7 @@ export type Hop = { account_id: number; model_id: string; weight: number; enable
 
 export type Combo = {
   id: number; name: string; strategy: string; sticky_idle_s: number | null; enabled: boolean;
-  compression_profile_id?: number | null;
+  compression_profile_id?: number | null; context_size: number;
   hops: Hop[];
 };
 

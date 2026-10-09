@@ -11,11 +11,11 @@ const emptyHop = (account_id: number): HopRow => ({ account_id, model_id: '', we
 
 type Draft = {
   name: string; strategy: string; sticky_idle_s: number; enabled: boolean;
-  compression_profile_id: number | null; hops: HopRow[];
+  compression_profile_id: number | null; context_size: number; hops: HopRow[];
 };
 
 function newDraft(): Draft {
-  return { name: '', strategy: 'failover', sticky_idle_s: 1800, enabled: true, compression_profile_id: null, hops: [] };
+  return { name: '', strategy: 'failover', sticky_idle_s: 1800, context_size: 200000, enabled: true, compression_profile_id: null, hops: [] };
 }
 
 function HopArrow({ last }: { last: boolean }) {
@@ -98,6 +98,7 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
       setD({
         name: editing.name, strategy: editing.strategy, sticky_idle_s: editing.sticky_idle_s ?? 1800,
         enabled: editing.enabled, compression_profile_id: editing.compression_profile_id ?? null,
+        context_size: editing.context_size ?? 200000,
         hops: (editing.hops ?? []).map((h) => ({ ...h })),
       });
     } else setD(newDraft());
@@ -109,7 +110,7 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
     setBusy(true); setErr(null);
     const body: Record<string, unknown> = {
       name: d.name.trim(), strategy: d.strategy, sticky_idle_s: d.strategy === 'sticky_last_good' ? d.sticky_idle_s : null,
-      enabled: d.enabled, compression_profile_id: d.compression_profile_id, hops: d.hops,
+      enabled: d.enabled, compression_profile_id: d.compression_profile_id, context_size: d.context_size, hops: d.hops,
     };
     try {
       if (editing) await patch<Combo>(`/admin/combos/${editing.id}`, body);
@@ -153,6 +154,12 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
                 <option value="">none — profiles arrive in M5</option>
               </select>
             )}
+          </div>
+          <div>
+            <label className={labelCls} htmlFor="cb-context-size">Context size advertised to clients</label>
+            <input id="cb-context-size" className={inputCls} type="number" min={1} max={10000000} step={1000}
+              value={d.context_size} onChange={(e) => setD((p) => ({ ...p, context_size: Number(e.target.value) }))} />
+            <p className="mt-1 text-[11px] text-mute">Clients such as Hermes use this metadata. ezllm does not enforce the context limit; direct models keep their provider metadata.</p>
           </div>
         </div>
 

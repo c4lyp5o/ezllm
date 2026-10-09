@@ -565,6 +565,33 @@ func TestComboEnableToggle(t *testing.T) {
 	if !listed() {
 		t.Fatalf("/v1/models should advertise an enabled combo")
 	}
+	_, _, modelsBody := h.do("GET", "/v1/models", "tok-infer", "")
+	var models struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(modelsBody), &models); err != nil {
+		t.Fatal(err)
+	}
+	foundContext := false
+	for _, model := range models.Data {
+		if model["id"] == "daily" {
+			foundContext = model["context_size"] == float64(200000)
+		}
+	}
+	if !foundContext {
+		t.Fatalf("/v1/models must advertise combo context_size=200000: %s", modelsBody)
+	}
+	if code, resp = jsonDo(t, h, "PATCH", fmt.Sprintf("/admin/combos/%d", id), "tok-admin",
+		map[string]any{"context_size": 128000}); code != http.StatusOK {
+		t.Fatalf("patch context_size: %d %s", code, resp)
+	}
+	if got := mustJSON(t, resp)["context_size"]; got != float64(128000) {
+		t.Fatalf("updated context_size = %v, want 128000", got)
+	}
+	if code, resp = jsonDo(t, h, "PATCH", fmt.Sprintf("/admin/combos/%d", id), "tok-admin",
+		map[string]any{"notes": "preserve context"}); code != http.StatusOK || mustJSON(t, resp)["context_size"] != float64(128000) {
+		t.Fatalf("omitted context_size must stay unchanged: %d %s", code, resp)
+	}
 
 	// body toggle off
 	if code, resp = jsonDo(t, h, "PATCH", fmt.Sprintf("/admin/combos/%d", id), "tok-admin",

@@ -21,13 +21,22 @@ Errors are OpenAI-shaped: `{"error":{"type":"...","message":"...","code":422}}`.
 
 `/v1/models` rows: namespaced ids carry the upstream's `owned_by` and, once probed, a `protocol`
 map. A combo row is bare (`owned_by: "ezllm"`) and adds a non-standard `combo` key —
-`{"strategy":"failover","hops":[{"account_id":1,"model":"mimo-v2.6-flash","enabled":true}]}` — so a
+`{"strategy":"failover","hops":[{"account_id":1,"model":"mimo-v2.6-flash","enabled":true}],"context_size":200000}` — so a
 picker can say what the name routes to; OpenAI clients that don't know the key ignore it. Combo names
 can never contain `/`, so a bare id is unambiguous. Disabled combos are never listed.
 
 ## M3 — accounts, keys, models, quota
 
-### `GET /admin/overview`
+| GET | `/admin/combos` | Lists combos with strategy, hops, compression profile, and advertised `context_size` (default 200000) |
+| POST | `/admin/combos` | Creates a combo; optional `context_size` is positive tokens, defaults to 200000 |
+| PATCH | `/admin/combos/{id}` | Partial update; omitted compression profile keeps current; explicit `compression_profile_id: null` clears it |
+| GET | `/v1/models` | Enabled combo rows include `context_size`; client-advertised only, not gateway enforcement |
+
+**Combo PATCH semantics:** omitted fields keep their stored value; `compression_profile_id: null` clears the binding. `context_size` is required positive integer when supplied, defaults to 200000 on creation, and is emitted only on combo rows.
+
+**Combo failover cooldown:** transport failures/timeouts and upstream 5xx responses cool only that account endpoint for 5 minutes. Model-specific 401/403/404/429 responses remain failover-able but do not mark the endpoint dead. After expiry exactly one half-open probe is admitted; if every candidate is cooling down, no upstream request is sent. When all attempted hops returned an upstream failover response, the last permitted response is returned rather than issuing another call.
+
+
 Dashboard payload. One call so the first paint is a single round trip.
 ```jsonc
 {

@@ -119,6 +119,7 @@ CREATE TABLE IF NOT EXISTS combos (
               CHECK (strategy IN ('failover','true_round_robin','strict_round_robin','sticky_last_good','least_used')),
   sticky_idle_s INTEGER NOT NULL DEFAULT 1800,  -- sticky_last_good: unstick after idle
   compression_profile_id INTEGER REFERENCES compression_profiles(id),
+  context_size INTEGER NOT NULL DEFAULT 200000 CHECK (context_size BETWEEN 1 AND 10000000),
   rr_cursor   INTEGER NOT NULL DEFAULT 0,       -- strict_round_robin position
   rr_epoch    INTEGER NOT NULL DEFAULT 0,       -- fingerprint of eligible hop set
   notes       TEXT,

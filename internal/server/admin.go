@@ -851,12 +851,21 @@ func (s *Server) handleCombos(w http.ResponseWriter, r *http.Request) {
 		// until traffic arrives. An explicit "enabled": false still disables.
 		var raw struct {
 			store.Combo
-			Enabled *bool `json:"enabled"`
+			Enabled *bool           `json:"enabled"`
+			Profile json.RawMessage `json:"compression_profile_id"`
 		}
 		if !decodeBody(w, r, &raw) {
 			return
 		}
 		c := raw.Combo
+		if raw.Profile != nil {
+			if string(raw.Profile) == "null" {
+				c.CompressionProfileID = nil
+			} else if err := json.Unmarshal(raw.Profile, &c.CompressionProfileID); err != nil {
+				writeErr(w, http.StatusBadRequest, "invalid_request_error", "compression_profile_id must be an integer or null")
+				return
+			}
+		}
 		c.Enabled = raw.Enabled == nil || *raw.Enabled
 		id, err := s.db.UpsertCombo(r.Context(), c)
 		if err != nil {
@@ -903,7 +912,9 @@ func (s *Server) handleCombo(w http.ResponseWriter, r *http.Request) {
 		// Pointer = tri-state: nil keeps the current value.
 		var body struct {
 			store.Combo
-			Enabled *bool `json:"enabled"`
+			Enabled               *bool           `json:"enabled"`
+			CompressionProfileRaw json.RawMessage `json:"compression_profile_id"`
+			ContextSizeRaw        json.RawMessage `json:"context_size"`
 		}
 		if !decodeBody(w, r, &body) {
 			return
@@ -935,8 +946,27 @@ func (s *Server) handleCombo(w http.ResponseWriter, r *http.Request) {
 		if c.StickyIdleS == 0 {
 			c.StickyIdleS = cur.StickyIdleS
 		}
-		if c.CompressionProfileID == nil {
+		if body.ContextSizeRaw == nil {
+			c.ContextSize = cur.ContextSize
+		}
+		if body.CompressionProfileRaw == nil {
 			c.CompressionProfileID = cur.CompressionProfileID
+		}
+		if body.CompressionProfileRaw != nil {
+			if string(body.CompressionProfileRaw) == "null" {
+				c.CompressionProfileID = nil
+			} else if err := json.Unmarshal(body.CompressionProfileRaw, &c.CompressionProfileID); err != nil {
+				writeErr(w, http.StatusBadRequest, "invalid_request_error", "compression_profile_id must be an integer or null")
+				return
+			}
+		}
+		if body.ContextSizeRaw != nil {
+			if string(body.ContextSizeRaw) == "null" || json.Unmarshal(body.ContextSizeRaw, &c.ContextSize) != nil {
+				writeErr(w, http.StatusBadRequest, "invalid_request_error", "context_size must be a positive integer")
+				return
+			}
+		} else {
+			c.ContextSize = cur.ContextSize
 		}
 		if c.Hops == nil {
 			c.Hops = cur.Hops

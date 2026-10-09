@@ -24,7 +24,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 5
+const schemaVersion = 6
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -215,6 +215,9 @@ func (d *DB) migrate() error {
 		if err := d.alterDashboardAuth(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate dashboard auth: %w", err)
 		}
+		if err := d.alterComboContextSize(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate combo context size: %w", err)
+		}
 		if _, err := d.w.Exec(schemaSQL); err != nil {
 			return fmt.Errorf("store: migrate %d->%d: %w", cur, schemaVersion, err)
 		}
@@ -223,6 +226,20 @@ func (d *DB) migrate() error {
 		}
 	}
 	return nil
+}
+
+// alterComboContextSize adds the client-advertised context metadata on existing DBs.
+func (d *DB) alterComboContextSize(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "combos")
+	if err != nil || !exists {
+		return err
+	}
+	has, err := hasColumn(ctx, d.w, "combos", "context_size")
+	if err != nil || has {
+		return err
+	}
+	_, err = d.w.ExecContext(ctx, `ALTER TABLE combos ADD COLUMN context_size INTEGER NOT NULL DEFAULT 200000`)
+	return err
 }
 
 // alterCallsAccountID adds calls.account_id (M5 metering key) on databases

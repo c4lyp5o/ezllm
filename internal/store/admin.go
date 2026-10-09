@@ -804,6 +804,7 @@ type Combo struct {
 	StickyIdleS          int        `json:"sticky_idle_s"`
 	Enabled              bool       `json:"enabled"`
 	CompressionProfileID *int64     `json:"compression_profile_id"`
+	ContextSize          int64      `json:"context_size"`
 	Notes                string     `json:"notes,omitempty"`
 	CreatedAt            string     `json:"created_at"`
 	Hops                 []ComboHop `json:"hops"`
@@ -818,6 +819,9 @@ func ValidStrategies() []string {
 func ValidateCombo(c Combo) error {
 	if strings.TrimSpace(c.Name) == "" {
 		return errors.New("name is required")
+	}
+	if c.ContextSize <= 0 || c.ContextSize > 10000000 {
+		return errors.New("context_size must be between 1 and 10000000 tokens")
 	}
 	if strings.Contains(c.Name, "/") {
 		return errors.New("combo name must not contain '/' — combos have no namespace")
@@ -849,7 +853,7 @@ func ValidateCombo(c Combo) error {
 // ListCombos returns all combos with their ordered hops.
 func (d *DB) ListCombos(ctx context.Context) ([]Combo, error) {
 	rows, err := d.r.QueryContext(ctx, `
-SELECT id, name, strategy, sticky_idle_s, enabled, compression_profile_id,
+SELECT id, name, strategy, sticky_idle_s, enabled, compression_profile_id, context_size,
        COALESCE(notes,''), created_at
 FROM combos ORDER BY name`)
 	if err != nil {
@@ -862,8 +866,11 @@ FROM combos ORDER BY name`)
 		var c Combo
 		var cpid sql.NullInt64
 		if err := rows.Scan(&c.ID, &c.Name, &c.Strategy, &c.StickyIdleS, &c.Enabled,
-			&cpid, &c.Notes, &c.CreatedAt); err != nil {
+			&cpid, &c.ContextSize, &c.Notes, &c.CreatedAt); err != nil {
 			return nil, err
+		}
+		if c.ContextSize == 0 {
+			c.ContextSize = 200000
 		}
 		if cpid.Valid {
 			v := cpid.Int64
@@ -900,6 +907,9 @@ FROM combo_hops ORDER BY combo_id, position`)
 // UpsertCombo creates or replaces a combo by name (idempotent POST per the
 // API contract). Hops replace the whole ordered list; positions = array order.
 func (d *DB) UpsertCombo(ctx context.Context, c Combo) (int64, error) {
+	if c.ContextSize == 0 {
+		c.ContextSize = 200000
+	}
 	if err := ValidateCombo(c); err != nil {
 		return 0, err
 	}
@@ -910,13 +920,13 @@ func (d *DB) UpsertCombo(ctx context.Context, c Combo) (int64, error) {
 			cpid = *c.CompressionProfileID
 		}
 		_, err := tx.ExecContext(ctx, `
-INSERT INTO combos (name, strategy, sticky_idle_s, enabled, compression_profile_id, notes)
-VALUES (?,?,?,?,?,?)
+INSERT INTO combos (name, strategy, sticky_idle_s, enabled, compression_profile_id, context_size, notes)
+VALUES (?,?,?,?,COALESCE(?, (SELECT id FROM compression_profiles WHERE 0)),?,?)
 ON CONFLICT(name) DO UPDATE SET
   strategy=excluded.strategy, sticky_idle_s=excluded.sticky_idle_s,
   enabled=excluded.enabled, compression_profile_id=excluded.compression_profile_id,
-  notes=excluded.notes`,
-			c.Name, c.Strategy, c.StickyIdleS, boolToInt(c.Enabled), cpid, c.Notes)
+  context_size=excluded.context_size, notes=excluded.notes`,
+			c.Name, c.Strategy, c.StickyIdleS, boolToInt(c.Enabled), cpid, c.ContextSize, c.Notes)
 		if err != nil {
 			return err
 		}
@@ -1014,13 +1024,13 @@ func (d *DB) AllComboNames(ctx context.Context) ([]string, error) {
 // every hop in the database just to return one of them.
 func (d *DB) ComboByName(ctx context.Context, name string) (*Combo, error) {
 	row := d.r.QueryRowContext(ctx, `
-SELECT id, name, strategy, sticky_idle_s, enabled, compression_profile_id,
+SELECT id, name, strategy, sticky_idle_s, enabled, compression_profile_id, context_size,
        COALESCE(notes,''), created_at
 FROM combos WHERE name = ?`, name)
 	var c Combo
 	var cpid sql.NullInt64
 	if err := row.Scan(&c.ID, &c.Name, &c.Strategy, &c.StickyIdleS, &c.Enabled,
-		&cpid, &c.Notes, &c.CreatedAt); err != nil {
+		&cpid, &c.ContextSize, &c.Notes, &c.CreatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}

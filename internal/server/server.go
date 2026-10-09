@@ -309,8 +309,8 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if protocol == "anthropic" {
-			// Anthropic's shape stays exactly {type,id,display_name}; the
-			// "combo" marker below is an OpenAI-side convenience only.
+			// Anthropic's shape stays exactly {type,id,display_name}; context_size
+			// is advertised only in OpenAI-compatible model metadata.
 			data = append(data, map[string]any{"type": "model", "id": c.Name, "display_name": c.Name})
 			continue
 		}
@@ -323,7 +323,8 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		}
 		data = append(data, map[string]any{
 			"id": c.Name, "object": "model", "created": 0, "owned_by": "ezllm",
-			"combo": map[string]any{"strategy": c.Strategy, "hops": hops},
+			"context_size": c.ContextSize,
+			"combo":        map[string]any{"strategy": c.Strategy, "hops": hops},
 		})
 	}
 

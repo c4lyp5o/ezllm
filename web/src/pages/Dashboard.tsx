@@ -31,8 +31,6 @@ function HealthStrip({ o }: { o: Overview }) {
     ['accounts', String(h.accounts)],
     ['models', String(h.models)],
     ['combos', String(h.combos)],
-    ['ledger rows', formatTokens(h.ledger_rows)],
-    ['dropped', String(h.dropped_rows)],
     ['uptime', fmtUptime(h.uptime_s)],
   ];
   return (
@@ -42,10 +40,9 @@ function HealthStrip({ o }: { o: Overview }) {
           <span className="text-mute">{k}</span> <Mono className="text-[11px] text-ink">{v}</Mono>
         </Chip>
       ))}
-      <Chip tone={h.dropped_rows > 0 ? 'warn' : 'ok'} className="gap-1.5 px-2.5 py-1">
+      <Chip tone={h.status === 'ok' ? 'ok' : 'warn'} className="gap-1.5 px-2.5 py-1">
         <span className={cx('h-1.5 w-1.5 rounded-full', h.status === 'ok' ? 'bg-ok' : 'bg-warn')} />
         {h.status}
-        <span className="text-mute">· schema v{h.schema_version}</span>
       </Chip>
     </div>
   );
@@ -151,7 +148,6 @@ function RecentCalls({ o }: { o: Overview }) {
                 <th className="px-3 py-2 text-right font-medium">in</th>
                 <th className="px-3 py-2 text-right font-medium">out</th>
                 <th className="px-3 py-2 text-right font-medium">saved</th>
-                <th className="px-3 py-2 text-right font-medium">context</th>
                 <th className="px-3 py-2 text-right font-medium">compression</th>
               </tr>
             </thead>
@@ -170,9 +166,6 @@ function RecentCalls({ o }: { o: Overview }) {
                   <td className="px-3 py-2 text-right tabular-nums text-dim">{r.tout}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-dim">
                     {r.saved > 0 ? <span className="text-emerald-300/80">−{formatTokens(r.saved)}</span> : '–'}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-dim" title={r.contextPre ? `before: ${formatTokens(r.contextPre)}` : undefined}>
-                    {r.contextSaved ? <span className="text-sky-300/80">−{formatTokens(r.contextSaved)}</span> : '–'}
                   </td>
                   <td className="px-3 py-2 text-right">
                     {r.compression ? (

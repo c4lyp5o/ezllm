@@ -1,7 +1,7 @@
 // COMBOS — list cards + create/edit modal with an ordered hops editor.
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError, accountModels, del, get, patch, post, STRATEGY_HINTS, type Combo, type Hop } from '../api';
-import { Chip, Modal, Mono, SectionLabel, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls } from '../ui';
+import { Chip, ConfirmModal, Modal, Mono, SectionLabel, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls } from '../ui';
 
 const STRATEGIES = ['failover', 'true_round_robin', 'strict_round_robin', 'sticky_last_good', 'least_used'] as const;
 
@@ -73,7 +73,9 @@ function HopsEditor({ hops, setHops, accounts }: {
         const models = list && list.length > 0 ? list : null;
         // Picked from the catalog by default; the checkbox below flips a row to
         // a free-typed id (an alias or a model the catalog has not synced yet).
-        const custom = h.custom ?? !(models && models.includes(h.model_id));
+        // Default unchecked (catalog pick). A row with no catalog yet shows the
+        // free-text input, so the checkbox reads checked to match what is shown.
+        const custom = h.custom ?? !models;
         return (
           <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-raised/60 px-3 py-2.5">
             <span className="w-5 text-center font-mono text-[11px] text-mute">{i + 1}</span>
@@ -246,6 +248,7 @@ export default function Combos() {
   const [accounts, setAccounts] = useState<{ id: number; name: string }[]>([]);
   const [profiles, setProfiles] = useState<{ id: number; name: string }[]>([]);
   const [modal, setModal] = useState<{ open: boolean; editing: Combo | null }>({ open: false, editing: null });
+  const [pendingDelete, setPendingDelete] = useState<Combo | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busyID, setBusyID] = useState<number | null>(null);
 
@@ -263,6 +266,7 @@ export default function Combos() {
     setErr(null);
     try { await del(`/admin/combos/${c.id}`); load(); }
     catch (e) { setErr(e instanceof ApiError ? e.detail.message : e instanceof Error ? e.message : String(e)); }
+    finally { setPendingDelete(null); }
   };
 
   // One-field PATCH: the server merges the rest, so this cannot clobber hops or
@@ -302,7 +306,6 @@ export default function Combos() {
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                 <span className="text-[14px] font-semibold">{c.name}</span>
                 <Chip><span className="font-mono">{c.strategy}</span></Chip>
-                {c.compression_profile_id != null && <Chip tone="accent">profile #{c.compression_profile_id}</Chip>}
                 <span className="ml-auto flex items-center gap-3">
                   <label className="flex items-center gap-2 text-[12px] text-dim">
                     <Toggle checked={c.enabled} disabled={busyID === c.id}
@@ -312,7 +315,7 @@ export default function Combos() {
                   </label>
                   <span className="flex items-center gap-2">
                     <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')} onClick={() => setModal({ open: true, editing: c })}>Edit</button>
-                    <button type="button" className={cx(btn.base, btn.danger, 'px-3 py-1.5 text-[12px]')} onClick={() => void remove(c)}>Delete</button>
+                    <button type="button" className={cx(btn.base, btn.danger, 'px-3 py-1.5 text-[12px]')} onClick={() => setPendingDelete(c)}>Delete</button>
                   </span>
                 </span>
               </div>
@@ -341,6 +344,13 @@ export default function Combos() {
 
       <ComboModal open={modal.open} editing={modal.editing} accounts={accounts} profiles={profiles}
         onClose={() => setModal({ open: false, editing: null })} onSaved={() => { setModal({ open: false, editing: null }); load(); }} />
+      <ConfirmModal
+        open={pendingDelete != null}
+        title={pendingDelete ? `Delete combo ${pendingDelete.name}?` : 'Delete combo?'}
+        body="Clients pointing at this combo will get errors until you recreate it or change their model."
+        busy={false}
+        onClose={() => setPendingDelete(null)}
+        onConfirm={() => { if (pendingDelete) void remove(pendingDelete); }} />
     </div>
   );
 }

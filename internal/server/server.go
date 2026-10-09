@@ -406,10 +406,20 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 		if err != nil {
 			var nf *router.ErrNotFound
 			var nu *router.ErrUnavailable
+			var np *router.ErrPinned
 			switch {
 			case errors.As(err, &nf):
 				writeErrExtra(w, http.StatusNotFound, "model_not_found", err.Error(),
 					map[string]any{"available": nf.Hints})
+			case errors.As(err, &np):
+				// The operator pinned this model to a surface and the
+				// client called a different one. That is a client
+				// mistake, not an upstream failure: 400, and the body
+				// says which endpoint to use. Never rerouted — ezllm
+				// passes bodies through untranslated, so switching the
+				// path upstream would send the wrong shape.
+				writeErrExtra(w, http.StatusBadRequest, "pinned_surface", err.Error(),
+					map[string]any{"pinned": np.Pinned, "requested_surface": np.Got})
 			case errors.As(err, &nu):
 				// A rule (cap / allowed hours) says no — not a routing miss.
 				// The cause (when it is a *rules.Refusal) carries the

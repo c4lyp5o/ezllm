@@ -207,15 +207,6 @@ func (t *Tester) Run(ctx context.Context, acct provider.Account, opts Options) *
 	key := strings.TrimSpace(opts.APIKey)
 	pace := &pacer{delay: acct.ProbeDelay}
 
-	// ── step 1: format — no network. Rejects empty/paste garbage outright. ──
-	if f := checkFormat(acct.Kind, key); f != nil {
-		res.Fail = f
-		res.Steps = append(res.Steps, Step{Step: StepFormat, OK: false, Detail: f.Message})
-		res.Detail = "failed at format: " + f.Message
-		return res
-	}
-	res.Steps = append(res.Steps, Step{Step: StepFormat, OK: true, Detail: "shape ok"})
-
 	// ── step 2: catalog — INFORMATIONAL. On opencode-go it answers 200 for
 	// any key (N1/N2), so a failure here is recorded but never decides. ──
 	models, catErr := probe(ctx, t, pace, defaultStepTimeout,
@@ -752,32 +743,6 @@ func surfaceFor(path string) provider.Surface {
 }
 
 // ── step 1: format ──────────────────────────────────────────────────────────
-
-// checkFormat is pure shape validation, zero network.
-func checkFormat(k provider.Kind, key string) *Failure {
-	if key == "" {
-		return &Failure{Step: StepFormat, Message: "api key is empty",
-			Hint: "Paste the key exactly as the provider issued it."}
-	}
-	if strings.TrimSpace(key) != key || strings.ContainsAny(key, " \t\r\n") {
-		return &Failure{Step: StepFormat, Message: "api key contains whitespace (paste error?)",
-			Hint: "Trim surrounding spaces and newlines — most providers reject keys with trailing whitespace."}
-	}
-	if len(key) < 8 {
-		return &Failure{Step: StepFormat, Message: "api key is too short to be real",
-			Hint: "Keys are at least a dozen characters. This looks truncated."}
-	}
-	if len(key) > 512 {
-		return &Failure{Step: StepFormat, Message: "api key is implausibly long (whole file pasted?)",
-			Hint: "You may have pasted an entire config file. Copy only the key value."}
-	}
-	// Prefix rules ONLY where verified live — both real keys are sk- (67 chars).
-	if k == provider.KindOpenCodeGo && !strings.HasPrefix(key, "sk-") {
-		return &Failure{Step: StepFormat, Message: "opencode-go keys start with 'sk-'",
-			Hint: "This does not look like an OpenCode key — check which provider you are registering."}
-	}
-	return nil
-}
 
 // ── error shaping ───────────────────────────────────────────────────────────
 

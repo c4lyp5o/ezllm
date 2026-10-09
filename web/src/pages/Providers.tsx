@@ -89,6 +89,8 @@ const PROVIDER_PRESETS: Record<string, { label: string; kind: string; baseURL?: 
   'alibaba-model-studio-token-plan': { label: 'Alibaba Cloud Model Studio token plan', kind: 'openai-compatible', baseURL: 'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1' },
   'commandcode': { label: 'Command Code', kind: 'openai-compatible', baseURL: 'https://api.commandcode.ai/provider/v1' },
   'deepseek': { label: 'DeepSeek', kind: 'openai-compatible', baseURL: 'https://api.deepseek.com' },
+  'tokenrouter': { label: 'TokenRouter', kind: 'openai-compatible', baseURL: 'https://api.tokenrouter.com/v1' },
+  'gemini': { label: 'Gemini (API key)', kind: 'gemini-openai', baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai' },
   'openai-compatible': { label: 'OpenAI-compatible', kind: 'openai-compatible' },
   'anthropic-compatible': { label: 'Anthropic-compatible', kind: 'anthropic-compatible' },
 };
@@ -148,7 +150,7 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
     } finally { setBusy(false); }
   };
 
-  const isCompat = PROVIDER_PRESETS[d.preset]?.kind === 'openai-compatible' || PROVIDER_PRESETS[d.preset]?.kind === 'anthropic-compatible';
+  const isCompat = ['openai-compatible', 'anthropic-compatible', 'gemini-openai'].includes(PROVIDER_PRESETS[d.preset]?.kind ?? '');
   const isAnthropicKind = PROVIDER_PRESETS[d.preset]?.kind === 'anthropic-compatible';
   const valid = d.name.trim().length > 0
     && /^[a-z0-9][a-z0-9._-]{0,62}$/.test(d.namespace.trim())

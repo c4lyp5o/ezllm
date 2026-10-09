@@ -40,6 +40,14 @@ type AuthProbe struct {
 // retry; on these providers 403 means bad credentials, not "slow down").
 func AuthOracle(a Adapter) AuthProbe { return a.AuthOracle() }
 
+// AuthRejectStatuser is an optional adapter interface. Adapters whose upstream
+// signals a bad credential with a non-401/403 status (Gemini: 400
+// INVALID_ARGUMENT) list those statuses here. Adapters that do not implement it
+// keep the 401/403 default, so no other provider's behavior changes.
+type AuthRejectStatuser interface {
+	AuthRejectStatuses() []int
+}
+
 // CatalogIsPublic reports whether ListModels succeeds without a valid key.
 // true → the catalog step is informational only and CANNOT pass a key test.
 func CatalogIsPublic(a Adapter) bool { return a.CatalogIsPublic() }

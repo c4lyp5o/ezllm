@@ -21,6 +21,9 @@ const (
 	KindOpenCodeGo       Kind = "opencode-go"
 	KindOpenAICompatible Kind = "openai-compatible"
 	KindAnthropicCompat  Kind = "anthropic-compatible"
+	// KindGeminiOpenAI is Gemini's OpenAI-compatible endpoint. It rejects a bad
+	// key with 400 INVALID_ARGUMENT, not 401, so it opts into AuthRejectStatuser.
+	KindGeminiOpenAI Kind = "gemini-openai"
 )
 
 // Surface is a wire protocol. Each adapter reports which it can serve, per model.
@@ -60,7 +63,9 @@ func UpstreamURL(baseURL string, kind Kind, path string) string {
 }
 
 // ValidKinds lists the kinds this build can register (used by config/admin validation).
-func ValidKinds() []Kind { return []Kind{KindOpenCodeGo, KindOpenAICompatible, KindAnthropicCompat} }
+func ValidKinds() []Kind {
+	return []Kind{KindOpenCodeGo, KindOpenAICompatible, KindAnthropicCompat, KindGeminiOpenAI}
+}
 
 // ParseKind validates a kind string.
 func ParseKind(s string) (Kind, error) {
@@ -176,6 +181,7 @@ func NewRegistry(client *http.Client) *Registry {
 	r.Register(NewOpenCodeGo(client))
 	r.Register(NewOpenAICompatible(client))
 	r.Register(NewAnthropicCompatible(client))
+	r.Register(NewGeminiOpenAI(client))
 	return r
 }
 

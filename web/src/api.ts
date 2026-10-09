@@ -458,7 +458,7 @@ export function compressionProfiles(): Promise<CompressionProfile[]> {
 
 export const STEPS = ['format', 'catalog', 'auth', 'quota', 'inference', 'protocol'] as const;
 
-export const KINDS = ['opencode-go', 'openai-compatible', 'anthropic-compatible'] as const;
+export const KINDS = ['opencode-go', 'openai-compatible', 'anthropic-compatible', 'gemini-openai'] as const;
 
 export const STRATEGY_HINTS: Record<string, string> = {
   failover: 'try hops in order until one works',

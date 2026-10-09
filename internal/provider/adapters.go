@@ -357,3 +357,17 @@ func newRequestID() string {
 	}
 	return fmt.Sprintf("%x", b)
 }
+
+// geminiOpenAI is the OpenAI-compatible surface of Gemini
+// (generativelanguage.googleapis.com/v1beta/openai). Live-probed 2026-10-09:
+// a bad key answers 400 INVALID_ARGUMENT "Please pass a valid API key", not 401.
+type geminiOpenAI struct{ openAICompatible }
+
+func NewGeminiOpenAI(c *http.Client) Adapter {
+	return &geminiOpenAI{openAICompatible{client: c}}
+}
+
+func (a *geminiOpenAI) Kind() Kind { return KindGeminiOpenAI }
+
+// AuthRejectStatuses: 400 is the bad-key signal here, alongside 401/403.
+func (a *geminiOpenAI) AuthRejectStatuses() []int { return []int{400, 401, 403} }

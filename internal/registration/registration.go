@@ -411,7 +411,7 @@ func (t *Tester) authGate(
 				Detail: "oracle public (200 for any key) — deferring to inference"})
 			res.authDeferred = true
 			return true // not a failure yet: inference may still gate
-		case isAuthStatus(calStatus):
+		case isAuthRejectFor(adapter, calStatus):
 			res.Steps = append(res.Steps, Step{Step: StepAuth, OK: true,
 				Detail: "oracle 200, calibration rejected the fake key"})
 			return true
@@ -424,7 +424,7 @@ func (t *Tester) authGate(
 			return true
 		}
 
-	case isAuthStatus(status):
+	case isAuthRejectFor(adapter, status):
 		// The provider itself said no. This is THE invalid-key signal.
 		f := authFailure(StepAuth, probeStatusError(status, body), adapter)
 		res.Fail = f
@@ -865,6 +865,22 @@ func statusOf(err error) int {
 
 func isAuthStatus(status int) bool {
 	return status == http.StatusUnauthorized || status == http.StatusForbidden
+}
+
+// isAuthRejectFor is isAuthStatus widened by the adapter's own reject codes
+// (AuthRejectStatuser). Adapters without the interface keep 401/403 only.
+func isAuthRejectFor(adapter provider.Adapter, status int) bool {
+	if isAuthStatus(status) {
+		return true
+	}
+	if r, ok := adapter.(provider.AuthRejectStatuser); ok {
+		for _, s := range r.AuthRejectStatuses() {
+			if s == status {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // retryableStatus: 401/403 are NOT retryable — they mean bad credentials, and

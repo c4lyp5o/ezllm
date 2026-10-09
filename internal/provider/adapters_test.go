@@ -169,8 +169,8 @@ func TestParseKindAndValidKinds(t *testing.T) {
 			t.Errorf("ParseKind(%q) should fail", bad)
 		}
 	}
-	if len(ValidKinds()) != 3 {
-		t.Errorf("ValidKinds = %v, want 3 entries", ValidKinds())
+	if len(ValidKinds()) != 4 {
+		t.Errorf("ValidKinds = %v, want 4 entries", ValidKinds())
 	}
 }
 
@@ -203,8 +203,8 @@ func TestRegistryGetAndKinds(t *testing.T) {
 	if _, err := r.Get(Kind("nope")); err == nil {
 		t.Error("Get(unknown) must fail")
 	}
-	if len(r.Kinds()) != 3 {
-		t.Errorf("registry has %d kinds, want 3", len(r.Kinds()))
+	if len(r.Kinds()) != 4 {
+		t.Errorf("registry has %d kinds, want 4", len(r.Kinds()))
 	}
 }
 

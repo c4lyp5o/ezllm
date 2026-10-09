@@ -28,7 +28,7 @@ var namespaceRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 
 // validKinds mirrors provider.ValidKinds, duplicated as strings so the config
 // package does not import provider (keeps validation dependency-free).
-var validKinds = []string{"opencode-go", "openai-compatible", "anthropic-compatible"}
+var validKinds = []string{"opencode-go", "openai-compatible", "anthropic-compatible", "gemini-openai"}
 
 type KeyRef struct {
 	Label string `yaml:"label"`

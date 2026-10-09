@@ -1,11 +1,14 @@
 // COMBOS — list cards + create/edit modal with an ordered hops editor.
 import { useCallback, useEffect, useState } from 'react';
-import { ApiError, del, get, patch, post, STRATEGY_HINTS, type Combo, type Hop } from '../api';
+import { ApiError, accountModels, del, get, patch, post, STRATEGY_HINTS, type Combo, type Hop } from '../api';
 import { Chip, Modal, Mono, SectionLabel, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls } from '../ui';
 
 const STRATEGIES = ['failover', 'true_round_robin', 'strict_round_robin', 'sticky_last_good', 'least_used'] as const;
 
-type HopRow = Hop;
+// HopRow carries one UI-only flag: whether the model id is typed by hand
+// rather than picked from the account's catalog (doc #12). It never reaches
+// the wire — submit maps each row onto the plain Hop shape.
+type HopRow = Hop & { custom?: boolean };
 
 const emptyHop = (account_id: number): HopRow => ({ account_id, model_id: '', weight: 1, enabled: true });
 
@@ -36,6 +39,21 @@ function HopsEditor({ hops, setHops, accounts }: {
   };
   const set = (i: number, p: Partial<HopRow>) => setHops(hops.map((h, k) => (k === i ? { ...h, ...p } : h)));
 
+  // One model catalog per referenced account, fetched once each. null = the
+  // catalog didn't load, so that hop falls back to a typed model id.
+  const [catalog, setCatalog] = useState<Record<number, string[] | null>>({});
+  useEffect(() => {
+    let alive = true;
+    const ids = [...new Set(hops.map((h) => h.account_id))].filter((id) => id > 0);
+    for (const id of ids) {
+      if (catalog[id] !== undefined) continue;
+      accountModels(id)
+        .then((ms) => { if (alive) setCatalog((p) => ({ ...p, [id]: ms.map((m) => m.id) })); })
+        .catch(() => { if (alive) setCatalog((p) => ({ ...p, [id]: null })); });
+    }
+    return () => { alive = false; };
+  }, [hops, catalog]);
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
@@ -50,33 +68,53 @@ function HopsEditor({ hops, setHops, accounts }: {
           No hops yet — add the first one.
         </p>
       )}
-      {hops.map((h, i) => (
-        <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-raised/60 px-3 py-2.5">
-          <span className="w-5 text-center font-mono text-[11px] text-mute">{i + 1}</span>
-          <select className={cx(inputCls, 'w-auto min-w-40 flex-1 py-1.5 text-[12px]')} value={h.account_id}
-            onChange={(e) => set(i, { account_id: Number(e.target.value) })}>
-            {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-            {accounts.length === 0 && <option value={0}>— no accounts —</option>}
-          </select>
-          <input className={cx(inputCls, 'min-w-36 flex-[2] py-1.5 font-mono text-[12px]')} placeholder="model id · e.g. gpt-6-luna"
-            value={h.model_id} onChange={(e) => set(i, { model_id: e.target.value.trim() })} spellCheck={false} />
-          <label className="flex items-center gap-1.5 text-[11px] text-mute">
-            w
-            <input type="number" min={1} className={cx(inputCls, 'w-16 py-1.5 font-mono text-[12px] tabular-nums')}
-              value={h.weight} onChange={(e) => set(i, { weight: Math.max(1, Number(e.target.value) || 1) })} />
-          </label>
-          <Toggle checked={h.enabled} onChange={(v) => set(i, { enabled: v })} label="hop enabled" />
-          <div className="flex items-center gap-0.5">
-            <button type="button" title="Move up" disabled={i === 0} className="rounded p-1 text-mute hover:bg-hover hover:text-ink disabled:opacity-30"
-              onClick={() => move(i, -1)}>↑</button>
-            <button type="button" title="Move down" disabled={i === hops.length - 1} className="rounded p-1 text-mute hover:bg-hover hover:text-ink disabled:opacity-30"
-              onClick={() => move(i, 1)}>↓</button>
-            <button type="button" title="Remove" className="rounded p-1 text-mute hover:bg-hover hover:text-bad"
-              onClick={() => setHops(hops.filter((_, k) => k !== i))}>✕</button>
+      {hops.map((h, i) => {
+        const list = catalog[h.account_id];
+        const models = list && list.length > 0 ? list : null;
+        // Picked from the catalog by default; the checkbox below flips a row to
+        // a free-typed id (an alias or a model the catalog has not synced yet).
+        const custom = h.custom ?? !(models && models.includes(h.model_id));
+        return (
+          <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-raised/60 px-3 py-2.5">
+            <span className="w-5 text-center font-mono text-[11px] text-mute">{i + 1}</span>
+            <select className={cx(inputCls, 'w-auto min-w-40 flex-1 py-1.5 text-[12px]')} value={h.account_id}
+              onChange={(e) => set(i, { account_id: Number(e.target.value), custom: undefined })}>
+              {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              {accounts.length === 0 && <option value={0}>— no accounts —</option>}
+            </select>
+            {custom || !models ? (
+              <input className={cx(inputCls, 'min-w-36 flex-[2] py-1.5 font-mono text-[12px]')} placeholder="model id · e.g. gpt-6-luna"
+                value={h.model_id} onChange={(e) => set(i, { model_id: e.target.value.trim() })} spellCheck={false} />
+            ) : (
+              <select className={cx(inputCls, 'min-w-36 flex-[2] py-1.5 text-[12px]')} value={h.model_id}
+                title="models synced from this account" onChange={(e) => set(i, { model_id: e.target.value })}>
+                {!models.includes(h.model_id) && <option value={h.model_id}>{h.model_id} · not in catalog</option>}
+                {models.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            )}
+            <label className="flex items-center gap-1.5 text-[11px] text-mute"
+              title="type a model id instead of picking from the account catalog">
+              <input type="checkbox" checked={custom} onChange={(e) => set(i, { custom: e.target.checked })} />
+              custom model id
+            </label>
+            <label className="flex items-center gap-1.5 text-[11px] text-mute">
+              w
+              <input type="number" min={1} className={cx(inputCls, 'w-16 py-1.5 font-mono text-[12px] tabular-nums')}
+                value={h.weight} onChange={(e) => set(i, { weight: Math.max(1, Number(e.target.value) || 1) })} />
+            </label>
+            <Toggle checked={h.enabled} onChange={(v) => set(i, { enabled: v })} label="hop enabled" />
+            <div className="flex items-center gap-0.5">
+              <button type="button" title="Move up" disabled={i === 0} className="rounded p-1 text-mute hover:bg-hover hover:text-ink disabled:opacity-30"
+                onClick={() => move(i, -1)}>↑</button>
+              <button type="button" title="Move down" disabled={i === hops.length - 1} className="rounded p-1 text-mute hover:bg-hover hover:text-ink disabled:opacity-30"
+                onClick={() => move(i, 1)}>↓</button>
+              <button type="button" title="Remove" className="rounded p-1 text-mute hover:bg-hover hover:text-bad"
+                onClick={() => setHops(hops.filter((_, k) => k !== i))}>✕</button>
+            </div>
+            {i < hops.length - 1 && <HopArrow last={false} />}
           </div>
-          {i < hops.length - 1 && <HopArrow last={false} />}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -110,7 +148,9 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
     setBusy(true); setErr(null);
     const body: Record<string, unknown> = {
       name: d.name.trim(), strategy: d.strategy, sticky_idle_s: d.strategy === 'sticky_last_good' ? d.sticky_idle_s : null,
-      enabled: d.enabled, compression_profile_id: d.compression_profile_id, context_size: d.context_size, hops: d.hops,
+      enabled: d.enabled, compression_profile_id: d.compression_profile_id, context_size: d.context_size,
+      // strip the UI-only `custom` flag: the wire shape is the plain Hop.
+      hops: d.hops.map((h) => ({ account_id: h.account_id, model_id: h.model_id, weight: h.weight, enabled: h.enabled })),
     };
     try {
       if (editing) await patch<Combo>(`/admin/combos/${editing.id}`, body);
@@ -192,7 +232,7 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
 
         <div className="flex items-center gap-3">
           <Toggle checked={d.enabled} onChange={(v) => setD((p) => ({ ...p, enabled: v }))} label="combo enabled" />
-          <span className="text-[12.5px] text-dim">Enabled — routable immediately</span>
+          <span className="text-[12.5px] text-dim">Enabled</span>
         </div>
 
         {err && <div className="rounded-lg border border-bad/30 bg-[rgba(248,113,113,0.06)] px-4 py-3 text-[12.5px] text-bad">{err}</div>}

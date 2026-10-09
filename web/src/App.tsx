@@ -16,23 +16,38 @@ import Requests from './pages/Requests';
 import Settings from './pages/Settings';
 import Chat from './pages/Chat';
 
-const NAV = [
+// One sidebar entry per destination — Stats / Token Economics / Requests live
+// together under Analytics (same data family, tabbed).
+type NavItem = { to: string; label: string; hint: string; match?: readonly string[] };
+
+const ANALYTICS_ROUTES = ['/stats', '/economics', '/requests'] as const;
+
+const NAV: NavItem[] = [
   { to: '/', label: 'Dashboard', hint: 'overview · health · ledger' },
-  { to: '/stats', label: 'Stats', hint: 'granularity · range' },
-  { to: '/economics', label: 'Token Economics', hint: 'savings · cache · outliers' },
-  { to: '/requests', label: 'Requests', hint: 'filter · tokens' },
+  { to: '/stats', label: 'Analytics', hint: 'stats · economics · requests', match: ANALYTICS_ROUTES },
   { to: '/providers', label: 'Providers', hint: 'accounts · keys · models' },
   { to: '/chat', label: 'Chat', hint: 'test a model' },
   { to: '/combos', label: 'Combos', hint: 'routing chains' },
-  { to: '/rules', label: 'Rules', hint: 'caps · windows' },
+  { to: '/rules', label: 'Rules', hint: 'quotas · windows' },
   { to: '/compression', label: 'Compression', hint: 'profiles · engines' },
   { to: '/connect', label: 'Connect', hint: 'routes · API keys' },
   { to: '/settings', label: 'Settings', hint: 'dashboard password' },
+];
+
+const ANALYTICS_TABS = [
+  { to: '/stats', label: 'Stats' },
+  { to: '/economics', label: 'Token Economics' },
+  { to: '/requests', label: 'Requests' },
 ] as const;
 
+const isAnalytics = (path: string) => (ANALYTICS_ROUTES as readonly string[]).some((p) => path === p || path.startsWith(`${p}/`));
+
 const LOGO = (
+  // The mark is a monogram "R" (same glyph as the favicon) — labelled here so
+  // it reads as the ezllm router instead of an unexplained letter.
   <svg viewBox="0 0 24 24" className="h-5 w-5 text-accent" fill="none" stroke="currentColor" strokeWidth="1.8"
-    strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    strokeLinecap="round" strokeLinejoin="round" role="img" aria-label="ezllm router mark">
+    <title>ezllm router mark</title>
     <path d="M4 18V6h4.5a3.5 3.5 0 0 1 0 7H4m4.5 0L13 18" />
   </svg>
 );
@@ -96,11 +111,13 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       <div className="flex items-center gap-2.5 px-5 py-5">
         {LOGO}
         <span className="text-[15px] font-semibold tracking-tight">ezllm</span>
-        <span className="ml-auto rounded-full border border-line bg-raised px-2 py-0.5 font-mono text-[10px] text-mute">M3</span>
+        <span title="M1–M7 shipped — live" className="ml-auto cursor-help rounded-full border border-line bg-raised px-2 py-0.5 font-mono text-[10px] text-mute">M7</span>
       </div>
       <nav className="flex-1 space-y-1 px-3">
         {NAV.map((item) => {
-          const active = item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to);
+          const active = item.match
+            ? item.match.some((p) => location.pathname === p || location.pathname.startsWith(`${p}/`))
+            : item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to);
           return (
             <NavLink key={item.to} to={item.to} onClick={onNavigate} end={item.to === '/'}
               className={cx('block rounded-lg px-3 py-2 transition-colors', active ? 'bg-accent-dim text-ink' : 'text-dim hover:bg-hover hover:text-ink')}>
@@ -116,7 +133,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           className="text-[11.5px] text-mute transition-colors hover:text-bad"
           onClick={() => { clearToken(); onNavigate?.(); window.location.reload(); }}
         >
-          Lock dashboard ⇥
+          Log out
         </button>
       </div>
     </div>
@@ -125,9 +142,9 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
 const PAGE_HEADERS: Record<string, { title: string; sub: string }> = {
   '/': { title: 'Dashboard', sub: 'traffic, health and the last 20 calls' },
-  '/stats': { title: 'Stats', sub: 'usage by granularity and range' },
-  '/economics': { title: 'Token Economics', sub: 'optimization savings and large requests' },
-  '/requests': { title: 'Requests', sub: 'dissect tokens in and out' },
+  '/stats': { title: 'Analytics', sub: 'usage by granularity and range' },
+  '/economics': { title: 'Analytics', sub: 'optimization savings and large requests' },
+  '/requests': { title: 'Analytics', sub: 'dissect tokens in and out' },
   '/providers': { title: 'Providers', sub: 'accounts, keys, catalogs and quota' },
   '/chat': { title: 'Chat', sub: 'test a routed provider model' },
   '/combos': { title: 'Combos', sub: 'ordered routing chains' },
@@ -140,6 +157,7 @@ const PAGE_HEADERS: Record<string, { title: string; sub: string }> = {
 export default function App() {
   const [token, setTokenState] = useState<string | null>(() => getToken());
   const [drawer, setDrawer] = useState(false);
+  const location = useLocation();
 
   const closeDrawer = useCallback(() => setDrawer(false), []);
 
@@ -188,6 +206,17 @@ export default function App() {
           <h1 className="text-[20px] font-semibold tracking-tight">{header.title}</h1>
           <p className="text-[13px] text-mute">{header.sub}</p>
         </div>
+        {isAnalytics(location.pathname) && (
+          <nav className="mt-5 flex gap-1 border-b border-line" aria-label="Analytics views">
+            {ANALYTICS_TABS.map((tab) => (
+              <NavLink key={tab.to} to={tab.to}
+                className={({ isActive }) => cx('-mb-px border-b-2 px-3 py-2 text-[13px] transition-colors',
+                  isActive ? 'border-accent text-ink' : 'border-transparent text-mute hover:text-ink')}>
+                {tab.label}
+              </NavLink>
+            ))}
+          </nav>
+        )}
         <div className="mt-8">
           <Routes>
             <Route path="/" element={<Dashboard />} />

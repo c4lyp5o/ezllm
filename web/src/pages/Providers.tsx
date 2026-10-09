@@ -1,9 +1,9 @@
 // PROVIDERS — account cards, add-provider wizard modal, per-key actions, model drawer.
 import { useCallback, useEffect, useState } from 'react';
 import {
-  ApiError, AuthError, del, get, patch, post,
+  ApiError, AuthError, del, get, modelRules, patch, post,
   KINDS, STEPS,
-  type Account, type ApiErrorDetail, type KeyRow, type ModelRow, type ProtocolSupport, type TestResult, type TestStep,
+  type Account, type ApiErrorDetail, type KeyRow, type ModelRule, type ModelRow, type TestResult, type TestStep,
 } from '../api';
 import { Chip, Modal, SectionLabel, Skeleton, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls, relTime, Mono } from '../ui';
 
@@ -11,12 +11,6 @@ import { Chip, Modal, SectionLabel, Skeleton, SkeletonCards, Spinner, Toggle, bt
 
 const slugify = (s: string) =>
   s.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 63);
-
-const protoState = (v: boolean | number | null | undefined): 'yes' | 'no' | 'unknown' =>
-  v === true || v === 1 ? 'yes' : v === false || v === 0 ? 'no' : 'unknown';
-
-const supportCount = (ps: ProtocolSupport | null | undefined, k: string) =>
-  (ps && typeof (ps as Record<string, unknown>)[k] === 'number' ? (ps as Record<string, number>)[k] : null);
 
 function ErrBox({ e, onDismiss }: { e: ApiErrorDetail | null; onDismiss: () => void }) {
   if (!e) return null;
@@ -43,25 +37,28 @@ function ErrBox({ e, onDismiss }: { e: ApiErrorDetail | null; onDismiss: () => v
 
 const STEP_ORDER: string[] = STEPS as unknown as string[];
 
+// Horizontal step chain (doc #7.5): the six probe steps read left→right with
+// arrows between them instead of a numbered vertical list — per-step detail
+// rides along as a title tooltip so nothing is lost, only the space.
 function StepList({ steps, running }: { steps: TestStep[] | null; running: boolean }) {
   const byStep = new Map((steps ?? []).map((s) => [s.step, s]));
   return (
-    <ol className="space-y-1.5">
+    <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-1 font-mono text-[11.5px]">
       {STEP_ORDER.map((name, idx) => {
         const s = byStep.get(name);
-        const state = s ? (s.ok ? 'ok' : 'bad') : running && idx <= (byStep.size ?? 0) ? 'pending' : 'idle';
+        const state = s ? (s.ok ? 'ok' : 'bad') : running && idx <= byStep.size ? 'pending' : 'idle';
+        const tip = s?.detail ? `${s.detail}${s.ms != null ? ` · ${s.ms}ms` : ''}` : name;
         return (
-          <li key={name} className="flex items-center gap-3 font-mono text-[12px]">
-            <span className={cx('flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[10px]',
+          <li key={name} className="flex items-center gap-1.5">
+            {idx > 0 && <span className="text-mute/40">→</span>}
+            <span title={tip} className={cx('flex items-center gap-1.5 rounded-full border px-2 py-0.5',
               state === 'ok' && 'border-ok/40 bg-[rgba(52,211,153,0.1)] text-ok',
               state === 'bad' && 'border-bad/40 bg-[rgba(248,113,113,0.1)] text-bad',
               state === 'pending' && 'border-line text-mute',
               state === 'idle' && 'border-line/60 text-mute/50')}>
-              {state === 'ok' ? '✓' : state === 'bad' ? '✕' : idx + 1}
+              <span>{state === 'ok' ? '✓' : state === 'bad' ? '✕' : idx + 1}</span>
+              <span>{name}</span>
             </span>
-            <span className={cx(state === 'ok' ? 'text-dim' : state === 'bad' ? 'text-bad' : 'text-mute')}>{name}</span>
-            {s?.detail && <span className="truncate text-mute" title={s.detail}>{s.detail}</span>}
-            {s?.ms != null && <span className="ml-auto shrink-0 tabular-nums text-mute/70">{s.ms}ms</span>}
           </li>
         );
       })}
@@ -76,7 +73,6 @@ type Draft = {
   base_url: string; keyLabel: string; apiKey: string;
   probe_delay_ms: number; notes: string; skipInference: boolean;
   advOpen: boolean; requiresSessionHeader: boolean; customHeaders: string;
-  quotaMode: string; capWindow: string; capTokens: number;
 };
 
 const emptyDraft: Draft = {
@@ -84,7 +80,6 @@ const emptyDraft: Draft = {
   base_url: 'https://opencode.ai/zen/go/v1', keyLabel: 'primary', apiKey: '',
   probe_delay_ms: 400, notes: '', skipInference: false,
   advOpen: false, requiresSessionHeader: true, customHeaders: '',
-  quotaMode: 'probe', capWindow: 'monthly', capTokens: 0,
 };
 
 const PROVIDER_PRESETS: Record<string, { label: string; kind: string; baseURL?: string; sessionHeader?: boolean }> = {
@@ -96,6 +91,16 @@ const PROVIDER_PRESETS: Record<string, { label: string; kind: string; baseURL?: 
   'anthropic-compatible': { label: 'Anthropic-compatible', kind: 'anthropic-compatible' },
 };
 const PRESET_IDS = Object.keys(PROVIDER_PRESETS);
+
+// Endpoints the gateway already knows: every preset plus the two big public
+// APIs. Once an account points at one of these, the base URL is fixed — editing
+// it only ever introduces a typo, and the adapter owns the path suffixes anyway.
+const KNOWN_ENDPOINTS = new Set<string>([
+  ...PRESET_IDS.map((p) => PROVIDER_PRESETS[p].baseURL ?? '').filter(Boolean),
+  'https://api.openai.com/v1',
+  'https://api.anthropic.com',
+]);
+const isKnownEndpoint = (url: string) => KNOWN_ENDPOINTS.has(url.replace(/\/+$/, ''));
 
 function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: () => void }) {
   const [d, setD] = useState<Draft>(emptyDraft);
@@ -120,8 +125,8 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
         base_url: preset.baseURL ?? d.base_url.trim(), probe_delay_ms: d.probe_delay_ms,
         requires_session_header: preset.sessionHeader ?? d.requiresSessionHeader,
         custom_headers: customHeaders, notes: d.notes.trim(),
-        quota_mode: d.quotaMode,
-        ...(d.quotaMode === 'tokens' ? { cap_window: d.capWindow, cap_tokens: d.capTokens } : {}),
+        // No quota_mode / caps here on purpose: quota is always probed, and
+        // cap_window + cap_tokens live on Rules (per model, enforced in-flight).
       };
       const account = await post<Account>('/admin/accounts', payload);
       createdAccountID = account.id;
@@ -193,7 +198,7 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
               onChange={(e) => set('probe_delay_ms', Number(e.target.value) || 0)} />
           </div>
         </div>
-        {isCompat ? (
+        {isCompat && !isKnownEndpoint(d.base_url) ? (
           <div>
             <label className={labelCls} htmlFor="ap-url">Provider API base URL</label>
             <input id="ap-url" className={cx(inputCls, 'font-mono')} value={d.base_url}
@@ -205,7 +210,7 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
           </div>
         ) : (
           <div className="rounded-lg border border-line bg-raised/60 px-3.5 py-2.5 text-[12px] text-dim">
-            Endpoint preset: <Mono>{d.base_url}</Mono>
+            {isKnownEndpoint(d.base_url) ? 'Known endpoint — fixed: ' : 'Endpoint preset: '}<Mono>{d.base_url}</Mono>
           </div>
         )}
         <div className="grid gap-4 sm:grid-cols-2">
@@ -243,25 +248,6 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
               <label className={labelCls} htmlFor="ap-cH">Custom headers (JSON)</label>
               <textarea id="ap-cH" rows={3} spellCheck={false} className={cx(inputCls, 'font-mono text-[12px]')}
                 placeholder={'{"x-team":"ops"}'} value={d.customHeaders} onChange={(e) => set('customHeaders', e.target.value)} />
-            </div>
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div>
-                <label className={labelCls} htmlFor="ap-qm">Quota mode</label>
-                <select id="ap-qm" className={inputCls} value={d.quotaMode} onChange={(e) => set('quotaMode', e.target.value)}>
-                  {['probe', 'percent', 'money', 'tokens', 'none'].map((mode) => <option key={mode} value={mode}>{mode}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className={labelCls} htmlFor="ap-cw">Cap window</label>
-                <select id="ap-cw" className={inputCls} value={d.capWindow} disabled={d.quotaMode !== 'tokens'} onChange={(e) => set('capWindow', e.target.value)}>
-                  {['weekly', 'monthly'].map((window) => <option key={window} value={window}>{window}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className={labelCls} htmlFor="ap-ct">Cap tokens</label>
-                <input id="ap-ct" type="number" min={0} className={cx(inputCls, 'font-mono tabular-nums')} value={d.capTokens}
-                  disabled={d.quotaMode !== 'tokens'} onChange={(e) => set('capTokens', Number(e.target.value) || 0)} />
-              </div>
             </div>
           </div>
         </details>
@@ -325,7 +311,13 @@ function EditAccountModal({ account, onClose, onSaved }: { account: Account | nu
         </div>
         <div>
           <label className={labelCls}>Base URL</label>
-          <input className={cx(inputCls, 'font-mono')} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value.trim())} />
+          {isKnownEndpoint(account.base_url) ? (
+            <div className="rounded-lg border border-line bg-raised/60 px-3.5 py-2.5 font-mono text-[12px] text-dim">
+              {baseUrl} <span className="font-sans text-mute">— known endpoint, fixed</span>
+            </div>
+          ) : (
+            <input className={cx(inputCls, 'font-mono')} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value.trim())} />
+          )}
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
@@ -368,28 +360,118 @@ function ModelsDrawer({ id }: { id: number }) {
           <thead>
             <tr className="text-left text-[10px] uppercase tracking-[0.1em] text-mute">
               <th className="pb-1.5 font-medium">model</th>
-              <th className="pb-1.5 text-center font-medium">openai</th>
-              <th className="pb-1.5 text-center font-medium">anthropic</th>
-              <th className="pb-1.5 text-center font-medium">responses</th>
             </tr>
           </thead>
           <tbody className="font-mono">
             {models.map((m) => (
               <tr key={m.id} className="border-t border-line/50">
                 <td className="max-w-[260px] truncate py-1.5 text-dim" title={m.id}>{m.id}</td>
-                {(['openai', 'anthropic', 'responses'] as const).map((k) => (
-                  <td key={k} className="py-1.5 text-center" title={protoState(m[k])}>
-                    <span className={protoState(m[k]) === 'yes' ? 'text-ok' : protoState(m[k]) === 'no' ? 'text-bad' : 'text-warn'}>
-                      {protoState(m[k]) === 'yes' ? '✓' : protoState(m[k]) === 'no' ? '✕' : '?'}
-                    </span>
-                  </td>
-                ))}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
     </div>
+  );
+}
+
+// ── quota modal ─────────────────────────────────────────────────────────────
+
+// Live /v1/usage read for one account. The button that opens this is only
+// enabled once a probe proved the provider exposes /v1/usage; caps are shown
+// here read-only and stay owned by the Rules page (doc #7 + #9).
+type QuotaLive = { kind: string; raw: string; read_at: string };
+
+const prettyBody = (raw: string) => {
+  try { return JSON.stringify(JSON.parse(raw), null, 2); } catch { return raw; }
+};
+
+function QuotaModal({ account, onClose }: { account: Account; onClose: () => void }) {
+  const [live, setLive] = useState<QuotaLive | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [err, setErr] = useState<ApiErrorDetail | null>(null);
+  const [rules, setRules] = useState<ModelRule[] | null>(null);
+
+  const load = useCallback(() => {
+    setBusy(true);
+    setErr(null);
+    get<QuotaLive>(`/admin/accounts/${account.id}/quota`)
+      .then((q) => setLive(q))
+      .catch((e: unknown) => setErr({ status: 0, type: 'error', message: e instanceof Error ? e.message : 'quota read failed' }))
+      .finally(() => setBusy(false));
+  }, [account.id]);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    let alive = true;
+    modelRules()
+      .then((rs) => { if (alive) setRules(rs.filter((r) => r.account_id === account.id)); })
+      .catch(() => { if (alive) setRules([]); });
+    return () => { alive = false; };
+  }, [account.id]);
+
+  const caps = (rules ?? []).filter((r) => r.cap_tokens > 0);
+
+  return (
+    <Modal open onClose={onClose} title={`Quota — ${account.name}`}
+      subtitle="live GET /v1/usage · caps come from Rules"
+      footer={(
+        <>
+          <button type="button" className={cx(btn.base, btn.ghost)} onClick={onClose}>Close</button>
+          <button type="button" className={cx(btn.base, btn.primary)} disabled={busy} onClick={load}>
+            {busy ? <Spinner /> : null} Refresh
+          </button>
+        </>
+      )}>
+      <div className="space-y-4">
+        <ErrBox e={err} onDismiss={() => setErr(null)} />
+        <div className="rounded-lg border border-line bg-raised/60 p-4">
+          <SectionLabel>Usage</SectionLabel>
+          {busy && !live && <Skeleton className="h-3.5 w-56" />}
+          {!busy && live?.kind === 'none' && (
+            <p className="text-[13px] text-mute">This provider does not expose <code className="font-mono">/v1/usage</code>.</p>
+          )}
+          {live && live.kind !== 'none' && (
+            <div className="mt-2 space-y-2">
+              <div className="flex flex-wrap items-center gap-2 text-[12px]">
+                <span className="rounded-full border border-line bg-bg px-2 py-0.5 font-mono text-[11px] text-accent">{live.kind}</span>
+                <span className="text-mute">read {live.read_at ? relTime(live.read_at) : '—'}</span>
+              </div>
+              <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-md border border-line bg-bg px-3 py-2 font-mono text-[11.5px] leading-relaxed text-dim">
+                {prettyBody(live.raw)}
+              </pre>
+            </div>
+          )}
+        </div>
+        <div className="rounded-lg border border-line bg-raised/60 p-4">
+          <SectionLabel>Cap window · cap tokens</SectionLabel>
+          {rules === null && <Skeleton className="mt-2 h-3.5 w-48" />}
+          {rules !== null && caps.length === 0 && (
+            <p className="mt-2 text-[13px] text-mute">No caps set for this account — add one under <span className="text-ink">Rules</span>.</p>
+          )}
+          {caps.length > 0 && (
+            <table className="mt-2 w-full text-[12px]">
+              <thead>
+                <tr className="text-left text-[10px] uppercase tracking-[0.1em] text-mute">
+                  <th className="pb-1.5 font-medium">model</th>
+                  <th className="pb-1.5 font-medium">cap tokens</th>
+                  <th className="pb-1.5 font-medium">window</th>
+                </tr>
+              </thead>
+              <tbody className="font-mono">
+                {caps.map((c) => (
+                  <tr key={c.id} className="border-t border-line/50">
+                    <td className="max-w-[220px] truncate py-1.5 text-dim" title={c.model_id}>{c.model_id}</td>
+                    <td className="py-1.5 tabular-nums text-dim">{c.cap_tokens.toLocaleString()}</td>
+                    <td className="py-1.5 text-dim">{c.cap_window}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -401,6 +483,14 @@ function AccountCard({ a, onChanged }: { a: Account; onChanged: () => void }) {
   const [err, setErr] = useState<ApiErrorDetail | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [quotaOpen, setQuotaOpen] = useState(false);
+
+  // The quota button is only live once a probe proved this provider serves
+  // /v1/usage (doc #9): no snapshot yet = unproven, kind "none" = no endpoint.
+  const quotaExposed = a.quota != null && a.quota.kind !== 'none';
+  const quotaHint = a.quota == null
+    ? 'no /v1/usage read yet — run Test key first'
+    : a.quota.kind === 'none' ? 'this provider does not expose /v1/usage' : 'live /v1/usage read';
 
   const act = async (label: string, fn: () => Promise<unknown>) => {
     setMenuBusy(label); setErr(null); setFlash(null);
@@ -432,25 +522,17 @@ function AccountCard({ a, onChanged }: { a: Account; onChanged: () => void }) {
           <span className="text-[14px] font-semibold">{a.name}</span>
           <Chip><span className="font-mono">{a.namespace}</span></Chip>
           <Chip tone="neutral" className="text-mute"><span className="font-mono">{a.kind}</span></Chip>
+          <span className="font-mono text-[11px] text-mute">{a.models_count ?? '–'} models</span>
           {!a.enabled && <Chip tone="warn">disabled</Chip>}
           <span className="ml-auto hidden font-mono text-[11px] text-mute sm:block">{a.base_url}</span>
           <span className={cx('text-mute transition-transform', open && 'rotate-180')}>⌄</span>
         </div>
-        <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11.5px] text-mute">
-          <span>{a.keys.length} key{a.keys.length === 1 ? '' : 's'}</span>
-          <span>{a.models_count ?? '–'} models</span>
-          {(['openai', 'anthropic', 'responses'] as const).map((k) => {
-            const n = supportCount(a.protocol_support, k);
-            return n == null ? null : (
-              <span key={k} className="flex items-center gap-1">
-                <span className="text-ok">✓</span><span className="font-mono">{k} {n}</span>
-              </span>
-            );
-          })}
-          {a.quota?.kind && a.quota.kind !== 'none' && (
+        {a.quota?.kind && a.quota.kind !== 'none' && (
+          <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11.5px] text-mute">
             <span>quota <span className="font-mono text-dim">{a.quota.kind}</span></span>
-          )}
-        </div>
+            {a.quota.read_at && <span>read {relTime(a.quota.read_at)}</span>}
+          </div>
+        )}
       </button>
 
       {open && (
@@ -492,6 +574,13 @@ function AccountCard({ a, onChanged }: { a: Account; onChanged: () => void }) {
               }); }}>
               {menuBusy === 'retest' ? <Spinner /> : null} Test key
             </button>
+            <span title={quotaHint}>
+              <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')}
+                disabled={!quotaExposed}
+                onClick={(e) => { e.stopPropagation(); setQuotaOpen(true); }}>
+                Quota
+              </button>
+            </span>
             <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')}
               onClick={(e) => { e.stopPropagation(); setEditing(true); }}>
               Edit
@@ -504,6 +593,7 @@ function AccountCard({ a, onChanged }: { a: Account; onChanged: () => void }) {
             {menuBusy && <span className="text-[11.5px] text-mute">{menuBusy}…</span>}
           </div>
           {editing && <EditAccountModal account={a} onClose={() => setEditing(false)} onSaved={onChanged} />}
+          {quotaOpen && <QuotaModal account={a} onClose={() => setQuotaOpen(false)} />}
           <ErrBox e={err} onDismiss={() => setErr(null)} />
         </div>
       )}

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { accountModels, chat, get, type Account, type ModelRow } from '../api';
+import { accountModels, chatStream, get, type Account, type ModelRow } from '../api';
+import { Markdown } from '../markdown';
 import { Spinner, cx, inputCls, btn } from '../ui';
 
 type Message = { role: 'user' | 'assistant'; content: string };
@@ -47,17 +48,30 @@ export default function Chat() {
     const text = input.trim();
     if (!text || !model || busy) return;
     const next = [...messages, { role: 'user' as const, content: text }];
-    setMessages(next);
+    setMessages([...next, { role: 'assistant', content: '' }]);
     setInput('');
     setBusy(true);
     setError('');
     try {
-      const response = await chat(model, next);
-      const content = response?.choices?.[0]?.message?.content;
-      if (typeof content !== 'string') throw new Error('provider returned no assistant message');
-      setMessages([...next, { role: 'assistant', content }]);
+      // Stream the reply: each delta lands in the assistant bubble as it
+      // arrives, so the answer grows token by token instead of appearing at once.
+      await chatStream(model, next, (delta) => {
+        setMessages((prev) => {
+          const last = prev[prev.length - 1];
+          if (!last || last.role !== 'assistant') return prev;
+          const updated = [...prev];
+          updated[updated.length - 1] = { ...last, content: last.content + delta };
+          return updated;
+        });
+      });
+      // Drop a bubble that never received content (upstream said nothing).
+      setMessages((prev) => (prev[prev.length - 1]?.content === '' ? prev.slice(0, -1) : prev));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'chat request failed');
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        return last?.role === 'assistant' && last.content === '' ? prev.slice(0, -1) : prev;
+      });
     } finally {
       setBusy(false);
     }
@@ -85,12 +99,12 @@ export default function Chat() {
           <div className="py-20 text-center text-sm text-mute">Send a message to test routing, retries and provider response handling.</div>
         )}
         {messages.map((m, i) => (
-          <div key={`${m.role}-${i}`} className={cx('max-w-[88%] whitespace-pre-wrap rounded-lg border px-4 py-3 text-sm leading-relaxed', m.role === 'user' ? 'ml-auto border-accent/30 bg-accent/5' : 'border-line bg-panel')}>
+          <div key={`${m.role}-${i}`} className={cx('max-w-[88%] rounded-lg border px-4 py-3 text-sm leading-relaxed', m.role === 'user' ? 'ml-auto whitespace-pre-wrap border-accent/30 bg-accent/5' : 'border-line bg-panel')}>
             <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-mute">{m.role}</div>
-            {m.content}
+            {m.role === 'assistant' ? <Markdown text={m.content} /> : m.content}
           </div>
         ))}
-        {busy && <div className="flex items-center gap-2 text-sm text-mute"><Spinner /> Waiting for provider…</div>}
+        {busy && <div className="flex items-center gap-2 text-sm text-mute"><Spinner /> Streaming…</div>}
       </section>
 
       {error && <div className="border border-bad/30 bg-bad/5 px-4 py-3 text-sm text-bad">{error}</div>}

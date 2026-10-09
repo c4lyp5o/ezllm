@@ -14,12 +14,12 @@ type ProfileDraft = {
   notes: string;
 };
 
-const ENGINE_INFO: Record<string, { label: string; note: string; option?: { key: string; label: string; initial: string } }> = {
+const ENGINE_INFO: Record<string, { label: string; note: string; option?: { key: string; label: string; initial: string; values?: readonly string[] } }> = {
   session_dedup: { label: 'Session dedup', note: 'Drops exact duplicate system, user and assistant turns.' },
   rtk: { label: 'RTK', note: 'Filters noisy CLI/tool output; errors and failures are retained.', option: { key: 'keep_lines', label: 'Keep lines', initial: '6' } },
   headroom: { label: 'Headroom', note: 'Lossless columnar compaction for homogeneous JSON tool payloads.', option: { key: 'min_rows', label: 'Minimum rows', initial: '4' } },
   lite: { label: 'Lite', note: 'Whitespace cleanup only; words and code fences remain unchanged.', option: { key: 'blank_lines', label: 'Blank lines', initial: '1' } },
-  caveman: { label: 'Caveman', note: 'Deterministic prose condensation with protected spans and safety gates.', option: { key: 'intensity', label: 'Intensity (lite/standard)', initial: 'lite' } },
+  caveman: { label: 'Caveman', note: 'Deterministic prose condensation with protected spans and safety gates.', option: { key: 'intensity', label: 'Intensity', initial: 'lite', values: ['lite', 'standard'] } },
   budget: { label: 'Context budget', note: 'Keeps system instructions, the first request, recent turns and complete tool pairs under a token budget.', option: { key: 'max_tokens', label: 'Maximum history tokens', initial: '12000' } },
 };
 const ENGINE_IDS = Object.keys(ENGINE_INFO);
@@ -149,7 +149,22 @@ export default function Compression() {
             return <div key={`${i}-${stage.engine}`} className="grid items-end gap-2 rounded-lg border border-line bg-raised/40 p-3 sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto]">
               <span className="pb-2 font-mono text-[11px] text-mute">{String(i + 1).padStart(2, '0')}</span>
               <div><label className={labelCls} htmlFor={`cp-engine-${i}`}>Engine</label><select id={`cp-engine-${i}`} className={inputCls} value={stage.engine} onChange={(e) => updateStage(i, { engine: e.target.value, option: ENGINE_INFO[e.target.value]?.option?.initial ?? '' })}>{ENGINE_IDS.map((id) => <option key={id} value={id}>{ENGINE_INFO[id].label}</option>)}</select></div>
-              <div>{info?.option ? <><label className={labelCls} htmlFor={`cp-option-${i}`}>{info.option.label}</label><input id={`cp-option-${i}`} className={inputCls} value={stage.option || info.option.initial} onChange={(e) => updateStage(i, { option: e.target.value })} /></> : <p className="pb-2 text-[11px] text-mute">No stage options</p>}</div>
+              <div>{info?.option ? (
+                info.option.values ? (
+                  <>
+                    <label className={labelCls} htmlFor={`cp-option-${i}`}>{info.option.label}</label>
+                    <select id={`cp-option-${i}`} className={inputCls} value={stage.option || info.option.initial}
+                      onChange={(e) => updateStage(i, { option: e.target.value })}>
+                      {info.option.values.map((v) => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                  </>
+                ) : (
+                  <>
+                    <label className={labelCls} htmlFor={`cp-option-${i}`}>{info.option.label}</label>
+                    <input id={`cp-option-${i}`} className={inputCls} value={stage.option || info.option.initial} onChange={(e) => updateStage(i, { option: e.target.value })} />
+                  </>
+                )
+              ) : <p className="pb-2 text-[11px] text-mute">No stage options</p>}</div>
               <div className="flex gap-1"><button type="button" className={cx(btn.base, btn.ghost, 'px-2 py-1.5')} aria-label="Move stage up" disabled={i === 0} onClick={() => moveStage(i, -1)}>↑</button><button type="button" className={cx(btn.base, btn.ghost, 'px-2 py-1.5')} aria-label="Move stage down" disabled={i === draft.stages.length - 1} onClick={() => moveStage(i, 1)}>↓</button><button type="button" className={cx(btn.base, btn.ghost, 'px-2 py-1.5 text-bad')} aria-label="Remove stage" onClick={() => update('stages', draft.stages.filter((_, j) => j !== i))}>×</button></div>
             </div>;
           })}

@@ -141,13 +141,14 @@ export default function Stats() {
       {data && (
         <>
           {/* Totals strip — always visible, ground truth for the range */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
             <Card label="calls" value={formatTokens(t!.calls)} />
             <Card label="tokens in" value={formatTokens(t!.tin)} />
             <Card label="tokens out" value={formatTokens(t!.tout)} />
             <Card label={primaryLabel()} value={formatTokens(primaryOf(t!))}
               tone={gran === 'cache' || gran === 'savings' || gran === 'compression' ? 'text-ok' : undefined} />
             <Card label="cached read" value={formatTokens(t!.cread)} />
+            <Card label="reasoning" value={formatTokens(t!.reasoning)} sub="Σ thinking tokens" />
             <Card label="errors" value={formatTokens(t!.errors)} tone={t!.errors > 0 ? 'text-warn' : 'text-ok'} />
           </div>
 
@@ -210,6 +211,7 @@ export default function Stats() {
                       <th className="px-4 py-2 text-right font-medium">in</th>
                       <th className="px-4 py-2 text-right font-medium">out</th>
                       <th className="px-4 py-2 text-right font-medium">cached</th>
+                      <th className="px-4 py-2 text-right font-medium">reasoning</th>
                       <th className="px-4 py-2 text-right font-medium">saved</th>
                       <th className="px-4 py-2 text-right font-medium">errors</th>
                     </tr>
@@ -222,12 +224,13 @@ export default function Stats() {
                         <td className="px-4 py-1.5 text-right tabular-nums text-mute">{formatTokens(r.tin)}</td>
                         <td className="px-4 py-1.5 text-right tabular-nums text-mute">{formatTokens(r.tout)}</td>
                         <td className="px-4 py-1.5 text-right tabular-nums text-mute">{formatTokens(r.cread + r.cwrite)}</td>
+                        <td className="px-4 py-1.5 text-right tabular-nums text-mute">{formatTokens(r.reasoning ?? 0)}</td>
                         <td className="px-4 py-1.5 text-right tabular-nums text-ok">{formatTokens(r.saved)}</td>
                         <td className={cx('px-4 py-1.5 text-right tabular-nums', r.errors > 0 ? 'text-warn' : 'text-mute')}>{formatTokens(r.errors)}</td>
                       </tr>
                     ))}
                     {rows.length === 0 && (
-                      <tr><td colSpan={7} className="px-4 py-6 text-center text-mute">No usage in this range.</td></tr>
+                      <tr><td colSpan={8} className="px-4 py-6 text-center text-mute">No usage in this range.</td></tr>
                     )}
                   </tbody>
                 </table>

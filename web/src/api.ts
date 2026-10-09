@@ -294,6 +294,71 @@ export const modelRules = () => get<ModelRule[]>('/admin/model-rules');
 export const accountModels = (id: number) => get<ModelRow[]>(`/admin/accounts/${id}/models`);
 export const chat = (model: string, messages: { role: string; content: string }[]) =>
   post<any>('/admin/chat', { model, messages });
+
+/**
+ * chatStream sends the same chat request with stream:true and feeds each SSE
+ * content delta to onDelta as the upstream emits it. Resolves on [DONE] or
+ * stream end; rejects with the usual ApiError/AuthError shape.
+ */
+export async function chatStream(
+  model: string,
+  messages: { role: string; content: string }[],
+  onDelta: (text: string) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const token = getToken();
+  if (!token) throw new AuthError(401, 'unlocked');
+  let res: Response;
+  try {
+    res = await fetch('/admin/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ model, messages, stream: true }),
+      signal,
+    });
+  } catch (e) {
+    if (signal?.aborted) throw e;
+    throw new ApiError({ status: 0, type: 'network', message: 'upstream unreachable — is ezllm running?' });
+  }
+  if (!res.ok || !res.body) {
+    const text = await res.text().catch(() => '');
+    let parsed: unknown;
+    try { parsed = JSON.parse(text) as unknown; } catch { parsed = undefined; }
+    const detail = parseOpenAIError(parsed, res.status);
+    // Only OUR auth 401 (numeric code) ends the session — a provider 401 is
+    // the upstream rejecting its own key and must not lock the dashboard.
+    if (res.status === 401 && detail.code === 401) { clearToken(); throw new AuthError(401, detail.message); }
+    throw new ApiError(detail);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  const emit = (frame: string) => {
+    for (const raw of frame.split('\n')) {
+      const line = raw.replace(/\r$/, '');
+      if (!line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      if (!data || data === '[DONE]') continue;
+      try {
+        const o = JSON.parse(data) as { choices?: { delta?: { content?: unknown } }[] };
+        const delta = o?.choices?.[0]?.delta?.content;
+        if (typeof delta === 'string' && delta.length > 0) onDelta(delta);
+      } catch { /* keepalive comment or partial frame — next read finishes it */ }
+    }
+  };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+    let sep: number;
+    while ((sep = buf.indexOf('\n\n')) !== -1) {
+      emit(buf.slice(0, sep));
+      buf = buf.slice(sep + 2);
+    }
+  }
+  if (buf.trim()) emit(buf);
+}
 export const createModelRule = (r: Partial<ModelRule> & { account_id: number; model_id: string }) =>
   post<ModelRule>('/admin/model-rules', r);
 // PATCH merges onto the stored row, but window fields are all-or-nothing —

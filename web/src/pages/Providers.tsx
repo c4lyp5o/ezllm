@@ -5,7 +5,7 @@ import {
   KINDS, STEPS,
   type Account, type ApiErrorDetail, type KeyRow, type ModelRule, type ModelRow, type TestResult, type TestStep,
 } from '../api';
-import { Chip, Modal, SectionLabel, Skeleton, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls, relTime, Mono } from '../ui';
+import { Chip, ConfirmModal, Modal, SectionLabel, Skeleton, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls, relTime, Mono } from '../ui';
 
 // ── helpers ─────────────────────────────────────────────────────────────
 
@@ -489,13 +489,14 @@ function AccountCard({ a, onChanged }: { a: Account; onChanged: () => void }) {
   const [flash, setFlash] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [quotaOpen, setQuotaOpen] = useState(false);
+  const [confirm, setConfirm] = useState<null | { kind: 'account' } | { kind: 'key'; keyID: number; label: string }>(null);
 
   // The quota button is only live once a probe proved this provider serves
-  // /v1/usage (doc #9): no snapshot yet = unproven, kind "none" = no endpoint.
+  // /v1/usage: no snapshot or kind "none" both mean the quota read is not available.
   const quotaExposed = a.quota != null && a.quota.kind !== 'none';
   const quotaHint = a.quota == null
-    ? 'no /v1/usage read yet — run Test key first'
-    : a.quota.kind === 'none' ? 'this provider does not expose /v1/usage' : 'live /v1/usage read';
+    ? 'quota not available — run Test key to check'
+    : a.quota.kind === 'none' ? 'quota not available — this provider exposes no usage endpoint' : 'live /v1/usage read';
 
   const act = async (label: string, fn: () => Promise<unknown>) => {
     setMenuBusy(label); setErr(null); setFlash(null);
@@ -549,8 +550,10 @@ function AccountCard({ a, onChanged }: { a: Account; onChanged: () => void }) {
                 : a.keys.map((k) => (
                   <span key={k.id} className="flex items-center gap-2 rounded-full border border-line bg-raised px-2.5 py-1">
                     <Mono className="text-[11.5px]">{k.label} · {k.hint}</Mono>
-                    {k.last_test_ok === true && <span className="text-[10px] text-ok" title="last test ok">●</span>}
-                    {k.last_test_ok === false && <span className="text-[10px] text-bad" title="last test failed">●</span>}
+                    <span className={cx('text-[11px]', k.last_test_ok === true ? 'text-ok' : k.last_test_ok === false ? 'text-bad' : 'text-mute')}
+                      title={k.last_test_detail ?? ''}>
+                      {k.last_test_ok === true ? '● tested ok' : k.last_test_ok === false ? '● test failed' : 'untested'}
+                    </span>
                     {k.last_test_at && <span className="text-[10px] text-mute" title={k.last_test_detail ?? ''}>{relTime(k.last_test_at)}</span>}
                     <button type="button" title="Test key (retest)" disabled={menuBusy != null}
                       className="text-mute transition-colors hover:text-accent disabled:opacity-40"
@@ -559,7 +562,7 @@ function AccountCard({ a, onChanged }: { a: Account; onChanged: () => void }) {
                     </button>
                     <button type="button" title="Delete key" disabled={menuBusy != null}
                       className="text-mute transition-colors hover:text-bad disabled:opacity-40"
-                      onClick={(e) => { e.stopPropagation(); void act('del key', () => del(`/admin/accounts/${a.id}/keys/${k.id}`)); }}>
+                      onClick={(e) => { e.stopPropagation(); setConfirm({ kind: 'key', keyID: k.id, label: `${k.label} · ${k.hint}` }); }}>
                       ✕
                     </button>
                   </span>
@@ -591,13 +594,27 @@ function AccountCard({ a, onChanged }: { a: Account; onChanged: () => void }) {
               Edit
             </button>
             <button type="button" className={cx(btn.base, btn.danger, 'px-3 py-1.5 text-[12px]')}
-              onClick={(e) => { e.stopPropagation(); void removeAccount(); }}>
+              onClick={(e) => { e.stopPropagation(); setConfirm({ kind: 'account' }); }}>
               Delete
             </button>
             {flash && <span className="text-[11.5px] text-ok">{flash} ✓</span>}
             {menuBusy && <span className="text-[11.5px] text-mute">{menuBusy}…</span>}
           </div>
           {editing && <EditAccountModal account={a} onClose={() => setEditing(false)} onSaved={onChanged} />}
+          <ConfirmModal
+            open={confirm != null}
+            title={confirm?.kind === 'key' ? `Delete key ${confirm.label}?` : `Delete provider ${a.name}?`}
+            body={confirm?.kind === 'key'
+              ? 'This key is removed immediately. The provider stays, and routes using it will fail until you add a key.'
+              : 'This removes the provider and all its keys. Combos that use it will lose that hop.'}
+            busy={menuBusy != null}
+            onClose={() => setConfirm(null)}
+            onConfirm={() => {
+              const c = confirm; setConfirm(null);
+              if (!c) return;
+              if (c.kind === 'key') void act('del key', () => del(`/admin/accounts/${a.id}/keys/${c.keyID}`));
+              else void removeAccount();
+            }} />
           {quotaOpen && <QuotaModal account={a} onClose={() => setQuotaOpen(false)} />}
           <ErrBox e={err} onDismiss={() => setErr(null)} />
         </div>

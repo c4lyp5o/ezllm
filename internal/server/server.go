@@ -483,7 +483,8 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 		}
 		call := store.Call{
 			TS: start, Client: client, Surface: store2surface(surface), Alias: served.Alias,
-			Account: served.Account.Namespace, KeyID: served.KeyID, KeyHint: served.KeyHint, Model: served.Model,
+			AccountID: served.Account.ID,
+			Account:   served.Account.Namespace, KeyID: served.KeyID, KeyHint: served.KeyHint, Model: served.Model,
 			Status: status, Stream: res.Stream, TTFTms: res.TTFTms, Totalms: res.Totalms,
 			EndpointID: res.EndpointID, UpstreamModel: res.UpstreamModel,
 		}

@@ -11,7 +11,7 @@ import {
   updateModelRule, windowState,
   type Account, type ModelRow, type ModelRule,
 } from '../api';
-import { Chip, Modal, SectionLabel, SkeletonRows, Toggle, btn, cx, formatTokens, inputCls, labelCls } from '../ui';
+import { Chip, ConfirmModal, Modal, SectionLabel, SkeletonRows, Toggle, btn, cx, formatTokens, inputCls, labelCls } from '../ui';
 
 const CAP_WINDOWS = ['5h', 'daily', 'weekly', 'monthly'] as const;
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -206,6 +206,7 @@ export default function Rules() {
   const [err, setErr] = useState('');
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<ModelRule | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<ModelRule | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [models, setModels] = useState<ModelRow[]>([]);
   const [saving, setSaving] = useState(false);
@@ -268,7 +269,6 @@ export default function Rules() {
   };
 
   const remove = async (r: ModelRule) => {
-    if (!window.confirm(`Delete rule for ${r.model_id}? The router stops enforcing it immediately.`)) return;
     setBusy(r.id);
     try { await deleteModelRule(r.id); await load(); }
     catch (e) { setErr(errText(e)); }
@@ -330,10 +330,10 @@ export default function Rules() {
                     </span>
                   </td>
                   <td className="whitespace-nowrap px-5 py-2.5 text-right">
-                    <button type="button" className="mr-3 text-[12px] text-accent hover:underline"
-                      onClick={() => startEdit(r)}>edit</button>
-                    <button type="button" className="text-[12px] text-bad hover:underline"
-                      onClick={() => void remove(r)}>delete</button>
+                    <button type="button" className={cx(btn.base, btn.ghost, 'mr-2 px-3 py-1.5 text-[12px]')}
+                      onClick={() => startEdit(r)}>Edit</button>
+                    <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px] text-bad')}
+                      onClick={() => setPendingDelete(r)}>Delete</button>
                   </td>
                 </tr>
               ))}
@@ -347,6 +347,13 @@ export default function Rules() {
         draft={draft} setDraft={setDraft} onClose={() => setOpen(false)}
         onSave={() => void save()} saving={saving} err={modalErr}
       />
+      <ConfirmModal
+        open={pendingDelete != null}
+        title={pendingDelete ? `Delete rule for ${pendingDelete.model_id}?` : 'Delete rule?'}
+        body="The router stops enforcing this rule immediately."
+        busy={pendingDelete != null && busy === pendingDelete.id}
+        onClose={() => setPendingDelete(null)}
+        onConfirm={() => { if (pendingDelete) void remove(pendingDelete).then(() => setPendingDelete(null)); }} />
     </div>
   );
 }

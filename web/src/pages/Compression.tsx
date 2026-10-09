@@ -1,7 +1,7 @@
 // COMPRESSION — profile editor for ordered, fail-open compression pipelines.
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError, compressionProfiles, del, patch, post, type CompressionProfile, type CompressionStage } from '../api';
-import { Chip, Mono, SectionLabel, btn, cx, inputCls, labelCls, Spinner } from '../ui';
+import { Chip, ConfirmModal, Mono, SectionLabel, btn, cx, inputCls, labelCls, Spinner } from '../ui';
 
 type StageDraft = { engine: string; option: string };
 type ProfileDraft = {
@@ -50,6 +50,7 @@ function packStages(stages: StageDraft[]): CompressionStage[] {
 export default function Compression() {
   const [profiles, setProfiles] = useState<CompressionProfile[] | null>(null);
   const [draft, setDraft] = useState<ProfileDraft | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<CompressionProfile | null>(null);
   const [editingID, setEditingID] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -102,7 +103,6 @@ export default function Compression() {
     finally { setBusy(false); }
   };
   const remove = async (p: CompressionProfile) => {
-    if (!window.confirm(`Delete compression profile “${p.name}”?`)) return;
     setBusy(true); setErr('');
     try { await del(`/admin/compression-profiles/${p.id}`); reload(); }
     catch (e) { setErr(e instanceof ApiError ? e.detail.message : e instanceof Error ? e.message : String(e)); }
@@ -181,10 +181,18 @@ export default function Compression() {
             <div className="flex flex-wrap items-center gap-2"><Mono className="font-semibold">{p.name}</Mono><Chip tone={p.enabled ? 'ok' : 'warn'}>{p.enabled ? 'enabled' : 'paused'}</Chip><span className="ml-auto text-[11px] text-mute">min {Math.round(p.min_compress_ratio * 100)}% · {p.exempt_last_turn ? 'final turn exempt' : 'final turn editable'} · fail-open</span></div>
             <div className="mt-2 flex flex-wrap items-center gap-1.5">{(p.stages ?? []).map((stage, i) => <span key={i} className="flex items-center gap-1.5">{i > 0 && <span className="text-mute">→</span>}<Chip tone="neutral"><Mono>{ENGINE_INFO[stage.engine]?.label ?? stage.engine}</Mono></Chip>{stage.options && <Mono className="text-[10px] text-mute">{JSON.stringify(stage.options)}</Mono>}</span>)}</div>
             {p.notes && <p className="mt-2 text-[12px] text-dim">{p.notes}</p>}
-            <div className="mt-3 flex justify-end gap-2"><button type="button" disabled={busy} className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')} onClick={() => void toggleEnabled(p)}>{p.enabled ? 'Pause' : 'Enable'}</button><button type="button" disabled={busy} className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')} onClick={() => startEdit(p)}>Edit</button><button type="button" disabled={busy} className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px] text-bad')} onClick={() => void remove(p)}>Delete</button></div>
+            <div className="mt-3 flex justify-end gap-2"><button type="button" disabled={busy} className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')} onClick={() => void toggleEnabled(p)}>{p.enabled ? 'Pause' : 'Enable'}</button><button type="button" disabled={busy} className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')} onClick={() => startEdit(p)}>Edit</button><button type="button" disabled={busy} className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px] text-bad')} onClick={() => setPendingDelete(p)}>Delete</button></div>
           </article>)}</div>
         )}
       </section>
+
+      <ConfirmModal
+        open={pendingDelete != null}
+        title={pendingDelete ? `Delete compression profile “${pendingDelete.name}”?` : 'Delete profile?'}
+        body="Combos attached to this profile will stop compressing until you attach another."
+        busy={busy}
+        onClose={() => setPendingDelete(null)}
+        onConfirm={() => { if (pendingDelete) void remove(pendingDelete).then(() => setPendingDelete(null)); }} />
 
       <section className="rounded-xl border border-line bg-surface px-5 py-5 sm:px-6"><SectionLabel>Wiring</SectionLabel><ul className="mt-3 space-y-1.5 text-[13px] text-dim"><li>· Attach a profile to a combo using <Mono>compression_profile_id</Mono>.</li><li>· Per-request override uses <Mono>x-ezllm-compression: &lt;profile-name|off&gt;</Mono>.</li><li>· Actual saved-token counts are recorded in Stats → Compression / Savings.</li></ul></section>
     </div>

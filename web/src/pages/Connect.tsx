@@ -9,18 +9,18 @@
 //     no way to dismiss until copy, and the "I saved it" confirmation.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError, type UsageRow } from '../api';
-import { Chip, Mono, SectionLabel, Spinner, Toggle, btn, cx, inputCls, labelCls } from '../ui';
+import { Chip, ConfirmModal, Mono, SectionLabel, Spinner, Toggle, btn, cx, inputCls, labelCls } from '../ui';
 import {
   createToken, listTokens, patchToken, probeModels, revokeToken, usageByClient,
   type TokenCreated, type TokenInfo, type V1Model,
 } from '../tokens';
 
-// The gateway speaks three client protocols. All are mounted under /v1 on one
-// port; "OpenAI Responses" is a distinct URL because it is a distinct API shape.
+// The gateway speaks two client protocols on one port under /v1: OpenAI Chat
+// and Anthropic Messages. The OpenAI Responses route still exists server-side
+// for other clients but is not surfaced here.
 const SURFACES = [
   { key: 'openai', label: 'OpenAI Chat', path: '/v1/chat/completions', note: 'the one almost everything speaks' },
   { key: 'anthropic', label: 'Anthropic Messages', path: '/v1/messages', note: 'Claude Code, SDKs, Anthropic-style clients' },
-  { key: 'responses', label: 'OpenAI Responses', path: '/v1/responses', note: 'the newer /responses shape' },
 ] as const;
 
 type SurfaceKey = (typeof SURFACES)[number]['key'];
@@ -118,14 +118,6 @@ function snippet(surface: SurfaceKey, base: string, key: string, model: string):
       'ANTHROPIC_MODEL=' + model,
     ].join('\n');
   }
-  if (surface === 'responses') {
-    return [
-      'OPENAI_BASE_URL=' + base + '/v1',
-      'OPENAI_API_KEY=' + key,
-      '# used as client.chat.completions.create({ model })',
-      'OPENAI_MODEL=' + model,
-    ].join('\n');
-  }
   return [
     'OPENAI_BASE_URL=' + base,
     'OPENAI_API_KEY=' + key,
@@ -143,6 +135,7 @@ export default function Connect() {
   const [name, setName] = useState('');
   const [role, setRole] = useState<'infer' | 'admin'>('infer');
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [pendingRevoke, setPendingRevoke] = useState<TokenInfo | null>(null);
 
   // Base URL: same origin as the dashboard, minus the trailing slash.
   const base = useMemo(() => window.location.origin, []);
@@ -190,7 +183,6 @@ export default function Connect() {
   };
 
   const revoke = async (t: TokenInfo) => {
-    if (!window.confirm(`Revoke "${t.name}"? Clients using it will fail immediately and it cannot be un-revoked.`)) return;
     setBusyId(t.id);
     try { await revokeToken(t.id); await reload(); }
     finally { setBusyId(null); }
@@ -201,12 +193,9 @@ export default function Connect() {
 
   return (
     <div className="space-y-8">
-      <header>
-        <h1 className="text-[22px] font-semibold tracking-tight">Connect</h1>
-        <p className="mt-1 text-[13px] text-dim">
-          Point Hermes, Claude Code or any OpenAI/Anthropic-style client at this gateway. One port, three protocols.
-        </p>
-      </header>
+      <p className="text-[13px] text-dim">
+        Point Hermes, Claude Code or any OpenAI/Anthropic-style client at this gateway. One port, two protocols.
+      </p>
 
       {err && (
         <div className="rounded-lg border border-[rgba(248,113,113,0.3)] bg-[rgba(248,113,113,0.06)] px-4 py-3 text-[13px] text-bad">
@@ -216,12 +205,11 @@ export default function Connect() {
 
       {/* ── Routes ─────────────────────────────────────────────────── */}
       <section>
-        <SectionLabel>Inference routes</SectionLabel>
         {/* [&>*]:min-w-0 is load-bearing, not decoration: grid items default to
             min-width:auto, so the unbreakable endpoint URLs inside the cards set
             the track's min-content width and blow the page out sideways on a
             390px phone (measured: 570px scrollWidth before this class). */}
-        <div className="mt-3 grid gap-3 md:grid-cols-3 [&>*]:min-w-0">
+        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 [&>*]:min-w-0">
           {SURFACES.map((s) => (
             <div key={s.key} className="rounded-xl border border-line bg-surface px-4 py-4 animate-fade-up">
               <div className="flex items-start justify-between gap-2">
@@ -229,10 +217,8 @@ export default function Connect() {
                   <div className="text-[13.5px] font-semibold">{s.label}</div>
                   <div className="mt-0.5 text-[11.5px] text-mute">{s.note}</div>
                 </div>
-                <Chip tone={models.length ? 'ok' : 'neutral'}>{models.length ? 'served' : 'check models'}</Chip>
               </div>
               <div className="mt-3 space-y-2">
-                <FieldRow label="base" value={base} />
                 <FieldRow label="endpoint" value={base + s.path} />
               </div>
             </div>
@@ -295,7 +281,7 @@ export default function Connect() {
 
       {/* ── Snippet for the tool you're wiring up ─────────────────── */}
       <section>
-        <SectionLabel>What to paste into your client</SectionLabel>
+        <SectionLabel>Paste into your client</SectionLabel>
         <div className="mt-3 space-y-2">
           {SURFACES.map((s) => (
             <div key={s.key} className="rounded-xl border border-line bg-surface px-4 py-3">
@@ -338,7 +324,7 @@ export default function Connect() {
                     <span>{(u?.calls ?? 0).toLocaleString()} calls · {(u?.tin ?? 0).toLocaleString()} in · {(u?.tout ?? 0).toLocaleString()} out</span>
                     <span className="flex items-center gap-2">
                       <Toggle checked={t.enabled} onChange={(v) => void toggle(t, v)} disabled={busyId === t.id} />
-                      <button type="button" className={cx(btn.base, btn.danger, 'px-2.5 py-1.5 text-[11.5px]')} onClick={() => void revoke(t)} disabled={busyId === t.id}>Revoke</button>
+                      <button type="button" className={cx(btn.base, btn.danger, 'px-2.5 py-1.5 text-[11.5px]')} onClick={() => setPendingRevoke(t)} disabled={busyId === t.id}>Revoke</button>
                     </span>
                   </div>
                 </div>
@@ -385,6 +371,14 @@ export default function Connect() {
           </div>
         </div>
       )}
+      <ConfirmModal
+        open={pendingRevoke != null}
+        title={pendingRevoke ? `Revoke "${pendingRevoke.name}"?` : 'Revoke token?'}
+        body="Clients using this token will fail immediately. It cannot be un-revoked."
+        confirmLabel="Revoke"
+        busy={pendingRevoke != null && busyId === pendingRevoke.id}
+        onClose={() => setPendingRevoke(null)}
+        onConfirm={() => { if (pendingRevoke) void revoke(pendingRevoke).then(() => setPendingRevoke(null)); }} />
     </div>
   );
 }

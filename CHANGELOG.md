@@ -1,6 +1,36 @@
 # Changelog
 
-Notable changes, reverse-chronological. Milestone-tagged (M1–M7); full history via `git log`.
+Notable changes, reverse-chronological. Milestone-tagged (M1–M8); full history via `git log`.
+
+## 2026-10-09/10 — providers batch, UI cleanup pass, surface pin (deployed 2026-10-10)
+- `feat(provider)`: fourth kind `gemini-openai` — Gemini's OpenAI-compat endpoint; its bad-key
+  signal is `400`, honored by the auth gate only for that kind via the optional
+  `AuthRejectStatuser` (`a8776ee`).
+- `feat(web)`: provider presets — Command Code, DeepSeek, TokenRouter, Gemini, Groq built-in
+  (`5335423`, `1d3f3d7`, `fb2a2fd`).
+- `feat(registration)`: dropped all API-key **shape** checks; the probe chain is the sole
+  validator, so exotic key formats are judged by the upstream (`9aa9cf1`).
+- `fix(server)`: `GET /healthz` is liveness-only (`{"status":"ok"}` after a DB ping) — the
+  public route no longer leaks counts, paths, or versions (`9a7b620`).
+- `feat(web)`: dashboard UI cleanup pass — shared `ConfirmModal` replaces `window.confirm`
+  and one-click deletes; Providers key status shown as text (`tested ok` / `test failed` /
+  `untested`) not a bare dot; quota copy "quota not available"; Connect drops the Responses
+  surface from the picker (server route unchanged), 2-column desktop layout; Dashboard strip
+  trimmed (no ledger/dropped/schema chips, no context column); combo "custom model id" flag now
+  defaults from what's actually rendered, and the profile-number pill is gone (`c099dd5`…`9915582`).
+- `feat(pin)`: per-model **surface pin**, enforce-only (schema v7 `models.proto_pin`). A
+  wrong-surface call to a pinned model is refused `400 pinned_surface` before any upstream
+  dial; never a reroute (bodies pass through untranslated). Lookup fails closed; catalog
+  resyncs preserve pins (`340442b`).
+- `fix(server)`: the pin refusal reached clients as `502` while the ledger logged `400` —
+  the proxy error switch had no `ErrPinned` case. Now `400 pinned_surface` with structured
+  `{pinned, requested_surface}`; live-proved on prod (`03a6317`).
+- `build(web)`: **rebuilt and committed `web/dist`** — the image embeds it, so source-only UI
+  commits shipped the old bundle; after every UI commit, `npm run build` + commit `dist` +
+  verify the served hash post-deploy (`831ecda`).
+- GitHub Copilot: OAuth app registered, device flow works end-to-end, but the
+  `copilot_internal/v2/token` exchange returns `403` for third-party apps → parked, not
+  circumvented. OAuth artifact deleted.
 
 ## 2026-10-09 — post-ship fixes
 - `fix(proxy)`: strip client `Origin` before forwarding — Anthropic reads any browser `Origin`

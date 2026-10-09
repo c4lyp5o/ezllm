@@ -6,12 +6,15 @@ routing across provider accounts, combo failover, per-model rules, request
 compression, and a SQLite usage ledger that normalizes token accounting across
 all three protocols — with a token-gated dashboard on top.
 
-**Status: M1–M7 shipped — live.** Deployed on the home box: dashboard + admin
+**Status: shipped and live** — last full verification 2026-10-10 (all Go packages + UI build
+green; prod re-proved live). Deployed on the home box: dashboard + admin
 API at `https://llm.calypso.dedyn.io`, local clients at `http://127.0.0.1:20129`.
 Claude Code talks to it as a native Anthropic endpoint (`POST /v1/messages`).
-Latest post-ship fixes (2026-10-09): upstream `Origin` stripping (Anthropic
-treats browser `Origin` as CORS and rejects with 401) and dashboard
-401-vs-provider-401 handling.
+Latest shipped batch (2026-10-10): per-model **surface pin** (`proto_pin`, schema v7,
+enforced never rerouted; wrong-surface calls refuse with `400 pinned_surface` before any
+upstream dial), `/healthz` reduced to liveness-only, a fourth provider kind (`gemini-openai`)
+plus presets for Groq, DeepSeek, Command Code, TokenRouter and Gemini, and a dashboard UI
+cleanup pass (confirmation modals, status text, 2-column layouts).
 
 ## Read this first
 
@@ -41,13 +44,14 @@ the Docker image distroless-able.
 
 | Layer | Route | Auth | Notes |
 |---|---|---|---|
-| Surface | `GET /healthz` | none | liveness |
+| Surface | `GET /healthz` | none | liveness only — `{"status":"ok"}` after a DB ping; all detail lives behind `/admin/*` |
 | Surface | `GET /v1/models` | client token | namespaced ids + bare combo ids; `?protocol=anthropic` for the Claude shape |
 | Surface | `POST /v1/chat/completions` · `/v1/messages` · `/v1/responses` | client token (`x-api-key` ok on messages) | stream + non-stream; all three live-verified |
 | Admin | `GET /admin/health` · `/admin/overview` · `/admin/usage` · `/admin/requests` | admin | rollups (`group_by=account\|key\|alias\|client\|model\|surface\|day`), token dissection, dashboard payload |
 | Admin | `GET /admin/stream` | admin | SSE live call feed |
 | Admin | `POST /admin/chat` | admin | in-dashboard chat via the normal inference path |
 | Admin | `/admin/accounts` · `/admin/combos` · `/admin/model-rules` · `/admin/compression-profiles` · `/admin/tokens` · `/admin/export` | admin | lifecycle CRUD + disaster-recovery dump |
+| Admin | `PUT /admin/accounts/{id}/model-pin` | admin | set/clear a model's surface pin (`{"model","pin","force"}`); unconfirmed surface → 409 unless `force` |
 | Admin | `POST /admin/login` · `/admin/settings/password` | password / admin | dashboard session gate |
 
 ## Addressing models
@@ -84,6 +88,24 @@ Per-(account, model) **token caps** and **allowed-hours** windows. Inside a comb
 out-of-window hop is skipped silently (the next hop serves); a direct call to a restricted
 model → `429` naming the rule and its window. Design + semantics:
 `docs/rules-engine-design.md`.
+
+## Surface pin (per model)
+
+Every model can carry an operator-chosen **pin**: `openai`, `anthropic`, `responses`, or
+NULL = auto (no enforcement). The pin is **enforce-only, never a reroute**: if a client
+calls a pinned model on a different surface, the request is refused with
+`400 pinned_surface` (body names the pinned surface + the one requested) **before** any
+upstream dial — so a refusal costs zero tokens and zero provider quota. ezllm passes
+request bodies through untranslated, so switching the upstream path would send the wrong
+shape; refusing is the honest answer.
+
+- Stored as `models.proto_pin` (schema v7); catalog resyncs preserve pins
+  (snapshot/restore around the delete-and-reinsert).
+- The pin lookup **fails closed**: a transient store error refuses the request rather
+  than silently bypassing an operator's pin.
+- The pin applies to both direct calls and combo hops.
+- Written via the dashboard (Providers → model drawer) or `PUT /admin/accounts/{id}/model-pin`;
+  pinning a surface the probe never confirmed needs `force`.
 
 ## Compression
 
@@ -138,6 +160,12 @@ backups. For phone-on-LAN access, use `-addr 0.0.0.0:20129`.
   testing-build choice; protect the database and its backups with filesystem access controls.
   AES-GCM field crypto (`internal/store/crypto.go`, master-key file) is implemented and
   test-covered but intentionally not wired in v1.
+- `GET /healthz` is deliberately liveness-only (`{"status":"ok"}` after a DB ping) — it is the
+  one unauthenticated route and leaks no counts, paths, or versions. Operational detail lives
+  behind `/admin/*`.
+- Key **shape** checks were removed from registration (2026-10-10): the probe chain (catalog →
+  auth gate → quota → inference → protocol) is the sole validator, so exotic key formats are
+  judged by the upstream itself.
 - Client tokens are SHA-256 hashed and dashboard passwords bcrypt-hashed in SQLite; plaintext credentials are never returned after creation/login.
 - Only a masked provider-key hint is ever exposed in admin responses or logs.
 - The upstream's own credentials replace the client's: `Authorization`, `x-api-key`, `Cookie` —
@@ -157,6 +185,11 @@ backups. For phone-on-LAN access, use `-addr 0.0.0.0:20129`.
 
 ## Non-goals (v1)
 
-No Anthropic↔OpenAI translation (native passthrough covers all three surfaces),
-no GitHub Copilot/OAuth kind yet, no quota scraping beyond `GET /v1/usage`, no
+No Anthropic↔OpenAI translation (native passthrough covers all three surfaces), no
 multi-node/Postgres. See EXPLORING.md §7 and the plan's §8.
+
+**GitHub Copilot is parked, not rejected.** A dedicated OAuth app (`ezllm`) was registered
+and the device flow completed end-to-end, but GitHub returns `403` at
+`copilot_internal/v2/token` for a third-party app — an access decision, not a bug to
+engineer around. No header spoofing or borrowed client IDs. Revisit only if GitHub
+grants the app.

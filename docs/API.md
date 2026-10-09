@@ -1,8 +1,8 @@
-# ezllm admin API — contract (v1 · M1–M7 shipped)
+# ezllm admin API — contract (v1 · M1–M8 shipped, current through 2026-10-10)
 
-Status codes: `200` ok · `201` created · `401` no/invalid client token · `403` token lacks `admin` ·
-`404` unknown id · `409` conflict (refs exist) · `422` **key test failed** (with `step`) · `429` at cap.
-All routes except `/healthz` require `Authorization: Bearer <client-token>`.
+Status codes: `200` ok · `201` created · `400` bad request **or surface-pin refusal** ·
+`401` no/invalid client token · `403` token lacks `admin` · `404` unknown id · `409` conflict (refs exist; unconfirmed pin surface) · `422` **key test failed** (with `step`) · `429` at cap.
+All routes except `/healthz` require `Authorization: Bearer ***
 
 Errors are OpenAI-shaped: `{"error":{"type":"...","message":"...","code":422}}`.
 `422` key-test failures add `step`, `upstream_status`, `upstream_error`, `hint` (see below).
@@ -13,11 +13,18 @@ Errors are OpenAI-shaped: `{"error":{"type":"...","message":"...","code":422}}`.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/healthz` | no auth |
+| GET | `/healthz` | no auth; **liveness only** — `{"status":"ok"}` after a DB ping (503 `{"status":"down"}` if the ping fails). No counts/paths/versions. |
 | GET | `/v1/models?protocol=` | `openai` (default) / `anthropic` shape; ids are `<namespace>/<model>`, plus one bare id per **enabled** combo |
 | POST | `/v1/chat/completions` | OpenAI stream + non-stream |
 | POST | `/v1/messages` | Anthropic (`x-api-key` or Bearer) |
 | POST | `/v1/responses` | OpenAI Responses |
+
+**Surface-pin refusal (all three POSTs).** If the resolved model carries a `proto_pin` and the
+client called a different surface, the request is refused **before any upstream dial** with
+`400 {"error":{"type":"pinned_surface","message":"...","pinned":"openai","requested_surface":"anthropic","code":400}}`.
+The pin never reroutes the request — bodies pass through untranslated, so the honest answer is
+a refusal that names the endpoint to use instead. Lookup errors fail closed (refuse), and combo
+hops pinned to another surface refuse the whole request rather than silently skipping.
 
 `/v1/models` rows: namespaced ids carry the upstream's `owned_by` and, once probed, a `protocol`
 map. A combo row is bare (`owned_by: "ezllm"`) and adds a non-standard `combo` key —
@@ -37,11 +44,14 @@ can never contain `/`, so a bare id is unambiguous. Disabled combos are never li
 **Combo failover cooldown:** transport failures/timeouts and upstream 5xx responses cool only that account endpoint for 5 minutes. Model-specific 401/403/404/429 responses remain failover-able but do not mark the endpoint dead. After expiry exactly one half-open probe is admitted; if every candidate is cooling down, no upstream request is sent. When all attempted hops returned an upstream failover response, the last permitted response is returned rather than issuing another call.
 
 
-Dashboard payload. One call so the first paint is a single round trip.
+Dashboard payload. One call so the first paint is a single round trip. (Admin-gated — this is
+where the detail that `/healthz` no longer leaks lives.)
 ```jsonc
 {
-  "health": { "status":"ok", "schema_version":1, "accounts":2, "provider_keys":3,
-               "models":47, "combos":1, "ledger_rows":128, "dropped_rows":0, "uptime_s":900 },
+  "health": { "status":"ok", "schema_version":7, "accounts":5, "provider_keys":5,
+               "models":51, "combos":2, "ledger_rows":1065, "dropped_rows":0,
+               "ledger_span":{"oldest":"…","newest":"…"}, "uptime_s":18119,
+               "db_path":"/data/ezllm.sqlite" },
   "usage":  [ {"k":"opengo","calls":64,"tin":1200000,"tout":84000,"cread":300000,"cwrite":21000,
                 "reasoning":4000,"saved":0,"errors":1} ],          // group_by=account, last 24h
   "usage_by_surface": [ {"k":"openai","calls":50,"tin":…,"tout":…,"cread":…,"cwrite":…,"reasoning":…,"saved":…,"errors":0} ],
@@ -92,10 +102,13 @@ Params: `min_tin` `max_tin` `min_tout` `max_tout` (non-negative integers);
   "base_url":"https://space.stationine.com/v1", "probe_delay_ms":400,
   "requires_session_header":false, "custom_headers":null, "notes":"" }
 ```
-`kind` ∈ `opencode-go|openai-compatible|anthropic-compatible`. `namespace`:
+`kind` ∈ `opencode-go|openai-compatible|anthropic-compatible|gemini-openai`. `namespace`:
 `^[a-z0-9][a-z0-9._-]{0,62}$` and must not contain `/`. Unique → `409`.
 For `anthropic-compatible`, `base_url` is the host only (e.g. `https://api.anthropic.com`) —
 the `/v1` version segment is appended automatically (`/v1/messages`, `/v1/models`).
+`gemini-openai` is Google's OpenAI-compatible endpoint (`…/v1beta/openai`): it answers a bad
+key with `400`, not `401`/`403`, and that is accepted as an auth rejection **only for this kind**
+(see `AuthRejectStatuser`).
 Returns the `AccountSummary`.
 
 ### `GET /admin/accounts` → `200` → `[AccountSummary, …]`
@@ -135,9 +148,16 @@ Runs the **7-step test** (design: `2026-10-06_070000-ezllm-m3-keytest-design.md`
   "upstream_error":{"type":"AuthError","message":"Invalid API key."},
   "hint":"opencode-go's GET /v1/models succeeds for ANY key, so a working catalog does not prove the key is valid. This key failed the usage-oracle check."}}
 ```
-Steps: `format`(no network) → `catalog` → `auth`(oracle; **gate**) → `quota`(non-fatal) →
+Steps: `format` → `catalog` → `auth`(oracle; **gate**) → `quota`(non-fatal) →
 `inference`(unless `skip_inference`) → `protocol` (≤ `probe_max_models`, default 6, async-flagged
 in response when deferred) → persist.
+**`format` no longer inspects the key.** Since 2026-10-10 all shape checks (empty, whitespace,
+min/max length, `sk-` prefix) were removed — providers change key formats and the upstream probe
+is the real validator; the step still fails here for an unregistered `kind`. The `format` step
+name is kept stable — the UI maps it to a chip and the 422 body names it.
+A **public `/models`** (Command Code returns 200 with no auth) proves nothing: the catalog step
+records models, the auth gate still decides, and when a kind has no usage oracle registration
+falls back to the real inference probe.
 `429`/`5xx`/timeout/transport failure → retried with exponential backoff, using the global
 `retry.retries` setting (default `3` retries after the initial attempt) per combo hop.
 Retries set to 3 after the initial call per hop. When all four total attempts fail retryably, combo failover advances and grants the next hop its own budget. For `n` hops, worst-case network attempts are `4n`; use `retry.retries: 0` to disable extra tries. **`400`/`401`/`403`/`404`/`422` → no retry.** Streaming responses are never replayed after bytes reach the client.
@@ -161,9 +181,25 @@ Full catalog + protocol probe (all models, or `{"models":[…],"surfaces":["open
 ### `GET /admin/accounts/{id}/models` → `200`
 ```jsonc
 [ {"id":"qwen3.8-flash","display":"…","owned_by":"opencode",
-   "openai":1,"anthropic":1,"responses":0,"tested_at":"…"} ]
+   "openai":1,"anthropic":1,"responses":0,"tested_at":"…","pin":""} ]
 ```
-`null` = untested (the UI must render three states: ✓ / ✗ / ?).
+`null` = untested (the UI must render three states: ✓ / ✗ / ?). `pin` is `""` (auto) or the
+pinned surface; enforced by the router (see Surface-pin refusal above).
+
+### `PUT /admin/accounts/{id}/model-pin` → `200`
+Set or clear a model's surface pin. The model id travels **in the body** (ids can contain `/`,
+so it can never be a path segment). `pin` distinguishes three states — **absent** field → `400`
+(this endpoint always states intent), `""` → clear (back to auto), or one of `openai|anthropic|responses`.
+```jsonc
+// request                                   // 200 response
+{ "model":"qwen3.8-flash",                   { "model":"qwen3.8-flash",
+  "pin":"openai",                              "pin":"openai",
+  "force":false }                              "force":false }
+```
+Unknown model → `404`. Pinning a surface the probe never confirmed (`null`/`0`) → `409
+unconfirmed_surface` unless `force:true`. A pin set with `force` on an unconfirmed surface is
+honored exactly like any other — the refusal then protects you from the mistake downstream.
+Catalog resyncs **preserve** pins (models that vanish upstream lose their pin with their row).
 
 ### `GET /admin/accounts/{id}/quota` → `200`
 Live `ReadQuota` → classified shape + `raw`. `{"kind":"none"}` when the provider has no endpoint

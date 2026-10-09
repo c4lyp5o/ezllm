@@ -103,16 +103,13 @@ func TestHealthIsPublic(t *testing.T) {
 	}
 	var m map[string]any
 	json.Unmarshal([]byte(body), &m)
-	if m["status"] != "ok" || m["version"] != "m2" {
-		t.Errorf("healthz payload = %v", m)
+	// Liveness only: exactly one field, nothing about the host or the data.
+	if len(m) != 1 || m["status"] != "ok" {
+		t.Errorf("healthz payload = %v, want exactly {status: ok}", m)
 	}
-	if m["accounts"].(float64) != 1 {
-		t.Errorf("accounts = %v, want 1", m["accounts"])
-	}
-	// must never leak secrets
-	for _, bad := range []string{"sk-upstream-key", "tok-infer", "test-master"} {
+	for _, bad := range []string{"***", "tok-infer", "test-master", "accounts", "ledger_rows", "schema_version", "\"db\"", "uptime_s", "version", ".sqlite", "/data"} {
 		if strings.Contains(body, bad) {
-			t.Errorf("healthz leaked %q", bad)
+			t.Errorf("healthz leaked %q in %s", bad, body)
 		}
 	}
 }

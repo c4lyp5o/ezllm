@@ -232,23 +232,20 @@ func (s *Server) WrapForTest(h http.Handler) http.Handler {
 
 // ── handlers ────────────────────────────────────────────────────────────────
 
-func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	payload := map[string]any{
-		"status":   "ok",
-		"version":  "m2",
-		"uptime_s": int(time.Since(s.started).Seconds()),
-	}
+// handleHealth is public (monitors, Traefik, the compose healthcheck), so it
+// reports liveness only. It leaks nothing: no DB path, counts, versions, or
+// uptime. Detailed stats are behind the admin token at /admin/overview.
+// A failing DB ping returns 503 so the probe still means something.
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if s.db != nil {
-		payload["schema_version"] = s.db.SchemaVersion()
-		payload["db"] = s.db.Path()
-		if n, err := s.countAccounts(); err == nil {
-			payload["accounts"] = n
-		}
-		if n, err := s.countLedger(); err == nil {
-			payload["ledger_rows"] = n
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := s.db.Ping(ctx); err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "down"})
+			return
 		}
 	}
-	writeJSON(w, http.StatusOK, payload)
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
 func (s *Server) countAccounts() (int, error) {

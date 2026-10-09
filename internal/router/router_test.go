@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -21,6 +22,12 @@ type fakeCatalog struct {
 
 	pickKeyErr error
 	combos     map[string]*store.Combo // by name
+	pins       map[string]string       // "accountID/model" -> pinned surface
+}
+
+// ModelPin returns the fake's pin for a model ("" when unpinned).
+func (f *fakeCatalog) ModelPin(_ context.Context, id int64, model string) (string, error) {
+	return f.pins[fmt.Sprintf("%d/%s", id, model)], nil
 }
 
 func newFake() *fakeCatalog {

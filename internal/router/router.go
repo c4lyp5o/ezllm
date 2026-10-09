@@ -44,6 +44,8 @@ type Catalog interface {
 	PickKey(ctx context.Context, accountID int64) (store.KeyPick, error)
 	// ModelExists reports whether the account's catalog contains modelID.
 	ModelExists(ctx context.Context, accountID int64, modelID string) (bool, error)
+	// ModelPin returns the surface pinned for a model, or "" when unpinned.
+	ModelPin(ctx context.Context, accountID int64, modelID string) (string, error)
 	// AllNamespaces lists namespace/model pairs for helpful 404s.
 	AllNamespaces(ctx context.Context) ([]string, error)
 	// AccountByID loads an account by primary key — combo hops reference
@@ -53,6 +55,48 @@ type Catalog interface {
 	ComboByName(ctx context.Context, name string) (*store.Combo, error)
 	// AllComboNames lists combo names for 404 hints.
 	AllComboNames(ctx context.Context) ([]string, error)
+}
+
+// ErrPinned refuses a request whose client surface is not the one this model
+// is pinned to. It never reroutes: the body is in the client's shape, so
+// sending it to another surface would only produce an upstream 400. The
+// server maps this to 400 and names the surface the client must use.
+type ErrPinned struct {
+	Requested string
+	Pinned    string
+	Got       string
+}
+
+func (e *ErrPinned) Error() string {
+	return fmt.Sprintf("model %q is pinned to the %s surface; this request used %s — call it on the %s endpoint instead",
+		e.Requested, e.Pinned, e.Got, e.Pinned)
+}
+
+// surfaceName maps a wire surface to its pin name.
+func surfaceName(s provider.Surface) string {
+	switch s {
+	case provider.SurfaceAnthropic:
+		return "anthropic"
+	case provider.SurfaceResponses:
+		return "responses"
+	default:
+		return "openai"
+	}
+}
+
+// checkPin enforces a model's pin against the client's surface. An unpinned
+// model passes unchanged. A lookup error FAILS CLOSED: an operator who pinned
+// a model away from a surface must not have that pin silently bypassed by a
+// transient DB error. The error is returned so the caller answers, not skips.
+func (r *Resolver) checkPin(ctx context.Context, accountID int64, model, requested string, surface provider.Surface) error {
+	pin, err := r.catalog.ModelPin(ctx, accountID, model)
+	if err != nil {
+		return fmt.Errorf("model pin lookup for %q: %w", requested, err)
+	}
+	if pin == "" || pin == surfaceName(surface) {
+		return nil
+	}
+	return &ErrPinned{Requested: requested, Pinned: pin, Got: surfaceName(surface)}
 }
 
 // ErrUnavailable marks a request the router refused for a RULE rather than a
@@ -174,6 +218,11 @@ func (r *Resolver) ResolveCandidates(ctx context.Context, requested string, surf
 		}
 	}
 
+	// A pin is a refusal, not a skip: a direct route has no other hop to try.
+	if err := r.checkPin(ctx, acct.ID, model, requested, surface); err != nil {
+		return nil, err
+	}
+
 	// A direct route has nowhere to fail over to, so an ineligible model is a
 	// hard stop rather than a dropped candidate.
 	if err := r.eligibleHere(ctx, acct.ID, model); err != nil {
@@ -260,6 +309,11 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 				first = fmt.Errorf("hop %s/%s: not in that account's catalog", acct.Namespace, h.ModelID)
 			}
 			continue
+		}
+		// A pinned hop on the wrong surface is a refusal for the whole request,
+		// not a skip: silently moving to another hop would change protocol.
+		if err := r.checkPin(ctx, acct.ID, h.ModelID, name, surface); err != nil {
+			return nil, err
 		}
 		// The rules engine's veto. In a combo this is a skip, never an error:
 		// that is the entire day/night mechanism. But when EVERY hop ends up

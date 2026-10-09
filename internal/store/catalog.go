@@ -202,6 +202,27 @@ VALUES (?,?,?,?,1)`, accountID, label, hint, plaintext)
 // UpsertModels replaces an account's catalog snapshot.
 func (d *DB) UpsertModels(ctx context.Context, accountID int64, models []provider.ModelInfo) error {
 	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		// The sync replaces the catalog wholesale, which would wipe operator
+		// pins. Snapshot them first and restore those that still exist after.
+		pins := map[string]string{}
+		prows, err := tx.QueryContext(ctx,
+			`SELECT model_id, proto_pin FROM models WHERE account_id=? AND proto_pin IS NOT NULL`, accountID)
+		if err != nil {
+			return err
+		}
+		for prows.Next() {
+			var id, pin string
+			if err := prows.Scan(&id, &pin); err != nil {
+				prows.Close()
+				return err
+			}
+			pins[id] = pin
+		}
+		prows.Close()
+		if err := prows.Err(); err != nil {
+			return err
+		}
+
 		if _, err := tx.ExecContext(ctx, `DELETE FROM models WHERE account_id=?`, accountID); err != nil {
 			return err
 		}
@@ -220,6 +241,47 @@ ON CONFLICT(account_id, model_id) DO UPDATE SET
 			if _, err := stmt.ExecContext(ctx, accountID, m.ID, m.Display, m.OwnedBy); err != nil {
 				return err
 			}
+			if pin, ok := pins[m.ID]; ok {
+				if _, err := tx.ExecContext(ctx,
+					`UPDATE models SET proto_pin=? WHERE account_id=? AND model_id=?`,
+					pin, accountID, m.ID); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+}
+
+// ModelPin returns the pinned surface for one model ("" when unpinned or the
+// model row does not exist). A pin is enforced by the router, never rerouted.
+func (d *DB) ModelPin(ctx context.Context, accountID int64, modelID string) (string, error) {
+	var pin sql.NullString
+	err := d.r.QueryRowContext(ctx,
+		`SELECT proto_pin FROM models WHERE account_id=? AND model_id=?`, accountID, modelID).Scan(&pin)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return pin.String, nil
+}
+
+// SetModelPin stores a pin (empty clears it). The caller validates the value.
+func (d *DB) SetModelPin(ctx context.Context, accountID int64, modelID, pin string) error {
+	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		var v any
+		if pin != "" {
+			v = pin
+		}
+		res, err := tx.ExecContext(ctx,
+			`UPDATE models SET proto_pin=? WHERE account_id=? AND model_id=?`, v, accountID, modelID)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrNotFound
 		}
 		return nil
 	})

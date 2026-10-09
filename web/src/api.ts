@@ -270,6 +270,8 @@ export type ModelRow = {
   id: string; display?: string | null; owned_by?: string | null;
   openai?: boolean | number | null; anthropic?: boolean | number | null; responses?: boolean | number | null;
   tested_at?: string | null;
+  /** Operator-pinned surface; empty string = auto (probed). Enforced by the router. */
+  pin?: string | null;
 };
 
 export type SyncResult = { synced: number; protocol_tested: number; protocol_support: ProtocolSupport; ms: number };
@@ -292,6 +294,14 @@ export type ModelRule = {
 
 export const modelRules = () => get<ModelRule[]>('/admin/model-rules');
 export const accountModels = (id: number) => get<ModelRow[]>(`/admin/accounts/${id}/models`);
+
+/** Pin a model to one surface ("" clears). force=true allows a surface the probe never confirmed. */
+export const setModelPin = (accountId: number, model: string, pin: string, force = false) =>
+  apiFetch<{ model: string; pin: string }>(
+    `/admin/accounts/${accountId}/model-pin`,
+    { method: 'PUT' },
+    { model, pin, force },
+  );
 export const chat = (model: string, messages: { role: string; content: string }[]) =>
   post<any>('/admin/chat', { model, messages });
 

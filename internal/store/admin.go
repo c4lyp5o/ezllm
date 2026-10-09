@@ -581,13 +581,15 @@ type ModelEntryRow struct {
 	Anthropic *bool   `json:"anthropic"`
 	Responses *bool   `json:"responses"`
 	TestedAt  *string `json:"tested_at,omitempty"`
+	// Pin is the operator-chosen surface ("" = auto). Enforced by the router.
+	Pin string `json:"pin"`
 }
 
 // ListModels returns an account's catalog with protocol verdicts.
 func (d *DB) ListModels(ctx context.Context, accountID int64) ([]ModelEntryRow, error) {
 	rows, err := d.r.QueryContext(ctx, `
 SELECT model_id, COALESCE(display_name,''), COALESCE(owned_by,''),
-       proto_openai, proto_anthropic, proto_responses, proto_tested_at
+       proto_openai, proto_anthropic, proto_responses, proto_tested_at, COALESCE(proto_pin,'')
 FROM models WHERE account_id=? ORDER BY model_id`, accountID)
 	if err != nil {
 		return nil, err
@@ -598,7 +600,7 @@ FROM models WHERE account_id=? ORDER BY model_id`, accountID)
 		var m ModelEntryRow
 		var o, a, r sql.NullBool
 		var tested sql.NullString
-		if err := rows.Scan(&m.ID, &m.Display, &m.OwnedBy, &o, &a, &r, &tested); err != nil {
+		if err := rows.Scan(&m.ID, &m.Display, &m.OwnedBy, &o, &a, &r, &tested, &m.Pin); err != nil {
 			return nil, err
 		}
 		if o.Valid {

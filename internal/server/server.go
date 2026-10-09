@@ -140,6 +140,7 @@ func (s *Server) routes() {
 
 	s.mux.HandleFunc("POST /admin/accounts/{id}/sync", s.admin(s.handleSync))
 	s.mux.HandleFunc("GET /admin/accounts/{id}/models", s.admin(s.handleListModels))
+	s.mux.HandleFunc("PUT /admin/accounts/{id}/model-pin", s.admin(s.handleSetModelPin))
 	s.mux.HandleFunc("POST /admin/chat", s.admin(s.inference(provider.SurfaceOpenAI)))
 	s.mux.HandleFunc("GET /admin/accounts/{id}/quota", s.admin(s.handleAccountQuota))
 
@@ -512,6 +513,10 @@ func errorStatus(err error) int {
 	var nu *router.ErrUnavailable
 	if errors.As(err, &nu) {
 		return http.StatusTooManyRequests
+	}
+	var np *router.ErrPinned
+	if errors.As(err, &np) {
+		return http.StatusBadRequest
 	}
 	return http.StatusBadGateway
 }

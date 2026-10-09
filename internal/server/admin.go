@@ -734,6 +734,80 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, entries)
 }
 
+// handleSetModelPin sets or clears a model's surface pin.
+//
+// Body: {"model": "<id>", "pin": "openai"|"anthropic"|"responses"|"", "force": bool}
+// The model id travels in the body, not the path: ids can contain "/".
+// pin is a RawMessage so "absent" (keep), "" (clear), and a value (set) are
+// distinct. A pin on a surface the probe never confirmed is refused unless
+// force is true, so an operator cannot pin a model into a 400 by mistake.
+func (s *Server) handleSetModelPin(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Model string          `json:"model"`
+		Pin   json.RawMessage `json:"pin"`
+		Force bool            `json:"force"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_json", "invalid JSON body")
+		return
+	}
+	model := body.Model
+	if model == "" {
+		writeErr(w, http.StatusBadRequest, "bad_request", "model is required")
+		return
+	}
+	if len(body.Pin) == 0 {
+		writeErr(w, http.StatusBadRequest, "bad_request", "pin is required (\"\" clears)")
+		return
+	}
+	var pin string
+	if err := json.Unmarshal(body.Pin, &pin); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_request", "pin must be a string")
+		return
+	}
+	switch pin {
+	case "", "openai", "anthropic", "responses":
+	default:
+		writeErr(w, http.StatusBadRequest, "bad_request", "pin must be openai, anthropic, responses, or empty")
+		return
+	}
+
+	if pin != "" && !body.Force {
+		entries, err := s.db.ListModels(r.Context(), id)
+		if err != nil {
+			s.writeStoreErr(w, err)
+			return
+		}
+		var found *store.ModelEntryRow
+		for i := range entries {
+			if entries[i].ID == model {
+				found = &entries[i]
+				break
+			}
+		}
+		if found == nil {
+			writeErr(w, http.StatusNotFound, "not_found", "model not in this account's catalog")
+			return
+		}
+		confirmed := map[string]*bool{"openai": found.OpenAI, "anthropic": found.Anthropic, "responses": found.Responses}[pin]
+		if confirmed == nil || !*confirmed {
+			writeErr(w, http.StatusConflict, "unconfirmed_surface",
+				"the probe has not confirmed this model on "+pin+"; pass force=true to pin anyway")
+			return
+		}
+	}
+
+	if err := s.db.SetModelPin(r.Context(), id, model, pin); err != nil {
+		s.writeStoreErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"model": model, "pin": pin, "force": body.Force})
+}
+
 // handleAccountQuota performs a live quota read + snapshot now.
 func (s *Server) handleAccountQuota(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)

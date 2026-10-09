@@ -24,7 +24,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 6
+const schemaVersion = 7
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -218,6 +218,9 @@ func (d *DB) migrate() error {
 		if err := d.alterComboContextSize(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate combo context size: %w", err)
 		}
+		if err := d.alterModelProtoPin(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate model proto pin: %w", err)
+		}
 		if _, err := d.w.Exec(schemaSQL); err != nil {
 			return fmt.Errorf("store: migrate %d->%d: %w", cur, schemaVersion, err)
 		}
@@ -226,6 +229,21 @@ func (d *DB) migrate() error {
 		}
 	}
 	return nil
+}
+
+// alterModelProtoPin adds models.proto_pin on databases created before v7.
+// Guarded by a column check: ALTER TABLE ADD COLUMN is not idempotent.
+func (d *DB) alterModelProtoPin(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "models")
+	if err != nil || !exists {
+		return err
+	}
+	has, err := hasColumn(ctx, d.w, "models", "proto_pin")
+	if err != nil || has {
+		return err
+	}
+	_, err = d.w.ExecContext(ctx, `ALTER TABLE models ADD COLUMN proto_pin TEXT`)
+	return err
 }
 
 // alterComboContextSize adds the client-advertised context metadata on existing DBs.

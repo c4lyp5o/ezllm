@@ -1,7 +1,7 @@
 // PROVIDERS — account cards, add-provider wizard modal, per-key actions, model drawer.
 import { useCallback, useEffect, useState } from 'react';
 import {
-  ApiError, AuthError, del, get, modelRules, patch, post,
+  ApiError, AuthError, del, get, modelRules, patch, post, setModelPin,
   KINDS, STEPS,
   type Account, type ApiErrorDetail, type KeyRow, type ModelRule, type ModelRow, type TestResult, type TestStep,
 } from '../api';
@@ -342,9 +342,15 @@ function EditAccountModal({ account, onClose, onSaved }: { account: Account | nu
 
 // ── models drawer ───────────────────────────────────────────────────────
 
+const PIN_SURFACES = ['openai', 'anthropic', 'responses'] as const;
+
 function ModelsDrawer({ id }: { id: number }) {
   const [models, setModels] = useState<ModelRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [pinErr, setPinErr] = useState<string | null>(null);
+  // A surface the probe never confirmed needs an explicit override. Held here
+  // so the prompt is per-row and cannot be bypassed by a stale select value.
+  const [pendingForce, setPendingForce] = useState<{ model: string; pin: string } | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -358,6 +364,29 @@ function ModelsDrawer({ id }: { id: number }) {
   if (!models) return <div className="border-t border-line px-5 py-4"><Skeleton className="h-3.5 w-40" /><Skeleton className="mt-2 h-3.5 w-56" /></div>;
   if (models.length === 0) return <div className="border-t border-line px-5 py-4 text-[12.5px] text-mute">No models synced — run “Sync models”.</div>;
 
+  const applyPin = (model: string, pin: string, force: boolean) => {
+    setPinErr(null);
+    setModels((prev) => prev?.map((m) => (m.id === model ? { ...m, pin } : m)) ?? prev);
+    setModelPin(id, model, pin, force)
+      .then(() => setPendingForce(null))
+      .catch((e: unknown) => {
+        // Roll the select back to what the server still holds.
+        get<ModelRow[]>(`/admin/accounts/${id}/models`).then(setModels).catch(() => undefined);
+        if (e instanceof ApiError && e.status === 409) {
+          setPendingForce({ model, pin });
+          return;
+        }
+        setPinErr(e instanceof Error ? e.message : 'pin failed');
+      });
+  };
+
+  const onPinChange = (m: ModelRow, pin: string) => {
+    if (pin === '') return applyPin(m.id, '', false);
+    const confirmed = pin === 'openai' ? m.openai : pin === 'anthropic' ? m.anthropic : m.responses;
+    if (!confirmed) return setPendingForce({ model: m.id, pin });
+    applyPin(m.id, pin, false);
+  };
+
   return (
     <div className="border-t border-line px-5 py-4 animate-fade-in">
       <div className="max-h-64 overflow-y-auto pr-1">
@@ -365,17 +394,43 @@ function ModelsDrawer({ id }: { id: number }) {
           <thead>
             <tr className="text-left text-[10px] uppercase tracking-[0.1em] text-mute">
               <th className="pb-1.5 font-medium">model</th>
+              <th className="pb-1.5 font-medium">response type</th>
             </tr>
           </thead>
           <tbody className="font-mono">
             {models.map((m) => (
               <tr key={m.id} className="border-t border-line/50">
-                <td className="max-w-[260px] truncate py-1.5 text-dim" title={m.id}>{m.id}</td>
+                <td className="max-w-[220px] truncate py-1.5 text-dim" title={m.id}>{m.id}</td>
+                <td className="py-1.5">
+                  <select
+                    aria-label={`response type for ${m.id}`}
+                    value={m.pin ?? ''}
+                    onChange={(e) => onPinChange(m, e.target.value)}
+                    className="rounded border border-line bg-transparent px-1.5 py-0.5 text-[11.5px] text-dim"
+                  >
+                    <option value="">auto (probed)</option>
+                    {PIN_SURFACES.map((s) => {
+                      const ok = s === 'openai' ? m.openai : s === 'anthropic' ? m.anthropic : m.responses;
+                      return <option key={s} value={s}>{s}{ok ? '' : ' (unconfirmed)'}</option>;
+                    })}
+                  </select>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
+        {pinErr && <div className="mt-2 text-[11.5px] text-bad">{pinErr}</div>}
       </div>
+      {pendingForce && (
+        <ConfirmModal
+          open
+          title={`Pin ${pendingForce.model} to ${pendingForce.pin}?`}
+          body={`The probe has not confirmed ${pendingForce.model} on ${pendingForce.pin}. Pinning it anyway can make every request 400 if the upstream rejects that surface.`}
+          confirmLabel="Pin anyway"
+          onConfirm={() => applyPin(pendingForce.model, pendingForce.pin, true)}
+          onClose={() => setPendingForce(null)}
+        />
+      )}
     </div>
   );
 }

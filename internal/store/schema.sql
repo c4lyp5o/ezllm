@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS models (
   proto_anthropic INTEGER,
   proto_responses INTEGER,
   proto_tested_at TEXT,
+  proto_pin       TEXT,                         -- NULL auto / 'openai' | 'anthropic' | 'responses' (enforced, never rerouted)
   UNIQUE(account_id, model_id)
 );
 CREATE INDEX IF NOT EXISTS idx_models_proto ON models(account_id, proto_anthropic, proto_responses);

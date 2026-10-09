@@ -468,6 +468,14 @@ func TestTokenPlaintextShownOnce(t *testing.T) {
 	if strings.Contains(listResp, plain) {
 		t.Errorf("GET /admin/tokens re-served the token plaintext")
 	}
+	code, resp = jsonDo(t, h, "POST", "/admin/tokens", "tok-admin",
+		map[string]any{"name": "opencode", "roles": []string{"admin"}})
+	if code != http.StatusConflict {
+		t.Fatalf("duplicate token name should return 409 without replacing it, got %d: %s", code, resp)
+	}
+	if countTable(t, h, "client_tokens") != 3 { // seeded hermes + admin + first created token
+		t.Fatalf("duplicate token attempt changed token row count")
+	}
 }
 
 func TestExportHasNoCredentials(t *testing.T) {

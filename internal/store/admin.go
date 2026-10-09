@@ -1118,9 +1118,8 @@ func (in TokenInput) Validate() error {
 	return nil
 }
 
-// UpsertToken creates a token (generating one when not supplied) or updates an
-// existing row's roles by name. Returns the plaintext token — the ONLY moment
-// it exists outside the caller's request.
+// Tokens are created, never overwritten: returning fresh plaintext for a name
+// that already exists is unsafe and misleading.
 func (d *DB) UpsertToken(ctx context.Context, in TokenInput) (id int64, plaintext string, err error) {
 	if err := in.Validate(); err != nil {
 		return 0, "", err
@@ -1137,9 +1136,16 @@ func (d *DB) UpsertToken(ctx context.Context, in TokenInput) (id int64, plaintex
 		roles = []string{"infer"}
 	}
 	err = d.WithWriteTx(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `
-INSERT INTO client_tokens (name, token_hash, roles, enabled) VALUES (?,?,?,1)
-ON CONFLICT(name) DO UPDATE SET roles=excluded.roles`,
+		var existing string
+		err = tx.QueryRowContext(ctx, `SELECT name FROM client_tokens WHERE name=?`, in.Name).Scan(&existing)
+		if err == nil {
+			return &ErrConflict{What: fmt.Sprintf("token name %q already exists", in.Name)}
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `
+INSERT INTO client_tokens (name, token_hash, roles, enabled) VALUES (?,?,?,1)`,
 			in.Name, HashToken(plaintext), strings.Join(roles, ","))
 		return err
 	})

@@ -141,6 +141,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /admin/accounts/{id}/sync", s.admin(s.handleSync))
 	s.mux.HandleFunc("GET /admin/accounts/{id}/models", s.admin(s.handleListModels))
 	s.mux.HandleFunc("PUT /admin/accounts/{id}/model-pin", s.admin(s.handleSetModelPin))
+	// v8: versioned model prices + derived cost (admin only — like overview,
+	// this is where detail that /healthz no longer leaks lives).
+	s.mux.HandleFunc("GET /admin/prices", s.admin(s.handleListPrices))
+	s.mux.HandleFunc("PUT /admin/accounts/{id}/prices", s.admin(s.handleSetPrice))
+	s.mux.HandleFunc("DELETE /admin/accounts/{id}/prices", s.admin(s.handleDeletePrice))
+	s.mux.HandleFunc("GET /admin/cost", s.admin(s.handleCost))
 	s.mux.HandleFunc("POST /admin/chat", s.admin(s.inference(provider.SurfaceOpenAI)))
 	s.mux.HandleFunc("GET /admin/accounts/{id}/quota", s.admin(s.handleAccountQuota))
 
@@ -462,6 +468,13 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 		// same compressed body, because hops only swap `model`.
 		body, compRes := s.applyCompression(r, requested, body)
 
+		// v8 (M9): shape capture for cacheability research. Runs AFTER
+		// compression so the hash describes what actually goes upstream —
+		// if a profile rewrites history, that IS a cache break and must
+		// measure as one. Best-effort: a failed parse records nothing and
+		// changes nothing about the request.
+		sh := captureShape(body, surface)
+
 		// served is the route that ACTUALLY committed a response — it may be
 		// hop 2 or 3 after failover. Every ledger field below (account, key,
 		// model) must describe that hop: crediting routes[0] would bill a
@@ -496,6 +509,9 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			Account:   served.Account.Namespace, KeyID: served.KeyID, KeyHint: served.KeyHint, Model: served.Model,
 			Status: status, Stream: res.Stream, TTFTms: res.TTFTms, Totalms: res.Totalms,
 			EndpointID: res.EndpointID, UpstreamModel: res.UpstreamModel,
+			// v8 research capture: request shape + operator session key.
+			PrefixSHA: sh.PrefixSHA, MsgCount: sh.MsgCount, ToolCount: sh.ToolCount,
+			SessionID: sessionOf(r), ReqBytes: sh.ReqBytes,
 		}
 		attachCompressionMetrics(&call, compRes)
 		if res.Usage != nil {

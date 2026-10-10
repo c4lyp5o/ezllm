@@ -212,7 +212,9 @@ const callsCols = `ts, client, surface, alias, account, model, status, ttft_ms, 
        tokens_in, tokens_out, tokens_cached_read, tokens_cached_write, reasoning_tokens,
        COALESCE(tokens_saved, 0), COALESCE(compression_profile, ''),
        COALESCE(compression_applied, 0), COALESCE(compression_rules_fired, 0),
-       COALESCE(context_tokens_pre, 0), COALESCE(context_tokens_saved, 0)`
+       COALESCE(context_tokens_pre, 0), COALESCE(context_tokens_saved, 0),
+       COALESCE(compression_saved_notional, 0), COALESCE(prefix_sha, ''),
+       COALESCE(session_id, ''), msg_count, tool_count, req_bytes`
 
 // scanCalls maps rows projected with callsCols into the row shape the
 // dashboard and the requests explorer share.
@@ -223,10 +225,12 @@ func scanCalls(rows *sql.Rows) ([]map[string]any, error) {
 		var status int
 		var ttft, total, tin, tout, cread, cwrite, reasoning any
 		var saved, applied, rulesFired, contextPre, contextSaved int
-		var profile string
+		var notional, msgCount, toolCount, reqBytes int
+		var prefixSHA, sessionID, profile string
 		if err := rows.Scan(&ts, &client, &surface, &alias, &account, &model, &status,
 			&ttft, &total, &tin, &tout, &cread, &cwrite, &reasoning,
-			&saved, &profile, &applied, &rulesFired, &contextPre, &contextSaved); err != nil {
+			&saved, &profile, &applied, &rulesFired, &contextPre, &contextSaved,
+			&notional, &prefixSHA, &sessionID, &msgCount, &toolCount, &reqBytes); err != nil {
 			return nil, err
 		}
 		out = append(out, map[string]any{
@@ -234,16 +238,27 @@ func scanCalls(rows *sql.Rows) ([]map[string]any, error) {
 			"account": account, "model": model, "status": status,
 			"ttft_ms": ttft, "total_ms": total,
 			"tin": tin, "tout": tout, "cread": cread, "cwrite": cwrite,
-			"reasoning":            reasoning,
+			"reasoning": reasoning,
+			// saved = tokens that ACTUALLY shipped shorter; saved_notional =
+			// what a rejected rewrite would have saved (tuning data, never in
+			// the headline). empty = the request never mentioned compression;
+			// "off" / "unknown-profile" / "disabled" = it asked and got no
+			// change; otherwise the profile name (applied says whether bytes
+			// moved).
 			"saved":                saved,
+			"saved_notional":       notional,
 			"context_tokens_pre":   contextPre,
-			"context_tokens_saved": contextSaved, // empty = the request never mentioned compression; "off" /
-			// "unknown-profile" / "disabled" = it asked and got no change;
-			// otherwise the profile name (applied says whether bytes moved).
-			"compression": profile,
-			"applied":     applied != 0,
+			"context_tokens_saved": contextSaved,
+			"compression":          profile,
+			"applied":              applied != 0,
 			// non-zero only when caveman prose rules rewrote something
 			"rules_fired": rulesFired,
+			// v8 research capture (see docs/API.md — cacheability section)
+			"prefix_sha": prefixSHA,
+			"session_id": sessionID,
+			"msg_count":  msgCount,
+			"tool_count": toolCount,
+			"req_bytes":  reqBytes,
 		})
 	}
 	return out, rows.Err()

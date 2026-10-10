@@ -106,7 +106,11 @@ func attachCompressionMetrics(call *store.Call, res compress.Result) {
 	call.CompressionProfile = res.Profile
 	call.CompressionApplied = res.Applied
 	call.PromptTokensPre = res.Pre
+	// Real vs notional: what actually shipped shorter goes in TokensSaved (the
+	// dashboard headline); a floor-rejected-but-measurable saving goes in
+	// TokensSavedNotional so it is visible without inflating the headline.
 	call.TokensSaved = res.Saved
+	call.TokensSavedNotional = res.SavedNotional
 	call.CompressionMs = &res.MS
 	// caveman attribution: non-zero only when prose rules actually rewrote
 	// something, so "why did this prompt shrink?" is answerable from the row.

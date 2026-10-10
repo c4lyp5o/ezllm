@@ -44,8 +44,14 @@ type Result struct {
 	Profile string
 	Applied bool
 	Pre     int64 // estimated prompt tokens before compression
-	Saved   int64 // estimated tokens saved (0 on any skip)
-	MS      int64
+	// Saved is what ACTUALLY shipped shorter — 0 on every skip/fail path, so
+	// SUM(Saved) is a real saving, not an aspiration.
+	Saved int64 // estimated tokens saved (0 on any skip)
+	// SavedNotional is what compression WOULD have saved had the ratio floor /
+	// integrity gate let the rewrite through. Recorded so a rejected-but-large
+	// saving is visible for tuning without polluting Saved.
+	SavedNotional int64
+	MS            int64
 	// RulesFired is caveman attribution: how many pack rules rewrote
 	// something. Zero for every other engine. Recorded so a surprising
 	// saving can be traced to prose condensation rather than guessed at.
@@ -150,10 +156,12 @@ func Apply(body []byte, p *Profile) ([]byte, Result) {
 	if saved <= 0 {
 		saved = 0
 	}
-	res.Saved = saved
 
 	// Contract rule 4: ratio floor — below it, the original ships.
 	if pre > 0 && float64(saved)/float64(pre) < p.MinCompressRatio {
+		// Record what we threw away so tuning the floor is a data question,
+		// not a guess. Saved stays 0: nothing actually shipped shorter.
+		res.SavedNotional = saved
 		res.Err = fmt.Sprintf("ratio floor: %.3f < %.3f", float64(saved)/float64(pre), p.MinCompressRatio)
 		return body, res
 	}
@@ -170,6 +178,7 @@ func Apply(body []byte, p *Profile) ([]byte, Result) {
 		res.Err = "re-marshal: " + err.Error()
 		return body, res
 	}
+	res.Saved = saved
 	res.Applied = true
 	return out, res
 }

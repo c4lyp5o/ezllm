@@ -323,6 +323,32 @@ func TestForwardStripsClientOrigin(t *testing.T) {
 	}
 }
 
+// X-Ezllm-Session is the operator's ledger grouping key (M9). It belongs to the
+// client->gateway hop only; forwarding it would leak internal session labels to
+// every provider. Same class as Origin: must die in the header copy.
+func TestForwardStripsEzllmSession(t *testing.T) {
+	saw := "unset"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		saw = r.Header.Get("X-Ezllm-Session")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"x","choices":[{"message":{"content":"OK"}}]}`))
+	}))
+	defer upstream.Close()
+
+	d := newDispatcher()
+	body := []byte(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(string(body)))
+	req.Header.Set("X-Ezllm-Session", "sess-internal-42")
+
+	if _, err := d.Forward(context.Background(), rec, req, testRoute(upstream.URL, provider.SurfaceOpenAI), body); err != nil {
+		t.Fatal(err)
+	}
+	if saw != "" {
+		t.Errorf("upstream saw X-Ezllm-Session %q — gateway-internal header must be stripped", saw)
+	}
+}
+
 // THE streaming invariant: bytes arrive incrementally, unbuffered, and the
 // client sees exactly what upstream sent.
 func TestForwardStreamedIsIncrementalAndLossless(t *testing.T) {

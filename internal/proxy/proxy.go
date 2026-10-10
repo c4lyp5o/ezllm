@@ -701,6 +701,11 @@ var stripAlways = map[string]bool{
 	// request and answer 401 ("dangerous-direct-browser-access" gate). The
 	// header describes the browser->dashboard hop and must die here.
 	"Origin": true,
+	// X-Ezllm-Session is the operator's ledger grouping key (M9). It describes
+	// the client->gateway hop, not the gateway->provider hop, so it must not
+	// reach the upstream. (x-ezllm-compression is a pre-existing sibling leak,
+	// left as-is here to keep this change scoped to the header added now.)
+	"X-Ezllm-Session": true,
 }
 
 func copyClientHeaders(dst, src *http.Request, extraStrip []string) {

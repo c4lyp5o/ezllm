@@ -10,9 +10,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/c4lyp5o/ezllm/internal/provider"
@@ -373,13 +373,10 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 // and the lists are tiny.
 func orderRoutes(combo *store.Combo, routes []proxy.Route) []proxy.Route {
 	switch combo.Strategy {
-	case "true_round_robin", "strict_round_robin":
-		// Both names do the same thing: rotate by one every request. The plan
-		// document described strict as persisted-and-epoch-safe and true as
-		// weighted; neither is implemented, so rather than keep two names for
-		// one behaviour the distinction is documented as absent. Use
-		// block_round_robin when cache reuse matters.
-		return rotate(NextRR(combo.ID)%uint64(len(routes)), routes)
+	case "true_round_robin":
+		return randomOrder(routes)
+	case "strict_round_robin":
+		return strictOrder(combo, routes)
 	case "block_round_robin":
 		return blockOrder(combo, routes)
 	case "least_used":
@@ -395,8 +392,9 @@ func orderRoutes(combo *store.Combo, routes []proxy.Route) []proxy.Route {
 }
 
 // blockCursors is the per-combo block_round_robin cursor: which hop owns the
-// current block, and how many dispatches it has left. Process-local like
-// rrCounters — losing it on restart only means a block restarts.
+// current block, and how many dispatches it has left. In-process on purpose: a
+// DB write per inference would put SQLite on the hot path for no benefit, and
+// losing it on restart only means one block starts over.
 //
 // Identity, not an index: the eligible candidate list changes as hops cool down
 // or come back, and an index would silently re-point the block at a different
@@ -464,11 +462,6 @@ func blockOrder(combo *store.Combo, routes []proxy.Route) []proxy.Route {
 	return rotate(uint64(target), routes)
 }
 
-// rrCounters is the per-combo round-robin cursor. In-process on purpose: a
-// DB write per inference would put SQLite on the hot path for no benefit —
-// losing a cursor on restart only means one combo starts at hop 0 again.
-var rrCounters sync.Map // int64 comboID -> *uint64
-
 func rotate(start uint64, routes []proxy.Route) []proxy.Route {
 	if start == 0 || len(routes) < 2 {
 		return routes
@@ -478,37 +471,53 @@ func rotate(start uint64, routes []proxy.Route) []proxy.Route {
 	return append(out, routes[:start]...)
 }
 
-// stickyLast remembers which hop last answered, so sticky_last_good keeps
-// using it until sticky_idle_s elapses. Process-local like rrCounters.
-var stickyLast sync.Map // int64 comboID -> stickyEntry
+// lastGood remembers which hop last ANSWERED a request, per combo NAME.
+//
+// Keyed by name, not id, because the only writer is the success path in the
+// server, which knows the alias the client asked for and not the combo's row id.
+// Combo names are unique. In-process, like every other cursor here — losing it
+// on restart costs one un-sticky (or one off-by-one rotation) request.
+//
+// TWO strategies read this, because "which hop last answered" answers both of
+// their questions:
+//   - sticky_last_good  : keep using it (until sticky_idle_s of quiet).
+//   - strict_round_robin: start the NEXT request after it.
+var lastGood sync.Map // string comboName -> lastGoodEntry
 
-type stickyEntry struct {
+type lastGoodEntry struct {
 	route proxy.Route
 	at    time.Time
+}
+
+// MarkHopGood records the hop that actually served a request. Called by the
+// server on a delivered 2xx for a combo-routed request.
+//
+// This had NO CALLER at all until now, which made sticky_last_good inert: the
+// map it reads was never written, so the strategy silently fell back to
+// position order (hop 1) on every request. A dead WRITE is as bad as a dead
+// knob, and it fails the same way — quietly, with the strategy appearing to run.
+func (r *Resolver) MarkHopGood(comboName string, rt proxy.Route) {
+	if comboName == "" {
+		return
+	}
+	lastGood.Store(comboName, lastGoodEntry{route: rt, at: time.Now()})
 }
 
 // stickyOrder puts the last-good hop first, while the combo is still within its
 // idle window AND the hop is still in the candidate list.
 //
-// The idle check is the whole point of the strategy and was MISSING: the entry's
-// timestamp was written and never read, so sticky_last_good pinned the first hop
-// that ever answered — through restarts of nothing, indefinitely — and
-// sticky_idle_s had no effect whatsoever. Release after the idle gap is what
-// lets the next session start on a different account while a running session
-// keeps its warm cache.
-//
 // sticky_idle_s of 0 means "never release on idle" (stick until the hop fails
 // or leaves the list); a positive value is the number of idle seconds to hold.
-// After a restart (no memory) or an idle gap it falls back to position order —
-// correct, just not sticky.
+// Without a remembered hop, or past the idle window, it falls back to position
+// order — correct, just not sticky.
 func stickyOrder(combo *store.Combo, routes []proxy.Route) []proxy.Route {
-	v, ok := stickyLast.Load(combo.ID)
+	v, ok := lastGood.Load(combo.Name)
 	if !ok {
 		return routes
 	}
-	e := v.(stickyEntry)
+	e := v.(lastGoodEntry)
 	if combo.StickyIdleS > 0 && time.Since(e.at) > time.Duration(combo.StickyIdleS)*time.Second {
-		stickyLast.Delete(combo.ID)
+		lastGood.Delete(combo.Name)
 		return routes
 	}
 	for i, rt := range routes {
@@ -516,23 +525,59 @@ func stickyOrder(combo *store.Combo, routes []proxy.Route) []proxy.Route {
 			if i == 0 {
 				return routes
 			}
-			out := make([]proxy.Route, 0, len(routes))
-			out = append(out, routes[i])
-			return append(out, append(routes[:i], routes[i+1:]...)...)
+			return rotate(uint64(i), routes)
 		}
 	}
 	return routes
 }
 
-// MarkHopGood records a hop as the one that answered, for sticky_last_good.
-func (r *Resolver) MarkHopGood(comboID int64, rt proxy.Route) {
-	stickyLast.Store(comboID, stickyEntry{route: rt, at: time.Now()})
+// strictOrder implements strict_round_robin: the rotation advances only when a
+// request SUCCEEDS, and it advances from the hop that actually served.
+//
+// The difference from plain per-request rotation is entirely in what happens on
+// failure. Plain rotation moves the cursor on every ATTEMPT, so a hop that just
+// failed is skipped next time even though it may be perfectly healthy. Here the
+// cursor moves only on a delivered response and moves to the hop that answered,
+// so a failing hop deprioritises itself without being blacklisted: A 429s, B
+// serves, the next request starts at C — and A is tried again when the rotation
+// comes back round to it. Failover inside the request is unchanged; only the
+// next request's starting point differs.
+//
+// With no remembered hop (a cold start) it is position order, which for the
+// first request is indistinguishable from starting at the top of the list.
+func strictOrder(combo *store.Combo, routes []proxy.Route) []proxy.Route {
+	if len(routes) < 2 {
+		return routes
+	}
+	v, ok := lastGood.Load(combo.Name)
+	if !ok {
+		return routes
+	}
+	e := v.(lastGoodEntry)
+	for i, rt := range routes {
+		if rt.Account.ID == e.route.Account.ID && rt.Model == e.route.Model {
+			return rotate(uint64((i+1)%len(routes)), routes)
+		}
+	}
+	// The hop that answered is not eligible right now (cooling, out of budget,
+	// dropped from the catalog). Position order is the honest fallback.
+	return routes
 }
 
-// NextRR advances and returns the round-robin cursor for a combo.
-func NextRR(comboID int64) uint64 {
-	v, _ := rrCounters.LoadOrStore(comboID, new(uint64))
-	return atomic.AddUint64(v.(*uint64), 1) - 1
+// randomOrder implements true_round_robin: a genuine dice roll over the eligible
+// hops, for every request.
+//
+// It is NOT a round robin despite the name, and it is the only strategy with no
+// cursor at all — which is its one real advantage: nothing to reset on restart
+// and no shared state to synchronise. The costs are worth stating: it is even
+// only in expectation, so it will pick the same hop several times in a row, and
+// like any per-request rotation it discards prefix-cache warmth. Prefer
+// block_round_robin when cache reuse matters.
+func randomOrder(routes []proxy.Route) []proxy.Route {
+	if len(routes) < 2 {
+		return routes
+	}
+	return rotate(uint64(rand.IntN(len(routes))), routes)
 }
 
 // splitNamespace splits "ns/model" into its parts. A model id may itself contain

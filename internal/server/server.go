@@ -488,6 +488,17 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			// and disappears from alias-grouped usage.
 			served = routes[0]
 		}
+		// Record which hop actually served. Two strategies need an OUTCOME and
+		// cannot get one from resolution alone: sticky_last_good keeps using the
+		// hop that last answered, and strict_round_robin starts the next request
+		// after it. Only a delivered 2xx counts — a failed attempt must not move
+		// either cursor, or a hop that just broke would look like one that
+		// worked. A bare model name is always a combo, so an alias without '/'
+		// identifies one; a direct namespace/model route has no rotation to
+		// inform.
+		if ferr == nil && res.Status >= 200 && res.Status < 300 && !strings.Contains(served.Alias, "/") {
+			s.resolver.MarkHopGood(served.Alias, served)
+		}
 		if info := reqInfoOf(r); info != nil {
 			info.account = served.Account.Namespace
 			info.model = served.Model

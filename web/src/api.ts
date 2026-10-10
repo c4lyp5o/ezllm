@@ -163,6 +163,10 @@ export type FeedRow = {
   ts: string; client: string; surface: string; alias?: string; account: string; model: string;
   status: number; stream?: boolean; ttft_ms?: number; total_ms?: number;
   tin: number; tout: number; cread?: number; reasoning?: number; saved: number;
+  /** What a REJECTED rewrite would have saved. Non-zero while `applied` is
+   *  false is the proof the pipeline ran and declined (usually the minimum
+   *  ratio floor), not that compression was skipped. */
+  savedNotional: number;
   contextPre?: number; contextSaved?: number;
   compression: string; applied: boolean; rulesFired?: number; error?: string;
 };
@@ -180,6 +184,8 @@ export function normalizeFeedRow(raw: any): FeedRow {
     reasoning: num(raw.reasoning ?? raw.reasoning_tokens),
     rulesFired: num(raw.rules_fired ?? raw.compression_rules_fired),
     saved: num(raw.saved ?? raw.tokens_saved),
+    // Snapshot rows carry the short key, live SSE rows the ledger column name.
+    savedNotional: num(raw.saved_notional ?? raw.compression_saved_notional),
     contextPre: num(raw.context_tokens_pre), contextSaved: num(raw.context_tokens_saved),
     compression: String(raw.compression ?? ''), applied: Boolean(raw.applied),
     error: raw.error ? String(raw.error) : undefined,
@@ -515,8 +521,8 @@ export const KINDS = ['opencode-go', 'openai-compatible', 'anthropic-compatible'
 export const STRATEGY_HINTS: Record<string, string> = {
   failover: 'try hops in order until one works',
   block_round_robin: 'keep one hop for N requests, then move to the next — keeps that account’s prompt cache warm; needs N <= the hop’s request budget',
-  true_round_robin: 'one hop per request, rotating — no cache reuse; prefer block_round_robin',
-  strict_round_robin: 'identical to true_round_robin today (the persisted-cursor version was never built)',
+  true_round_robin: 'a dice roll per request — perfectly even in expectation and stateless, but no cache reuse and it will streak',
+  strict_round_robin: 'rotate to the next hop only after a success — a failing hop deprioritises itself and still gets retried',
   sticky_last_good: 'stay on the last working hop, and release it after sticky_idle_s of quiet',
   least_used: 'not implemented yet — falls back to hop order',
 };

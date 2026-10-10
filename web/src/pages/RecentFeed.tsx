@@ -140,13 +140,17 @@ export default function RecentFeed() {
                         title={
                           c.applied
                             ? `compressed by ${c.compression}`
-                            : `asked ${c.compression}, no change`
+                            : c.savedNotional > 0
+                              ? `asked ${c.compression}: ${formatTokens(c.savedNotional)} tokens were compressible but below the profile's minimum ratio — the rewrite was rejected rather than break the cached prefix`
+                              : `asked ${c.compression}, no change`
                         }
                         className={cx(
                           'ml-1.5 rounded px-1 py-0.5 font-mono text-[10px] align-middle',
                           c.applied && c.saved > 0
                             ? 'bg-emerald-500/10 text-emerald-300/90'
-                            : 'bg-[rgba(255,255,255,0.06)] text-mute',
+                            : c.savedNotional > 0 && !c.applied
+                              ? 'bg-amber-500/10 text-amber-300/90'
+                              : 'bg-[rgba(255,255,255,0.06)] text-mute',
                         )}
                       >
                         {c.compression === 'off'
@@ -155,7 +159,9 @@ export default function RecentFeed() {
                             ? `↓${formatTokens(c.saved)}`
                             : c.applied
                               ? 'ok 0'
-                              : c.compression.replace('-profile', '')}
+                              : c.savedNotional > 0
+                                ? `held ${formatTokens(c.savedNotional)}`
+                                : c.compression.replace('-profile', '')}
                       </span>
                     )}
                   </span>

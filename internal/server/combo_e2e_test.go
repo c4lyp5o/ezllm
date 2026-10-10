@@ -374,3 +374,50 @@ func TestFailedHopIsNeverCreditedWithSuccess(t *testing.T) {
 	}
 	t.Error("expected a ledger row crediting account 'good'")
 }
+
+// The success hook must actually FIRE, or the outcome-driven strategies are
+// inert no matter how correct their ordering code is. This is the regression
+// that made sticky_last_good a no-op for its entire life: router.MarkHopGood
+// existed, was correct, and had ZERO callers, so the strategy silently fell
+// back to position order (hop 1) on every request while appearing to run.
+//
+// sticky_last_good is the observable one here: it puts the hop that ANSWERED
+// first, whereas a missing record always leads with hop 1 — so the assertion
+// distinguishes "the hook ran" from "the hook is dead" rather than just
+// checking that a request succeeded.
+func TestSuccessfulComboRequestRecordsTheServedHop(t *testing.T) {
+	tu := newTwoUpstream(t, true /* hop 1 answers 429, hop 2 serves */)
+	ctx := context.Background()
+
+	combo, err := tu.db.ComboByName(ctx, "daily")
+	if err != nil {
+		t.Fatalf("read combo: %v", err)
+	}
+	combo.Strategy = "sticky_last_good"
+	combo.StickyIdleS = 1800 // long enough that the record cannot expire mid-test
+	if _, err := tu.db.UpsertCombo(ctx, *combo); err != nil {
+		t.Fatalf("switch strategy: %v", err)
+	}
+
+	code, body := tu.chat(`{"model":"daily","messages":[{"role":"user","content":"hi"}]}`)
+	if code != http.StatusOK {
+		t.Fatalf("combo request = %d, want 200 — body: %s", code, body)
+	}
+	if !strings.Contains(body, "from-good") {
+		t.Fatalf("hop 2 should have served, got %s", body)
+	}
+
+	// A fresh resolver reads the same process-wide record, so this observes what
+	// the handler wrote rather than any state the test set up itself.
+	routes, err := router.New(tu.db).ResolveCandidates(ctx, "daily", provider.SurfaceOpenAI, "test")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if routes[0].Account.Namespace != "good" {
+		t.Errorf("sticky hop = %q, want the hop that actually served (\"good\") — the success hook did not fire",
+			routes[0].Account.Namespace)
+	}
+	if len(routes) != 2 {
+		t.Errorf("routes = %d, want both hops still present", len(routes))
+	}
+}

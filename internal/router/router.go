@@ -374,17 +374,94 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 func orderRoutes(combo *store.Combo, routes []proxy.Route) []proxy.Route {
 	switch combo.Strategy {
 	case "true_round_robin", "strict_round_robin":
+		// Both names do the same thing: rotate by one every request. The plan
+		// document described strict as persisted-and-epoch-safe and true as
+		// weighted; neither is implemented, so rather than keep two names for
+		// one behaviour the distinction is documented as absent. Use
+		// block_round_robin when cache reuse matters.
 		return rotate(NextRR(combo.ID)%uint64(len(routes)), routes)
+	case "block_round_robin":
+		return blockOrder(combo, routes)
 	case "least_used":
 		// Caller supplies hop order already; least-used needs usage data the
 		// router does not hold, so keep position order until M4's ledger hook
 		// lands. Ordering wrongly here would be worse than not ordering.
 		return routes
 	case "sticky_last_good":
-		return stickyOrder(combo.ID, routes)
+		return stickyOrder(combo, routes)
 	default: // "failover"
 		return routes
 	}
+}
+
+// blockCursors is the per-combo block_round_robin cursor: which hop owns the
+// current block, and how many dispatches it has left. Process-local like
+// rrCounters — losing it on restart only means a block restarts.
+//
+// Identity, not an index: the eligible candidate list changes as hops cool down
+// or come back, and an index would silently re-point the block at a different
+// hop when it does. The entry carries its own mutex because the read-check-
+// decrement is a read-modify-write that concurrent requests share.
+var blockCursors sync.Map // int64 comboID -> *blockEntry
+
+type blockEntry struct {
+	mu        sync.Mutex
+	accountID int64
+	model     string
+	remaining int
+}
+
+// blockOrder implements block_round_robin: one hop serves BlockSize consecutive
+// dispatches, then the rotation advances to the next hop in position order.
+//
+// Why blocks rather than per-request rotation: within an agent turn the tool
+// loop fires several calls seconds apart with a growing prefix, and each call
+// reads the previous prefix out of that ACCOUNT's prompt cache. Striping every
+// request across hops destroys that — the call landing on hop B carries a prefix
+// B has never seen, so B pays a full cold read, and A loses the delta that went
+// to B. Holding a hop for a run of calls keeps its cached prefix warm while
+// still splitting load evenly over time.
+//
+// BlockSize 1 degenerates to plain per-request round robin. Costs one cold read
+// per block boundary (`block_size - 1` warm calls per block), so a block that
+// splits a burst mid-way is the failure mode to size against.
+func blockOrder(combo *store.Combo, routes []proxy.Route) []proxy.Route {
+	if len(routes) < 2 {
+		return routes
+	}
+	size := combo.BlockSize
+	if size < 1 {
+		size = 1
+	}
+
+	v, _ := blockCursors.LoadOrStore(combo.ID, &blockEntry{})
+	e := v.(*blockEntry)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	target := -1
+	for i, rt := range routes {
+		if rt.Account.ID == e.accountID && rt.Model == e.model {
+			target = i
+			break
+		}
+	}
+
+	if target < 0 || e.remaining <= 0 {
+		// Start the next block. Walk forward in position order (the combo's
+		// declared preference) rather than jumping; with no usable previous
+		// target — a cold start, or the hop left the eligible list — begin at
+		// the top of the list.
+		next := 0
+		if target >= 0 {
+			next = (target + 1) % len(routes)
+		}
+		e.accountID, e.model = routes[next].Account.ID, routes[next].Model
+		e.remaining = size
+		target = next
+	}
+	e.remaining--
+	return rotate(uint64(target), routes)
 }
 
 // rrCounters is the per-combo round-robin cursor. In-process on purpose: a
@@ -410,16 +487,30 @@ type stickyEntry struct {
 	at    time.Time
 }
 
-// stickyOrder puts the last-good hop first when it is still within its idle
-// window AND still present in the candidate list. After a restart (no memory)
-// or an idle gap, it falls back to position order — which is correct, just not
-// sticky.
-func stickyOrder(comboID int64, routes []proxy.Route) []proxy.Route {
-	v, ok := stickyLast.Load(comboID)
+// stickyOrder puts the last-good hop first, while the combo is still within its
+// idle window AND the hop is still in the candidate list.
+//
+// The idle check is the whole point of the strategy and was MISSING: the entry's
+// timestamp was written and never read, so sticky_last_good pinned the first hop
+// that ever answered — through restarts of nothing, indefinitely — and
+// sticky_idle_s had no effect whatsoever. Release after the idle gap is what
+// lets the next session start on a different account while a running session
+// keeps its warm cache.
+//
+// sticky_idle_s of 0 means "never release on idle" (stick until the hop fails
+// or leaves the list); a positive value is the number of idle seconds to hold.
+// After a restart (no memory) or an idle gap it falls back to position order —
+// correct, just not sticky.
+func stickyOrder(combo *store.Combo, routes []proxy.Route) []proxy.Route {
+	v, ok := stickyLast.Load(combo.ID)
 	if !ok {
 		return routes
 	}
 	e := v.(stickyEntry)
+	if combo.StickyIdleS > 0 && time.Since(e.at) > time.Duration(combo.StickyIdleS)*time.Second {
+		stickyLast.Delete(combo.ID)
+		return routes
+	}
 	for i, rt := range routes {
 		if rt.Account.ID == e.route.Account.ID && rt.Model == e.route.Model {
 			if i == 0 {

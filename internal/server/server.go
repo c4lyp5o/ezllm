@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -493,12 +494,32 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 		}
 		status := res.Status
 		if ferr != nil {
-			// Nothing (or only headers) reached the client. Emit an explicit
-			// 502 so a transport failure never looks like an empty 200 —
-			// ResponseWriter defaults to 200 when WriteHeader is never called.
-			status = http.StatusBadGateway
-			if res.Status == 0 {
-				writeErr(w, status, "upstream_error", "upstream request failed: "+ferr.Error())
+			var rl *proxy.RateLimited
+			if errors.As(ferr, &rl) {
+				// Every candidate hop was out of its configured request budget,
+				// so NO upstream call was made. That is a refusal, not a gateway
+				// fault: answer 429 and name the earliest moment the request
+				// could succeed, so a client can wait instead of blind-retrying.
+				status = http.StatusTooManyRequests
+				extra := map[string]any{
+					"reason": ferr.Error(),
+					"rule": map[string]any{
+						"kind":   "rate",
+						"detail": fmt.Sprintf("%d requests per %s", rl.Limit, rl.Window),
+					},
+				}
+				if !rl.NextAllowed.IsZero() {
+					extra["rule"].(map[string]any)["next_allowed"] = rl.NextAllowed.Format(time.RFC3339)
+				}
+				writeErrExtra(w, status, "model_unavailable", ferr.Error(), extra)
+			} else {
+				// Nothing (or only headers) reached the client. Emit an explicit
+				// 502 so a transport failure never looks like an empty 200 —
+				// ResponseWriter defaults to 200 when WriteHeader is never called.
+				status = http.StatusBadGateway
+				if res.Status == 0 {
+					writeErr(w, status, "upstream_error", "upstream request failed: "+ferr.Error())
+				}
 			}
 		} else if status == 0 {
 			status = http.StatusBadGateway

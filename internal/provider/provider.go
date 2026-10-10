@@ -94,7 +94,14 @@ type Account struct {
 	QuotaMode             string // probe|percent|money|tokens|none
 	CapWindow             string // 5h|daily|weekly|monthly
 	CapTokens             int64  // 0 = unlimited
-	Notes                 string
+	// RateLimit/RateWindow are the account-WIDE request budget, enforced by the
+	// proxy's in-memory limiter before a hop is dispatched. Unlike CapTokens
+	// (a token budget enforced by the rules engine at resolution), a request
+	// rate is checked at dispatch so an exhausted hop can be SKIPPED and the
+	// combo can fail over instead of refusing the whole request.
+	RateLimit  int64         // requests per RateWindow; 0 = unlimited
+	RateWindow time.Duration // 0 = off
+	Notes      string
 }
 
 // Adapter translates between ezllm's generic request path and one provider kind.

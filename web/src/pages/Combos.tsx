@@ -3,7 +3,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { ApiError, accountModels, del, get, patch, post, STRATEGY_HINTS, type Combo, type Hop } from '../api';
 import { Chip, ConfirmModal, Modal, Mono, SectionLabel, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls } from '../ui';
 
-const STRATEGIES = ['failover', 'true_round_robin', 'strict_round_robin', 'sticky_last_good', 'least_used'] as const;
+const STRATEGIES = ['failover', 'block_round_robin', 'true_round_robin', 'strict_round_robin', 'sticky_last_good', 'least_used'] as const;
+
+// AccountLite keeps each account's request budget alongside its name so the
+// block-size field can warn when a block could not be served in full.
+type AccountLite = { id: number; name: string; rate_limit?: number; rate_window?: string | null };
 
 // HopRow carries one UI-only flag: whether the model id is typed by hand
 // rather than picked from the account's catalog (doc #12). It never reaches
@@ -15,10 +19,11 @@ const emptyHop = (account_id: number): HopRow => ({ account_id, model_id: '', we
 type Draft = {
   name: string; strategy: string; sticky_idle_s: number; enabled: boolean;
   compression_profile_id: number | null; context_size: number; hops: HopRow[];
+  block_size: number;
 };
 
 function newDraft(): Draft {
-  return { name: '', strategy: 'failover', sticky_idle_s: 1800, context_size: 200000, enabled: true, compression_profile_id: null, hops: [] };
+  return { name: '', strategy: 'failover', sticky_idle_s: 1800, context_size: 200000, enabled: true, compression_profile_id: null, hops: [], block_size: 5 };
 }
 
 function HopArrow({ last }: { last: boolean }) {
@@ -28,7 +33,7 @@ function HopArrow({ last }: { last: boolean }) {
 }
 
 function HopsEditor({ hops, setHops, accounts }: {
-  hops: HopRow[]; setHops: (h: HopRow[]) => void; accounts: { id: number; name: string }[];
+  hops: HopRow[]; setHops: (h: HopRow[]) => void; accounts: AccountLite[];
 }) {
   const move = (i: number, dir: -1 | 1) => {
     const j = i + dir;
@@ -123,7 +128,7 @@ function HopsEditor({ hops, setHops, accounts }: {
 
 function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
   open: boolean; editing: Combo | null;
-  accounts: { id: number; name: string }[];
+  accounts: AccountLite[];
   profiles: { id: number; name: string }[];
   onClose: () => void; onSaved: () => void;
 }) {
@@ -139,6 +144,7 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
         name: editing.name, strategy: editing.strategy, sticky_idle_s: editing.sticky_idle_s ?? 1800,
         enabled: editing.enabled, compression_profile_id: editing.compression_profile_id ?? null,
         context_size: editing.context_size ?? 200000,
+        block_size: editing.block_size ?? 1,
         hops: (editing.hops ?? []).map((h) => ({ ...h })),
       });
     } else setD(newDraft());
@@ -151,6 +157,9 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
     const body: Record<string, unknown> = {
       name: d.name.trim(), strategy: d.strategy, sticky_idle_s: d.strategy === 'sticky_last_good' ? d.sticky_idle_s : null,
       enabled: d.enabled, compression_profile_id: d.compression_profile_id, context_size: d.context_size,
+      // Always sent: the server keeps the stored value when this is 0, and 1 is
+      // the smallest meaningful block, so a real value always wins.
+      block_size: d.strategy === 'block_round_robin' ? d.block_size : 1,
       // strip the UI-only `custom` flag: the wire shape is the plain Hop.
       hops: d.hops.map((h) => ({ account_id: h.account_id, model_id: h.model_id, weight: h.weight, enabled: h.enabled })),
     };
@@ -228,6 +237,42 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
               <span className="text-[11px] text-mute">seconds — move on after this idle</span>
             </div>
           )}
+          {d.strategy === 'block_round_robin' && (
+            <div className="mt-3 rounded-lg border border-line bg-raised/60 p-3.5">
+              <div className="flex items-center gap-3">
+                <label className="text-[11px] uppercase tracking-wide text-mute" htmlFor="cb-block">block size</label>
+                <input id="cb-block" type="number" min={1} max={1000} className={cx(inputCls, 'w-24 py-1.5 font-mono text-[12px] tabular-nums')}
+                  value={d.block_size} onChange={(e) => setD((p) => ({ ...p, block_size: Number(e.target.value) || 1 }))} />
+                <span className="text-[11px] text-mute">requests per hop before the rotation moves on</span>
+              </div>
+              <p className="mt-2 text-[11px] leading-snug text-mute">
+                One hop serves this many requests in a row, then the next hop does the same, and so on.
+                Because each account caches your prompt prefix, a run of consecutive requests to the same
+                account keeps that cache warm — call <Mono>k</Mono> reads the prefix call <Mono>k-1</Mono> just
+                sent, so the marginal cost collapses. Rotating on every request (the plain round robins)
+                throws that away: the hop that receives the next call has never seen that prefix and pays a
+                full cold read. Load is still split evenly — just in blocks instead of alternating.
+                <span className="text-dim"> Every hop in the combo shares this size.</span>
+              </p>
+              {(() => {
+                // A block cannot be served in full if it is longer than the
+                // hop's own request budget — the budget gate will skip the hop
+                // mid-block and the rotation will move on early.
+                const tight = d.hops
+                  .map((h) => accounts.find((a) => a.id === h.account_id))
+                  .filter((a): a is AccountLite => !!a && (a.rate_limit ?? 0) > 0 && (a.rate_limit ?? 0) < d.block_size);
+                if (tight.length === 0) return null;
+                return (
+                  <p className="mt-2 text-[11px] leading-snug text-amber-400">
+                    Block size {d.block_size} exceeds the request budget of{' '}
+                    {tight.map((a) => `${a.name} (${a.rate_limit} per ${a.rate_window})`).join(', ')} —
+                    those hops will drop out mid-block and the rotation will advance early. Set the block
+                    size to the smallest hop budget, or raise it.
+                  </p>
+                );
+              })()}
+            </div>
+          )}
         </div>
 
         <HopsEditor hops={d.hops} setHops={setHops} accounts={accounts} />
@@ -245,7 +290,7 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
 
 export default function Combos() {
   const [combos, setCombos] = useState<Combo[] | null>(null);
-  const [accounts, setAccounts] = useState<{ id: number; name: string }[]>([]);
+  const [accounts, setAccounts] = useState<AccountLite[]>([]);
   const [profiles, setProfiles] = useState<{ id: number; name: string }[]>([]);
   const [modal, setModal] = useState<{ open: boolean; editing: Combo | null }>({ open: false, editing: null });
   const [pendingDelete, setPendingDelete] = useState<Combo | null>(null);
@@ -254,7 +299,9 @@ export default function Combos() {
 
   const load = useCallback(() => {
     get<Combo[]>('/admin/combos').then((c) => { setCombos(c); setErr(null); }).catch((e) => setErr(e instanceof Error ? e.message : 'failed to load'));
-    get<{ id: number; name: string }[]>('/admin/accounts').then((a) => setAccounts(a.map((x) => ({ id: x.id, name: x.name })))).catch(() => { /* non-fatal */ });
+    get<AccountLite[]>('/admin/accounts')
+      .then((a) => setAccounts(a.map((x) => ({ id: x.id, name: x.name, rate_limit: x.rate_limit, rate_window: x.rate_window }))))
+      .catch(() => { /* non-fatal */ });
     get<{ id: number; name: string }[]>('/admin/compression-profiles')
       .then((p) => setProfiles(p.map((x) => ({ id: x.id, name: String((x as { name?: unknown }).name ?? x.id) }))))
       .catch(() => setProfiles([]));
@@ -336,6 +383,12 @@ export default function Combos() {
               </div>
               {c.strategy === 'sticky_last_good' && (
                 <div className="mt-2 text-[11px] text-mute">sticky idle <Mono>{c.sticky_idle_s ?? '–'}s</Mono></div>
+              )}
+              {c.strategy === 'block_round_robin' && (
+                <div className="mt-2 text-[11px] text-mute">
+                  block size <Mono>{c.block_size ?? 1}</Mono> — one hop serves {c.block_size ?? 1} request
+                  {(c.block_size ?? 1) === 1 ? '' : 's'} in a row before rotating
+                </div>
               )}
             </div>
           ))}

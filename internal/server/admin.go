@@ -1035,6 +1035,12 @@ func (s *Server) handleCombo(w http.ResponseWriter, r *http.Request) {
 		if c.StickyIdleS == 0 {
 			c.StickyIdleS = cur.StickyIdleS
 		}
+		// Same zero-value convention as sticky_idle_s: an omitted block_size
+		// keeps the stored value. 1 is the smallest meaningful block, so nothing
+		// is expressible only as 0.
+		if c.BlockSize == 0 {
+			c.BlockSize = cur.BlockSize
+		}
 		if body.ContextSizeRaw == nil {
 			c.ContextSize = cur.ContextSize
 		}
@@ -1306,6 +1312,10 @@ func accountFromSummary(a *store.AccountSummary) provider.Account {
 	if err != nil {
 		kind = provider.KindOpenAICompatible // validated at write time; belt+braces
 	}
+	// A window that will not parse degrades to "no rate limit" rather than
+	// taking the account offline; the store applies the same rule on the
+	// routing path, so both views agree.
+	rateWindow, _ := time.ParseDuration(a.RateWindow)
 	return provider.Account{
 		ID:                    a.ID,
 		Name:                  a.Name,
@@ -1318,6 +1328,8 @@ func accountFromSummary(a *store.AccountSummary) provider.Account {
 		QuotaMode:             a.QuotaMode,
 		CapWindow:             a.CapWindow,
 		CapTokens:             a.CapTokens,
+		RateLimit:             a.RateLimit,
+		RateWindow:            rateWindow,
 		Notes:                 a.Notes,
 	}
 }

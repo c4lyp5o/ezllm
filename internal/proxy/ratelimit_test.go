@@ -2,12 +2,15 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/ratelimit"
 )
 
 // ── 429 is a failover signal, never a retry signal ───────────────────────────
@@ -69,7 +72,7 @@ func TestRateLimitedHopFailsOverAndIsThenSkipped(t *testing.T) {
 	d.SetRetries(3)
 	// A long park keeps the assertions deterministic: the second call must skip
 	// the parked hop, which it can only do while the window is still open.
-	d.ConfigureCooldown(5*time.Second, 5*time.Second)
+	d.ConfigureCooldown(5*time.Second, 5*time.Second, 0)
 
 	routes := []Route{textRoute(bad.URL, "day"), textRoute(good.URL, "night")}
 	for i := 0; i < 2; i++ {
@@ -102,7 +105,7 @@ func TestSoleHopRateLimitIsNotParked(t *testing.T) {
 	d.SetRetries(3)
 	// Deliberately generous: if the sole hop were parked, the second call would
 	// be refused locally and never reach the upstream.
-	d.ConfigureCooldown(time.Hour, time.Hour)
+	d.ConfigureCooldown(time.Hour, time.Hour, 0)
 
 	rt := textRoute(up.URL, "m")
 	for i := 0; i < 2; i++ {
@@ -128,33 +131,33 @@ func TestHopCooldownHonoursRetryAfter(t *testing.T) {
 	hdr := http.Header{}
 
 	hdr.Set("Retry-After", "7")
-	if got := d.hopCooldown(nil, http.StatusTooManyRequests, hdr, true); got != 7*time.Second {
+	if got := d.classifyHop(nil, http.StatusTooManyRequests, hdr, true).cooldown; got != 7*time.Second {
 		t.Errorf("Retry-After: 7 → %v, want 7s", got)
 	}
 
 	// A value the upstream cannot seriously mean is rejected rather than
 	// clamped, so the operator's configured duration applies instead.
 	hdr.Set("Retry-After", "86400")
-	if got := d.hopCooldown(nil, http.StatusTooManyRequests, hdr, true); got != d.on429 {
+	if got := d.classifyHop(nil, http.StatusTooManyRequests, hdr, true).cooldown; got != d.on429 {
 		t.Errorf("absurd Retry-After → %v, want the configured on_429 (%v)", got, d.on429)
 	}
 
 	// Garbage must not pin a hop.
 	hdr.Set("Retry-After", "soon")
-	if got := d.hopCooldown(nil, http.StatusTooManyRequests, hdr, true); got != d.on429 {
+	if got := d.classifyHop(nil, http.StatusTooManyRequests, hdr, true).cooldown; got != d.on429 {
 		t.Errorf("garbage Retry-After → %v, want the configured on_429 (%v)", got, d.on429)
 	}
 
 	// Zero is not a valid delay: "come back now" is what we are already doing.
 	hdr.Set("Retry-After", "0")
-	if got := d.hopCooldown(nil, http.StatusTooManyRequests, hdr, true); got != d.on429 {
+	if got := d.classifyHop(nil, http.StatusTooManyRequests, hdr, true).cooldown; got != d.on429 {
 		t.Errorf("Retry-After: 0 → %v, want the configured on_429 (%v)", got, d.on429)
 	}
 }
 
 func TestConfigureCooldownWiresOperatorValues(t *testing.T) {
 	d := newDispatcher()
-	d.ConfigureCooldown(42*time.Second, 5*time.Second)
+	d.ConfigureCooldown(42*time.Second, 5*time.Second, 0)
 	if d.on429 != 42*time.Second {
 		t.Errorf("on429 = %v, want 42s", d.on429)
 	}
@@ -162,9 +165,188 @@ func TestConfigureCooldownWiresOperatorValues(t *testing.T) {
 		t.Errorf("on5xx = %v, want 5s", d.on5xx)
 	}
 	// A zero value must not silently disable cooling — the default stands.
-	d.ConfigureCooldown(0, 0)
+	d.ConfigureCooldown(0, 0, 0)
 	if d.on429 != 42*time.Second || d.on5xx != 5*time.Second {
 		t.Errorf("zero config clobbered the durations: on429=%v on5xx=%v", d.on429, d.on5xx)
+	}
+}
+
+// ── account request budget at dispatch ──────────────────────────────────────
+
+// rateRoute is textRoute with a request budget attached to its account.
+func rateRoute(url, model string, accountID, limit int64, window time.Duration) Route {
+	rt := textRoute(url, model)
+	rt.Account.ID = accountID
+	rt.Account.RateLimit = limit
+	rt.Account.RateWindow = window
+	return rt
+}
+
+// An account at its budget must be SKIPPED, not treated as a failure: the combo
+// fails over and the client still gets an answer. That is the difference between
+// a rate limit that is survivable and one that kills the turn.
+func TestExhaustedAccountIsSkippedSoComboFailsOver(t *testing.T) {
+	var limited, unlimited int32
+	a := countingStub(t, http.StatusOK, `{"ok":"a"}`, &limited)
+	defer a.Close()
+	b := countingStub(t, http.StatusOK, `{"ok":"b"}`, &unlimited)
+	defer b.Close()
+
+	d := newDispatcher()
+	d.SetRetries(0)
+	d.SetLimiter(ratelimit.New(nil))
+
+	routes := []Route{
+		rateRoute(a.URL, "day", 100, 1, time.Minute), // budget of ONE request
+		rateRoute(b.URL, "night", 200, 0, 0),         // unlimited
+	}
+	for i := 0; i < 3; i++ {
+		req, body := reqWithBody(`{"model":"day","messages":[]}`)
+		rec := httptest.NewRecorder()
+		if _, _, err := d.ForwardCandidates(context.Background(), rec, req, routes, body); err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("request %d: status %d, want 200 from the account that still has budget", i, rec.Code)
+		}
+	}
+	if got := atomic.LoadInt32(&limited); got != 1 {
+		t.Errorf("budgeted account hits = %d, want exactly 1 — it must be skipped once spent", got)
+	}
+	if got := atomic.LoadInt32(&unlimited); got != 2 {
+		t.Errorf("unlimited account hits = %d, want 2 (the calls the first account could not take)", got)
+	}
+}
+
+// When EVERY hop is out of budget the request is refused locally — and the
+// upstream is never contacted, which is the whole point: the provider's ceiling
+// stops us spending a request to be told what we already know.
+func TestAllAccountsExhaustedRefusesWithoutCallingUpstream(t *testing.T) {
+	var hits int32
+	up := countingStub(t, http.StatusOK, `{"ok":true}`, &hits)
+	defer up.Close()
+
+	d := newDispatcher()
+	d.SetRetries(3) // even with retries available, no request may be sent
+	d.SetLimiter(ratelimit.New(nil))
+
+	routes := []Route{rateRoute(up.URL, "m", 300, 1, time.Minute)}
+	req, body := reqWithBody(`{"model":"m","messages":[]}`)
+	rec := httptest.NewRecorder()
+	if _, _, err := d.ForwardCandidates(context.Background(), rec, req, routes, body); err != nil {
+		t.Fatalf("first request: %v", err)
+	}
+
+	req2, body2 := reqWithBody(`{"model":"m","messages":[]}`)
+	rec2 := httptest.NewRecorder()
+	_, _, err := d.ForwardCandidates(context.Background(), rec2, req2, routes, body2)
+	if err == nil {
+		t.Fatal("second request should have been refused: the budget is one")
+	}
+	var rl *RateLimited
+	if !errors.As(err, &rl) {
+		t.Fatalf("error = %v (%T), want *RateLimited so the server can answer 429", err, err)
+	}
+	if rl.NextAllowed.IsZero() {
+		t.Error("NextAllowed must be set or the client cannot know when to come back")
+	}
+	if rl.Limit != 1 {
+		t.Errorf("reported limit = %d, want 1", rl.Limit)
+	}
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Errorf("upstream hits = %d, want 1 — a refused request must not reach the provider", got)
+	}
+	if rec2.Body.Len() != 0 {
+		t.Errorf("refusal wrote a body before the server could shape one: %q", rec2.Body.String())
+	}
+}
+
+// ── cooldown.max_per_key: strikes before parking ─────────────────────────────
+
+// The configured threshold defers parking, so one transient blip does not remove
+// a healthy hop for the whole cooldown window. Failover covers the difference,
+// so the client never sees it.
+func TestStrikeThresholdDefersParking(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		maxStrikes int
+		wantHits   int32
+	}{
+		{"threshold 1 parks immediately", 1, 1},
+		{"threshold 3 tolerates two blips", 3, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var flaky, good int32
+			bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				atomic.AddInt32(&flaky, 1)
+				w.WriteHeader(http.StatusServiceUnavailable)
+			}))
+			defer bad.Close()
+			ok := countingStub(t, http.StatusOK, `{"ok":true}`, &good)
+			defer ok.Close()
+
+			d := newDispatcher()
+			d.SetRetries(0)
+			d.ConfigureCooldown(time.Minute, time.Minute, tc.maxStrikes)
+
+			routes := []Route{textRoute(bad.URL, "day"), textRoute(ok.URL, "night")}
+			// One request past the threshold, so crossing it is observable.
+			for i := 0; i < tc.maxStrikes+1; i++ {
+				req, body := reqWithBody(`{"model":"day","messages":[]}`)
+				rec := httptest.NewRecorder()
+				if _, _, err := d.ForwardCandidates(context.Background(), rec, req, routes, body); err != nil {
+					t.Fatalf("request %d: %v", i, err)
+				}
+				if rec.Code != http.StatusOK {
+					t.Fatalf("request %d: status %d — failover should have served this", i, rec.Code)
+				}
+			}
+			if got := atomic.LoadInt32(&flaky); got != tc.wantHits {
+				t.Errorf("flaky hop hits = %d, want %d", got, tc.wantHits)
+			}
+		})
+	}
+}
+
+// A success must clear the strike count: three failures spread across a long
+// healthy period must never add up to a park.
+func TestSuccessResetsStrikes(t *testing.T) {
+	d := newDispatcher()
+	d.ConfigureCooldown(time.Minute, time.Minute, 3)
+	rt := textRoute("http://upstream.invalid", "m")
+	now := time.Now()
+
+	for i := 0; i < 5; i++ {
+		d.recordHop(rt, hopOutcome{failed: true, cooldown: time.Minute}, now)
+		d.recordHop(rt, hopOutcome{}, now) // a success in between
+	}
+	if ok, _ := d.acquireHop(rt, now); !ok {
+		t.Error("hop is parked, but every failure was followed by a success — strikes must reset")
+	}
+}
+
+// A budget change must take effect on the next request, not after a refresh.
+func TestLimiterChangeTakesEffectImmediately(t *testing.T) {
+	lim := ratelimit.New(nil)
+	d := newDispatcher()
+	d.SetLimiter(lim)
+
+	var hits int32
+	up := countingStub(t, http.StatusOK, `{"ok":true}`, &hits)
+	defer up.Close()
+
+	rt := rateRoute(up.URL, "m", 400, 5, time.Minute)
+	for i := 0; i < 3; i++ {
+		req, body := reqWithBody(`{"model":"m","messages":[]}`)
+		if _, _, err := d.ForwardCandidates(context.Background(), httptest.NewRecorder(), req, []Route{rt}, body); err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
+	}
+	// An operator tightens the budget to 2: the next request must be refused.
+	rt.Account.RateLimit = 2
+	req, body := reqWithBody(`{"model":"m","messages":[]}`)
+	if _, _, err := d.ForwardCandidates(context.Background(), httptest.NewRecorder(), req, []Route{rt}, body); err == nil {
+		t.Error("tightened budget not enforced on the next request")
 	}
 }
 

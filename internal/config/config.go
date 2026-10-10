@@ -210,7 +210,10 @@ func (c *Config) Validate() error {
 
 	// --- cooldown defaults + validation ---
 	if c.Cooldown.On429 == "" {
-		c.Cooldown.On429 = "300s"
+		// 60s matches the tightest tier we actually talk to (TokenRouter:
+		// "Maximum 5 requests within 1 minutes"). Parking a hop for longer than
+		// the budget it is waiting on keeps a healthy hop out for no reason.
+		c.Cooldown.On429 = "60s"
 	}
 	if c.Cooldown.On5xx == "" {
 		c.Cooldown.On5xx = "60s"

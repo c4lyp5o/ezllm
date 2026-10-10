@@ -23,6 +23,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/c4lyp5o/ezllm/internal/provider"
+	"github.com/c4lyp5o/ezllm/internal/ratelimit"
 	"github.com/c4lyp5o/ezllm/internal/store"
 )
 
@@ -115,15 +116,39 @@ type Dispatcher struct {
 	retryAttempts int
 	cooldownMu    sync.Mutex
 	cooldowns     map[string]cooldownState
-	// on429/on5xx are the operator's park durations, guarded by cooldownMu.
-	// Zero means "fall back to defaultHopCooldown".
-	on429 time.Duration
-	on5xx time.Duration
+	// on429/on5xx are the operator's park durations and maxStrikes the failure
+	// count needed to park, all guarded by cooldownMu. Zero durations mean
+	// "fall back to defaultHopCooldown"; maxStrikes < 1 means park on the first
+	// failure.
+	on429      time.Duration
+	on5xx      time.Duration
+	maxStrikes int
+
+	// limiter is the account-wide request budget. Nil disables rate gating
+	// entirely (the pre-limiter behaviour), which is what keeps this optional
+	// for tests and for callers that never set it.
+	limiter *ratelimit.Limiter
 }
 
 type cooldownState struct {
 	until       time.Time
 	probeActive bool
+	// strikes counts CONSECUTIVE failures. Parking is deferred until it reaches
+	// maxStrikes so one transient blip does not remove a healthy hop for the
+	// whole cooldown window; a success resets it.
+	strikes int
+}
+
+// hopOutcome classifies one hop attempt: whether it failed, and how long the
+// hop should be parked as a result (0 = leave it available).
+//
+// failed and cooldown are separate because they answer different questions. A
+// 429 on a combo's ONLY hop is a failure with nothing to park for — cooling it
+// would strand the request, so the hop stays available and the client gets the
+// upstream's real answer instead of a synthetic refusal.
+type hopOutcome struct {
+	failed   bool
+	cooldown time.Duration
 }
 
 const (
@@ -174,55 +199,55 @@ func (d *Dispatcher) releaseProbe(rt Route) {
 	}
 }
 
-// hopCooldown decides how long to park a hop after an answer, or 0 to leave it
-// available.
+// classifyHop decides what one hop attempt means: whether it failed, and how
+// long the hop should be parked for.
 //
-// Precedence for a rate limit: an explicit upstream Retry-After wins (the
+// Precedence for the park duration: an explicit upstream Retry-After wins (the
 // provider alone knows when its own window resets), then the operator's
-// cooldown.on_429, then the built-in default.
+// cooldown.on_429/on_5xx, then the built-in default.
 //
 // hasAlternate is what keeps cooling honest. Parking a hop is an optimisation:
 // it lets the NEXT call skip straight to a hop that still has budget instead of
 // re-discovering the same 429. When this hop is the only candidate, that
-// optimisation has nothing to optimise — the alternatives are "try again and
-// get a real answer once the window rolls over" versus "synthesise a refusal
-// from a stale local counter". The first is strictly more useful, so a sole
-// hop is never parked for a rate limit. A hop that is genuinely broken (5xx,
+// optimisation has nothing to optimise — the choice is "try again and get a
+// real answer once the window rolls over" versus "synthesise a refusal from a
+// stale local counter". The first is strictly more useful, so a sole hop is
+// never parked for a rate limit. A hop that is genuinely broken (5xx,
 // transport error) is still parked: those failures mean "do not send traffic
 // here", which a single hop cannot escape anyway.
-func (d *Dispatcher) hopCooldown(err error, status int, hdr http.Header, hasAlternate bool) time.Duration {
+func (d *Dispatcher) classifyHop(err error, status int, hdr http.Header, hasAlternate bool) hopOutcome {
 	if err != nil {
 		if !retryableUpstreamError(err) {
-			return 0
+			return hopOutcome{} // our own fault (bad kind, bad request shape): not the hop's
 		}
-		return defaultHopCooldown
+		return hopOutcome{failed: true, cooldown: defaultHopCooldown}
 	}
 	switch {
 	case status == http.StatusTooManyRequests:
 		if !hasAlternate {
-			// Sole hop: try again for real rather than refuse from a counter.
-			return 0
+			// Sole hop: fail, but do not park — a real attempt is better than a
+			// synthetic refusal once the window rolls.
+			return hopOutcome{failed: true}
 		}
 		if dur, ok := parseRetryAfter(hdr.Get("Retry-After")); ok {
-			return dur
+			return hopOutcome{failed: true, cooldown: dur}
 		}
 		if d.on429 > 0 {
-			return d.on429
+			return hopOutcome{failed: true, cooldown: d.on429}
 		}
-		return defaultHopCooldown
-	case status == http.StatusInternalServerError, status == http.StatusBadGateway,
-		status == http.StatusServiceUnavailable, status == http.StatusGatewayTimeout, status >= 500:
+		return hopOutcome{failed: true, cooldown: defaultHopCooldown}
+	case status >= 500 || status == http.StatusRequestTimeout || status == http.StatusTooEarly:
 		if dur, ok := parseRetryAfter(hdr.Get("Retry-After")); ok {
-			return dur
+			return hopOutcome{failed: true, cooldown: dur}
 		}
-		if d.on5xx > 0 {
-			return d.on5xx
+		// 408/425 are transient by definition and share the 5xx duration: the
+		// operator configured one "hop is unhealthy" number, not two.
+		if d.on5xx > 0 && status >= 500 {
+			return hopOutcome{failed: true, cooldown: d.on5xx}
 		}
-		return defaultHopCooldown
-	case status == http.StatusRequestTimeout || status == http.StatusTooEarly:
-		return defaultHopCooldown
+		return hopOutcome{failed: true, cooldown: defaultHopCooldown}
 	}
-	return 0
+	return hopOutcome{} // 2xx, or a 4xx that describes the request rather than the hop
 }
 
 // parseRetryAfter parses the two spellings RFC 9110 allows for Retry-After:
@@ -255,27 +280,85 @@ func parseRetryAfter(v string) (time.Duration, bool) {
 	return 0, false
 }
 
-// recordHop parks a hop for cooldown (0 leaves it available). A parked hop is
-// skipped by acquireHop until the window elapses, then gets exactly one
-// half-open probe.
-func (d *Dispatcher) recordHop(rt Route, cooldown time.Duration, now time.Time) {
+// recordHop applies the result of one hop attempt to its cooldown state.
+//
+// A success clears the hop outright — both the park and its strike count. A
+// failure banks a strike and only parks once the threshold is reached, so a
+// single transient blip does not remove a healthy hop for the whole cooldown
+// window. A failure with nothing to park for (a sole hop that 429'd) banks
+// nothing: there is no alternate to protect, so a strike could never be acted
+// on.
+func (d *Dispatcher) recordHop(rt Route, oc hopOutcome, now time.Time) {
 	key := hopKey(rt)
 	d.cooldownMu.Lock()
 	defer d.cooldownMu.Unlock()
-	if cooldown > 0 {
-		if d.cooldowns == nil {
-			d.cooldowns = make(map[string]cooldownState)
+
+	if !oc.failed {
+		if d.cooldowns != nil {
+			delete(d.cooldowns, key)
 		}
-		d.cooldowns[key] = cooldownState{until: now.Add(cooldown)}
-	} else if d.cooldowns != nil {
-		delete(d.cooldowns, key)
+		return
 	}
+	if oc.cooldown <= 0 {
+		return
+	}
+	if d.cooldowns == nil {
+		d.cooldowns = make(map[string]cooldownState)
+	}
+	st := d.cooldowns[key]
+	st.strikes++
+	threshold := d.maxStrikes
+	if threshold < 1 {
+		threshold = 1
+	}
+	if st.strikes >= threshold {
+		st.until = now.Add(oc.cooldown)
+		st.strikes = 0
+	}
+	d.cooldowns[key] = st
 }
 
-// ConfigureCooldown applies the operator's per-class cooldown durations. A
-// zero or negative value leaves the built-in default in place, so a partial or
-// hand-edited config can never silently disable cooling.
-func (d *Dispatcher) ConfigureCooldown(on429, on5xx time.Duration) {
+// SetLimiter attaches the account-wide request-budget gate. Nil (the default)
+// disables rate gating.
+func (d *Dispatcher) SetLimiter(l *ratelimit.Limiter) {
+	d.limiter = l
+}
+
+// reserveRate takes one request from the hop's account budget.
+//
+// Called immediately before dispatch, never during resolution: the router
+// visits every hop to build the candidate list, so reserving there would charge
+// requests to hops that are never called.
+func (d *Dispatcher) reserveRate(rt Route) (bool, time.Time) {
+	if d.limiter == nil {
+		return true, time.Time{}
+	}
+	return d.limiter.Allow(rt.Account.ID, rt.Account.RateLimit, rt.Account.RateWindow)
+}
+
+// RateLimited reports that every candidate hop was out of its configured
+// request budget. This is a REFUSAL, not a gateway fault: the client should wait
+// until NextAllowed rather than treat it as an outage, which is why the server
+// answers 429 and not 502.
+type RateLimited struct {
+	Account     string
+	Limit       int64
+	Window      time.Duration
+	NextAllowed time.Time
+}
+
+func (e *RateLimited) Error() string {
+	msg := fmt.Sprintf("account %q is at its request budget (%d per %s)", e.Account, e.Limit, e.Window)
+	if !e.NextAllowed.IsZero() {
+		msg += "; next request allowed at " + e.NextAllowed.Format(time.RFC3339)
+	}
+	return msg
+}
+
+// ConfigureCooldown applies the operator's cooldown settings. A zero or negative
+// value leaves the built-in default in place, so a partial or hand-edited config
+// can never silently disable cooling.
+func (d *Dispatcher) ConfigureCooldown(on429, on5xx time.Duration, maxStrikes int) {
 	d.cooldownMu.Lock()
 	defer d.cooldownMu.Unlock()
 	if on429 > 0 {
@@ -283,6 +366,9 @@ func (d *Dispatcher) ConfigureCooldown(on429, on5xx time.Duration) {
 	}
 	if on5xx > 0 {
 		d.on5xx = on5xx
+	}
+	if maxStrikes > 0 {
+		d.maxStrikes = maxStrikes
 	}
 }
 
@@ -296,6 +382,10 @@ func NewDispatcher(client *http.Client, registry *provider.Registry) *Dispatcher
 		cooldowns:     make(map[string]cooldownState),
 		on429:         defaultHopCooldown,
 		on5xx:         defaultHopCooldown,
+		// Park on the first failure unless the operator says otherwise. A
+		// threshold is only worth having once the operator has stated it; the
+		// conservative default keeps a failing hop out of rotation immediately.
+		maxStrikes: 1,
 	}
 }
 
@@ -573,10 +663,36 @@ func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWrite
 	var fallbackResult Result
 	var fallbackStart time.Time
 	var fallbackTransportErr error
+	var rateRefusal *RateLimited
 	for i := 0; i < len(routes); i++ {
 		rt := routes[i]
 		allowed, probe := d.acquireHop(rt, time.Now())
 		if !allowed {
+			continue
+		}
+		// Account-wide request budget, reserved HERE rather than at resolution:
+		// the router visits every hop to build this list, so reserving there
+		// would charge requests to hops that are never dispatched.
+		//
+		// Out of budget behaves exactly like cooling — the hop is skipped and
+		// the combo fails over. That is what makes a rate limit survivable
+		// instead of fatal: the provider's ceiling stops us wasting a request
+		// learning what we already know, while a hop with budget still serves.
+		if ok, next := d.reserveRate(rt); !ok {
+			if probe {
+				d.releaseProbe(rt)
+			}
+			// Keep the EARLIEST release time across hops: that is the first
+			// moment the request could succeed anywhere, which is what the
+			// client needs to wait for.
+			if rateRefusal == nil || next.Before(rateRefusal.NextAllowed) {
+				rateRefusal = &RateLimited{
+					Account:     rt.Account.Namespace,
+					Limit:       rt.Account.RateLimit,
+					Window:      rt.Account.RateWindow,
+					NextAllowed: next,
+				}
+			}
 			continue
 		}
 		// If all later candidates are cooling down, hold this eligible route as
@@ -595,13 +711,13 @@ func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWrite
 		resp, res, start, err := d.retryAttempt(ctx, r, rt, swapped)
 		// Park the hop only when there is somewhere else to go. len(routes) is
 		// the full candidate list the router resolved; a single entry means a
-		// cooled hop has no alternate, and hopCooldown declines to park a rate
+		// cooled hop has no alternate, and classifyHop declines to park a rate
 		// limit in that case.
 		var hdr http.Header
 		if resp != nil {
 			hdr = resp.Header
 		}
-		d.recordHop(rt, d.hopCooldown(err, res.Status, hdr, len(routes) > 1), time.Now())
+		d.recordHop(rt, d.classifyHop(err, res.Status, hdr, len(routes) > 1), time.Now())
 		if probe {
 			d.releaseProbe(rt)
 		}
@@ -641,6 +757,13 @@ func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWrite
 	}
 	if fallbackTransportErr != nil {
 		return Route{}, Result{}, fallbackTransportErr
+	}
+	// Nothing was attempted at all because every hop was out of request budget.
+	// Report the refusal with the earliest release time so the client can wait
+	// instead of blind-retrying — and note that no upstream request was wasted
+	// discovering this.
+	if rateRefusal != nil {
+		return Route{}, Result{}, rateRefusal
 	}
 	return Route{}, Result{}, errors.New("proxy: all combo endpoints are in five-minute cooldown")
 }

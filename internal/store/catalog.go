@@ -28,7 +28,8 @@ type KeyPick struct {
 func (d *DB) AccountByNamespace(ctx context.Context, ns string) (*provider.Account, error) {
 	row := d.r.QueryRowContext(ctx, `
 SELECT id, name, namespace, kind, base_url, enabled, requires_session_header,
-       COALESCE(custom_headers,''), COALESCE(probe_delay_ms,400)
+       COALESCE(custom_headers,''), COALESCE(probe_delay_ms,400),
+       COALESCE(rate_limit,0), COALESCE(rate_window,'')
 FROM accounts WHERE namespace = ?`, ns)
 	var (
 		a             provider.Account
@@ -37,9 +38,11 @@ FROM accounts WHERE namespace = ?`, ns)
 		needsSession  int
 		customHeaders string
 		probeDelay    int
+		rateLimit     int64
+		rateWindow    string
 	)
 	if err := row.Scan(&a.ID, &a.Name, &a.Namespace, &kind, &a.BaseURL, &enabled,
-		&needsSession, &customHeaders, &probeDelay); err != nil {
+		&needsSession, &customHeaders, &probeDelay, &rateLimit, &rateWindow); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -53,6 +56,7 @@ FROM accounts WHERE namespace = ?`, ns)
 	a.Enabled = enabled == 1
 	a.RequiresSessionHeader = needsSession == 1
 	a.ProbeDelay = time.Duration(probeDelay) * time.Millisecond
+	a.RateLimit, a.RateWindow = accountRate(rateLimit, rateWindow)
 	if customHeaders != "" {
 		var h map[string]string
 		if err := json.Unmarshal([]byte(customHeaders), &h); err == nil {
@@ -66,7 +70,8 @@ FROM accounts WHERE namespace = ?`, ns)
 func (d *DB) AccountByID(ctx context.Context, id int64) (*provider.Account, error) {
 	row := d.r.QueryRowContext(ctx, `
 SELECT id, name, namespace, kind, base_url, enabled, requires_session_header,
-       COALESCE(custom_headers,''), COALESCE(probe_delay_ms,400)
+       COALESCE(custom_headers,''), COALESCE(probe_delay_ms,400),
+       COALESCE(rate_limit,0), COALESCE(rate_window,'')
 FROM accounts WHERE id = ?`, id)
 	var (
 		a             provider.Account
@@ -75,9 +80,11 @@ FROM accounts WHERE id = ?`, id)
 		needsSession  int
 		customHeaders string
 		probeDelay    int
+		rateLimit     int64
+		rateWindow    string
 	)
 	if err := row.Scan(&a.ID, &a.Name, &a.Namespace, &kind, &a.BaseURL, &enabled,
-		&needsSession, &customHeaders, &probeDelay); err != nil {
+		&needsSession, &customHeaders, &probeDelay, &rateLimit, &rateWindow); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -91,6 +98,7 @@ FROM accounts WHERE id = ?`, id)
 	a.Enabled = enabled == 1
 	a.RequiresSessionHeader = needsSession == 1
 	a.ProbeDelay = time.Duration(probeDelay) * time.Millisecond
+	a.RateLimit, a.RateWindow = accountRate(rateLimit, rateWindow)
 	if customHeaders != "" {
 		var h map[string]string
 		if err := json.Unmarshal([]byte(customHeaders), &h); err == nil {

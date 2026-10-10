@@ -69,6 +69,10 @@ function StepList({ steps, running }: { steps: TestStep[] | null; running: boole
 
 // ── add provider modal ──────────────────────────────────────────────────
 
+// RATE_WINDOWS are the window spellings the request-budget field offers. A Go
+// duration string, matching cooldown.on_429 and the store's PATCH contract.
+const RATE_WINDOWS = ['1s', '10s', '30s', '1m', '5m', '15m', '1h'];
+
 type Draft = {
   name: string; namespace: string; nsTouched: boolean; kind: string; preset: string;
   base_url: string; keyLabel: string; apiKey: string;
@@ -272,11 +276,18 @@ function EditAccountModal({ account, onClose, onSaved }: { account: Account | nu
   const [baseUrl, setBaseUrl] = useState('');
   const [probeDelay, setProbeDelay] = useState(400);
   const [notes, setNotes] = useState('');
+  const [rateLimit, setRateLimit] = useState(0);
+  const [rateWindow, setRateWindow] = useState('60s');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<ApiErrorDetail | null>(null);
 
   useEffect(() => {
-    if (account) { setName(account.name); setKind(account.kind); setBaseUrl(account.base_url); setProbeDelay(account.probe_delay_ms ?? 400); setNotes(account.notes ?? ''); setErr(null); }
+    if (account) {
+      setName(account.name); setKind(account.kind); setBaseUrl(account.base_url);
+      setProbeDelay(account.probe_delay_ms ?? 400); setNotes(account.notes ?? ''); setErr(null);
+      setRateLimit(account.rate_limit ?? 0);
+      setRateWindow(account.rate_window || '60s');
+    }
   }, [account]);
 
   if (!account) return null;
@@ -286,6 +297,11 @@ function EditAccountModal({ account, onClose, onSaved }: { account: Account | nu
     try {
       await patch<Account>(`/admin/accounts/${account.id}`, {
         name: name.trim(), kind, base_url: baseUrl.trim(), probe_delay_ms: probeDelay, notes: notes.trim(),
+        // Sent unconditionally: 0 is a meaningful value (unlimited) and the
+        // server clears the window alongside it, so "unlimited" is expressible
+        // as a real state rather than an omission.
+        rate_limit: rateLimit,
+        rate_window: rateLimit > 0 ? rateWindow : '',
       });
       onSaved();
       onClose();
@@ -335,6 +351,34 @@ function EditAccountModal({ account, onClose, onSaved }: { account: Account | nu
             <label className={labelCls}>Notes</label>
             <input className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} />
           </div>
+        </div>
+        <div className="rounded-lg border border-line bg-raised/60 p-4">
+          <SectionLabel>Request budget (account-wide)</SectionLabel>
+          <p className="mt-1 text-[11px] text-mute">
+            The provider's own request ceiling, stated its way. It applies to the credential, so every
+            model routed through this account shares it. A spent account is skipped and the combo fails
+            over — the provider is never asked a request it has already refused. Leave 0 for unlimited.
+          </p>
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className={labelCls}>Requests</label>
+              <input type="number" min={0} className={cx(inputCls, 'font-mono tabular-nums')}
+                value={rateLimit} onChange={(e) => setRateLimit(Number(e.target.value) || 0)} />
+            </div>
+            <div>
+              <label className={labelCls}>Per window</label>
+              <select className={inputCls} value={rateWindow} disabled={rateLimit <= 0}
+                onChange={(e) => setRateWindow(e.target.value)}>
+                {RATE_WINDOWS.map((w) => <option key={w} value={w}>{w}</option>)}
+              </select>
+            </div>
+          </div>
+          {rateLimit > 0 ? (
+            <p className="mt-2 text-[11px] text-accent">
+              {rateLimit} request{rateLimit === 1 ? '' : 's'} per {rateWindow} — a combo with another hop
+              will fail over instead of failing.
+            </p>
+          ) : null}
         </div>
         <ErrBox e={err} onDismiss={() => setErr(null)} />
       </div>
@@ -597,6 +641,21 @@ function QuotaModal({ account, onClose }: { account: Account; onClose: () => voi
                 {prettyBody(live.raw)}
               </pre>
             </div>
+          )}
+        </div>
+        <div className="rounded-lg border border-line bg-raised/60 p-4">
+          <SectionLabel>Request budget · account-wide</SectionLabel>
+          {(account.rate_limit ?? 0) > 0 ? (
+            <p className="mt-2 text-[13px] text-dim">
+              <span className="font-mono tabular-nums text-ink">{account.rate_limit}</span> requests per{' '}
+              <span className="font-mono text-ink">{account.rate_window}</span>
+              <span className="text-mute"> — shared by every model on this account; a spent account is skipped and the combo fails over.</span>
+            </p>
+          ) : (
+            <p className="mt-2 text-[13px] text-mute">
+              Unlimited — no request ceiling is set for this account. Set one under Edit provider if the
+              provider enforces its own rate limit.
+            </p>
           )}
         </div>
         <div className="rounded-lg border border-line bg-raised/60 p-4">

@@ -140,6 +140,10 @@ export type Account = {
   base_url: string; enabled: boolean; probe_delay_ms?: number; notes?: string | null;
   requires_session_header?: boolean; custom_headers?: Record<string, unknown> | null;
   cap_window?: string | null; cap_tokens?: number;
+  /** Account-WIDE request budget: requests per rate_window (Go duration, e.g.
+   *  "60s"). 0 / absent = unlimited. Enforced by the proxy before dispatch, so
+   *  a spent account is SKIPPED and the combo fails over. */
+  rate_limit?: number; rate_window?: string | null;
   keys: KeyRow[];
   quota?: QuotaSnapshot | null;
   models_count?: number;
@@ -280,6 +284,9 @@ export type Hop = { account_id: number; model_id: string; weight: number; enable
 
 export type Combo = {
   id: number; name: string; strategy: string; sticky_idle_s: number | null; enabled: boolean;
+  /** block_round_robin: consecutive requests served by one hop before the
+   *  rotation advances. 1 = plain per-request rotation. */
+  block_size: number;
   compression_profile_id?: number | null; context_size: number;
   hops: Hop[];
 };
@@ -507,8 +514,9 @@ export const KINDS = ['opencode-go', 'openai-compatible', 'anthropic-compatible'
 
 export const STRATEGY_HINTS: Record<string, string> = {
   failover: 'try hops in order until one works',
-  true_round_robin: 'rotate through every hop evenly',
-  strict_round_robin: 'rotate hops exactly in order, always',
-  sticky_last_good: 'stay on the last working hop until it errors or idles 30 min',
-  least_used: 'pick whichever hop has the fewest active calls',
+  block_round_robin: 'keep one hop for N requests, then move to the next — keeps that account’s prompt cache warm; needs N <= the hop’s request budget',
+  true_round_robin: 'one hop per request, rotating — no cache reuse; prefer block_round_robin',
+  strict_round_robin: 'identical to true_round_robin today (the persisted-cursor version was never built)',
+  sticky_last_good: 'stay on the last working hop, and release it after sticky_idle_s of quiet',
+  least_used: 'not implemented yet — falls back to hop order',
 };

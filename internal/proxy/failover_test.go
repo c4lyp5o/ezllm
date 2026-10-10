@@ -197,7 +197,7 @@ func TestAllCooldownRoutesReturnErrorWithoutUpstreamCall(t *testing.T) {
 	defer up.Close()
 	d := newDispatcher()
 	rt := textRoute(up.URL, "model")
-	d.recordHop(rt, defaultHopCooldown, time.Now())
+	d.recordHop(rt, hopOutcome{failed: true, cooldown: defaultHopCooldown}, time.Now())
 	req, body := reqWithBody(`{"model":"model","messages":[]}`)
 	rec := httptest.NewRecorder()
 	_, _, err := d.ForwardCandidates(context.Background(), rec, req, []Route{rt}, body)
@@ -213,7 +213,7 @@ func TestHalfOpenAllowsExactlyOneProbe(t *testing.T) {
 	d := newDispatcher()
 	rt := textRoute("http://upstream.invalid", "model")
 	now := time.Now()
-	d.recordHop(rt, defaultHopCooldown, now.Add(-defaultHopCooldown-time.Second))
+	d.recordHop(rt, hopOutcome{failed: true, cooldown: defaultHopCooldown}, now.Add(-defaultHopCooldown-time.Second))
 	ok, probe := d.acquireHop(rt, now)
 	if !ok || !probe {
 		t.Fatalf("first expired-cooldown caller=(%v,%v), want (true,true)", ok, probe)
@@ -222,7 +222,7 @@ func TestHalfOpenAllowsExactlyOneProbe(t *testing.T) {
 	if ok || probe {
 		t.Fatalf("concurrent caller=(%v,%v), want (false,false)", ok, probe)
 	}
-	d.recordHop(rt, 0, now)
+	d.recordHop(rt, hopOutcome{}, now)
 	ok, probe = d.acquireHop(rt, now)
 	if !ok || probe {
 		t.Fatalf("recovered endpoint caller=(%v,%v), want (true,false)", ok, probe)

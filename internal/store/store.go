@@ -24,7 +24,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 8
+const schemaVersion = 9
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -183,6 +183,12 @@ func (d *DB) migrate() error {
 		if err := d.alterDashboardAuth(context.Background()); err != nil {
 			return fmt.Errorf("store: alter dashboard auth: %w", err)
 		}
+		if err := d.alterAccountRate(context.Background()); err != nil {
+			return fmt.Errorf("store: alter account rate: %w", err)
+		}
+		if err := d.rebuildCombosV9(context.Background()); err != nil {
+			return fmt.Errorf("store: rebuild combos: %w", err)
+		}
 		if _, err := d.w.Exec(schemaSQL); err != nil {
 			return fmt.Errorf("store: reapply schema: %w", err)
 		}
@@ -224,6 +230,12 @@ func (d *DB) migrate() error {
 		if err := d.alterCallsResearch(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate calls research columns: %w", err)
 		}
+		if err := d.alterAccountRate(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate account rate: %w", err)
+		}
+		if err := d.rebuildCombosV9(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate combos: %w", err)
+		}
 		if _, err := d.w.Exec(schemaSQL); err != nil {
 			return fmt.Errorf("store: migrate %d->%d: %w", cur, schemaVersion, err)
 		}
@@ -247,6 +259,126 @@ func (d *DB) alterModelProtoPin(ctx context.Context) error {
 	}
 	_, err = d.w.ExecContext(ctx, `ALTER TABLE models ADD COLUMN proto_pin TEXT`)
 	return err
+}
+
+// alterAccountRate adds accounts.rate_limit / accounts.rate_window on databases
+// created before v9. Guarded by a column check: ALTER TABLE ADD COLUMN is not
+// idempotent, and fresh databases already get both from schema.sql.
+func (d *DB) alterAccountRate(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "accounts")
+	if err != nil {
+		return fmt.Errorf("check accounts table: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+	has, err := hasColumn(ctx, d.w, "accounts", "rate_limit")
+	if err != nil || has {
+		return err
+	}
+	if _, err := d.w.ExecContext(ctx, `ALTER TABLE accounts ADD COLUMN rate_limit INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	has, err = hasColumn(ctx, d.w, "accounts", "rate_window")
+	if err != nil || has {
+		return err
+	}
+	_, err = d.w.ExecContext(ctx, `ALTER TABLE accounts ADD COLUMN rate_window TEXT NOT NULL DEFAULT ''`)
+	return err
+}
+
+// rebuildCombosV9 gives `combos` its block_size column and drops the duplicated
+// strategy CHECK constraint.
+//
+// This is a full table REBUILD, not an ALTER, and that is the whole point:
+// SQLite cannot alter or drop a CHECK constraint, so adding a single strategy
+// value ('block_round_robin') to the old CHECK would otherwise be impossible
+// without rebuilding. Doing both in one rebuild means the next strategy costs
+// no migration at all, because validation lives in Go (store.ValidStrategies).
+//
+// Guarded by the block_size column: a fresh database gets the new shape straight
+// from schema.sql and a migrated one already has it, so this is a no-op for both.
+// Row ids are preserved, which is load-bearing — combo_hops.combo_id references
+// them. The deferred foreign key means we must toggle enforcement off around the
+// DROP/RENAME and verify with foreign_key_check afterwards.
+func (d *DB) rebuildCombosV9(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "combos")
+	if err != nil || !exists {
+		return err
+	}
+	has, err := hasColumn(ctx, d.w, "combos", "block_size")
+	if err != nil || has {
+		return err
+	}
+
+	// context_size arrived as a later ALTER, so an older database may not have
+	// it. Its absence is not data loss — 200000 IS its default.
+	contextExpr := "200000"
+	if hasContext, err := hasColumn(ctx, d.w, "combos", "context_size"); err == nil && hasContext {
+		contextExpr = "COALESCE(context_size, 200000)"
+	}
+
+	// PRAGMA foreign_keys is a no-op inside a transaction, so it is set in
+	// autocommit around the rebuild.
+	if _, err := d.w.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
+		return fmt.Errorf("combos rebuild: disable fk: %w", err)
+	}
+	done := func() {
+		_, _ = d.w.ExecContext(ctx, `PRAGMA foreign_keys=ON`)
+	}
+
+	if _, err := d.w.ExecContext(ctx, `
+CREATE TABLE combos_v9 (
+  id          INTEGER PRIMARY KEY,
+  name        TEXT NOT NULL UNIQUE,
+  enabled     INTEGER NOT NULL DEFAULT 1,
+  strategy    TEXT NOT NULL DEFAULT 'failover',
+  sticky_idle_s INTEGER NOT NULL DEFAULT 1800,
+  compression_profile_id INTEGER REFERENCES compression_profiles(id),
+  context_size INTEGER NOT NULL DEFAULT 200000 CHECK (context_size BETWEEN 1 AND 10000000),
+  block_size  INTEGER NOT NULL DEFAULT 1 CHECK (block_size BETWEEN 1 AND 1000),
+  rr_cursor   INTEGER NOT NULL DEFAULT 0,
+  rr_epoch    INTEGER NOT NULL DEFAULT 0,
+  notes       TEXT,
+  created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+)`); err != nil {
+		done()
+		return fmt.Errorf("combos rebuild: create: %w", err)
+	}
+	if _, err := d.w.ExecContext(ctx, `
+INSERT INTO combos_v9 (id, name, enabled, strategy, sticky_idle_s,
+                       compression_profile_id, context_size, block_size,
+                       rr_cursor, rr_epoch, notes, created_at)
+SELECT id, name, enabled, strategy, sticky_idle_s,
+       compression_profile_id, `+contextExpr+`, 1,
+       0, 0, notes, created_at
+FROM combos`); err != nil {
+		done()
+		return fmt.Errorf("combos rebuild: copy: %w", err)
+	}
+	if _, err := d.w.ExecContext(ctx, `DROP TABLE combos`); err != nil {
+		done()
+		return fmt.Errorf("combos rebuild: drop: %w", err)
+	}
+	if _, err := d.w.ExecContext(ctx, `ALTER TABLE combos_v9 RENAME TO combos`); err != nil {
+		done()
+		return fmt.Errorf("combos rebuild: rename: %w", err)
+	}
+	done()
+
+	// The rebuild is only trustworthy if every combo_hops row still resolves to
+	// a combo. Check it rather than assume the id-preserving copy worked.
+	var orphans int
+	if err := d.w.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM combo_hops h
+LEFT JOIN combos c ON c.id = h.combo_id
+WHERE c.id IS NULL`).Scan(&orphans); err != nil {
+		return fmt.Errorf("combos rebuild: orphan check: %w", err)
+	}
+	if orphans != 0 {
+		return fmt.Errorf("combos rebuild: %d combo_hops rows lost their combo", orphans)
+	}
+	return nil
 }
 
 // alterCallsResearch adds the v8 (M9) research columns to `calls` on databases

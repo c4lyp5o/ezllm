@@ -27,16 +27,22 @@ import (
 // AccountSummary is the admin-API shape: an account plus its keys, latest
 // quota and protocol counts. Mirrors docs/API.md.
 type AccountSummary struct {
-	ID              int64          `json:"id"`
-	Name            string         `json:"name"`
-	Namespace       string         `json:"namespace"`
-	Kind            string         `json:"kind"`
-	BaseURL         string         `json:"base_url"`
-	Enabled         bool           `json:"enabled"`
-	RequiresSession bool           `json:"requires_session_header"`
-	QuotaMode       string         `json:"quota_mode"`
-	CapWindow       string         `json:"cap_window"`
-	CapTokens       int64          `json:"cap_tokens"`
+	ID              int64  `json:"id"`
+	Name            string `json:"name"`
+	Namespace       string `json:"namespace"`
+	Kind            string `json:"kind"`
+	BaseURL         string `json:"base_url"`
+	Enabled         bool   `json:"enabled"`
+	RequiresSession bool   `json:"requires_session_header"`
+	QuotaMode       string `json:"quota_mode"`
+	CapWindow       string `json:"cap_window"`
+	CapTokens       int64  `json:"cap_tokens"`
+	// RateLimit/RateWindow express the account's request ceiling as the
+	// provider states it ("5 requests per 1 minute"), not as a token budget:
+	// five calls to five different models spend the same 5/min tier, which no
+	// per-model cap can express.
+	RateLimit       int64          `json:"rate_limit"`
+	RateWindow      string         `json:"rate_window"`
 	ProbeDelayMS    int            `json:"probe_delay_ms"`
 	Notes           string         `json:"notes,omitempty"`
 	CreatedAt       string         `json:"created_at"`
@@ -80,6 +86,7 @@ func (d *DB) ListAccounts(ctx context.Context) ([]AccountSummary, error) {
 	rows, err := d.r.QueryContext(ctx, `
 SELECT id, name, namespace, kind, base_url, enabled, requires_session_header,
        quota_mode, cap_window, cap_tokens, COALESCE(probe_delay_ms,400),
+       COALESCE(rate_limit,0), COALESCE(rate_window,''),
        COALESCE(notes,''), created_at, updated_at
 FROM accounts ORDER BY namespace`)
 	if err != nil {
@@ -92,7 +99,8 @@ FROM accounts ORDER BY namespace`)
 		var a AccountSummary
 		if err := rows.Scan(&a.ID, &a.Name, &a.Namespace, &a.Kind, &a.BaseURL, &a.Enabled,
 			&a.RequiresSession, &a.QuotaMode, &a.CapWindow, &a.CapTokens,
-			&a.ProbeDelayMS, &a.Notes, &a.CreatedAt, &a.UpdatedAt); err != nil {
+			&a.ProbeDelayMS, &a.RateLimit, &a.RateWindow,
+			&a.Notes, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, a)
@@ -210,7 +218,12 @@ type AccountInput struct {
 	ProbeDelayMS    int               `json:"probe_delay_ms"`
 	CapWindow       string            `json:"cap_window"`
 	CapTokens       *int64            `json:"cap_tokens"`
-	Notes           string            `json:"notes"`
+	// Account-wide request budget. RateLimit is a pointer so a PATCH can
+	// distinguish "clear the budget" (0) from "leave it alone" (nil), matching
+	// the CapTokens convention above.
+	RateLimit  *int64 `json:"rate_limit"`
+	RateWindow string `json:"rate_window"`
+	Notes      string `json:"notes"`
 }
 
 // ErrConflict marks a uniqueness clash (409): namespace or name taken, or a
@@ -264,6 +277,37 @@ func ValidateAccountInput(in AccountInput) error {
 		default:
 			return errors.New("cap_window must be 5h|daily|weekly|monthly")
 		}
+	}
+	if err := validateRate(in.RateLimit, in.RateWindow); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateRate enforces the request-budget contract.
+//
+// Both halves or neither: a count with no window has no meaning, and a window
+// with no count is a limit of zero, which would refuse EVERY request. Refusing
+// the ambiguous pair at write time is the only way to keep those two mistakes
+// from becoming a silently dead or silently unlimited account.
+func validateRate(limit *int64, window string) error {
+	if window != "" {
+		d, err := time.ParseDuration(window)
+		if err != nil {
+			return errors.New("rate_window must be a duration like 60s, 5m, 1h")
+		}
+		if d < time.Second || d > 24*time.Hour {
+			return errors.New("rate_window must be between 1s and 24h")
+		}
+	}
+	if limit == nil {
+		return nil // window-only patch on an account that has no count yet
+	}
+	if *limit < 0 {
+		return errors.New("rate_limit must be >= 0 (0 = unlimited)")
+	}
+	if *limit > 0 && window == "" {
+		return errors.New("rate_limit requires rate_window (how long the count applies over)")
 	}
 	return nil
 }
@@ -332,6 +376,19 @@ func (d *DB) UpdateAccount(ctx context.Context, id int64, in AccountInput) error
 	if in.CapWindow == "" {
 		in.CapWindow = cur.CapWindow
 	}
+	// Rate budget: nil means "leave alone"; an explicit 0 clears it. The window
+	// follows its count — with no count the window is meaningless, and carrying
+	// a stale one would make a cleared account look configured.
+	if in.RateLimit == nil {
+		v := cur.RateLimit
+		in.RateLimit = &v
+		if in.RateWindow == "" && cur.RateWindow > 0 {
+			in.RateWindow = cur.RateWindow.String()
+		}
+	}
+	if *in.RateLimit == 0 {
+		in.RateWindow = ""
+	}
 	if in.ProbeDelayMS == 0 {
 		in.ProbeDelayMS = int(cur.ProbeDelay.Milliseconds())
 		if in.ProbeDelayMS == 0 {
@@ -392,16 +449,27 @@ func (d *DB) writeAccount(ctx context.Context, id int64, in AccountInput, kind p
 	if in.CapTokens != nil {
 		capTokens = *in.CapTokens
 	}
+	var rateLimit int64
+	if in.RateLimit != nil {
+		rateLimit = *in.RateLimit
+	}
+	rateWindow := in.RateWindow
+	if rateLimit <= 0 {
+		// A count of zero means unlimited, so keep no window: a stored window
+		// with no count is dead data that reads as "configured".
+		rateWindow = ""
+	}
 
 	var newID int64
 	err := d.WithWriteTx(ctx, func(tx *sql.Tx) error {
 		if id == 0 {
 			res, err := tx.ExecContext(ctx, `
 INSERT INTO accounts (name, namespace, kind, base_url, enabled, requires_session_header,
-                      quota_mode, custom_headers, probe_delay_ms, cap_window, cap_tokens, notes)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+                      quota_mode, custom_headers, probe_delay_ms, cap_window, cap_tokens,
+                      rate_limit, rate_window, notes)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 				in.Name, in.Namespace, string(kind), in.BaseURL, enabled, requires,
-				quotaMode, ch, probe, capWindow, capTokens, in.Notes)
+				quotaMode, ch, probe, capWindow, capTokens, rateLimit, rateWindow, in.Notes)
 			if err != nil {
 				return err
 			}
@@ -411,11 +479,11 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
 		_, err := tx.ExecContext(ctx, `
 UPDATE accounts SET name=?, namespace=?, kind=?, base_url=?, enabled=?,
        requires_session_header=?, quota_mode=?, custom_headers=?, probe_delay_ms=?,
-       cap_window=?, cap_tokens=?, notes=?,
+       cap_window=?, cap_tokens=?, rate_limit=?, rate_window=?, notes=?,
        updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
 WHERE id=?`,
 			in.Name, in.Namespace, string(kind), in.BaseURL, enabled, requires,
-			quotaMode, ch, probe, capWindow, capTokens, in.Notes, id)
+			quotaMode, ch, probe, capWindow, capTokens, rateLimit, rateWindow, in.Notes, id)
 		if err != nil {
 			return err
 		}
@@ -800,10 +868,13 @@ type ComboHop struct {
 
 // Combo is the admin-API combo shape.
 type Combo struct {
-	ID                   int64      `json:"id"`
-	Name                 string     `json:"name"`
-	Strategy             string     `json:"strategy"`
-	StickyIdleS          int        `json:"sticky_idle_s"`
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Strategy    string `json:"strategy"`
+	StickyIdleS int    `json:"sticky_idle_s"`
+	// BlockSize is how many consecutive dispatches one hop serves before the
+	// rotation advances (block_round_robin). 1 = plain per-request round robin.
+	BlockSize            int        `json:"block_size"`
 	Enabled              bool       `json:"enabled"`
 	CompressionProfileID *int64     `json:"compression_profile_id"`
 	ContextSize          int64      `json:"context_size"`
@@ -812,9 +883,13 @@ type Combo struct {
 	Hops                 []ComboHop `json:"hops"`
 }
 
-// ValidStrategies mirrors the schema CHECK — one source of truth for the UI.
+// ValidStrategies is the single source of truth for strategy names.
+//
+// This list IS the validation: the schema deliberately carries no CHECK on
+// `strategy`, because SQLite cannot alter a constraint, so a CHECK would make
+// every new strategy a full table rebuild (as block_round_robin was).
 func ValidStrategies() []string {
-	return []string{"failover", "true_round_robin", "strict_round_robin", "sticky_last_good", "least_used"}
+	return []string{"failover", "true_round_robin", "strict_round_robin", "sticky_last_good", "least_used", "block_round_robin"}
 }
 
 // ValidateCombo checks the payload before writing (422 on failure).
@@ -841,6 +916,11 @@ func ValidateCombo(c Combo) error {
 	if c.StickyIdleS < 0 {
 		return errors.New("sticky_idle_s must be >= 0")
 	}
+	// 0 is accepted as "unset" (the JSON zero value); UpsertCombo normalises it
+	// to 1 before writing, which is also what the column CHECK allows.
+	if c.BlockSize < 0 || c.BlockSize > 1000 {
+		return errors.New("block_size must be between 1 and 1000")
+	}
 	for i, h := range c.Hops {
 		if h.AccountID <= 0 {
 			return fmt.Errorf("hops[%d]: account_id is required", i)
@@ -856,7 +936,7 @@ func ValidateCombo(c Combo) error {
 func (d *DB) ListCombos(ctx context.Context) ([]Combo, error) {
 	rows, err := d.r.QueryContext(ctx, `
 SELECT id, name, strategy, sticky_idle_s, enabled, compression_profile_id, context_size,
-       COALESCE(notes,''), created_at
+       block_size, COALESCE(notes,''), created_at
 FROM combos ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -868,7 +948,7 @@ FROM combos ORDER BY name`)
 		var c Combo
 		var cpid sql.NullInt64
 		if err := rows.Scan(&c.ID, &c.Name, &c.Strategy, &c.StickyIdleS, &c.Enabled,
-			&cpid, &c.ContextSize, &c.Notes, &c.CreatedAt); err != nil {
+			&cpid, &c.ContextSize, &c.BlockSize, &c.Notes, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		if c.ContextSize == 0 {
@@ -912,6 +992,9 @@ func (d *DB) UpsertCombo(ctx context.Context, c Combo) (int64, error) {
 	if c.ContextSize == 0 {
 		c.ContextSize = 200000
 	}
+	if c.BlockSize == 0 {
+		c.BlockSize = 1
+	}
 	if err := ValidateCombo(c); err != nil {
 		return 0, err
 	}
@@ -922,13 +1005,13 @@ func (d *DB) UpsertCombo(ctx context.Context, c Combo) (int64, error) {
 			cpid = *c.CompressionProfileID
 		}
 		_, err := tx.ExecContext(ctx, `
-INSERT INTO combos (name, strategy, sticky_idle_s, enabled, compression_profile_id, context_size, notes)
-VALUES (?,?,?,?,COALESCE(?, (SELECT id FROM compression_profiles WHERE 0)),?,?)
+INSERT INTO combos (name, strategy, sticky_idle_s, enabled, compression_profile_id, context_size, block_size, notes)
+VALUES (?,?,?,?,COALESCE(?, (SELECT id FROM compression_profiles WHERE 0)),?,?,?)
 ON CONFLICT(name) DO UPDATE SET
   strategy=excluded.strategy, sticky_idle_s=excluded.sticky_idle_s,
   enabled=excluded.enabled, compression_profile_id=excluded.compression_profile_id,
-  context_size=excluded.context_size, notes=excluded.notes`,
-			c.Name, c.Strategy, c.StickyIdleS, boolToInt(c.Enabled), cpid, c.ContextSize, c.Notes)
+  context_size=excluded.context_size, block_size=excluded.block_size, notes=excluded.notes`,
+			c.Name, c.Strategy, c.StickyIdleS, boolToInt(c.Enabled), cpid, c.ContextSize, c.BlockSize, c.Notes)
 		if err != nil {
 			return err
 		}
@@ -1027,12 +1110,12 @@ func (d *DB) AllComboNames(ctx context.Context) ([]string, error) {
 func (d *DB) ComboByName(ctx context.Context, name string) (*Combo, error) {
 	row := d.r.QueryRowContext(ctx, `
 SELECT id, name, strategy, sticky_idle_s, enabled, compression_profile_id, context_size,
-       COALESCE(notes,''), created_at
+       block_size, COALESCE(notes,''), created_at
 FROM combos WHERE name = ?`, name)
 	var c Combo
 	var cpid sql.NullInt64
 	if err := row.Scan(&c.ID, &c.Name, &c.Strategy, &c.StickyIdleS, &c.Enabled,
-		&cpid, &c.ContextSize, &c.Notes, &c.CreatedAt); err != nil {
+		&cpid, &c.ContextSize, &c.BlockSize, &c.Notes, &c.CreatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}

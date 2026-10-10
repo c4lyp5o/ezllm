@@ -53,14 +53,14 @@ func TestLoadValid(t *testing.T) {
 	if cfg.Ledger.BatchSize != 16 || cfg.LedgerBatchWait != 100*time.Millisecond {
 		t.Errorf("ledger = %+v / %v", cfg.Ledger, cfg.LedgerBatchWait)
 	}
-	if cfg.Cooldown.On429 != "300s" || cfg.Cooldown.MaxPerKey != 3 {
+	if cfg.Cooldown.On429 != "60s" || cfg.Cooldown.MaxPerKey != 3 {
 		t.Errorf("cooldown defaults = %+v", cfg.Cooldown)
 	}
 	// The derived durations are what the dispatcher actually consumes — the
 	// string fields alone being correct is what let this config sit dead for so
 	// long, validated but read by nobody.
-	if cfg.CooldownOn429 != 300*time.Second || cfg.CooldownOn5xx != 60*time.Second {
-		t.Errorf("derived cooldown = %v / %v, want 300s / 60s", cfg.CooldownOn429, cfg.CooldownOn5xx)
+	if cfg.CooldownOn429 != 60*time.Second || cfg.CooldownOn5xx != 60*time.Second {
+		t.Errorf("derived cooldown = %v / %v, want 60s / 60s", cfg.CooldownOn429, cfg.CooldownOn5xx)
 	}
 	if ns := cfg.Namespace("opencode-main"); ns != "opengo" {
 		t.Errorf("namespace = %q, want opengo", ns)

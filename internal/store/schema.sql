@@ -37,6 +37,12 @@ CREATE TABLE IF NOT EXISTS accounts (
   probe_delay_ms INTEGER NOT NULL DEFAULT 400,  -- anti-Cloudflare-1010 pacing
   cap_window  TEXT NOT NULL DEFAULT 'monthly',  -- 5h|daily|weekly|monthly
   cap_tokens  INTEGER NOT NULL DEFAULT 0,       -- 0 = unlimited; at cap => hard 429
+  -- Account-WIDE request rate. The provider's ceiling applies to the
+  -- credential, not to any one model: a 5-requests-per-minute tier is spent by
+  -- five calls to five DIFFERENT models. So this lives on the account, and
+  -- every hop routed through it shares one budget. 0 = unlimited.
+  rate_limit  INTEGER NOT NULL DEFAULT 0,       -- requests per rate_window
+  rate_window TEXT NOT NULL DEFAULT '',         -- Go duration, e.g. '60s'; '' = off
   notes       TEXT,
   created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
@@ -110,19 +116,27 @@ CREATE TABLE IF NOT EXISTS compression_profiles (
   created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
--- ── combos: NO namespace. Addressed by bare `name` (must not contain '/'),
---    which keeps the combo space disjoint from account namespaces by shape.
+-- ── combos: an ordered hop list a client addresses by bare `name`. NO
+--    namespace — names must not contain '/', which keeps the combo space
+--    disjoint from account namespaces by shape.
+--    `strategy` is validated in Go (store.ValidStrategies), deliberately NOT by
+--    a schema CHECK: a CHECK means every new strategy needs a full table
+--    rebuild, because SQLite cannot alter a constraint. block_round_robin is
+--    what forced that rebuild once; the duplication is gone so it cannot
+--    happen again.
 CREATE TABLE IF NOT EXISTS combos (
   id          INTEGER PRIMARY KEY,
   name        TEXT NOT NULL UNIQUE,
   enabled     INTEGER NOT NULL DEFAULT 1,
-  strategy    TEXT NOT NULL DEFAULT 'failover'
-              CHECK (strategy IN ('failover','true_round_robin','strict_round_robin','sticky_last_good','least_used')),
+  strategy    TEXT NOT NULL DEFAULT 'failover',
   sticky_idle_s INTEGER NOT NULL DEFAULT 1800,  -- sticky_last_good: unstick after idle
   compression_profile_id INTEGER REFERENCES compression_profiles(id),
   context_size INTEGER NOT NULL DEFAULT 200000 CHECK (context_size BETWEEN 1 AND 10000000),
-  rr_cursor   INTEGER NOT NULL DEFAULT 0,       -- strict_round_robin position
-  rr_epoch    INTEGER NOT NULL DEFAULT 0,       -- fingerprint of eligible hop set
+  -- block_round_robin: consecutive dispatches served by one hop before the
+  -- rotation advances. 1 = plain per-request round robin.
+  block_size  INTEGER NOT NULL DEFAULT 1 CHECK (block_size BETWEEN 1 AND 1000),
+  rr_cursor   INTEGER NOT NULL DEFAULT 0,       -- UNUSED (rotation cursor is in-process)
+  rr_epoch    INTEGER NOT NULL DEFAULT 0,       -- UNUSED (see rr_cursor)
   notes       TEXT,
   created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );

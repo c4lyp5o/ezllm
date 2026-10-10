@@ -49,16 +49,19 @@ ledger:
 #
 # on_429: how long to park a hop that answered 429 — but ONLY when the combo has
 #   another hop to fall over to. With a single candidate, parking would convert
-#   the provider's own window (TokenRouter allows 5 requests per MINUTE) into a
-#   much longer outage of our making, so a sole hop is left available and the
-#   request is attempted for real.
+#   the provider's own window into a much longer outage of our making, so a sole
+#   hop is left available and the request is attempted for real.
+#   60s matches TokenRouter's real tier ("Maximum 5 requests within 1 minutes");
+#   a longer park would keep the hop out for far longer than the budget it is
+#   waiting on.
 #   An upstream Retry-After header always wins over this when present, so a
 #   provider that states its own reset time is believed over our configured one.
 # on_5xx: how long to park a hop that is genuinely broken.
-# max_per_key: NOT IMPLEMENTED — parsed and validated but read by no code.
-#   (Remove it, or tell me what it should mean and I will wire it.)
+# max_per_key: how many CONSECUTIVE failures a hop may take before it is parked.
+#   Guards against a single transient blip removing a healthy hop for the whole
+#   cooldown. A success resets the count. Set to 1 to park on the first failure.
 cooldown:
-  on_429: 300s
+  on_429: 60s
   on_5xx: 60s
   max_per_key: 3
 

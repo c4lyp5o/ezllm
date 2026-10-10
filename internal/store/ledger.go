@@ -68,7 +68,20 @@ type Call struct {
 	ContextTokensSaved    int64
 	PromptTokensPre       int64
 	TokensSaved           int64
-	CompressionMs         *int64
+	// TokensSavedNotional is what compression WOULD have saved on a request it
+	// ultimately shipped unchanged (ratio-floor reject / fail-open). Kept apart
+	// from TokensSaved so the dashboard headline never counts bytes we did not
+	// actually cut. 0 when TokensSaved was real.
+	TokensSavedNotional int64
+	CompressionMs       *int64
+
+	// v8 (M9) research capture — the request SHAPE, which raw_usage (a response)
+	// cannot reconstruct. See schema.sql calls.
+	PrefixSHA string // stable conversation prefix hash ('' = not derivable)
+	MsgCount  int    // messages posted upstream
+	ToolCount int    // tools in the action space
+	SessionID string // operator grouping key from X-Ezllm-Session
+	ReqBytes  int    // exact body bytes posted upstream
 
 	Err string
 }
@@ -321,8 +334,9 @@ INSERT INTO calls (
   tokens_in, tokens_out, tokens_cached_read, tokens_cached_write, reasoning_tokens, raw_usage,
   endpoint_id, upstream_model,
   compression_profile, compression_applied, prompt_tokens_pre, tokens_saved, compression_ms,
-  compression_rules_fired, context_tokens_pre, context_tokens_saved, err
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+  compression_rules_fired, context_tokens_pre, context_tokens_saved,
+  compression_saved_notional, prefix_sha, msg_count, tool_count, session_id, req_bytes, err
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
@@ -345,7 +359,8 @@ INSERT INTO calls (
 			c.TokensIn, c.TokensOut, c.TokensCachedRead, c.TokensCachedWrite, c.ReasoningTokens, c.RawUsage,
 			c.EndpointID, c.UpstreamModel,
 			c.CompressionProfile, boolInt(c.CompressionApplied), c.PromptTokensPre, c.TokensSaved, c.CompressionMs,
-			c.CompressionRulesFired, c.ContextTokensPre, c.ContextTokensSaved, c.Err,
+			c.CompressionRulesFired, c.ContextTokensPre, c.ContextTokensSaved,
+			c.TokensSavedNotional, c.PrefixSHA, c.MsgCount, c.ToolCount, c.SessionID, c.ReqBytes, c.Err,
 		)
 		if err != nil {
 			return fmt.Errorf("insert call: %w", err)
@@ -516,7 +531,9 @@ SELECT ts, client, surface, alias, account, COALESCE(provider_key_id,0), key_hin
        tokens_in, tokens_out, tokens_cached_read, tokens_cached_write, reasoning_tokens,
        COALESCE(raw_usage,''), COALESCE(endpoint_id,''), COALESCE(upstream_model,''),
        compression_profile, compression_applied, prompt_tokens_pre, tokens_saved, compression_ms,
-       compression_rules_fired, context_tokens_pre, context_tokens_saved, COALESCE(err,'')
+       compression_rules_fired, context_tokens_pre, context_tokens_saved,
+       COALESCE(compression_saved_notional,0), COALESCE(prefix_sha,''), msg_count, tool_count,
+       COALESCE(session_id,''), req_bytes, COALESCE(err,'')
 FROM calls ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -533,7 +550,9 @@ FROM calls ORDER BY id DESC LIMIT ?`, limit)
 			&c.TokensIn, &c.TokensOut, &c.TokensCachedRead, &c.TokensCachedWrite, &c.ReasoningTokens,
 			&c.RawUsage, &c.EndpointID, &c.UpstreamModel,
 			&c.CompressionProfile, &applied, &c.PromptTokensPre, &c.TokensSaved, &cms,
-			&c.CompressionRulesFired, &c.ContextTokensPre, &c.ContextTokensSaved, &c.Err); err != nil {
+			&c.CompressionRulesFired, &c.ContextTokensPre, &c.ContextTokensSaved,
+			&c.TokensSavedNotional, &c.PrefixSHA, &c.MsgCount, &c.ToolCount,
+			&c.SessionID, &c.ReqBytes, &c.Err); err != nil {
 			return nil, err
 		}
 		if t, err := time.Parse("2006-01-02T15:04:05.000Z", ts); err == nil {

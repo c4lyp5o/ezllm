@@ -187,6 +187,22 @@ CREATE TABLE IF NOT EXISTS calls (
   compression_rules_fired INTEGER NOT NULL DEFAULT 0,
   context_tokens_pre INTEGER NOT NULL DEFAULT 0,
   context_tokens_saved INTEGER NOT NULL DEFAULT 0,
+  -- v8 (M9 research): what the ledger could NOT answer before.
+  -- "Would compression have saved?" is kept separate from what actually
+  -- shipped, so the dashboard headline (SUM(tokens_saved)) is never inflated
+  -- by requests the ratio floor rejected.
+  compression_saved_notional INTEGER NOT NULL DEFAULT 0,
+  -- Cacheability is unmeasurable without the request SHAPE, which raw_usage
+  -- (a response) cannot give. prefix_sha is the stable conversation prefix
+  -- (system + tools + all but the newest turn); two calls sharing it are the
+  -- append-only pattern prompt caching rewards. msg/tool counts size the
+  -- action space; session_id is the operator's own grouping key (client sends
+  -- X-Ezllm-Session); req_bytes is the exact payload posted upstream.
+  prefix_sha     TEXT NOT NULL DEFAULT '',
+  msg_count      INTEGER NOT NULL DEFAULT 0,
+  tool_count     INTEGER NOT NULL DEFAULT 0,
+  session_id     TEXT NOT NULL DEFAULT '',
+  req_bytes      INTEGER NOT NULL DEFAULT 0,
   err            TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_calls_ts        ON calls(ts DESC);
@@ -195,6 +211,10 @@ CREATE INDEX IF NOT EXISTS idx_calls_client_ts ON calls(client, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_calls_key_ts    ON calls(provider_key_id, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_calls_alias_ts  ON calls(alias, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_calls_acct_model ON calls(account_id, model, ts DESC);
+-- v8: cacheability research groups by stable prefix within a model+window, and
+-- session rollups filter by session_id. Both are new hot paths for /admin only.
+CREATE INDEX IF NOT EXISTS idx_calls_prefix ON calls(model, prefix_sha, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_calls_session ON calls(session_id, ts DESC);
 
 -- ── key_cooldowns: reactive backoff; persisted so it survives restart ────────
 CREATE TABLE IF NOT EXISTS key_cooldowns (
@@ -237,3 +257,32 @@ CREATE TABLE IF NOT EXISTS usage_counters (
   updated_at TEXT    NOT NULL,
   PRIMARY KEY (account_id, model_id, bucket)
 ) WITHOUT ROWID;
+
+-- ── v8: model_prices — the ledger's missing money column ─────────────────────
+-- Per-million-USD rates. Keyed by (account, model), NOT model alone: the same
+-- model id costs different money through different resellers, and that is
+-- exactly the arbitrage the routing research cares about. Versioned by
+-- effective_from (a price change is a NEW row, never an UPDATE) so historical
+-- cost re-derivation stays correct when a provider reprices — every rate we
+-- seed today came from a dated source (arXiv 2601.06007 App. A, Jan 2026) and
+-- will be stale eventually.
+--
+-- Cost of a call (see NormalizeUsage — tokens_in is ALREADY the non-cached,
+-- full-price input portion, so the four columns partition input with no
+-- overlap and the bill is a plain weighted sum / 1e6):
+--   usd = (tokens_in*price_in + tokens_out*price_out
+--          + tokens_cached_read*price_cache_read + tokens_cached_write*price_cache_write)/1e6
+-- NULL/absent price row => cost unknown (0), never guessed.
+CREATE TABLE IF NOT EXISTS model_prices (
+  account_id         INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  model_id           TEXT    NOT NULL,
+  effective_from     TEXT    NOT NULL,          -- 'YYYY-MM-DD' the rate started
+  currency           TEXT    NOT NULL DEFAULT 'USD',
+  price_in           REAL    NOT NULL DEFAULT 0, -- per 1M full-price input tokens
+  price_out          REAL    NOT NULL DEFAULT 0,
+  price_cache_read   REAL    NOT NULL DEFAULT 0,
+  price_cache_write  REAL    NOT NULL DEFAULT 0,
+  note               TEXT    NOT NULL DEFAULT '',
+  updated_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  PRIMARY KEY (account_id, model_id, effective_from)
+);

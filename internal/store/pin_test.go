@@ -106,8 +106,8 @@ func TestMigrateV6AddsProtoPinKeepsRows(t *testing.T) {
 
 	db := openAt(t, path)
 	defer db.Close()
-	if got := db.SchemaVersion(); got != 7 {
-		t.Fatalf("SchemaVersion = %d, want 7", got)
+	if got := db.SchemaVersion(); got != schemaVersion {
+		t.Fatalf("SchemaVersion = %d, want %d", got, schemaVersion)
 	}
 	ok, err := hasColumn(context.Background(), db.Writer(), "models", "proto_pin")
 	if err != nil || !ok {

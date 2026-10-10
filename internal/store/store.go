@@ -24,7 +24,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 7
+const schemaVersion = 8
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -221,6 +221,9 @@ func (d *DB) migrate() error {
 		if err := d.alterModelProtoPin(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate model proto pin: %w", err)
 		}
+		if err := d.alterCallsResearch(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate calls research columns: %w", err)
+		}
 		if _, err := d.w.Exec(schemaSQL); err != nil {
 			return fmt.Errorf("store: migrate %d->%d: %w", cur, schemaVersion, err)
 		}
@@ -244,6 +247,50 @@ func (d *DB) alterModelProtoPin(ctx context.Context) error {
 	}
 	_, err = d.w.ExecContext(ctx, `ALTER TABLE models ADD COLUMN proto_pin TEXT`)
 	return err
+}
+
+// alterCallsResearch adds the v8 (M9) research columns to `calls` on databases
+// created before them. Must run BEFORE schema.sql re-applies, because schema.sql
+// creates idx_calls_prefix/idx_calls_session over prefix_sha/session_id — on a
+// pre-v8 table CREATE TABLE IF NOT EXISTS is a no-op (no such column) while the
+// CREATE INDEX still runs and aborts boot. Same guard discipline as the others:
+// ALTER TABLE ADD COLUMN is not idempotent; fresh databases get them from
+// schema.sql directly. TEXT columns default ”; counters default 0.
+func (d *DB) alterCallsResearch(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "calls")
+	if err != nil {
+		return fmt.Errorf("check calls table: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+	textCols := []string{"prefix_sha", "session_id"}
+	intCols := []string{"compression_saved_notional", "msg_count", "tool_count", "req_bytes"}
+	for _, column := range textCols {
+		ok, err := hasColumn(ctx, d.w, "calls", column)
+		if err != nil {
+			return fmt.Errorf("check calls.%s: %w", column, err)
+		}
+		if ok {
+			continue
+		}
+		if _, err := d.w.ExecContext(ctx, fmt.Sprintf("ALTER TABLE calls ADD COLUMN %s TEXT NOT NULL DEFAULT ''", column)); err != nil {
+			return fmt.Errorf("add calls.%s: %w", column, err)
+		}
+	}
+	for _, column := range intCols {
+		ok, err := hasColumn(ctx, d.w, "calls", column)
+		if err != nil {
+			return fmt.Errorf("check calls.%s: %w", column, err)
+		}
+		if ok {
+			continue
+		}
+		if _, err := d.w.ExecContext(ctx, fmt.Sprintf("ALTER TABLE calls ADD COLUMN %s INTEGER NOT NULL DEFAULT 0", column)); err != nil {
+			return fmt.Errorf("add calls.%s: %w", column, err)
+		}
+	}
+	return nil
 }
 
 // alterComboContextSize adds the client-advertised context metadata on existing DBs.

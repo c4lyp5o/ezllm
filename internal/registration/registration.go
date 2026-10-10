@@ -422,9 +422,13 @@ func (t *Tester) authGate(
 		res.Steps = append(res.Steps, Step{Step: StepAuth, OK: false, Detail: f.Message})
 		return false
 
-	case status == http.StatusNotFound || status == http.StatusMethodNotAllowed:
+	case status == http.StatusNotFound || status == http.StatusMethodNotAllowed || status == http.StatusBadRequest:
+		// 400 joins 404/405: the oracle path is not an auth check on this
+		// provider (OpenAI answers GET /v1/usage with 400 "missing 'date'"
+		// even for a VALID key). Deferring is safe: calibration or inference
+		// still has to prove the key, so this can never produce a false pass.
 		res.Steps = append(res.Steps, Step{Step: StepAuth, OK: false,
-			Detail: "no oracle endpoint — deferring to inference"})
+			Detail: "no oracle endpoint (HTTP " + httpStatusWord(status) + ") — deferring to inference"})
 		res.authDeferred = true
 		return true
 

@@ -13,8 +13,10 @@ Claude Code talks to it as a native Anthropic endpoint (`POST /v1/messages`).
 Latest shipped batch (2026-10-10): per-model **surface pin** (`proto_pin`, schema v7,
 enforced never rerouted; wrong-surface calls refuse with `400 pinned_surface` before any
 upstream dial), `/healthz` reduced to liveness-only, a fourth provider kind (`gemini-openai`)
-plus presets for Groq, DeepSeek, Command Code, TokenRouter and Gemini, and a dashboard UI
-cleanup pass (confirmation modals, status text, 2-column layouts).
+plus presets for Groq, DeepSeek, Command Code, TokenRouter and Gemini, a dashboard UI
+cleanup pass, and the **M9 research schema** (schema v8: request-shape capture for
+cacheability, versioned model prices + derived cost, real-vs-notional savings split, and
+TTFT finally measured from dispatch).
 
 ## Read this first
 
@@ -52,6 +54,7 @@ the Docker image distroless-able.
 | Admin | `POST /admin/chat` | admin | in-dashboard chat via the normal inference path |
 | Admin | `/admin/accounts` · `/admin/combos` · `/admin/model-rules` · `/admin/compression-profiles` · `/admin/tokens` · `/admin/export` | admin | lifecycle CRUD + disaster-recovery dump |
 | Admin | `PUT /admin/accounts/{id}/model-pin` | admin | set/clear a model's surface pin (`{"model","pin","force"}`); unconfirmed surface → 409 unless `force` |
+| Admin | `GET /admin/prices` · `PUT`/`DELETE /admin/accounts/{id}/prices` · `GET /admin/cost` | admin | versioned per-model USD rates + derived spend (`?from=`; unpriced calls counted, never zeroed) |
 | Admin | `POST /admin/login` · `/admin/settings/password` | password / admin | dashboard session gate |
 
 ## Addressing models
@@ -114,6 +117,31 @@ Ordered stages over six engines — `session_dedup`, `rtk`, `headroom`, `lite`, 
 the combo's default profile → off). Contract: never touch the final user message, tool
 calls, or structured tool results; fail-open on any engine error. Design + measured
 numbers: `docs/compression-design.md`.
+
+## Research capture & cost (schema v8)
+
+The ledger now records enough to answer the questions token-savings research actually
+needs. All of it is captured best-effort on the inference path — a failed parse records
+nothing and never affects the request.
+
+- **Cacheability** (`internal/server/shape.go`): every call stores `prefix_sha` — the hash
+  of the request's stable core (system + tools + history minus the newest turn) — plus
+  `msg_count`, `tool_count`, `session_id` (from an optional `X-Ezllm-Session` header) and
+  `req_bytes`. A re-send of the same context shares the hash (sibling reuse); any edit to
+  the stable core — an injected timestamp, a regrowing tool list, a compression profile
+  rewriting history — changes it, which is exactly a cache break. `raw_usage` is a
+  *response*, so this request structure was unreconstructable before.
+- **Real vs notional savings** (`compression_saved_notional`): `tokens_saved` counts only
+  bytes that actually shipped shorter; a ratio-floor rejection records its would-have-been
+  saving separately, so the dashboard headline is never inflated (it was ~2x before).
+- **Money** (`model_prices` + `GET /admin/cost`): per-(account, model) USD rates, versioned
+  by `effective_from` so a reprice never rewrites history. Cost is **derived** at query
+  time — not stamped per row — so correcting one rate fixes every past window. Calls with
+  no effective rate are counted as `unpriced_calls` and excluded from the total, never
+  silently zeroed. Economics shows spend and the unpriced gap; rates are set in
+  Providers → Pricing.
+- **TTFT** is measured from upstream dispatch, not from inside the stream copy, so it now
+  reflects real prefill latency instead of a constant 1–3ms.
 
 ## Dashboard
 

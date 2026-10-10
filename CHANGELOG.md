@@ -1,6 +1,25 @@
 # Changelog
 
-Notable changes, reverse-chronological. Milestone-tagged (M1–M8); full history via `git log`.
+Notable changes, reverse-chronological. Milestone-tagged (M1–M9); full history via `git log`.
+
+## 2026-10-10 — M9: research schema (v8) + honest savings + TTFT + cost
+- `fix(proxy)`: TTFT was timed from inside the stream copy — after headers had already
+  arrived — so every row read 1–3ms. Now timed from upstream dispatch; the number finally
+  means time-to-first-token, which is what caching research measures (`f48d20a`).
+- `fix(compress)`: `Saved` was set before the ratio-floor check, so rejected rewrites still
+  reported savings (prod week: 18.2k real vs 21.4k notional in one SUM). `Saved` is now 0 on
+  any skip; `SavedNotional` carries the rejected potential (`19b743d`).
+- `feat(store)` schema v8: request-shape capture (`prefix_sha` of system+tools+history-minus-
+  newest-turn, `msg_count`, `tool_count`, `session_id` via `X-Ezllm-Session`, `req_bytes`) —
+  the cacheability data `raw_usage` could never reconstruct; `compression_saved_notional`;
+  versioned `model_prices` (account×model×date) with cost DERIVED at query time, unpriced
+  calls counted not zeroed (`393460b`).
+- `feat(server)`: capture runs on the inference path after compression (a history rewrite
+  measures as the cache break it is); admin API `GET /admin/prices`,
+  `PUT/DELETE /admin/accounts/{id}/prices`, `GET /admin/cost`; requests projection surfaces
+  the shape columns (`0e24e32`).
+- `feat(web)`: Economics cost panel (spend, priced vs unpriced, per day/account/model) +
+  Providers Pricing drawer (per-account rate versions; all four rates required) (`ec27973`).
 
 ## 2026-10-09/10 — providers batch, UI cleanup pass, surface pin (deployed 2026-10-10)
 - `feat(provider)`: fourth kind `gemini-openai` — Gemini's OpenAI-compat endpoint; its bad-key

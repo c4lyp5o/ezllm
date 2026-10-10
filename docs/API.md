@@ -1,4 +1,4 @@
-# ezllm admin API — contract (v1 · M1–M8 shipped, current through 2026-10-10)
+# ezllm admin API — contract (v1 · M1–M9 shipped, current through 2026-10-10)
 
 Status codes: `200` ok · `201` created · `400` bad request **or surface-pin refusal** ·
 `401` no/invalid client token · `403` token lacks `admin` · `404` unknown id · `409` conflict (refs exist; unconfirmed pin surface) · `422` **key test failed** (with `step`) · `429` at cap.
@@ -200,6 +200,52 @@ Unknown model → `404`. Pinning a surface the probe never confirmed (`null`/`0`
 unconfirmed_surface` unless `force:true`. A pin set with `force` on an unconfirmed surface is
 honored exactly like any other — the refusal then protects you from the mistake downstream.
 Catalog resyncs **preserve** pins (models that vanish upstream lose their pin with their row).
+
+## M9 — prices, cost, and the research columns (schema v8)
+
+### `GET /admin/prices` → `200` → `[Price, …]`
+```jsonc
+{ "account_id":6, "model_id":"qwen3.8-flash", "effective_from":"2026-01-01",
+  "currency":"USD", "price_in":0.2, "price_out":1.6,
+  "price_cache_read":0.04, "price_cache_write":0.25, "note":"source + date" }
+```
+Rates are **USD per 1M tokens**, versioned per `(account, model, effective_from)`. Same
+version re-set = overwrite; new date = new version. Cost joins each call to the newest
+rate effective **on or before the call's date**, so a reprice never rewrites history.
+
+### `PUT /admin/accounts/{id}/prices` → `200` (echoes the stored row)
+Model id in the body (ids can contain `/`). **All four rates are required** — a missing
+one is refused rather than treated as zero, because "free" must be a stated decision.
+Negative rates → `400`; model not in the account's catalog → `404` (mirrors the pin
+endpoint). `effective_from` accepts a date or full timestamp (normalized to `YYYY-MM-DD`).
+
+### `DELETE /admin/accounts/{id}/prices` → `204` | `404`
+Body `{"model","effective_from"}` deletes that exact version. Unknown version → `404`.
+
+### `GET /admin/cost?from=&to=` → `200` (default: last 7 days)
+Derived spend per `(day, account, model)` — computed at query time, never stored per row:
+```jsonc
+{ "rows": [ { "day":"2026-10-09", "account":"alibaba-token-plan", "model":"qwen3.8-flash",
+              "calls":81, "unpriced_calls":3, "tokens_in":242413, "tokens_out":40880,
+              "tokens_cached_read":10353920, "tokens_cached_write":0, "usd":4.31 } ],
+  "totals": { "usd":4.31, "calls":1106, "unpriced_calls":3,
+              "pricing_complete":false, "note":"usd counts priced calls only" } }
+```
+**Unpriced calls are excluded from `usd`, never zeroed into it** — `unpriced_calls` > 0
+means the total is a floor, not the full bill. The bill formula (see `NormalizeUsage`:
+`tokens_in` already excludes cached, so the four columns partition input cleanly):
+`usd = (in·price_in + out·price_out + cached_read·price_cache_read + cached_write·price_cache_write)/1e6`.
+
+### Requests projection — new v8 fields
+`/admin/requests` and the SSE feed now also emit, per call:
+`saved_notional` (what a floor-rejected rewrite *would* have saved — `saved` is only real
+shipped savings), `prefix_sha` (stable-core hash: system+tools+history minus the newest
+turn; identical for re-sends of the same context, changes on ANY core edit — the cache-
+break signal), `session_id` (from the optional `X-Ezllm-Session` client header; a pure
+grouping key, never routing), `msg_count`, `tool_count`, `req_bytes` (exact body bytes
+posted upstream, after compression). Also: `ttft_ms` is now genuinely time-to-first-token
+(measured from dispatch; before this it timed from inside the stream copy and read ~1–3ms
+for every call).
 
 ### `GET /admin/accounts/{id}/quota` → `200`
 Live `ReadQuota` → classified shape + `raw`. `{"kind":"none"}` when the provider has no endpoint

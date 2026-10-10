@@ -38,14 +38,25 @@ func reqWithBody(body string) (*http.Request, []byte) {
 	return req, []byte(body)
 }
 
-// THE core failover claim: hop 1 answers 429, hop 2 answers 200, and the client
-// must see ONLY hop 2 — the 429 is never observable. If this breaks, failover
-// is not failover, it is a leak of an error the caller did nothing to deserve.
+// Retry and failover are DIFFERENT questions. A 429 must never be retried on
+// the same hop — retrying a rate-limited credential spends the very budget the
+// upstream just reported as exhausted, which is what turned one over-budget
+// call into a minute-long storm. It must still fail over, so a hop with budget
+// can serve the request.
 func TestRetryableUpstreamStatus(t *testing.T) {
-	for _, code := range []int{http.StatusTooManyRequests, http.StatusRequestTimeout, http.StatusTooEarly, 500, 502, 503, 504} {
+	for _, code := range []int{http.StatusRequestTimeout, http.StatusTooEarly, 500, 502, 503, 504} {
 		if !retryableUpstreamStatus(code) {
 			t.Errorf("%d should be retryable", code)
 		}
+	}
+	// 429 is a failover signal, not a retry signal: not retryable, but a
+	// failover trigger. Asserting both halves keeps a future edit from
+	// "fixing" one by breaking the other.
+	if retryableUpstreamStatus(http.StatusTooManyRequests) {
+		t.Error("429 must not be retryable on the same hop — it is a failover signal")
+	}
+	if !failoverStatus(http.StatusTooManyRequests) {
+		t.Error("429 must fail over — otherwise a rate-limited hop strands the request")
 	}
 	for _, code := range []int{400, 401, 403, 404, 422} {
 		if retryableUpstreamStatus(code) {
@@ -54,6 +65,9 @@ func TestRetryableUpstreamStatus(t *testing.T) {
 	}
 }
 
+// THE core failover claim: hop 1 answers 429, hop 2 answers 200, and the client
+// must see ONLY hop 2 — the 429 is never observable. If this breaks, failover
+// is not failover, it is a leak of an error the caller did nothing to deserve.
 func TestFailoverHidesFailedHopFromClient(t *testing.T) {
 	bad := upstub(t, http.StatusTooManyRequests, `{"error":"quota"}`)
 	defer bad.Close()
@@ -183,7 +197,7 @@ func TestAllCooldownRoutesReturnErrorWithoutUpstreamCall(t *testing.T) {
 	defer up.Close()
 	d := newDispatcher()
 	rt := textRoute(up.URL, "model")
-	d.recordHop(rt, true, time.Now())
+	d.recordHop(rt, defaultHopCooldown, time.Now())
 	req, body := reqWithBody(`{"model":"model","messages":[]}`)
 	rec := httptest.NewRecorder()
 	_, _, err := d.ForwardCandidates(context.Background(), rec, req, []Route{rt}, body)
@@ -199,7 +213,7 @@ func TestHalfOpenAllowsExactlyOneProbe(t *testing.T) {
 	d := newDispatcher()
 	rt := textRoute("http://upstream.invalid", "model")
 	now := time.Now()
-	d.recordHop(rt, true, now.Add(-deadHopCooldown-time.Second))
+	d.recordHop(rt, defaultHopCooldown, now.Add(-defaultHopCooldown-time.Second))
 	ok, probe := d.acquireHop(rt, now)
 	if !ok || !probe {
 		t.Fatalf("first expired-cooldown caller=(%v,%v), want (true,true)", ok, probe)
@@ -208,7 +222,7 @@ func TestHalfOpenAllowsExactlyOneProbe(t *testing.T) {
 	if ok || probe {
 		t.Fatalf("concurrent caller=(%v,%v), want (false,false)", ok, probe)
 	}
-	d.recordHop(rt, false, now)
+	d.recordHop(rt, 0, now)
 	ok, probe = d.acquireHop(rt, now)
 	if !ok || probe {
 		t.Fatalf("recovered endpoint caller=(%v,%v), want (true,false)", ok, probe)

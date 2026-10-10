@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/c4lyp5o/ezllm/internal/provider"
 	"github.com/c4lyp5o/ezllm/internal/store"
@@ -28,6 +29,12 @@ import (
 // maxBodyBytes caps the request body we will read into memory (we must read it
 // to swap `model`). 32 MiB is generous for chat payloads and bounds abuse.
 const maxBodyBytes = 32 << 20
+
+// maxErrSnippet bounds the upstream error text stored in the ledger's err
+// column. The ledger is not a request log: 512 bytes holds every provider's
+// error envelope (message, type, code, request id) and stops a chatty 4xx from
+// bloating the table.
+const maxErrSnippet = 512
 
 // maxStreamBytes bounds what the usage tap inspects. The response itself is
 // NOT bounded (it is streamed), only the per-line scan buffer.
@@ -108,6 +115,10 @@ type Dispatcher struct {
 	retryAttempts int
 	cooldownMu    sync.Mutex
 	cooldowns     map[string]cooldownState
+	// on429/on5xx are the operator's park durations, guarded by cooldownMu.
+	// Zero means "fall back to defaultHopCooldown".
+	on429 time.Duration
+	on5xx time.Duration
 }
 
 type cooldownState struct {
@@ -115,7 +126,17 @@ type cooldownState struct {
 	probeActive bool
 }
 
-const deadHopCooldown = 5 * time.Minute
+const (
+	// defaultHopCooldown parks a hop whose failure carries neither an upstream
+	// Retry-After nor an operator duration (transport errors).
+	defaultHopCooldown = 5 * time.Minute
+
+	// maxHonouredRetryAfter bounds an upstream-supplied Retry-After. Providers
+	// may legitimately ask for an hour; honouring that blindly would remove the
+	// hop for the rest of the session. A value beyond this is treated as absent
+	// so the operator's configured duration applies instead.
+	maxHonouredRetryAfter = 15 * time.Minute
+)
 
 func hopKey(rt Route) string {
 	return fmt.Sprintf("%d|%s", rt.Account.ID, strings.TrimRight(rt.Account.BaseURL, "/"))
@@ -153,31 +174,129 @@ func (d *Dispatcher) releaseProbe(rt Route) {
 	}
 }
 
-func cooldownFailure(err error, status int) bool {
+// hopCooldown decides how long to park a hop after an answer, or 0 to leave it
+// available.
+//
+// Precedence for a rate limit: an explicit upstream Retry-After wins (the
+// provider alone knows when its own window resets), then the operator's
+// cooldown.on_429, then the built-in default.
+//
+// hasAlternate is what keeps cooling honest. Parking a hop is an optimisation:
+// it lets the NEXT call skip straight to a hop that still has budget instead of
+// re-discovering the same 429. When this hop is the only candidate, that
+// optimisation has nothing to optimise — the alternatives are "try again and
+// get a real answer once the window rolls over" versus "synthesise a refusal
+// from a stale local counter". The first is strictly more useful, so a sole
+// hop is never parked for a rate limit. A hop that is genuinely broken (5xx,
+// transport error) is still parked: those failures mean "do not send traffic
+// here", which a single hop cannot escape anyway.
+func (d *Dispatcher) hopCooldown(err error, status int, hdr http.Header, hasAlternate bool) time.Duration {
 	if err != nil {
-		return retryableUpstreamError(err)
+		if !retryableUpstreamError(err) {
+			return 0
+		}
+		return defaultHopCooldown
 	}
-	return status == http.StatusRequestTimeout || status == http.StatusTooEarly || status >= http.StatusInternalServerError
+	switch {
+	case status == http.StatusTooManyRequests:
+		if !hasAlternate {
+			// Sole hop: try again for real rather than refuse from a counter.
+			return 0
+		}
+		if dur, ok := parseRetryAfter(hdr.Get("Retry-After")); ok {
+			return dur
+		}
+		if d.on429 > 0 {
+			return d.on429
+		}
+		return defaultHopCooldown
+	case status == http.StatusInternalServerError, status == http.StatusBadGateway,
+		status == http.StatusServiceUnavailable, status == http.StatusGatewayTimeout, status >= 500:
+		if dur, ok := parseRetryAfter(hdr.Get("Retry-After")); ok {
+			return dur
+		}
+		if d.on5xx > 0 {
+			return d.on5xx
+		}
+		return defaultHopCooldown
+	case status == http.StatusRequestTimeout || status == http.StatusTooEarly:
+		return defaultHopCooldown
+	}
+	return 0
 }
 
-func (d *Dispatcher) recordHop(rt Route, failed bool, now time.Time) {
+// parseRetryAfter parses the two spellings RFC 9110 allows for Retry-After:
+// delta-seconds and an HTTP-date. Anything absent, non-positive, unparseable,
+// or longer than maxHonouredRetryAfter reports false, so a bogus or hostile
+// header can neither pin a hop for a session nor be silently clamped into a
+// duration the upstream never asked for.
+func parseRetryAfter(v string) (time.Duration, bool) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0, false
+	}
+	if secs, err := strconv.Atoi(v); err == nil {
+		if secs <= 0 {
+			return 0, false
+		}
+		d := time.Duration(secs) * time.Second
+		if d > maxHonouredRetryAfter {
+			return 0, false
+		}
+		return d, true
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		d := time.Until(t)
+		if d <= 0 || d > maxHonouredRetryAfter {
+			return 0, false
+		}
+		return d, true
+	}
+	return 0, false
+}
+
+// recordHop parks a hop for cooldown (0 leaves it available). A parked hop is
+// skipped by acquireHop until the window elapses, then gets exactly one
+// half-open probe.
+func (d *Dispatcher) recordHop(rt Route, cooldown time.Duration, now time.Time) {
 	key := hopKey(rt)
 	d.cooldownMu.Lock()
 	defer d.cooldownMu.Unlock()
-	if failed {
+	if cooldown > 0 {
 		if d.cooldowns == nil {
 			d.cooldowns = make(map[string]cooldownState)
 		}
-		d.cooldowns[key] = cooldownState{until: now.Add(deadHopCooldown)}
+		d.cooldowns[key] = cooldownState{until: now.Add(cooldown)}
 	} else if d.cooldowns != nil {
 		delete(d.cooldowns, key)
+	}
+}
+
+// ConfigureCooldown applies the operator's per-class cooldown durations. A
+// zero or negative value leaves the built-in default in place, so a partial or
+// hand-edited config can never silently disable cooling.
+func (d *Dispatcher) ConfigureCooldown(on429, on5xx time.Duration) {
+	d.cooldownMu.Lock()
+	defer d.cooldownMu.Unlock()
+	if on429 > 0 {
+		d.on429 = on429
+	}
+	if on5xx > 0 {
+		d.on5xx = on5xx
 	}
 }
 
 // NewDispatcher builds a Dispatcher. timeout governs connection/response-header
 // time only; streaming bodies are unbounded by design.
 func NewDispatcher(client *http.Client, registry *provider.Registry) *Dispatcher {
-	return &Dispatcher{client: client, registry: registry, retryAttempts: 3, cooldowns: make(map[string]cooldownState)}
+	return &Dispatcher{
+		client:        client,
+		registry:      registry,
+		retryAttempts: 3,
+		cooldowns:     make(map[string]cooldownState),
+		on429:         defaultHopCooldown,
+		on5xx:         defaultHopCooldown,
+	}
 }
 
 func (d *Dispatcher) SetRetries(retries int) {
@@ -318,6 +437,15 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 		if u := tapJSONUsage(raw, rt.Surface); u != nil {
 			res.Usage = u
 		}
+		// Record WHY an error status happened. Before this, the err column was
+		// populated only for transport and stream failures, so a provider 429
+		// left a fully blank row — status 429, err "". The upstream's own
+		// sentence ("Maximum 5 requests within 1 minutes") is the single most
+		// useful field for diagnosing an incident after the fact, and without
+		// this it is streamed to the client and then gone forever.
+		if res.Status >= 400 && res.Err == "" {
+			res.Err = upstreamErrorSnippet(res.Status, raw)
+		}
 		w.WriteHeader(resp.StatusCode)
 		if _, werr := w.Write(raw); werr != nil {
 			res.Err = "client write: " + werr.Error()
@@ -349,10 +477,14 @@ func (d *Dispatcher) retryAttempt(ctx context.Context, r *http.Request, rt Route
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		resp, result, start, err := d.attempt(ctx, r, rt, body)
 		lastResp, lastResult, lastStart = resp, result, start
-		if err == nil && (result.Status < 500 && result.Status != http.StatusTooManyRequests) {
+		// A non-retryable answer is FINAL, whatever its status — including 429,
+		// which is a failover signal rather than a worth-another-try one. Every
+		// 2xx and every non-retryable 4xx leaves through here, so the retry
+		// decision lives in exactly one predicate.
+		if err == nil && !retryableUpstreamStatus(result.Status) {
 			return resp, result, start, nil
 		}
-		if attempt+1 == maxAttempts || ctx.Err() != nil || (err == nil && !retryableUpstreamStatus(result.Status)) || (err != nil && !retryableUpstreamError(err)) {
+		if attempt+1 == maxAttempts || ctx.Err() != nil || (err != nil && !retryableUpstreamError(err)) {
 			return resp, result, start, err
 		}
 		if resp != nil {
@@ -373,8 +505,20 @@ func (d *Dispatcher) retryAttempt(ctx context.Context, r *http.Request, rt Route
 	return lastResp, lastResult, lastStart, errors.New("proxy: retry budget exhausted")
 }
 
+// retryableUpstreamStatus reports whether an upstream answer is worth retrying
+// on the SAME hop.
+//
+// 429 is deliberately absent. A rate limit is not a transient glitch: the
+// upstream has just told us this credential has no budget left in the current
+// window, so an immediate retry spends MORE of the very budget being reported
+// and guarantees the next answer is another 429. Retrying a rate-limited key is
+// what turns "one call over budget" into "the whole minute gone".
+//
+// 429 is still a FAILOVER signal — see failoverStatus, which includes it, so a
+// different hop with budget can serve the request. Retry and failover are
+// different questions and must not share a predicate.
 func retryableUpstreamStatus(code int) bool {
-	return code == http.StatusTooManyRequests || code == http.StatusRequestTimeout || code == http.StatusTooEarly || code >= 500
+	return code == http.StatusRequestTimeout || code == http.StatusTooEarly || code >= 500
 }
 
 func retryableUpstreamError(err error) bool {
@@ -449,7 +593,15 @@ func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWrite
 			return Route{}, Result{}, err
 		}
 		resp, res, start, err := d.retryAttempt(ctx, r, rt, swapped)
-		d.recordHop(rt, cooldownFailure(err, res.Status), time.Now())
+		// Park the hop only when there is somewhere else to go. len(routes) is
+		// the full candidate list the router resolved; a single entry means a
+		// cooled hop has no alternate, and hopCooldown declines to park a rate
+		// limit in that case.
+		var hdr http.Header
+		if resp != nil {
+			hdr = resp.Header
+		}
+		d.recordHop(rt, d.hopCooldown(err, res.Status, hdr, len(routes) > 1), time.Now())
 		if probe {
 			d.releaseProbe(rt)
 		}
@@ -738,6 +890,30 @@ func copyResponseHeaders(w http.ResponseWriter, resp *http.Response) {
 }
 
 // --- small utils ---
+
+// upstreamErrorSnippet renders a bounded, single-line summary of an upstream
+// error body for the ledger.
+//
+// Bounded because the ledger is not a request log, and single-line because the
+// dashboard renders err inline — a raw multi-line provider body would wreck the
+// table. The status is prefixed so a row is self-describing even if the body is
+// empty or non-JSON (HTML error pages happen).
+func upstreamErrorSnippet(status int, raw []byte) string {
+	s := strings.Join(strings.Fields(string(raw)), " ")
+	if s == "" {
+		return fmt.Sprintf("upstream %d: (empty body)", status)
+	}
+	if len(s) > maxErrSnippet {
+		// Cut on a rune boundary so a multi-byte character is never split into
+		// invalid UTF-8 — the column is TEXT and the dashboard will render it.
+		cut := maxErrSnippet
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		s = s[:cut] + "…"
+	}
+	return fmt.Sprintf("upstream %d: %s", status, s)
+}
 
 func msPtr(d time.Duration) *int64 {
 	v := d.Milliseconds()

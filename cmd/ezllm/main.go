@@ -97,6 +97,11 @@ func run() error {
 	registry := provider.NewRegistry(client)
 	dispatcher := proxy.NewDispatcher(client, registry)
 	dispatcher.SetRetries(cfg.Retry.Retries)
+	// cooldown.on_429 / cooldown.on_5xx were parsed and validated but read by
+	// nothing: the dispatcher used one hardcoded five-minute park for every
+	// failure class. Wire the operator's numbers through so the config means
+	// what it says.
+	dispatcher.ConfigureCooldown(cfg.CooldownOn429, cfg.CooldownOn5xx)
 	resolver := router.New(db)
 
 	// ── M5 rules engine ──

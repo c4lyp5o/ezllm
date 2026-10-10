@@ -90,6 +90,8 @@ type Config struct {
 	// derived
 	UpstreamTimeout time.Duration
 	LedgerBatchWait time.Duration
+	CooldownOn429   time.Duration
+	CooldownOn5xx   time.Duration
 }
 
 // Load reads, parses and validates the config file at path.
@@ -216,10 +218,23 @@ func (c *Config) Validate() error {
 	if c.Cooldown.MaxPerKey == 0 {
 		c.Cooldown.MaxPerKey = 3
 	}
-	for _, d := range []struct{ label, v string }{{"on_429", c.Cooldown.On429}, {"on_5xx", c.Cooldown.On5xx}} {
-		if _, err := time.ParseDuration(d.v); err != nil {
+	for _, d := range []struct {
+		label, v string
+		dst      *time.Duration
+	}{
+		{"on_429", c.Cooldown.On429, &c.CooldownOn429},
+		{"on_5xx", c.Cooldown.On5xx, &c.CooldownOn5xx},
+	} {
+		dur, err := time.ParseDuration(d.v)
+		if err != nil {
 			errs = append(errs, fmt.Sprintf("cooldown.%s: %v", d.label, err))
+			continue
 		}
+		if dur <= 0 {
+			errs = append(errs, fmt.Sprintf("cooldown.%s: must be positive", d.label))
+			continue
+		}
+		*d.dst = dur
 	}
 	if c.Cooldown.MaxPerKey < 1 {
 		errs = append(errs, "cooldown.max_per_key: must be >= 1")

@@ -282,7 +282,7 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 
 	isSSE := strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")
 	if res.Stream && isSSE {
-		ttft, usage, copyErr := d.streamCopy(ctx, w, resp, rt.Surface)
+		ttft, usage, copyErr := d.streamCopy(ctx, w, resp, rt.Surface, start)
 		res.TTFTms = msAtLeastOne(ttft)
 		if usage != nil {
 			res.Usage = usage
@@ -497,8 +497,13 @@ func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWrite
 // usage events without altering a single byte. Returns (ttft, usage, err) where
 // err is non-nil when the stream was truncated — the caller records it, since
 // the 200 status has already been sent and cannot be changed.
-func (d *Dispatcher) streamCopy(ctx context.Context, w http.ResponseWriter, resp *http.Response, surface provider.Surface) (time.Duration, *store.Usage, error) {
-	start := time.Now()
+//
+// `start` is the DISPATCH time (when the upstream request was posted), not the
+// moment streaming began. TTFT means "time to first token": the provider's
+// prefill happens before it emits any byte, so measuring from inside this
+// function — after headers already arrived — reports a meaningless 1-3ms and
+// hides exactly the cache/prefill latency the number exists to reveal.
+func (d *Dispatcher) streamCopy(ctx context.Context, w http.ResponseWriter, resp *http.Response, surface provider.Surface, start time.Time) (time.Duration, *store.Usage, error) {
 	var ttft time.Duration
 	var firstByte bool
 

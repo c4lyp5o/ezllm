@@ -302,6 +302,41 @@ export const setModelPin = (accountId: number, model: string, pin: string, force
     { method: 'PUT' },
     { model, pin, force },
   );
+
+// ── v8: model prices + derived cost ──────────────────────────────────────
+// Rates are versioned per (account, model, date); cost is computed server-side
+// from the rate EFFECTIVE on each call's date. usd counts PRICED calls only —
+// unpriced_calls tells you when the total is a floor, not the full bill.
+
+export type Price = {
+  account_id: number; model_id: string; effective_from: string; currency: string;
+  price_in: number; price_out: number; price_cache_read: number; price_cache_write: number;
+  note?: string;
+};
+
+export const prices = () => get<Price[]>('/admin/prices');
+
+/** Upsert one rate version. All four prices are required (absent is NOT zero/free). */
+export const setPrice = (accountId: number, p: Omit<Price, 'account_id'>) =>
+  apiFetch<Price>(`/admin/accounts/${accountId}/prices`, { method: 'PUT' }, p);
+
+export const deletePrice = (accountId: number, model: string, effectiveFrom: string) =>
+  apiFetch<null>(`/admin/accounts/${accountId}/prices`, { method: 'DELETE' }, { model, effective_from: effectiveFrom });
+
+export type CostRow = {
+  day: string; account_id: number; account: string; model: string;
+  calls: number; unpriced_calls: number;
+  tokens_in: number; tokens_out: number; tokens_cached_read: number; tokens_cached_write: number;
+  usd: number;
+};
+
+export type CostTotals = { usd: number; calls: number; unpriced_calls: number; pricing_complete: boolean; note?: string };
+
+export const cost = (range: RangeKey = '7d') => {
+  const hours = RANGE_HOURS[range];
+  const params = new URLSearchParams({ from: new Date(Date.now() - hours * 3600_000).toISOString() });
+  return get<{ from: string; to: string; currency: string; rows: CostRow[]; totals: CostTotals }>(`/admin/cost?${params.toString()}`);
+};
 export const chat = (model: string, messages: { role: string; content: string }[]) =>
   post<any>('/admin/chat', { model, messages });
 

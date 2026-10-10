@@ -2,8 +2,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   ApiError, AuthError, del, get, modelRules, patch, post, setModelPin,
+  setPrice, deletePrice,
   KINDS, STEPS,
-  type Account, type ApiErrorDetail, type KeyRow, type ModelRule, type ModelRow, type TestResult, type TestStep,
+  type Account, type ApiErrorDetail, type KeyRow, type ModelRule, type ModelRow, type Price, type TestResult, type TestStep,
 } from '../api';
 import { Chip, ConfirmModal, Modal, SectionLabel, Skeleton, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls, relTime, Mono } from '../ui';
 
@@ -446,6 +447,100 @@ const prettyBody = (raw: string) => {
   try { return JSON.stringify(JSON.parse(raw), null, 2); } catch { return raw; }
 };
 
+// ── pricing drawer: versioned per-model rates for cost analysis ─────────
+
+// Rates live per (account, model, date). The newest row on or before a call's
+// date prices it; re-setting the same version overwrites, a new date versions.
+function PricingModal({ account, onClose }: { account: Account; onClose: () => void }) {
+  const [rows, setRows] = useState<Price[] | null>(null);
+  const [models, setModels] = useState<ModelRow[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState({ model: '', effective_from: new Date().toISOString().slice(0, 10), price_in: '', price_out: '', price_cache_read: '', price_cache_write: '', note: '' });
+
+  const load = useCallback(() => {
+    get<Price[]>('/admin/prices')
+      .then((ps) => setRows(ps.filter((p) => p.account_id === account.id)))
+      .catch((e) => setErr(e instanceof Error ? e.message : 'failed to load prices'));
+    get<ModelRow[]>(`/admin/accounts/${account.id}/models`)
+      .then(setModels)
+      .catch(() => setModels([]));
+  }, [account.id]);
+  useEffect(() => { load(); }, [load]);
+
+  const setRate = async () => {
+    // All four required: the API refuses partial rows so a missing rate can
+    // never silently mean "free".
+    const nums = [form.price_in, form.price_out, form.price_cache_read, form.price_cache_write];
+    if (!form.model || !form.effective_from || nums.some((v) => v.trim() === '' || Number.isNaN(Number(v)))) {
+      setErr('model, date and all four rates are required (USD per 1M tokens)');
+      return;
+    }
+    setBusy(true); setErr(null);
+    try {
+      await setPrice(account.id, {
+        model_id: form.model, effective_from: form.effective_from, currency: 'USD',
+        price_in: Number(form.price_in), price_out: Number(form.price_out),
+        price_cache_read: Number(form.price_cache_read), price_cache_write: Number(form.price_cache_write),
+        note: form.note,
+      });
+      setForm({ ...form, price_in: '', price_out: '', price_cache_read: '', price_cache_write: '', note: '' });
+      load();
+    } catch (e) { setErr(e instanceof Error ? e.message : 'save failed'); }
+    finally { setBusy(false); }
+  };
+
+  const remove = async (p: Price) => {
+    setBusy(true); setErr(null);
+    try { await deletePrice(account.id, p.model_id, p.effective_from); load(); }
+    catch (e) { setErr(e instanceof Error ? e.message : 'delete failed'); }
+    finally { setBusy(false); }
+  };
+
+  const cell = 'rounded border border-line bg-transparent px-2 py-1 text-[12px] text-ink';
+  return (
+    <Modal open onClose={onClose} title={`Pricing — ${account.name}`}
+      subtitle="USD per 1M tokens, versioned by date · cost derives from the rate effective on each call's day"
+      footer={<button type="button" className={cx(btn.base, btn.ghost)} onClick={onClose}>Close</button>}>
+      <div className="space-y-4">
+        {err && <div className="rounded-lg border border-bad/30 bg-bad/5 px-3 py-2 text-[12px] text-bad">{err}</div>}
+        {rows === null ? <div className="space-y-2"><Skeleton className="h-3.5 w-40" /><Skeleton className="h-3.5 w-56" /></div>
+          : rows.length === 0 ? <p className="text-[12.5px] text-mute">No rates yet — every call from this account is UNPRICED until you add one.</p>
+          : <div className="overflow-x-auto"><table className="w-full text-[12px]"><thead><tr className="text-left text-[10px] uppercase tracking-[0.1em] text-mute"><th className="pb-1 font-medium">model</th><th className="pb-1 font-medium">from</th><th className="pb-1 text-right">in</th><th className="pb-1 text-right">out</th><th className="pb-1 text-right">cache r</th><th className="pb-1 text-right">cache w</th><th className="pb-1"></th></tr></thead>
+            <tbody className="font-mono">{rows.map((p) => (
+              <tr key={`${p.model_id}-${p.effective_from}`} className="border-t border-line/50">
+                <td className="max-w-[180px] truncate py-1.5 text-dim" title={p.model_id}>{p.model_id}</td>
+                <td className="py-1.5 text-dim">{p.effective_from}</td>
+                <td className="py-1.5 text-right text-ink">{p.price_in}</td>
+                <td className="py-1.5 text-right text-ink">{p.price_out}</td>
+                <td className="py-1.5 text-right text-ink">{p.price_cache_read}</td>
+                <td className="py-1.5 text-right text-ink">{p.price_cache_write}</td>
+                <td className="py-1.5 text-right"><button type="button" disabled={busy} className="text-mute hover:text-bad disabled:opacity-40" onClick={() => void remove(p)} title="delete this version">✕</button></td>
+              </tr>))}</tbody></table></div>}
+        <div className="rounded-lg border border-line bg-raised/60 p-3">
+          <SectionLabel>set / update a rate</SectionLabel>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <select aria-label="model" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} className={cell}>
+              <option value="">model…</option>
+              {models.map((m) => <option key={m.id} value={m.id}>{m.id}</option>)}
+            </select>
+            <input aria-label="effective from" type="date" value={form.effective_from} onChange={(e) => setForm({ ...form, effective_from: e.target.value })} className={cell} />
+            {(['price_in', 'price_out', 'price_cache_read', 'price_cache_write'] as const).map((k) => (
+              <input key={k} aria-label={k} inputMode="decimal" placeholder={k.replace('price_', '')} value={form[k]}
+                onChange={(e) => setForm({ ...form, [k]: e.target.value })} className={cx(cell, 'w-20')} />
+            ))}
+            <input aria-label="note" placeholder="note" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} className={cx(cell, 'w-28')} />
+            <button type="button" className={cx(btn.base, btn.primary, 'px-3 py-1')} disabled={busy || !models.length} onClick={() => void setRate()}>
+              {busy ? <Spinner /> : null} Save
+            </button>
+          </div>
+          {!models.length && <p className="mt-2 text-[11px] text-mute">Sync this account's models first — rates can only name a model the catalog knows.</p>}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function QuotaModal({ account, onClose }: { account: Account; onClose: () => void }) {
   const [live, setLive] = useState<QuotaLive | null>(null);
   const [busy, setBusy] = useState(true);
@@ -544,6 +639,7 @@ function AccountCard({ a, onChanged }: { a: Account; onChanged: () => void }) {
   const [flash, setFlash] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [quotaOpen, setQuotaOpen] = useState(false);
+  const [pricingOpen, setPricingOpen] = useState(false);
   const [confirm, setConfirm] = useState<null | { kind: 'account' } | { kind: 'key'; keyID: number; label: string }>(null);
 
   // The quota button is only live once a probe proved this provider serves
@@ -644,6 +740,10 @@ function AccountCard({ a, onChanged }: { a: Account; onChanged: () => void }) {
                 Quota
               </button>
             </span>
+            <button type="button" title="Set per-model USD rates for cost analysis" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')}
+              onClick={(e) => { e.stopPropagation(); setPricingOpen(true); }}>
+              Pricing
+            </button>
             <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')}
               onClick={(e) => { e.stopPropagation(); setEditing(true); }}>
               Edit
@@ -671,6 +771,7 @@ function AccountCard({ a, onChanged }: { a: Account; onChanged: () => void }) {
               else void removeAccount();
             }} />
           {quotaOpen && <QuotaModal account={a} onClose={() => setQuotaOpen(false)} />}
+          {pricingOpen && <PricingModal account={a} onClose={() => setPricingOpen(false)} />}
           <ErrBox e={err} onDismiss={() => setErr(null)} />
         </div>
       )}

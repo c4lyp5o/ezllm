@@ -428,7 +428,7 @@ func (t *Tester) authGate(
 		// even for a VALID key). Deferring is safe: calibration or inference
 		// still has to prove the key, so this can never produce a false pass.
 		res.Steps = append(res.Steps, Step{Step: StepAuth, OK: false,
-			Detail: "no oracle endpoint (HTTP " + httpStatusWord(status) + ") — deferring to inference"})
+			Detail: "no oracle endpoint (" + httpStatusWord(status) + ") — deferring to inference"})
 		res.authDeferred = true
 		return true
 

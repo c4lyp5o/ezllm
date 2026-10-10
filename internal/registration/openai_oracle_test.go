@@ -81,6 +81,21 @@ func TestOpenAIValidKeyPassesAuthGate(t *testing.T) {
 	if !res.OK {
 		t.Fatalf("expected OK, got steps=%+v", res.Steps)
 	}
+	// The auth step must defer on the 400 (not reject) and its detail must
+	// read cleanly: httpStatusWord already prefixes "HTTP", so a doubled
+	// "HTTP HTTP 400" is a formatting regression.
+	sawDefer := false
+	for _, s := range res.Steps {
+		if strings.Contains(s.Detail, "HTTP HTTP") {
+			t.Fatalf("doubled HTTP prefix in step detail: %q", s.Detail)
+		}
+		if s.Step == StepAuth && strings.Contains(s.Detail, "deferring to inference") {
+			sawDefer = true
+		}
+	}
+	if !sawDefer {
+		t.Fatalf("400 oracle did not defer to inference: steps=%+v", res.Steps)
+	}
 }
 
 // A bogus key must still be rejected, with a real auth message, not the

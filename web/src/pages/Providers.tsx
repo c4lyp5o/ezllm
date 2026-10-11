@@ -96,6 +96,7 @@ const PROVIDER_PRESETS: Record<string, { label: string; kind: string; baseURL?: 
   'deepseek': { label: 'DeepSeek', kind: 'openai-compatible', baseURL: 'https://api.deepseek.com' },
   'groq': { label: 'Groq', kind: 'openai-compatible', baseURL: 'https://api.groq.com/openai/v1' },
   'tokenrouter': { label: 'TokenRouter', kind: 'openai-compatible', baseURL: 'https://api.tokenrouter.com/v1' },
+  'ollama-cloud': { label: 'Ollama Cloud', kind: 'openai-compatible', baseURL: 'https://ollama.com/v1' },
   'gemini': { label: 'Gemini (API key)', kind: 'gemini-openai', baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai' },
   'openai': { label: 'OpenAI', kind: 'openai-compatible', baseURL: 'https://api.openai.com/v1' },
   'openai-compatible': { label: 'OpenAI-compatible', kind: 'openai-compatible' },

@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -307,7 +308,7 @@ func (t *Tester) Run(ctx context.Context, acct provider.Account, opts Options) *
 			return res
 		}
 		res.Steps = append(res.Steps, Step{Step: StepInference, OK: true, Detail: "skipped"})
-	} else if model := pickProbeModel(res.Catalog, acct.Kind); model == "" {
+	} else if model := pickProbeModel(res.Catalog, acct); model == "" {
 		if res.authDeferred {
 			// If the authenticated catalog already said no, THAT is the
 			// provider's verdict — lead with its own words, not our prose.
@@ -539,6 +540,16 @@ func (t *Tester) inferenceStep(
 		}
 		res.Steps = append(res.Steps, Step{Step: StepInference, OK: false, Detail: f.Message})
 		return false, f
+
+	case isOllamaCloud(acct) && isPlanGatedError(status, resp):
+		// This exact Ollama Cloud response means the request passed credential
+		// checking but the selected model is outside this account's plan. The
+		// picker prefers the documented free models; this is a safe fallback if
+		// an entitlement changes after catalog retrieval. A 401/403 remains a
+		// hard credential failure because this branch follows isAuthStatus.
+		res.Steps = append(res.Steps, Step{Step: StepInference, OK: true,
+			Detail: fmt.Sprintf("credential accepted; %s is not included in this plan", model)})
+		return true, nil
 
 	default:
 		f := &Failure{
@@ -916,14 +927,37 @@ func upstreamMessage(m map[string]any) string {
 
 // ── model selection ─────────────────────────────────────────────────────────
 
-// pickProbeModel chooses the cheapest catalog model for the inference probe:
-// known-cheap first (deepseek-v4.1-flash measured 1689ms / 31 prompt tokens on
-// opencode-go), then name patterns, then the head of the catalog. Reasoning
-// models ignore max_tokens:1 anyway (qwen returned 25 completion tokens), so
-// cheap-by-prompt is what actually matters.
-func pickProbeModel(models []provider.ModelInfo, kind provider.Kind) string {
+// pickProbeModel chooses the cheapest catalog model for the inference probe.
+// For Ollama Cloud, the catalog includes models unavailable on a free plan; use
+// the documented free-plan model first rather than a generic "flash" model
+// (which may be catalogued but plan-gated). The provider check is deliberately
+// scoped to the exact public hostname, not an account-supplied name/namespace.
+func pickProbeModel(models []provider.ModelInfo, acct provider.Account) string {
+	if isOllamaCloud(acct) {
+		for _, preferred := range []string{
+			"gemma4:31b",
+			"gpt-oss:20b",
+			"gpt-oss:120b",
+			"nemotron-3-nano:30b",
+			"nemotron-3-super",
+			"nemotron-3-ultra",
+		} {
+			for _, model := range models {
+				if strings.EqualFold(model.ID, preferred) {
+					return model.ID
+				}
+			}
+		}
+		// Never fall through to a generic "flash/mini" match for Ollama Cloud:
+		// its public catalog includes paid models, and probing one can reject a
+		// perfectly good free-plan key. If the catalog doesn't list any free
+		// entitlement candidates, skip inference; because /v1/models is public,
+		// the existing fake-key calibration correctly refuses to store an
+		// unproven key instead of testing a paid model.
+		return ""
+	}
 	if len(models) == 0 {
-		if kind == provider.KindOpenCodeGo {
+		if acct.Kind == provider.KindOpenCodeGo {
 			return "deepseek-v4.1-flash" // verified cheap + present on this kind
 		}
 		return ""
@@ -953,6 +987,37 @@ func pickProbeModel(models []provider.ModelInfo, kind provider.Kind) string {
 	}
 	sort.Strings(ids) // deterministic fallback
 	return ids[0]
+}
+
+func isOllamaCloud(acct provider.Account) bool {
+	if acct.Kind != provider.KindOpenAICompatible {
+		return false
+	}
+	u, err := url.Parse(strings.TrimSpace(acct.BaseURL))
+	return err == nil && strings.EqualFold(u.Scheme, "https") && strings.EqualFold(u.Hostname(), "ollama.com")
+}
+
+// isPlanGatedError reports a provider-level refusal caused by the selected
+// model's plan, not by an invalid credential. Ollama Cloud returns this as a
+// 4xx with a JSON error body (notably "not included in your free usage").
+// The refusal itself proves the request reached authenticated model policy,
+// but we still need a successful generation before accepting a key whose auth
+// oracle and catalog are both public.
+func isPlanGatedError(status int, body []byte) bool {
+	if status < 400 || isAuthStatus(status) {
+		return false
+	}
+	text := strings.ToLower(string(body))
+	for _, marker := range []string{
+		"not included in your free usage",
+		"add usage credits",
+		"upgrade to use",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // sampleModels picks the protocol-probe sample: cheap-looking models first,

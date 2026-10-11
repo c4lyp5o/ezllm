@@ -22,6 +22,11 @@ services:
 
     environment:
       TZ: Asia/Kuala_Lumpur
+      # Default zone for group_by=day bucketing, so the dashboard's day view
+      # agrees with a usage rule's day (both use store.CountBucket). A tz that
+      # will not load is a BOOT error, never a silent UTC shift. Per-request
+      # ?tz= overrides this; see docs/API.md under GET /admin/usage.
+      EZLLM_USAGE_TZ: ${EZLLM_USAGE_TZ:-Asia/Kuala_Lumpur}
 
     # All credentials are dashboard-managed and persisted in the SQLite volume.
 

@@ -142,6 +142,10 @@ type Resolver struct {
 	// eligible filters candidates before any strategy runs. nil = everything
 	// eligible (the M2 behaviour, and the right default until rules exist).
 	eligible Eligible
+	// translationEnabled gates the anthropic→openai hop translation. Off
+	// by default; even ON it only ever serves hops whose probed capability
+	// PROVES the OpenAI shape (see translate.Eligible).
+	translationEnabled bool
 }
 
 // New builds a Resolver.
@@ -151,6 +155,13 @@ func New(c Catalog) *Resolver { return &Resolver{catalog: c} }
 // this at startup; leaving it unset keeps routing behaviour unchanged.
 func (r *Resolver) WithEligibility(e Eligible) *Resolver {
 	r.eligible = e
+	return r
+}
+
+// WithTranslation enables anthropic→openai hop translation (opt-in from
+// config/env). Unset keeps routing behaviour unchanged.
+func (r *Resolver) WithTranslation(enabled bool) *Resolver {
+	r.translationEnabled = enabled
 	return r
 }
 

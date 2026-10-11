@@ -76,6 +76,18 @@ type ModelRefresh struct {
 	Interval string `yaml:"interval"`
 }
 
+// Translation is the opt-in wire-protocol translation layer: a request from
+// an anthropic-shaped client (Claude Code, /v1/messages) may be translated
+// onto a hop that is PROVEN to speak only the OpenAI shape.
+//
+// Default OFF, and inert even when ON: eligibility additionally requires a
+// hop whose probed capability says proto_openai=true and proto_anthropic is
+// false/null. Those flags are NULL until a probe sweep runs, so enabling this
+// cannot change routing on its own.
+type Translation struct {
+	Enabled bool `yaml:"enabled"`
+}
+
 type Config struct {
 	Listen             string              `yaml:"listen"`
 	DataDir            string              `yaml:"data_dir"`
@@ -86,6 +98,7 @@ type Config struct {
 	Cooldown           Cooldown            `yaml:"cooldown"`
 	Retry              Retry               `yaml:"retry"`
 	ModelRefresh       ModelRefresh        `yaml:"model_refresh"`
+	Translation        Translation         `yaml:"translation"`
 
 	// derived
 	UpstreamTimeout time.Duration

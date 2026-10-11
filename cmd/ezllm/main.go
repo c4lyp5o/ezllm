@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -65,6 +66,17 @@ func run() error {
 	// Dockerfile sets EZLLM_DATA_DIR=/data and EZLLM_ADDR=0.0.0.0:20129.
 	if v := strings.TrimSpace(os.Getenv("EZLLM_DATA_DIR")); v != "" {
 		cfg.DataDir = v
+	}
+	// Translation is opt-in twice over: this knob, AND a hop proven
+	// openai-only by a probe sweep. A malformed value is a startup error —
+	// silently defaulting an "on" to "off" would leave the operator
+	// wondering why nothing translates.
+	if v := strings.TrimSpace(os.Getenv("EZLLM_TRANSLATION_ENABLED")); v != "" {
+		on, perr := strconv.ParseBool(v)
+		if perr != nil {
+			return fmt.Errorf("EZLLM_TRANSLATION_ENABLED=%q is not a boolean (want true/false/1/0): %w", v, perr)
+		}
+		cfg.Translation.Enabled = on
 	}
 
 	// ── data dir + store ──
@@ -142,6 +154,11 @@ func run() error {
 		}
 	}
 	resolver = resolver.WithEligibility(ruleEngine.Eligible)
+	// Translation of anthropic requests onto openai-only hops. Opt-in at
+	// boot; a set-but-unread knob must never look identical to a working
+	// one, so the effective state is logged here.
+	resolver = resolver.WithTranslation(cfg.Translation.Enabled)
+	log.Info("translation", "enabled", cfg.Translation.Enabled)
 
 	go refreshProviderModels(ctx, db, registry, cfg.ModelRefresh.Interval, log)
 

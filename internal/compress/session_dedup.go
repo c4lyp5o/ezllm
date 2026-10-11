@@ -1,12 +1,19 @@
 package compress
 
 // sessionDedup removes later byte-identical duplicates from history
-// (re-sent system prompts, repeated text turns — the 92.5% documented case).
+// (re-sent system prompts — the 92.5% documented case).
 //
-// Droppable: system/user/assistant messages with string or pure-text-array
-// content and NO tool_calls. Never dropped: role:"tool" (breaks pairing —
-// rtk covers those), tool_calls carriers, non-text blocks (tool_result,
-// images), and the final message (handled by Apply's exempt slice).
+// Droppable: system messages with string or pure-text-array content and NO
+// tool_calls. Never dropped: user and assistant turns (a repeated "continue"
+// or "yes" between assistant replies is a real conversation turn — dropping it
+// hands the provider an assistant reply with no preceding question), role
+// "tool" (breaks pairing — rtk covers those), tool_calls carriers, non-text
+// blocks (tool_result, images), and the final message (handled by Apply's
+// exempt slice).
+//
+// Dropping user/assistant repetition needs its own opt-in stage plus a test
+// pinning the conversation shape after the rewrite; it is NOT the documented
+// 92.5% case and must not ride along with system dedup.
 func sessionDedup(msgs []any) []any {
 	seen := make(map[string]bool, len(msgs))
 	out := make([]any, 0, len(msgs))
@@ -18,9 +25,9 @@ func sessionDedup(msgs []any) []any {
 		}
 		role, _ := mm["role"].(string)
 		switch role {
-		case "system", "user", "assistant":
+		case "system":
 		default:
-			out = append(out, m) // tool/other: never drop
+			out = append(out, m) // user/assistant/tool/other: never drop
 			continue
 		}
 		if _, has := mm["tool_calls"]; has {

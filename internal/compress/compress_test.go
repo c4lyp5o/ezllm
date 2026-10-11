@@ -85,8 +85,8 @@ func TestExemptFinalMessage(t *testing.T) {
 	}
 }
 
-// session_dedup core: later exact duplicates dropped, first stays, tool
-// pairing and tool_calls carriers never touched.
+// session_dedup core: later exact SYSTEM duplicates dropped, first stays.
+// user/assistant/tool/tool_calls carriers are never touched.
 func TestSessionDedupDropsOnlySafeDuplicates(t *testing.T) {
 	// Duplicates must be big enough to clear the 5% floor on their own —
 	// tiny dups are exactly what the floor is meant to reject (pinned in
@@ -98,7 +98,9 @@ func TestSessionDedupDropsOnlySafeDuplicates(t *testing.T) {
 		textMsg("user", task),
 		textMsg("assistant", "done"),
 		textMsg("system", big), // duplicate system: drop
-		textMsg("user", task),  // duplicate user: drop
+		textMsg("user", task),  // duplicate user: KEEP (C1 — a repeated
+		// turn is a real conversation turn; dropping it hands the
+		// provider an assistant reply with no preceding question)
 		map[string]any{"role": "assistant", "content": "calling", "tool_calls": []any{
 			map[string]any{"id": "c1", "type": "function",
 				"function": map[string]any{"name": "run", "arguments": `{"cmd":"ls"}`}},
@@ -126,8 +128,11 @@ func TestSessionDedupDropsOnlySafeDuplicates(t *testing.T) {
 			calls++
 		}
 	}
-	if sys != 1 || usr != 1 {
-		t.Errorf("duplicates not dropped: system=%d user=%d", sys, usr)
+	if sys != 1 {
+		t.Errorf("duplicate system not dropped: system=%d", sys)
+	}
+	if usr != 2 {
+		t.Errorf("duplicate USER turn must survive (C1): user=%d", usr)
 	}
 	if tools != 2 {
 		t.Errorf("tool messages must never drop (pairing): %d", tools)

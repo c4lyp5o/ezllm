@@ -106,6 +106,18 @@ func NewEngine(src RuleSource, usage UsageSource, now Clock, refreshEvery time.D
 // Reload republishes the rule set. Called at startup and after any admin
 // write to model_rules, so a change takes effect on the next request rather
 // than after a TTL. Safe to call concurrently with evaluation.
+//
+// A rule whose tz does not RESOLVE is refused, not installed. ValidateModelRule
+// checks the tz with a regex, so a typo of a real zone ("Asia/Kuala_Lumpyr")
+// passes the write gate and then fails time.LoadLocation at every request —
+// where Window.loc() falls back to UTC and the window shifts by the zone
+// offset with no error anywhere. The operator sees a rule that "is not
+// working" and nothing points at the tz. Refusing here turns that into a loud
+// config error at the moment of the write (and at boot), which is the whole
+// point.
+//
+// Refusing means the new set is NOT published: the previously loaded set keeps
+// serving, so one bad row cannot silently un-cap or un-window everything else.
 func (e *Engine) Reload(ctx context.Context) error {
 	list, err := e.src.AllRules(ctx)
 	if err != nil {
@@ -116,6 +128,12 @@ func (e *Engine) Reload(ctx context.Context) error {
 		r := list[i]
 		if !r.Enabled {
 			continue // disabled rules are as if absent
+		}
+		// Fail closed on an unresolvable tz rather than installing a rule
+		// that will evaluate its window in the wrong zone.
+		if terr := r.Window.ValidateTZ(); terr != nil {
+			return fmt.Errorf("rules: reload: refusing to install rule for account %d model %q: %w",
+				r.AccountID, r.ModelID, terr)
 		}
 		m[key{r.AccountID, r.ModelID}] = &r
 	}

@@ -76,6 +76,12 @@ func ParseHHMM(s string) (hour, min int, err error) {
 // unparseable. A corrupt tz must not panic and must not crash the request:
 // UTC is the safe neutral because buckets only need to be *consistent* — a
 // wrong-but-stable boundary is recoverable, a panic is not.
+//
+// The REQUEST path keeps this fallback deliberately: a rule published before
+// this validation existed (or a corrupt row arriving some other way) must not
+// turn a 429 into a 500. The fix for a typo'd tz is at the other end —
+// ValidateTZ at Reload refuses to install the rule at all, so the silent UTC
+// shift never reaches a request.
 func (w Window) loc() *time.Location {
 	if w.TZ == "" {
 		return time.UTC
@@ -84,6 +90,31 @@ func (w Window) loc() *time.Location {
 		return l
 	}
 	return time.UTC
+}
+
+// ValidateTZ reports whether the window's tz actually resolves. Empty is fine
+// (UTC). Anything else must be a name time.LoadLocation accepts, or an offset.
+//
+// This is NOT what the write path checks: ValidateModelRule validates the tz
+// with a REGEX, so "Asia/Kuala_Lumpyr" (a typo of a real zone) passes the write
+// gate and then fails LoadLocation at every request — which is exactly how an
+// allowed-hours window ends up silently evaluated in UTC, off by the zone
+// offset, with no error anywhere. The operator sees a rule that "is not
+// working".
+//
+// The regex can never catch this: only the resolver knows the real zone table.
+// So the resolver runs here, once per Reload, and its failure is fatal to that
+// rule rather than silent.
+func (w Window) ValidateTZ() error {
+	tz := strings.TrimSpace(w.TZ)
+	if tz == "" {
+		return nil // empty = UTC, by design
+	}
+	if _, err := time.LoadLocation(tz); err != nil {
+		return fmt.Errorf("win_tz %q does not resolve to a time zone on this host "+
+			"(typo? use an IANA name like Asia/Kuala_Lumpur or an offset like +08:00): %w", tz, err)
+	}
+	return nil
 }
 
 // InWindow reports whether `now` falls inside the allowed-hours window.

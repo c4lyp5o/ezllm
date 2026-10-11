@@ -101,6 +101,14 @@ type Result struct {
 	EndpointID    string
 	UpstreamModel string
 	Err           string
+	// Committed reports whether commit already called WriteHeader on the
+	// client. It exists because Status is set from the upstream in attempt
+	// BEFORE anything is written: on a body-read failure commit can return an
+	// error while still carrying a 200, and a caller that guards its error
+	// response on Status would leave net/http to emit its default 200 with an
+	// empty body. Only this flag distinguishes "has a status" from "has been
+	// sent".
+	Committed bool
 }
 
 // Rewriter resolves the client's requested model into a Route. The router
@@ -491,7 +499,10 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 
 	isSSE := strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")
 	if res.Stream && isSSE {
-		ttft, usage, copyErr := d.streamCopy(ctx, w, resp, rt.Surface, start)
+		// streamCopy writes the header before its first byte, so the status
+		// is committed the moment it returns — regardless of a copy error.
+		res.Committed = true
+		ttft, usage, copyErr, first := d.streamCopy(ctx, w, resp, rt.Surface, start)
 		res.TTFTms = msAtLeastOne(ttft)
 		if usage != nil {
 			res.Usage = usage
@@ -503,12 +514,40 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 			// the ledger.
 			res.Err = "stream truncated: " + copyErr.Error()
 		}
+		// Mirror the non-stream branch's err-column rule. The stream branch
+		// had no equivalent, so a failover-committed SSE error response — a
+		// 429 whose reason rides in the first data payload — landed in the
+		// ledger with a blank err, the one field that diagnoses an incident
+		// after the fact. Some providers also answer 200 SSE carrying an
+		// error object inside the stream, which is equally worth recording.
+		if res.Err == "" && (res.Status >= 400 || sseHasErrorEnvelope(first)) {
+			res.Err = upstreamErrorSnippet(res.Status, first)
+		}
 	} else {
 		// Non-streamed: read the body once, tap usage, then write it out.
-		raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
+		// The extra byte detects a body that outgrew maxBodyBytes: a
+		// LimitReader alone stops silently at the cap, so a truncated JSON
+		// payload would be written with a 200 and a Content-Length that no
+		// longer matches the body. Reading one byte MORE than the cap turns
+		// that into an explicit 502.
+		lr := io.LimitReader(resp.Body, maxBodyBytes+1)
+		raw, err := io.ReadAll(lr)
 		if err != nil {
 			res.Err = err.Error()
 			return res, err
+		}
+		if int64(len(raw)) > maxBodyBytes {
+			// The upstream kept sending past 32 MiB. Writing the truncated
+			// body would hand the client corrupt JSON, so refuse instead —
+			// and never raise the cap: this body is buffered in memory.
+			res.Status = http.StatusBadGateway
+			res.Err = fmt.Sprintf("upstream response exceeded %d bytes", maxBodyBytes)
+			w.Header().Set("Content-Type", "application/json")
+			res.Committed = true
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`{"error":{"type":"upstream_response_truncated","message":"upstream response exceeded 32 MiB","code":502}}`))
+			res.Totalms = msPtr(time.Since(start))
+			return res, nil
 		}
 		// A 200 with a completely empty body is not a valid provider response
 		// for any of our three surfaces (all return JSON). It means the
@@ -519,6 +558,7 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 			res.Status = http.StatusBadGateway
 			res.Err = "upstream returned an empty body"
 			w.Header().Set("Content-Type", "application/json")
+			res.Committed = true
 			w.WriteHeader(http.StatusBadGateway)
 			_, _ = w.Write([]byte(`{"error":{"type":"upstream_error","message":"upstream returned an empty body","code":502}}`))
 			res.Totalms = msPtr(time.Since(start))
@@ -536,6 +576,7 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 		if res.Status >= 400 && res.Err == "" {
 			res.Err = upstreamErrorSnippet(res.Status, raw)
 		}
+		res.Committed = true
 		w.WriteHeader(resp.StatusCode)
 		if _, werr := w.Write(raw); werr != nil {
 			res.Err = "client write: " + werr.Error()
@@ -592,6 +633,10 @@ func (d *Dispatcher) retryAttempt(ctx context.Context, r *http.Request, rt Route
 		case <-timer.C:
 		}
 	}
+	// Provably unreachable: the loop's final iteration always satisfies
+	// attempt+1 == maxAttempts and returns above. Go cannot see that
+	// invariant, so a terminating statement is required — keep it in sync with
+	// the guard, since a change there would make this the live fall-out path.
 	return lastResp, lastResult, lastStart, errors.New("proxy: retry budget exhausted")
 }
 
@@ -698,9 +743,7 @@ func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWrite
 		// If all later candidates are cooling down, hold this eligible route as
 		// the final response fallback. This preserves an actual upstream error
 		// without making an extra request that circumvents cooldown.
-		if i == len(routes)-1 && len(routes) == 1 {
-			// A sole eligible endpoint is attempted normally below.
-		}
+		// A sole eligible endpoint is attempted normally below.
 		swapped, _, err := SwapModel(body, rt.Model)
 		if err != nil {
 			if probe {
@@ -778,9 +821,14 @@ func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWrite
 // prefill happens before it emits any byte, so measuring from inside this
 // function — after headers already arrived — reports a meaningless 1-3ms and
 // hides exactly the cache/prefill latency the number exists to reveal.
-func (d *Dispatcher) streamCopy(ctx context.Context, w http.ResponseWriter, resp *http.Response, surface provider.Surface, start time.Time) (time.Duration, *store.Usage, error) {
+//
+// The fourth return is the first non-terminal SSE data payload. A streamed
+// error response carries its reason in there, and the ledger's err column is
+// blank for streams unless the caller is handed it.
+func (d *Dispatcher) streamCopy(ctx context.Context, w http.ResponseWriter, resp *http.Response, surface provider.Surface, start time.Time) (time.Duration, *store.Usage, error, []byte) {
 	var ttft time.Duration
 	var firstByte bool
+	var firstPayload []byte
 
 	flusher, _ := w.(http.Flusher)
 	// Headers already copied; write status now so the client starts receiving.
@@ -794,9 +842,9 @@ func (d *Dispatcher) streamCopy(ctx context.Context, w http.ResponseWriter, resp
 	sc.Buffer(make([]byte, 0, 64*1024), maxScanToken)
 
 	// We must forward EXACT bytes. Scanner strips the trailing newline, so we
-	// re-emit "\n" per line — SSE lines are newline-terminated, which makes this
-	// lossless for well-formed streams. Anything unusual (bare \r) is handled by
-	// falling back to a raw copy if the scanner errors.
+	// re-emit "\n" per line — SSE lines are newline-terminated, which makes it
+	// lossless for well-formed streams. Anything unusual (bare \r) is handled
+	// by falling back to a raw copy if the scanner errors.
 	// Read-only usage tap. Merges across events: Anthropic's message_start
 	// carries the input/cache breakdown while message_delta carries the final
 	// output totals, so taking only the first hit would record out=0.
@@ -807,11 +855,19 @@ func (d *Dispatcher) streamCopy(ctx context.Context, w http.ResponseWriter, resp
 			ttft = time.Since(start)
 			firstByte = true
 		}
+		// Remember the first real payload so the caller can quote it in the
+		// ledger. Comments (: keepalive) and the [DONE] sentinel are skipped:
+		// neither can carry an error envelope.
+		if firstPayload == nil {
+			if p := bytes.TrimSpace(bytes.TrimPrefix(bytes.TrimSpace(line), []byte("data:"))); len(p) > 0 && !bytes.Equal(p, []byte("[DONE]")) {
+				firstPayload = append([]byte(nil), p...)
+			}
+		}
 		if _, err := w.Write(line); err != nil {
-			return ttft, tapper.Usage(), fmt.Errorf("client write: %w", err)
+			return ttft, tapper.Usage(), fmt.Errorf("client write: %w", err), firstPayload
 		}
 		if _, err := w.Write([]byte("\n")); err != nil {
-			return ttft, tapper.Usage(), fmt.Errorf("client write: %w", err)
+			return ttft, tapper.Usage(), fmt.Errorf("client write: %w", err), firstPayload
 		}
 		if flusher != nil {
 			flusher.Flush()
@@ -828,7 +884,7 @@ func (d *Dispatcher) streamCopy(ctx context.Context, w http.ResponseWriter, resp
 			if !firstByte {
 				ttft = time.Since(start)
 			}
-			return ttft, tapper.Usage(), fmt.Errorf("upstream read: %w (scanner: %v)", cerr, err)
+			return ttft, tapper.Usage(), fmt.Errorf("upstream read: %w (scanner: %v)", cerr, err), firstPayload
 		}
 		if flusher != nil {
 			flusher.Flush()
@@ -839,14 +895,14 @@ func (d *Dispatcher) streamCopy(ctx context.Context, w http.ResponseWriter, resp
 		// An over-long line is survivable (bytes still forwarded); a genuine
 		// upstream read error means the stream was truncated.
 		if errors.Is(err, bufio.ErrTooLong) {
-			return ttft, tapper.Usage(), nil
+			return ttft, tapper.Usage(), nil, firstPayload
 		}
-		return ttft, tapper.Usage(), fmt.Errorf("upstream read: %w", err)
+		return ttft, tapper.Usage(), fmt.Errorf("upstream read: %w", err), firstPayload
 	}
 	if !firstByte {
 		ttft = time.Since(start)
 	}
-	return ttft, tapper.Usage(), nil
+	return ttft, tapper.Usage(), nil, firstPayload
 }
 
 // tapSSELine extracts usage from one SSE data line for the given surface.
@@ -978,9 +1034,14 @@ var stripAlways = map[string]bool{
 	"Origin": true,
 	// X-Ezllm-Session is the operator's ledger grouping key (M9). It describes
 	// the client->gateway hop, not the gateway->provider hop, so it must not
-	// reach the upstream. (x-ezllm-compression is a pre-existing sibling leak,
-	// left as-is here to keep this change scoped to the header added now.)
+	// reach the upstream.
 	"X-Ezllm-Session": true,
+	// x-ezllm-compression is the same class: it tells THIS gateway which
+	// compression profile to run, so it is an operator-side ledger header with
+	// no meaning upstream. It was a known leak carried for scope reasons once;
+	// a provider that started reading it would see a client implementation
+	// detail, so it dies here too.
+	"X-Ezllm-Compression": true,
 }
 
 func copyClientHeaders(dst, src *http.Request, extraStrip []string) {
@@ -1013,6 +1074,23 @@ func copyResponseHeaders(w http.ResponseWriter, resp *http.Response) {
 }
 
 // --- small utils ---
+
+// sseHasErrorEnvelope reports whether an SSE payload is an error object.
+// A streamed failure is NOT always signalled by the HTTP status: some
+// providers answer 200 with the error inside the stream's first data payload.
+// Detecting it is what lets the ledger record WHY a "successful" stream was
+// actually a failure.
+func sseHasErrorEnvelope(payload []byte) bool {
+	if len(payload) == 0 {
+		return false
+	}
+	var ev map[string]any
+	if err := json.Unmarshal(payload, &ev); err != nil {
+		return false
+	}
+	e, ok := ev["error"]
+	return ok && e != nil
+}
 
 // upstreamErrorSnippet renders a bounded, single-line summary of an upstream
 // error body for the ledger.

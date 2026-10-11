@@ -27,6 +27,7 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/provider"
 	"github.com/c4lyp5o/ezllm/internal/ratelimit"
 	"github.com/c4lyp5o/ezllm/internal/store"
+	"github.com/c4lyp5o/ezllm/internal/translate"
 )
 
 // maxBodyBytes caps the request body we will read into memory (we must read it
@@ -91,6 +92,13 @@ type Route struct {
 	Model    string // model id to send upstream
 	Alias    string // what the client asked for (combo name or namespace/model)
 	Surface  provider.Surface
+	// Translated marks a hop that speaks only the OpenAI wire shape while
+	// the client speaks anthropic: the request body is translated on the
+	// way out and the response on the way back, while Surface stays the
+	// CLIENT's surface (the ledger and the usage tap must never see the
+	// translation). Set by the router from probed capability; nothing else
+	// about the hop's failover/park semantics changes.
+	Translated bool
 }
 
 // Result carries what the ledger needs after a dispatch.
@@ -584,6 +592,18 @@ func IsStream(body []byte) bool {
 	return m.Stream
 }
 
+// prepareHopBody rewrites the client's body for one hop: a byte-stable
+// model swap on the native path, or a full anthropic→openai translation
+// for a translated hop. Translation REPLACES the swap — it rewrites the
+// whole wire shape, model included — so the two paths never compose.
+func prepareHopBody(body []byte, rt Route) ([]byte, error) {
+	if !rt.Translated {
+		swapped, _, err := SwapModel(body, rt.Model)
+		return swapped, err
+	}
+	return translate.Request(body, rt.Model)
+}
+
 // attempt runs the upstream call and returns the response WITHOUT touching w.
 //
 // Split out of Forward so failover can inspect the status before anything is
@@ -596,7 +616,13 @@ func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, bod
 	if err != nil {
 		return nil, Result{}, time.Time{}, err
 	}
-	url := provider.UpstreamURL(rt.Account.BaseURL, rt.Account.Kind, provider.SurfacePath(rt.Surface))
+	// A translated hop dials the upstream on ITS native path (openai) while
+	// everything client-facing (ledger, usage tap) keeps the client surface.
+	dialSurface := rt.Surface
+	if rt.Translated {
+		dialSurface = provider.SurfaceOpenAI
+	}
+	url := provider.UpstreamURL(rt.Account.BaseURL, rt.Account.Kind, provider.SurfacePath(dialSurface))
 
 	upReq, err := http.NewRequestWithContext(ctx, r.Method, url, bytes.NewReader(body))
 	if err != nil {
@@ -604,7 +630,7 @@ func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, bod
 	}
 	// Copy safe client headers, then let the adapter apply auth + strip its own.
 	copyClientHeaders(upReq, r, ad.StripHeaders())
-	if err := ad.PrepareRequest(ctx, upReq, rt.Account, rt.KeyPlain, rt.Surface); err != nil {
+	if err := ad.PrepareRequest(ctx, upReq, rt.Account, rt.KeyPlain, dialSurface); err != nil {
 		return nil, Result{}, time.Time{}, err
 	}
 	// Content-Length must match the rewritten body.
@@ -637,6 +663,17 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 
 	isSSE := strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")
 	if res.Stream && isSSE {
+		// A translated stream wraps the body BEFORE any byte is copied: the
+		// client sees a synthesized anthropic event stream, and streamCopy's
+		// usage tap then reads anthropic-shaped events — which matches
+		// rt.Surface, the CLIENT's surface, exactly. Close still reaches the
+		// ORIGINAL body (a NopCloser would leak the upstream connection).
+		if rt.Translated {
+			resp.Body = struct {
+				io.Reader
+				io.Closer
+			}{translate.NewSSEReader(resp.Body, rt.Alias), resp.Body}
+		}
 		// streamCopy writes the header before its first byte, so the status
 		// is committed the moment it returns — regardless of a copy error.
 		res.Committed = true
@@ -701,6 +738,34 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 			_, _ = w.Write([]byte(`{"error":{"type":"upstream_error","message":"upstream returned an empty body","code":502}}`))
 			res.Totalms = msPtr(time.Since(start))
 			return res, nil
+		}
+		// For a translated hop every byte the client sees is anthropic-shaped.
+		// The err-column snippet is captured from the upstream's OWN words
+		// before translation, and usage is tapped on the translated body —
+		// the tap is surface-aware and rt.Surface is the client's surface.
+		if rt.Translated {
+			if res.Status >= 400 {
+				if res.Err == "" {
+					res.Err = upstreamErrorSnippet(res.Status, raw)
+				}
+				raw = translate.Error(raw)
+			} else {
+				translated, terr := translate.Response(raw, rt.Alias)
+				if terr != nil {
+					// A body we cannot translate is a gateway fault, and the
+					// client must never receive openai-shaped bytes: refuse
+					// with an anthropic error envelope instead.
+					res.Status = http.StatusBadGateway
+					res.Err = "translate response: " + terr.Error()
+					w.Header().Set("Content-Type", "application/json")
+					res.Committed = true
+					w.WriteHeader(http.StatusBadGateway)
+					_, _ = w.Write(translate.Error(raw))
+					res.Totalms = msPtr(time.Since(start))
+					return res, nil
+				}
+				raw = translated
+			}
 		}
 		if u := tapJSONUsage(raw, rt.Surface); u != nil {
 			res.Usage = u
@@ -889,7 +954,7 @@ func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWrite
 		// the final response fallback. This preserves an actual upstream error
 		// without making an extra request that circumvents cooldown.
 		// A sole eligible endpoint is attempted normally below.
-		swapped, _, err := SwapModel(body, rt.Model)
+		swapped, err := prepareHopBody(body, rt)
 		if err != nil {
 			if probe {
 				d.releaseProbe(rt)

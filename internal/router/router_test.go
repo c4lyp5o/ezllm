@@ -26,12 +26,20 @@ type fakeCatalog struct {
 	// noProto marks "accountID/model/surface" as PROBED-INCOMPATIBLE. Absent
 	// (and a nil map) means UNTESTED, which the router must read as allowed.
 	noProto map[string]bool
+	// yesProto marks "accountID/model/surface" as PROBED-CAPABLE — the
+	// positive fact the translation gate keys on.
+	yesProto map[string]bool
 }
 
 // ModelSupportsSurface returns nil (untested) unless the fixture marks the
 // triple incompatible — the same "nil = allowed" contract the real store has.
 func (f *fakeCatalog) ModelSupportsSurface(_ context.Context, id int64, model string, s provider.Surface) (*bool, error) {
-	if f.noProto[fmt.Sprintf("%d/%s/%s", id, model, s)] {
+	key := fmt.Sprintf("%d/%s/%s", id, model, s)
+	if f.yesProto[key] {
+		yes := true
+		return &yes, nil
+	}
+	if f.noProto[key] {
 		no := false
 		return &no, nil
 	}

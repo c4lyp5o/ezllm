@@ -22,8 +22,10 @@ Errors are OpenAI-shaped: `{"error":{"type":"...","message":"...","code":422}}`.
 **Surface-pin refusal (all three POSTs).** If the resolved model carries a `proto_pin` and the
 client called a different surface, the request is refused **before any upstream dial** with
 `400 {"error":{"type":"pinned_surface","message":"...","pinned":"openai","requested_surface":"anthropic","code":400}}`.
-The pin never reroutes the request — bodies pass through untranslated, so the honest answer is
-a refusal that names the endpoint to use instead. Lookup errors fail closed (refuse), and combo
+The pin never reroutes the request — native paths pass bodies through untranslated, so the
+honest answer is a refusal that names the endpoint to use instead. (Translated hops — the
+probe-gated anthropic→openai exception, `docs/translation-runbook.md` — do not bypass pins
+either.) Lookup errors fail closed (refuse), and combo
 hops pinned to another surface refuse the whole request rather than silently skipping.
 
 `/v1/models` rows: namespaced ids carry the upstream's `owned_by` and, once probed, a `protocol`

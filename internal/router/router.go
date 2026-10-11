@@ -18,6 +18,7 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/provider"
 	"github.com/c4lyp5o/ezllm/internal/proxy"
 	"github.com/c4lyp5o/ezllm/internal/store"
+	"github.com/c4lyp5o/ezllm/internal/translate"
 )
 
 // ErrNotFound is returned when a model string cannot be resolved. The message
@@ -314,8 +315,9 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 	}
 
 	var (
-		routes []proxy.Route
-		first  error // first hop's rejection, kept as the failure to report
+		routes           []proxy.Route
+		translatedRoutes []proxy.Route
+		first            error // first hop's rejection, kept as the failure to report
 	)
 	for _, h := range combo.Hops {
 		if h.Enabled != nil && !*h.Enabled {
@@ -350,12 +352,21 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 		// deliberate, and the exact opposite of ModelExists/checkPin above. A
 		// capability flag is a hint learned from a probe, so a stale nil or a
 		// transient store hiccup must never strand a hop that actually works.
+		translated := false
 		if ok, err := r.catalog.ModelSupportsSurface(ctx, acct.ID, h.ModelID, surface); err == nil && ok != nil && !*ok {
-			if first == nil {
-				first = fmt.Errorf("hop %s/%s: probed unable to serve the %s surface",
-					acct.Namespace, h.ModelID, surfaceName(surface))
+			// The native path is PROVEN impossible. If translation is on and
+			// the hop is PROVEN OpenAI-capable, keep it as a translated
+			// candidate instead of dropping it — it rides the tail, so a
+			// healthy native hop always wins.
+			openai, _ := r.catalog.ModelSupportsSurface(ctx, acct.ID, h.ModelID, provider.SurfaceOpenAI)
+			if !translate.Eligible(surface, ok, openai, r.translationEnabled) {
+				if first == nil {
+					first = fmt.Errorf("hop %s/%s: probed unable to serve the %s surface",
+						acct.Namespace, h.ModelID, surfaceName(surface))
+				}
+				continue
 			}
-			continue
+			translated = true
 		}
 		// A pin on a hop that has already been probed incapable of this surface
 		// is irrelevant: that hop is excluded before routing. For a remaining
@@ -385,7 +396,7 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 			}
 			continue
 		}
-		routes = append(routes, proxy.Route{
+		route := proxy.Route{
 			Account:  *acct,
 			KeyID:    key.ID,
 			KeyPlain: key.Plaintext,
@@ -393,10 +404,18 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 			Model:    h.ModelID,
 			Alias:    name,
 			Surface:  surface,
-		})
+		}
+		if translated {
+			// The route keeps the CLIENT's surface (ledger/usage tap);
+			// only the wire shape flips, at dispatch time.
+			route.Translated = true
+			translatedRoutes = append(translatedRoutes, route)
+			continue
+		}
+		routes = append(routes, route)
 	}
 
-	if len(routes) == 0 {
+	if len(routes) == 0 && len(translatedRoutes) == 0 {
 		if first != nil {
 			// A rules veto arrives pre-typed and pre-worded ("X is not
 			// available right now: hop …"); re-wrapping it would print the
@@ -409,7 +428,14 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 		}
 		return nil, fmt.Errorf("router: combo %q has no usable hops", name)
 	}
-	return orderRoutes(combo, routes), nil
+	candidates := orderRoutes(combo, routes)
+	// Translated candidates ride the TAIL, after every native-compatible
+	// hop: a native hop always wins, and a translated hop serves only when
+	// every native hop failed or was skipped. They are deliberately NOT part
+	// of the strategy ordering — round-robin/sticky must never be able to
+	// put a translated hop first. Among themselves they keep combo position
+	// order.
+	return append(candidates, translatedRoutes...), nil
 }
 
 // orderRoutes applies the combo's strategy. The candidate list is already

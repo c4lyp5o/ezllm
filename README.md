@@ -1,7 +1,9 @@
 # ezllm
 
 Calypso's lightweight LLM router. Single static Go binary, **three passthrough
-surfaces** (OpenAI chat · Anthropic messages · OpenAI Responses), namespace
+surfaces** (OpenAI chat · Anthropic messages · OpenAI Responses) plus an
+opt-in, probe-gated anthropic→openai hop translation (see
+`docs/translation-runbook.md`), namespace
 routing across provider accounts, combo failover, per-model rules, request
 compression, and a SQLite usage ledger that normalizes token accounting across
 all three protocols — with a token-gated dashboard on top.
@@ -99,8 +101,10 @@ NULL = auto (no enforcement). The pin is **enforce-only, never a reroute**: if a
 calls a pinned model on a different surface, the request is refused with
 `400 pinned_surface` (body names the pinned surface + the one requested) **before** any
 upstream dial — so a refusal costs zero tokens and zero provider quota. ezllm passes
-request bodies through untranslated, so switching the upstream path would send the wrong
-shape; refusing is the honest answer.
+request bodies through untranslated on every native path, so switching the upstream path
+would send the wrong shape; refusing is the honest answer. (Translated hops are the one
+deliberate exception — a different wire protocol by design, see
+`docs/translation-design.md` — and pins still refuse there.)
 
 - Stored as `models.proto_pin` (schema v7); catalog resyncs preserve pins
   (snapshot/restore around the delete-and-reinsert).
@@ -213,8 +217,10 @@ backups. For phone-on-LAN access, use `-addr 0.0.0.0:20129`.
 
 ## Non-goals (v1)
 
-No Anthropic↔OpenAI translation (native passthrough covers all three surfaces), no
-multi-node/Postgres. See EXPLORING.md §7 and the plan's §8.
+No multi-node/Postgres. Anthropic↔OpenAI translation, a v1 non-goal, **shipped
+2026-10-12 as an opt-in, probe-gated exception** (`docs/translation-runbook.md`)
+— native passthrough remains the default for every unmarked hop. See
+EXPLORING.md §7 and the plan's §8.
 
 **GitHub Copilot is parked, not rejected.** A dedicated OAuth app (`ezllm`) was registered
 and the device flow completed end-to-end, but GitHub returns `403` at

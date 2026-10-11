@@ -334,9 +334,12 @@ These are the "if it's broken here, the project failed" spots — each must be v
 
 ## 7. Deliberate non-goals (don't go looking for them in the code)
 
-- No Anthropic↔OpenAI translation — all three surfaces are **native passthrough**; Claude Code
-  runs on the native Anthropic surface (`/v1/messages`). Translation stays out of scope — it's
-  also why the surface pin (M8) refuses instead of rerouting.
+- Anthropic↔OpenAI translation — **shipped 2026-10-12 as a deliberate, double-gated
+  exception** (`internal/translate`, `docs/translation-runbook.md`): native passthrough
+  remains the rule for every unmarked hop; translation serves only anthropic clients onto
+  hops PROVEN openai-only by a probe sweep (`proto_openai=true, proto_anthropic=false/null`)
+  when `translation.enabled` is on. Claude Code's native `/v1/messages` path is untouched;
+  the surface pin still refuses instead of rerouting (pins are not bypassed by translation).
 - No quota-cookie scraping — quotas come from provider usage endpoints where they exist;
   otherwise exhaustion is *detected reactively* on 429s (cooldown).
 - No multi-node / Postgres — single-writer SQLite, one home box.

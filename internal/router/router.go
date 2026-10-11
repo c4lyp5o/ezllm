@@ -46,6 +46,10 @@ type Catalog interface {
 	ModelExists(ctx context.Context, accountID int64, modelID string) (bool, error)
 	// ModelPin returns the surface pinned for a model, or "" when unpinned.
 	ModelPin(ctx context.Context, accountID int64, modelID string) (string, error)
+	// ModelSupportsSurface returns the PROBED protocol capability for one
+	// (account, model, surface). nil means UNTESTED, which the router reads as
+	// allowed — the upstream stays authoritative.
+	ModelSupportsSurface(ctx context.Context, accountID int64, modelID string, surface provider.Surface) (*bool, error)
 	// AllNamespaces lists namespace/model pairs for helpful 404s.
 	AllNamespaces(ctx context.Context) ([]string, error)
 	// AccountByID loads an account by primary key — combo hops reference
@@ -325,8 +329,26 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 			}
 			continue
 		}
-		// A pinned hop on the wrong surface is a refusal for the whole request,
-		// not a skip: silently moving to another hop would change protocol.
+		// Capability gate: a model PROBED unable to serve this surface is
+		// dropped instead of dialled. This is the hop-level half of the rule
+		// "ModelProtocolUnsupported → next hop" (see the ezllm skill): without
+		// it, one incompatible member of an otherwise healthy combo answers the
+		// client with the upstream's 400/403 on every rotation onto it.
+		//
+		// UNTESTED (nil) stays eligible, and a lookup ERROR fails OPEN — both
+		// deliberate, and the exact opposite of ModelExists/checkPin above. A
+		// capability flag is a hint learned from a probe, so a stale nil or a
+		// transient store hiccup must never strand a hop that actually works.
+		if ok, err := r.catalog.ModelSupportsSurface(ctx, acct.ID, h.ModelID, surface); err == nil && ok != nil && !*ok {
+			if first == nil {
+				first = fmt.Errorf("hop %s/%s: probed unable to serve the %s surface",
+					acct.Namespace, h.ModelID, surfaceName(surface))
+			}
+			continue
+		}
+		// A pin on a hop that has already been probed incapable of this surface
+		// is irrelevant: that hop is excluded before routing. For a remaining
+		// candidate, a mismatched pin is still an operator-directed hard refusal.
 		if err := r.checkPin(ctx, acct.ID, h.ModelID, name, surface); err != nil {
 			return nil, err
 		}

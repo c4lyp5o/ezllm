@@ -73,6 +73,23 @@ var protocolErrorHints = []string{
 	"protocol",
 	"not supported for format",
 	"not supported",
+	// Live 2026-10-11: space-stationine refuses a whole group with
+	// 403 {"error":{"message":"This group does not allow /v1/messages dispatch",
+	// "type":"permission_error"}} — a capability gap with none of the words above.
+	"does not allow",
+}
+
+// bodyHasProtocolHint reports whether an upstream error body names a protocol
+// capability gap rather than a credential or request problem. Judged on the
+// provider's own words, so a hint never has to guess a vendor's phrasing.
+func bodyHasProtocolHint(body string) bool {
+	lower := strings.ToLower(body)
+	for _, hint := range protocolErrorHints {
+		if strings.Contains(lower, strings.ToLower(hint)) {
+			return true
+		}
+	}
+	return false
 }
 
 // ClassifyProbeResult maps one upstream response to a verdict.
@@ -87,7 +104,16 @@ func ClassifyProbeResult(status int, body string) (v ProbeVerdict, authFailure b
 	switch {
 	case status >= 200 && status < 300:
 		return VerdictSupported, false
-	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+	case status == http.StatusUnauthorized:
+		return VerdictUnknown, true
+	case status == http.StatusForbidden:
+		// A 403 is normally a dead credential, but a POLICY refusal that names
+		// the protocol is a capability gap, not a key problem. Judging by the
+		// provider's own words keeps a sweep from aborting (and recording
+		// nothing) on a provider whose group simply blocks one surface.
+		if bodyHasProtocolHint(body) {
+			return VerdictUnsupported, false
+		}
 		return VerdictUnknown, true
 	case status == http.StatusTooManyRequests:
 		return VerdictUnknown, false
@@ -95,11 +121,8 @@ func ClassifyProbeResult(status int, body string) (v ProbeVerdict, authFailure b
 		// The surface endpoint itself doesn't exist → this kind can't serve it.
 		return VerdictUnsupported, false
 	case status == http.StatusBadRequest || status == http.StatusUnprocessableEntity:
-		lower := strings.ToLower(body)
-		for _, hint := range protocolErrorHints {
-			if strings.Contains(lower, strings.ToLower(hint)) {
-				return VerdictUnsupported, false
-			}
+		if bodyHasProtocolHint(body) {
+			return VerdictUnsupported, false
 		}
 		// A 400 we don't recognise: could be a malformed probe request rather
 		// than a protocol gap. Recording 0 would be a guess — record nothing.

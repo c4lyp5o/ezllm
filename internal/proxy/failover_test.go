@@ -1,11 +1,14 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -394,4 +397,181 @@ func TestServedRouteWhenSoleHopFails(t *testing.T) {
 	if res.Status != http.StatusTooManyRequests || rec.Code != http.StatusTooManyRequests {
 		t.Errorf("ledger=%d client=%d, want 429 both", res.Status, rec.Code)
 	}
+}
+
+// ── park visibility and probe bounds ────────────────────────────────────────
+
+// An EXPIRED park must not keep refusing callers just because one recovery probe
+// is slow. Live 2026-10-11: a direct probe to opencode-go was answered with
+// "all combo endpoints are in five-minute cooldown" while combo traffic reached
+// the same account seconds earlier — a probe against an 11-14s-TTFT provider was
+// holding the gate closed on a park that had already expired.
+func TestExpiredParkDoesNotBlockBehindAStaleProbe(t *testing.T) {
+	d := newDispatcher()
+	rt := textRoute("http://upstream.invalid", "model")
+	now := time.Now()
+	d.recordHop(rt, hopOutcome{failed: true, cooldown: defaultHopCooldown, reason: "transport error"},
+		now.Add(-defaultHopCooldown-time.Second))
+
+	// First caller after expiry wins the half-open probe.
+	ok, probe := d.acquireHop(rt, now)
+	if !ok || !probe {
+		t.Fatalf("expired-cooldown caller = (%v,%v), want (true,true)", ok, probe)
+	}
+	// A concurrent caller is held off while that probe is FRESH — the
+	// anti-herd intent of the election is preserved.
+	if ok, _ := d.acquireHop(rt, now.Add(time.Second)); ok {
+		t.Error("a fresh probe must hold off concurrent callers")
+	}
+	// Past probeHold the hop is eligible again: an expired park must never read
+	// as parked, or a healthy endpoint silently disappears from every combo.
+	if ok, _ := d.acquireHop(rt, now.Add(probeHold+time.Second)); !ok {
+		t.Error("a stale probe must not keep an expired park closed")
+	}
+}
+
+// The bound above must not have opened the gate on a park that is still LIVE.
+func TestLiveParkStillRefusesCallers(t *testing.T) {
+	d := newDispatcher()
+	rt := textRoute("http://upstream.invalid", "model")
+	now := time.Now()
+	d.recordHop(rt, hopOutcome{failed: true, cooldown: defaultHopCooldown, reason: "429 rate limited"}, now)
+	if ok, probe := d.acquireHop(rt, now.Add(time.Minute)); ok || probe {
+		t.Errorf("live 5-minute park caller = (%v,%v), want (false,false)", ok, probe)
+	}
+}
+
+// Cooldowns() is the ONLY place a parked hop is visible: the request never
+// reaches an upstream, so no ledger row is written and the only other symptom is
+// a combo quietly using fewer hops than it has.
+func TestCooldownsReportsCause(t *testing.T) {
+	d := newDispatcher()
+	rt := textRoute("http://upstream.invalid", "model")
+	now := time.Now()
+	d.recordHop(rt, hopOutcome{failed: true, cooldown: defaultHopCooldown, reason: "429 rate limited"}, now)
+
+	got := d.Cooldowns()
+	if len(got) != 1 {
+		t.Fatalf("cooldowns = %d, want 1", len(got))
+	}
+	if got[0].Namespace != "test" {
+		t.Errorf("namespace = %q, want the parked account's namespace", got[0].Namespace)
+	}
+	if got[0].Reason != "429 rate limited" {
+		t.Errorf("reason = %q, want the recorded cause", got[0].Reason)
+	}
+	if !got[0].Until.After(now) {
+		t.Errorf("until = %v, want a future instant for a live park", got[0].Until)
+	}
+
+	// An expired, idle park holds nothing back and must not be reported as if
+	// it did — the payload is read as "what is being skipped right now".
+	idle := newDispatcher()
+	idle.recordHop(rt, hopOutcome{failed: true, cooldown: defaultHopCooldown, reason: "transport error"},
+		now.Add(-defaultHopCooldown-time.Minute))
+	if l := idle.Cooldowns(); len(l) != 0 {
+		t.Errorf("expired idle park reported: %+v", l)
+	}
+}
+
+// classifyHop must name the cause it parks for, or the health payload has a
+// reason field that is always empty.
+func TestClassifyHopRecordsReason(t *testing.T) {
+	d := newDispatcher()
+	hdr := http.Header{}
+	if got := d.classifyHop(nil, http.StatusTooManyRequests, hdr, true); got.reason == "" {
+		t.Error("429 park must carry a reason")
+	}
+	if got := d.classifyHop(nil, http.StatusBadGateway, hdr, true); !strings.Contains(got.reason, "502") {
+		t.Errorf("5xx reason = %q, want the status named", got.reason)
+	}
+	// A 4xx that describes the REQUEST must not park, and so has no reason.
+	if got := d.classifyHop(nil, http.StatusBadRequest, hdr, true); got.failed || got.reason != "" {
+		t.Errorf("400 = %+v, want no park and no reason", got)
+	}
+}
+
+// ── park scope and failover visibility ──────────────────────────────────────
+
+// Parking is per (account, endpoint, MODEL). A 429 is nearly always a per-model
+// condition — opencode-go meters each model separately — so an account-wide key
+// meant one throttled model removed every other model on that account from every
+// combo that referenced it. Measured live 2026-10-11: a single unavailable
+// opencode-go model took all 38 of the account's models out of routing for 60s
+// at a time while the other models were perfectly healthy.
+func TestParkIsScopedToTheModel(t *testing.T) {
+	d := newDispatcher()
+	now := time.Now()
+	throttled := textRoute("http://upstream.invalid", "step-5-preview-free")
+	healthy := textRoute("http://upstream.invalid", "kimi-k3")
+	if throttled.Account.ID != healthy.Account.ID {
+		t.Fatal("fixture: both models must share one account for this test to mean anything")
+	}
+
+	d.recordHop(throttled, hopOutcome{failed: true, cooldown: defaultHopCooldown, reason: "429 rate limited"}, now)
+
+	if ok, _ := d.acquireHop(throttled, now.Add(time.Second)); ok {
+		t.Error("the throttled model must be parked")
+	}
+	if ok, _ := d.acquireHop(healthy, now.Add(time.Second)); !ok {
+		t.Error("a sibling model on the SAME account was parked too — park scope is account-wide again")
+	}
+
+	// The health payload must say WHICH model is cooling, not just the account.
+	got := d.Cooldowns()
+	if len(got) != 1 {
+		t.Fatalf("cooldowns = %d, want 1", len(got))
+	}
+	if got[0].Model != "step-5-preview-free" {
+		t.Errorf("cooldown model = %q, want the parked model named", got[0].Model)
+	}
+}
+
+// Failover is invisible to the client by design, so it must be visible to the
+// operator: a skipped (parked) hop and a failing-over hop both write NO ledger
+// row — the request never leaves the box, or never commits — which is how a combo
+// silently ran on one hop for hours with no explanation anywhere.
+func TestFailoverIsLoggedForTheOperator(t *testing.T) {
+	var buf bytes.Buffer
+	var mu sync.Mutex
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&lockedWriter{w: &buf, mu: &mu}, nil)))
+	defer slog.SetDefault(prev)
+
+	d := newDispatcher()
+	now := time.Now()
+	rt := textRoute("http://upstream.invalid", "model")
+	d.recordHop(rt, hopOutcome{failed: true, cooldown: defaultHopCooldown, reason: "429 rate limited"}, now)
+
+	// A skipped hop must say so, and say why.
+	if ok, _ := d.acquireHop(rt, now); ok {
+		t.Fatal("fixture: the hop should be parked")
+	}
+	if ok, _ := d.acquireHop(textRoute("http://upstream.invalid", "other"), now); !ok {
+		t.Fatal("fixture: a sibling model must stay eligible")
+	}
+	req, body := reqWithBody(`{"model":"model","messages":[]}`)
+	rec := httptest.NewRecorder()
+	_, _, _ = d.ForwardCandidates(context.Background(), rec, req, []Route{rt}, body)
+
+	mu.Lock()
+	out := buf.String()
+	mu.Unlock()
+	if !strings.Contains(out, "hop skipped") {
+		t.Errorf("a parked hop must be logged; log was:\n%s", out)
+	}
+}
+
+// lockedWriter keeps the test's buffer safe: the dispatcher logs from the
+// request goroutine while the test reads after it returns, and `go test -race`
+// would otherwise flag an unsynchronised write.
+type lockedWriter struct {
+	w  *bytes.Buffer
+	mu *sync.Mutex
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
 }

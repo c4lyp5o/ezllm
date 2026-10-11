@@ -2,6 +2,7 @@ package provider
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -14,7 +15,13 @@ func testAccount(kind Kind, base string) Account {
 }
 
 // TestPrepareRequestInjectsSession proves the opencode-go quirk is handled:
-// a missing x-opencode-session yields 400 MissingSessionID upstream.
+// a missing x-opencode-session yields 400 MissingSessionID upstream. A session
+// the CLIENT sends is kept — that is opencode's documented requirement (a stable
+// id per conversation, used for routing + prompt-cache affinity) and Hermes,
+// Claude Code, Codex and Kilo all send one. Regenerating it used to be this
+// adapter's behaviour on the theory that a shared session grows server-side
+// state; the session id is the routing key, not the conversation, so it is
+// forwarded now.
 func TestOpenCodeGoInjectsSessionHeaders(t *testing.T) {
 	a := NewOpenCodeGo(http.DefaultClient)
 	acct := testAccount(KindOpenCodeGo, "https://opencode.ai/zen/go/v1")
@@ -22,9 +29,8 @@ func TestOpenCodeGoInjectsSessionHeaders(t *testing.T) {
 
 	for _, surface := range []Surface{SurfaceOpenAI, SurfaceAnthropic, SurfaceResponses} {
 		req, _ := http.NewRequest(http.MethodPost, acct.BaseURL+SurfacePath(surface), nil)
-		// simulate a malicious/naive client pinning its own session
-		req.Header.Set("x-opencode-session", "client-evil-session")
-		req.Header.Set("x-opencode-request", "client-evil-req")
+		// a client with its own conversation session must keep it
+		req.Header.Set("x-opencode-session", "ses-hermes-conv-42")
 		if err := a.PrepareRequest(t.Context(), req, acct, "sk-test-key", surface); err != nil {
 			t.Fatalf("surface %s: %v", surface, err)
 		}
@@ -32,15 +38,82 @@ func TestOpenCodeGoInjectsSessionHeaders(t *testing.T) {
 		if sess == "" {
 			t.Errorf("surface %s: x-opencode-session missing (upstream would 400)", surface)
 		}
-		if sess == "client-evil-session" {
-			t.Errorf("surface %s: client-supplied session header was NOT replaced", surface)
+		if sess != "ses-hermes-conv-42" {
+			t.Errorf("surface %s: client session SURVIVED? got %q — a client that names its own conversation must keep it", surface, sess)
 		}
-		if got := req.Header.Get("x-opencode-request"); got == "" || got == "client-evil-req" {
-			t.Errorf("surface %s: request id not regenerated: %q", surface, got)
+	}
+}
+
+// With NO client session, one is synthesized — never empty, and in the shape
+// opencode's own clients use, so a bare curl gets a valid header instead of 400
+// MissingSessionID.
+func TestOpenCodeGoSynthesizesSessionWhenAbsent(t *testing.T) {
+	a := NewOpenCodeGo(http.DefaultClient)
+	acct := testAccount(KindOpenCodeGo, "https://opencode.ai/zen/go/v1")
+	req, _ := http.NewRequest(http.MethodPost, acct.BaseURL+"/chat/completions", nil)
+	if err := a.PrepareRequest(t.Context(), req, acct, "sk-k", SurfaceOpenAI); err != nil {
+		t.Fatal(err)
+	}
+	sess := req.Header.Get("x-opencode-session")
+	if sess == "" {
+		t.Fatal("no client session and nothing synthesized: upstream would 400")
+	}
+	if !strings.HasPrefix(sess, "ses_") {
+		t.Errorf("synthesized session = %q, want the ses_ shape opencode's clients use", sess)
+	}
+	if got := req.Header.Get("x-opencode-request"); got == "" {
+		t.Error("x-opencode-request not synthesized")
+	}
+}
+
+// Two synthesized sessions must differ (a collision would pin two conversations
+// to one backend); two requests FROM ONE CLIENT must not.
+func TestOpenCodeGoSessionIdentitySemantics(t *testing.T) {
+	a := NewOpenCodeGo(http.DefaultClient)
+	acct := testAccount(KindOpenCodeGo, "https://opencode.ai/zen/go/v1")
+
+	seen := map[string]bool{}
+	for i := 0; i < 200; i++ {
+		req, _ := http.NewRequest(http.MethodPost, acct.BaseURL+"/chat/completions", nil)
+		if err := a.PrepareRequest(t.Context(), req, acct, "sk-k", SurfaceOpenAI); err != nil {
+			t.Fatal(err)
 		}
-		if got := req.Header.Get("Authorization"); got != "Bearer sk-test-key" {
-			t.Errorf("surface %s: Authorization = %q", surface, got)
+		s := req.Header.Get("x-opencode-session")
+		if seen[s] {
+			t.Fatalf("synthesized session reused after %d requests: %s", i, s)
 		}
+		seen[s] = true
+	}
+
+	// Same client session across two turns must arrive byte-identical.
+	first, second := "", ""
+	for _, dst := range []*string{&first, &second} {
+		req, _ := http.NewRequest(http.MethodPost, acct.BaseURL+"/chat/completions", nil)
+		req.Header.Set("x-opencode-session", "ses-hermes-conv-42")
+		if err := a.PrepareRequest(t.Context(), req, acct, "sk-k", SurfaceOpenAI); err != nil {
+			t.Fatal(err)
+		}
+		*dst = req.Header.Get("x-opencode-session")
+	}
+	if first != second || first != "ses-hermes-conv-42" {
+		t.Errorf("stable client session not preserved across turns: %q then %q", first, second)
+	}
+}
+
+// A library User-Agent must never reach the upstream: opencode asks clients to
+// identify themselves "rather than a generic SDK or HTTP-library name", and
+// Cloudflare in front of them answers a banned library signature with 403
+// "error code: 1010" (measured live 2026-10-11 with Python-urllib).
+func TestOpenCodeGoOverridesClientUserAgent(t *testing.T) {
+	a := NewOpenCodeGo(http.DefaultClient)
+	acct := testAccount(KindOpenCodeGo, "https://opencode.ai/zen/go/v1")
+	req, _ := http.NewRequest(http.MethodPost, acct.BaseURL+"/chat/completions", nil)
+	req.Header.Set("User-Agent", "Python-urllib/3.11")
+	if err := a.PrepareRequest(t.Context(), req, acct, "sk-k", SurfaceOpenAI); err != nil {
+		t.Fatal(err)
+	}
+	if got := req.Header.Get("User-Agent"); got != agentUserAgent {
+		t.Errorf("User-Agent = %q, want ezllm's own (%q)", got, agentUserAgent)
 	}
 }
 
@@ -83,26 +156,6 @@ func TestOpenCodeGoAnthropicSurfaceAuth(t *testing.T) {
 	}
 }
 
-// Each request must get a DIFFERENT session id — a shared session grows
-// server-side and eventually blows context.
-func TestOpenCodeGoSessionIDsAreUnique(t *testing.T) {
-	a := NewOpenCodeGo(http.DefaultClient)
-	acct := testAccount(KindOpenCodeGo, "https://opencode.ai/zen/go/v1")
-	acct.RequiresSessionHeader = true
-	seen := map[string]bool{}
-	for i := 0; i < 200; i++ {
-		req, _ := http.NewRequest(http.MethodPost, acct.BaseURL+"/chat/completions", nil)
-		if err := a.PrepareRequest(t.Context(), req, acct, "sk-k", SurfaceOpenAI); err != nil {
-			t.Fatal(err)
-		}
-		s := req.Header.Get("x-opencode-session")
-		if seen[s] {
-			t.Fatalf("session id reused after %d requests: %s", i, s)
-		}
-		seen[s] = true
-	}
-}
-
 func TestPrepareRequestRejectsEmptyKey(t *testing.T) {
 	acct := testAccount(KindOpenCodeGo, "https://x/v1")
 	for _, a := range []Adapter{
@@ -142,19 +195,20 @@ func TestAnthropicCompatibleAuthShape(t *testing.T) {
 	}
 }
 
-// opencode-go must strip client-supplied session headers.
+// opencode-go must strip ONLY its internal model selector. The session headers
+// are forwarded now: they are the conversation's routing/cache key (see
+// TestOpenCodeGoInjectsSessionHeaders).
 func TestStripHeadersListed(t *testing.T) {
 	a := NewOpenCodeGo(http.DefaultClient)
-	want := map[string]bool{"X-Opencode-Session": false, "X-Opencode-Request": false}
+	stripped := map[string]bool{}
 	for _, h := range a.StripHeaders() {
-		if _, ok := want[h]; ok {
-			want[h] = true
-		}
+		stripped[h] = true
 	}
-	for h, found := range want {
-		if !found {
-			t.Errorf("StripHeaders missing %s", h)
-		}
+	if !stripped["X-Zen-Model"] {
+		t.Error("StripHeaders must include X-Zen-Model (opencode's internal model selector)")
+	}
+	if stripped["X-Opencode-Session"] || stripped["X-Opencode-Request"] {
+		t.Error("session headers must NOT be stripped: opencode pins routing + prompt cache by them")
 	}
 }
 

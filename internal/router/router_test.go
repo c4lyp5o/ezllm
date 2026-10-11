@@ -23,6 +23,19 @@ type fakeCatalog struct {
 	pickKeyErr error
 	combos     map[string]*store.Combo // by name
 	pins       map[string]string       // "accountID/model" -> pinned surface
+	// noProto marks "accountID/model/surface" as PROBED-INCOMPATIBLE. Absent
+	// (and a nil map) means UNTESTED, which the router must read as allowed.
+	noProto map[string]bool
+}
+
+// ModelSupportsSurface returns nil (untested) unless the fixture marks the
+// triple incompatible — the same "nil = allowed" contract the real store has.
+func (f *fakeCatalog) ModelSupportsSurface(_ context.Context, id int64, model string, s provider.Surface) (*bool, error) {
+	if f.noProto[fmt.Sprintf("%d/%s/%s", id, model, s)] {
+		no := false
+		return &no, nil
+	}
+	return nil, nil
 }
 
 // ModelPin returns the fake's pin for a model ("" when unpinned).

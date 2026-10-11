@@ -301,3 +301,53 @@ func TestComboAllHopsDisabledAccountNamesCause(t *testing.T) {
 		t.Errorf("error must name the cause, got: %v", err)
 	}
 }
+
+// A hop PROBED unable to serve the requested surface is DROPPED from the
+// candidates instead of dialled. Without this, one incompatible member of an
+// otherwise healthy combo answers the client with the upstream's own 400/403
+// every time the rotation lands on it — live 2026-10-11, Claude Code got
+// "Model does not support this protocol" from an opencode-go hop of the
+// claude-sonnet combo, and a 403 group policy from a space-stationine hop.
+func TestComboSkipsProbedIncompatibleHop(t *testing.T) {
+	cat := withCombo(newFake(), dayNightCombo())
+	cat.noProto = map[string]bool{"1/gpt-6-luna/anthropic": true}
+	r := New(cat)
+
+	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceAnthropic, "test")
+	if err != nil {
+		t.Fatalf("combo resolution: %v", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("candidates = %d, want 1 (the probed-incompatible hop must drop)", len(routes))
+	}
+	if routes[0].Account.ID != 2 {
+		t.Errorf("surviving hop = account %d, want 2", routes[0].Account.ID)
+	}
+
+	// The SAME hop stays eligible on a surface it was never probed against:
+	// untested is not incompatible, and a drop here would strand a good hop.
+	routes, err = r.ResolveCandidates(context.Background(), "daily", provider.SurfaceOpenAI, "test")
+	if err != nil || len(routes) != 2 {
+		t.Fatalf("openai surface: candidates=%d err=%v, want both hops", len(routes), err)
+	}
+}
+
+// When EVERY hop is probed incompatible the combo cannot serve that surface at
+// all, so the error must name the capability cause rather than the generic
+// "no usable hops" — the operator has to know which surface to stop sending.
+func TestComboAllHopsIncompatibleNamesCause(t *testing.T) {
+	cat := withCombo(newFake(), dayNightCombo())
+	cat.noProto = map[string]bool{
+		"1/gpt-6-luna/anthropic": true,
+		"2/gpt-6-luna/anthropic": true,
+	}
+	r := New(cat)
+
+	_, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceAnthropic, "test")
+	if err == nil {
+		t.Fatal("expected error: no hop can serve the anthropic surface")
+	}
+	if !strings.Contains(err.Error(), "probed unable to serve the anthropic surface") {
+		t.Errorf("error must name the capability cause, got: %v", err)
+	}
+}

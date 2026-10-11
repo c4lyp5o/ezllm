@@ -421,3 +421,71 @@ func TestSuccessfulComboRequestRecordsTheServedHop(t *testing.T) {
 		t.Errorf("routes = %d, want both hops still present", len(routes))
 	}
 }
+
+// THE capability gate, end to end: a hop the sweep PROVED cannot serve the
+// requested surface must never be dialled. The bad upstream's hit counter is the
+// proof — a router unit test can show the candidate list, but only this shows
+// that the gateway does not make the request, so the client never eats the
+// upstream's 400/403 and no quota is spent discovering it again.
+//
+// Bite proof: deleting the capability gate in resolveCombo makes hop 1 answer
+// this request ("from-bad") and pushes badHits to 1, failing both assertions.
+func TestComboSkipsProbedIncompatibleHopEndToEnd(t *testing.T) {
+	tu := newTwoUpstream(t, false /* both upstreams healthy */)
+	ctx := context.Background()
+
+	acct, err := tu.db.AccountByNamespace(ctx, "bad")
+	if err != nil {
+		t.Fatalf("account lookup: %v", err)
+	}
+	no := false
+	if err := tu.db.SetModelProto(ctx, acct.ID, "gpt-6-luna", provider.SurfaceAnthropic, &no); err != nil {
+		t.Fatalf("SetModelProto: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(`{"model":"daily","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Authorization", "Bearer tok-infer")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	tu.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 from the eligible hop; body: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "from-good") {
+		t.Errorf("body = %s, want the eligible hop's answer", rec.Body.String())
+	}
+	if len(tu.badHits) != 0 {
+		t.Errorf("the probed-incompatible hop was DIALED %d time(s) — the gate did not hold", len(tu.badHits))
+	}
+	if len(tu.goodHits) != 1 {
+		t.Errorf("good upstream calls = %d, want 1", len(tu.goodHits))
+	}
+}
+
+// The same hop stays eligible on a surface it was never probed against: a
+// capability flag marks ONE (account, model, surface) triple, and treating it as
+// account-wide would strand a hop that works fine everywhere else.
+func TestProbedGapIsSurfaceScopedEndToEnd(t *testing.T) {
+	tu := newTwoUpstream(t, false)
+	ctx := context.Background()
+
+	acct, err := tu.db.AccountByNamespace(ctx, "bad")
+	if err != nil {
+		t.Fatalf("account lookup: %v", err)
+	}
+	no := false
+	if err := tu.db.SetModelProto(ctx, acct.ID, "gpt-6-luna", provider.SurfaceAnthropic, &no); err != nil {
+		t.Fatalf("SetModelProto: %v", err)
+	}
+
+	// The OPENAI surface was never probed, so hop 1 must still serve it.
+	code, body := tu.chat(`{"model":"daily","messages":[{"role":"user","content":"hi"}]}`)
+	if code != http.StatusOK || !strings.Contains(body, "from-bad") {
+		t.Fatalf("openai surface: %d %s, want hop 1 (the flag is anthropic-only)", code, body)
+	}
+	if len(tu.badHits) != 1 {
+		t.Errorf("bad upstream calls = %d, want 1", len(tu.badHits))
+	}
+}

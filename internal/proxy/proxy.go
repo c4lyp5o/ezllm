@@ -14,8 +14,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -136,11 +138,35 @@ type Dispatcher struct {
 	// entirely (the pre-limiter behaviour), which is what keeps this optional
 	// for tests and for callers that never set it.
 	limiter *ratelimit.Limiter
+
+	// log makes failover VISIBLE to the operator. Failover is supposed to be
+	// invisible to the client, and it was invisible to everyone: a hop that was
+	// skipped (parked) writes no ledger row, and a hop that failed and was
+	// replaced writes none either, so a combo could quietly run on one healthy
+	// hop for hours with no record anywhere of why. Never nil — defaults to
+	// slog.Default().
+	log *slog.Logger
 }
 
 type cooldownState struct {
 	until       time.Time
 	probeActive bool
+	// probeSince bounds a half-open probe. The probe is released when the
+	// upstream answers its HEADERS, not when its body ends, so a slow provider
+	// (measured 11-14s TTFT on opencode-go) held the gate that long and every
+	// other caller was told "all combo endpoints are in five-minute cooldown"
+	// by a hop that was NOT parked. See acquireHop/probeHold.
+	probeSince time.Time
+	// reason is the operator-facing cause ("429 rate limited", "transport
+	// error"). A parked hop writes no ledger row — the request never reaches an
+	// upstream — so this is the only place the cause can be reported.
+	reason string
+	// namespace labels the entry for /admin/health; the park key is by account
+	// id and base URL, which is not readable at a glance.
+	namespace string
+	// model is the parked hop's model, so an operator can see WHICH of an
+	// account's many models is cooling rather than just the account.
+	model string
 	// strikes counts CONSECUTIVE failures. Parking is deferred until it reaches
 	// maxStrikes so one transient blip does not remove a healthy hop for the
 	// whole cooldown window; a success resets it.
@@ -157,6 +183,10 @@ type cooldownState struct {
 type hopOutcome struct {
 	failed   bool
 	cooldown time.Duration
+	// reason is the operator-facing cause, surfaced on /admin/health. A parked
+	// hop produces no ledger row, so without this a hop could disappear from
+	// routing with no recorded explanation anywhere.
+	reason string
 }
 
 const (
@@ -169,15 +199,37 @@ const (
 	// hop for the rest of the session. A value beyond this is treated as absent
 	// so the operator's configured duration applies instead.
 	maxHonouredRetryAfter = 15 * time.Minute
+
+	// probeHold bounds how long one half-open probe may keep an EXPIRED park
+	// closed to everyone else. The intent of the probe election is to stop a
+	// thundering herd from stampeding an endpoint whose window has just rolled
+	// over — not to serialize all traffic behind the one caller that happens to
+	// probe first. Without a bound, a probe against a slow provider blocked the
+	// endpoint for the whole upstream round-trip and callers were refused with
+	// "all combo endpoints are in five-minute cooldown" by a hop that was not
+	// parked: an expired park must not look parked.
+	probeHold = 30 * time.Second
 )
 
+// hopKey identifies one parkable hop: account + endpoint + MODEL.
+//
+// The model belongs in the key because a 429 is nearly always a per-model
+// condition — opencode-go meters each model separately, every router tiers per
+// model — while an account-only key meant ONE throttled model removed every model
+// on that account from every combo that referenced it. Measured live 2026-10-11:
+// a single unavailable opencode-go model ("Endpoint is unavailable", HTTP 429)
+// silently took all 38 of that account's models out of routing, 60s at a time,
+// which is how a free model that had served 235 calls in an afternoon shrank to a
+// few per hour. An endpoint-wide fault (transport error, 5xx) now parks each
+// model as it is tried, costing at most one extra failed attempt per model — what
+// the half-open probe would have done anyway.
 func hopKey(rt Route) string {
-	return fmt.Sprintf("%d|%s", rt.Account.ID, strings.TrimRight(rt.Account.BaseURL, "/"))
+	return fmt.Sprintf("%d|%s|%s", rt.Account.ID, strings.TrimRight(rt.Account.BaseURL, "/"), rt.Model)
 }
 
 // acquireHop grants one request the right to try an endpoint. A cooled endpoint
 // has exactly one half-open probe after the five-minute window; concurrent
-// callers skip it until that probe succeeds or fails.
+// callers skip it until that probe succeeds, fails, or exceeds probeHold.
 func (d *Dispatcher) acquireHop(rt Route, now time.Time) (allowed, probe bool) {
 	key := hopKey(rt)
 	d.cooldownMu.Lock()
@@ -189,12 +241,78 @@ func (d *Dispatcher) acquireHop(rt Route, now time.Time) (allowed, probe bool) {
 	if !exists {
 		return true, false
 	}
-	if state.until.After(now) || state.probeActive {
+	// Deny only while the park is live, or while a FRESH probe is deciding the
+	// endpoint's fate. Once the window has expired and any probe is older than
+	// probeHold, the hop is eligible again: reporting a healthy endpoint as
+	// parked is worse than one extra request against a bad one, and the strike
+	// counter re-parks it on the next real failure.
+	if state.until.After(now) || (state.probeActive && now.Sub(state.probeSince) < probeHold) {
 		return false, false
 	}
 	state.probeActive = true
+	state.probeSince = now
 	d.cooldowns[key] = state
 	return true, true
+}
+
+// Cooldown is one parked endpoint as an operator should see it: which account is
+// cooling, until when, why, and whether a recovery probe is in flight.
+type Cooldown struct {
+	Namespace   string    `json:"namespace"`
+	Model       string    `json:"model"`
+	Until       time.Time `json:"until"`
+	Strikes     int       `json:"strikes"`
+	ProbeActive bool      `json:"probe_active"`
+	Reason      string    `json:"reason"`
+}
+
+// skipReason explains, in one operator-readable line, why acquireHop refused a
+// hop. Read WITHOUT the caller holding the lock so the hot path never writes to
+// a log sink while holding cooldownMu.
+func (d *Dispatcher) skipReason(rt Route, now time.Time) string {
+	key := hopKey(rt)
+	d.cooldownMu.Lock()
+	defer d.cooldownMu.Unlock()
+	st, ok := d.cooldowns[key]
+	if !ok {
+		return "unknown"
+	}
+	if st.until.After(now) {
+		return fmt.Sprintf("parked until %s (%s)", st.until.UTC().Format(time.RFC3339), st.reason)
+	}
+	if st.probeActive && now.Sub(st.probeSince) < probeHold {
+		return "half-open probe in flight"
+	}
+	return "unknown"
+}
+
+// Cooldowns snapshots the parks that are currently keeping traffic off an
+// endpoint (still cooling, or probing). A parked hop is INVISIBLE in the ledger
+// — the request never reaches an upstream, so no row is written — which made a
+// silently-skipped account look exactly like a broken one. This is the operator's
+// only view of it, so it reports cause as well as fact.
+func (d *Dispatcher) Cooldowns() []Cooldown {
+	now := time.Now()
+	d.cooldownMu.Lock()
+	defer d.cooldownMu.Unlock()
+	out := make([]Cooldown, 0, len(d.cooldowns))
+	for _, st := range d.cooldowns {
+		if !st.until.After(now) && !st.probeActive {
+			continue // expired and idle: no longer holding traffic back
+		}
+		out = append(out, Cooldown{
+			Namespace:   st.namespace,
+			Model:       st.model,
+			Until:       st.until,
+			Strikes:     st.strikes,
+			ProbeActive: st.probeActive,
+			Reason:      st.reason,
+		})
+	}
+	// Stable order: the dashboard and its tests both read this list, and a map
+	// walk would reshuffle it on every call.
+	sort.Slice(out, func(i, j int) bool { return out[i].Namespace < out[j].Namespace })
+	return out
 }
 
 func (d *Dispatcher) releaseProbe(rt Route) {
@@ -228,32 +346,33 @@ func (d *Dispatcher) classifyHop(err error, status int, hdr http.Header, hasAlte
 		if !retryableUpstreamError(err) {
 			return hopOutcome{} // our own fault (bad kind, bad request shape): not the hop's
 		}
-		return hopOutcome{failed: true, cooldown: defaultHopCooldown}
+		return hopOutcome{failed: true, cooldown: defaultHopCooldown, reason: "transport error"}
 	}
 	switch {
 	case status == http.StatusTooManyRequests:
 		if !hasAlternate {
 			// Sole hop: fail, but do not park — a real attempt is better than a
 			// synthetic refusal once the window rolls.
-			return hopOutcome{failed: true}
+			return hopOutcome{failed: true, reason: "429 rate limited (sole hop, not parked)"}
 		}
 		if dur, ok := parseRetryAfter(hdr.Get("Retry-After")); ok {
-			return hopOutcome{failed: true, cooldown: dur}
+			return hopOutcome{failed: true, cooldown: dur, reason: "429 rate limited (Retry-After)"}
 		}
 		if d.on429 > 0 {
-			return hopOutcome{failed: true, cooldown: d.on429}
+			return hopOutcome{failed: true, cooldown: d.on429, reason: "429 rate limited"}
 		}
-		return hopOutcome{failed: true, cooldown: defaultHopCooldown}
+		return hopOutcome{failed: true, cooldown: defaultHopCooldown, reason: "429 rate limited"}
 	case status >= 500 || status == http.StatusRequestTimeout || status == http.StatusTooEarly:
+		reason := fmt.Sprintf("%d upstream error", status)
 		if dur, ok := parseRetryAfter(hdr.Get("Retry-After")); ok {
-			return hopOutcome{failed: true, cooldown: dur}
+			return hopOutcome{failed: true, cooldown: dur, reason: reason + " (Retry-After)"}
 		}
 		// 408/425 are transient by definition and share the 5xx duration: the
 		// operator configured one "hop is unhealthy" number, not two.
 		if d.on5xx > 0 && status >= 500 {
-			return hopOutcome{failed: true, cooldown: d.on5xx}
+			return hopOutcome{failed: true, cooldown: d.on5xx, reason: reason}
 		}
-		return hopOutcome{failed: true, cooldown: defaultHopCooldown}
+		return hopOutcome{failed: true, cooldown: defaultHopCooldown, reason: reason}
 	}
 	return hopOutcome{} // 2xx, or a 4xx that describes the request rather than the hop
 }
@@ -322,6 +441,14 @@ func (d *Dispatcher) recordHop(rt Route, oc hopOutcome, now time.Time) {
 	if st.strikes >= threshold {
 		st.until = now.Add(oc.cooldown)
 		st.strikes = 0
+		st.namespace = rt.Account.Namespace
+		st.model = rt.Model
+		st.reason = oc.reason
+		// Park events are rare (threshold crossings), so this stays inside the
+		// lock: it is the one line that explains an endpoint disappearing.
+		d.log.Info("hop parked",
+			"account", rt.Account.Namespace, "model", rt.Model,
+			"until", st.until.UTC().Format(time.RFC3339), "reason", oc.reason)
 	}
 	d.cooldowns[key] = st
 }
@@ -394,7 +521,18 @@ func NewDispatcher(client *http.Client, registry *provider.Registry) *Dispatcher
 		// threshold is only worth having once the operator has stated it; the
 		// conservative default keeps a failing hop out of rotation immediately.
 		maxStrikes: 1,
+		log:        slog.Default(),
 	}
+}
+
+// SetLogger installs the operator-facing logger used for failover diagnostics.
+// Nil restores the default so a caller can never silence the dispatcher by
+// accident.
+func (d *Dispatcher) SetLogger(l *slog.Logger) {
+	if l == nil {
+		l = slog.Default()
+	}
+	d.log = l
 }
 
 func (d *Dispatcher) SetRetries(retries int) {
@@ -713,6 +851,13 @@ func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWrite
 		rt := routes[i]
 		allowed, probe := d.acquireHop(rt, time.Now())
 		if !allowed {
+			// Failover is invisible to the CLIENT on purpose; it must not be
+			// invisible to the OPERATOR. A skipped hop writes no ledger row (the
+			// request never leaves the box), so this log line is the only place
+			// the reason exists.
+			d.log.Info("hop skipped",
+				"account", rt.Account.Namespace, "model", rt.Model,
+				"alias", rt.Alias, "why", d.skipReason(rt, time.Now()))
 			continue
 		}
 		// Account-wide request budget, reserved HERE rather than at resolution:
@@ -760,17 +905,33 @@ func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWrite
 		if resp != nil {
 			hdr = resp.Header
 		}
-		d.recordHop(rt, d.classifyHop(err, res.Status, hdr, len(routes) > 1), time.Now())
+		oc := d.classifyHop(err, res.Status, hdr, len(routes) > 1)
+		d.recordHop(rt, oc, time.Now())
 		if probe {
 			d.releaseProbe(rt)
 		}
 		if err != nil {
+			d.log.Warn("hop failed, failing over",
+				"account", rt.Account.Namespace, "model", rt.Model,
+				"alias", rt.Alias, "err", err.Error())
 			if fallbackResp != nil {
 				drainClose(fallbackResp)
 				fallbackResp = nil
 			}
 			fallbackTransportErr = err
 			continue
+		}
+		if failoverStatus(res.Status) || oc.failed {
+			// The upstream's own words are the whole diagnosis, and for a failed
+			// hop they reach nobody: no ledger row is written (this hop will not
+			// commit) and the response goes to the client only if every later hop
+			// also fails. So read a bounded prefix of the error body here and
+			// restore it afterwards — the response is still committable as the
+			// final fallback, and it must stay byte-identical.
+			d.log.Warn("hop failed, failing over",
+				"account", rt.Account.Namespace, "model", rt.Model,
+				"alias", rt.Alias, "status", res.Status,
+				"reason", oc.reason, "upstream", peekUpstreamError(resp))
 		}
 		if failoverStatus(res.Status) {
 			if fallbackResp != nil {
@@ -795,6 +956,10 @@ func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWrite
 	// issue another request to an endpoint that's cooling down. A stored response
 	// is safe to commit: it was obtained by a prior, permitted attempt.
 	if fallbackResp != nil {
+		d.log.Warn("every hop failed; committing the last upstream error",
+			"status", fallbackResult.Status,
+			"account", fallbackRoute.Account.Namespace, "model", fallbackRoute.Model,
+			"alias", fallbackRoute.Alias)
 		result, err := d.commit(ctx, w, fallbackResp, *fallbackRoute, fallbackResult, fallbackStart)
 		return *fallbackRoute, result, err
 	}
@@ -1090,6 +1255,30 @@ func sseHasErrorEnvelope(payload []byte) bool {
 	}
 	e, ok := ev["error"]
 	return ok && e != nil
+}
+
+// maxErrPeek bounds how much of a FAILED response body is read for diagnostics.
+// Error envelopes are tiny; 2 KiB costs nothing and still holds an HTML error
+// page's first line.
+const maxErrPeek = 2048
+
+// peekUpstreamError reads a bounded prefix of a failed response's body and puts
+// it back, so failover can report the provider's own words without stealing the
+// body from a later commit. Only non-2xx responses are touched, and the restored
+// reader repays every byte read, so the response stays committable byte-for-byte
+// as the final fallback.
+func peekUpstreamError(resp *http.Response) string {
+	if resp == nil || resp.Body == nil || resp.StatusCode < 400 {
+		return ""
+	}
+	head := make([]byte, maxErrPeek)
+	n, _ := io.ReadFull(resp.Body, head) // a short body yields ErrUnexpectedEOF; n holds what there was
+	if n > 0 {
+		resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(head[:n]), resp.Body))
+	}
+	// Same rendering as the ledger's err column, so a log line and a row read
+	// identically.
+	return upstreamErrorSnippet(resp.StatusCode, head[:n])
 }
 
 // upstreamErrorSnippet renders a bounded, single-line summary of an upstream

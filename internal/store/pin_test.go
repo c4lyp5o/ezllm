@@ -83,6 +83,47 @@ func TestModelPinSurvivesResync(t *testing.T) {
 	}
 }
 
+// A PROBED protocol capability survives a catalog re-sync, pin or no pin.
+// Without this, every catalog refresh — including the one at boot — resets
+// capability to "untested" and the router goes back to dialling hops it has
+// already proved incompatible with that surface, which is the exact failure the
+// capability gate exists to prevent.
+func TestProbedProtocolSurvivesResync(t *testing.T) {
+	ctx := context.Background()
+	db := openAt(t, filepath.Join(t.TempDir(), "proto.sqlite"))
+	defer db.Close()
+	acct := seedPinAccount(t, db)
+
+	no := false
+	if err := db.SetModelProto(ctx, acct, "m1", provider.SurfaceAnthropic, &no); err != nil {
+		t.Fatalf("SetModelProto: %v", err)
+	}
+	if got, err := db.ModelSupportsSurface(ctx, acct, "m1", provider.SurfaceAnthropic); err != nil || got == nil || *got {
+		t.Fatalf("before resync = %v err=%v, want a recorded false", got, err)
+	}
+
+	if err := db.UpsertModels(ctx, acct, []provider.ModelInfo{{ID: "m1", Display: "M One"}}); err != nil {
+		t.Fatalf("UpsertModels: %v", err)
+	}
+	if got, err := db.ModelSupportsSurface(ctx, acct, "m1", provider.SurfaceAnthropic); err != nil || got == nil || *got {
+		t.Fatalf("after resync = %v err=%v, want the probed false to survive", got, err)
+	}
+	// The sync still owns the vendor-supplied fields, and a surface that was
+	// never probed stays UNTESTED rather than inheriting a neighbour's verdict.
+	if got, _ := db.ModelSupportsSurface(ctx, acct, "m1", provider.SurfaceOpenAI); got != nil {
+		t.Errorf("openai capability = %v, want untested (nil)", got)
+	}
+
+	// A model the new catalog no longer lists is gone, and its capability with
+	// it — stale verdicts must not outlive the model they describe.
+	if err := db.UpsertModels(ctx, acct, []provider.ModelInfo{{ID: "other"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := db.ModelSupportsSurface(ctx, acct, "m1", provider.SurfaceAnthropic); got != nil {
+		t.Errorf("dropped model capability = %v, want nil", got)
+	}
+}
+
 // A v6 database (no proto_pin) upgrades to v7 in place, keeping its rows.
 func TestMigrateV6AddsProtoPinKeepsRows(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v6.sqlite")

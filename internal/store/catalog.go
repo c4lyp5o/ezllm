@@ -210,21 +210,33 @@ VALUES (?,?,?,?,1)`, accountID, label, hint, plaintext)
 // UpsertModels replaces an account's catalog snapshot.
 func (d *DB) UpsertModels(ctx context.Context, accountID int64, models []provider.ModelInfo) error {
 	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
-		// The sync replaces the catalog wholesale, which would wipe operator
-		// pins. Snapshot them first and restore those that still exist after.
-		pins := map[string]string{}
-		prows, err := tx.QueryContext(ctx,
-			`SELECT model_id, proto_pin FROM models WHERE account_id=? AND proto_pin IS NOT NULL`, accountID)
+		// The sync replaces the catalog wholesale, which would wipe everything
+		// the vendor catalog cannot supply: the operator's PIN and the PROBED
+		// protocol capability. Snapshot both, then restore those models the new
+		// catalog still lists. Without the capability half, every catalog
+		// refresh (including the one at boot) resets capability to "untested"
+		// and the router goes back to dialling hops it has already proved
+		// incompatible with that surface.
+		type modelState struct {
+			pin                          sql.NullString
+			openai, anthropic, responses sql.NullInt64
+			testedAt                     sql.NullString
+		}
+		prior := map[string]modelState{}
+		prows, err := tx.QueryContext(ctx, `
+SELECT model_id, proto_pin, proto_openai, proto_anthropic, proto_responses, proto_tested_at
+FROM models WHERE account_id=?`, accountID)
 		if err != nil {
 			return err
 		}
 		for prows.Next() {
-			var id, pin string
-			if err := prows.Scan(&id, &pin); err != nil {
+			var id string
+			var st modelState
+			if err := prows.Scan(&id, &st.pin, &st.openai, &st.anthropic, &st.responses, &st.testedAt); err != nil {
 				prows.Close()
 				return err
 			}
-			pins[id] = pin
+			prior[id] = st
 		}
 		prows.Close()
 		if err := prows.Err(); err != nil {
@@ -249,12 +261,15 @@ ON CONFLICT(account_id, model_id) DO UPDATE SET
 			if _, err := stmt.ExecContext(ctx, accountID, m.ID, m.Display, m.OwnedBy); err != nil {
 				return err
 			}
-			if pin, ok := pins[m.ID]; ok {
-				if _, err := tx.ExecContext(ctx,
-					`UPDATE models SET proto_pin=? WHERE account_id=? AND model_id=?`,
-					pin, accountID, m.ID); err != nil {
-					return err
-				}
+			st, ok := prior[m.ID]
+			if !ok {
+				continue // a brand-new model: nothing to carry over
+			}
+			if _, err := tx.ExecContext(ctx, `
+UPDATE models SET proto_pin=?, proto_openai=?, proto_anthropic=?, proto_responses=?, proto_tested_at=?
+WHERE account_id=? AND model_id=?`,
+				st.pin, st.openai, st.anthropic, st.responses, st.testedAt, accountID, m.ID); err != nil {
+				return err
 			}
 		}
 		return nil
@@ -293,6 +308,37 @@ func (d *DB) SetModelPin(ctx context.Context, accountID int64, modelID, pin stri
 		}
 		return nil
 	})
+}
+
+// ModelSupportsSurface returns the recorded protocol capability for one
+// (account, model, surface). A non-nil false means probed INCOMPATIBLE, a
+// non-nil true means probed compatible, and NIL means UNTESTED — a state every
+// caller must read as "allowed": the upstream stays authoritative, and
+// recording nothing beats dropping a hop that actually works.
+func (d *DB) ModelSupportsSurface(ctx context.Context, accountID int64, modelID string, s provider.Surface) (*bool, error) {
+	col := "proto_openai"
+	switch s {
+	case provider.SurfaceAnthropic:
+		col = "proto_anthropic"
+	case provider.SurfaceResponses:
+		col = "proto_responses"
+	}
+	var v sql.NullInt64
+	err := d.r.QueryRowContext(ctx,
+		`SELECT `+col+` FROM models WHERE account_id=? AND model_id=?`, accountID, modelID).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Not in the catalog — a model discovered by the sweep before a sync,
+		// or one removed since. Unknown, never "unsupported".
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !v.Valid {
+		return nil, nil
+	}
+	supported := v.Int64 != 0
+	return &supported, nil
 }
 
 // ModelExists reports whether an account's catalog contains a model.

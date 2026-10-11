@@ -30,10 +30,12 @@ func NewOpenCodeGo(c *http.Client) Adapter { return &openCodeGo{client: c} }
 
 func (a *openCodeGo) Kind() Kind { return KindOpenCodeGo }
 
-// StripHeaders: a client must never pin OUR session or collide with it, so any
-// client-supplied opencode session/request headers are dropped and regenerated.
+// StripHeaders: X-Zen-Model is opencode's own internal model selector and must
+// never come from a client. The SESSION headers are deliberately NOT stripped
+// any more (see PrepareRequest): opencode asks clients for a stable session id
+// per conversation, and the OpenCode-shaped clients we front already send one.
 func (a *openCodeGo) StripHeaders() []string {
-	return []string{"X-Opencode-Session", "X-Opencode-Request", "X-Zen-Model"}
+	return []string{"X-Zen-Model"}
 }
 
 func (a *openCodeGo) PrepareRequest(ctx context.Context, req *http.Request, acct Account, key string, surface Surface) error {
@@ -48,17 +50,45 @@ func (a *openCodeGo) PrepareRequest(ctx context.Context, req *http.Request, acct
 		req.Header.Set("x-api-key", key)
 		req.Header.Set("anthropic-version", "2023-06-01")
 	}
-	// Session identity is PER REQUEST. A shared long-lived session would grow
-	// server-side until it blew context — a real hazard for a router fronting
-	// many clients.
-	sid := newRequestID()
-	if acct.RequiresSessionHeader || surface != SurfaceOpenAI {
-		req.Header.Set("x-opencode-session", "ezllm-"+sid)
+	// Session identity is PRESERVED from the client when it sends one.
+	//
+	// This reverses an earlier deliberate choice here, which regenerated a random
+	// session per request because "a shared session grows server-side until it
+	// blew context". That rationale was wrong: the session id is not the
+	// conversation state — the client's own message history is — it is the key
+	// opencode uses to PIN a conversation to one backend. opencode's Go docs ask
+	// clients to "send a stable session ID in x-opencode-session for each
+	// conversation so we can optimize routing and prompt caching", and their
+	// validated-clients table says Hermes, Claude Code, Codex and Kilo all send a
+	// native session header they recognize. Regenerating it per request makes
+	// every turn look like a brand-new conversation: no backend pinning, no
+	// prompt-cache affinity, and (measured 2026-10-11) routing that degrades into
+	// "Endpoint is unavailable" under load. A router must forward that header,
+	// not own it.
+	//
+	// It is still SYNTHESIZED when absent, so a bare curl gets a valid header
+	// instead of opencode's 400 MissingSessionID.
+	if req.Header.Get("x-opencode-session") == "" {
+		req.Header.Set("x-opencode-session", newSessionID())
 	}
-	req.Header.Set("x-opencode-request", "req-"+sid)
+	if req.Header.Get("x-opencode-request") == "" {
+		req.Header.Set("x-opencode-request", "req-"+newRequestID())
+	}
+	// ezllm identifies ITSELF. opencode asks clients to identify "with its own
+	// user agent ... rather than a generic SDK or HTTP-library name", and the
+	// client's UA is unsuited to that: it is whatever library the caller used
+	// (Python-urllib, Go-http-client), which Cloudflare — in front of opencode —
+	// answers with 403 "error code: 1010" (browser-signature ban, measured live
+	// 2026-10-11). Setting ours here also means a banned library UA can never
+	// reach their edge, whatever client is behind us.
+	req.Header.Set("User-Agent", agentUserAgent)
 	applyCustomHeaders(req, acct.CustomHeaders)
 	return nil
 }
+
+// agentUserAgent is how ezllm identifies itself to upstreams that police client
+// signatures. Deliberately NOT a browser string and not a library default.
+const agentUserAgent = "ezllm/1.0 (llm-router)"
 
 func (a *openCodeGo) ListModels(ctx context.Context, acct Account, key string) ([]ModelInfo, error) {
 	return listModelsGeneric(ctx, a.client, acct, key, nil)
@@ -357,6 +387,11 @@ func newRequestID() string {
 	}
 	return fmt.Sprintf("%x", b)
 }
+
+// newSessionID mints a session id in the shape opencode's own clients use
+// ("ses_" + opaque suffix). Only reached when the client sent no session header
+// of its own; a client that has one keeps it (see PrepareRequest).
+func newSessionID() string { return "ses_" + newRequestID() }
 
 // geminiOpenAI is the OpenAI-compatible surface of Gemini
 // (generativelanguage.googleapis.com/v1beta/openai). Live-probed 2026-10-09:

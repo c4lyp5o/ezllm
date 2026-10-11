@@ -61,7 +61,7 @@ type Server struct {
 	mux         *http.ServeMux
 	started     time.Time
 	maxBody     int64
-	web         fs.FS    // dashboard source: embedded dist/ or EZLLM_WEB_DIR
+	web         fs.FS // dashboard source: embedded dist/ or EZLLM_WEB_DIR
 	corsOrigins []string
 	// usageTZ is the default zone for group_by=day. Never nil: UTC unless
 	// EZLLM_USAGE_TZ says otherwise (validated at boot).
@@ -675,19 +675,28 @@ func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
 			"could not read ledger span: "+err.Error())
 		return
 	}
+	// A parked hop is invisible everywhere else: the request never reaches an
+	// upstream, so no ledger row is written and the only symptom is a combo
+	// quietly using fewer hops. Report which account is being skipped, until
+	// when, and why.
+	cooldowns := []proxy.Cooldown{}
+	if s.dispatcher != nil {
+		cooldowns = s.dispatcher.Cooldowns()
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":         "ok",
-		"schema_version": s.db.SchemaVersion(),
-		"db_path":        s.db.Path(),
-		"accounts":       accounts,
-		"provider_keys":  keys,
-		"models":         models,
-		"combos":         combos,
-		"ledger_rows":    calls,
-		"ledger_span":    map[string]string{"oldest": oldest, "newest": newest},
-		"dropped_rows":   store.DroppedCalls(),
-		"lost_rows":      store.LostRows(),
-		"uptime_s":       int(time.Since(s.started).Seconds()),
+		"status":             "ok",
+		"schema_version":     s.db.SchemaVersion(),
+		"db_path":            s.db.Path(),
+		"accounts":           accounts,
+		"provider_keys":      keys,
+		"models":             models,
+		"combos":             combos,
+		"ledger_rows":        calls,
+		"ledger_span":        map[string]string{"oldest": oldest, "newest": newest},
+		"dropped_rows":       store.DroppedCalls(),
+		"lost_rows":          store.LostRows(),
+		"endpoint_cooldowns": cooldowns,
+		"uptime_s":           int(time.Since(s.started).Seconds()),
 	})
 }
 

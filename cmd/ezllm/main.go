@@ -98,6 +98,10 @@ func run() error {
 	registry := provider.NewRegistry(client)
 	dispatcher := proxy.NewDispatcher(client, registry)
 	dispatcher.SetRetries(cfg.Retry.Retries)
+	// Failover diagnostics go to the same logger as the request log: a hop that
+	// was skipped (parked) or failed over writes no ledger row, so without this
+	// the reason a combo silently stopped using a hop exists nowhere.
+	dispatcher.SetLogger(log)
 	// cooldown.on_429 / cooldown.on_5xx / cooldown.max_per_key were parsed and
 	// validated but read by nothing: the dispatcher used one hardcoded
 	// five-minute park for every failure class. Wire the operator's numbers

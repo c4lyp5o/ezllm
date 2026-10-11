@@ -527,9 +527,12 @@ func TestForwardAnthropicSurfaceRouting(t *testing.T) {
 	}
 }
 
-// opencode-go must get a generated session header, and a client-supplied one
-// must be stripped rather than forwarded.
-func TestForwardStripsClientSessionHeader(t *testing.T) {
+// A client's conversation session must SURVIVE the gateway end to end: opencode
+// pins routing and prompt-cache affinity by x-opencode-session, and stripping it
+// (this gateway's behaviour until 2026-10-11) makes every turn look like a brand
+// new conversation — no backend pinning, no cache affinity, degraded routing.
+// Credentials riding the same request must still die here: see the next test.
+func TestForwardPreservesClientSessionHeader(t *testing.T) {
 	var gotSession, gotRequest string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotSession = r.Header.Get("x-opencode-session")
@@ -547,8 +550,8 @@ func TestForwardStripsClientSessionHeader(t *testing.T) {
 	reqBody := []byte(`{"model":"resolved-model","messages":[]}`)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(string(reqBody)))
-	req.Header.Set("x-opencode-session", "client-evil")
-	req.Header.Set("x-opencode-request", "client-evil-req")
+	req.Header.Set("x-opencode-session", "ses-hermes-conv-42")
+	req.Header.Set("x-opencode-request", "req-from-client")
 	req.Header.Set("Authorization", "Bearer ***")
 	req.Header.Set("Cookie", "session=steal-me")
 
@@ -556,13 +559,40 @@ func TestForwardStripsClientSessionHeader(t *testing.T) {
 		t.Fatal(err)
 	}
 	if gotSession == "" {
-		t.Error("no session header generated — upstream would 400 MissingSessionID")
+		t.Error("no session header upstream — opencode answers 400 MissingSessionID")
 	}
-	if gotSession == "client-evil" {
-		t.Error("client-supplied session header was forwarded")
+	if gotSession != "ses-hermes-conv-42" {
+		t.Errorf("client session = %q, want it forwarded byte-identical (it is the routing/cache key)", gotSession)
 	}
-	if gotRequest == "client-evil-req" {
-		t.Error("client-supplied request id was forwarded")
+	if gotRequest != "req-from-client" {
+		t.Errorf("client request id = %q, want it forwarded", gotRequest)
+	}
+}
+
+// ...while a request with NO session still gets one synthesized, or opencode
+// answers 400 MissingSessionID.
+func TestForwardSynthesizesSessionWhenClientSendsNone(t *testing.T) {
+	var gotSession string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotSession = r.Header.Get("x-opencode-session")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"usage":{"prompt_tokens":1,"completion_tokens":1}}`))
+	}))
+	defer upstream.Close()
+
+	rt := testRoute(upstream.URL, provider.SurfaceOpenAI)
+	rt.Account.Kind = provider.KindOpenCodeGo
+
+	d := newDispatcher()
+	reqBody := []byte(`{"model":"resolved-model","messages":[]}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(string(reqBody)))
+
+	if _, err := d.Forward(context.Background(), rec, req, rt, reqBody); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(gotSession, "ses_") {
+		t.Errorf("synthesized session = %q, want the ses_ shape", gotSession)
 	}
 }
 

@@ -1,0 +1,1 @@
+{"id":"msg_chatcmpl-123","type":"message","role":"assistant","content":[{"type":"text","text":"The weather is great."},{"type":"tool_use","id":"call_2","name":"log_event","input":{"event":"weather_check"}}],"model":"claude-3-5-sonnet-20240620","stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":50,"output_tokens":30}}

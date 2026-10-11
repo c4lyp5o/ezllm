@@ -1,0 +1,26 @@
+{
+  "id": "chatcmpl-123",
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "content": "The weather is great.",
+        "tool_calls": [
+          {
+            "id": "call_2",
+            "type": "function",
+            "function": {
+              "name": "log_event",
+              "arguments": "{\"event\":\"weather_check\"}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 50,
+    "completion_tokens": 30
+  }
+}

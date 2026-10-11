@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -232,6 +233,16 @@ var droppedCalls atomic.Int64
 // DroppedCalls reports how many ledger rows were shed (should stay 0).
 func DroppedCalls() int64 { return droppedCalls.Load() }
 
+// lostRows counts rows a FAILED FLUSH discarded. It is separate from
+// droppedCalls on purpose: dropping counts the queue-full path, while a
+// transient SQLite lock or a full disk used to discard the whole batch with a
+// single log line and no counter — so the number an operator watches to answer
+// "am I losing rows?" read 0 while rows were being lost.
+var lostRows atomic.Int64
+
+// LostRows reports how many rows failed flushes discarded (should stay 0).
+func LostRows() int64 { return lostRows.Load() }
+
 // ledgerLoop batches inserts: flush every BatchSize rows or BatchWait, whichever
 // comes first, and on shutdown or an explicit barrier.
 func (d *DB) ledgerLoop(batchSize int, batchWait time.Duration) {
@@ -246,8 +257,23 @@ func (d *DB) ledgerLoop(batchSize int, batchWait time.Duration) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if err := d.insertCalls(ctx, buf); err != nil {
-			slog.Error("ledger flush failed", "rows", len(buf), "err", err)
+		err := d.insertCalls(ctx, buf)
+		if err != nil {
+			// One bounded retry before giving up: a transient SQLite lock
+			// (a concurrent writer, a checkpoint) clears on its own, and a
+			// ledger row is evidence, not boilerplate. Most failures end
+			// here, which is what keeps the counter below honest.
+			retryCtx, retryCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			err = d.insertCalls(retryCtx, buf)
+			retryCancel()
+		}
+		if err != nil {
+			// The batch is lost either way — but now it is COUNTED. The old
+			// code logged one line and incremented nothing, so the operator's
+			// "am I losing rows?" number stayed at zero while rows vanished.
+			lostRows.Add(int64(len(buf)))
+			slog.Error("ledger flush failed after retry; rows discarded",
+				"rows", len(buf), "err", err, "lost_total", lostRows.Load())
 		} else {
 			// Copy under the loop's lock (buf is reused after this tick), then
 			// hand the snapshot to live consumers.
@@ -482,42 +508,166 @@ func usageGroupColumn(groupBy string) (string, error) {
 	case "surface":
 		return "surface", nil
 	case "day":
+		// UTC by construction: rows are stamped UTC and this slices the first
+		// 10 chars off the stamp, so the dashboard's day boundary is midnight
+		// UTC. Usage-rule caps evaluate their bucket in the RULE's
+		// *time.Location (rules.Window.loc), so with a non-UTC rule the
+		// dashboard's day view and the "daily … cap reached" refusal can
+		// disagree about which day a call belongs to. Documented in
+		// docs/API.md under GET /admin/usage; deliberately NOT silently
+		// changed — making it tz-aware is a behaviour change for every
+		// existing dashboard.
 		return "substr(ts,1,10)", nil
 	default:
 		return "", fmt.Errorf("store: unknown group_by %q", groupBy)
 	}
 }
 
-// fillP50 computes median TTFT per group in Go (SQLite lacks percentile_cont).
+// fillP50 computes the median TTFT per group.
+//
+// It used to SELECT every matching (k, ttft_ms) row into a Go map on EVERY
+// /admin/usage request — cost scaling with ledger size instead of request
+// rate, against the codebase's own rule: "Do not sum paginated rows for
+// dashboard totals; calculate aggregates over the full filtered set in SQL."
+// The window functions below partition and order inside SQLite and return
+// exactly ONE row per group, so what crosses into Go is bounded by the number
+// of groups and the work is a single range scan.
+//
+// Median convention (documented because it was silent for years): the UPPER of
+// the two middle values for an even count — rn = n/2 + 1 reproduces the
+// historical Go `vs[len(vs)/2]` exactly. This number is directional guidance
+// on a dashboard, not a statistical claim, so the convention is pinned rather
+// than "improved" to the true mean of the middles: silently changing it would
+// move every even-sized group's number in the UI with no way to tell.
 func (d *DB) fillP50(ctx context.Context, col string, from, to time.Time, rows []UsageRow) error {
 	if len(rows) == 0 {
 		return nil
 	}
-	q := fmt.Sprintf(`SELECT %s AS k, ttft_ms FROM calls
-WHERE ts >= ? AND ts < ? AND ttft_ms IS NOT NULL ORDER BY k, ttft_ms`, col)
+	q := fmt.Sprintf(`SELECT k, ttft_ms FROM (
+  SELECT %s AS k, ttft_ms,
+         ROW_NUMBER() OVER (PARTITION BY %s ORDER BY ttft_ms) AS rn,
+         COUNT(*)     OVER (PARTITION BY %s)                  AS n
+  FROM calls
+  WHERE ts >= ? AND ts < ? AND ttft_ms IS NOT NULL
+)
+WHERE rn = n / 2 + 1
+ORDER BY k, ttft_ms`, col, col, col)
 	rs, err := d.r.QueryContext(ctx, q, from.UTC().Format("2006-01-02T15:04:05.000Z"), to.UTC().Format("2006-01-02T15:04:05.000Z"))
 	if err != nil {
 		return err
 	}
 	defer rs.Close()
-	byKey := make(map[string][]int64)
+	med := make(map[string]int64, len(rows))
 	for rs.Next() {
 		var k string
 		var v int64
 		if err := rs.Scan(&k, &v); err != nil {
 			return err
 		}
-		byKey[k] = append(byKey[k], v)
+		med[k] = v
 	}
 	if err := rs.Err(); err != nil {
 		return err
 	}
 	for i := range rows {
-		if vs := byKey[rows[i].Key]; len(vs) > 0 {
-			rows[i].P50TTFTms = vs[len(vs)/2] // already ORDER BY ttft_ms
+		if v, ok := med[rows[i].Key]; ok {
+			rows[i].P50TTFTms = v
 		}
 	}
 	return nil
+}
+
+// UsageDayReportTZ aggregates the ledger by LOCAL DAY in loc, computing the day
+// buckets in Go rather than in SQL.
+//
+// Why this one path is the exception to "aggregate in SQL": SQLite has no IANA
+// zone table, so a day bucket cannot be expressed in pure SQL for a zone that
+// observes DST. The tempting strftime('%Y-%m-%d', ts, '+N hours') trick is
+// correct for a FIXED-offset zone and silently wrong by up to an hour either
+// side of a DST transition — precisely the silent-wrong-answer class F9 exists
+// to remove. Converting per row in Go is correct for every zone.
+//
+// The bucketing is CountBucket(ts, "daily", loc): the SAME function the usage
+// meter writes its counters with. That is the whole point — one implementation
+// of "which day is this", so the dashboard's day view and the rule's
+// "daily … cap reached" refusal cannot drift apart by a zone offset.
+//
+// Every other group_by (and the no-tz default) still aggregates in SQL; this
+// path is opt-in via tz, and the window is capped by the caller.
+func (d *DB) UsageDayReportTZ(ctx context.Context, from, to time.Time, loc *time.Location) ([]UsageRow, error) {
+	if loc == nil {
+		loc = time.UTC
+	}
+	rs, err := d.r.QueryContext(ctx, `
+SELECT ts, ttft_ms,
+       COALESCE(tokens_in,0), COALESCE(tokens_out,0),
+       COALESCE(tokens_cached_read,0), COALESCE(tokens_cached_write,0),
+       COALESCE(reasoning_tokens,0), COALESCE(tokens_saved,0),
+       COALESCE(context_tokens_pre,0), COALESCE(context_tokens_saved,0),
+       status
+FROM calls
+WHERE ts >= ? AND ts < ?`, from.UTC().Format("2006-01-02T15:04:05.000Z"), to.UTC().Format("2006-01-02T15:04:05.000Z"))
+	if err != nil {
+		return nil, err
+	}
+	defer rs.Close()
+
+	type acc struct {
+		row   UsageRow
+		ttfts []int64
+	}
+	byDay := map[string]*acc{}
+	for rs.Next() {
+		var ts string
+		var ttft sql.NullInt64
+		var tin, tout, cread, cwrite, reasoning, saved, cpre, csaved int64
+		var status int
+		if err := rs.Scan(&ts, &ttft, &tin, &tout, &cread, &cwrite, &reasoning, &saved, &cpre, &csaved, &status); err != nil {
+			return nil, err
+		}
+		t, err := time.Parse("2006-01-02T15:04:05.000Z", ts)
+		if err != nil {
+			continue // a corrupt stamp must not abort the whole report
+		}
+		day := CountBucket(t, "daily", loc) // the meter's own bucketing
+		a := byDay[day]
+		if a == nil {
+			a = &acc{row: UsageRow{Key: day}}
+			byDay[day] = a
+		}
+		a.row.Calls++
+		a.row.TokensIn += tin
+		a.row.TokensOut += tout
+		a.row.CachedRead += cread
+		a.row.CachedWrite += cwrite
+		a.row.Reasoning += reasoning
+		a.row.TokensSaved += saved
+		a.row.ContextPre += cpre
+		a.row.ContextSaved += csaved
+		if status >= 400 {
+			a.row.Errors++
+		}
+		if ttft.Valid {
+			a.ttfts = append(a.ttfts, ttft.Int64)
+		}
+	}
+	if err := rs.Err(); err != nil {
+		return nil, err
+	}
+
+	out := make([]UsageRow, 0, len(byDay))
+	for _, a := range byDay {
+		if len(a.ttfts) > 0 {
+			slices.Sort(a.ttfts)
+			// Same convention as fillP50: the UPPER of the two middle values
+			// for an even count. Documented there; kept identical here so the
+			// tz path and the SQL path report the same statistic.
+			a.row.P50TTFTms = a.ttfts[len(a.ttfts)/2]
+		}
+		out = append(out, a.row)
+	}
+	slices.SortFunc(out, func(x, y UsageRow) int { return strings.Compare(x.Key, y.Key) })
+	return out, nil
 }
 
 // RecentCalls returns the newest N ledger rows (drilldown / debugging).

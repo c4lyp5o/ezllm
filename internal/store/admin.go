@@ -1242,6 +1242,18 @@ func (d *DB) UpsertToken(ctx context.Context, in TokenInput) (id int64, plaintex
 		_, err = tx.ExecContext(ctx, `
 INSERT INTO client_tokens (name, token_hash, roles, enabled) VALUES (?,?,?,1)`,
 			in.Name, HashToken(plaintext), strings.Join(roles, ","))
+		if err != nil && isUniqueViolation(err) {
+			// The pre-check above is check-then-act, so a genuine race — two
+			// concurrent POSTs with the same name — reaches this line. A raw
+			// SQLite error here answered 500; map it to the SAME *ErrConflict
+			// the pre-check returns, exactly as CreateAccount/writeAccount do
+			// for their UNIQUE clashes. Note the known adjacent wart this
+			// interacts with: a duplicate NAME can also answer 201 with a
+			// plaintext that authenticates nothing (no row created) — both
+			// live in the check-then-act gap and any deeper fix addresses them
+			// together.
+			return &ErrConflict{What: fmt.Sprintf("token name %q already exists", in.Name)}
+		}
 		return err
 	})
 	if err != nil {
@@ -1368,9 +1380,52 @@ type Export struct {
 	Ledger        []map[string]any     `json:"ledger,omitempty"`
 }
 
-// ExportAll builds the dump. includeLedger adds the call history (potentially
-// large), which is why it is opt-in.
-func (d *DB) ExportAll(ctx context.Context, includeLedger bool) (*Export, error) {
+// ExportLedgerRows returns a LIVE row cursor over the whole call ledger,
+// newest first. The caller MUST Close it.
+//
+// This exists so the HTTP handler can stream: the old shape built one
+// []map[string]any of the entire ledger and encoded it in a single write, so
+// memory scaled with ledger size — and a disaster-recovery export that OOMs
+// the box is not a recovery file. A row cursor keeps one row live at a time,
+// which makes the export's footprint flat and the file COMPLETE: the 10k cap
+// that used to bound it is gone, because bounding a recovery file means
+// silently omitting history from the thing you recover WITH.
+//
+// The row projection lives in scanExportRow so this and ExportAll cannot drift.
+func (d *DB) ExportLedgerRows(ctx context.Context) (*sql.Rows, error) {
+	return d.r.QueryContext(ctx, `
+SELECT ts, client, surface, alias, account, model, status, stream,
+       ttft_ms, total_ms, tokens_in, tokens_out, tokens_cached_read,
+       tokens_cached_write, reasoning_tokens, status
+FROM calls ORDER BY id DESC`)
+}
+
+// ScanExportRow projects one ledger row into the export's JSON shape. It is
+// exported alongside the cursor so the streaming path and ExportAll share ONE
+// projection — a second copy is how a DR file quietly loses a column.
+func ScanExportRow(rows *sql.Rows) (map[string]any, error) {
+	var ts, client, surface, alias, account, model string
+	var status, stream int
+	var ttft, total, tin, tout, cread, cwrite, reasoning sql.NullInt64
+	var statusDup int
+	if err := rows.Scan(&ts, &client, &surface, &alias, &account, &model, &status,
+		&stream, &ttft, &total, &tin, &tout, &cread, &cwrite, &reasoning, &statusDup); err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"ts": ts, "client": client, "surface": surface, "alias": alias,
+		"account": account, "model": model, "status": status, "stream": stream == 1,
+		"ttft_ms": nullInt(ttft), "total_ms": nullInt(total),
+		"tokens_in": nullInt(tin), "tokens_out": nullInt(tout),
+		"cached_read": nullInt(cread), "cached_write": nullInt(cwrite),
+		"reasoning": nullInt(reasoning),
+	}, nil
+}
+
+// ExportConfig builds the dump WITHOUT the ledger: the small, bounded half.
+// Kept separate from the ledger so a caller can validate (and a handler can
+// answer) before committing to a long stream.
+func (d *DB) ExportConfig(ctx context.Context) (*Export, error) {
 	accounts, err := d.ListAccounts(ctx)
 	if err != nil {
 		return nil, err
@@ -1391,7 +1446,7 @@ func (d *DB) ExportAll(ctx context.Context, includeLedger bool) (*Export, error)
 	if err != nil {
 		return nil, err
 	}
-	exp := &Export{
+	return &Export{
 		ExportedAt:    time.Now().UTC().Format(time.RFC3339),
 		SchemaVersion: d.SchemaVersion(),
 		Accounts:      accounts,
@@ -1399,39 +1454,38 @@ func (d *DB) ExportAll(ctx context.Context, includeLedger bool) (*Export, error)
 		Tokens:        tokens,
 		Compression:   profiles,
 		Quotas:        quotas,
+	}, nil
+}
+
+// ExportAll builds the whole dump in memory. includeLedger adds the call
+// history, which is why it is opt-in.
+//
+// Prefer ExportConfig + ExportLedgerRows for anything HTTP-facing: this
+// materialises every row. It stays for non-HTTP callers (cmd, tooling, tests)
+// where holding the result is fine and a single value is simpler.
+func (d *DB) ExportAll(ctx context.Context, includeLedger bool) (*Export, error) {
+	exp, err := d.ExportConfig(ctx)
+	if err != nil {
+		return nil, err
 	}
-	if includeLedger {
-		rows, err := d.r.QueryContext(ctx, `
-SELECT ts, client, surface, alias, account, model, status, stream,
-       ttft_ms, total_ms, tokens_in, tokens_out, tokens_cached_read,
-       tokens_cached_write, reasoning_tokens, status
-FROM calls ORDER BY id DESC LIMIT 10000`)
+	if !includeLedger {
+		return exp, nil
+	}
+	rows, err := d.ExportLedgerRows(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	exp.Ledger = []map[string]any{}
+	for rows.Next() {
+		m, err := ScanExportRow(rows)
 		if err != nil {
 			return nil, err
 		}
-		defer rows.Close()
-		exp.Ledger = []map[string]any{}
-		for rows.Next() {
-			var ts, client, surface, alias, account, model string
-			var status, stream int
-			var ttft, total, tin, tout, cread, cwrite, reasoning sql.NullInt64
-			var statusDup int
-			if err := rows.Scan(&ts, &client, &surface, &alias, &account, &model, &status,
-				&stream, &ttft, &total, &tin, &tout, &cread, &cwrite, &reasoning, &statusDup); err != nil {
-				return nil, err
-			}
-			exp.Ledger = append(exp.Ledger, map[string]any{
-				"ts": ts, "client": client, "surface": surface, "alias": alias,
-				"account": account, "model": model, "status": status, "stream": stream == 1,
-				"ttft_ms": nullInt(ttft), "total_ms": nullInt(total),
-				"tokens_in": nullInt(tin), "tokens_out": nullInt(tout),
-				"cached_read": nullInt(cread), "cached_write": nullInt(cwrite),
-				"reasoning": nullInt(reasoning),
-			})
-		}
-		if err := rows.Err(); err != nil {
-			return nil, err
-		}
+		exp.Ledger = append(exp.Ledger, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return exp, nil
 }

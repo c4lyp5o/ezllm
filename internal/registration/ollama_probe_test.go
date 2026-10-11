@@ -86,7 +86,7 @@ func TestOllamaPlanGatedGenerationIsAcceptedWithClearStep(t *testing.T) {
 		t.Fatal(err)
 	}
 	tester := NewTester(client, registry, nil)
-	tester.setAdapter(adapter)
+	tester.adapter = adapter
 	acct := provider.Account{Kind: provider.KindOpenAICompatible, BaseURL: "https://ollama.com/v1", Namespace: "test-ollama"}
 	res := &TestResult{}
 	ok, failure := tester.inferenceStep(context.Background(), adapter, acct, key, "deepseek-v4.1-flash", &pacer{}, res)

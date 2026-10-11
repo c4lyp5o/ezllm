@@ -27,6 +27,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/c4lyp5o/ezllm/internal/provider"
 	"github.com/c4lyp5o/ezllm/internal/store"
@@ -118,6 +119,13 @@ type Tester struct {
 	client   *http.Client
 	registry *provider.Registry
 	db       *store.DB // optional: admin probes are ledgered so spend is visible
+	// adapter is the provider adapter for the key test currently in flight,
+	// resolved once in Run/ProtocolSweep and passed explicitly into doProbe.
+	// It MUST stay a per-Tester field: the server shares one Tester across
+	// concurrent requests and background sweeps, so a process-wide adapter
+	// would let one key test prepare another's probes with the wrong auth
+	// semantics (Bearer vs x-api-key) and reject a valid key.
+	adapter provider.Adapter
 	// sleep is injectable so tests assert probe pacing without waiting on it.
 	sleep func(ctx context.Context, d time.Duration) error
 	now   func() time.Time
@@ -203,7 +211,7 @@ func (t *Tester) Run(ctx context.Context, acct provider.Account, opts Options) *
 		res.Fail = &Failure{Step: StepFormat, Message: err.Error()}
 		return res
 	}
-	t.setAdapter(adapter) // threads the adapter into doProbe (provider quirks live in one place)
+	t.adapter = adapter // per-Tester: doProbe takes this as a parameter, never a global
 
 	key := strings.TrimSpace(opts.APIKey)
 	pace := &pacer{delay: acct.ProbeDelay}
@@ -374,7 +382,7 @@ func (t *Tester) authGate(
 		var ores httpResult
 		ores, authErr = probe(ctx, t, pace, defaultStepTimeout,
 			func(c context.Context) (httpResult, error) {
-				s, b, err := doProbe(c, t.client, oracle, acct, key)
+				s, b, err := doProbe(c, t.client, adapter, oracle, acct, key)
 				return httpResult{status: s, body: b}, err
 			})
 		status, body = ores.status, ores.body
@@ -393,7 +401,7 @@ func (t *Tester) authGate(
 		// public (the N1 class of bug) and this 200 proves nothing.
 		calRes, calErr := probe(ctx, t, pace, defaultStepTimeout,
 			func(c context.Context) (httpResult, error) {
-				s, b, err := doProbe(c, t.client, oracle, acct, fakeKey())
+				s, b, err := doProbe(c, t.client, adapter, oracle, acct, fakeKey())
 				return httpResult{status: s, body: b}, err
 			})
 		calStatus := calRes.status
@@ -492,7 +500,7 @@ func (t *Tester) inferenceStep(
 		var ires httpResult
 		ires, err = probe(ctx, t, pace, defaultStepTimeout,
 			func(c context.Context) (httpResult, error) {
-				s, b, e := doProbe(c, t.client, probeSpec, acct, key)
+				s, b, e := doProbe(c, t.client, adapter, probeSpec, acct, key)
 				return httpResult{status: s, body: b}, e
 			})
 		status, resp = ires.status, ires.body
@@ -586,7 +594,7 @@ func (t *Tester) ProtocolSweep(
 	if err != nil {
 		return out
 	}
-	t.setAdapter(adapter)
+	t.adapter = adapter
 
 	maxModels := opts.ProbeMaxModels
 	if maxModels <= 0 {
@@ -665,7 +673,7 @@ func (t *Tester) probeSurface(
 
 	pres, err := probe(ctx, t, pace, defaultStepTimeout,
 		func(c context.Context) (httpResult, error) {
-			s, b, e := doProbe(c, t.client, spec, acct, key, withBody(body))
+			s, b, e := doProbe(c, t.client, adapter, spec, acct, key, withBody(body))
 			return httpResult{status: s, body: b}, e
 		})
 	status, resp := pres.status, pres.body
@@ -685,9 +693,12 @@ func withBody(b string) *bodyOverride { return &bodyOverride{body: b} }
 
 // doProbe performs one HTTP probe with the adapter's auth semantics: Bearer vs
 // x-api-key, per-request session ids, custom headers — all in one place.
+// The adapter is a parameter, not a package global: Tester is shared across
+// concurrent requests so any process-wide adapter would race.
 func doProbe(
 	ctx context.Context,
 	client *http.Client,
+	adapter provider.Adapter,
 	spec provider.AuthProbe,
 	acct provider.Account,
 	key string,
@@ -714,7 +725,7 @@ func doProbe(
 	if payload != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if err := currentAdapter.PrepareRequest(ctx, req, acct, key, surfaceFor(spec.Path)); err != nil {
+	if err := adapter.PrepareRequest(ctx, req, acct, key, surfaceFor(spec.Path)); err != nil {
 		return 0, nil, err
 	}
 	for k, v := range acct.CustomHeaders {
@@ -734,16 +745,6 @@ func doProbe(
 	}
 	return resp.StatusCode, b, nil
 }
-
-// currentAdapter is set per Run/Sweep. Tests substitute fakes by calling
-// SetAdapterForTest. Single-flight by construction: one Tester per request.
-var currentAdapter provider.Adapter
-
-func (t *Tester) setAdapter(a provider.Adapter) { currentAdapter = a }
-
-// SetAdapterForTest exposes the indirection so unit tests can inject fakes
-// without an http.Client.
-func SetAdapterForTest(a provider.Adapter) { currentAdapter = a }
 
 // surfaceFor picks the wire protocol implied by the probe path.
 func surfaceFor(path string) provider.Surface {
@@ -1126,11 +1127,19 @@ func shortErr(err error) string {
 	return truncate(err.Error(), 160)
 }
 
+// truncate cuts s to at most n BYTES, never splitting a multi-byte rune: the
+// err column is TEXT and the dashboard renders it, so a cut mid-rune would
+// produce invalid UTF-8. This mirrors proxy.go's snippet truncation.
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	// Walk back to the last rune boundary at or before n.
+	cut := n
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
 }
 
 func isJSON(b []byte) bool {

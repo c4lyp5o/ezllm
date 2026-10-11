@@ -56,23 +56,11 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 	// Window: [from, to), defaulting to the last 24h with the same +1min
 	// grace /admin/usage uses (ledger rows are stamped at request start and
 	// written asynchronously — a strict `ts < now` would drop the freshest).
-	now := time.Now().UTC()
-	from, to := now.Add(-24*time.Hour), now.Add(time.Minute)
-	if v := q.Get("from"); v != "" {
-		t, err := time.Parse(time.RFC3339, v)
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, "invalid_request_error", "from must be RFC3339")
-			return
-		}
-		from = t.UTC()
-	}
-	if v := q.Get("to"); v != "" {
-		t, err := time.Parse(time.RFC3339, v)
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, "invalid_request_error", "to must be RFC3339")
-			return
-		}
-		to = t.UTC()
+	// The span is capped by parseWindow so one request cannot force a
+	// full-table aggregate.
+	from, to, ok := parseWindow(w, r, 24*time.Hour)
+	if !ok {
+		return
 	}
 
 	limit := 50

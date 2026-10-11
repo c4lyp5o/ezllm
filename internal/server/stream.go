@@ -50,6 +50,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			"calls":   recent,
 			"ts":      time.Now().UTC().Format(time.RFC3339Nano),
 			"dropped": store.DroppedCalls(),
+			"lost":    store.LostRows(),
 		}); err != nil {
 			return
 		}

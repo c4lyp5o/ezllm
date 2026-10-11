@@ -62,7 +62,10 @@ type Server struct {
 	started     time.Time
 	maxBody     int64
 	web         fs.FS    // dashboard source: embedded dist/ or EZLLM_WEB_DIR
-	corsOrigins []string // /v1 CORS allowlist; empty = any origin
+	corsOrigins []string
+	// usageTZ is the default zone for group_by=day. Never nil: UTC unless
+	// EZLLM_USAGE_TZ says otherwise (validated at boot).
+	usageTZ *time.Location
 }
 
 // Options configures New.
@@ -77,6 +80,26 @@ type Options struct {
 	Log         *slog.Logger
 	MaxBodyMiB  int      // request body cap; default 32
 	CORSOrigins []string // EZLLM_CORS_ORIGINS: empty = any origin, /v1 only
+	// UsageTZ is the default timezone for group_by=day bucketing, from
+	// EZLLM_USAGE_TZ. Empty = UTC (the historical behaviour). A per-request
+	// ?tz= overrides it. It must already RESOLVE: main.go validates it at
+	// startup so a typo is a boot error, not a silent UTC shift.
+	UsageTZ string
+}
+
+// usageTZOrDefault resolves the day-bucketing zone. Empty or whitespace means
+// UTC — the historical behaviour, which must not silently change. A value that
+// does not resolve also falls back to UTC *here*, because main.go has already
+// rejected it at boot, so reaching this line means a caller hand-built Options;
+// the request path still refuses a bad ?tz= outright.
+func usageTZOrDefault(tz string) *time.Location {
+	if strings.TrimSpace(tz) == "" {
+		return time.UTC
+	}
+	if loc, err := time.LoadLocation(strings.TrimSpace(tz)); err == nil {
+		return loc
+	}
+	return time.UTC
 }
 
 func New(opts Options) *Server {
@@ -93,6 +116,7 @@ func New(opts Options) *Server {
 		log: opts.Log, mux: http.NewServeMux(), rulesEngine: opts.Rules,
 		started: time.Now(), maxBody: maxBody,
 		web: webFS(), corsOrigins: opts.CORSOrigins,
+		usageTZ: usageTZOrDefault(opts.UsageTZ),
 	}
 	// A server without a tester cannot run the key test; default one so the
 	// admin routes fail loudly at construction rather than nil-panic per request.
@@ -254,18 +278,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
-}
-
-func (s *Server) countAccounts() (int, error) {
-	var n int
-	err := s.db.Reader().QueryRow(`SELECT COUNT(*) FROM accounts WHERE enabled=1`).Scan(&n)
-	return n, err
-}
-
-func (s *Server) countLedger() (int, error) {
-	var n int
-	err := s.db.Reader().QueryRow(`SELECT COUNT(*) FROM calls`).Scan(&n)
-	return n, err
 }
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
@@ -527,8 +539,11 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 				// Nothing (or only headers) reached the client. Emit an explicit
 				// 502 so a transport failure never looks like an empty 200 —
 				// ResponseWriter defaults to 200 when WriteHeader is never called.
+				// The gate is Committed, NOT Status: commit can fail on the
+				// non-stream body read while still carrying the upstream's 200,
+				// and guarding on Status would let that through as an empty 200.
 				status = http.StatusBadGateway
-				if res.Status == 0 {
+				if !res.Committed {
 					writeErr(w, status, "upstream_error", "upstream request failed: "+ferr.Error())
 				}
 			}
@@ -579,6 +594,52 @@ func errorStatus(err error) int {
 	return http.StatusBadGateway
 }
 
+// maxWindowSpan bounds any [from,to) the admin APIs will aggregate over.
+//
+// from/to were unbounded: an admin could ask for a GROUP BY spanning the
+// entire ledger from its first row to now, and every such request re-scanned
+// the whole table — cost that scales with the requested span is cost the caller
+// controls, so it is capped exactly like `limit` already is. 400 days is
+// deliberately generous for an admin dashboard, and the bound is stated rather
+// than silent.
+const maxWindowSpan = 400 * 24 * time.Hour
+
+// parseWindow reads from/to (RFC3339) with a default span, and refuses a window
+// wider than maxWindowSpan or inverted. The default `to` carries a +1min grace
+// because ledger rows are stamped at request start and written asynchronously —
+// a strict `ts < now` would silently drop the freshest row.
+func parseWindow(w http.ResponseWriter, r *http.Request, defaultSpan time.Duration) (from, to time.Time, ok bool) {
+	q := r.URL.Query()
+	now := time.Now().UTC()
+	from, to = now.Add(-defaultSpan), now.Add(time.Minute)
+	if v := q.Get("from"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid_request_error", "from must be RFC3339")
+			return time.Time{}, time.Time{}, false
+		}
+		from = t.UTC()
+	}
+	if v := q.Get("to"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid_request_error", "to must be RFC3339")
+			return time.Time{}, time.Time{}, false
+		}
+		to = t.UTC()
+	}
+	if !to.After(from) {
+		writeErr(w, http.StatusBadRequest, "invalid_request_error", "to must be after from")
+		return time.Time{}, time.Time{}, false
+	}
+	if d := to.Sub(from); d > maxWindowSpan {
+		writeErr(w, http.StatusBadRequest, "invalid_request_error",
+			fmt.Sprintf("window of %s exceeds the %s cap — narrow from/to", d, maxWindowSpan))
+		return time.Time{}, time.Time{}, false
+	}
+	return from, to, true
+}
+
 func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
 	if !hasRole(r, "admin") {
 		writeErr(w, http.StatusForbidden, "forbidden", "admin role required")
@@ -586,16 +647,34 @@ func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	var accounts, keys, combos, models, calls int
 	var oldest, newest string
-	q := func(query string, dest *int) {
-		_ = s.db.Reader().QueryRowContext(r.Context(), query).Scan(dest)
+	// Errors are RETURNED, not swallowed into a zero. Reporting accounts: 0
+	// because a COUNT query failed states an untruth in the one endpoint whose
+	// whole job is telling the operator whether the box is healthy.
+	q := func(query string, dest *int) error {
+		return s.db.Reader().QueryRowContext(r.Context(), query).Scan(dest)
 	}
-	q(`SELECT COUNT(*) FROM accounts`, &accounts)
-	q(`SELECT COUNT(*) FROM provider_keys`, &keys)
-	q(`SELECT COUNT(*) FROM combos`, &combos)
-	q(`SELECT COUNT(*) FROM models`, &models)
-	q(`SELECT COUNT(*) FROM calls`, &calls)
-	_ = s.db.Reader().QueryRowContext(r.Context(),
-		`SELECT COALESCE(MIN(ts),''),COALESCE(MAX(ts),'') FROM calls`).Scan(&oldest, &newest)
+	for _, c := range []struct {
+		q    string
+		dest *int
+	}{
+		{`SELECT COUNT(*) FROM accounts`, &accounts},
+		{`SELECT COUNT(*) FROM provider_keys`, &keys},
+		{`SELECT COUNT(*) FROM combos`, &combos},
+		{`SELECT COUNT(*) FROM models`, &models},
+		{`SELECT COUNT(*) FROM calls`, &calls},
+	} {
+		if err := q(c.q, c.dest); err != nil {
+			writeErr(w, http.StatusServiceUnavailable, "health_check_failed",
+				"could not read ledger counts: "+err.Error())
+			return
+		}
+	}
+	if err := s.db.Reader().QueryRowContext(r.Context(),
+		`SELECT COALESCE(MIN(ts),''),COALESCE(MAX(ts),'') FROM calls`).Scan(&oldest, &newest); err != nil {
+		writeErr(w, http.StatusServiceUnavailable, "health_check_failed",
+			"could not read ledger span: "+err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":         "ok",
 		"schema_version": s.db.SchemaVersion(),
@@ -607,6 +686,7 @@ func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
 		"ledger_rows":    calls,
 		"ledger_span":    map[string]string{"oldest": oldest, "newest": newest},
 		"dropped_rows":   store.DroppedCalls(),
+		"lost_rows":      store.LostRows(),
 		"uptime_s":       int(time.Since(s.started).Seconds()),
 	})
 }
@@ -617,26 +697,48 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	groupBy := r.URL.Query().Get("group_by")
-	to := time.Now().UTC()
-	from := to.Add(-24 * time.Hour)
-	if v := r.URL.Query().Get("from"); v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			from = t
-		}
+	// Window: [from, to), default 24h with the inclusive +1min grace (rows are
+	// stamped at request start and the ledger is async, so a strict `ts < now`
+	// would silently drop the freshest row) and a capped span.
+	from, to, ok := parseWindow(w, r, 24*time.Hour)
+	if !ok {
+		return
 	}
-	if v := r.URL.Query().Get("to"); v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			to = t
+
+	// Day bucketing zone. Precedence: ?tz= > EZLLM_USAGE_TZ > UTC. The env
+	// default is what makes this usable without every caller knowing the zone
+	// (the point of F9: a deployer sets one variable and the dashboard's day
+	// agrees with the rule's day), and an explicit ?tz= wins for ad-hoc checks.
+	//
+	// Only group_by=day consults it. Every other grouping is unchanged, and a
+	// tz with any other group_by is rejected rather than ignored — a silently
+	// ignored parameter is how a caller believes a number means something it
+	// does not.
+	loc := s.usageTZ
+	if v := strings.TrimSpace(r.URL.Query().Get("tz")); v != "" {
+		if groupBy != "day" {
+			writeErr(w, http.StatusBadRequest, "invalid_request_error",
+				"tz applies only to group_by=day")
+			return
 		}
+		l, err := time.LoadLocation(v)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid_request_error",
+				fmt.Sprintf("tz %q does not resolve to a time zone on this host (use an IANA name like Asia/Kuala_Lumpur)", v))
+			return
+		}
+		loc = l
+	}
+
+	var rows []store.UsageRow
+	var usedTZ string
+	var err error
+	if groupBy == "day" {
+		rows, err = s.db.UsageDayReportTZ(r.Context(), from, to, loc)
+		usedTZ = loc.String()
 	} else {
-		// No explicit `to`: use an INCLUSIVE upper bound. Rows are stamped at
-		// request start and the ledger is async, so a row written a moment ago
-		// can carry a ts marginally after time.Now() as observed by this
-		// handler; a strict `ts < now` filter would silently drop it and
-		// under-report usage. Add a small grace window instead.
-		to = to.Add(time.Minute)
+		rows, err = s.db.UsageReport(r.Context(), from, to, groupBy)
 	}
-	rows, err := s.db.UsageReport(r.Context(), from, to, groupBy)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
@@ -653,11 +755,19 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		totals.TokensSaved += x.TokensSaved
 		totals.Errors += x.Errors
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"from": from.Format(time.RFC3339), "to": to.Format(time.RFC3339),
 		"group_by": orDefault(groupBy, "account"),
 		"groups":   rows, "totals": totals,
-	})
+	}
+	// Echo the zone the day buckets were actually computed in. A day-grouped
+	// number is meaningless without it: the same rows bucket differently in
+	// different zones, and a caller comparing against a rule's refusal has to
+	// know which zone produced the figure.
+	if groupBy == "day" {
+		out["tz"] = usedTZ
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func orDefault(v, def string) string {

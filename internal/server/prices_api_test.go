@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 )
 
 func pricesPath(acct int64) string { return fmt.Sprintf("/admin/accounts/%d/prices", acct) }
@@ -62,12 +63,16 @@ func TestPricesAPI(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &list); err != nil || len(list) != 1 {
 		t.Fatalf("list body = %s err %v", body, err)
 	}
-	// cost window covering the seeded traffic
+	// cost window covering the seeded traffic. The span stays inside
+	// maxWindowSpan: the old 2020→2099 window leaned on the unbounded from/to
+	// that S8 removed, and a window this wide was itself the defect.
 	h.do("POST", "/v1/chat/completions", "tok-infer", `{"model":"up/gpt-6-luna","messages":[{"role":"user","content":"hi"}]}`)
 	if err := h.db.Flush(); err != nil {
 		t.Fatalf("flush: %v", err)
 	}
-	code, _, body = h.do("GET", "/admin/cost?from=2020-01-01T00:00:00Z&to=2099-01-01T00:00:00Z", adminTok(), "")
+	from := time.Now().UTC().Add(-30 * 24 * time.Hour).Format(time.RFC3339)
+	to := time.Now().UTC().Add(time.Minute).Format(time.RFC3339)
+	code, _, body = h.do("GET", "/admin/cost?from="+from+"&to="+to, adminTok(), "")
 	if code != 200 {
 		t.Fatalf("cost: %d (%s)", code, body)
 	}

@@ -95,6 +95,37 @@ Params: `min_tin` `max_tin` `min_tout` `max_tout` (non-negative integers);
 +1min grace); `limit` (1-500, default 50); `sort` = `ts_desc` (default) | `tin_desc` |
 `tout_desc`. Anything invalid → `400`.
 
+### `GET /admin/usage?group_by=&from=&to=`
+Dashboard aggregates (`store.UsageReport`), computed server-side over the FULL filtered
+set — the client never sums rows. `group_by` ∈ `account` (default) | `key` | `alias` |
+`client` | `model` | `surface` | `day`; `from`/`to` are RFC3339 on `[from,to)` and default
+to the last 24h (+1min grace, same as `/admin/requests`). Each row carries
+`p50_ttft_ms`.
+
+**`group_by=day` is UTC by default.** Rows are stamped UTC and the default bucket is
+`substr(ts,1,10)`, so the dashboard's day boundary is midnight UTC. Usage-rule CAPS, by contrast, are evaluated in the
+rule's own `*time.Location` (`rules.Window.loc` — Asia/Kuala_Lumpur unless the rule names
+another zone). The two therefore disagree about which day a call belongs to whenever a rule
+runs in a non-UTC zone, by up to the zone offset: the dashboard's "today" counts a call the
+daily cap already refuses, or vice versa. Compare `group_by=day` against a UTC-aligned rule,
+or derive the day boundary from the rule's `tz` before trusting the two together. The
+grouping is UTC-by-construction and deliberately not silently changed.
+
+**Aligning the two — `EZLLM_USAGE_TZ` / `?tz=`.** Set `EZLLM_USAGE_TZ=Asia/Kuala_Lumpur` in the
+environment and every `group_by=day` bucket is computed in that zone, using the *same*
+`CountBucket` the usage meter writes its counters with — so the dashboard's day and the rule's
+day are one implementation and cannot drift. A per-request `?tz=` overrides the env default.
+Precedence: `?tz=` > `EZLLM_USAGE_TZ` > UTC. A `tz` that does not resolve is rejected (400 on the
+request; the container fails to start naming the bad value), never silently treated as UTC.
+The zone used is echoed back as `tz` in the response, because a day-grouped number is
+meaningless without it. `tz` applies only to `group_by=day` and is rejected for any other
+grouping rather than ignored. DST zones are handled per row, so a day boundary that moves
+during the year is still correct.
+
+**`p50_ttft_ms` convention:** the UPPER of the two middle values for an even-sized group
+(`order by ttft_ms`, position `n/2 + 1`). This is the historical behaviour, kept unchanged —
+it is directional dashboard guidance, not a statistical claim.
+
 ### `POST /admin/accounts` → `201`
 ```jsonc
 // request
@@ -282,6 +313,10 @@ Replaces the hop list atomically (same body shape, `hops` only).
 Full config dump: accounts (no key plaintext — hints + `key_ct` omitted), combos, tokens (hints),
 compression profiles, and per-key latest quota. `?include_ledger=true` adds the call ledger.
 This is the disaster-recovery file; it must re-seed a fresh instance minus credentials.
+The config half is written first and the ledger is **streamed** row by row, so the response is
+chunked (no `Content-Length`) and memory stays flat regardless of ledger size — the ledger is
+**complete**, with no row cap. If the ledger stream fails mid-way the document is still closed
+validly rather than truncated, and `/admin/health` carries the row counts to reconcile against.
 
 ## M3 — quota snapshots
 

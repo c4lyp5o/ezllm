@@ -29,7 +29,7 @@ type harness struct {
 	t        *testing.T
 }
 
-func newHarness(t *testing.T, upstream http.HandlerFunc) *harness {
+func newHarness(t *testing.T, upstream http.HandlerFunc, opts ...func(*Options)) *harness {
 	t.Helper()
 	up := httptest.NewServer(upstream)
 	dir := t.TempDir()
@@ -64,12 +64,16 @@ func newHarness(t *testing.T, upstream http.HandlerFunc) *harness {
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	registry := provider.NewRegistry(client)
-	s := New(Options{
+	serverOpts := Options{
 		Auth: db, Resolver: router.New(db),
 		Dispatcher: proxy.NewDispatcher(client, registry),
 		DB:         db, MaxBodyMiB: 1,
 		Registry: registry, Tester: registration.NewTester(client, registry, db),
-	})
+	}
+	for _, o := range opts {
+		o(&serverOpts)
+	}
+	s := New(serverOpts)
 	h := &harness{handler: s.Handler(), db: db, upstream: up, t: t}
 	t.Cleanup(func() { db.Close(); up.Close() })
 	return h

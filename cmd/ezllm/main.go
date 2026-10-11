@@ -141,11 +141,29 @@ func run() error {
 
 	go refreshProviderModels(ctx, db, registry, cfg.ModelRefresh.Interval, log)
 
+	// EZLLM_USAGE_TZ sets the default zone for group_by=day bucketing so the
+	// dashboard's day view agrees with a usage rule's day. Validated HERE,
+	// at boot, with the real resolver — not with a regex. A typo must be a
+	// startup error: the C5 lesson is that a tz which fails to resolve and
+	// falls back silently is an 8-hour window shift with nothing pointing at
+	// it, and the operator just sees a rule that "is not working".
+	//
+	// Per-request ?tz= still overrides it; this is only the default.
+	usageTZ := strings.TrimSpace(os.Getenv("EZLLM_USAGE_TZ"))
+	if usageTZ != "" {
+		if _, err := time.LoadLocation(usageTZ); err != nil {
+			return fmt.Errorf("EZLLM_USAGE_TZ=%q does not resolve to a time zone on this host "+
+				"(use an IANA name like Asia/Kuala_Lumpur, or unset it for UTC): %w", usageTZ, err)
+		}
+		log.Info("usage day bucketing zone", "tz", usageTZ)
+	}
+
 	srv := server.New(server.Options{
 		Auth: db, Resolver: resolver, Dispatcher: dispatcher, DB: db,
 		Registry: registry, Log: log, Rules: ruleEngine,
 		MaxBodyMiB:  cfg.MaxBodyMiB,
 		CORSOrigins: nil,
+		UsageTZ:     usageTZ,
 	})
 
 	addr := cfg.Listen

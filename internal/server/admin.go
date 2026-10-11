@@ -165,7 +165,11 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreErr(w, err)
 		return
 	}
-	health := s.healthSnapshot()
+	health, err := s.healthSnapshot(ctx)
+	if err != nil {
+		s.writeStoreErr(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"health":           health,
 		"usage":            usage,
@@ -177,19 +181,40 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 
 // healthSnapshot counts the same rows /admin/health reports, shaped for the
 // dashboard's health strip.
-func (s *Server) healthSnapshot() map[string]any {
+//
+// ctx is the REQUEST's context (r.Context()), not context.Background(): six
+// COUNT(*) queries issued on Background keep running after the client has
+// disconnected, which is a leaked-query class — the request that wanted the
+// answer is gone, so nobody is left to consume it.
+//
+// A count query that fails is RETURNED, not swallowed into a zero. The health
+// strip is the operator's "is this thing alive" answer, so reporting
+// accounts: 0 because a query errored is a lie stated in the one place where
+// the truth matters most. The caller answers 503 instead.
+func (s *Server) healthSnapshot(ctx context.Context) (map[string]any, error) {
 	var accounts, keys, combos, models, calls int
 	var oldest, newest string
-	q := func(query string, dest *int) {
-		_ = s.db.Reader().QueryRowContext(context.Background(), query).Scan(dest)
+	q := func(query string, dest *int) error {
+		return s.db.Reader().QueryRowContext(ctx, query).Scan(dest)
 	}
-	q(`SELECT COUNT(*) FROM accounts`, &accounts)
-	q(`SELECT COUNT(*) FROM provider_keys`, &keys)
-	q(`SELECT COUNT(*) FROM combos`, &combos)
-	q(`SELECT COUNT(*) FROM models`, &models)
-	q(`SELECT COUNT(*) FROM calls`, &calls)
-	_ = s.db.Reader().QueryRowContext(context.Background(),
-		`SELECT COALESCE(MIN(ts),''),COALESCE(MAX(ts),'') FROM calls`).Scan(&oldest, &newest)
+	for _, c := range []struct {
+		q    string
+		dest *int
+	}{
+		{`SELECT COUNT(*) FROM accounts`, &accounts},
+		{`SELECT COUNT(*) FROM provider_keys`, &keys},
+		{`SELECT COUNT(*) FROM combos`, &combos},
+		{`SELECT COUNT(*) FROM models`, &models},
+		{`SELECT COUNT(*) FROM calls`, &calls},
+	} {
+		if err := q(c.q, c.dest); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.db.Reader().QueryRowContext(ctx,
+		`SELECT COALESCE(MIN(ts),''),COALESCE(MAX(ts),'') FROM calls`).Scan(&oldest, &newest); err != nil {
+		return nil, err
+	}
 	return map[string]any{
 		"status":         "ok",
 		"schema_version": s.db.SchemaVersion(),
@@ -201,8 +226,9 @@ func (s *Server) healthSnapshot() map[string]any {
 		"ledger_rows":    calls,
 		"ledger_span":    map[string]string{"oldest": oldest, "newest": newest},
 		"dropped_rows":   store.DroppedCalls(),
+		"lost_rows":      store.LostRows(),
 		"uptime_s":       int(time.Since(s.started).Seconds()),
-	}
+	}, nil
 }
 
 // callsCols is the canonical projection for every calls-ledger list view
@@ -766,8 +792,7 @@ func (s *Server) handleSetModelPin(w http.ResponseWriter, r *http.Request) {
 		Pin   json.RawMessage `json:"pin"`
 		Force bool            `json:"force"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, "bad_json", "invalid JSON body")
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	model := body.Model
@@ -1227,18 +1252,111 @@ func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleExport dumps the full config for disaster recovery (no credentials).
+//
+// The ledger is STREAMED, not accumulated. The old shape built one
+// []map[string]any of every call and encoded it in a single write, so the
+// handler's memory scaled with the ledger — and a disaster-recovery file that
+// OOMs the box is not a recovery file. Now each row is projected and written as
+// it is read, so the footprint is flat regardless of ledger size and the file
+// is COMPLETE (no row cap: silently omitting history from the thing you recover
+// WITH is the worst possible failure for this endpoint).
+//
+// Ordering matters: every small config query is answered BEFORE the first
+// ledger byte is written, because a status can no longer change once the body
+// starts. A config failure therefore still answers a proper error, not a
+// half-written file.
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	includeLedger := r.URL.Query().Get("include_ledger") == "true"
-	exp, err := s.db.ExportAll(r.Context(), includeLedger)
+	exp, err := s.db.ExportConfig(r.Context())
 	if err != nil {
 		s.writeStoreErr(w, err)
 		return
 	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition",
 		fmt.Sprintf(`attachment; filename="ezllm-export-%s.json"`,
 			time.Now().UTC().Format("20060102-150405")))
-	writeJSON(w, http.StatusOK, exp)
+	// 200 is decided here: everything below can fail, and after this point the
+	// status is fixed. The config half is already validated, so only the ledger
+	// stream can still fail — and that failure can only truncate, never 500.
+	w.WriteHeader(http.StatusOK)
+
+	flusher, _ := w.(http.Flusher)
+	if _, err := io.WriteString(w, "{"); err != nil {
+		return
+	}
+	obj := newJSONObject(w)
+	for _, f := range []struct {
+		name string
+		v    any
+	}{
+		{"exported_at", exp.ExportedAt},
+		{"schema_version", exp.SchemaVersion},
+		{"accounts", exp.Accounts},
+		{"combos", exp.Combos},
+		{"tokens", exp.Tokens},
+		{"compression_profiles", exp.Compression},
+		{"latest_quotas", exp.Quotas},
+	} {
+		if err := obj.field(f.name, f.v); err != nil {
+			return
+		}
+	}
+
+	if includeLedger {
+		if err := obj.beginField("ledger"); err != nil {
+			return
+		}
+		if err := obj.raw("["); err != nil {
+			return
+		}
+		rows, rerr := s.db.ExportLedgerRows(r.Context())
+		if rerr != nil {
+			// Nothing has been promised yet beyond the opening bracket, so
+			// close the array and object: the client still gets a VALID JSON
+			// document with an empty ledger rather than a truncated one.
+			s.log.Error("export ledger stream failed", "err", rerr)
+			_, _ = io.WriteString(w, "]}")
+			if flusher != nil {
+				flusher.Flush()
+			}
+			return
+		}
+		n := 0
+		for rows.Next() {
+			m, serr := store.ScanExportRow(rows)
+			if serr != nil {
+				s.log.Error("export ledger row scan failed", "err", serr)
+				break
+			}
+			if n > 0 {
+				if _, werr := io.WriteString(w, ","); werr != nil {
+					break // client went away; stop reading
+				}
+			}
+			if eerr := json.NewEncoder(w).Encode(m); eerr != nil {
+				break
+			}
+			n++
+			if flusher != nil && n%500 == 0 { // batch the flushes: one per 500 rows
+				flusher.Flush()
+			}
+		}
+		if err := rows.Err(); err != nil {
+			s.log.Error("export ledger iteration failed", "err", err)
+		}
+		_ = rows.Close() // released before the tail so the read pool is free
+		if _, werr := io.WriteString(w, "]"); werr != nil {
+			return
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+	if _, err := io.WriteString(w, "}"); err != nil {
+		return
+	}
 }
 
 // handleQuotas is the poller's read side: latest snapshot per key.

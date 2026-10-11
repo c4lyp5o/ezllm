@@ -7,7 +7,6 @@ package server
 // whole reason cost is not a stored column.
 
 import (
-	"encoding/json"
 	"net/http"
 	"time"
 
@@ -49,8 +48,7 @@ func (s *Server) handleSetPrice(w http.ResponseWriter, r *http.Request) {
 		PriceCacheWrite *float64 `json:"price_cache_write"`
 		Note            string   `json:"note"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, "bad_json", "invalid JSON body")
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	if body.Model == "" {
@@ -127,8 +125,7 @@ func (s *Server) handleDeletePrice(w http.ResponseWriter, r *http.Request) {
 		Model         string `json:"model"`
 		EffectiveFrom string `json:"effective_from"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, "bad_json", "invalid JSON body")
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	if body.Model == "" || body.EffectiveFrom == "" {
@@ -146,25 +143,10 @@ func (s *Server) handleDeletePrice(w http.ResponseWriter, r *http.Request) {
 // last 7 days. The response names the unpriced gap explicitly so a number that
 // excludes them is never mistaken for the whole bill.
 func (s *Server) handleCost(w http.ResponseWriter, r *http.Request) {
-	to := time.Now().UTC()
-	from := to.Add(-7 * 24 * time.Hour)
-	if v := r.URL.Query().Get("from"); v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			from = t
-		} else {
-			writeErr(w, http.StatusBadRequest, "invalid_request_error", "from must be RFC3339")
-			return
-		}
-	}
-	if v := r.URL.Query().Get("to"); v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			to = t
-		} else {
-			writeErr(w, http.StatusBadRequest, "invalid_request_error", "to must be RFC3339")
-			return
-		}
-	} else {
-		to = to.Add(time.Minute) // same ledger-write grace as /admin/usage
+	// Window: [from, to), default 7 days, capped at maxWindowSpan.
+	from, to, ok := parseWindow(w, r, 7*24*time.Hour)
+	if !ok {
+		return
 	}
 	rows, err := s.db.CostReport(r.Context(), from, to)
 	if err != nil {

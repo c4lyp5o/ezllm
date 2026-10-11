@@ -96,13 +96,13 @@ export default function RecentFeed() {
           <span
             className={cx(
               'size-1.5 rounded-full',
-              live ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400/70',
+              live ? 'bg-ok animate-pulse' : 'bg-warn',
             )}
           />
           {live ? 'live' : 'reconnecting…'}
         </span>
         {dropped > 0 && (
-          <span className="text-[11px] text-amber-400/90">
+          <span className="text-[11px] text-warn">
             {dropped} row{dropped === 1 ? '' : 's'} shed under load
           </span>
         )}
@@ -125,7 +125,7 @@ export default function RecentFeed() {
                   <span
                     className={cx(
                       'font-mono tabular-nums w-12 shrink-0',
-                      bad ? 'text-red-400' : 'text-mute',
+                      bad ? 'text-bad' : 'text-mute',
                     )}
                   >
                     {c.status}
@@ -147,10 +147,10 @@ export default function RecentFeed() {
                         className={cx(
                           'ml-1.5 rounded px-1 py-0.5 font-mono text-[10px] align-middle',
                           c.applied && c.saved > 0
-                            ? 'bg-emerald-500/10 text-emerald-300/90'
+                            ? 'bg-ok-dim text-ok'
                             : c.savedNotional > 0 && !c.applied
-                              ? 'bg-amber-500/10 text-amber-300/90'
-                              : 'bg-[rgba(255,255,255,0.06)] text-mute',
+                              ? 'bg-warn-dim text-warn'
+                              : 'bg-shade text-mute',
                         )}
                       >
                         {c.compression === 'off'
@@ -171,7 +171,7 @@ export default function RecentFeed() {
                   <span className="font-mono tabular-nums text-mute w-28 shrink-0 text-right">
                     {formatTokens(c.tin)}↑ {formatTokens(c.tout)}↓
                     {c.saved > 0 && (
-                      <span className="text-emerald-300/80" title="tokens saved by compression">
+                      <span className="text-ok" title="tokens saved by compression">
                         {' '}
                         −{formatTokens(c.saved)}
                       </span>

@@ -198,7 +198,7 @@ export default function Connect() {
       </p>
 
       {err && (
-        <div className="rounded-lg border border-[rgba(248,113,113,0.3)] bg-[rgba(248,113,113,0.06)] px-4 py-3 text-[13px] text-bad">
+        <div className="rounded-lg border border-[rgba(248,113,113,0.3)] bg-bad-dim px-4 py-3 text-[13px] text-bad">
           {err}
         </div>
       )}
@@ -338,7 +338,7 @@ export default function Connect() {
       {fresh && (
         // Deliberately NOT <Modal>: backdrop clicks and Escape would dismiss a
         // one-time secret. The only way out is the button below.
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,0.72)] px-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay px-4">
           <div
             role="dialog"
             aria-modal="true"
@@ -356,7 +356,7 @@ export default function Connect() {
               <FieldRow label="base" value={base} />
               <FieldRow label="role" value={fresh.roles.join(' · ')} mono={false} />
               {fresh.roles.includes('admin') && (
-                <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-[12px] leading-relaxed text-amber-200">
+                <p className="rounded-lg border border-warn/30 bg-warn-dim p-2.5 text-[12px] leading-relaxed text-warn">
                   This key has admin role — it can add providers, read provider keys and mint other keys. For an
                   app that only needs models, create an <span className="text-ink">infer</span> key instead.
                 </p>

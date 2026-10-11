@@ -1,0 +1,294 @@
+// Shared data-viz primitives for every analytics surface.
+//
+// Two rules this module exists to enforce:
+//   1. ONE colour per meaning. `--color-viz-*` in index.css is the only source;
+//      no page may hardcode a hex for a series (Stats used #60a5fa and #4ade80
+//      for colours Dashboard spelled #38bdf8 and #34d399 — the same "saved"
+//      series rendered as two different colours on two screens).
+//   2. Aggregates arrive pre-aggregated from SQL. Nothing here re-sums raw
+//      rows — these are presentation layers over /admin/usage groups.
+import { motion, useReducedMotion } from 'framer-motion';
+import type { CSSProperties, ReactNode } from 'react';
+import { cx, formatTokens, pct, SectionLabel } from './ui';
+
+// ── palette ───────────────────────────────────────────────────────────────
+// Read through CSS vars so a token rename re-skins every chart and recharts
+// (which wants a literal fill) still gets a resolved colour.
+const v = (name: string) => `var(${name})`;
+
+export const VIZ = {
+  in: v('--color-viz-in'),
+  out: v('--color-viz-out'),
+  cached: v('--color-viz-cached'),
+  reasoning: v('--color-viz-reasoning'),
+  saved: v('--color-viz-saved'),
+  error: v('--color-viz-error'),
+  latency: v('--color-viz-latency'),
+} as const;
+
+export const CAT = Array.from({ length: 8 }, (_, i) => v(`--color-viz-cat-${i + 1}`));
+export const catColor = (i: number) => CAT[i % CAT.length];
+
+// ── shared recharts furniture ──────────────────────────────────────────────
+// Every chart in the app passes these, so axis/grid/tooltip/crosshair cannot
+// drift between pages (Dashboard used the tokens, Stats hardcoded #111/#333).
+export const chartGrid = { stroke: v('--color-viz-grid'), strokeDasharray: '3 3' } as const;
+
+export const axisProps = {
+  tick: { fill: v('--color-viz-axis'), fontSize: 10.5, fontFamily: 'var(--font-mono)' },
+  tickLine: false,
+  axisLine: false,
+} as const;
+
+export const axisPropsCompact = {
+  tick: { fill: v('--color-viz-axis'), fontSize: 10 },
+  tickLine: false,
+  axisLine: false,
+} as const;
+
+export const cursorFill = { fill: v('--color-viz-crosshair') } as const;
+
+export const tooltipBox: CSSProperties = {
+  background: v('--color-raised'),
+  border: `1px solid ${v('--color-line-strong')}`,
+  borderRadius: 8,
+  fontSize: 12,
+  fontFamily: 'var(--font-mono)',
+  color: v('--color-ink'),
+  padding: '8px 10px',
+  boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
+};
+
+// ── custom tooltip ─────────────────────────────────────────────────────────
+// Recharts' default tooltip renders a coloured square per series and a
+// right-aligned row, which fights the mono/tabular look everywhere else.
+// This keeps one shape: label on top, then name … value rows.
+type TipRow = { name?: string; value?: number | string; color?: string; dataKey?: string | number };
+type TipProps = { active?: boolean; payload?: TipRow[]; label?: string; format?: (n: number) => string };
+
+export function ChartTooltip({ active, payload, label, format = formatTokens }: TipProps) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div style={tooltipBox}>
+      {label != null && label !== '' && (
+        <div className="mb-1.5 text-[11px] font-semibold text-ink">{label}</div>
+      )}
+      <div className="space-y-1">
+        {payload.map((row, i) => (
+          <div key={`${row.dataKey ?? i}`} className="flex items-center gap-3">
+            <span className="flex items-center gap-1.5 text-[11px] text-dim">
+              <span className="h-1.5 w-1.5 rounded-full" style={{ background: row.color }} />
+              {row.name}
+            </span>
+            <span className="ml-auto tnum text-[11.5px] text-ink">
+              {typeof row.value === 'number' ? format(row.value) : String(row.value ?? '–')}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── sparkline ─────────────────────────────────────────────────────────────
+// A trend at card scale. Hand-rolled SVG, not recharts: a recharts chart per
+// stat card costs a ResponsiveContainer plus its resize observer, and this
+// dashboard already ships one full recharts bundle.
+export function Sparkline({
+  data, color = VIZ.in, height = 28, filled = true, className,
+}: {
+  data: number[]; color?: string; height?: number; filled?: boolean; className?: string;
+}) {
+  const points = data.filter((n) => Number.isFinite(n));
+  if (points.length < 2) {
+    // One point is not a trend. A flat line for a single value would read as
+    // "stable" when it is really "unknown".
+    return <div className={cx('h-7', className)} aria-hidden />;
+  }
+  const w = 100;
+  const h = height;
+  const max = Math.max(...points);
+  const min = Math.min(...points);
+  const span = max - min;
+  const pad = 2;
+  const x = (i: number) => (i / (points.length - 1)) * w;
+  const y = (n: number) => (span === 0 ? h / 2 : pad + (1 - (n - min) / span) * (h - pad * 2));
+  const line = points.map((n, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(2)},${y(n).toFixed(2)}`).join(' ');
+  const area = `${line} L${w},${h} L0,${h} Z`;
+  const gid = `spark-${color.replace(/[^a-z0-9]/gi, '')}`;
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className={cx('w-full', className)}
+      style={{ height }} aria-hidden focusable="false">
+      {filled && (
+        <>
+          <defs>
+            <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity="0.28" />
+              <stop offset="100%" stopColor={color} stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path d={area} fill={`url(#${gid})`} />
+        </>
+      )}
+      <path d={line} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// ── bar list ──────────────────────────────────────────────────────────────
+// The workhorse for "rank N named things": models, clients, aliases, accounts.
+// A pie chart is unreadable past five slices and a recharts bar chart costs a
+// container per card; this is a labelled bar, the share, and the value.
+export function BarList({
+  rows, total, format = formatTokens, maxRows, emptyLabel = 'nothing in this range',
+}: {
+  rows: { key: string; value: number; color?: string; hint?: string }[];
+  total?: number;
+  format?: (n: number) => string;
+  maxRows?: number;
+  emptyLabel?: string;
+}) {
+  const reduce = useReducedMotion();
+  const shown = maxRows ? rows.slice(0, maxRows) : rows;
+  const sum = total ?? rows.reduce((a, r) => a + r.value, 0);
+  const max = Math.max(...shown.map((r) => r.value), 0);
+  if (shown.length === 0) return <p className="px-5 py-8 text-center text-[12.5px] text-mute">{emptyLabel}</p>;
+  return (
+    <ul className="space-y-2.5">
+      {shown.map((r, i) => {
+        const share = pct(r.value, sum);
+        return (
+          <li key={`${r.key}-${i}`} className="group">
+            <div className="flex items-baseline gap-3">
+              <span className="min-w-0 flex-1 truncate text-[12.5px] text-dim" title={r.hint ?? r.key}>{r.key}</span>
+              <span className="tnum shrink-0 font-mono text-[12px] text-ink">{format(r.value)}</span>
+              {/* Share of the total, not of the bar: the bar is scaled to the
+                  largest row, so a bar's length and its share only agree when
+                  one row dominates. Both numbers are useful and they are not
+                  the same number. */}
+              <span className="tnum w-11 shrink-0 text-right font-mono text-[11px] text-mute">{share}</span>
+            </div>
+            <div className="mt-1 h-1 overflow-hidden rounded-full bg-shade">
+              <motion.div
+                className="h-full rounded-full"
+                style={{ background: r.color ?? VIZ.in }}
+                initial={reduce ? false : { width: 0 }}
+                animate={{ width: `${max > 0 ? (r.value / max) * 100 : 0}%` }}
+                transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1], delay: reduce ? 0 : Math.min(i * 0.035, 0.25) }}
+              />
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+// ── composition bar ───────────────────────────────────────────────────────
+// One stacked bar that answers "what were these tokens?". The point is the
+// RATIO between parts, so it renders the same at any width.
+export function CompositionBar({
+  parts, format = formatTokens, height = 10, className,
+}: {
+  parts: { key: string; label: string; value: number; color: string }[];
+  format?: (n: number) => string;
+  height?: number;
+  className?: string;
+}) {
+  const reduce = useReducedMotion();
+  const sum = parts.reduce((a, p) => a + Math.max(0, p.value), 0);
+  if (sum <= 0) {
+    return <div className={cx('rounded-full bg-inset', className)} style={{ height }} />;
+  }
+  return (
+    <div className={cx('flex gap-px overflow-hidden rounded-full bg-inset', className)}
+      style={{ height }} title={parts.map((p) => `${p.label} ${format(p.value)}`).join(' · ')}>
+      {parts.filter((p) => p.value > 0).map((p, i) => (
+        <motion.div
+          key={p.key}
+          className="h-full first:rounded-l-full last:rounded-r-full"
+          style={{ background: p.color }}
+          initial={reduce ? false : { width: 0 }}
+          animate={{ width: `${(p.value / sum) * 100}%` }}
+          transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1], delay: reduce ? 0 : i * 0.05 }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ── delta / trend ─────────────────────────────────────────────────────────
+// Direction with an honest guard: a previous of 0 has no meaningful percent,
+// so it reports the absolute move instead of dividing by zero and printing
+// "∞%" or "NaN%".
+export function Delta({ current, previous, className }: { current: number; previous: number; className?: string }) {
+  if (!Number.isFinite(current) || !Number.isFinite(previous) || previous <= 0) return null;
+  const pct = ((current - previous) / previous) * 100;
+  const up = pct > 0;
+  const flat = Math.abs(pct) < 0.05;
+  if (flat) return <span className={cx('text-[11px] text-mute', className)}>flat</span>;
+  return (
+    <span className={cx('tnum inline-flex items-center gap-0.5 text-[11px] font-medium', up ? 'text-warn' : 'text-ok', className)}
+      title={`${formatTokens(current)} vs ${formatTokens(previous)} previously`}>
+      <span aria-hidden>{up ? '▲' : '▼'}</span>
+      {Math.abs(pct) >= 100 ? `${Math.abs(pct).toFixed(0)}%` : `${Math.abs(pct).toFixed(1)}%`}
+    </span>
+  );
+}
+
+// ── card shell ────────────────────────────────────────────────────────────
+// Every analytics card uses this so padding, radius, border and header
+// spacing are identical; pages only supply the label and the extra.
+export function Panel({
+  label, aside, children, className, bodyClass,
+}: {
+  label?: ReactNode; aside?: ReactNode; children: ReactNode; className?: string; bodyClass?: string;
+}) {
+  return (
+    <section className={cx('flex min-w-0 flex-col rounded-xl border border-line bg-surface', className)}>
+      {(label || aside) && (
+        <header className="flex items-baseline justify-between gap-3 border-b border-line px-5 py-3.5">
+          {label}
+          {aside}
+        </header>
+      )}
+      <div className={cx('min-w-0 flex-1 p-5', bodyClass)}>{children}</div>
+    </section>
+  );
+}
+
+// ── stat card ─────────────────────────────────────────────────────────────
+// Dashboard's four cards, Stats' seven cards and Economics' metrics were
+// three near-identical components. This is the one. The sparkline is what
+// makes it worth unifying: a trend costs no recharts container, so a card can
+// show direction at the same weight as the number.
+export function StatCard({
+  label, value, sub, tone, spark, sparkColor, footer,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  tone?: string;
+  spark?: number[];
+  sparkColor?: string;
+  footer?: ReactNode;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col rounded-xl border border-line bg-surface px-4 py-3.5">
+      <SectionLabel>{label}</SectionLabel>
+      <div className={cx('mt-1.5 font-mono text-[22px] font-semibold tracking-tight tnum', tone ?? 'text-ink')}>
+        {value}
+      </div>
+      {sub && <div className="mt-0.5 text-[11px] text-mute">{sub}</div>}
+      {spark && spark.length > 1 && (
+        <div className="mt-2 -mb-1"><Sparkline data={spark} color={sparkColor} height={26} /></div>
+      )}
+      {footer && <div className="mt-2 border-t border-line pt-2.5">{footer}</div>}
+    </div>
+  );
+}
+
+// Label + value in the same compact shape the panels use, for card footers.
+export function StatLabel({ children }: { children: ReactNode }) {
+  return <div className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-mute">{children}</div>;
+}

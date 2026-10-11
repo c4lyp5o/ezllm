@@ -3,10 +3,37 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#0a0a0b" />
     <title>ezllm</title>
-    <link data-icon href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%23101014%22%2F%3E%3Cpath%20d%3D%22M10%2022V10h4a4%204%200%200%201%200%208h-4m4%200l4%204%22%20stroke%3D%22%2338bdf8%22%20stroke-width%3D%222.5%22%20fill%3D%22none%22%20stroke-linecap%3D%22round%22%2F%3E%3Csvg%3E" rel="icon" />
+    <link data-icon href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%23101014%22%2F%3E%3Cpath%20d%3D%22M10%2022V10h4a4%204%200%200%201%200%208h-4m4%200l4%204%22%20stroke%3D%22%2338bdf8%22%20stroke-width%3D%222.5%22%20fill%3D%22none%22%20stroke-linecap%3D%22round%22%2F%3E%3Csvg%3E" rel="icon" />
+    <script>
+      // Theme bootstrap, deliberately inline and non-module: it must run before
+      // first paint, and a module script is deferred until after the document
+      // is parsed — which is exactly the flash this prevents.
+      //
+      // There is exactly ONE rule: a stored choice wins, otherwise DARK.
+      //
+      // No prefers-color-scheme branch, on purpose. The first version had one,
+      // and it made the default depend on the OS: every headless/CI browser
+      // and any machine left on light produced a light first paint, which is
+      // not the default the operator asked for. A dashboard that silently
+      // re-themes because the laptop's sunset timer fired is also worse than
+      // one that never did. Stored choice, or dark. That is all.
+      (function () {
+        try {
+          var t = localStorage.getItem('ezllm.theme') === 'light' ? 'light' : 'dark';
+          var root = document.documentElement;
+          root.classList.toggle('dark', t === 'dark');
+          root.classList.toggle('light', t === 'light');
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute('content', t === 'dark' ? '#0a0a0b' : '#f6f7f9');
+        } catch (e) {
+          /* storage blocked or an exotic engine: class="dark" is already on
+             <html> and `color-scheme: dark` is already the default, so the
+             correct state is in effect with nothing to undo. */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

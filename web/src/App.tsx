@@ -2,8 +2,12 @@
 // Nothing renders or fetches before the unlock screen hands back a token.
 import { useCallback, useEffect, useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
+import { AnimatePresence, motion } from 'framer-motion';
 import { clearToken, dashboardLogin, getToken, setToken } from './api';
+import { DUR, spring } from './motion';
+import { readTheme, setTheme, type Theme } from './theme';
 import { Spinner, cx } from './ui';
+import ThemeToggle from './ThemeToggle';
 import Dashboard from './pages/Dashboard';
 import Providers from './pages/Providers';
 import Combos from './pages/Combos';
@@ -51,6 +55,28 @@ const LOGO = (
     <path d="M4 18V6h4.5a3.5 3.5 0 0 1 0 7H4m4.5 0L13 18" />
   </svg>
 );
+
+// Version badge beside the wordmark. This is a PLACEHOLDER, deliberately a
+// plain constant rather than an import of web/package.json's version: the
+// dashboard is served from an embedded bundle inside the Go binary, so the JS
+// package version and the running build are not the same thing and reading
+// one to display the other would be a lie. Bump this at release; the title
+// names the milestone so the chip is not the only place that knowledge lives.
+const VERSION = 'v0.1.0';
+
+// Where the source lives. Opened in a new tab with an explicit rel: this is a
+// cross-origin link out of the control plane, and without rel="noreferrer"
+// the destination receives the dashboard's own URL as the referrer.
+const REPO_URL = 'https://github.com/c4lyp5o/ezllm';
+const PROFILE_URL = 'https://github.com/c4lyp5o';
+
+function GitHubIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" className={cx('h-3.5 w-3.5', className)} fill="currentColor" aria-hidden focusable="false">
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-2.91-.88-2.91-2.79 0-.55.2-1.02.51-1.38-.05-.13-.22-.65.05-1.35 0 0 .61-.19 2 .74a5.4 5.4 0 0 1 1.4-.19c.48 0 .96.06 1.41.19 1.38-.93 1.99-.74 1.99-.74.27.7.1 1.22.05 1.35.32.36.51.83.51 1.38 0 1.92-1.14 2.59-2.92 2.79.3.26.56.76.56 1.53 0 1.11-.01 2-.01 2.27 0 .21.15.46.55.38A7.99 7.99 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+    </svg>
+  );
+}
 
 function Unlock({ onUnlock }: { onUnlock: () => void }) {
   const [value, setValue] = useState('');
@@ -106,12 +132,20 @@ function Unlock({ onUnlock }: { onUnlock: () => void }) {
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const location = useLocation();
+  const [theme, setThemeState] = useState<Theme>(() => readTheme());
+
+  const changeTheme = useCallback((t: Theme) => { setThemeState(t); setTheme(t); }, []);
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2.5 px-5 py-5">
         {LOGO}
         <span className="text-[15px] font-semibold tracking-tight">ezllm</span>
-        <span title="M1–M7 shipped — live" className="ml-auto cursor-help rounded-full border border-line bg-raised px-2 py-0.5 font-mono text-[10px] text-mute">M7</span>
+        <a href={REPO_URL} target="_blank" rel="noreferrer noopener"
+          title={`ezllm ${VERSION} — M1–M7 shipped, live on llm.calypso.dedyn.io`}
+          className="ml-auto cursor-help rounded-full border border-line bg-raised px-2 py-0.5 font-mono text-[10px] text-mute transition-colors hover:border-line-strong hover:text-ink">
+          {VERSION}
+        </a>
       </div>
       <nav className="flex-1 space-y-1 px-3">
         {NAV.map((item) => {
@@ -127,14 +161,23 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           );
         })}
       </nav>
-      <div className="border-t border-line px-5 py-4">
-        <button
-          type="button"
-          className="text-[11.5px] text-mute transition-colors hover:text-bad"
-          onClick={() => { clearToken(); onNavigate?.(); window.location.reload(); }}
-        >
-          Log out
-        </button>
+      <div className="space-y-1 border-t border-line px-3 py-3">
+        <ThemeToggle theme={theme} onChange={changeTheme} />
+        <div className="flex items-center px-3 py-1">
+          <a href={PROFILE_URL} target="_blank" rel="noreferrer noopener"
+            aria-label="GitHub profile (c4lyp5o)" title="github.com/c4lyp5o"
+            className="flex items-center gap-2 text-[11.5px] text-mute transition-colors hover:text-ink">
+            <GitHubIcon />
+            <span className="font-mono">c4lyp5o</span>
+          </a>
+          <button
+            type="button"
+            className="ml-auto text-[11.5px] text-mute transition-colors hover:text-bad"
+            onClick={() => { clearToken(); onNavigate?.(); window.location.reload(); }}
+          >
+            Log out
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -191,15 +234,24 @@ export default function App() {
         <SidebarContent />
       </aside>
 
-      {/* Sidebar — mobile drawer */}
-      {drawer && (
-        <div className="fixed inset-0 z-50 lg:hidden">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-fade-in" onClick={closeDrawer} />
-          <aside className="absolute bottom-0 left-0 top-0 w-64 border-r border-line bg-surface animate-fade-in">
-            <SidebarContent onNavigate={closeDrawer} />
-          </aside>
-        </div>
-      )}
+      {/* Sidebar — mobile drawer. AnimatePresence plays the exit, so closing
+          is a slide-out rather than a snap. */}
+      <AnimatePresence>
+        {drawer && (
+          <div className="fixed inset-0 z-50 lg:hidden">
+            <motion.div
+              className="absolute inset-0 bg-overlay backdrop-blur-sm"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              transition={{ duration: DUR.fast }} onClick={closeDrawer} />
+            <motion.aside
+              className="absolute bottom-0 left-0 top-0 w-64 border-r border-line bg-surface"
+              initial={{ x: '-100%' }} animate={{ x: 0 }} exit={{ x: '-100%' }}
+              transition={spring}>
+              <SidebarContent onNavigate={closeDrawer} />
+            </motion.aside>
+          </div>
+        )}
+      </AnimatePresence>
 
       <main className="min-w-0 flex-1 px-4 pb-16 pt-20 lg:ml-60 lg:pl-8 lg:pr-8 lg:pt-8 xl:px-10">
         <div className="hidden items-baseline gap-3 lg:flex">
@@ -209,10 +261,24 @@ export default function App() {
         {isAnalytics(location.pathname) && (
           <nav className="mt-5 flex gap-1 border-b border-line" aria-label="Analytics views">
             {ANALYTICS_TABS.map((tab) => (
-              <NavLink key={tab.to} to={tab.to}
-                className={({ isActive }) => cx('-mb-px border-b-2 px-3 py-2 text-[13px] transition-colors',
-                  isActive ? 'border-accent text-ink' : 'border-transparent text-mute hover:text-ink')}>
-                {tab.label}
+              <NavLink key={tab.to} to={tab.to} className="relative -mb-px px-3 py-2 text-[13px] transition-colors">
+                {({ isActive }) => (
+                  <>
+                    <span className={cx('relative z-10', isActive ? 'text-ink' : 'text-mute hover:text-ink')}>
+                      {tab.label}
+                    </span>
+                    {/* The underline is ONE element that slides between tabs
+                        (shared layoutId) instead of two borders swapping
+                        visibility — the eye follows the indicator rather than
+                        re-reading the row. */}
+                    {isActive && (
+                      <motion.span
+                        layoutId="analytics-tab-underline"
+                        className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-accent"
+                        transition={spring} />
+                    )}
+                  </>
+                )}
               </NavLink>
             ))}
           </nav>

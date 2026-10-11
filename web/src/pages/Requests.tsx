@@ -43,7 +43,7 @@ function Seg<T extends string>({ options, value, onChange }: {
           onClick={() => onChange(o.key)}
           className={cx(
             'rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors',
-            o.key === value ? 'bg-accent text-white' : 'text-mute hover:text-ink',
+            o.key === value ? 'bg-accent text-accent-ink' : 'text-mute hover:text-ink',
           )}
         >
           {o.label}

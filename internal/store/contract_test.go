@@ -66,8 +66,15 @@ func TestUsageRowJSONKeysMatchFrontend(t *testing.T) {
 	}
 	sort.Strings(goKeys)
 
-	// Fields the API sends that the frontend simply doesn't use yet.
-	unread := map[string]bool{"p50_ttft_ms": true}
+	// NOTE: this test deliberately keeps NO "fields the frontend ignores"
+	// allowlist. It used to hold exactly one entry, p50_ttft_ms — the median
+	// time-to-first-token per group, computed in SQL and served on every usage
+	// row. The exemption let that field sit unread for its whole life, so the
+	// dashboard could never show latency without someone first noticing the
+	// escape hatch and editing this test. The analytics explorer now reads it
+	// (web/src/api.ts declares it; focusValue("latency") consumes it), so the
+	// exemption is gone and the next field the frontend fails to declare fails
+	// loudly here instead of quietly disappearing from the UI.
 
 	tsKeys := usageRowTSKeys(t)
 
@@ -75,6 +82,7 @@ func TestUsageRowJSONKeysMatchFrontend(t *testing.T) {
 	for _, k := range goKeys {
 		inGo[k] = true
 	}
+
 	// 1. everything the frontend reads must actually be sent — this is the
 	//    failure that blanked the stat cards.
 	for _, k := range tsKeys {
@@ -88,7 +96,7 @@ func TestUsageRowJSONKeysMatchFrontend(t *testing.T) {
 		inTS[k] = true
 	}
 	for _, k := range goKeys {
-		if !inTS[k] && !unread[k] {
+		if !inTS[k] {
 			t.Errorf("UsageRow sends %q which the frontend does not declare — add it to web/src/api.ts or to `unread`", k)
 		}
 	}

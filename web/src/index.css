@@ -1,36 +1,192 @@
 @import "tailwindcss";
 
+/* Class-based dark mode. The bare `dark:` variant from Tailwind v4 is
+   media-query only; `@custom-variant` re-points it at the class so the toggle
+   in the sidebar can drive it and the choice can persist. */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ══ THEME ARCHITECTURE — read before adding a colour ══════════════════════
+   :root / @theme holds the LIGHT baseline. The DARK palette lives in a plain
+   `.dark { … }` block lower down that overrides THE SAME token names.
+
+   This is the opposite of how this file was first written (dark values in
+   @theme, nothing to switch to), and the reason is a real, silent bug: values
+   declared inside `@theme` are emitted at `:root`, so they are identical in
+   both modes. Toggling a `.dark` class then flips nothing at all — every
+   `var(--color-*)` still resolves to the one value it always had, and the
+   toggle looks broken with no error anywhere.
+
+   Rule: a token is declared ONCE in @theme (light) and ONCE in .dark. Never
+   declare a token only in .dark, and never read a raw hex in a component —
+   that is what "light mode with grey ghosts" is made of. Every translucent
+   white wash in the UI (row hovers, skeleton fills, inset fills) has a token
+   pair for exactly this reason.
+
+   Comments inside `@theme` MUST be /* *​/ — a // line is parsed as part of a
+   declaration and fails the whole build ("@theme blocks must only contain
+   custom properties or @keyframes"). Outside @theme, // is fine. */
+
 @theme {
-  --color-bg: #0a0a0b;
-  --color-surface: #101013;
-  --color-raised: #17171c;
-  --color-hover: #1d1d23;
-  --color-line: rgba(255, 255, 255, 0.08);
-  --color-line-strong: rgba(255, 255, 255, 0.14);
-  --color-ink: #ececef;
-  --color-dim: #a2a2ac;
-  --color-mute: #62626e;
-  --color-accent: #38bdf8;
-  --color-accent-dim: rgba(56, 189, 248, 0.14);
-  --color-ok: #34d399;
-  --color-warn: #fbbf24;
-  --color-bad: #f87171;
+  /* ── surfaces (light) ── */
+  --color-bg: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-raised: #f1f2f5;
+  --color-hover: #e9eaee;
+  --color-overlay: rgba(17, 20, 24, 0.42);
+
+  --color-line: rgba(15, 18, 22, 0.11);
+  --color-line-strong: rgba(15, 18, 22, 0.2);
+
+  --color-ink: #14171c;
+  --color-dim: #4c5361;
+  --color-mute: #7c8494;
+
+  --color-accent: #0284c7;
+  --color-accent-dim: rgba(2, 132, 199, 0.11);
+  /* Ink that goes ON TOP of an accent fill. It must invert with the accent:
+     light-mode accent is a dark blue (#0284c7) and wants white text, while
+     dark-mode accent is a bright sky (#38bdf8) and wants near-black. A single
+     hardcoded value is wrong in one of the two modes no matter which you pick
+     — this is why `text-white` / `text-[#082a3d]` both appear in the codebase
+     today and neither is correct everywhere. */
+  --color-accent-ink: #ffffff;
+
+  --color-ok: #047857;
+  --color-warn: #a16207;
+  --color-bad: #b91c1c;
+  /* Dim tints for the same three states: the fill behind a status chip or
+     alert border. Opaque percentages of the status hue, lightened/darkened
+     per theme, so a light-mode alert is a pale wash rather than a bright
+     emerald block that no text sits on readably. */
+  --color-ok-dim: rgba(4, 120, 87, 0.1);
+  --color-warn-dim: rgba(161, 98, 7, 0.12);
+  --color-bad-dim: rgba(185, 28, 28, 0.09);
+
+  /* ── data-viz series (light) ───────────────────────────────────────────
+     Deeper than the dark set: series colours have to survive a white surface
+     and a 4.5:1 text contrast floor, which rules out #38bdf8 as anything but
+     a fill on a dark chart. These are the values charts should have had in
+     light mode all along rather than a re-hue after the fact. */
+  --color-viz-in: #0369a1;
+  --color-viz-out: #4f46e5;
+  --color-viz-cached: #0e7490;
+  --color-viz-reasoning: #a16207;
+  --color-viz-saved: #047857;
+  --color-viz-error: #b91c1c;
+  --color-viz-latency: #6d28d9;
+  --color-viz-cat-1: #0369a1;
+  --color-viz-cat-2: #4f46e5;
+  --color-viz-cat-3: #047857;
+  --color-viz-cat-4: #a16207;
+  --color-viz-cat-5: #b91c1c;
+  --color-viz-cat-6: #6d28d9;
+  --color-viz-cat-7: #0f766e;
+  --color-viz-cat-8: #c2410c;
+  --color-viz-grid: rgba(15, 18, 22, 0.08);
+  --color-viz-axis: #6b7280;
+  --color-viz-crosshair: rgba(15, 18, 22, 0.05);
+
+  /* ── washes (light) ─────────────────────────────────────────────────────
+     Translucent fills sit on top of a surface and MUST invert with the theme.
+     A `rgba(255,255,255,0.05)` row hover is visible on a dark surface and
+     literally invisible on a white one — that is the grey-ghost failure. */
+  --color-wash: rgba(15, 18, 22, 0.045);
+  --color-wash-strong: rgba(15, 18, 22, 0.08);
+  --color-inset: rgba(15, 18, 22, 0.035);
+  --color-shade: rgba(15, 18, 22, 0.06);
 
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "JetBrains Mono", Consolas, monospace;
 
+  /* ── motion tokens ─────────────────────────────────────────────────────
+     framer-motion reads these and they double as the CSS animation
+     durations. Keep the fast tier ≤200ms: every one of these fires on data
+     that re-polls on a timer, and a slow ease on a 15s refresh loop reads to
+     the operator as lag, not polish. */
+  --dur-fast: 140ms;
+  --dur-base: 220ms;
+  --dur-slow: 360ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+
   --animate-pulse-soft: pulse-soft 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  --animate-fade-up: fade-up 200ms ease-out both;
-  --animate-fade-in: fade-in 150ms ease-out both;
+  --animate-fade-up: fade-up var(--dur-base) var(--ease-out) both;
+  --animate-fade-in: fade-in var(--dur-fast) var(--ease-out) both;
+  --animate-shimmer: shimmer 1.6s linear infinite;
+}
+
+/* The dark palette. Same names, dark values, applied by a class on <html>.
+   A token listed here with no @theme counterpart is a bug — it would exist
+   only in dark mode and every component using it would render unset in light. */
+.dark {
+  --color-bg: #0a0a0b;
+  --color-surface: #101013;
+  --color-raised: #17171c;
+  --color-hover: #1d1d23;
+  --color-overlay: rgba(4, 4, 6, 0.66);
+
+  --color-line: rgba(255, 255, 255, 0.08);
+  --color-line-strong: rgba(255, 255, 255, 0.14);
+
+  --color-ink: #ececef;
+  --color-dim: #a2a2ac;
+  --color-mute: #7c7c8a;
+
+  --color-accent: #38bdf8;
+  --color-accent-dim: rgba(56, 189, 248, 0.14);
+  --color-accent-ink: #082a3d;
+
+  --color-ok: #34d399;
+  --color-warn: #fbbf24;
+  --color-bad: #f87171;
+  --color-ok-dim: rgba(52, 211, 153, 0.1);
+  --color-warn-dim: rgba(251, 191, 36, 0.1);
+  --color-bad-dim: rgba(248, 113, 113, 0.1);
+
+  --color-viz-in: #38bdf8;
+  --color-viz-out: #818cf8;
+  --color-viz-cached: #22d3ee;
+  --color-viz-reasoning: #fbbf24;
+  --color-viz-saved: #34d399;
+  --color-viz-error: #f87171;
+  --color-viz-latency: #a78bfa;
+  --color-viz-cat-1: #38bdf8;
+  --color-viz-cat-2: #818cf8;
+  --color-viz-cat-3: #34d399;
+  --color-viz-cat-4: #fbbf24;
+  --color-viz-cat-5: #f87171;
+  --color-viz-cat-6: #a78bfa;
+  --color-viz-cat-7: #2dd4bf;
+  --color-viz-cat-8: #fb923c;
+  --color-viz-grid: rgba(255, 255, 255, 0.055);
+  --color-viz-axis: #62626e;
+  --color-viz-crosshair: rgba(255, 255, 255, 0.05);
+
+  --color-wash: rgba(255, 255, 255, 0.05);
+  --color-wash-strong: rgba(255, 255, 255, 0.09);
+  --color-inset: rgba(0, 0, 0, 0.22);
+  --color-shade: rgba(255, 255, 255, 0.06);
 }
 
 @keyframes pulse-soft { 0%, 100% { opacity: 0.45; } 50% { opacity: 0.85; } }
 @keyframes fade-up { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
-html, body, #root { height: 100%; }
+/* Switching themes repaints every element at once. Transitioning `all` here
+   would animate the whole page; listing the two properties that actually
+   change keeps the swap to a short crossfade instead of a cascade. */
+html {
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+/* Dark is the DEFAULT theme — the operator's working state, and the one this
+   dashboard shipped with for its whole life. Light is the opt-out. The class
+   is set by an inline script in index.html before first paint, so the user
+   never sees a flash of the wrong palette; this rule only governs the window
+   before that script runs and the UA's own form-control styling. */
+html { color-scheme: dark; }
+html.light { color-scheme: light; }
 
 body {
   background: var(--color-bg);
@@ -48,12 +204,29 @@ body {
   border-radius: 4px;
 }
 
-::selection { background: rgba(56, 189, 248, 0.25); }
+::selection { background: var(--color-accent-dim); }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 8px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+::-webkit-scrollbar-thumb { background: var(--color-wash-strong); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-line-strong); }
 
 input, select, textarea, button { font: inherit; color: inherit; }
 input::placeholder, textarea::placeholder { color: var(--color-mute); }
+
+/* Everything numeric in a dashboard is tabular by default: a column of figures
+   that re-renders on a 15s poll must not change width mid-tween. */
+.tnum { font-variant-numeric: tabular-nums; }
+
+/* The OS reduced-motion switch is the ONLY thing that can disable motion —
+   MotionConfig reducedMotion="user" covers framer, this covers the CSS
+   keyframes plus the theme crossfade above. An operator who asked for less
+   motion gets none of it. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

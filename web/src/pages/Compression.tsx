@@ -1,7 +1,11 @@
 // COMPRESSION — profile editor for ordered, fail-open compression pipelines.
 import { useCallback, useEffect, useState } from 'react';
-import { ApiError, compressionProfiles, del, patch, post, type CompressionProfile, type CompressionStage } from '../api';
-import { Chip, ConfirmModal, Mono, SectionLabel, btn, cx, inputCls, labelCls, Spinner } from '../ui';
+import {
+  ApiError, compressionProfiles, del, patch, post, usage,
+  type CompressionProfile, type CompressionStage, type UsageRow,
+} from '../api';
+import { BarList, Panel, VIZ } from '../charts';
+import { Chip, ConfirmModal, EmptyState, Mono, SectionLabel, btn, cx, formatTokens, inputCls, labelCls, nfmt, Spinner } from '../ui';
 
 type StageDraft = { engine: string; option: string };
 type ProfileDraft = {
@@ -49,6 +53,10 @@ function packStages(stages: StageDraft[]): CompressionStage[] {
 
 export default function Compression() {
   const [profiles, setProfiles] = useState<CompressionProfile[] | null>(null);
+  // Live savings from the ledger: saved / context_saved per account. This is
+  // the ONLY place the two compression mechanisms are shown together, because
+  // they are recorded in different columns and answer different questions.
+  const [savings, setSavings] = useState<UsageRow[] | null>(null);
   const [draft, setDraft] = useState<ProfileDraft | null>(null);
   const [pendingDelete, setPendingDelete] = useState<CompressionProfile | null>(null);
   const [editingID, setEditingID] = useState<number | null>(null);
@@ -61,6 +69,14 @@ export default function Compression() {
     compressionProfiles().then(setProfiles).catch((e) => setErr(e instanceof Error ? e.message : String(e)));
   }, []);
   useEffect(() => { reload(); }, [reload]);
+
+  // Savings over the last 24h, grouped by account. A failure here must not take
+  // the editor down, so it leaves its own panel empty.
+  useEffect(() => {
+    usage('account', '24h')
+      .then((r) => setSavings(r.groups))
+      .catch(() => setSavings([]));
+  }, []);
 
   const startNew = () => { setEditingID(null); setDraft(freshDraft()); setErr(''); setNotice(''); };
   const startEdit = (p: CompressionProfile) => { setEditingID(p.id); setDraft(fromProfile(p)); setErr(''); setNotice(''); };
@@ -109,6 +125,10 @@ export default function Compression() {
     finally { setBusy(false); }
   };
 
+  const savedTotal = savings?.reduce((a, r) => a + r.saved, 0) ?? 0;
+  const contextTotal = savings?.reduce((a, r) => a + r.context_saved, 0) ?? 0;
+  const hasSavings = savedTotal > 0 || contextTotal > 0;
+
   return (
     <div className="mx-auto max-w-4xl animate-fade-up space-y-4">
       <section className="rounded-xl border border-line bg-surface px-5 py-5 sm:px-6">
@@ -127,8 +147,65 @@ export default function Compression() {
         </p>
       </section>
 
-      {err && <div role="alert" className="rounded-lg border border-bad/30 bg-[rgba(248,113,113,0.06)] px-4 py-3 text-[13px] text-bad">{err}</div>}
-      {notice && <div className="rounded-lg border border-ok/30 bg-[rgba(52,211,153,0.06)] px-4 py-3 text-[13px] text-ok">{notice}</div>}
+      {err && <div role="alert" className="rounded-lg border border-bad/30 bg-bad-dim px-4 py-3 text-[13px] text-bad">{err}</div>}
+      {notice && <div className="rounded-lg border border-ok/30 bg-ok-dim px-4 py-3 text-[13px] text-ok">{notice}</div>}
+
+      {/* ── live savings ──────────────────────────────────────────────────
+          The editor above is the mechanism; this is what it actually did in
+          the last 24h. Two separate columns because they are two separate
+          mechanisms: `saved` is a deterministic rewrite stage that actually
+          shipped a shorter prompt, `context_saved` is the context-budget
+          stage keeping the high-signal envelope under a token cap. Adding
+          them into one "savings" number would hide which mechanism is doing
+          the work — and the answer changes what you tune next. */}
+      <Panel
+        label={<SectionLabel>Actual savings · last 24h</SectionLabel>}
+        aside={<span className="text-[11px] text-mute">
+          {hasSavings
+            ? `${formatTokens(savedTotal)} rewritten · ${formatTokens(contextTotal)} budgeted`
+            : 'nothing recorded yet'}
+        </span>}>
+        {savings === null ? (
+          <p className="text-[12px] text-mute">Loading savings…</p>
+        ) : !hasSavings ? (
+          <EmptyState
+            title="No savings recorded in the last 24h."
+            hint="Either traffic is small enough that every stage declined the minimum-ratio floor, or no profile is attached to a combo. A stage that declines is not a failure — see the note below." />
+        ) : (
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border border-line bg-raised/40 px-4 py-3">
+                <SectionLabel>rewritten (shipped shorter)</SectionLabel>
+                <div className="mt-1 font-mono text-[20px] font-semibold text-ok tnum">{formatTokens(savedTotal)}</div>
+                <p className="mt-1 text-[11px] leading-relaxed text-mute">
+                  Prompts that actually went out shorter than they arrived. A deterministic rewrite, auditable.
+                </p>
+              </div>
+              <div className="rounded-lg border border-line bg-raised/40 px-4 py-3">
+                <SectionLabel>context budget</SectionLabel>
+                <div className="mt-1 font-mono text-[20px] font-semibold text-accent tnum">{formatTokens(contextTotal)}</div>
+                <p className="mt-1 text-[11px] leading-relaxed text-mute">
+                  Tokens the budget stage kept OUT of the prompt by dropping the low-signal middle of history.
+                </p>
+              </div>
+            </div>
+            <BarList
+              rows={savings.filter((r) => r.saved > 0 || r.context_saved > 0).map((r) => ({
+                key: r.k,
+                value: r.saved + r.context_saved,
+                color: VIZ.saved,
+                hint: `${nfmt(r.calls)} calls · ${formatTokens(r.saved)} rewritten · ${formatTokens(r.context_saved)} budgeted`,
+              }))}
+              emptyLabel="No savings recorded in the last 24h." />
+            <p className="border-t border-line pt-3 text-[11.5px] leading-relaxed text-mute">
+              A stage can also correctly DECLINE: 409 rows in this ledger carry <Mono>tokens_saved &gt; 0</Mono>{' '}
+              with <Mono>compression_applied = 0</Mono>. Those are cases where the rewrite was real but below the
+              profile's minimum-ratio floor, so the original shipped rather than break a cached prefix — the
+              savings are recorded as a notional on the live feed as “held N”, not counted here.
+            </p>
+          </div>
+        )}
+      </Panel>
 
       {draft && <section className="rounded-xl border border-accent-dim bg-surface px-5 py-5 sm:px-6">
         <div className="flex items-start justify-between gap-4"><div><SectionLabel>{editingID == null ? 'Create profile' : 'Edit profile'}</SectionLabel><p className="mt-1 text-[12px] text-mute">Compose and order deterministic stages. Save validates against the backend engine registry.</p></div>

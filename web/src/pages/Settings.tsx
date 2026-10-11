@@ -50,7 +50,7 @@ export default function Settings() {
           <button disabled={busy} className={cx(btn.base, btn.primary)} type="submit">{busy ? 'Saving…' : 'Change password'}</button>
         </form>
       </section>
-      <div className="flex items-start gap-3 rounded-xl border border-warn/30 bg-[rgba(251,191,36,0.05)] p-4">
+      <div className="flex items-start gap-3 rounded-xl border border-warn/30 bg-warn-dim p-4">
         <Chip tone="warn">Security</Chip>
         <p className="text-xs leading-relaxed text-mute">The first-run password is displayed on the sign-in page by design. Change it before exposing the dashboard beyond a trusted network.</p>
       </div>

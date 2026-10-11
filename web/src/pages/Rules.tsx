@@ -291,7 +291,7 @@ export default function Rules() {
         <button type="button" className={cx(btn.base, btn.primary)} onClick={startCreate}>+ New rule</button>
       </div>
 
-      {err && <div className="rounded-lg border border-bad/40 bg-[rgba(248,113,113,0.06)] px-4 py-2.5 text-[13px] text-bad">{err}</div>}
+      {err && <div className="rounded-lg border border-bad/40 bg-bad-dim px-4 py-2.5 text-[13px] text-bad">{err}</div>}
 
       {!rules || !accounts ? (
         <SkeletonRows rows={4} cols={6} />
@@ -316,7 +316,7 @@ export default function Rules() {
             </thead>
             <tbody>
               {rules.map((r) => (
-                <tr key={r.id} className="border-t border-line/60 transition-colors hover:bg-[rgba(255,255,255,0.03)]">
+                <tr key={r.id} className="border-t border-line/60 transition-colors hover:bg-wash">
                   <td className="whitespace-nowrap px-5 py-2.5"><StatusChip rule={r} /></td>
                   <td className="px-3 py-2.5 text-dim">{accountName(r.account_id)}</td>
                   <td className="px-3 py-2.5 font-mono text-ink">{r.model_id}</td>

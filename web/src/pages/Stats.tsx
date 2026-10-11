@@ -1,74 +1,78 @@
-// STATS — the granularity + range explorer.
+// ANALYTICS EXPLORER — the /admin/usage report, exposed properly.
 //
-// Two selectors drive ONE view (the locked design): a granularity toggle
-// (global / provider / model / cache / compression / savings) and a range
-// toggle (24h / 7d / 30d / 1y). Every combination resolves to a single
-// /admin/usage query whose group_by and highlighted columns follow the chosen
-// granularity — so it is one data path, not six.
+// The old design was ONE toggle called "granularity" that folded two
+// independent questions into one enum: which DIMENSION do I split by, and
+// which COLUMN do I care about. Choosing "Cache" silently meant "group by
+// account" — you could not see cache spend per model, and you could not see
+// token volume per client. Both axes are separate here:
 //
-// The reactive recent-requests feed (SSE) lands separately; this is the
-// stats-first pass.
-import { useCallback, useEffect, useState } from 'react';
+//   split → group_by. Eight choices; the server has supported all eight
+//           (store.usageGroupColumn) since M3 and the dashboard used three.
+//   focus → which column the chart and the ranking emphasise. Free: the row
+//           already carries every column, so a focus change re-reads the data
+//           already in hand — no second request.
+//   range → 24h / 7d / 30d / 1y.
+//
+// Every combination is still ONE /admin/usage query. Nothing here aggregates
+// raw ledger rows in the browser; the SQL does it and this renders it.
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area,
 } from 'recharts';
 import {
-  usage, type UsageResp, type UsageRow, type Granularity, type RangeKey,
-  RANGE_LABEL, GRANULARITY_GROUP,
+  usage, FOCUS_HINT, FOCUS_LABEL, SPLIT_HINT, SPLIT_LABEL,
+  focusFormat, focusValue, RANGE_LABEL,
+  type FocusKey, type RangeKey, type SplitKey, type UsageResp, type UsageRow,
 } from '../api';
-import { Chip, SectionLabel, SkeletonCards, SkeletonRows, cx, formatTokens, Mono } from '../ui';
+import {
+  ChartTooltip, BarList, CompositionBar, Panel, Sparkline, StatCard, VIZ, axisProps,
+  catColor, chartGrid, cursorFill,
+} from '../charts';
+import { Reveal } from '../motion';
+import {
+  Chip, EmptyState, Mono, SectionLabel, Segmented, cx, fmtMs, formatTokens, nfmt, pct,
+} from '../ui';
 import RecentFeed from './RecentFeed';
 
-const GRAN: { key: Granularity; label: string }[] = [
-  { key: 'global', label: 'Global' },
-  { key: 'provider', label: 'Provider' },
-  { key: 'model', label: 'Model' },
-  { key: 'cache', label: 'Cache' },
-  { key: 'compression', label: 'Compression' },
-  { key: 'savings', label: 'Savings' },
-];
+const SPLITS: SplitKey[] = ['global', 'day', 'account', 'model', 'client', 'alias', 'key', 'surface'];
+const FOCI: FocusKey[] = ['tokens', 'cache', 'compression', 'savings', 'reasoning', 'latency', 'errors'];
 const RANGES: RangeKey[] = ['24h', '7d', '30d', '365d'];
 
-function Toggle({ options, value, onChange, labelFor }: {
-  options: string[]; value: string; onChange: (v: string) => void; labelFor?: (v: string) => string;
-}) {
-  return (
-    <div className="inline-flex flex-wrap gap-1 rounded-lg border border-line bg-surface p-1">
-      {options.map((o) => (
-        <button
-          key={o}
-          onClick={() => onChange(o)}
-          className={cx(
-            'rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors',
-            o === value ? 'bg-accent text-white' : 'text-mute hover:text-ink',
-          )}
-        >
-          {labelFor ? labelFor(o) : o}
-        </button>
-      ))}
-    </div>
-  );
+// Which series a focus draws on a multi-series chart. `global` and named
+// splits both read this; a focus that is inherently single-valued (latency,
+// compression, errors) draws one series rather than three meaningless ones.
+function seriesOf(focus: FocusKey): { key: keyof UsageRow | string; label: string; color: string }[] {
+  switch (focus) {
+    case 'cache':
+      return [
+        { key: 'cread', label: 'cached read', color: VIZ.cached },
+        { key: 'cwrite', label: 'cached write', color: VIZ.out },
+      ];
+    case 'tokens':
+      return [
+        { key: 'tin', label: 'tokens in', color: VIZ.in },
+        { key: 'tout', label: 'tokens out', color: VIZ.out },
+      ];
+    default:
+      return [{ key: focus, label: FOCUS_LABEL[focus].toLowerCase(), color: focusColor(focus) }];
+  }
 }
 
-function Card({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: string }) {
-  return (
-    <div className="rounded-xl border border-line bg-surface px-4 py-3.5">
-      <SectionLabel>{label}</SectionLabel>
-      <div className={cx('mt-1.5 font-mono text-[22px] font-semibold tabular-nums tracking-tight', tone ?? 'text-ink')}>{value}</div>
-      {sub && <div className="mt-0.5 text-[11px] text-mute">{sub}</div>}
-    </div>
-  );
-}
-
-// Group rows into chart points. For time-series granularities (cache,
-// compression, savings) group_by=day gives YYYY-MM-DD keys → a line. For
-// entity granularities (provider, model) the key is a name → a bar.
-function isTimeSeries(gran: Granularity): boolean {
-  return gran === 'cache' || gran === 'compression' || gran === 'savings';
+function focusColor(focus: FocusKey): string {
+  switch (focus) {
+    case 'cache': return VIZ.cached;
+    case 'compression': return VIZ.saved;
+    case 'savings': return VIZ.saved;
+    case 'reasoning': return VIZ.reasoning;
+    case 'latency': return VIZ.latency;
+    case 'errors': return VIZ.error;
+    default: return VIZ.in;
+  }
 }
 
 export default function Stats() {
-  const [gran, setGran] = useState<Granularity>('global');
+  const [split, setSplit] = useState<SplitKey>('account');
+  const [focus, setFocus] = useState<FocusKey>('tokens');
   const [range, setRange] = useState<RangeKey>('24h');
   const [data, setData] = useState<UsageResp | null>(null);
   const [loading, setLoading] = useState(true);
@@ -78,176 +82,299 @@ export default function Stats() {
     setLoading(true);
     setErr(null);
     try {
-      const r = await usage(range, gran);
-      setData(r);
+      setData(await usage(split, range));
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, [range, gran]);
+  }, [split, range]);
 
   useEffect(() => { load(); }, [load]);
 
-  const t = data?.totals;
-  // Which column the selected granularity cares about most.
-  const primaryOf = (r: UsageRow): number => {
-    switch (gran) {
-      case 'cache': return r.cread + r.cwrite;
-      case 'compression': return r.saved;
-      case 'savings': return r.context_saved + r.saved;
-      case 'provider': case 'model': return r.tin + r.tout;
-      default: return r.tin + r.tout;
-    }
-  };
-  const primaryLabel = (): string => {
-    switch (gran) {
-      case 'cache': return 'cached tokens';
-      case 'compression': case 'savings': return 'tokens saved';
-      default: return 'tokens';
-    }
-  };
-
   const rows = data?.groups ?? [];
-  const chartable = gran !== 'global' && rows.length > 0;
+  const totals = data?.totals;
+  const fmt = focusFormat(focus);
+  const series = seriesOf(focus);
+  const isTime = split === 'day';
+
+  // Ranked rows, biggest first. The SQL returns ORDER BY calls DESC, which is
+  // right for a traffic listing and wrong for "who is the biggest on this
+  // focus" — a high-volume account can still be small on cached tokens.
+  const ranked = useMemo(
+    () => [...rows].sort((a, b) => focusValue(focus, b) - focusValue(focus, a)),
+    [rows, focus],
+  );
+
+  const totalFocus = totals ? focusValue(focus, totals) : 0;
+  const focusSeries = ranked.map((r) => focusValue(focus, r));
+  const isExpanded = data?.group_by != null && data.group_by !== '';
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-semibold text-ink">Stats</h1>
-          <p className="text-[12px] text-mute">Granularity × time range — one query, one view.</p>
+      {/* ── controls ─────────────────────────────────────────────────────── */}
+      <div className="flex flex-col gap-3 rounded-xl border border-line bg-surface px-5 py-4">
+        <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+          <div>
+            <SectionLabel>Split by</SectionLabel>
+            <div className="mt-1.5">
+              <Segmented
+                label="Split the report by"
+                options={SPLITS.map((s) => ({ key: s, label: SPLIT_LABEL[s], title: SPLIT_HINT[s] }))}
+                value={split} onChange={setSplit} />
+            </div>
+          </div>
+          <div>
+            <SectionLabel>Focus</SectionLabel>
+            <div className="mt-1.5">
+              <Segmented
+                label="Which metric to emphasise"
+                options={FOCI.map((f) => ({ key: f, label: FOCUS_LABEL[f], title: FOCUS_HINT[f] }))}
+                value={focus} onChange={setFocus} />
+            </div>
+          </div>
+          <div>
+            <SectionLabel>Range</SectionLabel>
+            <div className="mt-1.5">
+              <Segmented
+                label="Time range"
+                options={RANGES.map((r) => ({ key: r, label: RANGE_LABEL[r] }))}
+                value={range} onChange={setRange} />
+            </div>
+          </div>
         </div>
-      </div>
-
-      {/* Selectors */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-wrap gap-2">
-          <Toggle options={GRAN.map((g) => g.key)} value={gran} onChange={(v) => setGran(v as Granularity)}
-            labelFor={(v) => GRAN.find((g) => g.key === v)?.label ?? v} />
-        </div>
-        <Toggle options={RANGES} value={range} onChange={(v) => setRange(v as RangeKey)}
-          labelFor={(v) => RANGE_LABEL[v as RangeKey]} />
+        <p className="border-t border-line pt-3 text-[11.5px] leading-relaxed text-mute">
+          <span className="text-dim">{SPLIT_LABEL[split]}</span> — {SPLIT_HINT[split]} ·{' '}
+          <span className="text-dim">{FOCUS_LABEL[focus]}</span> — {FOCUS_HINT[focus]} ·{' '}
+          last {RANGE_LABEL[range]}.
+          {isExpanded && <> grouped by <Mono>{data?.group_by}</Mono>.</>}
+        </p>
       </div>
 
       {err && (
-        <div className="rounded-xl border border-bad/40 bg-bad/10 px-4 py-3 text-[13px] text-bad">{err}</div>
+        <div role="alert" className="rounded-xl border border-bad/30 bg-bad-dim px-5 py-4 text-[13px] text-bad">
+          {err}
+          <button onClick={() => void load()} className="ml-3 underline underline-offset-2 hover:text-ink">retry</button>
+        </div>
       )}
 
+      {/* ── totals ──────────────────────────────────────────────────────── */}
+      {totals && (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
+          <StatCard label="calls" value={nfmt(totals.calls)} sub={`${RANGE_LABEL[range]} window`} />
+          <StatCard label="tokens in" value={formatTokens(totals.tin)} />
+          <StatCard label="tokens out" value={formatTokens(totals.tout)} sub={`${pct(totals.tout, totals.tin + totals.tout)} of volume`} />
+          <StatCard label="cached read" value={formatTokens(totals.cread)}
+            sub={`${pct(totals.cread, totals.tin)} of input re-read from cache`} />
+          <StatCard label="reasoning" value={formatTokens(totals.reasoning)}
+            tone={totals.reasoning > 0 ? 'text-warn' : undefined}
+            sub="billed, never shown" />
+          <StatCard label="saved" value={formatTokens(totals.saved)}
+            tone={totals.saved > 0 ? 'text-ok' : undefined}
+            sub={totals.context_saved > 0 ? `+${formatTokens(totals.context_saved)} context budget` : 'compression only'} />
+          <StatCard
+            label="p50 ttft"
+            value={fmtMs(totals.p50_ttft_ms)}
+            tone={totals.p50_ttft_ms > 0 ? 'text-[color:var(--color-viz-latency)]' : 'text-mute'}
+            sub={totals.p50_ttft_ms > 0 ? 'median first token' : 'not measured yet'} />
+        </div>
+      )}
+
+      {/* ── chart ───────────────────────────────────────────────────────── */}
       {loading && !data && (
-        <div className="space-y-3"><SkeletonCards n={4} /><SkeletonRows rows={5} /></div>
+        <Panel label={<SectionLabel>loading…</SectionLabel>}>
+          <div className="h-72 animate-pulse-soft rounded-lg bg-inset" />
+        </Panel>
       )}
 
-      {data && (
-        <>
-          {/* Totals strip — always visible, ground truth for the range */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
-            <Card label="calls" value={formatTokens(t!.calls)} />
-            <Card label="tokens in" value={formatTokens(t!.tin)} />
-            <Card label="tokens out" value={formatTokens(t!.tout)} />
-            <Card label={primaryLabel()} value={formatTokens(primaryOf(t!))}
-              tone={gran === 'cache' || gran === 'savings' || gran === 'compression' ? 'text-ok' : undefined} />
-            <Card label="cached read" value={formatTokens(t!.cread)} />
-            <Card label="reasoning" value={formatTokens(t!.reasoning)} sub="Σ thinking tokens" />
-            <Card label="errors" value={formatTokens(t!.errors)} tone={t!.errors > 0 ? 'text-warn' : 'text-ok'} />
-          </div>
-
-          {/* Chart for entity / time-series breakdowns */}
-          {chartable && (
-            <div className="rounded-xl border border-line bg-surface p-4">
-              <div className="mb-3 flex items-center justify-between">
-                <SectionLabel>
-                  {GRAN.find((g) => g.key === gran)?.label} — {primaryLabel()} · {RANGE_LABEL[range]}
-                </SectionLabel>
-                <Chip className="px-2 py-0.5"><Mono className="text-[10px] text-mute">{data.group_by}</Mono></Chip>
-              </div>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  {isTimeSeries(gran) ? (
-                    <LineChart data={[...rows].reverse().map((r) => ({ ...r, cached: r.cread + r.cwrite }))}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-line" />
-                      <XAxis dataKey="k" tick={{ fontSize: 10 }} stroke="currentColor" className="text-mute" />
-                      <YAxis tick={{ fontSize: 10 }} stroke="currentColor" className="text-mute"
-                        tickFormatter={(v) => formatTokens(v as number)} width={56} />
-                      <Tooltip
-                        contentStyle={{ background: '#111', border: '1px solid #333', borderRadius: 8, fontSize: 12 }}
-                        formatter={(v: number) => [formatTokens(v), primaryLabel()]}
-                      />
-                      <Line type="monotone"
-                        dataKey={gran === 'cache' ? 'cached' : 'saved'}
-                        stroke="#4ade80" strokeWidth={2} dot={false}
-                        name={primaryLabel()} />
-                    </LineChart>
-                  ) : (
-                    <BarChart data={rows}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-line" />
-                      <XAxis dataKey="k" tick={{ fontSize: 10 }} stroke="currentColor" className="text-mute" />
-                      <YAxis tick={{ fontSize: 10 }} stroke="currentColor" className="text-mute"
-                        tickFormatter={(v) => formatTokens(v as number)} width={56} />
-                      <Tooltip
-                        contentStyle={{ background: '#111', border: '1px solid #333', borderRadius: 8, fontSize: 12 }}
-                        formatter={(v: number) => [formatTokens(v), primaryLabel()]}
-                      />
-                      <Bar dataKey={(r: UsageRow) => primaryOf(r)} fill="#60a5fa" radius={[3, 3, 0, 0]} name={primaryLabel()} />
-                    </BarChart>
-                  )}
-                </ResponsiveContainer>
+      {totals && data && !isExpanded && (
+        <Panel
+          label={<SectionLabel>Everything · last {RANGE_LABEL[range]}</SectionLabel>}
+          aside={<Chip><Mono className="text-[10px]">totals only</Mono></Chip>}>
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+            <div>
+              <p className="text-[12.5px] leading-relaxed text-dim">
+                The range totals above are the whole ledger view. Pick a dimension
+                under <span className="text-ink">Split by</span> to break it down.
+              </p>
+              <div className="mt-5">
+                <SectionLabel>Token composition</SectionLabel>
+                <div className="mt-2.5">
+                  <CompositionBar parts={[
+                    { key: 'tin', label: 'tokens in', value: totals.tin, color: VIZ.in },
+                    { key: 'tout', label: 'tokens out', value: totals.tout, color: VIZ.out },
+                    { key: 'cread', label: 'cached read', value: totals.cread, color: VIZ.cached },
+                    { key: 'reasoning', label: 'reasoning', value: totals.reasoning, color: VIZ.reasoning },
+                  ]} height={12} />
+                </div>
+                <ul className="mt-3 space-y-1.5">
+                  {[
+                    { key: 'tin', label: 'tokens in', value: totals.tin, color: VIZ.in },
+                    { key: 'tout', label: 'tokens out', value: totals.tout, color: VIZ.out },
+                    { key: 'cread', label: 'cached read', value: totals.cread, color: VIZ.cached },
+                    { key: 'reasoning', label: 'reasoning', value: totals.reasoning, color: VIZ.reasoning },
+                  ].map((p) => (
+                    <li key={p.key} className="flex items-center gap-2 text-[12px]">
+                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: p.color }} />
+                      <span className="text-dim">{p.label}</span>
+                      <span className="tnum ml-auto font-mono text-ink">{formatTokens(p.value)}</span>
+                      <span className="tnum w-12 text-right font-mono text-mute">
+                        {pct(p.value, totals.tin + totals.tout + totals.cread + totals.reasoning)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
               </div>
             </div>
-          )}
+            <div>
+              <SectionLabel>Trend · {FOCUS_LABEL[focus]}</SectionLabel>
+              <div className="mt-2.5"><Sparkline data={focusSeries} color={focusColor(focus)} height={64} /></div>
+              <p className="mt-2 text-[11.5px] leading-relaxed text-mute">
+                Ranked order over {nfmt(rows.length)} group{rows.length === 1 ? '' : 's'}, not a time
+                series — the ledger's only time bucketing is the calendar day,
+                so switch <span className="text-dim">Split by</span> to Day for the trend.
+              </p>
+            </div>
+          </div>
+        </Panel>
+      )}
 
-          {/* Breakdown table — the raw rows behind the chart */}
-          {gran !== 'global' && (
-            <div className="rounded-xl border border-line bg-surface">
-              <div className="border-b border-line px-4 py-2.5">
-                <SectionLabel>Breakdown · {RANGE_LABEL[range]} · grouped by {data.group_by}</SectionLabel>
-              </div>
+      {data && isExpanded && ranked.length === 0 && (
+        <Panel label={<SectionLabel>{SPLIT_LABEL[split]} · last {RANGE_LABEL[range]}</SectionLabel>}>
+          <EmptyState
+            title={`No calls in the last ${RANGE_LABEL[range]}.`}
+            hint="The ledger is empty for this window and dimension. Widen the range, or route a request through a combo and it appears here within a second." />
+        </Panel>
+      )}
+
+      {totals && data && isExpanded && ranked.length > 0 && (
+        <>
+          <Panel
+            label={
+              <SectionLabel>
+                {FOCUS_LABEL[focus]} by {SPLIT_LABEL[split].toLowerCase()} · last {RANGE_LABEL[range]}
+              </SectionLabel>
+            }
+            aside={<Chip><Mono className="text-[10px]">{data.group_by}</Mono></Chip>}>
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                {isTime ? (
+                  <AreaChart data={[...ranked].reverse()} margin={{ top: 4, right: 8, bottom: 0, left: -8 }}>
+                    <defs>
+                      {series.map((s) => (
+                        <linearGradient key={String(s.key)} id={`fill-${String(s.key)}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={s.color} stopOpacity={0.3} />
+                          <stop offset="100%" stopColor={s.color} stopOpacity={0} />
+                        </linearGradient>
+                      ))}
+                    </defs>
+                    <CartesianGrid {...chartGrid} vertical={false} />
+                    <XAxis dataKey="k" {...axisProps} />
+                    <YAxis {...axisProps} width={58} tickFormatter={(v: number) => fmt(v)} />
+                    <Tooltip content={<ChartTooltip format={fmt} />} cursor={cursorFill} />
+                    {series.map((s) => (
+                      <Area
+                        key={String(s.key)}
+                        type="monotone" dataKey={s.key as string} name={s.label}
+                        stroke={s.color} strokeWidth={2} fill={`url(#fill-${String(s.key)})`}
+                        dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />
+                    ))}
+                  </AreaChart>
+                ) : (
+                  <BarChart data={ranked} margin={{ top: 4, right: 8, bottom: 0, left: -8 }} barCategoryGap="26%">
+                    <CartesianGrid {...chartGrid} vertical={false} />
+                    <XAxis dataKey="k" {...axisProps} interval={0}
+                      tickFormatter={(v: string) => (v.length > 12 ? `${v.slice(0, 11)}…` : v)} />
+                    <YAxis {...axisProps} width={58} tickFormatter={(v: number) => fmt(v)} />
+                    <Tooltip content={<ChartTooltip format={fmt} />} cursor={cursorFill} />
+                    {series.map((s, i) => (
+                      <Bar
+                        key={String(s.key)}
+                        dataKey={s.key as string} name={s.label}
+                        fill={s.color} maxBarSize={38}
+                        radius={i === series.length - 1 ? [3, 3, 0, 0] : undefined} />
+                    ))}
+                  </BarChart>
+                )}
+              </ResponsiveContainer>
+            </div>
+            {isTime && (
+              <p className="mt-2 text-[11px] text-mute">
+                One bucket per calendar day — the ledger's finest time grouping. A 24h
+                range therefore shows one or two points; that is the data, not a rendering gap.
+              </p>
+            )}
+          </Panel>
+
+          {/* Ranked list and the raw rows behind it, side by side: the bar
+              chart answers "who is biggest", the list gives the exact share,
+              the table gives every column. */}
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
+            <Panel
+              label={<SectionLabel>Ranked · {FOCUS_LABEL[focus]}</SectionLabel>}
+              aside={<span className="text-[11px] text-mute">{pct(totalFocus, focusValue(focus, totals))} of total</span>}>
+              <BarList
+                rows={ranked.map((r, i) => ({
+                  key: r.k,
+                  value: focusValue(focus, r),
+                  // A categorical ramp per position is stable within a render
+                  // but NOT across splits — the legend below the chart is the
+                  // mapping of record; here the hue just separates neighbours.
+                  color: series.length > 1 ? series[0].color : catColor(i),
+                  hint: `${nfmt(r.calls)} calls · p50 ttft ${fmtMs(r.p50_ttft_ms)}`,
+                }))}
+                format={fmt} maxRows={12} />
+            </Panel>
+
+            <Panel label={<SectionLabel>Every column · {RANGE_LABEL[range]}</SectionLabel>} bodyClass="p-0">
               <div className="overflow-x-auto">
-                <table className="w-full text-[12px]">
+                <table className="w-full min-w-[720px] text-[12px]">
                   <thead>
-                    <tr className="text-left text-mute">
-                      <th className="px-4 py-2 font-medium">key</th>
-                      <th className="px-4 py-2 text-right font-medium">calls</th>
-                      <th className="px-4 py-2 text-right font-medium">in</th>
-                      <th className="px-4 py-2 text-right font-medium">out</th>
-                      <th className="px-4 py-2 text-right font-medium">cached</th>
-                      <th className="px-4 py-2 text-right font-medium">reasoning</th>
-                      <th className="px-4 py-2 text-right font-medium">saved</th>
-                      <th className="px-4 py-2 text-right font-medium">errors</th>
+                    <tr className="border-b border-line text-left text-[10.5px] uppercase tracking-[0.1em] text-mute">
+                      <th className="px-5 py-2.5 font-medium">{SPLIT_LABEL[split]}</th>
+                      <th className="px-3 py-2.5 text-right font-medium">calls</th>
+                      <th className="px-3 py-2.5 text-right font-medium">in</th>
+                      <th className="px-3 py-2.5 text-right font-medium">out</th>
+                      <th className="px-3 py-2.5 text-right font-medium">cached</th>
+                      <th className="px-3 py-2.5 text-right font-medium">reason</th>
+                      <th className="px-3 py-2.5 text-right font-medium">saved</th>
+                      <th className="px-3 py-2.5 text-right font-medium" title="median time to first token">p50</th>
+                      <th className="px-5 py-2.5 text-right font-medium">err</th>
                     </tr>
                   </thead>
-                  <tbody>
-                    {rows.map((r) => (
-                      <tr key={r.k} className="border-t border-line/60">
-                        <td className="px-4 py-1.5 font-mono text-ink">{r.k}</td>
-                        <td className="px-4 py-1.5 text-right tabular-nums text-ink">{formatTokens(r.calls)}</td>
-                        <td className="px-4 py-1.5 text-right tabular-nums text-mute">{formatTokens(r.tin)}</td>
-                        <td className="px-4 py-1.5 text-right tabular-nums text-mute">{formatTokens(r.tout)}</td>
-                        <td className="px-4 py-1.5 text-right tabular-nums text-mute">{formatTokens(r.cread + r.cwrite)}</td>
-                        <td className="px-4 py-1.5 text-right tabular-nums text-mute">{formatTokens(r.reasoning ?? 0)}</td>
-                        <td className="px-4 py-1.5 text-right tabular-nums text-ok">{formatTokens(r.saved)}</td>
-                        <td className={cx('px-4 py-1.5 text-right tabular-nums', r.errors > 0 ? 'text-warn' : 'text-mute')}>{formatTokens(r.errors)}</td>
+                  <tbody className="font-mono tnum">
+                    {ranked.map((r) => (
+                      <tr key={r.k} className="border-b border-line/50 transition-colors last:border-0 hover:bg-wash">
+                        <td className="max-w-[240px] truncate px-5 py-2 font-sans text-ink" title={r.k}>{r.k}</td>
+                        <td className="px-3 py-2 text-right text-ink">{nfmt(r.calls)}</td>
+                        <td className="px-3 py-2 text-right text-dim">{formatTokens(r.tin)}</td>
+                        <td className="px-3 py-2 text-right text-dim">{formatTokens(r.tout)}</td>
+                        <td className="px-3 py-2 text-right text-dim">{formatTokens(r.cread + r.cwrite)}</td>
+                        <td className={cx('px-3 py-2 text-right', r.reasoning > 0 ? 'text-warn' : 'text-mute')}>
+                          {r.reasoning > 0 ? formatTokens(r.reasoning) : '–'}
+                        </td>
+                        <td className={cx('px-3 py-2 text-right', r.saved > 0 ? 'text-ok' : 'text-mute')}>
+                          {r.saved > 0 ? formatTokens(r.saved) : '–'}
+                        </td>
+                        <td className={cx('px-3 py-2 text-right', r.p50_ttft_ms > 0 ? 'text-[color:var(--color-viz-latency)]' : 'text-mute')}>
+                          {fmtMs(r.p50_ttft_ms)}
+                        </td>
+                        <td className={cx('px-5 py-2 text-right', r.errors > 0 ? 'text-warn' : 'text-mute')}>
+                          {r.errors > 0 ? nfmt(r.errors) : '–'}
+                        </td>
                       </tr>
                     ))}
-                    {rows.length === 0 && (
-                      <tr><td colSpan={8} className="px-4 py-6 text-center text-mute">No usage in this range.</td></tr>
-                    )}
                   </tbody>
                 </table>
               </div>
-            </div>
-          )}
-
-          {gran === 'global' && rows.length > 0 && (
-            <div className="rounded-xl border border-line bg-surface p-4 text-[12px] text-mute">
-              Showing range totals. Pick a granularity above for a per-{''}
-              {GRANULARITY_GROUP[gran] ?? 'account'} breakdown.
-            </div>
-          )}
+            </Panel>
+          </div>
         </>
       )}
 
-      <RecentFeed />
+      <Reveal>
+        <RecentFeed />
+      </Reveal>
     </div>
   );
 }

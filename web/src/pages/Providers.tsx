@@ -16,7 +16,7 @@ const slugify = (s: string) =>
 function ErrBox({ e, onDismiss }: { e: ApiErrorDetail | null; onDismiss: () => void }) {
   if (!e) return null;
   return (
-    <div className="rounded-lg border border-bad/30 bg-[rgba(248,113,113,0.06)] px-4 py-3 animate-fade-in">
+    <div className="rounded-lg border border-bad/30 bg-bad-dim px-4 py-3 animate-fade-in">
       <div className="flex items-start justify-between gap-3">
         <p className="text-[13px] text-bad">{e.message}</p>
         <button onClick={onDismiss} className="shrink-0 text-mute hover:text-ink" aria-label="dismiss">✕</button>
@@ -53,8 +53,8 @@ function StepList({ steps, running }: { steps: TestStep[] | null; running: boole
           <li key={name} className="flex items-center gap-1.5">
             {idx > 0 && <span className="text-mute/40">→</span>}
             <span title={tip} className={cx('flex items-center gap-1.5 rounded-full border px-2 py-0.5',
-              state === 'ok' && 'border-ok/40 bg-[rgba(52,211,153,0.1)] text-ok',
-              state === 'bad' && 'border-bad/40 bg-[rgba(248,113,113,0.1)] text-bad',
+              state === 'ok' && 'border-ok/40 bg-ok-dim text-ok',
+              state === 'bad' && 'border-bad/40 bg-bad-dim text-bad',
               state === 'pending' && 'border-line text-mute',
               state === 'idle' && 'border-line/60 text-mute/50')}>
               <span>{state === 'ok' ? '✓' : state === 'bad' ? '✕' : idx + 1}</span>
@@ -866,7 +866,7 @@ export default function Providers() {
         </button>
       </div>
 
-      {err && <div className="mb-4 rounded-lg border border-bad/30 bg-[rgba(248,113,113,0.06)] px-4 py-3 text-[13px] text-bad">{err}</div>}
+      {err && <div className="mb-4 rounded-lg border border-bad/30 bg-bad-dim px-4 py-3 text-[13px] text-bad">{err}</div>}
 
       {accounts === null ? (
         <SkeletonCards n={3} />

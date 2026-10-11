@@ -1,4 +1,5 @@
 // ── ezllm admin API contract (docs/API.md, M3) — types + tiny fetch helper ──
+import { fmtMs, formatTokens } from './lib';
 
 const TOKEN_KEY = 'ezllm.admin.token';
 
@@ -108,7 +109,20 @@ export const del = (p: string) => apiFetch<null>(p, { method: 'DELETE' });
 
 // ── Shapes ───────────────────────────────────────────────────────────────
 
-export type UsageRow = { k: string; calls: number; tin: number; tout: number; cread: number; cwrite: number; reasoning: number; saved: number; errors: number; context_pre: number; context_saved: number };
+// UsageRow is one group of a usage report. Field names are the LEDGER JSON
+// tags verbatim and this declaration is pinned by a Go test
+// (internal/store/contract_test.go) that parses it with a regex, so it must
+// stay a single brace-free line with NO comments inside the braces — prose
+// here is read as field names and the contract test fails.
+//
+// p50_ttft_ms is the median time-to-first-token for the group, computed in
+// SQL with window functions (one row per group, no Go-side aggregation).
+// Convention: the UPPER of the two middle values on an even count, matching
+// the historical Go median exactly. It shipped on every row and was read by
+// nothing for its whole life — it sat in that contract test's "sent but
+// unread" allowlist, which is precisely why latency was invisible on the
+// dashboard. The analytics explorer's Latency focus now renders it.
+export type UsageRow = { k: string; calls: number; tin: number; tout: number; cread: number; cwrite: number; reasoning: number; saved: number; errors: number; context_pre: number; context_saved: number; p50_ttft_ms: number };
 
 export type Health = {
   status: string; schema_version: number; accounts: number; provider_keys: number;
@@ -215,26 +229,119 @@ export type RangeKey = '24h' | '7d' | '30d' | '365d';
 export const RANGE_HOURS: Record<RangeKey, number> = { '24h': 24, '7d': 168, '30d': 720, '365d': 8760 };
 export const RANGE_LABEL: Record<RangeKey, string> = { '24h': '24h', '7d': '7d', '30d': '30d', '365d': '1y' };
 
-// The six granularities the user can select.
-export type Granularity = 'global' | 'provider' | 'model' | 'cache' | 'compression' | 'savings';
+// Which LEDGER DIMENSION the explorer splits by. The server accepts seven
+// (store.usageGroupColumn) and the dashboard used three of them for its whole
+// life — account, model, day. The rest answer questions the operator
+// actually asks and could not see:
+//   client  → which application is burning the tokens
+//   alias   → which combo is really getting the traffic
+//   key     → which API key, per client
+//   surface → openai vs anthropic vs responses uptake
+// `global` sends no group_by and reads `totals` only.
+export type SplitKey = 'global' | 'day' | 'account' | 'model' | 'client' | 'alias' | 'key' | 'surface';
 
-// group_by the endpoint needs for a given granularity (null = use totals only).
-export const GRANULARITY_GROUP: Record<Granularity, string | null> = {
-  global: null,
-  provider: 'account',
-  model: 'model',
-  cache: 'account',     // cache cols are per-row; group by account to attribute them
-  compression: 'account',
-  savings: 'account',
+export const SPLIT_LABEL: Record<SplitKey, string> = {
+  global: 'Everything',
+  day: 'Day',
+  account: 'Provider',
+  model: 'Model',
+  client: 'Client',
+  alias: 'Combo',
+  key: 'API key',
+  surface: 'Surface',
 };
 
-// usage fetches the /admin/usage report for a range + granularity.
-export function usage(range: RangeKey, gran: Granularity): Promise<UsageResp> {
-  const hours = RANGE_HOURS[range];
-  const from = new Date(Date.now() - hours * 3600_000).toISOString();
-  const g = GRANULARITY_GROUP[gran];
-  const params = new URLSearchParams({ from });
+/** One-line "what am I looking at" per split, shown under the toggle. */
+export const SPLIT_HINT: Record<SplitKey, string> = {
+  global: 'one row for the whole range',
+  day: 'traffic over time — the only time bucketing the ledger supports',
+  account: 'which upstream the calls actually landed on',
+  model: 'which model the traffic resolved to',
+  client: 'which application sent it (the x-ezllm-client header)',
+  alias: 'which combo a request named, vs a direct model call',
+  key: 'which API key was used',
+  surface: 'openai vs anthropic vs responses endpoint',
+};
+
+// group_by the endpoint needs for a given split (null = totals only).
+export const SPLIT_GROUP: Record<SplitKey, string | null> = {
+  global: null,
+  day: 'day',
+  account: 'account',
+  model: 'model',
+  client: 'client',
+  alias: 'alias',
+  key: 'key',
+  surface: 'surface',
+};
+
+// Does this split produce a time-ordered series (a line chart) or a set of
+// named entities (a ranked bar list)? Only `day` is a time series — the
+// ledger's finest bucket is a calendar day, so a 24h range yields one or two
+// points and the honest render is a bar, not a smooth line.
+export const SPLIT_IS_TIME: Record<SplitKey, boolean> = {
+  global: false, day: true, account: false, model: false,
+  client: false, alias: false, key: false, surface: false,
+};
+
+// Which column the chosen FOCUS is about. The row carries every column, so a
+// focus change is a client-side re-read — no second request.
+export type FocusKey = 'tokens' | 'cache' | 'compression' | 'savings' | 'reasoning' | 'latency' | 'errors';
+
+export const FOCUS_LABEL: Record<FocusKey, string> = {
+  tokens: 'Tokens', cache: 'Cache', compression: 'Compression',
+  savings: 'Savings', reasoning: 'Reasoning', latency: 'Latency', errors: 'Errors',
+};
+
+export const FOCUS_HINT: Record<FocusKey, string> = {
+  tokens: 'in vs out — raw volume',
+  cache: 'prompt-cache reads and writes',
+  compression: 'tokens a compression stage actually removed',
+  savings: 'compression plus context-budget savings together',
+  reasoning: 'tokens the model spent thinking (billed, never seen)',
+  latency: 'p50 time to first token per group',
+  errors: 'calls that came back 4xx/5xx',
+};
+
+/** The value a focus reads out of one row. */
+export function focusValue(f: FocusKey, r: UsageRow): number {
+  switch (f) {
+    case 'cache': return r.cread + r.cwrite;
+    case 'compression': return r.saved;
+    case 'savings': return r.context_saved + r.saved;
+    case 'reasoning': return r.reasoning;
+    case 'latency': return r.p50_ttft_ms;
+    case 'errors': return r.errors;
+    default: return r.tin + r.tout;
+  }
+}
+
+/** How a focus renders a value — latency is milliseconds, the rest are tokens. */
+export function focusFormat(f: FocusKey): (n: number) => string {
+  return f === 'latency' ? fmtMs : formatTokens;
+}
+
+// Legacy alias: the old granularity axis folded split + focus into one enum.
+// Kept as a type so existing call sites keep compiling; the explorer uses
+// SplitKey + FocusKey directly.
+export type Granularity = SplitKey;
+export const GRANULARITY_GROUP = SPLIT_GROUP;
+
+function rangeFrom(range: RangeKey): string {
+  return new Date(Date.now() - RANGE_HOURS[range] * 3600_000).toISOString();
+}
+
+/** /admin/usage for a split + range. One request, one view — never two. */
+export function usage(split: SplitKey, range: RangeKey): Promise<UsageResp> {
+  const params = new URLSearchParams({ from: rangeFrom(range) });
+  const g = SPLIT_GROUP[split];
   if (g) params.set('group_by', g);
+  return get<UsageResp>(`/admin/usage?${params.toString()}`);
+}
+
+/** Escape hatch for a group_by the SplitKey map does not name. */
+export function usageGroup(groupBy: string, range: RangeKey): Promise<UsageResp> {
+  const params = new URLSearchParams({ from: rangeFrom(range), group_by: groupBy });
   return get<UsageResp>(`/admin/usage?${params.toString()}`);
 }
 
@@ -350,8 +457,33 @@ export const cost = (range: RangeKey = '7d') => {
   const params = new URLSearchParams({ from: new Date(Date.now() - hours * 3600_000).toISOString() });
   return get<{ from: string; to: string; currency: string; rows: CostRow[]; totals: CostTotals }>(`/admin/cost?${params.toString()}`);
 };
-export const chat = (model: string, messages: { role: string; content: string }[]) =>
+export const chat = (model: string, messages: ChatMessage[]) =>
   post<any>('/admin/chat', { model, messages });
+
+/**
+ * A chat turn's content. Plain string for text; an array of parts when a file
+ * is attached, following the OpenAI chat-completions shape:
+ *   { type: 'text',        text }
+ *   { type: 'image_url',   image_url: { url: '<data URI>' } }
+ *
+ * The router passes request bodies through UNTRANSLATED, so these parts reach
+ * the upstream as-is — a vision-capable model sees the image and a model
+ * without vision gets its own error, which is the honest outcome rather than
+ * a silent drop.
+ */
+export type ChatPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
+export type ChatMessage = { role: 'user' | 'assistant' | 'system'; content: string | ChatPart[] };
+
+/** Flatten a turn's content to plain text, for the textarea echo and copy. */
+export function messageText(m: ChatMessage): string {
+  if (typeof m.content === 'string') return m.content;
+  return m.content
+    .map((p) => (p.type === 'text' ? p.text : `[image: ${p.image_url.url.slice(5, 40) || 'attached'}…]`))
+    .join('\n');
+}
 
 /**
  * chatStream sends the same chat request with stream:true and feeds each SSE
@@ -360,7 +492,7 @@ export const chat = (model: string, messages: { role: string; content: string }[
  */
 export async function chatStream(
   model: string,
-  messages: { role: string; content: string }[],
+  messages: ChatMessage[],
   onDelta: (text: string) => void,
   signal?: AbortSignal,
 ): Promise<void> {

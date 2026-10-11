@@ -267,7 +267,7 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
                   .filter((a): a is AccountLite => !!a && (a.rate_limit ?? 0) > 0 && (a.rate_limit ?? 0) < d.block_size);
                 if (tight.length === 0) return null;
                 return (
-                  <p className="mt-2 text-[11px] leading-snug text-amber-400">
+                  <p className="mt-2 text-[11px] leading-snug text-warn">
                     Block size {d.block_size} exceeds the request budget of{' '}
                     {tight.map((a) => `${a.name} (${a.rate_limit} per ${a.rate_window})`).join(', ')} —
                     those hops will drop out mid-block and the rotation will advance early. Set the block
@@ -286,7 +286,7 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
           <span className="text-[12.5px] text-dim">Enabled</span>
         </div>
 
-        {err && <div className="rounded-lg border border-bad/30 bg-[rgba(248,113,113,0.06)] px-4 py-3 text-[12.5px] text-bad">{err}</div>}
+        {err && <div className="rounded-lg border border-bad/30 bg-bad-dim px-4 py-3 text-[12.5px] text-bad">{err}</div>}
       </div>
     </Modal>
   );
@@ -340,7 +340,7 @@ export default function Combos() {
         </button>
       </div>
 
-      {err && <div className="mb-4 rounded-lg border border-bad/30 bg-[rgba(248,113,113,0.06)] px-4 py-3 text-[12.5px] text-bad">{err}</div>}
+      {err && <div className="mb-4 rounded-lg border border-bad/30 bg-bad-dim px-4 py-3 text-[12.5px] text-bad">{err}</div>}
 
       {combos === null ? (
         <SkeletonCards n={2} />

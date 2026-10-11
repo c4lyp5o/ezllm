@@ -1,8 +1,15 @@
 // Tiny shared UI primitives — hand-built with Tailwind, no component library.
+import { AnimatePresence, motion } from 'framer-motion';
 import { createPortal } from 'react-dom';
 import { useEffect, useRef, type ReactNode } from 'react';
+import { DUR, spring } from './motion';
+import { cx, fmtDuration, fmtMs, fmtUptime, formatTokens, nfmt, pct } from './lib';
 
-export const cx = (...xs: Array<string | false | null | undefined>) => xs.filter(Boolean).join(' ');
+// formatTokens / fmtMs / fmtDuration / fmtUptime / cx / nfmt / pct are
+// re-exported here because existing pages already import them from './ui'.
+// Their home is lib.ts (the import-free leaf); keep these aliases until those
+// call sites are touched, then drop them.
+export { cx, fmtDuration, fmtMs, fmtUptime, formatTokens, nfmt, pct };
 
 // ── labels ──────────────────────────────────────────────────────────────
 
@@ -23,9 +30,9 @@ export function Mono({ children, className }: { children: ReactNode; className?:
 const chipTones: Record<string, string> = {
   neutral: 'border-line bg-raised text-dim',
   accent: 'border-accent-dim bg-accent-dim text-accent',
-  ok: 'border-[rgba(52,211,153,0.25)] bg-[rgba(52,211,153,0.1)] text-ok',
-  warn: 'border-[rgba(251,191,36,0.25)] bg-[rgba(251,191,36,0.1)] text-warn',
-  bad: 'border-[rgba(248,113,113,0.25)] bg-[rgba(248,113,113,0.1)] text-bad',
+  ok: 'border-[rgba(52,211,153,0.25)] bg-ok-dim text-ok',
+  warn: 'border-[rgba(251,191,36,0.25)] bg-warn-dim text-warn',
+  bad: 'border-[rgba(248,113,113,0.25)] bg-bad-dim text-bad',
 };
 
 export function Chip({ tone = 'neutral', children, className, title }: {
@@ -63,7 +70,14 @@ export function StaleBadge({ stale }: { stale: boolean }) {
 // ── skeleton shimmers ───────────────────────────────────────────────────
 
 export function Skeleton({ className }: { className?: string }) {
-  return <div aria-hidden className={cx('animate-pulse-soft rounded-md bg-[rgba(255,255,255,0.05)]', className)} />;
+  // Shimmer, not a pulse: a pulsing block and a loading block look identical
+  // to a "stale" state, while a sweep reads unambiguously as loading.
+  return (
+    <div aria-hidden className={cx(
+      'rounded-md bg-[linear-gradient(90deg,transparent_0%,var(--color-shade)_50%,transparent_100%)] bg-[length:200%_100%] animate-shimmer',
+      className,
+    )} />
+  );
 }
 
 export function SkeletonRows({ rows = 5, cols = 6, height = 'h-4' }: { rows?: number; cols?: number; height?: string }) {
@@ -121,28 +135,43 @@ export function Modal({ open, onClose, title, subtitle, children, footer, wide }
 
   const overlay = (e: React.MouseEvent) => { if (e.target === e.currentTarget) onClose(); };
 
+  // No early return on !open: AnimatePresence needs the subtree mounted to
+  // PLAY the exit. Returning null instead would snap the dialog away and the
+  // `exit` props below would be dead code.
   return createPortal((
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6" onMouseDown={overlay}>
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-fade-in" onClick={onClose} />
-      <div ref={ref} role="dialog" aria-modal="true" aria-label={title}
-        className="relative z-10 flex max-h-[90dvh] w-full flex-col overflow-hidden rounded-xl border border-line-strong bg-surface shadow-2xl shadow-black/60 animate-fade-up"
-        style={{ maxWidth: wide ? '56rem' : '44rem' }}>
-        <div className="flex items-start justify-between gap-6 border-b border-line px-6 py-4">
-          <div>
-            <h2 className="text-[15px] font-semibold">{title}</h2>
-            {subtitle && <p className="mt-0.5 text-xs text-mute">{subtitle}</p>}
-          </div>
-          <button type="button" onClick={onClose} aria-label="Close"
-            className="-mr-1 rounded-md p-1 text-mute transition-colors hover:bg-hover hover:text-ink">✕</button>
+    <AnimatePresence>
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6" onMouseDown={overlay}>
+          <motion.div
+            className="absolute inset-0 bg-overlay backdrop-blur-sm"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            transition={{ duration: DUR.fast }} onClick={onClose} />
+          <motion.div
+            ref={ref} role="dialog" aria-modal="true" aria-label={title}
+            className="relative z-10 flex max-h-[90dvh] w-full flex-col overflow-hidden rounded-xl border border-line-strong bg-surface shadow-2xl shadow-black/60"
+            style={{ maxWidth: wide ? '56rem' : '44rem' }}
+            initial={{ opacity: 0, y: 8, scale: 0.985 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 4, scale: 0.99 }}
+            transition={spring}>
+            <div className="flex items-start justify-between gap-6 border-b border-line px-6 py-4">
+              <div>
+                <h2 className="text-[15px] font-semibold">{title}</h2>
+                {subtitle && <p className="mt-0.5 text-xs text-mute">{subtitle}</p>}
+              </div>
+              <button type="button" onClick={onClose} aria-label="Close"
+                className="-mr-1 rounded-md p-1 text-mute transition-colors hover:bg-hover hover:text-ink">✕</button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</div>
+            {footer && (
+              <div className="sticky bottom-0 flex items-center justify-end gap-3 border-t border-line bg-surface/95 px-6 py-4 backdrop-blur">
+                {footer}
+              </div>
+            )}
+          </motion.div>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</div>
-        {footer && (
-          <div className="sticky bottom-0 flex items-center justify-end gap-3 border-t border-line bg-surface/95 px-6 py-4 backdrop-blur">
-            {footer}
-          </div>
-        )}
-      </div>
-    </div>
+      )}
+    </AnimatePresence>
   ), document.body);
 }
 
@@ -186,9 +215,9 @@ export function Toggle({ checked, onChange, label, disabled }: { checked: boolea
 
 export const btn = {
   base: 'inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-[13px] font-medium transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-45',
-  primary: 'border border-accent/60 bg-accent text-[#082a3d] hover:brightness-110 active:brightness-95',
+  primary: 'border border-accent/60 bg-accent text-accent-ink hover:brightness-110 active:brightness-95',
   ghost: 'border border-line bg-transparent text-dim hover:border-line-strong hover:bg-hover hover:text-ink',
-  danger: 'border border-[rgba(248,113,113,0.3)] bg-transparent text-bad hover:bg-[rgba(248,113,113,0.08)]',
+  danger: 'border border-[rgba(248,113,113,0.3)] bg-transparent text-bad hover:bg-bad-dim',
 };
 
 export function Spinner({ className }: { className?: string }) {
@@ -204,15 +233,6 @@ export function Spinner({ className }: { className?: string }) {
 
 export function Kbd({ children }: { children: ReactNode }) {
   return <kbd className="rounded border border-line bg-raised px-1.5 py-0.5 font-mono text-[10.5px] text-mute">{children}</kbd>;
-}
-
-export function formatTokens(n: number): string {
-  if (!Number.isFinite(n)) return '–';
-  const a = Math.abs(n);
-  if (a >= 1e9) return `${(n / 1e9).toFixed(1).replace(/\.0$/, '')}B`;
-  if (a >= 1e6) return `${(n / 1e6).toFixed(1).replace(/\.0$/, '')}M`;
-  if (a >= 1e3) return `${(n / 1e3).toFixed(1).replace(/\.0$/, '')}k`;
-  return `${n}`;
 }
 
 export function relTime(iso: string | null | undefined): string {
@@ -234,4 +254,55 @@ export function clockTime(iso: string): string {
   const d = new Date(t);
   const time = d.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
   return time;
+}
+
+// ── segmented control ──────────────────────────────────────────────────────
+// Stats, Economics and Requests each grew their own copy of this inline
+// (three identical 15-line components). One generic version, typed on the
+// option key so a typo in the value is a compile error, not a blank toggle.
+export function Segmented<T extends string>({
+  options, value, onChange, label, size = 'md',
+}: {
+  options: { key: T; label: string; title?: string }[];
+  value: T;
+  onChange: (v: T) => void;
+  label?: string;
+  size?: 'sm' | 'md';
+}) {
+  return (
+    <div role="group" aria-label={label}
+      className="inline-flex flex-wrap gap-1 rounded-lg border border-line bg-surface p-1">
+      {options.map((o) => (
+        <button
+          key={o.key}
+          type="button"
+          title={o.title}
+          aria-pressed={o.key === value}
+          onClick={() => onChange(o.key)}
+          className={cx(
+            'rounded-md font-medium transition-colors',
+            size === 'sm' ? 'px-2 py-0.5 text-[11.5px]' : 'px-2.5 py-1 text-[12px]',
+            o.key === value ? 'bg-accent text-accent-ink' : 'text-mute hover:text-ink',
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── empty state ────────────────────────────────────────────────────────────
+// A blank region with no explanation is the most common dashboard bug: the
+// operator cannot tell "no data" from "the query failed" from "I broke it".
+export function EmptyState({
+  title, hint, action,
+}: { title: string; hint?: string; action?: ReactNode }) {
+  return (
+    <div className="flex flex-col items-center gap-1 px-5 py-10 text-center">
+      <p className="text-[13px] text-dim">{title}</p>
+      {hint && <p className="max-w-sm text-[11.5px] leading-relaxed text-mute">{hint}</p>}
+      {action && <div className="mt-3">{action}</div>}
+    </div>
+  );
 }

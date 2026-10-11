@@ -138,7 +138,7 @@ func TestStickyReleasesAfterIdleWindow(t *testing.T) {
 	combo := &store.Combo{ID: 201, Name: "sticky", Strategy: "sticky_last_good", StickyIdleS: 30}
 
 	// Hop 2 answered two minutes ago: past the 30s window.
-	lastGood.Store(combo.Name, lastGoodEntry{route: routes[1], at: time.Now().Add(-2 * time.Minute)})
+	lastGood.Store(combo.Name, lastGoodEntry{accountID: 2, model: "m", at: time.Now().Add(-2 * time.Minute)})
 	ordered := stickyOrder(combo, routes)
 	if ordered[0].Account.ID != 1 {
 		t.Errorf("stale sticky hop still leads (%d) — sticky_idle_s is not being honoured",
@@ -155,7 +155,7 @@ func TestStickyHoldsWithinIdleWindow(t *testing.T) {
 	routes := []proxy.Route{hop(1, "m"), hop(2, "m")}
 	combo := &store.Combo{ID: 202, Name: "sticky2", Strategy: "sticky_last_good", StickyIdleS: 1800}
 
-	lastGood.Store(combo.Name, lastGoodEntry{route: routes[1], at: time.Now()})
+	lastGood.Store(combo.Name, lastGoodEntry{accountID: 2, model: "m", at: time.Now()})
 	ordered := stickyOrder(combo, routes)
 	if ordered[0].Account.ID != 2 {
 		t.Fatalf("fresh sticky hop lost the lead (%d), want hop 2", ordered[0].Account.ID)
@@ -171,7 +171,7 @@ func TestStickyZeroIdleNeverReleases(t *testing.T) {
 	routes := []proxy.Route{hop(1, "m"), hop(2, "m")}
 	combo := &store.Combo{ID: 203, Name: "sticky3", Strategy: "sticky_last_good", StickyIdleS: 0}
 
-	lastGood.Store(combo.Name, lastGoodEntry{route: routes[1], at: time.Now().Add(-24 * time.Hour)})
+	lastGood.Store(combo.Name, lastGoodEntry{accountID: 2, model: "m", at: time.Now().Add(-24 * time.Hour)})
 	if ordered := stickyOrder(combo, routes); ordered[0].Account.ID != 2 {
 		t.Errorf("hop %d leads, want the sticky hop 2 with idle release disabled", ordered[0].Account.ID)
 	}
@@ -226,17 +226,17 @@ func TestStrictRoundRobinAdvancesAfterSuccess(t *testing.T) {
 		t.Fatalf("cold start head = %d, want 1", ordered[0].Account.ID)
 	}
 	// Hop 1 answered → next request starts at hop 2.
-	lastGood.Store(combo.Name, lastGoodEntry{route: routes[0], at: time.Now()})
+	lastGood.Store(combo.Name, lastGoodEntry{accountID: 1, model: "m", at: time.Now()})
 	if ordered := strictOrder(combo, routes); ordered[0].Account.ID != 2 {
 		t.Fatalf("after hop 1 served, head = %d, want 2", ordered[0].Account.ID)
 	}
 	// Hop 2 answered → hop 3.
-	lastGood.Store(combo.Name, lastGoodEntry{route: routes[1], at: time.Now()})
+	lastGood.Store(combo.Name, lastGoodEntry{accountID: 2, model: "m", at: time.Now()})
 	if ordered := strictOrder(combo, routes); ordered[0].Account.ID != 3 {
 		t.Fatalf("after hop 2 served, head = %d, want 3", ordered[0].Account.ID)
 	}
 	// Hop 3 answered → wraps to hop 1.
-	lastGood.Store(combo.Name, lastGoodEntry{route: routes[2], at: time.Now()})
+	lastGood.Store(combo.Name, lastGoodEntry{accountID: 3, model: "m", at: time.Now()})
 	if ordered := strictOrder(combo, routes); ordered[0].Account.ID != 1 {
 		t.Fatalf("after hop 3 served, head = %d, want the rotation to wrap to 1", ordered[0].Account.ID)
 	}
@@ -251,13 +251,13 @@ func TestStrictRoundRobinDeprioritisesAFailedHop(t *testing.T) {
 	routes := []proxy.Route{hop(1, "m"), hop(2, "m"), hop(3, "m")}
 
 	// Request 1 started at hop 1 (position order), hop 1 failed, hop 2 served.
-	lastGood.Store(combo.Name, lastGoodEntry{route: routes[1], at: time.Now()})
+	lastGood.Store(combo.Name, lastGoodEntry{accountID: 2, model: "m", at: time.Now()})
 	if ordered := strictOrder(combo, routes); ordered[0].Account.ID != 3 {
 		t.Fatalf("head = %d, want 3 — the request must not restart at the hop that just failed",
 			ordered[0].Account.ID)
 	}
 	// Then hop 3 serves, and the rotation comes back round to hop 1.
-	lastGood.Store(combo.Name, lastGoodEntry{route: routes[2], at: time.Now()})
+	lastGood.Store(combo.Name, lastGoodEntry{accountID: 3, model: "m", at: time.Now()})
 	if ordered := strictOrder(combo, routes); ordered[0].Account.ID != 1 {
 		t.Errorf("head = %d, want 1 — a failed hop must be retried, not skipped forever",
 			ordered[0].Account.ID)
@@ -269,7 +269,7 @@ func TestStrictRoundRobinDeprioritisesAFailedHop(t *testing.T) {
 func TestStrictRoundRobinFallsBackWhenServedHopIsGone(t *testing.T) {
 	combo := &store.Combo{ID: 303, Name: "strict3", Strategy: "strict_round_robin"}
 	routes := []proxy.Route{hop(1, "m"), hop(2, "m")}
-	lastGood.Store(combo.Name, lastGoodEntry{route: hop(99, "m"), at: time.Now()})
+	lastGood.Store(combo.Name, lastGoodEntry{accountID: 99, model: "m", at: time.Now()})
 	if ordered := strictOrder(combo, routes); ordered[0].Account.ID != 1 {
 		t.Errorf("head = %d, want position order (1) when the served hop is no longer eligible",
 			ordered[0].Account.ID)
@@ -279,7 +279,7 @@ func TestStrictRoundRobinFallsBackWhenServedHopIsGone(t *testing.T) {
 func TestStrictRoundRobinSingleHopUnchanged(t *testing.T) {
 	combo := &store.Combo{ID: 304, Name: "strict4", Strategy: "strict_round_robin"}
 	routes := []proxy.Route{hop(7, "m")}
-	lastGood.Store(combo.Name, lastGoodEntry{route: routes[0], at: time.Now()})
+	lastGood.Store(combo.Name, lastGoodEntry{accountID: 1, model: "m", at: time.Now()})
 	if ordered := strictOrder(combo, routes); len(ordered) != 1 || ordered[0].Account.ID != 7 {
 		t.Errorf("single hop was reordered: %v", ordered)
 	}
@@ -296,8 +296,8 @@ func TestMarkHopGoodIsKeyedByComboName(t *testing.T) {
 	r.MarkHopGood("daily", routes[1])
 	if v, ok := lastGood.Load("daily"); !ok {
 		t.Fatal("MarkHopGood stored nothing under the combo name")
-	} else if e := v.(lastGoodEntry); e.route.Account.ID != 2 {
-		t.Errorf("stored hop = %d, want 2", e.route.Account.ID)
+	} else if e := v.(lastGoodEntry); e.accountID != 2 {
+		t.Errorf("stored hop = %d, want 2", e.accountID)
 	}
 	// A different combo is unaffected — the map is per combo, not global.
 	strict := &store.Combo{ID: 305, Name: "other", Strategy: "strict_round_robin"}

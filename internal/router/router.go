@@ -210,7 +210,15 @@ func (r *Resolver) ResolveCandidates(ctx context.Context, requested string, surf
 	// Surface capability is enforced in M4 via the probed models table; in M2 we
 	// still verify the model exists in the account's catalog so a typo 404s
 	// rather than burning an upstream call.
-	if ok, err := r.catalog.ModelExists(ctx, acct.ID, model); err == nil && !ok {
+	//
+	// A lookup error FAILS CLOSED: the same reasoning as checkPin above — a
+	// transient store error must not disable the existence check and let a
+	// typo'd model burn an upstream call on every attempt until the DB recovers.
+	exists, err := r.catalog.ModelExists(ctx, acct.ID, model)
+	if err != nil {
+		return nil, fmt.Errorf("router: model lookup for %q: %w", requested, err)
+	}
+	if !exists {
 		hints, _ := r.catalog.AllNamespaces(ctx)
 		return nil, &ErrNotFound{
 			Requested: requested,
@@ -271,7 +279,14 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 			// showing all of them is the useful behaviour.
 			combos, _ := r.catalog.AllComboNames(ctx)
 			ns, _ := r.catalog.AllNamespaces(ctx)
-			hints := append(combos, filterHints(ns, name)...)
+			// Copy into a fresh slice: AllComboNames returns a slice the
+			// catalog owns, and appending into it can write into that
+			// backing array when it has spare capacity — safe today, a
+			// cross-request data race tomorrow. Order preserved: combos
+			// first, then the filtered namespaces.
+			hints := make([]string, 0, len(combos)+len(ns))
+			hints = append(hints, combos...)
+			hints = append(hints, filterHints(ns, name)...)
 			return nil, &ErrNotFound{Requested: name, Hints: hints}
 		}
 		return nil, err
@@ -300,7 +315,7 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 		}
 		if !acct.Enabled {
 			if first == nil {
-				first = fmt.Errorf("hop %s/%s: account %q is disabled", acct.Namespace, h.ModelID, acct.Namespace)
+				first = fmt.Errorf("hop %s/%s: account %q is disabled", acct.Namespace, h.ModelID, acct.Name)
 			}
 			continue
 		}
@@ -482,11 +497,18 @@ func rotate(start uint64, routes []proxy.Route) []proxy.Route {
 // their questions:
 //   - sticky_last_good  : keep using it (until sticky_idle_s of quiet).
 //   - strict_round_robin: start the NEXT request after it.
+//
+// The value is deliberately {accountID, model, at} and NOT the whole
+// proxy.Route. Both readers use exactly those two fields (plus the timestamp),
+// while a full Route carries KeyPlain — the DECRYPTED upstream credential — so
+// storing it would pin a plaintext provider API key in a process-global map
+// with no eviction, duplicating it outside the request scope that needed it.
 var lastGood sync.Map // string comboName -> lastGoodEntry
 
 type lastGoodEntry struct {
-	route proxy.Route
-	at    time.Time
+	accountID int64
+	model     string
+	at        time.Time
 }
 
 // MarkHopGood records the hop that actually served a request. Called by the
@@ -500,7 +522,11 @@ func (r *Resolver) MarkHopGood(comboName string, rt proxy.Route) {
 	if comboName == "" {
 		return
 	}
-	lastGood.Store(comboName, lastGoodEntry{route: rt, at: time.Now()})
+	lastGood.Store(comboName, lastGoodEntry{
+		accountID: rt.Account.ID,
+		model:     rt.Model,
+		at:        time.Now(),
+	})
 }
 
 // stickyOrder puts the last-good hop first, while the combo is still within its
@@ -521,7 +547,7 @@ func stickyOrder(combo *store.Combo, routes []proxy.Route) []proxy.Route {
 		return routes
 	}
 	for i, rt := range routes {
-		if rt.Account.ID == e.route.Account.ID && rt.Model == e.route.Model {
+		if rt.Account.ID == e.accountID && rt.Model == e.model {
 			if i == 0 {
 				return routes
 			}
@@ -555,7 +581,7 @@ func strictOrder(combo *store.Combo, routes []proxy.Route) []proxy.Route {
 	}
 	e := v.(lastGoodEntry)
 	for i, rt := range routes {
-		if rt.Account.ID == e.route.Account.ID && rt.Model == e.route.Model {
+		if rt.Account.ID == e.accountID && rt.Model == e.model {
 			return rotate(uint64((i+1)%len(routes)), routes)
 		}
 	}

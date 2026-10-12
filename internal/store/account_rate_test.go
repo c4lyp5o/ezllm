@@ -47,15 +47,23 @@ func TestMigrateV8ToV9AddsAccountRateColumns(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 
-	// Reopen → cur(8) < schemaVersion(9) → the upgrade branch must run.
+	// Reopen → cur(8) < schemaVersion → the upgrade branch must run.
 	migrated, err := Open(ctx, Options{Path: path})
 	if err != nil {
 		t.Fatalf("reopen/migrate: %v", err)
 	}
 	defer migrated.Close()
 
-	if got := migrated.SchemaVersion(); got != 9 {
-		t.Fatalf("schema version = %d, want 9", got)
+	// The claim is "this DB was migrated UP to the binary's version" — assert
+	// the constant, not a literal, so the next schema bump updates one place.
+	if got := migrated.SchemaVersion(); got != schemaVersion {
+		t.Fatalf("schema version = %d, want %d", got, schemaVersion)
+	}
+	// v10 rides the same upgrade: calls.block_pos must exist on a pre-v9 DB
+	// after the idempotent ALTER loop (this is the migration the dashboard's
+	// block-position tag depends on).
+	if has, err := hasColumn(ctx, migrated.w, "calls", "block_pos"); err != nil || !has {
+		t.Fatalf("calls.block_pos missing after migrate (has=%v err=%v)", has, err)
 	}
 	for _, col := range []string{"rate_limit", "rate_window"} {
 		has, err := hasColumn(ctx, migrated.w, "accounts", col)

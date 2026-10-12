@@ -217,6 +217,10 @@ CREATE TABLE IF NOT EXISTS calls (
   tool_count     INTEGER NOT NULL DEFAULT 0,
   session_id     TEXT NOT NULL DEFAULT '',
   req_bytes      INTEGER NOT NULL DEFAULT 0,
+  -- block_round_robin: this dispatch's 1-based position inside its block.
+  -- 0 = not counted (direct routes, non-block strategies, len(routes)==0).
+  -- The "N requests finished" tag the dashboard renders as ▮ pos/size.
+  block_pos      INTEGER NOT NULL DEFAULT 0,
   err            TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_calls_ts        ON calls(ts DESC);

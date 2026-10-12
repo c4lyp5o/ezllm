@@ -41,6 +41,41 @@ const TREND_RANGE: RangeKey = '7d';
 const HEARTBEAT_MS = 15_000; // overview
 const SLOW_MS = 60_000;      // breakdowns
 
+// failoverNote: the hops that hopped, from the served row's err trail. The
+// server appends `failover: ns/model …` entries for every candidate skipped or
+// failed before the one that served; this returns a compact summary (first
+// entry, plus a count) or '' when the row served on the first try.
+function failoverNote(err?: string): string {
+  if (!err) return '';
+  const i = err.indexOf('failover:');
+  if (i < 0) return '';
+  // Split on the MARKER, never on ';' alone: provider JSON bodies contain
+  // semicolons and splitting on those would miscount the trail.
+  const segs = err.slice(i).split(/;\s*failover:\s*/);
+  const first = segs[0].replace(/^failover:\s*/, '').trim();
+  return segs.length > 1 ? `${first} (+${segs.length - 1} more)` : first;
+}
+
+// errReason: the upstream's own short words from the ledger err column —
+// everything after the `upstream <status> [<cause>]: ` prefix, and before any
+// failover trail (which the model cell shows separately). Provider bodies are
+// usually JSON with the words under error.message, so surface those, not the
+// braces. Clipped for the status cell's second row; full text on hover.
+function errReason(err?: string): string {
+  if (!err) return '';
+  let s = err.split('; failover:')[0];
+  const m = /^\S+\s+\d+\s+\[[a-z_]+\]:\s?/.exec(s);
+  if (m) s = s.slice(m[0].length);
+  if (s.startsWith('{')) {
+    try {
+      const o = JSON.parse(s.replace(/…$/, ''));
+      const msg = (o.error ?? o)?.message;
+      if (typeof msg === 'string') s = msg;
+    } catch { /* truncated or odd shape — show it raw */ }
+  }
+  return s.replace(/\s+/g, ' ').trim();
+}
+
 function statusTone(s: number): string {
   return s >= 500 ? 'text-bad' : s >= 400 ? 'text-warn' : 'text-ok';
 }
@@ -179,13 +214,12 @@ function RecentCalls({ o }: { o: Overview }) {
                 <th className="px-3 py-2.5 text-right font-medium">in</th>
                 <th className="px-3 py-2.5 text-right font-medium">out</th>
                 <th className="px-3 py-2.5 text-right font-medium">saved</th>
-                <th className="px-3 py-2.5 text-right font-medium">compression</th>
-                <th className="px-5 py-2.5 text-right font-medium" title="what a REJECTED rewrite would have saved — tuning data, never real savings">held</th>
+                <th className="px-5 py-2.5 text-right font-medium" title="profile applied; held = what a REJECTED rewrite would have saved (tuning data)">compression</th>
               </tr>
             </thead>
             <tbody className="font-mono tnum">
               {rows.map((r, i) => {
-                const cur = r.alias ? cursors.get(r.alias) : undefined;
+                const cursor = r.alias ? cursors.get(r.alias) : undefined;
                 return (
                   <tr key={i} className="border-b border-line/50 transition-colors last:border-0 hover:bg-wash">
                     <td className="whitespace-nowrap px-5 py-2 text-mute">{clockTime(r.ts)}</td>
@@ -193,12 +227,24 @@ function RecentCalls({ o }: { o: Overview }) {
                     <td className="px-3 py-2 text-dim">{r.surface}</td>
                     <td className="max-w-[220px] px-3 py-2 font-sans">
                       <div className="truncate text-ink" title={r.model}>{r.model}</div>
-                      {cur && (
-                        // The block cursor this combo is on RIGHT NOW — the
-                        // table refreshes with it, so a rotation onto another
-                        // hop is visible within seconds of the advance log.
-                        <div className="mt-0.5 text-[10px] text-mute" title={`block_round_robin: ${cur.hop} serves ${cur.block_size} consecutive dispatches`}>
-                          ▮ {cur.hop} · {cur.remaining}/{cur.block_size} left
+                      {/* Row 2: this dispatch's position in its block — the
+                          "N requests finished" tag. Size comes from the live
+                          cursor when the combo has one; a pos longer than the
+                          size was never possible, so a fallback run that
+                          overruns N is visible row by row. */}
+                      {(r.block_pos ?? 0) > 0 && (
+                        <div className="mt-0.5 text-[10px] text-mute"
+                          title={cursor
+                            ? `block_round_robin: dispatch ${r.block_pos} of ${cursor.block_size}; ${cursor.hop} owns the current block (${cursor.remaining} left)`
+                            : `block_round_robin: dispatch ${r.block_pos} of its block`}>
+                          ▮ {r.block_pos}{cursor ? `/${cursor.block_size}` : ''}
+                        </div>
+                      )}
+                      {/* The hops that hopped: skipped or failed candidates,
+                          from the served row's trail. */}
+                      {failoverNote(r.err) && (
+                        <div className="mt-0.5 truncate text-[10px] text-warn" title={r.err}>
+                          ⚠ {failoverNote(r.err)}
                         </div>
                       )}
                     </td>
@@ -206,29 +252,57 @@ function RecentCalls({ o }: { o: Overview }) {
                     <td className="px-3 py-2 text-dim">{r.alias || '–'}</td>
                     <td className={cx('px-3 py-2 text-right', statusTone(r.status))}>
                       <div>{r.status}</div>
-                      <div className="mt-0.5 font-sans"><CauseChip err={r.err} status={r.status} /></div>
+                      {r.status >= 400 && (
+                        // Row 2 under the code: the classified cause AND the
+                        // upstream's own short reason — the code says what
+                        // happened, this says why. Full text on hover.
+                        <div className="mt-0.5 flex items-center justify-end gap-1.5 font-sans">
+                          <CauseChip err={r.err} status={r.status} />
+                          {errReason(r.err) && (
+                            <span className="max-w-[180px] truncate text-[10px] text-mute" title={r.err}>
+                              {errReason(r.err)}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-right text-dim">{fmtMs(r.ttft_ms)}</td>
                     <td className="px-3 py-2 text-right text-dim">{fmtDuration(r.total_ms)}</td>
-                    <td className="px-3 py-2 text-right text-dim">{nfmt(r.tin)}</td>
+                    <td className="px-3 py-2 text-right">
+                      <div className="text-dim">{nfmt(r.tin)}</div>
+                      {/* Cached reads ride inside tokens_in by the anthropic
+                          convention — shown greyed so cache efficiency is
+                          trackable per call without opening the ledger. */}
+                      {(r.cread ?? 0) > 0 && (
+                        <div className="mt-0.5 text-[10px] text-mute" title="of which served from the prompt cache (counted inside tokens in)">
+                          {nfmt(r.cread ?? 0)} cached
+                        </div>
+                      )}
+                    </td>
                     <td className="px-3 py-2 text-right text-dim">{nfmt(r.tout)}</td>
                     <td className="px-3 py-2 text-right">
                       {r.saved > 0 ? <span className="text-ok">−{formatTokens(r.saved)}</span> : <span className="text-mute">–</span>}
                     </td>
-                    <td className="px-3 py-2 text-right font-sans">
+                    <td className="px-5 py-2 text-right font-sans">
                       {r.compression ? (
-                        <span
-                          title={r.applied ? `compressed by ${r.compression}` : `asked ${r.compression}, no change`}
-                          className={cx('rounded px-1 py-0.5 font-mono text-[10px]',
-                            r.applied ? 'bg-ok-dim text-ok' : 'bg-shade text-mute')}>
-                          {r.compression === 'off' ? 'off' : r.compression}
-                        </span>
+                        <>
+                          <span
+                            title={r.applied ? `compressed by ${r.compression}` : `asked ${r.compression}, no change`}
+                            className={cx('rounded px-1 py-0.5 font-mono text-[10px]',
+                              r.applied ? 'bg-ok-dim text-ok' : 'bg-shade text-mute')}>
+                            {r.compression === 'off' ? 'off' : r.compression}
+                          </span>
+                          {/* Row 2 of the same cell: held tokens — what a
+                              REJECTED rewrite would have saved. Tuning data,
+                              never real savings. */}
+                          {!r.applied && (r.saved_notional ?? 0) > 0 && (
+                            <div className="mt-0.5 text-[10px] text-warn"
+                              title="held: a rewrite was rejected by the ratio floor — this is what it would have saved">
+                              held {formatTokens(r.saved_notional ?? 0)}
+                            </div>
+                          )}
+                        </>
                       ) : <span className="text-mute">–</span>}
-                    </td>
-                    <td className="px-5 py-2 text-right">
-                      {!r.applied && (r.saved_notional ?? 0) > 0
-                        ? <span className="text-warn" title="held: a rewrite was rejected by the ratio floor — this is what it would have saved">held {formatTokens(r.saved_notional ?? 0)}</span>
-                        : <span className="text-mute">–</span>}
                     </td>
                   </tr>
                 );

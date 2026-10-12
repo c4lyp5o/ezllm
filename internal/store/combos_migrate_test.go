@@ -78,15 +78,15 @@ func TestMigrateV8ToV9RebuildsCombos(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 
-	// Reopen → cur(8) < schemaVersion(9) → the rebuild must run.
+	// Reopen → cur(8) < schemaVersion → the rebuild must run.
 	migrated, err := Open(ctx, Options{Path: path})
 	if err != nil {
 		t.Fatalf("reopen/migrate: %v", err)
 	}
 	defer migrated.Close()
 
-	if got := migrated.SchemaVersion(); got != 9 {
-		t.Fatalf("schema version = %d, want 9", got)
+	if got := migrated.SchemaVersion(); got != schemaVersion {
+		t.Fatalf("schema version = %d, want %d", got, schemaVersion)
 	}
 	if has, err := hasColumn(ctx, migrated.w, "combos", "block_size"); err != nil || !has {
 		t.Fatalf("combos.block_size missing after rebuild (has=%v err=%v)", has, err)

@@ -24,7 +24,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 9
+const schemaVersion = 10
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -397,7 +397,7 @@ func (d *DB) alterCallsResearch(ctx context.Context) error {
 		return nil
 	}
 	textCols := []string{"prefix_sha", "session_id"}
-	intCols := []string{"compression_saved_notional", "msg_count", "tool_count", "req_bytes"}
+	intCols := []string{"compression_saved_notional", "msg_count", "tool_count", "req_bytes", "block_pos"}
 	for _, column := range textCols {
 		ok, err := hasColumn(ctx, d.w, "calls", column)
 		if err != nil {

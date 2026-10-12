@@ -252,6 +252,7 @@ const callsCols = `ts, client, surface, alias, account, model, status, ttft_ms, 
        COALESCE(context_tokens_pre, 0), COALESCE(context_tokens_saved, 0),
        COALESCE(compression_saved_notional, 0), COALESCE(prefix_sha, ''),
        COALESCE(session_id, ''), msg_count, tool_count, req_bytes,
+       COALESCE(block_pos, 0),
        COALESCE(err, '')`
 
 // scanCalls maps rows projected with callsCols into the row shape the
@@ -263,12 +264,12 @@ func scanCalls(rows *sql.Rows) ([]map[string]any, error) {
 		var status int
 		var ttft, total, tin, tout, cread, cwrite, reasoning any
 		var saved, applied, rulesFired, contextPre, contextSaved int
-		var notional, msgCount, toolCount, reqBytes int
+		var notional, msgCount, toolCount, reqBytes, blockPos int
 		var prefixSHA, sessionID, profile, errText string
 		if err := rows.Scan(&ts, &client, &surface, &alias, &account, &model, &status,
 			&ttft, &total, &tin, &tout, &cread, &cwrite, &reasoning,
 			&saved, &profile, &applied, &rulesFired, &contextPre, &contextSaved,
-			&notional, &prefixSHA, &sessionID, &msgCount, &toolCount, &reqBytes, &errText); err != nil {
+			&notional, &prefixSHA, &sessionID, &msgCount, &toolCount, &reqBytes, &blockPos, &errText); err != nil {
 			return nil, err
 		}
 		out = append(out, map[string]any{
@@ -297,6 +298,9 @@ func scanCalls(rows *sql.Rows) ([]map[string]any, error) {
 			"msg_count":  msgCount,
 			"tool_count": toolCount,
 			"req_bytes":  reqBytes,
+			// block_round_robin: this dispatch's 1-based position in its block
+			// (0 = not counted). The dashboard tags rows ▮ pos/size.
+			"block_pos": blockPos,
 			// Verbatim err column (empty on success): carries the upstream
 			// words and, for rows written after the error-cause classifier
 			// shipped, the leading `[<cause>]` the dashboard renders as a chip.

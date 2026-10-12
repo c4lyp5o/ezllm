@@ -170,8 +170,12 @@ export type RecentCall = {
   saved: number; compression: string; applied: boolean; contextPre?: number; contextSaved?: number;
   // alias = the combo name (or "ns/model" for a direct route); err = the
   // verbatim ledger err column, with the leading `[<cause>]` marker when the
-  // row was written after the error-cause classifier shipped.
+  // row was written after the error-cause classifier shipped, plus any
+  // `failover:` trail of hops that were skipped or failed before the served one.
   alias?: string; err?: string; saved_notional?: number; rules_fired?: number;
+  // block_pos = block_round_robin dispatch position in its block (0 = not
+  // counted): the "N requests finished" tag.
+  block_pos?: number;
 };
 
 // The feed's snapshot rows come from recentCalls (ledger names: tin, saved);

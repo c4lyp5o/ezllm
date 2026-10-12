@@ -18,6 +18,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/c4lyp5o/ezllm/internal/provider"
 	"github.com/c4lyp5o/ezllm/internal/proxy"
@@ -575,6 +576,19 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 		} else if res.Err != "" {
 			call.Err = res.Err
 		}
+		// Failover trail: every candidate that did NOT serve, appended to the
+		// served row's err. One request stays ONE ledger row (the billing
+		// truth), but the hops that "hopped" become visible in the dashboard —
+		// the operator asked for exactly this, and without it a fallback run
+		// looks like the rotation never moved.
+		if note := failoverTrail(res.Attempts); note != "" {
+			if call.Err == "" {
+				call.Err = note
+			} else {
+				call.Err = call.Err + "; " + note
+			}
+		}
+		call.BlockPos = served.BlockPos
 		s.ledger(call)
 	}
 }
@@ -785,6 +799,35 @@ func orDefault(v, def string) string {
 		return def
 	}
 	return v
+}
+
+// failoverTrail renders the dispatcher's abandoned-candidate list for the
+// ledger err column. The marker word is `failover:` so the dashboard can tell
+// the served hop's own failure (which comes first) from the hops that hopped.
+func failoverTrail(attempts []proxy.Attempt) string {
+	if len(attempts) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(attempts))
+	for _, a := range attempts {
+		if a.Status > 0 {
+			parts = append(parts, fmt.Sprintf("failover: %s/%s — %s", a.Namespace, a.Model, a.Note))
+		} else {
+			parts = append(parts, fmt.Sprintf("failover: %s/%s skipped (%s)", a.Namespace, a.Model, a.Note))
+		}
+	}
+	// Attempt notes are bounded individually; clip the joined string so a
+	// pathological candidate list cannot blow the column up. Cut on a rune
+	// boundary — the column is TEXT and the dashboard renders it.
+	s := strings.Join(parts, "; ")
+	if len(s) > 400 {
+		cut := 400
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		s = s[:cut] + "…"
+	}
+	return s
 }
 
 // ledger records a call without ever blocking the response path.

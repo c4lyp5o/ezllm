@@ -461,7 +461,16 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 		}
 		return nil, fmt.Errorf("router: combo %q has no usable hops", name)
 	}
-	candidates := orderRoutes(combo, routes)
+	candidates, blockPos := orderRoutes(combo, routes)
+	// BlockPos rides on EVERY candidate: it tags the DISPATCH (this request's
+	// position inside its block), not a hop. Whichever route actually serves,
+	// the ledger row carries the same tag — the "N requests finished" evidence.
+	for i := range candidates {
+		candidates[i].BlockPos = blockPos
+	}
+	for i := range translatedRoutes {
+		translatedRoutes[i].BlockPos = blockPos
+	}
 	// Translated candidates ride the TAIL, after every native-compatible
 	// hop: a native hop always wins, and a translated hop serves only when
 	// every native hop failed or was skipped. They are deliberately NOT part
@@ -478,23 +487,23 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 // Weights are handled by expansion (a weight-3 hop appears three times) rather
 // than by a weighted cursor: it keeps the hot path free of arithmetic state,
 // and the lists are tiny.
-func orderRoutes(combo *store.Combo, routes []proxy.Route) []proxy.Route {
+func orderRoutes(combo *store.Combo, routes []proxy.Route) ([]proxy.Route, int) {
 	switch combo.Strategy {
 	case "true_round_robin":
-		return randomOrder(routes)
+		return randomOrder(routes), 0
 	case "strict_round_robin":
-		return strictOrder(combo, routes)
+		return strictOrder(combo, routes), 0
 	case "block_round_robin":
 		return blockOrder(combo, routes)
 	case "least_used":
 		// Caller supplies hop order already; least-used needs usage data the
 		// router does not hold, so keep position order until M4's ledger hook
 		// lands. Ordering wrongly here would be worse than not ordering.
-		return routes
+		return routes, 0
 	case "sticky_last_good":
-		return stickyOrder(combo, routes)
+		return stickyOrder(combo, routes), 0
 	default: // "failover"
-		return routes
+		return routes, 0
 	}
 }
 
@@ -587,9 +596,18 @@ type blockEntry struct {
 // BlockSize 1 degenerates to plain per-request round robin. Costs one cold read
 // per block boundary (`block_size - 1` warm calls per block), so a block that
 // splits a burst mid-way is the failure mode to size against.
-func blockOrder(combo *store.Combo, routes []proxy.Route) []proxy.Route {
-	if len(routes) < 2 {
-		return routes
+//
+// Every dispatch is COUNTED, including stretches where fewer than two hops are
+// eligible: N must mean N dispatches everywhere, or the per-row block tag lies
+// about how much of the block was spent. With a single candidate the rotation
+// "advances" onto the same hop and the advance log says so — that is the
+// operator's evidence that a long visible run was eligibility, not arithmetic.
+// The second return is this dispatch's 1-based position inside its block.
+func blockOrder(combo *store.Combo, routes []proxy.Route) ([]proxy.Route, int) {
+	// len(routes)==0 cannot happen (the caller checked), but never index into
+	// an empty list regardless.
+	if len(routes) == 0 {
+		return routes, 0
 	}
 	size := combo.BlockSize
 	if size < 1 {
@@ -642,7 +660,9 @@ func blockOrder(combo *store.Combo, routes []proxy.Route) []proxy.Route {
 			"block_size", size)
 	}
 	e.remaining--
-	return rotate(uint64(target), routes)
+	// Position AFTER the decrement: 1..size. A dispatch that spends the last
+	// slot of its block reports pos == size, and the NEXT dispatch advances.
+	return rotate(uint64(target), routes), size - e.remaining
 }
 
 func rotate(start uint64, routes []proxy.Route) []proxy.Route {

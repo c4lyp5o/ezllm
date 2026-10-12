@@ -101,8 +101,8 @@ func (a *gateAdapter) PrepareRequest(ctx context.Context, req *http.Request, acc
 	return nil
 }
 
-func (a *gateAdapter) StripHeaders() []string         { return nil }
-func (a *gateAdapter) CatalogIsPublic() bool          { return false }
+func (a *gateAdapter) StripHeaders() []string { return nil }
+func (a *gateAdapter) CatalogIsPublic() bool  { return false }
 func (a *gateAdapter) AuthOracle() provider.AuthProbe {
 	return provider.AuthProbe{Method: http.MethodGet, Path: "/usage"}
 }

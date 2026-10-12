@@ -19,7 +19,7 @@ func hop(id int64, model string) proxy.Route {
 func blockHeads(combo *store.Combo, routes []proxy.Route, n int) []int64 {
 	out := make([]int64, 0, n)
 	for i := 0; i < n; i++ {
-		ordered := blockOrder(combo, routes)
+		ordered, _ := blockOrder(combo, routes)
 		out = append(out, ordered[0].Account.ID)
 	}
 	return out
@@ -87,7 +87,7 @@ func TestBlockOrderKeepsFailoverTail(t *testing.T) {
 
 	blockOrder(combo, routes) // hop 1, slot 1
 	blockOrder(combo, routes) // hop 1, block spent
-	ordered := blockOrder(combo, routes)
+	ordered, _ := blockOrder(combo, routes)
 	if ordered[0].Account.ID != 2 {
 		t.Fatalf("new block starts at hop %d, want hop 2", ordered[0].Account.ID)
 	}
@@ -123,7 +123,7 @@ func TestBlockTargetLeavingEligibleListStartsFreshBlock(t *testing.T) {
 func TestBlockOrderSingleHopUnchanged(t *testing.T) {
 	combo := &store.Combo{ID: 106, Name: "solo", Strategy: "block_round_robin", BlockSize: 5}
 	routes := []proxy.Route{hop(9, "m")}
-	if ordered := blockOrder(combo, routes); len(ordered) != 1 || ordered[0].Account.ID != 9 {
+	if ordered, pos := blockOrder(combo, routes); len(ordered) != 1 || ordered[0].Account.ID != 9 || pos != 1 {
 		t.Errorf("single hop was reordered: %v", ordered)
 	}
 }

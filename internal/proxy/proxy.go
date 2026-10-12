@@ -99,6 +99,11 @@ type Route struct {
 	// translation). Set by the router from probed capability; nothing else
 	// about the hop's failover/park semantics changes.
 	Translated bool
+	// BlockPos tags the DISPATCH, not the hop: this request's 1-based
+	// position inside its block_round_robin block (0 = not counted). The
+	// router sets the SAME value on every candidate of a dispatch, so the
+	// ledger row carries it no matter which hop actually served.
+	BlockPos int
 	// ResponsesWire marks a hop curated onto OpenAI's Responses wire for a
 	// chat client (docs/responses-wire-design.md): the body is translated
 	// chat→responses on the way out and back on the way in. Same rules as
@@ -107,7 +112,20 @@ type Route struct {
 	ResponsesWire bool
 }
 
-// Result carries what the ledger needs after a dispatch.
+// Attempt is one candidate that did NOT serve the request, in the order the
+// dispatcher abandoned it. It exists because a failed or skipped hop writes no
+// ledger row of its own (one request = one row, and that row is the billing
+// truth) — without the trail, the hops that "hopped" are invisible to the
+// operator's recent-calls view and only exist in logs.
+type Attempt struct {
+	Namespace string // hop namespace
+	Model     string // hop model
+	Status    int    // the upstream status the hop earned (0 = never dialed)
+	Note      string // short reason: classified cause, skip reason, transport error
+}
+
+// Result carries what the ledger needs after a dispatch. Attempts lists every
+// candidate that did not serve, dispatch order; the serving hop is never listed.
 type Result struct {
 	Status        int
 	Stream        bool
@@ -117,6 +135,7 @@ type Result struct {
 	EndpointID    string
 	UpstreamModel string
 	Err           string
+	Attempts      []Attempt
 	// Committed reports whether commit already called WriteHeader on the
 	// client. It exists because Status is set from the upstream in attempt
 	// BEFORE anything is written: on a body-read failure commit can return an
@@ -955,6 +974,10 @@ func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWrite
 	var fallbackStart time.Time
 	var fallbackTransportErr error
 	var rateRefusal *RateLimited
+	// The failover trail: every candidate abandoned before the one that
+	// served, in dispatch order. Attached to whatever Result goes back so the
+	// ledger row can show the hops that "hopped".
+	var attempts []Attempt
 	for i := 0; i < len(routes); i++ {
 		rt := routes[i]
 		allowed, probe := d.acquireHop(rt, time.Now())
@@ -962,10 +985,15 @@ func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWrite
 			// Failover is invisible to the CLIENT on purpose; it must not be
 			// invisible to the OPERATOR. A skipped hop writes no ledger row (the
 			// request never leaves the box), so this log line is the only place
-			// the reason exists.
+			// the reason exists — and the attempt trail carries it to the
+			// served row's ledger err.
+			why := d.skipReason(rt, time.Now())
 			d.log.Info("hop skipped",
 				"account", rt.Account.Namespace, "model", rt.Model,
-				"alias", rt.Alias, "why", d.skipReason(rt, time.Now()))
+				"alias", rt.Alias, "why", why)
+			attempts = append(attempts, Attempt{
+				Namespace: rt.Account.Namespace, Model: rt.Model, Note: why,
+			})
 			continue
 		}
 		// Account-wide request budget, reserved HERE rather than at resolution:
@@ -980,6 +1008,10 @@ func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWrite
 			if probe {
 				d.releaseProbe(rt)
 			}
+			attempts = append(attempts, Attempt{
+				Namespace: rt.Account.Namespace, Model: rt.Model,
+				Note: fmt.Sprintf("account budget %d per %s exhausted", rt.Account.RateLimit, rt.Account.RateWindow),
+			})
 			// Keep the EARLIEST release time across hops: that is the first
 			// moment the request could succeed anywhere, which is what the
 			// client needs to wait for.
@@ -1022,6 +1054,10 @@ func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWrite
 			d.log.Warn("hop failed, failing over",
 				"account", rt.Account.Namespace, "model", rt.Model,
 				"alias", rt.Alias, "err", err.Error())
+			attempts = append(attempts, Attempt{
+				Namespace: rt.Account.Namespace, Model: rt.Model,
+				Note: "transport: " + err.Error(),
+			})
 			if fallbackResp != nil {
 				drainClose(fallbackResp)
 				fallbackResp = nil
@@ -1036,10 +1072,18 @@ func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWrite
 			// also fails. So read a bounded prefix of the error body here and
 			// restore it afterwards — the response is still committable as the
 			// final fallback, and it must stay byte-identical.
+			words := peekUpstreamError(resp)
 			d.log.Warn("hop failed, failing over",
 				"account", rt.Account.Namespace, "model", rt.Model,
 				"alias", rt.Alias, "status", res.Status,
-				"reason", oc.reason, "upstream", peekUpstreamError(resp))
+				"reason", oc.reason, "upstream", words)
+			attempts = append(attempts, Attempt{
+				Namespace: rt.Account.Namespace, Model: rt.Model, Status: res.Status,
+				// peekUpstreamError already renders the ledger's err format
+				// (`upstream 429 [cause]: words`) — use it verbatim, never
+				// re-wrap it (that double-printed the prefix once).
+				Note: words,
+			})
 		}
 		if failoverStatus(res.Status) {
 			if fallbackResp != nil {
@@ -1057,6 +1101,7 @@ func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWrite
 		// credit the hop that ACTUALLY served the call. Reporting routes[0]
 		// would attribute a failed hop's spend — and, worse, would make a
 		// per-account cap meter the wrong budget entirely.
+		res2.Attempts = attempts
 		return rt, res2, err2
 	}
 
@@ -1069,19 +1114,20 @@ func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWrite
 			"account", fallbackRoute.Account.Namespace, "model", fallbackRoute.Model,
 			"alias", fallbackRoute.Alias)
 		result, err := d.commit(ctx, w, fallbackResp, *fallbackRoute, fallbackResult, fallbackStart)
+		result.Attempts = attempts
 		return *fallbackRoute, result, err
 	}
 	if fallbackTransportErr != nil {
-		return Route{}, Result{}, fallbackTransportErr
+		return Route{}, Result{Attempts: attempts}, fallbackTransportErr
 	}
 	// Nothing was attempted at all because every hop was out of request budget.
 	// Report the refusal with the earliest release time so the client can wait
 	// instead of blind-retrying — and note that no upstream request was wasted
 	// discovering this.
 	if rateRefusal != nil {
-		return Route{}, Result{}, rateRefusal
+		return Route{}, Result{Attempts: attempts}, rateRefusal
 	}
-	return Route{}, Result{}, errors.New("proxy: all combo endpoints are in five-minute cooldown")
+	return Route{}, Result{Attempts: attempts}, errors.New("proxy: all combo endpoints are in five-minute cooldown")
 }
 
 // streamCopy copies SSE upstream->client with a Flush per chunk, observing

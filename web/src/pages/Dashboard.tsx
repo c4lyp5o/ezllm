@@ -199,18 +199,14 @@ function RecentCalls({ o }: { o: Overview }) {
           hint="Route something through a combo and it lands here — this table refreshes itself every few seconds." />
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1080px] text-[12.5px]">
+          <table className="w-full min-w-[860px] text-[12.5px]">
             <thead>
               <tr className="border-b border-line text-left text-[10.5px] uppercase tracking-[0.1em] text-mute">
                 <th className="px-5 py-2.5 font-medium">time</th>
                 <th className="px-3 py-2.5 font-medium">client</th>
-                <th className="px-3 py-2.5 font-medium">surface</th>
-                <th className="px-3 py-2.5 font-medium">model</th>
-                <th className="px-3 py-2.5 font-medium">provider</th>
-                <th className="px-3 py-2.5 font-medium">combo</th>
+                <th className="px-3 py-2.5 font-medium" title="the served model, with the surface it rode and who served it (provider · combo) parked underneath">model</th>
                 <th className="px-3 py-2.5 text-right font-medium">status</th>
-                <th className="px-3 py-2.5 text-right font-medium" title="time to first token — only meaningful on a stream">ttft</th>
-                <th className="px-3 py-2.5 text-right font-medium">total</th>
+                <th className="px-3 py-2.5 text-right font-medium" title="time to first token on top, total duration below — ttft is only meaningful on a stream">duration</th>
                 <th className="px-3 py-2.5 text-right font-medium">in</th>
                 <th className="px-3 py-2.5 text-right font-medium">out</th>
                 <th className="px-5 py-2.5 text-right font-medium" title="profile applied; saved = tokens a shipped rewrite removed; held = what a REJECTED rewrite would have saved (tuning data)">compression</th>
@@ -223,10 +219,18 @@ function RecentCalls({ o }: { o: Overview }) {
                   <tr key={i} className="border-b border-line/50 transition-colors last:border-0 hover:bg-wash">
                     <td className="whitespace-nowrap px-5 py-2 text-mute">{clockTime(r.ts)}</td>
                     <td className="px-3 py-2 text-dim">{r.client || '–'}</td>
-                    <td className="px-3 py-2 text-dim">{r.surface}</td>
-                    <td className="max-w-[220px] px-3 py-2 font-sans">
+                    <td className="max-w-[260px] px-3 py-2 font-sans">
                       <div className="truncate text-ink" title={r.model}>{r.model}</div>
-                      {/* Row 2: this dispatch's position in its block — the
+                      {/* Identity of the serve, parked under the model: the
+                          surface it rode, then who served it (provider ·
+                          combo). Direct routes carry no combo, so the dash
+                          stays for those. */}
+                      <div className="mt-0.5 flex items-center gap-1.5 text-[10.5px] text-mute"
+                        title={[r.surface, r.account, r.alias].filter(Boolean).join(' · ')}>
+                        <span className="shrink-0 rounded bg-shade px-1 py-0.5 font-mono text-[10px] text-dim">{r.surface}</span>
+                        <span className="truncate">{r.account}{r.alias ? ` · ${r.alias}` : ''}</span>
+                      </div>
+                      {/* Row 3: this dispatch's position in its block — the
                           "N requests finished" tag. Size comes from the live
                           cursor when the combo has one; a pos longer than the
                           size was never possible, so a fallback run that
@@ -255,8 +259,6 @@ function RecentCalls({ o }: { o: Overview }) {
                         </div>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-dim">{r.account}</td>
-                    <td className="px-3 py-2 text-dim">{r.alias || '–'}</td>
                     <td className={cx('px-3 py-2 text-right', statusTone(r.status))}>
                       <div>{r.status}</div>
                       {r.status >= 400 && (
@@ -273,8 +275,18 @@ function RecentCalls({ o }: { o: Overview }) {
                         </div>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-right text-dim">{fmtMs(r.ttft_ms)}</td>
-                    <td className="px-3 py-2 text-right text-dim">{fmtDuration(r.total_ms)}</td>
+                    <td className="px-3 py-2 text-right text-dim">
+                      {/* Duration, stacked like every other two-line cell:
+                          ttft on top (stream-only meaningful), total below. */}
+                      <div>
+                        <span className="text-[10px] uppercase tracking-wide text-mute">ttft </span>
+                        {fmtMs(r.ttft_ms)}
+                      </div>
+                      <div className="mt-0.5">
+                        <span className="text-[10px] uppercase tracking-wide text-mute">total </span>
+                        {fmtDuration(r.total_ms)}
+                      </div>
+                    </td>
                     <td className="px-3 py-2 text-right">
                       <div className="text-dim">{nfmt(r.tin)}</div>
                       {/* Cached reads ride inside tokens_in by the anthropic

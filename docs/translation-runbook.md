@@ -4,13 +4,17 @@ ezllm's native contract is passthrough: bodies leave the box byte-identical to
 what the client sent (model swap aside). Translation is the **one deliberate
 exception**, and it is double-gated so it can never happen by accident:
 
-1. **Operator knob** — `translation.enabled` in `config.yaml` (default `false`),
-   overridden by `EZLLM_TRANSLATION_ENABLED` (flag > env > config > default).
-   The effective state is logged at boot: `translation enabled=true|false`.
-2. **Proven capability** — the hop's probed `proto_*` facts must say
+1. **Operator knob** — `translation.enabled` in `config.yaml`, **default `true`**
+   (global enable, 2026-10-12). The default is seeded before the YAML decode, so
+   an absent key keeps it and an explicit `enabled: false` still wins;
+   `EZLLM_TRANSLATION_ENABLED=false` is the no-rebuild rollback lever (flag >
+   env > config > default). The effective state is logged at boot:
+   `translation enabled=true|false`.
+2. **Proven capability** — the hop's probed/curated `proto_*` facts must say
    `proto_openai = true` AND `proto_anthropic` false-or-NULL. Both flags are
-   **NULL until a probe sweep marks them**, so a fresh deploy (or a database
-   where the sweep never ran) makes the feature inert even with the knob on.
+   **NULL until a probe sweep marks them or an operator curates them**, so a
+   fresh deploy (or a database where the sweep never ran) makes the feature
+   inert even with the knob on.
 
 ## What a translated hop does
 

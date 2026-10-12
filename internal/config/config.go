@@ -76,14 +76,16 @@ type ModelRefresh struct {
 	Interval string `yaml:"interval"`
 }
 
-// Translation is the opt-in wire-protocol translation layer: a request from
-// an anthropic-shaped client (Claude Code, /v1/messages) may be translated
-// onto a hop that is PROVEN to speak only the OpenAI shape.
+// Translation is the wire-protocol translation layer: a request from an
+// anthropic-shaped client (Claude Code, /v1/messages) may be translated onto a
+// hop that is PROVEN to speak only the OpenAI shape.
 //
-// Default OFF, and inert even when ON: eligibility additionally requires a
-// hop whose probed capability says proto_openai=true and proto_anthropic is
-// false/null. Those flags are NULL until a probe sweep runs, so enabling this
-// cannot change routing on its own.
+// Default ON (global enable, 2026-10-12): the layer is inert on its own —
+// eligibility additionally requires a hop whose probed capability says
+// proto_openai=true and proto_anthropic is false/null, and those flags are NULL
+// until a probe sweep or an operator curation sets them. Set `enabled: false`
+// in config.yaml, or EZLLM_TRANSLATION_ENABLED=false (the env wins, kept as the
+// rollback lever with no rebuild), to turn it back off.
 type Translation struct {
 	Enabled bool `yaml:"enabled"`
 	// ResponsesModels lists "<namespace>/<model_id>" hops that must be dialed
@@ -117,12 +119,16 @@ type Config struct {
 }
 
 // Load reads, parses and validates the config file at path.
+// Defaults are seeded BEFORE the YAML is decoded so a key that is absent keeps
+// its default while an explicit value still wins. translation.enabled is the
+// one default that is ON: translated hops need a proven/curated openai-only
+// flag, so the layer stays inert until an operator (or a sweep) marks one.
 func Load(path string) (*Config, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("config: read %s: %w", path, err)
 	}
-	var cfg Config
+	cfg := Config{Translation: Translation{Enabled: true}}
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}

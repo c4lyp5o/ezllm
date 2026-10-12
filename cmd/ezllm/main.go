@@ -67,10 +67,11 @@ func run() error {
 	if v := strings.TrimSpace(os.Getenv("EZLLM_DATA_DIR")); v != "" {
 		cfg.DataDir = v
 	}
-	// Translation is opt-in twice over: this knob, AND a hop proven
-	// openai-only by a probe sweep. A malformed value is a startup error —
-	// silently defaulting an "on" to "off" would leave the operator
-	// wondering why nothing translates.
+	// Translation DEFAULTS ON (config.go seeds it); this env var is the
+	// override — the no-rebuild rollback lever. Eligibility still needs a hop
+	// proven/curated openai-only, so the knob alone changes no routing. A
+	// malformed value is a startup error: silently defaulting an "off" to "on"
+	// would leave the operator wondering why traffic still translates.
 	if v := strings.TrimSpace(os.Getenv("EZLLM_TRANSLATION_ENABLED")); v != "" {
 		on, perr := strconv.ParseBool(v)
 		if perr != nil {

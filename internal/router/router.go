@@ -178,8 +178,14 @@ type Resolver struct {
 	// on the Responses wire for chat AND anthropic clients. Each entry is a
 	// REGEX matched against the full "<ns>/<model>" string (both ends
 	// anchored), so a plain id still matches only itself and a family pattern
-	// like `stationine/gpt-6\.1-sol` covers the variants. Empty = inert.
+	// like `stationine/gpt-6\\.1-sol` covers the variants. Empty = inert.
 	responsesModels []*regexp.Regexp
+	// universalEnabled turns on the three NEW cross-wire cells
+	// (chat→messages, responses→chat, responses→messages) and the fixed
+	// fallback ordering, and lets an explicit pin name the wire. It is
+	// ANDed with translationEnabled: the universal matrix cannot resurrect a
+	// translation layer the operator switched off.
+	universalEnabled bool
 }
 
 // New builds a Resolver.
@@ -197,6 +203,42 @@ func (r *Resolver) WithEligibility(e Eligible) *Resolver {
 func (r *Resolver) WithTranslation(enabled bool) *Resolver {
 	r.translationEnabled = enabled
 	return r
+}
+
+// WithUniversal enables the universal wire matrix (config
+// translation.universal_enabled, default off). Unset keeps every routing
+// decision exactly as it is today: the single anthropic→openai alternative
+// plus the curated responses-wire override.
+func (r *Resolver) WithUniversal(enabled bool) *Resolver {
+	r.universalEnabled = enabled
+	return r
+}
+
+// universalOrder is the fixed fallback preference for a proven-impossible
+// native wire. A Messages client (Claude Code) falls back to chat first —
+// the most widely served shape — then Responses; a chat client prefers
+// Responses (tools+reasoning parity) then Messages; a Responses client
+// prefers chat then Messages. Only proven-capable destinations are used.
+func universalOrder(client provider.Surface) []provider.Surface {
+	switch client {
+	case provider.SurfaceAnthropic:
+		return []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceResponses}
+	case provider.SurfaceOpenAI:
+		return []provider.Surface{provider.SurfaceResponses, provider.SurfaceAnthropic}
+	case provider.SurfaceResponses:
+		return []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceAnthropic}
+	}
+	return nil
+}
+
+// pinSurface parses a models.proto_pin value. The stored names ARE the
+// provider.Surface values, so the pin vocabulary cannot drift from the wires.
+func pinSurface(pin string) (provider.Surface, bool) {
+	switch provider.Surface(pin) {
+	case provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses:
+		return provider.Surface(pin), true
+	}
+	return "", false
 }
 
 // WithResponsesModels installs the curated patterns whose matching hops ride
@@ -238,6 +280,11 @@ func (r *Resolver) needsResponsesWire(clientSurface provider.Surface, namespace,
 	}
 	return false
 }
+
+// messagesConventionReason names the one non-capability blocker of a Messages
+// destination: the operator's usage_convention fact (schema v13) is unstated,
+// so a cross-wire conversion onto that wire cannot normalize input tokens.
+const messagesConventionReason = "messages destination needs an explicit usage_convention on the account (auto is unstated)"
 
 // wireDecision is the outcome of wire-first selection for one candidate: the
 // wire to dial plus the legacy flags that carry the same fact, or a typed
@@ -290,6 +337,35 @@ func (r *Resolver) selectWire(ctx context.Context, acct *provider.Account, model
 		return wireDecision{wire: provider.SurfaceResponses, responsesWire: true}
 	}
 
+	// 1b. Universal: an explicit PIN names the wire. A pin is operator intent
+	// (like the curated override), so it is honored BEFORE the native rule —
+	// but only when the probe has not disproved the pinned wire, and a
+	// Messages destination additionally needs the account's explicit usage
+	// convention. universalEnabled is ANDed with translationEnabled here: the
+	// matrix never resurrects a layer the operator switched off.
+	if r.universalEnabled && r.translationEnabled {
+		if pin, perr := r.catalog.ModelPin(ctx, acct.ID, model); perr == nil && pin != "" && pin != surfaceName(clientSurface) {
+			wire, ok := pinSurface(pin)
+			if !ok {
+				return wireDecision{refuse: &ErrWireUnsupported{Requested: requested, Wire: clientSurface,
+					Reason: fmt.Sprintf("model is pinned to an unknown wire %q", pin)}}
+			}
+			capability, cerr := r.catalog.ModelSupportsSurface(ctx, acct.ID, model, wire)
+			if cerr != nil {
+				capability = nil
+			}
+			if capability != nil && !*capability {
+				return wireDecision{refuse: &ErrWireUnsupported{Requested: requested, Wire: wire,
+					Reason: "model is pinned to a wire the probe disproved"}}
+			}
+			if wire == provider.SurfaceAnthropic && !acct.UsageConvention.Known() {
+				return wireDecision{refuse: &ErrWireUnsupported{Requested: requested, Wire: wire,
+					Reason: messagesConventionReason}}
+			}
+			return wireDecision{wire: wire, translated: true}
+		}
+	}
+
 	// 2. Native when possible or unproven-impossible.
 	native, err := r.catalog.ModelSupportsSurface(ctx, acct.ID, model, clientSurface)
 	if err != nil {
@@ -302,7 +378,39 @@ func (r *Resolver) selectWire(ctx context.Context, acct *provider.Account, model
 		return wireDecision{wire: clientSurface}
 	}
 
-	// 3. Native is PROVEN impossible: the one automatic alternative.
+	// 3. Native is PROVEN impossible: the automatic alternatives.
+	//
+	// Universal: walk the fixed preference chain. A destination is used only
+	// when it is PROVEN capable (NULL or a lookup error is not evidence), and
+	// a Messages destination additionally requires the account's explicit
+	// usage convention — an unstated convention would make the input-token
+	// meaning of the upstream's own responses a guess.
+	if r.universalEnabled && r.translationEnabled {
+		blockedByConvention := false
+		for _, dest := range universalOrder(clientSurface) {
+			capability, cerr := r.catalog.ModelSupportsSurface(ctx, acct.ID, model, dest)
+			if cerr != nil {
+				capability = nil
+			}
+			if capability == nil || !*capability {
+				continue
+			}
+			if dest == provider.SurfaceAnthropic && !acct.UsageConvention.Known() {
+				blockedByConvention = true
+				continue
+			}
+			if err := r.checkPin(ctx, acct.ID, model, requested, dest); err != nil {
+				return wireDecision{refusePin: err}
+			}
+			return wireDecision{wire: dest, translated: true}
+		}
+		if blockedByConvention {
+			return wireDecision{refuse: &ErrWireUnsupported{Requested: requested, Wire: clientSurface,
+				Reason: messagesConventionReason}}
+		}
+	}
+
+	// Legacy (universal off): the single anthropic→openai alternative.
 	openai, oerr := r.catalog.ModelSupportsSurface(ctx, acct.ID, model, provider.SurfaceOpenAI)
 	if oerr != nil {
 		openai = nil

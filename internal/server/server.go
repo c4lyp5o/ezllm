@@ -545,7 +545,13 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 		// worked. A bare model name is always a combo, so an alias without '/'
 		// identifies one; a direct namespace/model route has no rotation to
 		// inform.
-		if ferr == nil && res.Status >= 200 && res.Status < 300 && !strings.Contains(served.Alias, "/") {
+		// A translated stream that ended in a late error frame or a truncated
+		// source delivered a 200 header but did NOT serve the request: the
+		// positive signal must not fire, or a hop that cuts its answers looks
+		// healthy and sticky_last_good keeps choosing it. The ledger row keeps
+		// the delivered status (that is what the client saw) and carries the
+		// outcome in its err column.
+		if ferr == nil && res.Status >= 200 && res.Status < 300 && res.StreamCompleted() && !strings.Contains(served.Alias, "/") {
 			s.resolver.MarkHopGood(served.Alias, served)
 		}
 		if info := reqInfoOf(r); info != nil {

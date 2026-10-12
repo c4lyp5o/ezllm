@@ -79,6 +79,17 @@ func run() error {
 		}
 		cfg.Translation.Enabled = on
 	}
+	// Universal wire matrix: default OFF, opt-in at config or via this env
+	// (the no-rebuild rollback lever). A malformed value is a startup error,
+	// never a silent default: "off" turning "on" would activate three new
+	// cross-wire cells the operator did not ask for.
+	if v := strings.TrimSpace(os.Getenv("EZLLM_TRANSLATION_UNIVERSAL_ENABLED")); v != "" {
+		on, perr := strconv.ParseBool(v)
+		if perr != nil {
+			return fmt.Errorf("EZLLM_TRANSLATION_UNIVERSAL_ENABLED=%q is not a boolean (want true/false/1/0): %w", v, perr)
+		}
+		cfg.Translation.UniversalEnabled = on
+	}
 
 	// ── data dir + store ──
 	dbPath := filepath.Join(cfg.DataDir, "ezllm.sqlite")
@@ -165,7 +176,12 @@ func run() error {
 	// translator). The list itself is the opt-in; empty list = inert. Logged at
 	// boot because a set-but-unread knob looks identical to a working one.
 	resolver = resolver.WithResponsesModels(cfg.Translation.ResponsesModels)
+	// The universal matrix: three NEW cross-wire cells plus the fixed
+	// fallback ordering. Logged at boot because a set-but-unread knob looks
+	// identical to a working one.
+	resolver = resolver.WithUniversal(cfg.Translation.UniversalEnabled)
 	log.Info("translation", "enabled", cfg.Translation.Enabled,
+		"universal_enabled", cfg.Translation.UniversalEnabled,
 		"responses_wire_models", cfg.Translation.ResponsesModels)
 
 	go refreshProviderModels(ctx, db, registry, cfg.ModelRefresh.Interval, log)

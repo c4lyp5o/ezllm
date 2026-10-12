@@ -29,6 +29,11 @@ type eventDecoder struct {
 	created          int64
 	traces           map[string]*decodedTrace
 	traceBytes       int
+	// truncated records a source that ended WITHOUT a usable terminal event.
+	// The legacy policy synthesizes a successful close for such sources (its
+	// clients must not break), but the outcome plumbing needs the truth: a
+	// hop that cut its answer is not a hop that worked.
+	truncated bool
 }
 
 func (d *eventDecoder) start(id string, created int64) []Event {
@@ -86,7 +91,9 @@ func (e *streamTruncation) Error() string { return "translate: " + e.Reason }
 func (d *eventDecoder) sourceEnd(transport bool, cause error) ([]Event, error) {
 	if d.opts.Legacy && d.surface == provider.SurfaceOpenAI && d.started {
 		// Historic Chat reader closed the message as a completed answer on
-		// ANY source end (transport cuts included). Preserve exactly.
+		// ANY source end (transport cuts included). Preserve exactly — and
+		// mark the synthesis so the outcome plumbing knows the source died.
+		d.truncated = d.finish == ""
 		if d.finish != "" {
 			return d.finishEvents(d.finish), nil
 		}

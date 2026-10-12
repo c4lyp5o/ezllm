@@ -101,6 +101,16 @@ type Translation struct {
 	// wire override is inert. This list is its own opt-in; translation.enabled
 	// gates the separate anthropic→chat leg.
 	ResponsesModels []string `yaml:"responses_models"`
+	// UniversalEnabled (default FALSE) turns on the three NEW cross-wire
+	// cells — chat→messages, responses→chat, responses→messages — and the
+	// universal selection ordering (a Messages client falls back to Chat
+	// then Responses; Chat to Responses then Messages; Responses to Chat
+	// then Messages). Every alternative destination must be PROVEN capable
+	// and, for a Messages destination, the account must carry an explicit
+	// usage_convention (schema v13). A wrong-typed value fails boot naming
+	// the field; EZLLM_TRANSLATION_UNIVERSAL_ENABLED is the no-rebuild
+	// rollback lever. OFF keeps every legacy behaviour byte-for-byte.
+	UniversalEnabled bool `yaml:"universal_enabled"`
 }
 
 type Config struct {
@@ -134,12 +144,38 @@ func Load(path string) (*Config, error) {
 	}
 	cfg := Config{Translation: Translation{Enabled: true}}
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
+		// The yaml diagnostic names only the type, never the key. When the
+		// offender is a wrong-typed translation.universal_enabled, say so.
+		if uerr := universalValueError(raw); uerr != nil {
+			return nil, uerr
+		}
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 	return &cfg, nil
+}
+
+// universalValueError reports a non-boolean translation.universal_enabled as
+// a field-named error so the operator knows which key to fix.
+func universalValueError(raw []byte) error {
+	var tree map[string]any
+	if err := yaml.Unmarshal(raw, &tree); err != nil {
+		return nil
+	}
+	sec, ok := tree["translation"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	v, ok := sec["universal_enabled"]
+	if !ok || v == nil {
+		return nil
+	}
+	if _, isBool := v.(bool); isBool {
+		return nil
+	}
+	return fmt.Errorf("config: translation.universal_enabled must be a boolean (true/false), got %T", v)
 }
 
 // Validate checks structural integrity and applies defaults. It collects every

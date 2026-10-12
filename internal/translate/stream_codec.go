@@ -46,6 +46,11 @@ func NewStreamReader(r io.Reader, source, target provider.Surface, clientModel s
 	return s
 }
 func (s *StreamReader) Outcome() FinishKind { return s.outcome }
+
+// Truncated reports a source that ended without a usable terminal event. In
+// legacy mode the client still sees the historic synthesized close; the
+// outcome plumbing reads this to keep a cut-answer hop out of "good".
+func (s *StreamReader) Truncated() bool { return s.decoder.truncated }
 func (s *StreamReader) Close() error {
 	s.closeOnce.Do(func() {
 		if s.closer != nil {

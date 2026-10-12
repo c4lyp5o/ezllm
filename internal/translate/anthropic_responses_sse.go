@@ -7,6 +7,6 @@ import (
 
 // NewResponsesAnthropicSSEReader is the compatibility entry point; the source
 // decoder and destination encoder are shared with every portable stream cell.
-func NewResponsesAnthropicSSEReader(r io.Reader, clientModel string) io.Reader {
+func NewResponsesAnthropicSSEReader(r io.Reader, clientModel string) *StreamReader {
 	return NewStreamReader(r, provider.SurfaceResponses, provider.SurfaceAnthropic, clientModel, CodecOptions{Legacy: true})
 }

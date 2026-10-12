@@ -164,9 +164,31 @@ type Result struct {
 	// BEFORE anything is written: on a body-read failure commit can return an
 	// error while still carrying a 200, and a caller that guards its error
 	// response on Status would leave net/http to emit its default 200 with an
-	// empty body. Only this flag distinguishes "has a status" from "has been
+	// Only this flag distinguishes "has a status" from "has been
 	// sent".
 	Committed bool
+	// StreamOutcome reports how a TRANSLATED stream ended after its bytes
+	// reached the client: completed, failed (a late error frame), or
+	// truncated (the source ended without a terminal event — including the
+	// legacy synthesized close, which looks successful to a legacy client).
+	// Empty for native streams and for a stream the client abandoned before
+	// its terminal (client disconnects say nothing about the hop).
+	StreamOutcome string
+}
+
+// Stream-delivery outcomes, in the vocabulary the ledger and hop-health read.
+const (
+	StreamOutcomeCompleted = "completed"
+	StreamOutcomeFailed    = "failed"
+	StreamOutcomeTruncated = "truncated"
+)
+
+// StreamCompleted reports whether the delivery outcome permits treating the
+// hop as having served the request. An unknown outcome (native stream, or a
+// stream cut short by the client) is not evidence AGAINST the hop, so it
+// passes; a failed or truncated translation is evidence against it.
+func (r Result) StreamCompleted() bool {
+	return r.StreamOutcome == "" || r.StreamOutcome == StreamOutcomeCompleted
 }
 
 // Rewriter resolves the client's requested model into a Route. The router
@@ -647,26 +669,69 @@ func IsStream(body []byte) bool {
 // wire while its body is encoded for another. Translation REPLACES the swap:
 // it rewrites the whole wire shape, model included, so the paths never compose.
 func prepareHopBody(body []byte, rt Route) ([]byte, error) {
-	switch wire := rt.EffectiveWire(); wire {
-	case provider.SurfaceOpenAI:
-		// Wire differs from the client: the client's shape must become chat
-		// (translate.Request follows rt.Surface for which source it decodes).
-		if rt.Surface != provider.SurfaceOpenAI {
+	wire := rt.EffectiveWire()
+	if wire != rt.Surface {
+		// The three NEW cells ride the strict surface-neutral codecs; an
+		// unsupported request feature is a typed refusal BEFORE any upstream
+		// call (zero spend, no blind failover).
+		if translate.IsUniversalCell(rt.Surface, wire) {
+			return translate.RequestUniversal(body, rt.Surface, wire, rt.Model)
+		}
+		// Legacy cells keep their characterized converters.
+		switch {
+		case wire == provider.SurfaceOpenAI:
 			return translate.Request(body, rt.Model)
-		}
-	case provider.SurfaceResponses:
-		// The translator follows the CLIENT's surface: chat→responses for a
-		// chat client, anthropic→responses for Claude Code.
-		if rt.Surface == provider.SurfaceAnthropic {
+		case wire == provider.SurfaceResponses && rt.Surface == provider.SurfaceAnthropic:
 			return translate.AnthropicToResponses(body, rt.Model)
-		}
-		if rt.Surface == provider.SurfaceOpenAI {
+		case wire == provider.SurfaceResponses && rt.Surface == provider.SurfaceOpenAI:
 			return translate.ChatToResponses(body, rt.Model)
 		}
+		// A cross-wire pair with no converter must never fall through to the
+		// model swap: that would send the client's own shape to a wire that
+		// cannot read it.
+		return nil, fmt.Errorf("proxy: no request converter for %s client on the %s wire", rt.Surface, wire)
 	}
 	// Native: same shape on both ends, only the model id is swapped.
 	swapped, _, err := SwapModel(body, rt.Model)
 	return swapped, err
+}
+
+// universalCodecOptions builds the strict codec options for a universal cell.
+// When the UPSTREAM speaks Messages, the account's explicit usage convention
+// is required: the upstream response's own input_tokens meaning is the
+// operator-declared fact (schema v13), never a guess. The router already
+// refuses the cell without one; a hand-built route gets the same refusal here.
+func universalCodecOptions(rt Route) (translate.CodecOptions, error) {
+	opts := translate.CodecOptions{}
+	if rt.EffectiveWire() == provider.SurfaceAnthropic {
+		conv, err := translate.UsageConventionOf(rt.Account.UsageConvention)
+		if err != nil {
+			return opts, err
+		}
+		opts.MessagesUsage = conv
+	}
+	return opts, nil
+}
+
+// streamOutcomeFrom maps a translated reader's terminal state onto the
+// delivery outcome hop-health reads. An undrained reader (the client went
+// away mid-stream) reports unknowable rather than failed: a client
+// disconnecting says nothing about the hop.
+func streamOutcomeFrom(sr *translate.StreamReader) string {
+	if sr == nil {
+		return ""
+	}
+	if sr.Truncated() {
+		return StreamOutcomeTruncated
+	}
+	switch sr.Outcome() {
+	case translate.FinishFailed:
+		return StreamOutcomeFailed
+	case "":
+		return ""
+	default:
+		return StreamOutcomeCompleted
+	}
 }
 
 // attempt runs the upstream call and returns the response WITHOUT touching w.
@@ -732,26 +797,49 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 		// rt.Surface, the CLIENT's surface, exactly. Close still reaches the
 		// ORIGINAL body (a NopCloser would leak the upstream connection).
 		wire := rt.EffectiveWire()
-		if wire == provider.SurfaceOpenAI && wire != rt.Surface {
-			resp.Body = struct {
-				io.Reader
-				io.Closer
-			}{translate.NewSSEReader(resp.Body, rt.Alias), resp.Body}
-		}
-		// A responses-wire stream wraps the same way: the client sees its OWN
-		// shape synthesized from the upstream's responses events — chat
-		// chunks for a chat client, anthropic events for Claude Code.
-		if wire == provider.SurfaceResponses && wire != rt.Surface {
-			var reader io.Reader
-			if rt.Surface == provider.SurfaceAnthropic {
-				reader = translate.NewResponsesAnthropicSSEReader(resp.Body, rt.Alias)
-			} else {
-				reader = translate.NewResponsesSSEReader(resp.Body, rt.Alias)
+		// translated carries the reader whose terminal state becomes the
+		// delivery outcome; nil for a native stream.
+		var translated *translate.StreamReader
+		if wire != rt.Surface {
+			switch {
+			case translate.IsUniversalCell(rt.Surface, wire):
+				opts, oerr := universalCodecOptions(rt)
+				if oerr != nil {
+					// A cell that cannot be converted must not stream
+					// foreign-shaped bytes to the client.
+					res.Status = http.StatusBadGateway
+					res.Err = "translate stream: " + oerr.Error()
+					w.Header().Set("Content-Type", "application/json")
+					res.Committed = true
+					w.WriteHeader(http.StatusBadGateway)
+					_, _ = w.Write(translate.EncodeError(translate.ErrorIR{Type: "api_error", Message: oerr.Error()}, rt.Surface))
+					res.Totalms = msPtr(time.Since(start))
+					return res, nil
+				}
+				translated = translate.NewStreamReader(resp.Body, wire, rt.Surface, rt.Alias, opts)
+				resp.Body = struct {
+					io.Reader
+					io.Closer
+				}{translated, resp.Body}
+			case wire == provider.SurfaceOpenAI:
+				translated = translate.NewSSEReader(resp.Body, rt.Alias)
+				resp.Body = struct {
+					io.Reader
+					io.Closer
+				}{translated, resp.Body}
+			case wire == provider.SurfaceResponses:
+				// A responses-wire stream: the client sees its OWN shape
+				// synthesized from the upstream's responses events.
+				if rt.Surface == provider.SurfaceAnthropic {
+					translated = translate.NewResponsesAnthropicSSEReader(resp.Body, rt.Alias)
+				} else {
+					translated = translate.NewResponsesSSEReader(resp.Body, rt.Alias)
+				}
+				resp.Body = struct {
+					io.Reader
+					io.Closer
+				}{translated, resp.Body}
 			}
-			resp.Body = struct {
-				io.Reader
-				io.Closer
-			}{reader, resp.Body}
 		}
 		// streamCopy writes the header before its first byte, so the status
 		// is committed the moment it returns — regardless of a copy error.
@@ -776,6 +864,19 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 		// error object inside the stream, which is equally worth recording.
 		if res.Err == "" && (res.Status >= 400 || sseHasErrorEnvelope(first)) {
 			res.Err = upstreamErrorSnippet(res.Status, first)
+		}
+		// The delivery outcome: a late error frame or a source that ended
+		// without a terminal event must not reach hop-health as success, even
+		// though the HTTP status said 200 and the client got bytes. Legacy
+		// clients still receive the historic synthesized close; the ledger
+		// and MarkHopGood read this field instead.
+		if translated != nil {
+			res.StreamOutcome = streamOutcomeFrom(translated)
+			if res.Err == "" && !res.StreamCompleted() {
+				// The client already received a 200 and bytes, so the status
+				// cannot change; the ledger records the outcome instead.
+				res.Err = "translated stream " + res.StreamOutcome
+			}
 		}
 	} else {
 		// Non-streamed: read the body once, tap usage, then write it out.
@@ -823,7 +924,45 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 		// is captured from the upstream's OWN words before translation, and
 		// usage is tapped on the translated body — the tap is surface-aware and
 		// rt.Surface is the client's surface.
-		if wire := rt.EffectiveWire(); wire == provider.SurfaceOpenAI && wire != rt.Surface {
+		// The three NEW cells re-encode through the strict shared codecs: the
+		// upstream's wire is decoded and the CLIENT's shape is emitted. Error
+		// bodies are re-shaped into the client's family (Messages wraps them
+		// as {"type":"error","error":{…}}), and the ledger snippet is
+		// captured from the upstream's own words first.
+		universalWire := translate.IsUniversalCell(rt.Surface, rt.EffectiveWire())
+		if wire := rt.EffectiveWire(); universalWire {
+			if res.Status >= 400 {
+				if res.Err == "" {
+					res.Err = upstreamErrorSnippet(res.Status, raw)
+				}
+				raw = translate.ReorientError(raw, rt.Surface)
+			} else {
+				opts, oerr := universalCodecOptions(rt)
+				if oerr == nil {
+					var terr error
+					var translated []byte
+					translated, terr = translate.ResponseUniversal(raw, wire, rt.Surface, rt.Alias, opts)
+					if terr == nil {
+						raw = translated
+					} else {
+						oerr = terr
+					}
+				}
+				if oerr != nil {
+					// A body we cannot translate is a gateway fault, and the
+					// client must never receive the upstream's foreign shape.
+					res.Status = http.StatusBadGateway
+					res.Err = "translate response: " + oerr.Error()
+					w.Header().Set("Content-Type", "application/json")
+					res.Committed = true
+					w.WriteHeader(http.StatusBadGateway)
+					_, _ = w.Write(translate.EncodeError(translate.ErrorIR{Type: "api_error", Message: "upstream response could not be translated"}, rt.Surface))
+					res.Totalms = msPtr(time.Since(start))
+					return res, nil
+				}
+			}
+		}
+		if wire := rt.EffectiveWire(); !universalWire && wire == provider.SurfaceOpenAI && wire != rt.Surface {
 			if res.Status >= 400 {
 				if res.Err == "" {
 					res.Err = upstreamErrorSnippet(res.Status, raw)
@@ -852,7 +991,7 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 		// messages body. Error bodies pass through byte-identical — all
 		// wires share the {"error":{…}} family, and the upstream's own words
 		// must reach the client and the ledger err column untouched.
-		if wire := rt.EffectiveWire(); wire == provider.SurfaceResponses && wire != rt.Surface && res.Status < 400 {
+		if wire := rt.EffectiveWire(); !universalWire && wire == provider.SurfaceResponses && wire != rt.Surface && res.Status < 400 {
 			var translated []byte
 			var terr error
 			if rt.Surface == provider.SurfaceAnthropic {

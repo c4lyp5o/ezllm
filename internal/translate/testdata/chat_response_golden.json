@@ -1,0 +1,1 @@
+{"id":"resp_123","object":"chat.completion","created":1791760934,"model":"daily","choices":[{"index":0,"message":{"role":"assistant","content":"Here is the plan.","tool_calls":[{"id":"call_2","type":"function","function":{"name":"list_dir","arguments":"{\"path\":\"src\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":50,"completion_tokens":12}}

@@ -1,0 +1,12 @@
+{
+  "id": "resp_123",
+  "object": "response",
+  "created_at": 1791760934,
+  "status": "completed",
+  "output": [
+    {"type": "reasoning", "id": "rs_1", "summary": []},
+    {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Here is the plan."}]},
+    {"type": "function_call", "call_id": "call_2", "name": "list_dir", "arguments": "{\"path\":\"src\"}"}
+  ],
+  "usage": {"input_tokens": 50, "output_tokens": 12}
+}

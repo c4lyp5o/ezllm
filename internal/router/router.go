@@ -134,6 +134,29 @@ func (e *ErrUnavailable) Error() string {
 // Unwrap exposes the underlying eligibility error so errors.As can reach it.
 func (e *ErrUnavailable) Unwrap() error { return e.cause }
 
+// ErrWireUnsupported reports a DIRECT route with no wire left to dial: the
+// client's surface is PROVEN impossible for the model and nothing entitles it
+// to another wire. A combo never surfaces this — a hop in that state is simply
+// dropped — but a direct route ("ns/model") has nowhere else to go, and
+// dialing a wire the probe already disproved only buys a pointless upstream
+// call. The server answers 400: the client asked for a surface this model
+// cannot serve, which is a request problem, not a gateway fault.
+type ErrWireUnsupported struct {
+	Requested string
+	// Wire is the surface that was probed impossible.
+	Wire provider.Surface
+	// Reason names the failing gate in the operator's words.
+	Reason string
+}
+
+func (e *ErrWireUnsupported) Error() string {
+	msg := fmt.Sprintf("%q cannot serve the %s wire", e.Requested, surfaceName(e.Wire))
+	if e.Reason != "" {
+		return msg + ": " + e.Reason
+	}
+	return msg
+}
+
 // Eligible reports whether a hop may be used RIGHT NOW. Returning an error
 // removes the hop from the candidate list (and, for a direct route, becomes
 // the 429). This is the seam the rules engine plugs into: token caps and
@@ -216,6 +239,88 @@ func (r *Resolver) needsResponsesWire(clientSurface provider.Surface, namespace,
 	return false
 }
 
+// wireDecision is the outcome of wire-first selection for one candidate: the
+// wire to dial plus the legacy flags that carry the same fact, or a typed
+// refusal.
+type wireDecision struct {
+	wire          provider.Surface
+	responsesWire bool
+	translated    bool
+	// refuse means the candidate cannot be dialed on ANY wire. A combo drops
+	// the hop; a direct route (no hop to fall back to) answers the client.
+	refuse *ErrWireUnsupported
+	// refusePin carries a pin violation on the ACTUAL wire. Both paths fail
+	// hard on it — a pin is a refusal, never a skip (see checkPin).
+	refusePin error
+}
+
+// selectWire decides, for one candidate, the wire the upstream is spoken to on
+// — BEFORE capability and pins can be consulted out of order:
+//
+//  1. An explicit translation.responses_models override WINS. It is operator
+//     intent naming a wire; a capability gate that predates it must not quietly
+//     reroute the hop onto the chat wire or drop it (both of which the
+//     pre-selector order did).
+//  2. Native proven-true OR untested stays native. NULL is "never probed", not
+//     "impossible", so an untested hop keeps dialing the client's own wire.
+//  3. Only a PROVEN-impossible native path opens an automatic alternative —
+//     today exactly one: the anthropic→openai hop, and only when translation
+//     is enabled AND the openai shape is proven. New cells join here in M5.
+//  4. Nothing left → refused with the probe's own words.
+//
+// The pin is checked against the DECIDED wire inside this function, so a hop
+// cannot pass a pin that guards a different wire than the one it dials.
+func (r *Resolver) selectWire(ctx context.Context, acct *provider.Account, model, requested string, clientSurface provider.Surface) wireDecision {
+	// 1. Curated responses-wire override.
+	if r.needsResponsesWire(clientSurface, acct.Namespace, model) {
+		rcap, rerr := r.catalog.ModelSupportsSurface(ctx, acct.ID, model, provider.SurfaceResponses)
+		if rerr == nil && rcap != nil && !*rcap {
+			// The override names responses and the probe disproves it:
+			// dialing anyway spends a request on a wire that cannot answer.
+			// (A lookup error or nil stays eligible — fail-open, like every
+			// capability hint.)
+			return wireDecision{refuse: &ErrWireUnsupported{
+				Requested: requested, Wire: provider.SurfaceResponses,
+				Reason: "probed unable to serve the responses surface",
+			}}
+		}
+		if err := r.checkPin(ctx, acct.ID, model, requested, provider.SurfaceResponses); err != nil {
+			return wireDecision{refusePin: err}
+		}
+		return wireDecision{wire: provider.SurfaceResponses, responsesWire: true}
+	}
+
+	// 2. Native when possible or unproven-impossible.
+	native, err := r.catalog.ModelSupportsSurface(ctx, acct.ID, model, clientSurface)
+	if err != nil {
+		native = nil // lookup error = untested, fail-open
+	}
+	if native == nil || *native {
+		if err := r.checkPin(ctx, acct.ID, model, requested, clientSurface); err != nil {
+			return wireDecision{refusePin: err}
+		}
+		return wireDecision{wire: clientSurface}
+	}
+
+	// 3. Native is PROVEN impossible: the one automatic alternative.
+	openai, oerr := r.catalog.ModelSupportsSurface(ctx, acct.ID, model, provider.SurfaceOpenAI)
+	if oerr != nil {
+		openai = nil
+	}
+	if translate.Eligible(clientSurface, native, openai, r.translationEnabled) {
+		if err := r.checkPin(ctx, acct.ID, model, requested, provider.SurfaceOpenAI); err != nil {
+			return wireDecision{refusePin: err}
+		}
+		return wireDecision{wire: provider.SurfaceOpenAI, translated: true}
+	}
+
+	// 4. No wire left.
+	return wireDecision{refuse: &ErrWireUnsupported{
+		Requested: requested, Wire: clientSurface,
+		Reason: "probed unable to serve the " + surfaceName(clientSurface) + " surface and not proven on another wire",
+	}}
+}
+
 // eligibleHere applies the filter, treating nil as "allow".
 func (r *Resolver) eligibleHere(ctx context.Context, accountID int64, modelID string) error {
 	if r.eligible == nil {
@@ -292,9 +397,17 @@ func (r *Resolver) ResolveCandidates(ctx context.Context, requested string, surf
 		}
 	}
 
-	// A pin is a refusal, not a skip: a direct route has no other hop to try.
-	if err := r.checkPin(ctx, acct.ID, model, requested, surface); err != nil {
-		return nil, err
+	// Wire-first selection (shared with combos): the curated responses
+	// override, the capability facts and the PIN are all decided against the
+	// wire this route will actually dial. A proven-impossible wire is refused
+	// here rather than dialed: a direct route has no other hop to try, so
+	// burning a request that cannot succeed only wastes the operator's quota.
+	dec := r.selectWire(ctx, acct, model, requested, surface)
+	if dec.refusePin != nil {
+		return nil, dec.refusePin
+	}
+	if dec.refuse != nil {
+		return nil, dec.refuse
 	}
 
 	// A direct route has nowhere to fail over to, so an ineligible model is a
@@ -308,7 +421,7 @@ func (r *Resolver) ResolveCandidates(ctx context.Context, requested string, surf
 		return nil, fmt.Errorf("router: no usable key for %q: %w", ns, err)
 	}
 
-	return []proxy.Route{{
+	rt := proxy.Route{
 		Account:  *acct,
 		KeyID:    key.ID,
 		KeyPlain: key.Plaintext,
@@ -319,8 +432,13 @@ func (r *Resolver) ResolveCandidates(ctx context.Context, requested string, surf
 		// The curated responses-wire override applies to direct routes too:
 		// a chat client calling the model by its namespaced id gets the same
 		// wire fix as a combo hop.
-		ResponsesWire: r.needsResponsesWire(surface, acct.Namespace, model),
-	}}, nil
+		Translated:    dec.translated,
+		ResponsesWire: dec.responsesWire,
+	}
+	if dec.wire != surface {
+		rt.WireSurface = dec.wire
+	}
+	return []proxy.Route{rt}, nil
 }
 
 // resolveCombo turns a bare combo name into ordered candidates.
@@ -396,41 +514,24 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 			}
 			continue
 		}
-		// Capability gate: a model PROBED unable to serve this surface is
-		// dropped instead of dialled. This is the hop-level half of the rule
-		// "ModelProtocolUnsupported → next hop" (see the ezllm skill): without
-		// it, one incompatible member of an otherwise healthy combo answers the
-		// client with the upstream's 400/403 on every rotation onto it.
-		//
-		// UNTESTED (nil) stays eligible, and a lookup ERROR fails OPEN — both
-		// deliberate, and the exact opposite of ModelExists/checkPin above. A
-		// capability flag is a hint learned from a probe, so a stale nil or a
-		// transient store hiccup must never strand a hop that actually works.
-		translated := false
-		if ok, err := r.catalog.ModelSupportsSurface(ctx, acct.ID, h.ModelID, surface); err == nil && ok != nil && !*ok {
-			// The native path is PROVEN impossible. If translation is on and
-			// the hop is PROVEN OpenAI-capable, keep it as a translated
-			// candidate instead of dropping it — it rides the tail, so a
-			// healthy native hop always wins.
-			openai, _ := r.catalog.ModelSupportsSurface(ctx, acct.ID, h.ModelID, provider.SurfaceOpenAI)
-			if !translate.Eligible(surface, ok, openai, r.translationEnabled) {
-				if first == nil {
-					first = fmt.Errorf("hop %s/%s: probed unable to serve the %s surface",
-						acct.Namespace, h.ModelID, surfaceName(surface))
-				}
-				continue
+		// Wire-first selection: the curated responses override, the capability
+		// facts and the pin are decided TOGETHER, against the wire this hop
+		// will actually be dialed on. Doing it in this order is what stops a
+		// curated responses hop from being rerouted onto the chat wire (or
+		// dropped) by a capability gate that never saw the override.
+		dec := r.selectWire(ctx, acct, h.ModelID, name, surface)
+		if dec.refusePin != nil {
+			// A pin is a refusal, not a skip: the operator's constraint fails
+			// the whole combo, exactly as it did before.
+			return nil, dec.refusePin
+		}
+		if dec.refuse != nil {
+			// A hop with no wire left is dropped like any other unusable hop;
+			// the reason is kept for the "no usable hops" message.
+			if first == nil {
+				first = fmt.Errorf("hop %s/%s: %w", acct.Namespace, h.ModelID, dec.refuse)
 			}
-			translated = true
-		}
-		// A dropped hop's pin is irrelevant. A remaining candidate must
-		// satisfy its pin on the actual upstream wire: translation dials
-		// OpenAI, while the route retains the client's surface for attribution.
-		pinSurface := surface
-		if translated {
-			pinSurface = provider.SurfaceOpenAI
-		}
-		if err := r.checkPin(ctx, acct.ID, h.ModelID, name, pinSurface); err != nil {
-			return nil, err
+			continue
 		}
 		// The rules engine's veto. In a combo this is a skip, never an error:
 		// that is the entire day/night mechanism. But when EVERY hop ends up
@@ -462,17 +563,20 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 			Model:    h.ModelID,
 			Alias:    name,
 			Surface:  surface,
+			// The route keeps the CLIENT's surface (ledger/usage tap); only
+			// the wire shape flips, at dispatch time.
+			Translated:    dec.translated,
+			ResponsesWire: dec.responsesWire,
 		}
-		if translated {
-			// The route keeps the CLIENT's surface (ledger/usage tap);
-			// only the wire shape flips, at dispatch time.
-			route.Translated = true
+		if dec.wire != surface {
+			route.WireSurface = dec.wire
+		}
+		if dec.translated {
 			translatedRoutes = append(translatedRoutes, route)
 			continue
 		}
 		// A curated responses-wire hop keeps its normal combo position: it is
 		// a working member, not a last resort — the wire flips at dispatch.
-		route.ResponsesWire = r.needsResponsesWire(surface, acct.Namespace, h.ModelID)
 		routes = append(routes, route)
 	}
 

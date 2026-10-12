@@ -455,6 +455,7 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			var nf *router.ErrNotFound
 			var nu *router.ErrUnavailable
 			var np *router.ErrPinned
+			var nw *router.ErrWireUnsupported
 			switch {
 			case errors.As(err, &nf):
 				writeErrExtra(w, http.StatusNotFound, "model_not_found", err.Error(),
@@ -468,6 +469,13 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 				// path upstream would send the wrong shape.
 				writeErrExtra(w, http.StatusBadRequest, "pinned_surface", err.Error(),
 					map[string]any{"pinned": np.Pinned, "requested_surface": np.Got})
+			case errors.As(err, &nw):
+				// Wire-first selection found no wire to dial: the model's own
+				// surface is probed impossible and nothing entitles it to
+				// another (no responses override, no translation). The
+				// request problem is the answer — 400, not a gateway 502.
+				writeErrExtra(w, http.StatusBadRequest, "wire_unsupported", err.Error(),
+					map[string]any{"requested_surface": string(nw.Wire)})
 			case errors.As(err, &nu):
 				// A rule (cap / allowed hours) says no — not a routing miss.
 				// The cause (when it is a *rules.Refusal) carries the

@@ -111,6 +111,28 @@ type Route struct {
 	// Translated — Surface stays the client's; error bodies pass through
 	// byte-identical (all wires share the {"error":{…}} family).
 	ResponsesWire bool
+	// WireSurface is the wire the upstream is ACTUALLY spoken to on, when it
+	// differs from the client's. It is the single source of truth for the dial
+	// path, the pin target and the codec choice — Translated/ResponsesWire are
+	// the same fact in legacy form (see EffectiveWire). Empty = native.
+	WireSurface provider.Surface
+}
+
+// EffectiveWire is THE wire selector: what we speak upstream. Native routes
+// (the overwhelming majority) leave WireSurface empty and answer with the
+// client's own surface; the legacy Translated/ResponsesWire flags are honoured
+// so a Route built before the field existed keeps its meaning.
+func (rt Route) EffectiveWire() provider.Surface {
+	if rt.WireSurface != "" {
+		return rt.WireSurface
+	}
+	switch {
+	case rt.Translated:
+		return provider.SurfaceOpenAI
+	case rt.ResponsesWire:
+		return provider.SurfaceResponses
+	}
+	return rt.Surface
 }
 
 // Attempt is one candidate that did NOT serve the request, in the order the
@@ -618,26 +640,33 @@ func IsStream(body []byte) bool {
 	return m.Stream
 }
 
-// prepareHopBody rewrites the client's body for one hop: a byte-stable
-// model swap on the native path, or a full wire translation for a
-// translated (anthropic→openai) or responses-wire (chat→responses) hop.
-// Translation REPLACES the swap — it rewrites the whole wire shape, model
-// included — so the paths never compose.
+// prepareHopBody rewrites the client's body for one hop: a byte-stable model
+// swap on the native path, or a full wire translation when the upstream wire
+// differs from the client's. The WIRE comes from EffectiveWire — the same
+// value attempt dials and commit unwraps — so a hop can never be dialed on one
+// wire while its body is encoded for another. Translation REPLACES the swap:
+// it rewrites the whole wire shape, model included, so the paths never compose.
 func prepareHopBody(body []byte, rt Route) ([]byte, error) {
-	switch {
-	case rt.Translated:
-		return translate.Request(body, rt.Model)
-	case rt.ResponsesWire:
+	switch wire := rt.EffectiveWire(); wire {
+	case provider.SurfaceOpenAI:
+		// Wire differs from the client: the client's shape must become chat
+		// (translate.Request follows rt.Surface for which source it decodes).
+		if rt.Surface != provider.SurfaceOpenAI {
+			return translate.Request(body, rt.Model)
+		}
+	case provider.SurfaceResponses:
 		// The translator follows the CLIENT's surface: chat→responses for a
 		// chat client, anthropic→responses for Claude Code.
 		if rt.Surface == provider.SurfaceAnthropic {
 			return translate.AnthropicToResponses(body, rt.Model)
 		}
-		return translate.ChatToResponses(body, rt.Model)
-	default:
-		swapped, _, err := SwapModel(body, rt.Model)
-		return swapped, err
+		if rt.Surface == provider.SurfaceOpenAI {
+			return translate.ChatToResponses(body, rt.Model)
+		}
 	}
+	// Native: same shape on both ends, only the model id is swapped.
+	swapped, _, err := SwapModel(body, rt.Model)
+	return swapped, err
 }
 
 // attempt runs the upstream call and returns the response WITHOUT touching w.
@@ -652,15 +681,10 @@ func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, bod
 	if err != nil {
 		return nil, Result{}, time.Time{}, err
 	}
-	// A translated hop dials the upstream on ITS native path (openai) while
-	// everything client-facing (ledger, usage tap) keeps the client surface.
-	dialSurface := rt.Surface
-	switch {
-	case rt.Translated:
-		dialSurface = provider.SurfaceOpenAI
-	case rt.ResponsesWire:
-		dialSurface = provider.SurfaceResponses
-	}
+	// A translated hop dials the upstream on ITS wire while everything
+	// client-facing (ledger, usage tap) keeps the client surface. One
+	// selector: the same value prepareHopBody encodes for and commit unwraps.
+	dialSurface := rt.EffectiveWire()
 	url := provider.UpstreamURL(rt.Account.BaseURL, rt.Account.Kind, provider.SurfacePath(dialSurface))
 
 	upReq, err := http.NewRequestWithContext(ctx, r.Method, url, bytes.NewReader(body))
@@ -707,7 +731,8 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 		// usage tap then reads anthropic-shaped events — which matches
 		// rt.Surface, the CLIENT's surface, exactly. Close still reaches the
 		// ORIGINAL body (a NopCloser would leak the upstream connection).
-		if rt.Translated {
+		wire := rt.EffectiveWire()
+		if wire == provider.SurfaceOpenAI && wire != rt.Surface {
 			resp.Body = struct {
 				io.Reader
 				io.Closer
@@ -716,7 +741,7 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 		// A responses-wire stream wraps the same way: the client sees its OWN
 		// shape synthesized from the upstream's responses events — chat
 		// chunks for a chat client, anthropic events for Claude Code.
-		if rt.ResponsesWire {
+		if wire == provider.SurfaceResponses && wire != rt.Surface {
 			var reader io.Reader
 			if rt.Surface == provider.SurfaceAnthropic {
 				reader = translate.NewResponsesAnthropicSSEReader(resp.Body, rt.Alias)
@@ -793,11 +818,12 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 			res.Totalms = msPtr(time.Since(start))
 			return res, nil
 		}
-		// For a translated hop every byte the client sees is anthropic-shaped.
-		// The err-column snippet is captured from the upstream's OWN words
-		// before translation, and usage is tapped on the translated body —
-		// the tap is surface-aware and rt.Surface is the client's surface.
-		if rt.Translated {
+		// For a hop on a DIFFERENT wire than the client's, every byte the
+		// client sees is re-encoded into its own shape. The err-column snippet
+		// is captured from the upstream's OWN words before translation, and
+		// usage is tapped on the translated body — the tap is surface-aware and
+		// rt.Surface is the client's surface.
+		if wire := rt.EffectiveWire(); wire == provider.SurfaceOpenAI && wire != rt.Surface {
 			if res.Status >= 400 {
 				if res.Err == "" {
 					res.Err = upstreamErrorSnippet(res.Status, raw)
@@ -826,7 +852,7 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 		// messages body. Error bodies pass through byte-identical — all
 		// wires share the {"error":{…}} family, and the upstream's own words
 		// must reach the client and the ledger err column untouched.
-		if rt.ResponsesWire && res.Status < 400 {
+		if wire := rt.EffectiveWire(); wire == provider.SurfaceResponses && wire != rt.Surface && res.Status < 400 {
 			var translated []byte
 			var terr error
 			if rt.Surface == provider.SurfaceAnthropic {

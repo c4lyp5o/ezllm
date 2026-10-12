@@ -168,6 +168,10 @@ export type RecentCall = {
   ts: string; client: string; surface: string; account: string; model: string;
   status: number; ttft_ms: number; total_ms: number; tin: number; tout: number; cread: number;
   saved: number; compression: string; applied: boolean; contextPre?: number; contextSaved?: number;
+  // alias = the combo name (or "ns/model" for a direct route); err = the
+  // verbatim ledger err column, with the leading `[<cause>]` marker when the
+  // row was written after the error-cause classifier shipped.
+  alias?: string; err?: string; saved_notional?: number; rules_fired?: number;
 };
 
 // The feed's snapshot rows come from recentCalls (ledger names: tin, saved);
@@ -212,6 +216,14 @@ export type Overview = {
   usage_by_surface: UsageRow[];
   accounts: Account[];
   recent_calls: RecentCall[];
+  // Live block_round_robin cursors, keyed by the combo NAME (the ledger
+  // alias) — the recent-calls table renders the cursor under the model of
+  // every row that alias served.
+  block_cursors?: BlockCursor[];
+};
+
+export type BlockCursor = {
+  combo: string; hop: string; remaining: number; block_size: number;
 };
 
 // ── Usage granularity (M5) ─────────────────────────────────────────────────

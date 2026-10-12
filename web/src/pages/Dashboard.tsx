@@ -29,10 +29,9 @@ import {
 } from '../charts';
 import { Reveal, Stagger, StaggerItem } from '../motion';
 import {
-  Chip, EmptyState, Mono, SectionLabel, SkeletonCards, SkeletonRows, StaleBadge,
+  Chip, CauseChip, EmptyState, Mono, SectionLabel, SkeletonCards, SkeletonRows, StaleBadge,
   clockTime, cx, fmtDuration, fmtMs, fmtUptime, formatTokens, nfmt, pct,
 } from '../ui';
-import RecentFeed from './RecentFeed';
 
 // Two ranges on purpose: 24h for the headline totals, 7d for the trend. The
 // ledger cannot sub-divide a day, so the trend is only honest across several.
@@ -135,63 +134,105 @@ function LatencyCard({ rows }: { rows: UsageRow[] }) {
 }
 
 // ── recent calls ──────────────────────────────────────────────────────────
+// The single consolidated feed: recent-requests (the SSE RecentFeed) is gone
+// from this page — it duplicated these rows. What this table gained:
+//   - combo column (the ledger alias: combo name or "ns/model" direct route)
+//   - block cursor under the model, joined by alias to the live cursor
+//     snapshot (/admin/overview block_cursors) — block_round_robin state is
+//     finally visible next to the traffic it governs
+//   - error-cause class under the status, parsed from the ledger err marker
+//   - compression is TWO columns: profile, then held tokens (the notional a
+//     rejected rewrite would have saved — tuning data, never real savings)
 function RecentCalls({ o }: { o: Overview }) {
   const rows = o.recent_calls ?? [];
+  const cursors = new Map((o.block_cursors ?? []).map((c) => [c.combo, c]));
   return (
     <Panel
       label={<SectionLabel>Recent calls</SectionLabel>}
-      aside={<span className="text-[11px] text-mute">{rows.length} shown · newest first</span>}
+      aside={(
+        <span className="flex items-center gap-2 text-[11px] text-mute">
+          <span className="relative flex h-1.5 w-1.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-ok opacity-60" />
+            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-ok" />
+          </span>
+          live · {rows.length} shown · newest first
+        </span>
+      )}
       bodyClass="p-0">
       {rows.length === 0 ? (
         <EmptyState title="No calls yet"
-          hint="Route something through a combo and it lands here — the live feed under it starts the moment it happens." />
+          hint="Route something through a combo and it lands here — this table refreshes itself every few seconds." />
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px] text-[12.5px]">
+          <table className="w-full min-w-[1080px] text-[12.5px]">
             <thead>
               <tr className="border-b border-line text-left text-[10.5px] uppercase tracking-[0.1em] text-mute">
                 <th className="px-5 py-2.5 font-medium">time</th>
                 <th className="px-3 py-2.5 font-medium">client</th>
                 <th className="px-3 py-2.5 font-medium">surface</th>
-                <th className="px-3 py-2.5 font-medium">account</th>
                 <th className="px-3 py-2.5 font-medium">model</th>
+                <th className="px-3 py-2.5 font-medium">provider</th>
+                <th className="px-3 py-2.5 font-medium">combo</th>
                 <th className="px-3 py-2.5 text-right font-medium">status</th>
                 <th className="px-3 py-2.5 text-right font-medium" title="time to first token — only meaningful on a stream">ttft</th>
                 <th className="px-3 py-2.5 text-right font-medium">total</th>
                 <th className="px-3 py-2.5 text-right font-medium">in</th>
                 <th className="px-3 py-2.5 text-right font-medium">out</th>
                 <th className="px-3 py-2.5 text-right font-medium">saved</th>
-                <th className="px-5 py-2.5 text-right font-medium">compression</th>
+                <th className="px-3 py-2.5 text-right font-medium">compression</th>
+                <th className="px-5 py-2.5 text-right font-medium" title="what a REJECTED rewrite would have saved — tuning data, never real savings">held</th>
               </tr>
             </thead>
             <tbody className="font-mono tnum">
-              {rows.map((r, i) => (
-                <tr key={i} className="border-b border-line/50 transition-colors last:border-0 hover:bg-wash">
-                  <td className="whitespace-nowrap px-5 py-2 text-mute">{clockTime(r.ts)}</td>
-                  <td className="px-3 py-2 text-dim">{r.client || '–'}</td>
-                  <td className="px-3 py-2 text-dim">{r.surface}</td>
-                  <td className="px-3 py-2 text-dim">{r.account}</td>
-                  <td className="max-w-[220px] truncate px-3 py-2 font-sans text-ink" title={r.model}>{r.model}</td>
-                  <td className={cx('px-3 py-2 text-right', statusTone(r.status))}>{r.status}</td>
-                  <td className="px-3 py-2 text-right text-dim">{fmtMs(r.ttft_ms)}</td>
-                  <td className="px-3 py-2 text-right text-dim">{fmtDuration(r.total_ms)}</td>
-                  <td className="px-3 py-2 text-right text-dim">{nfmt(r.tin)}</td>
-                  <td className="px-3 py-2 text-right text-dim">{nfmt(r.tout)}</td>
-                  <td className="px-3 py-2 text-right">
-                    {r.saved > 0 ? <span className="text-ok">−{formatTokens(r.saved)}</span> : <span className="text-mute">–</span>}
-                  </td>
-                  <td className="px-5 py-2 text-right font-sans">
-                    {r.compression ? (
-                      <span
-                        title={r.applied ? `compressed by ${r.compression}` : `asked ${r.compression}, no change`}
-                        className={cx('rounded px-1 py-0.5 font-mono text-[10px]',
-                          r.applied ? 'bg-ok-dim text-ok' : 'bg-shade text-mute')}>
-                        {r.compression === 'off' ? 'off' : r.compression}
-                      </span>
-                    ) : <span className="text-mute">–</span>}
-                  </td>
-                </tr>
-              ))}
+              {rows.map((r, i) => {
+                const cur = r.alias ? cursors.get(r.alias) : undefined;
+                return (
+                  <tr key={i} className="border-b border-line/50 transition-colors last:border-0 hover:bg-wash">
+                    <td className="whitespace-nowrap px-5 py-2 text-mute">{clockTime(r.ts)}</td>
+                    <td className="px-3 py-2 text-dim">{r.client || '–'}</td>
+                    <td className="px-3 py-2 text-dim">{r.surface}</td>
+                    <td className="max-w-[220px] px-3 py-2 font-sans">
+                      <div className="truncate text-ink" title={r.model}>{r.model}</div>
+                      {cur && (
+                        // The block cursor this combo is on RIGHT NOW — the
+                        // table refreshes with it, so a rotation onto another
+                        // hop is visible within seconds of the advance log.
+                        <div className="mt-0.5 text-[10px] text-mute" title={`block_round_robin: ${cur.hop} serves ${cur.block_size} consecutive dispatches`}>
+                          ▮ {cur.hop} · {cur.remaining}/{cur.block_size} left
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-dim">{r.account}</td>
+                    <td className="px-3 py-2 text-dim">{r.alias || '–'}</td>
+                    <td className={cx('px-3 py-2 text-right', statusTone(r.status))}>
+                      <div>{r.status}</div>
+                      <div className="mt-0.5 font-sans"><CauseChip err={r.err} status={r.status} /></div>
+                    </td>
+                    <td className="px-3 py-2 text-right text-dim">{fmtMs(r.ttft_ms)}</td>
+                    <td className="px-3 py-2 text-right text-dim">{fmtDuration(r.total_ms)}</td>
+                    <td className="px-3 py-2 text-right text-dim">{nfmt(r.tin)}</td>
+                    <td className="px-3 py-2 text-right text-dim">{nfmt(r.tout)}</td>
+                    <td className="px-3 py-2 text-right">
+                      {r.saved > 0 ? <span className="text-ok">−{formatTokens(r.saved)}</span> : <span className="text-mute">–</span>}
+                    </td>
+                    <td className="px-3 py-2 text-right font-sans">
+                      {r.compression ? (
+                        <span
+                          title={r.applied ? `compressed by ${r.compression}` : `asked ${r.compression}, no change`}
+                          className={cx('rounded px-1 py-0.5 font-mono text-[10px]',
+                            r.applied ? 'bg-ok-dim text-ok' : 'bg-shade text-mute')}>
+                          {r.compression === 'off' ? 'off' : r.compression}
+                        </span>
+                      ) : <span className="text-mute">–</span>}
+                    </td>
+                    <td className="px-5 py-2 text-right">
+                      {!r.applied && (r.saved_notional ?? 0) > 0
+                        ? <span className="text-warn" title="held: a rewrite was rejected by the ratio floor — this is what it would have saved">held {formatTokens(r.saved_notional ?? 0)}</span>
+                        : <span className="text-mute">–</span>}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -512,14 +553,6 @@ export default function Dashboard() {
 
       <Reveal><RecentCalls o={o} /></Reveal>
       <Reveal><QuotaPanel o={o} /></Reveal>
-
-      {/* The live pulse. SSE, so it costs no timer and no request budget, and
-          it is the only thing on this page that moves between refreshes.
-          RecentFeed owns its own connection lifecycle; mounting it here adds
-          the second consumer alongside the Analytics page. */}
-      <Reveal>
-        <RecentFeed />
-      </Reveal>
     </Stagger>
   );
 }

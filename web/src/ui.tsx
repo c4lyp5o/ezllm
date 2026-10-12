@@ -25,6 +25,33 @@ export function Mono({ children, className }: { children: ReactNode; className?:
   return <span className={cx('font-mono text-[12px]', className)}>{children}</span>;
 }
 
+// ── error-cause chip ────────────────────────────────────────────────────────
+// The Go classifier (provider.ErrorCause) prefixes the ledger err column with
+// `[<cause>]`. Render it as a typed badge; the hover carries the full
+// upstream text. Rows written before that deploy carry no marker, so no chip
+// renders for them (the raw status still tells the story).
+export const CAUSE_TONES: Record<string, 'bad' | 'warn' | 'neutral'> = {
+  // The request itself is wrong for this model — not transient.
+  bad_request: 'bad', bad_credentials: 'bad', permission_denied: 'bad',
+  chat_tools_unsupported: 'bad', protocol_unsupported: 'bad',
+  context_too_long: 'bad', too_large: 'bad', not_found: 'bad',
+  content_filter: 'bad', quota_exhausted: 'bad', provider_error: 'bad',
+  // Transient — retry/failover is the right response.
+  rate_limited: 'warn', upstream_capacity: 'warn', overloaded: 'warn',
+  timeout: 'warn', automation_gate: 'warn',
+};
+
+export function CauseChip({ err, status }: { err?: string; status: number }) {
+  if (status < 400 || !err) return null;
+  const m = /^\[([a-z_]+)\]:\s?/.exec(err);
+  if (!m) return null;
+  return (
+    <Chip tone={CAUSE_TONES[m[1]] ?? 'neutral'} title={err}>
+      {m[1].replace(/_/g, ' ')}
+    </Chip>
+  );
+}
+
 // ── chips & badges ──────────────────────────────────────────────────────
 
 const chipTones: Record<string, string> = {

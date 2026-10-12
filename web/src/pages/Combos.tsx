@@ -1,7 +1,7 @@
 // COMBOS — list cards + create/edit modal with an ordered hops editor.
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError, accountModels, del, get, patch, post, STRATEGY_HINTS, type Combo, type Hop } from '../api';
-import { Chip, ConfirmModal, Modal, Mono, SectionLabel, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls } from '../ui';
+import { CAUSE_TONES, Chip, ConfirmModal, Modal, Mono, SectionLabel, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls } from '../ui';
 
 // Strategies offered by the combo form. least_used is deliberately absent: it
 // is accepted by the backend (where it keeps position order, with a comment
@@ -292,12 +292,107 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
   );
 }
 
+// Hop test results — POST /admin/combos/{id}/test. Each probe is one REAL
+// upstream call (tiny: max_tokens 16) and lands in the ledger as client
+// "combo-test", so what the modal shows is the dispatcher's genuine verdict,
+// parks included.
+type TestHop = {
+  account_id: number; namespace?: string; model: string; enabled: boolean;
+  status: number; ms: number; err?: string; cause?: string;
+  parked?: boolean; cooldown_s?: number;
+};
+type TestResult = { combo: string; surface: string; hops: TestHop[] };
+
+function TestComboModal({ combo, onClose }: { combo: Combo | null; onClose: () => void }) {
+  const [surface, setSurface] = useState<'openai' | 'anthropic'>('openai');
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<TestResult | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const run = useCallback(async (c: Combo, s: 'openai' | 'anthropic') => {
+    setRunning(true); setErr(null);
+    try { setResult(await post<TestResult>(`/admin/combos/${c.id}/test`, { surface: s })); }
+    catch (e) { setErr(e instanceof ApiError ? e.detail.message : e instanceof Error ? e.message : String(e)); }
+    finally { setRunning(false); }
+  }, []);
+
+  // Run on open; the surface selector + Run again re-run explicitly.
+  useEffect(() => {
+    if (combo) { setResult(null); void run(combo, surface); }
+    // `surface` deliberately not a dep: changing it must not fire a paid
+    // probe behind the operator's hand.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [combo]);
+
+  return (
+    <Modal open={combo != null} onClose={onClose} wide
+      title={combo ? `Test combo ${combo.name}` : 'Test combo'}
+      subtitle="one real request per hop — tiny (16 tokens out), recorded in the ledger as combo-test"
+      footer={<>
+        <span className="mr-auto flex items-center gap-2 text-[12px] text-mute">
+          surface
+          <select className={cx(inputCls, 'w-auto py-1 text-[12px]')} value={surface}
+            onChange={(e) => setSurface(e.target.value as 'openai' | 'anthropic')}>
+            <option value="openai">openai</option>
+            <option value="anthropic">anthropic</option>
+          </select>
+        </span>
+        <button type="button" className={cx(btn.base, btn.ghost)} onClick={onClose}>Close</button>
+        <button type="button" disabled={running || !combo} className={cx(btn.base, btn.primary)}
+          onClick={() => { if (combo) void run(combo, surface); }}>
+          {running ? <Spinner /> : null} Run again
+        </button>
+      </>}>
+      {err && (
+        <div className="mb-3 rounded-lg border border-bad/30 bg-bad-dim px-4 py-3 text-[12.5px] text-bad">{err}</div>
+      )}
+      {running && !result && (
+        <div className="flex items-center gap-2 px-2 py-6 text-[13px] text-mute">
+          <Spinner /> probing {combo?.hops.length ?? 0} hop{combo?.hops.length === 1 ? '' : 's'}…
+        </div>
+      )}
+      {result && (
+        <div className="space-y-2">
+          {result.hops.map((h, i) => (
+            <div key={i} className="rounded-lg border border-line bg-raised/40 px-4 py-3">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                <span className="font-mono text-[12.5px] text-ink">{h.namespace ?? `#${h.account_id}`}/{h.model}</span>
+                {!h.enabled && <Chip tone="neutral">hop disabled</Chip>}
+                {h.status === 200 && <Chip tone="ok">200</Chip>}
+                {h.status >= 400 && (
+                  <Chip tone={CAUSE_TONES[h.cause ?? ''] ?? 'bad'} title={h.err}>
+                    {h.status}{h.cause ? ` · ${h.cause.replace(/_/g, ' ')}` : ''}
+                  </Chip>
+                )}
+                {h.status === 0 && <Chip tone="bad">not dialed</Chip>}
+                {h.parked && <Chip tone="warn" title="the probe parked this hop exactly as a production 429 would">parked {h.cooldown_s}s</Chip>}
+                <span className="ml-auto font-mono text-[11px] text-mute">{h.ms} ms</span>
+              </div>
+              {h.err && (
+                <div className="mt-1.5 break-words font-mono text-[11px] leading-relaxed text-mute" title={h.err}>
+                  {h.err.length > 220 ? h.err.slice(0, 220) + '…' : h.err}
+                </div>
+              )}
+            </div>
+          ))}
+          <p className="pt-1 text-[11.5px] leading-relaxed text-mute">
+            Probes run through the real dispatcher: a hop that earns a parkable failure stays parked, because
+            it failed for real. No eligibility, capability or pin filtering — disabled and skipped hops are
+            probed too, which is how you learn why the router avoids them.
+          </p>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 export default function Combos() {
   const [combos, setCombos] = useState<Combo[] | null>(null);
   const [accounts, setAccounts] = useState<AccountLite[]>([]);
   const [profiles, setProfiles] = useState<{ id: number; name: string }[]>([]);
   const [modal, setModal] = useState<{ open: boolean; editing: Combo | null }>({ open: false, editing: null });
   const [pendingDelete, setPendingDelete] = useState<Combo | null>(null);
+  const [testing, setTesting] = useState<Combo | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busyID, setBusyID] = useState<number | null>(null);
 
@@ -357,6 +452,14 @@ export default function Combos() {
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                 <span className="text-[14px] font-semibold">{c.name}</span>
                 <Chip><span className="font-mono">{c.strategy}</span></Chip>
+                {/* Item 10: the combo's compression profile, visible without
+                    opening the editor. "none" renders nothing — an empty pill
+                    on every card is noise. */}
+                {!!c.compression_profile_id && (
+                  <Chip tone="accent" title="compression profile applied to requests routed through this combo">
+                    <span className="font-mono">{profiles.find((p) => p.id === c.compression_profile_id)?.name ?? `profile #${c.compression_profile_id}`}</span>
+                  </Chip>
+                )}
                 <span className="ml-auto flex items-center gap-3">
                   <label className="flex items-center gap-2 text-[12px] text-dim">
                     <Toggle checked={c.enabled} disabled={busyID === c.id}
@@ -365,6 +468,9 @@ export default function Combos() {
                     <span>{c.enabled ? 'Enabled' : 'Disabled'}</span>
                   </label>
                   <span className="flex items-center gap-2">
+                    <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')}
+                      title="probe every hop with one tiny real request"
+                      onClick={() => setTesting(c)}>Test</button>
                     <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')} onClick={() => setModal({ open: true, editing: c })}>Edit</button>
                     <button type="button" className={cx(btn.base, btn.danger, 'px-3 py-1.5 text-[12px]')} onClick={() => setPendingDelete(c)}>Delete</button>
                   </span>
@@ -401,6 +507,7 @@ export default function Combos() {
 
       <ComboModal open={modal.open} editing={modal.editing} accounts={accounts} profiles={profiles}
         onClose={() => setModal({ open: false, editing: null })} onSaved={() => { setModal({ open: false, editing: null }); load(); }} />
+      <TestComboModal combo={testing} onClose={() => setTesting(null)} />
       <ConfirmModal
         open={pendingDelete != null}
         title={pendingDelete ? `Delete combo ${pendingDelete.name}?` : 'Delete combo?'}

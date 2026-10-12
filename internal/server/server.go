@@ -592,6 +592,10 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			}
 		}
 		call.BlockPos = served.BlockPos
+		// Attribution for wire-translated hops: the ledger row says the client
+		// got synthesized bytes, and with it that tokens_in is the vendor's
+		// INCLUSIVE total rather than our cold-token convention.
+		call.Translated = served.Translated
 		s.ledger(call)
 	}
 }

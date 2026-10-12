@@ -100,3 +100,19 @@ prod redeploy to take effect. Items 2–3 are process-local and need neither.
 - `internal/store/ledger.go` `NormalizeUsage` (the fix site)
 - `docs/API.md` token-accounting section (states the two conventions — extend with D3)
 - `references/token-economics-and-canary.md`, `references/implementation-pitfalls.md` (NULL-into-string)
+
+## Appendix — translated rows are the documented inclusive exception (schema v12)
+
+The cold-vs-inclusive rule above is about the WIRE the usage came from. A
+wire-translated hop (anthropic client -> openai-only hop) breaks it on purpose:
+`translate.Response` / the SSE synthesizer build an anthropic usage envelope out
+of OpenAI's `prompt_tokens`, which counts the cached prefix, so the tap reads an
+INCLUSIVE number on a row whose ledger surface is `anthropic`. `calls.translated`
+(schema v12) is the marker that makes it countable, and it carries the
+convention with it: for such a row `tokens_in` is inclusive and
+`tokens_cached_read` is 0. Pinned by `TestTranslatedUsageStaysInclusive`; the
+usage meter sums `tokens_in`, so translated traffic counts its cached prefix
+against caps (conservative on the free/prepaid pool). Normalizing translated
+rows into the cold convention later means teaching the translator to carry
+`prompt_tokens_details.cached_tokens` — a translator-contract change, not a
+ledger one.

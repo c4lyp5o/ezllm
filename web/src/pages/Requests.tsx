@@ -195,7 +195,17 @@ export default function Requests() {
               {rows.map((r, i) => (
                 <tr key={`${r.ts}-${i}`} className="border-t border-line">
                   <td className="whitespace-nowrap px-4 py-2 font-mono text-mute">{fmtTs(r.ts)}</td>
-                  <td className="px-4 py-2 font-mono">{r.model}</td>
+                  <td className="px-4 py-2 font-mono">
+                    {r.model}
+                    {/* Wire-translated hop: its in-tokens are the vendor's
+                        INCLUSIVE total — read before comparing tin. */}
+                    {r.translated && (
+                      <div className="text-[10px] text-accent"
+                        title="wire-translated hop: anthropic client -> openai-only hop. The in-tokens on this row are the vendor's INCLUSIVE total (cache counted inside), not ezllm's cold-token convention">
+                        ⇄ translated
+                      </div>
+                    )}
+                  </td>
                   <td className="px-4 py-2">{r.client}</td>
                   <td className={cx('px-4 py-2 text-right font-mono', r.status >= 400 ? 'text-bad' : 'text-ink')}>
                     <div>{r.status}</div>

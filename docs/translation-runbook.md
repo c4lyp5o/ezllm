@@ -20,6 +20,29 @@ Responses — streaming and not — are translated back into Anthropic shapes.
 Ledger rows stay on the **client's** surface (`anthropic`) with the **upstream's**
 model. Design and wire contracts: `docs/translation-design.md`.
 
+## Ledger attribution (schema v12)
+
+Every call served by a translated hop carries `calls.translated = 1` — a row
+you can COUNT, not infer from surface+model. Two token facts ride with the
+marker and they are part of the column's meaning:
+
+- **`tokens_in` is the vendor's INCLUSIVE total** for translated rows. The
+  synthesized anthropic usage envelope passes OpenAI's `prompt_tokens` through
+  as `input_tokens`, and OpenAI counts the cached prefix inside it. This is a
+  deliberate deviation from the ledger's cold-token convention, pinned by
+  `TestTranslatedUsageStaysInclusive`; changing it means changing the marker's
+  documented meaning too.
+- **`tokens_cached_read` stays 0** — the translator does not carry OpenAI's
+  cache split.
+
+Consequence for caps: usage buckets sum `tokens_in`, so translated rows count
+their cached prefix against daily caps. On the free/prepaid hop pool that is
+the conservative direction (refuse a little early rather than overspend).
+
+The dashboard renders the marker as a `⇄ translated` tag under the model on the
+recent-calls table, the requests explorer, and the live feed; `/admin/requests`
+and `/admin/overview` rows expose it as `translated: true`.
+
 **Pins still constrain the dispatch wire.** A translated combo hop dials
 OpenAI, so an `openai` pin is satisfied; an `anthropic` or `responses` pin
 still refuses the whole combo. Native/direct pin checks are unchanged, and

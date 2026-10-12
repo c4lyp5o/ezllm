@@ -89,6 +89,13 @@ type Call struct {
 	// 0 = not counted (direct routes, non-block strategies).
 	BlockPos int
 
+	// Translated marks the hop as WIRE-TRANSLATED (anthropic client ->
+	// openai-only hop): the client saw synthesized anthropic bytes. It also
+	// carries the token convention: for such a row tokens_in is the vendor's
+	// INCLUSIVE total (OpenAI prompt_tokens, cache included) and
+	// TokensCachedRead stays 0 — see schema.sql calls.translated.
+	Translated bool
+
 	Err string
 }
 
@@ -366,8 +373,8 @@ INSERT INTO calls (
   endpoint_id, upstream_model,
   compression_profile, compression_applied, prompt_tokens_pre, tokens_saved, compression_ms,
   compression_rules_fired, context_tokens_pre, context_tokens_saved,
-  compression_saved_notional, prefix_sha, msg_count, tool_count, session_id, req_bytes, block_pos, err
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+  compression_saved_notional, prefix_sha, msg_count, tool_count, session_id, req_bytes, block_pos, translated, err
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
@@ -391,7 +398,7 @@ INSERT INTO calls (
 			c.EndpointID, c.UpstreamModel,
 			c.CompressionProfile, boolInt(c.CompressionApplied), c.PromptTokensPre, c.TokensSaved, c.CompressionMs,
 			c.CompressionRulesFired, c.ContextTokensPre, c.ContextTokensSaved,
-			c.TokensSavedNotional, c.PrefixSHA, c.MsgCount, c.ToolCount, c.SessionID, c.ReqBytes, c.BlockPos, c.Err,
+			c.TokensSavedNotional, c.PrefixSHA, c.MsgCount, c.ToolCount, c.SessionID, c.ReqBytes, c.BlockPos, boolInt(c.Translated), c.Err,
 		)
 		if err != nil {
 			return fmt.Errorf("insert call: %w", err)
@@ -688,7 +695,7 @@ SELECT ts, client, surface, alias, account, COALESCE(provider_key_id,0), key_hin
        compression_profile, compression_applied, prompt_tokens_pre, tokens_saved, compression_ms,
        compression_rules_fired, context_tokens_pre, context_tokens_saved,
        COALESCE(compression_saved_notional,0), COALESCE(prefix_sha,''), msg_count, tool_count,
-       COALESCE(session_id,''), req_bytes, COALESCE(block_pos,0), COALESCE(err,'')
+       COALESCE(session_id,''), req_bytes, COALESCE(block_pos,0), COALESCE(translated,0), COALESCE(err,'')
 FROM calls ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -700,6 +707,7 @@ FROM calls ORDER BY id DESC LIMIT ?`, limit)
 		var ts string
 		var ttft, total, cms sql.NullInt64
 		var applied int
+		var translated int
 		if err := rows.Scan(&ts, &c.Client, &c.Surface, &c.Alias, &c.Account, &c.KeyID, &c.KeyHint, &c.Model,
 			&c.Status, &c.Stream, &ttft, &total,
 			&c.TokensIn, &c.TokensOut, &c.TokensCachedRead, &c.TokensCachedWrite, &c.ReasoningTokens,
@@ -707,7 +715,7 @@ FROM calls ORDER BY id DESC LIMIT ?`, limit)
 			&c.CompressionProfile, &applied, &c.PromptTokensPre, &c.TokensSaved, &cms,
 			&c.CompressionRulesFired, &c.ContextTokensPre, &c.ContextTokensSaved,
 			&c.TokensSavedNotional, &c.PrefixSHA, &c.MsgCount, &c.ToolCount,
-			&c.SessionID, &c.ReqBytes, &c.BlockPos, &c.Err); err != nil {
+			&c.SessionID, &c.ReqBytes, &c.BlockPos, &translated, &c.Err); err != nil {
 			return nil, err
 		}
 		if t, err := time.Parse("2006-01-02T15:04:05.000Z", ts); err == nil {
@@ -715,6 +723,7 @@ FROM calls ORDER BY id DESC LIMIT ?`, limit)
 		}
 		c.TTFTms, c.Totalms = ttftPtr(ttft), ttftPtr(total)
 		c.CompressionApplied = applied == 1
+		c.Translated = translated == 1
 		c.CompressionMs = ttftPtr(cms)
 		out = append(out, c)
 	}

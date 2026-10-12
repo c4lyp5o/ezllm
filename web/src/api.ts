@@ -176,6 +176,12 @@ export type RecentCall = {
   // block_pos = block_round_robin dispatch position in its block (0 = not
   // counted): the "N requests finished" tag.
   block_pos?: number;
+  // translated = the served hop's bodies were WIRE-TRANSLATED (anthropic
+  // client -> an openai-only hop). On such a row `tin` is the vendor's
+  // INCLUSIVE total (OpenAI counts cache inside prompt_tokens) and `cread` is
+  // 0 — the translator carries no openai cache split. Read the marker before
+  // comparing `tin` across rows.
+  translated?: boolean;
 };
 
 // The feed's snapshot rows come from recentCalls (ledger names: tin, saved);
@@ -191,6 +197,9 @@ export type FeedRow = {
   savedNotional: number;
   contextPre?: number; contextSaved?: number;
   compression: string; applied: boolean; rulesFired?: number; error?: string;
+  /** Wire-translated hop (anthropic client -> openai-only hop). When set, `tin`
+   *  is the vendor's INCLUSIVE total, not our cold-token convention. */
+  translated?: boolean;
 };
 const num = (v: unknown): number => (typeof v === 'number' ? v : 0);
 export function normalizeFeedRow(raw: any): FeedRow {
@@ -211,6 +220,8 @@ export function normalizeFeedRow(raw: any): FeedRow {
     contextPre: num(raw.context_tokens_pre), contextSaved: num(raw.context_tokens_saved),
     compression: String(raw.compression ?? ''), applied: Boolean(raw.applied),
     error: raw.error ? String(raw.error) : undefined,
+    // Snapshot rows and live SSE rows both carry the marker; absent = native.
+    translated: raw.translated ? true : undefined,
   };
 }
 

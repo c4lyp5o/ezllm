@@ -246,6 +246,14 @@ function RecentCalls({ o }: { o: Overview }) {
                           ⚠ {failoverNote(r.err)}
                         </div>
                       )}
+                      {/* Wire-translated hop: the row is attributable, and its
+                          in-tokens are the vendor's INCLUSIVE total. */}
+                      {r.translated && (
+                        <div className="mt-0.5 text-[10px] text-accent"
+                          title="wire-translated hop: the client speaks anthropic, this hop speaks openai — so the in-tokens below are the vendor's INCLUSIVE total (cache counted inside), not ezllm's cold-token convention">
+                          ⇄ translated
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-dim">{r.account}</td>
                     <td className="px-3 py-2 text-dim">{r.alias || '–'}</td>

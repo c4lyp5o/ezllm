@@ -24,7 +24,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 11
+const schemaVersion = 12
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -232,6 +232,9 @@ func (d *DB) migrate() error {
 		}
 		if err := d.alterCallsResearch(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate calls research columns: %w", err)
+		}
+		if err := d.alterCallsTranslated(context.Background()); err != nil {
+			return fmt.Errorf("store: alter calls translated: %w", err)
 		}
 		if err := d.alterAccountRate(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate account rate: %w", err)
@@ -443,6 +446,34 @@ func (d *DB) alterCallsResearch(ctx context.Context) error {
 		if _, err := d.w.ExecContext(ctx, fmt.Sprintf("ALTER TABLE calls ADD COLUMN %s INTEGER NOT NULL DEFAULT 0", column)); err != nil {
 			return fmt.Errorf("add calls.%s: %w", column, err)
 		}
+	}
+	return nil
+}
+
+// alterCallsTranslated adds calls.translated (schema v12) on databases created
+// before it. Attribution for wire-translated hops (anthropic client ->
+// openai-only hop): the marker carries two semantics with it — tokens_in is the
+// vendor's INCLUSIVE total (the synthesized anthropic envelope passes OpenAI's
+// prompt_tokens) and tokens_cached_read stays 0. Guarded by a column check:
+// ALTER TABLE ADD COLUMN is not idempotent.
+func (d *DB) alterCallsTranslated(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "calls")
+	if err != nil {
+		return fmt.Errorf("check calls table: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+	ok, err := hasColumn(ctx, d.w, "calls", "translated")
+	if err != nil {
+		return fmt.Errorf("check calls.translated: %w", err)
+	}
+	if ok {
+		return nil
+	}
+	if _, err := d.w.ExecContext(ctx,
+		`ALTER TABLE calls ADD COLUMN translated INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return fmt.Errorf("add calls.translated: %w", err)
 	}
 	return nil
 }

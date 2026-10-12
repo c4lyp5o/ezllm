@@ -30,7 +30,11 @@ type CallEvent struct {
 	// "unknown-profile" / "disabled" (asked, no change), or the profile name.
 	Compression string `json:"compression"`
 	Applied     bool   `json:"applied"`
-	Err         string `json:"error,omitempty"`
+	// Translated marks a wire-translated hop (anthropic client -> openai-only
+	// hop): the row's tokens_in is the vendor's INCLUSIVE total. Rendered as a
+	// chip in the feed so translated traffic is countable, not inferred.
+	Translated bool   `json:"translated"`
+	Err        string `json:"error,omitempty"`
 }
 
 // SubscribeLedger returns a channel of committed batches plus its cancel func.
@@ -83,7 +87,8 @@ func EventFromCall(c Call) CallEvent {
 		SavedNotional: c.TokensSavedNotional,
 		ContextPre:    c.ContextTokensPre, ContextSaved: c.ContextTokensSaved,
 		Compression: c.CompressionProfile, Applied: c.CompressionApplied,
-		Err: c.Err,
+		Translated: c.Translated,
+		Err:        c.Err,
 	}
 	if c.TTFTms != nil {
 		v := *c.TTFTms

@@ -164,6 +164,16 @@ export default function RecentFeed() {
                                 : c.compression.replace('-profile', '')}
                       </span>
                     )}
+                    {/* Wire-translated hop → in-tokens are the vendor's
+                        INCLUSIVE total. */}
+                    {c.translated && (
+                      <span
+                        title="wire-translated hop: anthropic client -> openai-only hop; in-tokens below are the vendor's INCLUSIVE total (cache counted inside)"
+                        className="ml-1.5 rounded px-1 py-0.5 font-mono text-[10px] align-middle text-accent"
+                      >
+                        ⇄ translated
+                      </span>
+                    )}
                   </span>
                   <span className="text-mute w-24 shrink-0 hidden sm:block truncate">
                     {c.account}

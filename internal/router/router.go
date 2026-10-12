@@ -341,9 +341,10 @@ func (r *Resolver) selectWire(ctx context.Context, acct *provider.Account, model
 	// (like the curated override), so it is honored BEFORE the native rule —
 	// but only when the probe has not disproved the pinned wire, and a
 	// Messages destination additionally needs the account's explicit usage
-	// convention. universalEnabled is ANDed with translationEnabled here: the
-	// matrix never resurrects a layer the operator switched off.
-	if r.universalEnabled && r.translationEnabled {
+	// convention. universal_enabled is the SINGLE switch for the matrix: it
+	// does not require the legacy translation.enabled gate (operator decision,
+	// 2026-10-13).
+	if r.universalEnabled {
 		if pin, perr := r.catalog.ModelPin(ctx, acct.ID, model); perr == nil && pin != "" && pin != surfaceName(clientSurface) {
 			wire, ok := pinSurface(pin)
 			if !ok {
@@ -385,7 +386,7 @@ func (r *Resolver) selectWire(ctx context.Context, acct *provider.Account, model
 	// a Messages destination additionally requires the account's explicit
 	// usage convention — an unstated convention would make the input-token
 	// meaning of the upstream's own responses a guess.
-	if r.universalEnabled && r.translationEnabled {
+	if r.universalEnabled {
 		blockedByConvention := false
 		for _, dest := range universalOrder(clientSurface) {
 			capability, cerr := r.catalog.ModelSupportsSurface(ctx, acct.ID, model, dest)
@@ -595,9 +596,9 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 	}
 
 	var (
-		routes           []proxy.Route
-		translatedRoutes []proxy.Route
-		first            error // first hop's rejection, kept as the failure to report
+		routes []proxy.Route
+
+		first error // first hop's rejection, kept as the failure to report
 	)
 	for _, h := range combo.Hops {
 		if h.Enabled != nil && !*h.Enabled {
@@ -679,16 +680,15 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 		if dec.wire != surface {
 			route.WireSurface = dec.wire
 		}
-		if dec.translated {
-			translatedRoutes = append(translatedRoutes, route)
-			continue
-		}
-		// A curated responses-wire hop keeps its normal combo position: it is
-		// a working member, not a last resort — the wire flips at dispatch.
+		// Every candidate is a working member of the strategy: a hop whose
+		// wire we translate is ordered, held good and rotated on exactly the
+		// same terms as a native one (operator decision 2026-10-13 — a
+		// successful translated hop IS a success, and a failure is a failure;
+		// the strategies must not be able to see a difference).
 		routes = append(routes, route)
 	}
 
-	if len(routes) == 0 && len(translatedRoutes) == 0 {
+	if len(routes) == 0 {
 		if first != nil {
 			// A rules veto arrives pre-typed and pre-worded ("X is not
 			// available right now: hop …"); re-wrapping it would print the
@@ -708,16 +708,7 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 	for i := range candidates {
 		candidates[i].BlockPos = blockPos
 	}
-	for i := range translatedRoutes {
-		translatedRoutes[i].BlockPos = blockPos
-	}
-	// Translated candidates ride the TAIL, after every native-compatible
-	// hop: a native hop always wins, and a translated hop serves only when
-	// every native hop failed or was skipped. They are deliberately NOT part
-	// of the strategy ordering — round-robin/sticky must never be able to
-	// put a translated hop first. Among themselves they keep combo position
-	// order.
-	return append(candidates, translatedRoutes...), nil
+	return candidates, nil
 }
 
 // orderRoutes applies the combo's strategy. The candidate list is already

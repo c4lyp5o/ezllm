@@ -183,17 +183,24 @@ func TestUniversalOffKeepsPinRefusal(t *testing.T) {
 	}
 }
 
-// The matrix is ANDed with translation.enabled: universal cannot resurrect a
-// translation layer the operator switched off.
-func TestUniversalNeedsTranslationEnabled(t *testing.T) {
+// universal_enabled is the SINGLE switch for the matrix: it is self-sufficient
+// and does NOT require the legacy translation.enabled gate (operator decision
+// 2026-10-13 — one flag, one mental model).
+func TestUniversalNeedsNoOtherFlag(t *testing.T) {
 	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceAnthropic)] = true
 	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceOpenAI)] = true
 
-	_, _, err := resolveWire(t, New(cat).WithUniversal(true), wireCombo, provider.SurfaceAnthropic)
+	// No WithTranslation: universal alone must serve the cell.
+	wire, translated, err := resolveWire(t, New(cat).WithUniversal(true), wireCombo, provider.SurfaceAnthropic)
+	if err != nil || wire != provider.SurfaceOpenAI || !translated {
+		t.Fatalf("wire=%q translated=%v err=%v; want the matrix to work on universal_enabled alone", wire, translated, err)
+	}
+	// And with neither flag, nothing translates (the legacy default).
+	_, _, err = resolveWire(t, New(cat), wireCombo, provider.SurfaceAnthropic)
 	var wu *ErrWireUnsupported
 	if !errors.As(err, &wu) {
-		t.Fatalf("error = %v, want ErrWireUnsupported with translation disabled", err)
+		t.Fatalf("error = %v, want ErrWireUnsupported with every flag off", err)
 	}
 }
 

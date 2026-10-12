@@ -287,8 +287,9 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
 - Proof files: `internal/proxy/wire_matrix_{e2e,paths}_test.go` (9 cells × stream/nonstream,
   tool loops, 429/400/preparation/late-error paths), `internal/router/universal_selection_test.go`,
   `internal/server/wire_matrix_test.go`, `internal/translate/usage_convention_test.go`.
-- Gotcha: translated candidates ride the TAIL outside combo strategy ordering
-  (`selectComboCandidates` tail rule) — outcome-driven rotation does not reach them today.
+- Translated hops are ordinary combo members now (operator decision 2026-10-13): strategies order
+  them like native hops, and a translated success/failure feeds the strategy the same way.
+  Earlier revisions parked them outside the strategy ordering; do not reintroduce that tail.
 
 ## 5. Invariants to check while reading (review checklist)
 

@@ -41,11 +41,12 @@ consistently between a direct route and the same hop inside a combo.
 
 ## Selection (router)
 
-Boot flags: `translation.enabled` (the global translation switch) and
-`translation.universal_enabled` (default **false**; `EZLLM_TRANSLATION_UNIVERSAL_ENABLED` is the
-no-rebuild rollback). The matrix is **ANDed** with `translation.enabled`: a flag must never
-resurrect a layer the operator switched off. A wrong-typed config value fails boot naming the
-field.
+Boot flags: `translation.universal_enabled` (default **false**;
+`EZLLM_TRANSLATION_UNIVERSAL_ENABLED` is the no-rebuild rollback) — the **single switch for the
+matrix**. It does not require `translation.enabled` (operator decision 2026-10-13): with the
+flag on, the whole matrix is available through one knob. With it off, nothing changes
+byte-for-byte. `translation.enabled` remains the legacy gate for the single anthropic→chat
+alternative when universal is off. A wrong-typed config value fails boot naming the field.
 
 Per candidate, wire-first:
 
@@ -101,11 +102,12 @@ refuses — it never falls through to the model swap.
   row carries it in its error column even though the delivered status stays 200 (that is what
   the client saw). The positive hop signal (`MarkHopGood`) is withheld unless the stream
   completed.
-- **Known boundary**: translated candidates ride the tail of a combo, outside strategy ordering
-  (a deliberate pre-existing rule: "a native hop always wins"). The withheld hop signal therefore
-  has no routing effect for translated hops today — it is only visible in the ledger. Letting
-  universal hops participate in strict/sticky rotation is a routing-policy change and was
-  deliberately not made.
+- **Translated hops are ordinary citizens (operator decision 2026-10-13).** A translated hop is
+  ordered, held good and rotated on exactly the same terms as a native one: a successful
+  translated hop IS a success, a failed one IS a failure, and the positive hop signal is
+  withheld unless its stream completed. An earlier design parked translated candidates outside
+  the strategy ordering ("a native hop always wins"); that was reversed, so a mixed combo can
+  now dispatch on a translated hop by strategy choice.
 
 ## Compatibility
 

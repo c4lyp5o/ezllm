@@ -109,7 +109,9 @@ type Translation struct {
 	// and, for a Messages destination, the account must carry an explicit
 	// usage_convention (schema v13). A wrong-typed value fails boot naming
 	// the field; EZLLM_TRANSLATION_UNIVERSAL_ENABLED is the no-rebuild
-	// rollback lever. OFF keeps every legacy behaviour byte-for-byte.
+	// rollback lever. This is the SINGLE switch for the matrix — it does not
+	// require translation.enabled (operator decision 2026-10-13). OFF keeps
+	// every legacy behaviour byte-for-byte.
 	UniversalEnabled bool `yaml:"universal_enabled"`
 }
 

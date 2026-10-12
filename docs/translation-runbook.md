@@ -163,13 +163,15 @@ Design: `docs/universal-wire-design.md`. Adds **chat→messages**, **responses�
 **responses→messages** through the strict codecs, plus the fixed fallback ordering for any
 client whose native wire a hop provably cannot serve.
 
-**Enabling (two switches, both required):**
+**Enabling (ONE switch — it is self-sufficient, no other flag required):**
 
 ```yaml
 translation:
-  enabled: true            # the existing global switch (unchanged)
-  universal_enabled: true  # NEW, default false — the three new cells + the chains
+  universal_enabled: true  # default false — the three new cells + the chains
 ```
+
+(`translation.enabled` keeps gating the legacy anthropic→chat alternative when universal is
+off; with universal on, that switch is not needed.)
 
 `EZLLM_TRANSLATION_UNIVERSAL_ENABLED=true|false` overrides it without a rebuild (rollback
 lever). A wrong-typed value fails boot naming `translation.universal_enabled`. With the flag
@@ -190,8 +192,8 @@ family. Ledger rows keep the `translated` marker and the inclusive `tokens_in` e
 **Stream outcomes (all cells):** a translated stream that ends in a late error frame or without a
 terminal event is recorded in the ledger error column (`translated stream failed` /
 `translated stream truncated`) while the delivered status stays 200 (that is what the client
-saw), and the hop is not marked good. Note: translated hops sit outside combo strategy ordering
-("a native hop always wins"), so the withheld mark shows in the ledger, not in rotation.
+saw), and the hop is not marked good. A translated hop is an ordinary member of the combo
+strategy: it is ordered, rotated and marked good on exactly the same terms as a native one.
 
 **Rollback:** `EZLLM_TRANSLATION_UNIVERSAL_ENABLED=false`, or `translation.universal_enabled: false`
 + restart. No data migration is involved; the curated `responses_models` list keeps working

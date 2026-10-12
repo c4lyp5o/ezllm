@@ -156,10 +156,8 @@ func TestServerUniversalCellEndToEnd(t *testing.T) {
 // status and carries the failure, and the positive hop signal is withheld (the
 // server gates it on Result.StreamCompleted()).
 //
-// Note the boundary: translated candidates are ordered OUTSIDE the combo
-// strategies by a deliberate pre-existing rule ("a native hop always wins"),
-// so the withheld signal is not observable through hop rotation here; what is
-// observable is the ledger record the operator actually diagnoses from.
+// Translated hops are ordinary combo members (operator decision 2026-10-13):
+// the withheld signal feeds the strategies exactly like a native failure.
 func TestServerLateStreamErrorRecordedNotMarkedGood(t *testing.T) {
 	up := &matrixUpstream{}
 	h := newHarness(t, up.handler(), func(o *Options) {

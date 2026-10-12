@@ -56,9 +56,11 @@ func TestNativeHopsPreferredOverTranslated(t *testing.T) {
 	}
 }
 
-// A healthy native hop always wins even under strategies that reorder:
-// translated candidates are outside the strategy ordering entirely.
-func TestTranslatedHopNeverReorderedToFront(t *testing.T) {
+// A translated hop is a NORMAL member of the strategy ordering (operator
+// decision 2026-10-13): a successful translated hop is a success and a failure
+// is a failure, so the reordering strategy must be able to choose it — and,
+// with a real dice roll, must actually do so over enough resolutions.
+func TestTranslatedHopParticipatesInStrategyOrdering(t *testing.T) {
 	cat := withCombo(newFake(), &store.Combo{
 		ID: 9, Name: "daily", Strategy: "true_round_robin", Enabled: true,
 		Hops: []store.ComboHop{
@@ -70,8 +72,9 @@ func TestTranslatedHopNeverReorderedToFront(t *testing.T) {
 	cat.yesProto = map[string]bool{"2/gpt-6.1-sol/openai": true}
 	r := New(cat).WithTranslation(true)
 
-	// true_round_robin is a real dice roll; over enough resolutions it
-	// would surface any leak of translated routes into the strategy order.
+	// true_round_robin is a real dice roll; if the translated hop were still
+	// parked outside the strategy it could never lead over 50 rolls (p ≈ 2^-50).
+	ledFirst := false
 	for i := 0; i < 50; i++ {
 		routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceAnthropic, "test")
 		if err != nil {
@@ -80,9 +83,18 @@ func TestTranslatedHopNeverReorderedToFront(t *testing.T) {
 		if len(routes) != 2 {
 			t.Fatalf("candidates = %d, want 2", len(routes))
 		}
-		if routes[1].Model != "gpt-6.1-sol" || !routes[1].Translated {
-			t.Fatalf("iteration %d: translated hop must be the tail: %+v", i, routes)
+		if routes[0].Model == "gpt-6.1-sol" {
+			if !routes[0].Translated {
+				t.Fatalf("iteration %d: the openai-only hop lost its translated marker", i)
+			}
+			ledFirst = true
 		}
+		if routes[1].Translated && routes[0].Translated {
+			t.Fatalf("iteration %d: both hops translated?", i)
+		}
+	}
+	if !ledFirst {
+		t.Error("the translated hop never led in 50 dice rolls — it is still parked outside the strategy")
 	}
 }
 

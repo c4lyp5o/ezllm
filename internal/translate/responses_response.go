@@ -1,9 +1,6 @@
 package translate
 
-import (
-	"encoding/json"
-	"fmt"
-)
+import "github.com/c4lyp5o/ezllm/internal/provider"
 
 // ResponsesToChat translates a non-streaming OpenAI Responses API response
 // body into an OpenAI chat-completions response body, for a chat client whose
@@ -13,60 +10,12 @@ import (
 // the envelope always carries a valid finish_reason; usage is remapped 1:1.
 // Contract tables: docs/responses-wire-design.md.
 func ResponsesToChat(body []byte, clientModel string) ([]byte, error) {
-	var up responsesWireResponse
-	if err := json.Unmarshal(body, &up); err != nil {
-		return nil, fmt.Errorf("unmarshal responses body: %w", err)
+	opts := CodecOptions{Legacy: true}
+	ir, err := DecodeResponse(body, provider.SurfaceResponses, opts)
+	if err != nil {
+		return nil, err
 	}
-
-	msg := chatWireOutMessage{Role: "assistant"}
-	for _, item := range up.Output {
-		switch item.Type {
-		case "message":
-			for _, c := range item.Content {
-				if c.Type == "output_text" && c.Text != "" {
-					if msg.Content != "" {
-						msg.Content += "\n"
-					}
-					msg.Content += c.Text
-				}
-			}
-		case "function_call":
-			msg.ToolCalls = append(msg.ToolCalls, chatWireOutToolCall{
-				ID:   item.CallID,
-				Type: "function",
-				Function: chatWireOutFunction{
-					Name:      item.Name,
-					Arguments: item.Arguments,
-				},
-			})
-		}
-		// "reasoning" and anything unknown: dropped by design.
-	}
-
-	finish := "stop"
-	switch {
-	case up.Status == "incomplete":
-		finish = "length"
-	case len(msg.ToolCalls) > 0:
-		finish = "tool_calls"
-	}
-
-	out := chatWireOutCompletion{
-		ID:      up.ID,
-		Object:  "chat.completion",
-		Created: up.CreatedAt,
-		Model:   clientModel,
-		Choices: []chatWireOutChoice{{
-			Index:        0,
-			Message:      msg,
-			FinishReason: finish,
-		}},
-		Usage: chatWireOutUsage{
-			PromptTokens:     up.Usage.InputTokens,
-			CompletionTokens: up.Usage.OutputTokens,
-		},
-	}
-	return json.Marshal(out)
+	return EncodeResponse(ir, provider.SurfaceOpenAI, clientModel, opts)
 }
 
 // ── responses wire decode types ───────────────────────────────────────────

@@ -2,8 +2,9 @@ package translate
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
+
+	"github.com/c4lyp5o/ezllm/internal/provider"
 )
 
 // Response translates an OpenAI chat-completions response body into an
@@ -13,49 +14,12 @@ import (
 // content array (possibly empty); a client that renders nothing is
 // better than one that chokes on a missing field.
 func Response(body []byte, clientModel string) ([]byte, error) {
-	var up OpenAIResponse
-	if err := json.Unmarshal(body, &up); err != nil {
-		return nil, fmt.Errorf("unmarshal openai response: %w", err)
+	opts := CodecOptions{Legacy: true}
+	ir, err := DecodeResponse(body, provider.SurfaceOpenAI, opts)
+	if err != nil {
+		return nil, err
 	}
-
-	res := AnthropicResponse{
-		Type:         "message",
-		Role:         "assistant",
-		Content:      []AnthropicBlock{},
-		Model:        clientModel,
-		StopReason:   "end_turn",
-		StopSequence: nil,
-	}
-
-	id := up.ID
-	if !strings.HasPrefix(id, "msg_") {
-		id = "msg_" + id
-	}
-	res.ID = id
-
-	if len(up.Choices) > 0 {
-		choice := up.Choices[0]
-
-		if choice.Message.Content != "" {
-			res.Content = append(res.Content, AnthropicBlock{Type: "text", Text: choice.Message.Content})
-		}
-		for _, tc := range choice.Message.ToolCalls {
-			res.Content = append(res.Content, AnthropicBlock{
-				Type:  "tool_use",
-				ID:    tc.ID,
-				Name:  tc.Function.Name,
-				Input: parseToolArguments(tc.Function.Arguments),
-			})
-		}
-		res.StopReason = mapStopReason(choice.FinishReason)
-	}
-
-	res.Usage = AnthropicUsage{
-		InputTokens:  up.Usage.PromptTokens,
-		OutputTokens: up.Usage.CompletionTokens,
-	}
-
-	return json.Marshal(res)
+	return EncodeResponse(ir, provider.SurfaceAnthropic, clientModel, opts)
 }
 
 // parseToolArguments turns the OpenAI `arguments` JSON string into the

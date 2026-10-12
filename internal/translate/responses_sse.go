@@ -37,7 +37,7 @@ type responsesSSEReader struct {
 	created     int64
 	started     bool
 
-	callIndex map[string]int // item_id -> chat tool_call index
+	callIndex map[string]int // item_id OR call_id -> chat tool_call index
 	nextCall  int
 }
 
@@ -84,8 +84,11 @@ func (s *responsesSSEReader) advance() bool {
 			s.frame(`{"error":{"message":"upstream stream failed","type":"api_error"}}`)
 			s.frame("[DONE]")
 		} else {
-			// Clean EOF without response.completed: close honestly.
-			s.emitFinish("stop", 0, 0)
+			// Clean EOF with NO terminal event. That is a truncated stream,
+			// not a completion: synthesizing finish_reason "stop" here told the
+			// client (and MarkHopGood) that a cut-off answer was successful.
+			s.ensureStarted()
+			s.frame(`{"error":{"message":"upstream stream ended without a terminal event","type":"api_error"}}`)
 			s.frame("[DONE]")
 		}
 		return false
@@ -119,6 +122,7 @@ func (s *responsesSSEReader) advance() bool {
 	case "response.output_item.added":
 		var e struct {
 			Item struct {
+				ID     string `json:"id"`
 				Type   string `json:"type"`
 				CallID string `json:"call_id"`
 				Name   string `json:"name"`
@@ -130,7 +134,11 @@ func (s *responsesSSEReader) advance() bool {
 		s.ensureStarted()
 		idx := s.nextCall
 		s.nextCall++
-		s.callIndex[e.Item.CallID] = idx
+		// Register the item id AND the call id. Argument deltas reference the
+		// item id while the client-visible tool id is the call id, and the two
+		// are DIFFERENT strings in real streams (item "fc_...", call "call_...").
+		// Keying on only one of them silently dropped every argument fragment.
+		s.registerCall(idx, e.Item.ID, e.Item.CallID)
 		s.chunk(fmt.Sprintf(`{"tool_calls":[{"index":%d,"id":%s,"type":"function","function":{"name":%s,"arguments":""}}]}`,
 			idx, mustMarshalString(e.Item.CallID), mustMarshalString(e.Item.Name)), "null")
 		return true
@@ -138,12 +146,13 @@ func (s *responsesSSEReader) advance() bool {
 	case "response.function_call_arguments.delta":
 		var e struct {
 			ItemID string `json:"item_id"`
+			CallID string `json:"call_id"`
 			Delta  string `json:"delta"`
 		}
 		if err := json.Unmarshal(payload, &e); err != nil {
 			return true
 		}
-		idx, seen := s.callIndex[e.ItemID]
+		idx, seen := s.lookupCall(e.ItemID, e.CallID)
 		if !seen {
 			return true // fragment for a call we never saw open: skip
 		}
@@ -170,8 +179,16 @@ func (s *responsesSSEReader) advance() bool {
 		return true
 
 	case "response.incomplete":
+		// Terminal like response.completed, but truncated: the payload still
+		// carries real usage, and dropping it recorded zero spend for the call.
+		var e struct {
+			Response struct {
+				Usage responsesOutUsage `json:"usage"`
+			} `json:"response"`
+		}
+		_ = json.Unmarshal(payload, &e)
 		s.ensureStarted()
-		s.emitFinish("length", 0, 0)
+		s.emitFinish("length", e.Response.Usage.InputTokens, e.Response.Usage.OutputTokens)
 		s.frame("[DONE]")
 		s.done = true
 		return true
@@ -180,6 +197,7 @@ func (s *responsesSSEReader) advance() bool {
 		var e struct {
 			Response struct {
 				Error *responsesWireError `json:"error"`
+				Usage responsesOutUsage   `json:"usage"`
 			} `json:"response"`
 		}
 		_ = json.Unmarshal(payload, &e)
@@ -191,6 +209,11 @@ func (s *responsesSSEReader) advance() bool {
 			}
 		} else {
 			s.frame(`{"error":{"message":"upstream stream failed","type":"api_error"}}`)
+		}
+		// A failed run still consumed tokens: report them so the ledger records
+		// the spend instead of a zero.
+		if e.Response.Usage.InputTokens > 0 || e.Response.Usage.OutputTokens > 0 {
+			s.usageChunk(e.Response.Usage.InputTokens, e.Response.Usage.OutputTokens)
 		}
 		s.frame("[DONE]")
 		s.done = true
@@ -219,13 +242,46 @@ func (s *responsesSSEReader) chunk(delta, finish string) {
 		mustMarshalString(s.id), s.created, mustMarshalString(s.clientModel), delta, finish))
 }
 
+// registerCall maps an open function call's item id AND call id to its chat
+// tool_call index. Sources differ on which one a later frame quotes, and the
+// pair is not equal in practice (item "fc_x" vs call "call_y").
+func (s *responsesSSEReader) registerCall(idx int, id, callID string) {
+	if id != "" {
+		s.callIndex[id] = idx
+	}
+	if callID != "" {
+		s.callIndex[callID] = idx
+	}
+}
+
+// lookupCall resolves a fragment to its tool_call index by whichever id the
+// frame carried (empty ids are ignored, never treated as a match).
+func (s *responsesSSEReader) lookupCall(ids ...string) (int, bool) {
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if idx, ok := s.callIndex[id]; ok {
+			return idx, true
+		}
+	}
+	return 0, false
+}
+
+// usageChunk writes the usage-only chunk (empty choices) OpenAI sends when
+// usage is requested. Used where a terminal event carries usage but there is no
+// successful finish chunk to attach it to.
+func (s *responsesSSEReader) usageChunk(in, out int) {
+	s.frame(fmt.Sprintf(`{"id":%s,"object":"chat.completion.chunk","created":%d,"model":%s,"choices":[],"usage":{"prompt_tokens":%d,"completion_tokens":%d}}`,
+		mustMarshalString(s.id), s.created, mustMarshalString(s.clientModel), in, out))
+}
+
 // emitFinish writes the closing pair in OpenAI's include_usage shape: the
 // finish_reason chunk, then a usage-only chunk with empty choices.
 func (s *responsesSSEReader) emitFinish(finish string, in, out int) {
 	s.ensureStarted()
 	s.chunk(`{}`, mustMarshalString(finish))
-	s.frame(fmt.Sprintf(`{"id":%s,"object":"chat.completion.chunk","created":%d,"model":%s,"choices":[],"usage":{"prompt_tokens":%d,"completion_tokens":%d}}`,
-		mustMarshalString(s.id), s.created, mustMarshalString(s.clientModel), in, out))
+	s.usageChunk(in, out)
 }
 
 func (s *responsesSSEReader) frame(data string) {

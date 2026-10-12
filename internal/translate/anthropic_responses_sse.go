@@ -78,9 +78,10 @@ func (s *responsesAnthropicSSEReader) advance() bool {
 		if err := s.scanner.Err(); err != nil {
 			s.emitError("api_error", "upstream stream failed")
 		} else {
-			// Clean EOF without response.completed: close honestly.
-			s.computeFinish()
-			s.emitClose()
+			// Clean EOF with NO terminal event: a truncated stream. Closing with
+			// stop_reason end_turn would tell the client (and MarkHopGood) that a
+			// cut-off answer succeeded.
+			s.emitError("api_error", "upstream stream ended without a terminal event")
 		}
 		return false
 	}
@@ -125,6 +126,7 @@ func (s *responsesAnthropicSSEReader) advance() bool {
 	case "response.output_item.added":
 		var e struct {
 			Item struct {
+				ID     string `json:"id"`
 				Type   string `json:"type"`
 				CallID string `json:"call_id"`
 				Name   string `json:"name"`
@@ -138,7 +140,15 @@ func (s *responsesAnthropicSSEReader) advance() bool {
 			s.closeBlock()
 		}
 		idx := s.blockIdx
-		s.toolIdx[e.Item.CallID] = idx
+		// Item id AND call id both map to this block: argument deltas quote the
+		// item id (e.g. "fc_x") while the client-visible tool id is the call id
+		// (e.g. "call_y"). They are not the same string in real streams.
+		if e.Item.ID != "" {
+			s.toolIdx[e.Item.ID] = idx
+		}
+		if e.Item.CallID != "" {
+			s.toolIdx[e.Item.CallID] = idx
+		}
 		s.toolCalls = true
 		s.frame("content_block_start", fmt.Sprintf(
 			`{"type":"content_block_start","index":%d,"content_block":{"type":"tool_use","id":%s,"name":%s,"input":{}}}`,
@@ -150,22 +160,26 @@ func (s *responsesAnthropicSSEReader) advance() bool {
 	case "response.function_call_arguments.delta":
 		var e struct {
 			ItemID string `json:"item_id"`
+			CallID string `json:"call_id"`
 			Delta  string `json:"delta"`
 		}
 		if err := json.Unmarshal(payload, &e); err != nil {
 			return true
 		}
-		idx, seen := s.toolIdx[e.ItemID]
+		idx, seen := s.lookupTool(e.ItemID, e.CallID)
 		if !seen {
 			return true // fragment for a call we never saw open: skip
 		}
 		s.ensureStarted()
-		// Stay inside this tool block even if a text delta interleaved.
-		if s.blockOpen && s.blockIdx != idx {
-			s.closeBlock()
-			s.blockOpen = true
-			s.openKind = "tool_use"
-			s.blockIdx = idx
+		// Anthropic content is a SINGLE-OPEN-BLOCK sequence: start -> deltas ->
+		// stop, then the next index. A fragment for a block that is not the
+		// open one means the source interleaved tool calls, which this wire
+		// cannot express. Emitting into a STOPPED block would hand the client a
+		// delta it has to reject (or re-open an index it already closed), so
+		// fail visibly instead of inventing an order.
+		if !s.blockOpen || s.blockIdx != idx {
+			s.emitError("api_error", "upstream interleaved tool argument streams; cannot map to the messages wire")
+			return true
 		}
 		s.frame("content_block_delta", fmt.Sprintf(
 			`{"type":"content_block_delta","index":%d,"delta":{"type":"input_json_delta","partial_json":%s}}`,
@@ -188,7 +202,17 @@ func (s *responsesAnthropicSSEReader) advance() bool {
 		return true
 
 	case "response.incomplete":
+		// Truncated terminal: usage still rides in the payload, and
+		// stop_reason must not be reported as if the answer completed.
+		var e struct {
+			Response struct {
+				Usage responsesOutUsage `json:"usage"`
+			} `json:"response"`
+		}
+		_ = json.Unmarshal(payload, &e)
 		s.ensureStarted()
+		s.usageIn, s.usageOut = e.Response.Usage.InputTokens, e.Response.Usage.OutputTokens
+		s.usageSeen = true
 		s.finish = "max_tokens"
 		s.emitClose()
 		s.done = true
@@ -262,6 +286,20 @@ func (s *responsesAnthropicSSEReader) closeBlock() {
 		`{"type":"content_block_stop","index":%d}`, s.blockIdx))
 	s.blockOpen = false
 	s.blockIdx++
+}
+
+// lookupTool resolves a fragment to its content_block index by whichever id
+// the frame carried (item id or call id; empty ids never match).
+func (s *responsesAnthropicSSEReader) lookupTool(ids ...string) (int, bool) {
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if idx, ok := s.toolIdx[id]; ok {
+			return idx, true
+		}
+	}
+	return 0, false
 }
 
 // emitClose runs once: close open blocks, message_delta with the real usage,

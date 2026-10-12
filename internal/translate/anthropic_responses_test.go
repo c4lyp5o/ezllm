@@ -209,9 +209,12 @@ data: {"type":"response.completed","response":{"usage":{"input_tokens":42,"outpu
 	}
 }
 
-// A transport cut before response.completed still closes the message instead
-// of hanging the client.
-func TestResponsesAnthropicSSECutClosesHonestly(t *testing.T) {
+// A transport cut before response.completed must NOT be reported as a
+// successful turn. Until M0 this emitted stop_reason "end_turn" (and a
+// message_stop), which told the client — and the hop-health hook — that a
+// cut-off answer had completed. It now closes with an explicit error event
+// while still ending the stream so the client cannot hang.
+func TestResponsesAnthropicSSECutWithoutCompletedReportsTruncation(t *testing.T) {
 	in := `event: response.created
 data: {"type":"response.created","response":{"id":"resp_y"}}
 
@@ -221,12 +224,16 @@ data: {"type":"response.output_text.delta","delta":"partial"}
 `
 	out, _ := io.ReadAll(NewResponsesAnthropicSSEReader(strings.NewReader(in), "daily"))
 	events := parseAnthropicFrames(t, string(out))
-	if len(events) == 0 || events[len(events)-1].event != "message_stop" {
-		t.Fatalf("cut stream did not close: %v", events)
+	if len(events) == 0 || events[len(events)-1].event != "error" {
+		t.Fatalf("cut stream must end with an error event: %v", events)
 	}
-	delta := events[len(events)-2]
-	if !strings.Contains(delta.data, `"stop_reason":"end_turn"`) {
-		t.Fatalf("close frame = %s", delta.data)
+	if !strings.Contains(events[len(events)-1].data, "without a terminal event") {
+		t.Fatalf("truncation error = %s", events[len(events)-1].data)
+	}
+	for _, ev := range events {
+		if strings.Contains(ev.data, `"stop_reason":"end_turn"`) {
+			t.Fatalf("truncated stream must not report end_turn: %s", ev.data)
+		}
 	}
 }
 

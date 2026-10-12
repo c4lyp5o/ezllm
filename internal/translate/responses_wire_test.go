@@ -345,7 +345,11 @@ data: {"type":"response.failed","response":{"error":{"message":"model overloaded
 	}
 }
 
-func TestResponsesSSECutWithoutCompletedClosesHonestly(t *testing.T) {
+// A cut stream must still terminate (never hang the client), but it must not
+// claim success. Until M0 this synthesized finish_reason "stop" for a stream
+// that never sent a terminal event — handing the client a truncated answer
+// marked complete and marking the hop healthy.
+func TestResponsesSSECutWithoutCompletedReportsTruncation(t *testing.T) {
 	in := `event: response.created
 data: {"type":"response.created","response":{"id":"r1","created_at":1}}
 
@@ -354,8 +358,11 @@ data: {"type":"response.output_text.delta","delta":"half"}
 
 `
 	out := string(runResponsesSSE(t, in, "daily"))
-	if !strings.Contains(out, `"finish_reason":"stop"`) {
-		t.Errorf("cut stream must close with stop:\n%s", out)
+	if strings.Contains(out, `"finish_reason":"stop"`) || strings.Contains(out, `"finish_reason":"tool_calls"`) {
+		t.Errorf("cut stream must not synthesize a success finish:\n%s", out)
+	}
+	if !strings.Contains(out, "without a terminal event") {
+		t.Errorf("cut stream must report truncation:\n%s", out)
 	}
 	if !strings.HasSuffix(out, "data: [DONE]\n\n") {
 		t.Errorf("stream must end with [DONE]:\n%s", out)

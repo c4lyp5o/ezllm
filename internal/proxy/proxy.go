@@ -99,6 +99,12 @@ type Route struct {
 	// translation). Set by the router from probed capability; nothing else
 	// about the hop's failover/park semantics changes.
 	Translated bool
+	// ResponsesWire marks a hop curated onto OpenAI's Responses wire for a
+	// chat client (docs/responses-wire-design.md): the body is translated
+	// chat→responses on the way out and back on the way in. Same rules as
+	// Translated — Surface stays the client's; error bodies pass through
+	// byte-identical (both wires share the {"error":{…}} family).
+	ResponsesWire bool
 }
 
 // Result carries what the ledger needs after a dispatch.
@@ -593,15 +599,20 @@ func IsStream(body []byte) bool {
 }
 
 // prepareHopBody rewrites the client's body for one hop: a byte-stable
-// model swap on the native path, or a full anthropic→openai translation
-// for a translated hop. Translation REPLACES the swap — it rewrites the
-// whole wire shape, model included — so the two paths never compose.
+// model swap on the native path, or a full wire translation for a
+// translated (anthropic→openai) or responses-wire (chat→responses) hop.
+// Translation REPLACES the swap — it rewrites the whole wire shape, model
+// included — so the paths never compose.
 func prepareHopBody(body []byte, rt Route) ([]byte, error) {
-	if !rt.Translated {
+	switch {
+	case rt.Translated:
+		return translate.Request(body, rt.Model)
+	case rt.ResponsesWire:
+		return translate.ChatToResponses(body, rt.Model)
+	default:
 		swapped, _, err := SwapModel(body, rt.Model)
 		return swapped, err
 	}
-	return translate.Request(body, rt.Model)
 }
 
 // attempt runs the upstream call and returns the response WITHOUT touching w.
@@ -619,8 +630,11 @@ func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, bod
 	// A translated hop dials the upstream on ITS native path (openai) while
 	// everything client-facing (ledger, usage tap) keeps the client surface.
 	dialSurface := rt.Surface
-	if rt.Translated {
+	switch {
+	case rt.Translated:
 		dialSurface = provider.SurfaceOpenAI
+	case rt.ResponsesWire:
+		dialSurface = provider.SurfaceResponses
 	}
 	url := provider.UpstreamURL(rt.Account.BaseURL, rt.Account.Kind, provider.SurfacePath(dialSurface))
 
@@ -673,6 +687,14 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 				io.Reader
 				io.Closer
 			}{translate.NewSSEReader(resp.Body, rt.Alias), resp.Body}
+		}
+		// A responses-wire stream wraps the same way: the client sees chat
+		// chunks synthesized from the upstream's responses events.
+		if rt.ResponsesWire {
+			resp.Body = struct {
+				io.Reader
+				io.Closer
+			}{translate.NewResponsesSSEReader(resp.Body, rt.Alias), resp.Body}
 		}
 		// streamCopy writes the header before its first byte, so the status
 		// is committed the moment it returns — regardless of a copy error.
@@ -766,6 +788,27 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 				}
 				raw = translated
 			}
+		}
+		// A responses-wire hop answers a chat client: success bodies are
+		// translated back to chat completions shape. Error bodies pass
+		// through byte-identical — chat and responses share the
+		// {"error":{…}} family, and the upstream's own words must reach the
+		// client and the ledger err column untouched.
+		if rt.ResponsesWire && res.Status < 400 {
+			translated, terr := translate.ResponsesToChat(raw, rt.Alias)
+			if terr != nil {
+				// A body we cannot translate is a gateway fault; a chat
+				// client must never receive responses-shaped bytes.
+				res.Status = http.StatusBadGateway
+				res.Err = "translate responses body: " + terr.Error()
+				w.Header().Set("Content-Type", "application/json")
+				res.Committed = true
+				w.WriteHeader(http.StatusBadGateway)
+				_, _ = w.Write([]byte(`{"error":{"type":"upstream_error","message":"responses body could not be translated","code":502}}`))
+				res.Totalms = msPtr(time.Since(start))
+				return res, nil
+			}
+			raw = translated
 		}
 		if u := tapJSONUsage(raw, rt.Surface); u != nil {
 			res.Usage = u

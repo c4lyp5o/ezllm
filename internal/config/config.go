@@ -86,6 +86,11 @@ type ModelRefresh struct {
 // cannot change routing on its own.
 type Translation struct {
 	Enabled bool `yaml:"enabled"`
+	// ResponsesModels lists "<namespace>/<model_id>" hops that must be dialed
+	// on OpenAI's Responses wire even when the client speaks chat — for models
+	// whose chat path refuses tools+reasoning (tokenrouter gpt-6.1-sol). Empty
+	// list (default) = the wire override is inert.
+	ResponsesModels []string `yaml:"responses_models"`
 }
 
 type Config struct {

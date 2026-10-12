@@ -147,6 +147,9 @@ type Resolver struct {
 	// by default; even ON it only ever serves hops whose probed capability
 	// PROVES the OpenAI shape (see translate.Eligible).
 	translationEnabled bool
+	// responsesModels is the operator-curated "<ns>/<model>" list of hops that
+	// must be dialed on the Responses wire for chat clients. Empty = inert.
+	responsesModels map[string]bool
 }
 
 // New builds a Resolver.
@@ -164,6 +167,27 @@ func (r *Resolver) WithEligibility(e Eligible) *Resolver {
 func (r *Resolver) WithTranslation(enabled bool) *Resolver {
 	r.translationEnabled = enabled
 	return r
+}
+
+// WithResponsesModels installs the curated list of "<ns>/<model>" hops that
+// ride the Responses wire for chat clients (see docs/responses-wire-design.md).
+func (r *Resolver) WithResponsesModels(models []string) *Resolver {
+	m := make(map[string]bool, len(models))
+	for _, v := range models {
+		m[strings.TrimSpace(v)] = true
+	}
+	r.responsesModels = m
+	return r
+}
+
+// needsResponsesWire reports whether a hop is curated onto the Responses wire
+// for the given client surface. Only chat clients translate: anthropic is
+// handled by the proto-gated translation, and responses clients pass through.
+func (r *Resolver) needsResponsesWire(clientSurface provider.Surface, namespace, model string) bool {
+	if clientSurface != provider.SurfaceOpenAI || len(r.responsesModels) == 0 {
+		return false
+	}
+	return r.responsesModels[namespace+"/"+model]
 }
 
 // eligibleHere applies the filter, treating nil as "allow".
@@ -266,6 +290,10 @@ func (r *Resolver) ResolveCandidates(ctx context.Context, requested string, surf
 		Model:    model,
 		Alias:    requested,
 		Surface:  surface,
+		// The curated responses-wire override applies to direct routes too:
+		// a chat client calling the model by its namespaced id gets the same
+		// wire fix as a combo hop.
+		ResponsesWire: r.needsResponsesWire(surface, acct.Namespace, model),
 	}}, nil
 }
 
@@ -412,6 +440,9 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 			translatedRoutes = append(translatedRoutes, route)
 			continue
 		}
+		// A curated responses-wire hop keeps its normal combo position: it is
+		// a working member, not a last resort — the wire flips at dispatch.
+		route.ResponsesWire = r.needsResponsesWire(surface, acct.Namespace, h.ModelID)
 		routes = append(routes, route)
 	}
 

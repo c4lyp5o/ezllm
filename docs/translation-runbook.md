@@ -87,3 +87,33 @@ probed-incompatible hops.
 - Direct `<namespace>/<model>` requests are NOT translated in M1 — combos only.
 - Accounts needing `max_completion_tokens` (tokenrouter `openai/gpt-6.1-sol`)
   are not translation-eligible in M1.
+
+## Responses-wire hops (chat client → /v1/responses hop)
+
+Separate companion feature (`docs/responses-wire-design.md`): some models'
+**chat** path refuses tools+reasoning (tokenrouter `gpt-6.1-sol`) while their
+Responses path handles both. The curated list is the opt-in:
+
+```yaml
+translation:
+  enabled: true
+  responses_models:
+    - "tokenrouter/openai/gpt-6.1-sol"
+```
+
+- A marked hop is dialed on `/v1/responses` with a translated body (chat →
+  responses), and the response translates back (JSON and SSE). The client
+  keeps speaking chat; the ledger row keeps the client's surface and the
+  upstream's model.
+- Unlike translated anthropic hops, a responses-wire hop KEEPS its normal
+  combo position — it is a working member, not a last resort. Direct
+  `<ns>/<model>` routes are marked too.
+- Error bodies pass through byte-identical (chat and responses share the
+  `{"error":{…}}` family).
+- **Discovery:** which models belong on the list comes from the ledger's 400
+  signatures (`Function tools with reasoning_effort are not supported … use
+  /v1/responses`). On 2026-10-12 exactly one model qualified
+  (`tokenrouter/openai/gpt-6.1-sol`).
+- Verified live 2026-10-12: chat call with tools + `reasoning_effort: high` →
+  200 `sol wire ok` via the responses wire, ledger `surface=openai,
+  model=openai/gpt-6.1-sol`, after a mock-rig 17/17 pass.

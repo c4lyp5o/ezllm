@@ -215,6 +215,52 @@ data: [DONE]
 	}
 }
 
+// TestSSEUsageOnFinishChunk: several providers attach `usage` to the chunk
+// that carries finish_reason instead of a dedicated include_usage chunk
+// (deepseek-flash and opencode-go both did in prod, which recorded 0/1 tokens
+// for every streamed translated call). The real numbers must reach
+// message_delta either way.
+func TestSSEUsageOnFinishChunk(t *testing.T) {
+	in := `data: {"id":"c1","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}]}
+
+data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1234,"completion_tokens":56}}
+
+data: [DONE]
+
+`
+	_, frames := runSSE(t, in, "client-model")
+	delta := frames[len(frames)-2]
+	if delta.Event != "message_delta" {
+		t.Fatalf("second-to-last = %s, want message_delta: %+v", delta.Event, frames)
+	}
+	if !strings.Contains(delta.Data, `"input_tokens":1234`) || !strings.Contains(delta.Data, `"output_tokens":56`) {
+		t.Fatalf("usage lost when attached to the finish chunk: %s", delta.Data)
+	}
+	if !strings.Contains(delta.Data, `"stop_reason":"end_turn"`) {
+		t.Errorf("stop_reason = %s", delta.Data)
+	}
+}
+
+// TestSSEUsageOnContentChunk: usage attached to an earlier content chunk is
+// captured too, and the stream still closes exactly once.
+func TestSSEUsageOnContentChunk(t *testing.T) {
+	in := `data: {"id":"c1","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}],"usage":{"prompt_tokens":7,"completion_tokens":9}}
+
+data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+`
+	out, frames := runSSE(t, in, "client-model")
+	delta := frames[len(frames)-2]
+	if !strings.Contains(delta.Data, `"input_tokens":7`) || !strings.Contains(delta.Data, `"output_tokens":9`) {
+		t.Fatalf("usage lost when attached to a content chunk: %s", delta.Data)
+	}
+	if n := strings.Count(string(out), "event: message_stop"); n != 1 {
+		t.Errorf("message_stop emitted %d times, want 1", n)
+	}
+}
+
 // TestSSEStreamCutWithoutFinish: a transport cut after content but
 // before finish_reason closes the message rather than hanging.
 func TestSSEStreamCutWithoutFinish(t *testing.T) {

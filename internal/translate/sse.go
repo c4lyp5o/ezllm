@@ -113,14 +113,18 @@ func (s *sseReader) advance() bool {
 		return false
 	}
 
-	// Usage-only chunk (include_usage): the final chunk before [DONE].
+	// Usage rides either the dedicated include_usage chunk (choices empty,
+	// the OpenAI shape) or the final content chunk — several providers attach
+	// `usage` to the chunk that also carries finish_reason. Capture it in
+	// both shapes; a stream that truly never sends usage still warns in
+	// finish() (locked decision Q5).
+	if chunk.Usage != nil {
+		s.inTokens = chunk.Usage.PromptTokens
+		s.outTokens = chunk.Usage.CompletionTokens
+		s.usageSeen = true
+	}
 	if len(chunk.Choices) == 0 {
-		if chunk.Usage != nil {
-			s.inTokens = chunk.Usage.PromptTokens
-			s.outTokens = chunk.Usage.CompletionTokens
-			s.usageSeen = true
-			s.emitFinalIfReady()
-		}
+		s.emitFinalIfReady()
 		return true
 	}
 

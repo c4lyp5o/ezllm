@@ -20,6 +20,42 @@ Responses — streaming and not — are translated back into Anthropic shapes.
 Ledger rows stay on the **client's** surface (`anthropic`) with the **upstream's**
 model. Design and wire contracts: `docs/translation-design.md`.
 
+**Pins still constrain the dispatch wire.** A translated combo hop dials
+OpenAI, so an `openai` pin is satisfied; an `anthropic` or `responses` pin
+still refuses the whole combo. Native/direct pin checks are unchanged, and
+the route retains the client's Anthropic surface for attribution. With the
+knob OFF, proven-incompatible hops are dropped before checking their pins,
+while an untested wrong-surface pinned hop still returns `400 pinned_surface`.
+
+## Curated capability verdicts (`PUT /admin/accounts/{id}/model-protocol`)
+
+The probe sweep cannot mark every hop — an edge that stonewalls probe traffic
+always records UNKNOWN — so an operator can record a capability fact by hand:
+
+    PUT /admin/accounts/{id}/model-protocol
+    {"model": "step-5-preview-free", "proto_openai": true, "proto_anthropic": false,
+     "note": "edge refuses /v1/messages; the openai wire works"}
+
+- The model id travels in the **body**, not the path: 493 of 622 catalog ids
+  contain `/` (the same rule as model-pin).
+- Each `proto_*` field is three-state: absent keeps the recorded value, `null`
+  clears it to untested, `true`/`false` records the verdict.
+- `note` is **required** on a verdict write. It is the audit trail that makes a
+  curated fact auditable instead of a silent override.
+- A curated write stamps `proto_source='curated'` and leaves `proto_tested_at`
+  NULL — nothing was probed, so no probe timestamp is fabricated. In other
+  words `proto_tested_at` always means "last probed at", and `proto_source`
+  says who wrote the verdicts (`probe` | `curated` | empty for legacy rows).
+- Curated rows are **probe-protected**: `SetModelProto` / `SetModelProtos` skip
+  them, so a later sweep cannot silently undo the operator's fact and a
+  translation-eligibility verdict stays stable.
+- `{"model": "...", "release": true}` hands the row back to the sweep: the
+  verdicts stay as recorded, `proto_source`/`proto_note` clear, and the next
+  probe write applies again.
+- A catalog re-sync preserves provenance along with the verdicts.
+- 404 when the model is not in the account's catalog (typo protection);
+  curation never creates rows.
+
 ## Running the probe sweep (this is the rollout gate)
 
 Capability flags come from the dashboard-triggered **ProtocolSweep**
@@ -43,8 +79,12 @@ Caveats, learned live (see the ezllm skill):
 
 - **Raise the sample to cover the hops you care about.** The sweep samples N
   models per account; an un-sampled hop stays `NULL` (= untested = native-only
-  routing). If `opencode-go/step-5-preview-free` matters, make sure the sweep
-  covers it.
+  routing). To aim it: `POST /admin/accounts/{id}/sync` with
+  `{"models":["<id>",…],"max_models":N}` — the scope applies to the **sweep
+  only**; the catalog refresh always writes the full fetched catalog (handing
+  the filtered list to `UpsertModels` used to delete every unnamed row —
+  command-code 87→3 in prod, fixed 2026-10-12). The deployed binary predates
+  `max_models` and rejects unknown body fields.
 - **A 429/timeout mid-sweep means UNKNOWN, never unsupported** — the sweep will
   not silently mark a working model incompatible.
 - An account whose group blocks a surface (403 "this group does not allow")

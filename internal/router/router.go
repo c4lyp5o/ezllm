@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/rand/v2"
 	"strings"
 	"sync"
@@ -555,13 +556,27 @@ func blockOrder(combo *store.Combo, routes []proxy.Route) []proxy.Route {
 		// declared preference) rather than jumping; with no usable previous
 		// target — a cold start, or the hop left the eligible list — begin at
 		// the top of the list.
+		reason := "cold start"
+		if e.accountID != 0 && target < 0 {
+			reason = "block hop left candidates"
+		}
 		next := 0
 		if target >= 0 {
 			next = (target + 1) % len(routes)
+			reason = "block complete"
 		}
 		e.accountID, e.model = routes[next].Account.ID, routes[next].Model
 		e.remaining = size
 		target = next
+		// The cursor is in-process state with no other visibility: a block that
+		// advances early (eligibility flap) or never advances (a sticky
+		// healthy hop) looks identical from the ledger. One line per ADVANCE
+		// — never per request — makes it observable without noise.
+		slog.Info("block advance",
+			"combo", combo.Name,
+			"hop", routes[next].Account.Namespace+"/"+routes[next].Model,
+			"reason", reason,
+			"block_size", size)
 	}
 	e.remaining--
 	return rotate(uint64(target), routes)

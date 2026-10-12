@@ -96,6 +96,11 @@ const PROVIDER_PRESETS: Record<string, { label: string; kind: string; baseURL?: 
   'deepseek': { label: 'DeepSeek', kind: 'openai-compatible', baseURL: 'https://api.deepseek.com' },
   'groq': { label: 'Groq', kind: 'openai-compatible', baseURL: 'https://api.groq.com/openai/v1' },
   'tokenrouter': { label: 'TokenRouter', kind: 'openai-compatible', baseURL: 'https://api.tokenrouter.com/v1' },
+  // Vercel AI Gateway: OpenAI-compatible chat + /models discovery over one key,
+  // model ids are `creator/model` (slashes inside the id — splitNamespace
+  // splits on the FIRST slash only, so `vercel/anthropic/claude-opus-5` routes
+  // exactly like tokenrouter's slash-ids already do).
+  'vercel-ai-gateway': { label: 'Vercel AI Gateway', kind: 'openai-compatible', baseURL: 'https://ai-gateway.vercel.sh/v1' },
   'ollama-cloud': { label: 'Ollama Cloud', kind: 'openai-compatible', baseURL: 'https://ollama.com/v1' },
   'gemini': { label: 'Gemini (API key)', kind: 'gemini-openai', baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai' },
   'openai': { label: 'OpenAI', kind: 'openai-compatible', baseURL: 'https://api.openai.com/v1' },
@@ -113,6 +118,48 @@ const KNOWN_ENDPOINTS = new Set<string>([
   'https://api.anthropic.com',
 ]);
 const isKnownEndpoint = (url: string) => KNOWN_ENDPOINTS.has(url.replace(/\/+$/, ''));
+
+// ── quota presentation (moved from the dashboard's per-account quota panel:
+//    quota data belongs under the provider it describes) ──────────────────────
+
+function stale(quota: { read_at?: string | null } | null | undefined): boolean {
+  if (!quota?.read_at) return false;
+  const t = Date.parse(quota.read_at);
+  return !Number.isNaN(t) && Date.now() - t > 5 * 60 * 1000;
+}
+
+function QuotaBars({ quota }: { quota: NonNullable<Account['quota']> }) {
+  const rows: Array<[string, number]> = [];
+  if (quota.percent_rolling != null) rows.push(['rolling', quota.percent_rolling]);
+  if (quota.percent_weekly != null) rows.push(['weekly', quota.percent_weekly]);
+  if (quota.percent_monthly != null) rows.push(['monthly', quota.percent_monthly]);
+  if (rows.length > 0 && rows.every(([, v]) => typeof v === 'number')) {
+    return (
+      <div className="space-y-1.5">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex items-center gap-2.5">
+            <span className="w-14 text-[10.5px] uppercase tracking-wide text-mute">{k}</span>
+            <div className="h-1.5 min-w-16 flex-1 overflow-hidden rounded-full bg-shade">
+              <div className={cx('h-full rounded-full', v >= 90 ? 'bg-bad' : v >= 70 ? 'bg-warn' : 'bg-ok')}
+                style={{ width: `${Math.min(100, Math.max(0, v))}%` }} />
+            </div>
+            <span className="tnum w-10 text-right font-mono text-[11px] text-dim">{v}%</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (quota.kind === 'money' && quota.balance != null) {
+    return (
+      <div className="font-mono text-[12px]">
+        <span className="text-dim">{quota.balance}</span>
+        {quota.unit ? <span className="ml-1 text-mute">{quota.unit}</span> : null}
+        {quota.plan ? <div className="mt-0.5 text-[10.5px] text-mute">{quota.plan}</div> : null}
+      </div>
+    );
+  }
+  return <span className="text-mute">–</span>;
+}
 
 function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: () => void }) {
   const [d, setD] = useState<Draft>(emptyDraft);
@@ -693,7 +740,10 @@ function QuotaModal({ account, onClose }: { account: Account; onClose: () => voi
 
 // ── account card ────────────────────────────────────────────────────────
 
-function AccountCard({ a, onChanged }: { a: Account; onChanged: () => void }) {
+function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
+  a: Account; onChanged: () => void;
+  onReloadQuota: () => void; quotaBusy: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [menuBusy, setMenuBusy] = useState<string | null>(null);
   const [err, setErr] = useState<ApiErrorDetail | null>(null);
@@ -745,13 +795,39 @@ function AccountCard({ a, onChanged }: { a: Account; onChanged: () => void }) {
           <span className="ml-auto hidden font-mono text-[11px] text-mute sm:block">{a.base_url}</span>
           <span className={cx('text-mute transition-transform', open && 'rotate-180')}>⌄</span>
         </div>
-        {a.quota?.kind && a.quota.kind !== 'none' && (
-          <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11.5px] text-mute">
-            <span>quota <span className="font-mono text-dim">{a.quota.kind}</span></span>
-            {a.quota.read_at && <span>read {relTime(a.quota.read_at)}</span>}
-          </div>
-        )}
       </button>
+
+      {/* Quota, slotted under the provider it describes (moved from the
+          dashboard's per-account quota panel). The stale pill is GONE by
+          request: freshness is now a reload icon that live-probes the
+          provider's usage endpoint and refreshes the snapshot — an action,
+          not an adjective. The icon glows accent when the snapshot is old. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 pb-3">
+        <div className="min-w-44 flex-1">
+          {a.quota && a.quota.kind !== 'none' && a.quota.kind !== 'unknown'
+            ? <QuotaBars quota={a.quota} />
+            : <span className="text-[11.5px] text-mute">quota — no probe data yet</span>}
+        </div>
+        <div className="flex items-center gap-2">
+          {a.quota?.kind && a.quota.kind !== 'none' && (
+            <Chip tone="neutral"><span className="font-mono">{a.quota.kind}</span></Chip>
+          )}
+          {a.quota?.read_at && (
+            <span className="text-[10.5px] text-mute" title={`snapshot read ${a.quota.read_at}`}>
+              read {relTime(a.quota.read_at)}
+            </span>
+          )}
+          <button type="button" disabled={quotaBusy}
+            title={stale(a.quota)
+              ? 'snapshot is stale — refresh from the provider\u2019s usage endpoint'
+              : 'refresh quota from the provider\u2019s usage endpoint'}
+            className={cx('rounded-md p-1 text-[13px] leading-none transition-colors disabled:opacity-40',
+              stale(a.quota) ? 'text-accent hover:bg-accent-dim' : 'text-mute hover:bg-hover hover:text-ink')}
+            onClick={(e) => { e.stopPropagation(); onReloadQuota(); }}>
+            {quotaBusy ? <Spinner /> : '↻'}
+          </button>
+        </div>
+      </div>
 
       {open && (
         <div className="px-5 pb-4 animate-fade-in">
@@ -848,12 +924,23 @@ export default function Providers() {
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [quotaBusy, setQuotaBusy] = useState<number | null>(null);
 
   const load = useCallback((silent = true) => {
     get<Account[]>('/admin/accounts')
       .then((a) => { setAccounts(a); setErr(null); })
       .catch((e) => { if (!silent || e instanceof AuthError) setErr(e instanceof Error ? e.message : 'failed to load'); });
   }, []);
+
+  // The reload icon's action: live-probe this provider's usage endpoint
+  // (GET /admin/accounts/{id}/quota persists the snapshot server-side), then
+  // one silent reload brings the bars up to date. Failures keep the old
+  // snapshot — the icon just stops spinning.
+  const reloadQuota = useCallback(async (id: number) => {
+    setQuotaBusy(id);
+    try { await get(`/admin/accounts/${id}/quota`); } catch { /* keep old snapshot */ }
+    finally { load(true); setQuotaBusy(null); }
+  }, [load]);
 
   useEffect(() => { load(false); }, [load]);
 
@@ -878,7 +965,11 @@ export default function Providers() {
         </div>
       ) : (
         <div className="space-y-3">
-          {accounts.map((a) => <AccountCard key={a.id} a={a} onChanged={() => load(true)} />)}
+          {accounts.map((a) => (
+            <AccountCard key={a.id} a={a} onChanged={() => load(true)}
+              quotaBusy={quotaBusy === a.id}
+              onReloadQuota={() => void reloadQuota(a.id)} />
+          ))}
         </div>
       )}
 

@@ -29,7 +29,7 @@ import {
 } from '../charts';
 import { Reveal, Stagger, StaggerItem } from '../motion';
 import {
-  Chip, CauseChip, EmptyState, Mono, SectionLabel, SkeletonCards, SkeletonRows, StaleBadge,
+  Chip, CauseChip, EmptyState, Mono, SectionLabel, SkeletonCards, SkeletonRows,
   clockTime, cx, fmtDuration, fmtMs, fmtUptime, formatTokens, nfmt, pct,
 } from '../ui';
 
@@ -315,80 +315,8 @@ function RecentCalls({ o }: { o: Overview }) {
   );
 }
 
-// ── quota ─────────────────────────────────────────────────────────────────
-function QuotaBars({ quota }: { quota: NonNullable<Overview['accounts'][number]['quota']> }) {
-  const rows: Array<[string, number]> = [];
-  if (quota.percent_rolling != null) rows.push(['rolling', quota.percent_rolling]);
-  if (quota.percent_weekly != null) rows.push(['weekly', quota.percent_weekly]);
-  if (quota.percent_monthly != null) rows.push(['monthly', quota.percent_monthly]);
-  if (rows.length > 0 && rows.every(([, v]) => typeof v === 'number')) {
-    return (
-      <div className="space-y-2">
-        {rows.map(([k, v]) => (
-          <div key={k} className="flex items-center gap-2.5">
-            <span className="w-14 text-[10.5px] uppercase tracking-wide text-mute">{k}</span>
-            <div className="h-1.5 min-w-16 flex-1 overflow-hidden rounded-full bg-shade">
-              <div className={cx('h-full rounded-full', v >= 90 ? 'bg-bad' : v >= 70 ? 'bg-warn' : 'bg-ok')}
-                style={{ width: `${Math.min(100, Math.max(0, v))}%` }} />
-            </div>
-            <span className="tnum w-10 text-right font-mono text-[11px] text-dim">{v}%</span>
-          </div>
-        ))}
-      </div>
-    );
-  }
-  if (quota.kind === 'money' && quota.balance != null) {
-    return (
-      <div className="font-mono text-[12px]">
-        <span className="text-dim">{quota.balance}</span>
-        {quota.unit ? <span className="ml-1 text-mute">{quota.unit}</span> : null}
-        {quota.plan ? <div className="mt-0.5 text-[10.5px] text-mute">{quota.plan}</div> : null}
-      </div>
-    );
-  }
-  return <span className="text-mute">–</span>;
-}
-
-function stale(quota: { read_at?: string | null } | null | undefined): boolean {
-  if (!quota?.read_at) return false;
-  const t = Date.parse(quota.read_at);
-  return !Number.isNaN(t) && Date.now() - t > 5 * 60 * 1000;
-}
-
-function QuotaPanel({ o }: { o: Overview }) {
-  const accounts = o.accounts ?? [];
-  return (
-    <Panel label={<SectionLabel>Per-account quota</SectionLabel>}
-      aside={<span className="text-[11px] text-mute">probe snapshots · {accounts.length} accounts</span>}
-      bodyClass="p-0">
-      {accounts.length === 0 ? (
-        <EmptyState title="No accounts yet"
-          hint="Add a provider and its key counts, models and quota snapshot appear here." />
-      ) : (
-        <div className="divide-y divide-line/60">
-          {accounts.map((a) => (
-            <div key={a.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3">
-              <div className="w-44 shrink-0">
-                <span className="text-[13px] font-medium">{a.name}</span>
-                <Mono className="ml-2 hidden text-mute sm:inline">{a.namespace}</Mono>
-              </div>
-              <div className="min-w-40 flex-1">
-                {!a.quota || a.quota.kind === 'none' || a.quota.kind === 'unknown'
-                  ? <span className="text-[12.5px] text-mute">–</span>
-                  : <QuotaBars quota={a.quota} />}
-              </div>
-              <div className="flex items-center gap-2">
-                <Chip tone="neutral"><span className="font-mono">{a.quota?.kind ?? 'none'}</span></Chip>
-                <StaleBadge stale={stale(a.quota)} />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </Panel>
-  );
-}
-
+// Quota presentation moved to pages/Providers.tsx — quota data is slotted
+// under the provider it describes; the stale pill became a reload action.
 // ── the dashboard ────────────────────────────────────────────────────────
 export default function Dashboard() {
   const [o, setO] = useState<Overview | null>(null);
@@ -626,7 +554,6 @@ export default function Dashboard() {
       </div>
 
       <Reveal><RecentCalls o={o} /></Reveal>
-      <Reveal><QuotaPanel o={o} /></Reveal>
     </Stagger>
   );
 }

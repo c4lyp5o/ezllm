@@ -104,11 +104,12 @@ type Route struct {
 	// router sets the SAME value on every candidate of a dispatch, so the
 	// ledger row carries it no matter which hop actually served.
 	BlockPos int
-	// ResponsesWire marks a hop curated onto OpenAI's Responses wire for a
-	// chat client (docs/responses-wire-design.md): the body is translated
-	// chat→responses on the way out and back on the way in. Same rules as
+	// ResponsesWire marks a hop curated onto OpenAI's Responses wire
+	// (translation.responses_models) while the client speaks chat OR
+	// anthropic: the body is translated onto the responses wire on the way
+	// out and back into the CLIENT's shape on the way in. Same rules as
 	// Translated — Surface stays the client's; error bodies pass through
-	// byte-identical (both wires share the {"error":{…}} family).
+	// byte-identical (all wires share the {"error":{…}} family).
 	ResponsesWire bool
 }
 
@@ -627,6 +628,11 @@ func prepareHopBody(body []byte, rt Route) ([]byte, error) {
 	case rt.Translated:
 		return translate.Request(body, rt.Model)
 	case rt.ResponsesWire:
+		// The translator follows the CLIENT's surface: chat→responses for a
+		// chat client, anthropic→responses for Claude Code.
+		if rt.Surface == provider.SurfaceAnthropic {
+			return translate.AnthropicToResponses(body, rt.Model)
+		}
 		return translate.ChatToResponses(body, rt.Model)
 	default:
 		swapped, _, err := SwapModel(body, rt.Model)
@@ -707,13 +713,20 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 				io.Closer
 			}{translate.NewSSEReader(resp.Body, rt.Alias), resp.Body}
 		}
-		// A responses-wire stream wraps the same way: the client sees chat
-		// chunks synthesized from the upstream's responses events.
+		// A responses-wire stream wraps the same way: the client sees its OWN
+		// shape synthesized from the upstream's responses events — chat
+		// chunks for a chat client, anthropic events for Claude Code.
 		if rt.ResponsesWire {
+			var reader io.Reader
+			if rt.Surface == provider.SurfaceAnthropic {
+				reader = translate.NewResponsesAnthropicSSEReader(resp.Body, rt.Alias)
+			} else {
+				reader = translate.NewResponsesSSEReader(resp.Body, rt.Alias)
+			}
 			resp.Body = struct {
 				io.Reader
 				io.Closer
-			}{translate.NewResponsesSSEReader(resp.Body, rt.Alias), resp.Body}
+			}{reader, resp.Body}
 		}
 		// streamCopy writes the header before its first byte, so the status
 		// is committed the moment it returns — regardless of a copy error.
@@ -808,13 +821,19 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 				raw = translated
 			}
 		}
-		// A responses-wire hop answers a chat client: success bodies are
-		// translated back to chat completions shape. Error bodies pass
-		// through byte-identical — chat and responses share the
-		// {"error":{…}} family, and the upstream's own words must reach the
-		// client and the ledger err column untouched.
+		// A responses-wire hop answers a client on its own surface: chat
+		// clients get chat completions back, anthropic clients get a
+		// messages body. Error bodies pass through byte-identical — all
+		// wires share the {"error":{…}} family, and the upstream's own words
+		// must reach the client and the ledger err column untouched.
 		if rt.ResponsesWire && res.Status < 400 {
-			translated, terr := translate.ResponsesToChat(raw, rt.Alias)
+			var translated []byte
+			var terr error
+			if rt.Surface == provider.SurfaceAnthropic {
+				translated, terr = translate.ResponsesToAnthropic(raw, rt.Alias)
+			} else {
+				translated, terr = translate.ResponsesToChat(raw, rt.Alias)
+			}
 			if terr != nil {
 				// A body we cannot translate is a gateway fault; a chat
 				// client must never receive responses-shaped bytes.

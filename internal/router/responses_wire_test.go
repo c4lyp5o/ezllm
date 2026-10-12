@@ -91,21 +91,37 @@ func TestResponsesWireDirectRouteMarked(t *testing.T) {
 	}
 }
 
-// Non-chat clients never ride the responses override: anthropic is the
-// proto-gated translation's business, responses passes through natively.
-func TestResponsesWireNeverMarksNonChatClients(t *testing.T) {
+// Anthropic clients now ride the override too — the anthropic→responses leg
+// (Claude Code against a hop whose chat path refuses tools+reasoning and which
+// has no /v1/messages at all). Responses clients ARE the wire: never marked.
+func TestResponsesWireMarksAnthropicNotResponses(t *testing.T) {
 	cat := withCombo(newFake(), solCombo())
 	r := New(cat).WithResponsesModels([]string{"super-ssn/gpt-6.1-sol"})
 
-	for _, surface := range []provider.Surface{provider.SurfaceAnthropic, provider.SurfaceResponses} {
-		routes, err := r.ResolveCandidates(context.Background(), "daily", surface, "test")
-		if err != nil {
-			t.Fatal(err)
-		}
-		for i, rt := range routes {
-			if rt.ResponsesWire {
-				t.Errorf("surface %s route %d wrongly marked: %+v", surface, i, rt)
+	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceAnthropic, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	marked := 0
+	for _, rt := range routes {
+		if rt.ResponsesWire {
+			marked++
+			if rt.Surface != provider.SurfaceAnthropic {
+				t.Fatalf("the client surface must never change: %+v", rt)
 			}
+		}
+	}
+	if marked == 0 {
+		t.Fatalf("an anthropic client on a listed hop must be marked: %+v", routes)
+	}
+
+	routes, err = r.ResolveCandidates(context.Background(), "daily", provider.SurfaceResponses, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, rt := range routes {
+		if rt.ResponsesWire {
+			t.Errorf("responses route %d wrongly marked: %+v", i, rt)
 		}
 	}
 }

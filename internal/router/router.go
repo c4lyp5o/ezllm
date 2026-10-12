@@ -184,10 +184,11 @@ func (r *Resolver) WithResponsesModels(models []string) *Resolver {
 }
 
 // needsResponsesWire reports whether a hop is curated onto the Responses wire
-// for the given client surface. Only chat clients translate: anthropic is
-// handled by the proto-gated translation, and responses clients pass through.
+// for the given client surface. Chat and anthropic clients both translate
+// (the operator's list is the proof the hop only behaves on /v1/responses —
+// same list, same master knob); responses clients pass through unchanged.
 func (r *Resolver) needsResponsesWire(clientSurface provider.Surface, namespace, model string) bool {
-	if clientSurface != provider.SurfaceOpenAI || len(r.responsesModels) == 0 {
+	if clientSurface == provider.SurfaceResponses || len(r.responsesModels) == 0 {
 		return false
 	}
 	return r.responsesModels[namespace+"/"+model]

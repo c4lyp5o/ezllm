@@ -87,9 +87,13 @@ type ModelRefresh struct {
 type Translation struct {
 	Enabled bool `yaml:"enabled"`
 	// ResponsesModels lists "<namespace>/<model_id>" hops that must be dialed
-	// on OpenAI's Responses wire even when the client speaks chat — for models
-	// whose chat path refuses tools+reasoning (tokenrouter gpt-6.1-sol). Empty
-	// list (default) = the wire override is inert.
+	// on OpenAI's Responses wire — for models whose chat path refuses
+	// tools+reasoning (tokenrouter gpt-6.1-sol) and which have no
+	// /v1/messages at all. Applies to chat AND anthropic clients: chat bodies
+	// ride the chat↔responses translator, anthropic bodies (Claude Code) the
+	// anthropic↔responses one. Empty list (default) = the wire override is
+	// inert. This list is its own opt-in; translation.enabled gates the
+	// separate anthropic→chat leg.
 	ResponsesModels []string `yaml:"responses_models"`
 }
 

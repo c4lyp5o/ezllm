@@ -158,10 +158,11 @@ func run() error {
 	// boot; a set-but-unread knob must never look identical to a working
 	// one, so the effective state is logged here.
 	resolver = resolver.WithTranslation(cfg.Translation.Enabled)
-	// Curated responses-wire hops ride /v1/responses for chat clients
-	// (tokenrouter gpt-6.1-sol refuses tools+reasoning on chat). The list
-	// itself is the opt-in; empty list = inert. Logged at boot because a
-	// set-but-unread knob looks identical to a working one.
+	// Curated responses-wire hops ride /v1/responses for chat AND anthropic
+	// clients (tokenrouter gpt-6.1-sol refuses tools+reasoning on chat and has
+	// no /v1/messages; Claude Code reaches it with the anthropic→responses
+	// translator). The list itself is the opt-in; empty list = inert. Logged at
+	// boot because a set-but-unread knob looks identical to a working one.
 	resolver = resolver.WithResponsesModels(cfg.Translation.ResponsesModels)
 	log.Info("translation", "enabled", cfg.Translation.Enabled,
 		"responses_wire_models", cfg.Translation.ResponsesModels)

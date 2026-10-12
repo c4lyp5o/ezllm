@@ -218,14 +218,29 @@ Full catalog + protocol probe (all models, or `{"models":[…],"surfaces":["open
   "protocol_support":{"openai":36,"anthropic":12,"responses":5,"untested":0},
   "ms":12400 }
 ```
+**Test-all fields** (2026-10-12): `{"probe_all":true}` sweeps the WHOLE catalog on the
+requested surfaces instead of sampling `max_models` of it, and defaults
+`only_untested:true` — models that already carry a verdict on every requested surface
+(probed or curated) are skipped, so a second click never re-sends. Send
+`{"probe_all":true,"only_untested":false}` for a forced re-test. The response gains
+`probing` (models actually queued), `surfaces`, `budget_s`, and `probe_all`. One sweep
+per account: a second `POST` while one runs → `409` with the stop instruction.
+- `GET /admin/accounts/{id}/sync` → `{"running":false}` or
+  `{running, started_at, surfaces, probing, elapsed_s}`. Progress itself is the model
+  list: probes write verdicts per model as they run.
+- `DELETE /admin/accounts/{id}/sync` → `204` stops the running sweep (`404` when none).
+  Already-written verdicts stay.
 
 ### `GET /admin/accounts/{id}/models` → `200`
 ```jsonc
 [ {"id":"qwen3.8-flash","display":"…","owned_by":"opencode",
-   "openai":1,"anthropic":1,"responses":0,"tested_at":"…","pin":""} ]
+   "openai":1,"anthropic":1,"responses":0,"tested_at":"…","pin":"",
+   "source":"probe","note":""} ]
 ```
 `null` = untested (the UI must render three states: ✓ / ✗ / ?). `pin` is `""` (auto) or the
-pinned surface; enforced by the router (see Surface-pin refusal above).
+pinned surface; enforced by the router (see Surface-pin refusal above). `source` = who
+last wrote the verdicts (`probe` / `curated` / absent for a legacy row); `note` is the
+operator's reason for a curation.
 
 ### `PUT /admin/accounts/{id}/model-pin` → `200`
 Set or clear a model's surface pin. The model id travels **in the body** (ids can contain `/`,

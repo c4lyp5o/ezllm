@@ -691,6 +691,108 @@ func (s *Server) handleToggleKey(w http.ResponseWriter, r *http.Request) {
 // handleSync runs a full catalog + protocol sweep for an account. The catalog
 // refresh is inline (one request); the protocol sweep follows in the
 // background, and the response reports both.
+
+// needsProbe reports whether a model still lacks a recorded verdict on at
+// least one of the surfaces about to be probed.
+func needsProbe(e store.ModelEntryRow, surfaces []provider.Surface) bool {
+	for _, s := range surfaces {
+		var v *bool
+		switch s {
+		case provider.SurfaceOpenAI:
+			v = e.OpenAI
+		case provider.SurfaceAnthropic:
+			v = e.Anthropic
+		case provider.SurfaceResponses:
+			v = e.Responses
+		}
+		if v == nil {
+			return true // untested on this wire: probing is information
+		}
+	}
+	return false
+}
+
+// beginSweep registers an in-flight sweep for an account; a 409-style error
+// means one is already running (the caller answers with instructions to stop
+// it first — a second click must never cancel a sweep it did not start).
+func (s *Server) beginSweep(id int64, surfaces []string, probing int) error {
+	s.sweepsMu.Lock()
+	defer s.sweepsMu.Unlock()
+	if s.sweeps == nil {
+		s.sweeps = map[int64]*sweepRun{}
+	}
+	if _, running := s.sweeps[id]; running {
+		return fmt.Errorf("sweep %d already running", id)
+	}
+	s.sweeps[id] = &sweepRun{started: time.Now().UTC(), surfaces: surfaces, probing: probing}
+	return nil
+}
+
+func (s *Server) attachCancel(id int64, cancel context.CancelFunc) {
+	s.sweepsMu.Lock()
+	defer s.sweepsMu.Unlock()
+	if r, ok := s.sweeps[id]; ok {
+		r.cancel = cancel
+	}
+}
+
+func (s *Server) endSweep(id int64) {
+	s.sweepsMu.Lock()
+	defer s.sweepsMu.Unlock()
+	delete(s.sweeps, id)
+}
+
+// sweepStatus reports the in-flight sweep, so a multi-minute probe is never a
+// blind wait. Progress itself is the model list: probes write verdicts per
+// model as they run.
+func (s *Server) sweepStatus(id int64) map[string]any {
+	s.sweepsMu.Lock()
+	defer s.sweepsMu.Unlock()
+	r, ok := s.sweeps[id]
+	if !ok {
+		return map[string]any{"running": false}
+	}
+	return map[string]any{
+		"running":    true,
+		"started_at": r.started.Format(time.RFC3339),
+		"surfaces":   r.surfaces,
+		"probing":    r.probing,
+		"elapsed_s":  int(time.Since(r.started).Seconds()),
+	}
+}
+
+// handleSyncStatus: GET reports the in-flight sweep; DELETE stops it. Already
+// written verdicts stay — probes are independent, and a stopped sweep is
+// visible in the model list (the rows it managed to test).
+func (s *Server) handleSyncStatus(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, s.sweepStatus(id))
+	case http.MethodDelete:
+		s.sweepsMu.Lock()
+		run, had := s.sweeps[id]
+		if had {
+			delete(s.sweeps, id)
+		}
+		s.sweepsMu.Unlock()
+		if !had {
+			writeErr(w, http.StatusNotFound, "invalid_request_error", "no sweep running for this account")
+			return
+		}
+		if run.cancel != nil {
+			run.cancel()
+		}
+		s.log.Info("protocol sweep cancelled", "account", id)
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		writeErr(w, http.StatusMethodNotAllowed, "invalid_request_error", "method not allowed")
+	}
+}
+
 func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeErr(w, http.StatusMethodNotAllowed, "invalid_request_error", "method not allowed")
@@ -719,6 +821,13 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		Models   []string `json:"models"`
 		Surfaces []string `json:"surfaces"`
 		Max      int      `json:"max_models"`
+		// ProbeAll is the "test all models" action: sweep the whole catalog on
+		// the requested surfaces instead of sampling max_models of it.
+		ProbeAll bool `json:"probe_all"`
+		// OnlyUntested skips models whose requested surfaces already carry a
+		// verdict (probed or curated), so a second click does not re-spend.
+		// nil = true when probe_all, false otherwise.
+		OnlyUntested *bool `json:"only_untested"`
 	}
 	if r.ContentLength > 0 {
 		if !decodeBody(w, r, &body) {
@@ -758,25 +867,114 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		}
 		sweepModels = scoped
 	}
+	probeAll := body.ProbeAll
+	onlyUntested := probeAll // default for the test-all action: skip what has verdicts
+	if body.OnlyUntested != nil {
+		onlyUntested = *body.OnlyUntested
+	}
+	surfaces := parseSurfaces(body.Surfaces)
+	if len(surfaces) == 0 {
+		surfaces = []provider.Surface{
+			provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses,
+		}
+	}
+	surfaceNames := make([]string, 0, len(surfaces))
+	for _, s := range surfaces {
+		surfaceNames = append(surfaceNames, string(s))
+	}
+	if onlyUntested {
+		verdicts, verr := s.db.ListModels(r.Context(), id)
+		if verr != nil {
+			s.writeStoreErr(w, verr)
+			return
+		}
+		byID := make(map[string]store.ModelEntryRow, len(verdicts))
+		for _, e := range verdicts {
+			byID[e.ID] = e
+		}
+		kept := sweepModels[:0]
+		for _, m := range sweepModels {
+			e, ok := byID[m.ID]
+			if !ok {
+				kept = append(kept, m) // no catalog row yet: nothing recorded, keep
+				continue
+			}
+			// A recorded verdict on EVERY requested surface means the model has
+			// been proven (or curated) on exactly the wires we are about to
+			// probe — re-probing is spend, not information.
+			if !needsProbe(e, surfaces) {
+				continue
+			}
+			kept = append(kept, m)
+		}
+		sweepModels = kept
+	}
+	if probeAll && len(sweepModels) == 0 {
+		entries, _ := s.db.ListModels(r.Context(), id)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"synced":           len(models),
+			"probing":          0,
+			"probe_all":        true,
+			"surfaces":         surfaceNames,
+			"note":             "nothing to probe: every model already carries a verdict on the requested surfaces",
+			"protocol_support": protocolCounts(entries),
+		})
+		return
+	}
 	if err := s.db.UpsertModels(r.Context(), id, models); err != nil {
 		s.writeStoreErr(w, err)
 		return
 	}
 
 	// Protocol sweep: background (paced probes are slow by design).
-	surfaces := parseSurfaces(body.Surfaces)
 	maxModels := body.Max
+	budget := 15 * time.Minute
+	if probeAll {
+		// Per-probe cost ≈ pacing delay + one request. A cap of 60 minutes
+		// keeps a fat catalog (408 models × 3 surfaces) inside one sitting.
+		perProbe := acct.ProbeDelay + 1500*time.Millisecond
+		est := perProbe * time.Duration(len(sweepModels)*len(surfaces))
+		budget = 15 * time.Minute
+		if est > budget {
+			budget = est
+		}
+		if budget > 60*time.Minute {
+			budget = 60 * time.Minute
+		}
+	}
+	// One sweep per account: a new one replaces (cancels) a stale one.
+	if err := s.beginSweep(id, surfaceNames, len(sweepModels)); err != nil {
+		writeErr(w, http.StatusConflict, "conflict",
+			"a protocol sweep is already running for this account — stop it first (DELETE /admin/accounts/"+fmt.Sprint(id)+"/sync)")
+		return
+	}
+	runCtx, cancel := context.WithTimeout(context.Background(), budget)
+	s.attachCancel(id, cancel)
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		defer s.endSweep(id)
 		defer cancel()
-		res := s.tester.ProtocolSweep(ctx, acct, key, sweepModels, registration.Options{
+		res := s.tester.ProtocolSweep(runCtx, acct, key, sweepModels, registration.Options{
 			Surfaces:       surfaces,
 			ProbeMaxModels: maxModels,
+			ProbeAll:       probeAll,
 		})
+		// A cancelled or timed-out sweep has nothing to batch: every verdict it
+		// managed to record was written per model as it ran, and a final write
+		// on a dead context only produces a misleading "persist failed" line.
+		if runCtx.Err() != nil {
+			return
+		}
 		if res != nil && len(res.Rows) > 0 {
-			if err := s.db.SetModelProtos(ctx, id, res.Rows); err != nil {
+			// Persist on a FRESH context: runCtx may already be at its
+			// deadline when the last probe returns, and losing the verdicts of
+			// a 20-minute sweep to an expired context would be absurd. The
+			// probes already wrote per-model rows as they ran; this batch is
+			// the same values, and it is what keeps a stopped sweep's work.
+			pctx, pcancel := context.WithTimeout(context.Background(), 30*time.Second)
+			if err := s.db.SetModelProtos(pctx, id, res.Rows); err != nil {
 				s.log.Error("sync protocol sweep persist failed", "err", err)
 			}
+			pcancel()
 		}
 	}()
 
@@ -784,6 +982,10 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	support := protocolCounts(entries)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"synced":           len(models),
+		"probing":          len(sweepModels),
+		"probe_all":        probeAll,
+		"surfaces":         surfaceNames,
+		"budget_s":         int(budget.Seconds()),
 		"protocol_tested":  0, // background sweep reports its own counts on refresh
 		"protocol_support": support,
 		"ms":               int(time.Since(start).Milliseconds()),

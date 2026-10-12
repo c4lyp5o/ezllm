@@ -80,6 +80,11 @@ type Options struct {
 	SkipInference bool
 	// ProbeMaxModels caps the protocol phase (0 → DefaultProbeMaxModels).
 	ProbeMaxModels int
+	// ProbeAll sweeps EVERY model handed in instead of sampling
+	// ProbeMaxModels of them — the "test all models" operator action. It only
+	// lifts the cap; the caller decides WHICH models are handed over (scoped
+	// list, untested-only filter), so pacing and abort rules are unchanged.
+	ProbeAll bool
 	// Surfaces scopes the protocol probe (empty → all three).
 	Surfaces []provider.Surface
 	// ProtocolInline runs the protocol phase synchronously — tests use it; the
@@ -680,6 +685,13 @@ func (t *Tester) ProtocolSweep(
 		maxModels = DefaultProbeMaxModels
 	}
 	sample := sampleModels(models, maxModels)
+	if opts.ProbeAll {
+		// Uncapped sweep: every model the caller handed over, in catalog order.
+		// sampleModels shuffles, which is right for a 6-of-N sample (so the
+		// same faces are not tested every deploy) and wrong here: the UI
+		// reports progress against the catalog list, so keep that order.
+		sample = models
+	}
 	surfaces := opts.Surfaces
 	if len(surfaces) == 0 {
 		surfaces = []provider.Surface{

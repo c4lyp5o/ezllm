@@ -107,6 +107,28 @@ export const post = <T = unknown>(p: string, body?: unknown) => apiFetch<T>(p, {
 export const patch = <T = unknown>(p: string, body: unknown) => apiFetch<T>(p, { method: 'PATCH' }, body);
 export const del = (p: string) => apiFetch<null>(p, { method: 'DELETE' });
 
+// ── protocol sweep ("test all models") ───────────────────────────────────
+export type StartSweepOpts = {
+  /** Probe every model, not the 6-of-N sample. */
+  all?: boolean;
+  /** Include models that already carry a verdict on the requested surfaces
+   *  (a re-test). Default false: skip what is already proven. */
+  includeTested?: boolean;
+  /** Surfaces to probe (default: all three). */
+  surfaces?: string[];
+};
+export const startSweep = (id: number, o: StartSweepOpts = {}) =>
+  post<{ synced: number; probing: number; probe_all?: boolean; surfaces?: string[]; note?: string; ms: number }>(
+    `/admin/accounts/${id}/sync`,
+    {
+      probe_all: o.all ?? true,
+      only_untested: !(o.includeTested ?? false),
+      ...(o.surfaces ? { surfaces: o.surfaces } : {}),
+    },
+  );
+export const sweepStatus = (id: number) => get<SweepStatus>(`/admin/accounts/${id}/sync`);
+export const stopSweep = (id: number) => del(`/admin/accounts/${id}/sync`);
+
 // ── Shapes ───────────────────────────────────────────────────────────────
 
 // UsageRow is one group of a usage report. Field names are the LEDGER JSON
@@ -416,6 +438,16 @@ export type ModelRow = {
   tested_at?: string | null;
   /** Operator-pinned surface; empty string = auto (probed). Enforced by the router. */
   pin?: string | null;
+  /** Who last wrote the verdicts: 'probe', 'curated', or absent for a legacy row. */
+  source?: string | null;
+  /** The operator's reason for a curation (curated rows only). */
+  note?: string | null;
+};
+
+/** The in-flight protocol sweep for one account (the "test all models" job). */
+export type SweepStatus = {
+  running: boolean;
+  started_at?: string | null; surfaces?: string[]; probing?: number; elapsed_s?: number;
 };
 
 export type SyncResult = { synced: number; protocol_tested: number; protocol_support: ProtocolSupport; ms: number };

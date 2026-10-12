@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -67,6 +68,24 @@ type Server struct {
 	// usageTZ is the default zone for group_by=day. Never nil: UTC unless
 	// EZLLM_USAGE_TZ says otherwise (validated at boot).
 	usageTZ *time.Location
+
+	// sweeps tracks the in-flight protocol sweeps started by POST
+	// /admin/accounts/{id}/sync (the "test all models" action), keyed by
+	// account. Without it a caller would fire a multi-minute sweep and have no
+	// way to ask whether it is still running or to stop it. The probe writes
+	// verdicts per model as it goes, so progress is read from the model list;
+	// this registry answers only "running since when" and holds the cancel.
+	sweepsMu sync.Mutex
+	sweeps   map[int64]*sweepRun
+}
+
+// sweepRun is one in-flight protocol sweep for an account. cancel stops the
+// probe loop (already-written verdicts stay — probes are independent).
+type sweepRun struct {
+	cancel   context.CancelFunc
+	started  time.Time
+	surfaces []string
+	probing  int
 }
 
 // Options configures New.
@@ -165,6 +184,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /admin/accounts/{id}/keys/{keyId}/retest", s.admin(s.handleRetest))
 
 	s.mux.HandleFunc("POST /admin/accounts/{id}/sync", s.admin(s.handleSync))
+	// Sweep liveness + cancel for the test-all action: the probe is a
+	// multi-minute background job, so the operator can ask if it is running
+	// and stop it without waiting out the budget.
+	s.mux.HandleFunc("GET /admin/accounts/{id}/sync", s.admin(s.handleSyncStatus))
+	s.mux.HandleFunc("DELETE /admin/accounts/{id}/sync", s.admin(s.handleSyncStatus))
 	s.mux.HandleFunc("GET /admin/accounts/{id}/models", s.admin(s.handleListModels))
 	s.mux.HandleFunc("PUT /admin/accounts/{id}/model-pin", s.admin(s.handleSetModelPin))
 	// Curated capability verdicts (operator-set, probe-protected). Same

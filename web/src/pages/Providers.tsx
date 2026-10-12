@@ -2,9 +2,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   ApiError, AuthError, del, get, modelRules, patch, post, setModelPin,
-  setPrice, deletePrice,
+  setPrice, deletePrice, startSweep, stopSweep, sweepStatus,
   KINDS, STEPS,
-  type Account, type ApiErrorDetail, type KeyRow, type ModelRule, type ModelRow, type Price, type TestResult, type TestStep,
+  type Account, type ApiErrorDetail, type KeyRow, type ModelRule, type ModelRow, type Price, type SweepStatus, type TestResult, type TestStep,
 } from '../api';
 import { Chip, ConfirmModal, Modal, SectionLabel, Skeleton, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls, relTime, Mono } from '../ui';
 
@@ -449,14 +449,69 @@ function ModelsDrawer({ id }: { id: number }) {
   // A surface the probe never confirmed needs an explicit override. Held here
   // so the prompt is per-row and cannot be bypassed by a stale select value.
   const [pendingForce, setPendingForce] = useState<{ model: string; pin: string } | null>(null);
+  // The "test all models" job. While it runs the drawer polls the status route
+  // and refreshes the model list, because probes write verdicts per model as
+  // they go — the list itself is the progress bar.
+  const [sweep, setSweep] = useState<SweepStatus | null>(null);
+  const [sweepBusy, setSweepBusy] = useState(false);
+  const [sweepNote, setSweepNote] = useState<string | null>(null);
+  // Default: probe only what is untested — a second click never re-spend.
+  const [includeTested, setIncludeTested] = useState(false);
+
+  const loadModels = useCallback(() => {
+    get<ModelRow[]>(`/admin/accounts/${id}/models`)
+      .then((m) => setModels(m))
+      .catch((e) => setErr(e instanceof Error ? e.message : 'failed to load models'));
+  }, [id]);
 
   useEffect(() => {
     let alive = true;
     get<ModelRow[]>(`/admin/accounts/${id}/models`)
       .then((m) => { if (alive) setModels(m); })
       .catch((e) => { if (alive) setErr(e instanceof Error ? e.message : 'failed to load models'); });
+    sweepStatus(id).then((s) => { if (alive) setSweep(s); }).catch(() => undefined);
     return () => { alive = false; };
   }, [id]);
+
+  // Poll while a sweep runs: status for the clock, models for the verdicts.
+  const running = sweep?.running === true;
+  useEffect(() => {
+    if (!running) return;
+    const iv = setInterval(() => {
+      sweepStatus(id)
+        .then((s) => {
+          setSweep(s);
+          if (!s.running) loadModels(); // the sweep finished: show its verdicts
+        })
+        .catch(() => undefined);
+      if (Math.floor(Date.now() / 3000) % 2 === 0) loadModels();
+    }, 3000);
+    return () => clearInterval(iv);
+  }, [running, id, loadModels]);
+
+  const startTestAll = () => {
+    setSweepBusy(true);
+    setSweepNote(null);
+    setPinErr(null);
+    startSweep(id, { all: true, includeTested })
+      .then((res) => {
+        setSweep({ running: res.probing > 0, probing: res.probing, elapsed_s: 0 });
+        setSweepNote(res.probing > 0
+          ? `testing ${res.probing} model${res.probing === 1 ? '' : 's'} on ${(res.surfaces ?? []).join(' + ')}`
+          : res.note ?? 'nothing to probe');
+        loadModels();
+      })
+      .catch((e: unknown) => setSweepNote(e instanceof Error ? e.message : 'test all failed'))
+      .finally(() => setSweepBusy(false));
+  };
+
+  const stopTestAll = () => {
+    setSweepBusy(true);
+    stopSweep(id)
+      .then(() => setSweep({ running: false }))
+      .catch((e: unknown) => setSweepNote(e instanceof Error ? e.message : 'stop failed'))
+      .finally(() => { setSweepBusy(false); loadModels(); });
+  };
 
   if (err) return <div className="border-t border-line px-5 py-4 text-[12px] text-bad">{err}</div>;
   if (!models) return <div className="border-t border-line px-5 py-4"><Skeleton className="h-3.5 w-40" /><Skeleton className="mt-2 h-3.5 w-56" /></div>;
@@ -485,13 +540,49 @@ function ModelsDrawer({ id }: { id: number }) {
     applyPin(m.id, pin, false);
   };
 
+  const untested = models.filter((m) => m.openai == null && m.anthropic == null && m.responses == null).length;
+  const verdict = (v: boolean | number | null | undefined) => (v == null ? '–' : v ? 'ok' : 'no');
+
   return (
     <div className="border-t border-line px-5 py-4 animate-fade-in">
+      {/* Test-all: probe the whole catalog, skip what is already proven, and
+          stay stoppable — a 400-model × 3-surface sweep is minutes long. */}
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <span className="text-[11.5px] text-mute">
+          {models.length} model{models.length === 1 ? '' : 's'} · {untested} untested
+          {running && (
+            <span className="ml-2 text-accent">
+              testing… {sweep?.probing ?? 0} queued{sweep?.elapsed_s != null ? ` · ${sweep.elapsed_s}s` : ''}
+            </span>
+          )}
+        </span>
+        <span className="flex items-center gap-2">
+          {!running && (
+            <label className="flex items-center gap-1.5 text-[11.5px] text-mute" title="probe models that already carry a verdict too — a re-test after an upstream change">
+              <input type="checkbox" checked={includeTested} onChange={(e) => setIncludeTested(e.target.checked)} />
+              re-test all
+            </label>
+          )}
+          {running ? (
+            <button type="button" className={cx(btn.base, btn.ghost)} disabled={sweepBusy} onClick={stopTestAll}>
+              {sweepBusy ? <Spinner /> : null} Stop
+            </button>
+          ) : (
+            <button type="button" className={cx(btn.base, btn.primary)} disabled={sweepBusy || models.length === 0}
+              title="one tiny request per model per surface — the probe tests the wire, not the model's tool-dialect"
+              onClick={startTestAll}>
+              {sweepBusy ? <Spinner /> : null} Test all models
+            </button>
+          )}
+        </span>
+      </div>
+      {sweepNote && <div className="mb-2 text-[11.5px] text-dim">{sweepNote}</div>}
       <div className="max-h-64 overflow-y-auto pr-1">
         <table className="w-full text-[12px]">
           <thead>
             <tr className="text-left text-[10px] uppercase tracking-[0.1em] text-mute">
               <th className="pb-1.5 font-medium">model</th>
+              <th className="pb-1.5 font-medium">status</th>
               <th className="pb-1.5 font-medium">response type</th>
             </tr>
           </thead>
@@ -499,6 +590,21 @@ function ModelsDrawer({ id }: { id: number }) {
             {models.map((m) => (
               <tr key={m.id} className="border-t border-line/50">
                 <td className="max-w-[220px] truncate py-1.5 text-dim" title={m.id}>{m.id}</td>
+                <td className="whitespace-nowrap py-1.5 text-[11px]">
+                  {m.openai == null && m.anthropic == null && m.responses == null ? (
+                    <span className="text-mute">untested</span>
+                  ) : (
+                    <>
+                      <div className="text-dim">
+                        chat {verdict(m.openai)} · msgs {verdict(m.anthropic)} · resp {verdict(m.responses)}
+                      </div>
+                      <div className="text-[10px] text-mute"
+                        title={m.note ?? undefined}>
+                        {m.source === 'curated' ? 'curated' : 'probed'} {relTime(m.tested_at)}
+                      </div>
+                    </>
+                  )}
+                </td>
                 <td className="py-1.5">
                   <select
                     aria-label={`response type for ${m.id}`}

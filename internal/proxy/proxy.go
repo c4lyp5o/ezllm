@@ -1396,10 +1396,15 @@ func peekUpstreamError(resp *http.Response) string {
 // dashboard renders err inline — a raw multi-line provider body would wreck the
 // table. The status is prefixed so a row is self-describing even if the body is
 // empty or non-JSON (HTML error pages happen).
+//
+// The semantic cause from provider.ErrorCause leads in brackets —
+// `err LIKE '%[rate_limited]%'` is a diagnosis — and the upstream's own
+// words follow verbatim.
 func upstreamErrorSnippet(status int, raw []byte) string {
+	cause := provider.ErrorCause(status, raw)
 	s := strings.Join(strings.Fields(string(raw)), " ")
 	if s == "" {
-		return fmt.Sprintf("upstream %d: (empty body)", status)
+		return fmt.Sprintf("upstream %d [%s]: (empty body)", status, cause)
 	}
 	if len(s) > maxErrSnippet {
 		// Cut on a rune boundary so a multi-byte character is never split into
@@ -1410,7 +1415,7 @@ func upstreamErrorSnippet(status int, raw []byte) string {
 		}
 		s = s[:cut] + "…"
 	}
-	return fmt.Sprintf("upstream %d: %s", status, s)
+	return fmt.Sprintf("upstream %d [%s]: %s", status, cause, s)
 }
 
 func msPtr(d time.Duration) *int64 {

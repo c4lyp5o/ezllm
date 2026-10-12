@@ -316,24 +316,17 @@ export default function Chat() {
           </button>
         </div>
 
-        {/* Protocol support matters here in a way the namespace/id selector
-            hides: it is the difference between an image being seen and an
-            image being a 400. */}
-        {selected && (
+        {/* The protocol chips (✓/✕/? anthropic|openai|responses) were removed
+            here on request: they answered a question the caller does not ask
+            in the chat surface — the namespace/id selector already resolves
+            the hop, and the surface was going to be probed on the first call
+            either way. The pin chip survives: it CHANGES behavior (the servable
+            surface is fixed, no probe needed). */}
+        {selected?.pin && (
           <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-line pt-3">
-            {(['anthropic', 'openai', 'responses'] as const).map((proto) => {
-              const state = selected[proto];
-              const label = proto === 'openai' ? 'openai' : proto;
-              return (
-                <Chip key={proto} title={`${label}: ${state === true ? 'supported' : state === false ? 'not supported' : 'untested'}`}
-                  tone={state === true ? 'ok' : state === false ? 'bad' : 'warn'}>
-                  {state === true ? '✓' : state === false ? '✕' : '?'} <span className="font-mono">{label}</span>
-                </Chip>
-              );
-            })}
-            {selected.pin && <Chip tone="accent">pinned · {selected.pin}</Chip>}
+            <Chip tone="accent">pinned · {selected.pin}</Chip>
             <span className="ml-auto text-[11px] text-mute">
-              an untested protocol is probed on the first call, which costs a round trip
+              a pin fixes the backend surface — no protocol probe happens
             </span>
           </div>
         )}

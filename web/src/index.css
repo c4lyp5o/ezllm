@@ -22,6 +22,12 @@
    white wash in the UI (row hovers, skeleton fills, inset fills) has a token
    pair for exactly this reason.
 
+   ONE exception, by mechanism: tokens that exist ONLY to be read from JS as
+   `var(--color-viz-*)` live in a plain `:root` block instead of @theme,
+   because Tailwind prunes @theme vars that no utility class references — the
+   light values silently vanished from the built CSS and the bars went
+   colourless in light mode. See the data-viz block above.
+
    Comments inside `@theme` MUST be /* *​/ — a // line is parsed as part of a
    declaration and fails the whole build ("@theme blocks must only contain
    custom properties or @keyframes"). Outside @theme, // is fine. */
@@ -62,29 +68,7 @@
   --color-warn-dim: rgba(161, 98, 7, 0.12);
   --color-bad-dim: rgba(185, 28, 28, 0.09);
 
-  /* ── data-viz series (light) ───────────────────────────────────────────
-     Deeper than the dark set: series colours have to survive a white surface
-     and a 4.5:1 text contrast floor, which rules out #38bdf8 as anything but
-     a fill on a dark chart. These are the values charts should have had in
-     light mode all along rather than a re-hue after the fact. */
-  --color-viz-in: #0369a1;
-  --color-viz-out: #4f46e5;
-  --color-viz-cached: #0e7490;
-  --color-viz-reasoning: #a16207;
-  --color-viz-saved: #047857;
-  --color-viz-error: #b91c1c;
-  --color-viz-latency: #6d28d9;
-  --color-viz-cat-1: #0369a1;
-  --color-viz-cat-2: #4f46e5;
-  --color-viz-cat-3: #047857;
-  --color-viz-cat-4: #a16207;
-  --color-viz-cat-5: #b91c1c;
-  --color-viz-cat-6: #6d28d9;
-  --color-viz-cat-7: #0f766e;
-  --color-viz-cat-8: #c2410c;
-  --color-viz-grid: rgba(15, 18, 22, 0.08);
-  --color-viz-axis: #6b7280;
-  --color-viz-crosshair: rgba(15, 18, 22, 0.05);
+  /* ── data-viz series: NOT in @theme — see :root below ───────────────── */
 
   /* ── washes (light) ─────────────────────────────────────────────────────
      Translucent fills sit on top of a surface and MUST invert with the theme.
@@ -113,6 +97,39 @@
   --animate-fade-up: fade-up var(--dur-base) var(--ease-out) both;
   --animate-fade-in: fade-in var(--dur-fast) var(--ease-out) both;
   --animate-shimmer: shimmer 1.6s linear infinite;
+}
+
+/* ── data-viz series (light) ──────────────────────────────────────────────
+   These live in :root, NOT in @theme — and that is deliberate. Tailwind v4
+   PRUNES @theme variables that no utility class references, and every viz
+   token is read from JS as `var(--color-viz-*)` strings (recharts wants a
+   literal fill), so nothing marks them "used". Declared in @theme they
+   vanished from the built CSS entirely in light mode — the bars rendered
+   colourless while dark mode worked (the plain `.dark` block is never
+   pruned), which is exactly the bug this placement fixes.
+
+   Values are deeper than the dark set: series colours have to survive a white
+   surface and a 4.5:1 text contrast floor, which rules out #38bdf8 as
+   anything but a fill on a dark chart. */
+:root {
+  --color-viz-in: #0369a1;
+  --color-viz-out: #4f46e5;
+  --color-viz-cached: #0e7490;
+  --color-viz-reasoning: #a16207;
+  --color-viz-saved: #047857;
+  --color-viz-error: #b91c1c;
+  --color-viz-latency: #6d28d9;
+  --color-viz-cat-1: #0369a1;
+  --color-viz-cat-2: #4f46e5;
+  --color-viz-cat-3: #047857;
+  --color-viz-cat-4: #a16207;
+  --color-viz-cat-5: #b91c1c;
+  --color-viz-cat-6: #6d28d9;
+  --color-viz-cat-7: #0f766e;
+  --color-viz-cat-8: #c2410c;
+  --color-viz-grid: rgba(15, 18, 22, 0.08);
+  --color-viz-axis: #6b7280;
+  --color-viz-crosshair: rgba(15, 18, 22, 0.05);
 }
 
 /* The dark palette. Same names, dark values, applied by a class on <html>.

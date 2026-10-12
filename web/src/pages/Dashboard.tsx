@@ -53,7 +53,6 @@ function HealthStrip({ o }: { o: Overview }) {
     ['accounts', String(h.accounts)],
     ['models', String(h.models)],
     ['combos', String(h.combos)],
-    ['ledger', nfmt(h.ledger_rows)],
     ['uptime', fmtUptime(h.uptime_s)],
   ];
   return (
@@ -72,10 +71,14 @@ function HealthStrip({ o }: { o: Overview }) {
           dropped <Mono className="tnum text-[11px]">{nfmt(h.dropped_rows)}</Mono>
         </Chip>
       )}
-      <Chip tone={h.status === 'ok' ? 'ok' : 'warn'} className="gap-1.5 px-2.5 py-1">
-        <span className={cx('h-1.5 w-1.5 rounded-full', h.status === 'ok' ? 'bg-ok' : 'bg-warn')} />
-        {h.status}
-      </Chip>
+      {/* A green "ok" pill signified nothing — the page responding IS ok. The
+          pill earns its pixels only when the collector is actually degraded. */}
+      {h.status !== 'ok' && (
+        <Chip tone="warn" className="gap-1.5 px-2.5 py-1">
+          <span className="h-1.5 w-1.5 rounded-full bg-warn" />
+          {h.status}
+        </Chip>
+      )}
     </div>
   );
 }
@@ -315,7 +318,13 @@ export default function Dashboard() {
     return () => { clearInterval(fast); clearInterval(slow); };
   }, [loadFast, loadSlow]);
 
-  const series = useMemo(() => [...trend].reverse().map((r) => ({
+  // The API ranks day groups by call count (`ORDER BY calls DESC` — right for
+  // the ranked breakdowns), so a time series must be sorted by the day key
+  // before charting: old → new, flowing to the right. Reversing was not
+  // enough — the input order was not temporal at all.
+  const series = useMemo(() => [...trend]
+    .sort((a, b) => a.k.localeCompare(b.k))
+    .map((r) => ({
     k: r.k,
     in: r.tin,
     out: r.tout,

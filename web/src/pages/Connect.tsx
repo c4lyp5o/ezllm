@@ -19,8 +19,12 @@ import {
 // and Anthropic Messages. The OpenAI Responses route still exists server-side
 // for other clients but is not surfaced here.
 const SURFACES = [
-  { key: 'openai', label: 'OpenAI Chat', path: '/v1/chat/completions', note: 'the one almost everything speaks' },
-  { key: 'anthropic', label: 'Anthropic Messages', path: '/v1/messages', note: 'Claude Code, SDKs, Anthropic-style clients' },
+  // The value is the BASE URL a client of that dialect is configured with —
+  // not the endpoint a single request hits. OpenAI clients take the whole
+  // base including /v1; Anthropic clients append /v1/messages themselves, so
+  // their base is the origin bare.
+  { key: 'openai', label: 'OpenAI Chat', path: '/v1', note: 'the one almost everything speaks' },
+  { key: 'anthropic', label: 'Anthropic Messages', path: '', note: 'Claude Code, SDKs, Anthropic-style clients (appends /v1/messages)' },
 ] as const;
 
 type SurfaceKey = (typeof SURFACES)[number]['key'];
@@ -112,14 +116,16 @@ function FieldRow({ label, value, mono = true }: { label: string; value: string;
 
 function snippet(surface: SurfaceKey, base: string, key: string, model: string): string {
   if (surface === 'anthropic') {
+    // Anthropic clients append /v1/messages themselves — the base is bare.
     return [
       'ANTHROPIC_BASE_URL=' + base,
       'ANTHROPIC_API_KEY=' + key,
       'ANTHROPIC_MODEL=' + model,
     ].join('\n');
   }
+  // OpenAI clients take the base WITH /v1 — without it every request 404s.
   return [
-    'OPENAI_BASE_URL=' + base,
+    'OPENAI_BASE_URL=' + base + '/v1',
     'OPENAI_API_KEY=' + key,
     'OPENAI_MODEL=' + model,
   ].join('\n');
@@ -219,7 +225,7 @@ export default function Connect() {
                 </div>
               </div>
               <div className="mt-3 space-y-2">
-                <FieldRow label="endpoint" value={base + s.path} />
+                <FieldRow label="base url" value={base + s.path} />
               </div>
             </div>
           ))}

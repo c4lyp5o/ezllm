@@ -142,7 +142,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         {LOGO}
         <span className="text-[15px] font-semibold tracking-tight">ezllm</span>
         <a href={REPO_URL} target="_blank" rel="noreferrer noopener"
-          title={`ezllm ${VERSION} — M1–M9 shipped · hop translation + responses-wire staged on master, live on llm.calypso.dedyn.io`}
+          aria-label={`ezllm ${VERSION}`}
           className="ml-auto cursor-help rounded-full border border-line bg-raised px-2 py-0.5 font-mono text-[10px] text-mute transition-colors hover:border-line-strong hover:text-ink">
           {VERSION}
         </a>
@@ -166,13 +166,12 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         <div className="flex items-center px-3 py-1">
           <a href={PROFILE_URL} target="_blank" rel="noreferrer noopener"
             aria-label="GitHub profile (c4lyp5o)" title="github.com/c4lyp5o"
-            className="flex items-center gap-2 text-[11.5px] text-mute transition-colors hover:text-ink">
+            className="flex items-center gap-2 rounded-md p-1.5 text-[11.5px] text-mute transition-colors hover:bg-hover hover:text-ink">
             <GitHubIcon />
-            <span className="font-mono">c4lyp5o</span>
           </a>
           <button
             type="button"
-            className="ml-auto text-[11.5px] text-mute transition-colors hover:text-bad"
+            className="ml-auto rounded-md px-2.5 py-1.5 text-[11.5px] text-mute transition-colors hover:bg-bad-dim hover:text-bad"
             onClick={() => { clearToken(); onNavigate?.(); window.location.reload(); }}
           >
             Log out
@@ -283,7 +282,10 @@ export default function App() {
             ))}
           </nav>
         )}
-        <div className="mt-8">
+        {/* Page header → content gap. Was mt-8 and read as a void between the
+            title row and the first content row (the health pills on
+            Dashboard). */}
+        <div className="mt-5">
           <Routes>
             <Route path="/" element={<Dashboard />} />
       <Route path="/stats" element={<Stats />} />

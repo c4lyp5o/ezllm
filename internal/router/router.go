@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -508,11 +509,68 @@ func orderRoutes(combo *store.Combo, routes []proxy.Route) []proxy.Route {
 // decrement is a read-modify-write that concurrent requests share.
 var blockCursors sync.Map // int64 comboID -> *blockEntry
 
+// BlockCursor is one combo's live block_round_robin state, shaped for the
+// dashboard's recent-calls table (the block cursor renders under the model
+// of every row that alias served).
+type BlockCursor struct {
+	Combo     string `json:"combo"` // the ledger alias for combo-routed calls
+	Hop       string `json:"hop"`   // namespace/model owning the current block
+	Remaining int    `json:"remaining"`
+	BlockSize int    `json:"block_size"`
+}
+
+// BlockCursors snapshots the live block_round_robin cursors. Entries that
+// never advanced (single-hop combos, block strategy unused) are skipped —
+// they have nothing to observe.
+func (r *Resolver) BlockCursors() []BlockCursor {
+	out := []BlockCursor{}
+	blockCursors.Range(func(k, v any) bool {
+		e, ok := v.(*blockEntry)
+		if !ok || e == nil {
+			return true
+		}
+		e.mu.Lock()
+		if e.combo != "" && e.ns != "" {
+			out = append(out, BlockCursor{
+				Combo: e.combo, Hop: e.ns + "/" + e.model,
+				Remaining: e.remaining, BlockSize: e.size,
+			})
+		}
+		e.mu.Unlock()
+		return true
+	})
+	sort.Slice(out, func(i, j int) bool { return out[i].Combo < out[j].Combo })
+	return out
+}
+
+// TestRoute resolves a single hop to a dialable Route with NO eligibility
+// filtering, capability gating, or pin checks: the combo-test endpoint probes
+// every hop exactly as configured, because showing WHY the router currently
+// skips a hop is the point of the test. Resolution failures (account gone,
+// no usable key) are the test's OUTPUT, not a handler error.
+func (r *Resolver) TestRoute(ctx context.Context, accountID int64, model, comboName string, surface provider.Surface) (proxy.Route, error) {
+	acct, err := r.catalog.AccountByID(ctx, accountID)
+	if err != nil {
+		return proxy.Route{}, err
+	}
+	key, err := r.catalog.PickKey(ctx, acct.ID)
+	if err != nil {
+		return proxy.Route{}, err
+	}
+	return proxy.Route{
+		Account: *acct, KeyID: key.ID, KeyPlain: key.Plaintext, KeyHint: key.Hint,
+		Model: model, Alias: comboName, Surface: surface,
+	}, nil
+}
+
 type blockEntry struct {
 	mu        sync.Mutex
+	combo     string // combo NAME (the ledger alias) — set on first use
 	accountID int64
+	ns        string // namespace of the hop owning the block
 	model     string
 	remaining int
+	size      int // effective block size for this block
 }
 
 // blockOrder implements block_round_robin: one hop serves BlockSize consecutive
@@ -542,6 +600,9 @@ func blockOrder(combo *store.Combo, routes []proxy.Route) []proxy.Route {
 	e := v.(*blockEntry)
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.combo == "" {
+		e.combo = combo.Name
+	}
 
 	target := -1
 	for i, rt := range routes {
@@ -566,7 +627,9 @@ func blockOrder(combo *store.Combo, routes []proxy.Route) []proxy.Route {
 			reason = "block complete"
 		}
 		e.accountID, e.model = routes[next].Account.ID, routes[next].Model
+		e.ns = routes[next].Account.Namespace
 		e.remaining = size
+		e.size = size
 		target = next
 		// The cursor is in-process state with no other visibility: a block that
 		// advances early (eligibility flap) or never advances (a sticky

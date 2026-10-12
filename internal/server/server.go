@@ -182,6 +182,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /admin/combos/{id}", s.admin(s.handleCombo))
 	s.mux.HandleFunc("POST /admin/combos/{id}/hops", s.admin(s.handleComboHops))
 	s.mux.HandleFunc("PUT /admin/combos/{id}/hops", s.admin(s.handleComboHops))
+	s.mux.HandleFunc("POST /admin/combos/{id}/test", s.admin(s.handleComboTest))
 
 	s.mux.HandleFunc("GET /admin/model-rules", s.admin(s.handleModelRules))
 	s.mux.HandleFunc("POST /admin/model-rules", s.admin(s.handleModelRules))

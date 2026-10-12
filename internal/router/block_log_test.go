@@ -85,4 +85,21 @@ func TestBlockAdvanceLoggedOncePerBlock(t *testing.T) {
 		// The rotation must walk FORWARD to the next position, not restart.
 		t.Errorf("second advance hop = %s, want super-ssn/gpt-6.1-sol", (*lines)[1])
 	}
+
+	// The same state the log line reports must be readable by the dashboard
+	// through the resolver's cursor snapshot (the recent-calls table joins
+	// rows to their combo's cursor by combo name).
+	cursors := r.BlockCursors()
+	found := false
+	for _, c := range cursors {
+		if c.Combo == "daily" {
+			found = true
+			if c.BlockSize != 3 || (c.Hop != "super-ssn/gpt-6-luna" && c.Hop != "super-ssn/gpt-6.1-sol") {
+				t.Errorf("cursor = %+v, want block_size 3 on one of the hops", c)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("no cursor for combo daily in %v", cursors)
+	}
 }

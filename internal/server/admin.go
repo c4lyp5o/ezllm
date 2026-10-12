@@ -10,6 +10,7 @@ package server
 //   - error bodies preserve the provider's own words + the step that failed
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -22,7 +23,9 @@ import (
 	"time"
 
 	"github.com/c4lyp5o/ezllm/internal/provider"
+	"github.com/c4lyp5o/ezllm/internal/proxy"
 	"github.com/c4lyp5o/ezllm/internal/registration"
+	"github.com/c4lyp5o/ezllm/internal/router"
 	"github.com/c4lyp5o/ezllm/internal/store"
 )
 
@@ -170,12 +173,20 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreErr(w, err)
 		return
 	}
+	// Live block_round_robin cursors, so the recent-calls table can show which
+	// hop currently owns each combo's block. In-process state (not ledger data)
+	// — nil resolver in unit tests yields an empty list.
+	cursors := []router.BlockCursor{}
+	if s.resolver != nil {
+		cursors = s.resolver.BlockCursors()
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"health":           health,
 		"usage":            usage,
 		"usage_by_surface": surfaceUsage,
 		"accounts":         accounts,
 		"recent_calls":     recent,
+		"block_cursors":    cursors,
 	})
 }
 
@@ -240,7 +251,8 @@ const callsCols = `ts, client, surface, alias, account, model, status, ttft_ms, 
        COALESCE(compression_applied, 0), COALESCE(compression_rules_fired, 0),
        COALESCE(context_tokens_pre, 0), COALESCE(context_tokens_saved, 0),
        COALESCE(compression_saved_notional, 0), COALESCE(prefix_sha, ''),
-       COALESCE(session_id, ''), msg_count, tool_count, req_bytes`
+       COALESCE(session_id, ''), msg_count, tool_count, req_bytes,
+       COALESCE(err, '')`
 
 // scanCalls maps rows projected with callsCols into the row shape the
 // dashboard and the requests explorer share.
@@ -252,11 +264,11 @@ func scanCalls(rows *sql.Rows) ([]map[string]any, error) {
 		var ttft, total, tin, tout, cread, cwrite, reasoning any
 		var saved, applied, rulesFired, contextPre, contextSaved int
 		var notional, msgCount, toolCount, reqBytes int
-		var prefixSHA, sessionID, profile string
+		var prefixSHA, sessionID, profile, errText string
 		if err := rows.Scan(&ts, &client, &surface, &alias, &account, &model, &status,
 			&ttft, &total, &tin, &tout, &cread, &cwrite, &reasoning,
 			&saved, &profile, &applied, &rulesFired, &contextPre, &contextSaved,
-			&notional, &prefixSHA, &sessionID, &msgCount, &toolCount, &reqBytes); err != nil {
+			&notional, &prefixSHA, &sessionID, &msgCount, &toolCount, &reqBytes, &errText); err != nil {
 			return nil, err
 		}
 		out = append(out, map[string]any{
@@ -285,6 +297,10 @@ func scanCalls(rows *sql.Rows) ([]map[string]any, error) {
 			"msg_count":  msgCount,
 			"tool_count": toolCount,
 			"req_bytes":  reqBytes,
+			// Verbatim err column (empty on success): carries the upstream
+			// words and, for rows written after the error-cause classifier
+			// shipped, the leading `[<cause>]` the dashboard renders as a chip.
+			"err": errText,
 		})
 	}
 	return out, rows.Err()
@@ -997,6 +1013,221 @@ func (s *Server) handleCombos(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeErr(w, http.StatusMethodNotAllowed, "invalid_request_error", "method not allowed")
 	}
+}
+
+// ── POST /admin/combos/{id}/test ────────────────────────────────────────────
+
+// comboTestHop is one hop's probe result. Status 0 with Err set means the hop
+// could not be DIALED at all (account missing, no usable key) — distinct from
+// an upstream status the request actually earned.
+type comboTestHop struct {
+	AccountID int64  `json:"account_id"`
+	Namespace string `json:"namespace"`
+	Model     string `json:"model"`
+	Enabled   bool   `json:"enabled"`
+	Status    int    `json:"status"`
+	Ms        int64  `json:"ms"`
+	Err       string `json:"err,omitempty"`
+	Cause     string `json:"cause,omitempty"`
+	Parked    bool   `json:"parked"`
+	CooldownS int64  `json:"cooldown_s,omitempty"`
+}
+
+// captureWriter is a minimal http.ResponseWriter for the probes below: the
+// response body is discarded, only the status the dispatcher earned is kept.
+// (httptest would do the same thing, but a test package has no business in
+// production code.)
+type captureWriter struct {
+	hdr    http.Header
+	status int
+}
+
+func (c *captureWriter) Header() http.Header {
+	if c.hdr == nil {
+		c.hdr = http.Header{}
+	}
+	return c.hdr
+}
+func (c *captureWriter) WriteHeader(s int) { c.status = s }
+func (c *captureWriter) Write(b []byte) (int, error) {
+	if c.status == 0 {
+		c.status = http.StatusOK
+	}
+	return len(b), nil
+}
+
+// causeFromSnippet pulls the `[<cause>]` marker the error-cause classifier
+// writes into the ledger err column.
+func causeFromSnippet(s string) string {
+	i := strings.Index(s, "[")
+	if i < 0 {
+		return ""
+	}
+	if j := strings.Index(s[i:], "]"); j > 0 {
+		return s[i+1 : i+j]
+	}
+	return ""
+}
+
+// handleComboTest probes EVERY hop of a combo with one tiny real request per
+// hop and reports the outcome. Deliberate choices, all of them operator-facing:
+//
+//   - No eligibility/capability/pin filtering: showing WHY the router
+//     currently skips a hop is the point of the test.
+//   - No translation/responses-wire marking on the probe: it is a bare
+//     <surface> request, so a protocol refusal here is genuine signal about
+//     the hop's native support (the markings are applied by the router).
+//   - It SPENDS: one request per hop, max_tokens 16, non-streaming.
+//   - It uses the real dispatcher, so parks, cooldowns and the ledger behave
+//     exactly as in production — each probe is recorded as a normal call, and
+//     a probe that parks a hop LEAVES it parked, because it failed for real.
+func (s *Server) handleComboTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, http.StatusMethodNotAllowed, "invalid_request_error", "method not allowed")
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	combos, err := s.db.ListCombos(r.Context())
+	if err != nil {
+		s.writeStoreErr(w, err)
+		return
+	}
+	var combo *store.Combo
+	for i := range combos {
+		if combos[i].ID == id {
+			combo = &combos[i]
+			break
+		}
+	}
+	if combo == nil {
+		writeErr(w, http.StatusNotFound, "not_found", fmt.Sprintf("no combo %d", id))
+		return
+	}
+	if len(combo.Hops) == 0 {
+		writeErr(w, http.StatusUnprocessableEntity, "invalid_request_error", "combo has no hops")
+		return
+	}
+	if s.dispatcher == nil || s.resolver == nil {
+		writeErr(w, http.StatusServiceUnavailable, "server_error", "dispatcher unavailable")
+		return
+	}
+
+	surface := provider.SurfaceOpenAI
+	if r.ContentLength > 0 {
+		var in struct {
+			Surface string `json:"surface"`
+		}
+		// A malformed body is ignored on purpose: the surface is a UI hint,
+		// not a security-relevant field, and defaulting is what the button
+		// sends anyway.
+		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<12)).Decode(&in)
+		switch in.Surface {
+		case "", "openai":
+			surface = provider.SurfaceOpenAI
+		case "anthropic":
+			surface = provider.SurfaceAnthropic
+		default:
+			writeErr(w, http.StatusBadRequest, "invalid_request_error", "surface must be openai or anthropic")
+			return
+		}
+	}
+
+	hops := make([]comboTestHop, 0, len(combo.Hops))
+	for _, h := range combo.Hops {
+		hr := comboTestHop{
+			AccountID: h.AccountID,
+			Model:     h.ModelID,
+			Enabled:   h.Enabled == nil || *h.Enabled,
+		}
+		rt, rerr := s.resolver.TestRoute(r.Context(), h.AccountID, h.ModelID, combo.Name, surface)
+		if rerr != nil {
+			hr.Err = rerr.Error()
+			hops = append(hops, hr)
+			continue
+		}
+		hr.Namespace = rt.Account.Namespace
+
+		body := probeBody(h.ModelID)
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, probePath(surface), bytes.NewReader(body))
+		if reqErr != nil {
+			cancel()
+			hr.Err = reqErr.Error()
+			hops = append(hops, hr)
+			continue
+		}
+		start := time.Now()
+		_, res, ferr := s.dispatcher.ForwardCandidates(ctx, &captureWriter{}, req, []proxy.Route{rt}, body)
+		cancel()
+		hr.Ms = time.Since(start).Milliseconds()
+
+		// The probe is a real call and must be recorded like one: the ledger
+		// is the audit trail, and an unrecorded probe would be invisible
+		// spend. Client "combo-test" tells probe traffic from client traffic
+		// in every dashboard.
+		call := store.Call{
+			TS: start, Client: "combo-test", Surface: store2surface(surface), Alias: rt.Alias,
+			AccountID: rt.Account.ID, Account: rt.Account.Namespace,
+			KeyID: rt.KeyID, KeyHint: rt.KeyHint, Model: rt.Model,
+			Status: res.Status, Stream: res.Stream, Totalms: res.Totalms,
+			EndpointID: res.EndpointID, UpstreamModel: res.UpstreamModel,
+		}
+		switch {
+		case ferr != nil:
+			hr.Err = ferr.Error()
+			// Nothing reached the client — the same 502 the inference path
+			// answers with, so a transport failure never reads as status 0.
+			hr.Status = http.StatusBadGateway
+		default:
+			hr.Status = res.Status
+			hr.Err = res.Err
+			hr.Cause = causeFromSnippet(res.Err)
+		}
+		call.Status = hr.Status
+		if ferr != nil {
+			call.Err = ferr.Error()
+		} else if res.Err != "" {
+			call.Err = res.Err
+		}
+		if res.Usage != nil {
+			call.TokensIn = res.Usage.In
+			call.TokensOut = res.Usage.Out
+			call.TokensCachedRead = res.Usage.CachedRead
+			call.TokensCachedWrite = res.Usage.CachedWrite
+			call.ReasoningTokens = res.Usage.Reasoning
+		}
+		s.ledger(call)
+		for _, c := range s.dispatcher.Cooldowns() {
+			if c.Namespace == rt.Account.Namespace && c.Model == rt.Model && c.Until.After(time.Now()) {
+				hr.Parked = true
+				hr.CooldownS = int64(time.Until(c.Until).Seconds())
+			}
+		}
+		hops = append(hops, hr)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"combo":   combo.Name,
+		"surface": string(surface),
+		"hops":    hops,
+	})
+}
+
+// probeBody is the smallest request that proves a hop answers: one user
+// message, 16 tokens out, no tools, no streaming. The SAME shape works on
+// both wires (both accept model/max_tokens/messages), so the surface only
+// changes the path.
+func probeBody(model string) []byte {
+	return []byte(fmt.Sprintf(`{"model":%q,"max_tokens":16,"messages":[{"role":"user","content":"ezllm combo test: reply ok"}]}`, model))
+}
+
+func probePath(surface provider.Surface) string {
+	if surface == provider.SurfaceAnthropic {
+		return "/v1/messages"
+	}
+	return "/v1/chat/completions"
 }
 
 func (s *Server) handleCombo(w http.ResponseWriter, r *http.Request) {

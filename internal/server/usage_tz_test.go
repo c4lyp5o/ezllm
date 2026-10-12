@@ -186,7 +186,6 @@ func TestOtherGroupingsUnaffected(t *testing.T) {
 	}
 }
 
-
 // The whole point of the env knob: a deployer sets EZLLM_USAGE_TZ once and
 // every dashboard day view agrees with the rule's day, with no per-request
 // parameter. Options.UsageTZ is exactly what main.go derives from that env var.

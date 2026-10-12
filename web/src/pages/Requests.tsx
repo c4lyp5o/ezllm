@@ -201,7 +201,7 @@ export default function Requests() {
                         INCLUSIVE total — read before comparing tin. */}
                     {r.translated && (
                       <div className="text-[10px] text-accent"
-                        title="wire-translated hop: anthropic client -> openai-only hop. The in-tokens on this row are the vendor's INCLUSIVE total (cache counted inside), not ezllm's cold-token convention">
+                        title="translated hop: its wire differs from the client's surface (anthropic client -> openai-only hop, or a hop curated for /v1/responses). The in-tokens on this row are the vendor's INCLUSIVE total (cache counted inside), not ezllm's cold-token convention">
                         ⇄ translated
                       </div>
                     )}

@@ -176,11 +176,11 @@ export type RecentCall = {
   // block_pos = block_round_robin dispatch position in its block (0 = not
   // counted): the "N requests finished" tag.
   block_pos?: number;
-  // translated = the served hop's bodies were WIRE-TRANSLATED (anthropic
-  // client -> an openai-only hop). On such a row `tin` is the vendor's
-  // INCLUSIVE total (OpenAI counts cache inside prompt_tokens) and `cread` is
-  // 0 — the translator carries no openai cache split. Read the marker before
-  // comparing `tin` across rows.
+  // translated = the served hop's WIRE differed from the client's surface, so
+  // the bodies were translated (anthropic client -> openai-only hop, or any
+  // client onto a hop curated for /v1/responses). On such a row `tin` is the
+  // vendor's INCLUSIVE total (cache counted inside) and `cread` is 0. Read the
+  // marker before comparing `tin` across rows.
   translated?: boolean;
 };
 
@@ -197,8 +197,8 @@ export type FeedRow = {
   savedNotional: number;
   contextPre?: number; contextSaved?: number;
   compression: string; applied: boolean; rulesFired?: number; error?: string;
-  /** Wire-translated hop (anthropic client -> openai-only hop). When set, `tin`
-   *  is the vendor's INCLUSIVE total, not our cold-token convention. */
+  /** Translated hop: its wire differs from the client's surface. When set,
+   *  `tin` is the vendor's INCLUSIVE total, not our cold-token convention. */
   translated?: boolean;
 };
 const num = (v: unknown): number => (typeof v === 'number' ? v : 0);

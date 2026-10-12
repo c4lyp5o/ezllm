@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -150,9 +151,12 @@ type Resolver struct {
 	// by default; even ON it only ever serves hops whose probed capability
 	// PROVES the OpenAI shape (see translate.Eligible).
 	translationEnabled bool
-	// responsesModels is the operator-curated "<ns>/<model>" list of hops that
-	// must be dialed on the Responses wire for chat clients. Empty = inert.
-	responsesModels map[string]bool
+	// responsesModels is the operator-curated list of hops that must be dialed
+	// on the Responses wire for chat AND anthropic clients. Each entry is a
+	// REGEX matched against the full "<ns>/<model>" string (both ends
+	// anchored), so a plain id still matches only itself and a family pattern
+	// like `stationine/gpt-6\.1-sol` covers the variants. Empty = inert.
+	responsesModels []*regexp.Regexp
 }
 
 // New builds a Resolver.
@@ -172,14 +176,26 @@ func (r *Resolver) WithTranslation(enabled bool) *Resolver {
 	return r
 }
 
-// WithResponsesModels installs the curated list of "<ns>/<model>" hops that
-// ride the Responses wire for chat clients (see docs/responses-wire-design.md).
+// WithResponsesModels installs the curated patterns whose matching hops ride
+// the Responses wire for chat and anthropic clients (see
+// docs/responses-wire-design.md). Entries are regexes matched fully against
+// "<ns>/<model>"; an entry that does not compile is dropped — config.Load
+// validates the same list at boot and refuses to start on it, so this skip is
+// defensive only (tests may hand the resolver raw strings).
 func (r *Resolver) WithResponsesModels(models []string) *Resolver {
-	m := make(map[string]bool, len(models))
+	patterns := make([]*regexp.Regexp, 0, len(models))
 	for _, v := range models {
-		m[strings.TrimSpace(v)] = true
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		re, err := regexp.Compile(`\A(?:` + v + `)\z`)
+		if err != nil {
+			continue // unreachable via config (validated at boot); see above
+		}
+		patterns = append(patterns, re)
 	}
-	r.responsesModels = m
+	r.responsesModels = patterns
 	return r
 }
 
@@ -191,7 +207,13 @@ func (r *Resolver) needsResponsesWire(clientSurface provider.Surface, namespace,
 	if clientSurface == provider.SurfaceResponses || len(r.responsesModels) == 0 {
 		return false
 	}
-	return r.responsesModels[namespace+"/"+model]
+	full := namespace + "/" + model
+	for _, re := range r.responsesModels {
+		if re.MatchString(full) {
+			return true
+		}
+	}
+	return false
 }
 
 // eligibleHere applies the filter, treating nil as "allow".

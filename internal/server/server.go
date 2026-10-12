@@ -592,10 +592,13 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			}
 		}
 		call.BlockPos = served.BlockPos
-		// Attribution for wire-translated hops: the ledger row says the client
-		// got synthesized bytes, and with it that tokens_in is the vendor's
-		// INCLUSIVE total rather than our cold-token convention.
-		call.Translated = served.Translated
+		// Attribution for hops whose WIRE differs from the client's surface —
+		// the request/response bodies were translated, so the row's tokens_in
+		// is the vendor's INCLUSIVE total rather than our cold-token
+		// convention. That covers both the anthropic->openai-chat leg
+		// (Translated) and a hop curated onto the Responses wire
+		// (ResponsesWire): one marker, one meaning, no second vocabulary.
+		call.Translated = served.Translated || served.ResponsesWire
 		s.ledger(call)
 	}
 }

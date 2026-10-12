@@ -16,10 +16,14 @@ normally (the 400 class only fires upstream if the model itself misbehaves).
 
 **How a hop is marked:** the operator-curated list
 `translation.responses_models: ["<namespace>/<model_id>", …]` in config.yaml,
-gated by the same master switch `translation.enabled`. Empty list (default) =
-feature inert. Ledger evidence is the discovery mechanism: a hop whose chat
-calls 400 with the tools/reasoning signature is a candidate (today exactly one
-model qualifies — see the 400 scan in the vault, 2026-10-12).
+gated by the same master switch `translation.enabled`. Each entry is a **regex
+matched fully against `<namespace>/<model_id>`** (both ends anchored), so a
+family pattern like `space-stationine/gpt-6\.1-sol` covers its variants while a
+plain id matches only itself; an uncompilable entry fails the boot by name.
+Empty list (default) = feature inert. Ledger evidence is the discovery
+mechanism: a hop whose chat calls 400 with the tools/reasoning signature is a
+candidate — and marking a hop that does NOT need it costs native fidelity, so
+patterns are scoped per account rather than globbed across the fleet.
 
 **Invariants carried over:** passthrough identity for unmarked hops (tested),
 byte-determinism (ordered structs, golden byte-exact tests), the route keeps

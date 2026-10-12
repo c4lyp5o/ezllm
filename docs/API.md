@@ -88,12 +88,13 @@ returned page — so the totals answer "how much lives behind this filter".
                               // reasoning/saved/compression/applied/rules_fired
                               // (rules_fired = caveman prose rules that fired; 0 otherwise),
                               // plus `translated` (schema v12): true when the served hop's
-                              // bodies were wire-translated (anthropic client -> openai-only
-                              // hop). On such a row `tin` is the vendor's INCLUSIVE total —
-                              // OpenAI counts the cached prefix inside prompt_tokens, and
-                              // the synthesized anthropic envelope passes it through — and
-                              // `cread` is 0. Read the marker before comparing tin across
-                              // rows; see docs/translation-runbook.md "Ledger attribution".
+                              // WIRE differed from the client's surface, so the bodies were
+                              // translated (anthropic client -> openai-only hop, or any client
+                              // onto a hop curated for /v1/responses). On such a row `tin` is
+                              // the vendor's INCLUSIVE total — the upstream's own total is
+                              // passed through, cache counted inside — and `cread` is 0. Read
+                              // the marker before comparing tin across rows; see
+                              // docs/translation-runbook.md "Ledger attribution".
   "summary": { "count":23, "tin":966, "tout":69, "cread":0, "reasoning":0,
                "max_tin":42, "max_tout":3 },
   "filter": { "from":"…","to":"…","limit":50,"sort":"ts_desc" }

@@ -89,11 +89,13 @@ type Call struct {
 	// 0 = not counted (direct routes, non-block strategies).
 	BlockPos int
 
-	// Translated marks the hop as WIRE-TRANSLATED (anthropic client ->
-	// openai-only hop): the client saw synthesized anthropic bytes. It also
-	// carries the token convention: for such a row tokens_in is the vendor's
-	// INCLUSIVE total (OpenAI prompt_tokens, cache included) and
-	// TokensCachedRead stays 0 — see schema.sql calls.translated.
+	// Translated marks a hop whose WIRE differed from the client's surface, so
+	// the bodies were translated in one or both directions: the
+	// anthropic->openai-chat leg (Route.Translated) and a hop curated onto the
+	// Responses wire (Route.ResponsesWire). For such a row tokens_in is the
+	// vendor's INCLUSIVE total (the synthesized envelope passes it through,
+	// cache included) and TokensCachedRead stays 0 — see schema.sql
+	// calls.translated.
 	Translated bool
 
 	Err string

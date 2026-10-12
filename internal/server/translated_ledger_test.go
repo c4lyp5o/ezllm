@@ -147,3 +147,58 @@ func TestNativeHopIsNotMarkedTranslated(t *testing.T) {
 		t.Error("a native anthropic hop must never be marked translated")
 	}
 }
+
+// A hop curated onto the RESPONSES wire is also translated traffic — same
+// marker, no second vocabulary. A chat client asking such a hop must land a
+// ledger row with translated=true and the CLIENT's surface, with the responses
+// usage total passed through as tokens_in.
+func TestResponsesWireHopIsMarkedTranslated(t *testing.T) {
+	var hits int
+	var wirePath string
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		wirePath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"resp_1","object":"response","status":"completed",
+			"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}],
+			"usage":{"input_tokens":500,"output_tokens":7}}`))
+	}, func(o *Options) {
+		o.Resolver = o.Resolver.WithResponsesModels([]string{"up/gpt-6-luna"})
+	})
+	acct := seededAccountID(t, h)
+	if _, err := h.db.UpsertCombo(context.Background(), store.Combo{
+		Name: "resp-proof", Strategy: "failover", Enabled: true,
+		Hops: []store.ComboHop{{AccountID: acct, ModelID: "gpt-6-luna", Weight: 1}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	code, _, body := h.do("POST", "/v1/chat/completions", "tok-infer",
+		`{"model":"resp-proof","max_tokens":8,"messages":[{"role":"user","content":"ping"}]}`)
+	if code != 200 || hits != 1 {
+		t.Fatalf("call: code=%d hits=%d (%s)", code, hits, body)
+	}
+	if wirePath != "/responses" {
+		t.Fatalf("hop must be dialed on the responses wire, got %q", wirePath)
+	}
+	if err := h.db.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := h.db.RecentCalls(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	row := rows[0]
+	if !row.Translated {
+		t.Error("a responses-wire hop must carry the translated marker (one marker, one meaning)")
+	}
+	if row.Surface != "openai" {
+		t.Errorf("surface = %q, want the CLIENT surface (openai)", row.Surface)
+	}
+	if row.TokensIn != 500 {
+		t.Errorf("tokens_in = %d, want 500 (the responses total passed through)", row.TokensIn)
+	}
+}

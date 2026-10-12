@@ -26,9 +26,11 @@ model. Design and wire contracts: `docs/translation-design.md`.
 
 ## Ledger attribution (schema v12)
 
-Every call served by a translated hop carries `calls.translated = 1` — a row
-you can COUNT, not infer from surface+model. Two token facts ride with the
-marker and they are part of the column's meaning:
+Every call served by a hop whose WIRE differed from the client's surface carries
+`calls.translated = 1` — the anthropic→openai-chat leg and responses-wire hops
+alike. One marker, one meaning; a row you can COUNT, not infer from
+surface+model. Two token facts ride with the marker and they are part of the
+column's meaning:
 
 - **`tokens_in` is the vendor's INCLUSIVE total** for translated rows. The
   synthesized anthropic usage envelope passes OpenAI's `prompt_tokens` through
@@ -159,19 +161,31 @@ probed-incompatible hops.
 
 Separate companion feature (`docs/responses-wire-design.md`): some models'
 **chat** path refuses tools+reasoning (tokenrouter `gpt-6.1-sol`) while their
-Responses path handles both. The curated list is the opt-in:
+Responses path handles both. The curated list is the opt-in, and each entry is
+a **regex matched fully against `<namespace>/<model_id>`**:
 
 ```yaml
 translation:
   enabled: true
   responses_models:
-    - "tokenrouter/openai/gpt-6.1-sol"
+    - "space-stationine/gpt-6\\.1-sol"        # one hop, one family pattern
+    - "tokenrouter/openai/gpt-6\\.1-sol"      # a plain id matches itself only
+    - "vercel-ai-gateway/openai/gpt-6\\.1-sol.*"   # covers -fast variants
 ```
 
+- Patterns are **anchored at both ends**, so a bare `sol` matches nothing —
+  it cannot turn a typo into a fleet-wide wire change. An entry that does not
+  compile is a **boot failure naming the entry**.
+- **Mark only what needs it.** A hop with a working chat path loses native
+  fidelity on the responses wire, so a blanket `.*sol.*` is a tax, not a fix:
+  the ledger decides (a model whose chat calls 400 on the tools/reasoning
+  signature is a candidate). Probing a model on all three surfaces is what
+  tells you which one it actually needs.
 - A marked hop is dialed on `/v1/responses` with a translated body (chat →
   responses), and the response translates back (JSON and SSE). The client
   keeps speaking chat; the ledger row keeps the client's surface and the
-  upstream's model.
+  upstream's model, and carries `translated=true` (the marker covers every
+  translated wire — see "Ledger attribution").
 - Unlike translated anthropic hops, a responses-wire hop KEEPS its normal
   combo position — it is a working member, not a last resort. Direct
   `<ns>/<model>` routes are marked too.

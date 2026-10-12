@@ -88,14 +88,18 @@ type ModelRefresh struct {
 // rollback lever with no rebuild), to turn it back off.
 type Translation struct {
 	Enabled bool `yaml:"enabled"`
-	// ResponsesModels lists "<namespace>/<model_id>" hops that must be dialed
-	// on OpenAI's Responses wire — for models whose chat path refuses
-	// tools+reasoning (tokenrouter gpt-6.1-sol) and which have no
-	// /v1/messages at all. Applies to chat AND anthropic clients: chat bodies
-	// ride the chat↔responses translator, anthropic bodies (Claude Code) the
-	// anthropic↔responses one. Empty list (default) = the wire override is
-	// inert. This list is its own opt-in; translation.enabled gates the
-	// separate anthropic→chat leg.
+	// ResponsesModels lists hops that must be dialed on OpenAI's Responses wire
+	// — for models whose chat path refuses tools+reasoning (tokenrouter
+	// gpt-6.1-sol) and which have no /v1/messages at all. Applies to chat AND
+	// anthropic clients: chat bodies ride the chat↔responses translator,
+	// anthropic bodies (Claude Code) the anthropic↔responses one.
+	//
+	// Each entry is a REGEX matched FULLY against "<namespace>/<model_id>"
+	// (both ends anchored), so a plain id matches only itself and a family
+	// pattern like `stationine/gpt-6\.1-sol` covers its variants. Compile
+	// errors are a boot failure naming the entry. Empty list (default) = the
+	// wire override is inert. This list is its own opt-in; translation.enabled
+	// gates the separate anthropic→chat leg.
 	ResponsesModels []string `yaml:"responses_models"`
 }
 
@@ -234,6 +238,21 @@ func (c *Config) Validate() error {
 		errs = append(errs, "ledger.batch_wait: below 10ms defeats batching")
 	} else {
 		c.LedgerBatchWait = d
+	}
+
+	// --- translation validation ---
+	// responses_models entries are REGEXES matched fully against
+	// "<ns>/<model>" (the router compiles the same list). A pattern that does
+	// not compile is a boot error naming the entry — a silently-dropped entry
+	// would leave an operator wondering why a hop still rides chat.
+	for i, p := range c.Translation.ResponsesModels {
+		if strings.TrimSpace(p) == "" {
+			errs = append(errs, fmt.Sprintf("translation.responses_models[%d]: empty pattern", i))
+			continue
+		}
+		if _, err := regexp.Compile(`\A(?:` + p + `)\z`); err != nil {
+			errs = append(errs, fmt.Sprintf("translation.responses_models[%d]: %q is not a valid regexp: %v", i, p, err))
+		}
 	}
 
 	// --- cooldown defaults + validation ---

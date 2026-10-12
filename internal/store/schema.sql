@@ -223,13 +223,15 @@ CREATE TABLE IF NOT EXISTS calls (
   -- 0 = not counted (direct routes, non-block strategies, len(routes)==0).
   -- The "N requests finished" tag the dashboard renders as ▮ pos/size.
   block_pos      INTEGER NOT NULL DEFAULT 0,
-  -- v12: the served hop's bodies were WIRE-TRANSLATED (anthropic client ->
-  -- an openai-only hop). Attribution, so translated traffic is a row you can
-  -- count instead of infer from surface+model. Two consequences travel with it:
-  -- tokens_in for such a row is the vendor's INCLUSIVE total (the synthesized
-  -- anthropic envelope passes OpenAI's prompt_tokens, cache included) and
-  -- tokens_cached_read stays 0 (the translator does not carry the openai
-  -- cache split). 0 = the client surface and the hop wire matched.
+  -- v12: the served hop's WIRE differed from the client's surface, so the
+  -- bodies were TRANSLATED — the anthropic->openai-chat leg (Claude Code onto
+  -- an openai-only hop) or a hop curated onto the Responses wire. Attribution,
+  -- so translated traffic is a row you can count instead of infer from
+  -- surface+model. Two consequences travel with it: tokens_in for such a row is
+  -- the vendor's INCLUSIVE total (the synthesized envelope passes the upstream's
+  -- own total through, cache included) and tokens_cached_read stays 0 (the
+  -- translators do not carry the upstream cache split). 0 = the client surface
+  -- and the hop wire matched.
   translated     INTEGER NOT NULL DEFAULT 0,
   err            TEXT
 );

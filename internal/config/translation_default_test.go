@@ -44,3 +44,22 @@ func TestTranslationPartialSectionKeepsDefault(t *testing.T) {
 		t.Errorf("responses_models = %v", cfg.Translation.ResponsesModels)
 	}
 }
+
+// responses_models entries are regexes; a bad pattern must be a BOOT failure
+// naming the entry, never a silently-dropped one (the operator would be left
+// wondering why a hop still rides the chat wire).
+func TestResponsesModelsPatternsValidatedAtBoot(t *testing.T) {
+	if _, err := Load(writeTemp(t, validYAML+"\ntranslation:\n  responses_models: [\"stationine/gpt-6\\\\.1-sol\", \"vercel-ai-gateway/openai/gpt-6.1-sol.*\"]\n")); err != nil {
+		t.Fatalf("valid patterns rejected: %v", err)
+	}
+	_, err := Load(writeTemp(t, validYAML+"\ntranslation:\n  responses_models: [\"stationine/gpt-6.1-sol\", \"[\"]\n"))
+	if err == nil {
+		t.Fatal("an uncompilable pattern must fail the boot")
+	}
+	if !strings.Contains(err.Error(), "responses_models[1]") {
+		t.Errorf("error must name the offending entry, got: %v", err)
+	}
+	if _, err := Load(writeTemp(t, validYAML+"\ntranslation:\n  responses_models: [\"  \"]\n")); err == nil {
+		t.Error("a blank pattern must fail the boot")
+	}
+}

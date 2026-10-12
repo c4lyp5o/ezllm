@@ -168,7 +168,7 @@ export default function RecentFeed() {
                         INCLUSIVE total. */}
                     {c.translated && (
                       <span
-                        title="wire-translated hop: anthropic client -> openai-only hop; in-tokens below are the vendor's INCLUSIVE total (cache counted inside)"
+                        title="translated hop: its wire differs from the client's surface; in-tokens below are the vendor's INCLUSIVE total (cache counted inside)"
                         className="ml-1.5 rounded px-1 py-0.5 font-mono text-[10px] align-middle text-accent"
                       >
                         ⇄ translated

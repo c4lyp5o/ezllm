@@ -651,13 +651,19 @@ type ModelEntryRow struct {
 	TestedAt  *string `json:"tested_at,omitempty"`
 	// Pin is the operator-chosen surface ("" = auto). Enforced by the router.
 	Pin string `json:"pin"`
+	// Source is who last wrote the verdicts: "probe", "curated", or "" for a
+	// legacy row nobody has attributed yet. Curated rows survive probe sweeps.
+	Source string `json:"source,omitempty"`
+	// Note is the operator's reason for a curation (curated rows only).
+	Note string `json:"note,omitempty"`
 }
 
 // ListModels returns an account's catalog with protocol verdicts.
 func (d *DB) ListModels(ctx context.Context, accountID int64) ([]ModelEntryRow, error) {
 	rows, err := d.r.QueryContext(ctx, `
 SELECT model_id, COALESCE(display_name,''), COALESCE(owned_by,''),
-       proto_openai, proto_anthropic, proto_responses, proto_tested_at, COALESCE(proto_pin,'')
+       proto_openai, proto_anthropic, proto_responses, proto_tested_at, COALESCE(proto_pin,''),
+       COALESCE(proto_source,''), COALESCE(proto_note,'')
 FROM models WHERE account_id=? ORDER BY model_id`, accountID)
 	if err != nil {
 		return nil, err
@@ -668,7 +674,7 @@ FROM models WHERE account_id=? ORDER BY model_id`, accountID)
 		var m ModelEntryRow
 		var o, a, r sql.NullBool
 		var tested sql.NullString
-		if err := rows.Scan(&m.ID, &m.Display, &m.OwnedBy, &o, &a, &r, &tested, &m.Pin); err != nil {
+		if err := rows.Scan(&m.ID, &m.Display, &m.OwnedBy, &o, &a, &r, &tested, &m.Pin, &m.Source, &m.Note); err != nil {
 			return nil, err
 		}
 		if o.Valid {
@@ -693,6 +699,8 @@ FROM models WHERE account_id=? ORDER BY model_id`, accountID)
 
 // SetModelProto records one probe verdict. nil → NULL (untested), which is a
 // first-class state: "we could not ask" must never render as "unsupported".
+// A curated row is left alone: the operator's curation outranks a probe until
+// released via SetModelCurated, so a sweep can never silently undo one.
 func (d *DB) SetModelProto(ctx context.Context, accountID int64, modelID string, s provider.Surface, supported *bool) error {
 	col := "proto_openai"
 	switch s {
@@ -705,10 +713,11 @@ func (d *DB) SetModelProto(ctx context.Context, accountID int64, modelID string,
 	// catalog sync has not inserted yet (or vice versa).
 	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, fmt.Sprintf(`
-INSERT INTO models (account_id, model_id, %s, proto_tested_at)
-VALUES (?,?,?,strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ','now'))
+INSERT INTO models (account_id, model_id, %s, proto_tested_at, proto_source)
+VALUES (?,?,?,strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ','now'),'probe')
 ON CONFLICT(account_id, model_id) DO UPDATE SET
-  %s=excluded.%s, proto_tested_at=excluded.proto_tested_at`,
+  %s=excluded.%s, proto_tested_at=excluded.proto_tested_at, proto_source='probe'
+WHERE COALESCE(proto_source,'') <> 'curated'`,
 			col, col, col),
 			accountID, modelID, boolPtrToInt(supported))
 		return err
@@ -734,10 +743,11 @@ func (d *DB) SetModelProtos(ctx context.Context, accountID int64, rows map[strin
 				return st, nil
 			}
 			st, err := tx.PrepareContext(ctx, fmt.Sprintf(`
-INSERT INTO models (account_id, model_id, %s, proto_tested_at)
-VALUES (?,?,?,strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ','now'))
+INSERT INTO models (account_id, model_id, %s, proto_tested_at, proto_source)
+VALUES (?,?,?,strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ','now'),'probe')
 ON CONFLICT(account_id, model_id) DO UPDATE SET
-  %s=excluded.%s, proto_tested_at=excluded.proto_tested_at`, col, col, col))
+  %s=excluded.%s, proto_tested_at=excluded.proto_tested_at, proto_source='probe'
+WHERE COALESCE(proto_source,'') <> 'curated'`, col, col, col))
 			if err != nil {
 				return nil, err
 			}
@@ -766,7 +776,60 @@ ON CONFLICT(account_id, model_id) DO UPDATE SET
 	})
 }
 
-// ── quota snapshots (append-only) ───────────────────────────────────────────
+// ProtoEdit is one surface's three-state edit on a curated row: Present=false
+// keeps the recorded verdict, Value=nil clears it to untested, Value non-nil
+// records the verdict.
+type ProtoEdit struct {
+	Present bool
+	Value   *bool
+}
+
+// SetModelCurated records operator-curated protocol verdicts with provenance.
+//
+// release=false stamps proto_source='curated' with the note and clears
+// proto_tested_at — nothing was probed, so no probe timestamp is fabricated.
+// Until released, probe writes (SetModelProto/Protos) skip the row entirely.
+// release=true hands the row back to the sweep: verdicts stay as recorded,
+// source and note clear, and the next probe write applies again.
+//
+// ErrNotFound when the model row does not exist: curation never creates rows.
+func (d *DB) SetModelCurated(ctx context.Context, accountID int64, modelID, note string, edits map[string]ProtoEdit, release bool) error {
+	cols := map[string]string{"openai": "proto_openai", "anthropic": "proto_anthropic", "responses": "proto_responses"}
+	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		var res sql.Result
+		var err error
+		if release {
+			res, err = tx.ExecContext(ctx,
+				`UPDATE models SET proto_source=NULL, proto_note=NULL
+WHERE account_id=? AND model_id=?`, accountID, modelID)
+		} else {
+			set := []string{}
+			args := []any{}
+			for surface, edit := range edits {
+				col, ok := cols[surface]
+				if !ok {
+					return fmt.Errorf("store: unknown surface %q", surface)
+				}
+				if !edit.Present {
+					continue
+				}
+				set = append(set, col+"=?")
+				args = append(args, boolPtrToInt(edit.Value))
+			}
+			set = append(set, "proto_source='curated'", "proto_note=?", "proto_tested_at=NULL")
+			args = append(args, note, accountID, modelID)
+			res, err = tx.ExecContext(ctx,
+				`UPDATE models SET `+strings.Join(set, ", ")+` WHERE account_id=? AND model_id=?`, args...)
+		}
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
+}
 
 // InsertQuotaSnapshot stores one immutable quota read.
 func (d *DB) InsertQuotaSnapshot(ctx context.Context, keyID int64, q provider.Quota, ok bool, errMsg string) error {

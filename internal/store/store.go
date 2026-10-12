@@ -24,7 +24,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 10
+const schemaVersion = 11
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -227,6 +227,9 @@ func (d *DB) migrate() error {
 		if err := d.alterModelProtoPin(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate model proto pin: %w", err)
 		}
+		if err := d.alterModelProtoSource(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate model proto source: %w", err)
+		}
 		if err := d.alterCallsResearch(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate calls research columns: %w", err)
 		}
@@ -258,6 +261,25 @@ func (d *DB) alterModelProtoPin(ctx context.Context) error {
 		return err
 	}
 	_, err = d.w.ExecContext(ctx, `ALTER TABLE models ADD COLUMN proto_pin TEXT`)
+	return err
+}
+
+// alterModelProtoSource adds models.proto_source / proto_note on databases
+// created before v11 — provenance for operator-curated capability verdicts.
+// Guarded by a column check: ALTER TABLE ADD COLUMN is not idempotent.
+func (d *DB) alterModelProtoSource(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "models")
+	if err != nil || !exists {
+		return err
+	}
+	has, err := hasColumn(ctx, d.w, "models", "proto_source")
+	if err != nil || has {
+		return err
+	}
+	if _, err = d.w.ExecContext(ctx, `ALTER TABLE models ADD COLUMN proto_source TEXT`); err != nil {
+		return err
+	}
+	_, err = d.w.ExecContext(ctx, `ALTER TABLE models ADD COLUMN proto_note TEXT`)
 	return err
 }
 

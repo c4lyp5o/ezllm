@@ -96,6 +96,8 @@ CREATE TABLE IF NOT EXISTS models (
   proto_responses INTEGER,
   proto_tested_at TEXT,
   proto_pin       TEXT,                         -- NULL auto / 'openai' | 'anthropic' | 'responses' (enforced, never rerouted)
+  proto_source    TEXT,                         -- 'probe' | 'curated' | NULL legacy: who wrote the verdicts; curated sticks until released
+  proto_note      TEXT,                         -- operator's reason, curated rows only
   UNIQUE(account_id, model_id)
 );
 CREATE INDEX IF NOT EXISTS idx_models_proto ON models(account_id, proto_anthropic, proto_responses);

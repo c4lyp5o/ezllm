@@ -734,7 +734,11 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"retryable": true})
 		return
 	}
-	// Optional scope: sync only the models named in the body.
+	// Optional scope: the SWEEP probes only the named models. The catalog
+	// refresh ALWAYS upserts the full fetched catalog — handing the filtered
+	// list to UpsertModels would delete every unnamed row (a scoped sync once
+	// pruned command-code 87→3 in prod before this was fixed).
+	sweepModels := models
 	if len(body.Models) > 0 {
 		want := map[string]bool{}
 		for _, m := range body.Models {
@@ -746,7 +750,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 				scoped = append(scoped, m)
 			}
 		}
-		models = scoped
+		sweepModels = scoped
 	}
 	if err := s.db.UpsertModels(r.Context(), id, models); err != nil {
 		s.writeStoreErr(w, err)
@@ -759,7 +763,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 		defer cancel()
-		res := s.tester.ProtocolSweep(ctx, acct, key, models, registration.Options{
+		res := s.tester.ProtocolSweep(ctx, acct, key, sweepModels, registration.Options{
 			Surfaces:       surfaces,
 			ProbeMaxModels: maxModels,
 		})
@@ -866,6 +870,115 @@ func (s *Server) handleSetModelPin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"model": model, "pin": pin, "force": body.Force})
+}
+
+// handleSetModelProtocol records operator-curated protocol verdicts.
+//
+// Body: {"model": "<id>", "proto_openai": true|false|null, "proto_anthropic":
+// ..., "proto_responses": ..., "note": "<why>", "release": bool}
+// The model id travels in the body, not the path: ids can contain "/".
+// Each proto_* verdict is three-state: absent keeps the recorded value, null
+// clears it to untested, true/false records the verdict. A non-release write
+// requires a note — the audit trail for why the fact is curated — and
+// protects the row from probe sweeps until released. release=true hands the
+// row back to the sweep: verdicts stay as recorded, source and note clear.
+func (s *Server) handleSetModelProtocol(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Model     string          `json:"model"`
+		OpenAI    json.RawMessage `json:"proto_openai"`
+		Anthropic json.RawMessage `json:"proto_anthropic"`
+		Responses json.RawMessage `json:"proto_responses"`
+		Note      string          `json:"note"`
+		Release   bool            `json:"release"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	if body.Model == "" {
+		writeErr(w, http.StatusBadRequest, "bad_request", "model is required")
+		return
+	}
+	present := 0
+	for _, raw := range []json.RawMessage{body.OpenAI, body.Anthropic, body.Responses} {
+		if len(raw) != 0 {
+			present++
+		}
+	}
+	if body.Release && present > 0 {
+		writeErr(w, http.StatusBadRequest, "bad_request", "release cannot be combined with proto_* verdicts")
+		return
+	}
+	if !body.Release && present == 0 {
+		writeErr(w, http.StatusBadRequest, "bad_request", "at least one proto_* verdict is required (or release=true)")
+		return
+	}
+	if !body.Release && strings.TrimSpace(body.Note) == "" {
+		writeErr(w, http.StatusBadRequest, "bad_request", "note is required: it is the audit trail for a curated fact")
+		return
+	}
+	edits := map[string]store.ProtoEdit{}
+	for name, raw := range map[string]json.RawMessage{
+		"openai": body.OpenAI, "anthropic": body.Anthropic, "responses": body.Responses,
+	} {
+		if len(raw) == 0 {
+			continue
+		}
+		edit := store.ProtoEdit{Present: true}
+		switch string(raw) {
+		case "null":
+		case "true":
+			v := true
+			edit.Value = &v
+		case "false":
+			v := false
+			edit.Value = &v
+		default:
+			writeErr(w, http.StatusBadRequest, "bad_request", "proto_"+name+" must be true, false, or null")
+			return
+		}
+		edits[name] = edit
+	}
+	// 404 on an unknown model — the same typo protection as the pin route.
+	model := body.Model
+	entries, err := s.db.ListModels(r.Context(), id)
+	if err != nil {
+		s.writeStoreErr(w, err)
+		return
+	}
+	found := false
+	for i := range entries {
+		if entries[i].ID == model {
+			found = true
+			break
+		}
+	}
+	if !found {
+		writeErr(w, http.StatusNotFound, "not_found", "model not in this account's catalog")
+		return
+	}
+	if err := s.db.SetModelCurated(r.Context(), id, model, strings.TrimSpace(body.Note), edits, body.Release); err != nil {
+		s.writeStoreErr(w, err)
+		return
+	}
+	// Echo the persisted truth, not the request: absent verdicts kept their
+	// old values, and release keeps values while clearing provenance.
+	entries, err = s.db.ListModels(r.Context(), id)
+	if err != nil {
+		s.writeStoreErr(w, err)
+		return
+	}
+	for i := range entries {
+		if entries[i].ID != model {
+			continue
+		}
+		writeJSON(w, http.StatusOK, entries[i])
+		return
+	}
+	writeErr(w, http.StatusNotFound, "not_found", "model vanished while writing")
 }
 
 // handleAccountQuota performs a live quota read + snapshot now.

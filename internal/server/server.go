@@ -167,6 +167,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /admin/accounts/{id}/sync", s.admin(s.handleSync))
 	s.mux.HandleFunc("GET /admin/accounts/{id}/models", s.admin(s.handleListModels))
 	s.mux.HandleFunc("PUT /admin/accounts/{id}/model-pin", s.admin(s.handleSetModelPin))
+	// Curated capability verdicts (operator-set, probe-protected). Same
+	// body-carried model id as model-pin: ids can contain "/".
+	s.mux.HandleFunc("PUT /admin/accounts/{id}/model-protocol", s.admin(s.handleSetModelProtocol))
 	// v8: versioned model prices + derived cost (admin only — like overview,
 	// this is where detail that /healthz no longer leaks lives).
 	s.mux.HandleFunc("GET /admin/prices", s.admin(s.handleListPrices))

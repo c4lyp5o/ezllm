@@ -221,10 +221,12 @@ func (d *DB) UpsertModels(ctx context.Context, accountID int64, models []provide
 			pin                          sql.NullString
 			openai, anthropic, responses sql.NullInt64
 			testedAt                     sql.NullString
+			source, note                 sql.NullString
 		}
 		prior := map[string]modelState{}
 		prows, err := tx.QueryContext(ctx, `
-SELECT model_id, proto_pin, proto_openai, proto_anthropic, proto_responses, proto_tested_at
+SELECT model_id, proto_pin, proto_openai, proto_anthropic, proto_responses, proto_tested_at,
+       proto_source, proto_note
 FROM models WHERE account_id=?`, accountID)
 		if err != nil {
 			return err
@@ -232,7 +234,7 @@ FROM models WHERE account_id=?`, accountID)
 		for prows.Next() {
 			var id string
 			var st modelState
-			if err := prows.Scan(&id, &st.pin, &st.openai, &st.anthropic, &st.responses, &st.testedAt); err != nil {
+			if err := prows.Scan(&id, &st.pin, &st.openai, &st.anthropic, &st.responses, &st.testedAt, &st.source, &st.note); err != nil {
 				prows.Close()
 				return err
 			}
@@ -266,9 +268,10 @@ ON CONFLICT(account_id, model_id) DO UPDATE SET
 				continue // a brand-new model: nothing to carry over
 			}
 			if _, err := tx.ExecContext(ctx, `
-UPDATE models SET proto_pin=?, proto_openai=?, proto_anthropic=?, proto_responses=?, proto_tested_at=?
+UPDATE models SET proto_pin=?, proto_openai=?, proto_anthropic=?, proto_responses=?, proto_tested_at=?,
+       proto_source=?, proto_note=?
 WHERE account_id=? AND model_id=?`,
-				st.pin, st.openai, st.anthropic, st.responses, st.testedAt, accountID, m.ID); err != nil {
+				st.pin, st.openai, st.anthropic, st.responses, st.testedAt, st.source, st.note, accountID, m.ID); err != nil {
 				return err
 			}
 		}

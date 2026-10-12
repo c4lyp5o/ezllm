@@ -91,8 +91,9 @@ func surfaceName(s provider.Surface) string {
 	}
 }
 
-// checkPin enforces a model's pin against the client's surface. An unpinned
-// model passes unchanged. A lookup error FAILS CLOSED: an operator who pinned
+// checkPin enforces a model's pin against the supplied dispatch surface.
+// Native/direct callers pass the client's surface; translated combo hops pass
+// their OpenAI wire. An unpinned model passes unchanged. A lookup error FAILS CLOSED: an operator who pinned
 // a model away from a surface must not have that pin silently bypassed by a
 // transient DB error. The error is returned so the caller answers, not skips.
 func (r *Resolver) checkPin(ctx context.Context, accountID int64, model, requested string, surface provider.Surface) error {
@@ -398,10 +399,14 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 			}
 			translated = true
 		}
-		// A pin on a hop that has already been probed incapable of this surface
-		// is irrelevant: that hop is excluded before routing. For a remaining
-		// candidate, a mismatched pin is still an operator-directed hard refusal.
-		if err := r.checkPin(ctx, acct.ID, h.ModelID, name, surface); err != nil {
+		// A dropped hop's pin is irrelevant. A remaining candidate must
+		// satisfy its pin on the actual upstream wire: translation dials
+		// OpenAI, while the route retains the client's surface for attribution.
+		pinSurface := surface
+		if translated {
+			pinSurface = provider.SurfaceOpenAI
+		}
+		if err := r.checkPin(ctx, acct.ID, h.ModelID, name, pinSurface); err != nil {
 			return nil, err
 		}
 		// The rules engine's veto. In a combo this is a skip, never an error:

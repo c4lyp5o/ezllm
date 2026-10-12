@@ -316,7 +316,7 @@ func (t *Tester) Run(ctx context.Context, acct provider.Account, opts Options) *
 			return res
 		}
 		res.Steps = append(res.Steps, Step{Step: StepInference, OK: true, Detail: "skipped"})
-	} else if model := pickProbeModel(res.Catalog, acct); model == "" {
+	} else if models := pickProbeModels(res.Catalog, acct); len(models) == 0 {
 		if res.authDeferred {
 			// If the authenticated catalog already said no, THAT is the
 			// provider's verdict — lead with its own words, not our prose.
@@ -334,7 +334,7 @@ func (t *Tester) Run(ctx context.Context, acct provider.Account, opts Options) *
 			return res
 		}
 		res.Steps = append(res.Steps, Step{Step: StepInference, OK: true, Detail: "no model to probe"})
-	} else if ok, f := t.inferenceStep(ctx, adapter, acct, key, model, pace, res); !ok {
+	} else if ok, f := t.inferenceStep(ctx, adapter, acct, key, models, pace, res); !ok {
 		res.Fail = f
 		res.Detail = "failed at " + f.Step
 		return res
@@ -469,16 +469,29 @@ func (t *Tester) authGate(
 	}
 }
 
-// inferenceStep performs one real generation. When auth is still unproven this
-// call IS the gate: 401/403 here rejects the key.
-func (t *Tester) inferenceStep(
+// probeOutcome classifies ONE generation probe so the caller can decide
+// between failing the key test and trying the next catalog candidate.
+type probeOutcome int
+
+const (
+	probeOK               probeOutcome = iota // credential proven
+	probeModelUnavailable                     // this MODEL is refused; try the next candidate
+	probeFailed                               // auth/provider failure — stop
+)
+
+// probeModel runs one generation against one candidate model. Split out of
+// inferenceStep so a model-level refusal — Gemini retires models with a 404
+// ("no longer available to new users") while the catalog still lists them —
+// advances to the next candidate instead of failing a key that was never the
+// problem.
+func (t *Tester) probeModel(
 	ctx context.Context,
 	adapter provider.Adapter,
 	acct provider.Account,
 	key, model string,
 	pace *pacer,
 	res *TestResult,
-) (bool, *Failure) {
+) (probeOutcome, *Failure) {
 	surface := provider.SurfaceOpenAI
 	if acct.Kind == provider.KindAnthropicCompat {
 		surface = provider.SurfaceAnthropic
@@ -505,7 +518,10 @@ func (t *Tester) inferenceStep(
 			})
 		status, resp = ires.status, ires.body
 		elapsed = t.now().Sub(start)
-		if err == nil || !retryableStatus(status) {
+		// A quota-exhausted answer is a VERDICT, not weather: retrying spends
+		// nothing and proves nothing new.
+		if err == nil || !retryableStatus(status) ||
+			provider.ErrorCause(status, resp) == "quota_exhausted" {
 			break
 		}
 		if serr := t.sleep(ctx, backoff(attempt)); serr != nil {
@@ -530,7 +546,7 @@ func (t *Tester) inferenceStep(
 	case err == nil && status >= 200 && status < 300 && isJSON(resp):
 		res.Steps = append(res.Steps, Step{Step: StepInference, OK: true,
 			Detail: fmt.Sprintf("%s · %dms", model, msAtLeastOne(elapsed))})
-		return true, nil
+		return probeOK, nil
 
 	case err == nil && status >= 200 && status < 300:
 		f := &Failure{
@@ -539,7 +555,7 @@ func (t *Tester) inferenceStep(
 			Hint:    "The credential was not proven. Check base_url — an interstitial page suggests the URL is wrong.",
 		}
 		res.Steps = append(res.Steps, Step{Step: StepInference, OK: false, Detail: f.Message})
-		return false, f
+		return probeFailed, f
 
 	case isAuthStatus(status):
 		f := authFailure(StepInference, probeStatusError(status, resp), adapter)
@@ -547,7 +563,7 @@ func (t *Tester) inferenceStep(
 			f.Hint = "The provider's catalog/usage endpoints are public, so this generation call was the only credential check. It was rejected: the key is invalid."
 		}
 		res.Steps = append(res.Steps, Step{Step: StepInference, OK: false, Detail: f.Message})
-		return false, f
+		return probeFailed, f
 
 	case isOllamaCloud(acct) && isPlanGatedError(status, resp):
 		// This exact Ollama Cloud response means the request passed credential
@@ -557,7 +573,28 @@ func (t *Tester) inferenceStep(
 		// hard credential failure because this branch follows isAuthStatus.
 		res.Steps = append(res.Steps, Step{Step: StepInference, OK: true,
 			Detail: fmt.Sprintf("credential accepted; %s is not included in this plan", model)})
-		return true, nil
+		return probeOK, nil
+
+	case err == nil && provider.ErrorCause(status, resp) == "quota_exhausted":
+		// A valid credential with an empty balance: the provider
+		// authenticated this key and then refused to spend. OpenAI answers
+		// 429 insufficient_quota / credit_balance_exhausted here, where a bad
+		// key would have been 401 — so the key is PROVEN and only generation
+		// is blocked until a top-up. Rejecting the key would be a lie.
+		res.Steps = append(res.Steps, Step{Step: StepInference, OK: true,
+			Detail: "credential accepted; provider reports no remaining quota/credits — top up before real traffic"})
+		return probeOK, nil
+
+	case err == nil && isModelUnavailable(status, resp):
+		f := &Failure{
+			Step:           StepInference,
+			Message:        fmt.Sprintf("%s unavailable to this account (HTTP %d)", model, status),
+			UpstreamStatus: status,
+			UpstreamError:  upstreamErr(resp),
+			Hint:           "The provider retired or gated this model. The probe tries the next catalog candidate.",
+		}
+		res.Steps = append(res.Steps, Step{Step: StepInference, OK: false, Detail: f.Message})
+		return probeModelUnavailable, f
 
 	default:
 		f := &Failure{
@@ -569,8 +606,50 @@ func (t *Tester) inferenceStep(
 			Retryable:      retryableStatus(status),
 		}
 		res.Steps = append(res.Steps, Step{Step: StepInference, OK: false, Detail: f.Message})
-		return false, f
+		return probeFailed, f
 	}
+}
+
+// inferenceStep runs the generation probe over the candidate list, advancing
+// when a model itself is refused. Returns true when the credential is proven —
+// a successful generation, a plan-gated refusal, or an out-of-credits refusal,
+// all of which a provider only says to a valid key. When auth is still
+// unproven this call IS the gate: 401/403 here rejects the key.
+func (t *Tester) inferenceStep(
+	ctx context.Context,
+	adapter provider.Adapter,
+	acct provider.Account,
+	key string,
+	models []string,
+	pace *pacer,
+	res *TestResult,
+) (bool, *Failure) {
+	var last *Failure
+	for i, model := range models {
+		outcome, f := t.probeModel(ctx, adapter, acct, key, model, pace, res)
+		switch outcome {
+		case probeOK:
+			return true, nil
+		case probeModelUnavailable:
+			last = f
+			if i+1 < len(models) {
+				res.Steps = append(res.Steps, Step{Step: StepInference, OK: false,
+					Detail: fmt.Sprintf("%s unavailable — falling back to %s", model, models[i+1])})
+				continue
+			}
+			return false, f
+		default:
+			return false, f
+		}
+	}
+	if last == nil {
+		last = &Failure{
+			Step:    StepInference,
+			Message: "no model to probe",
+			Hint:    "The catalog listed no chat-capable model to test with.",
+		}
+	}
+	return false, last
 }
 
 // ProtocolSweep probes surfaces × sampled models and classifies each response.
@@ -928,13 +1007,44 @@ func upstreamMessage(m map[string]any) string {
 
 // ── model selection ─────────────────────────────────────────────────────────
 
-// pickProbeModel chooses the cheapest catalog model for the inference probe.
-// For Ollama Cloud, the catalog includes models unavailable on a free plan; use
-// the documented free-plan model first rather than a generic "flash" model
-// (which may be catalogued but plan-gated). The provider check is deliberately
-// scoped to the exact public hostname, not an account-supplied name/namespace.
-func pickProbeModel(models []provider.ModelInfo, acct provider.Account) string {
+// probeCandidates caps how many models ONE key test may probe: the first
+// candidate proves the key in the normal case, and the rest exist so a retired
+// or plan-gated model cannot fail a key that was never the problem.
+const probeCandidates = 3
+
+// nonChatModelMarkers are catalog ids that can never answer a chat probe.
+// Probing one wastes a call and can look like a credential failure.
+var nonChatModelMarkers = []string{
+	"embed", "imagen", "image", "tts", "audio", "speech", "transcribe",
+	"whisper", "guard", "rerank", "moderation", "veo", "aqa", "realtime",
+	"dall-e", "orpheus",
+}
+
+func chatsLikeProbe(id string) bool {
+	lower := strings.ToLower(id)
+	for _, marker := range nonChatModelMarkers {
+		if strings.Contains(lower, marker) {
+			return false
+		}
+	}
+	return true
+}
+
+// pickProbeModels returns the ordered inference-probe candidates (at most
+// probeCandidates): the cheapest-looking chat models from the account's OWN
+// catalog, best guess first. The candidate list matters because a model can be
+// catalogued and still refuse generation — Gemini retires models with a 404
+// ("no longer available to new users") while still listing them — and that
+// must never read as a bad credential.
+//
+// For Ollama Cloud the catalog includes models unavailable on a free plan, so
+// the documented free-plan models lead and a generic "flash" match is refused
+// outright (probing one can reject a perfectly good free-plan key). The
+// provider check is scoped to the exact public hostname, not an account-
+// supplied name/namespace.
+func pickProbeModels(models []provider.ModelInfo, acct provider.Account) []string {
 	if isOllamaCloud(acct) {
+		out := []string{}
 		for _, preferred := range []string{
 			"gemma4:31b",
 			"gpt-oss:20b",
@@ -945,49 +1055,95 @@ func pickProbeModel(models []provider.ModelInfo, acct provider.Account) string {
 		} {
 			for _, model := range models {
 				if strings.EqualFold(model.ID, preferred) {
-					return model.ID
+					out = append(out, model.ID)
 				}
 			}
 		}
-		// Never fall through to a generic "flash/mini" match for Ollama Cloud:
-		// its public catalog includes paid models, and probing one can reject a
-		// perfectly good free-plan key. If the catalog doesn't list any free
-		// entitlement candidates, skip inference; because /v1/models is public,
-		// the existing fake-key calibration correctly refuses to store an
-		// unproven key instead of testing a paid model.
-		return ""
+		if len(out) > probeCandidates {
+			out = out[:probeCandidates]
+		}
+		return out
 	}
 	if len(models) == 0 {
 		if acct.Kind == provider.KindOpenCodeGo {
-			return "deepseek-v4.1-flash" // verified cheap + present on this kind
+			return []string{"deepseek-v4.1-flash"} // verified cheap + present on this kind
 		}
-		return ""
+		return nil
 	}
 	ids := make([]string, 0, len(models))
+	seen := map[string]bool{}
 	for _, m := range models {
-		if m.ID != "" {
-			ids = append(ids, m.ID)
+		if m.ID == "" || seen[m.ID] || !chatsLikeProbe(m.ID) {
+			continue
 		}
+		seen[m.ID] = true
+		ids = append(ids, m.ID)
 	}
 	if len(ids) == 0 {
-		return ""
+		return nil
+	}
+	out := []string{}
+	add := func(id string) {
+		for _, existing := range out {
+			if existing == id {
+				return
+			}
+		}
+		out = append(out, id)
 	}
 	for _, k := range []string{"deepseek-v4.1-flash", "qwen3.8-flash", "minimax-m3"} {
 		for _, id := range ids {
 			if id == k {
-				return id
+				add(id)
 			}
 		}
 	}
 	for _, p := range []string{"flash", "mini", "haiku", "nano", "lite", "free", "instant", "small"} {
 		for _, id := range ids {
 			if strings.Contains(strings.ToLower(id), p) {
-				return id
+				add(id)
 			}
 		}
 	}
-	sort.Strings(ids) // deterministic fallback
-	return ids[0]
+	sorted := append([]string{}, ids...)
+	sort.Strings(sorted) // deterministic fallback
+	for _, id := range sorted {
+		add(id)
+	}
+	if len(out) > probeCandidates {
+		out = out[:probeCandidates]
+	}
+	return out
+}
+
+// pickProbeModel is the single-candidate view of pickProbeModels — the best
+// guess alone, for callers that do not run the fallback loop.
+func pickProbeModel(models []provider.ModelInfo, acct provider.Account) string {
+	if candidates := pickProbeModels(models, acct); len(candidates) > 0 {
+		return candidates[0]
+	}
+	return ""
+}
+
+// isModelUnavailable reports a refusal about THIS MODEL rather than about the
+// credential or the provider: Gemini's retired-model 404 ("This model
+// models/gemini-2.5-flash is no longer available to new users"), a
+// model_not_found body, or a bare 404 on the generation path. Auth statuses are
+// excluded on purpose — a 401/403 stays a credential verdict.
+func isModelUnavailable(status int, body []byte) bool {
+	if status < 400 || status >= 500 || isAuthStatus(status) {
+		return false
+	}
+	text := strings.ToLower(string(body))
+	for _, marker := range []string{
+		"no longer available", "does not exist", "deactivated",
+		"model_not_found", "unknown model", "not a valid model",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return status == http.StatusNotFound
 }
 
 func isOllamaCloud(acct provider.Account) bool {

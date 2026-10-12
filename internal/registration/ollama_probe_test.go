@@ -89,7 +89,7 @@ func TestOllamaPlanGatedGenerationIsAcceptedWithClearStep(t *testing.T) {
 	tester.adapter = adapter
 	acct := provider.Account{Kind: provider.KindOpenAICompatible, BaseURL: "https://ollama.com/v1", Namespace: "test-ollama"}
 	res := &TestResult{}
-	ok, failure := tester.inferenceStep(context.Background(), adapter, acct, key, "deepseek-v4.1-flash", &pacer{}, res)
+	ok, failure := tester.inferenceStep(context.Background(), adapter, acct, key, []string{"deepseek-v4.1-flash"}, &pacer{}, res)
 	if !ok || failure != nil {
 		t.Fatalf("plan-gated valid key should be accepted: ok=%v failure=%+v", ok, failure)
 	}

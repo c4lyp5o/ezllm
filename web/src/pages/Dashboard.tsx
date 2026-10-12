@@ -213,8 +213,7 @@ function RecentCalls({ o }: { o: Overview }) {
                 <th className="px-3 py-2.5 text-right font-medium">total</th>
                 <th className="px-3 py-2.5 text-right font-medium">in</th>
                 <th className="px-3 py-2.5 text-right font-medium">out</th>
-                <th className="px-3 py-2.5 text-right font-medium">saved</th>
-                <th className="px-5 py-2.5 text-right font-medium" title="profile applied; held = what a REJECTED rewrite would have saved (tuning data)">compression</th>
+                <th className="px-5 py-2.5 text-right font-medium" title="profile applied; saved = tokens a shipped rewrite removed; held = what a REJECTED rewrite would have saved (tuning data)">compression</th>
               </tr>
             </thead>
             <tbody className="font-mono tnum">
@@ -280,9 +279,6 @@ function RecentCalls({ o }: { o: Overview }) {
                       )}
                     </td>
                     <td className="px-3 py-2 text-right text-dim">{nfmt(r.tout)}</td>
-                    <td className="px-3 py-2 text-right">
-                      {r.saved > 0 ? <span className="text-ok">−{formatTokens(r.saved)}</span> : <span className="text-mute">–</span>}
-                    </td>
                     <td className="px-5 py-2 text-right font-sans">
                       {r.compression ? (
                         <>
@@ -292,17 +288,36 @@ function RecentCalls({ o }: { o: Overview }) {
                               r.applied ? 'bg-ok-dim text-ok' : 'bg-shade text-mute')}>
                             {r.compression === 'off' ? 'off' : r.compression}
                           </span>
-                          {/* Row 2 of the same cell: held tokens — what a
-                              REJECTED rewrite would have saved. Tuning data,
-                              never real savings. */}
-                          {!r.applied && (r.saved_notional ?? 0) > 0 && (
-                            <div className="mt-0.5 text-[10px] text-warn"
-                              title="held: a rewrite was rejected by the ratio floor — this is what it would have saved">
-                              held {formatTokens(r.saved_notional ?? 0)}
+                          {/* Row 2 of the same cell: saved + held, consolidated
+                              from the old standalone Saved column. `saved` is a
+                              rewrite that SHIPPED (real tokens removed); `held`
+                              is what a REJECTED rewrite would have saved —
+                              tuning data, never real savings. Saved keeps its
+                              own status color, held stays amber. */}
+                          {((r.applied && r.saved > 0) || (!r.applied && (r.saved_notional ?? 0) > 0)) && (
+                            <div className="mt-0.5 text-[10px]">
+                              {r.applied && r.saved > 0 && (
+                                <span className="text-ok"
+                                  title={`compressed by ${r.compression}: ${nfmt(r.saved)} tokens removed`}>
+                                  saved {formatTokens(r.saved)}
+                                </span>
+                              )}
+                              {!r.applied && (r.saved_notional ?? 0) > 0 && (
+                                <span className="text-warn"
+                                  title="held: a rewrite was rejected by the ratio floor — this is what it would have saved">
+                                  {' '}held {formatTokens(r.saved_notional ?? 0)}
+                                </span>
+                              )}
                             </div>
                           )}
                         </>
-                      ) : <span className="text-mute">–</span>}
+                      ) : (
+                        // No profile on this call — the savings column still
+                        // earns its place: a saved-only row is real data.
+                        r.saved > 0
+                          ? <span className="text-ok" title={`${nfmt(r.saved)} tokens removed by compression`}>saved {formatTokens(r.saved)}</span>
+                          : <span className="text-mute">–</span>
+                      )}
                     </td>
                   </tr>
                 );

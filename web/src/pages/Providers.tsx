@@ -102,12 +102,16 @@ const PROVIDER_PRESETS: Record<string, { label: string; kind: string; baseURL?: 
   // exactly like tokenrouter's slash-ids already do).
   'vercel-ai-gateway': { label: 'Vercel AI Gateway', kind: 'openai-compatible', baseURL: 'https://ai-gateway.vercel.sh/v1' },
   'ollama-cloud': { label: 'Ollama Cloud', kind: 'openai-compatible', baseURL: 'https://ollama.com/v1' },
-  'gemini': { label: 'Gemini (API key)', kind: 'gemini-openai', baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai' },
+  'gemini': { label: 'Google AI Studio', kind: 'gemini-openai', baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai' },
   'openai': { label: 'OpenAI', kind: 'openai-compatible', baseURL: 'https://api.openai.com/v1' },
   'openai-compatible': { label: 'OpenAI-compatible', kind: 'openai-compatible' },
   'anthropic-compatible': { label: 'Anthropic-compatible', kind: 'anthropic-compatible' },
 };
 const PRESET_IDS = Object.keys(PROVIDER_PRESETS);
+// The add-provider dropdown reads in label order (babe's ask): a copy, so the
+// insertion order above stays the documented canonical list.
+const sortedPresetIDs = () =>
+  [...PRESET_IDS].sort((a, b) => PROVIDER_PRESETS[a].label.localeCompare(PROVIDER_PRESETS[b].label));
 
 // Endpoints the gateway already knows: every preset plus the two big public
 // APIs. Once an account points at one of these, the base URL is fixed — editing
@@ -248,7 +252,7 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
               const preset = PROVIDER_PRESETS[presetID];
               setD((p) => ({ ...p, preset: presetID, kind: preset.kind, base_url: preset.baseURL ?? '', requiresSessionHeader: preset.sessionHeader ?? false }));
             }}>
-              {PRESET_IDS.map((presetID) => <option key={presetID} value={presetID}>{PROVIDER_PRESETS[presetID].label}</option>)}
+              {sortedPresetIDs().map((presetID) => <option key={presetID} value={presetID}>{PROVIDER_PRESETS[presetID].label}</option>)}
             </select>
           </div>
           <div>
@@ -965,7 +969,9 @@ export default function Providers() {
         </div>
       ) : (
         <div className="space-y-3">
-          {accounts.map((a) => (
+          {/* Alphabetical by namespace — the add-provider preset list sorts the
+              same way, so the two lists read in one order. */}
+          {[...accounts].sort((a, b) => a.namespace.localeCompare(b.namespace)).map((a) => (
             <AccountCard key={a.id} a={a} onChanged={() => load(true)}
               quotaBusy={quotaBusy === a.id}
               onReloadQuota={() => void reloadQuota(a.id)} />

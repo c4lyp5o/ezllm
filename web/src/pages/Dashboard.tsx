@@ -238,7 +238,9 @@ function RecentCalls({ o }: { o: Overview }) {
                       {(r.block_pos ?? 0) > 0 && (
                         <div className="mt-0.5 text-[10px] text-mute"
                           title={cursor
-                            ? `block_round_robin: dispatch ${r.block_pos} of ${cursor.block_size}; ${cursor.hop} owns the current block (${cursor.remaining} left)`
+                            ? cursor.hop
+                              ? `block_round_robin: dispatch ${r.block_pos} of ${cursor.block_size}; ${cursor.hop} owns the current block (${cursor.remaining} left)${cursor.reason ? ` — this block started: ${cursor.reason}` : ''}`
+                              : `block_round_robin: dispatch ${r.block_pos} of ${cursor.block_size}; no live block yet (${cursor.reason || 'cold start'} — nothing has dispatched on this combo since the last restart)`
                             : `block_round_robin: dispatch ${r.block_pos} of its block`}>
                           ▮ {r.block_pos}{cursor ? `/${cursor.block_size}` : ''}
                         </div>

@@ -554,6 +554,13 @@ type BlockCursor struct {
 	Hop       string `json:"hop"`   // namespace/model owning the current block
 	Remaining int    `json:"remaining"`
 	BlockSize int    `json:"block_size"`
+	// Reason is WHY this block started: "cold start" (first dispatch, or after
+	// a restart), "block complete" (the previous block ran its N), or "block
+	// hop left candidates" (the owner dropped out of the eligible list).
+	// It was logged once per advance and nowhere else — so a block that
+	// advanced early looked identical, in the dashboard, to one that rotated
+	// on schedule. Empty for a seeded (no live block yet) cursor.
+	Reason string `json:"reason,omitempty"`
 }
 
 // BlockCursors snapshots the live block_round_robin cursors. Entries that
@@ -571,6 +578,7 @@ func (r *Resolver) BlockCursors() []BlockCursor {
 			out = append(out, BlockCursor{
 				Combo: e.combo, Hop: e.ns + "/" + e.model,
 				Remaining: e.remaining, BlockSize: e.size,
+				Reason: e.reason,
 			})
 		}
 		e.mu.Unlock()
@@ -608,6 +616,10 @@ type blockEntry struct {
 	model     string
 	remaining int
 	size      int // effective block size for this block
+	// reason is the last advance's reason (the same word the "block advance"
+	// log line carries), retained so the dashboard can show WHY this hop
+	// owns the block, not just that it does.
+	reason string
 }
 
 // blockOrder implements block_round_robin: one hop serves BlockSize consecutive
@@ -676,6 +688,7 @@ func blockOrder(combo *store.Combo, routes []proxy.Route) ([]proxy.Route, int) {
 		e.ns = routes[next].Account.Namespace
 		e.remaining = size
 		e.size = size
+		e.reason = reason
 		target = next
 		// The cursor is in-process state with no other visibility: a block that
 		// advances early (eligibility flap) or never advances (a sticky

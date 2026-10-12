@@ -261,6 +261,11 @@ export type Overview = {
 
 export type BlockCursor = {
   combo: string; hop: string; remaining: number; block_size: number;
+  /** Why this block started: 'cold start' | 'block complete' | 'block hop left
+   *  candidates'. Empty/absent on a SEEDED cursor — an enabled block combo that
+   *  has not dispatched since the last restart, so its size is known but no hop
+   *  owns a live block yet. */
+  reason?: string;
 };
 
 // ── Usage granularity (M5) ─────────────────────────────────────────────────

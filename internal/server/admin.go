@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -179,6 +180,29 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	cursors := []router.BlockCursor{}
 	if s.resolver != nil {
 		cursors = s.resolver.BlockCursors()
+		// After a restart (or before a combo's first dispatch) the in-process
+		// map is empty, and the recent-calls table then renders a bare "▮ 1"
+		// for rows whose "/N" lived only in the cursor. Seed the size from the
+		// combo row so the by-name join always finds block_size; hop/remaining
+		// stay empty = no live block yet. Disabled combos are skipped (the
+		// resolver refuses them, so their rows are historical).
+		if combos, cerr := s.db.ListCombos(ctx); cerr == nil {
+			have := make(map[string]bool, len(cursors))
+			for _, c := range cursors {
+				have[c.Combo] = true
+			}
+			for _, c := range combos {
+				if !c.Enabled || c.Strategy != "block_round_robin" || have[c.Name] {
+					continue
+				}
+				size := c.BlockSize
+				if size < 1 {
+					size = 1
+				}
+				cursors = append(cursors, router.BlockCursor{Combo: c.Name, BlockSize: size, Reason: "cold start"})
+			}
+			sort.Slice(cursors, func(i, j int) bool { return cursors[i].Combo < cursors[j].Combo })
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"health":           health,

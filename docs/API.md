@@ -69,6 +69,8 @@ where the detail that `/healthz` no longer leaks lives.)
   "id":1, "name":"OpenCode Go", "namespace":"opengo", "kind":"opencode-go",
   "base_url":"https://opencode.ai/zen/go/v1", "enabled":true,
   "probe_delay_ms":400, "cap_window":"monthly", "cap_tokens":0,
+  "usage_convention":"auto",   // schema v13: how the upstream Messages wire counts
+                               // input_tokens — auto|anthropic|total
   "keys":[ {"id":9,"label":"primary","hint":"sk…5E5i","enabled":true,
              "last_test_at":"…","last_test_ok":true,"last_test_detail":"200 · 36 models · auth ok · quota=percent"} ],
   "quota": { "kind":"percent", "percent_rolling":0, "percent_weekly":7, "percent_monthly":12,
@@ -145,6 +147,11 @@ it is directional dashboard guidance, not a statistical claim.
 ```
 `kind` ∈ `opencode-go|openai-compatible|anthropic-compatible|gemini-openai`. `namespace`:
 `^[a-z0-9][a-z0-9._-]{0,62}$` and must not contain `/`. Unique → `409`.
+`usage_convention` (schema v13, optional; default `auto`) is the operator-declared input
+accounting of the upstream **Messages** wire: `auto` = unstated (never inferred from `kind` or
+`base_url`; cross-wire conversions onto a Messages upstream are refused), `anthropic` =
+`input_tokens` EXCLUDES cache tokens, `total` = `input_tokens` INCLUDES cache tokens. See
+`docs/usage-convention-design.md`.
 For `anthropic-compatible`, `base_url` is the host only (e.g. `https://api.anthropic.com`) —
 the `/v1` version segment is appended automatically (`/v1/messages`, `/v1/models`).
 `gemini-openai` is Google's OpenAI-compatible endpoint (`…/v1beta/openai`): it answers a bad
@@ -156,6 +163,8 @@ Returns the `AccountSummary`.
 
 ### `GET|PATCH|DELETE /admin/accounts/{id}`
 `PATCH` accepts any subset of the create fields (namespace change allowed — it re-points routing).
+Absent fields keep their current values — including `usage_convention`; an invalid value is
+`422` naming the field and leaves the stored value untouched.
 `DELETE` → **`409`** when combos reference it, body lists the combos:
 ```jsonc
 {"error":{"type":"conflict","message":"account referenced by 2 combos",

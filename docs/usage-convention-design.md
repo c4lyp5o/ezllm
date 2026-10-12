@@ -1,8 +1,9 @@
 # Usage convention design — one meaning for `tokens_in`
 
-Sign-off doc for Phase 1 item 1 of the Claude Code breakage. Status: **DECISIONS locked,
-implementation NOT started** (needs a schema migration; see "Deployment" for why it is not
-in the same patch as items 2–3).
+Sign-off doc for Phase 1 item 1 of the Claude Code breakage. Status: **D1 shipped** (schema
+v13: the per-account fact, its validation, PATCH semantics and the read projections — see
+"Implementation status" below). **D2 (ledger `NormalizeUsageShape`), D4 (verification probe)
+and D5 (historical backfill) remain open** and are deliberately NOT in that patch.
 
 ## The problem
 
@@ -94,6 +95,25 @@ upgrade migration — rehearse it on a COPY of the live sqlite (online backup AP
 
 Ships as its own commit after items 2–3, because it needs the migration rehearsal above and a
 prod redeploy to take effect. Items 2–3 are process-local and need neither.
+
+## Implementation status (2026-10-13, schema v13)
+
+- **D1 landed** as `accounts.usage_convention TEXT NOT NULL DEFAULT 'auto'` with values
+  exactly as decided. Fresh schema + guarded forward migration in both migrate branches;
+  `provider.Account` and both read paths carry it; `GET|PATCH /admin/accounts/{id}` expose it;
+  the catalog/registration upsert deliberately does not touch it (refresh survival).
+  Absent PATCH keeps, `auto` is the documented reset, an invalid value is `422` naming the
+  field and nothing is written. Rehearsed on an online-backup copy of the live DB:
+  v11 → v13 with every table count preserved and all rows at `auto`; the copy was deleted.
+- **Meaning of `auto`** is "unstated", which is why it is both today's ledger behaviour
+  (D1) and a *refusal* for cross-wire conversions onto a Messages upstream (the wire-matrix
+  prerequisite: an unstated convention must never be guessed). `anthropic`/`total` are the
+  only values a cross-wire Messages destination accepts.
+- **D3's arithmetic guard** exists in the codec layer (`translate.NormalizeMessagesUsage`):
+  a declared `total` whose `input_tokens < cache_read_input_tokens` is read as exclusive
+  instead of producing a negative cache split. The ledger side of D3 rides with D2.
+- The universal wire matrix consumes the fact via `translate.UsageConventionOf` — the guard
+  that refuses a Messages destination on an unstated account.
 
 ## Related
 

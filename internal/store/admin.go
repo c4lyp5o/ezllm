@@ -37,6 +37,9 @@ type AccountSummary struct {
 	QuotaMode       string `json:"quota_mode"`
 	CapWindow       string `json:"cap_window"`
 	CapTokens       int64  `json:"cap_tokens"`
+	// UsageConvention is the operator-declared input_tokens accounting of the
+	// upstream Messages wire: auto (unknown) | anthropic | total.
+	UsageConvention provider.UsageConvention `json:"usage_convention"`
 	// RateLimit/RateWindow express the account's request ceiling as the
 	// provider states it ("5 requests per 1 minute"), not as a token budget:
 	// five calls to five different models spend the same 5/min tier, which no
@@ -87,7 +90,7 @@ func (d *DB) ListAccounts(ctx context.Context) ([]AccountSummary, error) {
 SELECT id, name, namespace, kind, base_url, enabled, requires_session_header,
        quota_mode, cap_window, cap_tokens, COALESCE(probe_delay_ms,400),
        COALESCE(rate_limit,0), COALESCE(rate_window,''),
-       COALESCE(notes,''), created_at, updated_at
+       COALESCE(notes,''), created_at, updated_at, COALESCE(usage_convention,'auto')
 FROM accounts ORDER BY namespace`)
 	if err != nil {
 		return nil, err
@@ -100,7 +103,7 @@ FROM accounts ORDER BY namespace`)
 		if err := rows.Scan(&a.ID, &a.Name, &a.Namespace, &a.Kind, &a.BaseURL, &a.Enabled,
 			&a.RequiresSession, &a.QuotaMode, &a.CapWindow, &a.CapTokens,
 			&a.ProbeDelayMS, &a.RateLimit, &a.RateWindow,
-			&a.Notes, &a.CreatedAt, &a.UpdatedAt); err != nil {
+			&a.Notes, &a.CreatedAt, &a.UpdatedAt, &a.UsageConvention); err != nil {
 			return nil, err
 		}
 		out = append(out, a)
@@ -224,6 +227,9 @@ type AccountInput struct {
 	RateLimit  *int64 `json:"rate_limit"`
 	RateWindow string `json:"rate_window"`
 	Notes      string `json:"notes"`
+	// UsageConvention: '' = keep current (PATCH) / default 'auto' (create);
+	// otherwise auto|anthropic|total. See provider.UsageConvention.
+	UsageConvention string `json:"usage_convention"`
 }
 
 // ErrConflict marks a uniqueness clash (409): namespace or name taken, or a
@@ -280,6 +286,11 @@ func ValidateAccountInput(in AccountInput) error {
 	}
 	if err := validateRate(in.RateLimit, in.RateWindow); err != nil {
 		return err
+	}
+	if in.UsageConvention != "" {
+		if _, err := provider.ParseUsageConvention(in.UsageConvention); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -407,12 +418,18 @@ func (d *DB) UpdateAccount(ctx context.Context, id int64, in AccountInput) error
 	if in.Notes == "" {
 		in.Notes = cur.Notes
 	}
+	if in.UsageConvention == "" {
+		in.UsageConvention = string(cur.UsageConvention)
+	}
 	kind, err := provider.ParseKind(in.Kind)
 	if err != nil {
 		return err
 	}
-	if _, err := d.writeAccount(ctx, id, in, kind); err != nil && isUniqueViolation(err) {
-		return &ErrConflict{What: "namespace or name already in use"}
+	if _, err := d.writeAccount(ctx, id, in, kind); err != nil {
+		if isUniqueViolation(err) {
+			return &ErrConflict{What: "namespace or name already in use"}
+		}
+		return err
 	}
 	return nil
 }
@@ -438,6 +455,14 @@ func (d *DB) writeAccount(ctx context.Context, id int64, in AccountInput, kind p
 	if capWindow == "" {
 		capWindow = "monthly"
 	}
+	usageConvention := in.UsageConvention
+	if usageConvention == "" {
+		usageConvention = string(provider.UsageConventionAuto)
+	}
+	parsedUsage, err := provider.ParseUsageConvention(usageConvention)
+	if err != nil {
+		return 0, err
+	}
 	enabled, requires := 1, 0
 	if in.Enabled != nil && !*in.Enabled {
 		enabled = 0
@@ -461,15 +486,16 @@ func (d *DB) writeAccount(ctx context.Context, id int64, in AccountInput, kind p
 	}
 
 	var newID int64
-	err := d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+	err = d.WithWriteTx(ctx, func(tx *sql.Tx) error {
 		if id == 0 {
 			res, err := tx.ExecContext(ctx, `
 INSERT INTO accounts (name, namespace, kind, base_url, enabled, requires_session_header,
                       quota_mode, custom_headers, probe_delay_ms, cap_window, cap_tokens,
-                      rate_limit, rate_window, notes)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                      rate_limit, rate_window, notes, usage_convention)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 				in.Name, in.Namespace, string(kind), in.BaseURL, enabled, requires,
-				quotaMode, ch, probe, capWindow, capTokens, rateLimit, rateWindow, in.Notes)
+				quotaMode, ch, probe, capWindow, capTokens, rateLimit, rateWindow, in.Notes,
+				parsedUsage)
 			if err != nil {
 				return err
 			}
@@ -480,10 +506,11 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 UPDATE accounts SET name=?, namespace=?, kind=?, base_url=?, enabled=?,
        requires_session_header=?, quota_mode=?, custom_headers=?, probe_delay_ms=?,
        cap_window=?, cap_tokens=?, rate_limit=?, rate_window=?, notes=?,
-       updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+       usage_convention=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
 WHERE id=?`,
 			in.Name, in.Namespace, string(kind), in.BaseURL, enabled, requires,
-			quotaMode, ch, probe, capWindow, capTokens, rateLimit, rateWindow, in.Notes, id)
+			quotaMode, ch, probe, capWindow, capTokens, rateLimit, rateWindow, in.Notes,
+			parsedUsage, id)
 		if err != nil {
 			return err
 		}

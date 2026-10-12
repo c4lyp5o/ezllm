@@ -1,5 +1,11 @@
 package translate
 
+import (
+	"fmt"
+
+	"github.com/c4lyp5o/ezllm/internal/provider"
+)
+
 // ResponseIR is used only by cross-wire codecs. Native bodies bypass it.
 // Identity and created time come from the source; generated identities/times
 // (when a source lacks them) are per-response, never fixed fixture constants.
@@ -63,6 +69,20 @@ const (
 	UsageExclusive UsageConvention = "anthropic"
 	UsageInclusive UsageConvention = "total"
 )
+
+// UsageConventionOf maps the stored per-account fact onto the codec
+// primitive. 'auto' (or unset) is NOT a convention: a cross-wire Messages
+// destination must refuse rather than guess whether input_tokens already
+// includes cache tokens, so callers treat an error as "cannot convert".
+func UsageConventionOf(m provider.UsageConvention) (UsageConvention, error) {
+	switch m {
+	case provider.UsageConventionAnthropic:
+		return UsageExclusive, nil
+	case provider.UsageConventionTotal:
+		return UsageInclusive, nil
+	}
+	return UsageUnknown, fmt.Errorf("translate: account messages usage convention is unknown — set usage_convention to anthropic or total")
+}
 
 type ErrorIR struct {
 	Type    string `json:"type"`

@@ -29,7 +29,8 @@ func (d *DB) AccountByNamespace(ctx context.Context, ns string) (*provider.Accou
 	row := d.r.QueryRowContext(ctx, `
 SELECT id, name, namespace, kind, base_url, enabled, requires_session_header,
        COALESCE(custom_headers,''), COALESCE(probe_delay_ms,400),
-       COALESCE(rate_limit,0), COALESCE(rate_window,'')
+       COALESCE(rate_limit,0), COALESCE(rate_window,''),
+       COALESCE(usage_convention,'auto')
 FROM accounts WHERE namespace = ?`, ns)
 	var (
 		a             provider.Account
@@ -42,7 +43,8 @@ FROM accounts WHERE namespace = ?`, ns)
 		rateWindow    string
 	)
 	if err := row.Scan(&a.ID, &a.Name, &a.Namespace, &kind, &a.BaseURL, &enabled,
-		&needsSession, &customHeaders, &probeDelay, &rateLimit, &rateWindow); err != nil {
+		&needsSession, &customHeaders, &probeDelay, &rateLimit, &rateWindow,
+		&a.UsageConvention); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -71,7 +73,8 @@ func (d *DB) AccountByID(ctx context.Context, id int64) (*provider.Account, erro
 	row := d.r.QueryRowContext(ctx, `
 SELECT id, name, namespace, kind, base_url, enabled, requires_session_header,
        COALESCE(custom_headers,''), COALESCE(probe_delay_ms,400),
-       COALESCE(rate_limit,0), COALESCE(rate_window,'')
+       COALESCE(rate_limit,0), COALESCE(rate_window,''),
+       COALESCE(usage_convention,'auto'), COALESCE(notes,'')
 FROM accounts WHERE id = ?`, id)
 	var (
 		a             provider.Account
@@ -84,7 +87,8 @@ FROM accounts WHERE id = ?`, id)
 		rateWindow    string
 	)
 	if err := row.Scan(&a.ID, &a.Name, &a.Namespace, &kind, &a.BaseURL, &enabled,
-		&needsSession, &customHeaders, &probeDelay, &rateLimit, &rateWindow); err != nil {
+		&needsSession, &customHeaders, &probeDelay, &rateLimit, &rateWindow, &a.UsageConvention,
+		&a.Notes); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}

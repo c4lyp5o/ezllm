@@ -81,6 +81,33 @@ func ParseKind(s string) (Kind, error) {
 // Account is the runtime view of a registered provider account. The store layer
 // builds this; adapters consume it. Key material is already DECRYPTED here and
 // must never be logged.
+// UsageConvention is how an upstream Messages (Anthropic-shape) wire counts
+// input_tokens relative to cache tokens. It is a per-account OPERATOR fact:
+// adapters and wiring cannot reveal it, and a guess silently corrupts cost.
+// UsageConventionAuto is "unknown", which refuses cross-wire Messages
+// destinations instead of guessing cache inclusion.
+type UsageConvention string
+
+const (
+	UsageConventionAuto      UsageConvention = "auto"      // unknown — never inferred
+	UsageConventionAnthropic UsageConvention = "anthropic" // input_tokens EXCLUDES cache tokens
+	UsageConventionTotal     UsageConvention = "total"     // input_tokens INCLUDES cache tokens
+)
+
+// Known reports whether the convention is explicit enough to convert with.
+func (m UsageConvention) Known() bool {
+	return m == UsageConventionAnthropic || m == UsageConventionTotal
+}
+
+// ParseUsageConvention validates an operator-supplied value.
+func ParseUsageConvention(s string) (UsageConvention, error) {
+	switch UsageConvention(s) {
+	case UsageConventionAuto, UsageConventionAnthropic, UsageConventionTotal:
+		return UsageConvention(s), nil
+	}
+	return "", fmt.Errorf("usage_convention must be auto|anthropic|total")
+}
+
 type Account struct {
 	ID                    int64
 	Name                  string
@@ -102,6 +129,10 @@ type Account struct {
 	RateLimit  int64         // requests per RateWindow; 0 = unlimited
 	RateWindow time.Duration // 0 = off
 	Notes      string
+	// UsageConvention is the operator-declared input_tokens accounting of the
+	// upstream Messages wire (see UsageConvention above). Empty on hand-built
+	// values is treated as UsageConventionAuto.
+	UsageConvention UsageConvention
 }
 
 // Adapter translates between ezllm's generic request path and one provider kind.

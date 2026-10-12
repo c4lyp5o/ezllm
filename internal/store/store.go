@@ -24,7 +24,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 12
+const schemaVersion = 13
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -186,6 +186,9 @@ func (d *DB) migrate() error {
 		if err := d.alterAccountRate(context.Background()); err != nil {
 			return fmt.Errorf("store: alter account rate: %w", err)
 		}
+		if err := d.alterAccountUsageConvention(context.Background()); err != nil {
+			return fmt.Errorf("store: alter account messages usage: %w", err)
+		}
 		if err := d.rebuildCombosV9(context.Background()); err != nil {
 			return fmt.Errorf("store: rebuild combos: %w", err)
 		}
@@ -239,6 +242,9 @@ func (d *DB) migrate() error {
 		if err := d.alterAccountRate(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate account rate: %w", err)
 		}
+		if err := d.alterAccountUsageConvention(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate account messages usage: %w", err)
+		}
 		if err := d.rebuildCombosV9(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate combos: %w", err)
 		}
@@ -250,6 +256,22 @@ func (d *DB) migrate() error {
 		}
 	}
 	return nil
+}
+
+// alterAccountUsageConvention adds accounts.usage_convention on databases created
+// before v13. Guarded by a column check: ALTER TABLE ADD COLUMN is not
+// idempotent. Existing rows take the documented default 'auto' (unknown) —
+// the value must be operator-declared, never back-filled by guess.
+func (d *DB) alterAccountUsageConvention(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "accounts")
+	if err != nil || !exists {
+		return err
+	}
+	if ok, err := hasColumn(ctx, d.w, "accounts", "usage_convention"); err != nil || ok {
+		return err
+	}
+	_, err = d.w.ExecContext(ctx, `ALTER TABLE accounts ADD COLUMN usage_convention TEXT NOT NULL DEFAULT 'auto'`)
+	return err
 }
 
 // alterModelProtoPin adds models.proto_pin on databases created before v7.

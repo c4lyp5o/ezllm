@@ -2,6 +2,25 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M9); full history via `git log`.
 
+## 2026-10-12/13 — universal wire matrix (M0–M5; local, not pushed)
+- `fix(translate)` M0: Responses streams lost tool arguments when the item id and call id
+  differed, and dropped terminal usage on incomplete/failed runs (`00232c5`).
+- `feat(router,proxy,server)` M1: wire identity — `Route.WireSurface`/`EffectiveWire()`, the
+  wire decided BEFORE capability/pin gates, typed `wire_unsupported` (400) with zero upstream
+  calls for a disproved destination (`14e4730`).
+- `feat(translate)` M2: surface-neutral request IR + one codec per surface; unsupported
+  features refuse with a reason; absent vs zero preserved (`3a3ab3c`).
+- `feat(translate)` M3: shared response/event codecs with the legacy wrapper cutover —
+  byte-identical to the pre-cutover package across a 35×3 + 35×3 corpus (`f7ee36b`).
+- `feat(store,provider,translate)` M4: `accounts.usage_convention` (schema v13) — the
+  operator-declared Messages input-token accounting; a cross-wire Messages destination refuses
+  an unstated convention. Also fixed two pre-existing bugs: a partial PATCH blanked `notes`,
+  and `UpdateAccount` swallowed non-conflict write errors (`7294755`).
+- `feat(proxy,router,server,config)` M5: the three new cells (chat→messages, responses→chat,
+  responses→messages) behind `translation.universal_enabled` (default OFF; env rollback), the
+  fixed fallback chains, pin-as-intent, and the completion outcome (`Result.StreamOutcome` +
+  ledger err; late stream failures withhold the hop-good signal) (`5a145dd`).
+
 ## 2026-10-10 — M9: research schema (v8) + honest savings + TTFT + cost
 - `fix(proxy)`: TTFT was timed from inside the stream copy — after headers had already
   arrived — so every row read 1–3ms. Now timed from upstream dispatch; the number finally

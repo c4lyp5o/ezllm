@@ -25,6 +25,8 @@ TTFT finally measured from dispatch).
 - `docs/API.md` — the admin API contract (v1): every endpoint, shapes, semantics.
 - `docs/compression-design.md` — the compression subsystem as shipped (M5–M7).
 - `docs/rules-engine-design.md` — caps + allowed-hours rules (design record).
+- `docs/universal-wire-design.md` — the universal wire matrix: any client surface onto any
+  upstream wire, behind `translation.universal_enabled` (default off).
 - `EXPLORING.md` — the codebase tour: what to read, in what order, which
   invariants to verify, and per-milestone file/line landmarks.
 - `~/workspace/.hermes/plans/2026-10-05_223000-ezllm-v1-rev4-namespace-compression.md`

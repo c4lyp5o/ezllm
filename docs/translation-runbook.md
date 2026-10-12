@@ -157,6 +157,46 @@ probed-incompatible hops.
 - Accounts needing `max_completion_tokens` (tokenrouter `openai/gpt-6.1-sol`)
   are not translation-eligible in M1.
 
+## Universal wire matrix (2026-10-13) — the three NEW cells
+
+Design: `docs/universal-wire-design.md`. Adds **chat→messages**, **responses→chat** and
+**responses→messages** through the strict codecs, plus the fixed fallback ordering for any
+client whose native wire a hop provably cannot serve.
+
+**Enabling (two switches, both required):**
+
+```yaml
+translation:
+  enabled: true            # the existing global switch (unchanged)
+  universal_enabled: true  # NEW, default false — the three new cells + the chains
+```
+
+`EZLLM_TRANSLATION_UNIVERSAL_ENABLED=true|false` overrides it without a rebuild (rollback
+lever). A wrong-typed value fails boot naming `translation.universal_enabled`. With the flag
+off, nothing changes byte-for-byte.
+
+**Prerequisite for a Messages destination:** the hop's account must carry an explicit
+`usage_convention` (schema v13, `PATCH /admin/accounts/{id}` with `{"usage_convention":"anthropic"}`
+or `"total"`). `auto` means unstated and the router will skip that candidate with a refusal
+naming the field — it never guesses how the upstream counts `input_tokens`. Set it from the
+provider's docs, or with the per-account verification action once that ships
+(usage-convention-design D4).
+
+**What you get when it is on:** requests on the new cells are translated through the strict
+IR codecs (unsupported features refuse with a reason, **zero upstream spend**), responses and
+streams come back in the client's own shape, and error envelopes are re-shaped into the client's
+family. Ledger rows keep the `translated` marker and the inclusive `tokens_in` exception.
+
+**Stream outcomes (all cells):** a translated stream that ends in a late error frame or without a
+terminal event is recorded in the ledger error column (`translated stream failed` /
+`translated stream truncated`) while the delivered status stays 200 (that is what the client
+saw), and the hop is not marked good. Note: translated hops sit outside combo strategy ordering
+("a native hop always wins"), so the withheld mark shows in the ledger, not in rotation.
+
+**Rollback:** `EZLLM_TRANSLATION_UNIVERSAL_ENABLED=false`, or `translation.universal_enabled: false`
++ restart. No data migration is involved; the curated `responses_models` list keeps working
+independently.
+
 ## Responses-wire hops (chat client → /v1/responses hop)
 
 Separate companion feature (`docs/responses-wire-design.md`): some models'

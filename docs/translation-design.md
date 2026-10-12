@@ -1,5 +1,10 @@
 # Anthropic → OpenAI Translation Layer Implementation Plan
 
+> **2026-10-13:** superseded in part by `docs/universal-wire-design.md`. The pairwise
+> translators described here remain the CONTRACT for the legacy cells (their bytes are
+> pinned by tests), while the three new cells ride the strict surface-neutral codecs.
+> `translation.universal_enabled` (default off) is the opt-in.
+
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 
 **Goal:** Let Claude Code (an `/v1/messages` client) use OpenAI-surface hops — starting with the free `opencode-go/step-5-preview-free` — by translating the wire protocol per hop, while every non-translated path stays byte-identical to today.

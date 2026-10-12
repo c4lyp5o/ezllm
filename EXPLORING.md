@@ -267,6 +267,29 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
   + commit dist in the same push; after deploy verify the served hash
   (`curl https://llm.calypso.dedyn.io/ | grep assets/index-`) + grep one marker string.
 
+### Universal wire matrix (M0–M5) ✅ (2026-10-13, local; not pushed)
+- `docs/universal-wire-design.md` — the architecture; the plan of record is
+  `.hermes/plans/2026-10-12_215619-ezllm-universal-wire-matrix-rev1.md`; runbook section at
+  the end of `docs/translation-runbook.md`.
+- `internal/translate/` — `ir.go` (RequestIR) + `codec_{chat,messages,responses}.go` (one codec
+  per surface), `response_ir.go`/`response_codec.go` (ResponseIR, usage convention, errors),
+  `events.go`/`stream_decode.go`/`stream_codec.go` (event model, per-source decoders,
+  per-destination encoders, bounded SSE framing), `universal.go` (`IsUniversalCell`,
+  `RequestUniversal`, `ReorientError`), `eligibility.go` (`Eligible`, `IsUniversalCell`).
+- `internal/router/router.go` — `selectWire` (wire-first), `universalOrder` (fixed fallback
+  chains), `pinSurface`, `messagesConventionReason`, `WithUniversal`.
+- `internal/proxy/proxy.go` — `prepareHopBody` (pair-aware codecs), the stream wrapper +
+  `streamOutcomeFrom`, `Result.StreamOutcome` / `StreamCompleted`, `universalCodecOptions`.
+- `internal/store/{schema.sql,store.go,admin.go}` — `accounts.usage_convention` (schema v13),
+  `alterAccountUsageConvention`; `internal/provider/provider.go` — the `UsageConvention`
+  vocabulary; `internal/config/config.go` — `translation.universal_enabled` +
+  `universalValueError` (field-named boot failure); `cmd/ezllm/main.go` — env override + boot log.
+- Proof files: `internal/proxy/wire_matrix_{e2e,paths}_test.go` (9 cells × stream/nonstream,
+  tool loops, 429/400/preparation/late-error paths), `internal/router/universal_selection_test.go`,
+  `internal/server/wire_matrix_test.go`, `internal/translate/usage_convention_test.go`.
+- Gotcha: translated candidates ride the TAIL outside combo strategy ordering
+  (`selectComboCandidates` tail rule) — outcome-driven rotation does not reach them today.
+
 ## 5. Invariants to check while reading (review checklist)
 
 These are the "if it's broken here, the project failed" spots — each must be visibly true in code:

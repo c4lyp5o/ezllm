@@ -142,7 +142,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         {LOGO}
         <span className="text-[15px] font-semibold tracking-tight">ezllm</span>
         <a href={REPO_URL} target="_blank" rel="noreferrer noopener"
-          title={`ezllm ${VERSION} — M1–M7 shipped, live on llm.calypso.dedyn.io`}
+          title={`ezllm ${VERSION} — M1–M9 shipped · hop translation + responses-wire staged on master, live on llm.calypso.dedyn.io`}
           className="ml-auto cursor-help rounded-full border border-line bg-raised px-2 py-0.5 font-mono text-[10px] text-mute transition-colors hover:border-line-strong hover:text-ink">
           {VERSION}
         </a>

@@ -9,7 +9,7 @@ import {
   normalizeFeedRow, requests, RANGE_LABEL,
   type FeedRow, type RangeKey, type RequestSort, type RequestsResp,
 } from '../api';
-import { SectionLabel, btn, cx, inputCls, labelCls } from '../ui';
+import { Chip, SectionLabel, btn, cx, inputCls, labelCls } from '../ui';
 
 const RANGES: RangeKey[] = ['24h', '7d', '30d', '365d'];
 const SORTS: { key: RequestSort; label: string }[] = [
@@ -198,7 +198,8 @@ export default function Requests() {
                   <td className="px-4 py-2 font-mono">{r.model}</td>
                   <td className="px-4 py-2">{r.client}</td>
                   <td className={cx('px-4 py-2 text-right font-mono', r.status >= 400 ? 'text-bad' : 'text-ink')}>
-                    {r.status}
+                    <div>{r.status}</div>
+                    <CauseChip err={r.error} status={r.status} />
                   </td>
                   <td className="px-4 py-2 text-right font-mono tabular-nums">{nfmt(r.tin)}</td>
                   <td className="px-4 py-2 text-right font-mono tabular-nums">{nfmt(r.tout)}</td>
@@ -225,6 +226,34 @@ export default function Requests() {
           </table>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Cause chips: the Go classifier (provider.ErrorCause) prefixes the ledger
+// err column with `[<cause>]` — render it as a typed badge; the hover carries
+// the full upstream text. Rows written before that deploy carry no marker, so
+// no chip renders for them (the raw status still tells the story).
+const CAUSE_TONES: Record<string, 'bad' | 'warn' | 'neutral'> = {
+  // The request itself is wrong for this model — not transient.
+  bad_request: 'bad', bad_credentials: 'bad', permission_denied: 'bad',
+  chat_tools_unsupported: 'bad', protocol_unsupported: 'bad',
+  context_too_long: 'bad', too_large: 'bad', not_found: 'bad',
+  content_filter: 'bad', quota_exhausted: 'bad', provider_error: 'bad',
+  // Transient — retry/failover is the right response.
+  rate_limited: 'warn', upstream_capacity: 'warn', overloaded: 'warn',
+  timeout: 'warn', automation_gate: 'warn',
+};
+
+function CauseChip({ err, status }: { err?: string; status: number }) {
+  if (status < 400 || !err) return null;
+  const m = /^\[([a-z_]+)\]:\s?/.exec(err);
+  if (!m) return null;
+  return (
+    <div className="mt-1">
+      <Chip tone={CAUSE_TONES[m[1]] ?? 'neutral'} title={err}>
+        {m[1].replace(/_/g, ' ')}
+      </Chip>
     </div>
   );
 }

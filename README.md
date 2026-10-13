@@ -15,7 +15,8 @@ Claude Code talks to it as a native Anthropic endpoint (`POST /v1/messages`).
 Latest shipped batch (2026-10-10): per-model **surface pin** (`proto_pin`, schema v7,
 enforced never rerouted; wrong-surface calls refuse with `400 pinned_surface` before any
 upstream dial), `/healthz` reduced to liveness-only, a fourth provider kind (`gemini-openai`)
-plus presets for Groq, DeepSeek, Command Code, TokenRouter and Gemini, a dashboard UI
+plus presets for Groq, DeepSeek, Command Code, TokenRouter, Gemini, NVIDIA NIM,
+OpenRouter and Cloudflare Workers AI (account ID composes the endpoint), a dashboard UI
 cleanup pass, and the **M9 research schema** (schema v8: request-shape capture for
 cacheability, versioned model prices + derived cost, real-vs-notional savings split, and
 TTFT finally measured from dispatch).

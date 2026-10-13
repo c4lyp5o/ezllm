@@ -78,6 +78,7 @@ type Draft = {
   base_url: string; keyLabel: string; apiKey: string;
   probe_delay_ms: number; notes: string; skipInference: boolean;
   advOpen: boolean; requiresSessionHeader: boolean; customHeaders: string;
+  accountId: string;
 };
 
 const emptyDraft: Draft = {
@@ -85,9 +86,16 @@ const emptyDraft: Draft = {
   base_url: 'https://opencode.ai/zen/go/v1', keyLabel: 'primary', apiKey: '',
   probe_delay_ms: 400, notes: '', skipInference: false,
   advOpen: false, requiresSessionHeader: true, customHeaders: '',
+  accountId: '',
 };
 
-const PROVIDER_PRESETS: Record<string, { label: string; kind: string; baseURL?: string; sessionHeader?: boolean }> = {
+const PROVIDER_PRESETS: Record<string, {
+  label: string; kind: string; baseURL?: string; sessionHeader?: boolean;
+  // accountURL builds the base URL from an account ID the operator supplies.
+  // Cloudflare is the only one that needs it: the account ID lives INSIDE the
+  // endpoint path.
+  accountURL?: (id: string) => string;
+}> = {
   'claude-platform': { label: 'Claude Platform', kind: 'anthropic-compatible', baseURL: 'https://api.anthropic.com' },
   'opencode-go': { label: 'OpenCode Go', kind: 'opencode-go', baseURL: 'https://opencode.ai/zen/go/v1', sessionHeader: true },
   'xiaomi-mimo-token-plan': { label: 'Xiaomi MiMo token plan', kind: 'openai-compatible', baseURL: 'https://token-plan-sgp.xiaomimimo.com/v1' },
@@ -104,6 +112,19 @@ const PROVIDER_PRESETS: Record<string, { label: string; kind: string; baseURL?: 
   'ollama-cloud': { label: 'Ollama Cloud', kind: 'openai-compatible', baseURL: 'https://ollama.com/v1' },
   'gemini': { label: 'Google AI Studio', kind: 'gemini-openai', baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai' },
   'openai': { label: 'OpenAI', kind: 'openai-compatible', baseURL: 'https://api.openai.com/v1' },
+  // NVIDIA NIM — standard OpenAI-compatible chat, model ids are bare
+  // (e.g. meta/llama-3.3-70b-instruct), so splitNamespace routes them like
+  // tokenrouter's slash-ids already do.
+  'nvidia-nim': { label: 'NVIDIA NIM', kind: 'openai-compatible', baseURL: 'https://integrate.api.nvidia.com/v1' },
+  // Cloudflare Workers AI — the account ID composes the base URL. Workers AI
+  // serves the whole OpenAI family under /accounts/{id}/ai/v1: /chat/completions,
+  // /responses and an Anthropic-compatible /messages, so nothing here needs a
+  // new protocol. Model ids carry their own slashes (@cf/moonshotai/kimi-k2.6).
+  'cloudflare-workers-ai': {
+    label: 'Cloudflare Workers AI', kind: 'openai-compatible',
+    accountURL: (id) => `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(id.trim())}/ai/v1`,
+  },
+  'openrouter': { label: 'OpenRouter', kind: 'openai-compatible', baseURL: 'https://openrouter.ai/api/v1' },
   'openai-compatible': { label: 'OpenAI-compatible', kind: 'openai-compatible' },
   'anthropic-compatible': { label: 'Anthropic-compatible', kind: 'anthropic-compatible' },
 };
@@ -211,6 +232,7 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
 
   const isCompat = ['openai-compatible', 'anthropic-compatible', 'gemini-openai'].includes(PROVIDER_PRESETS[d.preset]?.kind ?? '');
   const isAnthropicKind = PROVIDER_PRESETS[d.preset]?.kind === 'anthropic-compatible';
+  const presetAccountID = PROVIDER_PRESETS[d.preset]?.accountURL;
   const valid = d.name.trim().length > 0
     && /^[a-z0-9][a-z0-9._-]{0,62}$/.test(d.namespace.trim())
     && (!isCompat || /^https?:\/\//i.test(d.base_url.trim()))
@@ -250,7 +272,10 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
             <select id="ap-kind" className={inputCls} value={d.preset} onChange={(e) => {
               const presetID = e.target.value;
               const preset = PROVIDER_PRESETS[presetID];
-              setD((p) => ({ ...p, preset: presetID, kind: preset.kind, base_url: preset.baseURL ?? '', requiresSessionHeader: preset.sessionHeader ?? false }));
+              setD((p) => ({ ...p, preset: presetID, kind: preset.kind,
+                accountId: '',
+                base_url: preset.baseURL ?? (preset.accountURL ? preset.accountURL('') : ''),
+                requiresSessionHeader: preset.sessionHeader ?? false }));
             }}>
               {sortedPresetIDs().map((presetID) => <option key={presetID} value={presetID}>{PROVIDER_PRESETS[presetID].label}</option>)}
             </select>
@@ -261,7 +286,27 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
               onChange={(e) => set('probe_delay_ms', Number(e.target.value) || 0)} />
           </div>
         </div>
-        {isCompat && !isKnownEndpoint(d.base_url) ? (
+        {presetAccountID ? (
+          <div>
+            <label className={labelCls} htmlFor="ap-account-id">Cloudflare account ID</label>
+            <input id="ap-account-id" className={cx(inputCls, 'font-mono')} value={d.accountId}
+              placeholder="from wrangler whoami" spellCheck={false}
+              onChange={(e) => {
+                const accountId = e.target.value.trim();
+                setD((p) => ({ ...p, accountId, base_url: presetAccountID(accountId) }));
+              }} />
+            <p className="mt-1 text-[11px] text-mute">
+              The account ID is part of the endpoint. It composes
+              <Mono> /accounts/&lt;account_id&gt;/ai/v1</Mono> — Workers AI serves
+              chat, responses and anthropic messages under that prefix.
+            </p>
+            {d.accountId && (
+              <div className="mt-2 rounded-lg border border-line bg-raised/60 px-3.5 py-2.5 text-[12px] text-dim">
+                Endpoint preset: <Mono>{d.base_url}</Mono>
+              </div>
+            )}
+          </div>
+        ) : isCompat && !isKnownEndpoint(d.base_url) ? (
           <div>
             <label className={labelCls} htmlFor="ap-url">Provider API base URL</label>
             <input id="ap-url" className={cx(inputCls, 'font-mono')} value={d.base_url}

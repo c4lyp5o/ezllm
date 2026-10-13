@@ -2,6 +2,15 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M9); full history via `git log`.
 
+## 2026-10-13 — provider presets: NVIDIA NIM, Cloudflare Workers AI, OpenRouter
+- Dashboard add-provider presets: **NVIDIA NIM** (`https://integrate.api.nvidia.com/v1`),
+  **OpenRouter** (`https://openrouter.ai/api/v1`), and **Cloudflare Workers AI**, whose
+  account ID composes the endpoint `https://api.cloudflare.com/client/v4/accounts/{id}/ai/v1`.
+  All three are ordinary `openai-compatible` accounts — Workers AI serves the whole OpenAI
+  family under that prefix (chat, responses and an anthropic-compatible `/messages`), so no
+  new protocol was needed. The `cf-aig-gateway-id` header only applies to Cloudflare's AI
+  Gateway (`/ai/run`), not to these endpoints.
+
 ## 2026-10-13 — strategy citizenship, the hold checkbox, request IP (M7; local, not pushed)
 - `feat(router)` two operator decisions on the universal matrix: translated hops are ordinary
   combo members (the old "native hop always wins" tail rule is removed), and

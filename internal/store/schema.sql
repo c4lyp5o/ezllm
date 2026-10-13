@@ -155,6 +155,11 @@ CREATE TABLE IF NOT EXISTS combo_hops (
   model_id    TEXT NOT NULL,
   weight      INTEGER NOT NULL DEFAULT 1,
   enabled     INTEGER NOT NULL DEFAULT 1,
+  -- block_round_robin: when 1, this hop does not rotate on its N dispatches —
+  -- it HOLDS the block while it keeps succeeding, and releases it on a
+  -- hop-attributable failure (429/5xx/transport/failed stream; a 4xx is the
+  -- request's fault and keeps the hold).
+  hold_until_failure INTEGER NOT NULL DEFAULT 0,
   UNIQUE(combo_id, position)
 );
 CREATE INDEX IF NOT EXISTS idx_hops_combo ON combo_hops(combo_id, enabled, position);
@@ -180,6 +185,7 @@ CREATE TABLE IF NOT EXISTS calls (
   ts             TEXT NOT NULL,
   account_id     INTEGER,                       -- M5: denormalized NAME survives key deletion, this is the id for metering
   client         TEXT NOT NULL DEFAULT '',
+  ip             TEXT NOT NULL DEFAULT '',       -- v14: caller IP (X-Forwarded-For/X-Real-IP/remote)
   surface        TEXT NOT NULL,                  -- openai|anthropic|responses
   alias          TEXT NOT NULL DEFAULT '',       -- combo name or namespace/model requested
   account        TEXT NOT NULL,                  -- denormalized

@@ -954,6 +954,10 @@ type ComboHop struct {
 	ModelID   string `json:"model_id"`
 	Weight    int    `json:"weight"`
 	Enabled   *bool  `json:"enabled"`
+	// HoldUntilFailure (block_round_robin only): the hop keeps the block while
+	// it succeeds and releases it on a hop-attributable failure. Nullable so a
+	// PATCH that omits it keeps the stored value.
+	HoldUntilFailure *bool `json:"hold_until_failure,omitempty"`
 }
 
 // Combo is the admin-API combo shape.
@@ -979,7 +983,7 @@ type Combo struct {
 // `strategy`, because SQLite cannot alter a constraint, so a CHECK would make
 // every new strategy a full table rebuild (as block_round_robin was).
 func ValidStrategies() []string {
-	return []string{"failover", "true_round_robin", "strict_round_robin", "sticky_last_good", "least_used", "block_round_robin"}
+	return []string{"failover", "true_round_robin", "sticky_last_good", "least_used", "block_round_robin"}
 }
 
 // ValidateCombo checks the payload before writing (422 on failure).
@@ -1057,7 +1061,7 @@ FROM combos ORDER BY name`)
 	}
 
 	hrows, err := d.r.QueryContext(ctx, `
-SELECT combo_id, account_id, model_id, weight, enabled
+SELECT combo_id, account_id, model_id, weight, enabled, hold_until_failure
 FROM combo_hops ORDER BY combo_id, position`)
 	if err != nil {
 		return nil, err
@@ -1066,10 +1070,15 @@ FROM combo_hops ORDER BY combo_id, position`)
 	for hrows.Next() {
 		var comboID int64
 		var h ComboHop
-		if err := hrows.Scan(&comboID, &h.AccountID, &h.ModelID, &h.Weight, &h.Enabled); err != nil {
+		var hold int
+		if err := hrows.Scan(&comboID, &h.AccountID, &h.ModelID, &h.Weight, &h.Enabled, &hold); err != nil {
 			return nil, err
 		}
 		if idx, ok := byID[comboID]; ok {
+			if hold != 0 {
+				held := true
+				h.HoldUntilFailure = &held
+			}
 			out[idx].Hops = append(out[idx].Hops, h)
 		}
 	}
@@ -1150,9 +1159,10 @@ func (d *DB) replaceHops(ctx context.Context, tx *sql.Tx, comboID int64, hops []
 		if weight <= 0 {
 			weight = 1
 		}
+		held := h.HoldUntilFailure != nil && *h.HoldUntilFailure
 		if _, err := tx.ExecContext(ctx, `
-INSERT INTO combo_hops (combo_id, position, account_id, model_id, weight, enabled)
-VALUES (?,?,?,?,?,?)`, comboID, i, h.AccountID, h.ModelID, weight, boolToInt(enabled)); err != nil {
+INSERT INTO combo_hops (combo_id, position, account_id, model_id, weight, enabled, hold_until_failure)
+VALUES (?,?,?,?,?,?,?)`, comboID, i, h.AccountID, h.ModelID, weight, boolToInt(enabled), boolToInt(held)); err != nil {
 			return err
 		}
 	}
@@ -1218,7 +1228,7 @@ FROM combos WHERE name = ?`, name)
 	c.Hops = []ComboHop{}
 
 	hrows, err := d.r.QueryContext(ctx, `
-SELECT account_id, model_id, weight, enabled
+SELECT account_id, model_id, weight, enabled, hold_until_failure
 FROM combo_hops WHERE combo_id = ? ORDER BY position`, c.ID)
 	if err != nil {
 		return nil, err
@@ -1226,8 +1236,13 @@ FROM combo_hops WHERE combo_id = ? ORDER BY position`, c.ID)
 	defer hrows.Close()
 	for hrows.Next() {
 		var h ComboHop
-		if err := hrows.Scan(&h.AccountID, &h.ModelID, &h.Weight, &h.Enabled); err != nil {
+		var hold int
+		if err := hrows.Scan(&h.AccountID, &h.ModelID, &h.Weight, &h.Enabled, &hold); err != nil {
 			return nil, err
+		}
+		if hold != 0 {
+			held := true
+			h.HoldUntilFailure = &held
 		}
 		c.Hops = append(c.Hops, h)
 	}

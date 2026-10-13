@@ -312,6 +312,13 @@ posted upstream, after compression). Also: `ttft_ms` is now genuinely time-to-fi
 (measured from dispatch; before this it timed from inside the stream copy and read ~1–3ms
 for every call).
 
+### Requests projection — v14 fields
+`ip` — the caller address captured at request time (`X-Real-IP`, then the FIRST
+`X-Forwarded-For` entry, then the socket peer; empty when nothing was available).
+Attribution for traffic mapping, not authentication: a direct connection can
+claim any value, so it must never gate anything. The dashboard shows it under
+the request's timestamp.
+
 ### `GET /admin/accounts/{id}/quota` → `200`
 Live `ReadQuota` → classified shape + `raw`. `{"kind":"none"}` when the provider has no endpoint
 (`404`/`405` → NOT an error).
@@ -322,9 +329,19 @@ Live `ReadQuota` → classified shape + `raw`. `{"kind":"none"}` when the provid
 ```jsonc
 { "name":"daily","strategy":"failover","sticky_idle_s":1800,"enabled":true,
   "compression_profile_id":null,
-  "hops":[{"account_id":1,"model_id":"gpt-6-luna","weight":1,"enabled":true}, …] }
+  "hops":[{"account_id":1,"model_id":"gpt-6-luna","weight":1,"enabled":true,
+           "hold_until_failure":false}, …] }
+
+Each hop carries `hold_until_failure` (block_round_robin only, default false):
+when true the hop does not rotate when its block runs out — it HOLDS the block
+while it keeps succeeding and releases it on a hop-attributable failure (429,
+5xx, transport error, or a translated stream that failed/truncated late). A 4xx
+is the request's fault and keeps the hold. The hop's block tag renders pinned at
+`▮ 1/N` while it holds.
 ```
-`strategy` ∈ `failover|true_round_robin|strict_round_robin|sticky_last_good|least_used`.
+`strategy` ∈ `failover|true_round_robin|sticky_last_good|least_used|block_round_robin`.
+(`strict_round_robin` was removed 2026-10-13: zero combos used it and its
+success-driven advance is now expressed as `block_round_robin` with a held hop.)
 `POST` upserts by name (idempotent). `hops` replace the whole ordered list (positions = array order).
 `PATCH` is a partial update — only the fields you send change, `enabled` included, so the one-field
 toggle is `PATCH /admin/combos/{id}` `{"enabled":false}` (the `?enabled=true|false` query form is

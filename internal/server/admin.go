@@ -269,7 +269,7 @@ func (s *Server) healthSnapshot(ctx context.Context) (map[string]any, error) {
 // callsCols is the canonical projection for every calls-ledger list view
 // (the dashboard tail, the requests explorer), so both return identical JSON
 // keys — tin/tout/cread/... are ledger names in the emitted row maps.
-const callsCols = `ts, client, surface, alias, account, model, status, ttft_ms, total_ms,
+const callsCols = `ts, client, COALESCE(ip, '') AS ip, surface, alias, account, model, status, ttft_ms, total_ms,
        tokens_in, tokens_out, tokens_cached_read, tokens_cached_write, reasoning_tokens,
        COALESCE(tokens_saved, 0), COALESCE(compression_profile, ''),
        COALESCE(compression_applied, 0), COALESCE(compression_rules_fired, 0),
@@ -285,21 +285,21 @@ const callsCols = `ts, client, surface, alias, account, model, status, ttft_ms, 
 func scanCalls(rows *sql.Rows) ([]map[string]any, error) {
 	out := []map[string]any{}
 	for rows.Next() {
-		var ts, client, surface, alias, account, model string
+		var ts, client, ip, surface, alias, account, model string
 		var status int
 		var ttft, total, tin, tout, cread, cwrite, reasoning any
 		var saved, applied, rulesFired, contextPre, contextSaved int
 		var notional, msgCount, toolCount, reqBytes, blockPos int
 		var translated int
 		var prefixSHA, sessionID, profile, errText string
-		if err := rows.Scan(&ts, &client, &surface, &alias, &account, &model, &status,
+		if err := rows.Scan(&ts, &client, &ip, &surface, &alias, &account, &model, &status,
 			&ttft, &total, &tin, &tout, &cread, &cwrite, &reasoning,
 			&saved, &profile, &applied, &rulesFired, &contextPre, &contextSaved,
 			&notional, &prefixSHA, &sessionID, &msgCount, &toolCount, &reqBytes, &blockPos, &translated, &errText); err != nil {
 			return nil, err
 		}
 		out = append(out, map[string]any{
-			"ts": ts, "client": client, "surface": surface, "alias": alias,
+			"ts": ts, "client": client, "ip": ip, "surface": surface, "alias": alias,
 			"account": account, "model": model, "status": status,
 			"ttft_ms": ttft, "total_ms": total,
 			"tin": tin, "tout": tout, "cread": cread, "cwrite": cwrite,

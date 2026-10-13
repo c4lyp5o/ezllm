@@ -213,78 +213,6 @@ func TestRandomOrderSingleHopUnchanged(t *testing.T) {
 	}
 }
 
-// ── strict_round_robin: advance only on success, from the hop that served ───
-
-// The core semantics: after a hop DELIVERS, the next request starts at the one
-// after it — walking the list and wrapping.
-func TestStrictRoundRobinAdvancesAfterSuccess(t *testing.T) {
-	combo := &store.Combo{ID: 301, Name: "strict1", Strategy: "strict_round_robin"}
-	routes := []proxy.Route{hop(1, "m"), hop(2, "m"), hop(3, "m")}
-
-	// Nothing delivered yet: position order.
-	if ordered := strictOrder(combo, routes); ordered[0].Account.ID != 1 {
-		t.Fatalf("cold start head = %d, want 1", ordered[0].Account.ID)
-	}
-	// Hop 1 answered → next request starts at hop 2.
-	lastGood.Store(combo.Name, lastGoodEntry{accountID: 1, model: "m", at: time.Now()})
-	if ordered := strictOrder(combo, routes); ordered[0].Account.ID != 2 {
-		t.Fatalf("after hop 1 served, head = %d, want 2", ordered[0].Account.ID)
-	}
-	// Hop 2 answered → hop 3.
-	lastGood.Store(combo.Name, lastGoodEntry{accountID: 2, model: "m", at: time.Now()})
-	if ordered := strictOrder(combo, routes); ordered[0].Account.ID != 3 {
-		t.Fatalf("after hop 2 served, head = %d, want 3", ordered[0].Account.ID)
-	}
-	// Hop 3 answered → wraps to hop 1.
-	lastGood.Store(combo.Name, lastGoodEntry{accountID: 3, model: "m", at: time.Now()})
-	if ordered := strictOrder(combo, routes); ordered[0].Account.ID != 1 {
-		t.Fatalf("after hop 3 served, head = %d, want the rotation to wrap to 1", ordered[0].Account.ID)
-	}
-}
-
-// A hop that FAILED does not move the cursor, so it deprioritises itself: hop 1
-// failed, hop 2 answered, and the next request therefore starts at hop 3 rather
-// than going straight back to the hop that just broke. It is not blacklisted —
-// the rotation returns to it on the next lap.
-func TestStrictRoundRobinDeprioritisesAFailedHop(t *testing.T) {
-	combo := &store.Combo{ID: 302, Name: "strict2", Strategy: "strict_round_robin"}
-	routes := []proxy.Route{hop(1, "m"), hop(2, "m"), hop(3, "m")}
-
-	// Request 1 started at hop 1 (position order), hop 1 failed, hop 2 served.
-	lastGood.Store(combo.Name, lastGoodEntry{accountID: 2, model: "m", at: time.Now()})
-	if ordered := strictOrder(combo, routes); ordered[0].Account.ID != 3 {
-		t.Fatalf("head = %d, want 3 — the request must not restart at the hop that just failed",
-			ordered[0].Account.ID)
-	}
-	// Then hop 3 serves, and the rotation comes back round to hop 1.
-	lastGood.Store(combo.Name, lastGoodEntry{accountID: 3, model: "m", at: time.Now()})
-	if ordered := strictOrder(combo, routes); ordered[0].Account.ID != 1 {
-		t.Errorf("head = %d, want 1 — a failed hop must be retried, not skipped forever",
-			ordered[0].Account.ID)
-	}
-}
-
-// The remembered hop can leave the eligible set. Position order is the honest
-// fallback rather than an index guess.
-func TestStrictRoundRobinFallsBackWhenServedHopIsGone(t *testing.T) {
-	combo := &store.Combo{ID: 303, Name: "strict3", Strategy: "strict_round_robin"}
-	routes := []proxy.Route{hop(1, "m"), hop(2, "m")}
-	lastGood.Store(combo.Name, lastGoodEntry{accountID: 99, model: "m", at: time.Now()})
-	if ordered := strictOrder(combo, routes); ordered[0].Account.ID != 1 {
-		t.Errorf("head = %d, want position order (1) when the served hop is no longer eligible",
-			ordered[0].Account.ID)
-	}
-}
-
-func TestStrictRoundRobinSingleHopUnchanged(t *testing.T) {
-	combo := &store.Combo{ID: 304, Name: "strict4", Strategy: "strict_round_robin"}
-	routes := []proxy.Route{hop(7, "m")}
-	lastGood.Store(combo.Name, lastGoodEntry{accountID: 1, model: "m", at: time.Now()})
-	if ordered := strictOrder(combo, routes); len(ordered) != 1 || ordered[0].Account.ID != 7 {
-		t.Errorf("single hop was reordered: %v", ordered)
-	}
-}
-
 // ── the success hook itself ────────────────────────────────────────────────
 
 // Keyed by combo NAME because the writer is the server, which knows the alias
@@ -300,8 +228,10 @@ func TestMarkHopGoodIsKeyedByComboName(t *testing.T) {
 		t.Errorf("stored hop = %d, want 2", e.accountID)
 	}
 	// A different combo is unaffected — the map is per combo, not global.
-	strict := &store.Combo{ID: 305, Name: "other", Strategy: "strict_round_robin"}
-	if ordered := strictOrder(strict, routes); ordered[0].Account.ID != 1 {
+	// stickyOrder is the remaining lastGood reader; for a combo with no
+	// recorded hop it must return position order.
+	other := &store.Combo{ID: 305, Name: "other", Strategy: "sticky_last_good"}
+	if ordered := stickyOrder(other, routes); ordered[0].Account.ID != 1 {
 		t.Errorf("another combo inherited daily's last-good hop (head %d)", ordered[0].Account.ID)
 	}
 	// An empty alias (a route with no combo) must not create an entry.

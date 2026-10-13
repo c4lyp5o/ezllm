@@ -676,6 +676,8 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 			// the wire shape flips, at dispatch time.
 			Translated:    dec.translated,
 			ResponsesWire: dec.responsesWire,
+			// The per-hop block_round_robin hold (combo editor checkbox).
+			HoldUntilFailure: h.HoldUntilFailure != nil && *h.HoldUntilFailure,
 		}
 		if dec.wire != surface {
 			route.WireSurface = dec.wire
@@ -722,8 +724,6 @@ func orderRoutes(combo *store.Combo, routes []proxy.Route) ([]proxy.Route, int) 
 	switch combo.Strategy {
 	case "true_round_robin":
 		return randomOrder(routes), 0
-	case "strict_round_robin":
-		return strictOrder(combo, routes), 0
 	case "block_round_robin":
 		return blockOrder(combo, routes)
 	case "least_used":
@@ -903,6 +903,16 @@ func blockOrder(combo *store.Combo, routes []proxy.Route) ([]proxy.Route, int) {
 			"reason", reason,
 			"block_size", size)
 	}
+	// A hold_until_failure hop keeps its block while it succeeds: its
+	// dispatches do NOT consume the block, so the count only ever falls when
+	// the operator's hold releases (MarkHopBad) or the hop leaves the
+	// eligible list. Unchecked hops keep today's exact behaviour.
+	if routes[target].HoldUntilFailure {
+		// Position 1, not 0: the dispatch is the FIRST of the block it holds,
+		// and the tag is the operator's only visibility that a hold is active
+		// (a held hop would otherwise render "not counted" and look blank).
+		return rotate(uint64(target), routes), 1
+	}
 	e.remaining--
 	// Position AFTER the decrement: 1..size. A dispatch that spends the last
 	// slot of its block reports pos == size, and the NEXT dispatch advances.
@@ -925,10 +935,8 @@ func rotate(start uint64, routes []proxy.Route) []proxy.Route {
 // Combo names are unique. In-process, like every other cursor here — losing it
 // on restart costs one un-sticky (or one off-by-one rotation) request.
 //
-// TWO strategies read this, because "which hop last answered" answers both of
-// their questions:
-//   - sticky_last_good  : keep using it (until sticky_idle_s of quiet).
-//   - strict_round_robin: start the NEXT request after it.
+// sticky_last_good reads this: "which hop last answered" is exactly the
+// question "keep using it (until sticky_idle_s of quiet)" needs answered.
 //
 // The value is deliberately {accountID, model, at} and NOT the whole
 // proxy.Route. Both readers use exactly those two fields (plus the timestamp),
@@ -961,6 +969,39 @@ func (r *Resolver) MarkHopGood(comboName string, rt proxy.Route) {
 	})
 }
 
+// MarkHopBad reports a hop-attributable failure (429/5xx/transport, or a
+// failed/truncated translated stream) for a combo-routed request. Its one job
+// today is releasing a hold_until_failure block: the next dispatch rotates.
+// A 4xx is the REQUEST's fault and reports neither this nor MarkHopGood, so an
+// operator's hold survives a bad payload (operator decision 2026-10-13).
+//
+// It is deliberately not a negative cache: nothing is blacklisted, and
+// failover inside a request still walks the combo in position order.
+func (r *Resolver) MarkHopBad(comboName string, rt proxy.Route) {
+	if comboName == "" || strings.Contains(comboName, "/") {
+		return // not a combo route
+	}
+	if !rt.HoldUntilFailure {
+		return // only a held hop learns from a failure
+	}
+	blockCursors.Range(func(k, v any) bool {
+		e, ok := v.(*blockEntry)
+		if !ok || e == nil {
+			return true
+		}
+		e.mu.Lock()
+		if e.combo == comboName && e.accountID == rt.Account.ID && e.model == rt.Model {
+			// Release the block. remaining=0 makes the NEXT dispatch advance
+			// (blockOrder sees remaining<=0) and the reason names why, so the
+			// dashboard shows a release rather than a mysterious rotation.
+			e.remaining = 0
+			e.reason = "held hop failed"
+		}
+		e.mu.Unlock()
+		return true
+	})
+}
+
 // stickyOrder puts the last-good hop first, while the combo is still within its
 // idle window AND the hop is still in the candidate list.
 //
@@ -986,39 +1027,6 @@ func stickyOrder(combo *store.Combo, routes []proxy.Route) []proxy.Route {
 			return rotate(uint64(i), routes)
 		}
 	}
-	return routes
-}
-
-// strictOrder implements strict_round_robin: the rotation advances only when a
-// request SUCCEEDS, and it advances from the hop that actually served.
-//
-// The difference from plain per-request rotation is entirely in what happens on
-// failure. Plain rotation moves the cursor on every ATTEMPT, so a hop that just
-// failed is skipped next time even though it may be perfectly healthy. Here the
-// cursor moves only on a delivered response and moves to the hop that answered,
-// so a failing hop deprioritises itself without being blacklisted: A 429s, B
-// serves, the next request starts at C — and A is tried again when the rotation
-// comes back round to it. Failover inside the request is unchanged; only the
-// next request's starting point differs.
-//
-// With no remembered hop (a cold start) it is position order, which for the
-// first request is indistinguishable from starting at the top of the list.
-func strictOrder(combo *store.Combo, routes []proxy.Route) []proxy.Route {
-	if len(routes) < 2 {
-		return routes
-	}
-	v, ok := lastGood.Load(combo.Name)
-	if !ok {
-		return routes
-	}
-	e := v.(lastGoodEntry)
-	for i, rt := range routes {
-		if rt.Account.ID == e.accountID && rt.Model == e.model {
-			return rotate(uint64((i+1)%len(routes)), routes)
-		}
-	}
-	// The hop that answered is not eligible right now (cooling, out of budget,
-	// dropped from the catalog). Position order is the honest fallback.
 	return routes
 }
 

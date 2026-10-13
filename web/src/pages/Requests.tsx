@@ -175,8 +175,7 @@ export default function Requests() {
                 <th className="px-4 py-2 font-medium">model</th>
                 <th className="px-4 py-2 font-medium">client</th>
                 <th className="px-4 py-2 text-right font-medium">status</th>
-                <th className="px-4 py-2 text-right font-medium">in</th>
-                <th className="px-4 py-2 text-right font-medium">out</th>
+                <th className="px-4 py-2 text-right font-medium" title="tokens in ↑ / tokens out ↓">tokens ↑↓</th>
                 <th className="px-4 py-2 text-right font-medium">cached</th>
                 <th className="px-4 py-2 text-right font-medium">reasoning</th>
                 <th className="px-4 py-2 text-right font-medium">saved</th>
@@ -194,7 +193,10 @@ export default function Requests() {
               )}
               {rows.map((r, i) => (
                 <tr key={`${r.ts}-${i}`} className="border-t border-line">
-                  <td className="whitespace-nowrap px-4 py-2 font-mono text-mute">{fmtTs(r.ts)}</td>
+                  <td className="whitespace-nowrap px-4 py-2 font-mono text-mute">
+                    {fmtTs(r.ts)}
+                    {r.ip && <div className="text-[10px] text-mute/70" title="caller address">{r.ip}</div>}
+                  </td>
                   <td className="px-4 py-2 font-mono">
                     {r.model}
                     {/* Wire-translated hop: its in-tokens are the vendor's
@@ -211,8 +213,11 @@ export default function Requests() {
                     <div>{r.status}</div>
                     <CauseChip err={r.error} status={r.status} />
                   </td>
-                  <td className="px-4 py-2 text-right font-mono tabular-nums">{nfmt(r.tin)}</td>
-                  <td className="px-4 py-2 text-right font-mono tabular-nums">{nfmt(r.tout)}</td>
+                  <td className="px-4 py-2 text-right font-mono tabular-nums"
+                    title={`tokens in ${nfmt(r.tin)} (↑) · tokens out ${nfmt(r.tout)} (↓)`}>
+                    <span title="tokens in — prompt, cache counted inside">↑{nfmt(r.tin)}</span>{' '}
+                    <span className="text-mute" title="tokens out — completion">↓{nfmt(r.tout)}</span>
+                  </td>
                   <td className="px-4 py-2 text-right font-mono tabular-nums text-mute">{nfmt(r.cread ?? 0)}</td>
                   <td className={cx('px-4 py-2 text-right font-mono tabular-nums',
                     (r.reasoning ?? 0) > 0 ? 'text-warn' : 'text-mute')}>

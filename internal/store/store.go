@@ -24,7 +24,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 13
+const schemaVersion = 14
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -189,6 +189,12 @@ func (d *DB) migrate() error {
 		if err := d.alterAccountUsageConvention(context.Background()); err != nil {
 			return fmt.Errorf("store: alter account messages usage: %w", err)
 		}
+		if err := d.alterComboHopHold(context.Background()); err != nil {
+			return fmt.Errorf("store: alter combo hop hold: %w", err)
+		}
+		if err := d.alterCallsIP(context.Background()); err != nil {
+			return fmt.Errorf("store: alter calls ip: %w", err)
+		}
 		if err := d.rebuildCombosV9(context.Background()); err != nil {
 			return fmt.Errorf("store: rebuild combos: %w", err)
 		}
@@ -245,6 +251,12 @@ func (d *DB) migrate() error {
 		if err := d.alterAccountUsageConvention(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate account messages usage: %w", err)
 		}
+		if err := d.alterComboHopHold(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate combo hop hold: %w", err)
+		}
+		if err := d.alterCallsIP(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate calls ip: %w", err)
+		}
 		if err := d.rebuildCombosV9(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate combos: %w", err)
 		}
@@ -271,6 +283,34 @@ func (d *DB) alterAccountUsageConvention(ctx context.Context) error {
 		return err
 	}
 	_, err = d.w.ExecContext(ctx, `ALTER TABLE accounts ADD COLUMN usage_convention TEXT NOT NULL DEFAULT 'auto'`)
+	return err
+}
+
+// alterComboHopHold adds combo_hops.hold_until_failure on databases created
+// before v14. Guarded by a column check: ALTER TABLE ADD COLUMN is not
+// idempotent.
+func (d *DB) alterComboHopHold(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "combo_hops")
+	if err != nil || !exists {
+		return err
+	}
+	if ok, err := hasColumn(ctx, d.w, "combo_hops", "hold_until_failure"); err != nil || ok {
+		return err
+	}
+	_, err = d.w.ExecContext(ctx, `ALTER TABLE combo_hops ADD COLUMN hold_until_failure INTEGER NOT NULL DEFAULT 0`)
+	return err
+}
+
+// alterCallsIP adds calls.ip on databases created before v14.
+func (d *DB) alterCallsIP(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "calls")
+	if err != nil || !exists {
+		return err
+	}
+	if ok, err := hasColumn(ctx, d.w, "calls", "ip"); err != nil || ok {
+		return err
+	}
+	_, err = d.w.ExecContext(ctx, `ALTER TABLE calls ADD COLUMN ip TEXT NOT NULL DEFAULT ''`)
 	return err
 }
 

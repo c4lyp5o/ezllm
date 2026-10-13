@@ -188,6 +188,10 @@ export type Account = {
 
 export type RecentCall = {
   ts: string; client: string; surface: string; account: string; model: string;
+  /** Caller address captured at request time (X-Real-IP / X-Forwarded-For /
+   *  socket peer). Empty when the ledger row predates v14 or no address was
+   *  available. Attribution only — a direct connection can claim any value. */
+  ip?: string;
   status: number; ttft_ms: number; total_ms: number; tin: number; tout: number; cread: number;
   saved: number; compression: string; applied: boolean; contextPre?: number; contextSaved?: number;
   // alias = the combo name (or "ns/model" for a direct route); err = the
@@ -211,6 +215,8 @@ export type RecentCall = {
 // whichever the row actually carries so both render with the same fields.
 export type FeedRow = {
   ts: string; client: string; surface: string; alias?: string; account: string; model: string;
+  /** Caller address (see RecentCall.ip). */
+  ip?: string;
   status: number; stream?: boolean; ttft_ms?: number; total_ms?: number;
   tin: number; tout: number; cread?: number; reasoning?: number; saved: number;
   /** What a REJECTED rewrite would have saved. Non-zero while `applied` is
@@ -457,7 +463,14 @@ export type SweepStatus = {
 
 export type SyncResult = { synced: number; protocol_tested: number; protocol_support: ProtocolSupport; ms: number };
 
-export type Hop = { account_id: number; model_id: string; weight: number; enabled: boolean };
+export type Hop = {
+  account_id: number; model_id: string; weight: number; enabled: boolean;
+  /** block_round_robin only: this hop does not rotate when its block runs
+   *  out — it HOLDS the block while it keeps succeeding and releases it on a
+   *  hop-attributable failure (429/5xx/transport/failed stream). A 4xx is the
+   *  request's fault and keeps the hold. */
+  hold_until_failure?: boolean;
+};
 
 export type Combo = {
   id: number; name: string; strategy: string; sticky_idle_s: number | null; enabled: boolean;
@@ -718,7 +731,6 @@ export const STRATEGY_HINTS: Record<string, string> = {
   failover: 'try hops in order until one works',
   block_round_robin: 'keep one hop for N requests, then move to the next — keeps that account’s prompt cache warm; needs N <= the hop’s request budget',
   true_round_robin: 'a dice roll per request — perfectly even in expectation and stateless, but no cache reuse and it will streak',
-  strict_round_robin: 'rotate to the next hop only after a success — a failing hop deprioritises itself and still gets retried',
   sticky_last_good: 'stay on the last working hop, and release it after sticky_idle_s of quiet',
   least_used: 'not implemented yet — falls back to hop order',
 };

@@ -178,8 +178,11 @@ export default function RecentFeed() {
                   <span className="text-mute w-24 shrink-0 hidden sm:block truncate">
                     {c.account}
                   </span>
-                  <span className="font-mono tabular-nums text-mute w-28 shrink-0 text-right">
-                    {formatTokens(c.tin)}↑ {formatTokens(c.tout)}↓
+                  <span className="font-mono tabular-nums text-mute w-28 shrink-0 text-right"
+                    title={`tokens in ${formatTokens(c.tin)} (↑, prompt with cache inside) · tokens out ${formatTokens(c.tout)} (↓, completion)`}>
+                    <span title="tokens in — prompt, cache counted inside">↑{formatTokens(c.tin)}</span>
+                    {' '}
+                    <span title="tokens out — completion">↓{formatTokens(c.tout)}</span>
                     {c.saved > 0 && (
                       <span className="text-ok" title="tokens saved by compression">
                         {' '}
@@ -190,8 +193,13 @@ export default function RecentFeed() {
                   <span className="font-mono tabular-nums text-mute w-14 shrink-0 text-right">
                     {c.total_ms != null ? `${c.total_ms}ms` : '—'}
                   </span>
-                  <span className="text-mute w-9 shrink-0 text-right">
+                  <span className="text-mute w-14 shrink-0 text-right">
                     {timeAgo(c.ts)}
+                    {c.ip && (
+                      <div className="font-mono text-[9px] text-mute/70 truncate" title={`caller address: ${c.ip}`}>
+                        {c.ip}
+                      </div>
+                    )}
                   </span>
                 </li>
               );

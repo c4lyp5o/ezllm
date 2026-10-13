@@ -14,6 +14,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"runtime/debug"
 	"strings"
@@ -442,6 +443,7 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			return
 		}
 		client := clientName(r)
+		cip := clientIP(r)
 		if info := reqInfoOf(r); info != nil {
 			info.surface = string(surface)
 		}
@@ -499,7 +501,7 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 				writeErr(w, http.StatusBadGateway, "upstream_error", err.Error())
 			}
 			s.ledger(store.Call{
-				TS: start, Client: client, Surface: store2surface(surface), Alias: requested,
+				TS: start, Client: client, IP: cip, Surface: store2surface(surface), Alias: requested,
 				Model: requested, Status: errorStatus(err), Err: err.Error(),
 				// Compression never ran (the request died at resolution), but
 				// the stamp still says what WOULD have happened — "off" or the
@@ -537,14 +539,19 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			// and disappears from alias-grouped usage.
 			served = routes[0]
 		}
-		// Record which hop actually served. Two strategies need an OUTCOME and
-		// cannot get one from resolution alone: sticky_last_good keeps using the
-		// hop that last answered, and strict_round_robin starts the next request
-		// after it. Only a delivered 2xx counts — a failed attempt must not move
-		// either cursor, or a hop that just broke would look like one that
+		// Record which hop actually served. sticky_last_good needs an OUTCOME and
+		// cannot get one from resolution alone: it keeps using the hop that last
+		// answered. Only a delivered 2xx counts — a failed attempt must not move
+		// that cursor, or a hop that just broke would look like one that
 		// worked. A bare model name is always a combo, so an alias without '/'
 		// identifies one; a direct namespace/model route has no rotation to
 		// inform.
+		// A hop-attributable failure releases a hold_until_failure block so the
+		// next dispatch rotates; a 4xx is the REQUEST's fault and keeps the
+		// hold (operator decision 2026-10-13).
+		if hopAttributableFailure(res, ferr) && !strings.Contains(served.Alias, "/") {
+			s.resolver.MarkHopBad(served.Alias, served)
+		}
 		// A translated stream that ended in a late error frame or a truncated
 		// source delivered a 200 header but did NOT serve the request: the
 		// positive signal must not fire, or a hop that cuts its answers looks
@@ -594,7 +601,7 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			status = http.StatusBadGateway
 		}
 		call := store.Call{
-			TS: start, Client: client, Surface: store2surface(surface), Alias: served.Alias,
+			TS: start, Client: client, IP: cip, Surface: store2surface(surface), Alias: served.Alias,
 			AccountID: served.Account.ID,
 			Account:   served.Account.Namespace, KeyID: served.KeyID, KeyHint: served.KeyHint, Model: served.Model,
 			Status: status, Stream: res.Stream, TTFTms: res.TTFTms, Totalms: res.Totalms,
@@ -920,6 +927,49 @@ func hasRole(r *http.Request, want string) bool {
 		}
 	}
 	return false
+}
+
+// hopAttributableFailure decides whether an attempt FAILED ON THE HOP (so a
+// hold_until_failure block must release) or on the REQUEST (so the hold
+// survives, because the next request may be perfectly fine).
+//
+// Hop-attributable: 429 (the hop's budget/window), any 5xx (the hop is broken),
+// a transport error (never reached a body), and a translated stream that failed
+// or truncated late (bytes came, the answer did not). Not hop-attributable: a
+// 2xx/3xx that delivered, and every 4xx — a 400/404/422 is the caller's
+// payload or model id, and rotating away from a healthy hop on it would be
+// fabricating a health signal.
+func hopAttributableFailure(res proxy.Result, ferr error) bool {
+	if ferr != nil {
+		return true
+	}
+	if res.Status == 429 || res.Status >= 500 {
+		return true
+	}
+	return !res.StreamCompleted()
+}
+
+// clientIP captures the caller address for the ledger's traffic mapping
+// (operator decision 2026-10-13, lat/long dropped). Precedence matches the
+// usual reverse-proxy contract: X-Real-IP (nginx), then the FIRST address in
+// X-Forwarded-For (the client, when the proxy appends), then the socket peer.
+// The value is whatever the proxy sent — spoofable on a direct connection, so
+// it is attribution, not authentication.
+func clientIP(r *http.Request) string {
+	if v := strings.TrimSpace(r.Header.Get("X-Real-Ip")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); v != "" {
+		if i := strings.IndexByte(v, ','); i > 0 {
+			v = v[:i]
+		}
+		return strings.TrimSpace(v)
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 func clientName(r *http.Request) string {

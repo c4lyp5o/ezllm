@@ -196,7 +196,8 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
 
 ### M4 — combos, strategies, key pool + cooldown ✅
 - `internal/router/router.go` — combo OR `ns/model` resolution → ordered hops; strategy switch:
-  `failover` / `true_round_robin` / `strict_round_robin` / `sticky_last_good` / `least_used`;
+  `failover` / `true_round_robin` / `sticky_last_good` / `least_used` /
+  `block_round_robin` (strict_round_robin removed 2026-10-13 — a held hop);
   failover retry budget; 4xx passthrough (never retried).
 - Key pool: per-account key selection + cooldown after 429/failure (skipped until expiry).
 - `internal/rules/engine.go` — token caps (rolling window) + allowed-hours; combo hops that

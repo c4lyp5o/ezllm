@@ -365,6 +365,30 @@ func TestRehearseMigrationOnLiveCopy(t *testing.T) {
 			t.Errorf("accounts.%s missing after migration (has=%v err=%v)", col, has, err)
 		}
 	}
+	// v14: the hold checkbox and the request IP land as guarded ALTERs, so a
+	// pre-v14 database must gain both columns with safe defaults.
+	for _, chk := range []struct{ table, col string }{
+		{"combo_hops", "hold_until_failure"}, {"calls", "ip"},
+	} {
+		has, err := hasColumn(ctx, db.w, chk.table, chk.col)
+		if err != nil || !has {
+			t.Errorf("%s.%s missing after migration (has=%v err=%v)", chk.table, chk.col, has, err)
+		}
+	}
+	if len(combosAfter) > 0 {
+		var holds int
+		if err := db.r.QueryRowContext(ctx, `SELECT COUNT(*) FROM combo_hops WHERE hold_until_failure != 0`).Scan(&holds); err != nil {
+			t.Errorf("hold_until_failure unreadable after migration: %v", err)
+		} else if holds != 0 {
+			t.Errorf("%d migrated hops carry a hold — a migration must never invent operator intent", holds)
+		}
+	}
+	var emptyIPs int
+	if err := db.r.QueryRowContext(ctx, `SELECT COUNT(*) FROM calls WHERE ip != ''`).Scan(&emptyIPs); err != nil {
+		t.Errorf("calls.ip unreadable after migration: %v", err)
+	} else if emptyIPs != 0 {
+		t.Errorf("%d migrated rows carry an ip — a migration must never invent captured data", emptyIPs)
+	}
 	if len(combosAfter) > 0 {
 		has, err := hasColumn(ctx, db.w, "combos", "block_size")
 		if err != nil || !has {

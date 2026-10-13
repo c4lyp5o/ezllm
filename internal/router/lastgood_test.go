@@ -2,7 +2,7 @@ package router
 
 // F8 regression: lastGoodEntry used to store a whole proxy.Route, whose
 // KeyPlain field is the DECRYPTED upstream credential. Both readers
-// (stickyOrder and strictOrder) use exactly two fields — the account id and
+// (stickyOrder) use exactly two fields — the account id and
 // the model — so everything else the Route carries, including the plaintext
 // key, was being pinned in a process-global map with no eviction, duplicating
 // it outside the request scope that needed it.

@@ -7,7 +7,7 @@ import { CAUSE_TONES, Chip, ConfirmModal, Modal, Mono, SectionLabel, SkeletonCar
 // is accepted by the backend (where it keeps position order, with a comment
 // explaining why) but is NOT offered here, because a selectable option that
 // silently equals another one is a knob that appears to work and does not.
-const STRATEGIES = ['failover', 'block_round_robin', 'true_round_robin', 'strict_round_robin', 'sticky_last_good'] as const;
+const STRATEGIES = ['failover', 'block_round_robin', 'true_round_robin', 'sticky_last_good'] as const;
 
 // AccountLite keeps each account's request budget alongside its name so the
 // block-size field can warn when a block could not be served in full.
@@ -18,7 +18,7 @@ type AccountLite = { id: number; name: string; rate_limit?: number; rate_window?
 // the wire — submit maps each row onto the plain Hop shape.
 type HopRow = Hop & { custom?: boolean };
 
-const emptyHop = (account_id: number): HopRow => ({ account_id, model_id: '', weight: 1, enabled: true });
+const emptyHop = (account_id: number): HopRow => ({ account_id, model_id: '', weight: 1, enabled: true, hold_until_failure: false });
 
 type Draft = {
   name: string; strategy: string; sticky_idle_s: number; enabled: boolean;
@@ -36,8 +36,8 @@ function HopArrow({ last }: { last: boolean }) {
     : <span className="select-none font-mono text-[11px] text-accent/60">→</span>;
 }
 
-function HopsEditor({ hops, setHops, accounts }: {
-  hops: HopRow[]; setHops: (h: HopRow[]) => void; accounts: AccountLite[];
+function HopsEditor({ hops, setHops, accounts, strategy }: {
+  hops: HopRow[]; setHops: (h: HopRow[]) => void; accounts: AccountLite[]; strategy: string;
 }) {
   const move = (i: number, dir: -1 | 1) => {
     const j = i + dir;
@@ -114,6 +114,14 @@ function HopsEditor({ hops, setHops, accounts }: {
                 value={h.weight} onChange={(e) => set(i, { weight: Math.max(1, Number(e.target.value) || 1) })} />
             </label>
             <Toggle checked={h.enabled} onChange={(v) => set(i, { enabled: v })} label="hop enabled" />
+            {strategy === 'block_round_robin' && (
+              <label className="flex items-center gap-1.5 text-[11px] text-mute"
+                title="hold the block while this hop keeps succeeding; release it on a hop-attributable failure (429/5xx/transport/failed stream). A 4xx is the request's fault and keeps the hold.">
+                <input type="checkbox" checked={h.hold_until_failure === true}
+                  onChange={(e) => set(i, { hold_until_failure: e.target.checked })} />
+                hold until fail
+              </label>
+            )}
             <div className="flex items-center gap-0.5">
               <button type="button" title="Move up" disabled={i === 0} className="rounded p-1 text-mute hover:bg-hover hover:text-ink disabled:opacity-30"
                 onClick={() => move(i, -1)}>↑</button>
@@ -165,7 +173,10 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
       // the smallest meaningful block, so a real value always wins.
       block_size: d.strategy === 'block_round_robin' ? d.block_size : 1,
       // strip the UI-only `custom` flag: the wire shape is the plain Hop.
-      hops: d.hops.map((h) => ({ account_id: h.account_id, model_id: h.model_id, weight: h.weight, enabled: h.enabled })),
+      hops: d.hops.map((h) => ({
+        account_id: h.account_id, model_id: h.model_id, weight: h.weight, enabled: h.enabled,
+        hold_until_failure: h.hold_until_failure === true,
+      })),
     };
     try {
       if (editing) await patch<Combo>(`/admin/combos/${editing.id}`, body);
@@ -279,7 +290,7 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
           )}
         </div>
 
-        <HopsEditor hops={d.hops} setHops={setHops} accounts={accounts} />
+        <HopsEditor hops={d.hops} setHops={setHops} accounts={accounts} strategy={d.strategy} />
 
         <div className="flex items-center gap-3">
           <Toggle checked={d.enabled} onChange={(v) => setD((p) => ({ ...p, enabled: v }))} label="combo enabled" />
@@ -487,6 +498,12 @@ export default function Combos() {
                         <span className="mx-1 text-mute">/</span>
                         <span className={h.enabled ? 'text-ink' : 'text-mute'}>{h.model_id}</span>
                         {h.weight > 1 && <span className="ml-1.5 text-mute">×{h.weight}</span>}
+                        {h.hold_until_failure && (
+                          <span className="ml-1.5 rounded border border-accent/40 px-1 text-[10px] text-accent"
+                            title="holds the block while it succeeds; releases on a hop-attributable failure">
+                            hold
+                          </span>
+                        )}
                       </span>
                     </span>
                   ))}

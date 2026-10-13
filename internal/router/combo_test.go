@@ -183,51 +183,6 @@ func TestDirectRouteIneligibleIsUnavailable(t *testing.T) {
 	}
 }
 
-// Strict round robin advances ONLY on success, so its rotation is driven by the
-// resolver's success hook, never by the request count. This is the strategy's
-// whole point: a hop that failed must not consume its turn in the rotation.
-func TestStrictRoundRobinRotatesOnSuccess(t *testing.T) {
-	combo := dayNightCombo()
-	// A unique name: the success hook is keyed by combo name, so sharing one
-	// with another test would leak state between them.
-	combo.Name = "strict-rotate"
-	combo.Strategy = "strict_round_robin"
-	r := New(withCombo(newFake(), combo))
-	ctx := context.Background()
-
-	// No success recorded yet: every resolve starts at the top of the list.
-	for i := 0; i < 3; i++ {
-		routes, err := r.ResolveCandidates(ctx, "strict-rotate", provider.SurfaceOpenAI, "test")
-		if err != nil {
-			t.Fatalf("resolve %d: %v", i, err)
-		}
-		if routes[0].Account.ID != 1 {
-			t.Fatalf("resolve %d started at hop %d with no success recorded — the cursor moved without one",
-				i, routes[0].Account.ID)
-		}
-	}
-
-	// Hop 1 delivers → the next request must start at hop 2.
-	r.MarkHopGood("strict-rotate", hop(1, "gpt-6-luna"))
-	routes, err := r.ResolveCandidates(ctx, "strict-rotate", provider.SurfaceOpenAI, "test")
-	if err != nil {
-		t.Fatalf("resolve after success: %v", err)
-	}
-	if routes[0].Account.ID != 2 {
-		t.Fatalf("head after hop 1 delivered = %d, want 2", routes[0].Account.ID)
-	}
-
-	// Hop 2 delivers → wrap back to hop 1.
-	r.MarkHopGood("strict-rotate", hop(2, "gpt-6-luna"))
-	routes, err = r.ResolveCandidates(ctx, "strict-rotate", provider.SurfaceOpenAI, "test")
-	if err != nil {
-		t.Fatalf("wrap resolve: %v", err)
-	}
-	if routes[0].Account.ID != 1 {
-		t.Errorf("head after hop 2 delivered = %d, want the rotation to wrap to 1", routes[0].Account.ID)
-	}
-}
-
 // block_round_robin must be reachable through the resolver, not only through a
 // direct blockOrder call: with a block of 1 it is plain per-request rotation.
 func TestBlockRoundRobinIsWiredAtTheResolver(t *testing.T) {

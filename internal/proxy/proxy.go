@@ -99,6 +99,11 @@ type Route struct {
 	// translation). Set by the router from probed capability; nothing else
 	// about the hop's failover/park semantics changes.
 	Translated bool
+	// HoldUntilFailure (block_round_robin only) marks a hop the operator
+	// wants held: it keeps the block while it succeeds and releases it on a
+	// hop-attributable failure (see Resolver.MarkHopBad). It affects nothing
+	// else — eligibility, failover and the ledger are unchanged.
+	HoldUntilFailure bool
 	// BlockPos tags the DISPATCH, not the hop: this request's 1-based
 	// position inside its block_round_robin block (0 = not counted). The
 	// router sets the SAME value on every candidate of a dispatch, so the

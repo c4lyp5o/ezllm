@@ -82,7 +82,9 @@ every namespace that does serve it.
 
 - A **combo** is a bare name (`daily`, `fallback`) → ordered hops `[{account, model}, …]`
   + a strategy. Combo names can't contain `/`.
-- Strategies: `failover` (default), `true_round_robin`, `strict_round_robin`,
+- Strategies: `failover` (default), `true_round_robin`, `block_round_robin`
+  (per-hop `hold_until_failure` checkbox: the hop holds its block while it
+  succeeds and releases on a hop-attributable failure),
   `sticky_last_good`, `least_used`.
 - Failover: transient failures (429, 5xx, timeout, transport) → retry budget per hop →
   next hop. 4xx goes straight back to the client — never retried.

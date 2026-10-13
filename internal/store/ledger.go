@@ -34,6 +34,9 @@ const (
 // copying fields by hand.
 type Call struct {
 	TS time.Time
+	// IP is the caller address (X-Forwarded-For / X-Real-IP / remote) captured
+	// at request time, for traffic mapping. Empty when unavailable.
+	IP string
 	// AccountID is the M5 metering key. The denormalized Account NAME below
 	// survives key deletion (and can be re-pointed at a different account), so
 	// a cap keyed by name would merge two accounts' budgets — meter by ID.
@@ -369,14 +372,14 @@ func (d *DB) insertCalls(ctx context.Context, rows []Call) error {
 
 	stmt, err := tx.PrepareContext(ctx, `
 INSERT INTO calls (
-  ts, account_id, client, surface, alias, account, provider_key_id, key_hint, model,
+  ts, account_id, client, ip, surface, alias, account, provider_key_id, key_hint, model,
   status, stream, ttft_ms, total_ms,
   tokens_in, tokens_out, tokens_cached_read, tokens_cached_write, reasoning_tokens, raw_usage,
   endpoint_id, upstream_model,
   compression_profile, compression_applied, prompt_tokens_pre, tokens_saved, compression_ms,
   compression_rules_fired, context_tokens_pre, context_tokens_saved,
   compression_saved_notional, prefix_sha, msg_count, tool_count, session_id, req_bytes, block_pos, translated, err
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
@@ -394,7 +397,7 @@ INSERT INTO calls (
 		_, err := stmt.ExecContext(ctx,
 			c.TS.UTC().Format("2006-01-02T15:04:05.000Z"),
 			acctID,
-			c.Client, string(c.Surface), c.Alias, c.Account, keyID, c.KeyHint, c.Model,
+			c.Client, c.IP, string(c.Surface), c.Alias, c.Account, keyID, c.KeyHint, c.Model,
 			c.Status, boolInt(c.Stream), c.TTFTms, c.Totalms,
 			c.TokensIn, c.TokensOut, c.TokensCachedRead, c.TokensCachedWrite, c.ReasoningTokens, c.RawUsage,
 			c.EndpointID, c.UpstreamModel,
@@ -690,7 +693,7 @@ func (d *DB) RecentCalls(ctx context.Context, limit int) ([]Call, error) {
 		limit = 50
 	}
 	rows, err := d.r.QueryContext(ctx, `
-SELECT ts, client, surface, alias, account, COALESCE(provider_key_id,0), key_hint, model,
+SELECT ts, client, COALESCE(ip,''), surface, alias, account, COALESCE(provider_key_id,0), key_hint, model,
        status, stream, ttft_ms, total_ms,
        tokens_in, tokens_out, tokens_cached_read, tokens_cached_write, reasoning_tokens,
        COALESCE(raw_usage,''), COALESCE(endpoint_id,''), COALESCE(upstream_model,''),
@@ -710,7 +713,7 @@ FROM calls ORDER BY id DESC LIMIT ?`, limit)
 		var ttft, total, cms sql.NullInt64
 		var applied int
 		var translated int
-		if err := rows.Scan(&ts, &c.Client, &c.Surface, &c.Alias, &c.Account, &c.KeyID, &c.KeyHint, &c.Model,
+		if err := rows.Scan(&ts, &c.Client, &c.IP, &c.Surface, &c.Alias, &c.Account, &c.KeyID, &c.KeyHint, &c.Model,
 			&c.Status, &c.Stream, &ttft, &total,
 			&c.TokensIn, &c.TokensOut, &c.TokensCachedRead, &c.TokensCachedWrite, &c.ReasoningTokens,
 			&c.RawUsage, &c.EndpointID, &c.UpstreamModel,

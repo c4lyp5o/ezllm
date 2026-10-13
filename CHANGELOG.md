@@ -2,7 +2,27 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M9); full history via `git log`.
 
-## 2026-10-12/13 — universal wire matrix (M0–M5; local, not pushed)
+## 2026-10-13 — strategy citizenship, the hold checkbox, request IP (M7; local, not pushed)
+- `feat(router)` two operator decisions on the universal matrix: translated hops are ordinary
+  combo members (the old "native hop always wins" tail rule is removed), and
+  `translation.universal_enabled` is the SINGLE switch for the matrix (no longer requires
+  `translation.enabled`) (`b1a2f5b`).
+- `feat(store,router,web)` schema v14 — `combo_hops.hold_until_failure`: a block_round_robin
+  hop the operator checks HOLDS its block while it keeps succeeding and releases it on a
+  hop-attributable failure (429/5xx/transport/failed-truncated stream; a 4xx keeps the hold).
+  Combo editor checkbox + a `hold` chip in the combo list.
+- `refactor(router)` `strict_round_robin` REMOVED (no live combo used it; its success-driven
+  advance is now block_round_robin with a held hop).
+- `feat(store,server,web)` schema v14 — `calls.ip`: the caller address (X-Real-IP, then the
+  first X-Forwarded-For entry, then the socket peer) captured for traffic mapping; shown in
+  the dashboard under the request timestamp. Lat/long dropped by operator decision.
+- `feat(web)` requests explorer: tokens in/out consolidated into one `tokens ↑↓` column with
+  hover titles; the feed's arrows get proper hover titles too.
+- Migration rehearsed on a live-DB copy: v11→v14, calls 6052 / accounts 11 / models 624 /
+  combos 11 / hops 39 / tokens 6 preserved, zero invented holds or IPs, second boot idempotent,
+  production untouched at v11.
+
+## 2026-10-12/13 — universal wire matrix (M0–M6; local, not pushed)
 - `fix(translate)` M0: Responses streams lost tool arguments when the item id and call id
   differed, and dropped terminal usage on incomplete/failed runs (`00232c5`).
 - `feat(router,proxy,server)` M1: wire identity — `Route.WireSurface`/`EffectiveWire()`, the

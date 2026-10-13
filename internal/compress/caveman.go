@@ -71,12 +71,18 @@ func caveman(msgs []any, opts map[string]any) ([]any, int) {
 	intensity := intensityLite
 	if s, ok := opts["intensity"].(string); ok {
 		switch strings.ToLower(strings.TrimSpace(s)) {
-		case "standard", "aggressive", "ultra":
+		case "standard":
 			intensity = intensityStandard
 		case "lite", "":
 			intensity = intensityLite
 		default:
-			return msgs, 0 // unknown level: fail-open rather than guess
+			// Unknown level: fail open rather than guess. omniroute's
+			// `aggressive`/`ultra` land here on purpose — they are pipeline
+			// compositions upstream, not caveman prose levels, and silently
+			// aliasing them to `standard` would make the ledger attribute
+			// savings to a level the caller never asked for
+			// (docs/compression-design.md, "Intensity").
+			return msgs, 0
 		}
 	}
 

@@ -170,6 +170,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/audio/speech", s.authed(s.inference(provider.SurfaceAudioTTS)))
 	s.mux.HandleFunc("POST /v1/audio/transcriptions", s.authed(s.inference(provider.SurfaceAudioSTT)))
 
+	// VS Code / Headerless tokenized aliases (OmniRoute compatibility)
+	s.mux.HandleFunc("GET /api/v1/vscode/{token}/", s.vscodeAuthed(s.handleModels))
+	s.mux.HandleFunc("GET /api/v1/vscode/{token}/models", s.vscodeAuthed(s.handleModels))
+	s.mux.HandleFunc("POST /api/v1/vscode/{token}/chat/completions", s.vscodeAuthed(s.inference(provider.SurfaceOpenAI)))
+	s.mux.HandleFunc("POST /api/v1/vscode/{token}/responses", s.vscodeAuthed(s.inference(provider.SurfaceResponses)))
+
 	// ── Dashboard account settings ──
 	s.mux.HandleFunc("POST /admin/settings/password", s.admin(s.handleDashboardPassword))
 

@@ -88,10 +88,10 @@ func (tr cfCatalogTransport) RoundTrip(req *http.Request) (*http.Response, error
 		return cfCatalogJSON(401, `{"success":false,"errors":[{"code":1000,"message":"Invalid API Token"}],"messages":[],"result":null}`), nil
 	}
 	return cfCatalogJSON(200, `{"errors":[],"messages":[],"success":true,"result":[
-		{"id":"@cf/zai-org/glm-4.7-flash","name":"GLM-4.7 Flash"},
-		{"id":"@cf/baai/bge-large-en-v1.5","name":"BGE Large (embedding)"},
-		{"id":"","name":"entry without id must be skipped"},
-		{"id":"@cf/zai-org/glm-4.7-flash","name":"duplicate"}
+		{"id":"01564c52-8717-47dc-8efd-907a2ca18301","name":"@cf/zai-org/glm-4.7-flash","description":"GLM-4.7 Flash"},
+		{"id":"01bc2fb0-4bca-4598-b985-d2584a3f46c0","name":"@cf/baai/bge-large-en-v1.5"},
+		{"id":"deadbeef-1111-0000-0000-000000000000","name":"","description":"no name -> skip"},
+		{"id":"deadbeef-0000-0000-0000-000000000000","name":"@cf/zai-org/glm-4.7-flash","description":"duplicate"}
 	]}`), nil
 }
 
@@ -109,10 +109,14 @@ func TestListModelsCloudflareEnvelope(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("models = %+v, want the 2 unique id-bearing entries", got)
 	}
+	// The REAL Cloudflare item shape is id=<uuid>, name=<@cf/...>. The
+	// callable id is the NAME, not the UUID — a UUID id 404s upstream. This
+	// test previously encoded the shape backwards, which is how that shipped.
 	if got[0].ID != "@cf/zai-org/glm-4.7-flash" || got[0].Display != "GLM-4.7 Flash" {
 		t.Fatalf("first model = %+v", got[0])
 	}
-	if got[1].ID != "@cf/baai/bge-large-en-v1.5" {
+	// No description in the second entry → Display falls back to the name.
+	if got[1].ID != "@cf/baai/bge-large-en-v1.5" || got[1].Display != "@cf/baai/bge-large-en-v1.5" {
 		t.Fatalf("second model = %+v", got[1])
 	}
 }

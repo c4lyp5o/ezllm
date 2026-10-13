@@ -55,10 +55,10 @@ func (tr cfTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			return cfJSON(req, 401, `{"success":false,"errors":[{"code":1000,"message":"Invalid API Token"}],"messages":[],"result":null}`), nil
 		}
 		return cfJSON(req, 200, `{"errors":[],"messages":[],"success":true,"result":[
-			{"id":"@cf/zai-org/glm-4.7-flash","name":"GLM-4.7 Flash"},
-			{"id":"@cf/meta/llama-3.3-70b-instruct-fp8-fast","name":"Llama 3.3 70B Instruct (fast)"},
-			{"id":"@cf/zai-org/glm-4.7-flash","name":"duplicate must be skipped"}
-		]}`), nil
+				{"id":"uuid-001","name":"@cf/zai-org/glm-4.7-flash","description":"GLM-4.7 Flash"},
+				{"id":"uuid-002","name":"@cf/meta/llama-3.3-70b-instruct-fp8-fast","description":"Llama 3.3 70B Instruct (fast)"},
+				{"id":"uuid-003","name":"@cf/zai-org/glm-4.7-flash","description":"duplicate must be skipped"}
+			]}`), nil
 
 	case strings.HasSuffix(req.URL.Path, "/ai/v1/models"):
 		// The OpenAI-shaped path Cloudflare does NOT implement.

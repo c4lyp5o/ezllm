@@ -325,8 +325,10 @@ func listModelsCloudflare(ctx context.Context, c *http.Client, acct Account, key
 	var env struct {
 		Success bool `json:"success"`
 		Result  []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
+			ID          string `json:"id"`
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Label       string `json:"label"`
 		} `json:"result"`
 		Errors []struct {
 			Message string `json:"message"`
@@ -345,11 +347,20 @@ func listModelsCloudflare(ctx context.Context, c *http.Client, acct Account, key
 	out := make([]ModelInfo, 0, len(env.Result))
 	seen := map[string]bool{}
 	for _, m := range env.Result {
-		if m.ID == "" || seen[m.ID] {
+		// The callable model id is m.Name (@cf/...). m.ID is an internal UUID.
+		// Display name: prefer description/label, fall back to name.
+		display := m.Description
+		if display == "" {
+			display = m.Label
+		}
+		if display == "" {
+			display = m.Name
+		}
+		if m.Name == "" || seen[m.Name] {
 			continue
 		}
-		seen[m.ID] = true
-		out = append(out, ModelInfo{ID: m.ID, Display: m.Name})
+		seen[m.Name] = true
+		out = append(out, ModelInfo{ID: m.Name, Display: display})
 	}
 	return out, nil
 }

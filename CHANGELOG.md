@@ -2,6 +2,32 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M9); full history via `git log`.
 
+## 2026-10-13 — NVIDIA NIM key-test fix: measured-fast candidates, honest timeout verdict
+- `fix(registration)` adding NVIDIA NIM failed with `generation probe failed: Post
+  "https://integrate.api.nvidia.com/v1/chat/completions": context deadline exceeded`, and
+  the hint blamed a provider rejection for a response no provider ever sent. NIM's shared
+  free tier answered `deepseek-ai/deepseek-v4.1-flash` (the generic buckets' FIRST pick, by
+  name) with nothing inside 90s and `z-ai/glm-5.3-flash` with 43.7s, against
+  `defaultStepTimeout = 15s`. Ledger evidence for the failed add: `admin:test …
+  deepseek-ai/deepseek-v4.1-flash status=0 15000ms`.
+- `pickProbeModels` now leads with `nvidiaNIMProbeModels` on this host (host-scoped like
+  `isOllamaCloud`, preset base URL `https://integrate.api.nvidia.com/v1`):
+  `nemotron-3.5-lightning-30b-a3b` 0.6s · `llama-3.2-11b-vision-instruct` 1.7s ·
+  `gpt-oss-20b` 6.2s — measured, matching the probe playbook's "pick by measurement, never
+  by 'flash'/'mini' in the id". Each entry is matched against the account's own catalog; a
+  full miss falls through to the generic buckets (NIM rotates ids: `meta/llama-3.1-8b-instruct`
+  went EOL 2026-08-26 while still listed).
+- A transport error/timeout in the generation probe is no longer `probeFailed` with a
+  rejection hint: it carries an honest "did not answer within 15s" verdict and ADVANCES to
+  the next candidate; only the last candidate's timeout fails the test. 401/403 and 4xx
+  verdicts are unchanged.
+- NIM's `/v1/models` verified PUBLIC (200 + full catalog for a garbage key), so the catalog
+  can never prove a credential — the generation probe stays the gate.
+- Verification: 5 new tests (2/2 bites fell for the right reason), full suite green, and a
+  live scratch-instance proof through the real handler — `scripts/prove_nim_keytest.py`,
+  201 in 2.1s, `inference: nvidia/nemotron-3.5-lightning-30b-a3b · 766ms`, ledger row
+  `status=200`.
+
 ## 2026-10-13 — provider presets: NVIDIA NIM, Cloudflare Workers AI, OpenRouter
 - Dashboard add-provider presets: **NVIDIA NIM** (`https://integrate.api.nvidia.com/v1`),
   **OpenRouter** (`https://openrouter.ai/api/v1`), and **Cloudflare Workers AI**, whose

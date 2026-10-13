@@ -222,3 +222,144 @@ func (tr fixedStatusTransport) RoundTrip(req *http.Request) (*http.Response, err
 	}
 	return jsonHTTPResponse(req, tr.status, tr.body), nil
 }
+
+// ── NVIDIA NIM (measured live 2026-10-13, free-credits account) ──────────────
+// The generic buckets pick deepseek-ai/deepseek-v4.1-flash first on this host;
+// it never answered a 16-token probe (90s+), glm-5.3-flash took 43.7s — both
+// past defaultStepTimeout — while the preferred ids answer in 0.6s/1.7s/6.2s.
+
+func TestNIMCatalogPicksMeasuredFastCandidates(t *testing.T) {
+	acct := provider.Account{Kind: provider.KindOpenAICompatible, BaseURL: "https://integrate.api.nvidia.com/v1"}
+	models := []provider.ModelInfo{
+		{ID: "deepseek-ai/deepseek-v4.1-flash"},       // generic bucket's first pick — >90s live
+		{ID: "z-ai/glm-5.3-flash"},                    // "flash" bucket — 43.7s live
+		{ID: "nvidia/nemotron-3.5-lightning-30b-a3b"}, // 0.6s live
+		{ID: "meta/llama-3.2-11b-vision-instruct"},    // 1.7s live
+		{ID: "openai/gpt-oss-20b"},                    // 6.2s live
+		{ID: "nvidia/embed-qa-4"},                     // non-chat, must never appear
+	}
+	want := []string{
+		"nvidia/nemotron-3.5-lightning-30b-a3b",
+		"meta/llama-3.2-11b-vision-instruct",
+		"openai/gpt-oss-20b",
+	}
+	got := pickProbeModels(models, acct)
+	if len(got) != len(want) {
+		t.Fatalf("candidates = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("candidate[%d] = %q, want %q (full list %v)", i, got[i], want[i], got)
+		}
+	}
+	if pickProbeModel(models, acct) != want[0] {
+		t.Fatalf("single-candidate view = %q, want %q", pickProbeModel(models, acct), want[0])
+	}
+}
+
+func TestNIMWithoutPreferredModelsFallsBackToGeneric(t *testing.T) {
+	acct := provider.Account{Kind: provider.KindOpenAICompatible, BaseURL: "https://integrate.api.nvidia.com/v1"}
+	models := []provider.ModelInfo{
+		{ID: "deepseek-ai/deepseek-v4.1-flash"},
+		{ID: "nvidia/llama-3.1-nemotron-70b-instruct"},
+	}
+	got := pickProbeModels(models, acct)
+	if len(got) == 0 || got[0] != "deepseek-ai/deepseek-v4.1-flash" {
+		t.Fatalf("fallback candidates = %v, want the generic bucket's pick first", got)
+	}
+}
+
+func TestNIMDetectionIsHostScoped(t *testing.T) {
+	yes := provider.Account{Kind: provider.KindOpenAICompatible, BaseURL: "https://integrate.api.nvidia.com/v1"}
+	if !isNVIDIANIM(yes) {
+		t.Fatal("the NIM preset base URL must be detected")
+	}
+	no := []provider.Account{
+		{Kind: provider.KindOpenAICompatible, BaseURL: "https://api.openai.com/v1"},
+		{Kind: provider.KindOpenAICompatible, BaseURL: "http://integrate.api.nvidia.com/v1"}, // not https
+		{Kind: provider.KindAnthropicCompat, BaseURL: "https://integrate.api.nvidia.com/v1"},
+	}
+	for _, acct := range no {
+		if isNVIDIANIM(acct) {
+			t.Fatalf("must not match kind=%s base=%q", acct.Kind, acct.BaseURL)
+		}
+	}
+}
+
+// hangFirstTransport: candidate #1 never answers — the live NVIDIA NIM shape
+// (deepseek-v4.1-flash outlives the probe deadline) — candidate #2 answers.
+type hangFirstTransport struct{ key string }
+
+func (tr hangFirstTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Header.Get("Authorization") != "Bearer "+tr.key {
+		return jsonHTTPResponse(req, http.StatusUnauthorized, `{"error":{"message":"bad key"}}`), nil
+	}
+	body, _ := io.ReadAll(req.Body)
+	var payload struct {
+		Model string `json:"model"`
+	}
+	_ = json.Unmarshal(body, &payload)
+	if payload.Model == "slow-model" {
+		// What net/http returns when the caller's context deadline fires.
+		return nil, fmt.Errorf(`Post "https://integrate.api.nvidia.com/v1/chat/completions": context deadline exceeded`)
+	}
+	return jsonHTTPResponse(req, http.StatusOK,
+		`{"id":"chatcmpl-1","choices":[{"index":0,"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1}}`), nil
+}
+
+func TestTimeoutOnOneModelAdvancesInsteadOfFailingTheKey(t *testing.T) {
+	const key = "nim-valid-key"
+	client := &http.Client{Transport: hangFirstTransport{key: key}}
+	registry := provider.NewRegistry(client)
+	adapter, err := registry.Get(provider.KindOpenAICompatible)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tester := NewTester(client, registry, nil)
+	acct := provider.Account{Kind: provider.KindOpenAICompatible, BaseURL: "https://integrate.api.nvidia.com/v1", Namespace: "nvidia-nim"}
+	res := &TestResult{Steps: []Step{}}
+
+	ok, failure := tester.inferenceStep(context.Background(), adapter, acct, key,
+		[]string{"slow-model", "fast-model"}, &pacer{}, res)
+	if !ok || failure != nil {
+		t.Fatalf("a timed-out model must not fail a valid key: ok=%v failure=%+v", ok, failure)
+	}
+	joined := stepDetails(res.Steps)
+	if !strings.Contains(joined, "slow-model did not answer within") ||
+		!strings.Contains(joined, "falling back to fast-model") {
+		t.Fatalf("timeout fallback trail missing from steps: %s", joined)
+	}
+}
+
+// hangAllTransport: every candidate times out — the honest verdict is "no
+// answer", never "the provider rejected".
+type hangAllTransport struct{ key string }
+
+func (tr hangAllTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return nil, fmt.Errorf(`Post "https://integrate.api.nvidia.com/v1/chat/completions": context deadline exceeded`)
+}
+
+func TestAllCandidatesTimingOutFailsHonestNotAsRejection(t *testing.T) {
+	const key = "nim-valid-key"
+	client := &http.Client{Transport: hangAllTransport{key: key}}
+	registry := provider.NewRegistry(client)
+	adapter, err := registry.Get(provider.KindOpenAICompatible)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tester := NewTester(client, registry, nil)
+	acct := provider.Account{Kind: provider.KindOpenAICompatible, BaseURL: "https://integrate.api.nvidia.com/v1", Namespace: "nvidia-nim"}
+	res := &TestResult{Steps: []Step{}}
+
+	ok, failure := tester.inferenceStep(context.Background(), adapter, acct, key,
+		[]string{"slow-a", "slow-b"}, &pacer{}, res)
+	if ok || failure == nil {
+		t.Fatalf("all-timeout must fail the test: ok=%v failure=%+v", ok, failure)
+	}
+	if !strings.Contains(failure.Message, "slow-b did not answer within") {
+		t.Fatalf("failure should name the last candidate and the honest cause: %+v", failure)
+	}
+	if strings.Contains(failure.Hint, "The provider rejected") {
+		t.Fatalf("a timeout is not a provider rejection: %+v", failure)
+	}
+}

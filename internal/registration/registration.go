@@ -480,7 +480,7 @@ type probeOutcome int
 
 const (
 	probeOK               probeOutcome = iota // credential proven
-	probeModelUnavailable                     // this MODEL is refused; try the next candidate
+	probeModelUnavailable                     // this MODEL is refused or never answered; try the next candidate — no credential verdict either way
 	probeFailed                               // auth/provider failure — stop
 )
 
@@ -602,6 +602,25 @@ func (t *Tester) probeModel(
 		return probeModelUnavailable, f
 
 	default:
+		if err != nil {
+			// The provider never answered: there is no upstream verdict at
+			// all, so "The provider rejected a minimal test request" would be
+			// a lie over a plain timeout (it read as a bad credential), and a
+			// slow model — NVIDIA NIM answers some models in under 2s while
+			// others take 90s+ to first token — must not fail a key that was
+			// never the problem. Advance to the next candidate; only the
+			// LAST candidate's timeout fails the key test.
+			f := &Failure{
+				Step:           StepInference,
+				Message:        fmt.Sprintf("%s did not answer within %s (%s)", model, defaultStepTimeout, shortErr(err)),
+				UpstreamStatus: status,
+				UpstreamError:  upstreamErr(resp),
+				Hint:           "No upstream response arrived in time — a slow or overloaded model, not a credential rejection. The probe tries the next catalog candidate.",
+				Retryable:      retryableStatus(status),
+			}
+			res.Steps = append(res.Steps, Step{Step: StepInference, OK: false, Detail: f.Message})
+			return probeModelUnavailable, f
+		}
 		f := &Failure{
 			Step:           StepInference,
 			Message:        "generation probe failed: " + shortErr(err),
@@ -1032,6 +1051,20 @@ var nonChatModelMarkers = []string{
 	"dall-e", "orpheus",
 }
 
+// nvidiaNIMProbeModels are the probe candidates MEASURED fast on
+// integrate.api.nvidia.com (2026-10-13, free-credits account): 0.6s / 1.7s /
+// 6.2s to a 16-token completion, where the generic buckets pick
+// deepseek-ai/deepseek-v4.1-flash first (>90s, no answer at all) — the exact
+// "by name, not by measurement" trap the probe playbook forbids. NIM rotates
+// ids (meta/llama-3.1-8b-instruct went EOL 2026-08-26 while still catalogued),
+// so every entry is matched against the account's OWN catalog and a full miss
+// falls through to the generic buckets.
+var nvidiaNIMProbeModels = []string{
+	"nvidia/nemotron-3.5-lightning-30b-a3b",
+	"meta/llama-3.2-11b-vision-instruct",
+	"openai/gpt-oss-20b",
+}
+
 func chatsLikeProbe(id string) bool {
 	lower := strings.ToLower(id)
 	for _, marker := range nonChatModelMarkers {
@@ -1103,6 +1136,25 @@ func pickProbeModels(models []provider.ModelInfo, acct provider.Account) []strin
 		}
 		out = append(out, id)
 	}
+	// NVIDIA NIM leads with the measured-fast ids (see nvidiaNIMProbeModels):
+	// the generic buckets below pick deepseek-v4.1-flash on this host, which
+	// outlives the probe deadline without answering. A full miss (NIM rotated
+	// every listed id out of the catalog) falls through to the buckets.
+	if isNVIDIANIM(acct) {
+		for _, preferred := range nvidiaNIMProbeModels {
+			for _, id := range ids {
+				if strings.EqualFold(id, preferred) {
+					add(id)
+				}
+			}
+		}
+		if len(out) > 0 {
+			if len(out) > probeCandidates {
+				out = out[:probeCandidates]
+			}
+			return out
+		}
+	}
 	for _, k := range []string{"deepseek-v4.1-flash", "qwen3.8-flash", "minimax-m3"} {
 		for _, id := range ids {
 			if id == k {
@@ -1164,6 +1216,20 @@ func isOllamaCloud(acct provider.Account) bool {
 	}
 	u, err := url.Parse(strings.TrimSpace(acct.BaseURL))
 	return err == nil && strings.EqualFold(u.Scheme, "https") && strings.EqualFold(u.Hostname(), "ollama.com")
+}
+
+// isNVIDIANIM recognizes NVIDIA's hosted NIM endpoint (the dashboard preset's
+// base URL). Like ollama.com it needs host-scoped probe handling: its
+// /v1/models catalog is PUBLIC — 200 with a full listing for a garbage key
+// (verified 2026-10-13) — so the catalog can never prove a credential, and its
+// free tier queues shared capacity, making model choice the difference
+// between a 0.6s and a 90s+ probe (see nvidiaNIMProbeModels).
+func isNVIDIANIM(acct provider.Account) bool {
+	if acct.Kind != provider.KindOpenAICompatible {
+		return false
+	}
+	u, err := url.Parse(strings.TrimSpace(acct.BaseURL))
+	return err == nil && strings.EqualFold(u.Scheme, "https") && strings.EqualFold(u.Hostname(), "integrate.api.nvidia.com")
 }
 
 // isPlanGatedError reports a provider-level refusal caused by the selected

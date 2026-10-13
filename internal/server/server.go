@@ -7,6 +7,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"runtime/debug"
@@ -161,6 +163,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/chat/completions", s.authed(s.inference(provider.SurfaceOpenAI)))
 	s.mux.HandleFunc("POST /v1/messages", s.authed(s.inference(provider.SurfaceAnthropic)))
 	s.mux.HandleFunc("POST /v1/responses", s.authed(s.inference(provider.SurfaceResponses)))
+
+	// Phase 1: New inference endpoints
+	s.mux.HandleFunc("POST /v1/embeddings", s.authed(s.inference(provider.SurfaceEmbeddings)))
+	s.mux.HandleFunc("POST /v1/images/generations", s.authed(s.inference(provider.SurfaceImagesGen)))
+	s.mux.HandleFunc("POST /v1/audio/speech", s.authed(s.inference(provider.SurfaceAudioTTS)))
+	s.mux.HandleFunc("POST /v1/audio/transcriptions", s.authed(s.inference(provider.SurfaceAudioSTT)))
 
 	// ── Dashboard account settings ──
 	s.mux.HandleFunc("POST /admin/settings/password", s.admin(s.handleDashboardPassword))
@@ -427,6 +435,14 @@ func edgeID(d []map[string]any, first bool) string {
 func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		// Audio STT is multipart/form-data, not JSON: the model lives in a
+		// form field, not a JSON key, so the generic JSON reader below would
+		// reject it. Parse it here and re-serialize to a shape the rest of
+		// the pipeline can consume.
+		if surface == provider.SurfaceAudioSTT {
+			s.inferenceSTT(w, r)
+			return
+		}
 		body, err := io.ReadAll(io.LimitReader(r.Body, s.maxBody))
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, "invalid_request_error", "could not read body: "+err.Error())
@@ -646,6 +662,128 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 		call.Translated = served.Translated || served.ResponsesWire
 		s.ledger(call)
 	}
+}
+
+// inferenceSTT handles /v1/audio/transcriptions: multipart/form-data, where the
+// model lives in a form field rather than a JSON key. The raw multipart body is
+// forwarded upstream with the model field swapped inside prepareHopBody.
+func (s *Server) inferenceSTT(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	// Read the raw multipart body FIRST so it can be forwarded byte-for-byte
+	// (ParseMultipartForm would consume the stream).
+	body, err := io.ReadAll(io.LimitReader(r.Body, s.maxBody))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_request_error", "could not read multipart body: "+err.Error())
+		return
+	}
+	if len(body) == 0 {
+		writeErr(w, http.StatusBadRequest, "invalid_request_error", "empty body")
+		return
+	}
+	// Extract the model from the multipart form (read a copy — the original
+	// body bytes stay intact for forwarding).
+	requested, err := extractModelMultipart(body)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return
+	}
+	client := clientName(r)
+	cip := clientIP(r)
+	if info := reqInfoOf(r); info != nil {
+		info.surface = string(provider.SurfaceAudioSTT)
+	}
+
+	routes, err := s.resolver.ResolveCandidates(r.Context(), requested, provider.SurfaceAudioSTT, client)
+	if err != nil {
+		var nf *router.ErrNotFound
+		var nu *router.ErrUnavailable
+		switch {
+		case errors.As(err, &nf):
+			writeErrExtra(w, http.StatusNotFound, "model_not_found", err.Error(),
+				map[string]any{"available": nf.Hints})
+		case errors.As(err, &nu):
+			writeErrExtra(w, http.StatusTooManyRequests, "model_unavailable", err.Error(),
+				map[string]any{"reason": nu.Reason})
+		default:
+			writeErr(w, http.StatusBadGateway, "upstream_error", err.Error())
+		}
+		s.ledger(store.Call{
+			TS: start, Client: client, IP: cip, Surface: store.SurfaceAudioSTT,
+			Alias: requested, Model: requested, Status: errorStatus(err), Err: err.Error(),
+		})
+		return
+	}
+	if info := reqInfoOf(r); info != nil {
+		info.account = routes[0].Account.Namespace
+		info.model = routes[0].Model
+	}
+
+	// Forward the raw multipart body; prepareHopBody detects multipart and
+	// swaps the model field per hop.
+	served, res, ferr := s.dispatcher.ForwardCandidates(r.Context(), w, r, routes, body)
+	if served.Alias == "" {
+		served = routes[0]
+	}
+	status := res.Status
+	if ferr != nil {
+		status = http.StatusBadGateway
+		if !res.Committed {
+			writeErr(w, status, "upstream_error", "upstream request failed: "+ferr.Error())
+		}
+	} else if status == 0 {
+		status = http.StatusBadGateway
+	}
+	call := store.Call{
+		TS: start, Client: client, IP: cip, Surface: store.SurfaceAudioSTT,
+		Alias: served.Alias, AccountID: served.Account.ID, Account: served.Account.Namespace,
+		KeyID: served.KeyID, KeyHint: served.KeyHint, Model: served.Model,
+		Status: status, Stream: res.Stream, Totalms: res.Totalms,
+	}
+	if res.Usage != nil {
+		call.TokensIn = res.Usage.In
+		call.TokensOut = res.Usage.Out
+	}
+	if ferr != nil {
+		call.Err = ferr.Error()
+	} else if res.Err != "" {
+		call.Err = res.Err
+	}
+	s.ledger(call)
+}
+
+// extractModelMultipart reads the "model" form field from a multipart body.
+func extractModelMultipart(body []byte) (string, error) {
+	// Parse the boundary from the first line: --<boundary>\r\n
+	eol := bytes.IndexAny(body, "\r\n")
+	if eol < 0 {
+		return "", errors.New("multipart body has no boundary line")
+	}
+	boundary := strings.TrimPrefix(string(body[:eol]), "--")
+	if boundary == "" {
+		return "", errors.New("multipart body has empty boundary")
+	}
+	mr := multipart.NewReader(bytes.NewReader(body), boundary)
+	for {
+		part, err := mr.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", fmt.Errorf("read multipart part: %w", err)
+		}
+		if part.FormName() == "model" {
+			value, err := io.ReadAll(part)
+			if err != nil {
+				return "", fmt.Errorf("read model field: %w", err)
+			}
+			model := strings.TrimSpace(string(value))
+			if model == "" {
+				return "", errors.New("'model' is required in form data")
+			}
+			return model, nil
+		}
+	}
+	return "", errors.New("'model' is required in form data")
 }
 
 func errorStatus(err error) int {
@@ -1104,6 +1242,14 @@ func store2surface(s provider.Surface) store.Surface {
 		return store.SurfaceAnthropic
 	case provider.SurfaceResponses:
 		return store.SurfaceResponses
+	case provider.SurfaceEmbeddings:
+		return store.SurfaceEmbeddings
+	case provider.SurfaceImagesGen:
+		return store.SurfaceImagesGen
+	case provider.SurfaceAudioTTS:
+		return store.SurfaceAudioTTS
+	case provider.SurfaceAudioSTT:
+		return store.SurfaceAudioSTT
 	default:
 		return store.SurfaceOpenAI
 	}

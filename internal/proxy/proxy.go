@@ -15,8 +15,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net"
 	"net/http"
+	"net/textproto"
 	"sort"
 	"strconv"
 	"strings"
@@ -667,6 +669,81 @@ func IsStream(body []byte) bool {
 	return m.Stream
 }
 
+// isMultipartBody reports whether the body looks like a multipart/form-data
+// payload (audio STT). Multipart bodies start with a boundary marker "--".
+func isMultipartBody(body []byte) bool {
+	return bytes.HasPrefix(body, []byte("--"))
+}
+
+// extractMultipartBoundary reads the boundary from the first line of a
+// multipart body ("--<boundary>\r\n").
+func extractMultipartBoundary(body []byte) string {
+	eol := bytes.IndexAny(body, "\r\n")
+	if eol < 0 {
+		return ""
+	}
+	return strings.TrimPrefix(string(body[:eol]), "--")
+}
+
+// swapModelMultipart rebuilds a multipart/form-data body with the "model" form
+// field replaced by newModel. Every other part (the audio file, language,
+// prompt, etc.) is copied through byte-for-byte. The boundary is extracted
+// from the body's own first line, so no external Content-Type is needed.
+func swapModelMultipart(body []byte, newModel string) ([]byte, error) {
+	// Parse the boundary from the first line: --<boundary>\r\n
+	eol := bytes.IndexAny(body, "\r\n")
+	if eol < 0 {
+		return nil, errors.New("proxy: multipart body has no boundary line")
+	}
+	boundary := strings.TrimPrefix(string(body[:eol]), "--")
+	if boundary == "" {
+		return nil, errors.New("proxy: multipart body has empty boundary")
+	}
+	// Use mime/multipart to read the parts, then rebuild with the model swapped.
+	mr := multipart.NewReader(bytes.NewReader(body), boundary)
+	var out bytes.Buffer
+	mw := multipart.NewWriter(&out)
+	if err := mw.SetBoundary(boundary); err != nil {
+		return nil, fmt.Errorf("proxy: multipart boundary: %w", err)
+	}
+	var swapped bool
+	for {
+		part, err := mr.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("proxy: read multipart part: %w", err)
+		}
+		value, err := io.ReadAll(part)
+		if err != nil {
+			return nil, fmt.Errorf("proxy: read multipart part body: %w", err)
+		}
+		fieldName := part.FormName()
+		// Swap the model field; pass everything else through untouched.
+		if fieldName == "model" {
+			value = []byte(newModel)
+			swapped = true
+		}
+		// Preserve the original part header (filename, content-type).
+		h := textproto.MIMEHeader(part.Header)
+		w, err := mw.CreatePart(h)
+		if err != nil {
+			return nil, fmt.Errorf("proxy: create multipart part: %w", err)
+		}
+		if _, err := w.Write(value); err != nil {
+			return nil, fmt.Errorf("proxy: write multipart part: %w", err)
+		}
+	}
+	if !swapped {
+		return nil, errors.New("proxy: multipart body has no 'model' field")
+	}
+	if err := mw.Close(); err != nil {
+		return nil, fmt.Errorf("proxy: close multipart writer: %w", err)
+	}
+	return out.Bytes(), nil
+}
+
 // prepareHopBody rewrites the client's body for one hop: a byte-stable model
 // swap on the native path, or a full wire translation when the upstream wire
 // differs from the client's. The WIRE comes from EffectiveWire — the same
@@ -674,6 +751,13 @@ func IsStream(body []byte) bool {
 // wire while its body is encoded for another. Translation REPLACES the swap:
 // it rewrites the whole wire shape, model included, so the paths never compose.
 func prepareHopBody(body []byte, rt Route) ([]byte, error) {
+	// Multipart (audio STT): the model lives in a form field, not a JSON key,
+	// and SwapModel is JSON-only. Rebuild the multipart body with the model
+	// field swapped; everything else (the audio file part) passes through
+	// byte-for-byte.
+	if isMultipartBody(body) {
+		return swapModelMultipart(body, rt.Model)
+	}
 	wire := rt.EffectiveWire()
 	if wire != rt.Surface {
 		// The three NEW cells ride the strict surface-neutral codecs; an
@@ -768,7 +852,14 @@ func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, bod
 	}
 	// Content-Length must match the rewritten body.
 	upReq.ContentLength = int64(len(body))
-	upReq.Header.Set("Content-Type", "application/json")
+	// Preserve multipart Content-Type with boundary; default to JSON.
+	contentType := "application/json"
+	if isMultipartBody(body) {
+		if boundary := extractMultipartBoundary(body); boundary != "" {
+			contentType = "multipart/form-data; boundary=" + boundary
+		}
+	}
+	upReq.Header.Set("Content-Type", contentType)
 
 	start := time.Now()
 	resp, err := d.client.Do(upReq)

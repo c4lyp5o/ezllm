@@ -16,9 +16,13 @@ import (
 type Surface string
 
 const (
-	SurfaceOpenAI    Surface = "openai"    // /v1/chat/completions
-	SurfaceAnthropic Surface = "anthropic" // /v1/messages
-	SurfaceResponses Surface = "responses" // /v1/responses
+	SurfaceOpenAI     Surface = "openai"     // /v1/chat/completions
+	SurfaceAnthropic  Surface = "anthropic"  // /v1/messages
+	SurfaceResponses  Surface = "responses"  // /v1/responses
+	SurfaceEmbeddings Surface = "embeddings" // /v1/embeddings
+	SurfaceImagesGen  Surface = "images_gen" // /v1/images/generations
+	SurfaceAudioTTS   Surface = "audio_tts"  // /v1/audio/speech
+	SurfaceAudioSTT   Surface = "audio_stt"  // /v1/audio/transcriptions
 )
 
 // Call is one ledger row. Token counters are NORMALIZED (surface-independent):

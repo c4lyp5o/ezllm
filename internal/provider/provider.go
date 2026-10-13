@@ -30,9 +30,13 @@ const (
 type Surface string
 
 const (
-	SurfaceOpenAI    Surface = "openai"    // POST /chat/completions
-	SurfaceAnthropic Surface = "anthropic" // POST /messages
-	SurfaceResponses Surface = "responses" // POST /responses
+	SurfaceOpenAI     Surface = "openai"     // POST /chat/completions
+	SurfaceAnthropic  Surface = "anthropic"  // POST /messages
+	SurfaceResponses  Surface = "responses"  // POST /responses
+	SurfaceEmbeddings Surface = "embeddings" // POST /embeddings
+	SurfaceImagesGen  Surface = "images_gen" // POST /images/generations
+	SurfaceAudioTTS   Surface = "audio_tts"  // POST /audio/speech
+	SurfaceAudioSTT   Surface = "audio_stt"  // POST /audio/transcriptions
 )
 
 // SurfacePath returns the upstream path (relative to BaseURL) for a surface.
@@ -42,6 +46,14 @@ func SurfacePath(s Surface) string {
 		return "/messages"
 	case SurfaceResponses:
 		return "/responses"
+	case SurfaceEmbeddings:
+		return "/embeddings"
+	case SurfaceImagesGen:
+		return "/images/generations"
+	case SurfaceAudioTTS:
+		return "/audio/speech"
+	case SurfaceAudioSTT:
+		return "/audio/transcriptions"
 	default:
 		return "/chat/completions"
 	}

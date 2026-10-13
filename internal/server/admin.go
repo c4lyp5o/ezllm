@@ -1066,9 +1066,9 @@ func (s *Server) handleSetModelPin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch pin {
-	case "", "openai", "anthropic", "responses":
+	case "", "openai", "anthropic", "responses", "embeddings", "images_gen", "audio_tts", "audio_stt":
 	default:
-		writeErr(w, http.StatusBadRequest, "bad_request", "pin must be openai, anthropic, responses, or empty")
+		writeErr(w, http.StatusBadRequest, "bad_request", "pin must be openai, anthropic, responses, embeddings, images_gen, audio_tts, audio_stt, or empty")
 		return
 	}
 

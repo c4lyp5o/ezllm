@@ -374,6 +374,12 @@ func (t *Tester) authGate(
 	res *TestResult,
 ) bool {
 	oracle := adapter.AuthOracle()
+	// Host-scoped oracle when the adapter declares one (Cloudflare's cheapest
+	// credential check lives outside the account base URL); every other
+	// adapter keeps the parameterless oracle above.
+	if hosted, ok := adapter.(provider.HostedAuthOracle); ok {
+		oracle = hosted.AuthOracleFor(acct)
+	}
 
 	var (
 		status  int
@@ -404,9 +410,16 @@ func (t *Tester) authGate(
 		// The oracle says yes — but does it ever say no? Calibration: one
 		// deliberately-invalid key. If garbage also passes, the endpoint is
 		// public (the N1 class of bug) and this 200 proves nothing.
+		// The adapter may dictate the fake key's SHAPE (Cloudflare validates
+		// token format before the credential: a non-cfut_ fake gets 400, which
+		// would read as inconclusive instead of a rejection).
+		calKey := oracle.CalibrationKey
+		if calKey == "" {
+			calKey = fakeKey()
+		}
 		calRes, calErr := probe(ctx, t, pace, defaultStepTimeout,
 			func(c context.Context) (httpResult, error) {
-				s, b, err := doProbe(c, t.client, adapter, oracle, acct, fakeKey())
+				s, b, err := doProbe(c, t.client, adapter, oracle, acct, calKey)
 				return httpResult{status: s, body: b}, err
 			})
 		calStatus := calRes.status
@@ -818,7 +831,14 @@ func doProbe(
 	if method == "" {
 		method = http.MethodGet
 	}
-	url := provider.UpstreamURL(acct.BaseURL, acct.Kind, spec.Path)
+	// An absolute Path (http/https) is used VERBATIM: some providers' cheapest
+	// credential check lives outside the account base URL (Cloudflare's
+	// user/tokens/verify is account-independent — see AuthOracleFor). Everything
+	// else joins the account base at the single UpstreamURL join.
+	url := spec.Path
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		url = provider.UpstreamURL(acct.BaseURL, acct.Kind, spec.Path)
+	}
 
 	payload := spec.Body
 	if len(body) > 0 && body[0] != nil && body[0].body != "" {

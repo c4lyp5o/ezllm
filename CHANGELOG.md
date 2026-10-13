@@ -2,6 +2,31 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M9); full history via `git log`.
 
+## 2026-10-13 — Cloudflare Workers AI key test fixed (account-aware oracle + native catalog)
+- `fix(provider,registration)` adding Cloudflare Workers AI failed with `cannot verify this
+  key: no credential-checking endpoint and no model to probe with / This gateway exposes
+  neither /usage nor a catalog`. Two separate misses, both live-measured 2026-10-13:
+  - **Oracle** — the generic `GET {base}/usage` does not exist there (405), and
+    Cloudflare's real check lives outside the account base URL:
+    `GET https://api.cloudflare.com/client/v4/user/tokens/verify` → 200 `{"status":"active"}`
+    for a valid token, **401** for a well-formed `cfut_`+40-hex fake, but **400 format
+    error** for a malformed fake — which calibration would have read as inconclusive.
+    New optional `HostedAuthOracle` interface gives the adapter the ACCOUNT so
+    openai-compatible can return a host-scoped oracle; `AuthProbe.CalibrationKey` carries
+    the format-valid fake; `doProbe` now accepts an absolute `http(s)` Path (used verbatim,
+    everything else still joins at `UpstreamURL`).
+  - **Catalog** — the OpenAI-compat prefix has NO `/models` (405 live), and the native
+    `GET /client/v4/accounts/{id}/ai/models/search` answers the Cloudflare envelope
+    `{"success":true,"result":[...]}` which the OpenAI parser reads as ZERO models.
+    `isCloudflareAI` (kind+https+host+`/ai/v1`, OllamaCloud parity) switches `ListModels`
+    to the native envelope, skipping id-less entries.
+- Non-Cloudflare openai-compatible accounts are untouched (explicit regression test), and a
+  `success:false` catalog envelope now surfaces the provider's own words instead of
+  passing as an empty catalog.
+- Verification: 5 new tests (e2e key test through the real flow + detector + oracle shape +
+  envelope parse + non-leak), **bites 3/3 fell for the right reason** (hosted oracle
+  removed / CalibrationKey ignored / catalog branch removed), full suite green.
+
 ## 2026-10-13 — NVIDIA NIM key-test fix: measured-fast candidates, honest timeout verdict
 - `fix(registration)` adding NVIDIA NIM failed with `generation probe failed: Post
   "https://integrate.api.nvidia.com/v1/chat/completions": context deadline exceeded`, and

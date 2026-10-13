@@ -2,10 +2,13 @@ package provider
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -153,6 +156,9 @@ func (a *openAICompatible) PrepareRequest(_ context.Context, req *http.Request, 
 }
 
 func (a *openAICompatible) ListModels(ctx context.Context, acct Account, key string) ([]ModelInfo, error) {
+	if isCloudflareAI(acct) {
+		return listModelsCloudflare(ctx, a.client, acct, key)
+	}
 	return listModelsGeneric(ctx, a.client, acct, key, map[string]string{
 		"Authorization": "Bearer " + key,
 	})
@@ -165,6 +171,25 @@ func (a *openAICompatible) ListModels(ctx context.Context, acct Account, key str
 // proof (see registration.go), so a provider without /usage is still testable.
 func (a *openAICompatible) AuthOracle() AuthProbe {
 	return AuthProbe{Method: http.MethodGet, Path: "/usage"}
+}
+
+// AuthOracleFor: the account-aware oracle (HostedAuthOracle). Cloudflare's
+// cheapest credential check lives OUTSIDE the account-scoped base URL — GET
+// https://api.cloudflare.com/client/v4/user/tokens/verify, verified live
+// 2026-10-13: 200 + {"status":"active"} on a real token, 401 "Invalid API
+// Token" on a well-formed cfut_ fake. A non-cfut_ fake gets a 400 format
+// error instead, which calibration would read as inconclusive — hence
+// CalibrationKey (a format-valid, definitely-invalid token). Every other
+// openai-compatible account keeps the generic GET /usage.
+func (a *openAICompatible) AuthOracleFor(acct Account) AuthProbe {
+	if isCloudflareAI(acct) {
+		return AuthProbe{
+			Method:         http.MethodGet,
+			Path:           "https://api.cloudflare.com/client/v4/user/tokens/verify",
+			CalibrationKey: cfFakeKey(),
+		}
+	}
+	return a.AuthOracle()
 }
 
 // CatalogIsPublic: false on ssn-gpt (bad key → 401 INVALID_API_KEY), which is
@@ -263,6 +288,83 @@ func (a *anthropicCompatible) CatalogIsPublic() bool { return false }
 // ─────────────────────────────────────────────────────────────────────────────
 // shared helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+// isCloudflareAI recognizes the Cloudflare Workers AI preset's base URL — an
+// account-scoped OpenAI-compatible prefix ending in /ai/v1 on api.cloudflare.com
+// (https://api.cloudflare.com/client/v4/accounts/{id}/ai/v1). Host-scoped like
+// isOllamaCloud: neither the account NAME nor a user-supplied path can trigger
+// the Cloudflare-specific oracle or catalog below.
+func isCloudflareAI(acct Account) bool {
+	if acct.Kind != KindOpenAICompatible {
+		return false
+	}
+	b := strings.TrimSuffix(strings.TrimSpace(acct.BaseURL), "/")
+	u, err := url.Parse(b)
+	if err != nil || !strings.EqualFold(u.Scheme, "https") || !strings.EqualFold(u.Hostname(), "api.cloudflare.com") {
+		return false
+	}
+	return strings.HasSuffix(b, "/ai/v1")
+}
+
+// listModelsCloudflare: Cloudflare's OpenAI-compatible prefix has NO /models
+// (verified live 2026-10-13: 405 "GET not supported for requested URI"), so
+// the catalog comes from the native Workers AI endpoint
+// GET {origin}/client/v4/accounts/{id}/ai/models/search. That answers the
+// Cloudflare envelope {"success":true,"result":[...]} — NOT OpenAI's {"data":[...]}
+// — so the generic parser reads zero models and the key test reports "no model
+// to probe with". Entries without an id are skipped: the published schema
+// documents the envelope, not the item shape.
+func listModelsCloudflare(ctx context.Context, c *http.Client, acct Account, key string) ([]ModelInfo, error) {
+	prefix := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSpace(acct.BaseURL), "/"), "/ai/v1")
+	body, err := getJSON(ctx, c, prefix+"/ai/models/search", map[string]string{
+		"Authorization": "Bearer " + key,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var env struct {
+		Success bool `json:"success"`
+		Result  []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"result"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		return nil, err
+	}
+	if !env.Success {
+		msg := "cloudflare catalog rejected the request"
+		if len(env.Errors) > 0 && env.Errors[0].Message != "" {
+			msg = "cloudflare catalog: " + env.Errors[0].Message
+		}
+		return nil, fmt.Errorf("%s", msg)
+	}
+	out := make([]ModelInfo, 0, len(env.Result))
+	seen := map[string]bool{}
+	for _, m := range env.Result {
+		if m.ID == "" || seen[m.ID] {
+			continue
+		}
+		seen[m.ID] = true
+		out = append(out, ModelInfo{ID: m.ID, Display: m.Name})
+	}
+	return out, nil
+}
+
+// cfFakeKey is a format-valid but definitely-invalid Cloudflare API token.
+// Cloudflare validates the Authorization header's SHAPE before the credential:
+// a non-cfut_ string gets 400 "Invalid format for Authorization header", which
+// the registration calibration would read as "inconclusive" and defer — so the
+// deliberate bad key must be cfut_ + 40 hex to reach the 401 the calibration
+// needs (verified live 2026-10-13).
+func cfFakeKey() string {
+	buf := make([]byte, 20)
+	_, _ = rand.Read(buf)
+	return "cfut_" + hex.EncodeToString(buf)
+}
 
 func applyCustomHeaders(req *http.Request, hdrs map[string]string) {
 	for k, v := range hdrs {

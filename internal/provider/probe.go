@@ -25,7 +25,7 @@ import (
 // AuthProbe is the cheapest call that fails on a bad credential for this kind.
 type AuthProbe struct {
 	Method string // GET / POST
-	Path   string // relative to Account.BaseURL, e.g. "/usage"
+	Path   string // relative to Account.BaseURL, e.g. "/usage"; if it starts with "http" it is treated as an absolute URL
 	// Headers are sent verbatim (e.g. anthropic-version). Auth itself is the
 	// adapter's normal path — registration calls PrepareRequest when it can, so
 	// quirks like x-opencode-session stay in ONE place.
@@ -33,6 +33,12 @@ type AuthProbe struct {
 	// Body, when non-empty, is the request body for POST oracles (Anthropic
 	// has no cheap GET that authenticates).
 	Body string
+	// CalibrationKey: if set, this key is used for the deliberate-bad-key
+	// calibration call instead of the generic fakeKey(). Some providers (e.g.
+	// Cloudflare) require a well-formed token prefix (cfut_ + 40 hex) to reach
+	// the 401 rejection path; a syntactically-invalid key gets a 400 format
+	// error which the calibration would misclassify as "inconclusive".
+	CalibrationKey string
 }
 
 // AuthOracle returns the cheapest call that proves the credential is valid.
@@ -46,6 +52,14 @@ func AuthOracle(a Adapter) AuthProbe { return a.AuthOracle() }
 // keep the 401/403 default, so no other provider's behavior changes.
 type AuthRejectStatuser interface {
 	AuthRejectStatuses() []int
+}
+
+// HostedAuthOracle is an optional adapter interface for adapters whose cheapest
+// credential check depends on the ACCOUNT (host-scoped paths, absolute URLs).
+// If implemented, registration uses this instead of the parameterless
+// AuthOracle() to get the oracle with full account context.
+type HostedAuthOracle interface {
+	AuthOracleFor(acct Account) AuthProbe
 }
 
 // CatalogIsPublic reports whether ListModels succeeds without a valid key.

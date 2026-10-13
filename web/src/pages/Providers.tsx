@@ -485,7 +485,7 @@ function EditAccountModal({ account, onClose, onSaved }: { account: Account | nu
 
 // ── models drawer ───────────────────────────────────────────────────────
 
-const PIN_SURFACES = ['openai', 'anthropic', 'responses'] as const;
+const PIN_SURFACES = ['openai', 'anthropic', 'responses', 'embeddings', 'images_gen', 'audio_tts', 'audio_stt'] as const;
 
 function ModelsDrawer({ id }: { id: number }) {
   const [models, setModels] = useState<ModelRow[] | null>(null);
@@ -615,7 +615,13 @@ function ModelsDrawer({ id }: { id: number }) {
 
   const onPinChange = (m: ModelRow, pin: string) => {
     if (pin === '') return applyPin(m.id, '', false);
-    const confirmed = pin === 'openai' ? m.openai : pin === 'anthropic' ? m.anthropic : m.responses;
+    // Chat-family surfaces have probe verdicts; a pin to an unconfirmed one
+    // needs an explicit force. The new surfaces (embeddings/images/audio)
+    // have no probe column yet, so ANY pin to them needs the confirm step.
+    const confirmed = pin === 'openai' ? m.openai
+      : pin === 'anthropic' ? m.anthropic
+      : pin === 'responses' ? m.responses
+      : undefined;
     if (!confirmed) return setPendingForce({ model: m.id, pin });
     applyPin(m.id, pin, false);
   };
@@ -663,7 +669,7 @@ function ModelsDrawer({ id }: { id: number }) {
             <tr className="text-left text-[10px] uppercase tracking-[0.1em] text-mute">
               <th className="pb-1.5 font-medium">model</th>
               <th className="pb-1.5 font-medium">status</th>
-              <th className="pb-1.5 font-medium">response type</th>
+              <th className="pb-1.5 font-medium">surface</th>
               <th className="pb-1.5 text-right font-medium">test</th>
             </tr>
           </thead>
@@ -688,15 +694,20 @@ function ModelsDrawer({ id }: { id: number }) {
                 </td>
                 <td className="py-1.5">
                   <select
-                    aria-label={`response type for ${m.id}`}
+                    aria-label={`surface for ${m.id}`}
                     value={m.pin ?? ''}
                     onChange={(e) => onPinChange(m, e.target.value)}
                     className="rounded border border-line bg-transparent px-1.5 py-0.5 text-[11.5px] text-dim"
                   >
                     <option value="">auto (probed)</option>
                     {PIN_SURFACES.map((s) => {
-                      const ok = s === 'openai' ? m.openai : s === 'anthropic' ? m.anthropic : m.responses;
-                      return <option key={s} value={s}>{s}{ok ? '' : ' (unconfirmed)'}</option>;
+                      const ok = s === 'openai' ? m.openai
+                        : s === 'anthropic' ? m.anthropic
+                        : s === 'responses' ? m.responses
+                        : undefined;
+                      // undefined = no probe column for this surface yet.
+                      const tag = ok === undefined ? ' (no probe)' : ok ? '' : ' (unconfirmed)';
+                      return <option key={s} value={s}>{s}{tag}</option>;
                     })}
                   </select>
                 </td>

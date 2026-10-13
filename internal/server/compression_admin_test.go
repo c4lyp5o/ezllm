@@ -1,0 +1,67 @@
+package server
+
+import (
+	"strings"
+	"testing"
+)
+
+// The supported-engines message must not drift from the registry. It was
+// hardcoded to five engines and silently omitted `budget`, so an operator
+// typing a valid engine got an error that didn't list it as valid.
+func TestValidateStagesErrorListsEveryRegisteredEngine(t *testing.T) {
+	_, err := validateStages([]byte(`[{"engine":"nope"}]`))
+	if err == nil {
+		t.Fatal("expected unknown engine to be rejected")
+	}
+	msg := err.Error()
+	// budget is the registry entry the hardcoded string forgot.
+	if !strings.Contains(msg, "budget") {
+		t.Errorf("error message must mention every registered engine, missing \"budget\": %s", msg)
+	}
+	if !strings.Contains(msg, "session_dedup") || !strings.Contains(msg, "caveman") {
+		t.Errorf("error message lost engines it used to list: %s", msg)
+	}
+}
+
+// omniroute's aggressive/ultra are pipeline compositions, not prose levels.
+// Accepting them here would let a profile author believe a stronger rewrite
+// was running when `standard` was — the docs refuse this deliberately.
+func TestValidateStagesRejectsCavemanCompositionAliases(t *testing.T) {
+	for _, bad := range []string{"aggressive", "ultra", "Aggressive", " ULTRA "} {
+		pipe := `[{"engine":"caveman","options":{"intensity":"` + bad + `"}}]`
+		_, err := validateStages([]byte(pipe))
+		if err == nil {
+			t.Errorf("intensity %q must be rejected, not silently accepted", bad)
+			continue
+		}
+		if !strings.Contains(err.Error(), "session_dedup") {
+			t.Errorf("rejection must point at the composed pipeline, got: %s", err.Error())
+		}
+	}
+}
+
+func TestValidateStagesAcceptsRealCavemanIntensities(t *testing.T) {
+	for _, good := range []string{"lite", "standard"} {
+		pipe := `[{"engine":"caveman","options":{"intensity":"` + good + `"}}]`
+		if _, err := validateStages([]byte(pipe)); err != nil {
+			t.Errorf("intensity %q must stay valid, got: %v", good, err)
+		}
+	}
+	// Absent and empty are both the engine's own default (lite).
+	for _, pipe := range []string{
+		`[{"engine":"caveman"}]`,
+		`[{"engine":"caveman","options":{"intensity":""}}]`,
+	} {
+		if _, err := validateStages([]byte(pipe)); err != nil {
+			t.Errorf("default intensity must validate, %s -> %v", pipe, err)
+		}
+	}
+}
+
+// A non-caveman stage carries no intensity; validating it must be a no-op.
+func TestValidateStagesIgnoresOptionsOnOtherEngines(t *testing.T) {
+	pipe := `[{"engine":"headroom","options":{"intensity":"aggressive"}}]`
+	if _, err := validateStages([]byte(pipe)); err != nil {
+		t.Errorf("intensity is meaningless outside caveman and must not be validated: %v", err)
+	}
+}

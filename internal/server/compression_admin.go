@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
+	"strings"
 
 	"github.com/c4lyp5o/ezllm/internal/compress"
 	"github.com/c4lyp5o/ezllm/internal/store"
@@ -45,10 +47,52 @@ func validateStages(raw json.RawMessage) (json.RawMessage, error) {
 	}
 	for i, st := range stages {
 		if !compress.KnownEngines[st.Engine] {
-			return nil, errStrf("stage %d: unknown engine %q (supported: session_dedup, rtk, headroom, lite, caveman)", i, st.Engine)
+			return nil, errStrf("stage %d: unknown engine %q (supported: %s)", i, st.Engine, supportedEngines())
+		}
+		if err := validateStageOptions(i, st); err != nil {
+			return nil, err
 		}
 	}
 	return json.Marshal(stages)
+}
+
+// supportedEngines renders the registry keys in a STABLE order so this error
+// can never drift from KnownEngines. It previously hardcoded a 5-engine list
+// that was missing `budget` — the symptom of building the string by hand.
+func supportedEngines() string {
+	names := make([]string, 0, len(compress.KnownEngines))
+	for n := range compress.KnownEngines {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
+// cavemanIntensities are the ONLY values the caveman engine honours. omniroute's
+// aggressive/ultra are deliberately refused: they are pipeline COMPOSITIONS here
+// (session_dedup + rtk + headroom + caveman), not prose levels, and accepting
+// them silently would let a profile author believe a stronger rewrite was running
+// when `standard` was (docs/compression-design.md, "Intensity").
+var cavemanIntensities = map[string]bool{"lite": true, "standard": true}
+
+func validateStageOptions(i int, st compress.Stage) error {
+	if st.Engine != "caveman" {
+		return nil
+	}
+	raw, ok := st.Options["intensity"]
+	if !ok {
+		return nil // absent -> engine default (lite)
+	}
+	v, _ := raw.(string)
+	if strings.TrimSpace(v) == "" {
+		return nil // explicit "" -> engine treats as lite
+	}
+	if !cavemanIntensities[strings.ToLower(strings.TrimSpace(v))] {
+		return errStrf("stage %d: caveman intensity %q is not a prose level — caveman supports only "+
+			"\"lite\"/\"standard\". For omniroute-style aggressive/ultra, compose the pipeline instead: "+
+			"session_dedup -> rtk -> headroom -> caveman(standard)", i, v)
+	}
+	return nil
 }
 
 type errStr string

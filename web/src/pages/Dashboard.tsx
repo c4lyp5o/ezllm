@@ -176,8 +176,11 @@ function LatencyCard({ rows }: { rows: UsageRow[] }) {
 //     snapshot (/admin/overview block_cursors) — block_round_robin state is
 //     finally visible next to the traffic it governs
 //   - error-cause class under the status, parsed from the ledger err marker
-//   - compression is TWO columns: profile, then held tokens (the notional a
-//     rejected rewrite would have saved — tuning data, never real savings)
+//   - compression cell holds profile + saved + held (cae3565 folded the old
+//     standalone saved column in)
+//   - tokens are ONE cell (in ↑ first, out ↓ second — the requests explorer's
+//     shape), and the caller ip renders under the timestamp (01c7a54 captured
+//     it; the dashboard was the one view left rendering neither)
 function RecentCalls({ o }: { o: Overview }) {
   const rows = o.recent_calls ?? [];
   const cursors = new Map((o.block_cursors ?? []).map((c) => [c.combo, c]));
@@ -207,8 +210,7 @@ function RecentCalls({ o }: { o: Overview }) {
                 <th className="px-3 py-2.5 font-medium" title="the served model, with the surface it rode and who served it (provider · combo) parked underneath">model</th>
                 <th className="px-3 py-2.5 text-right font-medium">status</th>
                 <th className="px-3 py-2.5 text-right font-medium" title="time to first token on top, total duration below — ttft is only meaningful on a stream">duration</th>
-                <th className="px-3 py-2.5 text-right font-medium">in</th>
-                <th className="px-3 py-2.5 text-right font-medium">out</th>
+                <th className="px-3 py-2.5 text-right font-medium" title="tokens in ↑ / tokens out ↓">tokens ↑↓</th>
                 <th className="px-5 py-2.5 text-right font-medium" title="profile applied; saved = tokens a shipped rewrite removed; held = what a REJECTED rewrite would have saved (tuning data)">compression</th>
               </tr>
             </thead>
@@ -217,7 +219,16 @@ function RecentCalls({ o }: { o: Overview }) {
                 const cursor = r.alias ? cursors.get(r.alias) : undefined;
                 return (
                   <tr key={i} className="border-b border-line/50 transition-colors last:border-0 hover:bg-wash">
-                    <td className="whitespace-nowrap px-5 py-2 text-mute">{clockTime(r.ts)}</td>
+                    <td className="whitespace-nowrap px-5 py-2 text-mute">
+                      {clockTime(r.ts)}
+                      {/* The caller address (ledger calls.ip, captured at
+                          request time). Public traffic arrives through traefik
+                          with a real client ip; a row from this box's own
+                          loopback hits reads as the docker bridge peer. */}
+                      {r.ip && (
+                        <div className="text-[10px] text-mute/70" title={`caller address: ${r.ip}`}>{r.ip}</div>
+                      )}
+                    </td>
                     <td className="px-3 py-2 text-dim">{r.client || '–'}</td>
                     <td className="max-w-[260px] px-3 py-2 font-sans">
                       <div className="truncate text-ink" title={r.model}>{r.model}</div>
@@ -290,17 +301,21 @@ function RecentCalls({ o }: { o: Overview }) {
                       </div>
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <div className="text-dim">{nfmt(r.tin)}</div>
-                      {/* Cached reads ride inside tokens_in by the anthropic
-                          convention — shown greyed so cache efficiency is
-                          trackable per call without opening the ledger. */}
+                      {/* ONE tokens cell, in ↑ first and out ↓ second — the
+                          same shape as the requests explorer. Cached reads
+                          ride inside tokens_in by the anthropic convention,
+                          so they stay a greyed sub-line of the in figure. */}
+                      <div className="text-dim"
+                        title={`tokens in ${nfmt(r.tin)} (↑, prompt with cache inside) · tokens out ${nfmt(r.tout)} (↓, completion)`}>
+                        <span title="tokens in — prompt, cache counted inside">↑{nfmt(r.tin)}</span>{' '}
+                        <span className="text-mute" title="tokens out — completion">↓{nfmt(r.tout)}</span>
+                      </div>
                       {(r.cread ?? 0) > 0 && (
                         <div className="mt-0.5 text-[10px] text-mute" title="of which served from the prompt cache (counted inside tokens in)">
                           {nfmt(r.cread ?? 0)} cached
                         </div>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-right text-dim">{nfmt(r.tout)}</td>
                     <td className="px-5 py-2 text-right font-sans">
                       {r.compression ? (
                         <>

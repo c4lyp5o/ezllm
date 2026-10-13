@@ -116,6 +116,10 @@ export type StartSweepOpts = {
   includeTested?: boolean;
   /** Surfaces to probe (default: all three). */
   surfaces?: string[];
+  /** Scope the sweep to these model ids (the per-row "Test" action). The
+   *  catalog refresh still upserts the FULL catalog — only the probe is
+   *  scoped, so a one-model test never prunes the drawer. */
+  models?: string[];
 };
 export const startSweep = (id: number, o: StartSweepOpts = {}) =>
   post<{ synced: number; probing: number; probe_all?: boolean; surfaces?: string[]; note?: string; ms: number }>(
@@ -124,6 +128,7 @@ export const startSweep = (id: number, o: StartSweepOpts = {}) =>
       probe_all: o.all ?? true,
       only_untested: !(o.includeTested ?? false),
       ...(o.surfaces ? { surfaces: o.surfaces } : {}),
+      ...(o.models ? { models: o.models } : {}),
     },
   );
 export const sweepStatus = (id: number) => get<SweepStatus>(`/admin/accounts/${id}/sync`);

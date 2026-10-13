@@ -2,6 +2,24 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M9); full history via `git log`.
 
+## 2026-10-13 — chat searchable model picker + per-model Test in the providers drawer
+- `feat(web)` chat model `<select>` → **searchable combobox**: typing filters by model id
+  OR label (namespace prefix included), ↑/↓ highlight, Enter picks, Escape/click-outside
+  closes; empty states (loading / no models / no match) preserved, same input classes so
+  the controls row does not move. Built for the "too many models to scroll" complaint.
+- `feat(web)` providers models drawer gets a **`test` column**: a per-row `Test` button
+  probes JUST that model (the sync endpoint's `models` scope, force re-test) instead of a
+  whole `Test all models` sweep. Curated rows disable the button with an explanation —
+  probe writes cannot overwrite an operator-curated verdict (server-proven), so clicking
+  would only spend. While a sweep runs, the row button spins and the header line carries
+  the clock; a scoped probe of an id that left the live catalog reports THAT as the cause.
+- `api.ts` `startSweep` accepts `models?: string[]` (scoping the sweep; the catalog
+  refresh still upserts the FULL list — a one-model test never prunes the drawer).
+- Verified: `tsc`+vite green; live browser walk at 390×844 — all 8 routes
+  `scrollWidth == clientWidth == 390`, `scrollX` stays 0, models drawer shows the 4-column
+  table with 80 Test buttons and no overflow; combobox filter/enter/arrow/escape all
+  exercised in the live page.
+
 ## 2026-10-13 — Cloudflare Workers AI key test fixed (account-aware oracle + native catalog)
 - `fix(provider,registration)` adding Cloudflare Workers AI failed with `cannot verify this
   key: no credential-checking endpoint and no model to probe with / This gateway exposes

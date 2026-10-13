@@ -502,6 +502,9 @@ function ModelsDrawer({ id }: { id: number }) {
   const [sweepNote, setSweepNote] = useState<string | null>(null);
   // Default: probe only what is untested — a second click never re-spend.
   const [includeTested, setIncludeTested] = useState(false);
+  // The row whose per-model Test was clicked. Its button keeps the spinner
+  // while that single-model sweep runs (the header line carries the clock).
+  const [testingId, setTestingId] = useState<string | null>(null);
 
   const loadModels = useCallback(() => {
     get<ModelRow[]>(`/admin/accounts/${id}/models`)
@@ -526,7 +529,7 @@ function ModelsDrawer({ id }: { id: number }) {
       sweepStatus(id)
         .then((s) => {
           setSweep(s);
-          if (!s.running) loadModels(); // the sweep finished: show its verdicts
+          if (!s.running) { setTestingId(null); loadModels(); } // the sweep finished: show its verdicts
         })
         .catch(() => undefined);
       if (Math.floor(Date.now() / 3000) % 2 === 0) loadModels();
@@ -555,7 +558,39 @@ function ModelsDrawer({ id }: { id: number }) {
     stopSweep(id)
       .then(() => setSweep({ running: false }))
       .catch((e: unknown) => setSweepNote(e instanceof Error ? e.message : 'stop failed'))
-      .finally(() => { setSweepBusy(false); loadModels(); });
+      .finally(() => { setSweepBusy(false); setTestingId(null); loadModels(); });
+  };
+
+  // Per-row test: the SAME sync endpoint scoped to ONE model (the backend has
+  // always accepted a models array). Force re-test — a manual click means "test
+  // it now", not "test it unless it is proven". Curated rows never reach this:
+  // their button is disabled, because a probe write cannot overwrite an
+  // operator-curated verdict (server-side, proven by a test) — clicking would
+  // only spend quota and change nothing.
+  const testOne = (m: ModelRow) => {
+    setSweepBusy(true);
+    setTestingId(m.id);
+    setSweepNote(null);
+    setPinErr(null);
+    startSweep(id, { all: true, includeTested: true, models: [m.id] })
+      .then((res) => {
+        setSweep({ running: res.probing > 0, probing: res.probing, elapsed_s: 0 });
+        if (res.probing > 0) {
+          setSweepNote(`testing ${m.id} · ${(res.surfaces ?? []).join(' + ')}`);
+        } else {
+          setTestingId(null);
+          // probing=0 with only_untested:false means the id is NOT in the
+          // provider's live catalog — the server's generic note would blame
+          // verdicts, which cannot be the cause here.
+          setSweepNote(`${m.id} is no longer in the provider's live catalog — sync to refresh the list`);
+        }
+        loadModels();
+      })
+      .catch((e: unknown) => {
+        setTestingId(null);
+        setSweepNote(e instanceof Error ? e.message : 'test failed');
+      })
+      .finally(() => setSweepBusy(false));
   };
 
   if (err) return <div className="border-t border-line px-5 py-4 text-[12px] text-bad">{err}</div>;
@@ -629,6 +664,7 @@ function ModelsDrawer({ id }: { id: number }) {
               <th className="pb-1.5 font-medium">model</th>
               <th className="pb-1.5 font-medium">status</th>
               <th className="pb-1.5 font-medium">response type</th>
+              <th className="pb-1.5 text-right font-medium">test</th>
             </tr>
           </thead>
           <tbody className="font-mono">
@@ -663,6 +699,20 @@ function ModelsDrawer({ id }: { id: number }) {
                       return <option key={s} value={s}>{s}{ok ? '' : ' (unconfirmed)'}</option>;
                     })}
                   </select>
+                </td>
+                <td className="py-1.5 text-right">
+                  <button
+                    type="button"
+                    className={cx(btn.base, btn.ghost, 'px-2 py-0.5')}
+                    disabled={running || sweepBusy || m.source === 'curated'}
+                    title={m.source === 'curated'
+                      ? 'this verdict is operator-curated — probes never overwrite it; release it first to re-test'
+                      : 'one tiny request for THIS model on all three surfaces — tests the wire, not the tool-dialect'}
+                    onClick={() => testOne(m)}
+                  >
+                    {testingId === m.id ? <Spinner /> : null}
+                    Test
+                  </button>
                 </td>
               </tr>
             ))}

@@ -420,6 +420,55 @@ the dashboard's own Chat page.
 
 ---
 
+## M10 — service defaults (schema v15)
+
+The four non-chat surfaces (`/v1/embeddings`, `/v1/images/generations`,
+`/v1/audio/speech`, `/v1/audio/transcriptions`) get per-endpoint default models,
+backed by `service_bindings` + `service_probes`. The default applies **only when a
+request omits `model`** — an explicit `model` always wins.
+
+### `GET /admin/services` → `200` → `{services: [ServiceCard, …]}`
+Always all four cards in fixed order, including a first run with no providers:
+`surface` (`embeddings|images_gen|audio_tts|audio_stt`), `endpoint`, `label`,
+`description`, `mode` (`off|manual|auto` — `off` = no row stored), `model_target`
+(stored binding, `manual` only), `resolved_target` (what a model-less request uses
+right now; `""` = it will refuse), `target_exists`, `verified_models` (green probes
+for THIS surface), `accounts` (enabled providers; `0` drives the "connect a
+provider" state), `verdict` (`{model, ok, detail, tested_at}` for the resolved
+target, or `null`).
+
+### `PUT /admin/services/{surface}` → `200` (echoes the card) | `400` | `404`
+Body `{"mode": "manual"|"auto"|"off", "model": "ns/model"}` (unknown keys rejected).
+`manual` requires `model`, validated against what EXISTS — a namespaced id in the
+account's live catalog (split on the FIRST slash, ids may contain slashes) or an
+enabled combo name — never against transient rules/cooldown state. `auto` ignores
+and clears `model`; `off` deletes the binding.
+
+### `POST /admin/services/{surface}/test` → `200` (echoes the verdict) | `400` | `404`
+Body `{"model": "ns/model", "prompt": "…"}` — `prompt` optional (max 2000 bytes). It
+is sent verbatim on the endpoint's own wire field (`prompt` for images, `input` for
+embeddings/tts); empty falls back to the per-surface default (embeddings `ping`,
+images `a small red circle`, tts `ok`). `audio_stt` rejects a non-empty prompt with
+`400` — it tests a file upload, not text, and an input the operator believes was
+tested must never be silently dropped. The probe runs ONE real request through the
+normal dispatch path (ResolveCandidates → ForwardCandidates) with an endpoint-appropriate
+shape — embeddings `{"input":…}` · images `{"prompt":…,"n":1}` ·
+tts `{"input":…,"voice":"alloy"}` · stt multipart with a 0.2 s silent WAV — and
+stores the verdict in `service_probes` per `(surface, account, model)`. The call is
+ledgered like any other (client `service-test`): invisible spend is unauditable
+spend. **Image probes can cost provider quota — the UI confirms before each one and
+no sweep ever runs one unattended.** `ok` means "the wire answered this service
+shape", not output quality; `auto` may only pick tested-ok models.
+
+### Model-less request behavior
+- Service surface + usable binding → the default fills in and dispatches normally.
+- Service surface + no usable default → `400` `service_not_configured` (typed, with
+  `service` + `configure: "/services"`), ledgered like every other resolve failure.
+- Chat surfaces are unchanged: `model` is still required (`400`).
+- Auth is unchanged: unauthenticated calls to these routes return `401`.
+
+---
+
 ## Conventions
 
 - Timestamps: RFC3339 UTC. `ms` fields are integers ≥ 1 (`ttft_ms` floors at 1).

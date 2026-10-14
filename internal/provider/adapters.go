@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -93,6 +94,20 @@ func (a *openCodeGo) PrepareRequest(ctx context.Context, req *http.Request, acct
 // signatures. Deliberately NOT a browser string and not a library default.
 const agentUserAgent = "ezllm/1.0 (llm-router)"
 
+// setAgentUAIfAbsent stamps ezllm's own UA on an OUTBOUND request only when no
+// UA is already set — operator custom_headers (applied after) always win.
+// Inference keeps the CLIENT's UA (copied upstream before PrepareRequest runs);
+// this fills the gap for probes/quota/catalog where there is no client, so a
+// library default never reaches a WAF-fronted edge. Measured 2026-10-14: the
+// 403/1010 on Groq + Command Code was python-urllib, while Go's own default
+// answered 200 on both (consistent with probe N9, "Go was never affected") —
+// so this is an operator rule + one less WAF variable, NOT a live fix.
+func setAgentUAIfAbsent(req *http.Request) {
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", agentUserAgent)
+	}
+}
+
 func (a *openCodeGo) ListModels(ctx context.Context, acct Account, key string) ([]ModelInfo, error) {
 	return listModelsGeneric(ctx, a.client, acct, key, nil)
 }
@@ -151,6 +166,7 @@ func (a *openAICompatible) PrepareRequest(_ context.Context, req *http.Request, 
 		req.Header.Set("x-api-key", key)
 		req.Header.Set("anthropic-version", "2023-06-01")
 	}
+	setAgentUAIfAbsent(req)
 	applyCustomHeaders(req, acct.CustomHeaders)
 	return nil
 }
@@ -198,14 +214,39 @@ func (a *openAICompatible) AuthOracleFor(acct Account) AuthProbe {
 // to a public catalog can't cause a false pass.
 func (a *openAICompatible) CatalogIsPublic() bool { return false }
 
+// mapOracleErr classifies a failed oracle read. A retired/renamed balance
+// endpoint is "provider has no quota endpoint" (404/405 →
+// ErrQuotaUnsupported — the documented contract). Every other status
+// (401/429/5xx) propagates unchanged so a transient failure or a dead
+// credential never overwrites a good snapshot with kind=none.
+func mapOracleErr(err error) error {
+	var he *HTTPError
+	if errors.As(err, &he) && (he.Status == http.StatusNotFound || he.Status == http.StatusMethodNotAllowed) {
+		return ErrQuotaUnsupported
+	}
+	return err
+}
+
 // ReadQuota classifies whatever shape the gateway exposes. Verified against
 // ssn-gpt (space.stationine.com): balance/remaining in USD plus usage.today and
-// usage.total cost fields. Providers with no quota endpoint yield
+// usage.total cost fields. Host-scoped oracles (DeepSeek/OpenRouter/Vercel/
+// Ollama) run first — providers whose balance lives outside {base}/usage but
+// on the SAME key (docs/quota-oracles-design.md); their endpoints were
+// live-probed 2026-10-14. Providers with no quota endpoint yield
 // ErrQuotaUnsupported, which the UI renders as "measured" (our own numbers).
 func (a *openAICompatible) ReadQuota(ctx context.Context, acct Account, key string) (Quota, error) {
-	body, err := getJSON(ctx, a.client, acct.BaseURL+"/usage", map[string]string{
-		"Authorization": "Bearer " + key,
-	})
+	hdrs := map[string]string{"Authorization": "Bearer " + key}
+	if oracleURL, parse, ok := quotaOracleFor(acct); ok {
+		body, err := getJSON(ctx, a.client, oracleURL, hdrs)
+		if err != nil {
+			return Quota{}, mapOracleErr(err)
+		}
+		if q := parse(string(body)); q.Kind != "" {
+			return q, nil
+		}
+		return Quota{}, ErrQuotaUnsupported
+	}
+	body, err := getJSON(ctx, a.client, acct.BaseURL+"/usage", hdrs)
 	if err != nil {
 		return Quota{}, err
 	}
@@ -237,6 +278,7 @@ func (a *anthropicCompatible) PrepareRequest(_ context.Context, req *http.Reques
 	// Deliberately no Authorization header: Anthropic-shaped endpoints reject
 	// requests carrying a Bearer they don't recognise, and StripHeaders removes
 	// any client-supplied one.
+	setAgentUAIfAbsent(req)
 	applyCustomHeaders(req, acct.CustomHeaders)
 	return nil
 }
@@ -420,6 +462,9 @@ func getJSONStatus(ctx context.Context, c *http.Client, url string, hdrs map[str
 			req.Header.Set(k, v)
 		}
 	}
+	// These are ezllm's OWN requests (quota, catalog, key probes) — there is no
+	// client UA to preserve, so ours is stamped unless the caller set one.
+	setAgentUAIfAbsent(req)
 	resp, err := c.Do(req)
 	if err != nil {
 		return nil, 0, err

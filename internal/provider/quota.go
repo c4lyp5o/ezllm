@@ -4,6 +4,9 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"io"
+	"net/url"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -115,4 +118,171 @@ func ClassifyQuota(body string) Quota {
 		return q
 	}
 	return Quota{Kind: QuotaNone, Raw: body, ReadAt: time.Now().UTC()}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Host-scoped quota oracles — providers with no /v1/usage whose SAME inference
+// key can still read a balance endpoint. Design: docs/quota-oracles-design.md.
+// Every URL and parser below was live-probed 2026-10-14 with the operator's
+// own keys (zero-token GETs, UA ezllm/1.0).
+// ─────────────────────────────────────────────────────────────────────────────
+
+// parseFloatString accepts a JSON number OR the quoted-number strings some
+// vendors send (Vercel: {"balance":"4.3014513844"}). jsonFloat rejects
+// strings, so the money parsers need this instead.
+func parseFloatString(v any) *float64 {
+	switch n := v.(type) {
+	case float64:
+		return &n
+	case int:
+		f := float64(n)
+		return &f
+	case string:
+		if f, err := strconv.ParseFloat(strings.TrimSpace(n), 64); err == nil {
+			return &f
+		}
+	}
+	return nil
+}
+
+// quotaOracleFor resolves a host-scoped balance endpoint for an account.
+// Scope = kind openai-compatible + https + EXACT hostname (the isCloudflareAI
+// discipline): neither the account name/namespace nor a user-supplied path can
+// trigger another provider's oracle. ok=false → the caller falls back to the
+// generic {base}/usage path.
+func quotaOracleFor(acct Account) (urlStr string, parse func(string) Quota, ok bool) {
+	if acct.Kind != KindOpenAICompatible {
+		return "", nil, false
+	}
+	u, err := url.Parse(strings.TrimSpace(acct.BaseURL))
+	if err != nil || !strings.EqualFold(u.Scheme, "https") {
+		return "", nil, false
+	}
+	base := strings.TrimSuffix(acct.BaseURL, "/")
+	switch strings.ToLower(u.Hostname()) {
+	case "api.deepseek.com":
+		return base + "/user/balance", parseDeepSeekBalance, true
+	case "openrouter.ai":
+		return base + "/key", parseOpenRouterKey, true
+	case "ai-gateway.vercel.sh":
+		return base + "/credits", parseVercelCredits, true
+	case "ollama.com":
+		// Origin-rooted: the usage API lives at /api/usage, NOT under the
+		// account base's /v1 — appending to base would 404.
+		return u.Scheme + "://" + u.Host + "/api/usage?range=24h", parseOllamaUsage, true
+	}
+	return "", nil, false
+}
+
+// parseDeepSeekBalance parses GET /user/balance:
+//
+//	{"is_available":true,"balance_infos":[{"currency":"USD","total_balance":"0.09",
+//	  "granted_balance":"0.00","topped_up_balance":"0.09"},{"currency":"CNY",…9.17…}]}
+//
+// Multi-currency and the entry ORDER is not stable across reads (observed both
+// CNY-first and USD-first), so USD is preferred explicitly, else the first
+// entry; the unit records WHICH currency was picked and raw keeps them all.
+func parseDeepSeekBalance(body string) Quota {
+	var raw struct {
+		BalanceInfos []struct {
+			Currency     string `json:"currency"`
+			TotalBalance string `json:"total_balance"`
+		} `json:"balance_infos"`
+	}
+	if err := jsonUnmarshal([]byte(body), &raw); err != nil || len(raw.BalanceInfos) == 0 {
+		return Quota{}
+	}
+	pick := raw.BalanceInfos[0]
+	for _, b := range raw.BalanceInfos {
+		if strings.EqualFold(b.Currency, "USD") {
+			pick = b
+			break
+		}
+	}
+	bal := parseFloatString(pick.TotalBalance)
+	if bal == nil || pick.Currency == "" {
+		return Quota{}
+	}
+	return Quota{
+		Kind: QuotaMoney, Raw: body, ReadAt: time.Now().UTC(),
+		Balance: bal, BalanceUnit: strings.ToUpper(pick.Currency),
+	}
+}
+
+// parseOpenRouterKey parses GET /api/v1/key:
+//
+//	{"data":{"limit":1000,"limit_remaining":999.98,"limit_reset":null,
+//	  "usage":0.0167,"usage_daily":0,"usage_weekly":0.0167,…}}
+//
+// balance = remaining on the key's credit limit (nil for an unlimited key →
+// the UI shows "–" rather than a fabricated zero), cost_total = all-time spend,
+// cost_today = today's spend.
+func parseOpenRouterKey(body string) Quota {
+	var raw struct {
+		Data *struct {
+			Limit          *float64 `json:"limit"`
+			LimitRemaining *float64 `json:"limit_remaining"`
+			Usage          *float64 `json:"usage"`
+			UsageDaily     *float64 `json:"usage_daily"`
+		} `json:"data"`
+	}
+	if err := jsonUnmarshal([]byte(body), &raw); err != nil || raw.Data == nil {
+		return Quota{}
+	}
+	d := raw.Data
+	if d.LimitRemaining == nil && d.Usage == nil {
+		return Quota{}
+	}
+	// limit_reset is deliberately NOT stored: it is an INTERVAL NAME
+	// ("monthly"|null), not a timestamp — putting it in resets_at would show
+	// the UI a non-time. It stays in raw.
+	return Quota{
+		Kind: QuotaMoney, Raw: body, ReadAt: time.Now().UTC(),
+		Balance: d.LimitRemaining, BalanceUnit: "USD",
+		CostTotal: d.Usage, CostToday: d.UsageDaily,
+	}
+}
+
+// parseVercelCredits parses GET /v1/credits — both values are STRINGS:
+//
+//	{"balance":"4.3014513844","total_used":"0.6985486156"}
+//
+// A payload without a balance is not this shape (no quota to show) → zero.
+func parseVercelCredits(body string) Quota {
+	var raw map[string]any
+	if err := jsonUnmarshal([]byte(body), &raw); err != nil {
+		return Quota{}
+	}
+	bal := parseFloatString(raw["balance"])
+	if bal == nil {
+		return Quota{}
+	}
+	return Quota{
+		Kind: QuotaMoney, Raw: body, ReadAt: time.Now().UTC(),
+		Balance: bal, BalanceUnit: "USD",
+		CostTotal: parseFloatString(raw["total_used"]),
+	}
+}
+
+// parseOllamaUsage parses GET /api/usage?range=24h:
+//
+//	{"range":"24h","scope":"self","granularity":"hour","from":…,"until":…,
+//	  "totals":{"request_count":11},"buckets":[…]}
+//
+// Ollama reports REQUEST COUNTS, no ceiling — kind=tokens with
+// requests_today set, never a percent (a percentage bar against a limit the
+// provider never stated would be fabricated). buckets are kept in raw.
+func parseOllamaUsage(body string) Quota {
+	var raw struct {
+		Range  string `json:"range"`
+		Totals *struct {
+			RequestCount int64 `json:"request_count"`
+		} `json:"totals"`
+	}
+	if err := jsonUnmarshal([]byte(body), &raw); err != nil || raw.Totals == nil {
+		return Quota{}
+	}
+	q := Quota{Kind: QuotaTokens, Raw: body, ReadAt: time.Now().UTC()}
+	q.ReqsToday = &raw.Totals.RequestCount
+	return q
 }

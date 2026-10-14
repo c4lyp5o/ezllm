@@ -573,15 +573,46 @@ func streamMessagesFinish(f FinishKind) string {
 		return "end_turn"
 	}
 }
+
+// streamMessagesUsage projects UsageIR onto the Messages usage contract:
+// input_tokens EXCLUDES cache, with the split carried alongside it. That is
+// what makes a translated hop ledgered like a native one — the tap reads this
+// exact synthesized envelope (rt.Surface is the client's surface), so an
+// omitted split is exactly how tokens_cached_read ended up 0 (v12 comment).
+// IR Input is the vendor's INCLUSIVE total, hence the subtraction.
+//
+// No legacy gate: every path that ENCODES to anthropic takes an openai or
+// responses source (client=anthropic makes IsUniversalCell false for every
+// hop, so upstream==anthropic is never translated at all), and those sources
+// are inclusive by contract. An anthropic source is normalized to inclusive
+// before it reaches a chat/responses encode, so subtracting is safe on all of
+// them — gating on Legacy here would have skipped the Claude Code leg, which
+// is precisely the legacy path (translate.Response / NewSSEReader).
 func streamMessagesUsage(u UsageIR) []byte {
 	m := map[string]int{}
 	if u.Input != nil {
-		m["input_tokens"] = *u.Input
+		in := *u.Input
+		for _, c := range []*int{u.CacheRead, u.CacheWrite} {
+			if c != nil && *c > 0 {
+				in -= *c
+			}
+		}
+		if in < 0 {
+			in = 0 // an inconsistent upstream must not emit negative input
+		}
+		m["input_tokens"] = in
+		if u.CacheRead != nil && *u.CacheRead >= 0 {
+			m["cache_read_input_tokens"] = *u.CacheRead
+		}
+		if u.CacheWrite != nil && *u.CacheWrite >= 0 {
+			m["cache_creation_input_tokens"] = *u.CacheWrite
+		}
 	}
 	if u.Output != nil {
 		m["output_tokens"] = *u.Output
 	}
-	// Fixed order matches the legacy byte contract (maps sort input before output).
+	// Fixed order matches the legacy byte contract (maps sort input before
+	// output; cache_* sorts first and only appears when the upstream reported one).
 	b, _ := json.Marshal(m)
 	return b
 }
@@ -597,9 +628,17 @@ func (e *eventEncoder) chatUsage(out *bytes.Buffer) {
 		e.frame(out, "", fmt.Sprintf(`{"id":%s,"object":"chat.completion.chunk","created":%d,"model":%s,"choices":[],"usage":{"prompt_tokens":%d,"completion_tokens":%d}}`, mustMarshalString(e.id), e.created, mustMarshalString(e.model), in, ot))
 		return
 	}
-	u := map[string]int{}
+	// OpenAI convention: prompt_tokens INCLUDES the cached share and the split
+	// rides in prompt_tokens_details.cached_tokens — the tap does
+	// in = prompt - cached. Emitting prompt without the details is how a
+	// translated OpenAI-client call ledgered as 0 cached (same defect as the
+	// Messages side, other wire).
+	u := map[string]any{}
 	if e.usage.Input != nil {
 		u["prompt_tokens"] = *e.usage.Input
+		if e.usage.CacheRead != nil && *e.usage.CacheRead >= 0 {
+			u["prompt_tokens_details"] = map[string]int{"cached_tokens": *e.usage.CacheRead}
+		}
 	}
 	if e.usage.Output != nil {
 		u["completion_tokens"] = *e.usage.Output
@@ -637,8 +676,15 @@ func (e *eventEncoder) responseObject(status string, err *ErrorIR) map[string]an
 	if e.usage.Input != nil || e.usage.Output != nil {
 		u := map[string]any{}
 		if e.usage.Input != nil {
+			// Responses input_tokens INCLUDES cached (tap: in = input - cached),
+			// so the total passes through and only the split is filled in. The
+			// hardcoded 0 above was this same "captured then dropped" defect.
+			cached := 0
+			if e.usage.CacheRead != nil && *e.usage.CacheRead >= 0 {
+				cached = *e.usage.CacheRead
+			}
 			u["input_tokens"] = *e.usage.Input
-			u["input_tokens_details"] = map[string]int{"cached_tokens": 0}
+			u["input_tokens_details"] = map[string]int{"cached_tokens": cached}
 		}
 		if e.usage.Output != nil {
 			u["output_tokens"] = *e.usage.Output

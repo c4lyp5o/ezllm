@@ -52,9 +52,39 @@ type AnthropicResponse struct {
 	Usage        AnthropicUsage   `json:"usage"`
 }
 
+// AnthropicUsage is the legacy-path usage struct (encode via json.Marshal of
+// the whole envelope). The cache fields are omitempty so an upstream that
+// reports no split marshals to byte-identical legacy output; when present they
+// carry the same split the strict projection emits, and InputTokens is then
+// already exclusive of both — the Messages contract, not the vendor's total.
 type AnthropicUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens  int  `json:"input_tokens"`
+	OutputTokens int  `json:"output_tokens"`
+	CacheRead    *int `json:"cache_read_input_tokens,omitempty"`
+	CacheWrite   *int `json:"cache_creation_input_tokens,omitempty"`
+}
+
+// projectAnthropicUsage applies the Messages contract (input EXCLUDES cache,
+// split carried alongside) to an inclusive IR usage. Shared by the strict and
+// legacy encoders so the two cannot drift on the convention the ledger reads.
+func projectAnthropicUsage(in *int, out *int, cacheRead *int, cacheWrite *int) AnthropicUsage {
+	u := AnthropicUsage{CacheRead: cacheRead, CacheWrite: cacheWrite}
+	if in != nil {
+		total := *in
+		for _, c := range []*int{cacheRead, cacheWrite} {
+			if c != nil && *c > 0 {
+				total -= *c
+			}
+		}
+		if total < 0 {
+			total = 0
+		}
+		u.InputTokens = total
+	}
+	if out != nil {
+		u.OutputTokens = *out
+	}
+	return u
 }
 
 // --- OpenAI Types ---

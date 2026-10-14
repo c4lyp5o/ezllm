@@ -1,12 +1,13 @@
 package server
 
 // Ledger attribution for translated hops, asserted through the real handler:
-// the row is MARKED (surface=anthropic + a hop dialed as openai), and the
-// usage recorded for it is the vendor's INCLUSIVE total — a translated hop
-// synthesizes the anthropic usage envelope from OpenAI's prompt_tokens, which
-// counts the cached prefix, so tokens_in is NOT our cold-token convention and
-// tokens_cached_read stays 0. Both facts ride with the marker so the dashboard
-// and any cost math can tell the two conventions apart.
+// the row is MARKED (surface=anthropic + a hop dialed as openai), and its usage
+// now follows the SAME convention as a native row. The synthesized Messages
+// envelope subtracts the cache from input_tokens and carries the split
+// (cache_read_input_tokens), so the tap records tokens_in = cold tokens and
+// tokens_cached_read = the prefix that hit cache — before this projection
+// carried no split, translated rows ledgered the vendor's inclusive total with
+// cached=0 and were the one documented exception to the invariant.
 
 import (
 	"context"
@@ -62,12 +63,14 @@ func TestTranslatedCallIsAttributedInTheLedger(t *testing.T) {
 	if !row.Translated {
 		t.Fatal("translated hop was not marked in the ledger")
 	}
-	// INCLUSIVE for translated rows: the openai total, cache NOT subtracted.
-	if row.TokensIn != 1000 {
-		t.Errorf("tokens_in = %d, want 1000 (inclusive openai total)", row.TokensIn)
+	// Same convention as a native row: prompt_tokens 1000 INCLUDES the 900
+	// cached, so the anthropic envelope reports input=100 + cache_read=900 and
+	// the tap lands exactly that. in + cached still equals the vendor's 1000.
+	if row.TokensIn != 100 {
+		t.Errorf("tokens_in = %d, want 100 (inclusive 1000 minus the 900 cached)", row.TokensIn)
 	}
-	if row.TokensCachedRead != 0 {
-		t.Errorf("tokens_cached_read = %d, want 0 (translator does not carry the openai cache split)", row.TokensCachedRead)
+	if row.TokensCachedRead != 900 {
+		t.Errorf("tokens_cached_read = %d, want 900 (the translator now carries the openai cache split)", row.TokensCachedRead)
 	}
 	if row.Surface != "anthropic" {
 		t.Errorf("surface = %q, want the CLIENT surface", row.Surface)

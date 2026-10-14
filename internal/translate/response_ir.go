@@ -32,8 +32,11 @@ const (
 
 // UsageIR keeps presence distinct from zero; partial stream snapshots MERGE,
 // never sum (message_delta output_tokens is cumulative). Input is the full
-// inclusive input count for translated projections; cache split is omitted.
-// Raw counters remain available for the explicit Messages convention.
+// inclusive input count; the cache split rides alongside it and every client
+// projection re-derives its own wire convention from those two facts (Messages
+// emits input minus cache plus the split; OpenAI/Responses keep the inclusive
+// total and fill the details object). Raw counters remain available for the
+// explicit Messages convention.
 type UsageIR struct {
 	Input      *int
 	Output     *int

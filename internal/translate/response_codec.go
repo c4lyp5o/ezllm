@@ -347,12 +347,12 @@ func EncodeResponse(ir *ResponseIR, surface provider.Surface, model string, opts
 				res.Content = append(res.Content, AnthropicBlock{Type: "tool_use", ID: b.CallID, Name: b.Name, Input: input})
 			}
 		}
-		if ir.Usage.Input != nil {
-			res.Usage.InputTokens = *ir.Usage.Input
-		}
-		if ir.Usage.Output != nil {
-			res.Usage.OutputTokens = *ir.Usage.Output
-		}
+		// Legacy marshals res directly (no optionalMessagesUsage), so the
+		// projection must live here: input exclusive of cache plus the split,
+		// identical to the strict path's streamMessagesUsage. An upstream that
+		// reports no split leaves the cache fields nil and omitempty keeps the
+		// legacy bytes unchanged.
+		res.Usage = projectAnthropicUsage(ir.Usage.Input, ir.Usage.Output, ir.Usage.CacheRead, ir.Usage.CacheWrite)
 		if opts.Legacy {
 			return json.Marshal(res)
 		}
@@ -390,11 +390,17 @@ func EncodeResponse(ir *ResponseIR, surface provider.Surface, model string, opts
 		if opts.Legacy {
 			return json.Marshal(out)
 		}
-		var usage map[string]int
+		// OpenAI convention (unchanged from the wire it replaces):
+		// prompt_tokens INCLUDES cached, split in prompt_tokens_details. The
+		// tap subtracts, so tokens_in stays non-cached like a native row.
+		var usage map[string]any
 		if ir.Usage.Input != nil || ir.Usage.Output != nil {
-			usage = map[string]int{}
+			usage = map[string]any{}
 			if ir.Usage.Input != nil {
 				usage["prompt_tokens"] = *ir.Usage.Input
+				if ir.Usage.CacheRead != nil && *ir.Usage.CacheRead >= 0 {
+					usage["prompt_tokens_details"] = map[string]int{"cached_tokens": *ir.Usage.CacheRead}
+				}
 			}
 			if ir.Usage.Output != nil {
 				usage["completion_tokens"] = *ir.Usage.Output
@@ -409,7 +415,7 @@ func EncodeResponse(ir *ResponseIR, surface provider.Surface, model string, opts
 			Created int64               `json:"created"`
 			Model   string              `json:"model"`
 			Choices []chatWireOutChoice `json:"choices"`
-			Usage   map[string]int      `json:"usage,omitempty"`
+			Usage   map[string]any      `json:"usage,omitempty"`
 		}{out.ID, out.Object, out.Created, out.Model, out.Choices, usage})
 	case provider.SurfaceResponses:
 		// Reuse the Responses event encoder's item/envelope schema. No framing;

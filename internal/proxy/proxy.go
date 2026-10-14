@@ -736,7 +736,13 @@ func swapModelMultipart(body []byte, newModel string) ([]byte, error) {
 		}
 	}
 	if !swapped {
-		return nil, errors.New("proxy: multipart body has no 'model' field")
+		// The request carried no model field at all: the handler resolved a
+		// service default, so APPEND the model field this hop must carry
+		// instead of refusing. A model-less multipart with no default is
+		// refused before dispatch — injection only happens for a resolved one.
+		if err := mw.WriteField("model", newModel); err != nil {
+			return nil, fmt.Errorf("proxy: write multipart model field: %w", err)
+		}
 	}
 	if err := mw.Close(); err != nil {
 		return nil, fmt.Errorf("proxy: close multipart writer: %w", err)

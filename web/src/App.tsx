@@ -10,6 +10,7 @@ import { Spinner, cx } from './ui';
 import ThemeToggle from './ThemeToggle';
 import Dashboard from './pages/Dashboard';
 import Providers from './pages/Providers';
+import Services from './pages/Services';
 import Combos from './pages/Combos';
 import Compression from './pages/Compression';
 import Connect from './pages/Connect';
@@ -30,6 +31,7 @@ const NAV: NavItem[] = [
   { to: '/', label: 'Dashboard', hint: 'overview · health · ledger' },
   { to: '/stats', label: 'Analytics', hint: 'stats · economics · requests', match: ANALYTICS_ROUTES },
   { to: '/providers', label: 'Providers', hint: 'accounts · keys · models' },
+  { to: '/services', label: 'Services', hint: 'embeddings · images · audio' },
   { to: '/chat', label: 'Chat', hint: 'test a model' },
   { to: '/combos', label: 'Combos', hint: 'routing chains' },
   { to: '/rules', label: 'Rules', hint: 'quotas · windows' },
@@ -188,6 +190,7 @@ const PAGE_HEADERS: Record<string, { title: string; sub: string }> = {
   '/economics': { title: 'Analytics', sub: 'optimization savings and large requests' },
   '/requests': { title: 'Analytics', sub: 'dissect tokens in and out' },
   '/providers': { title: 'Providers', sub: 'accounts, keys, catalogs and quota' },
+  '/services': { title: 'Services', sub: 'default models for embeddings, images and audio' },
   '/chat': { title: 'Chat', sub: 'test a routed provider model' },
   '/combos': { title: 'Combos', sub: 'ordered routing chains' },
   '/rules': { title: 'Rules', sub: 'usage caps and allowed-use windows' },
@@ -292,6 +295,7 @@ export default function App() {
       <Route path="/economics" element={<Economics />} />
       <Route path="/requests" element={<Requests />} />
             <Route path="/providers" element={<Providers />} />
+            <Route path="/services" element={<Services />} />
             <Route path="/chat" element={<Chat />} />
             <Route path="/combos" element={<Combos />} />
             <Route path="/rules" element={<Rules />} />

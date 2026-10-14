@@ -104,6 +104,7 @@ export async function apiFetch<T = unknown>(path: string, init: RequestInit = {}
 
 export const get = <T = unknown>(p: string) => apiFetch<T>(p, { method: 'GET' });
 export const post = <T = unknown>(p: string, body?: unknown) => apiFetch<T>(p, { method: 'POST' }, body);
+export const put = <T = unknown>(p: string, body?: unknown) => apiFetch<T>(p, { method: 'PUT' }, body);
 export const patch = <T = unknown>(p: string, body: unknown) => apiFetch<T>(p, { method: 'PATCH' }, body);
 export const del = (p: string) => apiFetch<null>(p, { method: 'DELETE' });
 
@@ -447,6 +448,21 @@ export function requests(f: RequestFilter = {}): Promise<RequestsResp> {
 export type TestStep = { step: string; ok?: boolean; ms?: number; detail?: string; error?: string };
 export type TestResult = { ok: boolean; steps: TestStep[]; catalog?: { id: string; owned_by?: string }[]; quota?: QuotaSnapshot | null; deferred?: string[] };
 export type TestOutcome = { key: KeyRow; test: TestResult };
+
+export type ServiceSurface = 'embeddings' | 'images_gen' | 'audio_tts' | 'audio_stt';
+export type ServiceMode = 'off' | 'manual' | 'auto';
+export type ServiceVerdict = { model: string; ok: boolean; detail: string; tested_at: string };
+export type ServiceCard = {
+  surface: ServiceSurface; endpoint: string; label: string; description: string;
+  mode: ServiceMode; model_target: string; resolved_target: string; target_exists: boolean;
+  verified_models: number; accounts: number; verdict: ServiceVerdict | null;
+};
+export type ServiceTestResult = { surface: ServiceSurface; model: string; ok: boolean; dispatched: boolean; status: number; ms: number; detail: string };
+export const serviceCards = () => get<{ services: ServiceCard[] }>('/admin/services');
+export const setServiceBinding = (surface: ServiceSurface, mode: ServiceMode, model = '') =>
+  put<ServiceCard>(`/admin/services/${encodeURIComponent(surface)}`, { mode, model });
+export const testService = (surface: ServiceSurface, model: string, prompt = '') =>
+  post<ServiceTestResult>(`/admin/services/${encodeURIComponent(surface)}/test`, { model, prompt });
 
 export type ModelRow = {
   id: string; display?: string | null; owned_by?: string | null;

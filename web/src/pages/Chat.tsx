@@ -34,7 +34,7 @@ import {
 } from '../api';
 import { Markdown } from '../markdown';
 import { DUR, spring } from '../motion';
-import { btn, cx, Chip, EmptyState, inputCls, labelCls, SectionLabel, Spinner } from '../ui';
+import { btn, cx, Chip, Combobox, EmptyState, inputCls, labelCls, SectionLabel, Spinner } from '../ui';
 
 // ── persistence keys ──────────────────────────────────────────────────────
 // All three are per-browser. A model default is a rendering/UX preference for
@@ -106,139 +106,6 @@ function AttachmentChip({ name, size, preview, onRemove }: Attachment & { previe
       <button type="button" onClick={onRemove} aria-label={`Remove ${name}`}
         className="-mr-1 ml-1 rounded p-1 text-mute transition-colors hover:bg-hover hover:text-bad">✕</button>
     </motion.li>
-  );
-}
-
-// ── searchable model combobox ─────────────────────────────────────────────
-// The old <select> forced a scroll through every synced model (dozens once
-// several providers are connected). Typing filters by id OR display name,
-// Enter picks the highlighted match, Escape closes, and clicking outside
-// closes without losing the selection. Keeps the same input classes so the
-// controls row does not move. Keyboard: ↑/↓ highlight, Enter confirm.
-type ModelOption = { value: string; label: string };
-
-function ModelCombobox({ options, value, onChange, disabled, loadingText }: {
-  options: ModelOption[];
-  value: string;
-  onChange: (v: string) => void;
-  disabled?: boolean;
-  loadingText: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const [active, setActive] = useState(0);
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const listRef = useRef<HTMLUListElement>(null);
-
-  const selected = options.find((o) => o.value === value);
-  // Closed → show the current selection; open → show the query being typed.
-  const shown = open ? query : (selected?.label ?? '');
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return options;
-    return options.filter(
-      (o) => o.value.toLowerCase().includes(q) || o.label.toLowerCase().includes(q),
-    );
-  }, [options, query]);
-
-  const close = useCallback(() => { setOpen(false); setQuery(''); }, []);
-  const pick = useCallback((v: string) => { onChange(v); close(); }, [onChange, close]);
-
-  // Click (or tap) outside closes; a click INSIDE the list is handled by the
-  // option itself and must not race this listener.
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) close();
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open, close]);
-
-  // Keep the highlighted row visible while arrowing through a long list.
-  useEffect(() => {
-    if (!open || !listRef.current) return;
-    const el = listRef.current.querySelector('[data-active="true"]') as HTMLElement | null;
-    el?.scrollIntoView({ block: 'nearest' });
-  }, [open, active, filtered]);
-
-  if (options.length === 0) {
-    return <div className={cx(inputCls, 'mt-0 flex w-full items-center font-mono')}>{loadingText}</div>;
-  }
-
-  return (
-    <div ref={wrapRef} className="relative w-full">
-      <input
-        type="text"
-        role="combobox"
-        aria-expanded={open}
-        aria-controls="model-listbox"
-        aria-autocomplete="list"
-        autoComplete="off"
-        spellCheck={false}
-        disabled={disabled}
-        value={shown}
-        placeholder="Search models…"
-        onFocus={() => { if (!disabled) { setOpen(true); setQuery(''); setActive(0); } }}
-        onChange={(e) => { setQuery(e.target.value); setOpen(true); setActive(0); }}
-        onKeyDown={(e) => {
-          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-            if (!open) { setOpen(true); setActive(0); e.preventDefault(); return; }
-            if (filtered.length === 0) return;
-            e.preventDefault();
-            setActive((i) => e.key === 'ArrowDown'
-              ? (i + 1) % filtered.length
-              : (i - 1 + filtered.length) % filtered.length);
-          } else if (e.key === 'Enter') {
-            if (!open) return;
-            e.preventDefault();
-            if (filtered.length > 0) pick(filtered[Math.min(active, filtered.length - 1)].value);
-          } else if (e.key === 'Escape' && open) {
-            close();
-          }
-        }}
-        className={cx(inputCls, 'mt-0 w-full font-mono')}
-      />
-      {open && (
-        <ul
-          id="model-listbox"
-          role="listbox"
-          ref={listRef}
-          className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-line bg-raised shadow-lg"
-        >
-          {filtered.length === 0 && (
-            <li className="px-3 py-2 text-[12px] text-mute">
-              No model matches “{query.trim()}”
-            </li>
-          )}
-          {filtered.map((o, i) => {
-            const isActive = i === Math.min(active, Math.max(filtered.length - 1, 0));
-            const isSel = o.value === value;
-            return (
-              <li
-                key={o.value}
-                role="option"
-                aria-selected={isSel}
-                data-active={isActive || undefined}
-                onClick={() => pick(o.value)}
-                className={cx(
-                  'cursor-pointer px-3 py-1.5 font-mono text-[12px]',
-                  isActive && 'bg-hover',
-                  isSel ? 'text-ink' : 'text-dim',
-                )}
-                title={o.value}
-              >
-                <span className="block truncate">{o.label}</span>
-                {o.label !== o.value && (
-                  <span className="block truncate text-[10px] text-mute">{o.value}</span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </div>
   );
 }
 
@@ -417,7 +284,7 @@ export default function Chat() {
           <label className="min-w-[280px] flex-1">
             <span className={labelCls}>Model</span>
             <div className="flex gap-2">
-              <ModelCombobox options={modelOptions} value={model} onChange={setModel}
+              <Combobox options={modelOptions} value={model} onChange={setModel}
               disabled={loading || busy} loadingText={loading ? 'Loading models…' : 'No synced models'} />
               {/* Set as default. Disabled when it already IS the default, so
                   the button never leaves its state ambiguous about what the

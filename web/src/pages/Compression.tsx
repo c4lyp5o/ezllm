@@ -26,7 +26,13 @@ const ENGINE_INFO: Record<string, { label: string; note: string; option?: { key:
   caveman: { label: 'Caveman', note: 'Deterministic prose condensation with protected spans and safety gates.', option: { key: 'intensity', label: 'Intensity', initial: 'lite', values: ['lite', 'standard'] } },
   budget: { label: 'Context budget', note: 'Keeps system instructions, the first request, recent turns and complete tool pairs under a token budget.', option: { key: 'max_tokens', label: 'Maximum history tokens', initial: '12000' } },
 };
+// "budget" stays a KnownEngines backend engine (an existing profile can hold
+// one) but is no longer OFFERED: it is hidden from the engines overview, the
+// stage picker and the profile-card chips. The fallback below keeps an existing
+// budget stage editable instead of crashing the editor.
 const ENGINE_IDS = Object.keys(ENGINE_INFO);
+const PICKABLE_IDS = ENGINE_IDS.filter((id) => id !== 'budget');
+const stageLabel = (id: string) => ENGINE_INFO[id]?.label ?? id;
 const freshDraft = (): ProfileDraft => ({ name: '', enabled: true, stages: [{ engine: 'session_dedup', option: '' }], exempt_last_turn: true, min_compress_ratio: 0.05, auto_trigger_tokens: 0, notes: '' });
 const fromProfile = (p: CompressionProfile): ProfileDraft => ({
   name: p.name,
@@ -137,14 +143,11 @@ export default function Compression() {
           <button type="button" className={cx(btn.base, btn.primary)} onClick={startNew}>＋ New profile</button>
         </div>
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
-          {ENGINE_IDS.map((id) => <div key={id} className="rounded-lg border border-line bg-raised/50 px-3.5 py-3">
+          {PICKABLE_IDS.map((id) => <div key={id} className="rounded-lg border border-line bg-raised/50 px-3.5 py-3">
             <div className="flex items-center justify-between"><Mono className="font-semibold">{ENGINE_INFO[id].label}</Mono><Chip tone="ok">live</Chip></div>
             <p className="mt-1.5 text-[11.5px] leading-relaxed text-mute">{ENGINE_INFO[id].note}</p>
           </div>)}
         </div>
-        <p className="mt-4 rounded-lg border border-line bg-raised/40 px-3.5 py-3 text-[11.5px] leading-relaxed text-mute">
-          Safety defaults are enforced on every profile: fail-open, final user turn exempt, tool-call integrity preserved, and changes below the minimum compression ratio are discarded.
-        </p>
       </section>
 
       {err && <div role="alert" className="rounded-lg border border-bad/30 bg-bad-dim px-4 py-3 text-[13px] text-bad">{err}</div>}
@@ -225,7 +228,7 @@ export default function Compression() {
             const info = ENGINE_INFO[stage.engine];
             return <div key={`${i}-${stage.engine}`} className="grid items-end gap-2 rounded-lg border border-line bg-raised/40 p-3 sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto]">
               <span className="pb-2 font-mono text-[11px] text-mute">{String(i + 1).padStart(2, '0')}</span>
-              <div><label className={labelCls} htmlFor={`cp-engine-${i}`}>Engine</label><select id={`cp-engine-${i}`} className={inputCls} value={stage.engine} onChange={(e) => updateStage(i, { engine: e.target.value, option: ENGINE_INFO[e.target.value]?.option?.initial ?? '' })}>{ENGINE_IDS.map((id) => <option key={id} value={id}>{ENGINE_INFO[id].label}</option>)}</select></div>
+              <div><label className={labelCls} htmlFor={`cp-engine-${i}`}>Engine</label><select id={`cp-engine-${i}`} className={inputCls} value={stage.engine} onChange={(e) => updateStage(i, { engine: e.target.value, option: ENGINE_INFO[e.target.value]?.option?.initial ?? '' })}>{PICKABLE_IDS.map((id) => <option key={id} value={id}>{stageLabel(id)}</option>)}{!PICKABLE_IDS.includes(stage.engine) && <option value={stage.engine} disabled>{stageLabel(stage.engine)} (not offered)</option>}</select></div>
               <div>{info?.option ? (
                 info.option.values ? (
                   <>
@@ -256,7 +259,7 @@ export default function Compression() {
         {profiles === null ? <p className="mt-3 text-[12px] text-mute">Loading profiles…</p> : profiles.length === 0 ? <p className="mt-3 text-[12.5px] text-mute">No profiles yet. Create one above, then attach it to a combo.</p> : (
           <div className="mt-3 space-y-3">{profiles.map((p) => <article key={p.id} className="rounded-lg border border-line bg-raised/30 px-4 py-3">
             <div className="flex flex-wrap items-center gap-2"><Mono className="font-semibold">{p.name}</Mono><Chip tone={p.enabled ? 'ok' : 'warn'}>{p.enabled ? 'enabled' : 'paused'}</Chip><span className="ml-auto text-[11px] text-mute">min {Math.round(p.min_compress_ratio * 100)}% · {p.exempt_last_turn ? 'final turn exempt' : 'final turn editable'} · fail-open</span></div>
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">{(p.stages ?? []).map((stage, i) => <span key={i} className="flex items-center gap-1.5">{i > 0 && <span className="text-mute">→</span>}<Chip tone="neutral"><Mono>{ENGINE_INFO[stage.engine]?.label ?? stage.engine}</Mono></Chip>{stage.options && <Mono className="text-[10px] text-mute">{JSON.stringify(stage.options)}</Mono>}</span>)}</div>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">{(p.stages ?? []).filter((stage) => stage.engine !== 'budget').map((stage, i) => <span key={i} className="flex items-center gap-1.5">{i > 0 && <span className="text-mute">→</span>}<Chip tone="neutral"><Mono>{stageLabel(stage.engine)}</Mono></Chip>{stage.options && <Mono className="text-[10px] text-mute">{JSON.stringify(stage.options)}</Mono>}</span>)}</div>
             {p.notes && <p className="mt-2 text-[12px] text-dim">{p.notes}</p>}
             <div className="mt-3 flex justify-end gap-2"><button type="button" disabled={busy} className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')} onClick={() => void toggleEnabled(p)}>{p.enabled ? 'Pause' : 'Enable'}</button><button type="button" disabled={busy} className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')} onClick={() => startEdit(p)}>Edit</button><button type="button" disabled={busy} className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px] text-bad')} onClick={() => setPendingDelete(p)}>Delete</button></div>
           </article>)}</div>
@@ -271,7 +274,7 @@ export default function Compression() {
         onClose={() => setPendingDelete(null)}
         onConfirm={() => { if (pendingDelete) void remove(pendingDelete).then(() => setPendingDelete(null)); }} />
 
-      <section className="rounded-xl border border-line bg-surface px-5 py-5 sm:px-6"><SectionLabel>Wiring</SectionLabel><ul className="mt-3 space-y-1.5 text-[13px] text-dim"><li>· Attach a profile to a combo using <Mono>compression_profile_id</Mono>.</li><li>· Per-request override uses <Mono>x-ezllm-compression: &lt;profile-name|off&gt;</Mono>.</li><li>· Actual saved-token counts are recorded in Stats → Compression / Savings.</li></ul></section>
+      <section className="rounded-xl border border-line bg-surface px-5 py-5 sm:px-6"><SectionLabel>Wiring</SectionLabel><ul className="mt-3 space-y-1.5 text-[13px] text-dim"><li>· Per-request override uses <Mono>x-ezllm-compression: &lt;profile-name|off&gt;</Mono>.</li></ul></section>
     </div>
   );
 }

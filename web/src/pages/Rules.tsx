@@ -15,23 +15,32 @@ import { Chip, ConfirmModal, Modal, SectionLabel, SkeletonRows, Toggle, btn, cx,
 
 const CAP_WINDOWS = ['5h', 'daily', 'weekly', 'monthly'] as const;
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const TZ_HINTS = ['Asia/Kuala_Lumpur', 'UTC', '+08:00', 'Asia/Jakarta'];
+// The platform's own timezone list; a hand-picked 4-entry datalist let
+// "+08:00" masquerade as a zone (no DST, silently wrong half the year).
+const TZS: string[] = (() => {
+  try {
+    const list = Intl.supportedValuesOf('timeZone');
+    return list.includes('Asia/Kuala_Lumpur') ? list : ['Asia/Kuala_Lumpur', ...list];
+  } catch {
+    return ['Asia/Kuala_Lumpur', 'UTC', 'Asia/Jakarta', 'Asia/Singapore'];
+  }
+})();
 
 type Draft = {
-  account_id: number; model_id: string;
+  account_id: number; model_ids: string[];
   cap_tokens: number; cap_window: string;
   win_start: string; win_end: string; win_days: string; win_tz: string;
   enabled: boolean; note: string;
 };
 
 const newDraft = (accountID: number): Draft => ({
-  account_id: accountID, model_id: '', cap_tokens: 0, cap_window: 'monthly',
+  account_id: accountID, model_ids: [], cap_tokens: 0, cap_window: 'monthly',
   win_start: '', win_end: '', win_days: '', win_tz: 'Asia/Kuala_Lumpur',
   enabled: true, note: '',
 });
 
 const draftOf = (r: ModelRule): Draft => ({
-  account_id: r.account_id, model_id: r.model_id,
+  account_id: r.account_id, model_ids: [r.model_id],
   cap_tokens: r.cap_tokens, cap_window: r.cap_window,
   win_start: r.win_start ?? '', win_end: r.win_end ?? '',
   win_days: r.win_days ?? '', win_tz: r.win_tz,
@@ -45,6 +54,19 @@ const errText = (e: unknown) =>
 
 // write-side validation mirror (store.ValidateModelRule): windows are
 // both-or-neither and start!=end — reject before the round-trip.
+// Draft.model_ids is UI state; the wire is ONE model_id per rule
+// (UNIQUE(account_id, model_id)) and decodeBody runs DisallowUnknownFields, so
+// a stray model_ids in a body is a hard 400, not a warning.
+function wireOf(d: Draft, modelID: string) {
+  return {
+    account_id: d.account_id, model_id: modelID,
+    cap_tokens: d.cap_tokens, cap_window: d.cap_window,
+    win_start: d.win_start, win_end: d.win_end,
+    win_days: d.win_days, win_tz: d.win_tz,
+    enabled: d.enabled, note: d.note,
+  };
+}
+
 function windowDraftError(d: Draft): string {
   const { win_start: s, win_end: e } = d;
   if (!!s !== !!e) return 'window needs BOTH start and end (or neither)';
@@ -74,17 +96,37 @@ function StatusChip({ rule }: { rule: ModelRule }) {
 }
 
 function RuleModal({ open, editing, accounts, models, draft, setDraft,
-  onClose, onSave, saving, err }: {
+  onClose, onSave, saving, err, existingRuleID }: {
   open: boolean; editing: ModelRule | null; accounts: Account[]; models: ModelRow[];
   draft: Draft | null; setDraft: (d: Draft) => void;
   onClose: () => void; onSave: () => void; saving: boolean; err: string;
+  existingRuleID: (accountID: number, modelID: string) => number | undefined;
 }) {
+  const [modelQuery, setModelQuery] = useState('');
+  // Account swap invalidates the filter: results are account-scoped, so a
+  // leftover query would silently hide everything and look like a bug.
+  useEffect(() => { setModelQuery(''); }, [draft?.account_id]);
+
   if (!draft) return null;
   const d = draft;
   const set = (p: Partial<Draft>) => setDraft({ ...d, ...p });
   const wErr = windowDraftError(d);
-  const wState = windowState(d);
-  const account = accounts.find((a) => a.id === d.account_id);
+  // Hundreds of models is normal (Vercel AI Gateway ships ~700), so the list
+  // is always filtered before it is rendered, and the DOM is capped at the
+  // first 300 matches — selected models stay visible even when filtered out,
+  // so ticking something can never make it vanish from the list.
+  const q = modelQuery.trim().toLowerCase();
+  const matches = q
+    ? models.filter((m) => m.id.toLowerCase().includes(q) || (m.display ?? '').toLowerCase().includes(q))
+    : models;
+  // The render list is ALL matches, selected rows included (checked), plus any
+  // selected model that the current query filters OUT — otherwise ticking
+  // everything under a filter empties the list and you cannot untick it.
+  const filteredOut = d.model_ids
+    .filter((id) => !matches.some((m) => m.id === id))
+    .map((id) => models.find((m) => m.id === id))
+    .filter((m): m is ModelRow => !!m);
+  const matchedModels = [...filteredOut, ...matches];
 
   const toggleDay = (i: number) => {
     const cur = d.win_days.split(',').map((x) => x.trim()).filter(Boolean).map(Number);
@@ -95,8 +137,7 @@ function RuleModal({ open, editing, accounts, models, draft, setDraft,
   return (
     <Modal
       open={open} onClose={onClose} wide
-      title={editing ? `Edit ${editing.model_id}` : 'New rule'}
-      subtitle={editing ? `PATCH /admin/model-rules/${editing.id}` : 'POST /admin/model-rules'}
+      title={editing ? 'Edit rule' : 'New rule'}
       footer={
         <div className="flex items-center justify-between gap-3">
           <span className="text-[12px] text-bad">{err}</span>
@@ -120,14 +161,53 @@ function RuleModal({ open, editing, accounts, models, draft, setDraft,
           </select>
         </div>
         <div>
-          <label className={labelCls} htmlFor="rl-model">model id</label>
-          <input id="rl-model" className={cx(inputCls, 'font-mono')} list="rl-models"
-            placeholder={account ? `${account.namespace}/model` : 'model id'}
-            value={d.model_id} onChange={(e) => set({ model_id: e.target.value })} />
-          <datalist id="rl-models">
-            {models.map((m) => <option key={m.id} value={m.id} />)}
-          </datalist>
-          <p className="mt-1 text-[11px] text-mute">bare id inside this account's namespace; router keys on (account, model)</p>
+          <label className={labelCls} htmlFor="rl-model">Model</label>
+          {models.length > 0 && (
+            <input id="rl-model" type="search" className={cx(inputCls, 'mb-1.5 font-mono')}
+              placeholder={`search ${models.length} model${models.length === 1 ? '' : 's'}…`}
+              value={modelQuery} onChange={(e) => setModelQuery(e.target.value)} />
+          )}
+          <div id="rl-model-list" role="group" aria-label="models"
+            className="max-h-44 space-y-0.5 overflow-y-auto rounded-lg border border-line bg-raised p-1.5">
+            {models.length === 0 ? (
+              <p className="px-2 py-1.5 text-[11.5px] text-mute">No models in this account — sync it on Providers first.</p>
+            ) : matchedModels.length === 0 ? (
+              <p className="px-2 py-1.5 text-[11.5px] text-mute">No model matches “{modelQuery.trim()}”.</p>
+            ) : matchedModels.slice(0, 300).map((m) => {
+              const pinned = editing?.model_id === m.id;
+              const on = pinned || d.model_ids.includes(m.id);
+              const hasRule = existingRuleID(d.account_id, m.id) != null;
+              return (
+                <label key={m.id} htmlFor={`rl-model-${m.id}`} className={cx(
+                  'flex items-center gap-2 rounded-md px-2 py-1.5 font-mono text-[11.5px] transition-colors',
+                  pinned ? 'bg-wash text-ink' : 'cursor-pointer hover:bg-wash',
+                  on && !pinned && 'bg-accent-dim text-accent', !on && !pinned && 'text-dim')}>
+                  <input id={`rl-model-${m.id}`} type="checkbox" checked={on} disabled={pinned}
+                    onChange={() => set({ model_ids: on ? d.model_ids.filter((x) => x !== m.id) : [...d.model_ids, m.id] })}
+                    className="h-3.5 w-3.5 accent-accent" />
+                  <span className="min-w-0 flex-1 truncate">{m.id}</span>
+                  {hasRule && <span className="text-[10px] text-mute">has rule</span>}
+                </label>
+              );
+            })}
+          </div>
+          {models.length > 0 && (
+            <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-[10.5px] text-mute">
+              <span>
+                {d.model_ids.length} selected
+                {matchedModels.length > 300 && <> · showing 300 of {matchedModels.length} matches</>}
+              </span>
+              {matches.length > 0 && (
+                <button type="button"
+                  className="font-medium text-dim underline-offset-2 hover:text-ink hover:underline"
+                  onClick={() => set({
+                    model_ids: [...new Set([...d.model_ids, ...matches.map((m) => m.id)])],
+                  })}>
+                  select all {matches.length} match{matches.length === 1 ? '' : 'es'}
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         <div>
@@ -144,11 +224,13 @@ function RuleModal({ open, editing, accounts, models, draft, setDraft,
         </div>
         <div>
           <label className={labelCls} htmlFor="rl-tz">timezone</label>
-          <input id="rl-tz" className={cx(inputCls, 'font-mono')} list="rl-tzs"
-            value={d.win_tz} onChange={(e) => set({ win_tz: e.target.value })} />
-          <datalist id="rl-tzs">
-            {TZ_HINTS.map((t) => <option key={t} value={t} />)}
-          </datalist>
+          <select id="rl-tz" className={cx(inputCls, 'font-mono')} value={d.win_tz}
+            onChange={(e) => set({ win_tz: e.target.value })}>
+            {/* The browser's own IANA list, so an exotic zone can't be typed
+                into a typo the router would silently treat as UTC. */}
+            {!TZS.includes(d.win_tz) && d.win_tz && <option value={d.win_tz}>{d.win_tz}</option>}
+            {TZS.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
         </div>
 
         <div>
@@ -180,15 +262,12 @@ function RuleModal({ open, editing, accounts, models, draft, setDraft,
         </div>
 
         <div className="sm:col-span-2 flex flex-wrap items-center gap-4 border-t border-line pt-4">
-          <Toggle checked={d.enabled} onChange={(v) => set({ enabled: v })} label="rule enabled" />
-          <span className="text-[12px] text-dim">{d.enabled ? 'rule enforces' : 'rule ignored by router'}</span>
-          <span className="ml-auto">
-            {wErr
-              ? <Chip tone="bad">{wErr}</Chip>
-              : <Chip tone={wState.open ? 'ok' : 'warn'}>
-                  {d.enabled ? (wState.open ? '▸ would allow now' : '▸ would refuse now') : '▸ not evaluated (disabled)'}
-                </Chip>}
-          </span>
+          <Toggle checked={d.enabled} onChange={(v) => set({ enabled: v })} label="enabled" />
+          {/* No routing reveal here: the live "would allow/would refuse" chip
+              told the operator exactly what the router decides right now, which
+              is the sort of behaviour detail that belongs inside ezllm. Window
+              validity still surfaces as a blocking error chip. */}
+          <span className="ml-auto">{wErr && <Chip tone="bad">{wErr}</Chip>}</span>
         </div>
         <div className="sm:col-span-2">
           <label className={labelCls} htmlFor="rl-note">note</label>
@@ -247,13 +326,24 @@ export default function Rules() {
 
   const save = async () => {
     if (!draft) return;
-    const modelID = draft.model_id.trim();
-    if (!modelID) { setModalErr('model id is required'); return; }
-    const payload = { ...draft, model_id: modelID };
+    const modelIDs = [...new Set(draft.model_ids.map((m) => m.trim()).filter(Boolean))];
+    if (modelIDs.length === 0) { setModalErr('select at least one model'); return; }
+    // One request per model: honest about a large fan-out instead of hanging
+    // silently while it fires hundreds of PATCH/POST calls.
+    if (modelIDs.length > 20 && !window.confirm(
+      `This will create or update ${modelIDs.length} rules (one request each). Continue?`)) {
+      return;
+    }
     setSaving(true); setModalErr('');
     try {
-      if (editing) await updateModelRule(editing.id, payload);
-      else await createModelRule(payload);
+      // Each checked model is its own rule. A model that already has one is
+      // PATCHed with these settings instead of re-POSTed (that is one row per
+      // (account, model) by schema), so multi-select also acts as apply-to-many.
+      for (const modelID of modelIDs) {
+        const existing = rules?.find((r) => r.account_id === draft.account_id && r.model_id === modelID)?.id;
+        if (existing != null) await updateModelRule(existing, wireOf(draft, modelID));
+        else await createModelRule(wireOf(draft, modelID));
+      }
       setOpen(false);
       await load();
     } catch (e) { setModalErr(errText(e)); }
@@ -263,7 +353,7 @@ export default function Rules() {
   // row toggle: send the FULL row — a PATCH without window fields clears them
   const setEnabled = async (r: ModelRule, enabled: boolean) => {
     setBusy(r.id);
-    try { await updateModelRule(r.id, { ...draftOf(r), enabled }); await load(); }
+    try { await updateModelRule(r.id, { ...wireOf(draftOf(r), r.model_id), enabled }); await load(); }
     catch (e) { setErr(errText(e)); }
     finally { setBusy(null); }
   };
@@ -346,6 +436,7 @@ export default function Rules() {
         open={open} editing={editing} accounts={accounts ?? []} models={models}
         draft={draft} setDraft={setDraft} onClose={() => setOpen(false)}
         onSave={() => void save()} saving={saving} err={modalErr}
+        existingRuleID={(a, m) => rules?.find((r) => r.account_id === a && r.model_id === m)?.id}
       />
       <ConfirmModal
         open={pendingDelete != null}

@@ -145,18 +145,25 @@ export function Modal({ open, onClose, title, subtitle, children, footer, wide }
   children: ReactNode; footer?: ReactNode; wide?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
 
+  // Keep Escape working with the LATEST onClose without re-subscribing per
+  // render: callers pass an inline `() => setOpen(false)`, a new identity every
+  // time their state changes.
+  useEffect(() => { onCloseRef.current = onClose; });
+
+  // deps are [open] ONLY. It used to be [open, onClose], so every parent
+  // re-render re-ran the autofocus and yanked focus to the FIRST field in the
+  // dialog — typing one character in any modal (the Rules note field above all)
+  // re-rendered and dropped the caret back onto the account select. Focus
+  // belongs to the closed -> open transition; after that the operator owns it.
   useEffect(() => {
     if (!open) return;
-    const node = ref.current;
-    if (node) {
-      const el = node.querySelector<HTMLElement>('input,select,textarea,button');
-      el?.focus();
-    }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    ref.current?.querySelector<HTMLElement>('input,select,textarea,button')?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCloseRef.current(); };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 

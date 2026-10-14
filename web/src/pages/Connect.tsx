@@ -15,22 +15,23 @@ import {
   type TokenCreated, type TokenInfo, type V1Model,
 } from '../tokens';
 
-// The gateway speaks two client protocols on one port under /v1: OpenAI Chat
-// and Anthropic Messages. The OpenAI Responses route still exists server-side
-// for other clients but is not surfaced here.
+// The gateway speaks two client protocols on one port under /v1: OpenAI and
+// Anthropic. The OpenAI Responses route still exists server-side for other
+// clients but is not surfaced here.
 const SURFACES = [
   // The value is the BASE URL a client of that dialect is configured with —
   // not the endpoint a single request hits. OpenAI clients take the whole
   // base including /v1; Anthropic clients append /v1/messages themselves, so
-  // their base is the origin bare.
-  { key: 'openai', label: 'OpenAI Chat', path: '/v1', note: 'the one almost everything speaks' },
-  { key: 'anthropic', label: 'Anthropic Messages', path: '', note: 'Claude Code, SDKs, Anthropic-style clients (appends /v1/messages)' },
+  // their base is the origin bare. That difference is why the base url row
+  // differs between the two boxes, and it is the single most common mistake.
+  { key: 'openai', label: 'OpenAI', path: '/v1' },
+  { key: 'anthropic', label: 'Anthropic', path: '' },
 ] as const;
 
 type SurfaceKey = (typeof SURFACES)[number]['key'];
 
 // Browser clients send a preflight. ezllm answers it for /v1/* out of the box
-// (unset = any Origin echoed back, /admin never granted), so the honest note is
+// (unset = any Origin echoed back), so the honest note is
 // how to RESTRICT it — telling users to "set the env var to make it work" would
 // be backwards and would send someone chasing a fix for a non-problem.
 const CORS_NOTE = (
@@ -38,7 +39,7 @@ const CORS_NOTE = (
     {' '}
     · browser preflights are allowed on <code className="font-mono text-dim">/v1/*</code> out of
     the box; set <code className="font-mono text-dim">EZLLM_CORS_ORIGINS</code> to a
-    comma-separated allowlist to restrict it (<code className="font-mono text-dim">/admin</code> is never granted)
+    comma-separated allowlist to restrict it
   </>
 );
 
@@ -218,14 +219,18 @@ export default function Connect() {
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 [&>*]:min-w-0">
           {SURFACES.map((s) => (
             <div key={s.key} className="rounded-xl border border-line bg-surface px-4 py-4 animate-fade-up">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <div className="text-[13.5px] font-semibold">{s.label}</div>
-                  <div className="mt-0.5 text-[11.5px] text-mute">{s.note}</div>
-                </div>
-              </div>
+              <div className="text-[13.5px] font-semibold">{s.label}</div>
               <div className="mt-3 space-y-2">
                 <FieldRow label="base url" value={base + s.path} />
+              </div>
+              {/* The paste-ready snippet lives with the protocol it belongs to,
+                  not in a separate section further down: pick your protocol,
+                  copy that box, done. */}
+              <pre className="mt-3 overflow-x-auto rounded-lg border border-line bg-bg px-3 py-2 font-mono text-[11.5px] leading-relaxed text-dim">
+{snippet(s.key, base, '<your-key>', sampleModel ?? '<model-id>')}
+              </pre>
+              <div className="mt-2 flex justify-end">
+                <CopyButton text={snippet(s.key, base, '<your-key>', sampleModel ?? '<model-id>')} label="Copy env" />
               </div>
             </div>
           ))}
@@ -233,7 +238,7 @@ export default function Connect() {
         <p className="mt-2 text-[11.5px] text-mute">
           Models list: <code className="font-mono text-dim">{base}/v1/models</code>
           {CORS_NOTE}
-          {sampleModel ? <> · {models.length} routable now, first is <code className="font-mono text-dim">{sampleModel}</code></> : <> · none routable yet</>}
+          {sampleModel && <> · {models.length} routable now, first is <code className="font-mono text-dim">{sampleModel}</code></>}
         </p>
       </section>
 
@@ -282,24 +287,6 @@ export default function Connect() {
           <p className="mt-3 text-[11.5px] text-mute">
             <span className="text-dim">infer</span> can call /v1 only. <span className="text-dim">admin</span> can also call /admin — give that role to yourself, not to tools.
           </p>
-        </div>
-      </section>
-
-      {/* ── Snippet for the tool you're wiring up ─────────────────── */}
-      <section>
-        <SectionLabel>Paste into your client</SectionLabel>
-        <div className="mt-3 space-y-2">
-          {SURFACES.map((s) => (
-            <div key={s.key} className="rounded-xl border border-line bg-surface px-4 py-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[12.5px] font-medium text-dim">{s.label}</span>
-                <CopyButton text={snippet(s.key, base, '<your-key>', sampleModel ?? '<model-id>')} label="Copy env" />
-              </div>
-              <pre className="mt-2 overflow-x-auto rounded-lg border border-line bg-bg px-3 py-2 font-mono text-[11.5px] leading-relaxed text-dim">
-{snippet(s.key, base, '<your-key>', sampleModel ?? '<model-id>')}
-              </pre>
-            </div>
-          ))}
         </div>
       </section>
 

@@ -205,6 +205,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /admin/accounts/{id}/sync", s.admin(s.handleSyncStatus))
 	s.mux.HandleFunc("DELETE /admin/accounts/{id}/sync", s.admin(s.handleSyncStatus))
 	s.mux.HandleFunc("GET /admin/accounts/{id}/models", s.admin(s.handleListModels))
+	s.mux.HandleFunc("GET /admin/services", s.admin(s.handleServices))
+	s.mux.HandleFunc("PUT /admin/services/{surface}", s.admin(s.handleServiceBinding))
+	s.mux.HandleFunc("POST /admin/services/{surface}/test", s.admin(s.handleServiceTest))
 	s.mux.HandleFunc("PUT /admin/accounts/{id}/model-pin", s.admin(s.handleSetModelPin))
 	// Curated capability verdicts (operator-set, probe-protected). Same
 	// body-carried model id as model-pin: ids can contain "/".
@@ -466,6 +469,13 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 		}
 		client := clientName(r)
 		cip := clientIP(r)
+		if requested == "" {
+			var ok bool
+			requested, ok = s.resolveServiceRequestModel(w, r, surface, start, client, cip)
+			if !ok {
+				return
+			}
+		}
 		if info := reqInfoOf(r); info != nil {
 			info.surface = string(surface)
 		}
@@ -695,6 +705,13 @@ func (s *Server) inferenceSTT(w http.ResponseWriter, r *http.Request) {
 	}
 	client := clientName(r)
 	cip := clientIP(r)
+	if requested == "" {
+		var ok bool
+		requested, ok = s.resolveServiceRequestModel(w, r, provider.SurfaceAudioSTT, start, client, cip)
+		if !ok {
+			return
+		}
+	}
 	if info := reqInfoOf(r); info != nil {
 		info.surface = string(provider.SurfaceAudioSTT)
 	}
@@ -782,14 +799,10 @@ func extractModelMultipart(body []byte) (string, error) {
 			if err != nil {
 				return "", fmt.Errorf("read model field: %w", err)
 			}
-			model := strings.TrimSpace(string(value))
-			if model == "" {
-				return "", errors.New("'model' is required in form data")
-			}
-			return model, nil
+			return strings.TrimSpace(string(value)), nil
 		}
 	}
-	return "", errors.New("'model' is required in form data")
+	return "", nil
 }
 
 func errorStatus(err error) int {
@@ -1206,7 +1219,32 @@ func bearerToken(r *http.Request) string {
 	return ""
 }
 
+func (s *Server) resolveServiceRequestModel(w http.ResponseWriter, r *http.Request, surface provider.Surface, started time.Time, client, ip string) (string, bool) {
+	if !store.IsServiceSurface(string(surface)) {
+		writeErr(w, http.StatusBadRequest, "invalid_request_error", "'model' is required")
+		return "", false
+	}
+	target, err := s.db.ResolveServiceDefault(r.Context(), string(surface))
+	if err != nil {
+		s.writeStoreErr(w, err)
+		return "", false
+	}
+	if target == "" {
+		msg := fmt.Sprintf("%s has no default model configured — bind one in Services or include a model in the request", surface)
+		writeErrExtra(w, http.StatusBadRequest, "service_not_configured", msg,
+			map[string]any{"service": string(surface), "configure": "/services"})
+		s.ledger(store.Call{
+			TS: started, Client: client, IP: ip, Surface: store2surface(surface),
+			Status: http.StatusBadRequest, Err: msg,
+		})
+		return "", false
+	}
+	return target, true
+}
+
 // extractModel reads the requested model without disturbing any other field.
+// An absent/empty model returns ("", nil): the handler decides per surface
+// whether that is a required-model refusal or a service-default lookup.
 func extractModel(body []byte) (string, error) {
 	var m struct {
 		Model string `json:"model"`
@@ -1214,10 +1252,7 @@ func extractModel(body []byte) (string, error) {
 	if err := json.Unmarshal(body, &m); err != nil {
 		return "", errors.New("body is not a JSON object")
 	}
-	if strings.TrimSpace(m.Model) == "" {
-		return "", errors.New("'model' is required")
-	}
-	return m.Model, nil
+	return strings.TrimSpace(m.Model), nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

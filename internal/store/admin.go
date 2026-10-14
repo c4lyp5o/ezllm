@@ -79,6 +79,8 @@ type QuotaSummary struct {
 	Unit           *string  `json:"unit"`
 	CostTotal      *float64 `json:"cost_total"`
 	CostToday      *float64 `json:"cost_today"`
+	TokensToday    *int64   `json:"tokens_today"`
+	RequestsToday  *int64   `json:"requests_today"`
 	ResetsAt       *string  `json:"resets_at"`
 	ReadAt         string   `json:"read_at"`
 }
@@ -169,18 +171,30 @@ FROM provider_keys WHERE account_id=? ORDER BY id`, a.ID)
 	// latest quota across this account's keys (most recent read wins)
 	var q QuotaSummary
 	var qReadAt string
+	var tokToday, reqToday sql.NullInt64
 	err = d.r.QueryRowContext(ctx, `
 SELECT q.kind, q.percent_rolling, q.percent_weekly, q.percent_monthly,
        q.balance, q.balance_unit, q.cost_total, q.cost_today,
+       q.tokens_today, q.requests_today,
        q.resets_at, q.read_at
 FROM quota_snapshots q
 JOIN provider_keys k ON k.id = q.provider_key_id
 WHERE k.account_id = ?
 ORDER BY q.read_at DESC, q.id DESC LIMIT 1`, a.ID).
 		Scan(&q.Kind, &q.PercentRolling, &q.PercentWeekly, &q.PercentMonthly,
-			&q.Balance, &q.Unit, &q.CostTotal, &q.CostToday, &q.ResetsAt, &qReadAt)
+			&q.Balance, &q.Unit, &q.CostTotal, &q.CostToday,
+			&tokToday, &reqToday,
+			&q.ResetsAt, &qReadAt)
 	if err == nil {
 		q.ReadAt = qReadAt
+		if tokToday.Valid {
+			v := tokToday.Int64
+			q.TokensToday = &v
+		}
+		if reqToday.Valid {
+			v := reqToday.Int64
+			q.RequestsToday = &v
+		}
 		a.Quota = &q
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return err
@@ -883,10 +897,12 @@ func (d *DB) InsertQuotaSnapshot(ctx context.Context, keyID int64, q provider.Qu
 		_, err := tx.ExecContext(ctx, `
 INSERT INTO quota_snapshots
   (provider_key_id, kind, percent_rolling, percent_weekly, percent_monthly,
-   balance, balance_unit, cost_total, cost_today, resets_at, raw, ok, err)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+   balance, balance_unit, cost_total, cost_today, tokens_today, requests_today,
+   resets_at, raw, ok, err)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			keyID, kind, q.PercentRolling, q.PercentWeekly, q.PercentMonthly,
 			q.Balance, nullIfEmpty(q.BalanceUnit), q.CostTotal, q.CostToday,
+			i64OrNil(q.TokensToday), i64OrNil(q.ReqsToday),
 			nullIfEmpty(resets), raw, boolToInt(ok), nullIfEmpty(errMsg))
 		return err
 	})
@@ -899,7 +915,9 @@ SELECT k.id, k.account_id, k.label, k.key_hint,
        -- LEFT JOIN: a never-probed key has all-NULL quota columns, and kind/
        -- read_at/ok scan into plain string/bool. No snapshot => '' / false.
        COALESCE(q.kind,''), q.percent_rolling, q.percent_weekly, q.percent_monthly,
-       q.balance, q.balance_unit, q.cost_total, q.cost_today, q.resets_at,
+       q.balance, q.balance_unit, q.cost_total, q.cost_today,
+       q.tokens_today, q.requests_today,
+       q.resets_at,
        COALESCE(q.read_at,''), COALESCE(q.ok,0)
 FROM provider_keys k
 LEFT JOIN quota_snapshots q ON q.id = (
@@ -926,10 +944,11 @@ LEFT JOIN quota_snapshots q ON q.id = (
 		var keyID, acctID int64
 		var label, hint, kind, readAt string
 		var pr, pw, pm, bal, ct, cd sql.NullFloat64
+		var tokToday, reqToday sql.NullInt64
 		var unit, resets sql.NullString
 		var ok bool
 		if err := rows.Scan(&keyID, &acctID, &label, &hint, &kind, &pr, &pw, &pm,
-			&bal, &unit, &ct, &cd, &resets, &readAt, &ok); err != nil {
+			&bal, &unit, &ct, &cd, &tokToday, &reqToday, &resets, &readAt, &ok); err != nil {
 			return nil, err
 		}
 		item := map[string]any{
@@ -938,7 +957,9 @@ LEFT JOIN quota_snapshots q ON q.id = (
 			"percent_rolling": nullFloat(pr), "percent_weekly": nullFloat(pw),
 			"percent_monthly": nullFloat(pm), "balance": nullFloat(bal),
 			"unit": nullStr(unit), "cost_total": nullFloat(ct),
-			"cost_today": nullFloat(cd), "resets_at": nullStr(resets),
+			"cost_today":   nullFloat(cd),
+			"tokens_today": nullInt(tokToday), "requests_today": nullInt(reqToday),
+			"resets_at": nullStr(resets),
 		}
 		out = append(out, item)
 	}
@@ -1609,6 +1630,16 @@ func nullIfEmpty(s string) any {
 		return nil
 	}
 	return s
+}
+
+// i64OrNil passes a *int64 straight through: nil inserts NULL (no data), and
+// a real 0 survives as 0. A helper that collapses 0→nil would corrupt a
+// legitimate "zero requests today" read.
+func i64OrNil(v *int64) any {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 func nullFloat(v sql.NullFloat64) any {

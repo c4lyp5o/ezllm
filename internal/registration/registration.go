@@ -1334,6 +1334,20 @@ func quotaDetail(q provider.Quota) string {
 			bal = *q.Balance
 		}
 		return fmt.Sprintf("money balance=%.4f %s", bal, unit)
+	case provider.QuotaTokens:
+		// Count-shaped usage with NO ceiling (Ollama): report what the
+		// provider actually said, never a fabricated percent.
+		var parts []string
+		if q.ReqsToday != nil {
+			parts = append(parts, fmt.Sprintf("requests(24h)=%d", *q.ReqsToday))
+		}
+		if q.TokensToday != nil {
+			parts = append(parts, fmt.Sprintf("tokens=%d", *q.TokensToday))
+		}
+		if len(parts) == 0 {
+			return "tokens"
+		}
+		return "tokens " + strings.Join(parts, " ")
 	case provider.QuotaNone:
 		return "none"
 	default:

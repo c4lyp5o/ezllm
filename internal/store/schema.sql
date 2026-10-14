@@ -327,3 +327,35 @@ CREATE TABLE IF NOT EXISTS model_prices (
   updated_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   PRIMARY KEY (account_id, model_id, effective_from)
 );
+
+-- ── v15: service_bindings — the DEFAULT model per service endpoint ──────────
+-- The Services page: which model serves /v1/embeddings, /v1/images/generations,
+-- /v1/audio/speech, /v1/audio/transcriptions when the client's request omits
+-- `model`. An explicit model in the request always wins — this is a default,
+-- never a routing override. `model_target` feeds ResolveCandidates verbatim, so
+-- it may be '<namespace>/<model_id>' or a bare combo name.
+--   mode 'manual' — model_target serves the endpoint
+--   mode 'auto'   — the most recently tested-ok model for the surface serves it
+-- No CHECK on mode: SQLite cannot alter a constraint (same rule as
+-- combos.strategy); the values are validated in Go.
+CREATE TABLE IF NOT EXISTS service_bindings (
+  surface      TEXT PRIMARY KEY,               -- 'embeddings'|'images_gen'|'audio_tts'|'audio_stt'
+  mode         TEXT NOT NULL DEFAULT 'manual', -- 'manual'|'auto'
+  model_target TEXT NOT NULL DEFAULT '',       -- '' only with 'auto'
+  updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
+-- ── v15: service_probes — real-test verdicts per (surface, account, model) ──
+-- Written only by an explicit per-card Test click (image probes cost money — no
+-- sweep may ever run one unattended). `ok` is "the wire answered this service
+-- shape", not output quality. A green probe replaces the row; detail keeps the
+-- upstream's own words on failure.
+CREATE TABLE IF NOT EXISTS service_probes (
+  surface    TEXT    NOT NULL,
+  account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  model_id   TEXT    NOT NULL,
+  ok         INTEGER NOT NULL,
+  detail     TEXT    NOT NULL DEFAULT '',
+  tested_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  PRIMARY KEY (surface, account_id, model_id)
+);

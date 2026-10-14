@@ -183,6 +183,23 @@ function QuotaBars({ quota }: { quota: NonNullable<Account['quota']> }) {
       </div>
     );
   }
+  // Count-shaped usage (Ollama class): what the provider reported, no ceiling.
+  // Deliberately NO bar — a bar needs a denominator the provider never stated.
+  if (quota.tokens_today != null || quota.requests_today != null) {
+    const lines: Array<[string, number]> = [];
+    if (quota.requests_today != null) lines.push(['requests·24h', quota.requests_today]);
+    if (quota.tokens_today != null) lines.push(['tokens', quota.tokens_today]);
+    return (
+      <div className="space-y-0.5 font-mono text-[12px]">
+        {lines.map(([k, v]) => (
+          <div key={k} className="flex items-baseline gap-2">
+            <span className="text-dim">{v.toLocaleString()}</span>
+            <span className="text-[10.5px] text-mute">{k}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
   return <span className="text-mute">–</span>;
 }
 
@@ -878,7 +895,7 @@ function QuotaModal({ account, onClose }: { account: Account; onClose: () => voi
 
   return (
     <Modal open onClose={onClose} title={`Quota — ${account.name}`}
-      subtitle="live GET /v1/usage · caps come from Rules"
+      subtitle="live provider quota read · caps come from Rules"
       footer={(
         <>
           <button type="button" className={cx(btn.base, btn.ghost)} onClick={onClose}>Close</button>
@@ -893,7 +910,7 @@ function QuotaModal({ account, onClose }: { account: Account; onClose: () => voi
           <SectionLabel>Usage</SectionLabel>
           {busy && !live && <Skeleton className="h-3.5 w-56" />}
           {!busy && live?.kind === 'none' && (
-            <p className="text-[13px] text-mute">This provider does not expose <code className="font-mono">/v1/usage</code>.</p>
+            <p className="text-[13px] text-mute">This provider exposes no quota endpoint its key can read.</p>
           )}
           {live && live.kind !== 'none' && (
             <div className="mt-2 space-y-2">
@@ -969,12 +986,13 @@ function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
   const [pricingOpen, setPricingOpen] = useState(false);
   const [confirm, setConfirm] = useState<null | { kind: 'account' } | { kind: 'key'; keyID: number; label: string }>(null);
 
-  // The quota button is only live once a probe proved this provider serves
-  // /v1/usage: no snapshot or kind "none" both mean the quota read is not available.
+  // The quota button is only live once a probe proved this provider exposes a
+  // quota read (generic /v1/usage or a host-scoped balance oracle): no
+  // snapshot or kind "none" both mean the quota read is not available.
   const quotaExposed = a.quota != null && a.quota.kind !== 'none';
   const quotaHint = a.quota == null
     ? 'quota not available — run Test key to check'
-    : a.quota.kind === 'none' ? 'quota not available — this provider exposes no usage endpoint' : 'live /v1/usage read';
+    : a.quota.kind === 'none' ? 'quota not available — this provider exposes no usage endpoint' : 'live provider quota read';
 
   const act = async (label: string, fn: () => Promise<unknown>) => {
     setMenuBusy(label); setErr(null); setFlash(null);

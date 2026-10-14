@@ -165,6 +165,8 @@ export type QuotaSnapshot = {
   balance?: number | string | null;
   unit?: string | null;
   plan?: string | null;
+  tokens_today?: number | null;
+  requests_today?: number | null;
   resets_at?: string | null;
   read_at?: string | null;
 };

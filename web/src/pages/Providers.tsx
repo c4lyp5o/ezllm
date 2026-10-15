@@ -1,7 +1,7 @@
 // PROVIDERS — account cards, add-provider wizard modal, per-key actions, model drawer.
 import { useCallback, useEffect, useState } from 'react';
 import {
-  ApiError, AuthError, del, get, modelRules, patch, post, setModelPin,
+  ApiError, AuthError, del, get, modelRules, patch, post, postKeyTestStream, setModelPin,
   setPrice, deletePrice, startSweep, stopSweep, sweepStatus,
   KINDS, STEPS,
   type Account, type ApiErrorDetail, type KeyRow, type ModelRule, type ModelRow, type Price, type SweepStatus, type TestResult, type TestStep,
@@ -207,10 +207,14 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
   const [d, setD] = useState<Draft>(emptyDraft);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<TestResult | null>(null);
+  // Live steps streamed by the server as the test walks (docx item 8): the
+  // chain colors green/red per step instead of sitting dead until the end.
+  // On completion result.steps supersedes them — same data, one append path.
+  const [liveSteps, setLiveSteps] = useState<TestStep[] | null>(null);
   const [err, setErr] = useState<ApiErrorDetail | null>(null);
 
   useEffect(() => {
-    if (open) { setD(emptyDraft); setBusy(false); setResult(null); setErr(null); }
+    if (open) { setD(emptyDraft); setBusy(false); setResult(null); setLiveSteps(null); setErr(null); }
   }, [open]);
 
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setD((p) => ({ ...p, [k]: v }));
@@ -231,9 +235,14 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
       };
       const account = await post<Account>('/admin/accounts', payload);
       createdAccountID = account.id;
-      const response = await post<{ key: KeyRow; test: TestResult }>(`/admin/accounts/${account.id}/keys`, {
-        label: d.keyLabel.trim() || 'primary', api_key: d.apiKey.trim(), skip_inference: d.skipInference,
-      });
+      // Streamed key test: every step lands in liveSteps as the server
+      // records it (NDJSON), so the chain moves. Falls back to the one-shot
+      // response shape when the server does not stream.
+      const response = await postKeyTestStream<{ key: KeyRow; test: TestResult }>(
+        `/admin/accounts/${account.id}/keys`,
+        { label: d.keyLabel.trim() || 'primary', api_key: d.apiKey.trim(), skip_inference: d.skipInference },
+        (step) => setLiveSteps((prev) => [...(prev ?? []), step]),
+      );
       setResult(response.test);
       onDone();
       onClose();
@@ -359,7 +368,7 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
         </div>
         <div className="rounded-lg border border-line bg-raised/60 px-4 py-3">
           <SectionLabel className="mb-2">Validation</SectionLabel>
-          <StepList steps={result?.steps ?? null} running={busy} />
+          <StepList steps={result?.steps ?? liveSteps} running={busy} />
           {result?.ok && <p className="mt-2 font-mono text-[11.5px] text-ok">✓ Key validated and stored.</p>}
         </div>
         <details className="rounded-lg border border-line bg-raised/40 px-4 py-3">

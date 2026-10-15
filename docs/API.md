@@ -215,6 +215,23 @@ Runs the **7-step test** (design: `2026-10-06_070000-ezllm-m3-keytest-design.md`
 Steps: `format` → `catalog` → `auth`(oracle; **gate**) → `quota`(non-fatal) →
 `inference`(unless `skip_inference`) → `protocol` (≤ `probe_max_models`, default 6, async-flagged
 in response when deferred) → persist.
+
+**Streamed steps (`Accept: application/x-ndjson`)** — both this endpoint and the retest endpoint
+accept a request with `Accept: application/x-ndjson` and answer `200` with
+`Content-Type: application/x-ndjson` instead: one flushed line per event, terminal line closes the
+stream. Same request body; same payloads as below — only delivery changes.
+```jsonc
+{"type":"step","step":{"step":"catalog","ok":true,"ms":640,"detail":"36 models"}}
+{"type":"step","step":{"step":"auth","ok":true,"ms":760,"detail":"usage oracle 200"}}
+{"type":"step","step":{"step":"inference","ok":false,"ms":1690,"detail":"generation probe failed"}}
+{"type":"error","status":422,"error":{ …exactly the 422 body below… }}   // failure terminal line
+{"type":"result","key":{…},"test":{…}}                                    // success terminal line (retest: same shape, HTTP 200 semantics)
+```
+Because headers precede the body, the stream's HTTP status is always `200`; the failure line
+carries the status the one-shot path would have used in its `status` field (and the `error.code`
+inside — identical bytes, single source: `keyTestError`). Clients that do not send the header get
+the historical one-shot JSON unchanged. Clients must not assume a status line for streamed
+failures — branch on the terminal line's `type`.
 **`format` no longer inspects the key.** Since 2026-10-10 all shape checks (empty, whitespace,
 min/max length, `sk-` prefix) were removed — providers change key formats and the upstream probe
 is the real validator; the step still fails here for an unregistered `kind`. The `format` step

@@ -91,6 +91,11 @@ type Options struct {
 	// HTTP handler defers it so registration answers in seconds rather than
 	// the ~30s a paced 6-model × 3-surface sweep costs.
 	ProtocolInline bool
+	// OnStep, when set, is called with EACH step the moment it is recorded —
+	// the wiring behind a live step chain in the UI. It runs on the test's
+	// goroutine, so a handler that streams must flush inside the callback;
+	// anything slow here slows the test itself.
+	OnStep func(Step)
 }
 
 // ProtocolResult reports the capability sweep.
@@ -112,11 +117,24 @@ type TestResult struct {
 	// Detail is the human summary stored in provider_keys.last_test_detail.
 	Detail string `json:"detail"`
 
+	onStep func(Step) // live sink (Options.OnStep); nil in tests/backfill
+
 	authDeferred bool // oracle could not prove auth → inference must gate
 	// catErr is set when an AUTHENTICATED catalog rejected this key (401/403).
 	// Kept so a later step can quote the provider's own words instead of our
 	// generic "could not verify" prose — see the no-model branch in Run.
 	catErr error
+}
+
+// addStep records one step in the audit trail and forwards it to the live
+// sink, if any. Every step in the test goes through here — the stream the UI
+// colors is the SAME append the result carries, so a streamed step and the
+// final JSON can never disagree.
+func (r *TestResult) addStep(s Step) {
+	r.Steps = append(r.Steps, s)
+	if r.onStep != nil {
+		r.onStep(s)
+	}
 }
 
 // Tester runs key tests against real providers.
@@ -210,7 +228,7 @@ func probe[T any](
 // writes: catalog/quota evidence is returned for the caller to persist after
 // it has decided the test passed.
 func (t *Tester) Run(ctx context.Context, acct provider.Account, opts Options) *TestResult {
-	res := &TestResult{}
+	res := &TestResult{onStep: opts.OnStep}
 	adapter, err := t.registry.Get(acct.Kind)
 	if err != nil {
 		res.Fail = &Failure{Step: StepFormat, Message: err.Error()}
@@ -230,7 +248,7 @@ func (t *Tester) Run(ctx context.Context, acct provider.Account, opts Options) *
 	switch {
 	case catErr == nil:
 		res.Catalog = models
-		res.Steps = append(res.Steps, Step{Step: StepCatalog, OK: true,
+		res.addStep(Step{Step: StepCatalog, OK: true,
 			Detail: fmt.Sprintf("%d models", len(models))})
 	case isAuthErr(catErr) && !adapter.CatalogIsPublic():
 		// The catalog authenticates on this provider (ssn-gpt) and rejected
@@ -239,10 +257,10 @@ func (t *Tester) Run(ctx context.Context, acct provider.Account, opts Options) *
 		// We keep the error so the NO-MODEL branch can quote it if nothing
 		// else ever gets a chance to check this key.
 		res.catErr = catErr
-		res.Steps = append(res.Steps, Step{Step: StepCatalog, OK: false,
+		res.addStep(Step{Step: StepCatalog, OK: false,
 			Detail: "rejected: " + shortErr(catErr)})
 	default:
-		res.Steps = append(res.Steps, Step{Step: StepCatalog, OK: false,
+		res.addStep(Step{Step: StepCatalog, OK: false,
 			Detail: "unavailable: " + shortErr(catErr)})
 	}
 
@@ -261,17 +279,17 @@ func (t *Tester) Run(ctx context.Context, acct provider.Account, opts Options) *
 	switch {
 	case qErr == nil && q.Kind != "":
 		res.Quota = &q
-		res.Steps = append(res.Steps, Step{Step: StepQuota, OK: true, Detail: quotaDetail(q)})
+		res.addStep(Step{Step: StepQuota, OK: true, Detail: quotaDetail(q)})
 	case isAuthErr(qErr):
 		// A credential rejection right after the oracle passed means the key
 		// stopped working between calls — contradictory, so treat as fatal.
 		f := authFailure(StepQuota, qErr, adapter)
 		res.Fail = f
-		res.Steps = append(res.Steps, Step{Step: StepQuota, OK: false, Detail: f.Message})
+		res.addStep(Step{Step: StepQuota, OK: false, Detail: f.Message})
 		res.Detail = "failed at quota"
 		return res
 	default:
-		res.Steps = append(res.Steps, Step{Step: StepQuota, OK: false, Detail: "no quota endpoint"})
+		res.addStep(Step{Step: StepQuota, OK: false, Detail: "no quota endpoint"})
 	}
 
 	// ── step 5: inference — one real generation on the cheapest model.
@@ -294,14 +312,14 @@ func (t *Tester) Run(ctx context.Context, acct provider.Account, opts Options) *
 			switch {
 			case cerr != nil && isAuthRejectFor(adapter, statusOf(cerr)):
 				res.authDeferred = false
-				res.Steps = append(res.Steps, Step{Step: StepAuth, OK: true,
+				res.addStep(Step{Step: StepAuth, OK: true,
 					Detail: "catalog rejected a fake key — the real key is proven"})
 			case cerr == nil:
 				// The public-catalog case (N1): 200 for garbage proves nothing.
-				res.Steps = append(res.Steps, Step{Step: StepAuth, OK: false,
+				res.addStep(Step{Step: StepAuth, OK: false,
 					Detail: "catalog answered 200 for a fake key — public, no proof"})
 			default:
-				res.Steps = append(res.Steps, Step{Step: StepAuth, OK: false,
+				res.addStep(Step{Step: StepAuth, OK: false,
 					Detail: "catalog " + httpStatusWord(statusOf(cerr)) + " for a fake key — inconclusive"})
 			}
 		}
@@ -316,11 +334,11 @@ func (t *Tester) Run(ctx context.Context, acct provider.Account, opts Options) *
 				Message: "cannot verify this key: the provider's credential endpoints answer 200 for any string, and the inference probe was skipped",
 				Hint:    "Re-run with 'Test & add' and leave the inference probe on — a key that is never proven is a key we must not store.",
 			}
-			res.Steps = append(res.Steps, Step{Step: StepInference, OK: false, Detail: "skipped — auth unproven"})
+			res.addStep(Step{Step: StepInference, OK: false, Detail: "skipped — auth unproven"})
 			res.Detail = "failed: auth unproven"
 			return res
 		}
-		res.Steps = append(res.Steps, Step{Step: StepInference, OK: true, Detail: "skipped"})
+		res.addStep(Step{Step: StepInference, OK: true, Detail: "skipped"})
 	} else if models := pickProbeModels(res.Catalog, acct); len(models) == 0 {
 		if res.authDeferred {
 			// If the authenticated catalog already said no, THAT is the
@@ -338,7 +356,7 @@ func (t *Tester) Run(ctx context.Context, acct provider.Account, opts Options) *
 			res.Detail = "failed: auth unproven"
 			return res
 		}
-		res.Steps = append(res.Steps, Step{Step: StepInference, OK: true, Detail: "no model to probe"})
+		res.addStep(Step{Step: StepInference, OK: true, Detail: "no model to probe"})
 	} else if ok, f := t.inferenceStep(ctx, adapter, acct, key, models, pace, res); !ok {
 		// A capacity-shaped generation failure (429/5xx/no answer) carries no
 		// credential verdict — the provider never got far enough to judge the
@@ -359,11 +377,11 @@ func (t *Tester) Run(ctx context.Context, acct provider.Account, opts Options) *
 	if opts.ProtocolInline {
 		p := t.ProtocolSweep(ctx, acct, key, res.Catalog, opts)
 		res.Proto = p
-		res.Steps = append(res.Steps, Step{Step: StepProtocol, OK: true,
+		res.addStep(Step{Step: StepProtocol, OK: true,
 			Detail: fmt.Sprintf("tested %d models", p.Tested)})
 	} else {
 		res.Proto = &ProtocolResult{Deferred: true, Support: map[string]int{}}
-		res.Steps = append(res.Steps, Step{Step: StepProtocol, OK: true,
+		res.addStep(Step{Step: StepProtocol, OK: true,
 			Detail: "deferred (runs after this response)"})
 	}
 
@@ -435,18 +453,18 @@ func (t *Tester) authGate(
 		calStatus := calRes.status
 		switch {
 		case calErr == nil && calStatus >= 200 && calStatus < 300:
-			res.Steps = append(res.Steps, Step{Step: StepAuth, OK: false,
+			res.addStep(Step{Step: StepAuth, OK: false,
 				Detail: "oracle public (200 for any key) — deferring to inference"})
 			res.authDeferred = true
 			return true // not a failure yet: inference may still gate
 		case isAuthRejectFor(adapter, calStatus):
-			res.Steps = append(res.Steps, Step{Step: StepAuth, OK: true,
+			res.addStep(Step{Step: StepAuth, OK: true,
 				Detail: "oracle 200, calibration rejected the fake key"})
 			return true
 		default:
 			// Calibration inconclusive (outage/429): we cannot confirm the
 			// endpoint discriminates, so we cannot claim proof from it.
-			res.Steps = append(res.Steps, Step{Step: StepAuth, OK: false,
+			res.addStep(Step{Step: StepAuth, OK: false,
 				Detail: "oracle inconclusive (calibration: " + httpStatusWord(calStatus) + ") — deferring to inference"})
 			res.authDeferred = true
 			return true
@@ -456,7 +474,7 @@ func (t *Tester) authGate(
 		// The provider itself said no. This is THE invalid-key signal.
 		f := authFailure(StepAuth, probeStatusError(status, body), adapter)
 		res.Fail = f
-		res.Steps = append(res.Steps, Step{Step: StepAuth, OK: false, Detail: f.Message})
+		res.addStep(Step{Step: StepAuth, OK: false, Detail: f.Message})
 		return false
 
 	case status == http.StatusNotFound || status == http.StatusMethodNotAllowed || status == http.StatusBadRequest:
@@ -464,7 +482,7 @@ func (t *Tester) authGate(
 		// provider (OpenAI answers GET /v1/usage with 400 "missing 'date'"
 		// even for a VALID key). Deferring is safe: calibration or inference
 		// still has to prove the key, so this can never produce a false pass.
-		res.Steps = append(res.Steps, Step{Step: StepAuth, OK: false,
+		res.addStep(Step{Step: StepAuth, OK: false,
 			Detail: "no oracle endpoint (" + httpStatusWord(status) + ") — deferring to inference"})
 		res.authDeferred = true
 		return true
@@ -480,7 +498,7 @@ func (t *Tester) authGate(
 			Retryable:      true,
 		}
 		res.Fail = f
-		res.Steps = append(res.Steps, Step{Step: StepAuth, OK: false, Detail: f.Message})
+		res.addStep(Step{Step: StepAuth, OK: false, Detail: f.Message})
 		return false
 
 	default:
@@ -492,7 +510,7 @@ func (t *Tester) authGate(
 			Retryable:      true,
 		}
 		res.Fail = f
-		res.Steps = append(res.Steps, Step{Step: StepAuth, OK: false, Detail: f.Message})
+		res.addStep(Step{Step: StepAuth, OK: false, Detail: f.Message})
 		return false
 	}
 }
@@ -572,7 +590,7 @@ func (t *Tester) probeModel(
 
 	switch {
 	case err == nil && status >= 200 && status < 300 && isJSON(resp):
-		res.Steps = append(res.Steps, Step{Step: StepInference, OK: true,
+		res.addStep(Step{Step: StepInference, OK: true,
 			Detail: fmt.Sprintf("%s · %dms", model, msAtLeastOne(elapsed))})
 		return probeOK, nil
 
@@ -582,7 +600,7 @@ func (t *Tester) probeModel(
 			Message: "provider returned a non-JSON 200 (captive portal or HTML error page?)",
 			Hint:    "The credential was not proven. Check base_url — an interstitial page suggests the URL is wrong.",
 		}
-		res.Steps = append(res.Steps, Step{Step: StepInference, OK: false, Detail: f.Message})
+		res.addStep(Step{Step: StepInference, OK: false, Detail: f.Message})
 		return probeFailed, f
 
 	case isAuthStatus(status):
@@ -590,7 +608,7 @@ func (t *Tester) probeModel(
 		if res.authDeferred {
 			f.Hint = "The provider's catalog/usage endpoints are public, so this generation call was the only credential check. It was rejected: the key is invalid."
 		}
-		res.Steps = append(res.Steps, Step{Step: StepInference, OK: false, Detail: f.Message})
+		res.addStep(Step{Step: StepInference, OK: false, Detail: f.Message})
 		return probeFailed, f
 
 	case isOllamaCloud(acct) && isPlanGatedError(status, resp):
@@ -599,7 +617,7 @@ func (t *Tester) probeModel(
 		// picker prefers the documented free models; this is a safe fallback if
 		// an entitlement changes after catalog retrieval. A 401/403 remains a
 		// hard credential failure because this branch follows isAuthStatus.
-		res.Steps = append(res.Steps, Step{Step: StepInference, OK: true,
+		res.addStep(Step{Step: StepInference, OK: true,
 			Detail: fmt.Sprintf("credential accepted; %s is not included in this plan", model)})
 		return probeOK, nil
 
@@ -609,7 +627,7 @@ func (t *Tester) probeModel(
 		// 429 insufficient_quota / credit_balance_exhausted here, where a bad
 		// key would have been 401 — so the key is PROVEN and only generation
 		// is blocked until a top-up. Rejecting the key would be a lie.
-		res.Steps = append(res.Steps, Step{Step: StepInference, OK: true,
+		res.addStep(Step{Step: StepInference, OK: true,
 			Detail: "credential accepted; provider reports no remaining quota/credits — top up before real traffic"})
 		return probeOK, nil
 
@@ -621,7 +639,7 @@ func (t *Tester) probeModel(
 			UpstreamError:  upstreamErr(resp),
 			Hint:           "The provider retired or gated this model. The probe tries the next catalog candidate.",
 		}
-		res.Steps = append(res.Steps, Step{Step: StepInference, OK: false, Detail: f.Message})
+		res.addStep(Step{Step: StepInference, OK: false, Detail: f.Message})
 		return probeModelUnavailable, f
 
 	default:
@@ -641,7 +659,7 @@ func (t *Tester) probeModel(
 				Hint:           "No upstream response arrived in time — a slow or overloaded model, not a credential rejection. The probe tries the next catalog candidate.",
 				Retryable:      retryableStatus(status),
 			}
-			res.Steps = append(res.Steps, Step{Step: StepInference, OK: false, Detail: f.Message})
+			res.addStep(Step{Step: StepInference, OK: false, Detail: f.Message})
 			return probeModelUnavailable, f
 		}
 		f := &Failure{
@@ -652,7 +670,7 @@ func (t *Tester) probeModel(
 			Hint:           probeFailedHint(status),
 			Retryable:      retryableStatus(status),
 		}
-		res.Steps = append(res.Steps, Step{Step: StepInference, OK: false, Detail: f.Message})
+		res.addStep(Step{Step: StepInference, OK: false, Detail: f.Message})
 		return probeFailed, f
 	}
 }
@@ -709,7 +727,7 @@ func (t *Tester) credentialAcceptedDespiteGeneration(
 		return false
 	}
 	res.authDeferred = false
-	res.Steps = append(res.Steps, Step{Step: StepAuth, OK: true,
+	res.addStep(Step{Step: StepAuth, OK: true,
 		Detail: "catalog rejected a fake key — the real key is proven"})
 	noteInferenceUnverified(res, f)
 	return true
@@ -723,7 +741,7 @@ func noteInferenceUnverified(res *TestResult, f *Failure) {
 	if f.UpstreamStatus > 0 {
 		cause = httpStatusWord(f.UpstreamStatus) + " — provider capacity"
 	}
-	res.Steps = append(res.Steps, Step{Step: StepInference, OK: true,
+	res.addStep(Step{Step: StepInference, OK: true,
 		Detail: "key accepted; generation unverified (" + cause + ")"})
 }
 
@@ -750,7 +768,7 @@ func (t *Tester) inferenceStep(
 		case probeModelUnavailable:
 			last = f
 			if i+1 < len(models) {
-				res.Steps = append(res.Steps, Step{Step: StepInference, OK: false,
+				res.addStep(Step{Step: StepInference, OK: false,
 					Detail: fmt.Sprintf("%s unavailable — falling back to %s", model, models[i+1])})
 				continue
 			}

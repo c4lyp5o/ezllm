@@ -469,9 +469,10 @@ func (s *Server) handleAddKey(w http.ResponseWriter, r *http.Request) {
 		in.Label = "default"
 	}
 
-	test := s.runTest(r.Context(), acc, in, true)
+	sink := s.keyTestSink(w, r)
+	test := s.runTest(r.Context(), acc, in, true, sink.step)
 	if !test.OK {
-		writeKeyTestFailure(w, test)
+		sink.fail(test)
 		return
 	}
 
@@ -479,20 +480,17 @@ func (s *Server) handleAddKey(w http.ResponseWriter, r *http.Request) {
 	acct := accountFromSummary(acc)
 	keyID, hint, err := s.db.AddKey(r.Context(), accountID, in.Label, in.APIKey)
 	if err != nil {
-		s.writeStoreErr(w, err)
+		sink.failStore(err)
 		return
 	}
 	if err := s.persistTest(r.Context(), accountID, keyID, test, hint); err != nil {
-		s.writeStoreErr(w, err)
+		sink.failStore(err)
 		return
 	}
 	s.deferProtocol(accountID, keyID, acct, in.APIKey, test, in.ProbeMaxModels)
 
 	keys, _ := s.db.ListKeys(r.Context(), accountID)
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"key":  findKey(keys, keyID),
-		"test": test,
-	})
+	sink.result(findKey(keys, keyID), test)
 }
 
 // handleRetest re-runs the test against an already-stored key. Unlike first
@@ -523,40 +521,41 @@ func (s *Server) handleRetest(w http.ResponseWriter, r *http.Request) {
 	}
 	in.APIKey = pt
 
-	test := s.runTest(r.Context(), acc, in, true)
+	sink := s.keyTestSink(w, r)
+	test := s.runTest(r.Context(), acc, in, true, sink.step)
 	detail := test.Detail
 	if !test.OK {
 		// Record the failure against the live row (last_test_ok=0) but keep it.
 		_ = s.db.MarkKeyTest(r.Context(), keyID, false, detail)
-		writeKeyTestFailure(w, test)
+		sink.fail(test)
 		return
 	}
 	if err := s.db.MarkKeyTest(r.Context(), keyID, true, detail); err != nil {
-		s.writeStoreErr(w, err)
+		sink.failStore(err)
 		return
 	}
 	acct := accountFromSummary(acc)
 	if err := s.persistTest(r.Context(), accountID, keyID, test, ""); err != nil {
-		s.writeStoreErr(w, err)
+		sink.failStore(err)
 		return
 	}
 	s.deferProtocol(accountID, keyID, acct, pt, test, in.ProbeMaxModels)
 
 	keys, _ := s.db.ListKeys(r.Context(), accountID)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"key":  findKey(keys, keyID),
-		"test": test,
-	})
+	sink.resultOK(findKey(keys, keyID), test)
 }
 
 // runTest executes the registration flow with sane per-request defaults.
-func (s *Server) runTest(ctx context.Context, acc *store.AccountSummary, in keyTestRequest, deferProto bool) *registration.TestResult {
+// onStep (may be nil) receives each step as it lands — the streaming
+// transport supplies one; one-shot callers pass nil and get Steps at the end.
+func (s *Server) runTest(ctx context.Context, acc *store.AccountSummary, in keyTestRequest, deferProto bool, onStep func(registration.Step)) *registration.TestResult {
 	opts := registration.Options{
 		Label:          in.Label,
 		APIKey:         in.APIKey,
 		SkipInference:  in.SkipInference,
 		ProbeMaxModels: in.ProbeMaxModels,
 		ProtocolInline: !deferProto,
+		OnStep:         onStep,
 	}
 	return s.tester.Run(ctx, accountFromSummary(acc), opts)
 }
@@ -608,6 +607,15 @@ func (s *Server) deferProtocol(accountID, keyID int64, acct provider.Account, ke
 
 // writeKeyTestFailure renders the 422 contract from docs/API.md.
 func writeKeyTestFailure(w http.ResponseWriter, test *registration.TestResult) {
+	status, e := keyTestError(test)
+	writeJSON(w, status, map[string]any{"error": e})
+}
+
+// keyTestError computes the wire payload for a failed key test — the SAME
+// bytes the streaming endpoint emits on its final line, so one source of
+// truth cannot drift between transports. status is 502 when the failure is
+// retryable (a 502 reads as "the provider, not the key" to proxies).
+func keyTestError(test *registration.TestResult) (int, map[string]any) {
 	f := test.Fail
 	if f == nil {
 		f = &registration.Failure{Step: "unknown", Message: "key test failed"}
@@ -635,7 +643,89 @@ func writeKeyTestFailure(w http.ResponseWriter, test *registration.TestResult) {
 	if f.Retryable {
 		e["retryable"] = true
 	}
-	writeJSON(w, status, map[string]any{"error": e})
+	return status, e
+}
+
+// ── streaming progress (docx item 8: the step chain must MOVE) ────────────
+
+// keyTestSink receives a key test's progress and verdict. One implementor
+// per transport:
+//   - jsonSink: the historical one-shot response (steps arrive together)
+//   - ndjsonSink: streamed — each step flushes to the browser the moment
+//     it lands, so the UI colors the chain as the test walks (no fake animation)
+type keyTestSink interface {
+	step(registration.Step)
+	// result is the add-key success (201 Created); resultOK is the retest
+	// success (200 OK) — the only difference between the two verdicts.
+	result(key any, test *registration.TestResult)
+	resultOK(key any, test *registration.TestResult)
+	fail(test *registration.TestResult)
+	failStore(err error)
+}
+
+type jsonSink struct {
+	w http.ResponseWriter
+	s *Server
+}
+
+func (k jsonSink) step(registration.Step) {}
+func (k jsonSink) result(key any, test *registration.TestResult) {
+	writeJSON(k.w, http.StatusCreated, map[string]any{"key": key, "test": test})
+}
+func (k jsonSink) resultOK(key any, test *registration.TestResult) {
+	writeJSON(k.w, http.StatusOK, map[string]any{"key": key, "test": test})
+}
+func (k jsonSink) fail(test *registration.TestResult) { writeKeyTestFailure(k.w, test) }
+func (k jsonSink) failStore(err error)                { k.s.writeStoreErr(k.w, err) }
+
+// ndjsonSink writes newline-delimited JSON, flushed per line:
+//
+//	{"type":"step","step":{"step":"catalog","ok":true,"detail":"12 models"}}
+//	{"type":"step","step":{...}}
+//	{"type":"error","status":422,"error":{...}}   ← same payload as a 422 body
+//	{"type":"result","key":{...},"test":{...}}    ← same payload as the 201 body
+//
+// Headers go out before the test runs, so a failure's HTTP status cannot be
+// sent afterwards; the error object therefore carries its own "status" field
+// with exactly the status the one-shot path would have used.
+type ndjsonSink struct {
+	w  http.ResponseWriter
+	fl http.Flusher
+}
+
+func (k *ndjsonSink) step(s registration.Step) {
+	k.line(map[string]any{"type": "step", "step": s})
+}
+func (k *ndjsonSink) result(key any, test *registration.TestResult) {
+	k.line(map[string]any{"type": "result", "key": key, "test": test})
+}
+func (k *ndjsonSink) resultOK(key any, test *registration.TestResult) {
+	k.line(map[string]any{"type": "result", "key": key, "test": test})
+}
+func (k *ndjsonSink) fail(test *registration.TestResult) {
+	status, e := keyTestError(test)
+	k.line(map[string]any{"type": "error", "status": status, "error": e})
+}
+func (k *ndjsonSink) failStore(err error) {
+	k.line(map[string]any{"type": "error", "status": http.StatusInternalServerError,
+		"error": map[string]any{"message": err.Error(), "type": "store_error", "code": http.StatusInternalServerError}})
+}
+
+func (k *ndjsonSink) line(v any) {
+	_ = json.NewEncoder(k.w).Encode(v)
+	k.fl.Flush() // the whole point: bytes leave NOW, not at handler return
+}
+
+// keyTestSink picks the transport by the client's Accept header. The ndjson
+// shape is opt-in: every existing client (and curl) keeps the one-shot JSON.
+func (s *Server) keyTestSink(w http.ResponseWriter, r *http.Request) keyTestSink {
+	if !strings.Contains(r.Header.Get("Accept"), "application/x-ndjson") {
+		return jsonSink{w: w, s: s}
+	}
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.WriteHeader(http.StatusOK)
+	fl, _ := w.(http.Flusher)
+	return &ndjsonSink{w: w, fl: fl}
 }
 
 func findKey(keys []store.KeySummary, id int64) *store.KeySummary {

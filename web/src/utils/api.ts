@@ -108,6 +108,85 @@ export const put = <T = unknown>(p: string, body?: unknown) => apiFetch<T>(p, { 
 export const patch = <T = unknown>(p: string, body: unknown) => apiFetch<T>(p, { method: 'PATCH' }, body);
 export const del = (p: string) => apiFetch<null>(p, { method: 'DELETE' });
 
+// ── streamed key test (docx item 8: the step chain must MOVE) ─────────────
+// POSTs with Accept: application/x-ndjson and resolves from the terminal
+// line the server sends. onStep fires per step AS THEY LAND — the same
+// append the final test.steps carries, streamed, so the UI colors the chain
+// live instead of a dead spinner followed by a full-color snap.
+//
+// The server may ignore the header (older build): a plain JSON body is then
+// parsed exactly like apiFetch would, so this is safe against both.
+export async function postKeyTestStream<T>(
+  path: string,
+  body: unknown,
+  onStep: (s: TestStep) => void,
+): Promise<T> {
+  const token = getToken();
+  if (!token) throw new AuthError(401, 'unlocked');
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/x-ndjson',
+      },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new ApiError({ status: 0, type: 'network', message: 'upstream unreachable — is ezllm running?' });
+  }
+  const contentType = res.headers.get('Content-Type') ?? '';
+  const ndjson = contentType.includes('x-ndjson');
+
+  if (res.status === 403) throw new AuthError(403, 'this token lacks the admin role');
+  if (!res.ok && !ndjson) {
+    // Non-streamed failure (auth, 404, …): same parsing as apiFetch.
+    const text = await res.text();
+    let parsed: unknown;
+    try { parsed = JSON.parse(text) as unknown; } catch { parsed = undefined; }
+    if (res.status === 401 && parseOpenAIError(parsed, res.status).code === 401) {
+      clearToken();
+      try { sessionStorage.setItem('ezllm.admin.rejected', '1'); } catch { /* noop */ }
+      window.location.reload();
+      throw new AuthError(401, 'invalid token');
+    }
+    throw new ApiError(parseOpenAIError(parsed, res.status));
+  }
+  if (!ndjson) {
+    // Server answered the old way: one-shot JSON, no step events.
+    return await res.json() as T;
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) throw new ApiError({ status: 0, type: 'error', message: 'empty stream body' });
+  const decoder = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const raw = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!raw) continue;
+      let msg: { type?: string; step?: TestStep; status?: number; error?: ApiErrorDetail; key?: unknown; test?: unknown };
+      try { msg = JSON.parse(raw) as typeof msg; } catch { continue; }
+      if (msg.type === 'step' && msg.step) onStep(msg.step);
+      else if (msg.type === 'error') {
+        const detail = { ...(msg.error ?? { status: msg.status ?? 500, type: 'error', message: 'key test failed' }),
+          status: msg.error?.status ?? msg.status ?? 500 };
+        throw new ApiError(detail);
+      } else if (msg.type === 'result') {
+        return msg as unknown as T;
+      }
+    }
+  }
+  throw new ApiError({ status: 0, type: 'error', message: 'stream ended without a result' });
+}
+
 // ── protocol sweep ("test all models") ───────────────────────────────────
 export type StartSweepOpts = {
   /** Probe every model, not the 6-of-N sample. */

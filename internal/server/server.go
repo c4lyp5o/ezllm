@@ -84,12 +84,21 @@ type Server struct {
 
 // sweepRun is one in-flight protocol sweep for an account. cancel stops the
 // probe loop (already-written verdicts stay — probes are independent).
+// deadline is the run's hard stop (budget + grace): past it the entry is
+// treated as dead by sweepStatus and replaceable by beginSweep, so no sweep
+// can ever wedge its account.
 type sweepRun struct {
 	cancel   context.CancelFunc
 	started  time.Time
+	deadline time.Time
 	surfaces []string
 	probing  int
 }
+
+// sweepDeadlineGrace is the slack past a sweep's own budget before its
+// registry entry self-heals. Budget already covers every probe plus the
+// final batch persist; grace covers the goroutine's wind-down.
+const sweepDeadlineGrace = 5 * time.Minute
 
 // Options configures New.
 type Options struct {

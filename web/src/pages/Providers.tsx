@@ -517,8 +517,6 @@ function ModelsDrawer({ id }: { id: number }) {
   const [sweep, setSweep] = useState<SweepStatus | null>(null);
   const [sweepBusy, setSweepBusy] = useState(false);
   const [sweepNote, setSweepNote] = useState<string | null>(null);
-  // Default: probe only what is untested — a second click never re-spend.
-  const [includeTested, setIncludeTested] = useState(false);
   // The row whose per-model Test was clicked. Its button keeps the spinner
   // while that single-model sweep runs (the header line carries the clock).
   const [testingId, setTestingId] = useState<string | null>(null);
@@ -558,7 +556,10 @@ function ModelsDrawer({ id }: { id: number }) {
     setSweepBusy(true);
     setSweepNote(null);
     setPinErr(null);
-    startSweep(id, { all: true, includeTested })
+    // No includeTested choice to make anymore: the button IS re-test-all
+    // (docx item 14). A manual click means "probe everything now" — the Stop
+    // button and the elapsed counter are the brakes, not a checkbox.
+    startSweep(id, { all: true, includeTested: true })
       .then((res) => {
         setSweep({ running: res.probing > 0, probing: res.probing, elapsed_s: 0 });
         setSweepNote(res.probing > 0
@@ -660,19 +661,13 @@ function ModelsDrawer({ id }: { id: number }) {
           )}
         </span>
         <span className="flex items-center gap-2">
-          {!running && (
-            <label className="flex items-center gap-1.5 text-[11.5px] text-mute" title="probe models that already carry a verdict too — a re-test after an upstream change">
-              <input type="checkbox" checked={includeTested} onChange={(e) => setIncludeTested(e.target.checked)} />
-              re-test all
-            </label>
-          )}
           {running ? (
             <button type="button" className={cx(btn.base, btn.ghost)} disabled={sweepBusy} onClick={stopTestAll}>
               {sweepBusy ? <Spinner /> : null} Stop
             </button>
           ) : (
             <button type="button" className={cx(btn.base, btn.primary)} disabled={sweepBusy || models.length === 0}
-              title="one tiny request per model per surface — the probe tests the wire, not the model's tool-dialect"
+              title="re-tests EVERY model (including proven ones) on all three surfaces — one tiny request each; Stop cancels what has not run"
               onClick={startTestAll}>
               {sweepBusy ? <Spinner /> : null} Test all models
             </button>
@@ -684,8 +679,11 @@ function ModelsDrawer({ id }: { id: number }) {
         <table className="w-full text-[12px]">
           <thead>
             <tr className="text-left text-[10px] uppercase tracking-[0.1em] text-mute">
-              <th className="pb-1.5 font-medium">model</th>
+              {/* status first (docx item 14): verdicts + code + clock are what
+                  the eye scans for while a probe runs; the model id is the key,
+                  not the question. */}
               <th className="pb-1.5 font-medium">status</th>
+              <th className="pb-1.5 font-medium">model</th>
               <th className="pb-1.5 font-medium">surface</th>
               <th className="pb-1.5 text-right font-medium">test</th>
             </tr>
@@ -693,10 +691,16 @@ function ModelsDrawer({ id }: { id: number }) {
           <tbody className="font-mono">
             {models.map((m) => (
               <tr key={m.id} className="border-t border-line/50">
-                <td className="max-w-[220px] truncate py-1.5 text-dim" title={m.id}>{m.id}</td>
+                {/* status: verdicts + code + clock. Live states: the row whose
+                    single-model Test is in flight gets the spinner; during a
+                    sweep, untested rows pulse — they are the queue. */}
                 <td className="whitespace-nowrap py-1.5 text-[11px]">
-                  {m.openai == null && m.anthropic == null && m.responses == null ? (
-                    <span className="text-mute">untested</span>
+                  {testingId === m.id ? (
+                    <span className="inline-flex items-center gap-1.5 text-accent"><Spinner /> testing…</span>
+                  ) : m.openai == null && m.anthropic == null && m.responses == null ? (
+                    <span className={running ? 'inline-flex items-center gap-1.5 text-accent animate-pulse' : 'text-mute'}>
+                      {running ? '· queued' : 'untested'}
+                    </span>
                   ) : (
                     <>
                       <div className="text-dim">
@@ -709,6 +713,7 @@ function ModelsDrawer({ id }: { id: number }) {
                     </>
                   )}
                 </td>
+                <td className="max-w-[220px] truncate py-1.5 text-dim" title={m.id}>{m.id}</td>
                 <td className="py-1.5">
                   <select
                     aria-label={`surface for ${m.id}`}

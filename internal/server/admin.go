@@ -739,41 +739,77 @@ func needsProbe(e store.ModelEntryRow, surfaces []provider.Surface) bool {
 // beginSweep registers an in-flight sweep for an account; a 409-style error
 // means one is already running (the caller answers with instructions to stop
 // it first — a second click must never cancel a sweep it did not start).
-func (s *Server) beginSweep(id int64, surfaces []string, probing int) error {
+//
+// The run carries a hard deadline (budget + grace): if its goroutine somehow
+// outlives it — a wedged probe, a hung persist — the entry self-heals: a
+// later beginSweep replaces it and sweepStatus reports it gone. The sweep
+// must end, one way or the other, whether it succeeded or not.
+func (s *Server) beginSweep(id int64, surfaces []string, probing int, budget time.Duration) (*sweepRun, error) {
 	s.sweepsMu.Lock()
 	defer s.sweepsMu.Unlock()
 	if s.sweeps == nil {
 		s.sweeps = map[int64]*sweepRun{}
 	}
-	if _, running := s.sweeps[id]; running {
-		return fmt.Errorf("sweep %d already running", id)
+	if cur, running := s.sweeps[id]; running {
+		if time.Now().Before(cur.deadline) {
+			return nil, fmt.Errorf("sweep %d already running", id)
+		}
+		// Stale entry whose run outlived its deadline: replace it. The old
+		// goroutine's endSweep is run-pointer-guarded, so it can no longer
+		// delete this newer entry.
+		if cur.cancel != nil {
+			cur.cancel()
+		}
 	}
-	s.sweeps[id] = &sweepRun{started: time.Now().UTC(), surfaces: surfaces, probing: probing}
-	return nil
+	run := &sweepRun{
+		started:  time.Now().UTC(),
+		deadline: time.Now().Add(budget + sweepDeadlineGrace),
+		surfaces: surfaces,
+		probing:  probing,
+	}
+	s.sweeps[id] = run
+	return run, nil
 }
 
-func (s *Server) attachCancel(id int64, cancel context.CancelFunc) {
+// attachCancel binds the cancel func to THIS run only — the guard matters:
+// without it, a slow old sweep could attach its cancel onto a newer run and
+// stop work it did not start (the mirror image of the endSweep race).
+func (s *Server) attachCancel(id int64, run *sweepRun, cancel context.CancelFunc) {
 	s.sweepsMu.Lock()
 	defer s.sweepsMu.Unlock()
-	if r, ok := s.sweeps[id]; ok {
-		r.cancel = cancel
+	if cur, ok := s.sweeps[id]; ok && cur == run {
+		cur.cancel = cancel
 	}
 }
 
-func (s *Server) endSweep(id int64) {
+// endSweep removes the entry only if it still IS this run's. An older
+// goroutine finishing late must never delete a newer run's registration —
+// that cross-deletion left sweeps running while the map said "idle", which
+// is exactly how a later click earned a 409 against nothing visible.
+func (s *Server) endSweep(id int64, run *sweepRun) {
 	s.sweepsMu.Lock()
 	defer s.sweepsMu.Unlock()
-	delete(s.sweeps, id)
+	if cur, ok := s.sweeps[id]; ok && cur == run {
+		delete(s.sweeps, id)
+	}
 }
 
 // sweepStatus reports the in-flight sweep, so a multi-minute probe is never a
 // blind wait. Progress itself is the model list: probes write verdicts per
-// model as they run.
+// model as they run. An entry past its deadline is reported (and dropped) as
+// not running — self-healing for the operator, whatever went wrong inside.
 func (s *Server) sweepStatus(id int64) map[string]any {
 	s.sweepsMu.Lock()
 	defer s.sweepsMu.Unlock()
 	r, ok := s.sweeps[id]
 	if !ok {
+		return map[string]any{"running": false}
+	}
+	if time.Now().After(r.deadline) {
+		if r.cancel != nil {
+			r.cancel()
+		}
+		delete(s.sweeps, id)
 		return map[string]any{"running": false}
 	}
 	return map[string]any{
@@ -967,15 +1003,16 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// One sweep per account: a new one replaces (cancels) a stale one.
-	if err := s.beginSweep(id, surfaceNames, len(sweepModels)); err != nil {
+	run, err := s.beginSweep(id, surfaceNames, len(sweepModels), budget)
+	if err != nil {
 		writeErr(w, http.StatusConflict, "conflict",
 			"a protocol sweep is already running for this account — stop it first (DELETE /admin/accounts/"+fmt.Sprint(id)+"/sync)")
 		return
 	}
 	runCtx, cancel := context.WithTimeout(context.Background(), budget)
-	s.attachCancel(id, cancel)
+	s.attachCancel(id, run, cancel)
 	go func() {
-		defer s.endSweep(id)
+		defer s.endSweep(id, run)
 		defer cancel()
 		res := s.tester.ProtocolSweep(runCtx, acct, key, sweepModels, registration.Options{
 			Surfaces:       surfaces,

@@ -147,16 +147,20 @@ export default function Economics() {
       )}
 
       {loading && !summary ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          {Array.from({ length: 5 }).map((_, i) => <StatCard key={i} label="loading" value="…" />)}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => <StatCard key={i} label="loading" value="…" />)}
         </div>
       ) : (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          {/* Four cards: the context-budget card was removed with the budget
+              stage itself — a card whose value can only ever be 0 is a lie
+              dressed as a stat. `saved` still sums BOTH ledger columns, so a
+              budget stage that ever ships again shows up in the compression
+              card's number without a resurrection commit here. */}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Metric label="actual input" value={formatTokens(input)} note={`${nfmt(matching)} matching calls`} />
             <Metric label="output" value={formatTokens(output)} note={`${pct(output, input + output)} of volume`} />
             <Metric label="cached read" value={formatTokens(cached)} note={`${pct(cached, input)} of input re-read from cache`} />
-            <Metric label="context saved" value={formatTokens(context)} note="context-budget stage" />
             <Metric label="compression saved" value={formatTokens(compression)}
               tone={saved > 0 ? 'text-ok' : undefined}
               note={`${saved > 0 ? pct(saved, before) : '0%'} estimated reduction`} />
@@ -194,11 +198,6 @@ export default function Economics() {
                     <span className="tnum ml-auto font-mono text-ok">−{formatTokens(saved)}</span>
                     <span className="w-12 text-right font-mono text-mute">{pct(saved, before)}</span>
                   </div>
-                  <p className="mt-2 text-[11.5px] leading-relaxed text-mute">
-                    {formatTokens(compression)} from compression stages and {formatTokens(context)} from the
-                    context budget — both are what actually shipped shorter. A stage that DECLINED is not
-                    counted here; that is the "held" figure on the Compression page.
-                  </p>
                 </div>
               )}
             </Panel>

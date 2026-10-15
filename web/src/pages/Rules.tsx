@@ -3,12 +3,13 @@
 // The router runs every combo candidate through internal/rules before a hop:
 // outside the window (or over the ledger cap) the candidate is skipped, and
 // when nothing is eligible the request is refused with 429 rule_refusal.
-// The status chip uses windowState() from api.ts — a faithful mirror of
-// Window.InWindow — so "open now" here is what the router decides right now.
+// The open/closed status chip was removed from the table (it duplicated what
+// the window column already says, one column wide at 8+ columns) — the
+// window column's times are the same data the chip summarised.
 import { useCallback, useEffect, useState } from 'react';
 import {
   ApiError, accountModels, createModelRule, deleteModelRule, formatDays, get, modelRules,
-  updateModelRule, windowState,
+  updateModelRule,
   type Account, type ModelRow, type ModelRule,
 } from '../utils/api';
 import { Chip, ConfirmModal, Modal, SectionLabel, SkeletonRows, Toggle, btn, cx, formatTokens, inputCls, labelCls } from '../components/ui';
@@ -84,15 +85,6 @@ function windowLabel(r: ModelRule): string {
   if (!r.win_start && !r.win_end) return 'always';
   const days = formatDays(r.win_days);
   return `${r.win_start}–${r.win_end} · ${days === 'any day' ? 'daily' : days} · ${r.win_tz}`;
-}
-
-function StatusChip({ rule }: { rule: ModelRule }) {
-  if (!rule.enabled) return <Chip tone="neutral">disabled</Chip>;
-  const w = windowState(rule);
-  if (!w.open) return <Chip tone="warn" title={`window: ${w.label}`}>closed now</Chip>;
-  return w.label === 'always'
-    ? <Chip tone="ok">always open</Chip>
-    : <Chip tone="ok" title={`window: ${w.label}`}>open now</Chip>;
 }
 
 function RuleModal({ open, editing, accounts, models, draft, setDraft,
@@ -394,31 +386,27 @@ export default function Rules() {
           <table className="w-full min-w-[900px] text-[12.5px]">
             <thead>
               <tr className="text-left text-[10.5px] uppercase tracking-[0.1em] text-mute">
-                <th className="px-5 py-2.5 font-medium">status</th>
+                <th className="px-5 py-2.5 font-medium">enabled</th>
                 <th className="px-3 py-2.5 font-medium">account</th>
                 <th className="px-3 py-2.5 font-medium">model</th>
                 <th className="px-3 py-2.5 font-medium">cap</th>
                 <th className="px-3 py-2.5 font-medium">window</th>
                 <th className="px-3 py-2.5 font-medium">note</th>
-                <th className="px-3 py-2.5 text-right font-medium">enabled</th>
                 <th className="px-5 py-2.5 text-right font-medium">actions</th>
               </tr>
             </thead>
             <tbody>
               {rules.map((r) => (
                 <tr key={r.id} className="border-t border-line/60 transition-colors hover:bg-wash">
-                  <td className="whitespace-nowrap px-5 py-2.5"><StatusChip rule={r} /></td>
+                  <td className="px-5 py-2.5">
+                    <Toggle checked={r.enabled} disabled={busy === r.id}
+                      onChange={(v) => void setEnabled(r, v)} label={`enable ${r.model_id}`} />
+                  </td>
                   <td className="px-3 py-2.5 text-dim">{accountName(r.account_id)}</td>
                   <td className="px-3 py-2.5 font-mono text-ink">{r.model_id}</td>
                   <td className={cx('px-3 py-2.5 font-mono tabular-nums', r.cap_tokens ? 'text-dim' : 'text-mute')}>{capLabel(r)}</td>
                   <td className="px-3 py-2.5 font-mono text-[11.5px] text-dim">{windowLabel(r)}</td>
                   <td className="max-w-[200px] truncate px-3 py-2.5 text-mute" title={r.note}>{r.note || '—'}</td>
-                  <td className="px-3 py-2.5 text-right">
-                    <span className="inline-flex justify-end">
-                      <Toggle checked={r.enabled} disabled={busy === r.id}
-                        onChange={(v) => void setEnabled(r, v)} label={`enable ${r.model_id}`} />
-                    </span>
-                  </td>
                   <td className="whitespace-nowrap px-5 py-2.5 text-right">
                     <button type="button" className={cx(btn.base, btn.ghost, 'mr-2 px-3 py-1.5 text-[12px]')}
                       onClick={() => startEdit(r)}>Edit</button>

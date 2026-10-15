@@ -598,6 +598,37 @@ ORDER BY k, ttft_ms`, col, col, col)
 	return nil
 }
 
+// TotalP50TTFTms computes the median TTFT across the WHOLE window — the
+// totals row of the usage report. Summing per-group medians would be
+// arithmetically meaningless, so the totals card read P50TTFTms straight off
+// the summed struct and showed 0 "not measured yet" for its whole life even
+// though thousands of rows carried a measured TTFT. Same window-function
+// shape and the same upper-of-two-middles convention as fillP50 — one row
+// scanned back, no per-row data crossing into Go.
+func (d *DB) TotalP50TTFTms(ctx context.Context, from, to time.Time) (int64, error) {
+	var v sql.NullInt64
+	err := d.r.QueryRowContext(ctx, `SELECT ttft_ms FROM (
+  SELECT ttft_ms,
+         ROW_NUMBER() OVER (ORDER BY ttft_ms) AS rn,
+         COUNT(*)     OVER ()                  AS n
+  FROM calls
+  WHERE ts >= ? AND ts < ? AND ttft_ms IS NOT NULL
+)
+WHERE rn = n / 2 + 1`,
+		from.UTC().Format("2006-01-02T15:04:05.000Z"),
+		to.UTC().Format("2006-01-02T15:04:05.000Z")).Scan(&v)
+	if err == sql.ErrNoRows {
+		return 0, nil // no measured TTFT in the window — 0, honestly
+	}
+	if err != nil {
+		return 0, err
+	}
+	if !v.Valid {
+		return 0, nil
+	}
+	return v.Int64, nil
+}
+
 // UsageDayReportTZ aggregates the ledger by LOCAL DAY in loc, computing the day
 // buckets in Go rather than in SQL.
 //

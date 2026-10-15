@@ -35,12 +35,15 @@ import {
 import RecentFeed from './RecentFeed';
 
 const SPLITS: SplitKey[] = ['global', 'day', 'account', 'model', 'client', 'alias', 'key', 'surface'];
-const FOCI: FocusKey[] = ['tokens', 'cache', 'compression', 'savings', 'reasoning', 'latency', 'errors'];
+const FOCI: FocusKey[] = ['tokens', 'cache', 'savings', 'reasoning', 'latency', 'errors'];
 const RANGES: RangeKey[] = ['24h', '7d', '30d', '365d'];
 
 // Which series a focus draws on a multi-series chart. `global` and named
-// splits both read this; a focus that is inherently single-valued (latency,
-// compression, errors) draws one series rather than three meaningless ones.
+// splits both read this; single-valued focuses (latency, errors, reasoning)
+// draw one series rather than meaningless ones. Keys are LEDGER FIELDS —
+// the chart reads row[s.key], so a key that is not a UsageRow field draws
+// nothing (that is exactly how 'compression'/'savings'/'latency' drew no
+// bars for their whole lives: the key was the focus NAME, not the column).
 function seriesOf(focus: FocusKey): { key: keyof UsageRow | string; label: string; color: string }[] {
   switch (focus) {
     case 'cache':
@@ -53,15 +56,26 @@ function seriesOf(focus: FocusKey): { key: keyof UsageRow | string; label: strin
         { key: 'tin', label: 'tokens in', color: VIZ.in },
         { key: 'tout', label: 'tokens out', color: VIZ.out },
       ];
-    default:
-      return [{ key: focus, label: FOCUS_LABEL[focus].toLowerCase(), color: focusColor(focus) }];
+    case 'savings':
+      // Two mechanisms, two bars, two colours: compression actually rewrote
+      // (and shipped a shorter prompt); the context-budget stage kept history
+      // out. Either can be 0 — the zero-filter below drops those rows.
+      return [
+        { key: 'saved', label: 'compression', color: VIZ.saved },
+        { key: 'context_saved', label: 'context budget', color: VIZ.budget },
+      ];
+    case 'latency':
+      return [{ key: 'p50_ttft_ms', label: 'p50 ttft', color: VIZ.latency }];
+    case 'reasoning':
+      return [{ key: 'reasoning', label: 'reasoning', color: VIZ.reasoning }];
+    case 'errors':
+      return [{ key: 'errors', label: 'errors', color: VIZ.error }];
   }
 }
 
 function focusColor(focus: FocusKey): string {
   switch (focus) {
     case 'cache': return VIZ.cached;
-    case 'compression': return VIZ.saved;
     case 'savings': return VIZ.saved;
     case 'reasoning': return VIZ.reasoning;
     case 'latency': return VIZ.latency;
@@ -98,14 +112,48 @@ export default function Stats() {
   const series = seriesOf(focus);
   const isTime = split === 'day';
 
-  // Ranked rows, biggest first. The SQL returns ORDER BY calls DESC, which is
-  // right for a traffic listing and wrong for "who is the biggest on this
-  // focus" — a high-volume account can still be small on cached tokens.
-  const ranked = useMemo(
-    () => [...rows].sort((a, b) => focusValue(focus, b) - focusValue(focus, a)),
-    [rows, focus],
-  );
+  // The Combo split shows ONLY combos. Direct model routes are recorded with
+  // an alias of "ns/model" (contains '/') or the '(direct)' placeholder, and
+  // combo names can never contain '/' — so the exact filter is defenseless.
+  // Direct traffic stays visible in the totals cards and the Every-column
+  // table is combo-scoped too; the ranked panel aside says what share of the
+  // total the displayed rows are.
+  const rawRows = useMemo(() => {
+    if (split !== 'alias') return rows;
+    return rows.filter((r) => !r.k.includes('/') && r.k !== '(direct)');
+  }, [rows, split]);
 
+  // Ranked rows. Split day → latest date first (a time listing reads newest
+  // at top; the chart below reverses this into chronological order). Every
+  // other split → focus-metric descending, biggest first.
+  const ranked = useMemo(() => {
+    const copy = [...rawRows];
+    if (isTime) return copy.sort((a, b) => b.k.localeCompare(a.k));
+    return copy.sort((a, b) => focusValue(focus, b) - focusValue(focus, a));
+  }, [rawRows, focus, isTime]);
+
+  // Bars only exist when there is something to measure: a group whose focus
+  // value is 0 draws no bar and no list row. (The Every-column table keeps
+  // every row — zeros there render as '–', which is data.)
+  const barRows = useMemo(() => ranked.filter((r) => focusValue(focus, r) > 0), [ranked, focus]);
+
+  // Chart rows. Bar charts read barRows (zero groups dropped). The day area
+  // chart trims only LEADING and TRAILING zero days: an interior zero day
+  // must stay on a time axis, because dropping it compresses the line and
+  // lies about when the neighbours happened.
+  const chartRows = useMemo(() => {
+    if (!isTime) return barRows;
+    let start = 0;
+    let end = ranked.length; // ranked is newest-first; trim both ends
+    while (start < end && focusValue(focus, ranked[start]) === 0) start++;
+    while (end > start && focusValue(focus, ranked[end - 1]) === 0) end--;
+    return ranked.slice(start, end);
+  }, [ranked, barRows, focus, isTime]);
+
+  // The ranked panel's aside said "of total" next to a fixed 100% — the
+  // share of the SUM of displayed rows (post-filter) vs the window total,
+  // which is the number that actually moves when a filter applies.
+  const rankedFocusSum = ranked.reduce((a, r) => a + focusValue(focus, r), 0);
   const totalFocus = totals ? focusValue(focus, totals) : 0;
   const focusSeries = ranked.map((r) => focusValue(focus, r));
   const isExpanded = data?.group_by != null && data.group_by !== '';
@@ -143,12 +191,6 @@ export default function Stats() {
             </div>
           </div>
         </div>
-        <p className="border-t border-line pt-3 text-[11.5px] leading-relaxed text-mute">
-          <span className="text-dim">{SPLIT_LABEL[split]}</span> — {SPLIT_HINT[split]} ·{' '}
-          <span className="text-dim">{FOCUS_LABEL[focus]}</span> — {FOCUS_HINT[focus]} ·{' '}
-          last {RANGE_LABEL[range]}.
-          {isExpanded && <> grouped by <Mono>{data?.group_by}</Mono>.</>}
-        </p>
       </div>
 
       {err && (
@@ -241,9 +283,16 @@ export default function Stats() {
 
       {data && isExpanded && ranked.length === 0 && (
         <Panel label={<SectionLabel>{SPLIT_LABEL[split]} · last {RANGE_LABEL[range]}</SectionLabel>}>
-          <EmptyState
-            title={`No calls in the last ${RANGE_LABEL[range]}.`}
-            hint="The ledger is empty for this window and dimension. Widen the range, or route a request through a combo and it appears here within a second." />
+          {rows.length > 0 ? (
+            // Rows exist for this split — the combo filter removed them all.
+            <EmptyState
+              title="No combo-routed calls in this window."
+              hint="Every excluded row is a DIRECT model call (an alias holding '/', or no alias at all) — combos and direct routes can't share a name, so nothing was hidden by accident. Split by account or surface to see the direct traffic." />
+          ) : (
+            <EmptyState
+              title={`No calls in the last ${RANGE_LABEL[range]}.`}
+              hint="The ledger is empty for this window and dimension. Widen the range, or route a request through a combo and it appears here within a second." />
+          )}
         </Panel>
       )}
 
@@ -257,46 +306,55 @@ export default function Stats() {
             }
             aside={<Chip><Mono className="text-[10px]">{data.group_by}</Mono></Chip>}>
             <div className="h-72">
-              <ResponsiveContainer width="100%" height="100%">
-                {isTime ? (
-                  <AreaChart data={[...ranked].reverse()} margin={{ top: 4, right: 8, bottom: 0, left: -8 }}>
-                    <defs>
+              {chartRows.length === 0 ? (
+                <div className="flex h-full items-center justify-center px-6">
+                  <p className="max-w-sm text-center text-[12.5px] leading-relaxed text-mute">
+                    {FOCUS_LABEL[focus]} measured 0 across every {SPLIT_LABEL[split].toLowerCase()} group in this
+                    window — nothing to plot. Switch the Focus, or widen the range.
+                  </p>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  {isTime ? (
+                    <AreaChart data={[...chartRows].reverse()} margin={{ top: 4, right: 8, bottom: 0, left: -8 }}>
+                      <defs>
+                        {series.map((s) => (
+                          <linearGradient key={String(s.key)} id={`fill-${String(s.key)}`} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor={s.color} stopOpacity={0.3} />
+                            <stop offset="100%" stopColor={s.color} stopOpacity={0} />
+                          </linearGradient>
+                        ))}
+                      </defs>
+                      <CartesianGrid {...chartGrid} vertical={false} />
+                      <XAxis dataKey="k" {...axisProps} />
+                      <YAxis {...axisProps} width={58} tickFormatter={(v: number) => fmt(v)} />
+                      <Tooltip content={<ChartTooltip format={fmt} />} cursor={cursorFill} />
                       {series.map((s) => (
-                        <linearGradient key={String(s.key)} id={`fill-${String(s.key)}`} x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor={s.color} stopOpacity={0.3} />
-                          <stop offset="100%" stopColor={s.color} stopOpacity={0} />
-                        </linearGradient>
+                        <Area
+                          key={String(s.key)}
+                          type="monotone" dataKey={s.key as string} name={s.label}
+                          stroke={s.color} strokeWidth={2} fill={`url(#fill-${String(s.key)})`}
+                          dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />
                       ))}
-                    </defs>
-                    <CartesianGrid {...chartGrid} vertical={false} />
-                    <XAxis dataKey="k" {...axisProps} />
-                    <YAxis {...axisProps} width={58} tickFormatter={(v: number) => fmt(v)} />
-                    <Tooltip content={<ChartTooltip format={fmt} />} cursor={cursorFill} />
-                    {series.map((s) => (
-                      <Area
-                        key={String(s.key)}
-                        type="monotone" dataKey={s.key as string} name={s.label}
-                        stroke={s.color} strokeWidth={2} fill={`url(#fill-${String(s.key)})`}
-                        dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />
-                    ))}
-                  </AreaChart>
-                ) : (
-                  <BarChart data={ranked} margin={{ top: 4, right: 8, bottom: 0, left: -8 }} barCategoryGap="26%">
-                    <CartesianGrid {...chartGrid} vertical={false} />
-                    <XAxis dataKey="k" {...axisProps} interval={0}
-                      tickFormatter={(v: string) => (v.length > 12 ? `${v.slice(0, 11)}…` : v)} />
-                    <YAxis {...axisProps} width={58} tickFormatter={(v: number) => fmt(v)} />
-                    <Tooltip content={<ChartTooltip format={fmt} />} cursor={cursorFill} />
-                    {series.map((s, i) => (
-                      <Bar
-                        key={String(s.key)}
-                        dataKey={s.key as string} name={s.label}
-                        fill={s.color} maxBarSize={38}
-                        radius={i === series.length - 1 ? [3, 3, 0, 0] : undefined} />
-                    ))}
-                  </BarChart>
-                )}
-              </ResponsiveContainer>
+                    </AreaChart>
+                  ) : (
+                    <BarChart data={chartRows} margin={{ top: 4, right: 8, bottom: 0, left: -8 }} barCategoryGap="26%">
+                      <CartesianGrid {...chartGrid} vertical={false} />
+                      <XAxis dataKey="k" {...axisProps} interval={0}
+                        tickFormatter={(v: string) => (v.length > 12 ? `${v.slice(0, 11)}…` : v)} />
+                      <YAxis {...axisProps} width={58} tickFormatter={(v: number) => fmt(v)} />
+                      <Tooltip content={<ChartTooltip format={fmt} />} cursor={cursorFill} />
+                      {series.map((s, i) => (
+                        <Bar
+                          key={String(s.key)}
+                          dataKey={s.key as string} name={s.label}
+                          fill={s.color} maxBarSize={38}
+                          radius={i === series.length - 1 ? [3, 3, 0, 0] : undefined} />
+                      ))}
+                    </BarChart>
+                  )}
+                </ResponsiveContainer>
+              )}
             </div>
             {isTime && (
               <p className="mt-2 text-[11px] text-mute">
@@ -308,13 +366,14 @@ export default function Stats() {
 
           {/* Ranked list and the raw rows behind it, side by side: the bar
               chart answers "who is biggest", the list gives the exact share,
-              the table gives every column. */}
+              the table gives every column. Zero-value groups appear in the
+              table (as '–') but draw no bar and no list row. */}
           <div className="grid gap-4 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
             <Panel
               label={<SectionLabel>Ranked · {FOCUS_LABEL[focus]}</SectionLabel>}
-              aside={<span className="text-[11px] text-mute">{pct(totalFocus, focusValue(focus, totals))} of total</span>}>
+              aside={<span className="text-[11px] text-mute">{pct(rankedFocusSum, totalFocus)} of total</span>}>
               <BarList
-                rows={ranked.map((r, i) => ({
+                rows={barRows.map((r, i) => ({
                   key: r.k,
                   value: focusValue(focus, r),
                   // A categorical ramp per position is stable within a render
@@ -323,7 +382,8 @@ export default function Stats() {
                   color: series.length > 1 ? series[0].color : catColor(i),
                   hint: `${nfmt(r.calls)} calls · p50 ttft ${fmtMs(r.p50_ttft_ms)}`,
                 }))}
-                format={fmt} maxRows={12} />
+                format={fmt} maxRows={12}
+                emptyLabel={`No ${FOCUS_LABEL[focus].toLowerCase()} recorded in this window.`} />
             </Panel>
 
             <Panel label={<SectionLabel>Every column · {RANGE_LABEL[range]}</SectionLabel>} bodyClass="p-0">

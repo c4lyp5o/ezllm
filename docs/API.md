@@ -98,7 +98,18 @@ returned page — so the totals answer "how much lives behind this filter".
                               // the marker before comparing tin across rows; see
                               // docs/translation-runbook.md "Ledger attribution".
   "summary": { "count":23, "tin":966, "tout":69, "cread":0, "reasoning":0,
-               "max_tin":42, "max_tout":3 },
+               "context_pre":0, "context_saved":0, "compression_saved":409,
+               "max_tin":42, "max_tout":3,
+               // compression accounting (whole matching set):
+               // applied_* = rows where a rewrite ACTUALLY shipped shorter
+               //   (applied_saved is the real token total — the plain
+               //   compression_saved also sweeps legacy tokens_saved sitting
+               //   on declined rows);
+               // declined_* = rows a stage recorded a rewrite for but
+               //   rejected (ratio floor / fail-open); held_notional sums
+               //   what those rejected rewrites would have saved.
+               "applied_calls":5, "applied_saved":400,
+               "declined_calls":2, "held_notional":370 },
   "filter": { "from":"…","to":"…","limit":50,"sort":"ts_desc" }
 }
 ```
@@ -136,7 +147,10 @@ during the year is still correct.
 
 **`p50_ttft_ms` convention:** the UPPER of the two middle values for an even-sized group
 (`order by ttft_ms`, position `n/2 + 1`). This is the historical behaviour, kept unchanged —
-it is directional dashboard guidance, not a statistical claim.
+it is directional dashboard guidance, not a statistical claim. The response's `totals` row
+carries its OWN `p50_ttft_ms` — a single median over the whole window (medians do not add,
+so it is never a sum of the group medians) — plus `context_pre`/`context_saved` summed like
+every other metric.
 
 ### `POST /admin/accounts` → `201`
 ```jsonc

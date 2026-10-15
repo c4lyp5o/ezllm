@@ -119,6 +119,10 @@
   --color-viz-saved: #047857;
   --color-viz-error: #b91c1c;
   --color-viz-latency: #6d28d9;
+  /* budget = the context-budget stage's savings series. Distinct hue because
+     it appears BESIDE the compression series on the same Savings chart — two
+     mechanisms, two colours, never "two greens". */
+  --color-viz-budget: #be185d;
   --color-viz-cat-1: #0369a1;
   --color-viz-cat-2: #4f46e5;
   --color-viz-cat-3: #047857;
@@ -167,6 +171,7 @@
   --color-viz-saved: #34d399;
   --color-viz-error: #f87171;
   --color-viz-latency: #a78bfa;
+  --color-viz-budget: #f472b6;
   --color-viz-cat-1: #38bdf8;
   --color-viz-cat-2: #818cf8;
   --color-viz-cat-3: #34d399;

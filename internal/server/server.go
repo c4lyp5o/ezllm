@@ -989,8 +989,20 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		totals.CachedWrite += x.CachedWrite
 		totals.Reasoning += x.Reasoning
 		totals.TokensSaved += x.TokensSaved
+		totals.ContextPre += x.ContextPre
+		totals.ContextSaved += x.ContextSaved
 		totals.Errors += x.Errors
 	}
+	// The totals P50 cannot be a sum of group P50s — medians don't add up —
+	// so it was never set and the card read "0ms · not measured yet" forever.
+	// One separate median over the whole window, same convention as the
+	// per-group fillP50 (upper of the two middle values).
+	tp50, err := s.db.TotalP50TTFTms(r.Context(), from, to)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "api_error", err.Error())
+		return
+	}
+	totals.P50TTFTms = tp50
 	out := map[string]any{
 		"from": from.Format(time.RFC3339), "to": to.Format(time.RFC3339),
 		"group_by": orDefault(groupBy, "account"),

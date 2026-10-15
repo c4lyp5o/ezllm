@@ -354,18 +354,21 @@ export const SPLIT_IS_TIME: Record<SplitKey, boolean> = {
 
 // Which column the chosen FOCUS is about. The row carries every column, so a
 // focus change is a client-side re-read — no second request.
-export type FocusKey = 'tokens' | 'cache' | 'compression' | 'savings' | 'reasoning' | 'latency' | 'errors';
+//
+// 'compression' was consolidated INTO 'savings' (dashboard polish pass): the
+// two focused on the same `saved` column with `savings` additionally adding
+// the (currently dead) context-budget column — two buttons for one question.
+export type FocusKey = 'tokens' | 'cache' | 'savings' | 'reasoning' | 'latency' | 'errors';
 
 export const FOCUS_LABEL: Record<FocusKey, string> = {
-  tokens: 'Tokens', cache: 'Cache', compression: 'Compression',
+  tokens: 'Tokens', cache: 'Cache',
   savings: 'Savings', reasoning: 'Reasoning', latency: 'Latency', errors: 'Errors',
 };
 
 export const FOCUS_HINT: Record<FocusKey, string> = {
   tokens: 'in vs out — raw volume',
   cache: 'prompt-cache reads and writes',
-  compression: 'tokens a compression stage actually removed',
-  savings: 'compression plus context-budget savings together',
+  savings: 'tokens compression removed (plus context budget when a stage ships it)',
   reasoning: 'tokens the model spent thinking (billed, never seen)',
   latency: 'p50 time to first token per group',
   errors: 'calls that came back 4xx/5xx',
@@ -375,7 +378,6 @@ export const FOCUS_HINT: Record<FocusKey, string> = {
 export function focusValue(f: FocusKey, r: UsageRow): number {
   switch (f) {
     case 'cache': return r.cread + r.cwrite;
-    case 'compression': return r.saved;
     case 'savings': return r.context_saved + r.saved;
     case 'reasoning': return r.reasoning;
     case 'latency': return r.p50_ttft_ms;
@@ -424,6 +426,13 @@ export type RequestsSummary = {
   cached_read?: number; tokens_in?: number; tokens_out?: number;
   reasoning: number; max_tin: number; max_tout: number;
   context_pre: number; context_saved: number; compression_saved: number;
+  // Compression-page cards (added with the four summary SQL columns):
+  // applied = a rewrite actually shipped; applied_saved = its real tokens
+  // (SUM(tokens_saved) sweeps in legacy declined rows, so cards read THIS);
+  // declined = a recorded rewrite rejected by the ratio floor; held_notional
+  // = what those rejected rewrites would have saved.
+  applied_calls: number; applied_saved: number;
+  declined_calls: number; held_notional: number;
 };
 export type RequestsResp = {
   rows: FeedRow[];

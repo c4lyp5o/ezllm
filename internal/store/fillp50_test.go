@@ -144,4 +144,63 @@ func parseTS(t *testing.T, s string) time.Time {
 	return ts
 }
 
+// The totals card's P50 is a median over the WHOLE window — it must not be a
+// sum of the per-group medians, and an empty window must stay 0.
+func TestTotalP50TTFTmsWholeWindowMedian(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	day := "2026-10-11T12:00:00.000Z"
+	// Two groups (odd: 10..90, even: 100,200) — the TOTAL median runs over the
+	// combined set 10,30,50,70,90,100,200 → 7 values → middle = 70.
+	// A group sum of medians would have been 50+200=250.
+	for _, ttft := range []int64{10, 30, 50, 70, 90} {
+		db.RecordCall(Call{TS: parseTS(t, day), Client: "c", Account: "odd", AccountID: 1,
+			Model: "m1", Status: 200, TTFTms: i64ptr(ttft)})
+	}
+	for _, ttft := range []int64{100, 200} {
+		db.RecordCall(Call{TS: parseTS(t, day), Client: "c", Account: "even", AccountID: 2,
+			Model: "m1", Status: 200, TTFTms: i64ptr(ttft)})
+	}
+	// A row with no TTFT must not affect the median (NULL filtered in SQL).
+	db.RecordCall(Call{TS: parseTS(t, day), Client: "c", Account: "odd", AccountID: 1,
+		Model: "m1", Status: 200})
+	if err := db.Flush(); err != nil {
+		t.Fatal(err)
+	}
+
+	from, to := parseTS(t, "2026-10-11T00:00:00.000Z"), parseTS(t, "2026-10-12T00:00:00.000Z")
+	got, err := db.TotalP50TTFTms(ctx, from, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 70 {
+		t.Errorf("total p50 = %d, want 70 (median of 10,30,50,70,90,100,200 — not the group-median sum 250)", got)
+	}
+}
+
+// Even count keeps the same upper-middle convention as fillP50, and an
+// unmeasured window returns 0 rather than an error.
+func TestTotalP50TTFTmsEvenAndEmpty(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	from, to := parseTS(t, "2026-10-11T00:00:00.000Z"), parseTS(t, "2026-10-12T00:00:00.000Z")
+	if got, err := db.TotalP50TTFTms(ctx, from, to); err != nil || got != 0 {
+		t.Fatalf("empty window = (%d, %v), want (0, nil)", got, err)
+	}
+
+	day := "2026-10-11T12:00:00.000Z"
+	for _, ttft := range []int64{100, 200} { // 2 values → upper middle = 200
+		db.RecordCall(Call{TS: parseTS(t, day), Client: "c", Account: "a", AccountID: 1,
+			Model: "m", Status: 200, TTFTms: i64ptr(ttft)})
+	}
+	if err := db.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := db.TotalP50TTFTms(ctx, from, to); err != nil || got != 200 {
+		t.Fatalf("even window p50 = (%d, %v), want (200, nil) — upper middle", got, err)
+	}
+}
+
 func i64ptr(v int64) *int64 { return &v }

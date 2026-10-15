@@ -19,12 +19,16 @@ type requestsResp struct {
 		Tout any `json:"tout"`
 	} `json:"rows"`
 	Summary struct {
-		Count     int64 `json:"count"`
-		Tin       int64 `json:"tin"`
-		Tout      int64 `json:"tout"`
-		MaxTin    int64 `json:"max_tin"`
-		MaxTout   int64 `json:"max_tout"`
-		Reasoning int64 `json:"reasoning"`
+		Count         int64 `json:"count"`
+		Tin           int64 `json:"tin"`
+		Tout          int64 `json:"tout"`
+		MaxTin        int64 `json:"max_tin"`
+		MaxTout       int64 `json:"max_tout"`
+		Reasoning     int64 `json:"reasoning"`
+		AppliedCalls  int64 `json:"applied_calls"`
+		AppliedSaved  int64 `json:"applied_saved"`
+		DeclinedCalls int64 `json:"declined_calls"`
+		HeldNotional  int64 `json:"held_notional"`
 	} `json:"summary"`
 	Filter struct {
 		Sort  string `json:"sort"`
@@ -134,6 +138,56 @@ func TestRequestsFiltersAndSummary(t *testing.T) {
 	code, got = doRequests(t, h, "?limit=1&sort=tin_desc")
 	if code != http.StatusOK || len(got.Rows) != 1 || got.Summary.Count != 4 {
 		t.Errorf("limit=1 → rows=%d count=%d (want 1 page / 4 summary)", len(got.Rows), got.Summary.Count)
+	}
+}
+
+// The Compression page's savings cards read exactly three summary numbers:
+// applied (rewrite actually shipped shorter), declined (a real rewrite was
+// rejected, notional holds what it WOULD have saved), and held_notional (the
+// sum of those rejected notional values). Before this existed the cards were
+// derived from a 409-row hardcoded claim — numbers that cannot go stale.
+func TestRequestsSummaryCompressionCounts(t *testing.T) {
+	h := newHarness(t, func(http.ResponseWriter, *http.Request) {})
+	now := time.Now()
+	seeds := []store.Call{
+		// applied: real savings, no notional.
+		{TS: now, Client: "hermes", Account: "a", Model: "m", Status: 200,
+			TokensIn: 100, TokensOut: 10, CompressionProfile: "agentic-safe",
+			CompressionApplied: true, TokensSaved: 400},
+		// declined: notional carries the would-have-saved, applied is false.
+		{TS: now, Client: "hermes", Account: "a", Model: "m", Status: 200,
+			TokensIn: 100, TokensOut: 10, CompressionProfile: "agentic-safe",
+			CompressionApplied: false, TokensSavedNotional: 250},
+		// declined again, plus another rejected notional.
+		{TS: now, Client: "hermes", Account: "a", Model: "m", Status: 200,
+			TokensIn: 100, TokensOut: 10, CompressionProfile: "agentic-safe",
+			CompressionApplied: false, TokensSavedNotional: 120},
+		// plain call: compression never ran at all — not a decline.
+		{TS: now, Client: "hermes", Account: "a", Model: "m", Status: 200,
+			TokensIn: 50, TokensOut: 5},
+	}
+	for _, c := range seeds {
+		h.db.RecordCall(c)
+	}
+	if err := h.db.Flush(); err != nil {
+		t.Fatal(err)
+	}
+
+	code, got := doRequests(t, h, "")
+	if code != http.StatusOK {
+		t.Fatalf("requests = %d", code)
+	}
+	if got.Summary.AppliedCalls != 1 {
+		t.Errorf("applied_calls = %d, want 1 (only the applied row)", got.Summary.AppliedCalls)
+	}
+	if got.Summary.AppliedSaved != 400 {
+		t.Errorf("applied_saved = %d, want 400 (only the applied row's real savings)", got.Summary.AppliedSaved)
+	}
+	if got.Summary.DeclinedCalls != 2 {
+		t.Errorf("declined_calls = %d, want 2 (notional>0 AND applied=0; the plain call is not a decline)", got.Summary.DeclinedCalls)
+	}
+	if got.Summary.HeldNotional != 370 {
+		t.Errorf("held_notional = %d, want 370 (250+120, NOT including the applied row's 400 tokens_saved)", got.Summary.HeldNotional)
 	}
 }
 

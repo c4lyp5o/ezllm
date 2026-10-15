@@ -1,8 +1,8 @@
 // COMPRESSION — profile editor for ordered, fail-open compression pipelines.
 import { useCallback, useEffect, useState } from 'react';
 import {
-  ApiError, compressionProfiles, del, patch, post, usage,
-  type CompressionProfile, type CompressionStage, type UsageRow,
+  ApiError, compressionProfiles, del, patch, post, requests, usage,
+  type CompressionProfile, type CompressionStage, type RequestsSummary, type UsageRow,
 } from '../utils/api';
 import { BarList, Panel, VIZ } from '../components/charts';
 import { Chip, ConfirmModal, EmptyState, Mono, SectionLabel, btn, cx, formatTokens, inputCls, labelCls, nfmt, Spinner } from '../components/ui';
@@ -59,10 +59,13 @@ function packStages(stages: StageDraft[]): CompressionStage[] {
 
 export default function Compression() {
   const [profiles, setProfiles] = useState<CompressionProfile[] | null>(null);
-  // Live savings from the ledger: saved / context_saved per account. This is
-  // the ONLY place the two compression mechanisms are shown together, because
-  // they are recorded in different columns and answer different questions.
+  // Live savings from the ledger: saved / context_saved per account (the
+  // per-account bar list), plus the requests summary's four compression
+  // columns — applied_saved is the REAL rewritten total (the per-account
+  // `saved` column sweeps in legacy declined rows), declined_calls /
+  // held_notional count and measure the rewrites a stage correctly refused.
   const [savings, setSavings] = useState<UsageRow[] | null>(null);
+  const [sum, setSum] = useState<RequestsSummary | null>(null);
   const [draft, setDraft] = useState<ProfileDraft | null>(null);
   const [pendingDelete, setPendingDelete] = useState<CompressionProfile | null>(null);
   const [editingID, setEditingID] = useState<number | null>(null);
@@ -76,12 +79,17 @@ export default function Compression() {
   }, []);
   useEffect(() => { reload(); }, [reload]);
 
-  // Savings over the last 24h, grouped by account. A failure here must not take
-  // the editor down, so it leaves its own panel empty.
+  // Savings over the last 24h: per-account groups for the bar list, and the
+  // requests summary (limit:1 — only its `summary` block is read) for the
+  // applied/declined cards. A failure here must not take the editor down, so
+  // each leaves its own panel piece empty.
   useEffect(() => {
     usage('account', '24h')
       .then((r) => setSavings(r.groups))
       .catch(() => setSavings([]));
+    requests({ range: '24h', limit: 1 })
+      .then((r) => setSum(r.summary))
+      .catch(() => setSum(null));
   }, []);
 
   const startNew = () => { setEditingID(null); setDraft(freshDraft()); setErr(''); setNotice(''); };
@@ -132,8 +140,21 @@ export default function Compression() {
   };
 
   const savedTotal = savings?.reduce((a, r) => a + r.saved, 0) ?? 0;
-  const contextTotal = savings?.reduce((a, r) => a + r.context_saved, 0) ?? 0;
-  const hasSavings = savedTotal > 0 || contextTotal > 0;
+  // The REAL rewritten total: applied_saved only counts rows where a rewrite
+  // actually shipped. `savedTotal` (the raw per-account column) additionally
+  // sweeps in ~21k legacy tokens_saved sitting on declined rows — direction
+  // is right, magnitude is not, so the card reads applied_saved when the
+  // summary answered and falls back to the raw column while it loads.
+  const rewritten = sum ? sum.applied_saved : savedTotal;
+  const declinedCalls = sum?.declined_calls ?? 0;
+  const heldNotional = sum?.held_notional ?? 0;
+  const appliedCalls = sum?.applied_calls ?? 0;
+  const rewritesDecided = appliedCalls + declinedCalls;
+  // Hit-rate is meaningful only when a stage actually refused something;
+  // 100% of one decision is a rounding error wearing a stat's clothes.
+  const showHitRate = declinedCalls > 0;
+  const showHeld = heldNotional > 0;
+  const hasSavings = rewritten > 0 || showHeld;
 
   return (
     <div className="mx-auto max-w-4xl animate-fade-up space-y-4">
@@ -155,17 +176,18 @@ export default function Compression() {
 
       {/* ── live savings ──────────────────────────────────────────────────
           The editor above is the mechanism; this is what it actually did in
-          the last 24h. Two separate columns because they are two separate
-          mechanisms: `saved` is a deterministic rewrite stage that actually
-          shipped a shorter prompt, `context_saved` is the context-budget
-          stage keeping the high-signal envelope under a token cap. Adding
-          them into one "savings" number would hide which mechanism is doing
-          the work — and the answer changes what you tune next. */}
+          the last 24h. Cards are driven by the requests summary's compression
+          columns: rewritten counts ONLY rows where a rewrite shipped
+          (applied_saved — the raw tokens_saved column also sweeps in legacy
+          declined rows); held is what the correctly-DECLINED rewrites would
+          have saved; the hit rate appears only when a decline exists to
+          compare against. No meaningful data → the rewritten card alone,
+          never filler. */}
       <Panel
         label={<SectionLabel>Actual savings · last 24h</SectionLabel>}
         aside={<span className="text-[11px] text-mute">
           {hasSavings
-            ? `${formatTokens(savedTotal)} rewritten · ${formatTokens(contextTotal)} budgeted`
+            ? `${formatTokens(rewritten)} rewritten${showHeld ? ` · ${formatTokens(heldNotional)} held` : ''}`
             : 'nothing recorded yet'}
         </span>}>
         {savings === null ? (
@@ -176,36 +198,51 @@ export default function Compression() {
             hint="Either traffic is small enough that every stage declined the minimum-ratio floor, or no profile is attached to a combo. A stage that declines is not a failure — see the note below." />
         ) : (
           <div className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className={cx('grid gap-3', showHitRate || showHeld ? 'sm:grid-cols-2 lg:grid-cols-3' : 'sm:grid-cols-2')}>
               <div className="rounded-lg border border-line bg-raised/40 px-4 py-3">
                 <SectionLabel>rewritten (shipped shorter)</SectionLabel>
-                <div className="mt-1 font-mono text-[20px] font-semibold text-ok tnum">{formatTokens(savedTotal)}</div>
+                <div className="mt-1 font-mono text-[20px] font-semibold text-ok tnum">{formatTokens(rewritten)}</div>
                 <p className="mt-1 text-[11px] leading-relaxed text-mute">
-                  Prompts that actually went out shorter than they arrived. A deterministic rewrite, auditable.
+                  {nfmt(appliedCalls)} call{appliedCalls === 1 ? '' : 's'} actually went out shorter than they arrived. A deterministic rewrite, auditable.
                 </p>
               </div>
-              <div className="rounded-lg border border-line bg-raised/40 px-4 py-3">
-                <SectionLabel>context budget</SectionLabel>
-                <div className="mt-1 font-mono text-[20px] font-semibold text-accent tnum">{formatTokens(contextTotal)}</div>
-                <p className="mt-1 text-[11px] leading-relaxed text-mute">
-                  Tokens the budget stage kept OUT of the prompt by dropping the low-signal middle of history.
-                </p>
-              </div>
+              {showHitRate && (
+                <div className="rounded-lg border border-line bg-raised/40 px-4 py-3">
+                  <SectionLabel>hit rate</SectionLabel>
+                  <div className="mt-1 font-mono text-[20px] font-semibold text-ink tnum">
+                    {Math.round((appliedCalls / Math.max(1, rewritesDecided)) * 100)}%
+                  </div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-mute">
+                    {nfmt(appliedCalls)} of {nfmt(rewritesDecided)} decided rewrites shipped; {nfmt(declinedCalls)} were declined to protect a cached prefix.
+                  </p>
+                </div>
+              )}
+              {showHeld && (
+                <div className="rounded-lg border border-line bg-raised/40 px-4 py-3">
+                  <SectionLabel>held (declined rewrites)</SectionLabel>
+                  <div className="mt-1 font-mono text-[20px] font-semibold text-warn tnum">{formatTokens(heldNotional)}</div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-mute">
+                    What the {nfmt(declinedCalls)} declined rewrites WOULD have saved — recorded as notional on the live feed (“held N”), never counted as real savings.
+                  </p>
+                </div>
+              )}
             </div>
             <BarList
-              rows={savings.filter((r) => r.saved > 0 || r.context_saved > 0).map((r) => ({
+              rows={savings.filter((r) => r.saved > 0).map((r) => ({
                 key: r.k,
-                value: r.saved + r.context_saved,
+                value: r.saved,
                 color: VIZ.saved,
-                hint: `${nfmt(r.calls)} calls · ${formatTokens(r.saved)} rewritten · ${formatTokens(r.context_saved)} budgeted`,
+                hint: `${nfmt(r.calls)} calls · ${formatTokens(r.saved)} rewritten`,
               }))}
               emptyLabel="No savings recorded in the last 24h." />
-            <p className="border-t border-line pt-3 text-[11.5px] leading-relaxed text-mute">
-              A stage can also correctly DECLINE: 409 rows in this ledger carry <Mono>tokens_saved &gt; 0</Mono>{' '}
-              with <Mono>compression_applied = 0</Mono>. Those are cases where the rewrite was real but below the
-              profile's minimum-ratio floor, so the original shipped rather than break a cached prefix — the
-              savings are recorded as a notional on the live feed as “held N”, not counted here.
-            </p>
+            {declinedCalls > 0 && (
+              <p className="border-t border-line pt-3 text-[11.5px] leading-relaxed text-mute">
+                A stage can also correctly DECLINE: {nfmt(declinedCalls)} calls in this window carried a real
+                rewrite that was rejected — usually the profile's minimum-ratio floor, so the original shipped
+                rather than break a cached prefix. Their {formatTokens(heldNotional)} is the held figure above,
+                not a loss.
+              </p>
+            )}
           </div>
         )}
       </Panel>

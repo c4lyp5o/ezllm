@@ -24,6 +24,7 @@ export const VIZ = {
   saved: v('--color-viz-saved'),
   error: v('--color-viz-error'),
   latency: v('--color-viz-latency'),
+  budget: v('--color-viz-budget'),
 } as const;
 
 export const CAT = Array.from({ length: 8 }, (_, i) => v(`--color-viz-cat-${i + 1}`));

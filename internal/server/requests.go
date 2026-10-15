@@ -99,8 +99,16 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 
 	// Summary first: over the WHOLE matching set, so the numbers answer
 	// "how much lives behind this filter" regardless of the page size.
+	// The four compression columns are what the Compression page's savings
+	// cards read: applied = a rewrite actually shipped shorter (its tokens
+	// are real); declined = a real rewrite was RECORDED but rejected (ratio
+	// floor / fail-open) and only its notional travelled; held_notional sums
+	// those rejected would-have-saved tokens so "declined" carries a number,
+	// not a claim. applied_saved exists because SUM(tokens_saved) over ALL
+	// rows also sweeps in ~21k legacy tokens_saved sitting on declined rows.
 	var sum struct {
 		Count, Tin, Tout, Cread, Reasoning, ContextPre, ContextSaved, CompressionSaved, MaxTin, MaxTout int64
+		AppliedCalls, AppliedSaved, DeclinedCalls, HeldNotional                                         int64
 	}
 	var sargs []any
 	for _, a := range args {
@@ -111,10 +119,15 @@ SELECT COUNT(*), COALESCE(SUM(tokens_in),0), COALESCE(SUM(tokens_out),0),
        COALESCE(SUM(tokens_cached_read),0), COALESCE(SUM(reasoning_tokens),0),
        COALESCE(SUM(context_tokens_pre),0), COALESCE(SUM(context_tokens_saved),0),
        COALESCE(SUM(tokens_saved),0),
-       COALESCE(MAX(tokens_in),0), COALESCE(MAX(tokens_out),0)
+       COALESCE(MAX(tokens_in),0), COALESCE(MAX(tokens_out),0),
+       COALESCE(SUM(CASE WHEN compression_applied=1 THEN 1 ELSE 0 END),0),
+       COALESCE(SUM(CASE WHEN compression_applied=1 THEN tokens_saved ELSE 0 END),0),
+       COALESCE(SUM(CASE WHEN compression_applied=0 AND compression_saved_notional>0 THEN 1 ELSE 0 END),0),
+       COALESCE(SUM(CASE WHEN compression_applied=0 THEN compression_saved_notional ELSE 0 END),0)
 FROM calls`+where, sargs...)
 	if err := row.Scan(&sum.Count, &sum.Tin, &sum.Tout, &sum.Cread,
-		&sum.Reasoning, &sum.ContextPre, &sum.ContextSaved, &sum.CompressionSaved, &sum.MaxTin, &sum.MaxTout); err != nil {
+		&sum.Reasoning, &sum.ContextPre, &sum.ContextSaved, &sum.CompressionSaved, &sum.MaxTin, &sum.MaxTout,
+		&sum.AppliedCalls, &sum.AppliedSaved, &sum.DeclinedCalls, &sum.HeldNotional); err != nil {
 		writeErr(w, http.StatusInternalServerError, "api_error", err.Error())
 		return
 	}
@@ -132,6 +145,8 @@ FROM calls`+where, sargs...)
 			"cread": sum.Cread, "reasoning": sum.Reasoning,
 			"context_pre": sum.ContextPre, "context_saved": sum.ContextSaved,
 			"compression_saved": sum.CompressionSaved, "max_tin": sum.MaxTin, "max_tout": sum.MaxTout,
+			"applied_calls": sum.AppliedCalls, "applied_saved": sum.AppliedSaved,
+			"declined_calls": sum.DeclinedCalls, "held_notional": sum.HeldNotional,
 		},
 		"filter": map[string]any{
 			"from": from.Format(time.RFC3339), "to": to.Format(time.RFC3339),

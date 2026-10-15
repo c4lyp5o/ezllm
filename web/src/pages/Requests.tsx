@@ -199,6 +199,16 @@ export default function Requests() {
                   </td>
                   <td className="px-4 py-2 font-mono">
                     {r.model}
+                    {/* Identity under the model, same shape as the dashboard's
+                        recent-calls cell: who served it, and through which
+                        combo when it rode one. Direct routes carry no alias,
+                        so the line is provider-only there. */}
+                    {(r.account || r.alias) && (
+                      <div className="mt-0.5 truncate font-sans text-[10.5px] text-mute"
+                        title={[r.account, r.alias].filter(Boolean).join(' · ')}>
+                        {r.account}{r.alias ? ` · ${r.alias}` : ''}
+                      </div>
+                    )}
                     {/* Wire-translated hop: its in-tokens are the vendor's
                         INCLUSIVE total — read before comparing tin. */}
                     {r.translated && (

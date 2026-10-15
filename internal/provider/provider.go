@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/config"
 )
 
 // Kind selects an adapter. Adding a provider = one new Kind + one adapter file.
@@ -76,7 +78,7 @@ func UpstreamURL(baseURL string, kind Kind, path string) string {
 
 // ValidKinds lists the kinds this build can register (used by config/admin validation).
 func ValidKinds() []Kind {
-	return []Kind{KindOpenCodeGo, KindOpenAICompatible, KindAnthropicCompat, KindGeminiOpenAI}
+	return []Kind{KindOpenCodeGo, KindOpenAICompatible, KindAnthropicCompat, KindGeminiOpenAI, KindGeminiWeb}
 }
 
 // ParseKind validates a kind string.
@@ -225,13 +227,17 @@ type Registry struct {
 	m map[Kind]Adapter
 }
 
-// NewRegistry builds the default registry with all v1 adapters.
+// NewRegistry builds the default registry with all v1 adapters. The
+// gemini-web adapter is registered with the DEFAULT listen address as its
+// bridge base; callers that know their real listen address (main) re-register
+// it — Register overwrites by kind.
 func NewRegistry(client *http.Client) *Registry {
 	r := &Registry{m: make(map[Kind]Adapter)}
 	r.Register(NewOpenCodeGo(client))
 	r.Register(NewOpenAICompatible(client))
 	r.Register(NewAnthropicCompatible(client))
 	r.Register(NewGeminiOpenAI(client))
+	r.Register(NewGeminiWeb("http://"+config.DefaultListen+"/internal/geminiweb/v1", client))
 	return r
 }
 

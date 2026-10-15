@@ -144,6 +144,16 @@ LIMIT 8`, accountID, now)
 	return KeyPick{}, ErrNotFound
 }
 
+// UpdateKeyPlain replaces a provider_keys row's plaintext credential. The
+// gemini-web cookie rotator uses it to persist a rotated __Secure-1PSIDTS
+// pair; the hint must be refreshed alongside (first line of the key).
+func (d *DB) UpdateKeyPlain(ctx context.Context, keyID int64, plaintext string) error {
+	hint := KeyHint(plaintext)
+	_, err := d.w.ExecContext(ctx, `
+UPDATE provider_keys SET key_plain = ?, key_hint = ? WHERE id = ?`, plaintext, hint, keyID)
+	return err
+}
+
 // UpsertAccount inserts or updates an account, returning its id.
 func (d *DB) UpsertAccount(ctx context.Context, a provider.Account) (int64, error) {
 	if _, err := provider.ParseKind(string(a.Kind)); err != nil {

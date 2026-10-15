@@ -162,7 +162,13 @@ func New(opts Options) *Server {
 			},
 		}, opts.Registry, opts.DB)
 	}
+	// The gemini-web bridge: loopback-internal OpenAI-wire routes the
+	// gemini-web adapter rewrites hops to. Distinct patterns from the public
+	// routes, so registration order is irrelevant.
 	s.routes()
+	if opts.DB != nil {
+		newGeminiWebBridge(opts.DB, "").register(s.mux)
+	}
 	return s
 }
 

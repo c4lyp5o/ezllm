@@ -119,7 +119,26 @@ func run() error {
 
 	// ── wiring ──
 	client := upstreamClient(cfg)
+	addr := cfg.Listen
+	if env := strings.TrimSpace(os.Getenv("EZLLM_ADDR")); env != "" {
+		addr = env
+	}
+	if *addrOverride != "" {
+		addr = *addrOverride
+	}
+
 	registry := provider.NewRegistry(client)
+	// gemini-web hops are rewritten to the in-process bridge; its base is the
+	// server's own listen address (loopback always works in-process, even
+	// when the listener binds all interfaces).
+	bridgeHost := strings.TrimPrefix(addr, ":")
+	if bridgeHost == "" {
+		bridgeHost = "127.0.0.1"
+	}
+	if strings.HasPrefix(bridgeHost, ":") {
+		bridgeHost = "127.0.0.1" + bridgeHost
+	}
+	registry.Register(provider.NewGeminiWeb("http://"+bridgeHost+"/internal/geminiweb/v1", client))
 	dispatcher := proxy.NewDispatcher(client, registry)
 	dispatcher.SetRetries(cfg.Retry.Retries)
 	// Failover diagnostics go to the same logger as the request log: a hop that
@@ -210,14 +229,6 @@ func run() error {
 		CORSOrigins: nil,
 		UsageTZ:     usageTZ,
 	})
-
-	addr := cfg.Listen
-	if env := strings.TrimSpace(os.Getenv("EZLLM_ADDR")); env != "" {
-		addr = env
-	}
-	if *addrOverride != "" {
-		addr = *addrOverride
-	}
 
 	httpSrv := &http.Server{
 		Addr:              addr,

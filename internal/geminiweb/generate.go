@@ -137,7 +137,7 @@ func (c *Client) Generate(ctx context.Context, opts GenerateOptions, onDelta fun
 	for k, v := range c.modelHeadersWithTurn(*opts.Model, opts.SessionID, opts.ExtendedThinking) {
 		req.Header.Set(k, v)
 	}
-	req.Header.Set(generateRPCHeader, fmt.Sprintf(`["%s",1]`, strings.ToUpper(newUUID())))
+	req.Header.Set(generateRPCHeader, fmt.Sprintf(`["%s",1]`, strings.ToUpper(NewUUID())))
 	c.applyCookies(req)
 
 	resp, err := c.http.Do(req)
@@ -185,7 +185,7 @@ func (c *Client) buildInnerReqList(opts GenerateOptions) ([]any, error) {
 		inner[slotTemporary] = 1
 	}
 	inner[slotFiftyThree] = 0
-	inner[slotFiftyNine] = strings.ToUpper(newUUID())
+	inner[slotFiftyNine] = strings.ToUpper(NewUUID())
 	inner[slotSixtyOne] = []any{}
 	inner[slotSixtyEight] = 1
 	inner[slotSeventyNine] = opts.Model.ModelNumber
@@ -435,8 +435,8 @@ func (u *utf8Incremental) decode(chunk []byte) string {
 	return string(buf[:consumed])
 }
 
-// newUUID is a v4 uuid string (crypto-grade randomness, stdlib only).
-func newUUID() string {
+// NewUUID is a v4 uuid string (crypto-grade randomness, stdlib only).
+func NewUUID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		// Deterministic fallback should never happen; surface rather than

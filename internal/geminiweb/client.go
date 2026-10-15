@@ -106,6 +106,23 @@ func New(c cookie) *Client {
 	return &Client{base: "https://gemini.google.com", rotateURL: rotateURL, http: &http.Client{}, cookies: c}
 }
 
+// NewFromKey parses a stored credential row (the two-line cookie pair) into
+// a ready client. Call Init before use.
+func NewFromKey(key string) (*Client, error) {
+	c, err := ParseKey(key)
+	if err != nil {
+		return nil, err
+	}
+	return New(c), nil
+}
+
+// WithBase points the client at a different host (tests; a future enterprise
+// deployment may relocate the app origin). Returns the client for chaining.
+func (c *Client) WithBase(base string) *Client {
+	c.base = strings.TrimSuffix(base, "/")
+	return c
+}
+
 // Init loads the app page and scrapes the session tokens. ErrNoAccessToken
 // means the cookies did not authenticate (expired / wrong flavor) — the
 // caller's key-test path maps it to a credential failure.
@@ -147,6 +164,9 @@ func (c *Client) Init(ctx context.Context) error {
 	}
 	return nil
 }
+
+// Initialized reports whether Init has scraped the session tokens.
+func (c *Client) Initialized() bool { return c.tokens.accessToken != "" }
 
 // applyCookies attaches the credential pair to a request.
 func (c *Client) applyCookies(req *http.Request) {

@@ -84,13 +84,39 @@ a self-hosted gateway can call with a user's Copilot credential.**
 - No client-ID spoofing (`vscode-chat` etc.): explicitly off the table per Calypso's
   standing rule. The undocumented endpoint path is off the table with it.
 
-## Decision (pending Calypso)
+## UPDATE 2026-10-16 (later same day) — omniroute's production implementation works
 
-Options on record:
-- **A. Build the Copilot SDK integration** as a separate executor type (device-flow
-  OAuth for `gho_` token, agent-run semantics, event→SSE adapter). Officially
-  supported and stable; substantial scope; different abstraction.
-- **B. Park GitHub Copilot** — this doc is the evidence record; revisit if/when
-  GitHub documents a public completions API.
+Calypso pointed at omniroute (`diegosouzapw/omniroute:latest`), whose GitHub
+provider has been **running in production** (verified live 2026-10-02 with
+`gpt-6-luna` serving; see the omniroute skill). Its implementation (executors
+`github.ts`, extracted from the image 2026-10-16) resolves the apparent
+contradiction — the restricted tier applies to *custom third-party OAuth apps*,
+not to the **official public Copilot CLI client ID used with `scope=read:user`
+via device flow**, which is precisely what the official CLI itself does:
 
-Recorded 2026-10-16. Evidence-only doc; no code was written for this path.
+- client_id = the public Copilot CLI client ID (`Iv1.b507a08c87ecfe98`,
+  publicly cited in GitHub Community #188413), **not** a custom app
+  registration (that is what 403'd our parked experiment).
+- device flow: `POST https://github.com/login/device/code` (client_id, scope
+  `read:user`) → `POST https://github.com/login/oauth/access_token`
+  (client_id, device_code, grant_type `urn:ietf:params:oauth:grant-type:device_code`).
+- Copilot token mint: `GET https://api.github.com/copilot_internal/v2/token`
+  with `Authorization: token <gh_access_token>` (NOT bearer) → `{token,
+  expires_at}`.
+- Inference base: `https://api.githubcopilot.com` with the CLI header set
+  (Editor-Version `copilot/<cli>`, Copilot-Integration-Id `copilot-developer-cli`,
+  Copilot-Harness-Id `copilot-sdk`, X-GitHub-Api-Version 2026-08-01, …
+  full set captured in docs/github-copilot-design.md).
+- Model routing: claude* → `/v1/messages` (native shim), `*codex*` /
+  openai-responses → `/responses`, default → `/chat/completions`.
+
+Verdict unchanged for *custom third-party apps*; **operationally viable for
+the official CLI identity + read:user scope**, which is the path ezllm now
+implements (M13, docs/github-copilot-design.md). The undocumented-endpoint
+risk stands; accepted by Calypso 2026-10-16: "I understand the risk and we
+must move forward."
+
+Decision (updated): **BUILD — Copilot via public CLI client ID + device flow
++ copilot_internal token mint**, ported from omniroute's production
+implementation. No custom OAuth app, no client-ID spoofing, no
+`vscode-chat`-style header forgery beyond the public CLI's own identity.

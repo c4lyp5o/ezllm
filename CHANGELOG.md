@@ -1,6 +1,45 @@
 # Changelog
 
-Notable changes, reverse-chronological. Milestone-tagged (M1–M13); full history via `git log`.
+Notable changes, reverse-chronological. Milestone-tagged (M1–M14); full history via `git log`.
+
+## 2026-10-16 — M14 claude-web provider: claude.ai web protocol ✅
+Claude.ai's web app (sessionKey cookie + SSE completion) as a provider,
+ported from omniroute's production implementation (design:
+`docs/claude-web-design.md`, runbook: `docs/claude-web-runbook.md`).
+- `internal/claudeweb/tlsclient.go` — uTLS Chrome-146 impersonation
+  (`HelloChrome_Auto`, h2 dialer) behind an injectable Fetcher (tests run
+  plain HTTP; one test runs the REAL profile against a local h2 TLS server).
+  New dependency: refraction-networking/utls v1.8.2 — Go's native TLS
+  fingerprint is rejected by claude.ai's Cloudflare.
+- `internal/claudeweb/client.go` — sessionKey normalization (CR/LF
+  injection rejected), org discovery via GET /api/organizations (the
+  zero-quota key-test oracle), the conversation state machine ported from
+  the compiled reference: the conversation UUID is CLIENT-generated and
+  rides the URL path; follow-ups chain conversation_id +
+  parent_message_uuid in turn_message_uuids with a fresh assistant uuid;
+  state commits ONLY after message_stop (a cut stream commits nothing).
+  Payload parity: opus-5 → high/auto effort, effort vocab
+  low|medium|high|xhigh|max, the Default personalized_styles block verbatim,
+  create_conversation_params on the first turn, Anthropic-native tool shape
+  {name, description, input_schema}. Typed failures: ErrSessionExpired
+  (401), ErrCloudflareChallenge (403 + markers), ErrForbidden,
+  ErrRateLimited, ErrUnavailable; upstream error events surface; a 401
+  mid-stream classifies before the generic stream-cut error.
+- `internal/provider/claudeweb.go` + `internal/server/claudeweb_bridge.go`
+  — kind `claude-web`, sentinel base `internal://claudeweb` rewritten to the
+  in-process bridge (the web SSE is not an ezllm wire), account-id +
+  credential stamped in loopback headers and stripped, bridge routes
+  /chat/completions (stream + non-stream, history flattening, typed
+  refusal for response_format, tools passed through natively) and /models
+  (org-discovery auth oracle + the bootstrap catalog). NO model discovery
+  exists on this surface: ids pass through, the upstream answer is
+  authoritative; the curated set only seeds routing.
+- Tests: 11 client tests (cookie forms, the five failure modes, first-turn
+  payload parity, follow-up chaining, no-commit-on-cut, error events,
+  401-mid-stream, header set, real TLS handshake) + 9 bridge tests + 3
+  adapter tests. Bite-proofs: core commit-on-cut, parent chaining,
+  challenge detection; bridge ErrForbidden→403 mapping, response_format
+  refusal, the removed model gate. Full suite green, -race green.
 
 ## 2026-10-16 — M13 github-copilot provider: official CLI device flow ✅
 GitHub Copilot as a provider, ported from omniroute's production

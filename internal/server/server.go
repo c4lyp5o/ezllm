@@ -168,6 +168,7 @@ func New(opts Options) *Server {
 	s.routes()
 	if opts.DB != nil {
 		newGeminiWebBridge(opts.DB, "").register(s.mux)
+		newClaudeWebBridge(opts.DB, nil).register(s.mux)
 	}
 	return s
 }

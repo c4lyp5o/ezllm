@@ -189,11 +189,11 @@ func (c *Client) Generate(ctx context.Context, opts GenerateOptions, onDelta fun
 		return GenerateResult{}, err
 	}
 
-	assistant := newUUID()
+	assistant := NewUUID()
 	newConversation := c.convID == ""
 	if newConversation {
-		c.convID = newUUID() // client-generated; the URL path carries it
-		c.humanUUID = newUUID()
+		c.convID = NewUUID() // client-generated; the URL path carries it
+		c.humanUUID = NewUUID()
 	}
 	res := GenerateResult{ConvID: c.convID, AssistUUID: assistant, HumanUUID: c.humanUUID}
 
@@ -365,7 +365,8 @@ func consumeSSE(body io.Reader, onDelta func(string), snippet *[]byte) (string, 
 	return text.String(), false, nil
 }
 
-func newUUID() string {
+// NewUUID is a v4 uuid string (crypto-grade randomness, stdlib only).
+func NewUUID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		panic("claudeweb: crypto/rand unavailable: " + err.Error())

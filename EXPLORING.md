@@ -452,3 +452,23 @@ These are the "if it's broken here, the project failed" spots — each must be v
   the device flow works end-to-end with a dedicated OAuth app, but GitHub answers the
   `copilot_internal/v2/token` exchange with `403` (ToS) for third-party apps. Not circumvented —
   no spoofing or borrowed client IDs. See the vault note in `Projects/ezllm.md`.
+
+### M14 — claude-web provider ✅ (2026-10-16; design `docs/claude-web-design.md`, runbook `docs/claude-web-runbook.md`)
+- `internal/claudeweb/` — the ported protocol. `tlsclient.go` (uTLS
+  Chrome-146 via `HelloChrome_Auto` behind an injectable Fetcher — Go's
+  native TLS dies at claude.ai's Cloudflare; the REAL handshake runs green
+  in-test against a local h2 server), `client.go` (sessionKey
+  normalization, org discovery = the zero-quota key oracle, the conversation
+  state machine: client-generated conv uuid in the URL path,
+  conversation_id + parent_message_uuid chaining, commit only after
+  message_stop, payload parity incl. opus-5 → high/auto + the styles block,
+  typed failures: expired / challenge / forbidden / rate / cut).
+- Non-ezllm wire → loopback bridge pattern, same as gemini-web:
+  `internal/server/claudeweb_bridge.go` at `/internal/claudeweb/v1`
+  (stream + non-stream, history flattening, tools pass through, typed
+  refusal for response_format), adapter `internal/provider/claudeweb.go`
+  with the sentinel base `internal://claudeweb`.
+- NO model discovery on this surface (unlike copilot/gemini): the curated
+  set only seeds routing, ids pass through, the upstream answer is the
+  entitlement truth. The bootstrap catalog is documented as ids, not
+  guarantees.

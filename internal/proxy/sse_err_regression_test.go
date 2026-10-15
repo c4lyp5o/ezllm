@@ -46,7 +46,7 @@ func TestSSEErrorStreamRecordsLedgerErr(t *testing.T) {
 	res := Result{Status: http.StatusTooManyRequests, Stream: true}
 
 	req, _ := reqWithBody(`{"model":"m","stream":true,"messages":[]}`)
-	resp, _, _, err := d.attempt(context.Background(), req, rt, []byte(`{"model":"m","stream":true,"messages":[]}`))
+	resp, _, _, err := d.attempt(context.Background(), req, rt, []byte(`{"model":"m","stream":true,"messages":[]}`), nil)
 	if err != nil {
 		t.Fatalf("attempt: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestSSE200WithErrorEnvelopeRecordsLedgerErr(t *testing.T) {
 
 	res := Result{Status: http.StatusOK, Stream: true}
 	req, _ := reqWithBody(`{"model":"m","stream":true,"messages":[]}`)
-	resp, _, _, err := d.attempt(context.Background(), req, rt, []byte(`{"model":"m","stream":true,"messages":[]}`))
+	resp, _, _, err := d.attempt(context.Background(), req, rt, []byte(`{"model":"m","stream":true,"messages":[]}`), nil)
 	if err != nil {
 		t.Fatalf("attempt: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestSSECleanStreamKeepsBlankErr(t *testing.T) {
 
 	res := Result{Status: http.StatusOK, Stream: true}
 	req, _ := reqWithBody(`{"model":"m","stream":true,"messages":[]}`)
-	resp, _, _, err := d.attempt(context.Background(), req, rt, []byte(`{"model":"m","stream":true,"messages":[]}`))
+	resp, _, _, err := d.attempt(context.Background(), req, rt, []byte(`{"model":"m","stream":true,"messages":[]}`), nil)
 	if err != nil {
 		t.Fatalf("attempt: %v", err)
 	}

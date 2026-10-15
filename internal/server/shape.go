@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/c4lyp5o/ezllm/internal/jsonbody"
 	"github.com/c4lyp5o/ezllm/internal/provider"
 )
 
@@ -45,18 +46,34 @@ type shape struct {
 // record byte size but leave the prefix empty (unknown), never fail the request.
 const maxShapeBody = 8 << 20 // 8 MiB
 
-// captureShape parses the body we are about to send upstream and derives the
-// stable-prefix hash plus counters. It is best-effort by contract: any parse
-// problem yields the zero shape (prefix ""), because a failed attribution must
-// never affect whether the inference happens.
+// captureShape is the byte-entry form: it decodes the body and delegates.
+// captureShapeDoc is the single-parse form the request path uses.
 func captureShape(body []byte, surface provider.Surface) shape {
-	s := shape{ReqBytes: len(body)}
-	if len(body) == 0 || len(body) > maxShapeBody {
+	return captureShapeDoc(jsonbody.Open(body), surface)
+}
+
+// captureShapeDoc parses the body we are about to send upstream and derives
+// the stable-prefix hash plus counters. It is best-effort by contract: any
+// parse problem yields the zero shape (prefix ""), because a failed
+// attribution must never affect whether the inference happens.
+//
+// Numbers: the shared doc decodes with UseNumber, so the hash sees the JSON
+// LITERAL (JSON `1e10` hashes as `1e10`, a 20-digit id keeps exact digits)
+// where the old byte path decoded to float64 (`1e+10`). Literal sensitivity is
+// the correct semantics for a CACHE-BREAK detector — a provider tokenizes
+// `1e10` and `10000000000` differently, so their effective prefixes differ and
+// the hash must say so. Documented in docs/single-parse-dispatch-design.md.
+func captureShapeDoc(doc *jsonbody.BodyDoc, surface provider.Surface) shape {
+	s := shape{ReqBytes: len(doc.Bytes())}
+	if len(doc.Bytes()) == 0 || len(doc.Bytes()) > maxShapeBody {
 		return s
 	}
-	var root map[string]any
-	if err := json.Unmarshal(body, &root); err != nil {
+	if doc.Err() != nil {
 		return s // not a JSON object — no shape to attribute
+	}
+	root := doc.Map()
+	if root == nil {
+		return s // a literal `null` body
 	}
 
 	prefix := map[string]any{}

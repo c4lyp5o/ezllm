@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/c4lyp5o/ezllm/internal/jsonbody"
 )
 
 // Stage is one entry of a profile's ordered pipeline:
@@ -71,6 +73,15 @@ func EstimateTokens(s string) int64 {
 // Apply runs the profile's pipeline over a chat-completions body.
 // body is returned unchanged on every skip/fail path.
 func Apply(body []byte, p *Profile) ([]byte, Result) {
+	return ApplyWithDoc(body, p, nil)
+}
+
+// ApplyWithDoc is Apply with the request's single-parse decode threaded
+// through (docs/single-parse-dispatch-design.md): when doc is non-nil its
+// map(root) replaces the internal decode — same UseNumber settings, same
+// fail-open decisions — so the body is not parsed a second time. doc must be
+// the decode of `body`; a nil doc decodes internally as before.
+func ApplyWithDoc(body []byte, p *Profile, doc *jsonbody.BodyDoc) ([]byte, Result) {
 	start := time.Now()
 	res := Result{Profile: p.Name}
 	defer func() { res.MS = time.Since(start).Milliseconds() }()
@@ -82,12 +93,28 @@ func Apply(body []byte, p *Profile) ([]byte, Result) {
 	// Chat-completions shape only (M5): anything without a messages array
 	// (/v1/responses input shape, anthropic blocks at top level, ...) passes
 	// through untouched with the profile truth recorded.
+	// Single-parse: the request's shared decode is the root map (read-only
+	// here — engines work on the messages slice copy), so this is where the
+	// per-request body parse disappears when doc is provided. Identical
+	// semantics to the decode below: UseNumber + non-object refusal.
 	var root map[string]any
-	dec := json.NewDecoder(bytes.NewReader(body))
-	dec.UseNumber()
-	if err := dec.Decode(&root); err != nil || root == nil {
-		res.Err = "body is not a JSON object"
-		return body, res
+	if doc != nil {
+		if doc.Err() != nil {
+			res.Err = "body is not a JSON object"
+			return body, res
+		}
+		root = doc.Map()
+		if root == nil {
+			res.Err = "body is not a JSON object"
+			return body, res
+		}
+	} else {
+		dec := json.NewDecoder(bytes.NewReader(body))
+		dec.UseNumber()
+		if err := dec.Decode(&root); err != nil || root == nil {
+			res.Err = "body is not a JSON object"
+			return body, res
+		}
 	}
 	rawMsgs, ok := root["messages"].([]any)
 	if !ok || len(rawMsgs) == 0 {

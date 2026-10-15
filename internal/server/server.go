@@ -24,6 +24,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/c4lyp5o/ezllm/internal/jsonbody"
 	"github.com/c4lyp5o/ezllm/internal/provider"
 	"github.com/c4lyp5o/ezllm/internal/proxy"
 	"github.com/c4lyp5o/ezllm/internal/registration"
@@ -471,7 +472,14 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			return
 		}
 
-		requested, err := extractModel(body)
+		// Single-parse dispatch (docs/single-parse-dispatch-design.md): one
+		// decode of the client body serves model extraction, compression,
+		// shape capture and every hop's model swap. Decode problems are not
+		// checked here — each consumer keeps its own documented decision
+		// (extractModel answers 400 for them, exactly as before).
+		doc := jsonbody.Open(body)
+
+		requested, err := extractModelDoc(doc)
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 			return
@@ -558,22 +566,31 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 
 		// Compression (M5): resolve the profile (header → combo), run the
 		// pipeline ONCE over the body — every candidate then receives the
-		// same compressed body, because hops only swap `model`.
-		body, compRes := s.applyCompression(r, requested, body)
+		// same compressed body, because hops only swap `model`. The shared
+		// doc is threaded through so the pipeline reuses the one decode
+		// (older code parsed the body again here).
+		body, compRes := s.applyCompression(r, requested, body, doc)
+		// A shipped rewrite produces NEW bytes, so the shared decode no
+		// longer describes them: re-open on that path only (compression
+		// almost always declines on hot prefixes, so the extra decode is the
+		// rare case). Equal bytes — the normal path — keep the doc.
+		if !bytes.Equal(body, doc.Bytes()) {
+			doc = jsonbody.Open(body)
+		}
 
 		// v8 (M9): shape capture for cacheability research. Runs AFTER
 		// compression so the hash describes what actually goes upstream —
 		// if a profile rewrites history, that IS a cache break and must
 		// measure as one. Best-effort: a failed parse records nothing and
 		// changes nothing about the request.
-		sh := captureShape(body, surface)
+		sh := captureShapeDoc(doc, surface)
 
 		// served is the route that ACTUALLY committed a response — it may be
 		// hop 2 or 3 after failover. Every ledger field below (account, key,
 		// model) must describe that hop: crediting routes[0] would bill a
 		// failed hop for work it did not do, which is exactly the number a
 		// per-account usage cap would later be measured against.
-		served, res, ferr := s.dispatcher.ForwardCandidates(r.Context(), w, r, routes, body)
+		served, res, ferr := s.dispatcher.ForwardCandidatesDoc(r.Context(), w, r, routes, body, doc)
 		if served.Alias == "" {
 			// Resolution or swap failed before any hop committed: the ledger
 			// still needs the REQUESTED target, or the row lands with no alias
@@ -1266,14 +1283,19 @@ func (s *Server) resolveServiceRequestModel(w http.ResponseWriter, r *http.Reque
 // extractModel reads the requested model without disturbing any other field.
 // An absent/empty model returns ("", nil): the handler decides per surface
 // whether that is a required-model refusal or a service-default lookup.
+// Byte form: decodes then delegates; the request path uses extractModelDoc on
+// the shared single-parse decode (docs/single-parse-dispatch-design.md).
 func extractModel(body []byte) (string, error) {
-	var m struct {
-		Model string `json:"model"`
-	}
-	if err := json.Unmarshal(body, &m); err != nil {
-		return "", errors.New("body is not a JSON object")
-	}
-	return strings.TrimSpace(m.Model), nil
+	return extractModelDoc(jsonbody.Open(body))
+}
+
+// extractModelDoc is extractModel over the request's shared decode. Parity
+// with the old struct decode is exact: absent or null -> ("", nil); a string
+// -> trimmed; a non-string value or any decode problem -> "body is not a JSON
+// object" (the old Unmarshal wrapped every failure into that one string).
+func extractModelDoc(doc *jsonbody.BodyDoc) (string, error) {
+	model, _, err := doc.Model()
+	return model, err
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

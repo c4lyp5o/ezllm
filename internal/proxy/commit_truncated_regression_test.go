@@ -73,7 +73,7 @@ func TestNonStreamBodyReadFailureLeavesCommittedFalse(t *testing.T) {
 	req, _ := reqWithBody(string(body))
 
 	// Reach the upstream the way commit() does, so the response object is real.
-	resp, res, start, err := d.attempt(context.Background(), req, rt, body)
+	resp, res, start, err := d.attempt(context.Background(), req, rt, body, nil)
 	if err != nil {
 		t.Fatalf("attempt: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestCommitSetsCommittedOnSuccess(t *testing.T) {
 	body := []byte(`{"model":"m","stream":false,"messages":[{"role":"user","content":"hi"}]}`)
 	req, _ := reqWithBody(string(body))
 
-	resp, res, start, err := d.attempt(context.Background(), req, rt, body)
+	resp, res, start, err := d.attempt(context.Background(), req, rt, body, nil)
 	if err != nil {
 		t.Fatalf("attempt: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestCommitSetsCommittedOnEmptyBody(t *testing.T) {
 	body := []byte(`{"model":"m","stream":false,"messages":[{"role":"user","content":"hi"}]}`)
 	req, _ := reqWithBody(string(body))
 
-	resp, res, start, err := d.attempt(context.Background(), req, rt, body)
+	resp, res, start, err := d.attempt(context.Background(), req, rt, body, nil)
 	if err != nil {
 		t.Fatalf("attempt: %v", err)
 	}

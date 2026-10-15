@@ -292,6 +292,30 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
   them like native hops, and a translated success/failure feeds the strategy the same way.
   Earlier revisions parked them outside the strategy ordering; do not reintroduce that tail.
 
+### M10 — single-parse dispatch (OPT-1) ✅ (2026-10-15, measured; design `docs/single-parse-dispatch-design.md`)
+- **The problem was 5 full JSON decodes per request**: `extractModel`
+  (`server.go:474`), `IsStream` (`proxy.go`, per attempt), `SwapModel`
+  (`proxy.go:637`, per hop), `compress.Apply` (`compress.go:73`),
+  `captureShape` (`shape.go:52`). The fix: `internal/jsonbody/jsonbody.go`
+  `BodyDoc` — one decode (map + `UseNumber` + trailing-garbage check),
+  opened once in `inference()` and threaded as an **optional hint**:
+  `ForwardCandidatesDoc`, `prepareHopBody(body, rt, doc)`,
+  `ApplyWithDoc`, `captureShapeDoc`. Every legacy call site passes nil and
+  keeps the exact old path — the whole pre-existing suite proves it.
+- `WithModel` is the hop swap on the shared map; it is byte-identical to the
+  old `SwapModel` by test (7 fixture classes) and by two bites (UseNumber
+  drop mangles `12345678901234567890`; assignment drop sends `"model":null`).
+- Measured: e2e −25% @1 MiB seq (−10…−16% parallel), −13.7% stream par16
+  @64 KiB; the isolated `InspectAndRoute` bench gets HEAVIER (one full map
+  decode where the old struct decode skipped the messages array) — request
+  level decides, phase-2 label is about inspection alone.
+- `prefix_sha` now sees number literals verbatim (`json.Number`): `1e10` ≠
+  `10000000000` in the hash. Intended (documented in the design doc §parity).
+- Behavioral parity to re-check after any edit here: `extractModel`
+  absent/null → ("", nil), non-string model → `400 "body is not a JSON
+  object"`; `IsStream` only a real `true`; trailing garbage rejected at
+  Open (the old per-site decoders rejected it too).
+
 ## 5. Invariants to check while reading (review checklist)
 
 These are the "if it's broken here, the project failed" spots — each must be visibly true in code:

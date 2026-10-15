@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/c4lyp5o/ezllm/internal/compress"
+	"github.com/c4lyp5o/ezllm/internal/jsonbody"
 	"github.com/c4lyp5o/ezllm/internal/store"
 )
 
@@ -87,12 +88,12 @@ func profileName(prof *store.CompressionProfile, skipReason string) string {
 	return skipReason
 }
 
-func (s *Server) applyCompression(r *http.Request, requested string, body []byte) ([]byte, compress.Result) {
+func (s *Server) applyCompression(r *http.Request, requested string, body []byte, doc *jsonbody.BodyDoc) ([]byte, compress.Result) {
 	prof, skip := s.compressionFor(r, requested)
 	if prof == nil {
 		return body, compress.Result{Profile: profileName(nil, skip)}
 	}
-	out, res := compress.Apply(body, compressProfileToRuntime(prof))
+	out, res := compress.ApplyWithDoc(body, compressProfileToRuntime(prof), doc)
 	return out, res
 }
 

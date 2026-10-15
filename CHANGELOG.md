@@ -1,6 +1,33 @@
 # Changelog
 
-Notable changes, reverse-chronological. Milestone-tagged (M1–M9); full history via `git log`.
+Notable changes, reverse-chronological. Milestone-tagged (M1–M10); full history via `git log`.
+
+## 2026-10-15 — single-parse dispatch (M10, perf)
+- `perf(proxy,server,compress)` the request body was JSON-decoded up to **5×**
+  per request (`extractModel`, `IsStream` per attempt, `SwapModel` per hop,
+  `compress.Apply`, `captureShape`). Now: **one decode** — new
+  `internal/jsonbody.BodyDoc` (map + `UseNumber`, trailing-garbage rejection),
+  opened once in `inference()` and threaded through compression, shape capture
+  and every native hop's model swap (`ForwardCandidatesDoc`,
+  `prepareHopBody(body, rt, doc)`). Translation legs, multipart STT and admin
+  combo-test keep the byte path — `doc` is an optional hint with a legacy
+  fallback (no flag; byte-equality tests are the rollback proof).
+- Measured (same box as M1 baseline): e2e **−25.0%** non-stream / **−26.1%**
+  stream at 1 MiB seq, −10…−16% par4/par16, −13.7% stream par16 at 64 KiB;
+  e2e allocs ~748→~690/op. Honest negative: `InspectAndRoute` in ISOLATION
+  got heavier (the one shared parse is a full map decode where the old
+  single-field struct decode skipped the messages array) — the request-level
+  metric is the one that counts. All numbers + the two bite proofs in
+  `docs/single-parse-dispatch-design.md`.
+- `prefix_sha` now sees JSON number literals verbatim (`1e10` and
+  `10000000000` hash differently, big ids keep exact digits) instead of
+  collapsing through float64 — correct for a cache-BREAK detector; documented.
+- Verified: full `go test ./...` green with zero edits to existing call
+  shapes (doc=nil path exercised by the entire old suite), byte-equality
+  tests vs legacy `SwapModel` on 7 fixture classes (unknown fields, big ints,
+  unicode, nested tools, dup keys), stream-flag parity, captureShape parity,
+  two bite proofs (UseNumber drop → mangled big int; model-assignment drop →
+  upstream sees `"model":null`), gofmt/vet/build/race green.
 
 ## 2026-10-13 — chat searchable model picker + per-model Test in the providers drawer
 - `feat(web)` chat model `<select>` → **searchable combobox**: typing filters by model id

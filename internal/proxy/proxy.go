@@ -26,6 +26,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/c4lyp5o/ezllm/internal/jsonbody"
 	"github.com/c4lyp5o/ezllm/internal/provider"
 	"github.com/c4lyp5o/ezllm/internal/ratelimit"
 	"github.com/c4lyp5o/ezllm/internal/store"
@@ -756,7 +757,7 @@ func swapModelMultipart(body []byte, newModel string) ([]byte, error) {
 // value attempt dials and commit unwraps — so a hop can never be dialed on one
 // wire while its body is encoded for another. Translation REPLACES the swap:
 // it rewrites the whole wire shape, model included, so the paths never compose.
-func prepareHopBody(body []byte, rt Route) ([]byte, error) {
+func prepareHopBody(body []byte, rt Route, doc *jsonbody.BodyDoc) ([]byte, error) {
 	// Multipart (audio STT): the model lives in a form field, not a JSON key,
 	// and SwapModel is JSON-only. Rebuild the multipart body with the model
 	// field swapped; everything else (the audio file part) passes through
@@ -786,7 +787,13 @@ func prepareHopBody(body []byte, rt Route) ([]byte, error) {
 		// cannot read it.
 		return nil, fmt.Errorf("proxy: no request converter for %s client on the %s wire", rt.Surface, wire)
 	}
-	// Native: same shape on both ends, only the model id is swapped.
+	// Native: same shape on both ends, only the model id is swapped. When the
+	// caller already decoded the body once (single-parse dispatch), mutate
+	// that shared map instead of decoding again; a nil doc falls back to the
+	// legacy self-contained decode. Both paths emit byte-identical bodies.
+	if doc != nil {
+		return doc.WithModel(rt.Model)
+	}
 	swapped, _, err := SwapModel(body, rt.Model)
 	return swapped, err
 }
@@ -836,7 +843,7 @@ func streamOutcomeFrom(sr *translate.StreamReader) string {
 // until WriteHeader fires, and WriteHeader is what makes the status
 // irrevocable. Keeping the two phases apart is what lets us try hop 2 after
 // hop 1 answers 429 — see ForwardCandidates.
-func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, body []byte) (*http.Response, Result, time.Time, error) {
+func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, body []byte, doc *jsonbody.BodyDoc) (*http.Response, Result, time.Time, error) {
 	ad, err := d.registry.Get(rt.Account.Kind)
 	if err != nil {
 		return nil, Result{}, time.Time{}, err
@@ -867,15 +874,25 @@ func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, bod
 	}
 	upReq.Header.Set("Content-Type", contentType)
 
+	// Single-parse dispatch: the client's streaming flag was decoded once per
+	// REQUEST (jsonbody), and every hop body — swapped or translated —
+	// preserves it, so the request-level flag answers for every attempt
+	// without re-deriving it per hop. A nil doc (legacy callers) falls back to
+	// the old per-attempt parse.
+	stream := IsStream(body)
+	if doc != nil {
+		stream = doc.Stream()
+	}
+
 	start := time.Now()
 	resp, err := d.client.Do(upReq)
 	if err != nil {
-		return nil, Result{Stream: IsStream(body), Totalms: msPtr(time.Since(start)), Err: err.Error()}, time.Time{}, err
+		return nil, Result{Stream: stream, Totalms: msPtr(time.Since(start)), Err: err.Error()}, time.Time{}, err
 	}
 
 	res := Result{
 		Status:        resp.StatusCode,
-		Stream:        IsStream(body),
+		Stream:        stream,
 		EndpointID:    resp.Header.Get("x-opencode-endpoint-id"),
 		UpstreamModel: resp.Header.Get("x-opencode-upstream-model-id"),
 	}
@@ -1141,14 +1158,14 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 // response to w. It returns the ledger Result. Single-candidate form: nothing
 // to fail over to, so attempt and commit happen back to back.
 func (d *Dispatcher) Forward(ctx context.Context, w http.ResponseWriter, r *http.Request, rt Route, body []byte) (Result, error) {
-	resp, res, start, err := d.retryAttempt(ctx, r, rt, body)
+	resp, res, start, err := d.retryAttempt(ctx, r, rt, body, nil)
 	if err != nil {
 		return res, err
 	}
 	return d.commit(ctx, w, resp, rt, res, start)
 }
 
-func (d *Dispatcher) retryAttempt(ctx context.Context, r *http.Request, rt Route, body []byte) (*http.Response, Result, time.Time, error) {
+func (d *Dispatcher) retryAttempt(ctx context.Context, r *http.Request, rt Route, body []byte, doc *jsonbody.BodyDoc) (*http.Response, Result, time.Time, error) {
 	maxAttempts := d.retryAttempts + 1
 	if maxAttempts < 1 {
 		maxAttempts = 1
@@ -1157,7 +1174,7 @@ func (d *Dispatcher) retryAttempt(ctx context.Context, r *http.Request, rt Route
 	var lastResult Result
 	var lastStart time.Time
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		resp, result, start, err := d.attempt(ctx, r, rt, body)
+		resp, result, start, err := d.attempt(ctx, r, rt, body, doc)
 		lastResp, lastResult, lastStart = resp, result, start
 		// A non-retryable answer is FINAL, whatever its status — including 429,
 		// which is a failover signal rather than a worth-another-try one. Every
@@ -1249,7 +1266,17 @@ func drainClose(resp *http.Response) {
 // Failover-able responses stay buffered until a later candidate succeeds; if
 // every eligible route fails, the last real upstream error is committed. Routes
 // still cooling down are never called merely to manufacture a final response.
+//
+// doc is the optional single-parse decode of body (docs/single-parse-dispatch-
+// design.md): when non-nil, every hop's model swap reuses that one decode.
+// Legacy callers pass nil and get the unchanged per-hop decode path.
 func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWriter, r *http.Request, routes []Route, body []byte) (Route, Result, error) {
+	return d.ForwardCandidatesDoc(ctx, w, r, routes, body, nil)
+}
+
+// ForwardCandidatesDoc is ForwardCandidates with the request body's shared
+// decode threaded through. See ForwardCandidates for the failover contract.
+func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWriter, r *http.Request, routes []Route, body []byte, doc *jsonbody.BodyDoc) (Route, Result, error) {
 	if len(routes) == 0 {
 		return Route{}, Result{}, errors.New("proxy: no candidate routes")
 	}
@@ -1315,14 +1342,14 @@ func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWrite
 		// the final response fallback. This preserves an actual upstream error
 		// without making an extra request that circumvents cooldown.
 		// A sole eligible endpoint is attempted normally below.
-		swapped, err := prepareHopBody(body, rt)
+		swapped, err := prepareHopBody(body, rt, doc)
 		if err != nil {
 			if probe {
 				d.releaseProbe(rt)
 			}
 			return Route{}, Result{}, err
 		}
-		resp, res, start, err := d.retryAttempt(ctx, r, rt, swapped)
+		resp, res, start, err := d.retryAttempt(ctx, r, rt, swapped, doc)
 		// Park the hop only when there is somewhere else to go. len(routes) is
 		// the full candidate list the router resolved; a single entry means a
 		// cooled hop has no alternate, and classifyHop declines to park a rate

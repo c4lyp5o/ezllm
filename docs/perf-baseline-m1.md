@@ -1,5 +1,11 @@
 # ezllm Performance & Correctness Baseline — Milestone 1 (Task 01)
 
+> **Superseded in part (2026-10-15):** the request body is now decoded exactly
+> once per request (single-parse dispatch, `internal/jsonbody`, see
+> `docs/single-parse-dispatch-design.md`). Every number below predates that
+> change; measured after-deltas live in the design doc's results section and
+> the CHANGELOG. `EXPLORING.md`'s flow map (parse sites) is updated too.
+
 Date: 2026-10-15 (+08). Status: measured, all gates green.
 Scope per task brief: measurement foundation only — no model-visible behavior
 changed, no production `.go` file modified (the diff is test files, `benchutil`,

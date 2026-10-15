@@ -1,6 +1,44 @@
 # Changelog
 
-Notable changes, reverse-chronological. Milestone-tagged (M1–M11); full history via `git log`.
+Notable changes, reverse-chronological. Milestone-tagged (M1–M12); full history via `git log`.
+
+## 2026-10-16 — M12 gemini-web provider: cookie auth, oracle, streaming, bridge ✅
+The full Gemini **web** protocol as a router provider, ported slot-for-slot
+from the reverse-engineered reference (digest: `~/workspace/gemini-web-api-protocol-digest.md`,
+design: `docs/gemini-web-design.md`, runbook: `docs/gemini-web-runbook.md`).
+Unofficial surface; risk posture accepted by Calypso: cookie material = live
+account access, test accounts, no fallback, typed refusals.
+- `internal/geminiweb/` — protocol package:
+  - `frame.go` — wrb.fr incremental parser (length-prefixed UTF-16-unit
+    frames, boundaries at any byte incl. mid-rune). Its own tests caught a
+    units-rescan desync across Feeds (fixed with a `scanned` offset) and
+    pinned two fixture traps (raw-string `\n`, wrong unit counts).
+  - `client.go` — cookie-pair credentials (PSID required, PSIDTS optional),
+    `/app` scrape of the five session tokens, `RotateCookies` (PSIDTS rotates
+    ~10 min); expired cookies = the distinct `ErrNoAccessToken`.
+  - `rpc.go` — batchexecute + `GET_USER_STATUS`: zero-quota auth verdict
+    (AccountStatus 1000/1016/…/1060) AND model catalog from one call.
+    Catalog ported index-for-index (capacity tiers Plus 4/12 > Pro > Free
+    1/12, model-header build incl. the `gemini-gemini-flash` alias quirk).
+  - `generate.go` — `StreamGenerate` request construction (81-slot
+    inner_req_list, model-header per-turn mutation) + incremental response
+    parse (error code → typed `ErrUpstream` 1013/1037/1050/1052/1060,
+    metadata [cid,rid], candidates text@[1][0] with artifact cleanup,
+    thoughts@[37][0][0], completion@[8][0]==2, final chunk@[25]) and
+    appended-tail delta emission with an incremental UTF-8 decoder
+    (`utf8.FullRune` tail test). Tests caught a real double-encode bug
+    (`json.RawMessage` inlining where the wire wants a JSON *string*) and a
+    final-chunk-before-candidates ordering bug.
+- Wiring: kind `gemini-web` + adapter (sentinel base `internal://geminiweb`
+  rewritten to the bridge, account+key stamping so bad-key calibration
+  exercises the real path, Authorization dropped) + in-process OpenAI-wire
+  bridge (`POST /internal/geminiweb/v1/chat/completions`, `GET /models` as
+  the auth oracle) + per-account client cache + rotator (8-min cadence)
+  persisting via the new `store.UpdateKeyPlain` + typed refusals above the
+  package (tools/response_format) + upstream-status→HTTP mapping.
+- All mock-proven (29 protocol tests + 4 adapter + 7 bridge-through-sqlite +
+  1 store), bite-proven, gates green, `-race` green on touched packages.
+  Live cookie proof is operator-gated (runbook).
 
 ## 2026-10-15 — M11 gap closure: 1 MiB percentiles, fuzz moat, cancel-latency certificate
 - **1 MiB latency percentiles** (`TestLatencyPercentiles`, n=2000, seq):

@@ -316,6 +316,24 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
   object"`; `IsStream` only a real `true`; trailing garbage rejected at
   Open (the old per-site decoders rejected it too).
 
+### M12 — gemini-web provider ✅ (2026-10-16, code complete, mock-proven; design `docs/gemini-web-design.md`, runbook `docs/gemini-web-runbook.md`)
+- `internal/geminiweb/` — the ported protocol: `frame.go` (wrb.fr frames;
+  caught the units-rescan desync), `client.go` (cookie auth + init scrape +
+  rotation), `rpc.go` (GET_USER_STATUS = zero-quota oracle + catalog),
+  `generate.go` (81-slot construction + incremental parse + delta tails;
+  caught the f.req double-encode bug and the final-chunk ordering bug).
+- `internal/provider/geminiweb.go` — kind `gemini-web`, sentinel-base
+  rewrite, key stamping (calibration exercises the real path), status-gated
+  ListModels.
+- `internal/server/geminiweb_bridge.go` — the in-process OpenAI-wire bridge:
+  `/chat/completions` (SSE + JSON) + `/models` (oracle), per-account client
+  cache, 8-min rotator, upstream-status→HTTP mapping. JSPB speaks no ezllm
+  wire, so the bridge — not a translated upstream URL — is the integration.
+- `internal/store/catalog.go` — `UpdateKeyPlain` (rotator persistence, same
+  row, refreshed hint).
+- 41 new tests across four packages, bite-proven, `-race` green. Live proof
+  operator-gated (test account, see runbook).
+
 ### M11 — gap closure trio ✅ (2026-10-15, measured; CHANGELOG carries the numbers)
 - `internal/server/perf_harness_test.go` — `TestInspectRoutePercentiles1MiB`
   (router-only, grades spec §18's ≤1 MiB row: p95 4.75–5.28 ms vs 5 ms target,

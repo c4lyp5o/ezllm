@@ -31,10 +31,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   accountModels, chatStream, get, messageText, type Account, type ChatMessage, type ChatPart, type ModelRow,
-} from '../api';
-import { Markdown } from '../markdown';
-import { DUR, spring } from '../motion';
-import { btn, cx, Chip, Combobox, EmptyState, inputCls, labelCls, SectionLabel, Spinner } from '../ui';
+} from '../utils/api';
+import { Markdown } from '../components/markdown';
+import { DUR, spring } from '../components/motion';
+import { btn, cx, Chip, Combobox, EmptyState, inputCls, labelCls, SectionLabel, Spinner } from '../components/ui';
 
 // ── persistence keys ──────────────────────────────────────────────────────
 // All three are per-browser. A model default is a rendering/UX preference for

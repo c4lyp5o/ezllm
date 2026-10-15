@@ -10,8 +10,8 @@ import {
   ApiError, accountModels, createModelRule, deleteModelRule, formatDays, get, modelRules,
   updateModelRule, windowState,
   type Account, type ModelRow, type ModelRule,
-} from '../api';
-import { Chip, ConfirmModal, Modal, SectionLabel, SkeletonRows, Toggle, btn, cx, formatTokens, inputCls, labelCls } from '../ui';
+} from '../utils/api';
+import { Chip, ConfirmModal, Modal, SectionLabel, SkeletonRows, Toggle, btn, cx, formatTokens, inputCls, labelCls } from '../components/ui';
 
 const CAP_WINDOWS = ['5h', 'daily', 'weekly', 'monthly'] as const;
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];

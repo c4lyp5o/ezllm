@@ -23,15 +23,15 @@ import {
   usage, FOCUS_HINT, FOCUS_LABEL, SPLIT_HINT, SPLIT_LABEL,
   focusFormat, focusValue, RANGE_LABEL,
   type FocusKey, type RangeKey, type SplitKey, type UsageResp, type UsageRow,
-} from '../api';
+} from '../utils/api';
 import {
   ChartTooltip, BarList, CompositionBar, Panel, Sparkline, StatCard, VIZ, axisProps,
   catColor, chartGrid, cursorFill,
-} from '../charts';
-import { Reveal } from '../motion';
+} from '../components/charts';
+import { Reveal } from '../components/motion';
 import {
   Chip, EmptyState, Mono, SectionLabel, Segmented, cx, fmtMs, formatTokens, nfmt, pct,
-} from '../ui';
+} from '../components/ui';
 import RecentFeed from './RecentFeed';
 
 const SPLITS: SplitKey[] = ['global', 'day', 'account', 'model', 'client', 'alias', 'key', 'surface'];

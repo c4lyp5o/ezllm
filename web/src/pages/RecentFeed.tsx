@@ -7,9 +7,9 @@
 //  - capped at 60 rows: this is a pulse monitor, not an archive
 //  - status >= 400 renders red; streaming rows show a live dot until done
 import { useEffect, useRef, useState } from 'react';
-import { openCallStream } from '../stream';
-import type { FeedRow } from '../api';
-import { SectionLabel, cx, formatTokens } from '../ui';
+import { openCallStream } from '../utils/stream';
+import type { FeedRow } from '../utils/api';
+import { SectionLabel, cx, formatTokens } from '../components/ui';
 
 // rows arrive normalized (stream.ts maps every snapshot + live row through
 // normalizeFeedRow), so the renderer reads the ledger names: tin/tout/saved.

@@ -8,12 +8,12 @@
 //     hash, so if this UI loses it, it is gone — hence the blocking modal with
 //     no way to dismiss until copy, and the "I saved it" confirmation.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ApiError, type UsageRow } from '../api';
-import { Chip, ConfirmModal, Mono, SectionLabel, Spinner, Toggle, btn, cx, inputCls, labelCls } from '../ui';
+import { ApiError, type UsageRow } from '../utils/api';
+import { Chip, ConfirmModal, Mono, SectionLabel, Spinner, Toggle, btn, cx, inputCls, labelCls } from '../components/ui';
 import {
   createToken, listTokens, patchToken, probeModels, revokeToken, usageByClient,
   type TokenCreated, type TokenInfo, type V1Model,
-} from '../tokens';
+} from '../utils/tokens';
 
 // The gateway speaks two client protocols on one port under /v1: OpenAI and
 // Anthropic. The OpenAI Responses route still exists server-side for other

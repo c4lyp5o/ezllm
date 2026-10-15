@@ -5,8 +5,8 @@ import { Link } from 'react-router-dom';
 import {
   accountModels, get, serviceCards, setServiceBinding, testService,
   type Account, type ModelRow, type ServiceCard, type ServiceMode, type ServiceSurface,
-} from '../api';
-import { Chip, Combobox, EmptyState, Spinner, btn, cx, labelCls } from '../ui';
+} from '../utils/api';
+import { Chip, Combobox, EmptyState, Spinner, btn, cx, labelCls } from '../components/ui';
 
 type CatalogModel = ModelRow & { id: string; display: string };
 

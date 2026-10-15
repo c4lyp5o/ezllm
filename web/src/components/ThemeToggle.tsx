@@ -5,7 +5,7 @@
 // theme work. Keeping the toggle separate means ui.tsx never has to import
 // theme.ts, so the two commits do not straddle one file.
 import { cx } from './ui';
-import type { Theme } from './theme';
+import type { Theme } from '../utils/theme';
 
 // An explicit two-state switch, not a single "dark mode" checkbox: light is
 // the default-off state, so a checkbox labelled "Dark" would read wrong on

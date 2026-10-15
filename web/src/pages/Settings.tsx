@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { ApiError, changeDashboardPassword, clearToken } from '../api';
-import { Chip, SectionLabel, btn, cx, inputCls } from '../ui';
+import { ApiError, changeDashboardPassword, clearToken } from '../utils/api';
+import { Chip, SectionLabel, btn, cx, inputCls } from '../components/ui';
 
 export default function Settings() {
   const [currentPassword, setCurrentPassword] = useState('');

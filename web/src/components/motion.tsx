@@ -11,7 +11,7 @@
 //      the overview polls every 15s and a long ease reads as lag.
 import { motion, useInView, useMotionValue, useMotionValueEvent, useReducedMotion, useSpring, type Transition } from 'framer-motion';
 import { useEffect, useRef, type ReactNode } from 'react';
-import { cx } from './lib';
+import { cx } from '../utils/lib';
 
 export const DUR = { fast: 0.14, base: 0.22, slow: 0.36 } as const;
 export const EASE = [0.22, 1, 0.36, 1] as const;

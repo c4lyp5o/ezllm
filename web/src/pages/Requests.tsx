@@ -8,8 +8,8 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import {
   normalizeFeedRow, requests, RANGE_LABEL,
   type FeedRow, type RangeKey, type RequestSort, type RequestsResp,
-} from '../api';
-import { CauseChip, SectionLabel, btn, cx, inputCls, labelCls } from '../ui';
+} from '../utils/api';
+import { CauseChip, SectionLabel, btn, cx, inputCls, labelCls } from '../components/ui';
 
 const RANGES: RangeKey[] = ['24h', '7d', '30d', '365d'];
 const SORTS: { key: RequestSort; label: string }[] = [

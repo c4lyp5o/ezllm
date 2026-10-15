@@ -5,8 +5,8 @@ import {
   setPrice, deletePrice, startSweep, stopSweep, sweepStatus,
   KINDS, STEPS,
   type Account, type ApiErrorDetail, type KeyRow, type ModelRule, type ModelRow, type Price, type SweepStatus, type TestResult, type TestStep,
-} from '../api';
-import { Chip, ConfirmModal, Modal, SectionLabel, Skeleton, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls, relTime, Mono } from '../ui';
+} from '../utils/api';
+import { Chip, ConfirmModal, Modal, SectionLabel, Skeleton, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls, relTime, Mono } from '../components/ui';
 
 // ── helpers ─────────────────────────────────────────────────────────────
 

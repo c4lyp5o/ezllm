@@ -16,13 +16,13 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import {
   cost, normalizeFeedRow, requests, RANGE_LABEL,
   type CostRow, type CostTotals, type FeedRow, type RangeKey,
-} from '../api';
+} from '../utils/api';
 import {
   BarList, ChartTooltip, CompositionBar, Panel, StatCard, VIZ, axisProps, chartGrid, cursorFill,
-} from '../charts';
+} from '../components/charts';
 import {
   btn, cx, EmptyState, formatTokens, inputCls, nfmt, pct, SectionLabel, Segmented,
-} from '../ui';
+} from '../components/ui';
 
 const RANGES: RangeKey[] = ['24h', '7d', '30d', '365d'];
 

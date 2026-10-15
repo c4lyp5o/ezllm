@@ -22,16 +22,16 @@
 // rather than implying a resolution the data does not have.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { get, usage, RANGE_LABEL, type Overview, type RangeKey, type UsageRow } from '../api';
+import { get, usage, RANGE_LABEL, type Overview, type RangeKey, type UsageRow } from '../utils/api';
 import {
   BarList, CAT, ChartTooltip, CompositionBar, Panel, StatCard, VIZ,
   axisProps, catColor, chartGrid, cursorFill,
-} from '../charts';
-import { Reveal, Stagger, StaggerItem } from '../motion';
+} from '../components/charts';
+import { Reveal, Stagger, StaggerItem } from '../components/motion';
 import {
   Chip, CauseChip, EmptyState, Mono, SectionLabel, SkeletonCards, SkeletonRows,
   clockTime, cx, fmtDuration, fmtMs, fmtUptime, formatTokens, nfmt, pct,
-} from '../ui';
+} from '../components/ui';
 
 // Two ranges on purpose: 24h for the headline totals, 7d for the trend. The
 // ledger cannot sub-divide a day, so the trend is only honest across several.

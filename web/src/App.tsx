@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { clearToken, dashboardLogin, getToken, setToken } from './api';
-import { DUR, spring } from './motion';
-import { readTheme, setTheme, type Theme } from './theme';
-import { Spinner, cx } from './ui';
-import ThemeToggle from './ThemeToggle';
+import { clearToken, dashboardLogin, getToken, setToken } from './utils/api';
+import { DUR, spring } from './components/motion';
+import { readTheme, setTheme, type Theme } from './utils/theme';
+import { Spinner, cx } from './components/ui';
+import ThemeToggle from './components/ThemeToggle';
 import Dashboard from './pages/Dashboard';
 import Providers from './pages/Providers';
 import Services from './pages/Services';

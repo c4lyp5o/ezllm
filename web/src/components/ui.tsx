@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { createPortal } from 'react-dom';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { DUR, spring } from './motion';
-import { cx, fmtDuration, fmtMs, fmtUptime, formatTokens, nfmt, pct } from './lib';
+import { cx, fmtDuration, fmtMs, fmtUptime, formatTokens, nfmt, pct } from '../utils/lib';
 
 // formatTokens / fmtMs / fmtDuration / fmtUptime / cx / nfmt / pct are
 // re-exported here because existing pages already import them from './ui'.

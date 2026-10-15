@@ -3,9 +3,9 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ApiError, compressionProfiles, del, patch, post, usage,
   type CompressionProfile, type CompressionStage, type UsageRow,
-} from '../api';
-import { BarList, Panel, VIZ } from '../charts';
-import { Chip, ConfirmModal, EmptyState, Mono, SectionLabel, btn, cx, formatTokens, inputCls, labelCls, nfmt, Spinner } from '../ui';
+} from '../utils/api';
+import { BarList, Panel, VIZ } from '../components/charts';
+import { Chip, ConfirmModal, EmptyState, Mono, SectionLabel, btn, cx, formatTokens, inputCls, labelCls, nfmt, Spinner } from '../components/ui';
 
 type StageDraft = { engine: string; option: string };
 type ProfileDraft = {

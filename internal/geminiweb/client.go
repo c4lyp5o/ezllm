@@ -49,6 +49,7 @@ type Client struct {
 	http      *http.Client
 	cookies   cookie
 	tokens    sessionTokens
+	reqID     int32 // _reqid counter, bumped per generate request
 }
 
 // ParseKey decodes the operator's stored credential into the cookie pair.

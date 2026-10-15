@@ -41,6 +41,18 @@ const STEP_ORDER: string[] = STEPS as unknown as string[];
 // Horizontal step chain (doc #7.5): the six probe steps read left→right with
 // arrows between them instead of a numbered vertical list — per-step detail
 // rides along as a title tooltip so nothing is lost, only the space.
+// Transient probe status: parse the real upstream status the tester already
+// embeds in a failed step's detail ("…HTTP 503…"). Purely informational,
+// never persisted — gone the moment the modal closes or the page refreshes.
+// It answers "why did this go red" at a glance: 404 = gone/retired, 401/403
+// = credential, 429/5xx = capacity, no answer = the provider never spoke.
+function probeStatus(detail?: string): string | null {
+  const m = /HTTP (\d{3})/.exec(detail ?? '');
+  if (m) return `HTTP ${m[1]}`;
+  if (/transport error|did not answer/i.test(detail ?? '')) return 'no answer';
+  return null;
+}
+
 function StepList({ steps, running }: { steps: TestStep[] | null; running: boolean }) {
   const byStep = new Map((steps ?? []).map((s) => [s.step, s]));
   return (
@@ -49,6 +61,7 @@ function StepList({ steps, running }: { steps: TestStep[] | null; running: boole
         const s = byStep.get(name);
         const state = s ? (s.ok ? 'ok' : 'bad') : running && idx <= byStep.size ? 'pending' : 'idle';
         const tip = s?.detail ? `${s.detail}${s.ms != null ? ` · ${s.ms}ms` : ''}` : name;
+        const status = state === 'bad' ? probeStatus(s?.detail) : null;
         return (
           <li key={name} className="flex items-center gap-1.5">
             {idx > 0 && <span className="text-mute/40">→</span>}
@@ -59,6 +72,7 @@ function StepList({ steps, running }: { steps: TestStep[] | null; running: boole
               state === 'idle' && 'border-line/60 text-mute/50')}>
               <span>{state === 'ok' ? '✓' : state === 'bad' ? '✕' : idx + 1}</span>
               <span>{name}</span>
+              {status && <span className="rounded bg-bad/15 px-1 text-[10px] text-bad">{status}</span>}
             </span>
           </li>
         );

@@ -292,7 +292,7 @@ func (t *Tester) Run(ctx context.Context, acct provider.Account, opts Options) *
 					return adapter.ListModels(c, acct, fakeKey())
 				})
 			switch {
-			case isAuthErr(cerr):
+			case cerr != nil && isAuthRejectFor(adapter, statusOf(cerr)):
 				res.authDeferred = false
 				res.Steps = append(res.Steps, Step{Step: StepAuth, OK: true,
 					Detail: "catalog rejected a fake key — the real key is proven"})
@@ -340,9 +340,19 @@ func (t *Tester) Run(ctx context.Context, acct provider.Account, opts Options) *
 		}
 		res.Steps = append(res.Steps, Step{Step: StepInference, OK: true, Detail: "no model to probe"})
 	} else if ok, f := t.inferenceStep(ctx, adapter, acct, key, models, pace, res); !ok {
-		res.Fail = f
-		res.Detail = "failed at " + f.Step
-		return res
+		// A capacity-shaped generation failure (429/5xx/no answer) carries no
+		// credential verdict — the provider never got far enough to judge the
+		// key. When some OTHER authenticated endpoint vouches for it (the
+		// oracle already passed, or an authenticated catalog rejects a fake
+		// key on calibration), record the generation as unverified and keep
+		// the test: the objective is to prove the key was ACCEPTED. Anything
+		// else — 401/403, a 400, a retired model — still fails: a key that is
+		// never proven is a key we must not store.
+		if !t.credentialAcceptedDespiteGeneration(ctx, adapter, acct, pace, res, f) {
+			res.Fail = f
+			res.Detail = "failed at " + f.Step
+			return res
+		}
 	}
 
 	// ── step 6: protocol — capability DATA, never a gate. ──
@@ -639,12 +649,82 @@ func (t *Tester) probeModel(
 			Message:        "generation probe failed: " + shortErr(err),
 			UpstreamStatus: status,
 			UpstreamError:  upstreamErr(resp),
-			Hint:           "The provider rejected a minimal test request. The response above is the provider's own explanation.",
+			Hint:           probeFailedHint(status),
 			Retryable:      retryableStatus(status),
 		}
 		res.Steps = append(res.Steps, Step{Step: StepInference, OK: false, Detail: f.Message})
 		return probeFailed, f
 	}
+}
+
+// credentialAcceptedDespiteGeneration handles a capacity-shaped inference
+// failure (f comes from inferenceStep; only 429/5xx/no-answer qualify —
+// never an auth-shaped status). Such a failure carries no credential
+// verdict, so it must not sink a key that some OTHER authenticated endpoint
+// already proved: the usage oracle (with calibration), or the catalog,
+// which discriminates because a deliberately-wrong key gets rejected where
+// the real one was just listed.
+//
+// The Gemini case this exists for: no /usage oracle, so auth defers to
+// inference; catalog fine; generation answers 503 "high demand". The key is
+// perfectly good and the operator must not be told the provider rejected
+// it. When nothing else proves the key, the caller fails the test — the
+// honest outcome when the credential is unverifiable right now.
+//
+// On success the failed inference step is followed by an OK note. The failed
+// step stays in the trail (deleting it would hide the capacity event from
+// the audit); the UI's by-step map keeps the last entry, so the operator
+// sees the final verdict, and summarize() shows both.
+func (t *Tester) credentialAcceptedDespiteGeneration(
+	ctx context.Context,
+	adapter provider.Adapter,
+	acct provider.Account,
+	pace *pacer,
+	res *TestResult,
+	f *Failure,
+) bool {
+	if f == nil || !f.Retryable || isAuthRejectFor(adapter, f.UpstreamStatus) {
+		return false
+	}
+	if !res.authDeferred {
+		// The usage oracle already proved the credential with calibration.
+		noteInferenceUnverified(res, f)
+		return true
+	}
+	// Deferred auth: calibrate the catalog with a deliberately-wrong key —
+	// the same discrimination probe the skip-inference path runs. A catalog
+	// that rejects the fake key has just proven the real one we watched
+	// get listed. One extra GET, only when we would otherwise have to
+	// refuse the key outright.
+	if res.catErr != nil || len(res.Catalog) == 0 {
+		return false
+	}
+	_, cerr := probe(ctx, t, pace, defaultStepTimeout,
+		func(c context.Context) ([]provider.ModelInfo, error) {
+			return adapter.ListModels(c, acct, fakeKey())
+		})
+	if cerr == nil || !isAuthRejectFor(adapter, statusOf(cerr)) {
+		// Public catalog (200 for garbage) or an inconclusive outage:
+		// nothing proves this key, so the capacity failure stays fatal.
+		return false
+	}
+	res.authDeferred = false
+	res.Steps = append(res.Steps, Step{Step: StepAuth, OK: true,
+		Detail: "catalog rejected a fake key — the real key is proven"})
+	noteInferenceUnverified(res, f)
+	return true
+}
+
+// noteInferenceUnverified appends the OK follow-up to the failed inference
+// step: the credential was accepted elsewhere; generation itself could not
+// be verified this run.
+func noteInferenceUnverified(res *TestResult, f *Failure) {
+	cause := "provider did not answer"
+	if f.UpstreamStatus > 0 {
+		cause = httpStatusWord(f.UpstreamStatus) + " — provider capacity"
+	}
+	res.Steps = append(res.Steps, Step{Step: StepInference, OK: true,
+		Detail: "key accepted; generation unverified (" + cause + ")"})
 }
 
 // inferenceStep runs the generation probe over the candidate list, advancing
@@ -935,6 +1015,20 @@ func (e *probeError) Error() string {
 
 func probeStatusError(status int, raw []byte) error {
 	return &probeError{status: status, body: upstreamErr(raw), raw: string(raw)}
+}
+
+// probeFailedHint keeps the generation-failure hint honest about WHAT kind
+// of failure it was. A capacity-shaped status (429/5xx/no answer) is not a
+// credential verdict, and telling the operator "the provider rejected a
+// minimal test request" over a 503 "high demand" — the Google AI Studio
+// case — reads as a bad key when the key was fine. Non-retryable statuses
+// (400/404/…) stay the old wording: the provider DID answer with a verdict
+// on our minimal request, and its own explanation follows.
+func probeFailedHint(status int) string {
+	if retryableStatus(status) || status == 0 {
+		return "The provider was rate-limited or unavailable when this probe ran — capacity, not a credential verdict. The response above is the provider's own explanation; retry later."
+	}
+	return "The provider rejected a minimal test request. The response above is the provider's own explanation."
 }
 
 func isAuthErr(err error) bool {

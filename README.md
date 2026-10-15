@@ -1,6 +1,6 @@
 # ezllm
 
-Calypso's lightweight LLM router. Single static Go binary, **three passthrough
+Lightweight LLM router. Single static Go binary, **three passthrough
 surfaces** (OpenAI chat · Anthropic messages · OpenAI Responses) plus an
 opt-in, probe-gated anthropic→openai hop translation (see
 `docs/translation-runbook.md`), namespace
@@ -121,8 +121,8 @@ deliberate exception — a different wire protocol by design, see
 
 ## Compression
 
-Ordered stages over six engines — `session_dedup`, `rtk`, `headroom`, `lite`, `caveman`,
-`budget` — configured as profiles and selected per request (`x-ezllm-compression` header →
+Ordered stages over six engines — `session_dedup`, `rtk`, `headroom`, `lite`, `caveman`
+ — configured as profiles and selected per request (`x-ezllm-compression` header →
 the combo's default profile → off). Contract: never touch the final user message, tool
 calls, or structured tool results; fail-open on any engine error. Design + measured
 numbers: `docs/compression-design.md`.
@@ -226,9 +226,3 @@ No multi-node/Postgres. Anthropic↔OpenAI translation, a v1 non-goal, **shipped
 2026-10-12 as an opt-in, probe-gated exception** (`docs/translation-runbook.md`)
 — native passthrough remains the default for every unmarked hop. See
 EXPLORING.md §7 and the plan's §8.
-
-**GitHub Copilot is parked, not rejected.** A dedicated OAuth app (`ezllm`) was registered
-and the device flow completed end-to-end, but GitHub returns `403` at
-`copilot_internal/v2/token` for a third-party app — an access decision, not a bug to
-engineer around. No header spoofing or borrowed client IDs. Revisit only if GitHub
-grants the app.

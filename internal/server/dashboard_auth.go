@@ -19,16 +19,20 @@ func (s *Server) handleDashboardLogin(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &in) {
 		return
 	}
+	isDefault := s.db.DashboardPasswordIsDefault(r.Context())
 	token, err := s.db.DashboardLogin(r.Context(), in.Password)
 	if err != nil {
 		if errors.Is(err, store.ErrInvalidDashboardPassword) {
-			writeErr(w, http.StatusUnauthorized, "invalid_request_error", "invalid dashboard password")
+			// The flag rides even the failure so the page can decide whether
+			// the first-run hint is still relevant BEFORE a successful login.
+			writeErrExtra(w, http.StatusUnauthorized, "invalid_request_error", "invalid dashboard password",
+				map[string]any{"default_password": isDefault})
 			return
 		}
 		s.writeStoreErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"token": token})
+	writeJSON(w, http.StatusOK, map[string]any{"token": token, "default_password": isDefault})
 }
 
 func (s *Server) handleDashboardPassword(w http.ResponseWriter, r *http.Request) {

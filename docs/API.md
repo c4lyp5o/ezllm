@@ -439,6 +439,10 @@ every hop returns `429`, not `502`.
 
 ### `POST /admin/login` → `200` + session · `POST /admin/settings/password`
 bcrypt dashboard password; the SPA renders and fetches nothing pre-auth.
+Both answers carry `default_password` (bool): whether the stored hash still
+matches the factory `STRONGPASSWORD` — the login page uses it to show the
+first-run hint only while it is true (fail-closed on errors). Success:
+`{"token":"…","default_password":false}`; the 401 nests it under `error`.
 
 ### `GET /admin/stream` → SSE
 Two event types: `snapshot` (last 20 calls on connect, newest first) and `calls` (each committed

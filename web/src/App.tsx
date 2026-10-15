@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { clearToken, dashboardLogin, getToken, setToken } from './utils/api';
+import { clearToken, dashboardLogin, getToken, probeDefaultPassword, setToken } from './utils/api';
 import { DUR, spring } from './components/motion';
+import RailwayBackground from './components/RailwayBackground';
 import { readTheme, setTheme, type Theme } from './utils/theme';
 import { Spinner, cx } from './components/ui';
 import ThemeToggle from './components/ThemeToggle';
@@ -84,29 +85,43 @@ function Unlock({ onUnlock }: { onUnlock: () => void }) {
   const [value, setValue] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  // The first-run hint is only relevant while the stored hash still matches
+  // STRONGPASSWORD (docx item 13) — ask the flag on mount, fail-closed.
+  const [defaultPassword, setDefaultPassword] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    probeDefaultPassword().then((v) => { if (alive) setDefaultPassword(v); }).catch(() => undefined);
+    return () => { alive = false; };
+  }, []);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!value) { setErr('enter the dashboard password'); return; }
     setBusy(true);
     dashboardLogin(value)
-      .then((token) => { setToken(token); onUnlock(); })
+      .then((res) => { setToken(res.token); onUnlock(); })
       .catch((error: unknown) => setErr(error instanceof Error ? error.message : 'login failed'))
       .finally(() => setBusy(false));
   };
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-bg px-4">
-      <div className="w-full max-w-sm rounded-xl border border-line bg-surface p-8 animate-fade-up">
+    // The railway backdrop (item 15) is the login page's own — the deep-blue
+    // gradient carries the canvas during its clear/fade so no white flash.
+    <div className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-bg px-4"
+      style={{ background: 'linear-gradient(135deg, #020205 0%, #0a1128 100%)' }}>
+      <RailwayBackground />
+      <div className="relative w-full max-w-sm rounded-xl border border-line bg-surface/85 p-8 shadow-2xl backdrop-blur-sm animate-fade-up">
         <div className="flex items-center gap-2.5">
           {LOGO}
           <span className="text-[15px] font-semibold tracking-tight">ezllm</span>
         </div>
-        <h1 className="mt-6 text-lg font-semibold">Unlock dashboard</h1>
-        <p className="mt-1 text-[13px] text-mute">Sign in with your dashboard password to reach the control plane.</p>
-        <p className="mt-3 rounded-lg border border-line bg-raised px-3 py-2 text-xs text-mute">
-          First-run password: <code className="font-mono text-ink">STRONGPASSWORD</code>
-        </p>
+        <h1 className="mt-6 text-lg font-semibold">Login</h1>
+        {defaultPassword && (
+          <p className="mt-3 rounded-lg border border-line bg-raised px-3 py-2 text-xs text-mute">
+            First-run password: <code className="font-mono text-ink">STRONGPASSWORD</code>
+          </p>
+        )}
         <form onSubmit={submit} className="mt-6">
           <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-mute" htmlFor="dashboard-password">
             Dashboard password
@@ -121,12 +136,9 @@ function Unlock({ onUnlock }: { onUnlock: () => void }) {
           {err && <p className="mt-2 text-xs text-bad">{err}</p>}
           <button type="submit" disabled={busy}
             className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-accent/60 bg-accent py-2.5 text-[13px] font-semibold text-[#082a3d] transition-all hover:brightness-110 active:brightness-95 disabled:opacity-50">
-            {busy ? <Spinner /> : null} Unlock dashboard
+            {busy ? <Spinner /> : null} Login
           </button>
         </form>
-        <p className="mt-5 border-t border-line pt-4 text-[11px] leading-relaxed text-mute">
-          Change the password any time in Settings. Dashboard sessions expire after 12 hours.
-        </p>
       </div>
     </div>
   );

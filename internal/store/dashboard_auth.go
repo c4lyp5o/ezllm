@@ -38,6 +38,20 @@ ON CONFLICT(id) DO NOTHING`, string(encoded))
 	})
 }
 
+// DashboardPasswordIsDefault reports whether the stored hash still matches
+// the factory STRONGPASSWORD. Used by the login page to decide whether the
+// first-run hint is still relevant (docx item 13: compare the hash with the
+// hash of STRONGPASSWORD; same → show, changed → hide). Fail-closed: a
+// lookup or comparison error reports false so the hint stays hidden rather
+// than hinting at an attack surface that may not exist.
+func (d *DB) DashboardPasswordIsDefault(ctx context.Context) bool {
+	var hash string
+	if err := d.r.QueryRowContext(ctx, `SELECT password_hash FROM dashboard_auth WHERE id=1`).Scan(&hash); err != nil {
+		return false
+	}
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(DefaultDashboardPassword)) == nil
+}
+
 func (d *DB) DashboardLogin(ctx context.Context, password string) (string, error) {
 	var hash string
 	if err := d.r.QueryRowContext(ctx, `SELECT password_hash FROM dashboard_auth WHERE id=1`).Scan(&hash); err != nil {

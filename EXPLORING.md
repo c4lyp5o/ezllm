@@ -316,6 +316,25 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
   object"`; `IsStream` only a real `true`; trailing garbage rejected at
   Open (the old per-site decoders rejected it too).
 
+### M11 — gap closure trio ✅ (2026-10-15, measured; CHANGELOG carries the numbers)
+- `internal/server/perf_harness_test.go` — `TestInspectRoutePercentiles1MiB`
+  (router-only, grades spec §18's ≤1 MiB row: p95 4.75–5.28 ms vs 5 ms target,
+  boundary-UNCERTAIN, single-parse's map decode is the cause) + 1 MiB e2e rows
+  in `TestLatencyPercentiles`.
+- `internal/jsonbody/fuzz_test.go` — 3 fuzz targets (panic-freedom, round-trip
+  model/stream invariants, extractModel decision tree) with a 22-seed corpus
+  (dup keys, deep nesting, escapes, `1e700`, trailing junk, non-objects).
+- `internal/proxy/swap_parity_fuzz_test.go` — `FuzzSwapParity`: the PIPELINE
+  parity oracle (reimplements the old `extractModel` gate, then compares
+  legacy `SwapModel` vs `doc.WithModel` byte-for-byte). **The trailing-garbage
+  subtlety lives here:** legacy `SwapModel` alone accepts trailing junk
+  (dec.Decode stops after the first value), the old pipeline never let such a
+  body reach a hop — pipeline parity, not component parity, is the contract.
+  `TestSwapParityTrailingGarbageGate` pins it.
+- `internal/proxy/cancel_latency_test.go` — `TestCancelPropagationLatency`
+  (n=1000, channel-sync + 5 s failure guards): client→upstream cancel p95
+  **63 µs** vs the spec's 20 ms. The §18 row is a certificate now.
+
 ## 5. Invariants to check while reading (review checklist)
 
 These are the "if it's broken here, the project failed" spots — each must be visibly true in code:

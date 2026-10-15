@@ -17,6 +17,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,6 +31,8 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/provider"
 	"github.com/c4lyp5o/ezllm/internal/proxy"
 	"github.com/c4lyp5o/ezllm/internal/proxy/benchutil"
+	"github.com/c4lyp5o/ezllm/internal/router"
+	"github.com/c4lyp5o/ezllm/internal/store"
 )
 
 // perfRequests is the fixed sample count per mode.
@@ -73,6 +76,12 @@ func TestLatencyPercentiles(t *testing.T) {
 	// bodies too, not only the small one (bench ns/op is not a percentile).
 	streamBody64 := benchutil.StreamChatBody(benchServerModel, 64<<10)
 	plainBody64 := benchutil.ChatBody(benchServerModel, 64<<10)
+	// 1 MiB variants: the dominant client sends ~0.7-1 MB agent turns, so the
+	// spec's "large body" percentile row (p95 <= 5 ms, spec §18) belongs to
+	// THIS payload, not to 64 KiB. Sequential only: at n=2000 the parallel
+	// variant doubles runtime for a traffic shape that is single-client.
+	streamBody1M := benchutil.StreamChatBody(benchServerModel, 1<<20)
+	plainBody1M := benchutil.ChatBody(benchServerModel, 1<<20)
 
 	// Warm-up: establish the pooled connections and let the ledger writer start.
 	for i := 0; i < perfWarmup; i++ {
@@ -162,6 +171,8 @@ func TestLatencyPercentiles(t *testing.T) {
 		run("plain-par", runtime.GOMAXPROCS(0), plainBody, false))
 	report("stream 64KiB, sequential", run("stream64-seq", 1, streamBody64, true))
 	report("non-stream 64KiB, sequential", run("plain64-seq", 1, plainBody64, false))
+	report("stream 1MiB, sequential", run("stream1M-seq", 1, streamBody1M, true))
+	report("non-stream 1MiB, sequential", run("plain1M-seq", 1, plainBody1M, false))
 
 	t.Logf("hardware: %s | GOMAXPROCS=%d | mock: 32 SSE events x 64B / 4KiB JSON body",
 		benchCPU(), runtime.GOMAXPROCS(0))
@@ -242,6 +253,65 @@ func mean(s []time.Duration) time.Duration {
 		sum += d
 	}
 	return sum / time.Duration(len(s))
+}
+
+// TestInspectRoutePercentiles1MiB grades spec §18's "pass-through inspection
+// and routing for large bodies: p95 ≤ 5 ms for requests ≤ 1 MiB" directly.
+// The latency harness's totals include the upstream round trip, so they
+// cannot certify this row: this measures ONLY the router's own work (body
+// decode via jsonbody + model extraction + ResolveCandidates) per request,
+// sequential, n=2000. Interval: t0 = immediately before jsonbody.Open; t1 =
+// ResolveCandidates returned. Excludes ingestion, compression, dispatch,
+// stream copy, ledger.
+func TestInspectRoutePercentiles1MiB(t *testing.T) {
+	mock := benchutil.New(benchutil.Options{})
+	defer mock.Close()
+	h := newHarnessAt(t, mock.Server())
+	ctx := context.Background()
+
+	acct, err := h.db.AccountByNamespace(ctx, "up")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.UpsertCombo(ctx, store.Combo{
+		Name: benchCombo, Strategy: "failover", Enabled: true,
+		Hops: []store.ComboHop{{AccountID: acct.ID, ModelID: "gpt-6-luna", Weight: 1}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resolver := router.New(h.db)
+
+	const n = 2000
+	const warmup = 50
+	for _, target := range []string{benchServerModel, benchCombo} {
+		body := benchutil.ChatBody(benchServerModel, 1<<20)
+		name := "direct"
+		if target == benchCombo {
+			name = "combo"
+		}
+		for i := 0; i < warmup; i++ {
+			if _, err := extractModel(body); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := resolver.ResolveCandidates(ctx, target, provider.SurfaceOpenAI, "bench"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		samples := make([]time.Duration, n)
+		for i := 0; i < n; i++ {
+			t0 := time.Now()
+			if _, err := extractModel(body); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := resolver.ResolveCandidates(ctx, target, provider.SurfaceOpenAI, "bench"); err != nil {
+				t.Fatal(err)
+			}
+			samples[i] = time.Since(t0)
+		}
+		sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
+		t.Logf("── inspect+route 1MiB %s ── n=%d (nearest-rank)", name, n)
+		logPercentiles(t, "router-only", samples)
+	}
 }
 
 func ms(d time.Duration) string {

@@ -1,6 +1,36 @@
 # Changelog
 
-Notable changes, reverse-chronological. Milestone-tagged (M1–M10); full history via `git log`.
+Notable changes, reverse-chronological. Milestone-tagged (M1–M11); full history via `git log`.
+
+## 2026-10-15 — M11 gap closure: 1 MiB percentiles, fuzz moat, cancel-latency certificate
+- **1 MiB latency percentiles** (`TestLatencyPercentiles`, n=2000, seq):
+  stream total p50 9.14 ms / p95 15.65 / p99 16.09, TTFT ≈ total (the gigabyte
+  body's parse dominates first byte); non-stream p50 9.77 / p95 16.74 /
+  p99 40.15 (one 596 ms max — a swap/GC spike on the loaded box, reported as
+  measured). These are e2e totals incl. the mock round trip.
+- **Router-only percentile test** (`TestInspectRoutePercentiles1MiB`, n=2000)
+  grades spec §18's "inspection+routing, ≤1 MiB, p95 ≤ 5 ms" ISOLATED from
+  e2e noise: p95 4.75–5.28 ms across 3 runs — **straddling the target inside
+  the noise band** (direct 4.75–5.07, combo 5.07–5.28). Honest grade: NOT
+  certified; single-parse's map decode is the cause (old struct-decode ~1.7 ms
+  mean, new map-decode ~4.0–4.5 ms mean). The trade stands (e2e −25%) but the
+  row is recorded as boundary-UNCERTAIN, exactly as instructed by the spec
+  itself ("revise targets based on measurement").
+- **Fuzz moat** for the single-parse hot path: 4 targets, seed corpus +
+  60 s live fuzz each (FuzzSwapParity: 467 306 execs, 0 divergence). Two
+  findings worth their keep: (1) legacy `SwapModel` standing alone TOLERATES
+  trailing garbage (dec.Decode stops after the first value) while
+  `extractModel` rejected it — the old pipeline rejected such bodies at the
+  gate, the new pipeline rejects at `jsonbody.Open`, so PIPELINE parity is
+  what the fuzz asserts (oracle = a reimplementation of the old extractModel
+  gate); (2) exponent literals overflowing float64 (`1e700`) survive the
+  round trip via json.Number — the crasher is now a permanent seed.
+- **Cancel propagation certified** (`TestCancelPropagationLatency`, n=1000,
+  hard assertion in the test): client-cancel → upstream-cancel **p50 22 µs /
+  p95 63 µs / p99 119 µs / max 216 µs** vs the spec's ≤ 20 ms. The §18 row
+  now has a measurement instead of a 5 s correctness bound.
+- Verified: gofmt/vet/build/full `go test ./...`/-race proxy+jsonbody all
+  rc=0.
 
 ## 2026-10-15 — single-parse dispatch (M10, perf)
 - `perf(proxy,server,compress)` the request body was JSON-decoded up to **5×**

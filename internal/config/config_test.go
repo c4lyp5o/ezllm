@@ -163,7 +163,7 @@ providers: { p1: { kind: ` + kind + `, base_url: https://x/v1, keys: [{env: K}] 
 			t.Errorf("kind %q should be valid: %v", kind, err)
 		}
 	}
-	for _, kind := range []string{"", "github-copilot", "openai", "OpenAI-Compatible"} {
+	for _, kind := range []string{"", "openai", "OpenAI-Compatible"} {
 		yaml := `
 providers: { p1: { kind: "` + kind + `", base_url: https://x/v1, keys: [{env: K}] } }
 `

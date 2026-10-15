@@ -1,6 +1,41 @@
 # Changelog
 
-Notable changes, reverse-chronological. Milestone-tagged (M1–M12); full history via `git log`.
+Notable changes, reverse-chronological. Milestone-tagged (M1–M13); full history via `git log`.
+
+## 2026-10-16 — M13 github-copilot provider: official CLI device flow ✅
+GitHub Copilot as a provider, ported from omniroute's production
+implementation (design: `docs/github-copilot-design.md`, evidence:
+`docs/github-copilot-policy-evidence.md`, runbook:
+`docs/github-copilot-runbook.md`). The auth path is the OFFICIAL CLI's:
+device flow with GitHub's public Copilot CLI client id and scope
+`read:user` — not a custom third-party app (restricted tier/403), no
+client-id spoofing. Live-proved 2026-10-16: the device-code request
+against real GitHub succeeds.
+- `internal/githubcopilot/auth.go` — device-code request + poll
+  (slow_down honored, ctx-cancellable, injectable sleep so tests never
+  sleep), `token <gh>` mint at copilot_internal/v2/token (NOT Bearer),
+  refresh-token grant with the public client id and NO client_secret
+  (9router#442), session encode/decode (JSON row; legacy bare-token rows
+  lifted).
+- `internal/githubcopilot/provider.go` — endpoint routing (claude* →
+  /v1/messages native shim, *codex*/responses → /responses, gemini never
+  /responses), full CLI header set with configurable CLI version (the 466
+  floor), body quirks (tools ≤128, gpt-5.4 temperature strip, assistant
+  reasoning strip, prefill drop, chat-only part sanitize, claude-native
+  untouched), /models discovery (chat/enabled/picker filters) with the
+  37-model curated fallback, NeedsRefresh 5-min margin, EnsureSession
+  mint→refresh→mint chain.
+- `internal/provider/githubcopilot.go` — KindGitHubCopilot adapter: session
+  decode + per-account in-memory mint cache, /messages → /v1/messages
+  anchoring, header set installed over client-supplied values, body quirks
+  applied in place, GET /models auth oracle (mint happens in
+  PrepareRequest, so calibration exercises the real path), ListModels via
+  the minted token, ReadQuota honestly unsupported.
+- `cmd/ezllm github-login` — interactive device flow: prints the
+  verification URL + code, polls, verifies the mint, lists the account
+  catalog, prints the session JSON to store.
+- 19 tests (13 protocol + 6 adapter), three bite-proofs red-then-restored,
+  `-race` green.
 
 ## 2026-10-16 — M12 gemini-web provider: cookie auth, oracle, streaming, bridge ✅
 The full Gemini **web** protocol as a router provider, ported slot-for-slot

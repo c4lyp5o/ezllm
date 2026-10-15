@@ -38,6 +38,18 @@ func main() {
 }
 
 func run() error {
+	// Subcommands run before flag parsing (they own the whole process).
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "github-login":
+			return runGitHubLogin()
+		case "help", "-h", "--help":
+			fmt.Println("usage: ezllm [flags]            start the router")
+			fmt.Println("       ezllm github-login       authorize a GitHub Copilot account (device flow)")
+			return nil
+		}
+	}
+
 	cfgPath := flag.String("config", "config.yaml", "path to config file")
 	addrOverride := flag.String("addr", "", "listen address override (precedence: -addr > EZLLM_ADDR > config.listen)")
 	flag.Parse()

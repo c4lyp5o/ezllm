@@ -316,6 +316,24 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
   object"`; `IsStream` only a real `true`; trailing garbage rejected at
   Open (the old per-site decoders rejected it too).
 
+### M13 — github-copilot provider ✅ (2026-10-16, device-flow live-proved; design `docs/github-copilot-design.md`, runbook `docs/github-copilot-runbook.md`)
+- `internal/githubcopilot/` — the ported protocol: `auth.go` (device flow
+  with the PUBLIC CLI client id + read:user, `token <gh>` mint, refresh grant
+  without client_secret), `provider.go` (3-endpoint routing — claude* →
+  /v1/messages, codex → /responses, default /chat/completions — CLI header
+  set with configurable version, body quirks, /models discovery +
+  37-model fallback, EnsureSession chain).
+- `internal/provider/githubcopilot.go` — KindGitHubCopilot: per-account
+  in-memory mint cache, /v1/messages anchoring, header install, in-place
+  quirks, GET /models oracle (mint in PrepareRequest so calibration
+  exercises the real path), honest quota-unsupported.
+- `cmd/ezllm/githublogin.go` — `ezllm github-login`: prints the device URL +
+  code, polls, verifies the mint, lists the catalog, prints the session row.
+  Live: the device-code request against real GitHub succeeds (code issued).
+- Evidence doc records the correction: the parked experiment's 403 was a
+  CUSTOM app; the CLI's public identity + read:user works in production
+  (omniroute, verified 2026-10-02).
+
 ### M12 — gemini-web provider ✅ (2026-10-16, code complete, mock-proven; design `docs/gemini-web-design.md`, runbook `docs/gemini-web-runbook.md`)
 - `internal/geminiweb/` — the ported protocol: `frame.go` (wrb.fr frames;
   caught the units-rescan desync), `client.go` (cookie auth + init scrape +

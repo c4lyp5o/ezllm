@@ -213,18 +213,18 @@ func TestStripHeadersListed(t *testing.T) {
 }
 
 func TestParseKindAndValidKinds(t *testing.T) {
-	for _, good := range []string{"opencode-go", "openai-compatible", "anthropic-compatible", "gemini-openai", "gemini-web", " opencode-go "} {
+	for _, good := range []string{"opencode-go", "openai-compatible", "anthropic-compatible", "gemini-openai", "gemini-web", "github-copilot", " opencode-go "} {
 		if _, err := ParseKind(good); err != nil {
 			t.Errorf("ParseKind(%q) failed: %v", good, err)
 		}
 	}
-	for _, bad := range []string{"", "github-copilot", "opencode", "OPENAI-COMPATIBLE"} {
+	for _, bad := range []string{"", "opencode", "OPENAI-COMPATIBLE"} {
 		if _, err := ParseKind(bad); err == nil {
 			t.Errorf("ParseKind(%q) should fail", bad)
 		}
 	}
-	if len(ValidKinds()) != 5 {
-		t.Errorf("ValidKinds = %v, want 5 entries", ValidKinds())
+	if len(ValidKinds()) != 6 {
+		t.Errorf("ValidKinds = %v, want 6 entries", ValidKinds())
 	}
 }
 
@@ -257,8 +257,8 @@ func TestRegistryGetAndKinds(t *testing.T) {
 	if _, err := r.Get(Kind("nope")); err == nil {
 		t.Error("Get(unknown) must fail")
 	}
-	if len(r.Kinds()) != 5 {
-		t.Errorf("registry has %d kinds, want 5", len(r.Kinds()))
+	if len(r.Kinds()) != 6 {
+		t.Errorf("registry has %d kinds, want 6", len(r.Kinds()))
 	}
 }
 

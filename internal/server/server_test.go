@@ -26,19 +26,27 @@ type harness struct {
 	db       *store.DB
 	base     string // ezllm base URL
 	upstream *httptest.Server
-	t        *testing.T
+	t        testing.TB
 }
 
 func newHarness(t *testing.T, upstream http.HandlerFunc, opts ...func(*Options)) *harness {
 	t.Helper()
-	up := httptest.NewServer(upstream)
-	dir := t.TempDir()
+	return newHarnessAt(t, httptest.NewServer(upstream), opts...)
+}
+
+// newHarnessAt is newHarness against an upstream server the CALLER owns. The
+// benchmark and lifecycle harnesses use it to point the account at
+// benchutil.Mock's own httptest.Server instead of wrapping the handler in a
+// second listener; testing.TB lets the same wiring serve benchmarks.
+func newHarnessAt(tb testing.TB, up *httptest.Server, opts ...func(*Options)) *harness {
+	tb.Helper()
+	dir := tb.TempDir()
 	db, err := store.Open(context.Background(), store.Options{
 		Path:      filepath.Join(dir, "t.sqlite"),
 		BatchSize: 4, BatchWait: 20 * time.Millisecond,
 	})
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	// one account, one key, one model
 	acct := provider.Account{
@@ -47,19 +55,19 @@ func newHarness(t *testing.T, upstream http.HandlerFunc, opts ...func(*Options))
 	}
 	id, err := db.UpsertAccount(context.Background(), acct)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	if _, _, err := db.AddKey(context.Background(), id, "primary", "sk-upstream-key-123456"); err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	if err := db.UpsertModels(context.Background(), id, []provider.ModelInfo{{ID: "gpt-6-luna", OwnedBy: "up"}}); err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	if err := db.UpsertClientToken(context.Background(), "hermes", "tok-infer", "infer"); err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	if err := db.UpsertClientToken(context.Background(), "admin", "tok-admin", "infer,admin"); err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
@@ -74,8 +82,8 @@ func newHarness(t *testing.T, upstream http.HandlerFunc, opts ...func(*Options))
 		o(&serverOpts)
 	}
 	s := New(serverOpts)
-	h := &harness{handler: s.Handler(), db: db, upstream: up, t: t}
-	t.Cleanup(func() { db.Close(); up.Close() })
+	h := &harness{handler: s.Handler(), db: db, upstream: up, t: tb}
+	tb.Cleanup(func() { db.Close(); up.Close() })
 	return h
 }
 

@@ -1,7 +1,7 @@
 GO  ?= go
 BIN := bin/ezllm
 
-.PHONY: build static run test test-race vet fmt check verify clean
+.PHONY: build static run test test-race vet fmt check verify bench perf clean
 
 build:
 	$(GO) build -o $(BIN) ./cmd/ezllm
@@ -32,6 +32,16 @@ check: fmt vet test build
 # Acceptance check against the LIVE ledger (run with the server up).
 verify:
 	$(GO) run ./cmd/m2verify
+
+# Phase-separated benchmarks (see docs/perf-baseline-m1.md). Every one runs
+# with -benchmem; -run XXX keeps the tests out of the run.
+bench:
+	$(GO) test ./internal/proxy/... ./internal/server/... -run XXX -bench . -benchmem -count=1
+
+# The latency-percentile harness and the retained-memory / lifecycle
+# measurements. Not skipped by -short, so do not pass it.
+perf:
+	$(GO) test ./internal/server/ -run 'TestLatencyPercentiles|TestRetainedMemory|TestSlowConsumer|TestClientCancel|TestUpstreamNotReported' -v -count=1
 
 clean:
 	rm -rf bin

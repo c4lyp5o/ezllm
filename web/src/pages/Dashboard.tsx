@@ -161,8 +161,7 @@ function LatencyCard({ rows }: { rows: UsageRow[] }) {
         format={fmtMs} maxRows={5} />
       <p className="mt-3 border-t border-line pt-3 text-[11.5px] leading-relaxed text-mute">
         Slowest first token: <span className="font-mono text-warn">{fmtMs(worst.p50_ttft_ms)}</span> on{' '}
-        <span className="text-dim">{worst.k}</span>. Computed in SQL per group — the upper of the two middle
-        values on an even count, the convention the backend has always used.
+        <span className="text-dim">{worst.k}</span>.
       </p>
     </Panel>
   );
@@ -488,8 +487,7 @@ export default function Dashboard() {
           deliberately a 7-day window: a 24h one is two dots. */}
       <StaggerItem>
         <Panel
-          label={<SectionLabel>Traffic · last {RANGE_LABEL[TREND_RANGE]} by day</SectionLabel>}
-          aside={<span className="text-[11px] text-mute">the ledger's finest bucket is a calendar day</span>}>
+          label={<SectionLabel>Traffic · last {RANGE_LABEL[TREND_RANGE]} by day</SectionLabel>}>
           {series.length === 0 ? (
             <EmptyState title="No traffic in the last 7 days"
               hint="Nothing has been routed through a combo in this window. The live feed below starts the moment it happens." />
@@ -519,10 +517,6 @@ export default function Dashboard() {
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
-              <p className="mt-2 text-[11px] text-mute">
-                One point per calendar day — the ledger's finest grouping. Out sits inside in by design;
-                both share the scale, so the gap between them is the ratio, not the difference.
-              </p>
             </>
           )}
         </Panel>
@@ -597,10 +591,6 @@ export default function Dashboard() {
               }))}
               format={nfmt}
               emptyLabel="No surface usage yet." />
-            <p className="mt-3 border-t border-line pt-3 text-[11.5px] leading-relaxed text-mute">
-              Which endpoint clients actually call. A surface with traffic but nothing pinned to it is worth
-              a look — it means every call is paying for a protocol probe.
-            </p>
           </Panel>
         </StaggerItem>
       </div>

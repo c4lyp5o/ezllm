@@ -120,12 +120,6 @@ export default function Economics() {
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold tracking-tight text-ink">Token Economics</h2>
-          <p className="mt-1 text-[12px] text-mute">
-            What arrived, what was cached, what ezllm removed before forwarding — and what it cost.
-          </p>
-        </div>
         <Segmented label="Time range"
           options={RANGES.map((r) => ({ key: r, label: RANGE_LABEL[r] }))}
           value={range} onChange={setRange} />

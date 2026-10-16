@@ -1,7 +1,8 @@
 package compress
 
 // ── caveman: prose condensation (scope: text_only) ─────────────────────────
-// The only lossy engine. It condenses VERBOSE REQUEST PROSE using deterministic
+// A lossy engine (rtk and budget are lossy too — caveman is not special).
+// It condenses VERBOSE REQUEST PROSE using deterministic
 // rule packs — never a model, never a tokenizer — so the same input always
 // produces the same output and every rewrite is auditable.
 //

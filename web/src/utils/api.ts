@@ -251,7 +251,7 @@ export const stopSweep = (id: number) => del(`/admin/accounts/${id}/sync`);
 // nothing for its whole life — it sat in that contract test's "sent but
 // unread" allowlist, which is precisely why latency was invisible on the
 // dashboard. The analytics explorer's Latency focus now renders it.
-export type UsageRow = { k: string; calls: number; tin: number; tout: number; cread: number; cwrite: number; reasoning: number; saved: number; errors: number; context_pre: number; context_saved: number; p50_ttft_ms: number };
+export type UsageRow = { k: string; calls: number; tin: number; tout: number; cread: number; cwrite: number; reasoning: number; saved: number; errors: number; context_pre: number; context_saved: number; p50_ttft_ms: number; applied_saved: number };
 
 export type Health = {
   status: string; schema_version: number; accounts: number; provider_keys: number;

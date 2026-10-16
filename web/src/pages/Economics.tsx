@@ -77,14 +77,23 @@ export default function Economics() {
   useEffect(() => { void load(); }, [load]);
 
   // ── derived from the token summary ──
+  // The savings headline is applied_saved ONLY: the raw compression_saved
+  // column sweeps legacy declined rows in (~21k tokens from before the
+  // applied/notional split), and adding context_saved on top double-counts
+  // the budget-stage component (budget attribution is a COMPONENT of total
+  // reduction, not an additional total). context is shown separately.
   const context = summary?.context_saved ?? 0;
-  const compression = summary?.compression_saved ?? 0;
+  const saved = summary?.applied_saved ?? 0;
   const input = summary?.tin ?? 0;
   const output = summary?.tout ?? 0;
   const cached = summary?.cread ?? 0;
   const reasoning = summary?.reasoning ?? 0;
-  const saved = context + compression;
-  const before = input + cached + saved;
+  // The counterfactual: `input` is what was ACTUALLY sent (post-compression)
+  // and already contains the cache-read tokens (cached is a subset of input
+  // — the "of input re-read from cache" note below relies on that), so the
+  // pre-optimization estimate is input + saved, never input + cached + saved.
+  // Approximate by construction — labeled as such wherever it is shown.
+  const before = input + saved;
   const matching = summary?.count ?? rows.length;
 
   // ── derived from the cost rows ──
@@ -154,16 +163,17 @@ export default function Economics() {
         <>
           {/* Four cards: the context-budget card was removed with the budget
               stage itself — a card whose value can only ever be 0 is a lie
-              dressed as a stat. `saved` still sums BOTH ledger columns, so a
-              budget stage that ever ships again shows up in the compression
-              card's number without a resurrection commit here. */}
+              dressed as a stat. The compression card reads applied_saved
+              (shipped rewrites only); context_saved is its own component and
+              is never added into the headline. If a budget stage ever ships
+              again it gets its OWN card, not an arithmetic resurrection. */}
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Metric label="actual input" value={formatTokens(input)} note={`${nfmt(matching)} matching calls`} />
             <Metric label="output" value={formatTokens(output)} note={`${pct(output, input + output)} of volume`} />
             <Metric label="cached read" value={formatTokens(cached)} note={`${pct(cached, input)} of input re-read from cache`} />
-            <Metric label="compression saved" value={formatTokens(compression)}
+            <Metric label="compression saved" value={formatTokens(saved)}
               tone={saved > 0 ? 'text-ok' : undefined}
-              note={`${saved > 0 ? pct(saved, before) : '0%'} estimated reduction`} />
+              note={`${saved > 0 ? pct(saved, before) : '0%'} approx. reduction (shipped rewrites)`} />
           </div>
 
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
@@ -213,7 +223,17 @@ export default function Economics() {
               </p>
               <div className="mt-4 border-t border-line pt-4">
                 <Metric label="estimated pre-optimization" value={formatTokens(before)}
-                  note="what would have shipped without ezllm" />
+                  note="approx. — what would have shipped without ezllm" />
+                <div className="mt-3">
+                  <Metric label="context budget" value={formatTokens(context)}
+                    tone={context > 0 ? 'text-ok' : undefined}
+                    note="component of the reduction, NOT added to the headline" />
+                  <p className="mt-2 text-[12px] leading-relaxed text-dim">
+                    The budget-stage component, shown on its own because budget
+                    attribution is part of the total reduction — not an extra
+                    total. Zero today: no active profile runs the budget stage.
+                  </p>
+                </div>
               </div>
             </Panel>
           </div>
@@ -222,13 +242,20 @@ export default function Economics() {
           <Panel
             label={<SectionLabel>Spend (derived from model_prices)</SectionLabel>}
             aside={
-              costTotals && costTotals.unpriced_calls > 0 ? (
-                <span className="text-[11px] text-warn">
-                  {nfmt(costTotals.unpriced_calls)} calls unpriced — the total is a floor, not the bill
-                </span>
-              ) : costTotals?.pricing_complete && costRows.length > 0 ? (
-                <span className="text-[11px] text-ok">all calls priced</span>
-              ) : null
+              <>
+                {minInput && (
+                  <span className="text-[11px] text-warn" title="The min-input filter scopes the token view above; the spend rows are the whole range.">
+                    min-input filter: tokens only — spend is the whole range
+                  </span>
+                )}
+                {costTotals && costTotals.unpriced_calls > 0 ? (
+                  <span className="text-[11px] text-warn">
+                    {nfmt(costTotals.unpriced_calls)} calls unpriced — the total is a floor, not the bill
+                  </span>
+                ) : costTotals?.pricing_complete && costRows.length > 0 ? (
+                  <span className="text-[11px] text-ok">all calls priced</span>
+                ) : null}
+              </>
             }>
             {costRows.length === 0 ? (
               <EmptyState title="No priced traffic yet"

@@ -1,7 +1,11 @@
 // Package compress implements ezllm's compression contract (rev4 plan §4.2,
-// docs/compression-design.md): deterministic, pure-Go prompt compression that
-// can only ever help. Every skip path returns the ORIGINAL body bytes —
-// fail-open means byte-identical passthrough, never a re-marshal.
+// docs/compression-design.md): deterministic, pure-Go prompt compression.
+// It is LOSSY and cannot help unconditionally — the contract's job is to
+// make that visible: every skip path returns the ORIGINAL body bytes
+// (fail-open means byte-identical passthrough, never a re-marshal), only a
+// shipped rewrite counts as Applied savings, and a rejected rewrite books
+// its would-have-saved into Notional. What the engines discard is gone —
+// see docs/compression-design.md and the per-engine scope notes.
 package compress
 
 import (

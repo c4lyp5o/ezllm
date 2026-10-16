@@ -451,18 +451,24 @@ func boolInt(b bool) int {
 // dashboard reads — a tag rename silently blanks the stat cards, because the
 // frontend's types are hand-written from that doc. TestUsageRowJSONKeys pins it.
 type UsageRow struct {
-	Key          string `json:"k"`
-	Calls        int64  `json:"calls"`
-	TokensIn     int64  `json:"tin"`
-	TokensOut    int64  `json:"tout"`
-	CachedRead   int64  `json:"cread"`
-	CachedWrite  int64  `json:"cwrite"`
-	Reasoning    int64  `json:"reasoning"`
-	TokensSaved  int64  `json:"saved"`
-	ContextPre   int64  `json:"context_pre"`
-	ContextSaved int64  `json:"context_saved"`
-	Errors       int64  `json:"errors"`
-	P50TTFTms    int64  `json:"p50_ttft_ms"`
+	Key         string `json:"k"`
+	Calls       int64  `json:"calls"`
+	TokensIn    int64  `json:"tin"`
+	TokensOut   int64  `json:"tout"`
+	CachedRead  int64  `json:"cread"`
+	CachedWrite int64  `json:"cwrite"`
+	Reasoning   int64  `json:"reasoning"`
+	TokensSaved int64  `json:"saved"`
+	// AppliedSaved is the AUTHORITATIVE savings aggregate: SUM over rows
+	// where compression_applied=1 only. TokensSaved sums the raw column,
+	// which sweeps in legacy rows written before the applied/notional split
+	// (~21k tokens sitting on declined rows) — kept as evidence, never as a
+	// headline. Every UI total must read AppliedSaved.
+	AppliedSaved int64 `json:"applied_saved"`
+	ContextPre   int64 `json:"context_pre"`
+	ContextSaved int64 `json:"context_saved"`
+	Errors       int64 `json:"errors"`
+	P50TTFTms    int64 `json:"p50_ttft_ms"`
 }
 
 // UsageReport aggregates the ledger. group_by: account|key|alias|client|model|surface|day.
@@ -482,6 +488,7 @@ SELECT %s AS k,
        COALESCE(SUM(tokens_cached_write),0)       AS cwrite,
        COALESCE(SUM(reasoning_tokens),0)          AS reasoning,
        COALESCE(SUM(tokens_saved),0)              AS saved,
+       COALESCE(SUM(CASE WHEN compression_applied=1 THEN tokens_saved ELSE 0 END),0) AS applied_saved,
        COALESCE(SUM(context_tokens_pre),0)        AS context_pre,
        COALESCE(SUM(context_tokens_saved),0)      AS context_saved,
        COALESCE(SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END),0) AS errors
@@ -499,7 +506,7 @@ ORDER BY calls DESC`, col)
 	out := []UsageRow{}
 	for rows.Next() {
 		var r UsageRow
-		if err := rows.Scan(&r.Key, &r.Calls, &r.TokensIn, &r.TokensOut, &r.CachedRead, &r.CachedWrite, &r.Reasoning, &r.TokensSaved, &r.ContextPre, &r.ContextSaved, &r.Errors); err != nil {
+		if err := rows.Scan(&r.Key, &r.Calls, &r.TokensIn, &r.TokensOut, &r.CachedRead, &r.CachedWrite, &r.Reasoning, &r.TokensSaved, &r.AppliedSaved, &r.ContextPre, &r.ContextSaved, &r.Errors); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

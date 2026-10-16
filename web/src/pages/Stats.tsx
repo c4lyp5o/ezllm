@@ -60,8 +60,12 @@ function seriesOf(focus: FocusKey): { key: keyof UsageRow | string; label: strin
       // Two mechanisms, two bars, two colours: compression actually rewrote
       // (and shipped a shorter prompt); the context-budget stage kept history
       // out. Either can be 0 — the zero-filter below drops those rows.
+      // The compression series reads applied_saved, NOT saved: `saved` sums
+      // the raw ledger column and sweeps in legacy declined rows (~21k tokens
+      // from before the applied/notional split) — evidence, not savings.
+      // applied_saved is SUM(tokens_saved) gated on compression_applied=1.
       return [
-        { key: 'saved', label: 'compression', color: VIZ.saved },
+        { key: 'applied_saved', label: 'compression', color: VIZ.saved },
         { key: 'context_saved', label: 'context budget', color: VIZ.budget },
       ];
     case 'latency':
@@ -211,9 +215,9 @@ export default function Stats() {
           <StatCard label="reasoning" value={formatTokens(totals.reasoning)}
             tone={totals.reasoning > 0 ? 'text-warn' : undefined}
             sub="billed, never shown" />
-          <StatCard label="saved" value={formatTokens(totals.saved)}
-            tone={totals.saved > 0 ? 'text-ok' : undefined}
-            sub={totals.context_saved > 0 ? `+${formatTokens(totals.context_saved)} context budget` : 'compression only'} />
+          <StatCard label="saved" value={formatTokens(totals.applied_saved)}
+            tone={totals.applied_saved > 0 ? 'text-ok' : undefined}
+            sub={totals.context_saved > 0 ? `+${formatTokens(totals.context_saved)} context budget` : 'shipped rewrites only'} />
           <StatCard
             label="p50 ttft"
             value={fmtMs(totals.p50_ttft_ms)}
@@ -413,8 +417,8 @@ export default function Stats() {
                         <td className={cx('px-3 py-2 text-right', r.reasoning > 0 ? 'text-warn' : 'text-mute')}>
                           {r.reasoning > 0 ? formatTokens(r.reasoning) : '–'}
                         </td>
-                        <td className={cx('px-3 py-2 text-right', r.saved > 0 ? 'text-ok' : 'text-mute')}>
-                          {r.saved > 0 ? formatTokens(r.saved) : '–'}
+                        <td className={cx('px-3 py-2 text-right', r.applied_saved > 0 ? 'text-ok' : 'text-mute')}>
+                          {r.applied_saved > 0 ? formatTokens(r.applied_saved) : '–'}
                         </td>
                         <td className={cx('px-3 py-2 text-right', r.p50_ttft_ms > 0 ? 'text-[color:var(--color-viz-latency)]' : 'text-mute')}>
                           {fmtMs(r.p50_ttft_ms)}

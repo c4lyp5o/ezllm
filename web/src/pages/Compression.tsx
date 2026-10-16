@@ -180,9 +180,9 @@ export default function Compression() {
           columns: rewritten counts ONLY rows where a rewrite shipped
           (applied_saved — the raw tokens_saved column also sweeps in legacy
           declined rows); held is what the correctly-DECLINED rewrites would
-          have saved; the hit rate appears only when a decline exists to
-          compare against. No meaningful data → the rewritten card alone,
-          never filler. */}
+          have saved; the rewrite-acceptance rate appears only when a decline
+          exists to compare against. No meaningful data → the rewritten card
+          alone, never filler. */}
       <Panel
         label={<SectionLabel>Actual savings · last 24h</SectionLabel>}
         aside={<span className="text-[11px] text-mute">
@@ -208,12 +208,12 @@ export default function Compression() {
               </div>
               {showHitRate && (
                 <div className="rounded-lg border border-line bg-raised/40 px-4 py-3">
-                  <SectionLabel>hit rate</SectionLabel>
+                  <SectionLabel>rewrite acceptance</SectionLabel>
                   <div className="mt-1 font-mono text-[20px] font-semibold text-ink tnum">
                     {Math.round((appliedCalls / Math.max(1, rewritesDecided)) * 100)}%
                   </div>
                   <p className="mt-1 text-[11px] leading-relaxed text-mute">
-                    {nfmt(appliedCalls)} of {nfmt(rewritesDecided)} decided rewrites shipped; {nfmt(declinedCalls)} were declined to protect a cached prefix.
+                    {nfmt(appliedCalls)} of {nfmt(rewritesDecided)} decided rewrites shipped; {nfmt(declinedCalls)} were declined by the ratio floor (tuning data — nothing is claimed as saved).
                   </p>
                 </div>
               )}

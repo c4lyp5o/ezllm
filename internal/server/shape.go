@@ -14,11 +14,14 @@ package server
 //   - SIBLING reuse: two calls with the SAME conversation (a retry after a 429,
 //     a re-send after a dropped connection, N-best branching) hash identically,
 //     so "we sent this exact context k times" is a GROUP BY.
-//   - CACHE BREAKS: any edit to the stable core — a timestamp or request id
-//     injected into the system prompt, a tool list that reorders/regrows, a
-//     compression profile rewriting history — changes the hash. A model+session
-//     whose hashes churn is a model+session that is not getting cache hits, and
-//     that is the number worth seeing.
+//   - PREFIX INSTABILITY: any edit to the stable core — a timestamp or request
+//     id injected into the system prompt, a tool list that reorders/regrows, a
+//     compression profile rewriting history — changes the hash, and
+//     append-only growth changes it too. Hash CHURN is therefore NOT evidence
+//     of a cache miss (ordinary conversation growth churns it): it only bounds
+//     how much of the stable core COULD have been cacheable. Actual upstream
+//     reuse is what the provider reports (cache-read tokens) — that is the
+//     number worth seeing, this hash is the offline sibling-grouping key.
 //   - Volume weighting: joined with tokens_in/req_bytes, it prices exactly how
 //     much was re-sent that a stable prefix would have cached.
 

@@ -1,0 +1,219 @@
+package compress
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"sort"
+	"sync"
+	"time"
+)
+
+// ── committed-prefix stability (WS-C, scoped) ──────────────────────────────
+//
+// The defect this kills: compression is deterministic per message, but the
+// ratio floor judges the WHOLE pipeline. As a conversation grows, the same
+// history edit's saved/pre shrinks and eventually fails the floor — so an
+// accepted rewrite is REJECTED on a later request and the already-transmitted
+// history reverts to its original bytes, breaking the upstream prefix cache
+// (accepted once, flipped the next). The exempt-final-message window slides
+// the same way: a message shipped verbatim becomes "editable" next request.
+//
+// The scoped fix: a per-session COMMIT LEDGER of what actually shipped. Each
+// editable message is keyed by a hash of its full shape; on every request the
+// ledger's form (transformed or original) ships verbatim, and only genuinely
+// NEW messages go through the engines + floor. Already-shipped history is
+// never re-judged, so the prefix is byte-stable for the life of the session.
+//
+// Properties (plan WS-C requirements, honestly scoped):
+//   - bounded: per-session and global entry caps with LRU/TTL eviction
+//   - TTL'd: entries expire after ttl of disuse
+//   - process-local: never written to disk or the ledger; lost on restart
+//     (re-derivation is deterministic, so the cost is one re-acceptance)
+//   - session-scoped: no cross-session state (the key includes the session)
+//   - profile-scoped: the key includes the profile name, so an operator's
+//     profile CHANGE starts a fresh ledger — an explicit, visible transition,
+//     not silent drift
+//   - privacy: keys are hashes (no plaintext session ids), values are the
+//     shipped message forms which are prompt-derived content — bounded,
+//     TTL'd, memory-only, and disableable by leaving the session id absent
+//     (legacy stateless behavior).
+
+const (
+	// Defaults chosen for chat-sized sessions on a single home box.
+	DefaultSessionTTL        = 30 * time.Minute
+	DefaultSessionMaxEntries = 512 // per session+profile
+	DefaultMemoMaxEntries    = 8192
+)
+
+// SessionMemo is the commit ledger. Safe for concurrent use.
+type SessionMemo struct {
+	mu         sync.Mutex
+	ttl        time.Duration
+	maxPerKey  int
+	maxEntries int
+	now        func() time.Time
+
+	// key = sha256(session | profile | messageHash); stores the SHIPPED form.
+	entries map[string]*memoEntry
+	lru     map[string]int64 // key -> logical clock of last use
+	clock   int64
+	ops     uint64
+}
+
+type memoEntry struct {
+	shipped any // the exact message object that went upstream (nil = original)
+	usedAt  time.Time
+}
+
+// SessionMemoOptions tunes the ledger; zero values take the defaults.
+type SessionMemoOptions struct {
+	TTL        time.Duration
+	MaxPerKey  int
+	MaxEntries int
+	Now        func() time.Time
+}
+
+// NewSessionMemo builds a ledger with defaults or the given overrides.
+func NewSessionMemo(opts *SessionMemoOptions) *SessionMemo {
+	m := &SessionMemo{
+		ttl:        DefaultSessionTTL,
+		maxPerKey:  DefaultSessionMaxEntries,
+		maxEntries: DefaultMemoMaxEntries,
+		now:        time.Now,
+		entries:    map[string]*memoEntry{},
+		lru:        map[string]int64{},
+	}
+	if opts != nil {
+		if opts.TTL > 0 {
+			m.ttl = opts.TTL
+		}
+		if opts.MaxPerKey > 0 {
+			m.maxPerKey = opts.MaxPerKey
+		}
+		if opts.MaxEntries > 0 {
+			m.maxEntries = opts.MaxEntries
+		}
+		if opts.Now != nil {
+			m.now = opts.Now
+		}
+	}
+	return m
+}
+
+// memoKey derives the ledger key: sha256(session | profile | messageHash).
+// The session id never appears in the clear inside the map.
+func memoKey(session, profile string, msgHash string) string {
+	h := sha256.New()
+	h.Write([]byte(session))
+	h.Write([]byte{0})
+	h.Write([]byte(profile))
+	h.Write([]byte{0})
+	h.Write([]byte(msgHash))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// messageHash is the content-address of a message's full shape: any change
+// (role, content, tool ids, position-independent fields) is a new message.
+// A nil/undecodable message hashes as absent and is simply never memoized.
+func messageHash(m any) string {
+	sum := sha256.Sum256(mustMarshal(m))
+	return hex.EncodeToString(sum[:])
+}
+
+// Get returns the committed form for (session, profile, message) if present
+// and unexpired. ok=false means "no commitment — treat as new work".
+func (m *SessionMemo) Get(session, profile string, msg any) (shipped any, ok bool) {
+	if m == nil || session == "" || profile == "" {
+		return nil, false
+	}
+	h := messageHash(msg)
+	if h == "" {
+		return nil, false
+	}
+	key := memoKey(session, profile, h)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e, exists := m.entries[key]
+	if !exists {
+		return nil, false
+	}
+	if m.now().Sub(e.usedAt) > m.ttl {
+		delete(m.entries, key)
+		delete(m.lru, key)
+		return nil, false
+	}
+	m.clock++
+	m.lru[key] = m.clock
+	e.usedAt = m.now()
+	return e.shipped, true
+}
+
+// Put records the shipped form for (session, profile, message).
+func (m *SessionMemo) Put(session, profile string, msg any, shipped any) {
+	if m == nil || session == "" || profile == "" || shipped == nil {
+		return
+	}
+	h := messageHash(msg)
+	if h == "" {
+		return
+	}
+	key := memoKey(session, profile, h)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.entries[key] = &memoEntry{shipped: shipped, usedAt: m.now()}
+	m.clock++
+	m.lru[key] = m.clock
+	m.ops++
+	if m.ops%1024 == 0 || len(m.entries) > m.maxEntries {
+		m.evictLocked()
+	}
+}
+
+// evictLocked drops expired entries and, if still over the global cap, the
+// least-recently-used ones. Caller holds the lock.
+func (m *SessionMemo) evictLocked() {
+	now := m.now()
+	for k, e := range m.entries {
+		if now.Sub(e.usedAt) > m.ttl {
+			delete(m.entries, k)
+			delete(m.lru, k)
+		}
+	}
+	if len(m.entries) <= m.maxEntries {
+		return
+	}
+	type kv struct {
+		key string
+		clk int64
+	}
+	all := make([]kv, 0, len(m.lru))
+	for k, c := range m.lru {
+		all = append(all, kv{k, c})
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].clk < all[j].clk })
+	for i := 0; i < len(all) && len(m.entries) > m.maxEntries; i++ {
+		delete(m.entries, all[i].key)
+		delete(m.lru, all[i].key)
+	}
+}
+
+// Len reports the entry count (tests/ops visibility).
+func (m *SessionMemo) Len() int {
+	if m == nil {
+		return 0
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.entries)
+}
+
+// Clear drops everything (tests; an operator-visible reset is a restart).
+func (m *SessionMemo) Clear() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.entries = map[string]*memoEntry{}
+	m.lru = map[string]int64{}
+}

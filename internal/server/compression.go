@@ -93,7 +93,9 @@ func (s *Server) applyCompression(r *http.Request, requested string, body []byte
 	if prof == nil {
 		return body, compress.Result{Profile: profileName(nil, skip)}
 	}
-	out, res := compress.ApplyWithDoc(body, compressProfileToRuntime(prof), doc)
+	// Committed-prefix stability: the operator/client session id (bounded by
+	// sessionOf) scopes the ledger; absent -> legacy stateless compression.
+	out, res := compress.ApplyWithSession(body, compressProfileToRuntime(prof), doc, sessionOf(r), s.sessMemo)
 	return out, res
 }
 

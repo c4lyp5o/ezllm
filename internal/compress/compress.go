@@ -89,7 +89,27 @@ func Apply(body []byte, p *Profile) ([]byte, Result) {
 // Results are NAMED (out, res): the deferred MS stamp below only reaches
 // the caller on named returns — with unnamed returns the deferred write
 // lands on a local copy and compression_ms silently reads 0 everywhere.
-func ApplyWithDoc(body []byte, p *Profile, doc *jsonbody.BodyDoc) (out []byte, res Result) {
+//
+// This is the LEGACY stateless entry: no session, no memo. Request-path
+// callers should use ApplyWithSession, which adds committed-prefix
+// stability on top of exactly this pipeline.
+func ApplyWithDoc(body []byte, p *Profile, doc *jsonbody.BodyDoc) ([]byte, Result) {
+	return applyPipeline(body, p, doc, "", nil)
+}
+
+// ApplyWithSession is ApplyWithDoc with committed-prefix stability (WS-C,
+// scoped): when session and memo are both non-empty, messages already
+// SHIPPED in a transformed form (this session, this profile) ship that
+// exact form again — never re-judged by the ratio floor — and the floor
+// applies to the new work only. With an empty session or nil memo the
+// behaviour is exactly ApplyWithDoc's (legacy stateless mode). See
+// sessionmemo.go for the ledger's bounds, TTL, and privacy properties.
+func ApplyWithSession(body []byte, p *Profile, doc *jsonbody.BodyDoc, session string, memo *SessionMemo) ([]byte, Result) {
+	return applyPipeline(body, p, doc, session, memo)
+}
+
+// applyPipeline is the shared pipeline; session/memo empty = legacy mode.
+func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session string, memo *SessionMemo) (out []byte, res Result) {
 	start := time.Now()
 	// A disabled/stageless profile still RESOLVED, so its name belongs on
 	// the row; a nil profile has no name (and must never be dereferenced).
@@ -153,7 +173,31 @@ func ApplyWithDoc(body []byte, p *Profile, doc *jsonbody.BodyDoc) (out []byte, r
 		editable = msgs[:last]
 	}
 
-	cur := editable
+	// WS-C committed-prefix stability: messages already SHIPPED in a
+	// transformed form (this session, this profile) are replayed verbatim
+	// and excluded from the new work. The ratio floor then judges new work
+	// only, so accepted history can never flip back to original bytes as the
+	// conversation grows, and a message that shipped untouched stays
+	// untouched when the exempt window slides off it. Order is preserved:
+	// hit[] marks the replayed positions, cur carries the new work in order.
+	useMemo := session != "" && memo != nil && p.Name != ""
+	hit := make([]bool, len(editable))
+	forms := make([]any, len(editable)) // committed forms for hit positions
+	newWork := make([]any, 0, len(editable))
+	if useMemo {
+		for i, m := range editable {
+			if form, ok := memo.Get(session, p.Name, m); ok {
+				hit[i] = true
+				forms[i] = form
+				continue
+			}
+			newWork = append(newWork, m)
+		}
+	} else {
+		newWork = append(newWork, editable...)
+	}
+
+	cur := newWork
 	for _, st := range p.Stages {
 		if !KnownEngines[st.Engine] {
 			res.Err = "unknown engine " + st.Engine
@@ -184,10 +228,51 @@ func ApplyWithDoc(body []byte, p *Profile, doc *jsonbody.BodyDoc) (out []byte, r
 		return body, res
 	}
 
-	// Reassemble with the exempt final message appended back byte-identical.
-	finalMsgs := cur
+	// Contract rule 4 applied to the NEW WORK ONLY: the floor judges this
+	// request's fresh rewrites. A rejection discards them (they ship
+	// original) while committed history rides along unchanged — re-judging
+	// committed content is exactly the flip-flop this design removes.
+	floorNote := ""
+	if len(newWork) > 0 {
+		newPre := EstimateTokens(string(mustMarshal(newWork)))
+		newPost := EstimateTokens(string(mustMarshal(cur)))
+		wouldSave := newPre - newPost
+		if newPre > 0 && float64(wouldSave)/float64(newPre) < p.MinCompressRatio {
+			res.SavedNotional = wouldSave
+			floorNote = fmt.Sprintf("ratio floor (new work): %.3f < %.3f", float64(wouldSave)/float64(newPre), p.MinCompressRatio)
+			cur = newWork // the new work ships original
+		}
+	}
+
+	// Reassemble. Positional mapping (exact original order) is used when the
+	// pipeline preserved the message count — every engine except budget.
+	// A dropping engine (budget) shortens the slice, so exact positions are
+	// no longer known: committed forms keep their relative order first, then
+	// the survivors of the new work, then the exempt tail.
+	var rebuilt []any
+	if len(cur) == len(newWork) {
+		rebuilt = make([]any, 0, len(editable))
+		ni := 0
+		for i := range editable {
+			if hit[i] {
+				rebuilt = append(rebuilt, forms[i])
+				continue
+			}
+			rebuilt = append(rebuilt, cur[ni])
+			ni++
+		}
+	} else {
+		rebuilt = make([]any, 0, len(editable)+len(cur))
+		for _, f := range forms {
+			if f != nil {
+				rebuilt = append(rebuilt, f)
+			}
+		}
+		rebuilt = append(rebuilt, cur...)
+	}
+	finalMsgs := rebuilt
 	if p.ExemptLastTurn && last > 0 {
-		finalMsgs = append(append([]any{}, cur...), msgs[last])
+		finalMsgs = append(append([]any{}, rebuilt...), msgs[last])
 	}
 
 	post := EstimateTokens(string(mustMarshal(finalMsgs)))
@@ -195,17 +280,15 @@ func ApplyWithDoc(body []byte, p *Profile, doc *jsonbody.BodyDoc) (out []byte, r
 	if saved <= 0 {
 		saved = 0
 	}
-
-	// Contract rule 4: ratio floor — below it, the original ships.
-	if pre > 0 && float64(saved)/float64(pre) < p.MinCompressRatio {
-		// Record what we threw away so tuning the floor is a data question,
-		// not a guess. Saved stays 0: nothing actually shipped shorter.
-		res.SavedNotional = saved
-		res.Err = fmt.Sprintf("ratio floor: %.3f < %.3f", float64(saved)/float64(pre), p.MinCompressRatio)
-		return body, res
-	}
 	if saved == 0 {
-		res.Err = "nothing saved"
+		res.Err = floorNote
+		if res.Err == "" {
+			res.Err = "nothing saved"
+		}
+		// The engines RAN and this body is what ships: freeze it verbatim so
+		// the same bytes go upstream next request (the exempt tail commit
+		// lives here too — it went upstream untouched).
+		commitShipped(session, memo, p, editable, hit, forms, cur, newWork, last, msgs)
 		return body, res
 	}
 
@@ -219,7 +302,40 @@ func ApplyWithDoc(body []byte, p *Profile, doc *jsonbody.BodyDoc) (out []byte, r
 	}
 	res.Saved = saved
 	res.Applied = true
+	if floorNote != "" {
+		res.Err = floorNote
+	}
+
+	// Commit what actually SHIPPED — every editable message and the exempt
+	// tail, in the form it went upstream (transformed OR verbatim). Freezing
+	// verbatim forms is deliberate: those bytes already went upstream, so
+	// rewriting them on a later request would break the very prefix this
+	// design protects. The two-directional crossing therefore happens only
+	// through an EXPLICIT transition (a profile change starts a fresh
+	// namespace), never through silent re-compression.
+	commitShipped(session, memo, p, editable, hit, forms, cur, newWork, last, msgs)
 	return out, res
+}
+
+// commitShipped freezes the shipped form of every processed message. It is a
+// no-op in legacy mode (no session/memo) and when a dropping engine ran
+// (positions are no longer aligned; budget + memo is a documented non-goal
+// of this scope).
+func commitShipped(session string, memo *SessionMemo, p *Profile, editable []any, hit []bool, forms []any, cur []any, newWork []any, last int, msgs []any) {
+	useMemo := session != "" && memo != nil && p.Name != ""
+	if !useMemo || len(cur) != len(newWork) {
+		return
+	}
+	ni := 0
+	for i, m := range editable {
+		if !hit[i] {
+			memo.Put(session, p.Name, m, cur[ni])
+			ni++
+		}
+	}
+	if p.ExemptLastTurn && last > 0 {
+		memo.Put(session, p.Name, msgs[last], msgs[last])
+	}
 }
 
 // runEngine applies one stage. fired is only meaningful for caveman (the count

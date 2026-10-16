@@ -24,6 +24,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/c4lyp5o/ezllm/internal/compress"
 	"github.com/c4lyp5o/ezllm/internal/jsonbody"
 	"github.com/c4lyp5o/ezllm/internal/provider"
 	"github.com/c4lyp5o/ezllm/internal/proxy"
@@ -63,6 +64,11 @@ type Server struct {
 	// reload it so a new cap/window applies on the next request instead of
 	// waiting for the background ticker. Nil in unit tests that don't care.
 	rulesEngine *rules.Engine
+	// sessMemo is the committed-prefix ledger (WS-C, scoped): it replays
+	// already-shipped transforms so accepted history never flip-flops back
+	// to original bytes as a conversation grows. Process-local, TTL'd,
+	// session+profile scoped (internal/compress/sessionmemo.go).
+	sessMemo    *compress.SessionMemo
 	log         *slog.Logger
 	mux         *http.ServeMux
 	started     time.Time
@@ -166,6 +172,11 @@ func New(opts Options) *Server {
 	// gemini-web adapter rewrites hops to. Distinct patterns from the public
 	// routes, so registration order is irrelevant.
 	s.routes()
+	// Committed-prefix ledger (WS-C): process-local, TTL'd, session+profile
+	// scoped. Nil-safe — a nil memo means legacy stateless compression.
+	if s.sessMemo == nil {
+		s.sessMemo = compress.NewSessionMemo(nil)
+	}
 	if opts.DB != nil {
 		newGeminiWebBridge(opts.DB, "").register(s.mux)
 		newClaudeWebBridge(opts.DB, nil).register(s.mux)

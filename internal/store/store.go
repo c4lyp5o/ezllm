@@ -24,7 +24,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 15
+const schemaVersion = 16
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -180,6 +180,9 @@ func (d *DB) migrate() error {
 		if err := d.alterCallsContextTokens(context.Background()); err != nil {
 			return fmt.Errorf("store: alter calls context tokens: %w", err)
 		}
+		if err := d.alterCallsCompressionVersion(context.Background()); err != nil {
+			return fmt.Errorf("store: alter calls compression version: %w", err)
+		}
 		if err := d.alterDashboardAuth(context.Background()); err != nil {
 			return fmt.Errorf("store: alter dashboard auth: %w", err)
 		}
@@ -226,6 +229,9 @@ func (d *DB) migrate() error {
 		}
 		if err := d.alterCallsContextTokens(context.Background()); err != nil {
 			return fmt.Errorf("store: alter calls context tokens: %w", err)
+		}
+		if err := d.alterCallsCompressionVersion(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate calls compression version: %w", err)
 		}
 		if err := d.alterDashboardAuth(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate dashboard auth: %w", err)
@@ -518,6 +524,30 @@ func (d *DB) alterCallsResearch(ctx context.Context) error {
 // vendor's INCLUSIVE total (the synthesized anthropic envelope passes OpenAI's
 // prompt_tokens) and tokens_cached_read stays 0. Guarded by a column check:
 // ALTER TABLE ADD COLUMN is not idempotent.
+// alterCallsCompressionVersion adds calls.compression_version (addendum #5:
+// the immutable profile fingerprint behind each accepted transformation).
+func (d *DB) alterCallsCompressionVersion(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "calls")
+	if err != nil {
+		return fmt.Errorf("check calls table: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+	ok, err := hasColumn(ctx, d.w, "calls", "compression_version")
+	if err != nil {
+		return fmt.Errorf("check calls.compression_version: %w", err)
+	}
+	if ok {
+		return nil
+	}
+	if _, err := d.w.ExecContext(ctx,
+		`ALTER TABLE calls ADD COLUMN compression_version TEXT`); err != nil {
+		return fmt.Errorf("alter calls compression_version: %w", err)
+	}
+	return nil
+}
+
 func (d *DB) alterCallsTranslated(ctx context.Context) error {
 	exists, err := hasTable(ctx, d.w, "calls")
 	if err != nil {

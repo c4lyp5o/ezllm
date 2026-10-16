@@ -95,7 +95,10 @@ func (s *Server) applyCompression(r *http.Request, requested string, body []byte
 	}
 	// Committed-prefix stability: the operator/client session id (bounded by
 	// sessionOf) scopes the ledger; absent -> legacy stateless compression.
-	out, res := compress.ApplyWithSession(body, compressProfileToRuntime(prof), doc, sessionOf(r), s.sessMemo)
+	rt := compressProfileToRuntime(prof)
+	rt.MinAbsoluteTokens = s.compressionMinAbs
+	rt.MaxPipelineMS = s.compressionMaxMS
+	out, res := compress.ApplyWithSession(body, rt, doc, sessionOf(r), s.sessMemo)
 	return out, res
 }
 
@@ -114,6 +117,9 @@ func attachCompressionMetrics(call *store.Call, res compress.Result) {
 	// TokensSavedNotional so it is visible without inflating the headline.
 	call.TokensSaved = res.Saved
 	call.TokensSavedNotional = res.SavedNotional
+	// The immutable ruleset behind the decision (addendum #5): the row can be
+	// re-derived against the exact profile version that produced it.
+	call.CompressionVersion = res.ProfileVersion
 	call.CompressionMs = &res.MS
 	// caveman attribution: non-zero only when prose rules actually rewrote
 	// something, so "why did this prompt shrink?" is answerable from the row.

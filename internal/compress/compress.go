@@ -41,6 +41,16 @@ type Profile struct {
 	MinCompressRatio  float64
 	FailOpen          bool
 	AutoTriggerTokens int64
+	// MinAbsoluteTokens (addendum #5): the new work must remove at least
+	// this many estimated tokens before it ships. A ratio alone lets a
+	// 3-token saving through on a big prompt — real bytes, real cache churn,
+	// no measurable benefit. 0 = no absolute floor.
+	MinAbsoluteTokens int64
+	// MaxPipelineMS (addendum #5): the CPU limit for the stage loop. When a
+	// stage boundary passes it, the pipeline stops and ships what already
+	// ran — compression must never be the most expensive part of a request.
+	// 0 = no limit.
+	MaxPipelineMS int64
 }
 
 // Result carries the truth for the ledger (contract rule 6).
@@ -48,8 +58,13 @@ type Profile struct {
 // Applied is true only when the rewritten body is what ships upstream.
 type Result struct {
 	Profile string
-	Applied bool
-	Pre     int64 // estimated prompt tokens before compression
+	// ProfileVersion is the immutable fingerprint of the effective profile
+	// that made THIS decision (addendum #5: every accepted transformation is
+	// attributable to the exact ruleset that produced it — the same binding
+	// the session memo uses, so a ledger row can be re-derived).
+	ProfileVersion string
+	Applied        bool
+	Pre            int64 // estimated prompt tokens before compression
 	// Saved is what ACTUALLY shipped shorter — 0 on every skip/fail path, so
 	// SUM(Saved) is a real saving, not an aspiration.
 	Saved int64 // estimated tokens saved (0 on any skip)
@@ -116,6 +131,11 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 	if p != nil {
 		res.Profile = p.Name
 	}
+	// The ruleset identity that decides this request (addendum #5). Stamped
+	// for EVERY profile, including skips, so any ledger row — applied,
+	// declined, or never-transformed — names the exact version that looked
+	// at it. A session's BOUND version overrides below when the memo is on.
+	res.ProfileVersion = ProfileFingerprint(p)
 	defer func() { res.MS = time.Since(start).Milliseconds() }()
 
 	if p == nil || !p.Enabled || len(p.Stages) == 0 {
@@ -184,7 +204,12 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 	// (addendum #4): an operator editing the profile never silently
 	// re-versions a live session — its committed bytes keep replaying under
 	// the version it was first seen with, and only new sessions bind fresh.
-	profileVersion := memo.Bind(session, ProfileFingerprint(p))
+	profileVersion := memo.Bind(session, res.ProfileVersion)
+	if profileVersion != "" {
+		// The DECISION ran under the bound version (its committed forms are
+		// from it), so that is what the row must name.
+		res.ProfileVersion = profileVersion
+	}
 	useMemo := profileVersion != ""
 	hit := make([]bool, len(editable))
 	forms := make([]any, len(editable)) // committed forms for hit positions
@@ -203,10 +228,18 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 	}
 
 	cur := newWork
+	stagesRan := 0
 	for _, st := range p.Stages {
 		if !KnownEngines[st.Engine] {
 			res.Err = "unknown engine " + st.Engine
 			return body, res // fail-open
+		}
+		// CPU limit (addendum #5): the pipeline stops at a stage boundary once
+		// it has spent its budget. What already ran ships (a deterministic,
+		// attributable partial pipeline); what did not run does not.
+		if p.MaxPipelineMS > 0 && stagesRan > 0 && time.Since(start).Milliseconds() > p.MaxPipelineMS {
+			res.Err = fmt.Sprintf("cpu cap: stopped after %d/%d stages at %dms", stagesRan, len(p.Stages), time.Since(start).Milliseconds())
+			break
 		}
 		beforeStage := EstimateTokens(string(mustMarshal(cur)))
 		next, fired, err := runEngine(st, cur)
@@ -223,6 +256,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 		}
 		res.RulesFired += fired
 		cur = next
+		stagesRan++
 	}
 
 	// Integrity (contract rule 3): every modified text must still be
@@ -242,10 +276,17 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 		newPre := EstimateTokens(string(mustMarshal(newWork)))
 		newPost := EstimateTokens(string(mustMarshal(cur)))
 		wouldSave := newPre - newPost
+		// Ratio floor first (cheapest check), then the ABSOLUTE floor
+		// (addendum #5): a ratio that passes on a tiny saving is still not
+		// worth the bytes. Both judge the new work only.
 		if newPre > 0 && float64(wouldSave)/float64(newPre) < p.MinCompressRatio {
 			res.SavedNotional = wouldSave
 			floorNote = fmt.Sprintf("ratio floor (new work): %.3f < %.3f", float64(wouldSave)/float64(newPre), p.MinCompressRatio)
 			cur = newWork // the new work ships original
+		} else if wouldSave > 0 && p.MinAbsoluteTokens > 0 && wouldSave < p.MinAbsoluteTokens {
+			res.SavedNotional = wouldSave
+			floorNote = fmt.Sprintf("absolute floor (new work): %d < %d tokens", wouldSave, p.MinAbsoluteTokens)
+			cur = newWork
 		}
 	}
 

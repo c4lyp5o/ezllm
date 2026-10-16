@@ -126,6 +126,19 @@ type Translation struct {
 	UniversalEnabled bool `yaml:"universal_enabled"`
 }
 
+// Compression holds the request-time compression policy (addendum #5). Both
+// values are global policy — per-profile variants would need a schema column
+// on compression_profiles; these are the honest defaults until then.
+type Compression struct {
+	// MinAbsoluteTokens: the new work must remove at least this many
+	// estimated tokens before it ships. A ratio alone lets a 3-token saving
+	// through — real bytes and cache churn for no measurable benefit.
+	MinAbsoluteTokens int64 `yaml:"min_absolute_tokens"`
+	// MaxPipelineMS: the CPU limit for the stage loop. A pipeline that spends
+	// more than this stops at the next stage boundary and ships what ran.
+	MaxPipelineMS int64 `yaml:"max_pipeline_ms"`
+}
+
 type Config struct {
 	Listen             string              `yaml:"listen"`
 	DataDir            string              `yaml:"data_dir"`
@@ -134,6 +147,7 @@ type Config struct {
 	Providers          map[string]Provider `yaml:"providers"`
 	Ledger             Ledger              `yaml:"ledger"`
 	Cooldown           Cooldown            `yaml:"cooldown"`
+	Compression        Compression         `yaml:"compression"`
 	Retry              Retry               `yaml:"retry"`
 	ModelRefresh       ModelRefresh        `yaml:"model_refresh"`
 	Translation        Translation         `yaml:"translation"`
@@ -155,7 +169,11 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: read %s: %w", path, err)
 	}
-	cfg := Config{Translation: Translation{Enabled: true}, Retry: Retry{RequestAttemptBudget: 8}}
+	cfg := Config{
+		Translation: Translation{Enabled: true},
+		Retry:       Retry{RequestAttemptBudget: 8},
+		Compression: Compression{MinAbsoluteTokens: 24, MaxPipelineMS: 250},
+	}
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
 		// The yaml diagnostic names only the type, never the key. When the
 		// offender is a wrong-typed translation.universal_enabled, say so.
@@ -239,6 +257,13 @@ func (c *Config) Validate() error {
 		if d, err := time.ParseDuration(c.Retry.DispatchDeadlineStr); err != nil || d < time.Second {
 			errs = append(errs, "retry.dispatch_deadline: must be a duration of at least 1s")
 		}
+	}
+	// compression policy: absolute floor 0..100000 tokens, CPU cap 1..5000ms.
+	if c.Compression.MinAbsoluteTokens < 0 || c.Compression.MinAbsoluteTokens > 100000 {
+		errs = append(errs, "compression.min_absolute_tokens: must be between 0 and 100000")
+	}
+	if c.Compression.MaxPipelineMS < 0 || c.Compression.MaxPipelineMS > 5000 {
+		errs = append(errs, "compression.max_pipeline_ms: must be between 0 and 5000")
 	}
 	if c.ModelRefresh.Interval == "" {
 		c.ModelRefresh.Interval = "6h"

@@ -248,6 +248,9 @@ func run() error {
 		MaxBodyMiB:  cfg.MaxBodyMiB,
 		CORSOrigins: nil,
 		UsageTZ:     usageTZ,
+		// Compression policy (addendum #5): absolute floor + CPU cap.
+		CompressionMinAbs: cfg.Compression.MinAbsoluteTokens,
+		CompressionMaxMS:  cfg.Compression.MaxPipelineMS,
 	})
 
 	httpSrv := &http.Server{

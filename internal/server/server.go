@@ -68,13 +68,17 @@ type Server struct {
 	// already-shipped transforms so accepted history never flip-flops back
 	// to original bytes as a conversation grows. Process-local, TTL'd,
 	// session+profile scoped (internal/compress/sessionmemo.go).
-	sessMemo    *compress.SessionMemo
-	log         *slog.Logger
-	mux         *http.ServeMux
-	started     time.Time
-	maxBody     int64
-	web         fs.FS // dashboard source: embedded dist/ or EZLLM_WEB_DIR
-	corsOrigins []string
+	sessMemo *compress.SessionMemo
+	// compression policy (addendum #5): the request-time gates for the
+	// absolute floor and the CPU cap. Zero values = no gate.
+	compressionMinAbs int64
+	compressionMaxMS  int64
+	log               *slog.Logger
+	mux               *http.ServeMux
+	started           time.Time
+	maxBody           int64
+	web               fs.FS // dashboard source: embedded dist/ or EZLLM_WEB_DIR
+	corsOrigins       []string
 	// usageTZ is the default zone for group_by=day. Never nil: UTC unless
 	// EZLLM_USAGE_TZ says otherwise (validated at boot).
 	usageTZ *time.Location
@@ -124,6 +128,10 @@ type Options struct {
 	// ?tz= overrides it. It must already RESOLVE: main.go validates it at
 	// startup so a typo is a boot error, not a silent UTC shift.
 	UsageTZ string
+	// Compression policy (addendum #5): the request-time gates. Zero values
+	// mean no gate, which is what unit tests get.
+	CompressionMinAbs int64
+	CompressionMaxMS  int64
 }
 
 // usageTZOrDefault resolves the day-bucketing zone. Empty or whitespace means
@@ -155,7 +163,8 @@ func New(opts Options) *Server {
 		log: opts.Log, mux: http.NewServeMux(), rulesEngine: opts.Rules,
 		started: time.Now(), maxBody: maxBody,
 		web: webFS(), corsOrigins: opts.CORSOrigins,
-		usageTZ: usageTZOrDefault(opts.UsageTZ),
+		usageTZ:           usageTZOrDefault(opts.UsageTZ),
+		compressionMinAbs: opts.CompressionMinAbs, compressionMaxMS: opts.CompressionMaxMS,
 	}
 	// A server without a tester cannot run the key test; default one so the
 	// admin routes fail loudly at construction rather than nil-panic per request.

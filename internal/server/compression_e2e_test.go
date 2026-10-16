@@ -364,4 +364,15 @@ SELECT compression_profile, compression_applied FROM calls ORDER BY ts DESC LIMI
 	if profile != "combo-profile" || applied != 1 {
 		t.Errorf("combo ledger = %q/%d, want combo-profile/1", profile, applied)
 	}
+	// Addendum #5: the row names the immutable ruleset that decided, so the
+	// decision can be re-derived against the exact profile version.
+	var version string
+	if err := h.db.Reader().QueryRowContext(ctx, `
+SELECT compression_version FROM calls ORDER BY ts DESC LIMIT 1`).
+		Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version == "" {
+		t.Error("a compressed request must persist its profile version on the ledger row")
+	}
 }

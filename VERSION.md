@@ -1,0 +1,228 @@
+# VERSION
+
+Version history for ezllm. One version per change date — all patches committed
+on the same date share one version. The patch component increments by one per
+date (`v0.0.1`, `v0.0.2`, …).
+
+The current version is served by `GET /healthz` (`version` field), shown in the
+dashboard health strip, and asserted against this file by
+`internal/server/version_test.go` — bump `internal/server/version.go` and this
+file in the same commit, or the test fails.
+
+**Current: v0.0.12**
+
+---
+
+## v0.0.12 — 2026-10-17
+
+Repo housekeeping and version plumbing.
+
+- **Versioning**: new `VERSION.md` (this file); `internal/server/version.go`
+  single source of truth; `GET /healthz` now reports `{"status":"ok","version":…}`;
+  `/admin/overview` health object carries `version`; dashboard health strip shows it.
+- **Docs**: README rewritten (professional, no personal deploy details);
+  CONTRIBUTING.md and AGENTS.md added; EXPLORING.md/API.md/CHANGELOG synced
+  to shipped state; stale landmarks corrected.
+- **Tests relocated**: live proof scripts `scripts/prove_*.py` → `tests/`;
+  Playwright drivers `web/shot-*.mjs`, `web/verify-*.mjs` → `web/tests/`.
+  Go `_test.go` files stay in-package (Go toolchain requirement — see CONTRIBUTING).
+- **Makefile**: test targets carry CI's memory envelope (`GOMEMLIMIT=3GiB`,
+  `GOGC=50`), `test` runs `-count=1 -timeout 15m` (CI parity; cached results
+  were masking changes), new `test-short` for constrained environments.
+
+## v0.0.11 — 2026-10-16 · 30 commits (02b1c40..75a46e5)
+
+The four web-protocol providers, compression addenda, and the CI gate.
+
+- **M11 gap closure**: 1 MiB percentiles, fuzz moat, cancel-latency certificate.
+- **M12 gemini-web**: wrb.fr frame parser, cookie auth, GET_USER_STATUS oracle,
+  StreamGenerate + incremental frames, provider kind + in-process bridge; runbook.
+- **M13 github-copilot**: device flow, mint chain, routing, quirks, catalog,
+  adapter + `ezllm github-login`; Copilot third-party OAccess policy evidence.
+- **M14 claude-web**: uTLS Chrome transport, session auth, SSE conversation
+  state machine, provider adapter + loopback bridge; runbook.
+- **Compression addenda** #2–#7: hop compatibility groups + context-size
+  filtering, request-wide attempt budget + selection deadline, immutable
+  profile versions, absolute floor + CPU cap + persisted decision versions,
+  per-engine attribution + sampled shadow mode, rtk tool-class filters.
+- **Correctness**: caveman §11 rule safety, one authoritative applied-savings
+  aggregate (WS-A), disjoint input/output economics (WS-B), committed-prefix
+  stability (WS-C).
+- **CI**: `test.yml` gate (gofmt + vet + test + web build) now blocks
+  `docker-publish` via `needs: test`.
+- **Web**: provider presets for the three web-protocol providers, Copilot
+  device-flow login, bar-chart ordering, railway backdrop restraint, token
+  economics cold-input fix.
+
+## v0.0.10 — 2026-10-15 · 11 commits (485ffc7..e5033eb)
+
+Performance baseline and the single-parse dispatch.
+
+- **M1 perf baseline**: phase benchmarks, latency percentile harness,
+  cancellation / slow-consumer / retained-memory tests (no leak: ~1.3–2 KB/req).
+- **M10 single-parse dispatch**: one JSON decode per request through
+  extractModel → Apply → captureShape → prepareHopBody (−25% e2e non-stream,
+  −26% stream at 1 MiB; design `docs/single-parse-dispatch-design.md`).
+- **Providers**: capacity-shaped generation failure passes with a proven key,
+  sweep registry can no longer wedge, real NDJSON step chain, transient
+  probe-status badge, drawer retest-all + live status.
+- **Web**: login page (first-run hint, railway backdrop), dashboard polish
+  (analytics, economics, rules, requests, compression), repo file sort.
+
+## v0.0.9 — 2026-10-14 · 10 commits (abd130b..44b9901)
+
+Service-level endpoint defaults and host-scoped quota.
+
+- **Schema v15**: `service_bindings` + `service_probes` for per-service
+  endpoint defaults (embeddings / images / audio TTS / audio STT).
+- **Server**: per-service default bindings with honest typed refusals;
+  multipart STT gets a missing model field injected.
+- **Quota**: host-scoped same-key quota oracles, `ezllm` UA on own requests,
+  `tokens_today` / `requests_today` wired end-to-end, count-shaped quota
+  rendered on provider cards, token kind shown in key tests.
+- **Web**: Services page (endpoint defaults, honest states, prompt tests),
+  cache split carried onto every client wire, docx UI list.
+
+## v0.0.8 — 2026-10-13 · 18 commits (f7ee36b..4232902)
+
+Universal wire matrix, four new inference endpoints, and key-test hardening.
+
+- **Universal wire matrix**: surface-neutral request IR, shared response/event
+  codecs, per-account Messages usage convention (schema v13), translated hops
+  as strategy citizens, single `translation.universal_enabled` switch.
+- **Endpoints**: embeddings, image generation, audio TTS + STT (multipart),
+  with per-surface default models (`/admin/services` contract).
+- **Key tests**: NVIDIA NIM measured-fast probe models + timeout advances to
+  the next candidate; Cloudflare Workers AI account-aware oracle with absolute
+  probe URL and `@cf/…`-name catalog ids; plan-free model probe; retired-model
+  and empty-balance survival.
+- **Web**: searchable chat model picker, per-model Test column, 7-surface
+  model-drawer pinning, NVIDIA NIM / Cloudflare / OpenRouter presets,
+  caller IP + in/out token fold on recent calls.
+- **Aliases**: VS Code tokenized aliases (OmniRoute parity).
+
+## v0.0.7 — 2026-10-12 · 37 commits (8afa172..3a3ab3c)
+
+The translation day: anthropic↔openai and chat→responses, probe-gated.
+
+- **anthropic→openai translation**: wire-protocol fixtures, deterministic
+  request translation (golden-tested), openai→anthropic response translation,
+  SSE synthesis, config knob + hop eligibility; translated hops ordered after
+  native.
+- **responses-wire translation**: chat client → `/v1/responses` hop,
+  curated responses-wire hops for chat clients; anthropic↔responses leg
+  (Claude Code on responses-only hops).
+- **Visibility**: hop-aware routing with visible failover, block-position
+  tagging + failover trail, block-cursor advances logged, upstream error
+  cause classification + cause chips, consolidated recent-calls table,
+  combo hop-test modal, request IP.
+- **Verdicts**: curated protocol verdicts (schema v11), whole-catalog protocol
+  sweep ("test all"), wire identity + wire-first selection.
+- **Web**: Vercel AI Gateway preset with per-provider quota, dashboard
+  polish pass (10-item list), cause chips + current-state tooltip.
+
+## v0.0.6 — 2026-10-11 · 12 commits (c5053c8..0044b00)
+
+Routing honesty and dashboard rev 2.
+
+- **Router**: true `true_round_robin` (stateless dice roll), success-driven
+  `strict_round_robin`, `block_round_robin` block size, the dead success hook
+  (`MarkHopGood`) wired for the first time; fail closed on store errors;
+  never cache decrypted keys.
+- **Registration**: per-test adapter resolution (not per process), plan-free
+  probe so a plan refusal is not read as a bad key.
+- **Proxy**: a status the upstream never sent is never written; hidden causes
+  surfaced.
+- **Store/ledger**: lost ledger batch made visible, p50 computed in SQL,
+  409 on conflict; repeated user turn never dropped from history; timezone
+  that will not load is refused instead of silently falling back to UTC.
+- **Web**: dashboard UI rev 2 (analytics explorer, light/dark theme, chat
+  upload), day alignment with the meter, disaster-recovery export stream,
+  `least_used` dropped from the strategy picker.
+- **Presets**: Ollama Cloud.
+
+## v0.0.5 — 2026-10-10 · 21 commits (c099dd5..9d05fa6)
+
+Surface pins, research schema, and honest economics (M8/M9).
+
+- **Surface pin**: per-model `proto_pin` (schema v7) — enforced, never
+  rerouted; wrong-surface calls refuse `400 pinned_surface` before any dial.
+- **M9 research schema (v8)**: request-shape capture (`prefix_sha`,
+  `session_id`, `req_bytes`), versioned model prices + derived cost, real vs
+  notional savings split, TTFT measured from dispatch.
+- **Admin API**: request-shape + pricing/cost endpoints, `GET /admin/requests`
+  token filter, `POST /admin/chat`.
+- **Routing**: per-account request budget, block round robin, honest strategy
+  implementations; 429 is a failover signal, not a retry signal.
+- **Registration**: 400 from the auth oracle defers instead of failing; no
+  doubled HTTP prefix in oracle detail.
+- **Web**: confirmation modals for destructive actions, cost panel +
+  per-account pricing drawer, connect page rewrite, OpenAI preset,
+  docs refresh to shipped state.
+
+## v0.0.4 — 2026-10-09 · 15 commits (8c832ef..fb2a2fd)
+
+First hardening pass and preset expansion.
+
+- **Fixes**: client `Origin` stripped before forwarding (Anthropic CORS 401),
+  dashboard session cleared only on own auth 401, routed account id persisted,
+  duplicate token names rejected, combo config size advertised.
+- **Router**: dead combo endpoints cool down; rules refusal returns 429, not
+  502.
+- **healthz reduced to liveness only** (`{"status":"ok"}`) — detail moved
+  behind `/admin/*`.
+- **Provider**: `gemini-openai` kind with scoped 400 auth rejection; key shape
+  checks dropped — the probe chain is the sole validator.
+- **Presets**: Command Code, DeepSeek, TokenRouter, Gemini, Groq.
+- **Web**: 18-item dashboard UI pass.
+- **Docs**: housekeeping to shipped state (M1–M7), API.md extended, CHANGELOG added.
+
+## v0.0.3 — 2026-10-08 · 21 commits (0056710..e60b7fd)
+
+Containerization, chat, and retry semantics.
+
+- **Retry**: combo hop retried with exponential backoff before failover;
+  global policy (3 retries/hop, transient-only) with config knobs.
+- **Config**: credentials become SQLite-only; `EZLLM_*` env overrides restored
+  for containers (deployment bug fix).
+- **Budget**: compression budget stage with own context-token accounting
+  (schema v5).
+- **Web**: chat page behind the real routing path, Token Economics +
+  budget-engine controls, add-provider dialog with key validation on save.
+- **Deploy**: static distroless Docker image + home-box Traefik overlay;
+  explicit router priorities + dedicated `/admin/login` limiter; MIT license.
+- **Combos**: advertised in `/v1/models`, `enabled` honored in PATCH,
+  per-combo enable toggle.
+- **Presets**: Claude Platform; anthropic-compatible `/v1` join fix.
+
+## v0.0.2 — 2026-10-07 · 18 commits (c10d422..18abe07)
+
+Rules, compression, and the dashboard surfaces (M5–M7).
+
+- **Rules**: eligibility engine — token caps + allowed-use windows, dashboard
+  editor with live open/closed chips.
+- **Compression**: M5 pipeline (engines, profiles, CRUD, inference wiring),
+  headroom + lite engines, caveman (lossy prose condensation gated by
+  construction), `rules_fired` attribution end to end, surface stamp on the feed.
+- **Ledger**: `GET /admin/requests` filters by tokens in/out; Requests page.
+- **Surfaces**: stats explorer (granularity × range), live recent-requests
+  feed (SSE over fetch).
+- **Auth**: dashboard password + plaintext keys stored in SQLite.
+- **Fix**: combo refused by rules on every hop returns 429, not 502.
+- **Test**: dashboard auth + plaintext schema coverage; Playwright render
+  drivers.
+
+## v0.0.1 — 2026-10-06 · 10 commits (d0247f8..fcabd35)
+
+Initial release: the skeleton up to a working routed gateway.
+
+- **M1**: skeleton + `/healthz`.
+- **M2**: SQLite store, field crypto (AES-GCM, test-covered, unwired in v1),
+  three-surface passthrough (chat / messages / responses).
+- **Store**: admin persistence — accounts, provider keys, combos, client tokens.
+- **Provider**: live model-catalog probe + adapter protocol surfaces.
+- **Registration**: provider key testing with capped protocol sweep.
+- **Proxy**: attempt/commit split — combo failover that never leaks a failed hop.
+- **Router**: combo name → ordered candidate hops; strategies.
+- **Admin**: admin API, embedded dashboard, combo inference wiring.
+- **Docs**: API reference, key-test design record.

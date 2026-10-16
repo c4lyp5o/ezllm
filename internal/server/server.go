@@ -384,19 +384,21 @@ func (s *Server) WrapForTest(h http.Handler) http.Handler {
 // ── handlers ────────────────────────────────────────────────────────────────
 
 // handleHealth is public (monitors, Traefik, the compose healthcheck), so it
-// reports liveness only. It leaks nothing: no DB path, counts, versions, or
-// uptime. Detailed stats are behind the admin token at /admin/overview.
+// reports liveness plus the release version — deliberately the ONLY extra
+// field: no DB path, counts, or uptime. Detailed stats are behind the admin
+// token at /admin/overview. The version pairing is asserted against
+// VERSION.md by version_test.go.
 // A failing DB ping returns 503 so the probe still means something.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if s.db != nil {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
 		if err := s.db.Ping(ctx); err != nil {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "down"})
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "down", "version": Version})
 			return
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "version": Version})
 }
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {

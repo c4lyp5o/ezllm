@@ -115,11 +115,13 @@ func TestHealthIsPublic(t *testing.T) {
 	}
 	var m map[string]any
 	json.Unmarshal([]byte(body), &m)
-	// Liveness only: exactly one field, nothing about the host or the data.
-	if len(m) != 1 || m["status"] != "ok" {
-		t.Errorf("healthz payload = %v, want exactly {status: ok}", m)
+	// Liveness + release version: exactly two fields, nothing about the host
+	// or the data (version is the deliberate 2026-10-17 addition, paired with
+	// VERSION.md by version_test.go).
+	if len(m) != 2 || m["status"] != "ok" || m["version"] != Version {
+		t.Errorf("healthz payload = %v, want exactly {status: ok, version: %s}", m, Version)
 	}
-	for _, bad := range []string{"***", "tok-infer", "test-master", "accounts", "ledger_rows", "schema_version", "\"db\"", "uptime_s", "version", ".sqlite", "/data"} {
+	for _, bad := range []string{"***", "tok-infer", "test-master", "accounts", "ledger_rows", "schema_version", "\"db\"", "uptime_s", ".sqlite", "/data"} {
 		if strings.Contains(body, bad) {
 			t.Errorf("healthz leaked %q in %s", bad, body)
 		}

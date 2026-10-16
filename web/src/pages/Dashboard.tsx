@@ -84,6 +84,7 @@ function statusTone(s: number): string {
 function HealthStrip({ o }: { o: Overview }) {
   const h = o.health;
   const items: Array<[string, string]> = [
+    ['version', h.version],
     ['accounts', String(h.accounts)],
     ['models', String(h.models)],
     ['combos', String(h.combos)],

@@ -277,7 +277,7 @@ export const stopSweep = (id: number) => del(`/admin/accounts/${id}/sync`);
 export type UsageRow = { k: string; calls: number; tin: number; tout: number; cread: number; cwrite: number; reasoning: number; saved: number; errors: number; context_pre: number; context_saved: number; p50_ttft_ms: number; applied_saved: number };
 
 export type Health = {
-  status: string; schema_version: number; accounts: number; provider_keys: number;
+  status: string; version: string; schema_version: number; accounts: number; provider_keys: number;
   models: number; combos: number; ledger_rows: number; dropped_rows: number; uptime_s: number;
 };
 

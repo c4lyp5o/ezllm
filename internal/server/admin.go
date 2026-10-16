@@ -252,6 +252,7 @@ func (s *Server) healthSnapshot(ctx context.Context) (map[string]any, error) {
 	}
 	return map[string]any{
 		"status":         "ok",
+		"version":        Version,
 		"schema_version": s.db.SchemaVersion(),
 		"db_path":        s.db.Path(),
 		"accounts":       accounts,

@@ -81,9 +81,17 @@ func Apply(body []byte, p *Profile) ([]byte, Result) {
 // map(root) replaces the internal decode — same UseNumber settings, same
 // fail-open decisions — so the body is not parsed a second time. doc must be
 // the decode of `body`; a nil doc decodes internally as before.
-func ApplyWithDoc(body []byte, p *Profile, doc *jsonbody.BodyDoc) ([]byte, Result) {
+//
+// Results are NAMED (out, res): the deferred MS stamp below only reaches
+// the caller on named returns — with unnamed returns the deferred write
+// lands on a local copy and compression_ms silently reads 0 everywhere.
+func ApplyWithDoc(body []byte, p *Profile, doc *jsonbody.BodyDoc) (out []byte, res Result) {
 	start := time.Now()
-	res := Result{Profile: p.Name}
+	// A disabled/stageless profile still RESOLVED, so its name belongs on
+	// the row; a nil profile has no name (and must never be dereferenced).
+	if p != nil {
+		res.Profile = p.Name
+	}
 	defer func() { res.MS = time.Since(start).Milliseconds() }()
 
 	if p == nil || !p.Enabled || len(p.Stages) == 0 {

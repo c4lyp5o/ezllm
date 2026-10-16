@@ -80,12 +80,12 @@
     },
     {
       "name": "please_could_you_tell_me",
-      "pattern": "\\bplease could you tell me (?:what|why|how|whether|if)\\s+",
+      "pattern": "\\b(?:please )?could you tell me\\s+",
       "replacement": "Tell me ",
       "flags": "gi",
       "category": "context",
       "minIntensity": "standard",
-      "description": "Double politeness collapses; the question word is preserved by the capture-free rewrite."
+      "description": "Double politeness collapses. The question word is NOT part of the match (capture groups are forbidden in this engine), so it survives verbatim: \"Please could you tell me what time it is?\" -> \"Tell me what time it is?\"."
     },
     {
       "name": "drop_i_am_currently",
@@ -95,15 +95,6 @@
       "category": "context",
       "minIntensity": "standard",
       "description": "\"I am currently running\" → \"I'm running\"."
-    },
-    {
-      "name": "drop_there_seems_to_be",
-      "pattern": "\\bthere seems to be\\s+",
-      "replacement": "there is ",
-      "flags": "gi",
-      "category": "context",
-      "minIntensity": "standard",
-      "description": "Hedged existence claim → plain one. Weaker assertion is acceptable framing loss; the subject and its state survive."
     },
     {
       "name": "shrink_it_looks_like",

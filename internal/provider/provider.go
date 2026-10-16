@@ -143,6 +143,11 @@ type Account struct {
 	RateLimit  int64         // requests per RateWindow; 0 = unlimited
 	RateWindow time.Duration // 0 = off
 	Notes      string
+	// MaxContextTokens (addendum #2/#6): the operator-declared context window
+	// for this account. A request whose estimated token count exceeds it is
+	// filtered BEFORE dispatch — no paid upstream call, no wasted round-trip.
+	// 0 = unknown/unlimited (the default and the backward-compatible value).
+	MaxContextTokens int64
 	// UsageConvention is the operator-declared input_tokens accounting of the
 	// upstream Messages wire (see UsageConvention above). Empty on hand-built
 	// values is treated as UsageConventionAuto.

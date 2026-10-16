@@ -68,7 +68,7 @@ where the detail that `/healthz` no longer leaks lives.)
 {
   "id":1, "name":"OpenCode Go", "namespace":"opengo", "kind":"opencode-go",
   "base_url":"https://opencode.ai/zen/go/v1", "enabled":true,
-  "probe_delay_ms":400, "cap_window":"monthly", "cap_tokens":0,
+  "probe_delay_ms":400, "cap_window":"monthly", "cap_tokens":0, "max_context_tokens":0,
   "usage_convention":"auto",   // schema v13: how the upstream Messages wire counts
                                // input_tokens — auto|anthropic|total
   "keys":[ {"id":9,"label":"primary","hint":"sk…5E5i","enabled":true,
@@ -414,6 +414,7 @@ Also `POST /admin/keys/{keyId}/quota` → `200` to force a live read + snapshot 
 One rule per `(account_id, model_id)`: a rolling **token cap** and/or an **allowed-use window**.
 
 - `cap_tokens` — `0` = unlimited; `cap_window` — `5h | daily | weekly | monthly` (default `monthly`).
+- `max_context_tokens` — the declared context window (default `0` = unknown/unlimited). Requests whose estimated token count exceeds it are filtered before dispatch — no wasted upstream call. The estimate is `len(body)/4`, a conservative heuristic.
 - `win_start` / `win_end` — `HH:MM` local to `win_tz`; `end < start` wraps midnight; both empty =
   always allowed; an identical pair is rejected (empty window, not all-day).
 - `win_days` — CSV of `0–6` (Sun=0), `""` = every day; `win_tz` — IANA name or fixed offset.

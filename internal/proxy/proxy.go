@@ -1369,6 +1369,30 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 	if len(routes) == 0 {
 		return Route{}, Result{}, errors.New("proxy: no candidate routes")
 	}
+	// HOP COMPATIBILITY GROUPS (addendum #2): the combo/strategy layer
+	// declares three kinds of relationship between hops, each handled by a
+	// different skip/failover rule:
+	//
+	//   REPLICA: same model, different accounts — interchangeable. Failover
+	//   picks the next replica; a 429 on one never retried on the same.
+	//
+	//   CROSS-MODEL FALLBACK: different model — the combo declares the
+	//   preference order. A 429 falls through to the next model.
+	//
+	//   WIRE TRANSLATION: WireSurface != "" — same logical model, different
+	//   wire protocol (e.g. OpenAI → Anthropic). The combo declares which
+	//   surface the upstream speaks; the Route carries the translation.
+	//
+	// CAPABILITY FILTERING (addendum #6): each hop is checked, in order,
+	// for: (1) cooldown, (2) context-size fitness, (3) rate budget, (4)
+	// attempt budget, then dispatched. A hop that fails any check is
+	// skipped with an honest note — the attempt trail carries it to the
+	// served row's ledger so the operator sees the full story.
+	//
+	// NEVER TRUNCATE: this dispatcher never truncates a request's history
+	// to fit a hop's context window. If the body is too large, the hop is
+	// skipped — the combo fails over to one that fits, or returns 503.
+	// Truncation would silently corrupt the conversation; a skip is honest.
 	// Try candidates in the resolver's strategy order, skipping cooled endpoints.
 	var fallbackRoute *Route
 	var fallbackResp *http.Response
@@ -1405,6 +1429,25 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 			break
 		}
 		rt := routes[i]
+		// Context-size filter (addendum #6): a request whose estimated token
+		// count exceeds the hop's declared context window is filtered BEFORE
+		// dispatch — no paid upstream call, no wasted round-trip. The estimate
+		// is len(body)/4, a standard conservative heuristic that overestimates
+		// slightly, which is exactly what we want for filtering. 0 = unknown
+		// or unlimited — never filtered.
+		if rt.Account.MaxContextTokens > 0 {
+			reqEst := int64(len(body)) / 4
+			if reqEst > rt.Account.MaxContextTokens {
+				d.log.Info("hop skipped: context too small",
+					"account", rt.Account.Namespace, "model", rt.Model,
+					"estimated_tokens", reqEst, "max_context", rt.Account.MaxContextTokens)
+				attempts = append(attempts, Attempt{
+					Namespace: rt.Account.Namespace, Model: rt.Model,
+					Note: fmt.Sprintf("context too small: estimated %d > max %d", reqEst, rt.Account.MaxContextTokens),
+				})
+				continue
+			}
+		}
 		allowed, probe := d.acquireHop(rt, time.Now())
 		if !allowed {
 			// Failover is invisible to the CLIENT on purpose; it must not be

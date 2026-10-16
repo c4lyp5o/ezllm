@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   -- every hop routed through it shares one budget. 0 = unlimited.
   rate_limit  INTEGER NOT NULL DEFAULT 0,       -- requests per rate_window
   rate_window TEXT NOT NULL DEFAULT '',         -- Go duration, e.g. '60s'; '' = off
+  max_context_tokens INTEGER NOT NULL DEFAULT 0,  -- 0 = unknown/unlimited; filter by this BEFORE dispatch
   -- How the upstream Messages wire counts input_tokens: 'auto' = unknown
   -- (cross-wire Messages destinations refuse), 'anthropic' = input EXCLUDES
   -- cache tokens, 'total' = input INCLUDES cache tokens. An OPERATOR fact:

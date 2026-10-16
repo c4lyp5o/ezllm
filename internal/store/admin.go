@@ -244,6 +244,10 @@ type AccountInput struct {
 	// UsageConvention: '' = keep current (PATCH) / default 'auto' (create);
 	// otherwise auto|anthropic|total. See provider.UsageConvention.
 	UsageConvention string `json:"usage_convention"`
+	// MaxContextTokens (addendum #2/#6): the operator-declared context window.
+	// Requests whose estimated token count exceeds it are filtered before
+	// dispatch. 0 = unknown/unlimited.
+	MaxContextTokens *int64 `json:"max_context_tokens"`
 }
 
 // ErrConflict marks a uniqueness clash (409): namespace or name taken, or a
@@ -492,6 +496,10 @@ func (d *DB) writeAccount(ctx context.Context, id int64, in AccountInput, kind p
 	if in.RateLimit != nil {
 		rateLimit = *in.RateLimit
 	}
+	var maxCtx int64
+	if in.MaxContextTokens != nil {
+		maxCtx = *in.MaxContextTokens
+	}
 	rateWindow := in.RateWindow
 	if rateLimit <= 0 {
 		// A count of zero means unlimited, so keep no window: a stored window
@@ -505,11 +513,11 @@ func (d *DB) writeAccount(ctx context.Context, id int64, in AccountInput, kind p
 			res, err := tx.ExecContext(ctx, `
 INSERT INTO accounts (name, namespace, kind, base_url, enabled, requires_session_header,
                       quota_mode, custom_headers, probe_delay_ms, cap_window, cap_tokens,
-                      rate_limit, rate_window, notes, usage_convention)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                      rate_limit, rate_window, notes, usage_convention, max_context_tokens)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 				in.Name, in.Namespace, string(kind), in.BaseURL, enabled, requires,
 				quotaMode, ch, probe, capWindow, capTokens, rateLimit, rateWindow, in.Notes,
-				parsedUsage)
+				parsedUsage, maxCtx)
 			if err != nil {
 				return err
 			}
@@ -520,11 +528,12 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 UPDATE accounts SET name=?, namespace=?, kind=?, base_url=?, enabled=?,
        requires_session_header=?, quota_mode=?, custom_headers=?, probe_delay_ms=?,
        cap_window=?, cap_tokens=?, rate_limit=?, rate_window=?, notes=?,
-       usage_convention=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+       usage_convention=?, max_context_tokens=?,
+       updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
 WHERE id=?`,
 			in.Name, in.Namespace, string(kind), in.BaseURL, enabled, requires,
 			quotaMode, ch, probe, capWindow, capTokens, rateLimit, rateWindow, in.Notes,
-			parsedUsage, id)
+			parsedUsage, maxCtx, id)
 		if err != nil {
 			return err
 		}

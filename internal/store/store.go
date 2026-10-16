@@ -24,7 +24,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 17
+const schemaVersion = 18
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -186,6 +186,9 @@ func (d *DB) migrate() error {
 		if err := d.alterCallsCompressionAttribution(context.Background()); err != nil {
 			return fmt.Errorf("store: alter calls compression attribution: %w", err)
 		}
+		if err := d.alterAccountMaxContext(context.Background()); err != nil {
+			return fmt.Errorf("store: alter accounts max context: %w", err)
+		}
 		if err := d.alterDashboardAuth(context.Background()); err != nil {
 			return fmt.Errorf("store: alter dashboard auth: %w", err)
 		}
@@ -238,6 +241,9 @@ func (d *DB) migrate() error {
 		}
 		if err := d.alterCallsCompressionAttribution(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate calls compression attribution: %w", err)
+		}
+		if err := d.alterAccountMaxContext(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate accounts max context: %w", err)
 		}
 		if err := d.alterDashboardAuth(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate dashboard auth: %w", err)
@@ -557,6 +563,29 @@ func (d *DB) alterCallsCompressionVersion(ctx context.Context) error {
 // alterCallsCompressionAttribution adds calls.compression_stages +
 // calls.shadow_tokens_saved (addendum #7): per-engine attribution and the
 // sampled shadow measurement.
+// alterAccountMaxContext adds accounts.max_context_tokens (addendum #2/#6).
+func (d *DB) alterAccountMaxContext(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "accounts")
+	if err != nil {
+		return fmt.Errorf("check accounts table: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+	ok, err := hasColumn(ctx, d.w, "accounts", "max_context_tokens")
+	if err != nil {
+		return fmt.Errorf("check accounts.max_context_tokens: %w", err)
+	}
+	if ok {
+		return nil
+	}
+	if _, err := d.w.ExecContext(ctx,
+		`ALTER TABLE accounts ADD COLUMN max_context_tokens INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return fmt.Errorf("alter accounts max_context_tokens: %w", err)
+	}
+	return nil
+}
+
 func (d *DB) alterCallsCompressionAttribution(ctx context.Context) error {
 	exists, err := hasTable(ctx, d.w, "calls")
 	if err != nil {

@@ -12,9 +12,19 @@ import { useEffect, useRef } from 'react';
 
 type Seg = { p0: { x: number; y: number }; p1: { x: number; y: number }; p2: { x: number; y: number }; p3: { x: number; y: number } };
 type Path = { segments: Seg[]; color: string };
-type Packet = { pathIndex: number; t: number; speed: number; size: number };
+type Packet = { pathIndex: number; t: number; speed: number; size: number; color: string };
 
 const PATH_COLORS = ['#38bdf8', '#60a5fa', '#818cf8', '#22d3ee', '#7dd3fc']; // ezllm sky family
+
+// Packet colours draw from a wider sky→violet range than the rails so two
+// packets never read as clones — and explicitly NO white and NO black: the
+// old white core was a hard spark against the dark field.
+const PACKET_COLORS = ['#38bdf8', '#60a5fa', '#818cf8', '#22d3ee', '#7dd3fc', '#a78bfa', '#c084fc'];
+
+// Calm by design: at most two packets in flight, spawned at random gaps on
+// random tracks. The original 80 looping dots were a light show; a railway
+// shows one or two cars at a time.
+const MAX_PACKETS = 2;
 
 export default function RailwayBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -30,9 +40,12 @@ export default function RailwayBackground() {
     let height = 0;
     let paths: Path[] = [];
     let packets: Packet[] = [];
+    // Spawn pacing: which track the LAST packet took (so the next one picks a
+    // different one) and the rAF timestamp the next packet becomes due.
+    let lastPathIndex = -1;
+    let nextSpawnAt = 0;
 
     const numPaths = 12;
-    const numPackets = 80;
     const boxW = 320;
     const boxH = 160;
 
@@ -60,6 +73,24 @@ export default function RailwayBackground() {
       c.lineTo(x, y + radius);
       c.quadraticCurveTo(x, y, x + radius, y);
       c.closePath();
+    };
+
+    // spawnPacket adds ONE packet on a random track the previous packet did
+    // not use, in its own colour. atT lets the static (reduced-motion) frame
+    // freeze a packet mid-track instead of running the loop.
+    const spawnPacket = (atT = 0) => {
+      let pathIndex = Math.floor(Math.random() * numPaths);
+      if (numPaths > 1) {
+        while (pathIndex === lastPathIndex) pathIndex = Math.floor(Math.random() * numPaths);
+      }
+      lastPathIndex = pathIndex;
+      packets.push({
+        pathIndex,
+        t: atT,
+        speed: 0.0018 + Math.random() * 0.0022,
+        size: 1.6 + Math.random() * 1.6,
+        color: PACKET_COLORS[Math.floor(Math.random() * PACKET_COLORS.length)],
+      });
     };
 
     const init = () => {
@@ -111,13 +142,12 @@ export default function RailwayBackground() {
         });
       }
 
-      for (let i = 0; i < numPackets; i++) {
-        packets.push({
-          pathIndex: Math.floor(Math.random() * numPaths),
-          t: Math.random(),
-          speed: 0.0015 + Math.random() * 0.0025,
-          size: 1.5 + Math.random() * 1.5,
-        });
+      lastPathIndex = -1;
+      nextSpawnAt = 0;
+      if (reducedMotion) {
+        // Static frame: one packet frozen mid-track, so the still picture
+        // still carries a packet without running the loop.
+        spawnPacket(0.45);
       }
     };
 
@@ -175,13 +205,19 @@ export default function RailwayBackground() {
       ctx.fillStyle = 'rgba(125, 211, 252, 0.45)';
       ctx.fillText('router', centerX, centerY + 18);
 
-      // 4. Packets with comet trails
+      // 4. Packets with comet trails — one or two at a time, each spawned at
+      // a random gap on a track the previous packet did not use.
+      if (now >= nextSpawnAt && packets.length < MAX_PACKETS) {
+        spawnPacket();
+        nextSpawnAt = now + 700 + Math.random() * 1500; // 0.7–2.2s of quiet
+      }
       ctx.globalCompositeOperation = 'screen';
-      packets.forEach((packet) => {
+      for (let i = packets.length - 1; i >= 0; i--) {
+        const packet = packets[i];
         packet.t += packet.speed;
         if (packet.t >= 1) {
-          packet.t = 0;
-          packet.pathIndex = Math.floor(Math.random() * numPaths);
+          packets.splice(i, 1); // off the far edge — retire, no respin
+          continue;
         }
         const path = paths[packet.pathIndex];
         const pos = posOnPath(path, packet.t);
@@ -191,25 +227,27 @@ export default function RailwayBackground() {
         ctx.beginPath();
         ctx.moveTo(tail.x, tail.y);
         ctx.lineTo(pos.x, pos.y);
-        ctx.strokeStyle = path.color;
+        ctx.strokeStyle = packet.color;
         ctx.globalAlpha = 0.35;
         ctx.lineWidth = packet.size;
         ctx.lineCap = 'round';
         ctx.stroke();
         ctx.globalAlpha = 1.0;
 
-        // Glowing core + colored halo
+        // Glowing core + halo, both in the packet's own colour: no white
+        // core, no black — colour carries the whole read.
         ctx.beginPath();
         ctx.arc(pos.x, pos.y, packet.size, 0, Math.PI * 2);
-        ctx.fillStyle = '#ffffff';
-        ctx.shadowBlur = 15;
-        ctx.shadowColor = path.color;
+        ctx.fillStyle = packet.color;
+        ctx.shadowBlur = 14;
+        ctx.shadowColor = packet.color;
         ctx.fill();
         ctx.beginPath();
-        ctx.arc(pos.x, pos.y, packet.size + 1, 0, Math.PI * 2);
-        ctx.fillStyle = path.color;
+        ctx.globalAlpha = 0.5;
+        ctx.arc(pos.x, pos.y, packet.size + 1.4, 0, Math.PI * 2);
         ctx.fill();
-      });
+        ctx.globalAlpha = 1.0;
+      }
       ctx.shadowBlur = 0;
     };
 

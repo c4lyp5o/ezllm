@@ -209,6 +209,29 @@ export async function postKeyTestStream<T>(
   throw new ApiError({ status: 0, type: 'error', message: 'stream ended without a result' });
 }
 
+// ── GitHub Copilot device flow (the phone path) ───────────────────────────
+// Start a flow, poll its status, cancel it. The OAuth session itself never
+// crosses the wire: the key add names the handle (device_handle) and the
+// server resolves the credential itself. docs/github-copilot-runbook.md.
+export type GhDeviceStart = {
+  handle: string;
+  verification_uri: string;
+  user_code: string;
+  expires_in: number;
+  interval: number;
+};
+export type GhDeviceStatus = {
+  status: 'pending' | 'authorized' | 'expired' | 'error';
+  github_login?: string;
+  copilot_expires_at?: string;
+  detail?: string;
+};
+export const ghDeviceStart = () => post<GhDeviceStart>('/admin/github/device');
+export const ghDeviceStatus = (handle: string) =>
+  get<GhDeviceStatus>(`/admin/github/device/${encodeURIComponent(handle)}`);
+export const ghDeviceCancel = (handle: string) =>
+  del(`/admin/github/device/${encodeURIComponent(handle)}`);
+
 // ── protocol sweep ("test all models") ───────────────────────────────────
 export type StartSweepOpts = {
   /** Probe every model, not the 6-of-N sample. */

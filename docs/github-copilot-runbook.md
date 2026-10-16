@@ -21,6 +21,27 @@ production on 2026-10-16: the device-code request succeeds).
 
 ## Adding an account
 
+**From the dashboard (no terminal — the phone path):**
+
+1. Providers → Add provider → provider type **GitHub Copilot** → *Start
+   GitHub login*. The dashboard shows `https://github.com/login/device`
+   and a code; authorize it on any device.
+2. The server polls, mints and stores the OAuth session itself — the
+   session JSON never reaches the browser. When the status reads
+   `authorized (@you)`, hit **Save & validate key**.
+3. The key add names the *device handle* instead of a pasted key
+   (`device_handle` on `POST /admin/accounts/{id}/keys`); the server
+   resolves it, runs the normal registration test and consumes the handle.
+   A failed test leaves the handle alive for a retry; closing the modal
+   cancels it.
+
+Routes: `POST /admin/github/device` (start), `GET
+/admin/github/device/{handle}` (one poll per tick, statuses `pending |
+authorized | expired | error`), `DELETE /admin/github/device/{handle}`
+(cancel). Registry is in-memory, TTL 30 minutes, no schema.
+
+**From a terminal (the CLI path):**
+
 1. Run the interactive flow:
    ```
    ezllm github-login
@@ -29,7 +50,8 @@ production on 2026-10-16: the device-code request succeeds).
    browser. On success it verifies the Copilot token mint, lists your
    catalog (entitlement is per-account), and prints the session JSON.
 2. Store that JSON as the account's provider key, with kind
-   `github-copilot` and base URL `https://api.githubcopilot.com`.
+   `github-copilot` and base URL `https://api.githubcopilot.com` (pasting
+   it into the same Add-provider form works).
 3. Registration runs the auth oracle (`GET /models` through the normal
    mint path): a dead credential fails as 401 bad_credentials.
 

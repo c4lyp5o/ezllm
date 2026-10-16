@@ -25,6 +25,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/c4lyp5o/ezllm/internal/compress"
+	"github.com/c4lyp5o/ezllm/internal/githubcopilot"
 	"github.com/c4lyp5o/ezllm/internal/jsonbody"
 	"github.com/c4lyp5o/ezllm/internal/provider"
 	"github.com/c4lyp5o/ezllm/internal/proxy"
@@ -94,6 +95,18 @@ type Server struct {
 	// this registry answers only "running since when" and holds the cancel.
 	sweepsMu sync.Mutex
 	sweeps   map[int64]*sweepRun
+
+	// ghMu guards ghDevices: the in-flight GitHub device flows started from
+	// the dashboard (POST /admin/github/device). An entry holds GitHub's
+	// device code and — once authorized — the OAuth session, which leaves
+	// only through a key add naming the handle (device_handle). The session
+	// is never serialized into a response.
+	ghMu      sync.Mutex
+	ghDevices map[string]*ghDevice
+	// ghCfg points the device flow at GitHub. Zero value = production
+	// endpoints; tests inject a routed HTTP client so no test ever dials
+	// github.com (internal/githubcopilot's own test technique, one level up).
+	ghCfg githubcopilot.Config
 }
 
 // sweepRun is one in-flight protocol sweep for an account. cancel stops the
@@ -138,6 +151,10 @@ type Options struct {
 	// ShadowSampler (addendum #7): per-request lambda for the discarded
 	// shadow pass. Nil = no shadow.
 	ShadowSampler func() bool
+	// GitHubDevice configures the dashboard's GitHub Copilot device flow.
+	// Zero value = the production GitHub endpoints (public CLI client id);
+	// tests inject a routed HTTP client. See internal/githubcopilot.
+	GitHubDevice githubcopilot.Config
 }
 
 // usageTZOrDefault resolves the day-bucketing zone. Empty or whitespace means
@@ -171,7 +188,9 @@ func New(opts Options) *Server {
 		web: webFS(), corsOrigins: opts.CORSOrigins,
 		usageTZ:           usageTZOrDefault(opts.UsageTZ),
 		compressionMinAbs: opts.CompressionMinAbs, compressionMaxMS: opts.CompressionMaxMS,
-		shadowSampler: opts.ShadowSampler,
+		shadowSampler:     opts.ShadowSampler,
+		ghDevices:         map[string]*ghDevice{},
+		ghCfg:             opts.GitHubDevice,
 	}
 	// A server without a tester cannot run the key test; default one so the
 	// admin routes fail loudly at construction rather than nil-panic per request.
@@ -229,6 +248,15 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /admin/overview", s.admin(s.handleOverview))
 	s.mux.HandleFunc("GET /admin/requests", s.admin(s.handleRequests))
 	s.mux.HandleFunc("GET /admin/stream", s.admin(s.handleStream))
+
+	// Dashboard GitHub device flow: the browser taps Authorize, the server
+	// does every other step (code request, poll, mint, session storage) so
+	// the OAuth session never reaches a client. The handle a POST returns is
+	// then named as device_handle on the normal key-add route.
+	// docs/github-copilot-runbook.md § Adding an account.
+	s.mux.HandleFunc("POST /admin/github/device", s.admin(s.handleGitHubDeviceStart))
+	s.mux.HandleFunc("GET /admin/github/device/{handle}", s.admin(s.handleGitHubDeviceStatus))
+	s.mux.HandleFunc("DELETE /admin/github/device/{handle}", s.admin(s.handleGitHubDeviceCancel))
 
 	s.mux.HandleFunc("GET /admin/accounts", s.admin(s.handleAccounts))
 	s.mux.HandleFunc("POST /admin/accounts", s.admin(s.handleAccounts))

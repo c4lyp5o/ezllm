@@ -1,10 +1,11 @@
 // PROVIDERS — account cards, add-provider wizard modal, per-key actions, model drawer.
 import { useCallback, useEffect, useState } from 'react';
 import {
-  ApiError, AuthError, del, get, modelRules, patch, post, postKeyTestStream, setModelPin,
+  ApiError, AuthError, del, get, ghDeviceCancel, ghDeviceStart, ghDeviceStatus,
+  modelRules, patch, post, postKeyTestStream, setModelPin,
   setPrice, deletePrice, startSweep, stopSweep, sweepStatus,
   KINDS, STEPS,
-  type Account, type ApiErrorDetail, type KeyRow, type ModelRule, type ModelRow, type Price, type SweepStatus, type TestResult, type TestStep,
+  type Account, type ApiErrorDetail, type GhDeviceStart, type GhDeviceStatus, type KeyRow, type ModelRule, type ModelRow, type Price, type SweepStatus, type TestResult, type TestStep,
 } from '../utils/api';
 import { Chip, ConfirmModal, Modal, SectionLabel, Skeleton, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls, relTime, Mono } from '../components/ui';
 
@@ -130,7 +131,7 @@ const PROVIDER_PRESETS: Record<string, {
   'groq': { label: 'Groq', kind: 'openai-compatible', baseURL: 'https://api.groq.com/openai/v1' },
   'github-copilot': {
     label: 'GitHub Copilot', kind: 'github-copilot', baseURL: 'https://api.githubcopilot.com',
-    keyHint: 'Run `ezllm github-login`, authorize at github.com/login/device, paste the session JSON it prints',
+    keyHint: 'Start the GitHub login below and tap Authorize — no terminal needed. Already have a session JSON from `ezllm github-login`? Paste it instead.',
   },
   'tokenrouter': { label: 'TokenRouter', kind: 'openai-compatible', baseURL: 'https://api.tokenrouter.com/v1' },
   // Vercel AI Gateway: OpenAI-compatible chat + /models discovery over one key,
@@ -245,10 +246,56 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
   // On completion result.steps supersedes them — same data, one append path.
   const [liveSteps, setLiveSteps] = useState<TestStep[] | null>(null);
   const [err, setErr] = useState<ApiErrorDetail | null>(null);
+  // GitHub device flow (the phone path): start → show the code → poll →
+  // the key add names the handle. The OAuth session never leaves the server,
+  // so this component only ever holds the handle, the user code and status.
+  const [ghStart, setGhStart] = useState<GhDeviceStart | null>(null);
+  const [ghStatus, setGhStatus] = useState<GhDeviceStatus | null>(null);
+  const [ghBusy, setGhBusy] = useState(false);
+  const [ghErr, setGhErr] = useState<ApiErrorDetail | null>(null);
 
   useEffect(() => {
-    if (open) { setD(emptyDraft); setBusy(false); setResult(null); setLiveSteps(null); setErr(null); }
+    if (open) {
+      setD(emptyDraft); setBusy(false); setResult(null); setLiveSteps(null); setErr(null);
+      setGhStart(null); setGhStatus(null); setGhBusy(false); setGhErr(null);
+    }
   }, [open]);
+
+  // Closing without a save abandons the flow: drop the handle so its
+  // session evaporates now instead of sitting in server memory until the
+  // TTL. A consumed handle (saved) is already gone — the DELETE is a no-op.
+  useEffect(() => {
+    if (open) return;
+    const handle = ghStart?.handle;
+    setGhStart(null);
+    setGhStatus(null);
+    if (handle) void ghDeviceCancel(handle).catch(() => undefined);
+  }, [open, ghStart]);
+
+  // One status tick per interval GitHub asked for (faster polls get
+  // slow_down). Stops the moment the flow reaches a terminal state.
+  useEffect(() => {
+    const phase = ghStatus?.status;
+    if (!ghStart || !open || (phase != null && phase !== 'pending')) return;
+    const iv = setInterval(() => {
+      ghDeviceStatus(ghStart.handle)
+        .then(setGhStatus)
+        .catch((e) => { if (e instanceof ApiError) setGhErr(e.detail); });
+    }, Math.max(3, ghStart.interval || 5) * 1000);
+    return () => clearInterval(iv);
+  }, [ghStart, ghStatus?.status, open]);
+
+  const isGitHub = PROVIDER_PRESETS[d.preset]?.kind === 'github-copilot';
+
+  const startGitHub = async () => {
+    setGhBusy(true); setGhErr(null); setGhStatus(null);
+    try {
+      setGhStart(await ghDeviceStart());
+    } catch (e) {
+      if (e instanceof ApiError) setGhErr(e.detail);
+      else setGhErr({ status: 0, type: 'error', message: e instanceof Error ? e.message : String(e) });
+    } finally { setGhBusy(false); }
+  };
 
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setD((p) => ({ ...p, [k]: v }));
 
@@ -268,12 +315,18 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
       };
       const account = await post<Account>('/admin/accounts', payload);
       createdAccountID = account.id;
+      // One credential source: a pasted session JSON wins, otherwise the
+      // device handle the GitHub flow produced — the server resolves THAT
+      // into the session itself, so no credential rides in this body.
+      const credential = d.apiKey.trim()
+        ? { api_key: d.apiKey.trim() }
+        : { device_handle: ghStart?.handle ?? '' };
       // Streamed key test: every step lands in liveSteps as the server
       // records it (NDJSON), so the chain moves. Falls back to the one-shot
       // response shape when the server does not stream.
       const response = await postKeyTestStream<{ key: KeyRow; test: TestResult }>(
         `/admin/accounts/${account.id}/keys`,
-        { label: d.keyLabel.trim() || 'primary', api_key: d.apiKey.trim(), skip_inference: d.skipInference },
+        { label: d.keyLabel.trim() || 'primary', ...credential, skip_inference: d.skipInference },
         (step) => setLiveSteps((prev) => [...(prev ?? []), step]),
       );
       setResult(response.test);
@@ -295,7 +348,9 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
   const valid = d.name.trim().length > 0
     && /^[a-z0-9][a-z0-9._-]{0,62}$/.test(d.namespace.trim())
     && (!isCompat || /^https?:\/\//i.test(d.base_url.trim()))
-    && d.apiKey.trim().length > 0;
+    // GitHub has no pasteable key: an authorized device flow substitutes for
+    // the API key. Anything else still needs its credential in hand.
+    && (d.apiKey.trim().length > 0 || (isGitHub && ghStatus?.status === 'authorized'));
 
   return (
     <Modal open={open} onClose={onClose} wide title="Add provider"
@@ -378,6 +433,69 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
         ) : (
           <div className="rounded-lg border border-line bg-raised/60 px-3.5 py-2.5 text-[12px] text-dim">
             {isKnownEndpoint(d.base_url) ? 'Known endpoint — fixed: ' : 'Endpoint preset: '}<Mono>{d.base_url}</Mono>
+          </div>
+        )}
+        {isGitHub && (
+          <div className="space-y-3 rounded-lg border border-line bg-raised/60 px-4 py-3">
+            <SectionLabel>GitHub login — device flow</SectionLabel>
+            {!ghStart && (
+              <div className="flex flex-wrap items-center gap-3">
+                <p className="text-[12.5px] text-dim">
+                  No key to paste. Start a login and tap <span className="text-ink">Authorize</span> on your
+                  phone — the session stays on the server and never reaches this browser.
+                </p>
+                <button type="button" className={cx(btn.base, btn.ghost)} disabled={ghBusy}
+                  onClick={() => void startGitHub()}>
+                  {ghBusy ? <Spinner /> : null} Start GitHub login
+                </button>
+              </div>
+            )}
+            {ghStart && (ghStatus == null || ghStatus.status === 'pending') && (
+              <div className="space-y-2">
+                <ol className="space-y-1 text-[12.5px] text-dim">
+                  <li>
+                    1. Open{' '}
+                    <a className="text-ink underline underline-offset-2" href={ghStart.verification_uri}
+                      target="_blank" rel="noreferrer">{ghStart.verification_uri}</a>
+                  </li>
+                  <li>
+                    2. Enter code{' '}
+                    <Mono className="text-[15px] tracking-[0.18em] text-ink">{ghStart.user_code}</Mono>
+                  </li>
+                </ol>
+                <div className="flex flex-wrap items-center gap-2 text-[12.5px] text-mute">
+                  <Spinner /> Waiting for authorization…
+                  <span className="text-mute/70">code expires in {Math.max(1, Math.round(ghStart.expires_in / 60))} min</span>
+                </div>
+                <button type="button" className={cx(btn.base, btn.ghost)}
+                  onClick={() => {
+                    const handle = ghStart.handle;
+                    setGhStart(null); setGhStatus(null);
+                    void ghDeviceCancel(handle).catch(() => undefined);
+                  }}>
+                  Cancel login
+                </button>
+              </div>
+            )}
+            {ghStatus?.status === 'authorized' && (
+              <p className="font-mono text-[12.5px] text-ok">
+                ✓ @{ghStatus.github_login} authorized — Save &amp; validate to store the key
+              </p>
+            )}
+            {(ghStatus?.status === 'expired' || ghStatus?.status === 'error') && (
+              <div className="space-y-2">
+                <p className="text-[12.5px] text-bad">
+                  {ghStatus.status === 'expired'
+                    ? 'The code expired before you authorized it.'
+                    : ghStatus.detail || 'GitHub refused the authorization.'}
+                </p>
+                <button type="button" className={cx(btn.base, btn.ghost)} disabled={ghBusy}
+                  onClick={() => void startGitHub()}>
+                  {ghBusy ? <Spinner /> : null} Start again
+                </button>
+              </div>
+            )}
+            <ErrBox e={ghErr} onDismiss={() => setGhErr(null)} />
           </div>
         )}
         <div className="grid gap-4 sm:grid-cols-2">

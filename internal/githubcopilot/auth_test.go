@@ -422,3 +422,50 @@ func TestDeviceFlowCancel(t *testing.T) {
 }
 
 var _ = json.Marshal
+
+
+// TestPollAccessTokenOnce covers the single-shot poll the dashboard's device
+// flow drives (one round trip per status GET instead of a held-open
+// request): GitHub's pending signals must read as "ask again", never as an
+// error, and only a grant or a denial may end the wait.
+func TestPollAccessTokenOnce(t *testing.T) {
+	var polls int
+	client := routedClient(t, map[string]http.HandlerFunc{
+		"github.com": func(w http.ResponseWriter, _ *http.Request) {
+			polls++
+			switch polls {
+			case 1:
+				jsonResp(200, `{"error":"authorization_pending"}`)(w, nil)
+			case 2:
+				jsonResp(200, `{"error":"slow_down"}`)(w, nil)
+			default:
+				jsonResp(200, `{"access_token":"gho_once","refresh_token":"ghr_once","token_type":"bearer"}`)(w, nil)
+			}
+		},
+	}, nil)
+	cfg := Config{HTTP: client}
+	dc := DeviceCode{DeviceCode: "dc-once", UserCode: "ABCD-1234"}
+
+	for tick, wantOK := range []bool{false, false, true} {
+		s, ok, err := PollAccessTokenOnce(context.Background(), cfg, dc)
+		if err != nil {
+			t.Fatalf("tick %d: unexpected error %v (pending must not fail)", tick, err)
+		}
+		if ok != wantOK {
+			t.Fatalf("tick %d: ok=%v, want %v", tick, ok, wantOK)
+		}
+		if wantOK && (s.AccessToken != "gho_once" || s.RefreshToken != "ghr_once") {
+			t.Fatalf("granted session = %+v", s)
+		}
+	}
+
+	// A denial is terminal: surfaced as an error, not as another tick.
+	denied := routedClient(t, map[string]http.HandlerFunc{
+		"github.com": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResp(200, `{"error":"access_denied"}`)(w, nil)
+		},
+	}, nil)
+	if _, ok, err := PollAccessTokenOnce(context.Background(), Config{HTTP: denied}, dc); err == nil || ok {
+		t.Fatalf("denied poll: ok=%v err=%v, want a failure", ok, err)
+	}
+}

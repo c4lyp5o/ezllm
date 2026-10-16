@@ -156,6 +156,61 @@ func RequestDeviceCode(ctx context.Context, cfg Config) (DeviceCode, error) {
 // slow_down/authorization_pending).
 var ErrAuthorizationPending = errors.New("githubcopilot: authorization pending")
 
+// pollDeviceOnce performs ONE RFC 8628 token poll. The returned string is
+// the RFC's pending signal: "" (with a session) means the grant is in,
+// "authorization_pending"/"slow_down" means keep polling on the interval,
+// anything else is fatal. Split out of PollAccessToken so the dashboard's
+// device flow can drive its own loop — one HTTP round trip per GET instead
+// of a handler held open for the 15 minutes a human needs to tap Authorize.
+func pollDeviceOnce(ctx context.Context, cfg Config, dc DeviceCode) (Session, string, error) {
+	cfg = cfg.withDefaults()
+	form := url.Values{
+		"client_id":   {cfg.ClientID},
+		"device_code": {dc.DeviceCode},
+		"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
+	}
+	body, err := postForm(ctx, cfg.HTTP, accessTokenURL, form, nil)
+	if err != nil {
+		return Session{}, "", err
+	}
+	var tr struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int    `json:"expires_in"`
+		TokenType    string `json:"token_type"`
+		Error        string `json:"error"`
+	}
+	if err := json.Unmarshal(body, &tr); err != nil {
+		return Session{}, "", fmt.Errorf("githubcopilot: token poll: %w", err)
+	}
+	switch tr.Error {
+	case "authorization_pending", "slow_down":
+		return Session{}, tr.Error, nil
+	case "":
+		if tr.AccessToken == "" {
+			// No token and no error: GitHub's documented "keep polling".
+			return Session{}, "authorization_pending", nil
+		}
+		return Session{AccessToken: tr.AccessToken, RefreshToken: tr.RefreshToken}, "", nil
+	default:
+		return Session{}, "", fmt.Errorf("githubcopilot: device flow %s", tr.Error)
+	}
+}
+
+// PollAccessTokenOnce is one poll for callers that own their own schedule —
+// the dashboard device flow asks once per status GET rather than blocking.
+// ok=false means the operator has not authorized yet; ask again.
+func PollAccessTokenOnce(ctx context.Context, cfg Config, dc DeviceCode) (Session, bool, error) {
+	s, pending, err := pollDeviceOnce(ctx, cfg, dc)
+	if err != nil {
+		return Session{}, false, err
+	}
+	if pending != "" {
+		return Session{}, false, nil
+	}
+	return s, true, nil
+}
+
 // PollAccessToken polls until the operator authorizes (or the code
 // expires / is denied). ctx cancellation aborts the wait.
 func PollAccessToken(ctx context.Context, cfg Config, dc DeviceCode) (Session, error) {
@@ -175,40 +230,16 @@ func PollAccessToken(ctx context.Context, cfg Config, dc DeviceCode) (Session, e
 		if time.Now().After(deadline) {
 			return Session{}, errors.New("githubcopilot: device code expired")
 		}
-		form := url.Values{
-			"client_id":   {cfg.ClientID},
-			"device_code": {dc.DeviceCode},
-			"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
-		}
-		body, err := postForm(ctx, cfg.HTTP, accessTokenURL, form, nil)
+		s, pending, err := pollDeviceOnce(ctx, cfg, dc)
 		if err != nil {
 			return Session{}, err
 		}
-		var tr struct {
-			AccessToken  string `json:"access_token"`
-			RefreshToken string `json:"refresh_token"`
-			ExpiresIn    int    `json:"expires_in"`
-			TokenType    string `json:"token_type"`
-			Error        string `json:"error"`
-		}
-		if err := json.Unmarshal(body, &tr); err != nil {
-			return Session{}, fmt.Errorf("githubcopilot: token poll: %w", err)
-		}
-		switch tr.Error {
-		case "authorization_pending", "slow_down":
-			// slow_down: GitHub asks for +5s; honor it.
-			if tr.Error == "slow_down" {
-				interval += 5 * time.Second
-			}
-			continue
+		switch pending {
 		case "":
-			if tr.AccessToken == "" {
-				continue
-			}
-			s := Session{AccessToken: tr.AccessToken, RefreshToken: tr.RefreshToken}
 			return s, nil
-		default:
-			return Session{}, fmt.Errorf("githubcopilot: device flow %s", tr.Error)
+		case "slow_down":
+			// GitHub asks for +5s; honor it.
+			interval += 5 * time.Second
 		}
 	}
 }

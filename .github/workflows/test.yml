@@ -1,0 +1,69 @@
+# Test gate — run BEFORE anything publishes.
+#
+# docker-publish.yml calls this workflow and its build_and_push job says
+# `needs: test`, so a red suite never produces an image (this is the gate
+# Calypso asked for on 2026-10-16: "let CI do the testing before pushing").
+# It is reusable (`workflow_call`) so release.yml can adopt the same gate
+# with one line when tags should be gated too.
+#
+# Two honest notes:
+#   * GOMEMLIMIT/GOGC: the internal/server suite churned past 4GB when run
+#     unbounded locally and got OOM-killed (dmesg: server.test anon-rss
+#     4.17GB). Its live set is small — it passes at a 1GiB limit — so a soft
+#     GC ceiling keeps the runner inside budget without altering behaviour.
+#   * The web step proves the sources type-check and build; it does NOT
+#     assert the committed dist reproduces byte-for-byte, because Vite's
+#     output hash depends on the absolute checkout path and would differ on
+#     every machine. Freshness of the committed bundle stays a local
+#     repo-path rebuild before commit.
+name: Tests
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: 🧾 Checkout source
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod   # stays in lockstep with the project
+          cache: true
+
+      - name: 🧹 gofmt
+        run: |
+          UNFORMATTED=$(gofmt -l cmd internal)
+          if [ -n "$UNFORMATTED" ]; then
+            echo "::error::gofmt needed on: $UNFORMATTED"
+            exit 1
+          fi
+
+      - name: 🩺 go vet
+        run: go vet ./...
+
+      - name: 🧪 go test
+        env:
+          GOMEMLIMIT: 3GiB
+          GOGC: "50"
+        run: go test -count=1 -timeout 15m ./...
+
+      - name: 🟢 Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: 🌐 Web type-check + build
+        working-directory: web
+        run: |
+          npm ci
+          npm run build   # tsc --noEmit && vite build

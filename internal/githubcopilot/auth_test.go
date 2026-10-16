@@ -423,7 +423,6 @@ func TestDeviceFlowCancel(t *testing.T) {
 
 var _ = json.Marshal
 
-
 // TestPollAccessTokenOnce covers the single-shot poll the dashboard's device
 // flow drives (one round trip per status GET instead of a held-open
 // request): GitHub's pending signals must read as "ask again", never as an

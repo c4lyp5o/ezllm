@@ -188,9 +188,9 @@ func New(opts Options) *Server {
 		web: webFS(), corsOrigins: opts.CORSOrigins,
 		usageTZ:           usageTZOrDefault(opts.UsageTZ),
 		compressionMinAbs: opts.CompressionMinAbs, compressionMaxMS: opts.CompressionMaxMS,
-		shadowSampler:     opts.ShadowSampler,
-		ghDevices:         map[string]*ghDevice{},
-		ghCfg:             opts.GitHubDevice,
+		shadowSampler: opts.ShadowSampler,
+		ghDevices:     map[string]*ghDevice{},
+		ghCfg:         opts.GitHubDevice,
 	}
 	// A server without a tester cannot run the key test; default one so the
 	// admin routes fail loudly at construction rather than nil-panic per request.

@@ -191,8 +191,10 @@ func TestCompressionAppliesAtInferenceAndLedgers(t *testing.T) {
 	origMsgs := []any{
 		map[string]any{"role": "system", "content": dupSystem},
 		map[string]any{"role": "user", "content": "run the suite and fix what breaks"},
-		map[string]any{"role": "assistant", "content": "running tests"},
-		map[string]any{"role": "tool", "content": noisy},
+		map[string]any{"role": "assistant", "content": "running tests", "tool_calls": []any{
+			map[string]any{"id": "e2e_1", "type": "function", "function": map[string]any{"name": "bash", "arguments": "{}"}},
+		}},
+		map[string]any{"role": "tool", "tool_call_id": "e2e_1", "content": noisy},
 		map[string]any{"role": "system", "content": dupSystem},      // duplicate: must drop
 		map[string]any{"role": "user", "content": "final question"}, // final: must survive
 	}

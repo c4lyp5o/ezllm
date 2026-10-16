@@ -87,7 +87,14 @@ export default function Economics() {
   const input = summary?.tin ?? 0;
   const output = summary?.tout ?? 0;
   const cached = summary?.cread ?? 0;
+  const cwrite = summary?.cwrite ?? 0;
   const reasoning = summary?.reasoning ?? 0;
+  // Input composition must be DISJOINT (plan WS-B): cache-read and
+  // cache-written are SUBSETS of the input total, so the cold remainder is
+  // the only honest third slice. Clamped — odd provider accounting must not
+  // draw negative tokens.
+  const cold = Math.max(0, input - cached - cwrite);
+  const visibleOut = Math.max(0, output - reasoning);
   // The counterfactual: `input` is what was ACTUALLY sent (post-compression)
   // and already contains the cache-read tokens (cached is a subset of input
   // — the "of input re-read from cache" note below relies on that), so the
@@ -179,24 +186,46 @@ export default function Economics() {
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
             <Panel label={<SectionLabel>What the tokens were · {RANGE_LABEL[range]}</SectionLabel>}
               aside={<span className="text-[11px] text-mute">{formatTokens(before)} before optimisation</span>}>
+              {/* Input composition (disjoint): cache-read and cache-written
+                  are SUBSETS of input — the cold remainder is the third
+                  slice, so the three parts sum to the input total. */}
+              <div className="mb-1 text-[11px] uppercase tracking-wide text-mute">input composition</div>
               <CompositionBar height={12} parts={[
-                { key: 'in', label: 'actual input', value: input, color: VIZ.in },
-                { key: 'cached', label: 'cached read', value: cached, color: VIZ.cached },
-                { key: 'out', label: 'output', value: output, color: VIZ.out },
+                { key: 'cold', label: 'cold input', value: cold, color: VIZ.in },
+                ...(cached > 0 ? [{ key: 'cached', label: 'cached read', value: cached, color: VIZ.cached }] : []),
+                ...(cwrite > 0 ? [{ key: 'cwrite', label: 'cached write', value: cwrite, color: VIZ.budget }] : []),
+              ]} />
+              <ul className="mt-3 space-y-1.5">
+                {[
+                  { key: 'cold', label: 'cold input', value: cold, color: VIZ.in },
+                  ...(cached > 0 ? [{ key: 'cached', label: 'cached read', value: cached, color: VIZ.cached }] : []),
+                  ...(cwrite > 0 ? [{ key: 'cwrite', label: 'cached write', value: cwrite, color: VIZ.budget }] : []),
+                ].map((p) => (
+                  <li key={p.key} className="flex items-center gap-2 text-[12px]">
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: p.color }} />
+                    <span className="text-dim">{p.label}</span>
+                    <span className="tnum ml-auto font-mono text-ink">{formatTokens(p.value)}</span>
+                    <span className="tnum w-12 text-right font-mono text-mute">{pct(p.value, input)}</span>
+                  </li>
+                ))}
+              </ul>
+              {/* Output composition (disjoint): reasoning is a SUBSET of
+                  output — visible output is the remainder. */}
+              <div className="mb-1 mt-5 text-[11px] uppercase tracking-wide text-mute">output composition</div>
+              <CompositionBar height={12} parts={[
+                { key: 'vis', label: 'visible output', value: visibleOut, color: VIZ.out },
                 { key: 'reason', label: 'reasoning', value: reasoning, color: VIZ.reasoning },
               ]} />
-              <ul className="mt-4 space-y-1.5">
+              <ul className="mt-3 space-y-1.5">
                 {[
-                  { key: 'in', label: 'actual input', value: input, color: VIZ.in },
-                  { key: 'cached', label: 'cached read', value: cached, color: VIZ.cached },
-                  { key: 'out', label: 'output', value: output, color: VIZ.out },
+                  { key: 'vis', label: 'visible output', value: visibleOut, color: VIZ.out },
                   { key: 'reason', label: 'reasoning', value: reasoning, color: VIZ.reasoning },
                 ].map((p) => (
                   <li key={p.key} className="flex items-center gap-2 text-[12px]">
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: p.color }} />
                     <span className="text-dim">{p.label}</span>
                     <span className="tnum ml-auto font-mono text-ink">{formatTokens(p.value)}</span>
-                    <span className="tnum w-12 text-right font-mono text-mute">{pct(p.value, before)}</span>
+                    <span className="tnum w-12 text-right font-mono text-mute">{pct(p.value, output)}</span>
                   </li>
                 ))}
               </ul>

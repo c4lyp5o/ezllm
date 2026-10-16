@@ -107,8 +107,8 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 	// not a claim. applied_saved exists because SUM(tokens_saved) over ALL
 	// rows also sweeps in ~21k legacy tokens_saved sitting on declined rows.
 	var sum struct {
-		Count, Tin, Tout, Cread, Reasoning, ContextPre, ContextSaved, CompressionSaved, MaxTin, MaxTout int64
-		AppliedCalls, AppliedSaved, DeclinedCalls, HeldNotional                                         int64
+		Count, Tin, Tout, Cread, Cwrite, Reasoning, ContextPre, ContextSaved, CompressionSaved, MaxTin, MaxTout int64
+		AppliedCalls, AppliedSaved, DeclinedCalls, HeldNotional                                                 int64
 	}
 	var sargs []any
 	for _, a := range args {
@@ -116,7 +116,7 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 	}
 	row := s.db.Reader().QueryRowContext(r.Context(), `
 SELECT COUNT(*), COALESCE(SUM(tokens_in),0), COALESCE(SUM(tokens_out),0),
-       COALESCE(SUM(tokens_cached_read),0), COALESCE(SUM(reasoning_tokens),0),
+       COALESCE(SUM(tokens_cached_read),0), COALESCE(SUM(tokens_cached_write),0), COALESCE(SUM(reasoning_tokens),0),
        COALESCE(SUM(context_tokens_pre),0), COALESCE(SUM(context_tokens_saved),0),
        COALESCE(SUM(tokens_saved),0),
        COALESCE(MAX(tokens_in),0), COALESCE(MAX(tokens_out),0),
@@ -125,7 +125,7 @@ SELECT COUNT(*), COALESCE(SUM(tokens_in),0), COALESCE(SUM(tokens_out),0),
        COALESCE(SUM(CASE WHEN compression_applied=0 AND compression_saved_notional>0 THEN 1 ELSE 0 END),0),
        COALESCE(SUM(CASE WHEN compression_applied=0 THEN compression_saved_notional ELSE 0 END),0)
 FROM calls`+where, sargs...)
-	if err := row.Scan(&sum.Count, &sum.Tin, &sum.Tout, &sum.Cread,
+	if err := row.Scan(&sum.Count, &sum.Tin, &sum.Tout, &sum.Cread, &sum.Cwrite,
 		&sum.Reasoning, &sum.ContextPre, &sum.ContextSaved, &sum.CompressionSaved, &sum.MaxTin, &sum.MaxTout,
 		&sum.AppliedCalls, &sum.AppliedSaved, &sum.DeclinedCalls, &sum.HeldNotional); err != nil {
 		writeErr(w, http.StatusInternalServerError, "api_error", err.Error())
@@ -142,7 +142,7 @@ FROM calls`+where, sargs...)
 		"rows": rows,
 		"summary": map[string]any{
 			"count": sum.Count, "tin": sum.Tin, "tout": sum.Tout,
-			"cread": sum.Cread, "reasoning": sum.Reasoning,
+			"cread": sum.Cread, "cwrite": sum.Cwrite, "reasoning": sum.Reasoning,
 			"context_pre": sum.ContextPre, "context_saved": sum.ContextSaved,
 			"compression_saved": sum.CompressionSaved, "max_tin": sum.MaxTin, "max_tout": sum.MaxTout,
 			"applied_calls": sum.AppliedCalls, "applied_saved": sum.AppliedSaved,

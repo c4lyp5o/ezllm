@@ -523,7 +523,7 @@ export function usageGroup(groupBy: string, range: RangeKey): Promise<UsageResp>
 // outliers that answer it. summary covers the WHOLE matching set, not just
 // the returned page.
 export type RequestsSummary = {
-  count: number; tin: number; tout: number; cread: number;
+  count: number; tin: number; tout: number; cread: number; cwrite: number;
   cached_read?: number; tokens_in?: number; tokens_out?: number;
   reasoning: number; max_tin: number; max_tout: number;
   context_pre: number; context_saved: number; compression_saved: number;

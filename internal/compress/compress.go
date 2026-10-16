@@ -51,6 +51,33 @@ type Profile struct {
 	// ran — compression must never be the most expensive part of a request.
 	// 0 = no limit.
 	MaxPipelineMS int64
+	// Shadow (addendum #7): run a sampled shadow pass after the real one —
+	// the engines over EVERYTHING with the floors ignored, discarded, and
+	// measured as potential. Armed per request by the sampler; the shadow
+	// transform never ships and never commits.
+	Shadow bool
+}
+
+// StageStat is one stage's measured contribution (addendum #5/#7 per-engine
+// attribution). Sequential before/after: Pre is what entered the stage, Post
+// what left it, Saved the difference.
+//
+// RECONCILIATION RULE (documented, not assumed): the stage stats measure the
+// EDITABLE SLICE's pipeline; the ledger's net reduction measures the WHOLE
+// REQUEST (slice spliced back into the body). The two agree up to boundary
+// effects — the slice's standalone marshal differs from its marshal in place
+// by a token at most, so SUM(Saved) may differ from the net by 1-2 tokens.
+// Both totals ride the row (compression_stages vs tokens_saved), so a larger
+// discrepancy is VISIBLE rather than silently absorbed. Every stage is
+// reductive by contract (an engine that would expand keeps its input), so
+// the sum never exceeds the net.
+type StageStat struct {
+	Engine string `json:"engine"`
+	Pre    int64  `json:"pre"`
+	Post   int64  `json:"post"`
+	Saved  int64  `json:"saved"`
+	Fired  int    `json:"fired"`
+	CPUms  int64  `json:"cpu_ms"`
 }
 
 // Result carries the truth for the ledger (contract rule 6).
@@ -79,7 +106,16 @@ type Result struct {
 	RulesFired   int
 	ContextPre   int64
 	ContextSaved int64
-	Err          string // diagnostics for tests/logs; never fails the request
+	// Stages is the per-engine attribution (addendum #7): every stage that
+	// RAN, in order, with its before/after. It reconciles with Saved via the
+	// documented rule on StageStat.
+	Stages []StageStat
+	// ShadowSaved is the POTENTIAL reduction a sampled shadow run measured
+	// (addendum #7): the engines over everything, with the floors ignored,
+	// for tuning. It NEVER contributes to applied savings — the shadow
+	// transform is discarded, not shipped.
+	ShadowSaved int64
+	Err         string // diagnostics for tests/logs; never fails the request
 }
 
 // EstimateTokens is the shared pure-Go estimator (no tokenizer dependency:
@@ -241,6 +277,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 			res.Err = fmt.Sprintf("cpu cap: stopped after %d/%d stages at %dms", stagesRan, len(p.Stages), time.Since(start).Milliseconds())
 			break
 		}
+		stageStart := time.Now()
 		beforeStage := EstimateTokens(string(mustMarshal(cur)))
 		next, fired, err := runEngine(st, cur)
 		if err != nil {
@@ -254,9 +291,37 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 				res.ContextSaved = beforeStage - postStage
 			}
 		}
+		postStage := EstimateTokens(string(mustMarshal(next)))
+		st := StageStat{Engine: st.Engine, Pre: beforeStage, Post: postStage, Fired: fired}
+		if beforeStage > postStage {
+			st.Saved = beforeStage - postStage
+		}
+		st.CPUms = time.Since(stageStart).Milliseconds()
+		res.Stages = append(res.Stages, st)
 		res.RulesFired += fired
 		cur = next
 		stagesRan++
+	}
+
+	// Shadow pass (addendum #7): sampled, DISCARDED, and measured. The
+	// engines run over the whole editable set with the floors ignored and
+	// nothing from it ships or commits — the number exists so the gates can
+	// be tuned with evidence instead of guesses. Bounded by the same CPU
+	// policy: a pipeline that already spent its budget skips the shadow.
+	if p.Shadow && len(editable) > 0 && (p.MaxPipelineMS == 0 || time.Since(start).Milliseconds() <= p.MaxPipelineMS) {
+		shadowPre := EstimateTokens(string(mustMarshal(editable)))
+		shadow := editable
+		for _, st := range p.Stages {
+			next, _, err := runEngine(st, shadow)
+			if err != nil {
+				break
+			}
+			shadow = next
+		}
+		shadowPost := EstimateTokens(string(mustMarshal(shadow)))
+		if shadowPre > shadowPost {
+			res.ShadowSaved = shadowPre - shadowPost
+		}
 	}
 
 	// Integrity (contract rule 3): every modified text must still be

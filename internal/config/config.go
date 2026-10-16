@@ -137,6 +137,11 @@ type Compression struct {
 	// MaxPipelineMS: the CPU limit for the stage loop. A pipeline that spends
 	// more than this stops at the next stage boundary and ships what ran.
 	MaxPipelineMS int64 `yaml:"max_pipeline_ms"`
+	// ShadowPct (addendum #7): the percentage of compressed requests that
+	// also run a DISCARDED shadow pass over everything, measuring potential
+	// reduction for tuning. The shadow never ships and never contributes to
+	// applied savings. 0 = off (the default — it costs CPU).
+	ShadowPct int `yaml:"shadow_pct"`
 }
 
 type Config struct {
@@ -172,7 +177,7 @@ func Load(path string) (*Config, error) {
 	cfg := Config{
 		Translation: Translation{Enabled: true},
 		Retry:       Retry{RequestAttemptBudget: 8},
-		Compression: Compression{MinAbsoluteTokens: 24, MaxPipelineMS: 250},
+		Compression: Compression{MinAbsoluteTokens: 24, MaxPipelineMS: 250, ShadowPct: 0},
 	}
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
 		// The yaml diagnostic names only the type, never the key. When the
@@ -264,6 +269,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Compression.MaxPipelineMS < 0 || c.Compression.MaxPipelineMS > 5000 {
 		errs = append(errs, "compression.max_pipeline_ms: must be between 0 and 5000")
+	}
+	if c.Compression.ShadowPct < 0 || c.Compression.ShadowPct > 100 {
+		errs = append(errs, "compression.shadow_pct: must be between 0 and 100")
 	}
 	if c.ModelRefresh.Interval == "" {
 		c.ModelRefresh.Interval = "6h"

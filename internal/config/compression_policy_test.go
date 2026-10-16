@@ -32,4 +32,16 @@ func TestCompressionPolicyDefaults(t *testing.T) {
 	if _, err := Load(write("listen: 127.0.0.1:20129\ncompression:\n  min_absolute_tokens: -5\n")); err == nil {
 		t.Error("a negative absolute floor must fail validation")
 	}
+	// shadow_pct: default off, bounded 0..100.
+	if c, _ := Load(write("listen: 127.0.0.1:20129\n")); c.Compression.ShadowPct != 0 {
+		t.Errorf("shadow must default to off, got %d%%", c.Compression.ShadowPct)
+	}
+	if c, err := Load(write("listen: 127.0.0.1:20129\ncompression:\n  shadow_pct: 10\n")); err != nil {
+		t.Fatal(err)
+	} else if c.Compression.ShadowPct != 10 {
+		t.Errorf("shadow_pct = %d, want 10", c.Compression.ShadowPct)
+	}
+	if _, err := Load(write("listen: 127.0.0.1:20129\ncompression:\n  shadow_pct: 101\n")); err == nil {
+		t.Error("shadow_pct > 100 must fail validation")
+	}
 }

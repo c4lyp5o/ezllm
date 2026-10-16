@@ -73,12 +73,15 @@ type Server struct {
 	// absolute floor and the CPU cap. Zero values = no gate.
 	compressionMinAbs int64
 	compressionMaxMS  int64
-	log               *slog.Logger
-	mux               *http.ServeMux
-	started           time.Time
-	maxBody           int64
-	web               fs.FS // dashboard source: embedded dist/ or EZLLM_WEB_DIR
-	corsOrigins       []string
+	// shadowSampler decides whether a request runs the discarded shadow pass
+	// (addendum #7). Injectable for tests; nil = never.
+	shadowSampler func() bool
+	log           *slog.Logger
+	mux           *http.ServeMux
+	started       time.Time
+	maxBody       int64
+	web           fs.FS // dashboard source: embedded dist/ or EZLLM_WEB_DIR
+	corsOrigins   []string
 	// usageTZ is the default zone for group_by=day. Never nil: UTC unless
 	// EZLLM_USAGE_TZ says otherwise (validated at boot).
 	usageTZ *time.Location
@@ -132,6 +135,9 @@ type Options struct {
 	// mean no gate, which is what unit tests get.
 	CompressionMinAbs int64
 	CompressionMaxMS  int64
+	// ShadowSampler (addendum #7): per-request lambda for the discarded
+	// shadow pass. Nil = no shadow.
+	ShadowSampler func() bool
 }
 
 // usageTZOrDefault resolves the day-bucketing zone. Empty or whitespace means
@@ -165,6 +171,7 @@ func New(opts Options) *Server {
 		web: webFS(), corsOrigins: opts.CORSOrigins,
 		usageTZ:           usageTZOrDefault(opts.UsageTZ),
 		compressionMinAbs: opts.CompressionMinAbs, compressionMaxMS: opts.CompressionMaxMS,
+		shadowSampler: opts.ShadowSampler,
 	}
 	// A server without a tester cannot run the key test; default one so the
 	// admin routes fail loudly at construction rather than nil-panic per request.

@@ -375,4 +375,46 @@ SELECT compression_version FROM calls ORDER BY ts DESC LIMIT 1`).
 	if version == "" {
 		t.Error("a compressed request must persist its profile version on the ledger row")
 	}
+	// Addendum #7: per-engine attribution JSON rides the row, and the
+	// sampled shadow measurement (none on this request) has its own column.
+	var stages string
+	var shadow int64
+	if err := h.db.Reader().QueryRowContext(ctx, `
+SELECT COALESCE(compression_stages,''), COALESCE(shadow_tokens_saved,0) FROM calls ORDER BY ts DESC LIMIT 1`).
+		Scan(&stages, &shadow); err != nil {
+		t.Fatal(err)
+	}
+	if stages == "" {
+		t.Error("an applied request must persist its per-stage attribution")
+	}
+	if !strings.Contains(stages, "engine") {
+		t.Errorf("attribution must name the engines: %s", stages)
+	}
+	if shadow != 0 {
+		t.Errorf("an unshadowed request must measure no potential: %d", shadow)
+	}
+	// The attribution reconciles with the ledger's own saved number.
+	var saved int64
+	if err := h.db.Reader().QueryRowContext(ctx, `
+SELECT tokens_saved FROM calls ORDER BY ts DESC LIMIT 1`).Scan(&saved); err != nil {
+		t.Fatal(err)
+	}
+	var stagesArr []struct {
+		Engine string `json:"engine"`
+		Saved  int64  `json:"saved"`
+	}
+	if err := json.Unmarshal([]byte(stages), &stagesArr); err != nil {
+		t.Fatalf("attribution is not JSON: %v", err)
+	}
+	var summed int64
+	for _, s := range stagesArr {
+		summed += s.Saved
+	}
+	// The documented reconciliation rule (compress.StageStat): the stage
+	// stats measure the editable slice, the ledger measures the whole
+	// request — they agree up to boundary effects, never grossly.
+	if diff := summed - saved; diff > 2 || diff < -2 {
+		t.Errorf("attribution does not reconcile within boundary slack: SUM(stages)=%d, tokens_saved=%d (diff %d > 2)",
+			summed, saved, diff)
+	}
 }

@@ -210,6 +210,8 @@ CREATE TABLE IF NOT EXISTS calls (
   tokens_saved        INTEGER NOT NULL DEFAULT 0,
   compression_ms      INTEGER,
   compression_version TEXT,
+  compression_stages  TEXT,
+  shadow_tokens_saved INTEGER NOT NULL DEFAULT 0,
   -- caveman attribution: how many prose rules actually fired. 0 for every
   -- other engine, so a surprising saving is traceable to condensation.
   compression_rules_fired INTEGER NOT NULL DEFAULT 0,

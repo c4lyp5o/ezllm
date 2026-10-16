@@ -24,7 +24,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 16
+const schemaVersion = 17
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -183,6 +183,9 @@ func (d *DB) migrate() error {
 		if err := d.alterCallsCompressionVersion(context.Background()); err != nil {
 			return fmt.Errorf("store: alter calls compression version: %w", err)
 		}
+		if err := d.alterCallsCompressionAttribution(context.Background()); err != nil {
+			return fmt.Errorf("store: alter calls compression attribution: %w", err)
+		}
 		if err := d.alterDashboardAuth(context.Background()); err != nil {
 			return fmt.Errorf("store: alter dashboard auth: %w", err)
 		}
@@ -232,6 +235,9 @@ func (d *DB) migrate() error {
 		}
 		if err := d.alterCallsCompressionVersion(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate calls compression version: %w", err)
+		}
+		if err := d.alterCallsCompressionAttribution(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate calls compression attribution: %w", err)
 		}
 		if err := d.alterDashboardAuth(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate dashboard auth: %w", err)
@@ -544,6 +550,37 @@ func (d *DB) alterCallsCompressionVersion(ctx context.Context) error {
 	if _, err := d.w.ExecContext(ctx,
 		`ALTER TABLE calls ADD COLUMN compression_version TEXT`); err != nil {
 		return fmt.Errorf("alter calls compression_version: %w", err)
+	}
+	return nil
+}
+
+// alterCallsCompressionAttribution adds calls.compression_stages +
+// calls.shadow_tokens_saved (addendum #7): per-engine attribution and the
+// sampled shadow measurement.
+func (d *DB) alterCallsCompressionAttribution(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "calls")
+	if err != nil {
+		return fmt.Errorf("check calls table: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+	for _, col := range []struct {
+		name, ddl string
+	}{
+		{"compression_stages", `ALTER TABLE calls ADD COLUMN compression_stages TEXT`},
+		{"shadow_tokens_saved", `ALTER TABLE calls ADD COLUMN shadow_tokens_saved INTEGER NOT NULL DEFAULT 0`},
+	} {
+		ok, err := hasColumn(ctx, d.w, "calls", col.name)
+		if err != nil {
+			return fmt.Errorf("check calls.%s: %w", col.name, err)
+		}
+		if ok {
+			continue
+		}
+		if _, err := d.w.ExecContext(ctx, col.ddl); err != nil {
+			return fmt.Errorf("alter calls %s: %w", col.name, err)
+		}
 	}
 	return nil
 }

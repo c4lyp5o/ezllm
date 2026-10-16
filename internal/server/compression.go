@@ -98,6 +98,11 @@ func (s *Server) applyCompression(r *http.Request, requested string, body []byte
 	rt := compressProfileToRuntime(prof)
 	rt.MinAbsoluteTokens = s.compressionMinAbs
 	rt.MaxPipelineMS = s.compressionMaxMS
+	// Sampled shadow pass (addendum #7): the sampler decides per request;
+	// nil = never. The shadow measurement is discarded, never shipped.
+	if s.shadowSampler != nil {
+		rt.Shadow = s.shadowSampler()
+	}
 	out, res := compress.ApplyWithSession(body, rt, doc, sessionOf(r), s.sessMemo)
 	return out, res
 }
@@ -120,6 +125,18 @@ func attachCompressionMetrics(call *store.Call, res compress.Result) {
 	// The immutable ruleset behind the decision (addendum #5): the row can be
 	// re-derived against the exact profile version that produced it.
 	call.CompressionVersion = res.ProfileVersion
+	// Per-engine attribution (addendum #7): every stage that ran, with its
+	// before/after, as JSON. Empty when nothing ran — an empty column, never
+	// a fabricated "[]".
+	if len(res.Stages) > 0 {
+		if b, err := json.Marshal(res.Stages); err == nil {
+			call.CompressionStages = string(b)
+		}
+	}
+	// The sampled POTENTIAL reduction (addendum #7): tuning data that never
+	// contributed to what shipped — it lives in its own column so it can
+	// never be mistaken for savings.
+	call.ShadowTokensSaved = res.ShadowSaved
 	call.CompressionMs = &res.MS
 	// caveman attribution: non-zero only when prose rules actually rewrote
 	// something, so "why did this prompt shrink?" is answerable from the row.

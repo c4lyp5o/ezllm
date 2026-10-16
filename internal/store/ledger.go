@@ -71,6 +71,13 @@ type Call struct {
 	// CompressionVersion is the immutable profile fingerprint behind this
 	// row's compression decision (addendum #5).
 	CompressionVersion string
+	// CompressionStages is the per-engine attribution JSON (addendum #7):
+	// every stage that ran, with before/after. Reconciles with TokensSaved
+	// via the documented rule on compress.StageStat.
+	CompressionStages string
+	// ShadowTokensSaved is the sampled POTENTIAL reduction (addendum #7) —
+	// tuning data that never contributed to what shipped.
+	ShadowTokensSaved  int64
 	CompressionApplied bool
 	// CompressionRulesFired is caveman attribution: the number of prose rules
 	// that rewrote something. Always 0 for session_dedup/rtk/headroom/lite.
@@ -386,8 +393,8 @@ INSERT INTO calls (
   compression_profile, compression_applied, prompt_tokens_pre, tokens_saved, compression_ms,
   compression_rules_fired, context_tokens_pre, context_tokens_saved,
   compression_saved_notional, prefix_sha, msg_count, tool_count, session_id, req_bytes, block_pos, translated, err,
-  compression_version
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+  compression_version, compression_stages, shadow_tokens_saved
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
@@ -412,7 +419,7 @@ INSERT INTO calls (
 			c.CompressionProfile, boolInt(c.CompressionApplied), c.PromptTokensPre, c.TokensSaved, c.CompressionMs,
 			c.CompressionRulesFired, c.ContextTokensPre, c.ContextTokensSaved,
 			c.TokensSavedNotional, c.PrefixSHA, c.MsgCount, c.ToolCount, c.SessionID, c.ReqBytes, c.BlockPos, boolInt(c.Translated), c.Err,
-			c.CompressionVersion,
+			c.CompressionVersion, c.CompressionStages, c.ShadowTokensSaved,
 		)
 		if err != nil {
 			return fmt.Errorf("insert call: %w", err)
@@ -748,7 +755,7 @@ SELECT ts, client, COALESCE(ip,''), surface, alias, account, COALESCE(provider_k
        compression_rules_fired, context_tokens_pre, context_tokens_saved,
        COALESCE(compression_saved_notional,0), COALESCE(prefix_sha,''), msg_count, tool_count,
        COALESCE(session_id,''), req_bytes, COALESCE(block_pos,0), COALESCE(translated,0), COALESCE(err,''),
-       COALESCE(compression_version,'')
+       COALESCE(compression_version,''), COALESCE(compression_stages,''), COALESCE(shadow_tokens_saved,0)
 FROM calls ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -768,7 +775,8 @@ FROM calls ORDER BY id DESC LIMIT ?`, limit)
 			&c.CompressionProfile, &applied, &c.PromptTokensPre, &c.TokensSaved, &cms,
 			&c.CompressionRulesFired, &c.ContextTokensPre, &c.ContextTokensSaved,
 			&c.TokensSavedNotional, &c.PrefixSHA, &c.MsgCount, &c.ToolCount,
-			&c.SessionID, &c.ReqBytes, &c.BlockPos, &translated, &c.Err, &c.CompressionVersion); err != nil {
+			&c.SessionID, &c.ReqBytes, &c.BlockPos, &translated, &c.Err, &c.CompressionVersion,
+			&c.CompressionStages, &c.ShadowTokensSaved); err != nil {
 			return nil, err
 		}
 		if t, err := time.Parse("2006-01-02T15:04:05.000Z", ts); err == nil {

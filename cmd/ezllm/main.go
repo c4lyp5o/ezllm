@@ -11,12 +11,14 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -251,6 +253,8 @@ func run() error {
 		// Compression policy (addendum #5): absolute floor + CPU cap.
 		CompressionMinAbs: cfg.Compression.MinAbsoluteTokens,
 		CompressionMaxMS:  cfg.Compression.MaxPipelineMS,
+		// Sampled shadow compression (addendum #7): off unless configured.
+		ShadowSampler: shadowSamplerFor(cfg.Compression.ShadowPct),
 	})
 
 	httpSrv := &http.Server{
@@ -459,6 +463,24 @@ func syncModels(ctx context.Context, db *store.DB, cfg *config.Config, acct prov
 }
 
 // upstreamClient builds the HTTP client for provider calls. No client-level
+// shadowSamplerFor arms the discarded shadow-compression pass (addendum #7)
+// for the configured percentage of requests. 0 = nil = never runs.
+func shadowSamplerFor(pct int) func() bool {
+	if pct <= 0 {
+		return nil
+	}
+	if pct >= 100 {
+		return func() bool { return true }
+	}
+	rng := rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), uint64(pct)))
+	var mu sync.Mutex
+	return func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return rng.IntN(100) < pct
+	}
+}
+
 // Timeout by default: streaming responses are unbounded, and per-request
 // deadlines come from the caller's context.
 func upstreamClient(cfg *config.Config) *http.Client {

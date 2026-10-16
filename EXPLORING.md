@@ -1,7 +1,7 @@
 # EXPLORING ezllm — Calypso's codebase tour notes
 
 > **How to use this file:** it's your map for reading ezllm's code — reading order, invariants
-> to verify, and per-milestone file landmarks (§4). M1–M8 are all filled in; keep a milestone's
+> to verify, and per-milestone file landmarks (§4). M1–M14 are filled in; keep a milestone's
 > landmarks updated as its code evolves (that's the standing rule from the plan).
 >
 > **Source of truth:** the v1 rev4 plan
@@ -68,7 +68,7 @@ equal, something is buffering — go read `proxy/sse.go` and find out why).
 | M4 | `internal/router` (hops → strategies → key pick/cooldown) + `internal/rules` | `go test ./internal/router ./internal/rules` | What happens on 429 with 1 key left? (answer must be in a test) |
 | M5 | `internal/compress` (engines + stage pipeline) + `internal/server/compression.go` | `docs/compression-design.md` | Where is "never touch final turn / tool results" enforced, and where does fail-open live? |
 | M6 | `internal/store/usage.go` → `/admin/usage` · `/admin/requests` · `/admin/stream` + `web/src` | `docs/API.md` + a dashboard login | Can I kill -9 it and restart without corrupting the ledger? Does the dashboard render anything pre-auth? (it must not) |
-| M7 | `internal/compress/rtk.go`, `caveman.go` + `internal/rules` windows/caps | `scripts/prove_*.py` (live proofs) | After compression, do ledger rows still carry faithful pre/saved token counts? |
+| M7 | `internal/compress/rtk.go`, `caveman.go` + `internal/rules` windows/caps | `tests/prove_*.py` (live proofs) | After compression, do ledger rows still carry faithful pre/saved token counts? |
 | M8 | `internal/router/router.go` `checkPin` + `internal/server/admin.go` `handleSetModelPin` | `internal/router/pin_test.go`, `internal/server/pinsurface_test.go` | Where does a refusal stop the request — before or after the upstream dial? Does every switch that renders a typed router error have a case for `ErrPinned`? |
 
 ## 4. Milestone landmarks
@@ -85,14 +85,14 @@ No narration, just landmarks. M1–M8 are all filled — keep them current as th
   error (missing env vars reported by NAME, never value); defaults applied here
   (`DefaultDataDir = "data"` at `:22`, cooldown defaults/validation at `:209`).
 - Auth moved out of config (M2+): the server resolves tokens through the store —
-  `Auth` interface (`internal/server/server.go:44`, `ClientByToken`) implemented by
-  `internal/store/catalog.go` (tokens matched by SHA-256 hash, `HashToken`).
-- `internal/server/server.go:81` `New` — route table starts at `:112`: `GET /healthz` (public,
-  liveness-only since 2026-10-10), `GET /v1/models`, `POST /v1/chat/completions` (both `authed`).
-- `internal/server/server.go:183` `Handler()` — stack = `accessLog(recoverer(mux))`.
-- `:632 authed` → writes `reqInfo.client` (holder created by accessLog at `:722`; client set at
-  `:647` — this wiring was buggy in the first cut, log showed `client=""`; fixed + re-verified).
-- `:690 statusWriter` — records status/bytes, **`Flush()` forwarded** (the M2 SSE
+  `Auth` interface (`internal/server/server.go:53`, `ClientByToken`) implemented by
+  `internal/store/catalog.go` (tokens matched by SHA-256 hash, `crypto.go:147 HashToken`).
+- `internal/server/server.go:175` `New` — route table starts at `:223`: `GET /healthz` (public,
+  liveness + `version` since 2026-10-17), `GET /v1/models`, `POST /v1/chat/completions` (both `authed`).
+- `internal/server/server.go:333` `Handler()` — stack = `accessLog(recoverer(mux))`.
+- `:1172 authed` → writes `reqInfo.client` at `:1187` (holder created by accessLog at
+  `:1308` — this wiring was buggy in the first cut, log showed `client=""`; fixed + re-verified).
+- `:1273 statusWriter` — records status/bytes, **`Flush()` forwarded** (the M2 SSE
   dependency lives here, not in the proxy).
 - `internal/config/config_test.go` — 4 tests: valid+defaults, aggregate-error, bad fallback
   provider, duplicate token.
@@ -118,7 +118,7 @@ one function. Then `store.NormalizeUsage` (`ledger.go:91`) for the accounting ru
   truncating, so a hint can never reconstruct its key. Master key is loaded from OUTSIDE `data/`.
   **Not wired in v1** — provider keys ship plaintext by explicit choice (commit `dfe323c`); this
   path is kept for a future hardening pass.
-- `internal/store/ledger.go:204 RecordCall` — **non-blocking by design** (drops + counts rather
+- `internal/store/ledger.go:249 RecordCall` — **non-blocking by design** (drops + counts rather
   than adding latency to a stream; invariant #5). `Flush()` (`:293`) uses an **in-band barrier on
   the same FIFO channel** so it's deterministic — an earlier 2-channel version let `select` serve a
   flush while rows were still queued, silently losing ledger rows.
@@ -211,7 +211,7 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
 - `internal/server/compression.go` — `/admin/compression-profiles` CRUD; per-request profile
   resolution (`x-ezllm-compression` header → combo default → off).
 - `internal/compress/caveman.go`, `rtk.go` — the aggressive pair (levels / surface-aware);
-  live proof scripts in `scripts/prove_*.py` (real runs, not unit mocks).
+  live proof scripts in `tests/prove_*.py` (real runs, not unit mocks).
 
 ### M6 — dashboard + live surfaces ✅
 - `internal/server/dashboard_auth.go` — bcrypt dashboard password + sessions; seeded default
@@ -242,18 +242,20 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
 - `internal/registration/registration.go` — all key **shape** checks deleted (`9aa9cf1`);
   `StepFormat` survives only as the unregistered-kind failure (`:202`). The probe chain is the
   sole validator.
-- `internal/server/server.go:240` `handleHealth` — liveness-only `{"status":"ok"}` after a 2s
-  DB ping (503 `{"status":"down"}` on failure); `TestHealthIsPublic` greps the body for leak
-  fields. The detail moved to `GET /admin/overview` (`internal/server/admin.go:195`).
+- `internal/server/server.go:392` `handleHealth` — liveness + release version
+  (`{"status":"ok","version":…}`) after a 2s DB ping (503 `{"status":"down","version":…"}` on
+  failure); `TestHealthIsPublic` greps the body for leak fields and pins the two-field shape.
+  The detail moved to `GET /admin/overview` (`internal/server/admin.go:150`).
 - **Surface pin** (`340442b`, schema v7): `models.proto_pin` (`schema.sql:92`), migration
   `alterModelProtoPin` (`store.go:234`), store API `ModelPin`/`SetModelPin`
   (`internal/store/catalog.go`), router gate `checkPin` (`router.go:91`, called at `:222`
   direct + `:315` combo — **before any upstream dial**; lookup errors fail CLOSED; resync
   preserves pins via snapshot/restore in `UpsertModels`). Admin write
-  `PUT /admin/accounts/{id}/model-pin` (`server.go:143`, handler `admin.go:744` — model id in
+  `PUT /admin/accounts/{id}/model-pin` (route `server.go:283`, handler
+  `admin.go:1195 handleSetModelPin` — model id in
   the body because ids contain `/`; `pin` is `json.RawMessage` so absent/""/value are three
   states; unconfirmed surface → 409 unless `force`). Client-facing refusal:
-  `400 pinned_surface` (`server.go:421`) — **never a reroute**: ezllm passes bodies through
+  `400 pinned_surface` (`server.go:585`) — **never a reroute**: ezllm passes bodies through
   untranslated, so switching the path would send the wrong shape to upstream.
   - Trap found by live prod test (`03a6317`): `errorStatus()` mapped `ErrPinned`→400 for the
     LEDGER, but the proxy error switch had no case and answered clients 502. Text-only tests

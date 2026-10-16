@@ -13,7 +13,7 @@ Errors are OpenAI-shaped: `{"error":{"type":"...","message":"...","code":422}}`.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/healthz` | no auth; **liveness only** — `{"status":"ok"}` after a DB ping (503 `{"status":"down"}` if the ping fails). No counts/paths/versions. |
+| GET | `/healthz` | no auth; **liveness + release version** — `{"status":"ok","version":"0.0.12"}` after a DB ping (503 `{"status":"down","version":"…"}` if the ping fails). Version is the only extra field; no counts/paths/uptime. |
 | GET | `/v1/models?protocol=` | `openai` (default) / `anthropic` shape; ids are `<namespace>/<model>`, plus one bare id per **enabled** combo |
 | POST | `/v1/chat/completions` | OpenAI stream + non-stream |
 | POST | `/v1/messages` | Anthropic (`x-api-key` or Bearer) |
@@ -50,7 +50,7 @@ Dashboard payload. One call so the first paint is a single round trip. (Admin-ga
 where the detail that `/healthz` no longer leaks lives.)
 ```jsonc
 {
-  "health": { "status":"ok", "schema_version":7, "accounts":5, "provider_keys":5,
+  "health": { "status":"ok", "version":"0.0.12", "schema_version":18, "accounts":5, "provider_keys":5,
                "models":51, "combos":2, "ledger_rows":1065, "dropped_rows":0,
                "ledger_span":{"oldest":"…","newest":"…"}, "uptime_s":18119,
                "db_path":"/data/ezllm.sqlite" },

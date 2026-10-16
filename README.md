@@ -1,167 +1,152 @@
 # ezllm
 
-Lightweight LLM router. Single static Go binary, **three passthrough
-surfaces** (OpenAI chat · Anthropic messages · OpenAI Responses) plus an
-opt-in, probe-gated anthropic→openai hop translation (see
-`docs/translation-runbook.md`), namespace
-routing across provider accounts, combo failover, per-model rules, request
-compression, and a SQLite usage ledger that normalizes token accounting across
-all three protocols — with a token-gated dashboard on top.
+**A self-hosted LLM router and gateway.** One static Go binary that fronts any
+mix of OpenAI-, Anthropic-, and Gemini-compatible providers behind a single
+endpoint: namespace-aware routing, combo failover, per-model rules, request
+compression, protocol translation, and a SQLite usage ledger that reconciles
+token accounting across all three wire protocols — with an operator dashboard
+in the same binary.
 
-**Status: shipped and live** — last full verification 2026-10-10 (all Go packages + UI build
-green; prod re-proved live). Deployed on the home box: dashboard + admin
-API at `https://llm.calypso.dedyn.io`, local clients at `http://127.0.0.1:20129`.
-Claude Code talks to it as a native Anthropic endpoint (`POST /v1/messages`).
-Latest shipped batch (2026-10-10): per-model **surface pin** (`proto_pin`, schema v7,
-enforced never rerouted; wrong-surface calls refuse with `400 pinned_surface` before any
-upstream dial), `/healthz` reduced to liveness-only, a fourth provider kind (`gemini-openai`)
-plus presets for Groq, DeepSeek, Command Code, TokenRouter, Gemini, NVIDIA NIM,
-OpenRouter and Cloudflare Workers AI (account ID composes the endpoint), a dashboard UI
-cleanup pass, and the **M9 research schema** (schema v8: request-shape capture for
-cacheability, versioned model prices + derived cost, real-vs-notional savings split, and
-TTFT finally measured from dispatch).
+[![Tests](https://github.com/c4lyp5o/ezllm/actions/workflows/test.yml/badge.svg)](https://github.com/c4lyp5o/ezllm/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-## Read this first
+**Status: shipped.** Every image publish is CI-gated (gofmt · vet · full test
+suite · web build). `GET /healthz` reports the running release version — see
+[VERSION.md](VERSION.md) for the release history.
 
-- `docs/API.md` — the admin API contract (v1): every endpoint, shapes, semantics.
-- `docs/compression-design.md` — the compression subsystem as shipped (M5–M7).
-- `docs/rules-engine-design.md` — caps + allowed-hours rules (design record).
-- `docs/universal-wire-design.md` — the universal wire matrix: any client surface onto any
-  upstream wire, behind `translation.universal_enabled` (default off).
-- `EXPLORING.md` — the codebase tour: what to read, in what order, which
-  invariants to verify, and per-milestone file/line landmarks.
-- `~/workspace/.hermes/plans/2026-10-05_223000-ezllm-v1-rev4-namespace-compression.md`
-  — the plan (rev5, gated). Its §0 probe table is the evidence behind the design.
+---
 
-## Build & run
+## Why ezllm
 
-```bash
-make check                          # fmt + vet + test + build
-cp config.example.yaml config.yaml  # provider metadata only; add credentials through the dashboard
+- **One endpoint, many providers.** Clients speak OpenAI, Anthropic, or
+  Responses; upstreams are reached on whichever wire they actually support —
+  natively or via probe-gated [translation](docs/translation-runbook.md).
+- **Routing that survives failures.** Combos (ordered hop lists) with
+  failover, round-robin, sticky, and block strategies; per-hop retry budgets,
+  key pools with cooldown, and dead-endpoint backoff. A failed hop is never
+  leaked to a live response (attempt/commit split).
+- **Honest numbers.** A normalized ledger (`tokens_in/out/cached_read/cached_write`)
+  across all three protocols, request-shape capture for cache research,
+  versioned model prices with derived cost, and real-vs-notional compression
+  savings.
+- **Compression that ships bytes, not promises.** Staged engines —
+  `session_dedup`, `rtk`, `headroom`, `lite`, `caveman`, `budget` — with
+  per-profile configuration and fail-open semantics.
+- **Ops surface included.** Dashboard, live request feed, analytics, key-test
+  pipeline with protocol sweeps, and a disaster-recovery export — all served
+  from the same binary.
 
-make run
-go run ./cmd/m2verify               # acceptance check against the live ledger
-```
+## Quick start
 
-Requires **Go 1.27** (`~/.local/go/bin/go`); SQLite is pure-Go
-(`modernc.org/sqlite`) so `CGO_ENABLED=0` static builds work — that's what makes
-the Docker image distroless-able.
-
-## Endpoints (full contract: docs/API.md)
-
-| Layer | Route | Auth | Notes |
-|---|---|---|---|
-| Surface | `GET /healthz` | none | liveness only — `{"status":"ok"}` after a DB ping; all detail lives behind `/admin/*` |
-| Surface | `GET /v1/models` | client token | namespaced ids + bare combo ids; `?protocol=anthropic` for the Claude shape |
-| Surface | `POST /v1/chat/completions` · `/v1/messages` · `/v1/responses` | client token (`x-api-key` ok on messages) | stream + non-stream; all three live-verified |
-| Admin | `GET /admin/health` · `/admin/overview` · `/admin/usage` · `/admin/requests` | admin | rollups (`group_by=account\|key\|alias\|client\|model\|surface\|day`), token dissection, dashboard payload |
-| Admin | `GET /admin/stream` | admin | SSE live call feed |
-| Admin | `POST /admin/chat` | admin | in-dashboard chat via the normal inference path |
-| Admin | `/admin/accounts` · `/admin/combos` · `/admin/model-rules` · `/admin/compression-profiles` · `/admin/tokens` · `/admin/export` | admin | lifecycle CRUD + disaster-recovery dump |
-| Admin | `PUT /admin/accounts/{id}/model-pin` | admin | set/clear a model's surface pin (`{"model","pin","force"}`); unconfirmed surface → 409 unless `force` |
-| Admin | `GET /admin/prices` · `PUT`/`DELETE /admin/accounts/{id}/prices` · `GET /admin/cost` | admin | versioned per-model USD rates + derived spend (`?from=`; unpriced calls counted, never zeroed) |
-| Admin | `POST /admin/login` · `/admin/settings/password` | password / admin | dashboard session gate |
-
-## Addressing models
-
-Routing is `<namespace>/<model>`, where the namespace belongs to a **provider
-account** (combos have no namespace):
+Requires **Go 1.27+**. SQLite is pure Go (`modernc.org/sqlite`), so
+`CGO_ENABLED=0` static builds work out of the box.
 
 ```bash
-curl localhost:20129/v1/chat/completions -H "Authorization: Bearer $TOKEN" \
-  -d '{"model":"opengo/qwen3.8-flash","messages":[{"role":"user","content":"hi"}]}'
-curl localhost:20129/v1/responses -H "Authorization: Bearer $TOKEN" \
-  -d '{"model":"opengo/gpt-6-luna","input":"hi"}'
+git clone https://github.com/c4lyp5o/ezllm.git && cd ezllm
+make check                                 # fmt + vet + tests + build
+cp config.example.yaml config.yaml         # provider metadata only —
+                                           # credentials are added in the dashboard
+make run                                   # http://127.0.0.1:20129
 ```
 
-A bare model id is **404 by design** — there is no default account, and the same
-model id can exist on several of your accounts (`gpt-6-luna` lives on both
-`opengo` and `super-ssn`), so guessing would mis-attribute spend. The 404 lists
-every namespace that does serve it.
+First run serves the dashboard at `/`; log in with the seeded dashboard
+password and **change it immediately** (Settings). Add provider accounts and
+keys from the Providers page — keys are validated by a live probe chain
+(catalog → auth → quota → inference → protocol), never by format checks.
 
-## Combos & strategies
+### Docker
 
-- A **combo** is a bare name (`daily`, `fallback`) → ordered hops `[{account, model}, …]`
-  + a strategy. Combo names can't contain `/`.
-- Strategies: `failover` (default), `true_round_robin`, `block_round_robin`
-  (per-hop `hold_until_failure` checkbox: the hop holds its block while it
-  succeeds and releases on a hop-attributable failure),
-  `sticky_last_good`, `least_used`.
-- Failover: transient failures (429, 5xx, timeout, transport) → retry budget per hop →
-  next hop. 4xx goes straight back to the client — never retried.
-- Keys: every account owns a pool; keys in cooldown after 429/failure are skipped until
-  they expire.
+```bash
+docker build -t ezllm .                    # distroless, static, non-root
+docker run -p 20129:20129 -v ./data:/data \
+  -e EZLLM_ADDR=0.0.0.0:20129 ezllm
+```
 
-## Rules engine
+Or use the published image (`ghcr.io/c4lyp5o/ezllm:latest`) with
+[compose.yml](compose.yml); [compose.traefik.yml](compose.traefik.yml) adds a
+Traefik overlay that exposes only `/v1`, `/healthz`, and the dashboard shell
+publicly and keeps `/admin` LAN-only.
 
-Per-(account, model) **token caps** and **allowed-hours** windows. Inside a combo, an
-out-of-window hop is skipped silently (the next hop serves); a direct call to a restricted
-model → `429` naming the rule and its window. Design + semantics:
-`docs/rules-engine-design.md`.
+## API surface
 
-## Surface pin (per model)
+Full contract — every endpoint, request/response shape, and error code — in
+**[docs/API.md](docs/API.md)**. The shape of it:
 
-Every model can carry an operator-chosen **pin**: `openai`, `anthropic`, `responses`, or
-NULL = auto (no enforcement). The pin is **enforce-only, never a reroute**: if a client
-calls a pinned model on a different surface, the request is refused with
-`400 pinned_surface` (body names the pinned surface + the one requested) **before** any
-upstream dial — so a refusal costs zero tokens and zero provider quota. ezllm passes
-request bodies through untranslated on every native path, so switching the upstream path
-would send the wrong shape; refusing is the honest answer. (Translated hops are the one
-deliberate exception — a different wire protocol by design, see
-`docs/translation-design.md` — and pins still refuse there.)
+| Layer | Routes | Auth |
+|---|---|---|
+| Liveness | `GET /healthz` → `{"status":"ok","version":"0.0.12"}` | none |
+| Inference | `POST /v1/chat/completions` · `/v1/messages` · `/v1/responses` | client token |
+| Extended | `POST /v1/embeddings` · `/v1/images/generations` · `/v1/audio/speech` · `/v1/audio/transcriptions` | client token |
+| Catalog | `GET /v1/models` (namespaced ids + combos; `?protocol=anthropic`) | client token |
+| Admin | `/admin/*` — overview, usage, requests, accounts, combos, rules, compression, services, pricing, export, SSE feed, chat | admin session / token |
 
-- Stored as `models.proto_pin` (schema v7); catalog resyncs preserve pins
-  (snapshot/restore around the delete-and-reinsert).
-- The pin lookup **fails closed**: a transient store error refuses the request rather
-  than silently bypassing an operator's pin.
-- The pin applies to both direct calls and combo hops.
-- Written via the dashboard (Providers → model drawer) or `PUT /admin/accounts/{id}/model-pin`;
-  pinning a surface the probe never confirmed needs `force`.
+Errors are OpenAI-shaped (`{"error":{"type","message","code"}}`).
+
+## Routing model
+
+### Namespaces
+
+A model is addressed `<namespace>/<model>`, where the namespace identifies a
+**provider account** (combos have no namespace):
+
+```bash
+curl -s localhost:20129/v1/chat/completions \
+  -H "Authorization: Bearer ***" -H "Content-Type: application/json" \
+  -d '{"model":"myprov/qwen-flash","messages":[{"role":"user","content":"hi"}]}'
+```
+
+A bare model id is **404 by design**: the same id can exist on several
+accounts, so guessing would mis-attribute spend. The 404 lists every
+namespace that serves it.
+
+### Combos
+
+A combo is a bare name (`fallback`) → ordered hops `[{account, model}, …]`
+plus a strategy:
+
+| Strategy | Behaviour |
+|---|---|
+| `failover` (default) | transient failure (429/5xx/timeout/transport) → retry budget per hop → next hop; a 4xx goes straight back to the client |
+| `true_round_robin` | stateless uniform roll across healthy hops |
+| `block_round_robin` | consecutive dispatches per hop; with *hold-until-failure*, a hop keeps its block while it succeeds |
+| `sticky_last_good` | stick to the hop that last served, until it fails |
+| `least_used` | prefer the hop with the least ledger traffic |
+
+Hop eligibility layers on top: per-(account, model) **rules** (token caps and
+allowed-hours windows, see [docs/rules-engine-design.md](docs/rules-engine-design.md)),
+per-model **surface pins**, context-size filtering, and cooldowns for dead
+endpoints. Rules refuse with `429` naming the rule — before any upstream dial,
+so a refusal costs zero tokens.
+
+### Surface pins
+
+Every model can carry an enforced pin (`openai` | `anthropic` | `responses` |
+auto). A pinned model called on the wrong surface is refused with
+`400 pinned_surface` **before dialling upstream** — enforcement, never a
+silent reroute, because ezllm passes bodies through untranslated on native
+paths and switching the shape behind the client's back would be dishonest.
+
+### Protocol translation (opt-in)
+
+Any client surface can be routed onto any upstream wire, gated behind
+`translation.universal_enabled` (default **off**) and per-hop probe verdicts.
+Native passthrough remains the default for every unmarked hop. Design and
+runbooks: [docs/universal-wire-design.md](docs/universal-wire-design.md),
+[docs/translation-runbook.md](docs/translation-runbook.md).
 
 ## Compression
 
-Ordered stages over six engines — `session_dedup`, `rtk`, `headroom`, `lite`, `caveman`
- — configured as profiles and selected per request (`x-ezllm-compression` header →
-the combo's default profile → off). Contract: never touch the final user message, tool
-calls, or structured tool results; fail-open on any engine error. Design + measured
-numbers: `docs/compression-design.md`.
+Profiles of ordered stages over six engines, selected per request
+(`x-ezllm-compression` header → combo default → off). Contract: the final
+user message, tool calls, and structured tool results are never touched;
+engine errors fail open. Savings are ledgered as **real** (bytes that
+actually shipped shorter) vs **notional** (rejected by ratio floor), so
+dashboards are never inflated. Design and measured numbers:
+[docs/compression-design.md](docs/compression-design.md).
 
-## Research capture & cost (schema v8)
+## Token accounting
 
-The ledger now records enough to answer the questions token-savings research actually
-needs. All of it is captured best-effort on the inference path — a failed parse records
-nothing and never affects the request.
-
-- **Cacheability** (`internal/server/shape.go`): every call stores `prefix_sha` — the hash
-  of the request's stable core (system + tools + history minus the newest turn) — plus
-  `msg_count`, `tool_count`, `session_id` (from an optional `X-Ezllm-Session` header) and
-  `req_bytes`. A re-send of the same context shares the hash (sibling reuse); any edit to
-  the stable core — an injected timestamp, a regrowing tool list, a compression profile
-  rewriting history — changes it, which is exactly a cache break. `raw_usage` is a
-  *response*, so this request structure was unreconstructable before.
-- **Real vs notional savings** (`compression_saved_notional`): `tokens_saved` counts only
-  bytes that actually shipped shorter; a ratio-floor rejection records its would-have-been
-  saving separately, so the dashboard headline is never inflated (it was ~2x before).
-- **Money** (`model_prices` + `GET /admin/cost`): per-(account, model) USD rates, versioned
-  by `effective_from` so a reprice never rewrites history. Cost is **derived** at query
-  time — not stamped per row — so correcting one rate fixes every past window. Calls with
-  no effective rate are counted as `unpriced_calls` and excluded from the total, never
-  silently zeroed. Economics shows spend and the unpriced gap; rates are set in
-  Providers → Pricing.
-- **TTFT** is measured from upstream dispatch, not from inside the stream copy, so it now
-  reflects real prefill latency instead of a constant 1–3ms.
-
-## Dashboard
-
-Same binary, served at `/`; the UI renders and fetches nothing until unlocked. First login
-uses the seeded dashboard password (`internal/store/dashboard_auth.go`) — **change it
-immediately in Settings**. Everything under `/admin/*` requires an admin session or an
-admin client token.
-
-## Token accounting (the reason the ledger exists)
-
-The three surfaces disagree about caching, so raw numbers can't be summed:
+The three surfaces disagree about caching, so raw numbers cannot be summed:
 
 | Surface | cached tokens are… | cache-write reported? |
 |---|---|---|
@@ -169,60 +154,86 @@ The three surfaces disagree about caching, so raw numbers can't be summed:
 | `/v1/messages` | **excluded** from `input_tokens` | yes |
 | `/v1/responses` | **included** in `input_tokens` | yes |
 
-Every ledger row stores normalized `tokens_in / tokens_out / tokens_cached_read /
-tokens_cached_write` (+ `reasoning_tokens`) plus the verbatim `raw_usage` JSON for
-audit. Verified live: a cached repeat reports raw `prompt=2496, cached=2048` and
-lands as `tokens_in=448 + cached_read=2048`.
+Every ledger row stores normalized `tokens_in / tokens_out /
+tokens_cached_read / tokens_cached_write` (+ `reasoning_tokens`) plus the
+verbatim `raw_usage` JSON for audit.
 
-## Config precedence
+## Dashboard
 
-Command-line flags override `EZLLM_*` environment overrides, which override
-`config.yaml`, which overrides the built-in defaults. The two overrides that
-matter operationally are `EZLLM_ADDR` (listening address — always set inside a
-container, where the config default is loopback) and `EZLLM_DATA_DIR` (ledger
-location — always set inside a container, where the config default `data` is
-repo-relative); `EZLLM_LOG_LEVEL` accepts `debug`, `warn` or `error`, and is
-env-only because it must work before the config is read.
+Same binary, served at `/`; the UI renders and fetches nothing until
+unlocked. Everything under `/admin/*` requires an admin session or an admin
+client token. The health strip shows the running **version**, account/model
+counts, and uptime.
 
-The global upstream retry policy defaults to
-3 retries after the initial attempt per combo hop. A hop is retried only for transient
-transport failures, timeouts, `429`, or `5xx`; then combo failover advances to the next
-hop with a fresh retry budget. Credentials are managed in SQLite via admin APIs and
-dashboard settings. Keep `data/ezllm.sqlite` private and include it in protected
-backups. For phone-on-LAN access, use `-addr 0.0.0.0:20129`.
+## Configuration
 
-## Security notes
+Precedence: command-line flags → `EZLLM_*` environment → `config.yaml` →
+built-in defaults.
 
-- Provider keys are stored in SQLite as plaintext per the operator's explicit
-  testing-build choice; protect the database and its backups with filesystem access controls.
-  AES-GCM field crypto (`internal/store/crypto.go`, master-key file) is implemented and
-  test-covered but intentionally not wired in v1.
-- `GET /healthz` is deliberately liveness-only (`{"status":"ok"}` after a DB ping) — it is the
-  one unauthenticated route and leaks no counts, paths, or versions. Operational detail lives
-  behind `/admin/*`.
-- Key **shape** checks were removed from registration (2026-10-10): the probe chain (catalog →
-  auth gate → quota → inference → protocol) is the sole validator, so exotic key formats are
-  judged by the upstream itself.
-- Client tokens are SHA-256 hashed and dashboard passwords bcrypt-hashed in SQLite; plaintext credentials are never returned after creation/login.
-- Only a masked provider-key hint is ever exposed in admin responses or logs.
-- The upstream's own credentials replace the client's: `Authorization`, `x-api-key`, `Cookie` —
-  and **`Origin`** (Anthropic reads any browser `Origin` as CORS and rejects with a 401;
-  regression-tested) — are stripped from client requests before forwarding.
-- Loopback by default (`127.0.0.1`); the dashboard hides all data pre-auth.
+- `EZLLM_ADDR` — listening address (set inside containers, where the default
+  is loopback)
+- `EZLLM_DATA_DIR` — ledger location (set inside containers, where the
+  default is repo-relative)
+- `EZLLM_LOG_LEVEL` — `debug` | `warn` | `error` (env-only: needed before
+  the config is read)
 
-## Testing & verification
+Provider credentials live in SQLite only, managed from the dashboard or the
+admin API — never in `config.yaml`. Upstream retry policy defaults to 3
+retries per hop for transient failures only; keep `data/ezllm.sqlite` private
+and backed up.
 
-- `make check` — fmt + vet + tests + build; `go run ./cmd/m2verify` — acceptance checker
-  against the live ledger (PASS/FAIL per invariant, run after any soak).
-- `web/*.mjs` — Playwright drivers (screenshots `shot-*.mjs`, checks `verify-*.mjs`);
-  `scripts/prove_*.py` — live proofs (compression phases, caveman, day/night rules,
-  requests, lmeval).
-- GitHub Actions: `docker-publish.yml` builds & pushes `ghcr.io/c4lyp5o/ezllm` on master;
-  `release.yml` cuts tagged releases.
+## Security
 
-## Non-goals (v1)
+- **Provider keys** are stored in SQLite as plaintext (explicit design choice
+  for this deployment class) — protect the database and its backups with
+  filesystem access controls. AES-GCM field crypto is implemented and
+  test-covered, intentionally unwired.
+- `GET /healthz` is the only unauthenticated route: liveness plus the release
+  version, nothing else. All counts, paths, and uptime live behind `/admin/*`.
+- Client tokens are SHA-256 hashed, dashboard passwords bcrypt-hashed;
+  plaintext credentials are never returned after creation. Only a masked key
+  hint is ever exposed.
+- The upstream's own credentials replace the client's on forwarding:
+  `Authorization`, `x-api-key`, `Cookie`, and `Origin` (Anthropic rejects
+  foreign browser Origins with a 401) are stripped, along with
+  `X-Ezllm-Session`.
+- Loopback by default; the dashboard hides all data pre-auth.
 
-No multi-node/Postgres. Anthropic↔OpenAI translation, a v1 non-goal, **shipped
-2026-10-12 as an opt-in, probe-gated exception** (`docs/translation-runbook.md`)
-— native passthrough remains the default for every unmarked hop. See
-EXPLORING.md §7 and the plan's §8.
+## Development
+
+```bash
+make check       # gofmt + go vet + full test suite + build
+make test-short  # functional suite only — for memory-constrained machines
+make bench       # phase benchmarks with -benchmem
+make perf        # latency percentile harness + retained-memory measurements
+make verify      # acceptance check against a live ledger
+```
+
+Repository layout:
+
+- `cmd/`, `internal/` — Go source; `_test.go` files live **in-package**
+  (Go toolchain requirement — see [CONTRIBUTING.md](CONTRIBUTING.md))
+- `tests/` — live proof scripts (Python) run against a real instance
+- `web/tests/` — Playwright screenshot/verification drivers for the dashboard
+- `docs/` — design records and runbooks; `EXPLORING.md` is the codebase tour
+- `VERSION.md` — release history (one version per change date)
+
+CI: [test.yml](.github/workflows/test.yml) gates
+[docker-publish.yml](.github/workflows/docker-publish.yml) — a red suite
+never produces an image.
+
+## Documentation
+
+| Document | What it holds |
+|---|---|
+| [docs/API.md](docs/API.md) | the admin + public API contract |
+| [VERSION.md](VERSION.md) | release history; what changed on each date |
+| [CHANGELOG.md](CHANGELOG.md) | milestone-tagged change narrative |
+| [EXPLORING.md](EXPLORING.md) | codebase tour: reading order, invariants, landmarks |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | workflow, conventions, known issues |
+| [AGENTS.md](AGENTS.md) | agent/maintainer instructions: hard rules, layout map |
+| [docs/](docs/) | design records and runbooks per subsystem |
+
+## License
+
+[MIT](LICENSE)

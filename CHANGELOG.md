@@ -2,6 +2,35 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14); full history via `git log`.
 
+## 2026-10-17 — release versioning, docs sync, test-file housekeeping ✅
+Version plumbing and a full documentation sync pass (release **v0.0.12**,
+see `VERSION.md`):
+- **`GET /healthz` now reports the release version**: new single source of
+  truth `internal/server/version.go`, served as `{"status":"ok","version":…}`
+  (503 down-payload carries it too); `/admin/overview` health object gains
+  `version`, rendered as the first chip in the dashboard health strip.
+  Guards: `version_test.go` fails on VERSION.md ↔ version.go drift and on a
+  healthz payload that grows beyond `{status, version}`.
+- **VERSION.md** (new): the release history — one version per change date,
+  patches on the same date grouped under one entry, back-filled v0.0.1
+  (2026-10-06) → v0.0.11 (2026-10-16) from `git log`.
+- **Docs rewritten/synced**: README rebuilt as the project front door (no
+  personal deploy details; version/healthz contract updated), CONTRIBUTING.md
+  (new — workflow, test placement rules, memory findings, known issues),
+  AGENTS.md (new — agent/maintainer hard rules, layout map),
+  EXPLORING.md landmark re-verified against code (`RecordCall`, model-pin
+  handler/route, M1 block line numbers, `Auth` interface), API.md healthz row
+  + health object example refreshed from the new contract, design-doc
+  citations corrected (`ValidateAccountInput`, `main.go` WriteTimeout).
+- **Test-file housekeeping**: Python live proofs `scripts/prove_*.py` →
+  `tests/`; Playwright drivers `web/{shot,verify}-*.mjs` → `web/tests/`. Go
+  `_test.go` files intentionally stay in-package (toolchain constraint —
+  CONTRIBUTING explains why).
+- **Makefile**: `test` now runs `-count=1 -timeout 15m` (CI parity; cached
+  results had masked changes), new `test-short` target for 4 GiB cgroups, and
+  an honest comment on what GOMEMLIMIT does/doesn't cap (measured: soft heap
+  limit ≠ RSS cap; full suite peaks ~4.21 GiB in the percentile harness).
+
 ## 2026-10-16 — M14 claude-web provider: claude.ai web protocol ✅
 Claude.ai's web app (sessionKey cookie + SSE completion) as a provider,
 ported from omniroute's production implementation (design:
@@ -236,7 +265,7 @@ account access, test accounts, no fallback, typed refusals.
 - NIM's `/v1/models` verified PUBLIC (200 + full catalog for a garbage key), so the catalog
   can never prove a credential — the generation probe stays the gate.
 - Verification: 5 new tests (2/2 bites fell for the right reason), full suite green, and a
-  live scratch-instance proof through the real handler — `scripts/prove_nim_keytest.py`,
+  live scratch-instance proof through the real handler — `tests/prove_nim_keytest.py`,
   201 in 2.1s, `inference: nvidia/nemotron-3.5-lightning-30b-a3b · 766ms`, ledger row
   `status=200`.
 

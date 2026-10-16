@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS model_rules (
   model_id      TEXT    NOT NULL,
   -- usage cap
   cap_tokens    INTEGER NOT NULL DEFAULT 0,   -- 0 = unlimited
-  cap_window    TEXT    NOT NULL DEFAULT 'monthly',  -- 5h|daily|weekly|monthly (matches store.ValidateAccount, admin.go:259)
+  cap_window    TEXT    NOT NULL DEFAULT 'monthly',  -- 5h|daily|weekly|monthly (matches store.ValidateAccountInput, internal/store/admin.go:277)
   -- allowed-hours window (NULL/empty = always allowed)
   win_start     TEXT,   -- 'HH:MM' local to win_tz
   win_end       TEXT,   -- 'HH:MM'; end < start means it wraps midnight
@@ -161,7 +161,7 @@ better error (a night-only model at noon should say "not until 22:00", not
 | `weekly` | `YYYY-Www` (ISO) | `2026-W41` |
 | `monthly` | `YYYY-MM` | `2026-10` |
 
-**Verified against the code**: `store.ValidateAccount` (`admin.go:259`) accepts
+**Verified against the code**: `store.ValidateAccountInput` (`internal/store/admin.go:277`) accepts
 exactly `5h|daily|weekly|monthly` and rejects anything else. There is **no
 `hourly`** — I had invented it in the first draft. `model_rules.cap_window`
 must accept the same set so one validator covers both, and the `5h` question

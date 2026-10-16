@@ -195,7 +195,7 @@ Payload 17.0 MB (4000 × 4096 B); client reads 8 KB then stops:
 - Where the bytes live: kernel socket buffers (`tcp_wmem` 16 KB–4 MB default–max,
   `tcp_rmem` 128 KB–6 MB) + the mock's own kernel buffers.
 - After resume the stream drains completely — no corruption, no cut.
-- `cmd/ezllm/main.go:226` sets **no WriteTimeout by design** ("SSE streams are
+- `cmd/ezllm/main.go:264` sets **no WriteTimeout by design** ("SSE streams are
   unbounded by design"), so a stalled client's resources are released only when
   the UPSTREAM's stream ends. There is no gateway-side deadline that drops a
   dead client mid-stream. This is now quantified (above), not assumed.
@@ -210,7 +210,7 @@ Payload 17.0 MB (4000 × 4096 B); client reads 8 KB then stops:
    for a 256-event stream) — per-event garbage, not a leak (retained-memory
    test is clean).
 3. **No gateway-side deadline on a stalled SSE client** (by design,
-   main.go:226) — resources tie to upstream stream lifetime. Quantified in §3;
+   main.go:264) — resources tie to upstream stream lifetime. Quantified in §3;
    a deliberate trade-off, recorded here so it is a decision, not an accident.
 4. **No correctness bugs found.** Every pre-existing test passes unmodified;
    no production file needed a fix; nothing to separate out per the task's

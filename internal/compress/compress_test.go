@@ -169,9 +169,12 @@ func TestRTKFiltersToolOutput(t *testing.T) {
 	toolOut := noisy.String()
 
 	body := bodyOf(
-		textMsg("user", "run the build"),                                // prose: untouched
-		map[string]any{"role": "tool", "content": toolOut},              // filtered
-		map[string]any{"role": "tool", "content": `{"ok":false,"n":1}`}, // JSON: untouched
+		textMsg("user", "run the build"), // prose: untouched
+		map[string]any{"role": "assistant", "content": "", "tool_calls": []any{
+			map[string]any{"id": "call_build", "type": "function", "function": map[string]any{"name": "bash", "arguments": "{}"}},
+		}},
+		map[string]any{"role": "tool", "tool_call_id": "call_build", "content": toolOut}, // log class: filtered
+		map[string]any{"role": "tool", "content": `{"ok":false,"n":1}`},                  // JSON + unresolved id: untouched
 		textMsg("user", "final"),
 	)
 	out, res := Apply(body, fullProfile(Stage{Engine: "rtk", Options: map[string]any{"keep_lines": 6}}))
@@ -182,10 +185,10 @@ func TestRTKFiltersToolOutput(t *testing.T) {
 	if msgs[0].(map[string]any)["content"] != "run the build" {
 		t.Error("rtk touched user prose (scope violation)")
 	}
-	if msgs[2].(map[string]any)["content"] != `{"ok":false,"n":1}` {
+	if msgs[3].(map[string]any)["content"] != `{"ok":false,"n":1}` {
 		t.Error("rtk touched JSON content (never mid-JSON)")
 	}
-	filtered, _ := msgs[1].(map[string]any)["content"].(string)
+	filtered, _ := msgs[2].(map[string]any)["content"].(string)
 	if !strings.Contains(filtered, "TypeError: cannot read property") {
 		t.Error("error line lost")
 	}
@@ -205,14 +208,17 @@ func TestRTKFencesAtomic(t *testing.T) {
 	content := "header line\n```js\nkeep this code\nline two\n```\n" +
 		strings.Repeat("noise log line\n", 30) + "error: boom"
 	body := bodyOf(
-		map[string]any{"role": "tool", "content": content},
+		map[string]any{"role": "assistant", "content": "", "tool_calls": []any{
+			map[string]any{"id": "call_1", "type": "function", "function": map[string]any{"name": "bash", "arguments": "{}"}},
+		}},
+		map[string]any{"role": "tool", "tool_call_id": "call_1", "content": content},
 		textMsg("user", "final"),
 	)
 	out, res := Apply(body, fullProfile(Stage{Engine: "rtk"}))
 	if !res.Applied {
 		t.Fatalf("expected applied: %s", res.Err)
 	}
-	filtered, _ := decodeMsgs(t, out)[0].(map[string]any)["content"].(string)
+	filtered, _ := decodeMsgs(t, out)[1].(map[string]any)["content"].(string)
 	if strings.Count(filtered, "```")%2 != 0 {
 		t.Fatalf("fence split by rtk: %q", filtered)
 	}

@@ -16,11 +16,17 @@ import (
 //  3. keep head keep_lines + tail keep_lines + every error-signature unit
 //  4. drop the middle; each contiguous run -> one `[ezllm/rtk: N lines elided]`
 //  5. if not strictly smaller, keep the original
+//
+// toolClasses: resolved tool names are filtered BY CLASS. File reads,
+// diffs, and anything UNKNOWN are preserved verbatim — unknown must never
+// mean "blindly truncate". Only log-class (build/test/terminal) and
+// search-class results are head/tail filtered. See toolClassFor.
 func rtk(msgs []any, opts map[string]any) []any {
 	keep := intOption(opts, "keep_lines", 6)
 	if keep < 0 {
 		keep = 6
 	}
+	names := toolNamesByCallID(msgs)
 	out := make([]any, 0, len(msgs))
 	for _, m := range msgs {
 		mm, ok := m.(map[string]any)
@@ -30,7 +36,25 @@ func rtk(msgs []any, opts map[string]any) []any {
 		}
 		role, _ := mm["role"].(string)
 		if role != "tool" {
+			// Anthropic shape: a tool RESULT is a tool_result block inside a
+			// user message's content array — same class gate, same filter.
+			if blocks, ok := mm["content"].([]any); ok {
+				if filtered, changed := filterToolResultBlocks(blocks, names, keep); changed {
+					cp := make(map[string]any, len(mm))
+					for k, v := range mm {
+						cp[k] = v
+					}
+					cp["content"] = filtered
+					out = append(out, cp)
+					continue
+				}
+			}
 			out = append(out, m) // scope: tool_only
+			continue
+		}
+		// Class gate: unknown/unresolved/file/diff classes are preserved.
+		if !toolClassFilterable(names[toolCallIDOf(mm)]) {
+			out = append(out, m)
 			continue
 		}
 		content, isStr := mm["content"].(string)
@@ -185,4 +209,175 @@ func intOption(opts map[string]any, key string, def int) int {
 		}
 	}
 	return def
+}
+
+// toolCallIDOf reads both wire shapes' result ids: OpenAI's tool_call_id and
+// Anthropic's tool_use_id.
+func toolCallIDOf(mm map[string]any) string {
+	if id, _ := mm["tool_call_id"].(string); id != "" {
+		return id
+	}
+	if id, _ := mm["tool_use_id"].(string); id != "" {
+		return id
+	}
+	return ""
+}
+
+// toolNamesByCallID maps every tool-call id in the conversation to its
+// lowercase tool name: assistant messages' tool_calls[].id +
+// .function.name (OpenAI) and content blocks of type tool_use (Anthropic).
+// An id absent from the map is an UNKNOWN tool — preserved, not filtered.
+func toolNamesByCallID(msgs []any) map[string]string {
+	out := map[string]string{}
+	for _, m := range msgs {
+		mm, ok := m.(map[string]any)
+		if !ok {
+			continue
+		}
+		if calls, ok := mm["tool_calls"].([]any); ok {
+			for _, c := range calls {
+				cm, ok := c.(map[string]any)
+				if !ok {
+					continue
+				}
+				id, _ := cm["id"].(string)
+				if id == "" {
+					continue
+				}
+				if fn, ok := cm["function"].(map[string]any); ok {
+					if name, _ := fn["name"].(string); name != "" {
+						out[id] = strings.ToLower(name)
+					}
+				}
+				if tu, ok := cm["tool_use"].(map[string]any); ok {
+					if name, _ := tu["name"].(string); name != "" {
+						out[id] = strings.ToLower(name)
+					}
+				}
+			}
+		}
+		if blocks, ok := mm["content"].([]any); ok {
+			for _, b := range blocks {
+				bm, ok := b.(map[string]any)
+				if !ok {
+					continue
+				}
+				if t, _ := bm["type"].(string); t != "tool_use" {
+					continue
+				}
+				id, _ := bm["id"].(string)
+				name, _ := bm["name"].(string)
+				if id != "" && name != "" {
+					out[id] = strings.ToLower(name)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// toolClass is the filtering class of a resolved tool name.
+type toolClass int
+
+const (
+	toolPreserve toolClass = iota // file reads, diffs, unknown tools
+	toolLog                       // build/test/terminal output
+	toolSearch                    // ranked results with paths
+)
+
+// Bucket membership is a documented policy, not content sniffing. Exact
+// name first (so "read" never lands in search's codebase bucket), then
+// prefix, then substring.
+var (
+	preserveToolTokens = []string{"read", "cat", "view", "open", "get_file", "show",
+		"edit", "write", "patch", "diff", "apply_patch", "str_replace", "create",
+		"insert", "notebook", "move", "rename", "delete", "undo", "commit", "push"}
+	logToolTokens = []string{"bash", "shell", "terminal", "exec", "command", "run",
+		"test", "pytest", "jest", "vitest", "mocha", "cargo", "npm", "pnpm", "yarn",
+		"make", "bundle", "docker", "kubectl", "tail", "system", "script", "build"}
+	searchToolTokens = []string{"grep", "glob", "search", "find", "rg", "ls", "list",
+		"codebase", "web", "scan", "query"}
+)
+
+// toolClassFor classifies a resolved tool name; empty/unknown -> preserve.
+func toolClassFor(name string) toolClass {
+	if name == "" {
+		return toolPreserve
+	}
+	for _, t := range preserveToolTokens {
+		if name == t {
+			return toolPreserve
+		}
+	}
+	for _, t := range logToolTokens {
+		if name == t {
+			return toolLog
+		}
+	}
+	for _, t := range searchToolTokens {
+		if name == t {
+			return toolSearch
+		}
+	}
+	for _, t := range preserveToolTokens {
+		if strings.HasPrefix(name, t) {
+			return toolPreserve
+		}
+	}
+	for _, t := range logToolTokens {
+		if strings.Contains(name, t) {
+			return toolLog
+		}
+	}
+	for _, t := range searchToolTokens {
+		if strings.Contains(name, t) {
+			return toolSearch
+		}
+	}
+	return toolPreserve
+}
+
+// toolClassFilterable reports whether a resolved name may be filtered.
+func toolClassFilterable(name string) bool {
+	return toolClassFor(name) != toolPreserve
+}
+
+// filterToolResultBlocks applies the class gate + unit filter to Anthropic
+// tool_result blocks inside a message's content array. Returns the (possibly
+// rewritten) block slice and whether anything changed. Blocks whose tool is
+// unknown or preserve-class are returned untouched; pairing (tool_use_id)
+// is never modified.
+func filterToolResultBlocks(blocks []any, names map[string]string, keep int) ([]any, bool) {
+	out := make([]any, len(blocks))
+	copy(out, blocks)
+	changed := false
+	for i, b := range blocks {
+		bm, ok := b.(map[string]any)
+		if !ok {
+			continue
+		}
+		if t, _ := bm["type"].(string); t != "tool_result" {
+			continue
+		}
+		id, _ := bm["tool_use_id"].(string)
+		if !toolClassFilterable(names[id]) {
+			continue
+		}
+		content, isStr := bm["content"].(string)
+		if !isStr || content == "" {
+			continue
+		}
+		filtered, ok := filterToolOutput(content, keep)
+		if !ok || len(filtered) >= len(content) {
+			continue
+		}
+		cp := make(map[string]any, len(bm))
+		for k, v := range bm {
+			cp[k] = v
+		}
+		cp["content"] = filtered
+		out[i] = cp
+		changed = true
+	}
+	return out, changed
 }

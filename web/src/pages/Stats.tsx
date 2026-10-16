@@ -129,10 +129,12 @@ export default function Stats() {
 
   // Ranked rows. Split day → latest date first (a time listing reads newest
   // at top; the chart below reverses this into chronological order). Every
-  // other split → focus-metric descending, biggest first.
+  // other split → focus-metric descending, biggest first — EXCEPT latency,
+  // where "smallest is best" and the ranked table/chart read ascending.
   const ranked = useMemo(() => {
     const copy = [...rawRows];
     if (isTime) return copy.sort((a, b) => b.k.localeCompare(a.k));
+    if (focus === 'latency') return copy.sort((a, b) => focusValue(focus, a) - focusValue(focus, b));
     return copy.sort((a, b) => focusValue(focus, b) - focusValue(focus, a));
   }, [rawRows, focus, isTime]);
 
@@ -387,6 +389,7 @@ export default function Stats() {
                   hint: `${nfmt(r.calls)} calls · p50 ttft ${fmtMs(r.p50_ttft_ms)}`,
                 }))}
                 format={fmt} maxRows={12}
+                order={focus === 'latency' ? 'asc' : 'desc'}
                 emptyLabel={`No ${FOCUS_LABEL[focus].toLowerCase()} recorded in this window.`} />
             </Panel>
 

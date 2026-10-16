@@ -141,22 +141,32 @@ export function Sparkline({
 // A pie chart is unreadable past five slices and a recharts bar chart costs a
 // container per card; this is a labelled bar, the share, and the value.
 export function BarList({
-  rows, total, format = formatTokens, maxRows, emptyLabel = 'nothing in this range',
+  rows, total, format = formatTokens, maxRows, emptyLabel = 'nothing in this range', order = 'desc',
 }: {
   rows: { key: string; value: number; color?: string; hint?: string }[];
   total?: number;
   format?: (n: number) => string;
   maxRows?: number;
   emptyLabel?: string;
+  // 'asc' is the latency reading: the selection still keeps the biggest-N
+  // rows (the ones worth showing), but they list lowest value first — the
+  // fastest first token at the top, the slow one at the bottom.
+  order?: 'asc' | 'desc';
 }) {
   const reduce = useReducedMotion();
-  const shown = maxRows ? rows.slice(0, maxRows) : rows;
+  // Ranked HERE rather than trusted from the caller: every bar chart in the
+  // dashboard answers "biggest first" without each page remembering to sort,
+  // and maxRows therefore caps at the N biggest rows, which is the point of
+  // a cap.
+  const rankedRows = [...rows].sort((a, b) => b.value - a.value);
+  const shown = maxRows ? rankedRows.slice(0, maxRows) : rankedRows;
+  const display = order === 'asc' ? [...shown].reverse() : shown;
   const sum = total ?? rows.reduce((a, r) => a + r.value, 0);
   const max = Math.max(...shown.map((r) => r.value), 0);
-  if (shown.length === 0) return <p className="px-5 py-8 text-center text-[12.5px] text-mute">{emptyLabel}</p>;
+  if (display.length === 0) return <p className="px-5 py-8 text-center text-[12.5px] text-mute">{emptyLabel}</p>;
   return (
     <ul className="space-y-2.5">
-      {shown.map((r, i) => {
+      {display.map((r, i) => {
         const share = pct(r.value, sum);
         return (
           <li key={`${r.key}-${i}`} className="group">

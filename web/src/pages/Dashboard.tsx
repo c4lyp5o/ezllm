@@ -156,9 +156,12 @@ function LatencyCard({ rows }: { rows: UsageRow[] }) {
   const worst = [...measured].sort((a, b) => b.p50_ttft_ms - a.p50_ttft_ms)[0];
   return (
     <Panel label={<SectionLabel>Latency · p50 time to first token</SectionLabel>}>
+      {/* The one bar list that reads ASCENDING (fastest on top): latency is
+          the metric where "smallest is best", so biggest-first would lead
+          with the worst number. The footer still names the slowest. */}
       <BarList
         rows={measured.map((r) => ({ key: r.k, value: r.p50_ttft_ms, color: VIZ.latency, hint: `${nfmt(r.calls)} calls` }))}
-        format={fmtMs} maxRows={5} />
+        format={fmtMs} maxRows={5} order="asc" />
       <p className="mt-3 border-t border-line pt-3 text-[11.5px] leading-relaxed text-mute">
         Slowest first token: <span className="font-mono text-warn">{fmtMs(worst.p50_ttft_ms)}</span> on{' '}
         <span className="text-dim">{worst.k}</span>.

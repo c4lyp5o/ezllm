@@ -3,6 +3,7 @@ package compress
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -53,8 +54,12 @@ type SessionMemo struct {
 	maxEntries int
 	now        func() time.Time
 
-	// key = sha256(session | profile | messageHash); stores the SHIPPED form.
+	// key = sha256(session | profileVersion | messageHash); ships form.
 	entries map[string]*memoEntry
+	// binding: session -> the profile fingerprint it was FIRST seen with (the
+	// immutable version binding, addendum #4). Bounded like entries; a session
+	// absent here binds on its next use.
+	binding map[string]string
 	lru     map[string]int64 // key -> logical clock of last use
 	clock   int64
 	ops     uint64
@@ -81,6 +86,7 @@ func NewSessionMemo(opts *SessionMemoOptions) *SessionMemo {
 		maxEntries: DefaultMemoMaxEntries,
 		now:        time.Now,
 		entries:    map[string]*memoEntry{},
+		binding:    map[string]string{},
 		lru:        map[string]int64{},
 	}
 	if opts != nil {
@@ -98,6 +104,83 @@ func NewSessionMemo(opts *SessionMemoOptions) *SessionMemo {
 		}
 	}
 	return m
+}
+
+// ProfileFingerprint is the immutable VERSION identity of an effective
+// profile: everything that changes the output bytes. Editing stages, the
+// exemption, the floor, or the auto-trigger yields a NEW fingerprint, so an
+// ACTIVE session keeps its binding (and its committed bytes) and only new
+// sessions see the change — a profile edit never silently rewrites a live
+// session (addendum #4). The profile NAME alone is not a version: renaming is
+// an explicit operator act and the fingerprint still moves with the content.
+func ProfileFingerprint(p *Profile) string {
+	if p == nil {
+		return ""
+	}
+	h := sha256.New()
+	fmt.Fprintf(h, "name:%s", p.Name)
+	for _, st := range p.Stages {
+		fmt.Fprintf(h, "\nstage:%s", st.Engine)
+		keys := make([]string, 0, len(st.Options))
+		for k := range st.Options {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Fprintf(h, "\nopt:%s=%v", k, st.Options[k])
+		}
+	}
+	fmt.Fprintf(h, "\nexempt:%v\nfloor:%v\nauto:%v\nfailopen:%v\nenabled:%v",
+		p.ExemptLastTurn, p.MinCompressRatio, p.AutoTriggerTokens, p.FailOpen, p.Enabled)
+	return "v" + hex.EncodeToString(h.Sum(nil)[:8])
+}
+
+// Bind returns the profile fingerprint a session is BOUND to. The first use
+// of a session binds the CURRENT fingerprint; later calls return the binding
+// even after the effective profile changes — an active session is never
+// silently re-versioned. An empty session binds nothing (legacy path).
+func (m *SessionMemo) Bind(session, currentFingerprint string) string {
+	if m == nil || session == "" || currentFingerprint == "" {
+		return ""
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if v, ok := m.binding[session]; ok {
+		return v
+	}
+	m.binding[session] = currentFingerprint
+	m.ops++
+	if m.ops%1024 == 0 {
+		m.evictBindingsLocked()
+	}
+	return currentFingerprint
+}
+
+// BoundFingerprint reports a session's binding without creating one.
+func (m *SessionMemo) BoundFingerprint(session string) (string, bool) {
+	if m == nil {
+		return "", false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	v, ok := m.binding[session]
+	return v, ok
+}
+
+// evictBindingsLocked keeps the session->version map bounded: dropping a
+// binding simply makes that session re-bind (adopting the CURRENT profile
+// version) on its next use — same treatment as a restart.
+func (m *SessionMemo) evictBindingsLocked() {
+	if len(m.binding) <= m.maxEntries {
+		return
+	}
+	drop := len(m.binding) - m.maxEntries/2
+	for k := range m.binding {
+		delete(m.binding, k)
+		if drop--; drop <= 0 {
+			break
+		}
+	}
 }
 
 // memoKey derives the ledger key: sha256(session | profile | messageHash).
@@ -215,5 +298,6 @@ func (m *SessionMemo) Clear() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.entries = map[string]*memoEntry{}
+	m.binding = map[string]string{}
 	m.lru = map[string]int64{}
 }

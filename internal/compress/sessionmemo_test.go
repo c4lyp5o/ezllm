@@ -154,7 +154,7 @@ func TestFloorJudgesNewWorkOnly(t *testing.T) {
 	}
 }
 
-// Sessions and profiles are isolated namespaces.
+// Sessions and profile VERSIONS are isolated namespaces.
 func TestMemoSessionAndProfileScoping(t *testing.T) {
 	memo := NewSessionMemo(nil)
 	p := memoProfile(Stage{Engine: "lite"})
@@ -163,28 +163,94 @@ func TestMemoSessionAndProfileScoping(t *testing.T) {
 	out, _ := ApplyWithSession(body, p, nil, "sA", memo)
 	shipped := msgContent(t, out, 0)
 
-	// another session sees no commitment: its first request re-derives, but
-	// determinism gives the same form; a DIFFERENT profile is a fresh namespace.
+	v1 := ProfileFingerprint(p)
 	p2 := memoProfile(Stage{Engine: "lite"})
 	p2.Name = "p2"
-	if _, ok := memo.Get("sB", "p1", heavy); ok {
+	v2 := ProfileFingerprint(p2)
+	if v1 == v2 {
+		t.Fatal("distinct profiles must have distinct fingerprints")
+	}
+	if _, ok := memo.Get("sB", v1, heavy); ok {
 		t.Error("another session must not see sA's commitment")
 	}
-	if _, ok := memo.Get("sA", "p2", heavy); ok {
-		t.Error("another profile must not see p1's commitment")
+	if _, ok := memo.Get("sA", v2, heavy); ok {
+		t.Error("another profile version must not see v1's commitment")
 	}
-	if _, ok := memo.Get("sA", "p1", heavy); !ok {
-		t.Error("the committing session+profile must see its own commitment")
-	}
-	if got := msgContent(t, bodyOf2(heavy), 0); got != "" {
-		_ = got
+	if _, ok := memo.Get("sA", v1, heavy); !ok {
+		t.Error("the committing session+version must see its own commitment")
 	}
 	if shipped == "" {
 		t.Error("sanity: shipped form missing")
 	}
 }
 
-func bodyOf2(m map[string]any) []byte { return bodyOf(m) }
+// The fingerprint must move with ANY byte-affecting change, and must be
+// stable for an equal profile.
+func TestProfileFingerprintMovesWithContent(t *testing.T) {
+	base := memoProfile(Stage{Engine: "lite"})
+	same := memoProfile(Stage{Engine: "lite"})
+	if ProfileFingerprint(base) != ProfileFingerprint(same) {
+		t.Error("equal effective profiles must fingerprint equal")
+	}
+	cases := map[string]*Profile{
+		"stage option": memoProfile(Stage{Engine: "rtk", Options: map[string]any{"keep_lines": 6}}),
+		"floor":        func() *Profile { p := memoProfile(Stage{Engine: "lite"}); p.MinCompressRatio = 0.2; return p }(),
+		"exempt":       func() *Profile { p := memoProfile(Stage{Engine: "lite"}); p.ExemptLastTurn = false; return p }(),
+		"auto":         func() *Profile { p := memoProfile(Stage{Engine: "lite"}); p.AutoTriggerTokens = 100; return p }(),
+		"stages":       memoProfile(Stage{Engine: "lite"}, Stage{Engine: "session_dedup"}),
+	}
+	fp := ProfileFingerprint(base)
+	for name, p := range cases {
+		if ProfileFingerprint(p) == fp {
+			t.Errorf("%s change must produce a new fingerprint", name)
+		}
+	}
+}
+
+// Addendum #4: an ACTIVE session is never silently re-versioned. A profile
+// edit mid-session keeps the session's binding (its committed bytes keep
+// replaying under the OLD fingerprint); a NEW session binds the new version.
+func TestProfileEditDoesNotRewriteActiveSession(t *testing.T) {
+	memo := NewSessionMemo(nil)
+	p := memoProfile(Stage{Engine: "lite"})
+	heavy := aCompressible()
+
+	// session binds v1 and commits a transformed form.
+	body := bodyOf(heavy, textMsg("user", "q"))
+	out1, res1 := ApplyWithSession(body, p, nil, "sV", memo)
+	if !res1.Applied {
+		t.Fatalf("v1 must apply: %s", res1.Err)
+	}
+	committed := msgContent(t, out1, 0)
+	v1, ok := memo.BoundFingerprint("sV")
+	if !ok {
+		t.Fatal("the session must have bound a version")
+	}
+
+	// the operator EDITS the profile (same name, new stage) — a new fingerprint.
+	p.Stages = []Stage{{Engine: "lite"}, {Engine: "session_dedup"}}
+	v2 := ProfileFingerprint(p)
+	if v1 == v2 {
+		t.Fatal("the edit must move the fingerprint")
+	}
+	// the ACTIVE session still replays its committed bytes.
+	body2 := bodyOf(heavy, textMsg("user", "q"), textMsg("user", "final"))
+	out2, res2 := ApplyWithSession(body2, p, nil, "sV", memo)
+	if !res2.Applied {
+		t.Fatalf("the active session must keep shipping: %s", res2.Err)
+	}
+	if got := msgContent(t, out2, 0); got != committed {
+		t.Error("a profile edit must NOT rewrite an active session's committed bytes")
+	}
+	if bound, _ := memo.BoundFingerprint("sV"); bound != v1 {
+		t.Errorf("the active session's binding must stay v1, got %s", bound)
+	}
+	// a NEW session binds the new version.
+	ApplyWithSession(body2, p, nil, "sV2", memo)
+	if bound, _ := memo.BoundFingerprint("sV2"); bound != v2 {
+		t.Errorf("a new session must bind the new version, got %s want %s", bound, v2)
+	}
+}
 
 // TTL expiry + global cap eviction keep the ledger bounded.
 func TestMemoBoundsAndTTL(t *testing.T) {

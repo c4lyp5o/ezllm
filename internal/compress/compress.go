@@ -180,13 +180,18 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 	// conversation grows, and a message that shipped untouched stays
 	// untouched when the exempt window slides off it. Order is preserved:
 	// hit[] marks the replayed positions, cur carries the new work in order.
-	useMemo := session != "" && memo != nil && p.Name != ""
+	// The session binds ONCE to the effective profile's fingerprint
+	// (addendum #4): an operator editing the profile never silently
+	// re-versions a live session — its committed bytes keep replaying under
+	// the version it was first seen with, and only new sessions bind fresh.
+	profileVersion := memo.Bind(session, ProfileFingerprint(p))
+	useMemo := profileVersion != ""
 	hit := make([]bool, len(editable))
 	forms := make([]any, len(editable)) // committed forms for hit positions
 	newWork := make([]any, 0, len(editable))
 	if useMemo {
 		for i, m := range editable {
-			if form, ok := memo.Get(session, p.Name, m); ok {
+			if form, ok := memo.Get(session, profileVersion, m); ok {
 				hit[i] = true
 				forms[i] = form
 				continue
@@ -288,7 +293,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 		// The engines RAN and this body is what ships: freeze it verbatim so
 		// the same bytes go upstream next request (the exempt tail commit
 		// lives here too — it went upstream untouched).
-		commitShipped(session, memo, p, editable, hit, forms, cur, newWork, last, msgs)
+		commitShipped(session, memo, profileVersion, p, editable, hit, forms, cur, newWork, last, msgs)
 		return body, res
 	}
 
@@ -313,7 +318,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 	// design protects. The two-directional crossing therefore happens only
 	// through an EXPLICIT transition (a profile change starts a fresh
 	// namespace), never through silent re-compression.
-	commitShipped(session, memo, p, editable, hit, forms, cur, newWork, last, msgs)
+	commitShipped(session, memo, profileVersion, p, editable, hit, forms, cur, newWork, last, msgs)
 	return out, res
 }
 
@@ -321,20 +326,19 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 // no-op in legacy mode (no session/memo) and when a dropping engine ran
 // (positions are no longer aligned; budget + memo is a documented non-goal
 // of this scope).
-func commitShipped(session string, memo *SessionMemo, p *Profile, editable []any, hit []bool, forms []any, cur []any, newWork []any, last int, msgs []any) {
-	useMemo := session != "" && memo != nil && p.Name != ""
-	if !useMemo || len(cur) != len(newWork) {
+func commitShipped(session string, memo *SessionMemo, profileVersion string, p *Profile, editable []any, hit []bool, forms []any, cur []any, newWork []any, last int, msgs []any) {
+	if profileVersion == "" || len(cur) != len(newWork) {
 		return
 	}
 	ni := 0
 	for i, m := range editable {
 		if !hit[i] {
-			memo.Put(session, p.Name, m, cur[ni])
+			memo.Put(session, profileVersion, m, cur[ni])
 			ni++
 		}
 	}
 	if p.ExemptLastTurn && last > 0 {
-		memo.Put(session, p.Name, msgs[last], msgs[last])
+		memo.Put(session, profileVersion, msgs[last], msgs[last])
 	}
 }
 

@@ -97,7 +97,7 @@ returned page — so the totals answer "how much lives behind this filter".
                               // passed through, cache counted inside — and `cread` is 0. Read
                               // the marker before comparing tin across rows; see
                               // docs/translation-runbook.md "Ledger attribution".
-  "summary": { "count":23, "tin":966, "tout":69, "cread":0, "reasoning":0,
+  "summary": { "count":23, "tin":966, "tout":69, "cread":0, "cwrite":0, "reasoning":0,
                "context_pre":0, "context_saved":0, "compression_saved":409,
                "max_tin":42, "max_tout":3,
                // compression accounting (whole matching set):

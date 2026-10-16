@@ -472,3 +472,28 @@ These are the "if it's broken here, the project failed" spots — each must be v
   set only seeds routing, ids pass through, the upstream answer is the
   entitlement truth. The bootstrap catalog is documented as ids, not
   guarantees.
+
+### Optimization pass — savings correctness + compression safety (2026-10-16)
+Feasibility-audited first (current-state map + per-workstream verdicts; two
+subagent audits were wrong and were corrected by direct source reads + one
+executable Go probe). Five slices, all local, all gates-green:
+- §11 fixes: nil-profile panic order (latent) and compression_ms was 0 on
+  EVERY row (unnamed return + deferred write — proven by execution).
+- WS-A: UsageReport gains applied_saved (the one authoritative applied
+  savings aggregate; legacy tokens_saved stays as evidence). UI totals read
+  it; the Economics double count (context_saved + tokens_saved, with an
+  admitting comment) is gone.
+- WS-E stage 1: rtk filters by tool class — reads/diffs/unknown preserved,
+  log/search filtered, both wire shapes resolved.
+- WS-B: disjoint input/output compositions (cache-read and cache-write are
+  SUBSETS of input), cache-write rendered, honest labels.
+- WS-C scoped (Calypso chose the session memo over the DB epoch table):
+  internal/compress/sessionmemo.go — TTL'd, session+profile scoped commit
+  ledger; committed history replays byte-identical; the ratio floor judges
+  new work only. Bugs the tests caught during the build: budget's message
+  drops broke the positional reassembly; the nothing-saved path never
+  committed (exempt tail never froze); verbatim forms needed freezing too.
+Caveman: please_could_you_tell_me no longer eats the question word (the
+engine forbids capture re-emission, so the word left the pattern);
+drop_there_seems_to_be removed. docs/compression-design.md carries the full
+corrections section.

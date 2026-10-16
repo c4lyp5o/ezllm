@@ -20,6 +20,76 @@ records every design decision where the plan left latitude.
 | Profile editor page (drag-order stages) | | M6.5 (Compression page stays a read-only preview) |
 | Anthropic `/v1/messages` rtk scoping | | M6.5 (shape passes through unchanged today) |
 
+---
+
+## Corrections and additions — optimization pass, 2026-10-16
+
+Five slices landed against the "token optimization and savings correctness"
+plan; the plan's findings were verified against current code before any
+change (see the feasibility audit). What changed and why:
+
+### 1. Savings accounting is authoritative in ONE place (Workstream A)
+
+- `UsageReport` (the dashboard's only data source) now returns
+  `applied_saved` — `SUM(tokens_saved)` gated on `compression_applied=1`.
+  The raw `saved` column stays as **evidence**: ~21k legacy rows carry
+  `tokens_saved>0` on declined rows from before the applied/notional split,
+  and un-gated sums inflate the headline by exactly that much.
+- **Every UI total reads `applied_saved`.** The budget-stage component
+  (`context_saved`) is shown separately and never added into a headline —
+  budget attribution is a component of the total reduction, not an extra
+  total. A rejected rewrite books `tokens_saved_notional` only.
+- The estimator (`runes/4`, `EstimateTokens`) is a **heuristic**, not a
+  tokenizer count: it feeds both the floor decision and the ledger so
+  ratios stay internally consistent, but it must never be presented as
+  measured tokens.
+
+### 2. rtk filters by TOOL CLASS (Workstream E, stage 1)
+
+Every `role:"tool"` result is resolved through its `tool_call_id` (or
+Anthropic `tool_use_id`) to the originating tool name, then filtered by
+class: **log** (build/test/terminal) and **search** results keep the
+head/tail + error-unit behaviour; **file reads, diffs/patches, and every
+UNKNOWN or unresolvable tool are preserved verbatim**. Unknown must never
+mean "blindly truncate". Tool arguments are never read.
+
+### 3. Committed-prefix stability (Workstream C, scoped)
+
+The full managed-session design (epochs, branches, durable storage) was
+scoped down to a process-local ledger (`internal/compress/sessionmemo.go`)
+after the defect was measured as narrower than the prescription: the
+sliding exemption window plus a whole-set ratio floor made an accepted
+rewrite get REJECTED on a later request, reverting already-transmitted
+history to its original bytes and breaking the upstream prefix cache.
+
+- Per session + profile, a TTL'd (30 min) LRU ledger keyed by
+  `sha256(session|profile|messageHash)` stores the form that SHIPPED.
+- Already-shipped messages replay verbatim; the ratio floor judges the
+  **new work only**.
+- The ledger is bounded (512/session, 8192 global), memory-only, lost on
+  restart (re-derivation is deterministic), and absent session id ⇒ the
+  legacy stateless path, unchanged.
+
+### 4. Corrections to earlier claims
+
+- "Compression can only ever help" — false. It is lossy; the contract's
+  value is byte-exact skips, honest applied/notional accounting, and
+  visible skips.
+- "Caveman is the only lossy engine" — false. `rtk` and `budget` are
+  lossy too.
+- "Ratio-floor rejection protects the cache" — the floor is a savings
+  gate, not a cache mechanism. Cache protection is what the committed-
+  prefix ledger (§3) actually provides.
+- The prefix hash (`PrefixSHA`) churns on ordinary append-only growth; it
+  is a sibling-grouping key, never evidence of a cache miss.
+- Two caveman rules shipped corrupted prompts while booking savings
+  (`please_could_you_tell_me` consumed the question word;
+  `drop_there_seems_to_be` hardened hedges into assertions). Fixed/removed,
+  and `internal/compress/semantic_safety_test.go` now pins both.
+- `compression_ms` was 0 on every row (a deferred write to an unnamed
+  return value never reached the caller). Results are named now; a
+  workload-sized test pins it.
+
 ## The §4.2 safety contract (non-negotiable, enforced in `internal/compress`)
 
 1. **Never modify the final message** — `exempt_last_turn` (default on): engines receive
@@ -191,7 +261,7 @@ context?, category?, minIntensity?, description?}]}`.
 - **Rule hygiene gate** — a rule whose replacement *adds* length is rejected at load.
   Caveman must only ever shrink.
 
-**Savings gates (the "can only ever help" promise, enforced per-content).**
+**Savings gates (enforced per-content — compression is LOSSY; the contract's job is to make every save visible and every skip byte-exact, NOT to promise help).**
 
 - Skip content where caveman yields **no strict byte reduction**.
 - **Emptied-segment guard**: a prose segment that carried words cannot be reduced to

@@ -11,6 +11,10 @@
 # plus SHA256SUMS for verification.
 #
 # Trigger:  git tag v1.0.0 && git push --tags
+#
+# Gate: the release job runs only after the reusable test workflow
+# (gofmt + vet + full suite + web build) — a red suite never produces
+# a release asset (adopted 2026-10-17, same gate docker-publish uses).
 name: Release binaries
 
 on:
@@ -23,7 +27,12 @@ permissions:
   contents: write        # required to create the release and upload assets
 
 jobs:
+  # The gate: same reusable test workflow docker-publish.yml calls.
+  test:
+    uses: ./.github/workflows/test.yml
+
   release:
+    needs: test
     runs-on: ubuntu-latest
     steps:
     - name: 🧾 Checkout source

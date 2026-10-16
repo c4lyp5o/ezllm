@@ -3,8 +3,8 @@
 # docker-publish.yml calls this workflow and its build_and_push job says
 # `needs: test`, so a red suite never produces an image (this is the gate
 # Calypso asked for on 2026-10-16: "let CI do the testing before pushing").
-# It is reusable (`workflow_call`) so release.yml can adopt the same gate
-# with one line when tags should be gated too.
+# It is reusable (`workflow_call`): docker-publish.yml AND release.yml both
+# call it, so a red suite never produces an image OR a release asset.
 #
 # Two honest notes:
 #   * GOMEMLIMIT/GOGC: the internal/server suite churned past 4GB when run

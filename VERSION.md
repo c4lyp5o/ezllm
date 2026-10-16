@@ -29,6 +29,8 @@ Repo housekeeping and version plumbing.
 - **Makefile**: test targets carry CI's memory envelope (`GOMEMLIMIT=3GiB`,
   `GOGC=50`), `test` runs `-count=1 -timeout 15m` (CI parity; cached results
   were masking changes), new `test-short` for constrained environments.
+- **CI**: `release.yml` tag builds gated by the reusable `test.yml`
+  (`needs: test`) — a red suite never produces a release asset either.
 
 ## v0.0.11 — 2026-10-16 · 30 commits (02b1c40..75a46e5)
 

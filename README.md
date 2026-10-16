@@ -219,8 +219,9 @@ Repository layout:
 - `VERSION.md` — release history (one version per change date)
 
 CI: [test.yml](.github/workflows/test.yml) gates
-[docker-publish.yml](.github/workflows/docker-publish.yml) — a red suite
-never produces an image.
+[docker-publish.yml](.github/workflows/docker-publish.yml) and
+[release.yml](.github/workflows/release.yml) — a red suite never produces
+an image or a release asset.
 
 ## Documentation
 

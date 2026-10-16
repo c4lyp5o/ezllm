@@ -30,6 +30,9 @@ see `VERSION.md`):
   results had masked changes), new `test-short` target for 4 GiB cgroups, and
   an honest comment on what GOMEMLIMIT does/doesn't cap (measured: soft heap
   limit ≠ RSS cap; full suite peaks ~4.21 GiB in the percentile harness).
+- **CI**: `release.yml` tag builds now call the reusable `test.yml`
+  (`needs: test`) — same gate as `docker-publish.yml`, so a red suite never
+  produces an image or a release asset. CONTRIBUTING known-issue #1 closed.
 
 ## 2026-10-16 — M14 claude-web provider: claude.ai web protocol ✅
 Claude.ai's web app (sessionKey cookie + SSE completion) as a provider,

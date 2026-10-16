@@ -261,6 +261,18 @@ func (e *ErrConflict) Error() string { return "store: conflict: " + e.What }
 
 var namespaceRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
 
+// bridgeSentinelFor maps a bridge kind to the sentinel base its runbook
+// documents (docs/claude-web-runbook.md, docs/gemini-web-runbook.md).
+func bridgeSentinelFor(kind string) (string, bool) {
+	switch kind {
+	case string(provider.KindClaudeWeb):
+		return "internal://claudeweb", true
+	case string(provider.KindGeminiWeb):
+		return "internal://geminiweb", true
+	}
+	return "", false
+}
+
 // ValidateAccountInput enforces the API contract before any write.
 func ValidateAccountInput(in AccountInput) error {
 	if strings.TrimSpace(in.Name) == "" {
@@ -282,11 +294,24 @@ func ValidateAccountInput(in AccountInput) error {
 	if in.Kind == string(provider.KindOpenCodeGo) && strings.TrimSpace(in.BaseURL) == "" {
 		in.BaseURL = "https://opencode.ai/zen/go/v1"
 	}
-	if strings.TrimSpace(in.BaseURL) == "" {
-		return errors.New("base_url is required for compatibility providers")
-	}
-	if !strings.HasPrefix(in.BaseURL, "http://") && !strings.HasPrefix(in.BaseURL, "https://") {
-		return errors.New("base_url must start with http:// or https://")
+	// Bridge kinds (claude-web, gemini-web) never dial a host the operator
+	// names — the adapter rewrites to the in-process bridge, so their base
+	// URL is the sentinel the runbooks document, defaulted when empty and
+	// required verbatim when present. github-copilot is NOT a bridge kind:
+	// it dials https://api.githubcopilot.com like any other provider.
+	if sentinel, ok := bridgeSentinelFor(in.Kind); ok {
+		// Empty is legal here — CreateAccount defaults it to the sentinel
+		// before the write (this validator takes AccountInput by value).
+		if in.BaseURL != "" && in.BaseURL != sentinel {
+			return fmt.Errorf("base_url for kind %s must be %s (the bridge sentinel)", in.Kind, sentinel)
+		}
+	} else {
+		if strings.TrimSpace(in.BaseURL) == "" {
+			return errors.New("base_url is required for compatibility providers")
+		}
+		if !strings.HasPrefix(in.BaseURL, "http://") && !strings.HasPrefix(in.BaseURL, "https://") {
+			return errors.New("base_url must start with http:// or https://")
+		}
 	}
 	if in.QuotaMode != "" {
 		switch in.QuotaMode {
@@ -346,6 +371,9 @@ func validateRate(limit *int64, window string) error {
 func (d *DB) CreateAccount(ctx context.Context, in AccountInput) (int64, error) {
 	if in.Kind == string(provider.KindOpenCodeGo) && strings.TrimSpace(in.BaseURL) == "" {
 		in.BaseURL = "https://opencode.ai/zen/go/v1"
+	}
+	if sentinel, ok := bridgeSentinelFor(in.Kind); ok && strings.TrimSpace(in.BaseURL) == "" {
+		in.BaseURL = sentinel
 	}
 	if err := ValidateAccountInput(in); err != nil {
 		return 0, err

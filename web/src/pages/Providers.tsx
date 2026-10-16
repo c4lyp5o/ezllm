@@ -109,14 +109,29 @@ const PROVIDER_PRESETS: Record<string, {
   // Cloudflare is the only one that needs it: the account ID lives INSIDE the
   // endpoint path.
   accountURL?: (id: string) => string;
+  // keyHint is the placeholder/one-liner for credentials that are NOT a
+  // pasteable API key: a browser cookie pair, a session JSON, an OAuth
+  // sessionKey. Shown under the key field when this preset is selected.
+  keyHint?: string;
 }> = {
   'claude-platform': { label: 'Claude Platform', kind: 'anthropic-compatible', baseURL: 'https://api.anthropic.com' },
+  // Web-protocol providers: no API key — credentials are browser sessions.
+  // The sentinel base URL is rewritten to the in-process bridge at request
+  // time (docs/claude-web-runbook.md, docs/gemini-web-runbook.md).
+  'claude-web': {
+    label: 'Claude.ai (web session)', kind: 'claude-web', baseURL: 'internal://claudeweb',
+    keyHint: 'claude.ai sessionKey cookie, pasted as sessionKey=sk-ant-… (runbook: DevTools → Cookies → claude.ai)',
+  },
   'opencode-go': { label: 'OpenCode Go', kind: 'opencode-go', baseURL: 'https://opencode.ai/zen/go/v1', sessionHeader: true },
   'xiaomi-mimo-token-plan': { label: 'Xiaomi MiMo token plan', kind: 'openai-compatible', baseURL: 'https://token-plan-sgp.xiaomimimo.com/v1' },
   'alibaba-model-studio-token-plan': { label: 'Alibaba Cloud Model Studio token plan', kind: 'openai-compatible', baseURL: 'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1' },
   'commandcode': { label: 'Command Code', kind: 'openai-compatible', baseURL: 'https://api.commandcode.ai/provider/v1' },
   'deepseek': { label: 'DeepSeek', kind: 'openai-compatible', baseURL: 'https://api.deepseek.com' },
   'groq': { label: 'Groq', kind: 'openai-compatible', baseURL: 'https://api.groq.com/openai/v1' },
+  'github-copilot': {
+    label: 'GitHub Copilot', kind: 'github-copilot', baseURL: 'https://api.githubcopilot.com',
+    keyHint: 'Run `ezllm github-login`, authorize at github.com/login/device, paste the session JSON it prints',
+  },
   'tokenrouter': { label: 'TokenRouter', kind: 'openai-compatible', baseURL: 'https://api.tokenrouter.com/v1' },
   // Vercel AI Gateway: OpenAI-compatible chat + /models discovery over one key,
   // model ids are `creator/model` (slashes inside the id — splitNamespace
@@ -125,6 +140,10 @@ const PROVIDER_PRESETS: Record<string, {
   'vercel-ai-gateway': { label: 'Vercel AI Gateway', kind: 'openai-compatible', baseURL: 'https://ai-gateway.vercel.sh/v1' },
   'ollama-cloud': { label: 'Ollama Cloud', kind: 'openai-compatible', baseURL: 'https://ollama.com/v1' },
   'gemini': { label: 'Google AI Studio', kind: 'gemini-openai', baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai' },
+  'gemini-web': {
+    label: 'Google Gemini (web cookies)', kind: 'gemini-web', baseURL: 'internal://geminiweb',
+    keyHint: 'Two cookies, one per line: __Secure-1PSID=… then __Secure-1PSIDTS=… — use a TEST Google account only',
+  },
   'openai': { label: 'OpenAI', kind: 'openai-compatible', baseURL: 'https://api.openai.com/v1' },
   // NVIDIA NIM — standard OpenAI-compatible chat, model ids are bare
   // (e.g. meta/llama-3.3-70b-instruct), so splitNamespace routes them like
@@ -365,7 +384,11 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
           <div>
             <label className={labelCls} htmlFor="ap-key">API key</label>
             <input id="ap-key" type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
-              placeholder="Paste provider API key" value={d.apiKey} onChange={(e) => set('apiKey', e.target.value)} />
+              placeholder={PROVIDER_PRESETS[d.preset]?.keyHint ?? 'Paste provider API key'}
+              value={d.apiKey} onChange={(e) => set('apiKey', e.target.value)} />
+            {PROVIDER_PRESETS[d.preset]?.keyHint && (
+              <p className="mt-1 text-[11px] text-mute">{PROVIDER_PRESETS[d.preset].keyHint}</p>
+            )}
           </div>
           <div>
             <label className={labelCls} htmlFor="ap-kl">Key label</label>

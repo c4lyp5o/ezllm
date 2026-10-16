@@ -89,16 +89,19 @@ export default function Economics() {
   const cached = summary?.cread ?? 0;
   const cwrite = summary?.cwrite ?? 0;
   const reasoning = summary?.reasoning ?? 0;
-  // Input composition must be DISJOINT (plan WS-B): cache-read and
-  // cache-written are SUBSETS of the input total, so the cold remainder is
-  // the only honest third slice. Clamped — odd provider accounting must not
-  // draw negative tokens.
-  const cold = Math.max(0, input - cached - cwrite);
+  // Input composition must be DISJOINT — and the ledger already guarantees
+  // that (store/ledger.go): tokens_in = COLD (non-cached) input, cread =
+  // served from cache, cwrite = written to cache. The previous version
+  // assumed the cache was a SUBSET of input and computed
+  // cold = input - cached - cwrite, which double-subtracted it and clamped
+  // cold to 0 for ANY window where caching existed — i.e. all of them.
+  // inputTotal is the honest denominator: everything that crossed the wire.
+  const cold = input;
+  const inputTotal = input + cached + cwrite;
   const visibleOut = Math.max(0, output - reasoning);
-  // The counterfactual: `input` is what was ACTUALLY sent (post-compression)
-  // and already contains the cache-read tokens (cached is a subset of input
-  // — the "of input re-read from cache" note below relies on that), so the
-  // pre-optimization estimate is input + saved, never input + cached + saved.
+  // The counterfactual: `input` is what was ACTUALLY sent cold
+  // (post-compression) and cached reads happen either way, so the
+  // pre-optimization estimate is input + saved — cold tokens only.
   // Approximate by construction — labeled as such wherever it is shown.
   const before = input + saved;
   const matching = summary?.count ?? rows.length;
@@ -175,9 +178,9 @@ export default function Economics() {
               is never added into the headline. If a budget stage ever ships
               again it gets its OWN card, not an arithmetic resurrection. */}
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Metric label="actual input" value={formatTokens(input)} note={`${nfmt(matching)} matching calls`} />
-            <Metric label="output" value={formatTokens(output)} note={`${pct(output, input + output)} of volume`} />
-            <Metric label="cached read" value={formatTokens(cached)} note={`${pct(cached, input)} of input re-read from cache`} />
+            <Metric label="actual input" value={formatTokens(input)} note={`${nfmt(matching)} matching calls · cold, non-cached`} />
+            <Metric label="output" value={formatTokens(output)} note={`${pct(output, inputTotal + output)} of volume`} />
+            <Metric label="cached read" value={formatTokens(cached)} note={`${pct(cached, inputTotal)} of input re-read from cache`} />
             <Metric label="compression saved" value={formatTokens(saved)}
               tone={saved > 0 ? 'text-ok' : undefined}
               note={`${saved > 0 ? pct(saved, before) : '0%'} approx. reduction (shipped rewrites)`} />
@@ -186,9 +189,10 @@ export default function Economics() {
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
             <Panel label={<SectionLabel>What the tokens were · {RANGE_LABEL[range]}</SectionLabel>}
               aside={<span className="text-[11px] text-mute">{formatTokens(before)} before optimisation</span>}>
-              {/* Input composition (disjoint): cache-read and cache-written
-                  are SUBSETS of input — the cold remainder is the third
-                  slice, so the three parts sum to the input total. */}
+              {/* Input composition (disjoint): the ledger's three counters
+                  are already exclusive — tokens_in is cold input, so the
+                  three parts sum to inputTotal (cold + read + write), not to
+                  the cold column. */}
               <div className="mb-1 text-[11px] uppercase tracking-wide text-mute">input composition</div>
               <CompositionBar height={12} parts={[
                 { key: 'cold', label: 'cold input', value: cold, color: VIZ.in },
@@ -205,7 +209,7 @@ export default function Economics() {
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: p.color }} />
                     <span className="text-dim">{p.label}</span>
                     <span className="tnum ml-auto font-mono text-ink">{formatTokens(p.value)}</span>
-                    <span className="tnum w-12 text-right font-mono text-mute">{pct(p.value, input)}</span>
+                    <span className="tnum w-12 text-right font-mono text-mute">{pct(p.value, inputTotal)}</span>
                   </li>
                 ))}
               </ul>

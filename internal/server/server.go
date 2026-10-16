@@ -712,6 +712,21 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 				call.Err = call.Err + "; " + note
 			}
 		}
+		// Request-wide attempt usage (addendum #3): what the budget allowed
+		// and what was spent, on every dispatched row. Unlimited is a word,
+		// never a zero-left ambiguity.
+		if res.UpstreamAttempts > 0 {
+			budget := "unlimited"
+			if res.AttemptBudget > 0 {
+				budget = fmt.Sprintf("%d", res.AttemptBudget)
+			}
+			note := fmt.Sprintf("upstream attempts %d/%s", res.UpstreamAttempts, budget)
+			if call.Err == "" {
+				call.Err = note
+			} else {
+				call.Err = call.Err + "; " + note
+			}
+		}
 		call.BlockPos = served.BlockPos
 		// Attribution for hops whose WIRE differs from the client's surface —
 		// the request/response bodies were translated, so the row's tokens_in

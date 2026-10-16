@@ -70,6 +70,17 @@ type Cooldown struct {
 
 type Retry struct {
 	Retries int `yaml:"retries"`
+	// RequestAttemptBudget is the request-WIDE upstream-attempt budget
+	// (addendum #3): same-hop retries and failover hops counted together.
+	// 0 = unlimited (legacy behaviour; recorded as unlimited, never as
+	// zero-left). Default 8 — the home box's combos are small, and this
+	// stops one client request from hammering N hops x retries upstream.
+	RequestAttemptBudget int `yaml:"request_attempt_budget"`
+	// DispatchDeadline bounds the SELECTION loop only — the time spent
+	// choosing and waiting between attempts. The winning attempt keeps its
+	// own (deliberately unbounded for streaming) upstream timeout, so this
+	// never truncates a live stream. "" = no deadline.
+	DispatchDeadlineStr string `yaml:"dispatch_deadline"`
 }
 
 type ModelRefresh struct {
@@ -144,7 +155,7 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: read %s: %w", path, err)
 	}
-	cfg := Config{Translation: Translation{Enabled: true}}
+	cfg := Config{Translation: Translation{Enabled: true}, Retry: Retry{RequestAttemptBudget: 8}}
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
 		// The yaml diagnostic names only the type, never the key. When the
 		// offender is a wrong-typed translation.universal_enabled, say so.
@@ -218,6 +229,16 @@ func (c *Config) Validate() error {
 		c.Retry.Retries = 3
 	} else if c.Retry.Retries > 9 {
 		errs = append(errs, "retry.retries: must be between 1 and 9")
+	}
+	// request-wide attempt budget: 0 = unlimited, max 64 (default 8, seeded
+	// before decode so an absent key keeps it while an explicit 0 overrides).
+	if c.Retry.RequestAttemptBudget < 0 || c.Retry.RequestAttemptBudget > 64 {
+		errs = append(errs, "retry.request_attempt_budget: must be between 0 (unlimited) and 64")
+	}
+	if c.Retry.DispatchDeadlineStr != "" {
+		if d, err := time.ParseDuration(c.Retry.DispatchDeadlineStr); err != nil || d < time.Second {
+			errs = append(errs, "retry.dispatch_deadline: must be a duration of at least 1s")
+		}
 	}
 	if c.ModelRefresh.Interval == "" {
 		c.ModelRefresh.Interval = "6h"

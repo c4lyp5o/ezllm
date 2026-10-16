@@ -86,6 +86,11 @@ func (t *UsageTapper) Usage() *store.Usage { return t.cur }
 // ErrUnknownModel is returned when the requested model cannot be resolved.
 var ErrUnknownModel = errors.New("proxy: unknown model")
 
+// errAttemptBudgetSpent is the request-wide budget (addendum #3) saying no.
+// It is an operator-visible condition, not an upstream failure: the ledger
+// note names the budget rather than blaming a provider.
+var errAttemptBudgetSpent = errors.New("proxy: request attempt budget spent")
+
 // Route is a resolved destination: one account + one key + the model to send.
 type Route struct {
 	Account  provider.Account
@@ -167,6 +172,13 @@ type Result struct {
 	UpstreamModel string
 	Err           string
 	Attempts      []Attempt
+	// UpstreamAttempts is how many upstream calls this REQUEST actually made
+	// — same-hop retries and failover hops counted together (addendum #3).
+	// AttemptBudget is the configured request-wide budget; 0 means UNLIMITED
+	// (the legacy behaviour), recorded as such so an unknown budget is never
+	// mistaken for a zero-left budget.
+	UpstreamAttempts int
+	AttemptBudget    int
 	// Committed reports whether commit already called WriteHeader on the
 	// client. It exists because Status is set from the upstream in attempt
 	// BEFORE anything is written: on a body-read failure commit can return an
@@ -210,8 +222,13 @@ type Dispatcher struct {
 	client        *http.Client
 	registry      *provider.Registry
 	retryAttempts int
-	cooldownMu    sync.Mutex
-	cooldowns     map[string]cooldownState
+	// attemptBudget is the request-wide upstream-attempt budget (addendum #3):
+	// same-hop retries and failover hops counted together. <=0 = unlimited.
+	attemptBudget int
+	// dispatchDeadline bounds the selection loop only (never a live stream).
+	dispatchDeadline time.Duration
+	cooldownMu       sync.Mutex
+	cooldowns        map[string]cooldownState
 	// on429/on5xx are the operator's park durations and maxStrikes the failure
 	// count needed to park, all guarded by cooldownMu. Zero durations mean
 	// "fall back to defaultHopCooldown"; maxStrikes < 1 means park on the first
@@ -619,6 +636,55 @@ func (d *Dispatcher) SetLogger(l *slog.Logger) {
 		l = slog.Default()
 	}
 	d.log = l
+}
+
+// SetAttemptBudget bounds the TOTAL upstream attempts one request may make
+// across same-hop retries AND failover hops (addendum #3). <=0 means
+// unlimited — the legacy behaviour, recorded explicitly as unlimited so an
+// unknown budget is never mistaken for a zero-left budget.
+func (d *Dispatcher) SetAttemptBudget(n int) {
+	d.attemptBudget = n
+}
+
+// SetDispatchDeadline bounds the SELECTION loop only: the time spent choosing
+// and waiting between attempts. The winning attempt keeps its own upstream
+// timeout (streaming responses have no natural deadline — config documents
+// that), so this never truncates a live stream.
+func (d *Dispatcher) SetDispatchDeadline(deadline time.Duration) {
+	d.dispatchDeadline = deadline
+}
+
+// attemptLedger is the request-wide attempt budget: one instance per
+// ForwardCandidatesDoc call, shared by every hop's retry loop.
+type attemptLedger struct {
+	limit int // <=0 unlimited
+	used  int
+}
+
+// consume records one upstream attempt. ok=false means the budget is spent.
+func (l *attemptLedger) consume() bool {
+	if l.limit > 0 && l.used >= l.limit {
+		return false
+	}
+	l.used++
+	return true
+}
+
+func (l *attemptLedger) exhausted() bool {
+	return l.limit > 0 && l.used >= l.limit
+}
+
+// pastDeadline reports whether the selection deadline has passed.
+func pastDeadline(sel time.Time) bool {
+	return !sel.IsZero() && !time.Now().Before(sel)
+}
+
+// budgetLabel renders the budget for ledger notes: unlimited is a word.
+func budgetLabel(limit int) string {
+	if limit <= 0 {
+		return "unlimited"
+	}
+	return strconv.Itoa(limit)
 }
 
 func (d *Dispatcher) SetRetries(retries int) {
@@ -1158,14 +1224,20 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 // response to w. It returns the ledger Result. Single-candidate form: nothing
 // to fail over to, so attempt and commit happen back to back.
 func (d *Dispatcher) Forward(ctx context.Context, w http.ResponseWriter, r *http.Request, rt Route, body []byte) (Result, error) {
-	resp, res, start, err := d.retryAttempt(ctx, r, rt, body, nil)
+	led := &attemptLedger{limit: d.attemptBudget}
+	var sel time.Time
+	if d.dispatchDeadline > 0 {
+		sel = time.Now().Add(d.dispatchDeadline)
+	}
+	resp, res, start, err := d.retryAttempt(ctx, r, rt, body, nil, led, sel)
+	res.UpstreamAttempts, res.AttemptBudget = led.used, d.attemptBudget
 	if err != nil {
 		return res, err
 	}
 	return d.commit(ctx, w, resp, rt, res, start)
 }
 
-func (d *Dispatcher) retryAttempt(ctx context.Context, r *http.Request, rt Route, body []byte, doc *jsonbody.BodyDoc) (*http.Response, Result, time.Time, error) {
+func (d *Dispatcher) retryAttempt(ctx context.Context, r *http.Request, rt Route, body []byte, doc *jsonbody.BodyDoc, led *attemptLedger, sel time.Time) (*http.Response, Result, time.Time, error) {
 	maxAttempts := d.retryAttempts + 1
 	if maxAttempts < 1 {
 		maxAttempts = 1
@@ -1174,6 +1246,14 @@ func (d *Dispatcher) retryAttempt(ctx context.Context, r *http.Request, rt Route
 	var lastResult Result
 	var lastStart time.Time
 	for attempt := 0; attempt < maxAttempts; attempt++ {
+		// The request-wide budget binds across hops: a hop whose turn comes
+		// after the budget is spent is never dialed at all.
+		if led != nil && (led.exhausted() || pastDeadline(sel)) {
+			return lastResp, lastResult, lastStart, errAttemptBudgetSpent
+		}
+		if led != nil {
+			led.consume()
+		}
 		resp, result, start, err := d.attempt(ctx, r, rt, body, doc)
 		lastResp, lastResult, lastStart = resp, result, start
 		// A non-retryable answer is FINAL, whatever its status — including 429,
@@ -1192,6 +1272,15 @@ func (d *Dispatcher) retryAttempt(ctx context.Context, r *http.Request, rt Route
 		delay := time.Duration(1<<attempt) * time.Second
 		if delay > 8*time.Second {
 			delay = 8 * time.Second
+		}
+		// Never sleep toward a failover the selection deadline forbids.
+		if !sel.IsZero() {
+			if left := time.Until(sel); left < delay {
+				delay = left
+			}
+		}
+		if delay <= 0 {
+			return lastResp, lastResult, lastStart, errAttemptBudgetSpent
 		}
 		timer := time.NewTimer(delay)
 		select {
@@ -1291,7 +1380,30 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 	// served, in dispatch order. Attached to whatever Result goes back so the
 	// ledger row can show the hops that "hopped".
 	var attempts []Attempt
+	// Addendum #3: ONE request-wide budget across same-hop retries AND
+	// failover hops, and a selection deadline that governs only the choosing
+	// (never the winning attempt's stream).
+	led := &attemptLedger{limit: d.attemptBudget}
+	var sel time.Time
+	if d.dispatchDeadline > 0 {
+		sel = time.Now().Add(d.dispatchDeadline)
+	}
+	budgetNote := func(ns, model string) Attempt {
+		return Attempt{
+			Namespace: ns, Model: model,
+			Note: fmt.Sprintf("request attempt budget spent (%s/%d used)", budgetLabel(d.attemptBudget), led.used),
+		}
+	}
 	for i := 0; i < len(routes); i++ {
+		// The budget is checked BEFORE any eligibility work: an unaffordable
+		// hop is never dialed, never probed, never cooled.
+		if led.exhausted() || pastDeadline(sel) {
+			attempts = append(attempts, budgetNote(routes[i].Account.Namespace, routes[i].Model))
+			for j := i + 1; j < len(routes); j++ {
+				attempts = append(attempts, budgetNote(routes[j].Account.Namespace, routes[j].Model))
+			}
+			break
+		}
 		rt := routes[i]
 		allowed, probe := d.acquireHop(rt, time.Now())
 		if !allowed {
@@ -1349,7 +1461,8 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 			}
 			return Route{}, Result{}, err
 		}
-		resp, res, start, err := d.retryAttempt(ctx, r, rt, swapped, doc)
+		resp, res, start, err := d.retryAttempt(ctx, r, rt, swapped, doc, led, sel)
+		res.UpstreamAttempts, res.AttemptBudget = led.used, d.attemptBudget
 		// Park the hop only when there is somewhere else to go. len(routes) is
 		// the full candidate list the router resolved; a single entry means a
 		// cooled hop has no alternate, and classifyHop declines to park a rate
@@ -1364,12 +1477,25 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 			d.releaseProbe(rt)
 		}
 		if err != nil {
-			d.log.Warn("hop failed, failing over",
-				"account", rt.Account.Namespace, "model", rt.Model,
-				"alias", rt.Alias, "err", err.Error())
+			// A budget/deadline refusal says nothing about the HOP's health —
+			// classify it as such so the note is honest AND the hop is not
+			// cooled/parked for a request it never even made.
+			note := "transport: " + err.Error()
+			var oc hopOutcome // not-dialed: nothing failed, no cooldown
+			if errors.Is(err, errAttemptBudgetSpent) {
+				note = err.Error()
+				d.log.Info("hop not dialed", // Info, not Warn: nothing failed
+					"account", rt.Account.Namespace, "model", rt.Model,
+					"alias", rt.Alias, "why", err.Error())
+			} else {
+				d.log.Warn("hop failed, failing over",
+					"account", rt.Account.Namespace, "model", rt.Model,
+					"alias", rt.Alias, "err", err.Error())
+			}
+			d.recordHop(rt, oc, time.Now())
 			attempts = append(attempts, Attempt{
 				Namespace: rt.Account.Namespace, Model: rt.Model,
-				Note: "transport: " + err.Error(),
+				Note: note,
 			})
 			if fallbackResp != nil {
 				drainClose(fallbackResp)
@@ -1431,16 +1557,16 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 		return *fallbackRoute, result, err
 	}
 	if fallbackTransportErr != nil {
-		return Route{}, Result{Attempts: attempts}, fallbackTransportErr
+		return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget}, fallbackTransportErr
 	}
 	// Nothing was attempted at all because every hop was out of request budget.
 	// Report the refusal with the earliest release time so the client can wait
 	// instead of blind-retrying — and note that no upstream request was wasted
 	// discovering this.
 	if rateRefusal != nil {
-		return Route{}, Result{Attempts: attempts}, rateRefusal
+		return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget}, rateRefusal
 	}
-	return Route{}, Result{Attempts: attempts}, errors.New("proxy: all combo endpoints are in five-minute cooldown")
+	return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget}, errors.New("proxy: all combo endpoints are in five-minute cooldown")
 }
 
 // streamCopy copies SSE upstream->client with a Flush per chunk, observing

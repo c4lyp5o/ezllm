@@ -153,6 +153,14 @@ func run() error {
 	registry.Register(provider.NewGeminiWeb("http://"+bridgeHost+"/internal/geminiweb/v1", client))
 	dispatcher := proxy.NewDispatcher(client, registry)
 	dispatcher.SetRetries(cfg.Retry.Retries)
+	// Request-wide attempt budget (addendum #3): retries + failovers counted
+	// together, so one client request cannot hammer N hops x retries.
+	dispatcher.SetAttemptBudget(cfg.Retry.RequestAttemptBudget)
+	if cfg.Retry.DispatchDeadlineStr != "" {
+		if d, err := time.ParseDuration(cfg.Retry.DispatchDeadlineStr); err == nil {
+			dispatcher.SetDispatchDeadline(d)
+		}
+	}
 	// Failover diagnostics go to the same logger as the request log: a hop that
 	// was skipped (parked) or failed over writes no ledger row, so without this
 	// the reason a combo silently stopped using a hop exists nowhere.

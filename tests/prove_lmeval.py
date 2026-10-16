@@ -23,7 +23,7 @@ Env-overridable (scratch-instance defaults):
   EZLLM_LIMIT  examples              default 100
   EZLLM_DB     ledger to verify      default <repo>/data/ezllm.sqlite
 
-Usage:  python3 scripts/prove_lmeval.py [--keep] [--run-only] [--ledger-only]
+Usage:  python3 tests/prove_lmeval.py [--keep] [--run-only] [--ledger-only]
 Exit 0 = score reported AND ledger row count matched the run.
 """
 from __future__ import annotations

@@ -9,7 +9,7 @@ Leaves state 3 standing so the Rules page shows one open + one closed chip.
 import datetime, json, os, urllib.request, urllib.error, zoneinfo
 
 # Instance targets — override for a non-default verify box:
-#   EZLLM_BASE=http://127.0.0.1:20199 EZLLM_TOKEN_FILE=... python3 scripts/prove_daynight.py
+#   EZLLM_BASE=http://127.0.0.1:20199 EZLLM_TOKEN_FILE=... python3 tests/prove_daynight.py
 BASE = os.environ.get('EZLLM_BASE', 'http://127.0.0.1:20199')
 TOK = open(os.environ.get('EZLLM_TOKEN_FILE', os.path.expanduser('~/.hermes/secrets/ezllm-admin.token'))).read().strip()
 ECHO_LOG = os.environ.get('ECHO_LOG', '/tmp/ezllm-echo.log')

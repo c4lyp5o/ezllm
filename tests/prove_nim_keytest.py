@@ -12,7 +12,7 @@ Run against a SCRATCH instance (verify-instance / canary rig), never prod:
 
     EZLLM_BASE=http://127.0.0.1:20139 \
     EZLLM_DATA_DIR=<rig>/data \
-    python3 scripts/prove_nim_keytest.py
+    python3 tests/prove_nim_keytest.py
 
 Env-overridable: EZLLM_BASE, EZLLM_ADMIN_TOKEN_FILE, NVIDIA_NIM_KEY_FILE,
 EZLLM_DB (the rig's sqlite, for the ledger read). Secrets are read at runtime

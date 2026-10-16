@@ -1,7 +1,17 @@
 GO  ?= go
 BIN := bin/ezllm
 
-.PHONY: build static run test test-race vet fmt check verify bench perf clean
+# Local test runs carry CI's memory envelope (.github/workflows/test.yml):
+# GOMEMLIMIT/GOGC keep the Go heap in the same budget the runner uses.
+# Honest scope (measured 2026-10-17): this does NOT cap RSS — the perf
+# harness (TestLatencyPercentiles) peaks ~4.21 GiB with any limit, because
+# the limit is soft and the traffic is transient. Under a memory-capped
+# cgroup (e.g. a 4 GiB worker scope) the full suite can still be OOM-killed
+# — use `make test-short` there (skips the harnesses: 0.18 GiB peak).
+test test-race bench perf: export GOMEMLIMIT := 3GiB
+test test-race bench perf: export GOGC := 50
+
+.PHONY: build static run test test-short test-race vet fmt check verify bench perf clean
 
 build:
 	$(GO) build -o $(BIN) ./cmd/ezllm
@@ -15,8 +25,15 @@ static:
 run:
 	$(GO) run ./cmd/ezllm -config config.yaml
 
+# -count=1 / -timeout 15m mirror CI exactly — cached results were masking
+# changes, and the percentile harness legitimately takes minutes.
 test:
-	$(GO) test ./...
+	$(GO) test -count=1 -timeout 15m ./...
+
+# Memory-constrained environments (4 GiB cgroups): skips the percentile /
+# retained-memory harnesses, still runs every functional test.
+test-short:
+	$(GO) test -short -count=1 ./...
 
 test-race:
 	$(GO) test -race ./...
@@ -39,7 +56,8 @@ bench:
 	$(GO) test ./internal/proxy/... ./internal/server/... -run XXX -bench . -benchmem -count=1
 
 # The latency-percentile harness and the retained-memory / lifecycle
-# measurements. Not skipped by -short, so do not pass it.
+# measurements. Not skipped by -short, so do not pass it. Needs real memory:
+# see the envelope note at the top of this file.
 perf:
 	$(GO) test ./internal/server/ -run 'TestLatencyPercentiles|TestRetainedMemory|TestSlowConsumer|TestClientCancel|TestUpstreamNotReported' -v -count=1
 

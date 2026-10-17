@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { clearToken, dashboardLogin, getToken, probeDefaultPassword, setToken } from './utils/api';
+import { clearToken, dashboardLogin, isUnlocked, markUnlocked, probeDefaultPassword } from './utils/api';
 import { DUR, spring } from './components/motion';
 import RailwayBackground from './components/RailwayBackground';
 import { readTheme, setTheme, type Theme } from './utils/theme';
@@ -133,7 +133,7 @@ function Unlock({ onUnlock }: { onUnlock: () => void }) {
     if (!value) { setErr('enter the dashboard password'); return; }
     setBusy(true);
     dashboardLogin(value)
-      .then((res) => { setToken(res.token); onUnlock(); })
+      .then(() => { markUnlocked(); onUnlock(); })
       .catch((error: unknown) => setErr(error instanceof Error ? error.message : 'login failed'))
       .finally(() => setBusy(false));
   };
@@ -248,7 +248,7 @@ const PAGE_HEADERS: Record<string, { title: string; sub: string }> = {
 };
 
 export default function App() {
-  const [token, setTokenState] = useState<string | null>(() => getToken());
+  const [token, setTokenState] = useState<string | null>(() => (isUnlocked() ? 'cookie' : null));
   const [drawer, setDrawer] = useState(false);
   const location = useLocation();
 
@@ -260,7 +260,7 @@ export default function App() {
     if (drawer) { document.addEventListener('keydown', onKey); return () => document.removeEventListener('keydown', onKey); }
   }, [drawer]);
 
-  if (!token) return <Unlock onUnlock={() => setTokenState(getToken())} />;
+  if (!token) return <Unlock onUnlock={() => setTokenState('cookie')} />;
 
   const header = PAGE_HEADERS[location.pathname] ?? PAGE_HEADERS['/'];
 

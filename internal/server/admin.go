@@ -34,9 +34,13 @@ import (
 // token that can only infer never sees account/key surfaces.
 func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Dashboard sessions are admin-only and are deliberately accepted only
-		// on /admin routes, never on the inference surfaces.
-		if s.db != nil && s.db.DashboardSession(r.Context(), bearerToken(r)) {
+		token := bearerToken(r)
+		if token == "" {
+			if c, err := r.Cookie("ezllm_session"); err == nil {
+				token = c.Value
+			}
+		}
+		if s.db != nil && s.db.DashboardSession(r.Context(), token) {
 			ctx := context.WithValue(r.Context(), rolesKey{}, []string{"admin"})
 			ctx = context.WithValue(ctx, clientKey{}, "dashboard")
 			next(w, r.WithContext(ctx))

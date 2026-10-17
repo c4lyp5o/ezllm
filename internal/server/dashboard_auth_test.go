@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -68,5 +69,49 @@ func TestDashboardLoginCarriesDefaultPasswordFlag(t *testing.T) {
 	}
 	if !strings.Contains(body, "token") {
 		t.Fatalf("success body shape changed: %s", body)
+	}
+}
+
+func TestDashboardLoginSetsHttpOnlyCookieAndCookieAuthenticates(t *testing.T) {
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
+	code, hdr, body := h.do("POST", "/admin/login", "", `{"password":"STRONGPASSWORD"}`)
+	if code != 200 {
+		t.Fatalf("login = %d: %s", code, body)
+	}
+	raw := hdr.Get("Set-Cookie")
+	if raw == "" {
+		t.Fatal("login did not set a session cookie")
+	}
+	cookie, err := http.ParseSetCookie(raw)
+	if err != nil {
+		t.Fatalf("parse cookie: %v", err)
+	}
+	if cookie.Name != "ezllm_session" || !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode {
+		t.Fatalf("cookie = %+v, want ezllm_session + HttpOnly + SameSite=Strict", cookie)
+	}
+
+	// The cookie alone (no Authorization header) must open an admin route.
+	req := httptest.NewRequest("GET", "/admin/overview", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	h.handler.ServeHTTP(rec, req)
+	if rec.Code == http.StatusUnauthorized || rec.Code == http.StatusForbidden {
+		t.Fatalf("cookie auth rejected: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDashboardLoginRateLimitsPerIP(t *testing.T) {
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
+	clearLoginAttempts("192.0.2.1")
+	defer clearLoginAttempts("192.0.2.1")
+	for i := 0; i < 5; i++ {
+		code, _, _ := h.do("POST", "/admin/login", "", `{"password":"wrong"}`)
+		if code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d = %d, want 401", i+1, code)
+		}
+	}
+	code, _, body := h.do("POST", "/admin/login", "", `{"password":"wrong"}`)
+	if code != http.StatusTooManyRequests {
+		t.Fatalf("sixth attempt = %d, want 429: %s", code, body)
 	}
 }

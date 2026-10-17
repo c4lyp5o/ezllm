@@ -2,15 +2,65 @@ package server
 
 import (
 	"errors"
+	"net"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/c4lyp5o/ezllm/internal/store"
 )
 
+var loginRateLimiter = struct {
+	mu       sync.Mutex
+	attempts map[string][]time.Time
+}{
+	attempts: map[string][]time.Time{},
+}
+
+func loginClientIP(r *http.Request) string {
+	ip := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(ip); err == nil {
+		ip = host
+	}
+	return ip
+}
+
+func loginAllowed(ip string) bool {
+	loginRateLimiter.mu.Lock()
+	defer loginRateLimiter.mu.Unlock()
+	now := time.Now()
+	cutoff := now.Add(-15 * time.Minute)
+	var recent []time.Time
+	for _, t := range loginRateLimiter.attempts[ip] {
+		if t.After(cutoff) {
+			recent = append(recent, t)
+		}
+	}
+	loginRateLimiter.attempts[ip] = recent
+	return len(recent) < 5
+}
+
+func recordLoginFailure(ip string) {
+	loginRateLimiter.mu.Lock()
+	defer loginRateLimiter.mu.Unlock()
+	loginRateLimiter.attempts[ip] = append(loginRateLimiter.attempts[ip], time.Now())
+}
+
+func clearLoginAttempts(ip string) {
+	loginRateLimiter.mu.Lock()
+	defer loginRateLimiter.mu.Unlock()
+	delete(loginRateLimiter.attempts, ip)
+}
+
 func (s *Server) handleDashboardLogin(w http.ResponseWriter, r *http.Request) {
 	if s.db == nil {
 		writeErr(w, http.StatusServiceUnavailable, "server_error", "dashboard authentication unavailable")
+		return
+	}
+	ip := loginClientIP(r)
+	if !loginAllowed(ip) {
+		writeErr(w, http.StatusTooManyRequests, "rate_limited", "too many login attempts; try again later")
 		return
 	}
 	var in struct {
@@ -23,8 +73,9 @@ func (s *Server) handleDashboardLogin(w http.ResponseWriter, r *http.Request) {
 	token, err := s.db.DashboardLogin(r.Context(), in.Password)
 	if err != nil {
 		if errors.Is(err, store.ErrInvalidDashboardPassword) {
-			// The flag rides even the failure so the page can decide whether
-			// the first-run hint is still relevant BEFORE a successful login.
+			if strings.TrimSpace(in.Password) != "" {
+				recordLoginFailure(ip)
+			}
 			writeErrExtra(w, http.StatusUnauthorized, "invalid_request_error", "invalid dashboard password",
 				map[string]any{"default_password": isDefault})
 			return
@@ -32,6 +83,17 @@ func (s *Server) handleDashboardLogin(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreErr(w, err)
 		return
 	}
+	clearLoginAttempts(ip)
+	secure := r.TLS != nil
+	http.SetCookie(w, &http.Cookie{
+		Name:     "ezllm_session",
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   12 * 60 * 60,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{"token": token, "default_password": isDefault})
 }
 

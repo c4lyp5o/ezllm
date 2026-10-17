@@ -2,17 +2,31 @@
 import { fmtMs, formatTokens } from './lib';
 
 const TOKEN_KEY = 'ezllm.admin.token';
+const UNLOCK_KEY = 'ezllm.admin.unlocked';
 
 export function getToken(): string | null {
   try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
 }
 export function setToken(t: string): void { try { localStorage.setItem(TOKEN_KEY, t); } catch { /* noop */ } }
-export function clearToken(): void { try { localStorage.removeItem(TOKEN_KEY); } catch { /* noop */ } }
+export function clearToken(): void {
+  try { localStorage.removeItem(TOKEN_KEY); } catch { /* noop */ }
+  try { sessionStorage.removeItem(UNLOCK_KEY); } catch { /* noop */ }
+}
+/** Cookie sessions are httpOnly, so JS cannot inspect them. This marker only
+ *  says "this tab logged in"; the cookie is what actually authenticates. */
+export function isUnlocked(): boolean {
+  if (getToken()) return true;
+  try { return sessionStorage.getItem(UNLOCK_KEY) === '1'; } catch { return false; }
+}
+export function markUnlocked(): void {
+  try { sessionStorage.setItem(UNLOCK_KEY, '1'); } catch { /* noop */ }
+}
 
 export async function dashboardLogin(password: string): Promise<{ token: string; defaultPassword: boolean }> {
   const response = await fetch('/admin/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     body: JSON.stringify({ password }),
   });
   const body = await response.json().catch(() => ({})) as { token?: string; default_password?: boolean; error?: { default_password?: boolean } };
@@ -32,6 +46,7 @@ export async function probeDefaultPassword(): Promise<boolean> {
     const response = await fetch('/admin/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({ password: '' }),
     });
     const body = await response.json().catch(() => ({})) as { error?: { default_password?: boolean } };
@@ -96,13 +111,14 @@ function parseOpenAIError(body: unknown, status: number): ApiErrorDetail {
 /** Shared fetch: bearer token from localStorage, OpenAI-shaped error parsing, 401/403 → AuthError. */
 export async function apiFetch<T = unknown>(path: string, init: RequestInit = {}, body?: unknown): Promise<T> {
   const token = getToken();
-  if (!token) throw new AuthError(401, 'unlocked');
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (body !== undefined) { headers['Content-Type'] = 'application/json'; }
   let payload: string | undefined;
-  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
-  if (body !== undefined) { headers['Content-Type'] = 'application/json'; payload = JSON.stringify(body); }
+  if (body !== undefined) payload = JSON.stringify(body);
   let res: Response;
   try {
-    res = await fetch(path, { ...init, headers, body: payload });
+    res = await fetch(path, { ...init, headers, body: payload, credentials: 'include' });
   } catch {
     throw new ApiError({ status: 0, type: 'network', message: 'upstream unreachable — is ezllm running?' });
   }
@@ -144,16 +160,16 @@ export async function postKeyTestStream<T>(
   onStep: (s: TestStep) => void,
 ): Promise<T> {
   const token = getToken();
-  if (!token) throw new AuthError(401, 'unlocked');
   let res: Response;
   try {
     res = await fetch(path, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${token}`,
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         'Content-Type': 'application/json',
         Accept: 'application/x-ndjson',
       },
+      credentials: 'include',
       body: JSON.stringify(body),
     });
   } catch {

@@ -5,7 +5,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M14); full histor
 ## 2026-10-18 — security milestones, native surfaces, playground, per-key budgets
 
 - Security Milestone A: provider keys encrypted at rest (AES-256-GCM), master key, migration + tests.
-- Security Milestone B: httpOnly cookie session, per-IP login rate limit, frontend cookie auth.
+- Security Milestone B: httpOnly cookie session, per-IP login rate limit, frontend cookie auth; cookie is `Secure` when the proxy reports `X-Forwarded-Proto: https` and scoped to `/admin`.
 - Native image/audio adapters (Cloudflare, Google AI Studio); per-account management key (schema v19) for TokenRouter balance.
 - Chat playground (1-3 columns), per-key budget meter + editor in Connect.
 - Dashboard: routing-rescue panel; Linear-inspired palette and sidebar icons.

@@ -72,6 +72,25 @@ func TestDashboardLoginCarriesDefaultPasswordFlag(t *testing.T) {
 	}
 }
 
+func TestDashboardLoginCookieSecureBehindProxy(t *testing.T) {
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
+	req := httptest.NewRequest("POST", "/admin/login", strings.NewReader(`{"password":"STRONGPASSWORD"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rec := httptest.NewRecorder()
+	h.handler.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("login = %d: %s", rec.Code, rec.Body.String())
+	}
+	cookie, err := http.ParseSetCookie(rec.Header().Get("Set-Cookie"))
+	if err != nil {
+		t.Fatalf("parse cookie: %v", err)
+	}
+	if !cookie.Secure {
+		t.Fatal("cookie must be Secure when the proxy reports https")
+	}
+}
+
 func TestDashboardLoginSetsHttpOnlyCookieAndCookieAuthenticates(t *testing.T) {
 	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
 	code, hdr, body := h.do("POST", "/admin/login", "", `{"password":"STRONGPASSWORD"}`)

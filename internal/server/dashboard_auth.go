@@ -84,11 +84,11 @@ func (s *Server) handleDashboardLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	clearLoginAttempts(ip)
-	secure := r.TLS != nil
+	secure := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 	http.SetCookie(w, &http.Cookie{
 		Name:     "ezllm_session",
 		Value:    token,
-		Path:     "/",
+		Path:     "/admin",
 		HttpOnly: true,
 		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,

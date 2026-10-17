@@ -9,7 +9,7 @@
 //     no way to dismiss until copy, and the "I saved it" confirmation.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError, getToken, type UsageRow } from '../utils/api';
-import { Chip, ConfirmModal, Mono, SectionLabel, Spinner, Toggle, btn, cx, inputCls, labelCls } from '../components/ui';
+import { Chip, ConfirmModal, Modal, Mono, SectionLabel, Spinner, Toggle, btn, cx, inputCls, labelCls } from '../components/ui';
 import {
   createToken, listTokens, patchToken, probeModels, revokeToken, usageByClient,
   type TokenCreated, type TokenInfo, type V1Model,
@@ -143,6 +143,10 @@ export default function Connect() {
   const [role, setRole] = useState<'infer' | 'admin'>('infer');
   const [busyId, setBusyId] = useState<number | null>(null);
   const [pendingRevoke, setPendingRevoke] = useState<TokenInfo | null>(null);
+  const [budgetTarget, setBudgetTarget] = useState<TokenInfo | null>(null);
+  const [budgetCap, setBudgetCap] = useState(0);
+  const [budgetWindow, setBudgetWindow] = useState('monthly');
+  const [budgetBusy, setBudgetBusy] = useState(false);
 
   // Base URL: same origin as the dashboard, minus the trailing slash.
   const base = useMemo(() => window.location.origin, []);
@@ -187,6 +191,18 @@ export default function Connect() {
     setBusyId(t.id);
     try { await patchToken(t.id, { enabled }); setTokens((p) => (p ?? []).map((x) => (x.id === t.id ? { ...x, enabled } : x))); }
     finally { setBusyId(null); }
+  };
+
+  const saveBudget = async () => {
+    if (!budgetTarget) return;
+    setBudgetBusy(true);
+    try {
+      const updated = await patchToken(budgetTarget.id, { cap_tokens: budgetCap, cap_window: budgetWindow });
+      setTokens((cur) => cur?.map((t) => (t.id === updated.id ? updated : t)) ?? null);
+      setBudgetTarget(null);
+    } catch (e) {
+      /* ignore; keep modal open */
+    } finally { setBudgetBusy(false); }
   };
 
   const revoke = async (t: TokenInfo) => {
@@ -301,6 +317,8 @@ export default function Connect() {
           <div className="mt-3 space-y-2">
             {tokens.map((t) => {
               const u = usageFor(t.name);
+              const used = (u?.tin ?? 0) + (u?.tout ?? 0);
+              const capPct = t.cap_tokens > 0 ? Math.min(100, (used / t.cap_tokens) * 100) : 0;
               return (
                 <div key={t.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-line bg-surface px-4 py-3 animate-fade-up">
                   <div className="min-w-0">
@@ -315,7 +333,25 @@ export default function Connect() {
                   </div>
                   <div className="ml-auto flex items-center gap-4 text-[11.5px] text-dim">
                     <span>{(u?.calls ?? 0).toLocaleString()} calls · {(u?.tin ?? 0).toLocaleString()} in · {(u?.tout ?? 0).toLocaleString()} out</span>
+                    <span className="min-w-[120px]">
+                      {t.cap_tokens > 0 ? (
+                        <>
+                          <span className="flex items-center justify-between gap-2">
+                            <span className="text-mute">budget</span>
+                            <span className="font-mono text-[10.5px]">{used.toLocaleString()} / {t.cap_tokens.toLocaleString()}</span>
+                          </span>
+                          <span className="mt-1 block h-1 overflow-hidden rounded-full bg-shade">
+                            <span className={cx('block h-full rounded-full', capPct >= 90 ? 'bg-bad' : capPct >= 70 ? 'bg-warn' : 'bg-accent')}
+                              style={{ width: `${capPct}%` }} />
+                          </span>
+                        </>
+                      ) : <span className="text-mute">budget unlimited</span>}
+                    </span>
                     <span className="flex items-center gap-2">
+                      <button type="button" className={cx(btn.base, btn.ghost, 'px-2.5 py-1.5 text-[11.5px]')}
+                        onClick={() => { setBudgetTarget(t); setBudgetCap(t.cap_tokens); setBudgetWindow(t.cap_window || 'monthly'); }}>
+                        Budget
+                      </button>
                       <Toggle checked={t.enabled} onChange={(v) => void toggle(t, v)} disabled={busyId === t.id} />
                       <button type="button" className={cx(btn.base, btn.danger, 'px-2.5 py-1.5 text-[11.5px]')} onClick={() => setPendingRevoke(t)} disabled={busyId === t.id}>Revoke</button>
                     </span>
@@ -326,6 +362,36 @@ export default function Connect() {
           </div>
         )}
       </section>
+
+      {/* ── Budget editor ─────────────────────────────────────────── */}
+      <Modal open={budgetTarget != null} onClose={() => setBudgetTarget(null)}
+        title={`Budget for ${budgetTarget?.name ?? ''}`}
+        subtitle="Per-key token budget, enforced by the rules engine"
+        footer={<>
+          <button type="button" className={cx(btn.base, btn.ghost)} onClick={() => setBudgetTarget(null)}>Cancel</button>
+          <button type="button" disabled={budgetBusy} className={cx(btn.base, btn.primary)} onClick={() => void saveBudget()}>
+            {budgetBusy ? <Spinner /> : null} Save
+          </button>
+        </>}>
+        <div className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className={labelCls}>Token cap (0 = unlimited)</label>
+              <input type="number" min={0} className={cx(inputCls, 'font-mono tabular-nums')}
+                value={budgetCap} onChange={(e) => setBudgetCap(Number(e.target.value) || 0)} />
+            </div>
+            <div>
+              <label className={labelCls}>Window</label>
+              <select className={inputCls} value={budgetWindow} onChange={(e) => setBudgetWindow(e.target.value)}>
+                {['5h', 'daily', 'weekly', 'monthly'].map((w) => <option key={w} value={w}>{w}</option>)}
+              </select>
+            </div>
+          </div>
+          <p className="text-[11.5px] text-mute">
+            Usage is the key's actual ledger spend (tokens in + out) inside the window. A spent key answers 429 until the window rolls.
+          </p>
+        </div>
+      </Modal>
 
       {/* ── Show-once plaintext ────────────────────────────────────── */}
       {fresh && (

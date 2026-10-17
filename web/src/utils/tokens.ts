@@ -24,7 +24,7 @@ export interface TokenCreated extends TokenInfo {
   plaintext: string;
 }
 
-export type TokenPatch = { name?: string; enabled?: boolean; cap_tokens?: number };
+export type TokenPatch = { name?: string; enabled?: boolean; cap_tokens?: number; cap_window?: string };
 
 export interface V1Model {
   id: string;
@@ -47,7 +47,7 @@ export const createToken = async (
   return { ...body.token, plaintext: body.plaintext };
 };
 
-export const patchToken = (id: number, p: TokenPatch) => patch(`/admin/tokens/${id}`, p);
+export const patchToken = (id: number, p: TokenPatch) => patch<TokenInfo>(`/admin/tokens/${id}`, p);
 
 export const revokeToken = (id: number) => del(`/admin/tokens/${id}`);
 

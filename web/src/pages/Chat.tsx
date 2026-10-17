@@ -79,7 +79,7 @@ const newColumn = (model = ''): Column => ({ id: `c${nextColumn++}`, model, mess
 export default function Chat() {
   const [catalog, setCatalog] = useState<ModelRow[]>([]);
   const [defaultModel, setDefaultModel] = useState(() => readStored(KEY_MODEL, ''));
-  const [columns, setColumns] = useState<Column[]>([newColumn()]);
+  const [columns, setColumns] = useState<Column[]>(() => [newColumn(), newColumn()]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -104,7 +104,7 @@ export default function Chat() {
         setCatalog(flat);
         const stored = readStored(KEY_MODEL, '');
         const preferred = stored && flat.some((m) => m.id === stored) ? stored : flat[0]?.id ?? '';
-        setColumns((prev) => prev.map((c, i) => (i === 0 && !c.model ? { ...c, model: preferred } : c)));
+        setColumns((prev) => prev.map((c) => (!c.model ? { ...c, model: preferred } : c)));
       } catch (e) {
         if (live) setError(e instanceof Error ? e.message : 'could not load provider models');
       } finally {
@@ -120,7 +120,7 @@ export default function Chat() {
   );
 
   const addColumn = useCallback(() => {
-    setColumns((prev) => (prev.length >= 3 ? prev : [...prev, newColumn(defaultModel || prev[0]?.model || '')]));
+    setColumns((prev) => (prev.length >= 3 ? prev : [...prev, newColumn(prev[0]?.model || defaultModel || '')]));
   }, [defaultModel]);
 
   const removeColumn = useCallback((id: string) => {

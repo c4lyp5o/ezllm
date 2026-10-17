@@ -31,6 +31,20 @@ Repo housekeeping and version plumbing.
   were masking changes), new `test-short` for constrained environments.
 - **CI**: `release.yml` tag builds gated by the reusable `test.yml`
   (`needs: test`) — a red suite never produces a release asset either.
+- **Provider credential entry (both web protocols)**: GitHub device-flow stall
+  fixed — `slow_down` is now surfaced (`GHDeviceStatus.slow_down`) and the
+  dashboard raises its poll interval (RFC 8628 §3.5) instead of folding it into
+  plain pending forever; poll/mint run on a detached context so a tab reload
+  cannot cancel an already-granted authorization; 5xx/429/context errors are
+  retryable instead of terminal (one blip used to poison a live handle); the
+  pending panel now renders `detail`, every status failure reaches `ErrBox`
+  (non-ApiError was silently swallowed), and the flow logs (handle prefix only).
+- **gemini-web cookies**: the key field is a textarea (`multilineKey` preset
+  flag) and `ParseKey` accepts a WHOLE cookie header (`Cookie: a=b; c=d`,
+  `document.cookie`, or one per line), keeping only `__Secure-1PSID`/TS by
+  EXACT name — the old line-wise split stored the entire rest of the header as
+  the PSID value. Guards: 4 new ParseKey tests + `slow_down`/classification
+  tests, all three bite-proven red without their fix.
 
 ## v0.0.11 — 2026-10-16 · 30 commits (02b1c40..75a46e5)
 

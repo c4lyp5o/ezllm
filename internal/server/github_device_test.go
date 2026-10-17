@@ -26,6 +26,7 @@ import (
 // moment the human "taps Authorize"; everything else is fixed truth.
 type fakeGitHub struct {
 	authorized atomic.Bool
+	slowDown   atomic.Bool  // RFC 8628 §3.5 — GitHub says "poll less often"
 	models     atomic.Int64 // /models hits, so the catalog step is provable
 }
 
@@ -54,7 +55,12 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, req *http.Request) {
 		case "/login/device/code":
 			fmt.Fprint(w, `{"device_code":"dc-test","user_code":"TEST-CODE","verification_uri":"https://github.com/login/device","expires_in":900,"interval":5}`)
 		case "/login/oauth/access_token":
-			if f.authorized.Load() {
+			// slow_down must be answered before authorization_pending: GitHub
+			// sends it as its own verdict and withholds the token until the
+			// poller slows down, so an accurate fake answers the same way.
+			if f.slowDown.Load() {
+				fmt.Fprint(w, `{"error":"slow_down"}`)
+			} else if f.authorized.Load() {
 				fmt.Fprint(w, `{"access_token":"gho_dev_session","refresh_token":"ghr_dev_session","token_type":"bearer"}`)
 			} else {
 				fmt.Fprint(w, `{"error":"authorization_pending"}`)

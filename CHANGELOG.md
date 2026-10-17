@@ -33,6 +33,30 @@ see `VERSION.md`):
 - **CI**: `release.yml` tag builds now call the reusable `test.yml`
   (`needs: test`) — same gate as `docker-publish.yml`, so a red suite never
   produces an image or a release asset. CONTRIBUTING known-issue #1 closed.
+- **Provider credential entry fixed (the "waiting for auth" stall)**: GitHub
+  device-flow `slow_down` is surfaced (`GHDeviceStatus.slow_down`) and the
+  dashboard backs its poll interval off per RFC 8628 §3.5 — it was folded into
+  plain `pending`, so GitHub withheld the token forever while
+  `github.com/login/device` already showed Success (reproved live: GitHub does
+  send `slow_down`, 6/8 polls at 1s; its own advertised 5s is clean). Poll and
+  mint now run on `context.WithoutCancel`, so a tab reload/blur mid-mint can no
+  longer cancel an already-granted authorization and poison the handle;
+  5xx/429/context errors classify retryable instead of terminal; the pending
+  panel renders `detail`; every status failure reaches `ErrBox` (a non-ApiError
+  used to be swallowed, leaving "Waiting…" with nothing under it); the flow now
+  logs start/poll/authorize/refusal/expiry (8-char handle prefix only — the
+  full handle is the capability to read a session).
+- **gemini-web cookie paste**: credential field becomes a textarea when the
+  preset says `multilineKey`, and `ParseKey` accepts every realistic paste —
+  `Cookie: a=b; c=d` header, `document.cookie`, or one cookie per line — keeping
+  only `__Secure-1PSID`/`__Secure-1PSIDTS` by EXACT name. The old line-wise
+  split stored the whole rest of the header as the PSID value, so a whole-jar
+  paste reached Google as a corrupt session; `__Secure-1PSIDCC` (prefix
+  sibling) can no longer satisfy the required PSID.
+- **Guards**: 4 new `ParseKey` paste-shape tests, `TestGitHubDeviceSlowDownIsSurfaced`,
+  `TestDeviceErrClassification` — each bite-proven RED without its fix, with
+  the pre-bite hash re-verified after restore; `make test-short` 16 pkgs green,
+  gofmt/vet/build clean, `web/dist` rebuilt in the same commit.
 
 ## 2026-10-16 — M14 claude-web provider: claude.ai web protocol ✅
 Claude.ai's web app (sessionKey cookie + SSE completion) as a provider,

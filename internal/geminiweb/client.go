@@ -53,32 +53,53 @@ type Client struct {
 }
 
 // ParseKey decodes the operator's stored credential into the cookie pair.
-// Format: one cookie per line, either "name=value" or a bare value:
 //
-//	__Secure-1PSID=<value>
-//	__Secure-1PSIDTS=<value>
+// Every shape an operator can realistically copy is accepted — the browser
+// gives them a whole jar, not our stored format:
 //
-// PSIDTS is optional (rotation re-fetches it). PSID is not.
+//	__Secure-1PSID=<v>                     one cookie per line (stored form)
+//	__Secure-1PSID=<v>
+//	__Secure-1PSID=<v>; SID=x; HSID=y; …   document.cookie / Cookie: header
+//	Cookie: __Secure-1PSID=<v>; …          a header line copied from DevTools
+//
+// Semicolons, newlines and CRs are all separators, so "one per line" and "one
+// header" collapse to the same token walk and only the two cookies we need are
+// kept. Names are matched EXACTLY — __Secure-1PSIDCC shares the prefix and must
+// never be mistaken for __Secure-1PSID. PSIDTS is optional (rotation re-fetches
+// it); PSID is not.
+//
+// A whole-cookie paste used to CORRUPT PSID: the old line-wise split kept the
+// rest of the header as the value ("<v>; SID=x; …"), which reached Google as an
+// invalid session cookie. That is the bug this shape-handling fixes.
 func ParseKey(key string) (cookie, error) {
 	var c cookie
-	for _, line := range strings.Split(key, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
+	body := strings.TrimSpace(key)
+	// Tolerate a pasted header line: "Cookie: a=b; c=d".
+	if i := strings.IndexByte(body, ':'); i >= 0 && strings.EqualFold(strings.TrimSpace(body[:i]), "cookie") {
+		body = body[i+1:]
+	}
+	for _, part := range strings.FieldsFunc(body, func(r rune) bool {
+		return r == ';' || r == '\n' || r == '\r'
+	}) {
+		part = strings.TrimSpace(part)
+		if part == "" {
 			continue
 		}
-		name, value := line, line
-		if i := strings.IndexByte(line, '='); i >= 0 {
-			name, value = line[:i], line[i+1:]
+		i := strings.IndexByte(part, '=') // first '=' only: values may carry padding
+		if i < 0 {
+			continue
 		}
-		switch strings.TrimSpace(name) {
+		name := strings.TrimSpace(part[:i])
+		value := strings.Trim(strings.TrimSpace(part[i+1:]), `"`)
+		switch name {
 		case "__Secure-1PSID":
-			c.psid = strings.TrimSpace(value)
+			c.psid = value
 		case "__Secure-1PSIDTS":
-			c.psidts = strings.TrimSpace(value)
+			c.psidts = value
 		}
 	}
 	if c.psid == "" {
-		return cookie{}, errors.New("geminiweb: no __Secure-1PSID cookie found")
+		return cookie{}, errors.New("geminiweb: no __Secure-1PSID cookie found — paste the whole cookie header, or __Secure-1PSID=… on its own line")
 	}
 	return c, nil
 }

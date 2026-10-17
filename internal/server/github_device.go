@@ -19,8 +19,10 @@ package server
 // abandoned flow costs one map entry for 30 minutes and then evaporates.
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -58,6 +60,9 @@ type ghDeviceStatus struct {
 	GitHubLogin      string `json:"github_login,omitempty"`
 	CopilotExpiresAt string `json:"copilot_expires_at,omitempty"`
 	Detail           string `json:"detail,omitempty"`
+	// SlowDown marks GitHub's RFC 8628 §3.5 "poll less often". The dashboard
+	// MUST raise its interval on this or GitHub withholds the token forever.
+	SlowDown bool `json:"slow_down,omitempty"`
 }
 
 // handleGitHubDeviceStart starts a flow: ask GitHub for a device code and
@@ -108,10 +113,18 @@ func (s *Server) handleGitHubDeviceStatus(w http.ResponseWriter, r *http.Request
 	}
 	handle := r.PathValue("handle")
 
+	// The operator's browser owns this request's context, but the GitHub work
+	// below must not die with it: a tab blur / fetch abort / reload mid-mint
+	// would otherwise cancel a grant GitHub already gave, and a cancelled
+	// context read as a terminal refusal — permanently poisoning a handle the
+	// human had successfully authorized. Detach, then check the handle still exists.
+	ctx := context.WithoutCancel(r.Context())
+
 	s.ghMu.Lock()
 	dev, ok := s.ghDevices[handle]
 	if !ok {
 		s.ghMu.Unlock()
+		s.log.Info("github device status: unknown handle", "handle", shortHandle(handle))
 		writeErr(w, http.StatusNotFound, "not_found", "unknown or expired device handle — start the GitHub login again")
 		return
 	}
@@ -131,33 +144,56 @@ func (s *Server) handleGitHubDeviceStatus(w http.ResponseWriter, r *http.Request
 		}
 		writeJSON(w, http.StatusOK, st)
 	case ghCodeExpired(dc, created):
+		s.log.Info("github device flow expired before authorization", "handle", shortHandle(handle))
 		s.dropGHDevice(handle)
 		writeJSON(w, http.StatusOK, ghDeviceStatus{Status: "expired"})
 	default:
-		s.pollGitHubDevice(w, r, handle, dc)
+		s.pollGitHubDevice(ctx, w, handle, dc)
 	}
+}
+
+// shortHandle is a log-safe handle prefix: enough to correlate one flow across
+// lines, never the whole value (a full handle is the capability to read a
+// session at key-add, so it belongs in no log).
+func shortHandle(handle string) string {
+	if len(handle) <= 8 {
+		return handle
+	}
+	return handle[:8]
 }
 
 // pollGitHubDevice is the unlocked GitHub contact: one token poll, and on a
 // grant the mint + identity read the CLI used to do in the same breath.
-func (s *Server) pollGitHubDevice(w http.ResponseWriter, r *http.Request, handle string, dc githubcopilot.DeviceCode) {
-	ctx := r.Context()
-	sess, granted, err := githubcopilot.PollAccessTokenOnce(ctx, s.ghCfg, dc)
+func (s *Server) pollGitHubDevice(ctx context.Context, w http.ResponseWriter, handle string, dc githubcopilot.DeviceCode) {
+	sess, state, err := githubcopilot.PollDeviceState(ctx, s.ghCfg, dc)
 	if err != nil {
 		if isTerminalDeviceErr(err) {
 			// GitHub itself refused (denied / expired_grant / bad client):
 			// this code is dead, say so and pin the reason on the handle.
 			msg := err.Error()
+			s.log.Error("github device flow refused", "handle", shortHandle(handle), "err", msg)
 			s.setGHFailure(handle, msg)
 			writeJSON(w, http.StatusOK, ghDeviceStatus{Status: "error", Detail: msg})
 			return
 		}
 		// Transport hiccup on a still-live code: report pending with the
 		// reason so the UI keeps ticking; the next poll retries.
+		s.log.Warn("github device poll failed (will retry)", "handle", shortHandle(handle), "err", err)
 		writeJSON(w, http.StatusOK, ghDeviceStatus{Status: "pending", Detail: err.Error()})
 		return
 	}
-	if !granted {
+	switch state {
+	case githubcopilot.PollSlowDown:
+		// RFC 8628 §3.5: GitHub WITHHOLDS the token until we poll less often.
+		// Surfacing this is the whole point — folded into plain pending, the
+		// dashboard keeps its old cadence and never receives the grant.
+		s.log.Info("github device flow slow_down", "handle", shortHandle(handle), "interval_s", dc.Interval)
+		writeJSON(w, http.StatusOK, ghDeviceStatus{
+			Status: "pending", SlowDown: true,
+			Detail: "GitHub asked us to poll less often — backing off",
+		})
+		return
+	case githubcopilot.PollPending:
 		writeJSON(w, http.StatusOK, ghDeviceStatus{Status: "pending"})
 		return
 	}
@@ -168,6 +204,7 @@ func (s *Server) pollGitHubDevice(w http.ResponseWriter, r *http.Request, handle
 	token, exp, err := githubcopilot.MintCopilotToken(ctx, s.ghCfg, sess.AccessToken)
 	if err != nil {
 		msg := fmt.Sprintf("copilot token mint failed (is the account entitled to Copilot?): %v", err)
+		s.log.Error("github device mint failed", "handle", shortHandle(handle), "err", err)
 		s.setGHFailure(handle, msg)
 		writeJSON(w, http.StatusOK, ghDeviceStatus{Status: "error", Detail: msg})
 		return
@@ -184,7 +221,7 @@ func (s *Server) pollGitHubDevice(w http.ResponseWriter, r *http.Request, handle
 		dev.session, dev.login, dev.expiry = sess.Encode(), identity, exp
 	}
 	s.ghMu.Unlock()
-
+	s.log.Info("github device flow authorized", "handle", shortHandle(handle), "login", identity)
 	writeJSON(w, http.StatusOK, ghDeviceStatus{
 		Status: "authorized", GitHubLogin: identity, CopilotExpiresAt: exp.Format(time.RFC3339),
 	})
@@ -272,13 +309,31 @@ func ghCodeExpired(dc githubcopilot.DeviceCode, created time.Time) bool {
 // isTerminalDeviceErr separates "GitHub said no" from "the network failed
 // us": a refusal (denied, expired_grant, bad client) kills the flow, a
 // transport blip must not eat a code the operator may still be approving.
+//
+// Two classes were wrongly terminal before and both poison a LIVE flow:
+//   - context errors (our own abort/reload), which are not GitHub's verdict;
+//   - upstream 5xx / 429 / gateway failures, which are transient by definition.
+//
+// GitHub's real refusals arrive as JSON error codes (access_denied,
+// expired_token, incorrect_client_credentials, …), never as a 5xx.
 func isTerminalDeviceErr(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
 	msg := err.Error()
 	for _, transient := range []string{
 		"connection refused", "no such host", "i/o timeout", "timeout",
 		"EOF", "reset by peer", "Temporary failure", "connection reset",
+		"context canceled", "context deadline exceeded", "request canceled",
 	} {
 		if strings.Contains(msg, transient) {
+			return false
+		}
+	}
+	// A 5xx or 429 from an intermediate is a retry, not a refusal: the poll
+	// helper formats "…: status 503: …" / "status 429: …".
+	for _, retryable := range []string{"status 500", "status 502", "status 503", "status 504", "status 429"} {
+		if strings.Contains(msg, retryable) {
 			return false
 		}
 	}

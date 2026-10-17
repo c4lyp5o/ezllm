@@ -197,15 +197,46 @@ func pollDeviceOnce(ctx context.Context, cfg Config, dc DeviceCode) (Session, st
 	}
 }
 
+// PollState is one RFC 8628 poll classified for a caller that owns its own
+// schedule. The dashboard needs slow_down SEPARATELY from authorization_pending:
+// GitHub will not hand over the token until the poller lengthens its interval
+// (RFC 8628 §3.5), so a poller that cannot tell them apart stalls forever while
+// github.com/login/device already shows "Success".
+type PollState int
+
+const (
+	PollPending  PollState = iota // authorization_pending, or an empty response
+	PollSlowDown                  // GitHub asked for a LONGER interval
+	PollGranted                   // session returned
+)
+
+// PollDeviceState is one poll with the pending reason preserved. ok=false (with
+// err==nil) means keep polling; err means GitHub or the network refused.
+func PollDeviceState(ctx context.Context, cfg Config, dc DeviceCode) (Session, PollState, error) {
+	s, pending, err := pollDeviceOnce(ctx, cfg, dc)
+	if err != nil {
+		return Session{}, PollPending, err
+	}
+	switch pending {
+	case "":
+		return s, PollGranted, nil
+	case "slow_down":
+		return Session{}, PollSlowDown, nil
+	default:
+		return Session{}, PollPending, nil
+	}
+}
+
 // PollAccessTokenOnce is one poll for callers that own their own schedule —
 // the dashboard device flow asks once per status GET rather than blocking.
 // ok=false means the operator has not authorized yet; ask again.
+// (slow_down is folded into ok=false here — use PollDeviceState to honour it.)
 func PollAccessTokenOnce(ctx context.Context, cfg Config, dc DeviceCode) (Session, bool, error) {
-	s, pending, err := pollDeviceOnce(ctx, cfg, dc)
+	s, state, err := PollDeviceState(ctx, cfg, dc)
 	if err != nil {
 		return Session{}, false, err
 	}
-	if pending != "" {
+	if state != PollGranted {
 		return Session{}, false, nil
 	}
 	return s, true, nil

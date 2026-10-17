@@ -225,6 +225,9 @@ export type GhDeviceStatus = {
   github_login?: string;
   copilot_expires_at?: string;
   detail?: string;
+  // GitHub's RFC 8628 §3.5 "poll less often". GitHub WITHHOLDS the token until
+  // the poller lengthens its interval, so this must raise ours (see Providers).
+  slow_down?: boolean;
 };
 export const ghDeviceStart = () => post<GhDeviceStart>('/admin/github/device');
 export const ghDeviceStatus = (handle: string) =>

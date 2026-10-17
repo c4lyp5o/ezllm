@@ -114,6 +114,11 @@ const PROVIDER_PRESETS: Record<string, {
   // pasteable API key: a browser cookie pair, a session JSON, an OAuth
   // sessionKey. Shown under the key field when this preset is selected.
   keyHint?: string;
+  // multilineKey swaps the masked single-line input for a textarea. Cookie
+  // jars arrive as several lines (or one long semicolon header) and simply do
+  // not fit one input row — the field must hold them before the backend can
+  // extract what it needs.
+  multilineKey?: boolean;
 }> = {
   'claude-platform': { label: 'Claude Platform', kind: 'anthropic-compatible', baseURL: 'https://api.anthropic.com' },
   // Web-protocol providers: no API key — credentials are browser sessions.
@@ -143,7 +148,8 @@ const PROVIDER_PRESETS: Record<string, {
   'gemini': { label: 'Google AI Studio', kind: 'gemini-openai', baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai' },
   'gemini-web': {
     label: 'Google Gemini (web cookies)', kind: 'gemini-web', baseURL: 'internal://geminiweb',
-    keyHint: 'Two cookies, one per line: __Secure-1PSID=… then __Secure-1PSIDTS=… — use a TEST Google account only',
+    multilineKey: true,
+    keyHint: 'Paste the WHOLE cookie header (all cookies, semicolon-separated) — we keep __Secure-1PSID and __Secure-1PSIDTS. Two lines work too. Use a TEST Google account only.',
   },
   'openai': { label: 'OpenAI', kind: 'openai-compatible', baseURL: 'https://api.openai.com/v1' },
   // NVIDIA NIM — standard OpenAI-compatible chat, model ids are bare
@@ -253,11 +259,16 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
   const [ghStatus, setGhStatus] = useState<GhDeviceStatus | null>(null);
   const [ghBusy, setGhBusy] = useState(false);
   const [ghErr, setGhErr] = useState<ApiErrorDetail | null>(null);
+  // Extra seconds GitHub asked for via slow_down (RFC 8628 §3.5). Once GitHub
+  // says slow_down it will NOT hand over the token until our interval grows, so
+  // this is what stops "Waiting for authorization…" from being permanent while
+  // github.com/login/device already says success.
+  const [ghBackoff, setGhBackoff] = useState(0);
 
   useEffect(() => {
     if (open) {
       setD(emptyDraft); setBusy(false); setResult(null); setLiveSteps(null); setErr(null);
-      setGhStart(null); setGhStatus(null); setGhBusy(false); setGhErr(null);
+      setGhStart(null); setGhStatus(null); setGhBusy(false); setGhErr(null); setGhBackoff(0);
     }
   }, [open]);
 
@@ -272,18 +283,31 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
     if (handle) void ghDeviceCancel(handle).catch(() => undefined);
   }, [open, ghStart]);
 
-  // One status tick per interval GitHub asked for (faster polls get
-  // slow_down). Stops the moment the flow reaches a terminal state.
+  // One status tick per interval GitHub asked for, plus any slow_down backoff.
+  // GitHub sends slow_down when polls arrive too fast and then WITHHOLDS the
+  // token until the interval grows, so the backoff is applied on receipt and
+  // the effect re-arms at the new cadence. Stops at a terminal state.
   useEffect(() => {
     const phase = ghStatus?.status;
     if (!ghStart || !open || (phase != null && phase !== 'pending')) return;
+    const secs = Math.max(3, ghStart.interval || 5) + ghBackoff;
     const iv = setInterval(() => {
       ghDeviceStatus(ghStart.handle)
-        .then(setGhStatus)
-        .catch((e) => { if (e instanceof ApiError) setGhErr(e.detail); });
-    }, Math.max(3, ghStart.interval || 5) * 1000);
+        .then((st) => {
+          setGhStatus(st);
+          // RFC 8628 §3.5: raise the interval by 5s, capped so a hostile or
+          // broken upstream cannot push us past the code's own lifetime.
+          if (st.slow_down) setGhBackoff((b) => (b >= 30 ? b : b + 5));
+        })
+        .catch((e) => {
+          // EVERY failure must be visible: swallowing a non-ApiError left the
+          // panel saying "Waiting for authorization…" forever with no clue.
+          if (e instanceof ApiError) setGhErr(e.detail);
+          else setGhErr({ status: 0, type: 'error', message: e instanceof Error ? e.message : String(e) });
+        });
+    }, secs * 1000);
     return () => clearInterval(iv);
-  }, [ghStart, ghStatus?.status, open]);
+  }, [ghStart, ghStatus?.status, open, ghBackoff]);
 
   const isGitHub = PROVIDER_PRESETS[d.preset]?.kind === 'github-copilot';
 
@@ -465,8 +489,14 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
                 </ol>
                 <div className="flex flex-wrap items-center gap-2 text-[12.5px] text-mute">
                   <Spinner /> Waiting for authorization…
-                  <span className="text-mute/70">code expires in {Math.max(1, Math.round(ghStart.expires_in / 60))} min</span>
+                  <span className="text-mute/70">
+                    code expires in {Math.max(1, Math.round(ghStart.expires_in / 60))} min
+                    {ghBackoff > 0 ? ` · polling every ${Math.max(3, ghStart.interval || 5) + ghBackoff}s` : ''}
+                  </span>
                 </div>
+                {ghStatus?.detail && (
+                  <p className="text-[12.5px] text-warn">{ghStatus.detail}</p>
+                )}
                 <button type="button" className={cx(btn.base, btn.ghost)}
                   onClick={() => {
                     const handle = ghStart.handle;
@@ -499,11 +529,24 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
           </div>
         )}
         <div className="grid gap-4 sm:grid-cols-2">
-          <div>
+          <div className="sm:col-span-1">
             <label className={labelCls} htmlFor="ap-key">API key</label>
-            <input id="ap-key" type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
-              placeholder={PROVIDER_PRESETS[d.preset]?.keyHint ?? 'Paste provider API key'}
-              value={d.apiKey} onChange={(e) => set('apiKey', e.target.value)} />
+            {PROVIDER_PRESETS[d.preset]?.multilineKey ? (
+              <textarea
+                id="ap-key"
+                rows={4}
+                autoComplete="off"
+                spellCheck={false}
+                className={cx(inputCls, 'font-mono resize-y leading-5')}
+                placeholder={PROVIDER_PRESETS[d.preset]?.keyHint ?? 'Paste the cookie header'}
+                value={d.apiKey}
+                onChange={(e) => set('apiKey', e.target.value)}
+              />
+            ) : (
+              <input id="ap-key" type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
+                placeholder={PROVIDER_PRESETS[d.preset]?.keyHint ?? 'Paste provider API key'}
+                value={d.apiKey} onChange={(e) => set('apiKey', e.target.value)} />
+            )}
             {PROVIDER_PRESETS[d.preset]?.keyHint && (
               <p className="mt-1 text-[11px] text-mute">{PROVIDER_PRESETS[d.preset].keyHint}</p>
             )}

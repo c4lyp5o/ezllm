@@ -86,6 +86,67 @@ func TestParseKey(t *testing.T) {
 	}
 }
 
+// TestParseKeyWholeCookiePaste covers what an operator actually copies out of a
+// browser: ONE semicolon-separated header carrying the whole jar. The old
+// line-wise split stored everything after __Secure-1PSID as its value, so the
+// session that reached Google was garbage.
+func TestParseKeyWholeCookiePaste(t *testing.T) {
+	whole := "cookie: __Secure-1PSID=g.a000REALPSID; __Secure-1PSIDTS=sidts.abc123==; " +
+		"SID=foo; HSID=bar; SSID=baz; APISID=x; SAPISID=y; __Secure-1PSIDCC=cc; SIDCC=zz"
+
+	c, err := ParseKey(whole)
+	if err != nil {
+		t.Fatalf("whole-cookie paste rejected: %v", err)
+	}
+	if c.psid != "g.a000REALPSID" {
+		t.Errorf("psid = %q, want the cookie value alone (no trailing jar)", c.psid)
+	}
+	if strings.Contains(c.psid, ";") {
+		t.Errorf("psid still carries the rest of the header: %q", c.psid)
+	}
+	if c.psidts != "sidts.abc123==" {
+		t.Errorf("psidts = %q, want exact value (padding preserved)", c.psidts)
+	}
+}
+
+// document.cookie has no "Cookie:" prefix — same jar, no header name.
+func TestParseKeyDocumentCookiePaste(t *testing.T) {
+	c, err := ParseKey("__Secure-1PSID=abc; SID=x; __Secure-1PSIDTS=def")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.psid != "abc" || c.psidts != "def" {
+		t.Fatalf("got psid=%q psidts=%q", c.psid, c.psidts)
+	}
+}
+
+// The prefix trap: __Secure-1PSIDCC is a DIFFERENT cookie. An exact-match is the
+// safety property — a prefix match would silently store the wrong credential.
+func TestParseKeyDoesNotMatchPrefixSibling(t *testing.T) {
+	if _, err := ParseKey("__Secure-1PSIDCC=ccvalue; SIDCC=zz"); err == nil {
+		t.Fatal("__Secure-1PSIDCC must not satisfy the required __Secure-1PSID")
+	}
+	// And it must not contaminate the real one when both are present.
+	c, err := ParseKey("__Secure-1PSIDCC=cc; __Secure-1PSID=real; SIDCC=z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.psid != "real" {
+		t.Fatalf("psid = %q, want %q", c.psid, "real")
+	}
+}
+
+// DevTools sometimes wraps values in quotes when copied.
+func TestParseKeyStripsQuoting(t *testing.T) {
+	c, err := ParseKey("__Secure-1PSID=\"abc\"\n__Secure-1PSIDTS=\"def\"")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.psid != "abc" || c.psidts != "def" {
+		t.Fatalf("got %+v", c)
+	}
+}
+
 func TestInitScrapesTokens(t *testing.T) {
 	var gotAt string
 	srv := newMockServer(t, initPageFixture, func(w http.ResponseWriter, r *http.Request) {

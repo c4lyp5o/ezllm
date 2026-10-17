@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -281,6 +282,9 @@ func (d *DB) migrateEncryptProviderKeys(ctx context.Context) error {
 			return err
 		}
 		if strings.HasPrefix(r.plain, cryptoPrefix) {
+			if _, err := d.crypto.Decrypt(r.plain); err != nil {
+				return fmt.Errorf("store: cannot decrypt provider key %d — wrong master key? %w", r.id, err)
+			}
 			continue
 		}
 		pending = append(pending, r)

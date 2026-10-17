@@ -8,7 +8,7 @@
 //     hash, so if this UI loses it, it is gone — hence the blocking modal with
 //     no way to dismiss until copy, and the "I saved it" confirmation.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ApiError, type UsageRow } from '../utils/api';
+import { ApiError, getToken, type UsageRow } from '../utils/api';
 import { Chip, ConfirmModal, Mono, SectionLabel, Spinner, Toggle, btn, cx, inputCls, labelCls } from '../components/ui';
 import {
   createToken, listTokens, patchToken, probeModels, revokeToken, usageByClient,
@@ -155,8 +155,8 @@ export default function Connect() {
       // Probe the live route with the admin token (a valid bearer for /v1 too),
       // so the "supported" chips below are observations, not labels.
       try {
-        const admin = localStorage.getItem('ezllm.admin.token') || '';
-        const ms = await probeModels(admin);
+        const admin = getToken();
+        const ms = admin ? await probeModels(admin) : [];
         setModels(ms);
       } catch {
         setModels([]);

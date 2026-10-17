@@ -137,6 +137,13 @@ LIMIT 8`, accountID, now)
 		if err := rows.Scan(&p.ID, &p.Hint, &p.Plaintext); err != nil {
 			return KeyPick{}, err
 		}
+		if d.crypto != nil && strings.HasPrefix(p.Plaintext, cryptoPrefix) {
+			dec, err := d.crypto.Decrypt(p.Plaintext)
+			if err != nil {
+				return KeyPick{}, err
+			}
+			p.Plaintext = dec
+		}
 		return p, nil
 	}
 	if err := rows.Err(); err != nil {
@@ -150,8 +157,16 @@ LIMIT 8`, accountID, now)
 // pair; the hint must be refreshed alongside (first line of the key).
 func (d *DB) UpdateKeyPlain(ctx context.Context, keyID int64, plaintext string) error {
 	hint := KeyHint(plaintext)
+	stored := plaintext
+	if d.crypto != nil {
+		enc, err := d.crypto.Encrypt(plaintext)
+		if err != nil {
+			return err
+		}
+		stored = enc
+	}
 	_, err := d.w.ExecContext(ctx, `
-UPDATE provider_keys SET key_plain = ?, key_hint = ? WHERE id = ?`, plaintext, hint, keyID)
+UPDATE provider_keys SET key_plain = ?, key_hint = ? WHERE id = ?`, stored, hint, keyID)
 	return err
 }
 
@@ -206,11 +221,19 @@ func (d *DB) AddKey(ctx context.Context, accountID int64, label, plaintext strin
 		return 0, "", errors.New("store: empty api key")
 	}
 	hint := KeyHint(plaintext)
+	stored := plaintext
+	if d.crypto != nil {
+		enc, err := d.crypto.Encrypt(plaintext)
+		if err != nil {
+			return 0, "", err
+		}
+		stored = enc
+	}
 	var id int64
 	err := d.WithWriteTx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `
 INSERT INTO provider_keys (account_id, label, key_hint, key_plain, enabled)
-VALUES (?,?,?,?,1)`, accountID, label, hint, plaintext)
+VALUES (?,?,?,?,1)`, accountID, label, hint, stored)
 		if err != nil {
 			return err
 		}
@@ -220,7 +243,50 @@ VALUES (?,?,?,?,1)`, accountID, label, hint, plaintext)
 	return id, hint, err
 }
 
-// ── models ──────────────────────────────────────────────────────────────────
+// migrateEncryptProviderKeys rewrites legacy plaintext provider_keys rows to
+// encrypted form when a master key is configured. Idempotent: already-encrypted
+// rows (cryptoPrefix) are skipped.
+func (d *DB) migrateEncryptProviderKeys(ctx context.Context) error {
+	if d.crypto == nil {
+		return nil
+	}
+	rows, err := d.r.QueryContext(ctx, `SELECT id, key_plain FROM provider_keys`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	type row struct {
+		id    int64
+		plain string
+	}
+	var pending []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.id, &r.plain); err != nil {
+			return err
+		}
+		if strings.HasPrefix(r.plain, cryptoPrefix) {
+			continue
+		}
+		pending = append(pending, r)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, r := range pending {
+		enc, err := d.crypto.Encrypt(r.plain)
+		if err != nil {
+			return err
+		}
+		if err := d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, `UPDATE provider_keys SET key_plain = ? WHERE id = ?`, enc, r.id)
+			return err
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // UpsertModels replaces an account's catalog snapshot.
 func (d *DB) UpsertModels(ctx context.Context, accountID int64, models []provider.ModelInfo) error {

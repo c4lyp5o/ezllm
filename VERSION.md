@@ -32,6 +32,13 @@ Native image/audio surfaces and the playground dashboard pass.
   selected model. Added columns carry the remove control; the first does not.
 - **Dashboard**: new routing-rescue panel surfaces recent calls that failed
   over and the hop trail that saved them.
+- **Security (Milestone A)**: provider API keys are encrypted at rest with
+  AES-256-GCM. The master key comes from `EZLLM_MASTER_KEY`, else
+  `~/.hermes/secrets/ezllm-master.key` (auto-generated 0600 on first boot).
+  Existing plaintext rows are rewritten in place on boot, idempotently;
+  `PickKey` decrypts only for the outbound hop. Tests in
+  `internal/store/crypto_integration_test.go`. **Back up the master key with
+  the DB — losing it loses every provider key.**
 
 ---
 

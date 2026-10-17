@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,22 +35,26 @@ type DB struct {
 
 	writeMu sync.Mutex // serializes writers explicitly (belt and braces over the pool)
 
+	// committed-batch fan-out for live consumers (see events.go)
+	sinkMu sync.Mutex
+	subs   []chan []Call
+
 	// ledger batching
 	callCh  chan ledgerItem
 	closeCh chan struct{}
 	wg      sync.WaitGroup
 
-	// committed-batch fan-out for live consumers (see events.go)
-	sinkMu sync.Mutex
-	subs   []chan []Call
+	// crypto at rest for provider keys (nil = plaintext, dev/back-compat)
+	crypto *FieldCrypto
 }
 
 // Options configures Open.
 type Options struct {
-	Path       string        // sqlite file; parent dirs created
-	BatchSize  int           // ledger flush threshold (default 32)
-	BatchWait  time.Duration // ledger flush interval (default 250ms)
-	MaxReaders int           // read pool size (default 4)
+	Path         string        // sqlite file; parent dirs created
+	BatchSize    int           // ledger flush threshold (default 32)
+	BatchWait    time.Duration // ledger flush interval (default 250ms)
+	MaxReaders   int           // read pool size (default 4)
+	MasterSecret string        // master key for at-rest provider-key encryption; empty = plaintext (dev)
 }
 
 // Open creates/migrates the database and starts the ledger writer goroutine.
@@ -96,6 +101,14 @@ func Open(ctx context.Context, opts Options) (*DB, error) {
 
 		closeCh: make(chan struct{}),
 	}
+	if strings.TrimSpace(opts.MasterSecret) != "" {
+		fc, err := NewFieldCrypto(opts.MasterSecret)
+		if err != nil {
+			db.closeConns()
+			return nil, err
+		}
+		db.crypto = fc
+	}
 	if err := db.Ping(ctx); err != nil {
 		db.closeConns()
 		return nil, err
@@ -103,6 +116,12 @@ func Open(ctx context.Context, opts Options) (*DB, error) {
 	if err := db.migrate(); err != nil {
 		db.closeConns()
 		return nil, err
+	}
+	if db.crypto != nil {
+		if err := db.migrateEncryptProviderKeys(ctx); err != nil {
+			db.closeConns()
+			return nil, fmt.Errorf("store: encrypt existing provider keys: %w", err)
+		}
 	}
 	if err := db.EnsureDashboardPassword(ctx); err != nil {
 		db.closeConns()

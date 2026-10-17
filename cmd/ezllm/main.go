@@ -7,6 +7,8 @@ package main
 
 import (
 	"context"
+	crand "crypto/rand"
+	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
@@ -105,6 +107,30 @@ func run() error {
 		cfg.Translation.UniversalEnabled = on
 	}
 
+	// ── master key (at-rest encryption of provider keys) ────────────────
+	masterSecret := strings.TrimSpace(os.Getenv("EZLLM_MASTER_KEY"))
+	if masterSecret == "" {
+		home, _ := os.UserHomeDir()
+		masterPath := filepath.Join(home, ".hermes", "secrets", "ezllm-master.key")
+		if b, err := os.ReadFile(masterPath); err == nil {
+			masterSecret = strings.TrimSpace(string(b))
+		} else {
+			// auto-generate on first boot
+			buf := make([]byte, 32)
+			if _, err := crand.Read(buf); err != nil {
+				return fmt.Errorf("master key: %w", err)
+			}
+			masterSecret = base64.StdEncoding.EncodeToString(buf)
+			if err := os.MkdirAll(filepath.Dir(masterPath), 0o700); err != nil {
+				return fmt.Errorf("master key: %w", err)
+			}
+			if err := os.WriteFile(masterPath, []byte(masterSecret+"\n"), 0o600); err != nil {
+				return fmt.Errorf("master key: %w", err)
+			}
+			log.Info("generated new master key", "path", masterPath, "action", "back up with the DB")
+		}
+	}
+
 	// ── data dir + store ──
 	dbPath := filepath.Join(cfg.DataDir, "ezllm.sqlite")
 
@@ -115,9 +141,10 @@ func run() error {
 	defer cancelOpen()
 
 	db, err := store.Open(openCtx, store.Options{
-		Path:      dbPath,
-		BatchSize: cfg.Ledger.BatchSize,
-		BatchWait: cfg.LedgerBatchWait,
+		Path:         dbPath,
+		BatchSize:    cfg.Ledger.BatchSize,
+		BatchWait:    cfg.LedgerBatchWait,
+		MasterSecret: masterSecret,
 	})
 	if err != nil {
 		return err

@@ -171,6 +171,26 @@ function LatencyCard({ rows }: { rows: UsageRow[] }) {
   );
 }
 
+function RescuedCalls({ o }: { o: Overview }) {
+  const rescued = (o.recent_calls ?? []).filter((r) => failoverNote(r.err));
+  if (rescued.length === 0) return null;
+  return (
+    <Panel label={<SectionLabel>Routing rescue · failover hops</SectionLabel>}
+      aside={<span className="text-[11px] text-mute">{rescued.length} rescued</span>}>
+      <ul className="space-y-1.5">
+        {rescued.slice(0, 8).map((r, i) => (
+          <li key={i} className="flex items-center gap-2 text-[12px]">
+            <span className="font-mono text-warn">⚠</span>
+            <span className="truncate text-dim">{r.model}</span>
+            <span className="ml-auto truncate text-[10.5px] text-mute" title={r.err}>{failoverNote(r.err)}</span>
+            <span className={cx('font-mono text-[10.5px]', statusTone(r.status))}>{r.status}</span>
+          </li>
+        ))}
+      </ul>
+    </Panel>
+  );
+}
+
 // ── recent calls ──────────────────────────────────────────────────────────
 // The single consolidated feed: recent-requests (the SSE RecentFeed) is gone
 // from this page — it duplicated these rows. What this table gained:
@@ -599,6 +619,7 @@ export default function Dashboard() {
         </StaggerItem>
       </div>
 
+      <Reveal><RescuedCalls o={o} /></Reveal>
       <Reveal><RecentCalls o={o} /></Reveal>
     </Stagger>
   );

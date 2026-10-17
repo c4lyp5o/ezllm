@@ -9,7 +9,29 @@ dashboard health strip, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v0.0.12**
+**Current: v0.0.13**
+
+---
+
+## v0.0.13 — 2026-10-18
+
+Native image/audio surfaces and the playground dashboard pass.
+
+- **Native image adapters**: Cloudflare Workers AI image models now use
+  `/ai/run/<model>` (flux-2 multipart, other models JSON `prompt`/`seed`)
+  instead of the OpenAI `/images/generations` path.
+- **Native audio adapters**: Cloudflare TTS/STT use `/ai/run/<model>` with
+  MeloTTS `{"prompt": ...}` translation; Google AI Studio TTS/STT translate
+  OpenAI audio bodies to native `generateContent` and back (PCM wrapped as WAV,
+  STT text in OpenAI shape). Tests in `internal/proxy/gemini_audio_test.go`.
+- **Dashboard**: Linear-inspired palette and sidebar icons; Providers models
+  render as a compact 4-column status grid with per-row test indicators;
+  Services use a two-column card grid with surface badges.
+- **Chat is a playground**: 1–3 side-by-side columns, each with its own model
+  selector and transcript, one detached composer broadcasting to every
+  selected model. Added columns carry the remove control; the first does not.
+- **Dashboard**: new routing-rescue panel surfaces recent calls that failed
+  over and the hop trail that saved them.
 
 ---
 

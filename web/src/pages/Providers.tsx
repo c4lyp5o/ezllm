@@ -852,7 +852,6 @@ function ModelsDrawer({ id }: { id: number }) {
   };
 
   const untested = models.filter((m) => m.openai == null && m.anthropic == null && m.responses == null).length;
-  const verdict = (v: boolean | number | null | undefined) => (v == null ? '–' : v ? 'ok' : 'no');
 
   return (
     <div className="border-t border-line px-5 py-4 animate-fade-in">
@@ -882,45 +881,63 @@ function ModelsDrawer({ id }: { id: number }) {
         </span>
       </div>
       {sweepNote && <div className="mb-2 text-[11.5px] text-dim">{sweepNote}</div>}
-      <div className="max-h-64 overflow-y-auto pr-1">
+      <div className="max-h-72 overflow-y-auto pr-1">
         <table className="w-full text-[12px]">
           <thead>
             <tr className="text-left text-[10px] uppercase tracking-[0.1em] text-mute">
-              {/* status first (docx item 14): verdicts + code + clock are what
-                  the eye scans for while a probe runs; the model id is the key,
-                  not the question. */}
-              <th className="pb-1.5 font-medium">status</th>
               <th className="pb-1.5 font-medium">model</th>
+              <th className="pb-1.5 font-medium">status</th>
               <th className="pb-1.5 font-medium">surface</th>
               <th className="pb-1.5 text-right font-medium">test</th>
             </tr>
           </thead>
           <tbody className="font-mono">
             {models.map((m) => (
-              <tr key={m.id} className="border-t border-line/50">
-                {/* status: verdicts + code + clock. Live states: the row whose
-                    single-model Test is in flight gets the spinner; during a
-                    sweep, untested rows pulse — they are the queue. */}
-                <td className="whitespace-nowrap py-1.5 text-[11px]">
+              <tr key={m.id} className="border-t border-line/50 align-middle">
+                <td className="max-w-[260px] py-1.5 pr-2 text-dim" title={m.id}>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    {testingId === m.id && <Spinner />}
+                    {running && testingId !== m.id && m.openai == null && m.anthropic == null && m.responses == null && (
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent animate-pulse" aria-hidden="true" />
+                    )}
+                    <span className="truncate">{m.id}</span>
+                  </div>
+                </td>
+                <td className="py-1.5">
                   {testingId === m.id ? (
-                    <span className="inline-flex items-center gap-1.5 text-accent"><Spinner /> testing…</span>
+                    <span className="text-[11px] text-accent">testing…</span>
                   ) : m.openai == null && m.anthropic == null && m.responses == null ? (
-                    <span className={running ? 'inline-flex items-center gap-1.5 text-accent animate-pulse' : 'text-mute'}>
-                      {running ? '· queued' : 'untested'}
+                    <span className={running ? 'text-[11px] text-accent animate-pulse' : 'text-[11px] text-mute'}>
+                      {running ? 'queued' : 'untested'}
                     </span>
                   ) : (
-                    <>
-                      <div className="text-dim">
-                        chat {verdict(m.openai)} · msgs {verdict(m.anthropic)} · resp {verdict(m.responses)}
-                      </div>
-                      <div className="text-[10px] text-mute"
-                        title={m.note ?? undefined}>
-                        {m.source === 'curated' ? 'curated' : 'probed'} {relTime(m.tested_at)}
-                      </div>
-                    </>
+                    <div className="flex flex-wrap items-center gap-1">
+                      {([
+                        ['chat', m.openai],
+                        ['msgs', m.anthropic],
+                        ['resp', m.responses],
+                      ] as const).map(([label, v]) => (
+                        <span
+                          key={label}
+                          title={v == null ? `${label}: no probe` : `${label}: ${v === true ? 'ok' : v === false ? 'failed' : `HTTP ${v}`}`}
+                          className={cx(
+                            'inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px]',
+                            v == null && 'border-line/60 text-mute/70',
+                            v === true && 'border-ok/40 bg-ok-dim text-ok',
+                            v === false && 'border-bad/40 bg-bad-dim text-bad',
+                            typeof v === 'number' && 'border-bad/40 bg-bad-dim text-bad',
+                          )}
+                        >
+                          <span className="font-sans">{label}</span>
+                          <span>{v == null ? '–' : v === true ? '✓' : v === false ? '✕' : v}</span>
+                        </span>
+                      ))}
+                    </div>
                   )}
+                  <div className="mt-0.5 text-[10px] text-mute" title={m.note ?? undefined}>
+                    {m.source === 'curated' ? 'curated' : m.tested_at ? `probed ${relTime(m.tested_at)}` : 'not probed'}
+                  </div>
                 </td>
-                <td className="max-w-[220px] truncate py-1.5 text-dim" title={m.id}>{m.id}</td>
                 <td className="py-1.5">
                   <select
                     aria-label={`surface for ${m.id}`}
@@ -928,7 +945,7 @@ function ModelsDrawer({ id }: { id: number }) {
                     onChange={(e) => onPinChange(m, e.target.value)}
                     className="rounded border border-line bg-transparent px-1.5 py-0.5 text-[11.5px] text-dim"
                   >
-                    <option value="">auto (probed)</option>
+                    <option value="">auto</option>
                     {PIN_SURFACES.map((s) => {
                       const ok = s === 'openai' ? m.openai
                         : s === 'anthropic' ? m.anthropic

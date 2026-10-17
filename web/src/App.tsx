@@ -41,6 +41,39 @@ const NAV: NavItem[] = [
   { to: '/settings', label: 'Settings', hint: 'dashboard password' },
 ];
 
+// One restrained 16px stroke icon per destination. Inline SVG keeps the
+// dashboard dependency-free and inherits currentColor, so the active/hover
+// state is handled by the NavLink's text colour alone.
+function NavIcon({ label }: { label: string }) {
+  const common = {
+    viewBox: '0 0 24 24', className: 'h-4 w-4 shrink-0', fill: 'none',
+    stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const, 'aria-hidden': true,
+  };
+  switch (label) {
+    case 'Dashboard':
+      return <svg {...common}><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></svg>;
+    case 'Analytics':
+      return <svg {...common}><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></svg>;
+    case 'Providers':
+      return <svg {...common}><path d="M4 7h16M4 12h16M4 17h16" /><circle cx="7" cy="7" r="1" fill="currentColor" /><circle cx="7" cy="12" r="1" fill="currentColor" /><circle cx="7" cy="17" r="1" fill="currentColor" /></svg>;
+    case 'Services':
+      return <svg {...common}><path d="M12 3 3 8l9 5 9-5-9-5Z" /><path d="M3 12l9 5 9-5M3 16l9 5 9-5" /></svg>;
+    case 'Chat':
+      return <svg {...common}><path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z" /></svg>;
+    case 'Combos':
+      return <svg {...common}><path d="M4 7h5l2 3 2-3h7M4 17h5l2-3 2 3h7" /><circle cx="4" cy="7" r="1.5" /><circle cx="20" cy="7" r="1.5" /><circle cx="4" cy="17" r="1.5" /><circle cx="20" cy="17" r="1.5" /></svg>;
+    case 'Rules':
+      return <svg {...common}><path d="M12 3 4 6v5c0 5 3.5 8 8 10 4.5-2 8-5 8-10V6l-8-3Z" /><path d="m9 12 2 2 4-4" /></svg>;
+    case 'Compression':
+      return <svg {...common}><path d="M4 7h16M4 12h10M4 17h7" /><path d="m16 15 3 3 3-3M19 12v6" /></svg>;
+    case 'Connect':
+      return <svg {...common}><path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0V7ZM12 16v5" /></svg>;
+    default:
+      return <svg {...common}><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2" /></svg>;
+  }
+}
+
 const ANALYTICS_TABS = [
   { to: '/stats', label: 'Stats' },
   { to: '/economics', label: 'Token Economics' },
@@ -168,9 +201,12 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             : item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to);
           return (
             <NavLink key={item.to} to={item.to} onClick={onNavigate} end={item.to === '/'}
-              className={cx('block rounded-lg px-3 py-2 transition-colors', active ? 'bg-accent-dim text-ink' : 'text-dim hover:bg-hover hover:text-ink')}>
-              <div className="text-[13px] font-medium">{item.label}</div>
-              <div className={cx('text-[10.5px]', active ? 'text-accent/70' : 'text-mute')}>{item.hint}</div>
+              className={cx('flex items-start gap-2.5 rounded-lg px-3 py-2 transition-colors', active ? 'bg-accent-dim text-ink' : 'text-dim hover:bg-hover hover:text-ink')}>
+              <span className={cx('mt-0.5', active ? 'text-accent' : 'text-mute')}><NavIcon label={item.label} /></span>
+              <span className="min-w-0">
+                <div className="text-[13px] font-medium">{item.label}</div>
+                <div className={cx('text-[10.5px]', active ? 'text-accent/70' : 'text-mute')}>{item.hint}</div>
+              </span>
             </NavLink>
           );
         })}

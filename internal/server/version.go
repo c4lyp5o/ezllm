@@ -9,4 +9,4 @@ package server
 //
 // Versioning scheme (see VERSION.md): one version per change date, all
 // patches on a date share a version, patch component increments per date.
-const Version = "0.0.12"
+const Version = "0.0.13"

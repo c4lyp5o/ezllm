@@ -26,6 +26,24 @@ const PROMPT_LABELS: Record<ServiceSurface, string> = {
   audio_stt: 'Test payload',
 };
 
+function ServiceIcon({ surface }: { surface: ServiceSurface }) {
+  const common = {
+    viewBox: '0 0 24 24', className: 'h-4 w-4', fill: 'none', stroke: 'currentColor',
+    strokeWidth: 1.7, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+  };
+  switch (surface) {
+    case 'embeddings':
+      return <svg {...common}><circle cx="6" cy="6" r="2" /><circle cx="18" cy="6" r="2" /><circle cx="6" cy="18" r="2" /><circle cx="18" cy="18" r="2" /><path d="M8 6h8M6 8v8M18 8v8M8 18h8" /></svg>;
+    case 'images_gen':
+      return <svg {...common}><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="m21 15-4-4-5 5-4-4-5 5" /></svg>;
+    case 'audio_tts':
+      return <svg {...common}><path d="M4 9v6M8 6v12M12 4v16M16 7v10M20 10v4" /></svg>;
+    default:
+      return <svg {...common}><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8" /></svg>;
+  }
+}
+
 function StateChip({ card }: { card: ServiceCard }) {
   if (card.mode === 'off') return <Chip tone="neutral">Not configured</Chip>;
   if (card.mode === 'auto' && !card.resolved_target) return <Chip tone="warn">Waiting for a successful test</Chip>;
@@ -93,6 +111,9 @@ function ServiceCardView({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
+            <span className="flex h-7 w-7 items-center justify-center rounded-md border border-line bg-raised text-accent">
+              <ServiceIcon surface={card.surface} />
+            </span>
             <h2 id={`service-${card.surface}`} className="text-[15px] font-semibold">{card.label}</h2>
             <code className="rounded border border-line bg-raised px-2 py-0.5 font-mono text-[11px] text-dim">{card.endpoint}</code>
           </div>
@@ -251,7 +272,7 @@ export default function Services() {
   if (error && cards.length === 0) return <EmptyState title="Could not load Services" hint={error} />;
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5">
+    <div className="mx-auto max-w-6xl space-y-5">
       <div className="rounded-xl border border-line bg-surface px-5 py-4">
         <h2 className="text-[14px] font-semibold">Choose endpoint defaults</h2>
         <p className="mt-1 text-[12px] leading-relaxed text-mute">
@@ -261,8 +282,10 @@ export default function Services() {
       </div>
 
       {error && <p className="rounded-lg border border-bad/30 bg-bad-dim px-3 py-2 text-[12px] text-bad" role="alert">{error}</p>}
-      {cards.map((card) => <ServiceCardView key={card.surface} card={card} models={models}
-        loadingModels={loadingModels} onSaved={onSaved} onTested={onTested} />)}
+      <div className="grid gap-4 xl:grid-cols-2">
+        {cards.map((card) => <ServiceCardView key={card.surface} card={card} models={models}
+          loadingModels={loadingModels} onSaved={onSaved} onTested={onTested} />)}
+      </div>
     </div>
   );
 }

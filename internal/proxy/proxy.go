@@ -824,6 +824,64 @@ func swapModelMultipart(body []byte, newModel string) ([]byte, error) {
 // wire while its body is encoded for another. Translation REPLACES the swap:
 // it rewrites the whole wire shape, model included, so the paths never compose.
 func prepareHopBody(body []byte, rt Route, doc *jsonbody.BodyDoc) ([]byte, error) {
+	// Google AI Studio native audio (TTS/STT) needs a generateContent
+	// translation, not the OpenAI envelope. It runs before the multipart
+	// branch because the STT input IS multipart and must be unwrapped.
+	if isGeminiNativeAudio(rt, rt.Surface) {
+		return geminiAudioRequest(body, rt.Surface)
+	}
+	// Cloudflare MeloTTS takes {"prompt": text}, not the OpenAI
+	// {"model","input","voice"} envelope.
+	if rt.Surface == provider.SurfaceAudioTTS && strings.Contains(rt.Account.BaseURL, "api.cloudflare.com") {
+		var in struct {
+			Input string `json:"input"`
+			Text  string `json:"text"`
+		}
+		if err := json.Unmarshal(body, &in); err != nil {
+			return nil, fmt.Errorf("proxy: cloudflare tts body: %w", err)
+		}
+		text := in.Input
+		if text == "" {
+			text = in.Text
+		}
+		return json.Marshal(map[string]any{"prompt": text})
+	}
+	// Cloudflare flux-2 models require a multipart body (prompt as a form
+	// field) rather than the JSON envelope. Build it here so the proxy's
+	// content-type detection picks up the boundary.
+	if rt.Surface == provider.SurfaceImagesGen && strings.Contains(rt.Account.BaseURL, "api.cloudflare.com") && strings.Contains(rt.Model, "flux-2") {
+		var in struct {
+			Prompt string `json:"prompt"`
+		}
+		if err := json.Unmarshal(body, &in); err != nil {
+			return nil, fmt.Errorf("proxy: cloudflare image body: %w", err)
+		}
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		if err := mw.WriteField("prompt", in.Prompt); err != nil {
+			return nil, err
+		}
+		if err := mw.Close(); err != nil {
+			return nil, err
+		}
+		return buf.Bytes(), nil
+	}
+	// Cloudflare Workers AI image models (non-flux-2) are native: the model is
+	// in the URL and the JSON body accepts ONLY prompt-like fields.
+	if rt.Surface == provider.SurfaceImagesGen && strings.Contains(rt.Account.BaseURL, "api.cloudflare.com") {
+		var in struct {
+			Prompt string `json:"prompt"`
+			Seed   any    `json:"seed"`
+		}
+		if err := json.Unmarshal(body, &in); err != nil {
+			return nil, fmt.Errorf("proxy: cloudflare image body: %w", err)
+		}
+		out := map[string]any{"prompt": in.Prompt}
+		if in.Seed != nil {
+			out["seed"] = in.Seed
+		}
+		return json.Marshal(out)
+	}
 	// Multipart (audio STT): the model lives in a form field, not a JSON key,
 	// and SwapModel is JSON-only. Rebuild the multipart body with the model
 	// field swapped; everything else (the audio file part) passes through
@@ -919,6 +977,23 @@ func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, bod
 	// selector: the same value prepareHopBody encodes for and commit unwraps.
 	dialSurface := rt.EffectiveWire()
 	url := provider.UpstreamURL(rt.Account.BaseURL, rt.Account.Kind, provider.SurfacePath(dialSurface))
+	// Google AI Studio native audio (TTS/STT): generateContent, not OpenAI audio.
+	if isGeminiNativeAudio(rt, rt.Surface) {
+		url = geminiAudioURL(rt)
+	}
+	// Cloudflare Workers AI does not implement the OpenAI /images/generations
+	// path: its image models are served at the native /ai/run/<model> endpoint.
+	if dialSurface == provider.SurfaceImagesGen && strings.Contains(rt.Account.BaseURL, "api.cloudflare.com") {
+		base := strings.TrimSuffix(strings.TrimSuffix(rt.Account.BaseURL, "/"), "/v1")
+		url = base + "/run/" + rt.Model
+	}
+	// Cloudflare Workers AI does not implement the OpenAI audio/* paths either:
+	// TTS/STT models are served at the native /ai/run/<model> endpoint.
+	if (dialSurface == provider.SurfaceAudioTTS || dialSurface == provider.SurfaceAudioSTT) &&
+		strings.Contains(rt.Account.BaseURL, "api.cloudflare.com") {
+		base := strings.TrimSuffix(strings.TrimSuffix(rt.Account.BaseURL, "/"), "/v1")
+		url = base + "/run/" + rt.Model
+	}
 
 	upReq, err := http.NewRequestWithContext(ctx, r.Method, url, bytes.NewReader(body))
 	if err != nil {
@@ -928,6 +1003,11 @@ func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, bod
 	copyClientHeaders(upReq, r, ad.StripHeaders())
 	if err := ad.PrepareRequest(ctx, upReq, rt.Account, rt.KeyPlain, dialSurface); err != nil {
 		return nil, Result{}, time.Time{}, err
+	}
+	// Google AI Studio native audio uses x-goog-api-key, not Bearer.
+	if isGeminiNativeAudio(rt, rt.Surface) {
+		upReq.Header.Set("x-goog-api-key", rt.KeyPlain)
+		upReq.Header.Del("Authorization")
 	}
 	// Content-Length must match the rewritten body.
 	upReq.ContentLength = int64(len(body))
@@ -954,6 +1034,11 @@ func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, bod
 	resp, err := d.client.Do(upReq)
 	if err != nil {
 		return nil, Result{Stream: stream, Totalms: msPtr(time.Since(start)), Err: err.Error()}, time.Time{}, err
+	}
+	if isGeminiNativeAudio(rt, rt.Surface) {
+		if err := geminiAudioResponse(resp, dialSurface); err != nil {
+			return nil, Result{Stream: stream, Totalms: msPtr(time.Since(start)), Err: err.Error()}, time.Time{}, err
+		}
 	}
 
 	res := Result{

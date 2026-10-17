@@ -47,8 +47,8 @@
   --color-dim: #4c5361;
   --color-mute: #7c8494;
 
-  --color-accent: #0284c7;
-  --color-accent-dim: rgba(2, 132, 199, 0.11);
+  --color-accent: #5e6ad2;
+  --color-accent-dim: rgba(94, 106, 210, 0.12);
   /* Ink that goes ON TOP of an accent fill. It must invert with the accent:
      light-mode accent is a dark blue (#0284c7) and wants white text, while
      dark-mode accent is a bright sky (#38bdf8) and wants near-black. A single
@@ -140,22 +140,22 @@
    A token listed here with no @theme counterpart is a bug — it would exist
    only in dark mode and every component using it would render unset in light. */
 .dark {
-  --color-bg: #0a0a0b;
-  --color-surface: #101013;
-  --color-raised: #17171c;
-  --color-hover: #1d1d23;
+  --color-bg: #0f1011;
+  --color-surface: #141516;
+  --color-raised: #191a1b;
+  --color-hover: #23252a;
   --color-overlay: rgba(4, 4, 6, 0.66);
 
   --color-line: rgba(255, 255, 255, 0.08);
   --color-line-strong: rgba(255, 255, 255, 0.14);
 
-  --color-ink: #ececef;
-  --color-dim: #a2a2ac;
-  --color-mute: #7c7c8a;
+  --color-ink: #f7f8f8;
+  --color-dim: #c9cdd4;
+  --color-mute: #8a8f98;
 
-  --color-accent: #38bdf8;
-  --color-accent-dim: rgba(56, 189, 248, 0.14);
-  --color-accent-ink: #082a3d;
+  --color-accent: #8b93ff;
+  --color-accent-dim: rgba(139, 147, 255, 0.14);
+  --color-accent-ink: #0b0c10;
 
   --color-ok: #34d399;
   --color-warn: #fbbf24;

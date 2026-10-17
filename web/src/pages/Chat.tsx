@@ -1,32 +1,6 @@
-// CHAT — a live test against the routed catalog, plus the three things that
-// make it usable for real work:
-//
-//   1. File upload. Images become OpenAI vision parts (image_url with a data
-//      URI); text and code files are inlined into the prompt inside a fenced
-//      block, because the dashboard has no server-side file store and should
-//      not grow one for a "paste my log" workflow.
-//   2. A custom system prompt, persisted, with a default that is a real
-//      default rather than a blank box.
-//   3. "Set as default" on the model selector, persisted in this browser.
-//
-// Why the router passes these through: ezllm forwards request bodies
-// UNTRANSLATED (internal/server/server.go records the invariant — "ezllm
-// passes bodies through untranslated, so switching the path upstream would
-// send the wrong shape"). So a vision part reaches a vision-capable upstream
-// as-is, and a model WITHOUT vision returns its own error. That is the honest
-// outcome; a silent drop would hide that the call is not doing what was asked.
-//
-// Compression interaction, stated because it is a real trap. A message whose
-// content is an ARRAY is never dropped by session_dedup: compress.hashContent
-// returns "" for any array that is not pure {"type":"text"} blocks, and an
-// empty key makes the message undroppable by construction. caveman and rtk
-// only rewrite `content` STRINGS on plain text messages, so images pass
-// through untouched. The one stage that DOES change the picture is `budget`:
-// it estimates a message's size from its marshalled form, and a base64 image
-// is large by that measure, so a tight budget profile can legitimately drop
-// OTHER messages to stay under its cap. That is the stage doing its job — but
-// it is why a vision call under a tight budget can lose history, and the
-// operator deserves to know it rather than discover it.
+// CHAT — a playground: 1-3 side-by-side chat columns, each with its own model
+// selector, one shared composer. Sending a message dispatches it to every
+// column whose model is set and streams each answer into its own column.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
@@ -34,13 +8,8 @@ import {
 } from '../utils/api';
 import { Markdown } from '../components/markdown';
 import { DUR, spring } from '../components/motion';
-import { btn, cx, Chip, Combobox, EmptyState, inputCls, labelCls, SectionLabel, Spinner } from '../components/ui';
+import { btn, cx, Chip, Combobox, EmptyState, inputCls, SectionLabel, Spinner } from '../components/ui';
 
-// ── persistence keys ──────────────────────────────────────────────────────
-// All three are per-browser. A model default is a rendering/UX preference for
-// this operator on this machine, not gateway state — making it a server
-// setting would mean the dashboard and every /v1 client inherit a model
-// picked while poking at a test chat.
 const KEY_MODEL = 'ezllm.chat.model';
 const KEY_SYSTEM = 'ezllm.chat.system';
 
@@ -48,13 +17,8 @@ const DEFAULT_SYSTEM_PROMPT =
   'You are a helpful assistant. Answer directly and concisely. If a task is ' +
   'ambiguous, ask one clarifying question instead of guessing.';
 
-// The server's body cap is 32 MiB by default (EZLLM_MAX_BODY_MIB), and base64
-// inflates by 4/3 — so a 6 MiB image is already 8 MiB on the wire. These
-// limits are enforced BEFORE the fetch, so a too-big file is a readable
-// message rather than a 413 from the router.
 const MAX_FILE_BYTES = 6 * 1024 * 1024;
 const MAX_ATTACH_BYTES = 16 * 1024 * 1024;
-
 const IMAGE_TYPES = /^image\//;
 
 const readAsDataURL = (f: File) => new Promise<string>((resolve, reject) => {
@@ -82,8 +46,8 @@ function writeStored(key: string, value: string): void {
 }
 
 type Attachment = { name: string; size: number; dataUrl?: string; text?: string };
+type Column = { id: string; model: string; messages: ChatMessage[]; busy: boolean; error: string };
 
-// ── attachment chip ───────────────────────────────────────────────────────
 function AttachmentChip({ name, size, preview, onRemove }: Attachment & { preview?: string; onRemove: () => void }) {
   const ext = (name.split('.').pop() ?? '?').slice(0, 4).toUpperCase();
   return (
@@ -109,25 +73,21 @@ function AttachmentChip({ name, size, preview, onRemove }: Attachment & { previe
   );
 }
 
+let nextColumn = 1;
+const newColumn = (model = ''): Column => ({ id: `c${nextColumn++}`, model, messages: [], busy: false, error: '' });
+
 export default function Chat() {
   const [catalog, setCatalog] = useState<ModelRow[]>([]);
-  const [model, setModel] = useState('');
   const [defaultModel, setDefaultModel] = useState(() => readStored(KEY_MODEL, ''));
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [columns, setColumns] = useState<Column[]>([newColumn()]);
   const [input, setInput] = useState('');
-  const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [pending, setPending] = useState<Attachment[]>([]);
-
-  // Seeded from storage so the textarea is editable from a cold start and
-  // "Reset" restores the real default rather than an empty box.
   const [system, setSystem] = useState(() => readStored(KEY_SYSTEM, DEFAULT_SYSTEM_PROMPT));
   const [systemOpen, setSystemOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
 
-  // ── load the catalog ──
   useEffect(() => {
     let live = true;
     (async () => {
@@ -137,21 +97,14 @@ export default function Chat() {
         for (const a of rows.filter((x) => x.enabled)) {
           const ms = await accountModels(a.id);
           for (const m of ms) {
-            flat.push({
-              ...m,
-              id: `${a.namespace}/${m.id}`,
-              display: `${a.namespace} / ${m.display ?? m.id}`,
-            });
+            flat.push({ ...m, id: `${a.namespace}/${m.id}`, display: `${a.namespace} / ${m.display ?? m.id}` });
           }
         }
         if (!live) return;
         setCatalog(flat);
-        // Preference order: the stored default (if still present in the
-        // catalog), then the first model. A default whose account was since
-        // disabled must not strand the selector on an empty value.
         const stored = readStored(KEY_MODEL, '');
-        const first = flat[0]?.id ?? '';
-        setModel(stored && flat.some((m) => m.id === stored) ? stored : first);
+        const preferred = stored && flat.some((m) => m.id === stored) ? stored : flat[0]?.id ?? '';
+        setColumns((prev) => prev.map((c, i) => (i === 0 && !c.model ? { ...c, model: preferred } : c)));
       } catch (e) {
         if (live) setError(e instanceof Error ? e.message : 'could not load provider models');
       } finally {
@@ -165,20 +118,24 @@ export default function Chat() {
     () => catalog.map((m) => ({ value: m.id, label: m.display ?? m.id })),
     [catalog],
   );
-  const selected = catalog.find((m) => m.id === model);
 
-  // Keep the transcript pinned to the bottom while it streams.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [messages]);
+  const addColumn = useCallback(() => {
+    setColumns((prev) => (prev.length >= 3 ? prev : [...prev, newColumn(defaultModel || prev[0]?.model || '')]));
+  }, [defaultModel]);
+
+  const removeColumn = useCallback((id: string) => {
+    setColumns((prev) => (prev.length <= 1 ? prev : prev.filter((c) => c.id !== id)));
+  }, []);
+
+  const setColumnModel = useCallback((id: string, model: string) => {
+    setColumns((prev) => prev.map((c) => (c.id === id ? { ...c, model } : c)));
+  }, []);
 
   const setAsDefault = useCallback((id: string) => {
     setDefaultModel(id);
     writeStored(KEY_MODEL, id);
   }, []);
 
-  // ── files ──
   const addFiles = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setError('');
@@ -194,10 +151,6 @@ export default function Chat() {
         continue;
       }
       try {
-        // An image becomes a vision part; anything else is read as text and
-        // inlined. A binary that is not an image would arrive as mojibake, so
-        // it is refused rather than sent as garbage a model will confidently
-        // interpret.
         next.push(IMAGE_TYPES.test(f.type)
           ? { name: f.name, size: f.size, dataUrl: await readAsDataURL(f) }
           : { name: f.name, size: f.size, text: await readAsText(f) });
@@ -209,263 +162,207 @@ export default function Chat() {
     if (next.length) setPending((p) => [...p, ...next]);
   }, [pending]);
 
+  const buildContent = (text: string): string | ChatPart[] => {
+    if (pending.length === 0) return text;
+    const parts: ChatPart[] = [];
+    let textPart = text;
+    for (const p of pending) {
+      if (p.dataUrl) parts.push({ type: 'image_url', image_url: { url: p.dataUrl } });
+      else if (p.text != null) textPart += `\n\n--- ${p.name} ---\n\`\`\`\n${p.text}\n\`\`\`\n`;
+    }
+    if (textPart.trim()) parts.unshift({ type: 'text', text: textPart.trim() });
+    return parts.length === 1 && parts[0].type === 'text' ? parts[0].text : parts;
+  };
+
   const send = useCallback(async () => {
     const text = input.trim();
-    if ((!text && pending.length === 0) || !model || busy) return;
+    const targets = columns.filter((c) => c.model && !c.busy);
+    if ((!text && pending.length === 0) || targets.length === 0) return;
 
-    // This turn's content. Images stay as vision parts; text files fold into
-    // the text part inside a fence so the model sees the filename.
-    let content: string | ChatPart[];
-    if (pending.length === 0) {
-      content = text;
-    } else {
-      const parts: ChatPart[] = [];
-      let textPart = text;
-      for (const p of pending) {
-        if (p.dataUrl) {
-          parts.push({ type: 'image_url', image_url: { url: p.dataUrl } });
-        } else if (p.text != null) {
-          textPart += `\n\n--- ${p.name} ---\n\`\`\`\n${p.text}\n\`\`\`\n`;
-        }
-      }
-      // No boilerplate when it is just text: a single text part is sent as a
-      // plain string, which is the shape every provider expects.
-      if (textPart.trim()) parts.unshift({ type: 'text', text: textPart.trim() });
-      content = parts.length === 1 && parts[0].type === 'text' ? parts[0].text : parts;
-    }
-
-    // The system prompt rides along on EVERY request — that is what makes it a
-    // system prompt rather than a one-off instruction. session_dedup drops the
-    // later byte-identical copies server-side, so the history does not
-    // accumulate duplicates of it.
-    const turns: ChatMessage[] = [];
-    if (system.trim()) turns.push({ role: 'system', content: system.trim() });
-    turns.push(...messages, { role: 'user', content });
-
-    setMessages([...messages, { role: 'user', content }, { role: 'assistant', content: '' }]);
+    const content = buildContent(text);
     setInput('');
     setPending([]);
-    setBusy(true);
     setError('');
 
-    try {
-      // Each delta lands in the assistant bubble as it arrives, so the answer
-      // grows token by token instead of appearing all at once.
-      await chatStream(model, turns, (delta) => {
-        setMessages((prev) => {
-          const last = prev[prev.length - 1];
-          if (!last || last.role !== 'assistant' || typeof last.content !== 'string') return prev;
-          const updated = [...prev];
-          updated[updated.length - 1] = { ...last, content: last.content + delta };
-          return updated;
-        });
-      });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'chat request failed');
-    } finally {
-      // Drop a bubble that never received content (the upstream said nothing).
-      setMessages((prev) => {
-        const last = prev[prev.length - 1];
-        return last?.role === 'assistant' && typeof last.content === 'string' && last.content === ''
-          ? prev.slice(0, -1)
-          : prev;
-      });
-      setBusy(false);
-    }
-  }, [input, pending, messages, model, busy, system]);
+    // Snapshot each target's history BEFORE the optimistic user turn lands.
+    const history = new Map(targets.map((c) => [c.id, c.messages]));
 
+    setColumns((prev) => prev.map((c) => (targets.some((t) => t.id === c.id)
+      ? { ...c, busy: true, error: '', messages: [...c.messages, { role: 'user', content } as ChatMessage, { role: 'assistant', content: '' }] }
+      : c)));
+
+    await Promise.all(targets.map(async (target) => {
+      const turns: ChatMessage[] = [];
+      if (system.trim()) turns.push({ role: 'system', content: system.trim() });
+      turns.push(...(history.get(target.id) ?? []), { role: 'user', content });
+      try {
+        await chatStream(target.model, turns, (delta) => {
+          setColumns((prev) => prev.map((c) => {
+            if (c.id !== target.id) return c;
+            const msgs = [...c.messages];
+            const last = msgs[msgs.length - 1];
+            if (last?.role === 'assistant' && typeof last.content === 'string') {
+              msgs[msgs.length - 1] = { ...last, content: last.content + delta };
+            }
+            return { ...c, messages: msgs };
+          }));
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'chat request failed';
+        setColumns((prev) => prev.map((c) => (c.id === target.id ? { ...c, error: msg } : c)));
+      } finally {
+        setColumns((prev) => prev.map((c) => {
+          if (c.id !== target.id) return c;
+          const msgs = c.messages.filter((m, i) => !(i === c.messages.length - 1 && m.role === 'assistant' && m.content === ''));
+          return { ...c, busy: false, messages: msgs };
+        }));
+      }
+    }));
+  }, [input, pending, columns, system]);
+
+  const busy = columns.some((c) => c.busy);
   const systemDirty = system !== DEFAULT_SYSTEM_PROMPT;
+  const sendable = columns.some((c) => c.model && !c.busy) && (input.trim().length > 0 || pending.length > 0);
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-5">
-      {/* ── controls ── */}
-      <section className="rounded-xl border border-line bg-surface px-5 py-4">
-        <div className="flex flex-wrap items-end gap-4">
-          <label className="min-w-[280px] flex-1">
-            <span className={labelCls}>Model</span>
-            <div className="flex gap-2">
-              <Combobox options={modelOptions} value={model} onChange={setModel}
-              disabled={loading || busy} loadingText={loading ? 'Loading models…' : 'No synced models'} />
-              {/* Set as default. Disabled when it already IS the default, so
-                  the button never leaves its state ambiguous about what the
-                  click would do. */}
-              <button
-                type="button"
-                onClick={() => setAsDefault(model)}
-                disabled={!model || model === defaultModel || busy}
-                title={model === defaultModel
-                  ? `${model} is already this browser's default`
-                  : `Make ${model} the model selected on every visit`}
-                className={cx(btn.base, 'shrink-0 whitespace-nowrap', btn.ghost,
-                  model === defaultModel && 'opacity-60')}>
-                {model === defaultModel ? '★ Default' : '☆ Set default'}
-              </button>
+    <div className="mx-auto flex max-w-7xl flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-end gap-2 rounded-xl border border-line bg-surface px-4 py-2.5">
+        <button type="button" onClick={() => setSystemOpen((v) => !v)}
+          className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')} aria-expanded={systemOpen}>
+          {systemOpen ? 'Hide' : 'Edit'} system prompt
+          {systemDirty && <span className="ml-1 h-1.5 w-1.5 rounded-full bg-accent" aria-label="modified" />}
+        </button>
+        <button type="button" onClick={addColumn} disabled={columns.length >= 3}
+          className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px] disabled:opacity-45')}
+          title={columns.length >= 3 ? 'Maximum 3 columns' : 'Add a chat column'}>
+          ＋ Add column
+        </button>
+      </div>
+
+      <AnimatePresence initial={false}>
+        {systemOpen && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: DUR.base, ease: [0.22, 1, 0.36, 1] }}
+            className="overflow-hidden rounded-xl border border-line bg-surface px-4 py-3">
+            <div className="flex flex-wrap items-baseline justify-between gap-3">
+              <SectionLabel>System prompt</SectionLabel>
+              <span className="text-[11px] text-mute">sent on every request in every column · stored in this browser</span>
             </div>
-          </label>
-
-          <button type="button" onClick={() => setSystemOpen((v) => !v)}
-            className={cx(btn.base, btn.ghost, 'shrink-0')}
-            aria-expanded={systemOpen}>
-            {systemOpen ? 'Hide' : 'Edit'} system prompt
-            {systemDirty && <span className="ml-1 h-1.5 w-1.5 rounded-full bg-accent" aria-label="modified" />}
-          </button>
-        </div>
-
-        {/* The protocol chips (✓/✕/? anthropic|openai|responses) were removed
-            here on request: they answered a question the caller does not ask
-            in the chat surface — the namespace/id selector already resolves
-            the hop, and the surface was going to be probed on the first call
-            either way. The pin chip survives: it CHANGES behavior (the servable
-            surface is fixed, no probe needed). */}
-        {selected?.pin && (
-          <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-line pt-3">
-            <Chip tone="accent">pinned · {selected.pin}</Chip>
-            <span className="ml-auto text-[11px] text-mute">
-              a pin fixes the backend surface — no protocol probe happens
-            </span>
-          </div>
+            <textarea value={system} onChange={(e) => setSystem(e.target.value)} onBlur={() => writeStored(KEY_SYSTEM, system)}
+              rows={4} placeholder={DEFAULT_SYSTEM_PROMPT} aria-label="System prompt"
+              className={cx(inputCls, 'mt-2 w-full resize-y font-sans leading-relaxed')} />
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <button type="button" onClick={() => { setSystem(DEFAULT_SYSTEM_PROMPT); writeStored(KEY_SYSTEM, DEFAULT_SYSTEM_PROMPT); }}
+                disabled={!systemDirty} className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px] disabled:opacity-45')}>
+                Reset to default
+              </button>
+              <span className="text-[11px] text-mute">{system.trim() ? `${system.trim().length} chars` : 'empty — no system message will be sent'}</span>
+            </div>
+          </motion.div>
         )}
+      </AnimatePresence>
 
-        <AnimatePresence initial={false}>
-          {systemOpen && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: DUR.base, ease: [0.22, 1, 0.36, 1] }}
-              className="overflow-hidden">
-              <div className="mt-4 border-t border-line pt-4">
-                <div className="flex flex-wrap items-baseline justify-between gap-3">
-                  <SectionLabel>System prompt</SectionLabel>
-                  <span className="text-[11px] text-mute">
-                    sent on every request in this conversation · stored in this browser
-                  </span>
-                </div>
-                <textarea
-                  value={system}
-                  onChange={(e) => setSystem(e.target.value)}
-                  onBlur={() => writeStored(KEY_SYSTEM, system)}
-                  rows={5}
-                  placeholder={DEFAULT_SYSTEM_PROMPT}
-                  aria-label="System prompt"
-                  className={cx(inputCls, 'mt-2 w-full resize-y font-sans leading-relaxed')} />
-                <div className="mt-2 flex flex-wrap items-center gap-3">
-                  <button type="button"
-                    onClick={() => { setSystem(DEFAULT_SYSTEM_PROMPT); writeStored(KEY_SYSTEM, DEFAULT_SYSTEM_PROMPT); }}
-                    disabled={!systemDirty}
-                    className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px] disabled:opacity-45')}>
-                    Reset to default
-                  </button>
-                  <span className="text-[11px] text-mute">
-                    {system.trim() ? `${system.trim().length} chars` : 'empty — no system message will be sent'}
-                  </span>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </section>
+      {error && <div role="alert" className="rounded-xl border border-bad/30 bg-bad-dim px-4 py-3 text-[13px] text-bad">{error}</div>}
 
-      {/* ── transcript ── */}
-      <section ref={scrollRef}
-        className="max-h-[52vh] min-h-[280px] space-y-4 overflow-y-auto rounded-xl border border-line bg-surface/40 px-5 py-5">
-        {messages.length === 0 && !loading && (
-          <EmptyState
-            title="Send a message to test routing, retries and provider response handling."
-            hint="Attach an image to exercise a vision path, or a log file to paste a large context. Everything here goes through the router, so strategy, failover, retries and compression all apply." />
-        )}
-        {messages.map((m, i) => {
-          const body = messageText(m);
-          const images = typeof m.content === 'string'
-            ? []
-            : m.content.filter((p): p is Extract<ChatPart, { type: 'image_url' }> => p.type === 'image_url');
+      <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}>
+        {columns.map((c, idx) => {
+          const selected = catalog.find((m) => m.id === c.model);
           return (
-            <motion.div
-              key={`${m.role}-${i}`}
-              layout="position"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={spring}
-              className={cx('max-w-[88%] rounded-lg border px-4 py-3 text-sm leading-relaxed',
-                m.role === 'user' ? 'ml-auto border-accent/30 bg-accent-dim' : 'border-line bg-surface')}>
-              <div className="mb-1.5 flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-wide text-mute">
-                {m.role}
-                {m.role === 'system' && (
-                  <span className="font-normal normal-case tracking-normal">sent with every request</span>
+            <section key={c.id} className="flex min-h-[520px] flex-col overflow-hidden rounded-xl border border-line bg-surface">
+              <div className="flex items-center gap-2 border-b border-line px-3 py-2.5">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line bg-raised font-mono text-[10px] text-mute">
+                  {idx + 1}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <Combobox idPrefix={`col-${c.id}`} options={modelOptions} value={c.model} onChange={(v) => setColumnModel(c.id, v)}
+                    disabled={loading || c.busy} loadingText={loading ? 'Loading models…' : 'No synced models'} />
+                </div>
+                {idx > 0 && (
+                  <button type="button" onClick={() => removeColumn(c.id)} aria-label="Remove column"
+                    className="rounded p-1 text-mute transition-colors hover:bg-hover hover:text-bad">✕</button>
                 )}
               </div>
-              {m.role === 'assistant'
-                ? <Markdown text={typeof m.content === 'string' ? m.content : body} />
-                : (
-                  <>
-                    {images.length > 0 && (
-                      <div className="mb-2 flex flex-wrap gap-2">
-                        {images.map((p, pi) => (
-                          <img key={pi} src={p.image_url.url} alt={`attachment ${pi + 1}`}
-                            className="max-h-48 rounded border border-line object-contain" />
-                        ))}
-                      </div>
-                    )}
-                    <p className="whitespace-pre-wrap break-words">{body}</p>
-                  </>
+              {selected && (
+                <div className="flex items-center gap-1.5 border-b border-line px-3 py-1.5">
+                  <Chip tone="neutral">{selected.id}</Chip>
+                  <button type="button" onClick={() => setAsDefault(c.model)}
+                    className="ml-auto text-[10.5px] text-mute hover:text-ink"
+                    title="Use this model for the first column on every visit">
+                    {c.model === defaultModel ? '★ default' : '☆ set default'}
+                  </button>
+                </div>
+              )}
+              <div className="flex-1 space-y-3 overflow-y-auto px-3 py-3">
+                {c.messages.length === 0 && !c.busy && (
+                  <EmptyState title="No messages yet." hint="Pick a model above, then send from the composer below." />
                 )}
-            </motion.div>
+                {c.messages.map((m, i) => {
+                  const body = messageText(m);
+                  const images = typeof m.content === 'string'
+                    ? []
+                    : m.content.filter((p): p is Extract<ChatPart, { type: 'image_url' }> => p.type === 'image_url');
+                  return (
+                    <motion.div key={`${c.id}-${i}`} layout="position" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={spring}
+                      className={cx('rounded-lg border px-3 py-2.5 text-[13px] leading-relaxed',
+                        m.role === 'user' ? 'border-accent/30 bg-accent-dim' : 'border-line bg-surface')}>
+                      <div className="mb-1 text-[9.5px] font-semibold uppercase tracking-wide text-mute">{m.role}</div>
+                      {m.role === 'assistant'
+                        ? <Markdown text={typeof m.content === 'string' ? m.content : body} />
+                        : (
+                          <>
+                            {images.length > 0 && (
+                              <div className="mb-2 flex flex-wrap gap-2">
+                                {images.map((p, pi) => <img key={pi} src={p.image_url.url} alt={`attachment ${pi + 1}`} className="max-h-36 rounded border border-line object-contain" />)}
+                              </div>
+                            )}
+                            <p className="whitespace-pre-wrap break-words">{body}</p>
+                          </>
+                        )}
+                    </motion.div>
+                  );
+                })}
+                {c.busy && <div className="flex items-center gap-2 text-[12px] text-mute"><Spinner /> Streaming…</div>}
+                {c.error && <p className="rounded-lg border border-bad/30 bg-bad-dim px-3 py-2 text-[11.5px] text-bad">{c.error}</p>}
+              </div>
+            </section>
           );
         })}
-        {busy && <div className="flex items-center gap-2 text-sm text-mute"><Spinner /> Streaming…</div>}
-      </section>
+      </div>
 
-      {error && (
-        <div role="alert" className="rounded-xl border border-bad/30 bg-bad-dim px-4 py-3 text-[13px] text-bad">{error}</div>
-      )}
-
-      {/* ── composer ── */}
-      <section className="rounded-xl border border-line bg-surface px-5 py-4">
+      <section className="rounded-xl border border-line bg-surface px-4 py-3 shadow-[0_1px_0_rgba(255,255,255,0.03)]">
         <AnimatePresence initial={false}>
           {pending.length > 0 && (
-            <motion.ul
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
+            <motion.ul initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
               transition={{ duration: DUR.base, ease: [0.22, 1, 0.36, 1] }}
-              className="mb-3 flex list-none flex-wrap gap-2 overflow-hidden p-0">
+              className="mb-2 flex list-none flex-wrap gap-2 overflow-hidden p-0">
               {pending.map((p, i) => (
-                <AttachmentChip key={`${p.name}-${i}`} {...p}
-                  onRemove={() => setPending((cur) => cur.filter((_, j) => j !== i))} />
+                <AttachmentChip key={`${p.name}-${i}`} {...p} onRemove={() => setPending((cur) => cur.filter((_, j) => j !== i))} />
               ))}
             </motion.ul>
           )}
         </AnimatePresence>
-
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
+        <textarea value={input} onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }}
-          placeholder={pending.length > 0 ? 'Add a note about the attachments (optional)…' : 'Message the selected model…'}
-          rows={3}
-          disabled={!model || busy}
-          aria-label="Message"
+          placeholder={pending.length > 0 ? 'Add a note about the attachments (optional)…' : 'Message every selected model…'}
+          rows={2} disabled={busy} aria-label="Message"
           className={cx(inputCls, 'w-full resize-y font-sans leading-relaxed')} />
-
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
             <input ref={fileRef} type="file" multiple className="hidden"
               accept="image/*,text/*,.json,.csv,.md,.log,.ts,.tsx,.js,.jsx,.py,.go,.rs,.java,.rb,.sh,.yml,.yaml,.toml,.sql,.html,.css,.xml,.env,.conf,.ini"
               onChange={(e) => { void addFiles(e.target.files); if (fileRef.current) fileRef.current.value = ''; }} />
             <button type="button" onClick={() => fileRef.current?.click()} disabled={busy}
-              className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')}>
-              ＋ Attach
-            </button>
-            <span className="text-[11px] text-mute">
-              images → vision parts · text/code → inlined · ≤ {humanBytes(MAX_FILE_BYTES)} each
-            </span>
+              className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')}>＋ Attach</button>
+            <span className="text-[11px] text-mute">images → vision parts · text/code → inlined · ≤ {humanBytes(MAX_FILE_BYTES)} each</span>
           </div>
           <div className="flex items-center gap-3">
             <span className="hidden text-[11px] text-mute sm:inline">Enter to send · Shift+Enter for a new line</span>
-            <button onClick={() => void send()}
-              disabled={(!input.trim() && pending.length === 0) || !model || busy}
-              className={cx(btn.base, btn.primary)}>
-              {busy ? <Spinner /> : null} Send
+            <button onClick={() => void send()} disabled={!sendable}
+              className={cx(btn.base, btn.primary, 'disabled:cursor-not-allowed disabled:opacity-45')}>
+              {busy ? <Spinner /> : null} Send to {columns.filter((c) => c.model).length || 0}
             </button>
           </div>
         </div>

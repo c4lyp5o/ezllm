@@ -45,6 +45,9 @@ Repo housekeeping and version plumbing.
   EXACT name — the old line-wise split stored the entire rest of the header as
   the PSID value. Guards: 4 new ParseKey tests + `slow_down`/classification
   tests, all three bite-proven red without their fix.
+- **Combos hop account select**: options grouped by provider (`<optgroup>` from
+  `base_url`, count shown only when a provider has >1 account) so multi-account
+  providers are visible without a schema change.
 
 ## v0.0.11 — 2026-10-16 · 30 commits (02b1c40..75a46e5)
 

@@ -11,7 +11,47 @@ const STRATEGIES = ['failover', 'block_round_robin', 'true_round_robin', 'sticky
 
 // AccountLite keeps each account's request budget alongside its name so the
 // block-size field can warn when a block could not be served in full.
-type AccountLite = { id: number; name: string; rate_limit?: number; rate_window?: string | null };
+// base_url is the GROUPING KEY: there is no `provider` column (schema change
+// deliberately deferred), and the upstream endpoint is the provider in practice
+// — two Groq accounts both point at api.groq.com. That is what lets the hop's
+// account select say "these two belong to the same provider" without a migration.
+type AccountLite = { id: number; name: string; base_url?: string; rate_limit?: number; rate_window?: string | null };
+
+// providerKey → providerLabel. Labels strip the generic prefixes and keep the
+// host, so the group reads as the endpoint it is (honest) rather than a
+// guessed brand name: api.groq.com → groq.com, internal://geminiweb → geminiweb.
+function providerKey(base_url: string | undefined): string {
+  const raw = (base_url ?? '').trim();
+  if (!raw) return 'unknown';
+  try {
+    return new URL(raw).host || raw;
+  } catch {
+    return raw;
+  }
+}
+
+function providerLabel(key: string): string {
+  if (key === 'unknown') return 'unknown endpoint';
+  return key.replace(/^(api|www|app)\./, '');
+}
+
+// Grouped once per render; order follows the first appearance so the select
+// keeps the operator's own account ordering.
+function groupAccounts(accounts: AccountLite[]): { key: string; label: string; accounts: AccountLite[] }[] {
+  const groups: { key: string; label: string; accounts: AccountLite[] }[] = [];
+  const byKey = new Map<string, number>();
+  for (const a of accounts) {
+    const key = providerKey(a.base_url);
+    const at = byKey.get(key);
+    if (at === undefined) {
+      byKey.set(key, groups.length);
+      groups.push({ key, label: providerLabel(key), accounts: [a] });
+    } else {
+      groups[at].accounts.push(a);
+    }
+  }
+  return groups;
+}
 
 // HopRow carries one UI-only flag: whether the model id is typed by hand
 // rather than picked from the account's catalog (doc #12). It never reaches
@@ -88,9 +128,18 @@ function HopsEditor({ hops, setHops, accounts, strategy }: {
         return (
           <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-raised/60 px-3 py-2.5">
             <span className="w-5 text-center font-mono text-[11px] text-mute">{i + 1}</span>
+            {/* Grouped by provider (base_url): a provider with MORE THAN ONE
+                account gets the count in its group label — that count is what
+                tells the operator the account choice below is meaningful.
+                A single-account group stays bare, and the control stays enabled
+                either way, because it is also how the provider is chosen. */}
             <select className={cx(inputCls, 'w-auto min-w-40 flex-1 py-1.5 text-[12px]')} value={h.account_id}
               onChange={(e) => set(i, { account_id: Number(e.target.value), custom: undefined })}>
-              {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              {groupAccounts(accounts).map((g) => (
+                <optgroup key={g.key} label={g.accounts.length > 1 ? `${g.label} · ${g.accounts.length} accounts` : g.label}>
+                  {g.accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </optgroup>
+              ))}
               {accounts.length === 0 && <option value={0}>— no accounts —</option>}
             </select>
             {custom || !models ? (
@@ -410,7 +459,7 @@ export default function Combos() {
   const load = useCallback(() => {
     get<Combo[]>('/admin/combos').then((c) => { setCombos(c); setErr(null); }).catch((e) => setErr(e instanceof Error ? e.message : 'failed to load'));
     get<AccountLite[]>('/admin/accounts')
-      .then((a) => setAccounts(a.map((x) => ({ id: x.id, name: x.name, rate_limit: x.rate_limit, rate_window: x.rate_window }))))
+      .then((a) => setAccounts(a.map((x) => ({ id: x.id, name: x.name, base_url: x.base_url, rate_limit: x.rate_limit, rate_window: x.rate_window }))))
       .catch(() => { /* non-fatal */ });
     get<{ id: number; name: string }[]>('/admin/compression-profiles')
       .then((p) => setProfiles(p.map((x) => ({ id: x.id, name: String((x as { name?: unknown }).name ?? x.id) }))))

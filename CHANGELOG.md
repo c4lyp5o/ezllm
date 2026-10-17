@@ -57,6 +57,16 @@ see `VERSION.md`):
   `TestDeviceErrClassification` — each bite-proven RED without its fix, with
   the pre-bite hash re-verified after restore; `make test-short` 16 pkgs green,
   gofmt/vet/build clean, `web/dist` rebuilt in the same commit.
+- **Combos account select grouped by provider**: hops can already pin an account
+  (`combo_hops.account_id`) and `accounts` allows several rows per provider
+  (`name`/`namespace` are the only UNIQUE columns — `kind` is not), but the
+  dropdown was a flat list of names with no way to see which accounts belong to
+  the same provider. It now renders `<optgroup>` per provider, derived from
+  `base_url` (no `provider` column — a schema bump is deliberately deferred),
+  labelled `groq.com · 2 accounts` only when a provider has more than one; single
+  accounts stay bare and the control stays enabled because it also selects the
+  provider. Verified against the live account list (16 accounts → 16 clean groups)
+  plus the multi-account case (`groq.com · 2 accounts` → "Groq | Groq alt").
 
 ## 2026-10-16 — M14 claude-web provider: claude.ai web protocol ✅
 Claude.ai's web app (sessionKey cookie + SSE completion) as a provider,

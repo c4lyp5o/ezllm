@@ -2,6 +2,16 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14); full history via `git log`.
 
+## 2026-10-18 — security milestones, native surfaces, playground, per-key budgets
+
+- Security Milestone A: provider keys encrypted at rest (AES-256-GCM), master key, migration + tests.
+- Security Milestone B: httpOnly cookie session, per-IP login rate limit, frontend cookie auth.
+- Native image/audio adapters (Cloudflare, Google AI Studio); per-account management key (schema v19) for TokenRouter balance.
+- Chat playground (1-3 columns), per-key budget meter + editor in Connect.
+- Dashboard: routing-rescue panel; Linear-inspired palette and sidebar icons.
+- UI: Providers/Services redesign, Connect leftover localStorage removed.
+- Tests + docs updated; security audit report.
+
 ## 2026-10-17 — release versioning, docs sync, test-file housekeeping ✅
 Version plumbing and a full documentation sync pass (release **v0.0.12**,
 see `VERSION.md`):

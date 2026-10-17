@@ -175,6 +175,8 @@ CREATE TABLE IF NOT EXISTS client_tokens (
   enabled     INTEGER NOT NULL DEFAULT 1,
   cap_window  TEXT NOT NULL DEFAULT 'monthly',
   cap_tokens  INTEGER NOT NULL DEFAULT 0,        -- 0 = unlimited
+  allowed_models TEXT NOT NULL DEFAULT '',      -- CSV globs; '' = every model
+  expires_at  TEXT NOT NULL DEFAULT '',          -- RFC3339 UTC; '' = never
   compression_profile_id INTEGER REFERENCES compression_profiles(id),
   created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
@@ -318,6 +320,19 @@ CREATE TABLE IF NOT EXISTS client_usage_counters (
   updated_at TEXT    NOT NULL,
   PRIMARY KEY (client, bucket)
 ) WITHOUT ROWID;
+
+-- v21: in-flight budget reservations. A request reserves its max_tokens
+-- before dispatch; the unused remainder is released when the handler returns.
+-- Rows carry an expiry so a crashed request cannot pin a budget forever.
+CREATE TABLE IF NOT EXISTS client_budget_reservations (
+  id         INTEGER PRIMARY KEY,
+  client     TEXT    NOT NULL,
+  bucket     TEXT    NOT NULL,
+  tokens     INTEGER NOT NULL,
+  created_at TEXT    NOT NULL,
+  expires_at TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_client_reservations ON client_budget_reservations(client, bucket);
 -- Per-million-USD rates. Keyed by (account, model), NOT model alone: the same
 -- model id costs different money through different resellers, and that is
 -- exactly the arbitrage the routing research cares about. Versioned by

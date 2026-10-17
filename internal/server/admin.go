@@ -1936,16 +1936,18 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPatch:
 		var body struct {
-			Enabled   *bool    `json:"enabled"`
-			Roles     []string `json:"roles"`
-			CapTokens *int64   `json:"cap_tokens"`
-			CapWindow string   `json:"cap_window"`
+			Enabled       *bool    `json:"enabled"`
+			Roles         []string `json:"roles"`
+			CapTokens     *int64   `json:"cap_tokens"`
+			CapWindow     string   `json:"cap_window"`
+			AllowedModels *string  `json:"allowed_models"`
+			ExpiresAt     *string  `json:"expires_at"`
 		}
 		if !decodeBody(w, r, &body) {
 			return
 		}
 		if err := s.db.UpdateToken(r.Context(), id, body.Enabled, body.Roles,
-			body.CapTokens, body.CapWindow); err != nil {
+			body.CapTokens, body.CapWindow, body.AllowedModels, body.ExpiresAt); err != nil {
 			s.writeStoreErr(w, err)
 			return
 		}

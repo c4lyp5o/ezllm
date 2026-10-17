@@ -30,7 +30,7 @@ func TestClientBudgetRejectsNegativeCap(t *testing.T) {
 		t.Fatal(err)
 	}
 	bad := int64(-1)
-	if err := db.UpdateToken(ctx, id, nil, nil, &bad, "daily"); err == nil {
+	if err := db.UpdateToken(ctx, id, nil, nil, &bad, "daily", nil, nil); err == nil {
 		t.Fatal("negative cap_tokens must be rejected")
 	}
 }
@@ -48,7 +48,7 @@ func TestClientBudgetMeterAndStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	limit := int64(100)
-	if err := db.UpdateToken(ctx, id, nil, nil, &limit, "daily"); err != nil {
+	if err := db.UpdateToken(ctx, id, nil, nil, &limit, "daily", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -102,9 +102,14 @@ func TestClientBudgetBackfillsCapSetAfterUsage(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
+	// Simulate a key that spent before any meter existed (old database): drop
+	// the counter, then set a cap. The first status check must backfill it.
+	if _, err := db.w.ExecContext(ctx, `DELETE FROM client_usage_counters WHERE client = 'late-key'`); err != nil {
+		t.Fatal(err)
+	}
 	// The cap is set after the spend: the counter row does not exist yet.
 	limit := int64(100)
-	if err := db.UpdateToken(ctx, id, nil, nil, &limit, "daily"); err != nil {
+	if err := db.UpdateToken(ctx, id, nil, nil, &limit, "daily", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	b, err := db.ClientBudgetStatus(ctx, "late-key")

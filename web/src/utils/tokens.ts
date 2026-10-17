@@ -16,6 +16,8 @@ export interface TokenInfo {
   enabled: boolean;
   cap_window: string;
   cap_tokens: number;
+  allowed_models: string;
+  expires_at: string;
   last_used_at?: string | null;
   created_at: string;
 }
@@ -24,7 +26,10 @@ export interface TokenCreated extends TokenInfo {
   plaintext: string;
 }
 
-export type TokenPatch = { name?: string; enabled?: boolean; cap_tokens?: number; cap_window?: string };
+export type TokenPatch = {
+  name?: string; enabled?: boolean; cap_tokens?: number; cap_window?: string;
+  allowed_models?: string; expires_at?: string;
+};
 
 export interface V1Model {
   id: string;
@@ -39,10 +44,12 @@ export const listTokens = () => get<TokenInfo[]>('/admin/tokens');
 export const createToken = async (
   name: string,
   role: 'admin' | 'infer' = 'infer',
+  extra: { allowed_models?: string; expires_at?: string } = {},
 ): Promise<TokenCreated> => {
   const body = await post<{ token: TokenInfo; plaintext: string }>('/admin/tokens', {
     name,
     roles: [role],
+    ...extra,
   });
   return { ...body.token, plaintext: body.plaintext };
 };

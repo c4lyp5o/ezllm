@@ -13,8 +13,119 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path"
+	"strings"
 	"time"
 )
+
+// ClientAllowsModel is the per-key model allowlist. Empty = every model.
+// Patterns are comma-separated exact ids or globs (`deepseek/*`, `gpt-5*`).
+func (d *DB) ClientAllowsModel(ctx context.Context, name, model string) (bool, error) {
+	var patterns string
+	err := d.r.QueryRowContext(ctx,
+		`SELECT allowed_models FROM client_tokens WHERE name = ? AND enabled = 1`, name).Scan(&patterns)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrNotFound
+	}
+	if err != nil {
+		return false, fmt.Errorf("client allowlist: %w", err)
+	}
+	patterns = strings.TrimSpace(patterns)
+	if patterns == "" {
+		return true, nil
+	}
+	for _, raw := range strings.Split(patterns, ",") {
+		p := strings.TrimSpace(raw)
+		if p == "" {
+			continue
+		}
+		if p == "*" || p == model {
+			return true, nil
+		}
+		if ok, _ := path.Match(p, model); ok {
+			return true, nil
+		}
+		// path.Match's `*` does not cross `/`; a namespace prefix is the
+		// common case (`deepseek/*`) and should match the whole model id.
+		if strings.HasSuffix(p, "*") && strings.HasPrefix(model, strings.TrimSuffix(p, "*")) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// ReserveClientBudget admits a request by reserving its max output tokens
+// against the token's current bucket. The row is deleted when the handler
+// returns; rows older than 15 minutes are ignored and pruned on the next
+// reservation, so a crashed process cannot pin a budget forever.
+func (d *DB) ReserveClientBudget(ctx context.Context, client string, tokens int64) (id int64, ok bool, err error) {
+	if tokens <= 0 {
+		return 0, true, nil
+	}
+	var limit int64
+	var window string
+	err = d.r.QueryRowContext(ctx,
+		`SELECT cap_tokens, COALESCE(NULLIF(cap_window,''), 'monthly')
+		   FROM client_tokens WHERE name = ? AND enabled = 1`, client).
+		Scan(&limit, &window)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, ErrNotFound
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("client reservation: %w", err)
+	}
+	if limit <= 0 {
+		return 0, true, nil
+	}
+	now := time.Now()
+	bucket := CountBucket(now, window, time.Local)
+	err = d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM client_budget_reservations WHERE expires_at < ?`,
+			now.UTC().Format(time.RFC3339)); err != nil {
+			return err
+		}
+		var used int64
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COALESCE(tokens,0) FROM client_usage_counters WHERE client = ? AND bucket = ?`,
+			client, bucket).Scan(&used); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		var reserved int64
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COALESCE(SUM(tokens),0) FROM client_budget_reservations WHERE client = ? AND bucket = ? AND expires_at >= ?`,
+			client, bucket, now.UTC().Format(time.RFC3339)).Scan(&reserved); err != nil {
+			return err
+		}
+		if used+reserved+tokens > limit {
+			return nil
+		}
+		res, err := tx.ExecContext(ctx, `
+INSERT INTO client_budget_reservations (client, bucket, tokens, created_at, expires_at)
+VALUES (?,?,?,?,?)`,
+			client, bucket, tokens,
+			now.UTC().Format(time.RFC3339),
+			now.Add(15*time.Minute).UTC().Format(time.RFC3339))
+		if err != nil {
+			return err
+		}
+		id, _ = res.LastInsertId()
+		ok = true
+		return nil
+	})
+	return id, ok, err
+}
+
+// ReleaseClientBudget drops an in-flight reservation.
+func (d *DB) ReleaseClientBudget(ctx context.Context, id int64) {
+	if id == 0 {
+		return
+	}
+	_ = d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `DELETE FROM client_budget_reservations WHERE id = ?`, id)
+		return err
+	})
+}
 
 // ClientBudget is the answer to "may this token make another call?".
 type ClientBudget struct {
@@ -147,7 +258,7 @@ func (d *DB) clientWindowsFor(ctx context.Context, rows []Call) (map[string]wind
 			args = append(args, n)
 		}
 		q := `SELECT name, COALESCE(NULLIF(cap_window,''), 'monthly')
-		        FROM client_tokens WHERE cap_tokens > 0 AND name IN (` + joinComma(ph) + `)`
+		        FROM client_tokens WHERE name IN (` + joinComma(ph) + `)`
 		rs, err := d.r.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("load client windows: %w", err)
@@ -223,8 +334,9 @@ ON CONFLICT(client, bucket) DO UPDATE SET
 	return nil
 }
 
-// meterClientsInTx folds the batch into per-token buckets. Only tokens with a
-// cap are metered; an unlimited token would write a counter nobody reads.
+// meterClientsInTx folds the batch into per-token buckets. It meters every
+// token (not only capped ones) so a cap enabled later starts from real usage
+// instead of a counter that stopped at the first uncapped call.
 func (d *DB) meterClientsInTx(ctx context.Context, tx *sql.Tx, rows []Call) error {
 	if len(rows) == 0 {
 		return nil

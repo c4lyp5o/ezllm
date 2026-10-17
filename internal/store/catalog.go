@@ -15,6 +15,10 @@ import (
 // ErrNotFound is returned for missing rows (accounts, keys, models).
 var ErrNotFound = errors.New("store: not found")
 
+// ErrTokenExpired is distinct from ErrNotFound so the HTTP layer can say
+// "token expired" instead of the generic invalid-token message.
+var ErrTokenExpired = errors.New("store: token expired")
+
 // KeyPick is a decrypted key plus the identity the ledger records.
 // Plaintext must never be logged.
 type KeyPick struct {
@@ -554,11 +558,11 @@ func (d *DB) ClientByToken(ctx context.Context, token string) (name string, role
 		return "", nil, ErrNotFound
 	}
 	h := HashToken(token)
-	var rolesCSV string
+	var rolesCSV, expiresAt string
 	var enabled int
 	err = d.r.QueryRowContext(ctx,
-		`SELECT name, roles, enabled FROM client_tokens WHERE token_hash = ?`, h).
-		Scan(&name, &rolesCSV, &enabled)
+		`SELECT name, roles, enabled, COALESCE(expires_at,'') FROM client_tokens WHERE token_hash = ?`, h).
+		Scan(&name, &rolesCSV, &enabled, &expiresAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", nil, ErrNotFound
@@ -567,6 +571,12 @@ func (d *DB) ClientByToken(ctx context.Context, token string) (name string, role
 	}
 	if enabled != 1 {
 		return "", nil, ErrNotFound
+	}
+	if expiresAt != "" {
+		t, perr := time.Parse(time.RFC3339, expiresAt)
+		if perr != nil || !time.Now().Before(t) {
+			return "", nil, ErrTokenExpired
+		}
 	}
 	return name, strings.Split(rolesCSV, ","), nil
 }

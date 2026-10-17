@@ -16,7 +16,7 @@ func TestExpiredClientBudgetAnswers429(t *testing.T) {
 		t.Fatal(err)
 	}
 	limit := int64(100)
-	if err := h.db.UpdateToken(context.Background(), id, nil, nil, &limit, "daily"); err != nil {
+	if err := h.db.UpdateToken(context.Background(), id, nil, nil, &limit, "daily", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	// Spend the whole budget in the ledger.

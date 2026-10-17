@@ -390,8 +390,8 @@ Replaces the hop list atomically (same body shape, `hops` only).
 ```jsonc
 // POST  → 201 (token plaintext returned EXACTLY ONCE, never again)
 { "name":"hermes","roles":["infer"],"token":"ezllm_…" }   // token optional; generated if absent
-// GET   → [{"id":4,"name":"hermes","hint":"ezllm…a91f","roles":["infer"],"enabled":true,"cap_window":"monthly","cap_tokens":0,"last_used_at":"…"}]
-// PATCH → {"enabled":false} | {"roles":["infer","admin"]} | {"cap_tokens":100000,"cap_window":"daily"}
+// GET   → [{"id":4,"name":"hermes","hint":"ezllm…a91f","roles":["infer"],"enabled":true,"cap_window":"monthly","cap_tokens":0,"allowed_models":"","expires_at":"","last_used_at":"…"}]
+// PATCH → {"enabled":false} | {"roles":["infer","admin"]} | {"cap_tokens":100000,"cap_window":"daily"} | {"allowed_models":"deepseek/*,openai/gpt-5*"} | {"expires_at":"2026-11-01"}
 ```
 `roles` ⊆ `infer|admin`.
 `cap_tokens` is a real per-key token budget (`0` = unlimited); `cap_window` is
@@ -399,6 +399,15 @@ Replaces the hop list atomically (same body shape, `hops` only).
 calendar bucket, metered in the ledger transaction. A spent key returns `429`
 with `limit`, `used`, and `window` before any upstream call. A cap set after the
 key already spent tokens backfills that bucket from the ledger once.
+`allowed_models` is a comma-separated list of exact ids or globs (`deepseek/*`);
+empty = every model. It is checked against the requested id before a combo is
+expanded, and a disallowed model answers `403 model_not_allowed`.
+`expires_at` is RFC3339 or `YYYY-MM-DD`; empty = never. An expired key answers
+`401 token expired`.
+A request that declares `max_tokens`/`max_completion_tokens`/`max_output_tokens`
+reserves that many tokens before dispatch; the reservation is released when the
+handler returns, so concurrent requests cannot all pass the same remaining
+budget. Reservations expire after 15 minutes if a process dies.
 
 ### `GET /admin/export` → `200`
 Full config dump: accounts (no key plaintext — hints + `key_ct` omitted), combos, tokens (hints),

@@ -19,6 +19,7 @@ import (
 	"net"
 	"net/http"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -513,6 +514,35 @@ func edgeID(d []map[string]any, first bool) string {
 	return s
 }
 
+// maxOutputTokens reads the request's declared output ceiling. OpenAI chat
+// uses max_tokens/max_completion_tokens; Responses uses max_output_tokens.
+// 0 means "not declared" — the caller reserves nothing rather than guessing.
+func maxOutputTokens(m map[string]any) int64 {
+	const maxReserve = 10_000_000 // absurd max_tokens must not overflow the budget check
+	for _, k := range []string{"max_completion_tokens", "max_tokens", "max_output_tokens"} {
+		var n int64
+		switch v := m[k].(type) {
+		case json.Number:
+			if x, err := strconv.ParseInt(v.String(), 10, 64); err == nil {
+				n = x
+			}
+		case float64:
+			n = int64(v)
+		case int64:
+			n = v
+		case int:
+			n = int64(v)
+		}
+		if n > 0 {
+			if n > maxReserve {
+				return maxReserve
+			}
+			return n
+		}
+	}
+	return 0
+}
+
 // inference builds the handler for one wire protocol. All three share the same
 // body: read -> resolve -> swap model -> forward -> ledger.
 func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
@@ -555,6 +585,34 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			requested, ok = s.resolveServiceRequestModel(w, r, surface, start, client, cip)
 			if !ok {
 				return
+			}
+		}
+		// Per-key model allowlist: an empty list means every model. Checked
+		// against the requested id before a combo is expanded, so a key
+		// cannot reach a disallowed hop through an alias.
+		if s.db != nil {
+			if allowed, aerr := s.db.ClientAllowsModel(r.Context(), client, requested); aerr == nil && !allowed {
+				writeErr(w, http.StatusForbidden, "model_not_allowed",
+					fmt.Sprintf("token %q is not allowed to use model %q", client, requested))
+				return
+			} else if aerr != nil && !errors.Is(aerr, store.ErrNotFound) {
+				slog.Warn("client allowlist check failed", "client", client, "err", aerr)
+			}
+		}
+		// Reserve the request's max output tokens against the key budget
+		// before dispatch; the defer releases the reservation when the
+		// handler returns (including streams and early errors).
+		if s.db != nil {
+			if n := maxOutputTokens(doc.Map()); n > 0 {
+				if id, ok, rerr := s.db.ReserveClientBudget(r.Context(), client, n); rerr != nil {
+					slog.Warn("client budget reservation failed", "client", client, "err", rerr)
+				} else if !ok {
+					writeErr(w, http.StatusTooManyRequests, "rate_limited",
+						fmt.Sprintf("token budget cannot cover max_tokens=%d for %q", n, client))
+					return
+				} else if id != 0 {
+					defer s.db.ReleaseClientBudget(context.Background(), id)
+				}
 			}
 		}
 		if info := reqInfoOf(r); info != nil {
@@ -815,6 +873,15 @@ func (s *Server) inferenceSTT(w http.ResponseWriter, r *http.Request) {
 		requested, ok = s.resolveServiceRequestModel(w, r, provider.SurfaceAudioSTT, start, client, cip)
 		if !ok {
 			return
+		}
+	}
+	if s.db != nil {
+		if allowed, aerr := s.db.ClientAllowsModel(r.Context(), client, requested); aerr == nil && !allowed {
+			writeErr(w, http.StatusForbidden, "model_not_allowed",
+				fmt.Sprintf("token %q is not allowed to use model %q", client, requested))
+			return
+		} else if aerr != nil && !errors.Is(aerr, store.ErrNotFound) {
+			slog.Warn("client allowlist check failed", "client", client, "err", aerr)
 		}
 	}
 	if info := reqInfoOf(r); info != nil {
@@ -1178,6 +1245,10 @@ func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 		}
 		name, roles, err := s.auth.ClientByToken(r.Context(), token)
 		if err != nil || name == "" {
+			if errors.Is(err, store.ErrTokenExpired) {
+				writeErr(w, http.StatusUnauthorized, "invalid_request_error", "token expired")
+				return
+			}
 			writeErr(w, http.StatusUnauthorized, "invalid_request_error", "invalid bearer token")
 			return
 		}

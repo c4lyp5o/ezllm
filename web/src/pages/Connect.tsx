@@ -142,11 +142,15 @@ export default function Connect() {
   const [fresh, setFresh] = useState<TokenCreated | null>(null);
   const [name, setName] = useState('');
   const [role, setRole] = useState<'infer' | 'admin'>('infer');
+  const [newModels, setNewModels] = useState('');
+  const [newExpiry, setNewExpiry] = useState('');
   const [busyId, setBusyId] = useState<number | null>(null);
   const [pendingRevoke, setPendingRevoke] = useState<TokenInfo | null>(null);
   const [budgetTarget, setBudgetTarget] = useState<TokenInfo | null>(null);
   const [budgetCap, setBudgetCap] = useState(0);
   const [budgetWindow, setBudgetWindow] = useState('monthly');
+  const [budgetModels, setBudgetModels] = useState('');
+  const [budgetExpiry, setBudgetExpiry] = useState('');
   const [budgetBusy, setBudgetBusy] = useState(false);
 
   // Base URL: same origin as the dashboard, minus the trailing slash.
@@ -184,9 +188,14 @@ export default function Connect() {
     if (!name.trim()) return;
     setCreating(true);
     try {
-      const t = await createToken(name.trim(), role);
+      const t = await createToken(name.trim(), role, {
+        allowed_models: newModels.trim(),
+        expires_at: newExpiry,
+      });
       setFresh(t);
       setName('');
+      setNewModels('');
+      setNewExpiry('');
       await reload();
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'create failed');
@@ -205,7 +214,12 @@ export default function Connect() {
     if (!budgetTarget) return;
     setBudgetBusy(true);
     try {
-      const updated = await patchToken(budgetTarget.id, { cap_tokens: budgetCap, cap_window: budgetWindow });
+      const updated = await patchToken(budgetTarget.id, {
+        cap_tokens: budgetCap,
+        cap_window: budgetWindow,
+        allowed_models: budgetModels.trim(),
+        expires_at: budgetExpiry,
+      });
       setTokens((cur) => cur?.map((t) => (t.id === updated.id ? updated : t)) ?? null);
       setBudgetTarget(null);
     } catch (e) {
@@ -302,6 +316,16 @@ export default function Connect() {
                 ))}
               </div>
             </div>
+            <div className="min-w-[180px]">
+              <label className={labelCls} htmlFor="tk-models">Allowed models <span className="text-mute">(optional)</span></label>
+              <input id="tk-models" className={cx(inputCls, 'font-mono text-[12px]')} placeholder="deepseek/*"
+                value={newModels} onChange={(e) => setNewModels(e.target.value)} />
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="tk-expiry">Expires <span className="text-mute">(optional)</span></label>
+              <input id="tk-expiry" type="date" className={inputCls} value={newExpiry}
+                onChange={(e) => setNewExpiry(e.target.value)} />
+            </div>
             <button
               type="button" disabled={!name.trim() || creating}
               className={cx(btn.base, btn.primary)}
@@ -341,6 +365,12 @@ export default function Connect() {
                       <Mono>{t.hint}</Mono>
                       <span>used {t.last_used_at ? new Date(t.last_used_at).toLocaleString() : 'never'}</span>
                     </div>
+                    {(t.expires_at || t.allowed_models) && (
+                      <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10.5px] text-mute">
+                        {t.expires_at && <span>expires {t.expires_at.slice(0, 10)}</span>}
+                        {t.allowed_models && <span className="truncate" title={t.allowed_models}>models: {t.allowed_models}</span>}
+                      </div>
+                    )}
                   </div>
                   <div className="ml-auto flex items-center gap-4 text-[11.5px] text-dim">
                     <span>{(u?.calls ?? 0).toLocaleString()} calls · {(u?.tin ?? 0).toLocaleString()} in · {(u?.tout ?? 0).toLocaleString()} out</span>
@@ -360,8 +390,14 @@ export default function Connect() {
                     </span>
                     <span className="flex items-center gap-2">
                       <button type="button" className={cx(btn.base, btn.ghost, 'px-2.5 py-1.5 text-[11.5px]')}
-                        onClick={() => { setBudgetTarget(t); setBudgetCap(t.cap_tokens); setBudgetWindow(t.cap_window || 'monthly'); }}>
-                        Budget
+                        onClick={() => {
+                          setBudgetTarget(t);
+                          setBudgetCap(t.cap_tokens);
+                          setBudgetWindow(t.cap_window || 'monthly');
+                          setBudgetModels(t.allowed_models || '');
+                          setBudgetExpiry(t.expires_at ? t.expires_at.slice(0, 10) : '');
+                        }}>
+                        Policy
                       </button>
                       <Toggle checked={t.enabled} onChange={(v) => void toggle(t, v)} disabled={busyId === t.id} />
                       <button type="button" className={cx(btn.base, btn.danger, 'px-2.5 py-1.5 text-[11.5px]')} onClick={() => setPendingRevoke(t)} disabled={busyId === t.id}>Revoke</button>
@@ -376,8 +412,8 @@ export default function Connect() {
 
       {/* ── Budget editor ─────────────────────────────────────────── */}
       <Modal open={budgetTarget != null} onClose={() => setBudgetTarget(null)}
-        title={`Budget for ${budgetTarget?.name ?? ''}`}
-        subtitle="Per-key token budget, enforced by the rules engine"
+        title={`Key policy — ${budgetTarget?.name ?? ''}`}
+        subtitle="Budget, model allowlist, and expiry for this key"
         footer={<>
           <button type="button" className={cx(btn.base, btn.ghost)} onClick={() => setBudgetTarget(null)}>Cancel</button>
           <button type="button" disabled={budgetBusy} className={cx(btn.base, btn.primary)} onClick={() => void saveBudget()}>
@@ -398,8 +434,19 @@ export default function Connect() {
               </select>
             </div>
           </div>
+          <div>
+            <label className={labelCls}>Allowed models <span className="text-mute">(empty = all)</span></label>
+            <input className={cx(inputCls, 'font-mono')} placeholder="deepseek/*, openai/gpt-5*"
+              value={budgetModels} onChange={(e) => setBudgetModels(e.target.value)} />
+            <p className="mt-1 text-[11px] text-mute">Comma-separated ids or globs. Checked before a combo is expanded.</p>
+          </div>
+          <div>
+            <label className={labelCls}>Expires <span className="text-mute">(empty = never)</span></label>
+            <input type="date" className={inputCls} value={budgetExpiry}
+              onChange={(e) => setBudgetExpiry(e.target.value)} />
+          </div>
           <p className="text-[11.5px] text-mute">
-            Usage is the key's actual ledger spend (tokens in + out) inside the window. A spent key answers 429 until the window rolls.
+            Usage is the key's actual ledger spend (tokens in + out) inside the window. A spent key answers 429 until the window rolls; max_tokens is reserved before dispatch.
           </p>
         </div>
       </Modal>

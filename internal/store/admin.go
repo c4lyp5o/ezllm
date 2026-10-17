@@ -1331,21 +1331,24 @@ FROM combo_hops WHERE combo_id = ? ORDER BY position`, c.ID)
 
 // TokenSummary is the admin-API token shape (hash never leaves the store).
 type TokenSummary struct {
-	ID         int64    `json:"id"`
-	Name       string   `json:"name"`
-	Hint       string   `json:"hint"`
-	Roles      []string `json:"roles"`
-	Enabled    bool     `json:"enabled"`
-	CapWindow  string   `json:"cap_window"`
-	CapTokens  int64    `json:"cap_tokens"`
-	LastUsedAt *string  `json:"last_used_at"`
-	CreatedAt  string   `json:"created_at"`
+	ID            int64    `json:"id"`
+	Name          string   `json:"name"`
+	Hint          string   `json:"hint"`
+	Roles         []string `json:"roles"`
+	Enabled       bool     `json:"enabled"`
+	CapWindow     string   `json:"cap_window"`
+	CapTokens     int64    `json:"cap_tokens"`
+	AllowedModels string   `json:"allowed_models"`
+	ExpiresAt     string   `json:"expires_at"`
+	LastUsedAt    *string  `json:"last_used_at"`
+	CreatedAt     string   `json:"created_at"`
 }
 
 // ListTokens returns all client tokens (hints only).
 func (d *DB) ListTokens(ctx context.Context) ([]TokenSummary, error) {
 	rows, err := d.r.QueryContext(ctx, `
 SELECT id, name, token_hash, roles, enabled, cap_window, cap_tokens,
+       allowed_models, expires_at,
        -- no last_used_at column: derive from the ledger (calls.client is the
        -- token name, set by ClientByToken). No hot-path write needed.
        (SELECT MAX(ts) FROM calls c WHERE c.client = client_tokens.name),
@@ -1361,7 +1364,7 @@ FROM client_tokens ORDER BY id`)
 		var hash, roles string
 		var lastUsed sql.NullString
 		if err := rows.Scan(&t.ID, &t.Name, &hash, &roles, &t.Enabled,
-			&t.CapWindow, &t.CapTokens, &lastUsed, &t.CreatedAt); err != nil {
+			&t.CapWindow, &t.CapTokens, &t.AllowedModels, &t.ExpiresAt, &lastUsed, &t.CreatedAt); err != nil {
 			return nil, err
 		}
 		t.Roles = splitCSV(roles)
@@ -1376,9 +1379,11 @@ FROM client_tokens ORDER BY id`)
 
 // TokenInput is the create payload; Token is plaintext and returned ONCE.
 type TokenInput struct {
-	Name  string   `json:"name"`
-	Roles []string `json:"roles"`
-	Token string   `json:"token"`
+	Name          string   `json:"name"`
+	Roles         []string `json:"roles"`
+	Token         string   `json:"token"`
+	AllowedModels string   `json:"allowed_models"`
+	ExpiresAt     string   `json:"expires_at"`
 }
 
 // ValidateToken checks roles before writing.
@@ -1393,7 +1398,26 @@ func (in TokenInput) Validate() error {
 			return fmt.Errorf("role %q must be infer|admin", r)
 		}
 	}
+	if _, err := normalizeExpiry(in.ExpiresAt); err != nil {
+		return err
+	}
 	return nil
+}
+
+// normalizeExpiry stores RFC3339 UTC. A bare YYYY-MM-DD means end of that day
+// (UTC) so a date picker does not expire a key at midnight at the start.
+func normalizeExpiry(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", nil
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t.UTC().Format(time.RFC3339), nil
+	}
+	if t, err := time.ParseInLocation("2006-01-02", s, time.Local); err == nil {
+		return t.Add(24*time.Hour - time.Second).UTC().Format(time.RFC3339), nil
+	}
+	return "", fmt.Errorf("expires_at must be RFC3339 or YYYY-MM-DD")
 }
 
 // Tokens are created, never overwritten: returning fresh plaintext for a name
@@ -1413,6 +1437,11 @@ func (d *DB) UpsertToken(ctx context.Context, in TokenInput) (id int64, plaintex
 	if len(roles) == 0 {
 		roles = []string{"infer"}
 	}
+	expires, err := normalizeExpiry(in.ExpiresAt)
+	if err != nil {
+		return 0, "", err
+	}
+	allowed := strings.TrimSpace(in.AllowedModels)
 	err = d.WithWriteTx(ctx, func(tx *sql.Tx) error {
 		var existing string
 		err = tx.QueryRowContext(ctx, `SELECT name FROM client_tokens WHERE name=?`, in.Name).Scan(&existing)
@@ -1423,8 +1452,9 @@ func (d *DB) UpsertToken(ctx context.Context, in TokenInput) (id int64, plaintex
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `
-INSERT INTO client_tokens (name, token_hash, roles, enabled) VALUES (?,?,?,1)`,
-			in.Name, HashToken(plaintext), strings.Join(roles, ","))
+INSERT INTO client_tokens (name, token_hash, roles, enabled, allowed_models, expires_at)
+VALUES (?,?,?,1,?,?)`,
+			in.Name, HashToken(plaintext), strings.Join(roles, ","), allowed, expires)
 		if err != nil && isUniqueViolation(err) {
 			// The pre-check above is check-then-act, so a genuine race — two
 			// concurrent POSTs with the same name — reaches this line. A raw
@@ -1446,8 +1476,8 @@ INSERT INTO client_tokens (name, token_hash, roles, enabled) VALUES (?,?,?,1)`,
 	return id, plaintext, err
 }
 
-// UpdateToken patches enabled/roles/caps.
-func (d *DB) UpdateToken(ctx context.Context, id int64, enabled *bool, roles []string, capTokens *int64, capWindow string) error {
+// UpdateToken patches enabled/roles/caps/policy.
+func (d *DB) UpdateToken(ctx context.Context, id int64, enabled *bool, roles []string, capTokens *int64, capWindow string, allowedModels *string, expiresAt *string) error {
 	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
 		if enabled != nil {
 			if _, err := tx.ExecContext(ctx,
@@ -1485,6 +1515,22 @@ func (d *DB) UpdateToken(ctx context.Context, id int64, enabled *bool, roles []s
 			}
 			if _, err := tx.ExecContext(ctx,
 				`UPDATE client_tokens SET cap_window=? WHERE id=?`, capWindow, id); err != nil {
+				return err
+			}
+		}
+		if allowedModels != nil {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE client_tokens SET allowed_models=? WHERE id=?`, strings.TrimSpace(*allowedModels), id); err != nil {
+				return err
+			}
+		}
+		if expiresAt != nil {
+			exp, err := normalizeExpiry(*expiresAt)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE client_tokens SET expires_at=? WHERE id=?`, exp, id); err != nil {
 				return err
 			}
 		}

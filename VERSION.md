@@ -54,8 +54,12 @@ Native image/audio surfaces and the playground dashboard pass.
 - **Per-key budgets enforced**: client token `cap_tokens`/`cap_window` meter in
   `client_usage_counters` (schema v20) inside the ledger transaction; a spent
   key returns `429` before dispatch. Caps set after usage backfill the current
-  bucket from `calls` once. Tests in `internal/store/client_budget_test.go` and
-  `internal/server/client_budget_test.go`.
+  bucket from `calls` once. `max_tokens` is reserved before dispatch and released
+  on return; reservations expire after 15 minutes. Schema v21 adds
+  `allowed_models` (glob allowlist, `403 model_not_allowed`) and `expires_at`
+  (`401 token expired`). Tests in `internal/store/client_budget_test.go`,
+  `internal/store/client_policy_test.go`, `internal/server/client_budget_test.go`,
+  and `internal/server/client_policy_test.go`.
 
 ---
 

@@ -25,7 +25,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 20
+const schemaVersion = 21
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -300,6 +300,9 @@ func (d *DB) migrate() error {
 		if err := d.alterCallsIP(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate calls ip: %w", err)
 		}
+		if err := d.alterClientTokenPolicy(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate client token policy: %w", err)
+		}
 		if err := d.rebuildCombosV9(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate combos: %w", err)
 		}
@@ -341,6 +344,30 @@ func (d *DB) alterAccountManagementKey(ctx context.Context) error {
 	}
 	_, err = d.w.ExecContext(ctx, `ALTER TABLE accounts ADD COLUMN management_key_plain TEXT`)
 	return err
+}
+
+// alterClientTokenPolicy adds allowed_models + expires_at on databases created
+// before v21. Both default to empty (every model / never expires).
+func (d *DB) alterClientTokenPolicy(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "client_tokens")
+	if err != nil || !exists {
+		return err
+	}
+	if ok, err := hasColumn(ctx, d.w, "client_tokens", "allowed_models"); err != nil {
+		return err
+	} else if !ok {
+		if _, err := d.w.ExecContext(ctx, `ALTER TABLE client_tokens ADD COLUMN allowed_models TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	if ok, err := hasColumn(ctx, d.w, "client_tokens", "expires_at"); err != nil {
+		return err
+	} else if !ok {
+		if _, err := d.w.ExecContext(ctx, `ALTER TABLE client_tokens ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // alterComboHopHold adds combo_hops.hold_until_failure on databases created

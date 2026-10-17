@@ -134,3 +134,49 @@ func TestPickKeyFailsWithWrongMasterKey(t *testing.T) {
 		t.Fatal("PickKey succeeded with the wrong master key")
 	}
 }
+
+func TestManagementKeyEncryptedAtRestAndReturnedDecrypted(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "t.sqlite")
+	ctx := context.Background()
+
+	db, err := Open(ctx, Options{Path: path, MasterSecret: "test-master"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := db.CreateAccount(ctx, AccountInput{
+		Name: "TokenRouter", Namespace: "tokenrouter", Kind: "openai-compatible",
+		BaseURL: "https://api.tokenrouter.com/v1", ManagementKey: "sk-mgmt-secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw string
+	if err := db.r.QueryRowContext(ctx, `SELECT COALESCE(management_key_plain,'') FROM accounts WHERE id=?`, id).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(raw, cryptoPrefix) {
+		t.Fatalf("management_key_plain was not encrypted: %q", raw)
+	}
+	acct, err := db.AccountByID(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acct.ManagementKey != "sk-mgmt-secret" {
+		t.Fatalf("decrypted management key = %q", acct.ManagementKey)
+	}
+	_ = db.Close()
+
+	db2, err := Open(ctx, Options{Path: path, MasterSecret: "test-master"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db2.Close()
+	acct, err = db2.AccountByNamespace(ctx, "tokenrouter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acct.ManagementKey != "sk-mgmt-secret" {
+		t.Fatalf("reopened management key = %q", acct.ManagementKey)
+	}
+}

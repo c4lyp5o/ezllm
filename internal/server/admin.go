@@ -1377,7 +1377,7 @@ func (s *Server) handleAccountQuota(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	acc, err := s.db.GetAccount(r.Context(), id)
+	acc, err := s.db.AccountByID(r.Context(), id)
 	if err != nil {
 		s.writeStoreErr(w, err)
 		return
@@ -1388,12 +1388,12 @@ func (s *Server) handleAccountQuota(w http.ResponseWriter, r *http.Request) {
 			"no enabled provider key on this account", map[string]any{"account_id": id})
 		return
 	}
-	adapter, err := s.registry.Get(accountFromSummary(acc).Kind)
+	adapter, err := s.registry.Get(acc.Kind)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "server_error", err.Error())
 		return
 	}
-	q, err := adapter.ReadQuota(r.Context(), accountFromSummary(acc), key)
+	q, err := adapter.ReadQuota(r.Context(), *acc, key)
 	if err != nil && !errors.Is(err, provider.ErrQuotaUnsupported) {
 		writeErrExtra(w, http.StatusBadGateway, "upstream_error",
 			"quota read failed: "+err.Error(), map[string]any{"retryable": true})

@@ -44,16 +44,17 @@ type AccountSummary struct {
 	// provider states it ("5 requests per 1 minute"), not as a token budget:
 	// five calls to five different models spend the same 5/min tier, which no
 	// per-model cap can express.
-	RateLimit       int64          `json:"rate_limit"`
-	RateWindow      string         `json:"rate_window"`
-	ProbeDelayMS    int            `json:"probe_delay_ms"`
-	Notes           string         `json:"notes,omitempty"`
-	CreatedAt       string         `json:"created_at"`
-	UpdatedAt       string         `json:"updated_at"`
-	Keys            []KeySummary   `json:"keys"`
-	Quota           *QuotaSummary  `json:"quota"`
-	ModelsCount     int            `json:"models_count"`
-	ProtocolSupport map[string]int `json:"protocol_support"`
+	RateLimit        int64          `json:"rate_limit"`
+	RateWindow       string         `json:"rate_window"`
+	ProbeDelayMS     int            `json:"probe_delay_ms"`
+	Notes            string         `json:"notes,omitempty"`
+	ManagementKeySet bool           `json:"management_key_set"`
+	CreatedAt        string         `json:"created_at"`
+	UpdatedAt        string         `json:"updated_at"`
+	Keys             []KeySummary   `json:"keys"`
+	Quota            *QuotaSummary  `json:"quota"`
+	ModelsCount      int            `json:"models_count"`
+	ProtocolSupport  map[string]int `json:"protocol_support"`
 }
 
 // KeySummary is the only surviving shape of a credential: hint + test history.
@@ -92,7 +93,8 @@ func (d *DB) ListAccounts(ctx context.Context) ([]AccountSummary, error) {
 SELECT id, name, namespace, kind, base_url, enabled, requires_session_header,
        quota_mode, cap_window, cap_tokens, COALESCE(probe_delay_ms,400),
        COALESCE(rate_limit,0), COALESCE(rate_window,''),
-       COALESCE(notes,''), created_at, updated_at, COALESCE(usage_convention,'auto')
+       COALESCE(notes,''), created_at, updated_at, COALESCE(usage_convention,'auto'),
+       COALESCE(management_key_plain,'')
 FROM accounts ORDER BY namespace`)
 	if err != nil {
 		return nil, err
@@ -102,12 +104,14 @@ FROM accounts ORDER BY namespace`)
 	out := []AccountSummary{}
 	for rows.Next() {
 		var a AccountSummary
+		var managementKey string
 		if err := rows.Scan(&a.ID, &a.Name, &a.Namespace, &a.Kind, &a.BaseURL, &a.Enabled,
 			&a.RequiresSession, &a.QuotaMode, &a.CapWindow, &a.CapTokens,
 			&a.ProbeDelayMS, &a.RateLimit, &a.RateWindow,
-			&a.Notes, &a.CreatedAt, &a.UpdatedAt, &a.UsageConvention); err != nil {
+			&a.Notes, &a.CreatedAt, &a.UpdatedAt, &a.UsageConvention, &managementKey); err != nil {
 			return nil, err
 		}
+		a.ManagementKeySet = strings.TrimSpace(managementKey) != ""
 		out = append(out, a)
 	}
 	if err := rows.Err(); err != nil {
@@ -244,6 +248,10 @@ type AccountInput struct {
 	// UsageConvention: '' = keep current (PATCH) / default 'auto' (create);
 	// otherwise auto|anthropic|total. See provider.UsageConvention.
 	UsageConvention string `json:"usage_convention"`
+	// ManagementKey is an optional second credential for providers whose
+	// balance endpoint needs a management key (TokenRouter). Empty on PATCH
+	// keeps the stored value; the account list only reports whether it is set.
+	ManagementKey string `json:"management_key"`
 	// MaxContextTokens (addendum #2/#6): the operator-declared context window.
 	// Requests whose estimated token count exceeds it are filtered before
 	// dispatch. 0 = unknown/unlimited.
@@ -467,6 +475,9 @@ func (d *DB) UpdateAccount(ctx context.Context, id int64, in AccountInput) error
 	if in.UsageConvention == "" {
 		in.UsageConvention = string(cur.UsageConvention)
 	}
+	if in.ManagementKey == "" {
+		in.ManagementKey = cur.ManagementKey
+	}
 	kind, err := provider.ParseKind(in.Kind)
 	if err != nil {
 		return err
@@ -534,6 +545,14 @@ func (d *DB) writeAccount(ctx context.Context, id int64, in AccountInput, kind p
 		// with no count is dead data that reads as "configured".
 		rateWindow = ""
 	}
+	mgmtKey := in.ManagementKey
+	if mgmtKey != "" && d.crypto != nil {
+		enc, err := d.crypto.Encrypt(mgmtKey)
+		if err != nil {
+			return 0, err
+		}
+		mgmtKey = enc
+	}
 
 	var newID int64
 	err = d.WithWriteTx(ctx, func(tx *sql.Tx) error {
@@ -541,11 +560,12 @@ func (d *DB) writeAccount(ctx context.Context, id int64, in AccountInput, kind p
 			res, err := tx.ExecContext(ctx, `
 INSERT INTO accounts (name, namespace, kind, base_url, enabled, requires_session_header,
                       quota_mode, custom_headers, probe_delay_ms, cap_window, cap_tokens,
-                      rate_limit, rate_window, notes, usage_convention, max_context_tokens)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                      rate_limit, rate_window, notes, usage_convention, max_context_tokens,
+                      management_key_plain)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 				in.Name, in.Namespace, string(kind), in.BaseURL, enabled, requires,
 				quotaMode, ch, probe, capWindow, capTokens, rateLimit, rateWindow, in.Notes,
-				parsedUsage, maxCtx)
+				parsedUsage, maxCtx, mgmtKey)
 			if err != nil {
 				return err
 			}
@@ -556,12 +576,12 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 UPDATE accounts SET name=?, namespace=?, kind=?, base_url=?, enabled=?,
        requires_session_header=?, quota_mode=?, custom_headers=?, probe_delay_ms=?,
        cap_window=?, cap_tokens=?, rate_limit=?, rate_window=?, notes=?,
-       usage_convention=?, max_context_tokens=?,
+       usage_convention=?, max_context_tokens=?, management_key_plain=?,
        updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
 WHERE id=?`,
 			in.Name, in.Namespace, string(kind), in.BaseURL, enabled, requires,
 			quotaMode, ch, probe, capWindow, capTokens, rateLimit, rateWindow, in.Notes,
-			parsedUsage, maxCtx, id)
+			parsedUsage, maxCtx, mgmtKey, id)
 		if err != nil {
 			return err
 		}

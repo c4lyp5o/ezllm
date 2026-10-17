@@ -20,10 +20,3 @@ func TestParseTokenRouterWallet(t *testing.T) {
 		t.Fatalf("cost = %v, want ~46.309", q.CostTotal)
 	}
 }
-
-func TestTokenRouterManagementKeyPrefersEnv(t *testing.T) {
-	t.Setenv("EZLLM_TOKENROUTER_MANAGEMENT_KEY", "env-key")
-	if got := tokenRouterManagementKey(); got != "env-key" {
-		t.Fatalf("got %q", got)
-	}
-}

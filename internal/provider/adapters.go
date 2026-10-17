@@ -236,10 +236,8 @@ func mapOracleErr(err error) error {
 // ErrQuotaUnsupported, which the UI renders as "measured" (our own numbers).
 func (a *openAICompatible) ReadQuota(ctx context.Context, acct Account, key string) (Quota, error) {
 	authKey := key
-	if strings.EqualFold(acct.BaseURL, "https://api.tokenrouter.com/v1") || strings.Contains(strings.ToLower(acct.BaseURL), "api.tokenrouter.com") {
-		if mk := tokenRouterManagementKey(); mk != "" {
-			authKey = mk
-		}
+	if strings.Contains(strings.ToLower(acct.BaseURL), "api.tokenrouter.com") && strings.TrimSpace(acct.ManagementKey) != "" {
+		authKey = acct.ManagementKey
 	}
 	hdrs := map[string]string{"Authorization": "Bearer " + authKey}
 	if oracleURL, parse, ok := quotaOracleFor(acct); ok {

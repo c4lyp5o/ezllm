@@ -30,7 +30,8 @@ func (d *DB) AccountByNamespace(ctx context.Context, ns string) (*provider.Accou
 SELECT id, name, namespace, kind, base_url, enabled, requires_session_header,
        COALESCE(custom_headers,''), COALESCE(probe_delay_ms,400),
        COALESCE(rate_limit,0), COALESCE(rate_window,''),
-       COALESCE(usage_convention,'auto'), COALESCE(max_context_tokens,0)
+       COALESCE(usage_convention,'auto'), COALESCE(max_context_tokens,0),
+       COALESCE(management_key_plain,'')
 FROM accounts WHERE namespace = ?`, ns)
 	var (
 		a             provider.Account
@@ -41,10 +42,11 @@ FROM accounts WHERE namespace = ?`, ns)
 		probeDelay    int
 		rateLimit     int64
 		rateWindow    string
+		mgmtKey       string
 	)
 	if err := row.Scan(&a.ID, &a.Name, &a.Namespace, &kind, &a.BaseURL, &enabled,
 		&needsSession, &customHeaders, &probeDelay, &rateLimit, &rateWindow,
-		&a.UsageConvention, &a.MaxContextTokens); err != nil {
+		&a.UsageConvention, &a.MaxContextTokens, &mgmtKey); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -65,6 +67,12 @@ FROM accounts WHERE namespace = ?`, ns)
 			a.CustomHeaders = h
 		}
 	}
+	if d.crypto != nil && mgmtKey != "" && strings.HasPrefix(mgmtKey, cryptoPrefix) {
+		if dec, err := d.crypto.Decrypt(mgmtKey); err == nil {
+			mgmtKey = dec
+		}
+	}
+	a.ManagementKey = mgmtKey
 	return &a, nil
 }
 
@@ -75,7 +83,7 @@ SELECT id, name, namespace, kind, base_url, enabled, requires_session_header,
        COALESCE(custom_headers,''), COALESCE(probe_delay_ms,400),
        COALESCE(rate_limit,0), COALESCE(rate_window,''),
        COALESCE(usage_convention,'auto'), COALESCE(notes,''),
-       COALESCE(max_context_tokens,0)
+       COALESCE(max_context_tokens,0), COALESCE(management_key_plain,'')
 FROM accounts WHERE id = ?`, id)
 	var (
 		a             provider.Account
@@ -86,10 +94,11 @@ FROM accounts WHERE id = ?`, id)
 		probeDelay    int
 		rateLimit     int64
 		rateWindow    string
+		mgmtKey       string
 	)
 	if err := row.Scan(&a.ID, &a.Name, &a.Namespace, &kind, &a.BaseURL, &enabled,
 		&needsSession, &customHeaders, &probeDelay, &rateLimit, &rateWindow, &a.UsageConvention,
-		&a.Notes, &a.MaxContextTokens); err != nil {
+		&a.Notes, &a.MaxContextTokens, &mgmtKey); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -110,6 +119,12 @@ FROM accounts WHERE id = ?`, id)
 			a.CustomHeaders = h
 		}
 	}
+	if d.crypto != nil && mgmtKey != "" && strings.HasPrefix(mgmtKey, cryptoPrefix) {
+		if dec, err := d.crypto.Decrypt(mgmtKey); err == nil {
+			mgmtKey = dec
+		}
+	}
+	a.ManagementKey = mgmtKey
 	return &a, nil
 }
 

@@ -90,7 +90,7 @@ const RATE_WINDOWS = ['1s', '10s', '30s', '1m', '5m', '15m', '1h'];
 
 type Draft = {
   name: string; namespace: string; nsTouched: boolean; kind: string; preset: string;
-  base_url: string; keyLabel: string; apiKey: string;
+  base_url: string; keyLabel: string; apiKey: string; managementKey: string;
   probe_delay_ms: number; notes: string; skipInference: boolean;
   advOpen: boolean; requiresSessionHeader: boolean; customHeaders: string;
   accountId: string;
@@ -98,7 +98,7 @@ type Draft = {
 
 const emptyDraft: Draft = {
   name: '', namespace: '', nsTouched: false, kind: 'opencode-go', preset: 'opencode-go',
-  base_url: 'https://opencode.ai/zen/go/v1', keyLabel: 'primary', apiKey: '',
+  base_url: 'https://opencode.ai/zen/go/v1', keyLabel: 'primary', apiKey: '', managementKey: '',
   probe_delay_ms: 400, notes: '', skipInference: false,
   advOpen: false, requiresSessionHeader: true, customHeaders: '',
   accountId: '',
@@ -334,6 +334,7 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
         base_url: preset.baseURL ?? d.base_url.trim(), probe_delay_ms: d.probe_delay_ms,
         requires_session_header: preset.sessionHeader ?? d.requiresSessionHeader,
         custom_headers: customHeaders, notes: d.notes.trim(),
+        management_key: d.managementKey.trim(),
         // No quota_mode / caps here on purpose: quota is always probed, and
         // cap_window + cap_tokens live on Rules (per model, enforced in-flight).
       };
@@ -556,6 +557,15 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
             <input id="ap-kl" className={inputCls} value={d.keyLabel} onChange={(e) => set('keyLabel', e.target.value)} placeholder="primary" />
           </div>
         </div>
+        {d.preset === 'tokenrouter' && (
+          <div>
+            <label className={labelCls} htmlFor="ap-mgmt">Management key <span className="text-mute">(optional)</span></label>
+            <input id="ap-mgmt" type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
+              placeholder="Paste the TokenRouter management key"
+              value={d.managementKey} onChange={(e) => set('managementKey', e.target.value)} />
+            <p className="mt-1 text-[11px] text-mute">Used only to read the wallet balance — stored encrypted, never sent upstream.</p>
+          </div>
+        )}
         <div>
           <label className={labelCls} htmlFor="ap-notes">Notes</label>
           <input id="ap-notes" className={inputCls} value={d.notes} onChange={(e) => set('notes', e.target.value)} placeholder="optional" />
@@ -597,6 +607,7 @@ function EditAccountModal({ account, onClose, onSaved }: { account: Account | nu
   const [baseUrl, setBaseUrl] = useState('');
   const [probeDelay, setProbeDelay] = useState(400);
   const [notes, setNotes] = useState('');
+  const [managementKey, setManagementKey] = useState('');
   const [rateLimit, setRateLimit] = useState(0);
   const [rateWindow, setRateWindow] = useState('60s');
   const [busy, setBusy] = useState(false);
@@ -606,6 +617,7 @@ function EditAccountModal({ account, onClose, onSaved }: { account: Account | nu
     if (account) {
       setName(account.name); setKind(account.kind); setBaseUrl(account.base_url);
       setProbeDelay(account.probe_delay_ms ?? 400); setNotes(account.notes ?? ''); setErr(null);
+      setManagementKey('');
       setRateLimit(account.rate_limit ?? 0);
       setRateWindow(account.rate_window || '60s');
     }
@@ -623,6 +635,7 @@ function EditAccountModal({ account, onClose, onSaved }: { account: Account | nu
         // as a real state rather than an omission.
         rate_limit: rateLimit,
         rate_window: rateLimit > 0 ? rateWindow : '',
+        ...(managementKey.trim() ? { management_key: managementKey.trim() } : {}),
       });
       onSaved();
       onClose();
@@ -673,6 +686,14 @@ function EditAccountModal({ account, onClose, onSaved }: { account: Account | nu
             <input className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} />
           </div>
         </div>
+        {kind === 'openai-compatible' && account?.namespace === 'tokenrouter' && (
+          <div>
+            <label className={labelCls}>Management key (optional, rotates the stored value)</label>
+            <input type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
+              placeholder={account?.management_key_set ? '•••• (set — paste to replace)' : 'Paste the TokenRouter management key'}
+              value={managementKey} onChange={(e) => setManagementKey(e.target.value)} />
+          </div>
+        )}
         <div className="rounded-lg border border-line bg-raised/60 p-4">
           <SectionLabel>Request budget (account-wide)</SectionLabel>
           <p className="mt-1 text-[11px] text-mute">

@@ -148,6 +148,10 @@ type Account struct {
 	// filtered BEFORE dispatch — no paid upstream call, no wasted round-trip.
 	// 0 = unknown/unlimited (the default and the backward-compatible value).
 	MaxContextTokens int64
+	// ManagementKey is an OPTIONAL second credential used by providers whose
+	// balance/quota endpoint needs a management (not inference) key, e.g.
+	// TokenRouter. Encrypted at rest alongside the inference keys.
+	ManagementKey string
 	// UsageConvention is the operator-declared input_tokens accounting of the
 	// upstream Messages wire (see UsageConvention above). Empty on hand-built
 	// values is treated as UsageConventionAuto.

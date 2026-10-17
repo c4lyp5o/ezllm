@@ -166,6 +166,10 @@ accounting of the upstream **Messages** wire: `auto` = unstated (never inferred 
 `base_url`; cross-wire conversions onto a Messages upstream are refused), `anthropic` =
 `input_tokens` EXCLUDES cache tokens, `total` = `input_tokens` INCLUDES cache tokens. See
 `docs/usage-convention-design.md`.
+`management_key` (schema v19, optional) is a second credential for providers whose balance
+endpoint needs a management key (TokenRouter). Stored encrypted at rest; the API never
+returns it, only `management_key_set: true|false` on `AccountSummary`. An empty value on
+`PATCH` keeps the stored one.
 For `anthropic-compatible`, `base_url` is the host only (e.g. `https://api.anthropic.com`) —
 the `/v1` version segment is appended automatically (`/v1/messages`, `/v1/models`).
 `gemini-openai` is Google's OpenAI-compatible endpoint (`…/v1beta/openai`): it answers a bad

@@ -235,7 +235,13 @@ func mapOracleErr(err error) error {
 // live-probed 2026-10-14. Providers with no quota endpoint yield
 // ErrQuotaUnsupported, which the UI renders as "measured" (our own numbers).
 func (a *openAICompatible) ReadQuota(ctx context.Context, acct Account, key string) (Quota, error) {
-	hdrs := map[string]string{"Authorization": "Bearer " + key}
+	authKey := key
+	if strings.EqualFold(acct.BaseURL, "https://api.tokenrouter.com/v1") || strings.Contains(strings.ToLower(acct.BaseURL), "api.tokenrouter.com") {
+		if mk := tokenRouterManagementKey(); mk != "" {
+			authKey = mk
+		}
+	}
+	hdrs := map[string]string{"Authorization": "Bearer " + authKey}
 	if oracleURL, parse, ok := quotaOracleFor(acct); ok {
 		body, err := getJSON(ctx, a.client, oracleURL, hdrs)
 		if err != nil {

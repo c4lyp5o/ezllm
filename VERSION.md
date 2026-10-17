@@ -39,6 +39,11 @@ Native image/audio surfaces and the playground dashboard pass.
   `PickKey` decrypts only for the outbound hop. Tests in
   `internal/store/crypto_integration_test.go`. **Back up the master key with
   the DB — losing it loses every provider key.**
+- **Provider quota**: added TokenRouter management-key balance oracle
+  (`/api/management/self/wallet`), parsed into a money quota. Management key
+  resolves from `EZLLM_TOKENROUTER_MANAGEMENT_KEY` or
+  `~/.hermes/secrets/tokenrouter-mgmt.key` (0600). Tests in
+  `internal/provider/quota_tokenrouter_test.go`.
 - **Security (Milestone B)**: `/admin/login` now also sets an HttpOnly,
   SameSite=Strict `ezllm_session` cookie (Secure on HTTPS). The admin
   middleware accepts that cookie, so the dashboard no longer stores the admin

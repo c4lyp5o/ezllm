@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -164,6 +166,10 @@ func quotaOracleFor(acct Account) (urlStr string, parse func(string) Quota, ok b
 		return base + "/user/balance", parseDeepSeekBalance, true
 	case "openrouter.ai":
 		return base + "/key", parseOpenRouterKey, true
+	case "api.tokenrouter.com":
+		// Management API, not the inference API: requires a MANAGEMENT key
+		// (sk-… from the TokenRouter dashboard), not the inference key.
+		return "https://api.tokenrouter.com/api/management/self/wallet", parseTokenRouterWallet, true
 	case "ai-gateway.vercel.sh":
 		return base + "/credits", parseVercelCredits, true
 	case "ollama.com":
@@ -206,6 +212,69 @@ func parseDeepSeekBalance(body string) Quota {
 	return Quota{
 		Kind: QuotaMoney, Raw: body, ReadAt: time.Now().UTC(),
 		Balance: bal, BalanceUnit: strings.ToUpper(pick.Currency),
+	}
+}
+
+// tokenRouterManagementKey resolves the TokenRouter MANAGEMENT key. It is a
+// different credential class from the inference key (the management key 401s
+// on /v1/models), so it is read from a dedicated env var or 0600 file rather
+// than from provider_keys.
+func tokenRouterManagementKey() string {
+	if k := strings.TrimSpace(os.Getenv("EZLLM_TOKENROUTER_MANAGEMENT_KEY")); k != "" {
+		return k
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	b, err := os.ReadFile(filepath.Join(home, ".hermes", "secrets", "tokenrouter-mgmt.key"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// parseTokenRouterWallet parses GET /api/management/self/wallet:
+//
+//	{"data":{"topUpBalance":3.690708,"toppedUpSpent":36.309292,
+//	         "voucherEfficientAmount":0,"voucherSpent":10},
+//	 "message":"","success":true}
+//
+// Balance = top-up balance + remaining voucher value. CostTotal = lifetime
+// spend across both purses.
+func parseTokenRouterWallet(body string) Quota {
+	var raw struct {
+		Data *struct {
+			TopUpBalance           *float64 `json:"topUpBalance"`
+			ToppedUpSpent          *float64 `json:"toppedUpSpent"`
+			VoucherEfficientAmount *float64 `json:"voucherEfficientAmount"`
+			VoucherSpent           *float64 `json:"voucherSpent"`
+		} `json:"data"`
+		Success bool `json:"success"`
+	}
+	if err := jsonUnmarshal([]byte(body), &raw); err != nil || raw.Data == nil || !raw.Success {
+		return Quota{}
+	}
+	if raw.Data.TopUpBalance == nil && raw.Data.VoucherEfficientAmount == nil {
+		return Quota{}
+	}
+	bal := 0.0
+	if raw.Data.TopUpBalance != nil {
+		bal += *raw.Data.TopUpBalance
+	}
+	if raw.Data.VoucherEfficientAmount != nil {
+		bal += *raw.Data.VoucherEfficientAmount
+	}
+	cost := 0.0
+	if raw.Data.ToppedUpSpent != nil {
+		cost += *raw.Data.ToppedUpSpent
+	}
+	if raw.Data.VoucherSpent != nil {
+		cost += *raw.Data.VoucherSpent
+	}
+	return Quota{
+		Kind: QuotaMoney, Raw: body, ReadAt: time.Now().UTC(),
+		Balance: &bal, BalanceUnit: "USD", CostTotal: &cost,
 	}
 }
 

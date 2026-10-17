@@ -110,8 +110,16 @@ func run() error {
 	// ── master key (at-rest encryption of provider keys) ────────────────
 	masterSecret := strings.TrimSpace(os.Getenv("EZLLM_MASTER_KEY"))
 	if masterSecret == "" {
-		home, _ := os.UserHomeDir()
-		masterPath := filepath.Join(home, ".hermes", "secrets", "ezllm-master.key")
+		masterPath := strings.TrimSpace(os.Getenv("EZLLM_MASTER_KEY_FILE"))
+		if masterPath == "" {
+			home, herr := os.UserHomeDir()
+			if herr != nil || home == "" || home == "/" {
+				// Containers often have no writable home; keep the key with the
+				// data volume so it is backed up with the DB.
+				home = cfg.DataDir
+			}
+			masterPath = filepath.Join(home, ".hermes", "secrets", "ezllm-master.key")
+		}
 		if b, err := os.ReadFile(masterPath); err == nil {
 			masterSecret = strings.TrimSpace(string(b))
 		} else {

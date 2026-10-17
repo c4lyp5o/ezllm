@@ -27,6 +27,10 @@ services:
       # will not load is a BOOT error, never a silent UTC shift. Per-request
       # ?tz= overrides this; see docs/API.md under GET /admin/usage.
       EZLLM_USAGE_TZ: ${EZLLM_USAGE_TZ:-Asia/Kuala_Lumpur}
+      # Master key for at-rest provider-key encryption. Default lives on the
+      # data volume so it is backed up with the DB; override with an absolute
+      # path or set EZLLM_MASTER_KEY directly. Losing it loses every provider key.
+      EZLLM_MASTER_KEY_FILE: ${EZLLM_MASTER_KEY_FILE:-/data/ezllm-master.key}
 
     # All credentials are dashboard-managed and persisted in the SQLite volume.
 

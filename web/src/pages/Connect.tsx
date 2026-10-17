@@ -209,7 +209,7 @@ export default function Connect() {
       setTokens((cur) => cur?.map((t) => (t.id === updated.id ? updated : t)) ?? null);
       setBudgetTarget(null);
     } catch (e) {
-      /* ignore; keep modal open */
+      setErr(e instanceof ApiError ? e.message : 'could not save budget');
     } finally { setBudgetBusy(false); }
   };
 

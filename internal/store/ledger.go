@@ -448,7 +448,10 @@ func (d *DB) meterInTx(ctx context.Context, tx *sql.Tx, rows []Call) error {
 	if err != nil {
 		return err
 	}
-	return bumpUsageCounters(ctx, tx, groupForCounter(rows, windows))
+	if err := bumpUsageCounters(ctx, tx, groupForCounter(rows, windows)); err != nil {
+		return err
+	}
+	return d.meterClientsInTx(ctx, tx, rows)
 }
 
 func boolInt(b bool) int {

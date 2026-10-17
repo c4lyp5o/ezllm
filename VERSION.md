@@ -51,6 +51,11 @@ Native image/audio surfaces and the playground dashboard pass.
   token in `localStorage`; it sends `credentials: include`. Five failed
   password attempts per IP in fifteen minutes answer 429 (empty-password
   probes are exempt). Tests in `internal/server/dashboard_auth_test.go`.
+- **Per-key budgets enforced**: client token `cap_tokens`/`cap_window` meter in
+  `client_usage_counters` (schema v20) inside the ledger transaction; a spent
+  key returns `429` before dispatch. Caps set after usage backfill the current
+  bucket from `calls` once. Tests in `internal/store/client_budget_test.go` and
+  `internal/server/client_budget_test.go`.
 
 ---
 

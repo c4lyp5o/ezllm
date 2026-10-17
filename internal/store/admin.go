@@ -1469,6 +1469,9 @@ func (d *DB) UpdateToken(ctx context.Context, id int64, enabled *bool, roles []s
 			}
 		}
 		if capTokens != nil {
+			if *capTokens < 0 {
+				return errors.New("cap_tokens must be >= 0")
+			}
 			if _, err := tx.ExecContext(ctx,
 				`UPDATE client_tokens SET cap_tokens=? WHERE id=?`, *capTokens, id); err != nil {
 				return err

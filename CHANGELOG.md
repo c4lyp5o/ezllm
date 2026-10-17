@@ -7,7 +7,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M14); full histor
 - Security Milestone A: provider keys encrypted at rest (AES-256-GCM), master key, migration + tests.
 - Security Milestone B: httpOnly cookie session, per-IP login rate limit, frontend cookie auth; cookie is `Secure` when the proxy reports `X-Forwarded-Proto: https` and scoped to `/admin`.
 - Native image/audio adapters (Cloudflare, Google AI Studio); per-account management key (schema v19) for TokenRouter balance.
-- Chat playground (1-3 columns), per-key budget meter + editor in Connect.
+- Chat playground (1-3 columns), per-key budget meter + editor in Connect; budgets are now enforced (schema v20 `client_usage_counters`, 429 before dispatch, backfill for caps set after spend).
 - Dashboard: routing-rescue panel; Linear-inspired palette and sidebar icons.
 - UI: Providers/Services redesign, Connect leftover localStorage removed.
 - Tests + docs updated; security audit report.

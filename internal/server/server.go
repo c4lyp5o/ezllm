@@ -1181,6 +1181,20 @@ func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 			writeErr(w, http.StatusUnauthorized, "invalid_request_error", "invalid bearer token")
 			return
 		}
+		// Per-key token budget. Checked before any upstream work, so an
+		// exhausted key costs one indexed lookup and zero provider calls.
+		if s.db != nil {
+			if budget, berr := s.db.ClientBudgetStatus(r.Context(), name); berr == nil {
+				if budget.Limit > 0 && budget.Used >= budget.Limit {
+					writeErrExtra(w, http.StatusTooManyRequests, "rate_limited",
+						fmt.Sprintf("token budget reached (%d of %d tokens this %s)", budget.Used, budget.Limit, budget.Window),
+						map[string]any{"limit": budget.Limit, "used": budget.Used, "window": budget.Window})
+					return
+				}
+			} else if !errors.Is(berr, store.ErrNotFound) {
+				slog.Warn("client budget check failed", "client", name, "err", berr)
+			}
+		}
 		ctx := context.WithValue(r.Context(), rolesKey{}, roles)
 		ctx = context.WithValue(ctx, clientKey{}, name)
 		if info := reqInfoOf(r); info != nil {

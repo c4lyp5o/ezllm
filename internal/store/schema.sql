@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   -- never inferred from kind/base_url/wiring.
   usage_convention TEXT NOT NULL DEFAULT 'auto',
   notes       TEXT,
+  management_key_plain TEXT,                    -- optional second credential (e.g. TokenRouter management key), encrypted at rest
   created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
@@ -306,7 +307,17 @@ CREATE TABLE IF NOT EXISTS usage_counters (
   PRIMARY KEY (account_id, model_id, bucket)
 ) WITHOUT ROWID;
 
--- ── v8: model_prices — the ledger's missing money column ─────────────────────
+-- v20: per-client-token budget meter. One row per (token name, window bucket),
+-- advanced in the same transaction as the ledger insert. Counted tokens are the
+-- same quantity as model caps: tokens_in + tokens_out.
+CREATE TABLE IF NOT EXISTS client_usage_counters (
+  client     TEXT    NOT NULL,
+  bucket     TEXT    NOT NULL,
+  tokens     INTEGER NOT NULL DEFAULT 0,
+  calls      INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT    NOT NULL,
+  PRIMARY KEY (client, bucket)
+) WITHOUT ROWID;
 -- Per-million-USD rates. Keyed by (account, model), NOT model alone: the same
 -- model id costs different money through different resellers, and that is
 -- exactly the arbitrage the routing research cares about. Versioned by

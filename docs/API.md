@@ -390,10 +390,15 @@ Replaces the hop list atomically (same body shape, `hops` only).
 ```jsonc
 // POST  → 201 (token plaintext returned EXACTLY ONCE, never again)
 { "name":"hermes","roles":["infer"],"token":"ezllm_…" }   // token optional; generated if absent
-// GET   → [{"id":4,"name":"hermes","hint":"ezllm…a91f","roles":["infer"],"enabled":true,"last_used_at":"…"}]
-// PATCH → {"enabled":false} | {"roles":["infer","admin"]}
+// GET   → [{"id":4,"name":"hermes","hint":"ezllm…a91f","roles":["infer"],"enabled":true,"cap_window":"monthly","cap_tokens":0,"last_used_at":"…"}]
+// PATCH → {"enabled":false} | {"roles":["infer","admin"]} | {"cap_tokens":100000,"cap_window":"daily"}
 ```
 `roles` ⊆ `infer|admin`.
+`cap_tokens` is a real per-key token budget (`0` = unlimited); `cap_window` is
+`5h|daily|weekly|monthly`. Usage is `tokens_in + tokens_out` in the current
+calendar bucket, metered in the ledger transaction. A spent key returns `429`
+with `limit`, `used`, and `window` before any upstream call. A cap set after the
+key already spent tokens backfills that bucket from the ledger once.
 
 ### `GET /admin/export` → `200`
 Full config dump: accounts (no key plaintext — hints + `key_ct` omitted), combos, tokens (hints),

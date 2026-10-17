@@ -69,7 +69,6 @@ export async function probeModels(key: string): Promise<V1Model[]> {
 }
 
 function isoDaysAgo(days: number): string {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() - days);
+  const d = new Date(Date.now() - days * 86_400_000);
   return d.toISOString();
 }

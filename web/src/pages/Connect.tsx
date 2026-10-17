@@ -135,6 +135,7 @@ function snippet(surface: SurfaceKey, base: string, key: string, model: string):
 export default function Connect() {
   const [tokens, setTokens] = useState<TokenInfo[] | null>(null);
   const [usage, setUsage] = useState<UsageRow[] | null>(null);
+  const [usageWindows, setUsageWindows] = useState<Record<string, UsageRow[]>>({});
   const [models, setModels] = useState<V1Model[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -153,9 +154,16 @@ export default function Connect() {
   const reload = useCallback(async () => {
     setErr(null);
     try {
-      const [tk, us] = await Promise.all([listTokens(), usageByClient(30).catch(() => [] as UsageRow[])]);
+      const [tk, us, us5h, usDaily, usWeekly] = await Promise.all([
+        listTokens(),
+        usageByClient(30).catch(() => [] as UsageRow[]),
+        usageByClient(5 / 24).catch(() => [] as UsageRow[]),
+        usageByClient(1).catch(() => [] as UsageRow[]),
+        usageByClient(7).catch(() => [] as UsageRow[]),
+      ]);
       setTokens(tk);
       setUsage(us);
+      setUsageWindows({ '5h': us5h, daily: usDaily, weekly: usWeekly, monthly: us });
       // Probe the live route with the admin token (a valid bearer for /v1 too),
       // so the "supported" chips below are observations, not labels.
       try {
@@ -212,6 +220,8 @@ export default function Connect() {
   };
 
   const usageFor = (name: string) => (usage ?? []).find((u) => u.k === name);
+  const budgetUsageFor = (name: string, window: string) =>
+    (usageWindows[window] ?? []).find((u) => u.k === name);
   const sampleModel = models[0]?.id;
 
   return (
@@ -317,7 +327,8 @@ export default function Connect() {
           <div className="mt-3 space-y-2">
             {tokens.map((t) => {
               const u = usageFor(t.name);
-              const used = (u?.tin ?? 0) + (u?.tout ?? 0);
+              const bu = budgetUsageFor(t.name, t.cap_window || 'monthly');
+              const used = (bu?.tin ?? 0) + (bu?.tout ?? 0);
               const capPct = t.cap_tokens > 0 ? Math.min(100, (used / t.cap_tokens) * 100) : 0;
               return (
                 <div key={t.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-line bg-surface px-4 py-3 animate-fade-up">
@@ -337,7 +348,7 @@ export default function Connect() {
                       {t.cap_tokens > 0 ? (
                         <>
                           <span className="flex items-center justify-between gap-2">
-                            <span className="text-mute">budget</span>
+                            <span className="text-mute">budget · {t.cap_window || 'monthly'}</span>
                             <span className="font-mono text-[10.5px]">{used.toLocaleString()} / {t.cap_tokens.toLocaleString()}</span>
                           </span>
                           <span className="mt-1 block h-1 overflow-hidden rounded-full bg-shade">

@@ -376,12 +376,17 @@ func mapUpstreamStatus(err error) int {
 
 // flattenMessages joins OpenAI messages into one prompt (the web protocol
 // has no message array — a documented simplification, see the design doc).
+// System messages are dropped: they carry the client's persona/memory
+// (SOUL.md/MEMORY.md/USER.md) which must never reach a web provider.
 func flattenMessages(msgs []struct {
 	Role    string `json:"role"`
 	Content any    `json:"content"`
 }) string {
 	var parts []string
 	for _, m := range msgs {
+		if m.Role == "system" {
+			continue // stealth: never forward persona/memory to web providers
+		}
 		if text := contentToText(m.Content); text != "" {
 			parts = append(parts, text)
 		}

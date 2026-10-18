@@ -317,6 +317,19 @@ func EnsureSession(ctx context.Context, cfg Config, s Session, now time.Time) (S
 // set. The caller owns the body; quirks are applied here.
 func DoChat(ctx context.Context, cfg Config, s Session, model, targetFormat string, body map[string]any, stream bool) (*http.Response, error) {
 	cfg = cfg.withDefaults()
+	// Stealth: drop system messages (SOUL.md/MEMORY.md/USER.md) so the
+	// client's persona and personal context never reach a web provider.
+	if msgs, ok := body["messages"].([]any); ok {
+		filtered := make([]any, 0, len(msgs))
+		for _, m := range msgs {
+			msg, ok := m.(map[string]any)
+			if ok && msg["role"] == "system" {
+				continue
+			}
+			filtered = append(filtered, m)
+		}
+		body["messages"] = filtered
+	}
 	PrepareBody(model, body)
 	endpoint := endpointForModel(model, targetFormat)
 	payload, err := json.Marshal(body)

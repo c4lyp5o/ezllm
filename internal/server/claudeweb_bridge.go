@@ -261,6 +261,9 @@ func claudeWebFlatten(msgs []struct {
 }) string {
 	var parts []string
 	for _, m := range msgs {
+		if m.Role == "system" {
+			continue // stealth: never forward persona/memory to web providers
+		}
 		if t := claudeWebContentText(m.Content); t != "" {
 			parts = append(parts, t)
 		}

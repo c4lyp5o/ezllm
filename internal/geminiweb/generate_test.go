@@ -109,6 +109,82 @@ func initGenerateClient(t *testing.T, srv *httptest.Server) *Client {
 	return c
 }
 
+// TestGenerateWireIdentity pins the three identity fields the reference
+// client sends and the earlier port omitted or diverged on:
+//   - _reqid starts at the client's random 5-digit seed (not 100000);
+//   - the x-goog-ext-525005358-jspb uuid equals payload slot 59 (one uuid,
+//     used in both places — not two independent randoms);
+//   - the model header's trailing session id is the client's session uuid,
+//     never the empty string.
+func TestGenerateWireIdentity(t *testing.T) {
+	var gotQuery, gotForm, gotRPCHeader, gotModelHeader string
+	mux := http.NewServeMux()
+	mux.HandleFunc(endpointInit, func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, initPageFixture)
+	})
+	mux.HandleFunc(endpointGenerate, func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		gotQuery = r.URL.RawQuery
+		gotForm = r.Form.Get("f.req")
+		gotRPCHeader = r.Header.Get(generateRPCHeader)
+		gotModelHeader = r.Header.Get(modelHeaderKey)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, genPart(nil, []any{candidate("rcid-1", "ok", "", true)}, "final"))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := initGenerateClient(t, srv)
+	if c.sessionID == "" {
+		t.Fatal("client session id must be seeded")
+	}
+	seededReqID := c.reqID
+	if seededReqID < 10000 || seededReqID > 99999 {
+		t.Fatalf("reqid seed = %d, want 10000..99999", seededReqID)
+	}
+	if _, err := c.Generate(context.Background(), GenerateOptions{Model: testModel(), Prompt: "hi"}, func(Delta) {}); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	// _reqid is the seed on the first call, then bumps by 100000.
+	if !strings.Contains(gotQuery, fmt.Sprintf("_reqid=%d", seededReqID)) {
+		t.Errorf("query %q missing the seeded _reqid %d", gotQuery, seededReqID)
+	}
+	if c.reqID != seededReqID+100000 {
+		t.Errorf("reqid after one call = %d, want %d", c.reqID, seededReqID+100000)
+	}
+
+	// f.req is [null, "<inner json>"]; slot 59 is the turn uuid.
+	var outer []any
+	if err := json.Unmarshal([]byte(gotForm), &outer); err != nil || len(outer) != 2 {
+		t.Fatalf("f.req outer = %q (%v)", gotForm, err)
+	}
+	innerJSON, _ := outer[1].(string)
+	var inner []any
+	if err := json.Unmarshal([]byte(innerJSON), &inner); err != nil {
+		t.Fatalf("f.req inner = %q (%v)", innerJSON, err)
+	}
+	turnUUID, _ := inner[slotFiftyNine].(string)
+
+	// The same uuid must ride the x-goog-ext-525005358-jspb header.
+	var hdr []any
+	if err := json.Unmarshal([]byte(gotRPCHeader), &hdr); err != nil || len(hdr) != 2 {
+		t.Fatalf("rpc header = %q (%v)", gotRPCHeader, err)
+	}
+	if hdr[0] != turnUUID {
+		t.Errorf("rpc header uuid = %v, payload slot 59 = %q (must match)", hdr[0], turnUUID)
+	}
+
+	// The model header ends with the client session uuid, never empty.
+	var mh []any
+	if err := json.Unmarshal([]byte(gotModelHeader), &mh); err != nil {
+		t.Fatalf("model header = %q (%v)", gotModelHeader, err)
+	}
+	if len(mh) < 2 || mh[len(mh)-1] != c.sessionID {
+		t.Errorf("model header tail = %v, want session id %q", mh, c.sessionID)
+	}
+}
+
 func TestGenerateStreamDeltas(t *testing.T) {
 	srv := newGenerateServer(t,
 		genPart([]any{"cid-1", "rid-1", "rcid-1"}, []any{candidate("rcid-1", "Hel", "", false)}, nil),
@@ -269,7 +345,7 @@ func TestBuildInnerReqListGolden(t *testing.T) {
 		Model:    m,
 		Prompt:   "hello",
 		Language: "en",
-	})
+	}, "TURN-UUID-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,25 +375,25 @@ func TestBuildInnerReqListGolden(t *testing.T) {
 		t.Errorf("default metadata = %+v", meta)
 	}
 	// Temporary flag off by default, on when asked.
-	inner2, _ := c.buildInnerReqList(GenerateOptions{Model: m, Prompt: "p", Temporary: true})
+	inner2, _ := c.buildInnerReqList(GenerateOptions{Model: m, Prompt: "p", Temporary: true}, "TURN-UUID-2")
 	if inner2[slotTemporary] != 1 {
 		t.Error("temporary flag not set")
 	}
 	// Extended thinking lands in slot 80 AND the model header.
-	inner3, _ := c.buildInnerReqList(GenerateOptions{Model: m, Prompt: "p", ExtendedThinking: true})
+	inner3, _ := c.buildInnerReqList(GenerateOptions{Model: m, Prompt: "p", ExtendedThinking: true}, "TURN-UUID-3")
 	if inner3[slotEighty] != 2 {
 		t.Errorf("extended thinking slot = %v, want 2", inner3[slotEighty])
 	}
 	// Chat metadata passthrough.
-	inner4, _ := c.buildInnerReqList(GenerateOptions{Model: m, Prompt: "p", ChatMetadata: []string{"cid", "rid", "rcid"}})
+	inner4, _ := c.buildInnerReqList(GenerateOptions{Model: m, Prompt: "p", ChatMetadata: []string{"cid", "rid", "rcid"}}, "TURN-UUID-4")
 	m4 := inner4[slotMetadata].([]any)
 	if m4[0] != "cid" || m4[1] != "rid" || m4[2] != "rcid" {
 		t.Errorf("chat metadata = %+v", m4)
 	}
 	// uuid slot populated, upper-case.
 	u, _ := inner[slotFiftyNine].(string)
-	if len(u) != 36 || u != strings.ToUpper(u) {
-		t.Errorf("uuid slot = %q", u)
+	if u != "TURN-UUID-1" {
+		t.Errorf("uuid slot = %q, want the turn uuid", u)
 	}
 }
 

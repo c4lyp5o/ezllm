@@ -116,7 +116,10 @@ func (c *Client) Generate(ctx context.Context, opts GenerateOptions, onDelta fun
 	if opts.Model == nil {
 		return GenerateResult{}, errors.New("geminiweb: Generate requires a model (use GetUserStatus to discover one)")
 	}
-	inner, err := c.buildInnerReqList(opts)
+	// One uuid for BOTH the payload slot and the x-goog-ext-525005358-jspb
+	// header — the reference client reuses the same value in both places.
+	turnUUID := strings.ToUpper(NewUUID())
+	inner, err := c.buildInnerReqList(opts, turnUUID)
 	if err != nil {
 		return GenerateResult{}, err
 	}
@@ -125,7 +128,11 @@ func (c *Client) Generate(ctx context.Context, opts GenerateOptions, onDelta fun
 	form.Set("f.req", doubleEncode(inner))
 
 	q := c.queryParams("c")
-	q.Set("_reqid", fmt.Sprint(atomic.AddInt32(&c.reqID, 100000)))
+	// _reqid: the reference client seeds a random 5-digit value and adds
+	// 100000 per request (first call uses the seed itself).
+	curReqID := atomic.LoadInt32(&c.reqID)
+	atomic.AddInt32(&c.reqID, 100000)
+	q.Set("_reqid", fmt.Sprint(curReqID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+endpointGenerate+"?"+q.Encode(), strings.NewReader(form.Encode()))
 	if err != nil {
 		return GenerateResult{}, err
@@ -134,10 +141,11 @@ func (c *Client) Generate(ctx context.Context, opts GenerateOptions, onDelta fun
 	req.Header.Set("Origin", "https://gemini.google.com")
 	req.Header.Set("Referer", "https://gemini.google.com/")
 	req.Header.Set("X-Same-Domain", "1")
-	for k, v := range c.modelHeadersWithTurn(*opts.Model, opts.SessionID, opts.ExtendedThinking) {
+	sessionID := firstNonEmpty(opts.SessionID, c.sessionID)
+	for k, v := range c.modelHeadersWithTurn(*opts.Model, sessionID, opts.ExtendedThinking) {
 		req.Header.Set(k, v)
 	}
-	req.Header.Set(generateRPCHeader, fmt.Sprintf(`["%s",1]`, strings.ToUpper(NewUUID())))
+	req.Header.Set(generateRPCHeader, fmt.Sprintf(`["%s",1]`, turnUUID))
 	c.applyCookies(req)
 
 	resp, err := c.http.Do(req)
@@ -155,7 +163,7 @@ func (c *Client) Generate(ctx context.Context, opts GenerateOptions, onDelta fun
 // buildInnerReqList assembles the 81-slot payload exactly as the Python
 // client does — sparse slots matter; nil vs missing is not equivalent on
 // the wire.
-func (c *Client) buildInnerReqList(opts GenerateOptions) ([]any, error) {
+func (c *Client) buildInnerReqList(opts GenerateOptions, turnUUID string) ([]any, error) {
 	lang := firstNonEmpty(opts.Language, "en")
 	inner := make([]any, 81)
 	inner[slotMessageContent] = []any{opts.Prompt, 0, nil, []any{}, nil, nil, 0}
@@ -185,7 +193,7 @@ func (c *Client) buildInnerReqList(opts GenerateOptions) ([]any, error) {
 		inner[slotTemporary] = 1
 	}
 	inner[slotFiftyThree] = 0
-	inner[slotFiftyNine] = strings.ToUpper(NewUUID())
+	inner[slotFiftyNine] = turnUUID
 	inner[slotSixtyOne] = []any{}
 	inner[slotSixtyEight] = 1
 	inner[slotSeventyNine] = opts.Model.ModelNumber

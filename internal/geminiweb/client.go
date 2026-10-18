@@ -2,6 +2,7 @@ package geminiweb
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -49,7 +50,21 @@ type Client struct {
 	http      *http.Client
 	cookies   cookie
 	tokens    sessionTokens
-	reqID     int32 // _reqid counter, bumped per generate request
+	reqID     int32  // _reqid counter, bumped per generate request
+	sessionID string // per-client uuid folded into the model header (reference: self._sessionid)
+}
+
+// randSessionSeed mirrors the reference client: _reqid starts at a random
+// 5-digit value (not 0), and _sessionid is a fresh upper-case uuid. Google
+// correlates the model header's trailing session id with the request, and a
+// seeded reqid keeps the sequence in the range the browser sends.
+func randSessionSeed() (int32, string) {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic("geminiweb: crypto/rand unavailable: " + err.Error())
+	}
+	n := int32(b[0])<<8 | int32(b[1])
+	return 10000 + n%90000, strings.ToUpper(NewUUID())
 }
 
 // ParseKey decodes the operator's stored credential into the cookie pair.
@@ -124,7 +139,8 @@ var (
 
 // New builds a client for the given cookies. Call Init before use.
 func New(c cookie) *Client {
-	return &Client{base: "https://gemini.google.com", rotateURL: rotateURL, http: &http.Client{}, cookies: c}
+	reqID, sessionID := randSessionSeed()
+	return &Client{base: "https://gemini.google.com", rotateURL: rotateURL, http: &http.Client{}, cookies: c, reqID: reqID, sessionID: sessionID}
 }
 
 // NewFromKey parses a stored credential row (the two-line cookie pair) into

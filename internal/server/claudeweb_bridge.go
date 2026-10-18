@@ -39,10 +39,15 @@ type claudeWebBridge struct {
 
 	mu      sync.Mutex
 	clients map[int64]*claudeweb.Client
+	// genLocks serializes per-account use of a cached client. The client
+	// carries mutable conversation state (convID/parentUUID/orgID) and is
+	// explicitly not safe for concurrent use, so two chats on one web
+	// account must not run at once.
+	genLocks map[int64]*sync.Mutex
 }
 
 func newClaudeWebBridge(db *store.DB, fetcher claudeweb.Fetcher) *claudeWebBridge {
-	b := &claudeWebBridge{db: db, fetcher: fetcher, clients: map[int64]*claudeweb.Client{}}
+	b := &claudeWebBridge{db: db, fetcher: fetcher, clients: map[int64]*claudeweb.Client{}, genLocks: map[int64]*sync.Mutex{}}
 	if fetcher == nil {
 		b.newClient = b.clientFor
 	} else {
@@ -80,38 +85,59 @@ func (b *claudeWebBridge) register(mux *http.ServeMux) {
 }
 
 // resolve maps the stamped headers to an enabled claude-web account + client.
-func (b *claudeWebBridge) resolve(r *http.Request) (*claudeweb.Client, error) {
+// The account id is returned too: callers serialize per-account generation
+// with lockFor.
+func (b *claudeWebBridge) resolve(r *http.Request) (*claudeweb.Client, int64, error) {
 	h := r.Header.Get(provider.ClaudeWebAccountHeader)
 	if h == "" {
-		return nil, errors.New("missing account header")
+		return nil, 0, errors.New("missing account header")
 	}
 	var acctID int64
 	if _, err := fmt.Sscan(h, &acctID); err != nil || acctID <= 0 {
-		return nil, errors.New("bad account header")
+		return nil, 0, errors.New("bad account header")
 	}
 	acct, err := b.db.AccountByID(r.Context(), acctID)
 	if err != nil || acct == nil || acct.Kind != provider.KindClaudeWeb || !acct.Enabled {
-		return nil, errors.New("not an enabled claude-web account")
+		return nil, 0, errors.New("not an enabled claude-web account")
 	}
 	key := r.Header.Get(provider.ClaudeWebKeyHeader)
 	if key == "" {
 		pick, err := b.db.PickKey(r.Context(), acctID)
 		if err != nil {
-			return nil, fmt.Errorf("claude-web bridge: pick key: %w", err)
+			return nil, 0, fmt.Errorf("claude-web bridge: pick key: %w", err)
 		}
 		key = pick.Plaintext
 	}
-	return b.newClient(r.Context(), acct, key)
+	c, err := b.newClient(r.Context(), acct, key)
+	if err != nil {
+		return nil, 0, err
+	}
+	return c, acctID, nil
+}
+
+// lockFor returns the per-account generation mutex, creating it on first use.
+func (b *claudeWebBridge) lockFor(acctID int64) *sync.Mutex {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	l, ok := b.genLocks[acctID]
+	if !ok {
+		l = &sync.Mutex{}
+		b.genLocks[acctID] = l
+	}
+	return l
 }
 
 // handleModels is the auth oracle: org discovery first (zero quota), then
 // the bootstrap catalog. Dead cookie -> 401.
 func (b *claudeWebBridge) handleModels(w http.ResponseWriter, r *http.Request) {
-	c, err := b.resolve(r)
+	c, acctID, err := b.resolve(r)
 	if err != nil {
 		b.writeErr(w, http.StatusUnauthorized, "authentication_error", err.Error())
 		return
 	}
+	lock := b.lockFor(acctID)
+	lock.Lock()
+	defer lock.Unlock()
 	if _, err := c.OrganizationID(r.Context()); err != nil {
 		b.writeErr(w, claudeWebStatus(err), "authentication_error", err.Error())
 		return
@@ -136,11 +162,16 @@ func (b *claudeWebBridge) handleModels(w http.ResponseWriter, r *http.Request) {
 // handleChatCompletions translates one OpenAI chat turn into a claude-web
 // completion (SSE or JSON out).
 func (b *claudeWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
-	c, err := b.resolve(r)
+	c, acctID, err := b.resolve(r)
 	if err != nil {
 		b.writeErr(w, http.StatusUnauthorized, "authentication_error", err.Error())
 		return
 	}
+	// Serialize generation per account: the cached client owns mutable
+	// conversation state and is not safe for concurrent use.
+	lock := b.lockFor(acctID)
+	lock.Lock()
+	defer lock.Unlock()
 	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 	if err != nil {
 		b.writeErr(w, http.StatusBadRequest, "invalid_request_error", "cannot read body")

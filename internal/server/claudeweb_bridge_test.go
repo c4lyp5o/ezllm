@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -279,4 +281,40 @@ func TestClaudeWebBridgeChallengeMaps403(t *testing.T) {
 func claudeWebReadAll(r *http.Request) []byte {
 	b, _ := io.ReadAll(r.Body)
 	return b
+}
+
+// TestClaudeWebBridgeSerializesPerAccount proves the per-account generation
+// lock: two concurrent completions on the same account must never overlap
+// upstream (the cached client carries mutable conversation state). Without
+// the lock the mock sees 2 in flight at once.
+func TestClaudeWebBridgeSerializesPerAccount(t *testing.T) {
+	var inFlight, maxInFlight int32
+	var wg sync.WaitGroup
+	mock := &claudeWebMock{complet: func(w http.ResponseWriter, _ *http.Request) {
+		n := atomic.AddInt32(&inFlight, 1)
+		for {
+			old := atomic.LoadInt32(&maxInFlight)
+			if n <= old || atomic.CompareAndSwapInt32(&maxInFlight, old, n) {
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+		atomic.AddInt32(&inFlight, -1)
+		claudeWebSSE(w, "ok")
+	}}
+	b, id, _ := claudeWebFixture(t, mock)
+
+	const n = 4
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			claudeWebReq(t, b, "POST", claudeWebBridgePrefix+"/chat/completions",
+				`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}]}`, id)
+		}()
+	}
+	wg.Wait()
+	if got := atomic.LoadInt32(&maxInFlight); got != 1 {
+		t.Fatalf("max concurrent upstream completions = %d, want 1 (per-account lock)", got)
+	}
 }

@@ -38,6 +38,11 @@ type geminiWebBridge struct {
 	mu      sync.Mutex
 	clients map[int64]*geminiwebClientEntry
 	now     func() time.Time // tests
+	// genLocks serializes per-account use of a cached client. The client
+	// carries mutable session/cookie state (and rotates them) and is not
+	// safe for concurrent use, so two chats on one web account must not
+	// run at once.
+	genLocks map[int64]*sync.Mutex
 }
 
 type geminiwebClientEntry struct {
@@ -58,7 +63,19 @@ const (
 // newGeminiWebBridge builds the bridge. geminiBase empty = production
 // upstream; tests pass a mock origin.
 func newGeminiWebBridge(db *store.DB, geminiBase string) *geminiWebBridge {
-	return &geminiWebBridge{db: db, geminiBase: geminiBase, clients: map[int64]*geminiwebClientEntry{}, now: time.Now}
+	return &geminiWebBridge{db: db, geminiBase: geminiBase, clients: map[int64]*geminiwebClientEntry{}, genLocks: map[int64]*sync.Mutex{}, now: time.Now}
+}
+
+// lockFor returns the per-account generation mutex, creating it on first use.
+func (b *geminiWebBridge) lockFor(acctID int64) *sync.Mutex {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	l, ok := b.genLocks[acctID]
+	if !ok {
+		l = &sync.Mutex{}
+		b.genLocks[acctID] = l
+	}
+	return l
 }
 
 // register mounts the bridge routes on the server mux.
@@ -75,7 +92,9 @@ func (b *geminiWebBridge) clientFor(ctx context.Context, acctID int64, stampedKe
 	entry, ok := b.clients[acctID]
 	if ok && entry.client.Initialized() && (stampedKey == "" || stampedKey == entry.key) {
 		b.mu.Unlock()
-		b.maybeRotate(ctx, entry)
+		// Rotation is deferred to the caller's per-account lock (rotate()
+		// below): doing it here would mutate the cached client while a
+		// concurrent generation is reading it.
 		return entry, nil
 	}
 	b.mu.Unlock()
@@ -166,6 +185,10 @@ func (b *geminiWebBridge) handleModels(w http.ResponseWriter, r *http.Request) {
 		b.writeErr(w, http.StatusUnauthorized, "authentication_error", err.Error())
 		return
 	}
+	lock := b.lockFor(entry.accountID)
+	lock.Lock()
+	defer lock.Unlock()
+	b.maybeRotate(r.Context(), entry)
 	models, err := b.models(r.Context(), entry)
 	if err != nil {
 		b.writeErr(w, http.StatusUnauthorized, "authentication_error", err.Error())
@@ -212,6 +235,12 @@ func (b *geminiWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.R
 		b.writeErr(w, http.StatusUnauthorized, "authentication_error", err.Error())
 		return
 	}
+	// Serialize generation per account: the cached client owns mutable
+	// session/cookie state and is not safe for concurrent use.
+	lock := b.lockFor(entry.accountID)
+	lock.Lock()
+	defer lock.Unlock()
+	b.maybeRotate(r.Context(), entry)
 	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 	if err != nil {
 		b.writeErr(w, http.StatusBadRequest, "invalid_request_error", "cannot read body")

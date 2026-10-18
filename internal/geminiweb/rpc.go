@@ -111,25 +111,24 @@ type UserStatus struct {
 // batchExecute POSTs RPCs to batchexecute and returns the raw response text
 // (which carries Google's ")]}'" XSSI prefix). Parsing happens per RPC.
 func (c *Client) batchExecute(ctx context.Context, rpcs []rpcCall) (string, error) {
-	// Each RPC serializes to [rpcid, payload, null, identifier]; the outer
-	// envelope is [null, "<double-encoded inner>"].
+	// Outer envelope per the live browser capture (gemini.google.com HAR):
+	//   f.req = [[[rpcid, payload, null, "generic"]]]
+	//   at   = <SNlM0e access token>
+	// payload for GET_USER_STATUS is "[1]" (not "[]").
 	inner := make([]any, len(rpcs))
 	for i, r := range rpcs {
-		inner[i] = []any{r.id, r.payload, nil, fmt.Sprintf("rpc%d", i)}
+		inner[i] = []any{r.id, r.payload, nil, "generic"}
 	}
-	encoded, err := json.Marshal(inner)
-	if err != nil {
-		return "", err
-	}
-	outer, err := json.Marshal([]any{nil, json.RawMessage(encoded)})
+	encoded, err := json.Marshal([]any{inner})
 	if err != nil {
 		return "", err
 	}
 	form := url.Values{}
 	form.Set("at", c.tokens.accessToken)
-	form.Set("f.req", string(outer))
+	form.Set("f.req", string(encoded))
 
 	q := c.queryParams("")
+	q.Set("rpcids", rpcs[0].id)
 	q.Set("source-path", "/app")
 	endpoint := c.base + endpointBatchExec + "?" + q.Encode()
 
@@ -139,9 +138,8 @@ func (c *Client) batchExecute(ctx context.Context, rpcs []rpcCall) (string, erro
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded;charset=utf-8")
 	req.Header.Set("X-Same-Domain", "1")
-	req.Header.Set(modelHeaderKey, "[1,null,null,null,null,null,null,null,[4,5,6,8],null,null,null,null,null,null,null]")
-	req.Header.Set(headerAux1, "[0]")
-	req.Header.Set("Referer", "https://gemini.google.com/")
+	req.Header.Set("Origin", c.base)
+	req.Header.Set("Referer", c.base+"/")
 	c.applyCookies(req)
 
 	resp, err := c.http.Do(req)
@@ -166,7 +164,7 @@ type rpcCall struct {
 
 // GetUserStatus is the zero-quota oracle: auth verdict + model catalog.
 func (c *Client) GetUserStatus(ctx context.Context) (UserStatus, error) {
-	raw, err := c.batchExecute(ctx, []rpcCall{{id: rpcGetUserStatus, payload: "[]"}})
+	raw, err := c.batchExecute(ctx, []rpcCall{{id: rpcGetUserStatus, payload: "[1]"}})
 	if err != nil {
 		return UserStatus{}, err
 	}
@@ -176,7 +174,21 @@ func (c *Client) GetUserStatus(ctx context.Context) (UserStatus, error) {
 	}
 	var out UserStatus
 	found := false
+	// Live responses wrap the frames in an outer array: [[frame1, frame2, ...]].
+	// Mocks return a bare frame. Normalize both shapes.
+	var frames []any
 	for _, part := range parts {
+		if arr, ok := part.([]any); ok && len(arr) > 0 {
+			if inner, ok := arr[0].([]any); ok && len(inner) > 0 {
+				if s, _ := inner[0].(string); s == "wrb.fr" || s == "er" {
+					frames = append(frames, arr...) // unwrap one level
+					continue
+				}
+			}
+		}
+		frames = append(frames, part)
+	}
+	for _, part := range frames {
 		// Frame parts are [kind, rpcid, body, ...]; keep ours.
 		kind, _ := indexValue(part, 1).(string)
 		if kind != rpcGetUserStatus {

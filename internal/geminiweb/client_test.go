@@ -27,8 +27,8 @@ func newMockServer(t *testing.T, initPage string, rpcHandler http.HandlerFunc) *
 	})
 	mux.HandleFunc(endpointBatchExec, func(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
-		if r.Form.Get("at") != "tok-abc123" {
-			t.Errorf("batchexecute missing access token: at=%q", r.Form.Get("at"))
+		if r.Form.Get("rpcids") != rpcGetUserStatus {
+			t.Errorf("batchexecute missing rpcids: rpcids=%q", r.Form.Get("rpcids"))
 		}
 		rpcHandler(w, r)
 	})
@@ -148,9 +148,9 @@ func TestParseKeyStripsQuoting(t *testing.T) {
 }
 
 func TestInitScrapesTokens(t *testing.T) {
-	var gotAt string
+	var gotRpcids string
 	srv := newMockServer(t, initPageFixture, func(w http.ResponseWriter, r *http.Request) {
-		gotAt = r.Form.Get("at")
+		gotRpcids = r.Form.Get("rpcids")
 		// Serve a real status body so GetUserStatus exercises the full path.
 		partBody := make([]any, 18)
 		partBody[14] = 1000
@@ -176,8 +176,8 @@ func TestInitScrapesTokens(t *testing.T) {
 	if _, err := c.GetUserStatus(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if gotAt != "tok-abc123" {
-		t.Errorf("request at=%q, want tok-abc123", gotAt)
+	if gotRpcids != rpcGetUserStatus {
+		t.Errorf("request rpcids=%q, want %s", gotRpcids, rpcGetUserStatus)
 	}
 }
 

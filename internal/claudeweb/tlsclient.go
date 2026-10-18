@@ -10,6 +10,7 @@
 package claudeweb
 
 import (
+	"compress/gzip"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -20,6 +21,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andybalholm/brotli"
+	"github.com/klauspost/compress/zstd"
 	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/http2"
 )
@@ -111,7 +114,48 @@ func (f *TLSFetcher) Fetch(ctx context.Context, method, url string, body []byte,
 	if err != nil {
 		return nil, err
 	}
-	return &Response{Status: resp.StatusCode, Header: resp.Header, Body: resp.Body}, nil
+	decoded, err := decodeBody(resp)
+	if err != nil {
+		resp.Body.Close()
+		return nil, err
+	}
+	return &Response{Status: resp.StatusCode, Header: resp.Header, Body: decoded}, nil
+}
+
+// decodeBody decompresses the response according to Content-Encoding. The
+// browser header advertises gzip/br/zstd, so Cloudflare answers compressed;
+// without this the JSON body is unreadable binary (the mock tests never
+// compress, so this only bites live).
+func decodeBody(resp *http.Response) (io.ReadCloser, error) {
+	switch strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Encoding"))) {
+	case "", "identity":
+		return resp.Body, nil
+	case "gzip":
+		zr, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("claudeweb: gzip: %w", err)
+		}
+		return struct {
+			io.Reader
+			io.Closer
+		}{zr, resp.Body}, nil
+	case "br":
+		return struct {
+			io.Reader
+			io.Closer
+		}{brotli.NewReader(resp.Body), resp.Body}, nil
+	case "zstd":
+		zr, err := zstd.NewReader(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("claudeweb: zstd: %w", err)
+		}
+		return struct {
+			io.Reader
+			io.Closer
+		}{zr, resp.Body}, nil
+	default:
+		return resp.Body, nil
+	}
 }
 
 // plainFetcher is the test fetcher: plain HTTP against a local mock. It

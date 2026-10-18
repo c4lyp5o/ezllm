@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -51,8 +52,26 @@ func NormalizeSessionCookie(raw string) (string, error) {
 // Organization is one entry of GET /api/organizations.
 type Organization struct {
 	UUID string `json:"uuid"`
-	ID   string `json:"id"`
+	ID   any    `json:"id"` // numeric on the live API, string on some responses
 	Name string `json:"name"`
+}
+
+// scalarString renders a json scalar (string or number) as a string.
+func scalarString(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case json.Number:
+		return t.String()
+	case float64:
+		return strconv.FormatFloat(t, 'f', -1, 64)
+	case int64:
+		return strconv.FormatInt(t, 10)
+	case nil:
+		return ""
+	default:
+		return fmt.Sprint(t)
+	}
 }
 
 // Client drives one claude.ai session. Conversation state: the conversation
@@ -110,7 +129,7 @@ func (c *Client) OrganizationID(ctx context.Context) (string, error) {
 	if err := json.Unmarshal(body, &orgs); err != nil || len(orgs) == 0 {
 		return "", ErrNoOrganization
 	}
-	id := firstNon(orgs[0].UUID, orgs[0].ID)
+	id := firstNon(orgs[0].UUID, scalarString(orgs[0].ID))
 	if id == "" {
 		return "", ErrNoOrganization
 	}

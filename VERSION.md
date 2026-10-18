@@ -69,6 +69,18 @@ Native image/audio surfaces and the playground dashboard pass.
   (`401 token expired`). Tests in `internal/store/client_budget_test.go`,
   `internal/store/client_policy_test.go`, `internal/server/client_budget_test.go`,
   and `internal/server/client_policy_test.go`.
+- **Web providers (claude-web/gemini-web)**: the bridge now serializes
+  generation per account (one in-flight turn per cached client) and moves
+  Gemini cookie rotation under the same lock; the Claude client decompresses
+  zstd/br/gzip responses and accepts the live API's numeric organization id.
+  Live-verified: org discovery resolves on a real session.
+- **Streaming**: a mid-stream upstream connection drop now ends the stream
+  with a terminal SSE error frame in the client's dialect (OpenAI, Anthropic
+  or Responses) instead of a silent EOF; the ledger still records the
+  truncation.
+- **Dashboard chat**: `chatStream` works with the httpOnly cookie session
+  (no admin token in localStorage required) and sends `credentials: include`,
+  fixing the red "unlocked" box with zero network activity.
 
 ---
 

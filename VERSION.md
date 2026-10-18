@@ -55,7 +55,9 @@ Native image/audio surfaces and the playground dashboard pass.
   current/historical rate per account+model; `POST /admin/prices/import` bulk-upserts
   snapshots; `POST /admin/prices/refresh?source=litellm` pulls LiteLLM's public
   price map and matches by exact model-id suffix. Prices carry `source` and
-  `fetched_at`; schema v22. Recommended refresh: daily.
+  `fetched_at`; schema v22. The refresh runs **in-process** (~45s after boot,
+  then daily at 03:00 in `EZLLM_USAGE_TZ`), so a self-hosted instance needs no
+  external cron.
 - **Per-key budgets enforced**: client token `cap_tokens`/`cap_window` meter in
   `client_usage_counters` (schema v20) inside the ledger transaction; a spent
   key returns `429` before dispatch. Caps set after usage backfill the current

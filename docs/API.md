@@ -350,6 +350,10 @@ of weeks, and the endpoint is idempotent for the day. For a **historical backfil
 pass an earlier `effective_from` (for example 30 days ago) — the cost report then
 applies today's list price to those calls as an estimate, still marked `source=litellm`.
 
+ezllm also runs this refresh **in-process**: ~45s after boot, then daily at 03:00
+in `EZLLM_USAGE_TZ`. `EZLLM_PRICE_REFRESH=off` disables the scheduler; the admin
+endpoint still works for manual runs.
+
 ### `PUT /admin/accounts/{id}/prices` → `200` (echoes the stored row)
 Model id in the body (ids can contain `/`). **All four rates are required** — a missing
 one is refused rather than treated as zero, because "free" must be a stated decision.

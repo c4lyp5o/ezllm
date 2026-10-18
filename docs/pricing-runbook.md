@@ -8,8 +8,11 @@ rate effective on the call's date, so a reprice never rewrites history.
 
 Refresh **daily** — provider list prices change on the order of weeks, and a
 daily pass is enough to keep the catalog honest without hammering the source.
-Run it at 03:00 local, after the ledger's day boundary. The endpoint is
-idempotent for the day (same `effective_from` upserts).
+ezllm runs this **inside the process**: once 45 seconds after boot (so a fresh
+deploy fills the catalog immediately), then every day at 03:00 local. No
+external cron or systemd timer is needed. The pass is idempotent for the day
+(same `effective_from` upserts), and an operator can still POST the endpoint
+manually at any time.
 
 Manual refresh is always available:
 
@@ -71,30 +74,16 @@ curl -s -H "Authorization: Bearer $EZLLM_INFER_TOKEN" \
 is false while any call has no effective rate. Never read `usd` as the full
 bill when `unpriced_calls > 0`.
 
-## Scheduling (systemd timer example)
+## Scheduling
 
-```ini
-# /etc/systemd/system/ezllm-prices.service
-[Service]
-Type=oneshot
-EnvironmentFile=/etc/ezllm/prices.env
-ExecStart=/usr/bin/curl -fsS -X POST \
-  -H "Authorization: Bearer ${EZLLM_ADMIN_TOKEN}" \
-  "https://llm.calypso.dedyn.io/admin/prices/refresh?source=litellm"
-```
+The scheduler is **inside ezllm** — no external cron, no systemd timer:
 
-```ini
-# /etc/ezllm/prices.env  (chmod 600)
-EZLLM_ADMIN_TOKEN=...
-```
+- first pass ~45 seconds after boot, so a deploy fills prices immediately;
+- then daily at **03:00** in `EZLLM_USAGE_TZ` (UTC if unset);
+- logs one line: `scheduled price refresh source=litellm effective_from=… entries=… matched=…`.
 
-```ini
-# /etc/systemd/system/ezllm-prices.timer
-[Timer]
-OnCalendar=*-*-* 03:00:00
-Persistent=true
-[Install]
-WantedBy=timers.target
-```
+Set `EZLLM_PRICE_REFRESH=off` to disable it (for an air-gapped instance).
+Prices stay manual/import-only unless the process can reach GitHub.
 
-Use the same hostname the dashboard uses; the admin router is the auth surface.
+The admin endpoint remains available for an immediate manual pass or a
+backfill; schedule nothing else.

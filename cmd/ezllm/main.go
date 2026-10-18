@@ -271,11 +271,14 @@ func run() error {
 	//
 	// Per-request ?tz= still overrides it; this is only the default.
 	usageTZ := strings.TrimSpace(os.Getenv("EZLLM_USAGE_TZ"))
+	usageLoc := time.UTC
 	if usageTZ != "" {
-		if _, err := time.LoadLocation(usageTZ); err != nil {
+		loc, err := time.LoadLocation(usageTZ)
+		if err != nil {
 			return fmt.Errorf("EZLLM_USAGE_TZ=%q does not resolve to a time zone on this host "+
 				"(use an IANA name like Asia/Kuala_Lumpur, or unset it for UTC): %w", usageTZ, err)
 		}
+		usageLoc = loc
 		log.Info("usage day bucketing zone", "tz", usageTZ)
 	}
 
@@ -291,6 +294,10 @@ func run() error {
 		// Sampled shadow compression (addendum #7): off unless configured.
 		ShadowSampler: shadowSamplerFor(cfg.Compression.ShadowPct),
 	})
+
+	if os.Getenv("EZLLM_PRICE_REFRESH") != "off" {
+		srv.StartPriceRefresh(ctx, 3, usageLoc)
+	}
 
 	httpSrv := &http.Server{
 		Addr:              addr,

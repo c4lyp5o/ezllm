@@ -271,6 +271,18 @@ func (c *Client) Generate(ctx context.Context, opts GenerateOptions, onDelta fun
 		c.convID = NewUUID() // client-generated; the URL path carries it
 		c.humanUUID = NewUUID()
 	}
+	// If the FIRST turn fails, this client must not keep the speculative
+	// conversation id: every later call would be a follow-up to a
+	// conversation that was never created (permanent empty-body 400 until
+	// the process restarts, since the bridge caches clients per account).
+	committed := false
+	defer func() {
+		if !committed && newConversation {
+			c.convID = ""
+			c.humanUUID = ""
+			c.parentUUID = ""
+		}
+	}()
 	res := GenerateResult{ConvID: c.convID, AssistUUID: assistant, HumanUUID: c.humanUUID}
 
 	url := apiBase + "/organizations/" + org + "/chat_conversations/" + c.convID + "/completion"
@@ -308,6 +320,7 @@ func (c *Client) Generate(ctx context.Context, opts GenerateOptions, onDelta fun
 	}
 	res.AssistUUID = c.parentUUID
 	res.Completed = true
+	committed = true
 	return res, nil
 }
 

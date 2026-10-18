@@ -459,3 +459,23 @@ func TestConsumeSSECapturesServerAssistUUID(t *testing.T) {
 		t.Fatalf("server assist uuid = %q, want server-assist-uuid", serverAssist)
 	}
 }
+
+// TestFailedFirstTurnDiscardsSpeculativeConversation pins the recovery path:
+// a failed first turn must not leave convID set, or the cached client turns
+// every later request into a follow-up to a conversation that never existed.
+func TestFailedFirstTurnDiscardsSpeculativeConversation(t *testing.T) {
+	c := New(failFetcher{}, "sessionKey=sk-ant-1", "")
+	c.orgID = "org-1" // skip discovery
+	if _, err := c.Generate(context.Background(), GenerateOptions{Model: "claude-sonnet-4-6", Prompt: "hi"}, nil); err == nil {
+		t.Fatal("want an upstream error")
+	}
+	if c.convID != "" || c.humanUUID != "" || c.parentUUID != "" {
+		t.Fatalf("speculative state survived a failed turn: conv=%q human=%q parent=%q", c.convID, c.humanUUID, c.parentUUID)
+	}
+}
+
+type failFetcher struct{}
+
+func (failFetcher) Fetch(context.Context, string, string, []byte, http.Header) (*Response, error) {
+	return &Response{Status: 500, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("boom"))}, nil
+}

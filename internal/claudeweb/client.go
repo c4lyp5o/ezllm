@@ -28,25 +28,71 @@ var (
 
 const sessionCookieName = "sessionKey"
 
-// NormalizeSessionCookie validates an operator-supplied sessionKey and
-// returns the Cookie header value. Accepts "sessionKey=sk-ant-…" or the bare
-// token. Rejects CR/LF outright (header injection is not a thing here).
+// NormalizeSessionCookie validates an operator-supplied credential and
+// returns the Cookie header value. It accepts:
+//
+//   - a bare sessionKey value (sk-ant-sid02-…)
+//   - sessionKey=sk-ant-…
+//   - the full claude.ai cookie header (sessionKey=…; cf_clearance=…; …)
+//
+// The full header is what the live wire actually requires: Claude/Cloudflare
+// answers a sessionKey-only request with a synthetic
+// 429 {"type":"rate_limit_error"} in ~30ms, while the same completion carrying
+// the browser's cf_clearance / __cf_bm / anthropic-device-id cookies succeeds
+// (measured 2026-10-19: 30ms 429 vs 1.25s 200). Keep the operator's header
+// intact instead of narrowing it to sessionKey.
 func NormalizeSessionCookie(raw string) (string, error) {
 	v := strings.TrimSpace(raw)
-	if i := strings.IndexByte(v, '='); i >= 0 {
-		name := strings.TrimSpace(v[:i])
-		if name != sessionCookieName {
-			return "", fmt.Errorf("claudeweb: expected %s cookie, got %q", sessionCookieName, name)
-		}
-		v = strings.TrimSpace(v[i+1:])
-	}
 	if v == "" {
 		return "", errors.New("claudeweb: empty session cookie")
 	}
 	if strings.ContainsAny(v, "\r\n") {
 		return "", errors.New("claudeweb: session cookie contains CR/LF")
 	}
-	return sessionCookieName + "=" + v, nil
+	// Bare value, or a single name=value pair.
+	if !strings.Contains(v, ";") {
+		if i := strings.IndexByte(v, '='); i >= 0 {
+			name := strings.TrimSpace(v[:i])
+			if name != sessionCookieName {
+				return "", fmt.Errorf("claudeweb: expected %s cookie, got %q", sessionCookieName, name)
+			}
+			v = strings.TrimSpace(v[i+1:])
+			if v == "" {
+				return "", errors.New("claudeweb: empty session cookie")
+			}
+		}
+		return sessionCookieName + "=" + v, nil
+	}
+	// Full cookie header: keep every cookie, but require the session one.
+	if CookieValue(v, sessionCookieName) == "" {
+		return "", fmt.Errorf("claudeweb: cookie header has no %s", sessionCookieName)
+	}
+	return v, nil
+}
+
+// CookieValue returns the value of name in a Cookie header, or "".
+func CookieValue(header, name string) string {
+	for _, part := range strings.Split(header, ";") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		i := strings.IndexByte(part, '=')
+		if i < 0 {
+			continue
+		}
+		if strings.TrimSpace(part[:i]) == name {
+			return strings.TrimSpace(part[i+1:])
+		}
+	}
+	return ""
+}
+
+// DeviceIDFromCookie extracts anthropic-device-id from a Cookie header. The
+// browser sends it both as a cookie and as the anthropic-device-id request
+// header; BrowserHeaders sets the header from this value.
+func DeviceIDFromCookie(header string) string {
+	return CookieValue(header, "anthropic-device-id")
 }
 
 // Organization is one entry of GET /api/organizations.

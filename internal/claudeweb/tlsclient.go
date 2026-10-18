@@ -63,10 +63,15 @@ func NewTLSFetcher() *TLSFetcher {
 // request. A challenge/error body is returned to the caller like omniroute's
 // transport does — classification happens above (isClaudeWebChallenge).
 func (f *TLSFetcher) Fetch(ctx context.Context, method, url string, body []byte, headers http.Header) (*Response, error) {
+	// The timeout must outlive this call: the caller reads the returned body
+	// (SSE completions stream for many seconds). Cancelling on return kills
+	// every read with "context canceled" — so tie the cancel to Body.Close
+	// instead of deferring it here.
+	var cancel context.CancelFunc
 	if f.Timeout > 0 {
-		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, f.Timeout)
-		defer cancel()
+	} else {
+		cancel = func() {}
 	}
 	tr := &http2.Transport{
 		AllowHTTP: false,
@@ -98,6 +103,7 @@ func (f *TLSFetcher) Fetch(ctx context.Context, method, url string, body []byte,
 	}
 	req, err := http.NewRequestWithContext(ctx, method, url, byteReader(body))
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	for k, vs := range headers {
@@ -112,14 +118,29 @@ func (f *TLSFetcher) Fetch(ctx context.Context, method, url string, body []byte,
 	}
 	resp, err := tr.RoundTrip(req)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	decoded, err := decodeBody(resp)
 	if err != nil {
 		resp.Body.Close()
+		cancel()
 		return nil, err
 	}
-	return &Response{Status: resp.StatusCode, Header: resp.Header, Body: decoded}, nil
+	return &Response{Status: resp.StatusCode, Header: resp.Header, Body: &cancelOnClose{ReadCloser: decoded, cancel: cancel}}, nil
+}
+
+// cancelOnClose releases the per-request timeout when the caller closes the
+// body — the streaming callers read it to EOF first.
+type cancelOnClose struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnClose) Close() error {
+	err := c.ReadCloser.Close()
+	c.cancel()
+	return err
 }
 
 // decodeBody decompresses the response according to Content-Encoding. The

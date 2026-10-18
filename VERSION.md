@@ -9,9 +9,25 @@ dashboard health strip, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v0.0.14**
+**Current: v0.0.15**
 
 ---
+
+## v0.0.15 — 2026-10-19
+
+Claude (web cookies) completions work against the live wire.
+
+- **Full cookie header is required**: Claude/Cloudflare answers a
+  sessionKey-only request with a synthetic `429 rate_limit_error` in ~30ms;
+  the same completion carrying the browser's `cf_clearance` / `__cf_bm` /
+  `anthropic-device-id` / `sessionKeyV3` cookies succeeds (measured 30ms 429
+  vs 1.25s 200). `NormalizeSessionCookie` now preserves the operator's whole
+  header (still accepting a bare token) and the bridge sends
+  `anthropic-device-id` from it.
+- **Streaming timeout fix**: `TLSFetcher.Fetch` cancelled its request context
+  on return, so every SSE read died with `context canceled` and 429 bodies
+  were misreported as transport errors. The cancel is now tied to
+  `Body.Close()`; `TestCancelOnCloseKeepsBodyAlive` guards it.
 
 ## v0.0.14 — 2026-10-19
 

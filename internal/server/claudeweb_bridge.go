@@ -56,7 +56,7 @@ func newClaudeWebBridge(db *store.DB, fetcher claudeweb.Fetcher) *claudeWebBridg
 			if err != nil {
 				return nil, err
 			}
-			return claudeweb.New(fetcher, cookie, ""), nil
+			return claudeweb.New(fetcher, cookie, claudeweb.DeviceIDFromCookie(cookie)), nil
 		}
 	}
 	return b

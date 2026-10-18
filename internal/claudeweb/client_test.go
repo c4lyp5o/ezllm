@@ -92,6 +92,22 @@ func TestNormalizeSessionCookie(t *testing.T) {
 	if _, err := NormalizeSessionCookie("   "); err == nil {
 		t.Error("empty must fail")
 	}
+	// A full browser header must be preserved verbatim — narrowing it to
+	// sessionKey is what produced the synthetic 429 on the live wire.
+	full := "cf_clearance=abc; anthropic-device-id=dev-42; sessionKey=sk-ant-123; sessionKeyV3=sk-ant-123"
+	got, err := NormalizeSessionCookie(full)
+	if err != nil || got != full {
+		t.Errorf("full header: %q %v, want it preserved", got, err)
+	}
+	if _, err := NormalizeSessionCookie("cf_clearance=abc; __cf_bm=def"); err == nil {
+		t.Error("a full header without sessionKey must fail")
+	}
+	if id := DeviceIDFromCookie(full); id != "dev-42" {
+		t.Errorf("device id = %q, want dev-42", id)
+	}
+	if id := DeviceIDFromCookie("sessionKey=sk-ant-123"); id != "" {
+		t.Errorf("device id on a bare session cookie = %q, want empty", id)
+	}
 }
 
 func TestOrganizationDiscoveryFailures(t *testing.T) {

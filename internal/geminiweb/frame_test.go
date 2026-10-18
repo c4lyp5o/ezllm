@@ -19,7 +19,7 @@ func utf16Units(s string) int {
 }
 
 func frame(s string) string {
-	return itoa(utf16Units(s)) + "\n" + s
+	return itoa(utf16Units(s)+1) + "\n" + s
 }
 
 func itoa(n int) string {
@@ -117,7 +117,7 @@ func TestFrameParserPartialFrameHangsNothing(t *testing.T) {
 	var p FrameParser
 	// ["partial"] is 11 UTF-16 units — declaring 12 and completing with 11
 	// would make the parser swallow the NEXT frame's prefix into this frame.
-	got, err := p.Feed([]byte("11\n[\"partial"))
+	got, err := p.Feed([]byte("12\n[\"partial"))
 	if err != nil || len(got) != 0 {
 		t.Fatalf("partial: got=%q err=%v, want nothing", got, err)
 	}
@@ -141,7 +141,7 @@ func TestFrameParserMalformed(t *testing.T) {
 		"zero length":        "0\n",
 		"negative length":    "-5\npayload",
 		"oversized length":   "99999999999\npayload",
-		"unclosable astral":  "2\n\"" + "🐀", // 2 units declared, but quote(1)+astral(2)=3 can never close
+		"unclosable astral":  "3\n\"" + "🐀", // 3 incl. newline => 2 payload units, but quote(1)+astral(2)=3 can never close
 	}
 	for name, stream := range cases {
 		var p FrameParser
@@ -153,7 +153,7 @@ func TestFrameParserMalformed(t *testing.T) {
 
 func TestFrameParserEmptyPayloadAfterPrefix(t *testing.T) {
 	// A well-formed empty-string payload (2 units for the quotes).
-	stream := itoa(utf16Units(`""`)) + "\n" + `""`
+	stream := itoa(utf16Units(`""`)+1) + "\n" + `""`
 	var p FrameParser
 	got, err := p.Feed([]byte(stream))
 	if err != nil {

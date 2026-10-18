@@ -80,10 +80,15 @@ func (p *FrameParser) tryFrame() (string, bool, error) {
 			return "", false, nil
 		}
 		length, err := strconv.Atoi(string(p.buf[:i]))
-		if err != nil || length <= 0 || length > maxFrameUnits {
+		if err != nil || length <= 1 || length > maxFrameUnits {
 			return "", false, errMalformedFrame
 		}
-		p.expected = length
+		// Google's declared length counts the separator newline as its first
+		// UTF-16 unit (reference client: payload_start = len(digits), so the
+		// slice starts at "\n"). Consume the newline here and count
+		// length-1 units of actual payload; keeping the full length would
+		// overrun every frame by one byte and desync the stream.
+		p.expected = length - 1
 		p.units = 0
 		p.scanned = 0
 		p.havePrefix = true

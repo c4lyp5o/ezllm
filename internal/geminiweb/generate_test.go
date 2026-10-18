@@ -109,9 +109,39 @@ func initGenerateClient(t *testing.T, srv *httptest.Server) *Client {
 	return c
 }
 
+// TestGenerateRealWireShape pins the two framing details the live endpoint
+// exposed and the earlier port missed: the body starts with Google's
+// `)]}'` anti-XSSI prefix, and each wrb.fr part is wrapped one level deep
+// ([["wrb.fr",...]]). Either omission yields zero text with no error.
+func TestGenerateRealWireShape(t *testing.T) {
+	body := make([]any, 26)
+	body[4] = []any{candidate("rcid-1", "hello", "", true)}
+	body[25] = "final"
+	bodyJSON, _ := json.Marshal(body)
+	part, _ := json.Marshal([]any{"wrb.fr", "haW8u6", string(bodyJSON)})
+	frame := wrbFrame("[" + string(part) + "]")
+
+	srv := newGenerateServer(t, ")]}'\n\n"+frame)
+	defer srv.Close()
+	c := initGenerateClient(t, srv)
+
+	var got string
+	res, err := c.Generate(context.Background(), GenerateOptions{Model: testModel(), Prompt: "hi"}, func(d Delta) {
+		got += d.Text
+	})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if res.Text != "hello" || got != "hello" {
+		t.Fatalf("text = %q (deltas %q), want hello", res.Text, got)
+	}
+	if !res.Completed {
+		t.Fatal("completed = false, want true")
+	}
+}
+
 // TestGenerateWireIdentity pins the three identity fields the reference
 // client sends and the earlier port omitted or diverged on:
-//   - _reqid starts at the client's random 5-digit seed (not 100000);
 //   - the x-goog-ext-525005358-jspb uuid equals payload slot 59 (one uuid,
 //     used in both places — not two independent randoms);
 //   - the model header's trailing session id is the client's session uuid,

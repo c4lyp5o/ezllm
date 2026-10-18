@@ -37,7 +37,7 @@ func newMockServer(t *testing.T, initPage string, rpcHandler http.HandlerFunc) *
 
 // wrbFrame wraps a payload in the length-prefixed frame format.
 func wrbFrame(payload string) string {
-	return fmt.Sprintf("%d\n%s", utf16Units(payload), payload)
+	return fmt.Sprintf("%d\n%s", utf16Units(payload)+1, payload)
 }
 
 // statusPart builds one batchexecute frame part for GET_USER_STATUS:

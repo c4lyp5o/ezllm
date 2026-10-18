@@ -1,6 +1,7 @@
 package geminiweb
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -255,11 +256,33 @@ func (c *Client) consumeStream(body io.Reader, onDelta func(Delta)) (GenerateRes
 	lastThoughts := map[string]string{}
 	res := GenerateResult{}
 
+	// StreamGenerate, like batchexecute, prefixes the body with Google's
+	// anti-XSSI line `)]}'`. It must be stripped before the length-prefixed
+	// frames are parsed; the batchexecute path does this in extractFrames,
+	// but this streaming path reads the raw body. Buffer until the whole
+	// prefix (4 bytes) is available so a tiny first chunk cannot desync it.
+	var prefixBuf []byte
+	prefixDone := false
+
 	buf := make([]byte, 32<<10)
 	for {
 		n, err := body.Read(buf)
 		if n > 0 {
-			text := dec.decode(buf[:n])
+			chunk := buf[:n]
+			if !prefixDone {
+				prefixBuf = append(prefixBuf, chunk...)
+				if len(prefixBuf) < len(")]}'") {
+					if err != nil {
+						break
+					}
+					continue
+				}
+				prefixBuf = bytes.TrimPrefix(prefixBuf, []byte(")]}'"))
+				prefixBuf = bytes.TrimLeft(prefixBuf, "\r\n	 ")
+				chunk = prefixBuf
+				prefixDone = true
+			}
+			text := dec.decode(chunk)
 			if text == "" {
 				if err != nil {
 					break
@@ -293,10 +316,33 @@ func (c *Client) consumeStream(body io.Reader, onDelta func(Delta)) (GenerateRes
 // consumePart handles one frame payload (the JSPB part array). stop=true
 // means the final-chunk marker was seen and the turn is closed.
 func (c *Client) consumePart(payload string, lastTexts, lastThoughts map[string]string, onDelta func(Delta), res *GenerateResult) (bool, error) {
-	var part []any
-	if err := json.Unmarshal([]byte(payload), &part); err != nil {
+	var envelope []any
+	if err := json.Unmarshal([]byte(payload), &envelope); err != nil {
 		return false, nil // not JSON: skip (heartbeat/keep-alive frames happen)
 	}
+	// StreamGenerate frames wrap their parts one level deep:
+	// [["wrb.fr", null, "<body>"], ...]. The batchexecute path unwraps this
+	// at the caller; do it here so both shapes share one parser.
+	if len(envelope) > 0 {
+		if _, wrapped := envelope[0].([]any); wrapped {
+			for _, p := range envelope {
+				part, ok := p.([]any)
+				if !ok {
+					continue
+				}
+				stop, err := c.consumePartArray(part, lastTexts, lastThoughts, onDelta, res)
+				if err != nil || stop {
+					return stop, err
+				}
+			}
+			return false, nil
+		}
+	}
+	return c.consumePartArray(envelope, lastTexts, lastThoughts, onDelta, res)
+}
+
+// consumePartArray handles one JSPB part array (["wrb.fr", rpcid, body]).
+func (c *Client) consumePartArray(part []any, lastTexts, lastThoughts map[string]string, onDelta func(Delta), res *GenerateResult) (bool, error) {
 	// Error code lives at part[5][2][0][1][0]; an absent slot is normal.
 	if code, ok := nestedInt(part, 5, 2, 0, 1, 0); ok && code != 0 {
 		return false, ErrUpstream{Code: code, What: upstreamErrorName(code)}

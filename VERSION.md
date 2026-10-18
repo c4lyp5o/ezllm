@@ -9,9 +9,26 @@ dashboard health strip, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v0.0.13**
+**Current: v0.0.14**
 
 ---
+
+## v0.0.14 — 2026-10-19
+
+Gemini (web cookies) generation is live.
+
+- **geminiweb generate**: the request now matches the reference client's wire
+  identity — `_reqid` seeds a random 5-digit value (bumped by 100000 per turn),
+  the turn uuid is shared between payload slot 59 and the
+  `x-goog-ext-525005358-jspb` header, and the model header always carries a
+  per-client session uuid. `TestGenerateWireIdentity` guards all three.
+- **geminiweb stream framing**: strip the `)]}'` anti-XSSI prefix before the
+  length-prefixed frames, unwrap the one-level `[["wrb.fr",…]]` envelope, and
+  count the declared frame length the way Google does (it includes the
+  separator newline). `TestGenerateRealWireShape` resumes the live shape.
+- **Local test ergonomics**: `make test-quiet` pins the suite to cores 0–1 with
+  `nice`/`ionice`, and `make check` refuses to run unbounded locally unless
+  `EZLLM_ALLOW_FULL_CHECK=1`. CI remains the full gate.
 
 ## v0.0.13 — 2026-10-18
 

@@ -48,7 +48,7 @@ func bridgeMockUpstream(t *testing.T, statusCode int, genFrames string) *httptes
 					units++
 				}
 			}
-			fmt.Fprintf(w, ")]}'\n%d\n%s", units, part)
+			fmt.Fprintf(w, ")]}'\n%d\n%s", units+1, part)
 		case strings.Contains(r.URL.Path, "StreamGenerate"):
 			w.Header().Set("Content-Type", "text/event-stream")
 			fmt.Fprint(w, genFrames)
@@ -81,7 +81,7 @@ func genFrame(text string, completed bool, final string) string {
 			units++
 		}
 	}
-	return fmt.Sprintf("%d\n%s", units, part)
+	return fmt.Sprintf("%d\n%s", units+1, part)
 }
 
 func newBridgeFixture(t *testing.T, genFrames string) (*geminiWebBridge, int64, *httptest.Server) {
@@ -282,7 +282,7 @@ func errFramePart(code int) string {
 			units++
 		}
 	}
-	return fmt.Sprintf("%d\n%s", units, b)
+	return fmt.Sprintf("%d\n%s", units+1, b)
 }
 
 func TestBridgeRotatorPersists(t *testing.T) {

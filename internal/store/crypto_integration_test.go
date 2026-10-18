@@ -24,6 +24,27 @@ func testAccount(t *testing.T, db *DB) int64 {
 	return id
 }
 
+func TestKeyForTestDecryptsAtRest(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "t.sqlite"), MasterSecret: "test-master"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	id := testAccount(t, db)
+	keyID, _, err := db.AddKey(ctx, id, "primary", "sk-test-1234567890")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotAcct, got, err := db.KeyForTest(ctx, keyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotAcct != id || got != "sk-test-1234567890" {
+		t.Fatalf("KeyForTest = (%d, %q), want (%d, plaintext)", gotAcct, got, id)
+	}
+}
+
 func TestAddKeyEncryptsAtRestAndPickKeyDecrypts(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "t.sqlite")

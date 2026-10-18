@@ -702,6 +702,12 @@ SELECT account_id, key_plain FROM provider_keys WHERE id=?`, keyID)
 		}
 		return 0, "", err
 	}
+	if d.crypto != nil && strings.HasPrefix(plaintext, cryptoPrefix) {
+		plaintext, err = d.crypto.Decrypt(plaintext)
+		if err != nil {
+			return 0, "", err
+		}
+	}
 	return accountID, plaintext, nil
 }
 

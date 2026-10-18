@@ -35,7 +35,7 @@ func geminiWebStatusFrame(t *testing.T, statusCode int, models []any) string {
 			units++
 		}
 	}
-	return fmt.Sprintf("%d\n%s", units, part)
+	return fmt.Sprintf("%d\n%s", units+1, part)
 }
 
 func geminiWebModelDescriptor(id, category, display string, number int) []any {

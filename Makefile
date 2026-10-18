@@ -11,7 +11,7 @@ BIN := bin/ezllm
 test test-race bench perf: export GOMEMLIMIT := 3GiB
 test test-race bench perf: export GOGC := 50
 
-.PHONY: build static run test test-short test-race vet fmt check verify bench perf clean
+.PHONY: build static run test test-short test-quiet test-race vet fmt check verify bench perf clean
 
 build:
 	$(GO) build -o $(BIN) ./cmd/ezllm
@@ -35,6 +35,16 @@ test:
 test-short:
 	$(GO) test -short -count=1 ./...
 
+# Desktop-friendly local gate. `go test ./...` defaults to -p = NumCPU
+# packages in parallel, and each test binary uses GOMAXPROCS threads — on a
+# 4-core box that is up to 16 runnable threads and the machine stops
+# responding. This pins the whole tree to cores 0-1, yields CPU/IO to
+# interactive work, and runs one package at a time. It still skips the
+# percentile harnesses. Use THIS locally; CI runs the full suite.
+test-quiet:
+	taskset -c 0-1 nice -n 19 ionice -c 3 env GOMAXPROCS=2 \
+		$(GO) test -short -count=1 -p 1 -timeout 15m ./...
+
 test-race:
 	$(GO) test -race ./...
 
@@ -44,7 +54,17 @@ vet:
 fmt:
 	gofmt -w cmd internal
 
-check: fmt vet test build
+# The full gate (: full test suite + build) is CI's job. Running it locally
+# saturates every core and can OOM a 4 GiB worker. Guarded on purpose: set
+# EZLLM_ALLOW_FULL_CHECK=1 only on an uncapped shell.
+check:
+	@if [ "$$EZLLM_ALLOW_FULL_CHECK" != "1" ]; then \
+		echo "refusing full 'make check' locally: it runs every package in parallel and the percentile harness."; \
+		echo "use 'make test-quiet' (or 'make test-short'); CI runs the full gate."; \
+		echo "override only on an uncapped shell: EZLLM_ALLOW_FULL_CHECK=1 make check"; \
+		exit 1; \
+	fi
+	$(MAKE) fmt vet test build
 
 # Acceptance check against the LIVE ledger (run with the server up).
 verify:

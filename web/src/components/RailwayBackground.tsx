@@ -21,10 +21,11 @@ const PATH_COLORS = ['#38bdf8', '#60a5fa', '#818cf8', '#22d3ee', '#7dd3fc']; // 
 // old white core was a hard spark against the dark field.
 const PACKET_COLORS = ['#38bdf8', '#60a5fa', '#818cf8', '#22d3ee', '#7dd3fc', '#a78bfa', '#c084fc'];
 
-// Calm by design: at most two packets in flight, spawned at random gaps on
-// random tracks. The original 80 looping dots were a light show; a railway
-// shows one or two cars at a time.
-const MAX_PACKETS = 2;
+// Calm by design: at most 9 packets in flight (2 original + 7 added),
+// spawned at random gaps on random tracks. Still light — each packet is
+// a single arc + a short trail, no offscreen canvas or per-packet state
+// beyond t/speed/size/color.
+const MAX_PACKETS = 9;
 
 export default function RailwayBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);

@@ -1770,6 +1770,12 @@ func (d *Dispatcher) streamCopy(ctx context.Context, w http.ResponseWriter, resp
 			if !firstByte {
 				ttft = time.Since(start)
 			}
+			if !errors.Is(err, bufio.ErrTooLong) {
+				writeStreamErrorFrame(w, surface, "upstream connection lost")
+				if flusher != nil {
+					flusher.Flush()
+				}
+			}
 			return ttft, tapper.Usage(), fmt.Errorf("upstream read: %w (scanner: %v)", cerr, err), firstPayload
 		}
 		if flusher != nil {
@@ -1783,12 +1789,34 @@ func (d *Dispatcher) streamCopy(ctx context.Context, w http.ResponseWriter, resp
 		if errors.Is(err, bufio.ErrTooLong) {
 			return ttft, tapper.Usage(), nil, firstPayload
 		}
+		// The upstream died mid-stream. The 200 is already committed, so the
+		// only honest signal left is a terminal SSE error frame in the
+		// client's dialect — otherwise the client is left with a silent EOF.
+		writeStreamErrorFrame(w, surface, "upstream connection lost")
+		if flusher != nil {
+			flusher.Flush()
+		}
 		return ttft, tapper.Usage(), fmt.Errorf("upstream read: %w", err), firstPayload
 	}
 	if !firstByte {
 		ttft = time.Since(start)
 	}
 	return ttft, tapper.Usage(), nil, firstPayload
+}
+
+// writeStreamErrorFrame emits a terminal SSE error event in the client's
+// surface dialect. Called only after a committed 200 when the upstream dies
+// mid-stream, so the client gets an explicit error instead of a silent EOF.
+func writeStreamErrorFrame(w io.Writer, surface provider.Surface, msg string) {
+	m, _ := json.Marshal(msg)
+	switch surface {
+	case provider.SurfaceAnthropic:
+		fmt.Fprintf(w, "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":%s}}\n\n", m)
+	case provider.SurfaceResponses:
+		fmt.Fprintf(w, "event: error\ndata: {\"type\":\"error\",\"code\":\"server_error\",\"message\":%s}\n\n", m)
+	default: // openai
+		fmt.Fprintf(w, "data: {\"error\":{\"type\":\"server_error\",\"message\":%s}}\n\n", m)
+	}
 }
 
 // tapSSELine extracts usage from one SSE data line for the given surface.

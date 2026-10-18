@@ -396,3 +396,66 @@ func readAll(r *http.Request) []byte {
 	b, _ := io.ReadAll(r.Body)
 	return b
 }
+
+// TestFollowUpPayloadCarriesAllThreeUUIDs pins the live 400: a follow-up
+// without human_message_uuid is rejected with an empty body. Every turn
+// carries a fresh human uuid, the conversation id, and the parent.
+func TestFollowUpPayloadCarriesAllThreeUUIDs(t *testing.T) {
+	c := New(nil, "sessionKey=sk-ant-1", "")
+	c.convID = "conv-1"
+	c.parentUUID = "parent-1"
+	raw := c.buildPayload(GenerateOptions{Model: "claude-sonnet-4-6", Prompt: "again"}, "assist-1", false)
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	uuids, _ := body["turn_message_uuids"].(map[string]any)
+	if uuids == nil {
+		t.Fatal("turn_message_uuids missing")
+	}
+	if uuids["conversation_id"] != "conv-1" {
+		t.Errorf("conversation_id = %v", uuids["conversation_id"])
+	}
+	if uuids["parent_message_uuid"] != "parent-1" {
+		t.Errorf("parent_message_uuid = %v", uuids["parent_message_uuid"])
+	}
+	if uuids["human_message_uuid"] == "" || uuids["human_message_uuid"] == nil {
+		t.Error("follow-up must carry a fresh human_message_uuid")
+	}
+	if uuids["assistant_message_uuid"] != "assist-1" {
+		t.Errorf("assistant_message_uuid = %v", uuids["assistant_message_uuid"])
+	}
+	if _, ok := body["create_conversation_params"]; ok {
+		t.Error("follow-ups must not send create_conversation_params")
+	}
+}
+
+// TestConsumeSSECapturesServerAssistUUID pins that the parent committed for
+// the next turn is the uuid the SERVER assigned in message_start, not the
+// client-generated placeholder (chaining the placeholder 400s).
+func TestConsumeSSECapturesServerAssistUUID(t *testing.T) {
+	stream := strings.Join([]string{
+		`event: message_start`,
+		`data: {"type":"message_start","message":{"uuid":"server-assist-uuid","parent_uuid":"server-human-uuid"}}`,
+		``,
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}`,
+		``,
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")
+	var snippet []byte
+	var got []string
+	var serverAssist string
+	text, completed, err := consumeSSE(strings.NewReader(stream), func(s string) { got = append(got, s) }, &snippet, &serverAssist)
+	if err != nil || !completed {
+		t.Fatalf("completed=%v err=%v", completed, err)
+	}
+	if text != "hi" || len(got) != 1 {
+		t.Fatalf("text=%q deltas=%v", text, got)
+	}
+	if serverAssist != "server-assist-uuid" {
+		t.Fatalf("server assist uuid = %q, want server-assist-uuid", serverAssist)
+	}
+}

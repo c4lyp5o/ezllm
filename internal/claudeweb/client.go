@@ -197,9 +197,20 @@ func classify(status int, header http.Header, body []byte) error {
 	case status == 429:
 		return ErrRateLimited
 	case status < 200 || status >= 300:
-		return fmt.Errorf("%w: status %d", ErrUnavailable, status)
+		// Carry a short body snippet: a bare "status 400" is undebuggable
+		// against a reverse-engineered wire whose errors name the field.
+		return fmt.Errorf("%w: status %d: %s", ErrUnavailable, status, snippet(body))
 	}
 	return nil
+}
+
+// snippet renders up to 300 bytes of an upstream body for an error message.
+func snippet(body []byte) string {
+	s := strings.TrimSpace(string(body))
+	if len(s) > 300 {
+		s = s[:300] + "…"
+	}
+	return s
 }
 
 // isChallenge mirrors omniroute's isClaudeWebChallenge: cf-mitigated header
@@ -270,12 +281,13 @@ func (c *Client) Generate(ctx context.Context, opts GenerateOptions, onDelta fun
 	defer resp.Body.Close()
 
 	var snippet []byte
+	var serverAssist string
 	_, completed, perr := consumeSSE(resp.Body, func(delta string) {
 		res.Text += delta
 		if onDelta != nil {
 			onDelta(delta)
 		}
-	}, &snippet)
+	}, &snippet, &serverAssist)
 	if perr != nil || !completed {
 		if resp.Status >= 400 {
 			if cerr := classify(resp.Status, resp.Header, snippet); cerr != nil {
@@ -287,8 +299,14 @@ func (c *Client) Generate(ctx context.Context, opts GenerateOptions, onDelta fun
 		}
 		return res, ErrStreamCut
 	}
-	// Commit only now: the assistant uuid becomes the next turn's parent.
-	c.parentUUID = assistant
+	// Commit only now. The next turn's parent MUST be the server-assigned
+	// assistant uuid from message_start — the one we generated is only a
+	// request-side placeholder and chaining it 400s on the follow-up.
+	c.parentUUID = serverAssist
+	if c.parentUUID == "" {
+		c.parentUUID = assistant
+	}
+	res.AssistUUID = c.parentUUID
 	res.Completed = true
 	return res, nil
 }
@@ -340,7 +358,11 @@ func (c *Client) buildPayload(opts GenerateOptions, assistantUUID string, newCon
 	if newConversation {
 		uuids["human_message_uuid"] = c.humanUUID
 	} else {
+		// Follow-ups carry the conversation id, the server-assigned parent,
+		// AND a fresh human uuid for this turn — omitting the human uuid is
+		// an empty-body 400 on the live wire.
 		uuids["conversation_id"] = c.convID
+		uuids["human_message_uuid"] = NewUUID()
 		if c.parentUUID != "" {
 			uuids["parent_message_uuid"] = c.parentUUID
 		}
@@ -382,7 +404,7 @@ func (c *Client) buildPayload(opts GenerateOptions, assistantUUID string, newCon
 // content_block_delta/text_delta deltas; message_stop ends the turn;
 // error events fail the turn. The body snippet (bounded) is captured for
 // classification when the status is >= 400.
-func consumeSSE(body io.Reader, onDelta func(string), snippet *[]byte) (string, bool, error) {
+func consumeSSE(body io.Reader, onDelta func(string), snippet *[]byte, serverAssist *string) (string, bool, error) {
 	sc := bufio.NewScanner(body)
 	sc.Buffer(make([]byte, 0, 64<<10), 8<<20)
 	var text strings.Builder
@@ -412,6 +434,14 @@ func consumeSSE(body io.Reader, onDelta func(string), snippet *[]byte) (string, 
 				if t, ok := delta["text"].(string); ok && t != "" {
 					text.WriteString(t)
 					onDelta(t)
+				}
+			}
+		case "message_start":
+			// The server, not the client, owns the assistant message uuid.
+			// Capture it for the next turn's parent_message_uuid.
+			if m, ok := ev["message"].(map[string]any); ok {
+				if u, ok := m["uuid"].(string); ok && u != "" && serverAssist != nil {
+					*serverAssist = u
 				}
 			}
 		case "message_stop":

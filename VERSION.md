@@ -9,9 +9,26 @@ dashboard health strip, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v0.0.15**
+**Current: v0.0.16**
 
 ---
+
+## v0.0.16 — 2026-10-19
+
+Claude (web cookies) multi-turn conversations.
+
+- **Follow-ups chain the server's assistant uuid**: the assistant message
+  uuid is assigned by Claude in the `message_start` SSE event, not by the
+  client. Chaining the locally generated placeholder returned an empty-body
+  400 on turn 2. `consumeSSE` now captures `message.uuid` and commits it as
+  the next turn's `parent_message_uuid`.
+- **Follow-ups carry a fresh `human_message_uuid`**: the payload previously
+  sent only `conversation_id` + parent on continuation turns; the live wire
+  requires the human uuid too (also an empty-body 400).
+- Non-2xx errors now include a bounded upstream body snippet, so a bare
+  "status 400" is diagnosable.
+- Tests: `TestFollowUpPayloadCarriesAllThreeUUIDs`,
+  `TestConsumeSSECapturesServerAssistUUID` (both bite).
 
 ## v0.0.15 — 2026-10-19
 

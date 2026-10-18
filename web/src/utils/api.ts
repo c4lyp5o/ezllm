@@ -750,13 +750,16 @@ export async function chatStream(
   signal?: AbortSignal,
 ): Promise<void> {
   const token = getToken();
-  if (!token) throw new AuthError(401, 'unlocked');
   let res: Response;
   try {
     res = await fetch('/admin/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify({ model, messages, stream: true }),
+      credentials: 'include',
       signal,
     });
   } catch (e) {

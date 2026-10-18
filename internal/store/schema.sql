@@ -357,6 +357,8 @@ CREATE TABLE IF NOT EXISTS model_prices (
   price_cache_read   REAL    NOT NULL DEFAULT 0,
   price_cache_write  REAL    NOT NULL DEFAULT 0,
   note               TEXT    NOT NULL DEFAULT '',
+  source             TEXT    NOT NULL DEFAULT 'manual', -- manual|import|openrouter|litellm
+  fetched_at         TEXT    NOT NULL DEFAULT '',       -- when the source was read
   updated_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   PRIMARY KEY (account_id, model_id, effective_from)
 );

@@ -7,11 +7,150 @@ package server
 // whole reason cost is not a stored column.
 
 import (
+	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/c4lyp5o/ezllm/internal/store"
 )
+
+// handleCurrentPrices is the read side of the price catalog:
+// GET /v1/prices?model=<id>&account_id=<id>&at=<date|RFC3339>
+// No filters = the current rate for every priced (account, model).
+func (s *Server) handleCurrentPrices(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	model := strings.TrimSpace(q.Get("model"))
+	var accountID int64
+	if v := strings.TrimSpace(q.Get("account_id")); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n < 0 {
+			writeErr(w, http.StatusBadRequest, "bad_request", "account_id must be a non-negative integer")
+			return
+		}
+		accountID = n
+	}
+	at := time.Now()
+	if v := strings.TrimSpace(q.Get("at")); v != "" {
+		t, err := parsePriceAt(v)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+		at = t
+	}
+	prices, err := s.db.CurrentPrices(r.Context(), at, accountID, model)
+	if err != nil {
+		s.writeStoreErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"as_of":  at.UTC().Format(time.RFC3339),
+		"count":  len(prices),
+		"prices": prices,
+	})
+}
+
+func parsePriceAt(s string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, nil
+	}
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		return t, nil
+	}
+	return time.Time{}, &priceAtError{s}
+}
+
+type priceAtError struct{ s string }
+
+func (e *priceAtError) Error() string {
+	return "at must be YYYY-MM-DD or RFC3339, got " + e.s
+}
+
+// handleImportPrices bulk-upserts a price snapshot. Source is stamped on rows
+// that do not carry one, so an importer can say "litellm" / "openrouter".
+func (s *Server) handleImportPrices(w http.ResponseWriter, r *http.Request) {
+	type importPrice struct {
+		AccountID       int64    `json:"account_id"`
+		ModelID         string   `json:"model_id"`
+		EffectiveFrom   string   `json:"effective_from"`
+		Currency        string   `json:"currency"`
+		PriceIn         *float64 `json:"price_in"`
+		PriceOut        *float64 `json:"price_out"`
+		PriceCacheRead  *float64 `json:"price_cache_read"`
+		PriceCacheWrite *float64 `json:"price_cache_write"`
+		Note            string   `json:"note"`
+		Source          string   `json:"source"`
+		FetchedAt       string   `json:"fetched_at"`
+	}
+	var body struct {
+		Source string        `json:"source"`
+		Prices []importPrice `json:"prices"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	if len(body.Prices) == 0 {
+		writeErr(w, http.StatusBadRequest, "bad_request", "prices must be a non-empty array")
+		return
+	}
+	source := strings.TrimSpace(body.Source)
+	if source == "" {
+		source = "import"
+	}
+	fetched := time.Now().UTC().Format(time.RFC3339)
+	modelsByAccount := map[int64]map[string]bool{}
+	for i := range body.Prices {
+		p := &body.Prices[i]
+		if p.AccountID == 0 || strings.TrimSpace(p.ModelID) == "" || strings.TrimSpace(p.EffectiveFrom) == "" {
+			writeErr(w, http.StatusBadRequest, "bad_request",
+				fmt.Sprintf("prices[%d] needs account_id, model_id and effective_from", i))
+			return
+		}
+		if p.PriceIn == nil || p.PriceOut == nil || p.PriceCacheRead == nil || p.PriceCacheWrite == nil {
+			writeErr(w, http.StatusBadRequest, "bad_request",
+				fmt.Sprintf("prices[%d]: price_in, price_out, price_cache_read and price_cache_write are all required", i))
+			return
+		}
+		known, ok := modelsByAccount[p.AccountID]
+		if !ok {
+			entries, err := s.db.ListModels(r.Context(), p.AccountID)
+			if err != nil {
+				writeErr(w, http.StatusBadRequest, "bad_request",
+					fmt.Sprintf("prices[%d]: account %d has no catalog", i, p.AccountID))
+				return
+			}
+			known = make(map[string]bool, len(entries))
+			for _, e := range entries {
+				known[e.ID] = true
+			}
+			modelsByAccount[p.AccountID] = known
+		}
+		if !known[p.ModelID] {
+			writeErr(w, http.StatusBadRequest, "bad_request",
+				fmt.Sprintf("prices[%d]: model %q is not in account %d's catalog", i, p.ModelID, p.AccountID))
+			return
+		}
+		if p.Source == "" {
+			p.Source = source
+		}
+		if p.FetchedAt == "" {
+			p.FetchedAt = fetched
+		}
+		if err := s.db.SetPrice(r.Context(), store.Price{
+			AccountID: p.AccountID, ModelID: p.ModelID,
+			EffectiveFrom: p.EffectiveFrom, Currency: p.Currency,
+			PriceIn: *p.PriceIn, PriceOut: *p.PriceOut,
+			PriceCacheRead: *p.PriceCacheRead, PriceCacheWrite: *p.PriceCacheWrite,
+			Note: p.Note, Source: p.Source, FetchedAt: p.FetchedAt,
+		}); err != nil {
+			writeErr(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"imported": len(body.Prices), "source": source})
+}
 
 // handleListPrices returns every versioned rate row.
 func (s *Server) handleListPrices(w http.ResponseWriter, r *http.Request) {

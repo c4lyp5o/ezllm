@@ -25,7 +25,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 21
+const schemaVersion = 22
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -303,6 +303,9 @@ func (d *DB) migrate() error {
 		if err := d.alterClientTokenPolicy(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate client token policy: %w", err)
 		}
+		if err := d.alterModelPriceSource(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate model price source: %w", err)
+		}
 		if err := d.rebuildCombosV9(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate combos: %w", err)
 		}
@@ -364,6 +367,30 @@ func (d *DB) alterClientTokenPolicy(ctx context.Context) error {
 		return err
 	} else if !ok {
 		if _, err := d.w.ExecContext(ctx, `ALTER TABLE client_tokens ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// alterModelPriceSource adds provenance columns to model_prices on databases
+// created before v22. Existing rows keep source='manual' and no fetched_at.
+func (d *DB) alterModelPriceSource(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "model_prices")
+	if err != nil || !exists {
+		return err
+	}
+	if ok, err := hasColumn(ctx, d.w, "model_prices", "source"); err != nil {
+		return err
+	} else if !ok {
+		if _, err := d.w.ExecContext(ctx, `ALTER TABLE model_prices ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`); err != nil {
+			return err
+		}
+	}
+	if ok, err := hasColumn(ctx, d.w, "model_prices", "fetched_at"); err != nil {
+		return err
+	} else if !ok {
+		if _, err := d.w.ExecContext(ctx, `ALTER TABLE model_prices ADD COLUMN fetched_at TEXT NOT NULL DEFAULT ''`); err != nil {
 			return err
 		}
 	}

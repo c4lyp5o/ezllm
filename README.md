@@ -229,6 +229,7 @@ an image or a release asset.
 |---|---|
 | [docs/API.md](docs/API.md) | the admin + public API contract |
 | [docs/master-key-runbook.md](docs/master-key-runbook.md) | at-rest key encryption: paths, backup, rotation |
+| [docs/pricing-runbook.md](docs/pricing-runbook.md) | price catalog: refresh cadence, import, query |
 | [VERSION.md](VERSION.md) | release history; what changed on each date |
 | [CHANGELOG.md](CHANGELOG.md) | milestone-tagged change narrative |
 | [EXPLORING.md](EXPLORING.md) | codebase tour: reading order, invariants, landmarks |

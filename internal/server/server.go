@@ -224,6 +224,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
 	s.mux.HandleFunc("POST /admin/login", s.handleDashboardLogin)
 	s.mux.HandleFunc("GET /v1/models", s.authed(s.handleModels))
+	// Public price catalog (infer token): current/historical rates per
+	// account+model, versioned by effective_from.
+	s.mux.HandleFunc("GET /v1/prices", s.authed(s.handleCurrentPrices))
 	s.mux.HandleFunc("POST /v1/chat/completions", s.authed(s.inference(provider.SurfaceOpenAI)))
 	s.mux.HandleFunc("POST /v1/messages", s.authed(s.inference(provider.SurfaceAnthropic)))
 	s.mux.HandleFunc("POST /v1/responses", s.authed(s.inference(provider.SurfaceResponses)))
@@ -288,6 +291,8 @@ func (s *Server) routes() {
 	// v8: versioned model prices + derived cost (admin only — like overview,
 	// this is where detail that /healthz no longer leaks lives).
 	s.mux.HandleFunc("GET /admin/prices", s.admin(s.handleListPrices))
+	s.mux.HandleFunc("POST /admin/prices/import", s.admin(s.handleImportPrices))
+	s.mux.HandleFunc("POST /admin/prices/refresh", s.admin(s.handleRefreshPrices))
 	s.mux.HandleFunc("PUT /admin/accounts/{id}/prices", s.admin(s.handleSetPrice))
 	s.mux.HandleFunc("DELETE /admin/accounts/{id}/prices", s.admin(s.handleDeletePrice))
 	s.mux.HandleFunc("GET /admin/cost", s.admin(s.handleCost))

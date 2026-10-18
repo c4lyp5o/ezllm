@@ -307,11 +307,48 @@ Catalog resyncs **preserve** pins (models that vanish upstream lose their pin wi
 ```jsonc
 { "account_id":6, "model_id":"qwen3.8-flash", "effective_from":"2026-01-01",
   "currency":"USD", "price_in":0.2, "price_out":1.6,
-  "price_cache_read":0.04, "price_cache_write":0.25, "note":"source + date" }
+  "price_cache_read":0.04, "price_cache_write":0.25, "note":"source + date",
+  "source":"litellm", "fetched_at":"2026-10-18T03:00:00Z" }
 ```
 Rates are **USD per 1M tokens**, versioned per `(account, model, effective_from)`. Same
 version re-set = overwrite; new date = new version. Cost joins each call to the newest
 rate effective **on or before the call's date**, so a reprice never rewrites history.
+
+### `GET /v1/prices?model=&account_id=&at=` → `200`
+Read-only price lookup for inference tokens. No filters returns the current rate for
+every priced `(account, model)`; `at` accepts `YYYY-MM-DD` or RFC3339 and returns the
+newest rate effective on that date. Response:
+```jsonc
+{ "as_of":"2026-10-18T00:00:00Z", "count":2,
+  "prices":[ { "account_id":6,"model_id":"qwen3.8-flash","effective_from":"2026-10-01",
+               "currency":"USD","price_in":0.2,"price_out":1.6,
+               "price_cache_read":0.04,"price_cache_write":0.25,
+               "source":"litellm","fetched_at":"2026-10-18T03:00:00Z" } ] }
+```
+
+### `POST /admin/prices/import` → `200`
+Bulk upsert of a price snapshot (max 1 MiB). Body:
+```jsonc
+{ "source":"litellm",
+  "prices":[ { "account_id":6,"model_id":"qwen3.8-flash","effective_from":"2026-10-01",
+               "price_in":0.2,"price_out":1.6,"price_cache_read":0.04,"price_cache_write":0.25 } ] }
+```
+Each row needs `account_id`, `model_id`, `effective_from` **and all four rates**
+(`price_in`, `price_out`, `price_cache_read`, `price_cache_write`) — a missing rate
+is a 400, never an implicit zero. `source` defaults to the top-level source,
+`fetched_at` is stamped now when absent. Existing
+`(account, model, effective_from)` is upserted, so imports are idempotent.
+
+### `POST /admin/prices/refresh?source=litellm&effective_from=YYYY-MM-DD` → `200`
+Fetches LiteLLM's public `model_prices_and_context_window.json`, matches entries by
+**exact model-id suffix** (`gpt-5-nano` ↔ `openai/gpt-5-nano`), and upserts the given
+`effective_from` (default: today) for every enabled account whose catalog has a match.
+Rows are stamped `source="litellm"` and a note that this is a list-price snapshot, not
+a bill. `matched` is the number written; unmatched models still need manual rates.
+Recommended cadence: **daily** (03:00 local); provider list prices change on the order
+of weeks, and the endpoint is idempotent for the day. For a **historical backfill**,
+pass an earlier `effective_from` (for example 30 days ago) — the cost report then
+applies today's list price to those calls as an estimate, still marked `source=litellm`.
 
 ### `PUT /admin/accounts/{id}/prices` → `200` (echoes the stored row)
 Model id in the body (ids can contain `/`). **All four rates are required** — a missing

@@ -37,6 +37,8 @@ type Price struct {
 	PriceCacheRead  float64 `json:"price_cache_read"`
 	PriceCacheWrite float64 `json:"price_cache_write"`
 	Note            string  `json:"note,omitempty"`
+	Source          string  `json:"source,omitempty"`
+	FetchedAt       string  `json:"fetched_at,omitempty"`
 }
 
 // validPriceDate accepts YYYY-MM-DD (and normalizes a full RFC3339 timestamp
@@ -67,6 +69,12 @@ func (d *DB) SetPrice(ctx context.Context, p Price) error {
 	if p.Currency == "" {
 		p.Currency = "USD"
 	}
+	if p.Source == "" {
+		p.Source = "manual"
+	}
+	if p.FetchedAt == "" {
+		p.FetchedAt = time.Now().UTC().Format(time.RFC3339)
+	}
 	for name, v := range map[string]float64{"price_in": p.PriceIn, "price_out": p.PriceOut, "price_cache_read": p.PriceCacheRead, "price_cache_write": p.PriceCacheWrite} {
 		if v < 0 {
 			return fmt.Errorf("store: price %s is negative (%v)", name, v)
@@ -77,14 +85,15 @@ func (d *DB) SetPrice(ctx context.Context, p Price) error {
 	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `
 INSERT INTO model_prices (account_id, model_id, effective_from, currency,
-  price_in, price_out, price_cache_read, price_cache_write, note, updated_at)
-VALUES (?,?,?,?,?,?,?,?,?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  price_in, price_out, price_cache_read, price_cache_write, note, source, fetched_at, updated_at)
+VALUES (?,?,?,?,?,?,?,?,?,?,?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 ON CONFLICT(account_id, model_id, effective_from) DO UPDATE SET
   currency=excluded.currency, price_in=excluded.price_in, price_out=excluded.price_out,
   price_cache_read=excluded.price_cache_read, price_cache_write=excluded.price_cache_write,
-  note=excluded.note, updated_at=excluded.updated_at`,
+  note=excluded.note, source=excluded.source, fetched_at=excluded.fetched_at,
+  updated_at=excluded.updated_at`,
 			p.AccountID, p.ModelID, p.EffectiveFrom, p.Currency,
-			p.PriceIn, p.PriceOut, p.PriceCacheRead, p.PriceCacheWrite, p.Note)
+			p.PriceIn, p.PriceOut, p.PriceCacheRead, p.PriceCacheWrite, p.Note, p.Source, p.FetchedAt)
 		if err != nil {
 			return fmt.Errorf("store: set price: %w", err)
 		}
@@ -96,7 +105,8 @@ ON CONFLICT(account_id, model_id, effective_from) DO UPDATE SET
 func (d *DB) ListPrices(ctx context.Context) ([]Price, error) {
 	rows, err := d.r.QueryContext(ctx, `
 SELECT account_id, model_id, effective_from, currency,
-       price_in, price_out, price_cache_read, price_cache_write, COALESCE(note,'')
+       price_in, price_out, price_cache_read, price_cache_write, COALESCE(note,''),
+       COALESCE(source,'manual'), COALESCE(fetched_at,'')
 FROM model_prices ORDER BY model_id, account_id, effective_from DESC`)
 	if err != nil {
 		return nil, err
@@ -106,7 +116,47 @@ FROM model_prices ORDER BY model_id, account_id, effective_from DESC`)
 	for rows.Next() {
 		var p Price
 		if err := rows.Scan(&p.AccountID, &p.ModelID, &p.EffectiveFrom, &p.Currency,
-			&p.PriceIn, &p.PriceOut, &p.PriceCacheRead, &p.PriceCacheWrite, &p.Note); err != nil {
+			&p.PriceIn, &p.PriceOut, &p.PriceCacheRead, &p.PriceCacheWrite, &p.Note,
+			&p.Source, &p.FetchedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// CurrentPrices returns the newest effective row per (account, model) at `at`.
+// Empty model / zero account mean "all"; at zero time means now.
+func (d *DB) CurrentPrices(ctx context.Context, at time.Time, accountID int64, model string) ([]Price, error) {
+	if at.IsZero() {
+		at = time.Now()
+	}
+	day := at.UTC().Format("2006-01-02")
+	model = strings.TrimSpace(model)
+	rows, err := d.r.QueryContext(ctx, `
+SELECT account_id, model_id, effective_from, currency,
+       price_in, price_out, price_cache_read, price_cache_write, COALESCE(note,''),
+       COALESCE(source,'manual'), COALESCE(fetched_at,'')
+FROM (
+  SELECT p.*, ROW_NUMBER() OVER (
+    PARTITION BY p.account_id, p.model_id ORDER BY p.effective_from DESC
+  ) AS rn
+  FROM model_prices p
+  WHERE p.effective_from <= ?
+    AND (? = '' OR p.model_id = ?)
+    AND (? = 0 OR p.account_id = ?)
+) WHERE rn = 1
+ORDER BY model_id, account_id`, day, model, model, accountID, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Price{}
+	for rows.Next() {
+		var p Price
+		if err := rows.Scan(&p.AccountID, &p.ModelID, &p.EffectiveFrom, &p.Currency,
+			&p.PriceIn, &p.PriceOut, &p.PriceCacheRead, &p.PriceCacheWrite, &p.Note,
+			&p.Source, &p.FetchedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, p)

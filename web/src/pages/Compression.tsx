@@ -29,6 +29,7 @@ const ENGINE_INFO: Record<string, { label: string; note: string; option?: { key:
   lite: { label: 'Lite', note: 'Whitespace cleanup only; words and code fences remain unchanged.', option: { key: 'blank_lines', label: 'Blank lines', initial: '1' } },
   ansi: { label: 'ANSI cleanup', note: 'Strips terminal escape codes and collapses carriage-return progress lines to what the terminal showed (log/search output only).' },
   fold: { label: 'Fold repeats', note: 'Collapses runs of exactly identical log lines into one line plus a count (log/search output only).', option: { key: 'min_repeat', label: 'Minimum run', initial: '3' } },
+  jsonmin: { label: 'JSON minify', note: 'Removes insignificant whitespace from pretty-printed JSON tool output; every key, number and escape stays byte-identical. Never file reads.' },
   caveman: { label: 'Caveman', note: 'Deterministic prose condensation with protected spans and safety gates.', option: { key: 'intensity', label: 'Intensity', initial: 'lite', values: ['lite', 'standard'] } },
 };
 const ENGINE_IDS = Object.keys(ENGINE_INFO);

@@ -234,6 +234,16 @@ is spent on real lines.
   A run folds only when its marker is shorter than the lines it replaces.
   Fences are atomic. Option `min_repeat` (default 3).
 
+### `jsonmin` — whitespace-free JSON tool output (2026-10-19)
+
+Tool output that is one whole JSON value (API responses, `kubectl -o json`,
+configs) loses its insignificant whitespace via `json.Compact`: nothing is
+decoded and re-encoded, so key order, duplicate keys, number spellings and
+string escapes stay byte-identical. Log, search and unknown tools qualify;
+**never preserve-class output** (a JSON file read is quoted back by the next
+edit). Text around the JSON, invalid JSON, JSON lines, or already-compact JSON
+⇒ untouched. Before `headroom`, which then columnarizes uniform arrays.
+
 ### `headroom` — lossless columnar JSON, `scope: tool_only`
 
 SmartCrusher-style tabular compaction (omniroute reference): a homogeneous JSON-array

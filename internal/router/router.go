@@ -837,11 +837,8 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 
 // orderRoutes applies the combo's strategy. The candidate list is already
 // filtered, so strategies only ever choose among hops that WILL work right
-// now — none of them re-implements eligibility.
-//
-// Weights are handled by expansion (a weight-3 hop appears three times) rather
-// than by a weighted cursor: it keeps the hot path free of arithmetic state,
-// and the lists are tiny.
+// now — none of them re-implements eligibility. Hop weights are not an input
+// (store.ComboHop.Weight is always 1).
 func orderRoutes(combo *store.Combo, routes []proxy.Route) ([]proxy.Route, int) {
 	switch combo.Strategy {
 	case "true_round_robin":

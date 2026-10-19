@@ -157,11 +157,6 @@ function HopsEditor({ hops, setHops, accounts, strategy }: {
               <input type="checkbox" checked={custom} onChange={(e) => set(i, { custom: e.target.checked })} />
               custom model id
             </label>
-            <label className="flex items-center gap-1.5 text-[11px] text-mute">
-              w
-              <input type="number" min={1} className={cx(inputCls, 'w-16 py-1.5 font-mono text-[12px] tabular-nums')}
-                value={h.weight} onChange={(e) => set(i, { weight: Math.max(1, Number(e.target.value) || 1) })} />
-            </label>
             <Toggle checked={h.enabled} onChange={(v) => set(i, { enabled: v })} label="hop enabled" />
             {strategy === 'block_round_robin' && (
               <label className="flex items-center gap-1.5 text-[11px] text-mute"
@@ -546,7 +541,6 @@ export default function Combos() {
                         {accounts.find((a) => a.id === h.account_id)?.name ?? `#${h.account_id}`}
                         <span className="mx-1 text-mute">/</span>
                         <span className={h.enabled ? 'text-ink' : 'text-mute'}>{h.model_id}</span>
-                        {h.weight > 1 && <span className="ml-1.5 text-mute">×{h.weight}</span>}
                         {h.hold_until_failure && (
                           <span className="ml-1.5 rounded border border-accent/40 px-1 text-[10px] text-accent"
                             title="holds the block while it succeeds; releases on a hop-attributable failure">

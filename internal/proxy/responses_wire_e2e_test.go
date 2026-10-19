@@ -188,3 +188,34 @@ func TestResponsesWireHopFailureStillFailsOver(t *testing.T) {
 		t.Error("the served route must be the native hop")
 	}
 }
+
+// An ANTHROPIC client on a responses-wire hop gets upstream errors in the
+// Messages envelope — the same shape the chat wire gives it — not the
+// responses family it cannot parse. The ledger still keeps the upstream's words.
+func TestResponsesWireHopErrorReshapedForAnthropicClient(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"slow down","type":"rate_limit_error","code":429}}`))
+	}))
+	defer upstream.Close()
+
+	clientBody := `{"model":"daily","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}`
+	rt := testRoute(upstream.URL, provider.SurfaceAnthropic)
+	rt.Model, rt.Alias, rt.ResponsesWire = "openai/gpt-6.1-sol", "daily", true
+	d := newDispatcher()
+	d.SetRetries(0)
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(clientBody))
+	rec := httptest.NewRecorder()
+	_, res, err := d.ForwardCandidates(context.Background(), rec, req, []Route{rt}, []byte(clientBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}`
+	if rec.Code != http.StatusTooManyRequests || rec.Body.String() != want {
+		t.Errorf("client got %d %s\nwant 429 %s", rec.Code, rec.Body.String(), want)
+	}
+	if !strings.Contains(res.Err, "slow down") {
+		t.Errorf("ledger err = %q, want the upstream's words", res.Err)
+	}
+}

@@ -303,3 +303,45 @@ func TestModelFactsMatchesPerQuestionReads(t *testing.T) {
 		t.Errorf("probed facts = %+v, want pin openai, openai true, anthropic false, responses nil", f)
 	}
 }
+
+// Hop weights are not a routing input: a submitted weight is stored as 1, and
+// a row saved before weights were removed is reported as 1 by every reader.
+func TestComboHopWeightIsAlwaysOne(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+	id, err := db.UpsertAccount(ctx, provider.Account{
+		Name: "w", Namespace: "w", Kind: provider.KindOpenAICompatible,
+		BaseURL: "https://x/v1", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	comboID, err := db.UpsertCombo(ctx, Combo{Name: "wc", Strategy: "true_round_robin", Enabled: true,
+		Hops: []ComboHop{{AccountID: id, ModelID: "a", Weight: 3}, {AccountID: id, ModelID: "b", Weight: 1}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored int
+	if err := db.Reader().QueryRow(`SELECT MAX(weight) FROM combo_hops WHERE combo_id=?`, comboID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != 1 {
+		t.Errorf("stored weight = %d, want 1", stored)
+	}
+	if _, err := db.w.Exec(`UPDATE combo_hops SET weight=5 WHERE combo_id=?`, comboID); err != nil {
+		t.Fatal(err)
+	}
+	c, err := db.ComboByName(ctx, "wc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	all, err := db.ListCombos(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range append(c.Hops, all[0].Hops...) {
+		if h.Weight != 1 {
+			t.Errorf("hop %s reported weight %d, want 1", h.ModelID, h.Weight)
+		}
+	}
+}

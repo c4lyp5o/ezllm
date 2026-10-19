@@ -34,8 +34,10 @@ patterns are scoped per account rather than globbed across the fleet.
 **Invariants carried over:** passthrough identity for unmarked hops (tested),
 byte-determinism (ordered structs, golden byte-exact tests), the route keeps
 the CLIENT's surface (ledger + usage tap never see the translation), upstream
-error bodies pass through byte-identical (chat and responses share the
-`{"error":{…}}` family — no error translation needed), and a marked hop keeps
+error bodies pass through byte-identical for chat clients (chat and responses
+share the `{"error":{…}}` family — no error translation needed; an anthropic
+client gets the Messages error envelope instead, exactly as on the chat wire —
+2026-10-19), and a marked hop keeps
 its normal combo position (this is a wire quirk, not a last-resort hop).
 
 ---
@@ -122,8 +124,9 @@ lines). Golden fixtures pin the bytes.
   rt.Model)` (replaces the model swap, same as translated hops).
 - **commit:** stream → wrap `resp.Body` with `NewResponsesSSEReader` (Close
   still reaches the original body); non-stream → `ResponsesToChat(raw,
-  rt.Alias)`; error statuses (≥400) pass through byte-identical — no error
-  translation on this wire. An untranslatable success body is a 502 (never
+  rt.Alias)`; error statuses (≥400) pass through byte-identical to a chat
+  client — no error translation on this wire — and are re-enveloped as
+  `{"type":"error","error":{…}}` for an anthropic client. An untranslatable success body is a 502 (never
   responses-shaped bytes to a chat client).
 - **Ordering:** a ResponsesWire hop keeps its normal combo position — it is a
   working member, not a last resort. No tail rule (unlike translated hops).

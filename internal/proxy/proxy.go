@@ -1121,16 +1121,24 @@ func crossWireFor(rt Route) (crossWire, bool) {
 			failBody:  translate.Error,
 		}, true
 	}
-	// Legacy responses-wire hop (chat or anthropic client). Error bodies pass
-	// through byte-identical: the upstream's own words reach the client and
-	// the ledger err column untouched.
-	return crossWire{
+	// Legacy responses-wire hop. A chat client shares the upstream's
+	// {"error":{…}} family, so its error bodies pass through byte-identical.
+	cw := crossWire{
 		wire: wire, opts: legacy,
 		errPrefix: "translate responses body: ",
 		failBody: func([]byte) []byte {
 			return []byte(`{"error":{"type":"upstream_error","message":"responses body could not be translated","code":502}}`)
 		},
-	}, true
+	}
+	if rt.Surface == provider.SurfaceAnthropic {
+		// An anthropic client does not: it gets the Messages error envelope,
+		// exactly as on the chat wire above, whichever wire its hop rides.
+		cw.reshape = translate.Error
+		cw.failBody = func([]byte) []byte {
+			return translate.EncodeError(translate.ErrorIR{Type: "upstream_error", Message: "responses body could not be translated"}, provider.SurfaceAnthropic)
+		}
+	}
+	return cw, true
 }
 
 // commit streams one upstream response to the client and closes resp.Body.

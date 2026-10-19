@@ -1036,8 +1036,10 @@ LEFT JOIN quota_snapshots q ON q.id = (
 type ComboHop struct {
 	AccountID int64  `json:"account_id"`
 	ModelID   string `json:"model_id"`
-	Weight    int    `json:"weight"`
-	Enabled   *bool  `json:"enabled"`
+	// Weight is kept for API compatibility only: routing never used it, so it
+	// is accepted on input and always stored and reported as 1.
+	Weight  int   `json:"weight"`
+	Enabled *bool `json:"enabled"`
 	// HoldUntilFailure (block_round_robin only): the hop keeps the block while
 	// it succeeds and releases it on a hop-attributable failure. Nullable so a
 	// PATCH that omits it keeps the stored value.
@@ -1158,6 +1160,7 @@ FROM combo_hops ORDER BY combo_id, position`)
 		if err := hrows.Scan(&comboID, &h.AccountID, &h.ModelID, &h.Weight, &h.Enabled, &hold); err != nil {
 			return nil, err
 		}
+		h.Weight = 1 // rows saved before weights were removed may hold more
 		if idx, ok := byID[comboID]; ok {
 			if hold != 0 {
 				held := true
@@ -1239,10 +1242,7 @@ func (d *DB) replaceHops(ctx context.Context, tx *sql.Tx, comboID int64, hops []
 		if h.Enabled != nil {
 			enabled = *h.Enabled
 		}
-		weight := h.Weight
-		if weight <= 0 {
-			weight = 1
-		}
+		const weight = 1 // see ComboHop.Weight: accepted, never stored as given
 		held := h.HoldUntilFailure != nil && *h.HoldUntilFailure
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO combo_hops (combo_id, position, account_id, model_id, weight, enabled, hold_until_failure)
@@ -1324,6 +1324,7 @@ FROM combo_hops WHERE combo_id = ? ORDER BY position`, c.ID)
 		if err := hrows.Scan(&h.AccountID, &h.ModelID, &h.Weight, &h.Enabled, &hold); err != nil {
 			return nil, err
 		}
+		h.Weight = 1 // rows saved before weights were removed may hold more
 		if hold != 0 {
 			held := true
 			h.HoldUntilFailure = &held

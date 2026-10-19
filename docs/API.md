@@ -414,6 +414,9 @@ Live `ReadQuota` → classified shape + `raw`. `{"kind":"none"}` when the provid
   "hops":[{"account_id":1,"model_id":"gpt-6-luna","weight":1,"enabled":true,
            "hold_until_failure":false}, …] }
 
+A hop's `weight` is accepted for compatibility and ignored: no strategy ever
+used it, so it is always stored and reported as `1` (removed 2026-10-19).
+
 Each hop carries `hold_until_failure` (block_round_robin only, default false):
 when true the hop does not rotate when its block runs out — it HOLDS the block
 while it keeps succeeding and releases it on a hop-attributable failure (429,

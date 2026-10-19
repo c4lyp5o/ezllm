@@ -31,6 +31,7 @@ const ENGINE_INFO: Record<string, { label: string; note: string; option?: { key:
   fold: { label: 'Fold repeats', note: 'Collapses runs of exactly identical log lines into one line plus a count (log/search output only).', option: { key: 'min_repeat', label: 'Minimum run', initial: '3' } },
   jsonmin: { label: 'JSON minify', note: 'Removes insignificant whitespace from pretty-printed JSON tool output; every key, number and escape stays byte-identical. Never file reads.' },
   tool_ref: { label: 'Tool reference', note: 'A tool result byte-identical to an earlier one becomes a reference to it; the earlier copy stays. Every tool. Place after the other tool-output stages.', option: { key: 'min_bytes', label: 'Minimum bytes', initial: '200' } },
+  blobs: { label: 'Blobs', note: 'Long base64 runs and data: URIs in tool output become a marker with their length and hash. Never file reads.', option: { key: 'min_bytes', label: 'Minimum bytes', initial: '1024' } },
   caveman: { label: 'Caveman', note: 'Deterministic prose condensation with protected spans and safety gates.', option: { key: 'intensity', label: 'Intensity', initial: 'lite', values: ['lite', 'standard'] } },
 };
 const ENGINE_IDS = Object.keys(ENGINE_INFO);
@@ -136,7 +137,7 @@ export default function Compression() {
     if (!draft) return;
     if (draft.stages.some((s) => s.engine === 'caveman' && !['lite', 'standard'].includes(s.option.trim())))
       return setErr('Caveman intensity must be lite or standard.');
-    if (draft.stages.some((s) => ['rtk', 'headroom', 'lite', 'fold', 'tool_ref'].includes(s.engine) && (!Number.isInteger(Number(s.option)) || Number(s.option) < 0)))
+    if (draft.stages.some((s) => ['rtk', 'headroom', 'lite', 'fold', 'tool_ref', 'blobs'].includes(s.engine) && (!Number.isInteger(Number(s.option)) || Number(s.option) < 0)))
       return setErr('Numeric stage options must be non-negative whole numbers.');
     if (draft.stages.some((s) => s.engine === 'rtk' && s.toolClasses?.trim() && parseToolClasses(s.toolClasses) === null))
       return setErr('RTK tool classes must be "name=log|search|preserve", comma-separated.');

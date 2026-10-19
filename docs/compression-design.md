@@ -265,6 +265,24 @@ already changed its prefix, so no cache is lost that was not already).
 The final message is exempt unless `fresh_tool_output: compress` opens it.
 Option `min_bytes` (default 200).
 
+### `blobs` — base64 payloads become markers (2026-10-19)
+
+A raw base64 run or a `data:` URI in tool output becomes
+`[ezllm/blob: <N> chars base64, sha256 <12 hex> elided]` (data URIs keep their
+media type). Detection is exact: at least `min_bytes` (default 1024) base64
+characters mixing upper case, lower case and digits, so hex digests and long
+words never match. **Minified code is deliberately not a blob**: a long
+space-free line is indistinguishable from compact JSON or a long log line, and
+a wrong guess deletes real content. Never on preserve-class output; safe
+inside JSON strings (the marker has no quote or backslash).
+
+### Suggested order
+
+`session_dedup → ansi → fold → rtk → blobs → jsonmin → headroom → tool_ref →
+lite → caveman`: clean terminal noise before rtk spends its head/tail, shrink
+payloads before headroom columnarizes, and reference repeats last so both
+copies went through the same engines.
+
 ### `headroom` — lossless columnar JSON, `scope: tool_only`
 
 SmartCrusher-style tabular compaction (omniroute reference): a homogeneous JSON-array

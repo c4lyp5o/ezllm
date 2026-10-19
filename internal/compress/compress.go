@@ -31,7 +31,7 @@ type Stage struct {
 // KnownEngines is the shipped engine registry (M5: session_dedup + rtk,
 // M6.5 phase 2: headroom + lite, M7: caveman).
 var KnownEngines = map[string]bool{"session_dedup": true, "rtk": true, "headroom": true, "lite": true, "caveman": true,
-	"ansi": true, "fold": true, "jsonmin": true, "tool_ref": true}
+	"ansi": true, "fold": true, "jsonmin": true, "tool_ref": true, "blobs": true}
 
 // Profile is the runtime view of a compression_profiles row.
 type Profile struct {
@@ -595,6 +595,8 @@ func runEngine(st Stage, msgs []any) ([]any, int, error) {
 		return jsonmin(msgs, st.Options), 0, nil
 	case "tool_ref":
 		return toolRef(msgs, nil, st.Options), 0, nil
+	case "blobs":
+		return blobs(msgs, st.Options), 0, nil
 	case "caveman":
 		// caveman also reports how many rules fired, so a surprising saving
 		// is attributable to a rule rather than a mystery.

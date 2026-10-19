@@ -130,6 +130,10 @@ text for one conversation written in all three shapes.
 
 1. **Never modify the final message** — `exempt_last_turn` (default on): engines receive
    `messages[:len-1]` only; the final message is appended back byte-identical.
+   Exception, opt-in per profile: `fresh_tool_output: compress` treats a final message that is
+   PURELY tool output as new work for the tool-output engines, so it is trimmed on its first send
+   and frozen thereafter (no already-sent message ever changes). Any prose in the final message
+   keeps the whole message exempt, so prose engines never touch the live turn.
 2. **Never modify tool-call arguments or structured tool results** — `tool_calls` on
    assistant messages are never read or written; `role:"tool"` messages are never dropped
    or structurally changed (pairing stays intact); `rtk` may filter *text lines* inside

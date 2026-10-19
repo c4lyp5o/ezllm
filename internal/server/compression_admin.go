@@ -29,6 +29,7 @@ type profilePayload struct {
 	MinCompressRatio  *float64         `json:"min_compress_ratio"`
 	FailOpen          *bool            `json:"fail_open"`
 	AutoTriggerTokens *int64           `json:"auto_trigger_tokens"`
+	FreshToolOutput   *string          `json:"fresh_tool_output"`
 	Notes             *string          `json:"notes"`
 }
 
@@ -156,6 +157,9 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 		if pay.AutoTriggerTokens != nil {
 			existing.AutoTriggerTokens = *pay.AutoTriggerTokens
 		}
+		if pay.FreshToolOutput != nil {
+			existing.FreshToolOutput = *pay.FreshToolOutput
+		}
 		if pay.Notes != nil {
 			existing.Notes = *pay.Notes
 		}
@@ -193,6 +197,7 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 		ExemptLastTurn:   true,
 		MinCompressRatio: 0.05,
 		FailOpen:         true,
+		FreshToolOutput:  "keep",
 		Stages:           json.RawMessage("[]"),
 	}
 	if pay.Name != nil {
@@ -215,6 +220,9 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if pay.AutoTriggerTokens != nil {
 		p.AutoTriggerTokens = *pay.AutoTriggerTokens
+	}
+	if pay.FreshToolOutput != nil {
+		p.FreshToolOutput = *pay.FreshToolOutput
 	}
 	if pay.Notes != nil {
 		p.Notes = *pay.Notes
@@ -248,6 +256,11 @@ func checkProfileBounds(p store.CompressionProfile) error {
 	}
 	if p.AutoTriggerTokens < 0 {
 		return errStr("auto_trigger_tokens must be >= 0")
+	}
+	switch p.FreshToolOutput {
+	case "", "keep", "compress":
+	default:
+		return errStr("fresh_tool_output must be \"keep\" or \"compress\"")
 	}
 	return nil
 }

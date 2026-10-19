@@ -1581,8 +1581,12 @@ type CompressionProfile struct {
 	MinCompressRatio  float64         `json:"min_compress_ratio"`
 	FailOpen          bool            `json:"fail_open"`
 	AutoTriggerTokens int64           `json:"auto_trigger_tokens"`
-	Notes             string          `json:"notes,omitempty"`
-	CreatedAt         string          `json:"created_at,omitempty"`
+	// FreshToolOutput: "keep" (default) leaves a trailing tool result for
+	// the exempt last turn; "compress" lets tool-output engines trim it on
+	// its first send (it is then frozen by the memo like any message).
+	FreshToolOutput string `json:"fresh_tool_output"`
+	Notes           string `json:"notes,omitempty"`
+	CreatedAt       string `json:"created_at,omitempty"`
 }
 
 // ListCompressionProfiles returns every profile with its full pipeline —

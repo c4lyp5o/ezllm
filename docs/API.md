@@ -501,12 +501,19 @@ every hop returns `429`, not `502`.
 ## M5–M7 — compression profiles
 
 ### `GET|POST /admin/compression-profiles` · `GET|PATCH|DELETE /admin/compression-profiles/{id}` → `200`
-`stages` is an ordered engine pipeline over `session_dedup`, `rtk`, `headroom`, `lite`, `caveman`,
-`budget`, validated against the engine registry on write. Stage options are engine-specific
-(e.g. `{"engine":"rtk","keep_lines":6}`); `budget` carries its own context-token accounting.
+`stages` is an ordered engine pipeline over `session_dedup`, `rtk`, `headroom`, `lite` and
+`caveman`, validated against the engine registry on write (`budget` was deleted 2026-10-19 and is
+rejected as an unknown engine). Stage options are engine-specific (e.g.
+`{"engine":"rtk","keep_lines":6}`). Every engine applies to all three request shapes
+(`/v1/chat/completions`, `/v1/messages`, `/v1/responses`).
 
 - `exempt_last_turn` (default true) · `min_compress_ratio` (0.05) · `fail_open` (true) ·
-  `auto_trigger_tokens` (0 = off) · `enabled` · `notes`.
+  `auto_trigger_tokens` (0 = off) · `fresh_tool_output` (`keep` | `compress`, default `keep`) ·
+  `enabled` · `notes`.
+- `fresh_tool_output: compress` lets the tool-output engines trim a last message that is purely
+  tool output (a `role:"tool"` message, a user message of only `tool_result` blocks, or a
+  `function_call_output` item) on its first send; it is then frozen like any shipped message. A
+  last message with any prose stays exempt. `keep` leaves the newest tool result whole.
 - Selection: per-request `x-ezllm-compression` header → the combo's `compression_profile_id` →
   off. Fail-open: an engine error passes the original request through untouched.
 

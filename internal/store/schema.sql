@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS compression_profiles (
   min_compress_ratio  REAL NOT NULL DEFAULT 0.05,
   fail_open           INTEGER NOT NULL DEFAULT 1,
   auto_trigger_tokens INTEGER NOT NULL DEFAULT 0, -- 0 = always; else only above N prompt tokens
+  fresh_tool_output   TEXT NOT NULL DEFAULT 'keep', -- v24: keep | compress a trailing tool result on first send
   notes         TEXT,
   created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );

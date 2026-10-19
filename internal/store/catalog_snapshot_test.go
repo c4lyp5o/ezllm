@@ -248,3 +248,41 @@ func TestMigrateV22AddsCatalogGen(t *testing.T) {
 		t.Errorf("catalog_gen = %d after a write, want > %d (triggers missing)", after, before)
 	}
 }
+
+// A v23 database (no fresh_tool_output) gains the column on open, and every
+// existing profile reads "keep" — today's behaviour, unchanged by the upgrade.
+func TestMigrateV23AddsFreshToolOutput(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v23.sqlite")
+	db := openAt(t, path)
+	ctx := context.Background()
+	if _, err := db.UpsertCompressionProfile(ctx, CompressionProfile{Name: "old", Enabled: true, Stages: []byte(`[{"engine":"rtk"}]`)}); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`ALTER TABLE compression_profiles DROP COLUMN fresh_tool_output`,
+		`DELETE FROM schema_version`,
+		`INSERT INTO schema_version(version) VALUES (23)`,
+	} {
+		if _, err := db.w.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	db.Close()
+
+	db = openAt(t, path)
+	defer db.Close()
+	p, err := db.CompressionProfileByName(ctx, "old")
+	if err != nil {
+		t.Fatalf("profile unreadable after migration: %v", err)
+	}
+	if p.FreshToolOutput != "keep" {
+		t.Errorf("migrated profile fresh_tool_output = %q, want keep", p.FreshToolOutput)
+	}
+	p.FreshToolOutput = "compress"
+	if _, err := db.UpsertCompressionProfile(ctx, *p); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := db.CompressionProfileByName(ctx, "old"); got.FreshToolOutput != "compress" {
+		t.Errorf("fresh_tool_output did not round-trip: %q", got.FreshToolOutput)
+	}
+}

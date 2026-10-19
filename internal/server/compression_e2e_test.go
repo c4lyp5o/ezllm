@@ -65,6 +65,20 @@ func TestCompressionProfileCRUD(t *testing.T) {
 	if created.MinCompressRatio != 0.05 {
 		t.Errorf("min_compress_ratio default = %v, want 0.05", created.MinCompressRatio)
 	}
+	if created.FreshToolOutput != "keep" {
+		t.Errorf("fresh_tool_output default = %q, want keep", created.FreshToolOutput)
+	}
+	// fresh_tool_output accepts keep|compress only
+	code, _, body = postProfile(t, h, "tok-admin",
+		`{"name":"bad-fresh","stages":[{"engine":"rtk"}],"fresh_tool_output":"always"}`)
+	if code != http.StatusBadRequest || !strings.Contains(body, "fresh_tool_output") {
+		t.Errorf("bad fresh_tool_output = %d %s, want 400 naming the field", code, body)
+	}
+	code, _, body = postProfile(t, h, "tok-admin",
+		`{"name":"fresh","stages":[{"engine":"rtk"}],"fresh_tool_output":"compress"}`)
+	if code != http.StatusCreated || !strings.Contains(body, `"fresh_tool_output":"compress"`) {
+		t.Errorf("fresh_tool_output=compress = %d %s", code, body)
+	}
 
 	// unknown engine rejected at the door (not silently fail-open forever)
 	code, _, body = postProfile(t, h, "tok-admin",

@@ -71,6 +71,7 @@ func compressProfileToRuntime(p *store.CompressionProfile) *compress.Profile {
 		MinCompressRatio:  p.MinCompressRatio,
 		FailOpen:          p.FailOpen,
 		AutoTriggerTokens: p.AutoTriggerTokens,
+		FreshToolOutput:   p.FreshToolOutput == "compress",
 	}
 }
 

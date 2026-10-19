@@ -15,6 +15,7 @@ type ProfileDraft = {
   exempt_last_turn: boolean;
   min_compress_ratio: number;
   auto_trigger_tokens: number;
+  fresh_tool_output: 'keep' | 'compress';
   notes: string;
 };
 
@@ -27,7 +28,7 @@ const ENGINE_INFO: Record<string, { label: string; note: string; option?: { key:
 };
 const ENGINE_IDS = Object.keys(ENGINE_INFO);
 const stageLabel = (id: string) => ENGINE_INFO[id]?.label ?? id;
-const freshDraft = (): ProfileDraft => ({ name: '', enabled: true, stages: [{ engine: 'session_dedup', option: '' }], exempt_last_turn: true, min_compress_ratio: 0.05, auto_trigger_tokens: 0, notes: '' });
+const freshDraft = (): ProfileDraft => ({ name: '', enabled: true, stages: [{ engine: 'session_dedup', option: '' }], exempt_last_turn: true, min_compress_ratio: 0.05, auto_trigger_tokens: 0, fresh_tool_output: 'keep', notes: '' });
 const fromProfile = (p: CompressionProfile): ProfileDraft => ({
   name: p.name,
   enabled: p.enabled,
@@ -35,6 +36,7 @@ const fromProfile = (p: CompressionProfile): ProfileDraft => ({
   exempt_last_turn: p.exempt_last_turn,
   min_compress_ratio: p.min_compress_ratio,
   auto_trigger_tokens: p.auto_trigger_tokens,
+  fresh_tool_output: p.fresh_tool_output === 'compress' ? 'compress' : 'keep',
   notes: p.notes ?? '',
 });
 function optionValue(stage: CompressionStage): string {
@@ -109,7 +111,7 @@ export default function Compression() {
     const body = {
       name: draft.name.trim(), enabled: draft.enabled, stages: packStages(draft.stages),
       exempt_last_turn: draft.exempt_last_turn, min_compress_ratio: draft.min_compress_ratio,
-      fail_open: true, auto_trigger_tokens: draft.auto_trigger_tokens, notes: draft.notes.trim(),
+      fail_open: true, auto_trigger_tokens: draft.auto_trigger_tokens, fresh_tool_output: draft.fresh_tool_output, notes: draft.notes.trim(),
     };
     try {
       if (editingID == null) await post<CompressionProfile>('/admin/compression-profiles', body);
@@ -247,6 +249,12 @@ export default function Compression() {
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <div><label className={labelCls} htmlFor="cp-name">Profile name</label><input id="cp-name" className={inputCls} value={draft.name} onChange={(e) => update('name', e.target.value)} placeholder="safe-default" /></div>
           <div><label className={labelCls} htmlFor="cp-trigger">Auto-trigger threshold (tokens; 0 = always)</label><input id="cp-trigger" type="number" min={0} className={inputCls} value={draft.auto_trigger_tokens} onChange={(e) => update('auto_trigger_tokens', Math.max(0, Number(e.target.value) || 0))} /></div>
+          <div><label className={labelCls} htmlFor="cp-fresh"
+            title="keep: a tool result arriving as the last message ships whole (exempt last turn). compress: tool-output engines trim it on its first send; it then stays frozen. A last message with any prose is always exempt.">Fresh tool output</label>
+            <select id="cp-fresh" className={inputCls} value={draft.fresh_tool_output} onChange={(e) => update('fresh_tool_output', e.target.value === 'compress' ? 'compress' : 'keep')}>
+              <option value="keep">keep (ship the newest tool result whole)</option>
+              <option value="compress">compress (trim it on first send)</option>
+            </select></div>
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
           <label className="flex items-center gap-2 text-[12px] text-dim"><input type="checkbox" checked={draft.enabled} onChange={(e) => update('enabled', e.target.checked)} /> Enabled</label>

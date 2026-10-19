@@ -41,6 +41,12 @@ type Profile struct {
 	MinCompressRatio  float64
 	FailOpen          bool
 	AutoTriggerTokens int64
+	// FreshToolOutput lets tool-output engines trim a final message that is
+	// PURELY tool output on its first send (profile fresh_tool_output =
+	// "compress"). A final message with any prose stays exempt, so prose
+	// engines never touch the live turn. Off = the whole final message is
+	// exempt (the default).
+	FreshToolOutput bool
 	// MinAbsoluteTokens (addendum #5): the new work must remove at least
 	// this many estimated tokens before it ships. A ratio alone lets a
 	// 3-token saving through on a big prompt — real bytes, real cache churn,
@@ -226,10 +232,13 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 		return body, res
 	}
 
-	// Contract rule 1: the final message is exempt when the profile says so.
+	// Contract rule 1: the final message is exempt when the profile says so
+	// — unless it is purely tool output and the profile compresses fresh tool
+	// output, in which case it is new work like any other message.
 	last := len(msgs) - 1
+	exemptTail := p.ExemptLastTurn && last > 0 && !(p.FreshToolOutput && pureToolOutput(msgs[last]))
 	editable := msgs
-	if p.ExemptLastTurn && last > 0 {
+	if exemptTail {
 		editable = msgs[:last]
 	}
 
@@ -380,7 +389,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 		}
 	}
 	finalMsgs := rebuilt
-	if p.ExemptLastTurn && last > 0 {
+	if exemptTail {
 		finalMsgs = append(append([]any{}, rebuilt...), msgs[last])
 	}
 
@@ -397,7 +406,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 		// The engines RAN and this body is what ships: freeze it verbatim so
 		// the same bytes go upstream next request (the exempt tail commit
 		// lives here too — it went upstream untouched).
-		commitShipped(session, memo, profileVersion, p, editable, hit, ord, cur, last, msgs)
+		commitShipped(session, memo, profileVersion, exemptTail, editable, hit, ord, cur, last, msgs)
 		return body, res
 	}
 
@@ -422,14 +431,14 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 	// design protects. The two-directional crossing therefore happens only
 	// through an EXPLICIT transition (a profile change starts a fresh
 	// namespace), never through silent re-compression.
-	commitShipped(session, memo, profileVersion, p, editable, hit, ord, cur, last, msgs)
+	commitShipped(session, memo, profileVersion, exemptTail, editable, hit, ord, cur, last, msgs)
 	return out, res
 }
 
 // commitShipped freezes the shipped form of every processed message,
 // including "shipped as nothing" for a dropped repeat. It is a no-op in
 // legacy mode (no session/memo).
-func commitShipped(session string, memo *SessionMemo, profileVersion string, p *Profile, editable []any, hit []bool, ord []int, cur []any, last int, msgs []any) {
+func commitShipped(session string, memo *SessionMemo, profileVersion string, exemptTail bool, editable []any, hit []bool, ord []int, cur []any, last int, msgs []any) {
 	if profileVersion == "" {
 		return
 	}
@@ -445,9 +454,24 @@ func commitShipped(session string, memo *SessionMemo, profileVersion string, p *
 		memo.PutAt(session, profileVersion, m, ord[i], form)
 		ni++
 	}
-	if p.ExemptLastTurn && last > 0 {
+	if exemptTail {
 		memo.PutAt(session, profileVersion, msgs[last], ord[last], msgs[last])
 	}
+}
+
+// pureToolOutput reports whether a message carries tool output and no prose
+// at all — the only kind of final message fresh_tool_output may open up.
+func pureToolOutput(msg any) bool {
+	tool, prose := false, false
+	editParts(msg, nil, func(p textPart) (string, bool) {
+		if p.kind == partToolOutput {
+			tool = true
+		} else if strings.TrimSpace(p.text) != "" {
+			prose = true
+		}
+		return "", false
+	})
+	return tool && !prose
 }
 
 // occurrences numbers each message by how many identical messages precede it

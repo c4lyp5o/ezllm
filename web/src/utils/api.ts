@@ -895,6 +895,7 @@ export type CompressionProfile = {
   min_compress_ratio: number;
   fail_open: boolean;
   auto_trigger_tokens: number;
+  fresh_tool_output?: 'keep' | 'compress';
   notes?: string | null;
   created_at?: string | null;
 } & Record<string, unknown>;

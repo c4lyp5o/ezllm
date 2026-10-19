@@ -26,7 +26,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 23
+const schemaVersion = 24
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -314,6 +314,9 @@ func (d *DB) migrate() error {
 		if err := d.alterModelPriceSource(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate model price source: %w", err)
 		}
+		if err := d.alterProfileFreshToolOutput(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate profile fresh_tool_output: %w", err)
+		}
 		if err := d.rebuildCombosV9(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate combos: %w", err)
 		}
@@ -403,6 +406,21 @@ func (d *DB) alterModelPriceSource(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// alterProfileFreshToolOutput adds compression_profiles.fresh_tool_output on
+// databases created before v24. Guarded by a column check: ALTER TABLE ADD
+// COLUMN is not idempotent. Existing profiles take 'keep' — today's behaviour.
+func (d *DB) alterProfileFreshToolOutput(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "compression_profiles")
+	if err != nil || !exists {
+		return err
+	}
+	if ok, err := hasColumn(ctx, d.w, "compression_profiles", "fresh_tool_output"); err != nil || ok {
+		return err
+	}
+	_, err = d.w.ExecContext(ctx, `ALTER TABLE compression_profiles ADD COLUMN fresh_tool_output TEXT NOT NULL DEFAULT 'keep'`)
+	return err
 }
 
 // alterComboHopHold adds combo_hops.hold_until_failure on databases created

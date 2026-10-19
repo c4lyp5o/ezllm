@@ -12,14 +12,14 @@ import (
 // ── compression profiles (M5: full CRUD; the combo editor reads the same row) ──
 
 const profileSelect = `SELECT id, name, enabled, stages, exempt_last_turn,
-       min_compress_ratio, fail_open, auto_trigger_tokens,
+       min_compress_ratio, fail_open, auto_trigger_tokens, fresh_tool_output,
        COALESCE(notes,''), created_at FROM compression_profiles`
 
 func scanProfile(rows *sql.Rows) (*CompressionProfile, error) {
 	var p CompressionProfile
 	var stages string
 	if err := rows.Scan(&p.ID, &p.Name, &p.Enabled, &stages, &p.ExemptLastTurn,
-		&p.MinCompressRatio, &p.FailOpen, &p.AutoTriggerTokens, &p.Notes, &p.CreatedAt); err != nil {
+		&p.MinCompressRatio, &p.FailOpen, &p.AutoTriggerTokens, &p.FreshToolOutput, &p.Notes, &p.CreatedAt); err != nil {
 		return nil, err
 	}
 	p.Stages = json.RawMessage(stages)
@@ -71,15 +71,18 @@ func (d *DB) UpsertCompressionProfile(ctx context.Context, p CompressionProfile)
 	if !json.Valid([]byte(stages)) {
 		return 0, errors.New("store: stages must be JSON")
 	}
+	if p.FreshToolOutput == "" {
+		p.FreshToolOutput = "keep"
+	}
 	var id int64
 	err := d.WithWriteTx(ctx, func(tx *sql.Tx) error {
 		if p.ID == 0 {
 			res, err := tx.ExecContext(ctx, `
 INSERT INTO compression_profiles
-  (name, enabled, stages, exempt_last_turn, min_compress_ratio, fail_open, auto_trigger_tokens, notes)
-VALUES (?,?,?,?,?,?,?,?)`,
+  (name, enabled, stages, exempt_last_turn, min_compress_ratio, fail_open, auto_trigger_tokens, fresh_tool_output, notes)
+VALUES (?,?,?,?,?,?,?,?,?)`,
 				p.Name, p.Enabled, stages, p.ExemptLastTurn, p.MinCompressRatio,
-				p.FailOpen, p.AutoTriggerTokens, p.Notes)
+				p.FailOpen, p.AutoTriggerTokens, p.FreshToolOutput, p.Notes)
 			if err != nil {
 				return err
 			}
@@ -89,10 +92,10 @@ VALUES (?,?,?,?,?,?,?,?)`,
 		_, err := tx.ExecContext(ctx, `
 UPDATE compression_profiles SET
   name=?, enabled=?, stages=?, exempt_last_turn=?, min_compress_ratio=?,
-  fail_open=?, auto_trigger_tokens=?, notes=?
+  fail_open=?, auto_trigger_tokens=?, fresh_tool_output=?, notes=?
 WHERE id=?`,
 			p.Name, p.Enabled, stages, p.ExemptLastTurn, p.MinCompressRatio,
-			p.FailOpen, p.AutoTriggerTokens, p.Notes, p.ID)
+			p.FailOpen, p.AutoTriggerTokens, p.FreshToolOutput, p.Notes, p.ID)
 		if err != nil {
 			return err
 		}

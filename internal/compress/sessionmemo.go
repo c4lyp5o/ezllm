@@ -133,6 +133,11 @@ func ProfileFingerprint(p *Profile) string {
 	}
 	fmt.Fprintf(h, "\nexempt:%v\nfloor:%v\nauto:%v\nfailopen:%v\nenabled:%v",
 		p.ExemptLastTurn, p.MinCompressRatio, p.AutoTriggerTokens, p.FailOpen, p.Enabled)
+	if p.FreshToolOutput {
+		// Only when on, so every profile fingerprinted before the option
+		// existed keeps its version (live sessions are not re-versioned).
+		fmt.Fprintf(h, "\nfresh:compress")
+	}
 	return "v" + hex.EncodeToString(h.Sum(nil)[:8])
 }
 

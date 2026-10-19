@@ -146,3 +146,64 @@ func TestClientBudgetUnlimitedTokenHasNoCounter(t *testing.T) {
 		t.Fatalf("unlimited budget = %+v, want limit=0 used=0", b)
 	}
 }
+
+// Expired reservations are pruned at most once per interval, and an unpruned
+// expired row never counts against the budget in between.
+func TestExpiredReservationsPrunedAtMostOncePerInterval(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "b.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	id, err := db.AddClientToken(ctx, "sweep-key", "tok-sweep", "infer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	limit := int64(100)
+	if err := db.UpdateToken(ctx, id, nil, nil, &limit, "daily", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	past := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
+	expired := func() {
+		t.Helper()
+		bucket := CountBucket(time.Now(), "daily", time.Local)
+		if _, err := db.w.Exec(`INSERT INTO client_budget_reservations (client, bucket, tokens, created_at, expires_at)
+VALUES ('sweep-key', ?, 90, ?, ?)`, bucket, past, past); err != nil {
+			t.Fatal(err)
+		}
+	}
+	count := func() int {
+		t.Helper()
+		var n int
+		if err := db.r.QueryRow(`SELECT COUNT(*) FROM client_budget_reservations WHERE expires_at < ?`,
+			time.Now().UTC().Format(time.RFC3339)).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	expired()
+	if _, ok, err := db.ReserveClientBudget(ctx, "sweep-key", 50); err != nil || !ok {
+		t.Fatalf("reserve = %v, %v; an expired 90 must not count against a 100 cap", ok, err)
+	}
+	if n := count(); n != 0 {
+		t.Fatalf("first reservation left %d expired rows, want 0 (pruned)", n)
+	}
+
+	expired()
+	if _, ok, err := db.ReserveClientBudget(ctx, "sweep-key", 10); err != nil || !ok {
+		t.Fatalf("reserve = %v, %v; want admitted (expired row ignored)", ok, err)
+	}
+	if n := count(); n != 1 {
+		t.Fatalf("expired rows = %d, want 1 (no second prune inside the interval)", n)
+	}
+
+	db.lastReservationSweep.Store(time.Now().Add(-2 * reservationSweepEvery).UnixNano())
+	if _, _, err := db.ReserveClientBudget(ctx, "sweep-key", 1); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(); n != 0 {
+		t.Fatalf("expired rows = %d after the interval, want 0", n)
+	}
+}

@@ -6,8 +6,9 @@ package proxy
 // X-Ezllm-Session, which was already stripped. It was knowingly carried as a
 // leak once; there is no reason for a provider to ever see it.
 //
-// The strip is case-insensitive (copyClientHeaders lowercases before lookup),
-// so the header is checked the way a client may actually send it.
+// The strip is case-insensitive (copyClientHeaders matches canonical keys and
+// folds case for adapter names), so the header is checked the way a client
+// may actually send it.
 
 import (
 	"context"
@@ -80,5 +81,49 @@ func TestClientAndCustomHeadersStillForward(t *testing.T) {
 	}
 	if got.Get("Content-Type") != "application/json" {
 		t.Errorf("Content-Type lost: %q", got.Get("Content-Type"))
+	}
+}
+
+// copyClientHeaders looks stripAlways up by canonical key, so a non-canonical
+// entry would silently never match.
+func TestStripAlwaysKeysAreCanonical(t *testing.T) {
+	for k := range stripAlways {
+		if c := http.CanonicalHeaderKey(k); c != k {
+			t.Errorf("stripAlways key %q is not canonical (%q): it would never match", k, c)
+		}
+	}
+}
+
+// Stripping is case-insensitive for both lists, including header keys that
+// were stored non-canonically.
+func TestCopyClientHeadersStripsAnyCase(t *testing.T) {
+	src := httptest.NewRequest("POST", "/", nil)
+	src.Header["x-api-key"] = []string{"client-secret"}
+	src.Header["cookie"] = []string{"c=1"}
+	src.Header.Set("X-Zen-Model", "client-choice")
+	src.Header["x-keep"] = []string{"yes"}
+	dst := httptest.NewRequest("POST", "/", nil)
+	dst.Header = http.Header{}
+	copyClientHeaders(dst, src, []string{"x-zen-model"})
+	for _, k := range []string{"X-Api-Key", "Cookie", "X-Zen-Model"} {
+		if dst.Header.Get(k) != "" {
+			t.Errorf("%s leaked upstream", k)
+		}
+	}
+	if got := dst.Header.Values("X-Keep"); len(got) != 1 || got[0] != "yes" {
+		t.Errorf("unstripped header lost: %v", dst.Header)
+	}
+}
+
+// The per-attempt copy builds no strip set: stripping costs no allocation.
+func TestCopyClientHeadersStripAllocatesNothing(t *testing.T) {
+	src := httptest.NewRequest("POST", "/", nil)
+	for _, k := range []string{"Authorization", "Cookie", "Host", "Origin", "X-Ezllm-Session"} {
+		src.Header.Set(k, "v")
+	}
+	dst := httptest.NewRequest("POST", "/", nil)
+	extra := []string{"X-Zen-Model"}
+	if n := testing.AllocsPerRun(100, func() { copyClientHeaders(dst, src, extra) }); n != 0 {
+		t.Errorf("allocs per call = %v, want 0 when every header is stripped", n)
 	}
 }

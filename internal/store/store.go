@@ -51,6 +51,9 @@ type DB struct {
 	// routing-catalog snapshot (catalog_snapshot.go); catalogMu serializes reloads
 	catalogMu sync.Mutex
 	catalog   atomic.Pointer[CatalogSnapshot]
+
+	// unix nanos of the last expired-reservation prune (client_budget.go)
+	lastReservationSweep atomic.Int64
 }
 
 // Options configures Open.

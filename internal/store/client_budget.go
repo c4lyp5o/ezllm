@@ -56,8 +56,9 @@ func (d *DB) ClientAllowsModel(ctx context.Context, name, model string) (bool, e
 
 // ReserveClientBudget admits a request by reserving its max output tokens
 // against the token's current bucket. The row is deleted when the handler
-// returns; rows older than 15 minutes are ignored and pruned on the next
-// reservation, so a crashed process cannot pin a budget forever.
+// returns; rows older than 15 minutes are ignored at once and pruned at most
+// once per reservationSweepEvery, so a crashed process cannot pin a budget
+// forever.
 func (d *DB) ReserveClientBudget(ctx context.Context, client string, tokens int64) (id int64, ok bool, err error) {
 	if tokens <= 0 {
 		return 0, true, nil
@@ -80,10 +81,15 @@ func (d *DB) ReserveClientBudget(ctx context.Context, client string, tokens int6
 	now := time.Now()
 	bucket := CountBucket(now, window, time.Local)
 	err = d.WithWriteTx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM client_budget_reservations WHERE expires_at < ?`,
-			now.UTC().Format(time.RFC3339)); err != nil {
-			return err
+		// Pruning is housekeeping only — the reserved sum below already ignores
+		// expired rows — so it runs at most once per reservationSweepEvery
+		// instead of inside every capped request's write.
+		if d.reservationSweepDue(now) {
+			if _, err := tx.ExecContext(ctx,
+				`DELETE FROM client_budget_reservations WHERE expires_at < ?`,
+				now.UTC().Format(time.RFC3339)); err != nil {
+				return err
+			}
 		}
 		var used int64
 		if err := tx.QueryRowContext(ctx,
@@ -114,6 +120,19 @@ VALUES (?,?,?,?,?)`,
 		return nil
 	})
 	return id, ok, err
+}
+
+// reservationSweepEvery bounds how often expired reservations are pruned.
+const reservationSweepEvery = time.Minute
+
+// reservationSweepDue claims the next prune slot; exactly one caller per
+// interval gets true.
+func (d *DB) reservationSweepDue(now time.Time) bool {
+	last := d.lastReservationSweep.Load()
+	if now.UnixNano()-last < int64(reservationSweepEvery) {
+		return false
+	}
+	return d.lastReservationSweep.CompareAndSwap(last, now.UnixNano())
 }
 
 // ReleaseClientBudget drops an in-flight reservation.

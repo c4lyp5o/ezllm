@@ -1980,22 +1980,28 @@ var stripAlways = map[string]bool{
 	"X-Ezllm-Compression": true,
 }
 
+// copyClientHeaders copies src's headers onto dst minus stripAlways and the
+// adapter's extraStrip, both matched case-insensitively. It runs per attempt,
+// so it builds nothing: CanonicalHeaderKey returns an already-canonical key
+// without allocating, and extraStrip is a handful of names compared in place.
 func copyClientHeaders(dst, src *http.Request, extraStrip []string) {
-	strip := make(map[string]bool, len(stripAlways)+len(extraStrip))
-	for k := range stripAlways {
-		strip[strings.ToLower(k)] = true
-	}
-	for _, k := range extraStrip {
-		strip[strings.ToLower(k)] = true
-	}
 	for k, vs := range src.Header {
-		if strip[strings.ToLower(k)] {
+		if stripAlways[http.CanonicalHeaderKey(k)] || containsFold(extraStrip, k) {
 			continue
 		}
 		for _, v := range vs {
 			dst.Header.Add(k, v)
 		}
 	}
+}
+
+func containsFold(names []string, k string) bool {
+	for _, n := range names {
+		if strings.EqualFold(n, k) {
+			return true
+		}
+	}
+	return false
 }
 
 func copyResponseHeaders(w http.ResponseWriter, resp *http.Response) {

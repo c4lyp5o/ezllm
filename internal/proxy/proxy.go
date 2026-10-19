@@ -703,9 +703,10 @@ func (d *Dispatcher) SetRetries(retries int) {
 }
 
 // SwapModel rewrites the `model` field of a JSON request body, preserving every
-// other field byte-for-byte in meaning (unknown provider-specific fields such
-// as extra_body, thinking, enable_thinking, tools, reasoning,
-// previous_response_id all survive because we round-trip through a map).
+// other field (unknown provider-specific fields such as extra_body, thinking,
+// enable_thinking, tools, reasoning, previous_response_id): the new model is
+// spliced into the client's own bytes, or the body is round-tripped through a
+// map where a splice cannot normalize it (see jsonbody.SpliceModel).
 func SwapModel(body []byte, newModel string) ([]byte, string, error) {
 	if len(body) == 0 {
 		return nil, "", errors.New("proxy: empty body")
@@ -722,6 +723,11 @@ func SwapModel(body []byte, newModel string) ([]byte, string, error) {
 		return nil, "", errors.New("proxy: body is not a JSON object")
 	}
 	old, _ := m["model"].(string)
+	// The same splice-or-re-marshal choice jsonbody.WithModel makes: both
+	// paths must emit identical bytes (docs/single-parse-dispatch-design.md).
+	if out, ok := jsonbody.SpliceModel(body, newModel); ok {
+		return out, old, nil
+	}
 	m["model"] = newModel
 	out, err := json.Marshal(m)
 	if err != nil {

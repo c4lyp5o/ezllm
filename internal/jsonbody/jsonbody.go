@@ -18,8 +18,10 @@
 //   - Model/Stream accessors carry the OLD semantics: null and absent mean
 //     "no value"; a non-string model or a non-true stream is an error/false,
 //     exactly what the old struct decodes did.
-//   - WithModel re-marshals through json.Marshal(map), byte-identical to the
-//     current SwapModel output for the same input.
+//   - WithModel splices the new model into the original bytes (SpliceModel),
+//     falling back to json.Marshal(map) where a splice cannot normalize the
+//     body; SwapModel runs the same two steps, so both paths stay
+//     byte-identical for the same input.
 //
 // Zero external dependencies (stdlib encoding/json only) — the no-CGO static
 // image constraint stays intact.
@@ -110,12 +112,12 @@ func (d *BodyDoc) Stream() bool {
 	return ok && b
 }
 
-// WithModel returns body bytes for the hop: the decoded map with `model` set
-// to newModel, re-marshaled — the same json.Marshal(map) round-trip SwapModel
-// performs today (key-sorted output, unknown fields preserved, UseNumber
-// literals exact), minus the re-decode. The receiver's map keeps the value for
-// the next hop: hops are tried serially and the last write before marshal is
-// the only one that matters.
+// WithModel returns body bytes for the hop: the client's bytes with `model`
+// set to newModel (SpliceModel), or, where a splice cannot be used, the
+// decoded map re-marshaled (key-sorted, unknown fields preserved, UseNumber
+// literals exact). SwapModel makes the same choice, so the two never differ.
+// The receiver's map keeps the value for the next hop: hops are tried
+// serially and the last write is the only one that matters.
 func (d *BodyDoc) WithModel(newModel string) ([]byte, error) {
 	if d.err != nil {
 		return nil, errors.New("proxy: body is not a JSON object")
@@ -126,6 +128,9 @@ func (d *BodyDoc) WithModel(newModel string) ([]byte, error) {
 		return nil, errors.New("proxy: body is not a JSON object")
 	}
 	d.m["model"] = newModel
+	if out, ok := SpliceModel(d.raw, newModel); ok {
+		return out, nil
+	}
 	out, err := json.Marshal(d.m)
 	if err != nil {
 		return nil, fmt.Errorf("proxy: re-marshal: %w", err)

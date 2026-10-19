@@ -37,14 +37,13 @@ shared map instead of re-decoding.**
   signature and falls back to the legacy parse path when doc is nil — the
   ~40 existing test call sites, `admin.go` combo-test, `services.go` probes
   and the multipart STT path are untouched and byte-identical.
-- Native hop: `doc.WithModel(hopModel)` mutates `m["model"]` and
-  `json.Marshal`s — the same map round-trip `SwapModel` performs today minus
-  its decode. Translated hops still rebuild the body through `translate.*`
-  from the raw bytes (unchanged). Multipart unchanged.
-- Byte fidelity: unchanged bytes ship when nothing rewrites (compression
-  declined + native hop without model change still re-marshals via the same
-  `json.Marshal(map)` path as today — output byte-identical to the current
-  `SwapModel` output for equal input).
+- Native hop: `doc.WithModel(hopModel)` splices the hop model into the
+  client's own bytes (`jsonbody.SpliceModel`, decision 6) and falls back to
+  `json.Marshal` of the shared map where a splice cannot normalize the body.
+  Translated hops still rebuild the body through `translate.*` from the raw
+  bytes (unchanged). Multipart unchanged.
+- Byte fidelity: `SwapModel` makes the same splice-or-re-marshal choice, so the
+  doc and legacy paths stay byte-identical for equal input.
 
 ## Parity rules (what "unchanged behavior" means here)
 
@@ -142,3 +141,14 @@ captureShape parity (number-literal divergence documented-by-test).
    documented per hash-sensitive tooling.
 5. Translation hops, multipart STT and admin combo-test stay on the byte
    path — translation rebuilds the body wholesale; there is nothing to share.
+6. The hop swap splices instead of re-marshaling (2026-10-19). Re-marshaling a
+   1 MiB body cost ~2.6 ms and ~1 MiB of garbage **per hop**; the splice copies
+   the client's bytes and replaces only the top-level `model` value (inserted
+   first when absent). Every other byte reaches the upstream as the client sent
+   it — key order, whitespace, escapes — where it used to arrive key-sorted
+   and re-escaped; `FuzzSpliceMatchesMarshal` pins that both forms decode to
+   the identical object. The splice declines, and the map is re-marshaled as
+   before, on invalid UTF-8 (the marshal sanitizes it) and on any duplicated
+   top-level key: routing reads `model`/`stream` last-wins, and an upstream
+   that reads the first would disagree. Nested duplicates carry no routing
+   fact and pass through as sent.

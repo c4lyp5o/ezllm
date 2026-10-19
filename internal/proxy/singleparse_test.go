@@ -163,3 +163,24 @@ func TestDocPathStreamFlag(t *testing.T) {
 	}
 	_ = provider.SurfaceOpenAI // keep the import for the Route construction helpers
 }
+
+// The upstream receives the client's own bytes with only the model value
+// changed — not a key-sorted, re-escaped re-encoding (design decision 6).
+func TestUpstreamReceivesClientBytesWithModelSwapped(t *testing.T) {
+	up := &captureUpstream{}
+	srv := httptest.NewServer(up)
+	defer srv.Close()
+	d := newDispatcher()
+	in := `{"stream":false, "model":"client","messages":[{"role":"user","content":"<a> & b"}],"temperature":0.7}`
+	req, body := reqWithBody(in)
+	if _, _, err := d.ForwardCandidatesDoc(context.Background(), httptest.NewRecorder(), req,
+		[]Route{textRoute(srv.URL, "hop/model")}, body, jsonbody.Open(body)); err != nil {
+		t.Fatal(err)
+	}
+	want := `{"stream":false, "model":"hop/model","messages":[{"role":"user","content":"<a> & b"}],"temperature":0.7}`
+	up.mu.Lock()
+	defer up.mu.Unlock()
+	if string(up.body) != want {
+		t.Errorf("upstream body:\n got %s\nwant %s", up.body, want)
+	}
+}

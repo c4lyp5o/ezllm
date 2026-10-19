@@ -41,6 +41,13 @@ Claude subscription surface: **one container**, no sidecar.
   native error codes mapped to honest statuses, boot asserts the CLI version and
   flag surface (`--max-turns`/`--system-prompt-file` are accepted but absent from
   `--help` on 2.1.299).
+- **Probe budget (the NIM lesson, again).** The key-test generation probe and the
+  protocol-sweep surface probe budgeted **8–16 output tokens**. Measured: a model
+  with mandatory thinking (Claude Haiku 5.5) cannot answer in that and returns
+  `max_output_tokens`, so a perfectly good key failed the inference step — and the
+  sweep would misread a Messages-only upstream. Probes now budget 256 tokens
+  (`internal/registration/probe_body.go`), with a test that fails if anyone
+  shrinks it.
 - `EZLLM_CLAUDE_BRIDGE=on` enables it; without a usable CLI or login the boot
   fails loudly. Loopback is enforced — the surface refuses a non-loopback bind.
 

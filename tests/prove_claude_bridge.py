@@ -93,10 +93,16 @@ def main():
         print("== 4. the call is in the ledger ==")
         status, raw = call("/admin/requests?limit=50", token=ADMIN)
         if status == 200:
-            rows = json.loads(raw)
-            rows = rows.get("requests", rows) if isinstance(rows, dict) else rows
-            hit = [r for r in rows if isinstance(r, dict) and NS in str(r.get("alias", "")) + str(r.get("account", ""))]
+            data = json.loads(raw)
+            if isinstance(data, dict):
+                rows = data.get("requests") or data.get("rows") or data.get("items") or data.get("data") or []
+            else:
+                rows = data
+            hit = [r for r in rows if isinstance(r, dict)
+                   and NS in (str(r.get("alias", "")) + str(r.get("account", "")))]
             check("a ledger row exists for this account", bool(hit), f"no row for {NS} in last 50")
+            ok = [r for r in hit if r.get("status") in (200, "200")]
+            check("a 200 row for this account", bool(ok), f"rows: {[r.get('status') for r in hit][:5]}")
         else:
             check("ledger query", False, f"status={status}")
     else:

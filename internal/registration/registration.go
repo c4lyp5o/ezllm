@@ -545,7 +545,7 @@ func (t *Tester) probeModel(
 	probeSpec := provider.AuthProbe{
 		Method: http.MethodPost,
 		Path:   provider.SurfacePath(surface),
-		Body:   fmt.Sprintf(`{"model":%q,"max_tokens":16,"messages":[{"role":"user","content":"ping"}]}`, model),
+		Body:   chatProbeBody(model),
 	}
 
 	var (
@@ -886,9 +886,9 @@ func (t *Tester) probeSurface(
 ) (provider.ProbeVerdict, bool) {
 	var body string
 	if surface == provider.SurfaceResponses {
-		body = fmt.Sprintf(`{"model":%q,"max_output_tokens":8,"input":"ping"}`, model)
+		body = responsesProbeBody(model)
 	} else {
-		body = fmt.Sprintf(`{"model":%q,"max_tokens":8,"messages":[{"role":"user","content":"ping"}]}`, model)
+		body = chatProbeBody(model)
 	}
 	spec := provider.AuthProbe{Method: http.MethodPost, Path: provider.SurfacePath(surface)}
 

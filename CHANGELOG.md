@@ -29,9 +29,18 @@ whole point: no OAuth-bearer reuse, no client impersonation
   (`rate_limit`→429, `billing_error`→402, `authentication_failed`→401,
   `overloaded`→529) and the CLI's own words ride along unrewritten. A client's own
   `max_tokens` ceiling is a 400, never a retryable 5xx.
-- **Proof.** `tests/prove_claude_bridge.py` runs the real binary against the real
-  CLI and a real Pro subscription: 13/13 (health contract, auth, catalog, streaming
-  SSE, native usage fields, tool refusal, history fidelity).
+- **Key test, operator's call.** The generation probe is **skipped** for this
+  account (`skip_inference`) — it is official Anthropic, Messages-only, and the
+  credential is already proven by the auth oracle (a fake key is rejected).
+  Inference evidence comes from the live proof instead of a "ping".
+- **Probe budget (the NIM lesson, again).** The remaining probes budgeted 8–16
+  output tokens, which a mandatory-thinking model (Haiku 5.5) cannot answer in —
+  measured `max_output_tokens` failures on a perfectly good key. Probes now budget
+  256 (`internal/registration/probe_body.go`), with a test that fails if anyone
+  shrinks it.
+- **Proof.** `tests/prove_claude_bridge.py`, through ezllm's front door against a
+  real Pro subscription: **7/7** — completion, native usage fields, conversation
+  history fidelity, tool refusal, and the ledger rows.
 - **Container.** One container, `distroless/base` runtime: the CLI is glibc-dynamic,
   and on `/static` the exec fails with a misleading "no such file or directory"
   (observed live); Alpine is musl and cannot run it at all. The CLI binary mounts

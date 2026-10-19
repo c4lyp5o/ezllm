@@ -394,3 +394,32 @@ CREATE TABLE IF NOT EXISTS service_probes (
   tested_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   PRIMARY KEY (surface, account_id, model_id)
 );
+
+-- ── v23: catalog_gen — routing-catalog generation counter ──────────────────
+--    The router serves accounts, keys, models and combos from an in-memory
+--    snapshot (store.CatalogSnapshot) and re-reads only this one row per request.
+--    Every write to a table the snapshot holds bumps the counter, from any code
+--    path or process, so a stale snapshot can never be served after a write.
+CREATE TABLE IF NOT EXISTS catalog_gen (
+  id  INTEGER PRIMARY KEY CHECK (id = 1),
+  gen INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO catalog_gen (id, gen) VALUES (1, 0);
+CREATE TRIGGER IF NOT EXISTS catalog_gen_accounts_ins AFTER INSERT ON accounts BEGIN UPDATE catalog_gen SET gen = gen + 1 WHERE id = 1; END;
+CREATE TRIGGER IF NOT EXISTS catalog_gen_accounts_upd AFTER UPDATE ON accounts BEGIN UPDATE catalog_gen SET gen = gen + 1 WHERE id = 1; END;
+CREATE TRIGGER IF NOT EXISTS catalog_gen_accounts_del AFTER DELETE ON accounts BEGIN UPDATE catalog_gen SET gen = gen + 1 WHERE id = 1; END;
+CREATE TRIGGER IF NOT EXISTS catalog_gen_provider_keys_ins AFTER INSERT ON provider_keys BEGIN UPDATE catalog_gen SET gen = gen + 1 WHERE id = 1; END;
+CREATE TRIGGER IF NOT EXISTS catalog_gen_provider_keys_upd AFTER UPDATE ON provider_keys BEGIN UPDATE catalog_gen SET gen = gen + 1 WHERE id = 1; END;
+CREATE TRIGGER IF NOT EXISTS catalog_gen_provider_keys_del AFTER DELETE ON provider_keys BEGIN UPDATE catalog_gen SET gen = gen + 1 WHERE id = 1; END;
+CREATE TRIGGER IF NOT EXISTS catalog_gen_key_cooldowns_ins AFTER INSERT ON key_cooldowns BEGIN UPDATE catalog_gen SET gen = gen + 1 WHERE id = 1; END;
+CREATE TRIGGER IF NOT EXISTS catalog_gen_key_cooldowns_upd AFTER UPDATE ON key_cooldowns BEGIN UPDATE catalog_gen SET gen = gen + 1 WHERE id = 1; END;
+CREATE TRIGGER IF NOT EXISTS catalog_gen_key_cooldowns_del AFTER DELETE ON key_cooldowns BEGIN UPDATE catalog_gen SET gen = gen + 1 WHERE id = 1; END;
+CREATE TRIGGER IF NOT EXISTS catalog_gen_models_ins AFTER INSERT ON models BEGIN UPDATE catalog_gen SET gen = gen + 1 WHERE id = 1; END;
+CREATE TRIGGER IF NOT EXISTS catalog_gen_models_upd AFTER UPDATE ON models BEGIN UPDATE catalog_gen SET gen = gen + 1 WHERE id = 1; END;
+CREATE TRIGGER IF NOT EXISTS catalog_gen_models_del AFTER DELETE ON models BEGIN UPDATE catalog_gen SET gen = gen + 1 WHERE id = 1; END;
+CREATE TRIGGER IF NOT EXISTS catalog_gen_combos_ins AFTER INSERT ON combos BEGIN UPDATE catalog_gen SET gen = gen + 1 WHERE id = 1; END;
+CREATE TRIGGER IF NOT EXISTS catalog_gen_combos_upd AFTER UPDATE ON combos BEGIN UPDATE catalog_gen SET gen = gen + 1 WHERE id = 1; END;
+CREATE TRIGGER IF NOT EXISTS catalog_gen_combos_del AFTER DELETE ON combos BEGIN UPDATE catalog_gen SET gen = gen + 1 WHERE id = 1; END;
+CREATE TRIGGER IF NOT EXISTS catalog_gen_combo_hops_ins AFTER INSERT ON combo_hops BEGIN UPDATE catalog_gen SET gen = gen + 1 WHERE id = 1; END;
+CREATE TRIGGER IF NOT EXISTS catalog_gen_combo_hops_upd AFTER UPDATE ON combo_hops BEGIN UPDATE catalog_gen SET gen = gen + 1 WHERE id = 1; END;
+CREATE TRIGGER IF NOT EXISTS catalog_gen_combo_hops_del AFTER DELETE ON combo_hops BEGIN UPDATE catalog_gen SET gen = gen + 1 WHERE id = 1; END;

@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "modernc.org/sqlite" // pure Go, no CGO — required for the static Docker image
@@ -25,7 +26,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 22
+const schemaVersion = 23
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -46,6 +47,10 @@ type DB struct {
 
 	// crypto at rest for provider keys (nil = plaintext, dev/back-compat)
 	crypto *FieldCrypto
+
+	// routing-catalog snapshot (catalog_snapshot.go); catalogMu serializes reloads
+	catalogMu sync.Mutex
+	catalog   atomic.Pointer[CatalogSnapshot]
 }
 
 // Options configures Open.

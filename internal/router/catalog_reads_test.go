@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/c4lyp5o/ezllm/internal/provider"
@@ -100,5 +101,25 @@ func TestWireSelectionReadsThePinOnce(t *testing.T) {
 	}
 	if c.pin != 1 {
 		t.Errorf("ModelPin reads = %d, want 1", c.pin)
+	}
+}
+
+// brokenSnapshotCatalog offers a snapshot that cannot be read.
+type brokenSnapshotCatalog struct{ *countingCatalog }
+
+func (brokenSnapshotCatalog) CatalogSnapshot(context.Context) (*store.CatalogSnapshot, error) {
+	return nil, errors.New("snapshot unavailable")
+}
+
+// A snapshot read failure must not fail the request: resolution falls back to
+// the live catalog, whose own errors keep their fail-closed meaning.
+func TestUnreadableSnapshotFallsBackToLiveCatalog(t *testing.T) {
+	c := brokenSnapshotCatalog{&countingCatalog{fakeCatalog: newFake()}}
+	routes, err := New(c).ResolveCandidates(context.Background(), "opengo/gpt-6-luna", provider.SurfaceOpenAI, "t")
+	if err != nil || len(routes) != 1 {
+		t.Fatalf("routes = %d, err = %v; want 1 via the live catalog", len(routes), err)
+	}
+	if c.pickKey != 1 {
+		t.Errorf("live PickKey calls = %d, want 1", c.pickKey)
 	}
 }

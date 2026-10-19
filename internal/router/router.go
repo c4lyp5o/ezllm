@@ -541,6 +541,26 @@ func (r *Resolver) Resolve(ctx context.Context, requested string, surface provid
 // route for "ns/model". The caller tries them in order (see
 // proxy.ForwardCandidates); an empty list is always accompanied by an error.
 func (r *Resolver) ResolveCandidates(ctx context.Context, requested string, surface provider.Surface, client string) ([]proxy.Route, error) {
+	// One resolution reads one consistent in-memory snapshot when the catalog
+	// offers it (store.DB does). A snapshot that cannot be read falls back to
+	// the live catalog, whose own errors keep their fail-closed handling.
+	if sc, ok := r.catalog.(snapshotCatalog); ok {
+		if snap, err := sc.CatalogSnapshot(ctx); err == nil {
+			rr := *r
+			rr.catalog = snap
+			return rr.resolveCandidates(ctx, requested, surface, client)
+		}
+	}
+	return r.resolveCandidates(ctx, requested, surface, client)
+}
+
+// snapshotCatalog is a Catalog that can hand out an immutable in-memory copy
+// of itself for one resolution.
+type snapshotCatalog interface {
+	CatalogSnapshot(ctx context.Context) (*store.CatalogSnapshot, error)
+}
+
+func (r *Resolver) resolveCandidates(ctx context.Context, requested string, surface provider.Surface, client string) ([]proxy.Route, error) {
 	requested = strings.TrimSpace(requested)
 	if requested == "" {
 		return nil, errors.New("router: model is required")

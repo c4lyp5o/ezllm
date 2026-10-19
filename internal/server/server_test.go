@@ -296,8 +296,10 @@ func TestResponsesRoutesAndCapturesCacheWrite(t *testing.T) {
 	}
 	// Responses is the ONLY surface reporting cache_write — the dashboard's
 	// "cached write" column depends on this.
-	if c.TokensCachedWrite != 512 || c.TokensCachedRead != 2048 || c.TokensIn != 952 || c.ReasoningTokens != 7 {
-		t.Errorf("responses normalization wrong: in=%d cr=%d cw=%d rt=%d (want 952/2048/512/7)",
+	// Both cache parts are inside input_tokens (live tokenrouter row:
+	// input 29327, cache_write 29324), so in = 3000 - 2048 - 512.
+	if c.TokensCachedWrite != 512 || c.TokensCachedRead != 2048 || c.TokensIn != 440 || c.ReasoningTokens != 7 {
+		t.Errorf("responses normalization wrong: in=%d cr=%d cw=%d rt=%d (want 440/2048/512/7)",
 			c.TokensIn, c.TokensCachedRead, c.TokensCachedWrite, c.ReasoningTokens)
 	}
 }

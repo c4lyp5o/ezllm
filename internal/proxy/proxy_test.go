@@ -216,25 +216,27 @@ func TestTapSSELineResponsesCacheWrite(t *testing.T) {
 	if u.CachedWrite != 512 {
 		t.Errorf("cached_write = %d, want 512", u.CachedWrite)
 	}
-	if u.CachedRead != 2048 || u.In != 952 {
-		t.Errorf("cr=%d in=%d, want 2048/952", u.CachedRead, u.In)
+	// The write is INSIDE input_tokens like the read (live tokenrouter row:
+	// input 29327, cache_write 29324), so in = 3000 - 2048 - 512.
+	if u.CachedRead != 2048 || u.In != 440 {
+		t.Errorf("cr=%d in=%d, want 2048/440", u.CachedRead, u.In)
 	}
 }
 
 func TestTapJSONUsageNonStreamed(t *testing.T) {
 	// Verbatim from live probe P6 (non-streamed gpt-6-luna on /v1/responses).
 	body := `{"id":"resp_029eb759","object":"response","status":"completed","model":"gpt-6-luna","usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0},"output_tokens_details":{"reasoning_tokens":0}}}`
-	u := tapJSONUsage([]byte(body), provider.SurfaceResponses)
+	u := tapJSONUsage([]byte(body), provider.SurfaceResponses, provider.UsageConventionAuto)
 	if u == nil || u.In != 10 || u.Out != 5 {
 		t.Fatalf("responses non-stream tap wrong: %+v", u)
 	}
 	// Anthropic non-streamed (live probe P9, tool use).
 	anth := `{"type":"message","id":"msg_x","role":"assistant","stop_reason":"tool_use","content":[{"type":"thinking"},{"type":"tool_use","id":"toolu_dd55","name":"get_weather","input":{"city":"Tokyo"}}],"usage":{"input_tokens":315,"output_tokens":73,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}`
-	ua := tapJSONUsage([]byte(anth), provider.SurfaceAnthropic)
+	ua := tapJSONUsage([]byte(anth), provider.SurfaceAnthropic, provider.UsageConventionAuto)
 	if ua == nil || ua.In != 315 || ua.Out != 73 {
 		t.Fatalf("anthropic non-stream tap wrong: %+v", ua)
 	}
-	if tapJSONUsage([]byte(`{"error":"x"}`), provider.SurfaceOpenAI) != nil {
+	if tapJSONUsage([]byte(`{"error":"x"}`), provider.SurfaceOpenAI, provider.UsageConventionAuto) != nil {
 		t.Error("error body must not yield usage")
 	}
 }

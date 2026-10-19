@@ -43,8 +43,8 @@ const maxBodyBytes = 32 << 20
 // bloating the table.
 const maxErrSnippet = 512
 
-// maxStreamBytes bounds what the usage tap inspects. The response itself is
-// NOT bounded (it is streamed), only the per-line scan buffer.
+// maxScanToken bounds the line the usage tap inspects. The response itself is
+// NOT bounded (it is streamed): a longer line is forwarded whole, untapped.
 const maxScanToken = 4 << 20
 
 // UsageTapper accumulates usage across an SSE stream.
@@ -59,15 +59,24 @@ const maxScanToken = 4 << 20
 //	           truncated by max_output_tokens, on response.incomplete. Tapping
 //	           only .completed records all-zero usage (observed live).
 //
-// So we merge rather than take the first hit.
+// So we merge rather than take the first hit — the RAW usage objects, key by
+// key, and normalize once at the end. Normalizing each event alone and then
+// mixing counters could pair one event's input with another's cache split.
 type UsageTapper struct {
 	surface provider.Surface
-	cur     *store.Usage
+	conv    provider.UsageConvention
+	raw     map[string]any
 }
 
-// NewUsageTapper builds a tapper for one surface.
+// NewUsageTapper builds a tapper for one surface (usage_convention auto).
 func NewUsageTapper(surface provider.Surface) *UsageTapper {
-	return &UsageTapper{surface: surface}
+	return NewUsageTapperFor(surface, provider.UsageConventionAuto)
+}
+
+// NewUsageTapperFor builds a tapper that normalizes with the account's
+// declared usage convention (it changes only the Messages wire's reading).
+func NewUsageTapperFor(surface provider.Surface, conv provider.UsageConvention) *UsageTapper {
+	return &UsageTapper{surface: surface, conv: conv}
 }
 
 // Observe inspects one SSE data line (read-only; bytes are forwarded untouched).
@@ -75,13 +84,55 @@ func (t *UsageTapper) Observe(line []byte) {
 	if len(line) < 6 || !bytes.HasPrefix(line, []byte("data:")) {
 		return
 	}
-	if u := tapSSELine(line, t.surface); u != nil {
-		t.cur = MergeUsage(t.cur, u)
+	if u := sseUsageRaw(line, t.surface); u != nil {
+		if t.raw == nil {
+			t.raw = map[string]any{}
+		}
+		mergeUsageRaw(t.raw, u)
 	}
 }
 
 // Usage returns the merged result, or nil when the stream carried none.
-func (t *UsageTapper) Usage() *store.Usage { return t.cur }
+func (t *UsageTapper) Usage() *store.Usage {
+	if t.raw == nil {
+		return nil
+	}
+	n := store.NormalizeUsageWith(store2surface(t.surface), t.raw, t.conv)
+	return &n
+}
+
+// mergeUsageRaw folds a later usage object into an earlier one: nested
+// objects merge, and a later value wins unless it is a zero (or null)
+// standing in for a number the earlier event did report — Anthropic's
+// message_delta repeats input_tokens but may zero what it does not carry.
+func mergeUsageRaw(dst, src map[string]any) {
+	for k, v := range src {
+		if sm, ok := v.(map[string]any); ok {
+			if dm, ok := dst[k].(map[string]any); ok {
+				mergeUsageRaw(dm, sm)
+				continue
+			}
+			cp := map[string]any{}
+			mergeUsageRaw(cp, sm)
+			dst[k] = cp
+			continue
+		}
+		if old, had := dst[k]; had && isZeroUsage(v) && !isZeroUsage(old) {
+			continue
+		}
+		dst[k] = v
+	}
+}
+
+func isZeroUsage(v any) bool {
+	switch n := v.(type) {
+	case nil:
+		return true
+	case float64:
+		return n == 0
+	}
+	return false
+}
 
 // ErrUnknownModel is returned when the requested model cannot be resolved.
 var ErrUnknownModel = errors.New("proxy: unknown model")
@@ -1178,7 +1229,7 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 		// streamCopy writes the header before its first byte, so the status
 		// is committed the moment it returns — regardless of a copy error.
 		res.Committed = true
-		ttft, usage, copyErr, first := d.streamCopy(ctx, w, resp, rt.Surface, start)
+		ttft, usage, copyErr, first := d.streamCopy(ctx, w, resp, rt.Surface, tapConvention(rt, cross), start)
 		res.TTFTms = msAtLeastOne(ttft)
 		if usage != nil {
 			res.Usage = usage
@@ -1271,7 +1322,7 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 				}
 			}
 		}
-		if u := tapJSONUsage(raw, rt.Surface); u != nil {
+		if u := tapJSONUsage(raw, rt.Surface, tapConvention(rt, cross)); u != nil {
 			res.Usage = u
 		}
 		// Record WHY an error status happened. Before this, the err column was
@@ -1729,97 +1780,100 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 // The fourth return is the first non-terminal SSE data payload. A streamed
 // error response carries its reason in there, and the ledger's err column is
 // blank for streams unless the caller is handed it.
-func (d *Dispatcher) streamCopy(ctx context.Context, w http.ResponseWriter, resp *http.Response, surface provider.Surface, start time.Time) (time.Duration, *store.Usage, error, []byte) {
+func (d *Dispatcher) streamCopy(ctx context.Context, w http.ResponseWriter, resp *http.Response, surface provider.Surface, conv provider.UsageConvention, start time.Time) (time.Duration, *store.Usage, error, []byte) {
 	var ttft time.Duration
-	var firstByte bool
+	var firstEvent bool
 	var firstPayload []byte
 
 	flusher, _ := w.(http.Flusher)
+	flush := func() {
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
 	// Headers already copied; write status now so the client starts receiving.
 	w.WriteHeader(resp.StatusCode)
-	if flusher != nil {
-		flusher.Flush()
-	}
+	flush()
 
+	// Lines are read with ReadSlice and written back VERBATIM, line ending
+	// included (CRLF stays CRLF), so forwarding is byte-exact. A line longer
+	// than the buffer arrives in pieces: every piece is forwarded at once,
+	// and only lines that fit (maxScanToken) are tapped — the usage chunk
+	// after a giant content line is still read.
 	br := bufio.NewReaderSize(resp.Body, 64*1024)
-	sc := bufio.NewScanner(br)
-	sc.Buffer(make([]byte, 0, 64*1024), maxScanToken)
-
-	// We must forward EXACT bytes. Scanner strips the trailing newline, so we
-	// re-emit "\n" per line — SSE lines are newline-terminated, which makes it
-	// lossless for well-formed streams. Anything unusual (bare \r) is handled
-	// by falling back to a raw copy if the scanner errors.
 	// Read-only usage tap. Merges across events: Anthropic's message_start
 	// carries the input/cache breakdown while message_delta carries the final
 	// output totals, so taking only the first hit would record out=0.
-	tapper := NewUsageTapper(surface)
-	for sc.Scan() {
-		line := sc.Bytes()
-		if !firstByte {
-			ttft = time.Since(start)
-			firstByte = true
-		}
-		// Remember the first real payload so the caller can quote it in the
-		// ledger. Comments (: keepalive) and the [DONE] sentinel are skipped:
-		// neither can carry an error envelope.
-		if firstPayload == nil {
-			if p := bytes.TrimSpace(bytes.TrimPrefix(bytes.TrimSpace(line), []byte("data:"))); len(p) > 0 && !bytes.Equal(p, []byte("[DONE]")) {
-				firstPayload = append([]byte(nil), p...)
+	tapper := NewUsageTapperFor(surface, conv)
+	var long []byte   // a line spanning several buffer fills, while it fits
+	overlong := false // the current line outgrew maxScanToken: not tapped
+	for {
+		piece, rerr := br.ReadSlice('\n')
+		if len(piece) > 0 {
+			if _, err := w.Write(piece); err != nil {
+				return ttft, tapper.Usage(), fmt.Errorf("client write: %w", err), firstPayload
 			}
-		}
-		if _, err := w.Write(line); err != nil {
-			return ttft, tapper.Usage(), fmt.Errorf("client write: %w", err), firstPayload
-		}
-		if _, err := w.Write([]byte("\n")); err != nil {
-			return ttft, tapper.Usage(), fmt.Errorf("client write: %w", err), firstPayload
-		}
-		if flusher != nil {
-			flusher.Flush()
-		}
-		tapper.Observe(line)
-	}
-	if err := sc.Err(); err != nil {
-		// Scanner hit an over-long line or a read error: drain the rest raw so
-		// the client still gets a complete (if untapped) stream.
-		if _, cerr := io.Copy(w, br); cerr != nil {
-			if flusher != nil {
-				flusher.Flush()
-			}
-			if !firstByte {
-				ttft = time.Since(start)
-			}
-			if !errors.Is(err, bufio.ErrTooLong) {
-				writeStreamErrorFrame(w, surface, "upstream connection lost")
-				if flusher != nil {
-					flusher.Flush()
+			complete := rerr == nil || rerr == io.EOF
+			line := piece
+			if !complete || long != nil || overlong {
+				if !overlong {
+					if len(long)+len(piece) > maxScanToken {
+						long, overlong = nil, true
+					} else {
+						long = append(long, piece...)
+					}
 				}
+				line = long
 			}
-			return ttft, tapper.Usage(), fmt.Errorf("upstream read: %w (scanner: %v)", cerr, err), firstPayload
+			if complete {
+				if !overlong {
+					line = bytes.TrimRight(line, "\r\n")
+					// TTFT is the first EVENT: blank separators and SSE
+					// comments (": keepalive", sent by some gateways the
+					// moment the request lands) are not the first token.
+					if !firstEvent && len(line) > 0 && line[0] != ':' {
+						ttft = time.Since(start)
+						firstEvent = true
+					}
+					// Remember the first real payload so the caller can
+					// quote it in the ledger. Comments and [DONE] are
+					// skipped: neither can carry an error envelope.
+					if firstPayload == nil {
+						if p := bytes.TrimSpace(bytes.TrimPrefix(bytes.TrimSpace(line), []byte("data:"))); len(p) > 0 && p[0] != ':' && !bytes.Equal(p, []byte("[DONE]")) {
+							firstPayload = append([]byte(nil), p...)
+						}
+					}
+					tapper.Observe(line)
+				} else if !firstEvent {
+					ttft = time.Since(start)
+					firstEvent = true
+				}
+				long, overlong = nil, false
+			}
+			// Flush only when nothing more is already buffered: the client
+			// sees every byte as soon as the upstream stops sending, and a
+			// burst of events costs one flush instead of one per line.
+			if br.Buffered() == 0 {
+				flush()
+			}
 		}
-		if flusher != nil {
-			flusher.Flush()
+		if rerr == nil || rerr == bufio.ErrBufferFull {
+			continue
 		}
-		if !firstByte {
+		flush()
+		if !firstEvent {
 			ttft = time.Since(start)
 		}
-		// An over-long line is survivable (bytes still forwarded); a genuine
-		// upstream read error means the stream was truncated.
-		if errors.Is(err, bufio.ErrTooLong) {
+		if rerr == io.EOF {
 			return ttft, tapper.Usage(), nil, firstPayload
 		}
 		// The upstream died mid-stream. The 200 is already committed, so the
 		// only honest signal left is a terminal SSE error frame in the
 		// client's dialect — otherwise the client is left with a silent EOF.
 		writeStreamErrorFrame(w, surface, "upstream connection lost")
-		if flusher != nil {
-			flusher.Flush()
-		}
-		return ttft, tapper.Usage(), fmt.Errorf("upstream read: %w", err), firstPayload
+		flush()
+		return ttft, tapper.Usage(), fmt.Errorf("upstream read: %w", rerr), firstPayload
 	}
-	if !firstByte {
-		ttft = time.Since(start)
-	}
-	return ttft, tapper.Usage(), nil, firstPayload
 }
 
 // writeStreamErrorFrame emits a terminal SSE error event in the client's
@@ -1844,8 +1898,20 @@ func writeStreamErrorFrame(w io.Writer, surface provider.Surface, msg string) {
 //	             authoritative output_tokens), so we merge
 //	responses  : response.completed carries the full response incl. usage
 func tapSSELine(line []byte, surface provider.Surface) *store.Usage {
+	u := sseUsageRaw(line, surface)
+	if u == nil {
+		return nil
+	}
+	n := store.NormalizeUsage(store2surface(surface), u)
+	return &n
+}
+
+// sseUsageRaw returns the raw usage object one SSE data line carries, or nil.
+// Every usage-bearing event names "usage", so a line without the word is
+// skipped before any JSON decoding — content deltas are most of a stream.
+func sseUsageRaw(line []byte, surface provider.Surface) map[string]any {
 	payload := bytes.TrimSpace(bytes.TrimPrefix(bytes.TrimSpace(line), []byte("data:")))
-	if len(payload) == 0 || bytes.Equal(payload, []byte("[DONE]")) {
+	if len(payload) == 0 || !bytes.Contains(payload, []byte(`"usage"`)) {
 		return nil
 	}
 	var ev map[string]any
@@ -1859,14 +1925,12 @@ func tapSSELine(line []byte, surface provider.Surface) *store.Usage {
 		case "message_start":
 			if msg, ok := ev["message"].(map[string]any); ok {
 				if u, ok := msg["usage"].(map[string]any); ok {
-					n := store.NormalizeUsage(store.SurfaceAnthropic, u)
-					return &n
+					return u
 				}
 			}
 		case "message_delta":
 			if u, ok := ev["usage"].(map[string]any); ok {
-				n := store.NormalizeUsage(store.SurfaceAnthropic, u)
-				return &n
+				return u
 			}
 		}
 	case provider.SurfaceResponses:
@@ -1879,35 +1943,42 @@ func tapSSELine(line []byte, surface provider.Surface) *store.Usage {
 		case "response.completed", "response.incomplete", "response.failed":
 			if r, ok := ev["response"].(map[string]any); ok {
 				if u, ok := r["usage"].(map[string]any); ok {
-					n := store.NormalizeUsage(store.SurfaceResponses, u)
-					return &n
+					return u
 				}
 			}
 		}
 		if u, ok := ev["usage"].(map[string]any); ok {
-			n := store.NormalizeUsage(store.SurfaceResponses, u)
-			return &n
+			return u
 		}
 	default: // openai
 		if u, ok := ev["usage"].(map[string]any); ok {
-			n := store.NormalizeUsage(store.SurfaceOpenAI, u)
-			return &n
+			return u
 		}
 	}
 	return nil
 }
 
 // tapJSONUsage extracts usage from a complete (non-streamed) JSON body.
-func tapJSONUsage(body []byte, surface provider.Surface) *store.Usage {
+func tapJSONUsage(body []byte, surface provider.Surface, conv provider.UsageConvention) *store.Usage {
 	var ev map[string]any
 	if err := json.Unmarshal(body, &ev); err != nil {
 		return nil
 	}
 	if u, ok := ev["usage"].(map[string]any); ok {
-		n := store.NormalizeUsage(store2surface(surface), u)
+		n := store.NormalizeUsageWith(store2surface(surface), u, conv)
 		return &n
 	}
 	return nil
+}
+
+// tapConvention is how the tap reads a Messages-shape usage object for this
+// hop: the account's declared convention for its own native bytes; exclusive
+// for a translated body, whose usage the codec already normalized.
+func tapConvention(rt Route, cross bool) provider.UsageConvention {
+	if cross {
+		return provider.UsageConventionAuto
+	}
+	return rt.Account.UsageConvention
 }
 
 // MergeUsage combines an earlier (message_start) and later (message_delta)

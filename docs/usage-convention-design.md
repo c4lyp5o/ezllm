@@ -2,8 +2,11 @@
 
 Sign-off doc for Phase 1 item 1 of the Claude Code breakage. Status: **D1 shipped** (schema
 v13: the per-account fact, its validation, PATCH semantics and the read projections — see
-"Implementation status" below). **D2 (ledger `NormalizeUsageShape`), D4 (verification probe)
-and D5 (historical backfill) remain open** and are deliberately NOT in that patch.
+"Implementation status" below). **D2 shipped 2026-10-20** as `store.NormalizeUsageWith`
+(the stream tap and the JSON tap pass the account's convention for native bytes; translated
+bodies are already normalized by the codec). **D4 (verification probe) and D5 (historical
+backfill) remain open.** Until D5 runs, rows written before D2 on a `total` account keep the
+inclusive `tokens_in`.
 
 ## The problem
 

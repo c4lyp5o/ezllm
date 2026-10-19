@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/provider"
 )
 
 // Surface identifies which wire protocol served a call.
@@ -109,10 +111,9 @@ type Call struct {
 	// Translated marks a hop whose WIRE differed from the client's surface, so
 	// the bodies were translated in one or both directions: the
 	// anthropic->openai-chat leg (Route.Translated) and a hop curated onto the
-	// Responses wire (Route.ResponsesWire). For such a row tokens_in is the
-	// vendor's INCLUSIVE total (the synthesized envelope passes it through,
-	// cache included) and TokensCachedRead stays 0 — see schema.sql
-	// calls.translated.
+	// Responses wire (Route.ResponsesWire). The tap reads the client-shaped
+	// body the codec synthesized, which carries the cache split in the
+	// client's own convention — see schema.sql calls.translated.
 	Translated bool
 
 	Err string
@@ -125,15 +126,28 @@ type Usage struct {
 }
 
 // NormalizeUsage maps a provider's raw usage object onto our surface-independent
-// counters. Verified against live probes 2026-10-05:
-//
-//	openai     prompt_tokens INCLUDES cached_tokens  -> in = prompt - cached
-//	anthropic  input_tokens EXCLUDES cache_read      -> in = input_tokens
-//	responses  input_tokens INCLUDES cached_tokens   -> in = input - cached
-//
-// Unknown shapes fall back to the most common OpenAI-ish field names and leave
-// cache counters at zero rather than guessing wrong.
+// counters, reading an anthropic-shape input_tokens as exclusive of cache (the
+// meaning of usage_convention=auto). See NormalizeUsageWith.
 func NormalizeUsage(surface Surface, raw map[string]any) Usage {
+	return NormalizeUsageWith(surface, raw, provider.UsageConventionAuto)
+}
+
+// NormalizeUsageWith maps a raw usage object onto the four billed buckets —
+// In (full-price input), CachedRead, CachedWrite, Out — so that every input
+// token lands in exactly ONE of them: cost is in·p_in + read·p_read +
+// write·p_write + out·p_out, and a token counted in two buckets is billed
+// twice. Verified against live ledger rows (2026-10-20):
+//
+//	openai     prompt_tokens INCLUDES the cache read and write  -> in = prompt - read - write
+//	responses  input_tokens INCLUDES the cache read and write   -> in = input - read - write
+//	anthropic  input_tokens EXCLUDES them (Anthropic itself, and usage_convention
+//	           auto/anthropic); a declared "total" account INCLUDES them
+//
+// A part is subtracted only when the total can contain it, so nothing goes
+// negative; on a declared-total Messages account, a total smaller than its
+// cache read is read as exclusive (D3 of usage-convention-design). Reasoning
+// is already inside the output count and is recorded for display only.
+func NormalizeUsageWith(surface Surface, raw map[string]any, conv provider.UsageConvention) Usage {
 	u := Usage{Raw: raw}
 	if raw == nil {
 		return u
@@ -150,31 +164,49 @@ func NormalizeUsage(surface Surface, raw map[string]any) Usage {
 		}
 		return nil
 	}
+	// first returns the first non-zero counter among (map, key) pairs.
+	first := func(pairs ...any) int64 {
+		for i := 0; i+1 < len(pairs); i += 2 {
+			if m, _ := pairs[i].(map[string]any); m != nil {
+				if v := num(m, pairs[i+1].(string)); v != 0 {
+					return v
+				}
+			}
+		}
+		return 0
+	}
+	// inclusive splits a total that contains the cache parts it can hold. A
+	// total smaller than its own cache read is broken data; it clamps to 0
+	// (under-report, never overcharge).
+	inclusive := func(total int64) int64 {
+		switch {
+		case total >= u.CachedRead+u.CachedWrite:
+			return total - u.CachedRead - u.CachedWrite
+		case total >= u.CachedRead:
+			return total - u.CachedRead // the write cannot be inside it
+		}
+		return 0
+	}
 
 	switch surface {
 	case SurfaceAnthropic:
-		// input_tokens already excludes cache_read / cache_creation.
-		u.In = num(raw, "input_tokens")
+		in := num(raw, "input_tokens")
 		u.Out = num(raw, "output_tokens")
 		u.CachedRead = num(raw, "cache_read_input_tokens")
 		u.CachedWrite = num(raw, "cache_creation_input_tokens")
-		// Anthropic has no reasoning field in usage; server_tool_use ignored.
+		u.Reasoning = num(sub(raw, "output_tokens_details"), "thinking_tokens")
+		u.In = in
+		if conv == provider.UsageConventionTotal && in >= u.CachedRead {
+			u.In = inclusive(in)
+		}
 
 	case SurfaceResponses:
-		in := num(raw, "input_tokens")
 		det := sub(raw, "input_tokens_details")
-		if det != nil {
-			u.CachedRead = num(det, "cached_tokens")
-			u.CachedWrite = num(det, "cache_write_tokens")
-		}
-		u.In = in - u.CachedRead // cached is INCLUDED in input_tokens
-		if u.In < 0 {
-			u.In = 0
-		}
+		u.CachedRead = num(det, "cached_tokens")
+		u.CachedWrite = num(det, "cache_write_tokens")
+		u.In = inclusive(num(raw, "input_tokens"))
 		u.Out = num(raw, "output_tokens")
-		if odet := sub(raw, "output_tokens_details"); odet != nil {
-			u.Reasoning = num(odet, "reasoning_tokens")
-		}
+		u.Reasoning = num(sub(raw, "output_tokens_details"), "reasoning_tokens")
 
 	case SurfaceOpenAI:
 		fallthrough
@@ -184,20 +216,18 @@ func NormalizeUsage(surface Surface, raw map[string]any) Usage {
 			// some gateways use input_tokens even on the OpenAI surface
 			prompt = num(raw, "input_tokens")
 		}
-		if det := sub(raw, "prompt_tokens_details"); det != nil {
-			u.CachedRead = num(det, "cached_tokens")
-		}
-		u.In = prompt - u.CachedRead // cached is INCLUDED in prompt_tokens
-		if u.In < 0 {
-			u.In = 0
-		}
+		det := sub(raw, "prompt_tokens_details")
+		// The details object is the standard place; DeepSeek's own
+		// prompt_cache_hit_tokens and a top-level cached_tokens are the
+		// fallbacks some gateways send instead.
+		u.CachedRead = first(det, "cached_tokens", raw, "prompt_cache_hit_tokens", raw, "cached_tokens")
+		u.CachedWrite = first(det, "cache_write_tokens", det, "cache_creation_input_tokens", raw, "cache_creation_input_tokens")
+		u.In = inclusive(prompt)
 		u.Out = num(raw, "completion_tokens")
 		if u.Out == 0 {
 			u.Out = num(raw, "output_tokens")
 		}
-		if odet := sub(raw, "completion_tokens_details"); odet != nil {
-			u.Reasoning = num(odet, "reasoning_tokens")
-		}
+		u.Reasoning = num(sub(raw, "completion_tokens_details"), "reasoning_tokens")
 	}
 	return u
 }

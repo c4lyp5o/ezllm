@@ -124,12 +124,14 @@ func TestNormalizeUsageSurfaceSemantics(t *testing.T) {
 			want:    Usage{In: 12, Out: 27, Reasoning: 13},
 		},
 		{
-			// Responses with a real cache hit + write: cached must be subtracted
-			// from input (P6 semantics), cache_write captured.
+			// Responses with a real cache hit + write: BOTH are inside
+			// input_tokens (live tokenrouter row 2026-10-20: input 29327,
+			// cache_write 29324 — 3 new tokens), so both are subtracted.
+			// Leaving the write in billed it twice (full price + write).
 			name:    "responses cached with write",
 			surface: SurfaceResponses,
 			raw:     `{"input_tokens":3000,"output_tokens":40,"input_tokens_details":{"cached_tokens":2048,"cache_write_tokens":512},"output_tokens_details":{"reasoning_tokens":7}}`,
-			want:    Usage{In: 952, Out: 40, CachedRead: 2048, CachedWrite: 512, Reasoning: 7},
+			want:    Usage{In: 440, Out: 40, CachedRead: 2048, CachedWrite: 512, Reasoning: 7},
 		},
 		{
 			name:    "empty usage",

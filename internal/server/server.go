@@ -561,9 +561,17 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			s.inferenceSTT(w, r)
 			return
 		}
-		body, err := io.ReadAll(io.LimitReader(r.Body, s.maxBody))
+		body, err := io.ReadAll(io.LimitReader(r.Body, s.maxBody+1))
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, "invalid_request_error", "could not read body: "+err.Error())
+			return
+		}
+		// The extra byte detects an oversized body: a LimitReader alone stops
+		// silently at the cap and the truncated bytes would be parsed (or, for
+		// multipart, forwarded) as if they were the whole request.
+		if int64(len(body)) > s.maxBody {
+			writeErr(w, http.StatusRequestEntityTooLarge, "invalid_request_error",
+				fmt.Sprintf("request body exceeds %d bytes", s.maxBody))
 			return
 		}
 		if len(body) == 0 {
@@ -855,9 +863,17 @@ func (s *Server) inferenceSTT(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	// Read the raw multipart body FIRST so it can be forwarded byte-for-byte
 	// (ParseMultipartForm would consume the stream).
-	body, err := io.ReadAll(io.LimitReader(r.Body, s.maxBody))
+	body, err := io.ReadAll(io.LimitReader(r.Body, s.maxBody+1))
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid_request_error", "could not read multipart body: "+err.Error())
+		return
+	}
+	// The extra byte detects an oversized body: a LimitReader alone stops
+	// silently at the cap and the truncated bytes would be parsed (or, for
+	// multipart, forwarded) as if they were the whole request.
+	if int64(len(body)) > s.maxBody {
+		writeErr(w, http.StatusRequestEntityTooLarge, "invalid_request_error",
+			fmt.Sprintf("request body exceeds %d bytes", s.maxBody))
 		return
 	}
 	if len(body) == 0 {

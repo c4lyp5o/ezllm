@@ -575,3 +575,63 @@ func (l *lockedWriter) Write(p []byte) (int, error) {
 	defer l.mu.Unlock()
 	return l.w.Write(p)
 }
+
+// A transport failure must leave the hop parked. The error branch once
+// recorded a second, empty outcome that read as success and deleted the park
+// it had just set — while the log still said "hop parked".
+func TestTransportFailureParksTheHop(t *testing.T) {
+	ok := upstub(t, http.StatusOK, `{"ok":true}`)
+	defer ok.Close()
+
+	d := newDispatcher()
+	d.SetRetries(0)
+	req, body := reqWithBody(`{"model":"day","messages":[]}`)
+	routes := []Route{textRoute("http://127.0.0.1:1", "day"), textRoute(ok.URL, "night")}
+	if _, _, err := d.ForwardCandidates(context.Background(), httptest.NewRecorder(), req, routes, body); err != nil {
+		t.Fatalf("should have failed over: %v", err)
+	}
+	if allowed, _ := d.acquireHop(routes[0], time.Now()); allowed {
+		t.Error("dead hop is not parked after a transport error")
+	}
+}
+
+// A hop retried on a 5xx until the request's attempt budget ran out DID
+// fail: the budget refusal must not erase that, or the answered 503 is
+// recorded as a success and clears the strikes the hop had banked.
+func TestBudgetSpentAfterA5xxStillStrikesTheHop(t *testing.T) {
+	bad := upstub(t, http.StatusServiceUnavailable, `{"error":"down"}`)
+	defer bad.Close()
+
+	d := newDispatcher()
+	d.SetRetries(1)
+	d.SetAttemptBudget(1)
+	d.ConfigureCooldown(0, 0, 3)
+	routes := []Route{textRoute(bad.URL, "day"), textRoute(bad.URL, "night")}
+	d.recordHop(routes[0], hopOutcome{failed: true, cooldown: time.Minute}, time.Now())
+
+	req, body := reqWithBody(`{"model":"day","messages":[]}`)
+	_, _, _ = d.ForwardCandidates(context.Background(), httptest.NewRecorder(), req, routes, body)
+	if st := d.cooldowns[hopKey(routes[0])]; st.strikes != 2 {
+		t.Errorf("hop strikes = %d, want 2 (banked strike kept, 503 added)", st.strikes)
+	}
+}
+
+// Cooldowns is read by the dashboard and must not reshuffle models that share
+// an account between calls.
+func TestCooldownsOrderIsStableWithinAnAccount(t *testing.T) {
+	d := newDispatcher()
+	now := time.Now()
+	for _, m := range []string{"c", "a", "b", "e", "d"} {
+		rt := textRoute("http://x", m)
+		d.recordHop(rt, hopOutcome{failed: true, cooldown: time.Minute, reason: "t"}, now)
+	}
+	for i := 0; i < 10; i++ {
+		var got []string
+		for _, c := range d.Cooldowns() {
+			got = append(got, c.Model)
+		}
+		if strings.Join(got, ",") != "a,b,c,d,e" {
+			t.Fatalf("order = %v, want a,b,c,d,e", got)
+		}
+	}
+}

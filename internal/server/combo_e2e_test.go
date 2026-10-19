@@ -489,3 +489,28 @@ func TestProbedGapIsSurfaceScopedEndToEnd(t *testing.T) {
 		t.Errorf("bad upstream calls = %d, want 1", len(tu.badHits))
 	}
 }
+
+// An oversized body must be refused with 413, never truncated at the cap and
+// then parsed (JSON) or forwarded (multipart) as if it were the whole request.
+func TestOversizedBodyIsRefusedNotTruncated(t *testing.T) {
+	tu := newTwoUpstream(t, false)
+	big := `{"model":"daily","messages":[{"role":"user","content":"` + strings.Repeat("x", 1<<20) + `"}]}`
+	if code, body := tu.chat(big); code != http.StatusRequestEntityTooLarge {
+		t.Errorf("oversized chat = %d, want 413 — body: %s", code, body)
+	}
+
+	mp := "--b\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\ndaily\r\n" +
+		"--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.wav\"\r\n\r\n" +
+		strings.Repeat("x", 1<<20) + "\r\n--b--\r\n"
+	req := httptest.NewRequest("POST", "/v1/audio/transcriptions", strings.NewReader(mp))
+	req.Header.Set("Authorization", "Bearer tok-infer")
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=b")
+	rec := httptest.NewRecorder()
+	tu.handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("oversized multipart = %d, want 413 — body: %s", rec.Code, rec.Body.String())
+	}
+	if len(tu.badHits)+len(tu.goodHits) != 0 {
+		t.Errorf("upstream calls = %d, want 0 for a refused body", len(tu.badHits)+len(tu.goodHits))
+	}
+}

@@ -414,7 +414,12 @@ func (d *Dispatcher) Cooldowns() []Cooldown {
 	}
 	// Stable order: the dashboard and its tests both read this list, and a map
 	// walk would reshuffle it on every call.
-	sort.Slice(out, func(i, j int) bool { return out[i].Namespace < out[j].Namespace })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Namespace != out[j].Namespace {
+			return out[i].Namespace < out[j].Namespace
+		}
+		return out[i].Model < out[j].Model
+	})
 	return out
 }
 
@@ -1025,9 +1030,11 @@ func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, bod
 	// preserves it, so the request-level flag answers for every attempt
 	// without re-deriving it per hop. A nil doc (legacy callers) falls back to
 	// the old per-attempt parse.
-	stream := IsStream(body)
+	var stream bool
 	if doc != nil {
 		stream = doc.Stream()
+	} else {
+		stream = IsStream(body)
 	}
 
 	start := time.Now()
@@ -1599,17 +1606,27 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 		if resp != nil {
 			hdr = resp.Header
 		}
-		oc := d.classifyHop(err, res.Status, hdr, len(routes) > 1)
-		d.recordHop(rt, oc, time.Now())
+		// A budget/deadline refusal says nothing about the hop by itself: when
+		// no attempt on this hop got an answer, record nothing (neither a
+		// strike nor a clear). When an earlier attempt did answer (a 5xx that
+		// was being retried), that answer is the hop's outcome.
+		var oc hopOutcome
+		switch {
+		case errors.Is(err, errAttemptBudgetSpent) && res.Status == 0:
+		case errors.Is(err, errAttemptBudgetSpent):
+			oc = d.classifyHop(nil, res.Status, hdr, len(routes) > 1)
+			d.recordHop(rt, oc, time.Now())
+		default:
+			oc = d.classifyHop(err, res.Status, hdr, len(routes) > 1)
+			d.recordHop(rt, oc, time.Now())
+		}
 		if probe {
 			d.releaseProbe(rt)
 		}
 		if err != nil {
-			// A budget/deadline refusal says nothing about the HOP's health —
-			// classify it as such so the note is honest AND the hop is not
-			// cooled/parked for a request it never even made.
+			// The hop's outcome was recorded above; a second record here once
+			// cleared the park a transport error had just set.
 			note := "transport: " + err.Error()
-			var oc hopOutcome // not-dialed: nothing failed, no cooldown
 			if errors.Is(err, errAttemptBudgetSpent) {
 				note = err.Error()
 				d.log.Info("hop not dialed", // Info, not Warn: nothing failed
@@ -1620,7 +1637,6 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 					"account", rt.Account.Namespace, "model", rt.Model,
 					"alias", rt.Alias, "err", err.Error())
 			}
-			d.recordHop(rt, oc, time.Now())
 			attempts = append(attempts, Attempt{
 				Namespace: rt.Account.Namespace, Model: rt.Model,
 				Note: note,

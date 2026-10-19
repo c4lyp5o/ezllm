@@ -1,7 +1,7 @@
 # ezllm admin API — contract (v1 · M1–M9 shipped, current through 2026-10-10)
 
 Status codes: `200` ok · `201` created · `400` bad request **or surface-pin refusal** ·
-`401` no/invalid client token · `403` token lacks `admin` · `404` unknown id · `409` conflict (refs exist; unconfirmed pin surface) · `422` **key test failed** (with `step`) · `429` at cap.
+`401` no/invalid client token · `403` token lacks `admin` · `404` unknown id · `409` conflict (refs exist; unconfirmed pin surface) · `413` inference body over `max_body_mib` · `422` **key test failed** (with `step`) · `429` at cap.
 All routes except `/healthz` require `Authorization: Bearer ***
 
 Errors are OpenAI-shaped: `{"error":{"type":"...","message":"...","code":422}}`.
@@ -27,6 +27,12 @@ honest answer is a refusal that names the endpoint to use instead. (Translated h
 probe-gated anthropic→openai exception, `docs/translation-runbook.md` — do not bypass pins
 either.) Lookup errors fail closed (refuse), and combo
 hops pinned to another surface refuse the whole request rather than silently skipping.
+
+**Oversized body (every inference POST, including `/v1/audio/transcriptions`).** A request body
+larger than `max_body_mib` (default 32) is refused **before any upstream dial** with
+`413 {"error":{"code":413,"message":"request body exceeds 1048576 bytes","type":"invalid_request_error"}}`
+(captured with `max_body_mib: 1`). The body is never truncated to the cap: earlier builds parsed
+the cut-off JSON (a misleading `400`) or forwarded a cut-off multipart upload upstream.
 
 `/v1/models` rows: namespaced ids carry the upstream's `owned_by` and, once probed, a `protocol`
 map. A combo row is bare (`owned_by: "ezllm"`) and adds a non-standard `combo` key —

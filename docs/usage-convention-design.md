@@ -4,9 +4,8 @@ Sign-off doc for Phase 1 item 1 of the Claude Code breakage. Status: **D1 shippe
 v13: the per-account fact, its validation, PATCH semantics and the read projections — see
 "Implementation status" below). **D2 shipped 2026-10-20** as `store.NormalizeUsageWith`
 (the stream tap and the JSON tap pass the account's convention for native bytes; translated
-bodies are already normalized by the codec). **D4 (verification probe) and D5 (historical
-backfill) remain open.** Until D5 runs, rows written before D2 on a `total` account keep the
-inclusive `tokens_in`.
+bodies are already normalized by the codec). **D5 ran 2026-10-20** (below). **D4
+(verification probe) remains open.**
 
 ## The problem
 
@@ -141,3 +140,23 @@ against caps (conservative on the free/prepaid pool). Normalizing translated
 rows into the cold convention later means teaching the translator to carry
 `prompt_tokens_details.cached_tokens` — a translator-contract change, not a
 ledger one.
+
+## D5 backfill — run 2026-10-20
+
+tokenrouter (account 7) set to `usage_convention=total` in the same transaction. Online
+backup first: `data/backups/ezllm-pre-usage-backfill-20261020.sqlite` (integrity ok, 16,118
+calls). Each row was recomputed from its own `raw_usage` with `NormalizeUsageWith`, under two
+gates: the PREVIOUS normalizer applied to that raw must reproduce the stored numbers exactly
+(proof the raw is what produced the row — 3 of 15,357 rows failed and were left alone), and a
+correction may only lower `tokens_in` into the cache buckets, never touch `tokens_out` or
+shrink a cache count. Result, 177 rows:
+
+| account / wire | rows | change |
+|---|---|---|
+| tokenrouter, Messages (native, `total`) | 15 | `tokens_in` −670,976 (already in `tokens_cached_read`) |
+| tokenrouter, Responses | 26 | `tokens_in` −272,175 (already in `tokens_cached_write`) |
+| claude-platform, Messages | 136 | `reasoning_tokens` filled from `thinking_tokens`; tokens unchanged |
+
+No client token carries a cap and the only model rules are uncapped, so no usage counter
+needed adjusting. A second pass found nothing left to correct. Cost reports read the calls
+table directly, so they reflect the correction at once.

@@ -142,13 +142,9 @@ type Tester struct {
 	client   *http.Client
 	registry *provider.Registry
 	db       *store.DB // optional: admin probes are ledgered so spend is visible
-	// adapter is the provider adapter for the key test currently in flight,
-	// resolved once in Run/ProtocolSweep and passed explicitly into doProbe.
-	// It MUST stay a per-Tester field: the server shares one Tester across
-	// concurrent requests and background sweeps, so a process-wide adapter
-	// would let one key test prepare another's probes with the wrong auth
-	// semantics (Bearer vs x-api-key) and reject a valid key.
-	adapter provider.Adapter
+	// No per-test state lives here: the server shares one Tester across
+	// concurrent key tests and background sweeps, so the adapter for a test
+	// is resolved in Run/ProtocolSweep and passed explicitly into doProbe.
 	// sleep is injectable so tests assert probe pacing without waiting on it.
 	sleep func(ctx context.Context, d time.Duration) error
 	now   func() time.Time
@@ -234,8 +230,6 @@ func (t *Tester) Run(ctx context.Context, acct provider.Account, opts Options) *
 		res.Fail = &Failure{Step: StepFormat, Message: err.Error()}
 		return res
 	}
-	t.adapter = adapter // per-Tester: doProbe takes this as a parameter, never a global
-
 	key := strings.TrimSpace(opts.APIKey)
 	pace := &pacer{delay: acct.ProbeDelay}
 
@@ -305,15 +299,8 @@ func (t *Tester) Run(ctx context.Context, acct provider.Account, opts Options) *
 		// res.catErr != nil means OUR key was rejected by the catalog — a fake
 		// key being rejected too proves nothing (both keys failed).
 		if res.authDeferred && res.catErr == nil && len(res.Catalog) > 0 {
-			_, cerr := probe(ctx, t, pace, defaultStepTimeout,
-				func(c context.Context) ([]provider.ModelInfo, error) {
-					return adapter.ListModels(c, acct, fakeKey())
-				})
-			switch {
-			case cerr != nil && isAuthRejectFor(adapter, statusOf(cerr)):
-				res.authDeferred = false
-				res.addStep(Step{Step: StepAuth, OK: true,
-					Detail: "catalog rejected a fake key — the real key is proven"})
+			switch proven, cerr := t.calibrateCatalog(ctx, adapter, acct, pace, res); {
+			case proven:
 			case cerr == nil:
 				// The public-catalog case (N1): 200 for garbage proves nothing.
 				res.addStep(Step{Step: StepAuth, OK: false,
@@ -416,7 +403,8 @@ func (t *Tester) authGate(
 	)
 	// Attempt up to 3× on 429/5xx/timeout. 401/403 stop immediately — on
 	// these providers 403 means bad credentials, not "slow down", so backing
-	// off would only delay the user's error message.
+	// off would only delay the user's error message. An HTTP status is not a
+	// Go error (doProbe errs only on transport), so the STATUS decides.
 	for attempt := 0; attempt < 3; attempt++ {
 		var ores httpResult
 		ores, authErr = probe(ctx, t, pace, defaultStepTimeout,
@@ -425,7 +413,7 @@ func (t *Tester) authGate(
 				return httpResult{status: s, body: b}, err
 			})
 		status, body = ores.status, ores.body
-		if authErr == nil || !retryableStatus(status) || ctx.Err() != nil {
+		if !retryableStatus(status) || ctx.Err() != nil {
 			break
 		}
 		if err := t.sleep(ctx, backoff(attempt)); err != nil {
@@ -492,7 +480,7 @@ func (t *Tester) authGate(
 		// retryable flag. Never claim a pass we did not prove.
 		f := &Failure{
 			Step:           StepAuth,
-			Message:        "could not verify key right now: " + shortErr(authErr),
+			Message:        "could not verify key right now: " + probeFailureText(status, body, authErr),
 			UpstreamStatus: status,
 			Hint:           "The provider is rate-limiting or unreachable. Wait a moment and retest — the key may be fine.",
 			Retryable:      true,
@@ -504,7 +492,7 @@ func (t *Tester) authGate(
 	default:
 		f := &Failure{
 			Step:           StepAuth,
-			Message:        "could not reach the credential endpoint: " + shortErr(authErr),
+			Message:        "could not reach the credential endpoint: " + probeFailureText(status, body, authErr),
 			UpstreamStatus: status,
 			Hint:           "Check base_url and that the provider is reachable from this host.",
 			Retryable:      true,
@@ -565,9 +553,9 @@ func (t *Tester) probeModel(
 		status, resp = ires.status, ires.body
 		elapsed = t.now().Sub(start)
 		// A quota-exhausted answer is a VERDICT, not weather: retrying spends
-		// nothing and proves nothing new.
-		if err == nil || !retryableStatus(status) ||
-			provider.ErrorCause(status, resp) == "quota_exhausted" {
+		// nothing and proves nothing new. Only the status decides — an HTTP
+		// 503 arrives with a nil error (doProbe errs only on transport).
+		if !retryableStatus(status) || provider.ErrorCause(status, resp) == "quota_exhausted" {
 			break
 		}
 		if serr := t.sleep(ctx, backoff(attempt)); serr != nil {
@@ -664,7 +652,7 @@ func (t *Tester) probeModel(
 		}
 		f := &Failure{
 			Step:           StepInference,
-			Message:        "generation probe failed: " + shortErr(err),
+			Message:        "generation probe failed: " + probeFailureText(status, resp, err),
 			UpstreamStatus: status,
 			UpstreamError:  upstreamErr(resp),
 			Hint:           probeFailedHint(status),
@@ -717,20 +705,37 @@ func (t *Tester) credentialAcceptedDespiteGeneration(
 	if res.catErr != nil || len(res.Catalog) == 0 {
 		return false
 	}
-	_, cerr := probe(ctx, t, pace, defaultStepTimeout,
-		func(c context.Context) ([]provider.ModelInfo, error) {
-			return adapter.ListModels(c, acct, fakeKey())
-		})
-	if cerr == nil || !isAuthRejectFor(adapter, statusOf(cerr)) {
+	if proven, _ := t.calibrateCatalog(ctx, adapter, acct, pace, res); !proven {
 		// Public catalog (200 for garbage) or an inconclusive outage:
 		// nothing proves this key, so the capacity failure stays fatal.
 		return false
 	}
+	noteInferenceUnverified(res, f)
+	return true
+}
+
+// calibrateCatalog lists the catalog with a deliberately-wrong key. A catalog
+// that rejects it discriminates, so the real key it just listed is proven:
+// auth is no longer deferred and the step says so. cerr is the fake key's
+// own outcome (nil = the public-catalog case, 200 for garbage).
+func (t *Tester) calibrateCatalog(
+	ctx context.Context,
+	adapter provider.Adapter,
+	acct provider.Account,
+	pace *pacer,
+	res *TestResult,
+) (proven bool, cerr error) {
+	_, cerr = probe(ctx, t, pace, defaultStepTimeout,
+		func(c context.Context) ([]provider.ModelInfo, error) {
+			return adapter.ListModels(c, acct, fakeKey())
+		})
+	if cerr == nil || !isAuthRejectFor(adapter, statusOf(cerr)) {
+		return false, cerr
+	}
 	res.authDeferred = false
 	res.addStep(Step{Step: StepAuth, OK: true,
 		Detail: "catalog rejected a fake key — the real key is proven"})
-	noteInferenceUnverified(res, f)
-	return true
+	return true, cerr
 }
 
 // noteInferenceUnverified appends the OK follow-up to the failed inference
@@ -792,7 +797,10 @@ func (t *Tester) inferenceStep(
 //
 // Rules (design §2.3): 200 → supported; protocol-shaped 400/404 → unsupported;
 // 401/403 → ABORT (the key died mid-probe — recording 0 would be a lie);
-// 429/5xx/timeout → unknown (NULL) and stop, rather than hammering.
+// 429/5xx/timeout → unknown: NOTHING is recorded, so a verdict proven by an
+// earlier sweep survives the weather. A 429 also stops the sweep rather than
+// spending the rest of the catalog against a rate limit; a 5xx is one
+// model's trouble and the sweep moves on. Every probe is ledgered.
 func (t *Tester) ProtocolSweep(
 	ctx context.Context,
 	acct provider.Account,
@@ -808,7 +816,6 @@ func (t *Tester) ProtocolSweep(
 	if err != nil {
 		return out
 	}
-	t.adapter = adapter
 
 	maxModels := opts.ProbeMaxModels
 	if maxModels <= 0 {
@@ -816,13 +823,12 @@ func (t *Tester) ProtocolSweep(
 	}
 	sample := sampleModels(models, maxModels)
 	if opts.ProbeAll {
-		// Uncapped sweep: every model the caller handed over, in catalog order.
-		// sampleModels shuffles, which is right for a 6-of-N sample (so the
-		// same faces are not tested every deploy) and wrong here: the UI
-		// reports progress against the catalog list, so keep that order.
+		// Uncapped sweep: every model the caller handed over, in catalog
+		// order — the UI reports progress against the catalog list.
 		sample = models
 	}
-	surfaces := opts.Surfaces
+	// A copy: the filter below must never rewrite the caller's slice.
+	surfaces := append([]provider.Surface(nil), opts.Surfaces...)
 	if len(surfaces) == 0 {
 		surfaces = []provider.Surface{
 			provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses,
@@ -841,13 +847,9 @@ func (t *Tester) ProtocolSweep(
 			}
 		}
 		surfaces = filtered
-		if t.db != nil {
-			for _, m := range models {
-				v := false
-				ptr := &v
-				t.setProto(acct.ID, m.ID, provider.SurfaceOpenAI, ptr)
-				_ = ptr
-			}
+		no := false
+		for _, m := range models {
+			t.setProto(acct.ID, m.ID, provider.SurfaceOpenAI, &no)
 		}
 	}
 	pace := &pacer{delay: acct.ProbeDelay}
@@ -863,26 +865,29 @@ func (t *Tester) ProtocolSweep(
 				abort = true
 				break
 			}
-			verdict, authDead := t.probeSurface(ctx, adapter, acct, key, m.ID, s, pace)
+			verdict, authDead, status := t.probeSurface(ctx, adapter, acct, key, m.ID, s, pace)
 			if authDead {
 				abort = true // the key went bad; stop, record nothing misleading
 				break
 			}
-			var ptr *bool
-			switch verdict {
-			case provider.VerdictSupported:
-				v := true
-				ptr = &v
+			if verdict != provider.VerdictSupported && verdict != provider.VerdictUnsupported {
+				// Unknown: keep whatever an earlier sweep proved. A rate
+				// limit ends the sweep; anything else moves on.
+				if status == http.StatusTooManyRequests {
+					abort = true
+					break
+				}
+				continue
+			}
+			v := verdict == provider.VerdictSupported
+			if v {
 				counts[s]++
-			case provider.VerdictUnsupported:
-				v := false
-				ptr = &v
 			}
 			if out.Rows[m.ID] == nil {
 				out.Rows[m.ID] = map[string]*bool{}
 			}
-			out.Rows[m.ID][string(s)] = ptr
-			t.setProto(acct.ID, m.ID, s, ptr)
+			out.Rows[m.ID][string(s)] = &v
+			t.setProto(acct.ID, m.ID, s, &v)
 		}
 		out.Tested++
 		if abort {
@@ -896,8 +901,9 @@ func (t *Tester) ProtocolSweep(
 	return out
 }
 
-// probeSurface classifies one (model, surface) pair. authDead reports a
-// credential failure so the caller can abort the whole sweep.
+// probeSurface classifies one (model, surface) pair and ledgers the probe.
+// authDead reports a credential failure so the caller can abort the whole
+// sweep; status is the HTTP answer (0 = none).
 func (t *Tester) probeSurface(
 	ctx context.Context,
 	adapter provider.Adapter,
@@ -905,7 +911,7 @@ func (t *Tester) probeSurface(
 	key, model string,
 	surface provider.Surface,
 	pace *pacer,
-) (provider.ProbeVerdict, bool) {
+) (provider.ProbeVerdict, bool, int) {
 	var body string
 	if surface == provider.SurfaceResponses {
 		body = responsesProbeBody(model)
@@ -914,17 +920,30 @@ func (t *Tester) probeSurface(
 	}
 	spec := provider.AuthProbe{Method: http.MethodPost, Path: provider.SurfacePath(surface)}
 
+	start := t.now()
 	pres, err := probe(ctx, t, pace, defaultStepTimeout,
 		func(c context.Context) (httpResult, error) {
 			s, b, e := doProbe(c, t.client, adapter, spec, acct, key, withBody(body))
 			return httpResult{status: s, body: b}, e
 		})
 	status, resp := pres.status, pres.body
+	total := msAtLeastOne(t.now().Sub(start))
+	t.ledgerCall(store.Call{
+		TS:      t.now().UTC(),
+		Client:  "admin:test",
+		Surface: storeSurface(surface),
+		Alias:   acct.Namespace + "/" + model,
+		Account: acct.Namespace,
+		Model:   model,
+		Status:  status,
+		Totalms: &total,
+	})
 	if err != nil {
 		// Transport failure → unknown, never "unsupported".
-		return provider.VerdictUnknown, false
+		return provider.VerdictUnknown, false, status
 	}
-	return provider.ClassifyProbeResult(status, string(resp))
+	verdict, authDead := provider.ClassifyProbeResult(status, string(resp))
+	return verdict, authDead, status
 }
 
 // ── probe transport ─────────────────────────────────────────────────────────
@@ -1055,6 +1074,15 @@ func (e *probeError) Error() string {
 
 func probeStatusError(status int, raw []byte) error {
 	return &probeError{status: status, body: upstreamErr(raw), raw: string(raw)}
+}
+
+// probeFailureText says what a failed probe got back: the transport error
+// when there was no answer, otherwise the status and the provider's words.
+func probeFailureText(status int, body []byte, err error) string {
+	if err != nil {
+		return shortErr(err)
+	}
+	return shortErr(probeStatusError(status, body))
 }
 
 // probeFailedHint keeps the generation-failure hint honest about WHAT kind
@@ -1409,19 +1437,18 @@ func isPlanGatedError(status int, body []byte) bool {
 	return false
 }
 
-// isAnthropicOnlyKind reports whether a provider kind natively speaks only
-// the Anthropic wire (POST /v1/messages). Such providers can never serve the
-// OpenAI wire natively, so marking proto_openai=false up front saves a
-// doomed probe and lets the router translate instead of refusing.
+// isAnthropicOnlyKind reports whether a provider kind is served on the
+// Anthropic wire (POST /v1/messages). Marking proto_openai=false up front
+// saves a probe per model and sends chat clients through the Messages
+// translation (native caching and thinking) instead of a compat endpoint.
+// claude-web is NOT one: ezllm's own bridge serves it on /chat/completions
+// only, and marking that wire false left its models no wire at all.
 func isAnthropicOnlyKind(k provider.Kind) bool {
-	switch k {
-	case provider.KindAnthropicCompat, provider.KindClaudeWeb:
-		return true
-	}
-	return false
+	return k == provider.KindAnthropicCompat
 }
 
-// then the rest of the catalog, deduped and capped.
+// sampleModels picks at most max models for a capped sweep: the cheap-looking
+// ones first, then the rest of the catalog in order.
 func sampleModels(models []provider.ModelInfo, max int) []provider.ModelInfo {
 	if max <= 0 || len(models) == 0 {
 		return nil

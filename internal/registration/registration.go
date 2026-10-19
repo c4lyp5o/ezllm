@@ -1420,6 +1420,7 @@ func isAnthropicOnlyKind(k provider.Kind) bool {
 	}
 	return false
 }
+
 // then the rest of the catalog, deduped and capped.
 func sampleModels(models []provider.ModelInfo, max int) []provider.ModelInfo {
 	if max <= 0 || len(models) == 0 {

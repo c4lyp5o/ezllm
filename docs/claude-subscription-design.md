@@ -241,6 +241,10 @@ is the container rollback. `claude-web` and every existing account are untouched
 11. Boot asserts the CLI's version, flag surface and login state; a CLI upgrade means re-pointing
     the mount and re-running the live proof.
 12. Calypso is the only gate for push and deploy.
+13. The CLI runs with an **allowlisted** environment (2026-10-19): identity, locale, temp dir, CA
+    trust, proxy settings and the operator's `CLAUDE_CODE_*` / `DISABLE_*` tuning pass; everything
+    else — `EZLLM_MASTER_KEY`, provider and cloud credentials, `ANTHROPIC_*` — stays out of a process
+    that has no reason to see it.
 
 ## 10. Open items for M1
 

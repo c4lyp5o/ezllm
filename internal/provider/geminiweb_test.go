@@ -86,9 +86,9 @@ func TestGeminiWebAdapterShape(t *testing.T) {
 	if oracle.Method != http.MethodGet || oracle.Path != "/models" {
 		t.Errorf("oracle = %+v", oracle)
 	}
-	// StripHeaders removes exactly the two loopback stamps.
+	// StripHeaders removes exactly the three loopback stamps.
 	strip := a.StripHeaders()
-	if len(strip) != 2 || strip[0] != GeminiWebAccountHeader || strip[1] != GeminiWebKeyHeader {
+	if len(strip) != 3 || strip[0] != GeminiWebAccountHeader || strip[1] != GeminiWebKeyHeader || strip[2] != BridgeSecretHeader {
 		t.Errorf("strip = %v", strip)
 	}
 }

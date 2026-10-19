@@ -34,9 +34,9 @@ func TestClaudeWebAdapterShape(t *testing.T) {
 	if models[0].OwnedBy != "anthropic" {
 		t.Errorf("owned_by = %q", models[0].OwnedBy)
 	}
-	// The adapter stamps exactly the two loopback headers and nothing else.
+	// The adapter stamps exactly the three loopback headers and nothing else.
 	strip := a.StripHeaders()
-	if len(strip) != 2 || strip[0] != ClaudeWebAccountHeader || strip[1] != ClaudeWebKeyHeader {
+	if len(strip) != 3 || strip[0] != ClaudeWebAccountHeader || strip[1] != ClaudeWebKeyHeader || strip[2] != BridgeSecretHeader {
 		t.Errorf("strip = %v", strip)
 	}
 }
@@ -61,5 +61,32 @@ func TestClaudeWebPrepareRequestRewrite(t *testing.T) {
 	}
 	if !strings.Contains(req.Header.Get(ClaudeWebKeyHeader), "sk-ant-1") {
 		t.Errorf("key header = %q", req.Header.Get(ClaudeWebKeyHeader))
+	}
+}
+
+// Both web adapters stamp this process's bridge secret on every rewritten hop
+// (the bridges refuse anything else) and strip any client-sent copy.
+func TestWebAdaptersStampTheBridgeSecret(t *testing.T) {
+	for name, ad := range map[string]Adapter{
+		"claude-web": NewClaudeWeb("http://127.0.0.1:1/internal/claudeweb/v1", nil),
+		"gemini-web": NewGeminiWeb("http://127.0.0.1:1/internal/geminiweb/v1", nil),
+	} {
+		req, _ := http.NewRequest("POST", "http://sentinel/chat/completions", nil)
+		if err := ad.PrepareRequest(context.Background(), req, Account{ID: 3}, "k", SurfaceOpenAI); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !ValidBridgeSecret(req.Header.Get(BridgeSecretHeader)) {
+			t.Errorf("%s: hop does not carry the bridge secret", name)
+		}
+		found := false
+		for _, h := range ad.StripHeaders() {
+			found = found || h == BridgeSecretHeader
+		}
+		if !found {
+			t.Errorf("%s: a client-sent %s would be forwarded", name, BridgeSecretHeader)
+		}
+	}
+	if ValidBridgeSecret("") || ValidBridgeSecret(BridgeSecret()+"x") {
+		t.Error("ValidBridgeSecret accepted a wrong value")
 	}
 }

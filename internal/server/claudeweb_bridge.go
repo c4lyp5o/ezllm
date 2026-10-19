@@ -38,7 +38,7 @@ type claudeWebBridge struct {
 	fetcher   claudeweb.Fetcher // nil = the production uTLS fetcher
 
 	mu      sync.Mutex
-	clients map[int64]*claudeweb.Client
+	clients map[int64]cachedClaudeWebClient
 	// genLocks serializes per-account use of a cached client. The client
 	// carries mutable conversation state (convID/parentUUID/orgID) and is
 	// explicitly not safe for concurrent use, so two chats on one web
@@ -47,7 +47,7 @@ type claudeWebBridge struct {
 }
 
 func newClaudeWebBridge(db *store.DB, fetcher claudeweb.Fetcher) *claudeWebBridge {
-	b := &claudeWebBridge{db: db, fetcher: fetcher, clients: map[int64]*claudeweb.Client{}, genLocks: map[int64]*sync.Mutex{}}
+	b := &claudeWebBridge{db: db, fetcher: fetcher, clients: map[int64]cachedClaudeWebClient{}, genLocks: map[int64]*sync.Mutex{}}
 	if fetcher == nil {
 		b.newClient = b.clientFor
 	} else {
@@ -62,8 +62,17 @@ func newClaudeWebBridge(db *store.DB, fetcher claudeweb.Fetcher) *claudeWebBridg
 	return b
 }
 
-// clientFor is the production client builder: normalizes the stored
-// sessionKey and caches one client per account (one conversation each).
+// cachedClaudeWebClient is one account's session client and the cookie it
+// was built from.
+type cachedClaudeWebClient struct {
+	client *claudeweb.Client
+	cookie string
+}
+
+// clientFor is the production client builder: normalizes the stamped
+// sessionKey and caches one client per account (one conversation each). The
+// cache is valid only for the cookie it was built from: a replaced or
+// rotated key gets a fresh client instead of the old session.
 func (b *claudeWebBridge) clientFor(_ context.Context, acct *provider.Account, key string) (*claudeweb.Client, error) {
 	cookie, err := claudeweb.NormalizeSessionCookie(key)
 	if err != nil {
@@ -71,11 +80,11 @@ func (b *claudeWebBridge) clientFor(_ context.Context, acct *provider.Account, k
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if c, ok := b.clients[acct.ID]; ok {
-		return c, nil
+	if c, ok := b.clients[acct.ID]; ok && c.cookie == cookie {
+		return c.client, nil
 	}
 	c := claudeweb.New(claudeweb.NewTLSFetcher(), cookie, "")
-	b.clients[acct.ID] = c
+	b.clients[acct.ID] = cachedClaudeWebClient{client: c, cookie: cookie}
 	return c, nil
 }
 
@@ -88,6 +97,12 @@ func (b *claudeWebBridge) register(mux *http.ServeMux) {
 // The account id is returned too: callers serialize per-account generation
 // with lockFor.
 func (b *claudeWebBridge) resolve(r *http.Request) (*claudeweb.Client, int64, error) {
+	// This route shares the public listener: only a request carrying this
+	// process's secret (stamped by the claude-web adapter) may name an
+	// account, since an account id alone would unlock its stored cookie.
+	if !provider.ValidBridgeSecret(r.Header.Get(provider.BridgeSecretHeader)) {
+		return nil, 0, errors.New("missing or wrong bridge secret")
+	}
 	h := r.Header.Get(provider.ClaudeWebAccountHeader)
 	if h == "" {
 		return nil, 0, errors.New("missing account header")

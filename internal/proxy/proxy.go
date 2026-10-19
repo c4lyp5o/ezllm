@@ -1954,6 +1954,9 @@ var stripAlways = map[string]bool{
 	// a provider that started reading it would see a client implementation
 	// detail, so it dies here too.
 	"X-Ezllm-Compression": true,
+	// The in-process web bridges' admission secret. A client cannot know it,
+	// but a value it sends is still never repeated to any upstream.
+	"X-Ezllm-Bridge-Secret": true,
 }
 
 // copyClientHeaders copies src's headers onto dst minus stripAlways and the

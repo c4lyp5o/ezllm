@@ -85,6 +85,16 @@ used only for corroboration, never as the source of truth).
   (429 → forward Retry-After after validating it), account ban risk on
   automation, protocol drift (both sources' pin dates recorded in the
   runbook).
+- **Bridge admission is a process secret, not the account header** —
+  the bridge routes share ezllm's public listener, so an account id alone
+  is never enough: each request must carry the process-local
+  `X-Ezllm-Bridge-Secret` (random, generated at start, never persisted),
+  which only the adapter stamps and the bridge checks in constant time.
+  Without it a caller who could reach the port drove the account's STORED
+  cookie with no ezllm token (2026-10-19). The secret is stripped from every
+  upstream request.
+  The cached session client is reused only for the cookie it was built
+  from; a replaced key gets a fresh session.
 
 ## Files
 

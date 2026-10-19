@@ -125,6 +125,7 @@ func claudeWebReq(t *testing.T, b *claudeWebBridge, method, path, body string, a
 		r = httptest.NewRequest(method, path, nil)
 	}
 	r.Header.Set(provider.ClaudeWebAccountHeader, fmt.Sprint(acctID))
+	r.Header.Set(provider.BridgeSecretHeader, provider.BridgeSecret())
 	w := httptest.NewRecorder()
 	if path == claudeWebBridgePrefix+"/models" {
 		b.handleModels(w, r)
@@ -151,8 +152,9 @@ func TestClaudeWebBridgeModelsOracle(t *testing.T) {
 	if out.Data[0].ID != "claude-opus-5" {
 		t.Errorf("first model = %q", out.Data[0].ID)
 	}
-	// missing header -> 401
+	// missing account header (secret present, so the account check is what refuses) -> 401
 	r := httptest.NewRequest("GET", claudeWebBridgePrefix+"/models", nil)
+	r.Header.Set(provider.BridgeSecretHeader, provider.BridgeSecret())
 	w2 := httptest.NewRecorder()
 	b.handleModels(w2, r)
 	if w2.Code != http.StatusUnauthorized {

@@ -159,3 +159,41 @@ func TestErrorEnvelopeNamesItsReason(t *testing.T) {
 		t.Errorf("inner = %v", inner)
 	}
 }
+
+// The CLI gets an allowlisted environment: what it needs to start and reach
+// the network, plus the operator's own CLI tuning — never ezllm's secrets or
+// any credential that would replace the subscription login.
+func TestChildEnvIsAnAllowlist(t *testing.T) {
+	for k, v := range map[string]string{
+		"PATH": "/usr/bin", "USER": "ezllm", "LOGNAME": "ezllm", "LC_ALL": "C.UTF-8",
+		"HTTPS_PROXY": "http://proxy:3128", "SSL_CERT_FILE": "/etc/ssl/cert.pem",
+		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "DISABLE_TELEMETRY": "1",
+		"EZLLM_MASTER_KEY": "master-secret", "EZLLM_CLAUDE_BRIDGE_TOKEN_FILE": "/data/t",
+		"GITHUB_TOKEN": "ghp_x", "AWS_SECRET_ACCESS_KEY": "aws",
+		"ANTHROPIC_API_KEY": "sk-ant", "ANTHROPIC_BASE_URL": "http://evil",
+		"CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CONFIG_DIR": "/elsewhere",
+	} {
+		t.Setenv(k, v)
+	}
+	r := &Runner{ConfigDir: "/claude-sub"}
+	got := map[string]string{}
+	for _, kv := range r.childEnv("/tmp/run", 0) {
+		k, v, _ := strings.Cut(kv, "=")
+		got[k] = v
+	}
+	for _, k := range []string{"PATH", "USER", "LOGNAME", "LC_ALL", "HTTPS_PROXY", "SSL_CERT_FILE",
+		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_TELEMETRY"} {
+		if _, ok := got[k]; !ok {
+			t.Errorf("%s was not passed to the CLI", k)
+		}
+	}
+	for _, k := range []string{"EZLLM_MASTER_KEY", "EZLLM_CLAUDE_BRIDGE_TOKEN_FILE", "GITHUB_TOKEN",
+		"AWS_SECRET_ACCESS_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_USE_BEDROCK"} {
+		if v, ok := got[k]; ok {
+			t.Errorf("%s=%q leaked into the CLI environment", k, v)
+		}
+	}
+	if got["CLAUDE_CONFIG_DIR"] != "/claude-sub" || got["HOME"] != "/tmp/run" {
+		t.Errorf("forced vars wrong: CLAUDE_CONFIG_DIR=%q HOME=%q", got["CLAUDE_CONFIG_DIR"], got["HOME"])
+	}
+}

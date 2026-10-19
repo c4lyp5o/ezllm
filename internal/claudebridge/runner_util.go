@@ -89,32 +89,23 @@ func (r *Runner) deadlineErr(err error, tb *tailBuffer, at int) error {
 	return &NativeError{Status: 502, Type: "api_error", Code: "native_closed", Message: msg}
 }
 
-// childEnv is the process environment for one native run. Conflicting auth and
-// backend overrides are removed rather than inherited: the subscription login in
-// ConfigDir is the only credential path, and an inherited ANTHROPIC_BASE_URL would
-// silently redirect it (the plugin refuses to start in that state; we drop it and
-// log). HOME points at the per-request temp dir so nothing reads or writes the
-// operator's ~/.claude state.
+// childEnv is the process environment for one native run. It is an ALLOWLIST
+// of what the CLI needs to start and reach the network from a container —
+// everything else in ezllm's environment (EZLLM_MASTER_KEY, provider and cloud
+// credentials) stays out of a process that has no reason to see it.
+//
+// Within the allowlist, conflicting auth and backend overrides are still
+// removed: the subscription login in ConfigDir is the only credential path, and
+// an inherited ANTHROPIC_BASE_URL would silently redirect it. HOME points at
+// the per-request temp dir so nothing reads or writes the operator's ~/.claude
+// state.
 func (r *Runner) childEnv(tmp string, maxTokens int) []string {
-	drop := map[string]bool{
-		"ANTHROPIC_API_KEY":         true,
-		"ANTHROPIC_AUTH_TOKEN":      true,
-		"ANTHROPIC_BASE_URL":        true,
-		"ANTHROPIC_FOUNDRY_API_KEY": true,
-		"CLAUDE_CODE_USE_BEDROCK":   true,
-		"CLAUDE_CODE_USE_VERTEX":    true,
-		"CLAUDE_CODE_USE_FOUNDRY":   true,
-		"CLAUDE_CODE_EXTRA_BODY":    true,
-		"CLAUDE_CODE_EFFORT_LEVEL":  true,
-		"CLAUDE_CONFIG_DIR":         true,
-	}
 	env := make([]string, 0, 32)
 	for _, kv := range os.Environ() {
 		key, _, ok := strings.Cut(kv, "=")
-		if ok && drop[key] {
-			continue
+		if ok && childEnvAllowed(key) {
+			env = append(env, kv)
 		}
-		env = append(env, kv)
 	}
 	env = append(env,
 		"HOME="+tmp,
@@ -129,4 +120,39 @@ func (r *Runner) childEnv(tmp string, maxTokens int) []string {
 		env = append(env, "CLAUDE_CODE_MAX_OUTPUT_TOKENS="+strconv.Itoa(maxTokens))
 	}
 	return env
+}
+
+// childEnvPass are inherited verbatim: process identity (the CLI's login check
+// reads USER/LOGNAME), locale, temp dir, CA trust and outbound proxy settings.
+var childEnvPass = map[string]bool{
+	"PATH": true, "USER": true, "LOGNAME": true, "SHELL": true, "TERM": true,
+	"LANG": true, "LANGUAGE": true, "TZ": true, "TMPDIR": true,
+	"SSL_CERT_FILE": true, "SSL_CERT_DIR": true, "NODE_EXTRA_CA_CERTS": true,
+	"HTTP_PROXY": true, "HTTPS_PROXY": true, "NO_PROXY": true, "ALL_PROXY": true,
+	"http_proxy": true, "https_proxy": true, "no_proxy": true, "all_proxy": true,
+}
+
+// childEnvDrop are CLI settings that would replace the subscription login or
+// override what childEnv sets itself — removed even though their prefix passes.
+var childEnvDrop = map[string]bool{
+	"CLAUDE_CODE_USE_BEDROCK":  true,
+	"CLAUDE_CODE_USE_VERTEX":   true,
+	"CLAUDE_CODE_USE_FOUNDRY":  true,
+	"CLAUDE_CODE_EXTRA_BODY":   true,
+	"CLAUDE_CODE_EFFORT_LEVEL": true,
+}
+
+// childEnvAllowed: the pass list, LC_* locale, and the operator's own CLI
+// tuning (CLAUDE_CODE_*, DISABLE_*, e.g. DISABLE_TELEMETRY) minus the drop
+// list. ANTHROPIC_* (API keys, base URL) and CLAUDE_CONFIG_DIR never pass.
+func childEnvAllowed(key string) bool {
+	switch {
+	case childEnvPass[key], strings.HasPrefix(key, "LC_"):
+		return true
+	case childEnvDrop[key]:
+		return false
+	case strings.HasPrefix(key, "CLAUDE_CODE_"), strings.HasPrefix(key, "DISABLE_"):
+		return true
+	}
+	return false
 }

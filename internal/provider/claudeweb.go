@@ -62,7 +62,7 @@ func newClaudeWebAdapterForTest(bridgeBase string) Adapter {
 func (a *claudeWebAdapter) Kind() Kind { return KindClaudeWeb }
 
 func (a *claudeWebAdapter) StripHeaders() []string {
-	return []string{ClaudeWebAccountHeader, ClaudeWebKeyHeader}
+	return []string{ClaudeWebAccountHeader, ClaudeWebKeyHeader, BridgeSecretHeader}
 }
 
 // PrepareRequest routes the hop to the bridge: rewrites the sentinel base to
@@ -85,6 +85,7 @@ func (a *claudeWebAdapter) PrepareRequest(_ context.Context, req *http.Request, 
 	req.Header.Del("Authorization")
 	req.Header.Del("X-Api-Key")
 	req.Header.Set(ClaudeWebAccountHeader, strconv.FormatInt(acct.ID, 10))
+	req.Header.Set(BridgeSecretHeader, BridgeSecret())
 	if key != "" {
 		req.Header.Set(ClaudeWebKeyHeader, key)
 	}

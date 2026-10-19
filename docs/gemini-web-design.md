@@ -168,3 +168,11 @@ enterprise-account cookie.
 7. **Errors carry the upstream's own words** through the existing
    `errclass` cause vocabulary; new causes only where the web protocol
    has genuinely new failure classes (captcha, TOS-pending, guardian).
+8. **Bridge admission is a process secret, not the account header** —
+   the bridge routes share ezllm's public listener, so an account id alone
+   is never enough: each request must carry the process-local
+   `X-Ezllm-Bridge-Secret` (random, generated at start, never persisted),
+   which only the adapter stamps and the bridge checks in constant time.
+   Without it a caller who could reach the port drove the account's STORED
+   cookie with no ezllm token (2026-10-19). The secret is stripped from every
+   upstream request.

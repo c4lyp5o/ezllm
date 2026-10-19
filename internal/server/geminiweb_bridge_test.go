@@ -119,6 +119,7 @@ func bridgeReq(t *testing.T, b *geminiWebBridge, method, path string, body strin
 		r = httptest.NewRequest(method, path, nil)
 	}
 	r.Header.Set(provider.GeminiWebAccountHeader, fmt.Sprint(acctID))
+	r.Header.Set(provider.BridgeSecretHeader, provider.BridgeSecret())
 	w := httptest.NewRecorder()
 	switch path {
 	case geminiWebBridgePrefix + "/models":
@@ -149,14 +150,16 @@ func TestBridgeModelsAuth(t *testing.T) {
 	// unknown account -> 401
 	r := httptest.NewRequest("GET", geminiWebBridgePrefix+"/models", nil)
 	r.Header.Set(provider.GeminiWebAccountHeader, "99999")
+	r.Header.Set(provider.BridgeSecretHeader, provider.BridgeSecret())
 	w2 := httptest.NewRecorder()
 	b.handleModels(w2, r)
 	if w2.Code != http.StatusUnauthorized {
 		t.Errorf("unknown account code = %d", w2.Code)
 	}
 
-	// no account header at all -> 401
+	// no account header at all (secret present, so the account check is what refuses) -> 401
 	r3 := httptest.NewRequest("GET", geminiWebBridgePrefix+"/models", nil)
+	r3.Header.Set(provider.BridgeSecretHeader, provider.BridgeSecret())
 	w3 := httptest.NewRecorder()
 	b.handleModels(w3, r3)
 	if w3.Code != http.StatusUnauthorized {

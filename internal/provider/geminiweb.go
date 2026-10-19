@@ -67,7 +67,7 @@ func (a *geminiWebAdapter) statusClient(key string) (*geminiweb.Client, error) {
 func (a *geminiWebAdapter) Kind() Kind { return KindGeminiWeb }
 
 func (a *geminiWebAdapter) StripHeaders() []string {
-	return []string{GeminiWebAccountHeader, GeminiWebKeyHeader}
+	return []string{GeminiWebAccountHeader, GeminiWebKeyHeader, BridgeSecretHeader}
 }
 
 // PrepareRequest routes the hop to the bridge: rewrites the sentinel base to
@@ -95,6 +95,7 @@ func (a *geminiWebAdapter) PrepareRequest(_ context.Context, req *http.Request, 
 	req.Header.Del("Authorization")
 	req.Header.Del("X-Api-Key")
 	req.Header.Set(GeminiWebAccountHeader, strconv.FormatInt(acct.ID, 10))
+	req.Header.Set(BridgeSecretHeader, BridgeSecret())
 	if key != "" {
 		req.Header.Set(GeminiWebKeyHeader, key)
 	}

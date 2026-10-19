@@ -389,6 +389,12 @@ func (b *geminiWebBridge) resolveModel(ctx context.Context, entry *geminiwebClie
 
 // resolve maps the stamped headers to an enabled gemini-web account.
 func (b *geminiWebBridge) resolve(r *http.Request) (*geminiwebClientEntry, error) {
+	// This route shares the public listener: only a request carrying this
+	// process's secret (stamped by the gemini-web adapter) may name an
+	// account, since an account id alone would unlock its stored cookie.
+	if !provider.ValidBridgeSecret(r.Header.Get(provider.BridgeSecretHeader)) {
+		return nil, errors.New("missing or wrong bridge secret")
+	}
 	h := r.Header.Get(provider.GeminiWebAccountHeader)
 	if h == "" {
 		return nil, errors.New("missing account header")

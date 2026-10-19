@@ -41,7 +41,7 @@ func budget(msgs []any, options map[string]any) []any {
 	// Protect the latest turn and walk backwards through recent history.
 	for i := len(msgs) - 1; i >= 0; i-- {
 		role, _ := messageRole(msgs[i])
-		if role == "tool" || hasToolCalls(msgs[i]) {
+		if role == "tool" || hasToolCalls(msgs[i]) || isToolBearing(msgs[i]) {
 			markToolGroup(msgs, keep, &used, i)
 			continue
 		}
@@ -52,6 +52,7 @@ func budget(msgs []any, options map[string]any) []any {
 	if len(msgs) > 0 {
 		mark(len(msgs) - 1)
 	}
+	keepToolPairs(msgs, keep, mark)
 
 	out := make([]any, 0, len(msgs))
 	for i, msg := range msgs {
@@ -60,6 +61,41 @@ func budget(msgs []any, options map[string]any) []any {
 		}
 	}
 	return out
+}
+
+// keepToolPairs closes the kept set over tool-call ids: a kept message that
+// issues or answers an id keeps every message on the other end of it. That is
+// the invariant every wire shape needs — a result without its call (or a call
+// without its result) is an invalid request — and it holds by id, so it does
+// not depend on how a shape lays the pair out.
+func keepToolPairs(msgs []any, keep []bool, mark func(int)) {
+	for changed := true; changed; {
+		changed = false
+		live := map[string]bool{}
+		for i, m := range msgs {
+			if !keep[i] {
+				continue
+			}
+			for _, id := range toolIDsIssued(m) {
+				live[id] = true
+			}
+			for _, id := range toolIDsAnswered(m) {
+				live[id] = true
+			}
+		}
+		for i, m := range msgs {
+			if keep[i] {
+				continue
+			}
+			for _, id := range append(toolIDsIssued(m), toolIDsAnswered(m)...) {
+				if live[id] {
+					mark(i)
+					changed = true
+					break
+				}
+			}
+		}
+	}
 }
 
 func optionInt(options map[string]any, key string) int {

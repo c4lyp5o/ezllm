@@ -1,7 +1,6 @@
 package compress
 
 import (
-	"encoding/json"
 	"strings"
 )
 
@@ -39,12 +38,9 @@ func lite(msgs []any, opts map[string]any) []any {
 			out = append(out, m)
 			continue
 		}
-		trimmed := strings.TrimSpace(content)
-		if trimmed != "" && (strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")) {
-			if json.Valid([]byte(trimmed)) {
-				out = append(out, m) // pure JSON payload: headroom's territory
-				continue
-			}
+		if isJSONPayload(content) {
+			out = append(out, m) // pure JSON payload: headroom's territory
+			continue
 		}
 		cleaned, ok := cleanText(content, keepBlanks)
 		if !ok || len(cleaned) >= len(content) {

@@ -62,12 +62,9 @@ func rtk(msgs []any, opts map[string]any) []any {
 			out = append(out, m)
 			continue
 		}
-		trimmed := strings.TrimSpace(content)
-		if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
-			if json.Valid([]byte(trimmed)) {
-				out = append(out, m) // never mid-JSON
-				continue
-			}
+		if isJSONPayload(content) {
+			out = append(out, m) // never mid-JSON
+			continue
 		}
 		filtered, ok := filterToolOutput(content, keep)
 		if !ok || len(filtered) >= len(content) {
@@ -364,8 +361,8 @@ func filterToolResultBlocks(blocks []any, names map[string]string, keep int) ([]
 			continue
 		}
 		content, isStr := bm["content"].(string)
-		if !isStr || content == "" {
-			continue
+		if !isStr || content == "" || isJSONPayload(content) {
+			continue // never mid-JSON, in this shape as in role:"tool"
 		}
 		filtered, ok := filterToolOutput(content, keep)
 		if !ok || len(filtered) >= len(content) {

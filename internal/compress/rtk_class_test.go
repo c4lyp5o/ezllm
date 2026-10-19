@@ -1,6 +1,8 @@
 package compress
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -183,4 +185,24 @@ func msgContent(t *testing.T, body []byte, i int) string {
 	}
 	s, _ := m["content"].(string)
 	return s
+}
+
+// A log-class tool can return JSON (kubectl -o json via a shell tool). The
+// Anthropic tool_result path must skip it whole, exactly like role:"tool":
+// a line filter inside JSON ships an invalid document.
+func TestRTKNeverFiltersJSONInsideAnthropicToolResult(t *testing.T) {
+	var rows []string
+	for i := 0; i < 60; i++ {
+		rows = append(rows, fmt.Sprintf("  {\"name\": \"pod-%d\",\n   \"status\": \"Running\"}", i))
+	}
+	js := "[\n" + strings.Join(rows, ",\n") + "\n]"
+	msgs := []any{
+		map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "tool_use", "id": "t1", "name": "Bash", "input": map[string]any{}}}},
+		map[string]any{"role": "user", "content": []any{map[string]any{"type": "tool_result", "tool_use_id": "t1", "content": js}}},
+	}
+	out := rtk(msgs, nil)
+	got := out[1].(map[string]any)["content"].([]any)[0].(map[string]any)["content"].(string)
+	if got != js {
+		t.Fatalf("JSON tool_result was line-filtered (valid JSON now: %v)", json.Valid([]byte(got)))
+	}
 }

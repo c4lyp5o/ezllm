@@ -2,6 +2,7 @@ package compress
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -88,4 +89,24 @@ func containsToolCall(msgs []any, want string) bool {
 func mustJSON(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+// The pair invariant holds by tool-call id in every wire shape: an Anthropic
+// tool_use and its tool_result survive or vanish together — never a result
+// whose call was dropped (the upstream answers that with a 400).
+func TestBudgetKeepsAnthropicToolPairs(t *testing.T) {
+	pad := strings.Repeat("x", 4000)
+	msgs := []any{
+		map[string]any{"role": "user", "content": "start"},
+		map[string]any{"role": "assistant", "content": []any{
+			map[string]any{"type": "text", "text": pad},
+			map[string]any{"type": "tool_use", "id": "t1", "name": "Bash", "input": map[string]any{}}}},
+		map[string]any{"role": "user", "content": []any{map[string]any{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}}},
+		map[string]any{"role": "assistant", "content": "fine"},
+		map[string]any{"role": "user", "content": "next"},
+	}
+	out := mustJSON(budget(msgs, map[string]any{"max_tokens": 200}))
+	if strings.Contains(out, `"tool_result"`) != strings.Contains(out, `"tool_use"`) {
+		t.Fatalf("tool pair split across the budget cut: %s", out)
+	}
 }

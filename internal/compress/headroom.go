@@ -11,8 +11,8 @@ import (
 // "lossless tabular compaction of homogeneous JSON-array payloads into a
 // columnar form"). Every key is paid once instead of once per row.
 //
-// Scope (same tool_only contract as rtk): role="tool" messages whose trimmed
-// content is a pure JSON array of objects sharing ONE key set. Everything
+// Scope (same tool_only contract as rtk): tool output in any shape (parts.go)
+// whose content is a pure JSON array of objects sharing ONE key set. Everything
 // else — prose, JSON objects, mixed shapes, user/system traffic — passes
 // through untouched.
 //
@@ -33,36 +33,16 @@ func headroom(msgs []any, opts map[string]any) []any {
 	if minRows < 1 {
 		minRows = 1
 	}
-	out := make([]any, 0, len(msgs))
-	for _, m := range msgs {
-		mm, ok := m.(map[string]any)
-		if !ok {
-			out = append(out, m)
-			continue
+	return editAll(msgs, nil, func(p textPart) (string, bool) {
+		if p.kind != partToolOutput || p.text == "" {
+			return "", false // scope: tool_only, in every shape
 		}
-		role, _ := mm["role"].(string)
-		if role != "tool" {
-			out = append(out, m) // scope: tool_only
-			continue
+		compacted, ok := compactTable(p.text, minRows)
+		if !ok || len(compacted) >= len(p.text) {
+			return "", false // no gain: keep the original bytes
 		}
-		content, isStr := mm["content"].(string)
-		if !isStr || content == "" {
-			out = append(out, m)
-			continue
-		}
-		compacted, ok := compactTable(content, minRows)
-		if !ok || len(compacted) >= len(content) {
-			out = append(out, m) // no gain: keep the original bytes
-			continue
-		}
-		cp := make(map[string]any, len(mm))
-		for k, v := range mm {
-			cp[k] = v
-		}
-		cp["content"] = compacted
-		out = append(out, cp)
-	}
-	return out
+		return compacted, true
+	})
 }
 
 // compactTable rewrites a homogeneous JSON-array payload into the columnar

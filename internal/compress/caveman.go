@@ -9,8 +9,8 @@ package compress
 // Safety is layered, and the layers are checked in the order that makes failure
 // cheap:
 //
-//  1. scope: only `content` strings on plain text messages. role:"tool" is
-//     headroom/rtk territory; assistant tool_calls are never read.
+//  1. scope: user/assistant prose only, in every wire shape (parts.go). Tool
+//     output is headroom/rtk territory; tool-call arguments are never read.
 //  2. whole-content skip: JSON content, or any content with an unclosed fence,
 //     is left completely alone (splitUnits returns ok=false).
 //  3. fenced regions are atomic and skipped whole — code survives verbatim even
@@ -88,42 +88,22 @@ func caveman(msgs []any, opts map[string]any) ([]any, int) {
 	}
 
 	firedTotal := 0
-	out := make([]any, 0, len(msgs))
-	for _, m := range msgs {
-		obj, isObj := m.(map[string]any)
-		if !isObj {
-			out = append(out, m)
-			continue
+	// text_only: system prompts are instructions we must not paraphrase,
+	// tool output belongs to headroom/rtk, and tool-call arguments are never
+	// read. Only user prose and assistant prose are candidates — and
+	// assistant prose is history at this point (the live turn is exempt).
+	// Every shape's prose is reached through parts.go.
+	out := editAll(msgs, nil, func(p textPart) (string, bool) {
+		if p.kind != partProse || (p.role != "user" && p.role != "assistant") || strings.TrimSpace(p.text) == "" {
+			return "", false
 		}
-		role, _ := obj["role"].(string)
-		// text_only: system prompts are instructions we must not paraphrase,
-		// tool results belong to headroom/rtk, and assistant tool_calls are
-		// never read. Only user prose and assistant prose are candidates — and
-		// assistant prose is history at this point (the live turn is exempt).
-		if role != "user" && role != "assistant" {
-			out = append(out, m)
-			continue
+		condensed, fired, ok := condenseProse(p.text, packs, intensity)
+		if !ok || condensed == p.text {
+			return "", false
 		}
-		content, isStr := obj["content"].(string)
-		if !isStr || strings.TrimSpace(content) == "" {
-			out = append(out, m)
-			continue
-		}
-
-		condensed, fired, ok := condenseProse(content, packs, intensity)
-		if !ok || condensed == content {
-			out = append(out, m)
-			continue
-		}
-		// Copy-on-write: never mutate the caller's map. Only `content` changes.
-		clone := make(map[string]any, len(obj))
-		for k, v := range obj {
-			clone[k] = v
-		}
-		clone["content"] = condensed
-		out = append(out, clone)
 		firedTotal += fired
-	}
+		return condensed, true
+	})
 	if firedTotal == 0 {
 		return msgs, 0
 	}

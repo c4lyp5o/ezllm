@@ -26,59 +26,18 @@ func rtk(msgs []any, opts map[string]any) []any {
 	if keep < 0 {
 		keep = 6
 	}
-	names := toolNamesByCallID(msgs)
-	out := make([]any, 0, len(msgs))
-	for _, m := range msgs {
-		mm, ok := m.(map[string]any)
-		if !ok {
-			out = append(out, m)
-			continue
+	// One rule for every shape (parts.go): tool output whose resolved tool
+	// is log- or search-class, never JSON, filtered only when it shrinks.
+	return editAll(msgs, toolNamesByCallID(msgs), func(p textPart) (string, bool) {
+		if p.kind != partToolOutput || p.text == "" || !toolClassFilterable(p.tool) || isJSONPayload(p.text) {
+			return "", false
 		}
-		role, _ := mm["role"].(string)
-		if role != "tool" {
-			// Anthropic shape: a tool RESULT is a tool_result block inside a
-			// user message's content array — same class gate, same filter.
-			if blocks, ok := mm["content"].([]any); ok {
-				if filtered, changed := filterToolResultBlocks(blocks, names, keep); changed {
-					cp := make(map[string]any, len(mm))
-					for k, v := range mm {
-						cp[k] = v
-					}
-					cp["content"] = filtered
-					out = append(out, cp)
-					continue
-				}
-			}
-			out = append(out, m) // scope: tool_only
-			continue
+		filtered, ok := filterToolOutput(p.text, keep)
+		if !ok || len(filtered) >= len(p.text) {
+			return "", false // integrity skip or no gain
 		}
-		// Class gate: unknown/unresolved/file/diff classes are preserved.
-		if !toolClassFilterable(names[toolCallIDOf(mm)]) {
-			out = append(out, m)
-			continue
-		}
-		content, isStr := mm["content"].(string)
-		if !isStr || content == "" {
-			out = append(out, m)
-			continue
-		}
-		if isJSONPayload(content) {
-			out = append(out, m) // never mid-JSON
-			continue
-		}
-		filtered, ok := filterToolOutput(content, keep)
-		if !ok || len(filtered) >= len(content) {
-			out = append(out, m) // integrity skip or no gain
-			continue
-		}
-		cp := make(map[string]any, len(mm))
-		for k, v := range mm {
-			cp[k] = v
-		}
-		cp["content"] = filtered
-		out = append(out, cp)
-	}
-	return out
+		return filtered, true
+	})
 }
 
 // filterToolOutput applies the unit algorithm. ok=false means "skip this
@@ -208,8 +167,8 @@ func intOption(opts map[string]any, key string, def int) int {
 	return def
 }
 
-// toolCallIDOf reads both wire shapes' result ids: OpenAI's tool_call_id and
-// Anthropic's tool_use_id.
+// toolCallIDOf reads a tool-result message's id: chat's tool_call_id (and
+// tool_use_id on messages that carry it at top level).
 func toolCallIDOf(mm map[string]any) string {
 	if id, _ := mm["tool_call_id"].(string); id != "" {
 		return id
@@ -222,7 +181,8 @@ func toolCallIDOf(mm map[string]any) string {
 
 // toolNamesByCallID maps every tool-call id in the conversation to its
 // lowercase tool name: assistant messages' tool_calls[].id +
-// .function.name (OpenAI) and content blocks of type tool_use (Anthropic).
+// .function.name (chat), content blocks of type tool_use (messages), and
+// function_call items (responses).
 // An id absent from the map is an UNKNOWN tool — preserved, not filtered.
 func toolNamesByCallID(msgs []any) map[string]string {
 	out := map[string]string{}
@@ -252,6 +212,15 @@ func toolNamesByCallID(msgs []any) map[string]string {
 					}
 				}
 			}
+		}
+		// Responses API: a function_call item names the tool for its call_id.
+		if t, _ := mm["type"].(string); t == "function_call" {
+			id, _ := mm["call_id"].(string)
+			name, _ := mm["name"].(string)
+			if id != "" && name != "" {
+				out[id] = strings.ToLower(name)
+			}
+			continue
 		}
 		if blocks, ok := mm["content"].([]any); ok {
 			for _, b := range blocks {
@@ -337,44 +306,4 @@ func toolClassFor(name string) toolClass {
 // toolClassFilterable reports whether a resolved name may be filtered.
 func toolClassFilterable(name string) bool {
 	return toolClassFor(name) != toolPreserve
-}
-
-// filterToolResultBlocks applies the class gate + unit filter to Anthropic
-// tool_result blocks inside a message's content array. Returns the (possibly
-// rewritten) block slice and whether anything changed. Blocks whose tool is
-// unknown or preserve-class are returned untouched; pairing (tool_use_id)
-// is never modified.
-func filterToolResultBlocks(blocks []any, names map[string]string, keep int) ([]any, bool) {
-	out := make([]any, len(blocks))
-	copy(out, blocks)
-	changed := false
-	for i, b := range blocks {
-		bm, ok := b.(map[string]any)
-		if !ok {
-			continue
-		}
-		if t, _ := bm["type"].(string); t != "tool_result" {
-			continue
-		}
-		id, _ := bm["tool_use_id"].(string)
-		if !toolClassFilterable(names[id]) {
-			continue
-		}
-		content, isStr := bm["content"].(string)
-		if !isStr || content == "" || isJSONPayload(content) {
-			continue // never mid-JSON, in this shape as in role:"tool"
-		}
-		filtered, ok := filterToolOutput(content, keep)
-		if !ok || len(filtered) >= len(content) {
-			continue
-		}
-		cp := make(map[string]any, len(bm))
-		for k, v := range bm {
-			cp[k] = v
-		}
-		cp["content"] = filtered
-		out[i] = cp
-		changed = true
-	}
-	return out, changed
 }

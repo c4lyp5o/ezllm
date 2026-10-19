@@ -18,7 +18,7 @@ records every design decision where the plan left latitude.
 | `caveman` (prose condensation) | ✅ (M7, shipped) | deterministic rule packs, text-only, protected spans + span-integrity gate, `lite`/`standard`; aggressive+ultra = stage composition |
 | `budget` engine | deleted 2026-10-19 | Dropping whole messages to fit a token budget changed the prompt prefix every time it activated (an upstream cache miss) and could split a tool call from its result. No profile used it. |
 | Profile editor page (drag-order stages) | | M6.5 (Compression page stays a read-only preview) |
-| Anthropic `/v1/messages` rtk scoping | | M6.5 (shape passes through unchanged today) |
+| Every engine on every wire shape (chat, messages, responses) | ✅ 2026-10-19 | see "Wire shapes" below |
 
 ---
 
@@ -88,6 +88,29 @@ history to its original bytes and breaking the upstream prefix cache.
 - `compression_ms` was 0 on every row (a deferred write to an unnamed
   return value never reached the caller). Results are named now; a
   workload-sized test pins it.
+
+## Wire shapes — one set of engines for every client (2026-10-19)
+
+ezllm serves several apps at once (Hermes on `/v1/chat/completions` and
+`/v1/responses`, Claude Code on `/v1/messages`, …). Savings must follow the
+CONTENT, never the app or the shape it happens to send. Engines therefore do
+not read wire shapes: `parts.go` walks every message (or Responses `input`
+item) and yields its editable text parts, each labelled **prose** or **tool
+output** (with the tool name resolved by call id in every shape):
+
+| | prose | tool output |
+|---|---|---|
+| chat | string content, `text` blocks | `role:"tool"` content (string or text blocks) |
+| messages | string content, `text` blocks | `tool_result` content (string or text blocks) |
+| responses | `message` items, `input_text`/`output_text` | `function_call_output` output (string or text blocks) |
+
+The pipeline reads `messages`, or the Responses `input` array. Never yielded,
+so never editable by construction: tool-call arguments (`tool_calls`,
+`tool_use.input`, `function_call.arguments`), thinking/reasoning items (they
+carry signatures), images and every other block type. Keys around an edited
+text — `cache_control`, ids — are carried over unchanged. A cross-shape test
+(`parts_test.go`) pins that each engine saves the same and produces the same
+text for one conversation written in all three shapes.
 
 ## The §4.2 safety contract (non-negotiable, enforced in `internal/compress`)
 

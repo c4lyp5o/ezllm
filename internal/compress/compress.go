@@ -176,9 +176,10 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 		return body, res
 	}
 
-	// Chat-completions shape only (M5): anything without a messages array
-	// (/v1/responses input shape, anthropic blocks at top level, ...) passes
-	// through untouched with the profile truth recorded.
+	// The conversation list: chat and messages carry `messages`, the
+	// Responses API carries an `input` item array. Anything else (a bare
+	// string input, no list at all) passes through untouched with the profile
+	// truth recorded.
 	// Single-parse: the request's shared decode is the root map (read-only
 	// here — engines work on the messages slice copy), so this is where the
 	// per-request body parse disappears when doc is provided. Identical
@@ -202,7 +203,12 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 			return body, res
 		}
 	}
+	listKey := "messages"
 	rawMsgs, ok := root["messages"].([]any)
+	if !ok {
+		listKey = "input"
+		rawMsgs, ok = root["input"].([]any)
+	}
 	if !ok || len(rawMsgs) == 0 {
 		res.Err = "no messages array"
 		return body, res
@@ -396,7 +402,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 
 	// Ship the rewrite: round-trip the root map (model + every unknown
 	// field preserved — same invariant as SwapModel).
-	root["messages"] = finalMsgs
+	root[listKey] = finalMsgs
 	out, err := json.Marshal(root)
 	if err != nil {
 		res.Err = "re-marshal: " + err.Error()

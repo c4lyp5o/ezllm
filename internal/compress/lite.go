@@ -26,35 +26,17 @@ func lite(msgs []any, opts map[string]any) []any {
 	if keepBlanks < 0 {
 		keepBlanks = 1
 	}
-	out := make([]any, 0, len(msgs))
-	for _, m := range msgs {
-		mm, ok := m.(map[string]any)
-		if !ok {
-			out = append(out, m)
-			continue
+	// Every text part, prose or tool output, in every shape (parts.go).
+	return editAll(msgs, nil, func(p textPart) (string, bool) {
+		if p.text == "" || isJSONPayload(p.text) {
+			return "", false // pure JSON payload: headroom's territory
 		}
-		content, isStr := mm["content"].(string)
-		if !isStr || content == "" {
-			out = append(out, m)
-			continue
+		cleaned, ok := cleanText(p.text, keepBlanks)
+		if !ok || len(cleaned) >= len(p.text) {
+			return "", false // integrity skip or no gain
 		}
-		if isJSONPayload(content) {
-			out = append(out, m) // pure JSON payload: headroom's territory
-			continue
-		}
-		cleaned, ok := cleanText(content, keepBlanks)
-		if !ok || len(cleaned) >= len(content) {
-			out = append(out, m) // integrity skip or no gain
-			continue
-		}
-		cp := make(map[string]any, len(mm))
-		for k, v := range mm {
-			cp[k] = v
-		}
-		cp["content"] = cleaned
-		out = append(out, cp)
-	}
-	return out
+		return cleaned, true
+	})
 }
 
 // cleanText runs the whitespace pass over content, keeping fenced regions

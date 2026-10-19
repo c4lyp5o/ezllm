@@ -98,20 +98,15 @@ func ParseKind(s string) (Kind, error) {
 // UsageConvention is how an upstream Messages (Anthropic-shape) wire counts
 // input_tokens relative to cache tokens. It is a per-account OPERATOR fact:
 // adapters and wiring cannot reveal it, and a guess silently corrupts cost.
-// UsageConventionAuto is "unknown", which refuses cross-wire Messages
-// destinations instead of guessing cache inclusion.
+// UsageConventionAuto is "unstated" and reads as exclusive, in the ledger and
+// on cross-wire Messages conversions alike.
 type UsageConvention string
 
 const (
-	UsageConventionAuto      UsageConvention = "auto"      // unknown — never inferred
+	UsageConventionAuto      UsageConvention = "auto"      // unstated — never inferred, read as exclusive
 	UsageConventionAnthropic UsageConvention = "anthropic" // input_tokens EXCLUDES cache tokens
 	UsageConventionTotal     UsageConvention = "total"     // input_tokens INCLUDES cache tokens
 )
-
-// Known reports whether the convention is explicit enough to convert with.
-func (m UsageConvention) Known() bool {
-	return m == UsageConventionAnthropic || m == UsageConventionTotal
-}
 
 // ParseUsageConvention validates an operator-supplied value.
 func ParseUsageConvention(s string) (UsageConvention, error) {
@@ -263,7 +258,7 @@ func (r *Registry) Get(k Kind) (Adapter, error) {
 	return nil, fmt.Errorf("provider: no adapter registered for kind %q", k)
 }
 
-// HTTPClient returns the shared client (adapters hold it).
+// Kinds lists the registered kinds (unordered).
 func (r *Registry) Kinds() []Kind {
 	out := make([]Kind, 0, len(r.m))
 	for k := range r.m {

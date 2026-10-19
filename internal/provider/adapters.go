@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -125,11 +126,11 @@ func (a *openCodeGo) CatalogIsPublic() bool { return true }
 
 // ReadQuota parses opencode-go's percent-shaped /usage.
 func (a *openCodeGo) ReadQuota(ctx context.Context, acct Account, key string) (Quota, error) {
-	body, err := getJSON(ctx, a.client, acct.BaseURL+"/usage", map[string]string{
+	body, err := getJSON(ctx, a.client, UpstreamURL(acct.BaseURL, acct.Kind, "/usage"), withCustomHeaders(map[string]string{
 		"Authorization": "Bearer " + key,
-	})
+	}, acct))
 	if err != nil {
-		return Quota{}, err
+		return Quota{}, mapUsageErr(err)
 	}
 	if q := parsePercentQuota(string(body)); q.Kind != "" {
 		return q, nil
@@ -180,6 +181,17 @@ func (a *openAICompatible) ListModels(ctx context.Context, acct Account, key str
 	})
 }
 
+// isTokenRouter recognizes TokenRouter by its exact public hostname (the
+// isCloudflareAI discipline): the management key must never be sent to a
+// host whose URL merely contains the name.
+func isTokenRouter(acct Account) bool {
+	if acct.Kind != KindOpenAICompatible {
+		return false
+	}
+	u, err := url.Parse(strings.TrimSpace(acct.BaseURL))
+	return err == nil && strings.EqualFold(u.Scheme, "https") && strings.EqualFold(u.Hostname(), "api.tokenrouter.com")
+}
+
 // AuthOracle: GET /usage — verified live on ssn-gpt: 401 INVALID_API_KEY on a
 // bad key, 401 API_KEY_REQUIRED with no header, 200 on a good one. Costs zero
 // tokens. Some OpenAI-shaped gateways lack /usage entirely; registration treats
@@ -227,6 +239,18 @@ func mapOracleErr(err error) error {
 	return err
 }
 
+// mapUsageErr classifies a failed generic {base}/usage read. 400/404/405 mean
+// the gateway has no quota endpoint there (OpenAI answers GET /v1/usage with
+// 400 "missing date" even for a valid key): ErrQuotaUnsupported, recorded as
+// "none". 401/429/5xx propagate, as for the oracles.
+func mapUsageErr(err error) error {
+	var he *HTTPError
+	if errors.As(err, &he) && he.Status == http.StatusBadRequest {
+		return ErrQuotaUnsupported
+	}
+	return mapOracleErr(err)
+}
+
 // ReadQuota classifies whatever shape the gateway exposes. Verified against
 // ssn-gpt (space.stationine.com): balance/remaining in USD plus usage.today and
 // usage.total cost fields. Host-scoped oracles (DeepSeek/OpenRouter/Vercel/
@@ -236,10 +260,15 @@ func mapOracleErr(err error) error {
 // ErrQuotaUnsupported, which the UI renders as "measured" (our own numbers).
 func (a *openAICompatible) ReadQuota(ctx context.Context, acct Account, key string) (Quota, error) {
 	authKey := key
-	if strings.Contains(strings.ToLower(acct.BaseURL), "api.tokenrouter.com") && strings.TrimSpace(acct.ManagementKey) != "" {
+	if isTokenRouter(acct) {
+		// The wallet takes the MANAGEMENT key only; the inference key draws
+		// a 401 there, which a key test would read as a dead key.
+		if strings.TrimSpace(acct.ManagementKey) == "" {
+			return Quota{}, ErrQuotaUnsupported
+		}
 		authKey = acct.ManagementKey
 	}
-	hdrs := map[string]string{"Authorization": "Bearer " + authKey}
+	hdrs := withCustomHeaders(map[string]string{"Authorization": "Bearer " + authKey}, acct)
 	if oracleURL, parse, ok := quotaOracleFor(acct); ok {
 		body, err := getJSON(ctx, a.client, oracleURL, hdrs)
 		if err != nil {
@@ -250,9 +279,9 @@ func (a *openAICompatible) ReadQuota(ctx context.Context, acct Account, key stri
 		}
 		return Quota{}, ErrQuotaUnsupported
 	}
-	body, err := getJSON(ctx, a.client, acct.BaseURL+"/usage", hdrs)
+	body, err := getJSON(ctx, a.client, UpstreamURL(acct.BaseURL, acct.Kind, "/usage"), hdrs)
 	if err != nil {
-		return Quota{}, err
+		return Quota{}, mapUsageErr(err)
 	}
 	if q := ClassifyQuota(string(body)); q.Kind != "" && q.Kind != QuotaNone {
 		return q, nil
@@ -289,24 +318,45 @@ func (a *anthropicCompatible) PrepareRequest(_ context.Context, req *http.Reques
 
 // ListModels: Anthropic's own catalog endpoint. Not all compatible gateways
 // implement it, so a 404/405 degrades to an empty catalog rather than an error —
-// registration can still proceed via an explicit model list.
+// registration can still proceed via an explicit model list. The endpoint is
+// paginated (20 per page by default), so the listing follows has_more/last_id.
 func (a *anthropicCompatible) ListModels(ctx context.Context, acct Account, key string) ([]ModelInfo, error) {
-	body, status, err := getJSONStatus(ctx, a.client, UpstreamURL(acct.BaseURL, acct.Kind, "/models"), map[string]string{
+	hdrs := withCustomHeaders(map[string]string{
 		"x-api-key":         key,
 		"anthropic-version": "2023-06-01",
-	})
-	if err != nil {
-		return nil, err
+	}, acct)
+	base := UpstreamURL(acct.BaseURL, acct.Kind, "/models") + "?limit=1000"
+	var out []ModelInfo
+	after := ""
+	for page := 0; page < maxCatalogPages; page++ {
+		u := base
+		if after != "" {
+			u += "&after_id=" + url.QueryEscape(after)
+		}
+		body, status, err := getJSONStatus(ctx, a.client, u, hdrs)
+		if page == 0 && (status == http.StatusNotFound || status == http.StatusMethodNotAllowed) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(body, &raw); err != nil {
+			break
+		}
+		out = append(out, parseModelList(raw)...)
+		more, _ := raw["has_more"].(bool)
+		last, _ := raw["last_id"].(string)
+		if !more || last == "" || last == after {
+			break
+		}
+		after = last
 	}
-	if status == http.StatusNotFound || status == http.StatusMethodNotAllowed {
-		return nil, nil
-	}
-	var raw map[string]any
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, nil
-	}
-	return parseModelList(raw), nil
+	return out, nil
 }
+
+// maxCatalogPages bounds a paginated catalog walk.
+const maxCatalogPages = 20
 
 func (a *anthropicCompatible) ReadQuota(ctx context.Context, acct Account, key string) (Quota, error) {
 	// No standard Anthropic quota endpoint; usage arrives in rate-limit headers
@@ -362,9 +412,9 @@ func isCloudflareAI(acct Account) bool {
 // documents the envelope, not the item shape.
 func listModelsCloudflare(ctx context.Context, c *http.Client, acct Account, key string) ([]ModelInfo, error) {
 	prefix := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSpace(acct.BaseURL), "/"), "/ai/v1")
-	body, err := getJSON(ctx, c, prefix+"/ai/models/search", map[string]string{
+	body, err := getJSON(ctx, c, prefix+"/ai/models/search", withCustomHeaders(map[string]string{
 		"Authorization": "Bearer " + key,
-	})
+	}, acct))
 	if err != nil {
 		return nil, err
 	}
@@ -421,6 +471,18 @@ func cfFakeKey() string {
 	buf := make([]byte, 20)
 	_, _ = rand.Read(buf)
 	return "cfut_" + hex.EncodeToString(buf)
+}
+
+// withCustomHeaders adds the account's operator headers to ezllm's own
+// catalog/quota requests, with the same precedence as PrepareRequest gives
+// inference: the operator's value wins.
+func withCustomHeaders(hdrs map[string]string, acct Account) map[string]string {
+	for k, v := range acct.CustomHeaders {
+		if k != "" && v != "" {
+			hdrs[k] = v
+		}
+	}
+	return hdrs
 }
 
 func applyCustomHeaders(req *http.Request, hdrs map[string]string) {
@@ -493,7 +555,7 @@ func listModelsGeneric(ctx context.Context, c *http.Client, acct Account, key st
 			hdrs["Authorization"] = "Bearer " + key
 		}
 	}
-	body, err := getJSON(ctx, c, strings.TrimSuffix(acct.BaseURL, "/")+"/models", hdrs)
+	body, err := getJSON(ctx, c, UpstreamURL(acct.BaseURL, acct.Kind, "/models"), withCustomHeaders(hdrs, acct))
 	if err != nil {
 		return nil, err
 	}
@@ -532,9 +594,14 @@ func parseModelList(raw map[string]any) []ModelInfo {
 	return out
 }
 
+// truncate cuts s to at most n bytes on a rune boundary: the text reaches the
+// ledger and the dashboard, where half a rune is invalid UTF-8.
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
 	}
 	return s[:n] + "…"
 }

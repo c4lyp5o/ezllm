@@ -409,7 +409,9 @@ the request's timestamp.
 
 ### `GET /admin/accounts/{id}/quota` → `200`
 Live `ReadQuota` → classified shape + `raw`. `{"kind":"none"}` when the provider has no endpoint
-(`404`/`405` → NOT an error).
+(`400`/`404`/`405` on the generic `{base}/usage` → NOT an error; OpenAI answers `400` there even
+for a valid key). A TokenRouter account without a `management_key` is `none` without a call.
+`401`/`429`/`5xx` stay errors (`502`, retryable), so a transient fault never records `none`.
 
 ## M3 — combos, tokens, export
 

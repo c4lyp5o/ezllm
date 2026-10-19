@@ -222,6 +222,7 @@ const (
 	itemText           = 1 // {role, content}
 	itemFunctionCall   = 2 // {type:"function_call", call_id, name, arguments}
 	itemFunctionOutput = 3 // {type:"function_call_output", call_id, output}
+	itemImage          = 4 // {type:"input_image", image_url}
 )
 
 type responsesInputItem struct {
@@ -232,10 +233,15 @@ type responsesInputItem struct {
 	name      string
 	arguments string
 	output    string
+	imageURL  string
 }
 
 func newResponsesTextItem(role, content string) responsesInputItem {
 	return responsesInputItem{kind: itemText, role: role, content: content}
+}
+
+func newResponsesImageItem(url string) responsesInputItem {
+	return responsesInputItem{kind: itemImage, imageURL: url}
 }
 
 func (i responsesInputItem) MarshalJSON() ([]byte, error) {
@@ -258,6 +264,11 @@ func (i responsesInputItem) MarshalJSON() ([]byte, error) {
 			CallID string `json:"call_id"`
 			Output string `json:"output"`
 		}{"function_call_output", i.callID, i.output})
+	case itemImage:
+		return json.Marshal(struct {
+			Type     string `json:"type"`
+			ImageURL string `json:"image_url"`
+		}{"input_image", i.imageURL})
 	}
 	return nil, fmt.Errorf("translate: unknown input item kind %d", i.kind)
 }

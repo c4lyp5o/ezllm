@@ -40,6 +40,10 @@ const (
 	BlockCall
 	// BlockResult is a tool's output: CallID + Text.
 	BlockResult
+	// BlockImage is an image content element. ImageURL carries the resolved
+	// URL — a data: URI for base64 payloads, or an http(s) URL otherwise —
+	// so every wire can express it without a side channel.
+	BlockImage
 )
 
 // Block is one content element of a turn.
@@ -56,6 +60,9 @@ type Block struct {
 	// wire had it (BlockCall only). Encoders that need an object parse it at
 	// encode time and refuse malformed input instead of inventing "{}".
 	Arguments string
+	// ImageURL is the resolved image location (data: URI or http URL) for
+	// BlockImage.
+	ImageURL string
 }
 
 // Turn is one message: a role plus ordered blocks.

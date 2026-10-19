@@ -237,18 +237,18 @@ func TestStatefulResponsesHistoryRefused(t *testing.T) {
 	}
 }
 
-func TestMediaContentRefused(t *testing.T) {
+func TestMediaContentSupported(t *testing.T) {
 	chatImg := `{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}]}]}`
-	if _, err := DecodeChatRequest([]byte(chatImg)); err == nil {
-		t.Error("chat image content must be refused")
+	if _, err := DecodeChatRequest([]byte(chatImg)); err != nil {
+		t.Errorf("chat image content must be supported: %v", err)
 	}
 	msgImg := `{"model":"m","max_tokens":8,"messages":[{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}}]}]}`
-	if _, err := DecodeMessagesRequest([]byte(msgImg)); err == nil {
-		t.Error("anthropic image content must be refused")
+	if _, err := DecodeMessagesRequest([]byte(msgImg)); err != nil {
+		t.Errorf("anthropic image content must be supported: %v", err)
 	}
 	respImg := `{"model":"m","input":[{"role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]}]}`
-	if _, err := DecodeResponsesRequest([]byte(respImg)); err == nil {
-		t.Error("responses image content must be refused")
+	if _, err := DecodeResponsesRequest([]byte(respImg)); err != nil {
+		t.Errorf("responses image content must be supported: %v", err)
 	}
 }
 

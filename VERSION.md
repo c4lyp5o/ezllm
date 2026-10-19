@@ -9,7 +9,7 @@ dashboard health strip, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v0.0.16**
+**Current: v0.0.17**
 
 ---
 

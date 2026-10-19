@@ -164,7 +164,7 @@ func responsesToolChoice(raw json.RawMessage) (*ToolChoice, error) {
 func responsesTurns(it responsesInItem) ([]Turn, error) {
 	switch it.Type {
 	case "", "message":
-		text, err := textContent(it.Content, "responses.input.content")
+		blocks, err := responsesContentBlocks(it.Content, "responses.input.content")
 		if err != nil {
 			return nil, err
 		}
@@ -178,11 +178,7 @@ func responsesTurns(it responsesInItem) ([]Turn, error) {
 			return nil, unsupported("responses.input.role",
 				fmt.Sprintf("role %q is not portable", role))
 		}
-		turn := Turn{Role: role}
-		if len(it.Content) > 0 {
-			turn.Blocks = []Block{{Kind: BlockText, Text: text}}
-		}
-		return []Turn{turn}, nil
+		return []Turn{{Role: role, Blocks: blocks}}, nil
 
 	case "function_call":
 		return []Turn{{Role: RoleAssistant, Blocks: []Block{{
@@ -272,11 +268,23 @@ func EncodeResponsesRequest(ir *RequestIR, upstreamModel string) ([]byte, error)
 					kind: itemFunctionCall, callID: b.CallID, name: b.Name, arguments: b.Arguments,
 				})
 			}
+			for _, b := range t.Blocks {
+				if b.Kind == BlockImage {
+					out.Input = append(out.Input, newResponsesImageItem(b.ImageURL))
+				}
+			}
 		default:
 			if len(t.Blocks) == 0 {
 				continue // nothing to say (the legacy encoder did the same)
 			}
-			out.Input = append(out.Input, newResponsesTextItem(t.Role, t.Text()))
+			if text := t.Text(); text != "" {
+				out.Input = append(out.Input, newResponsesTextItem(t.Role, text))
+			}
+			for _, b := range t.Blocks {
+				if b.Kind == BlockImage {
+					out.Input = append(out.Input, newResponsesImageItem(b.ImageURL))
+				}
+			}
 		}
 	}
 

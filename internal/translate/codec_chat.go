@@ -113,30 +113,91 @@ func boolValue(raw json.RawMessage) (bool, error) {
 	return *b, nil
 }
 
-// chatTurn maps one chat message onto a turn. One message is one turn here:
-// chat has no way to fold a tool result into a user message.
+// chatContentBlocks parses a chat message's content into IR blocks, carrying
+// both text and image parts. A plain string becomes a single text block.
+func chatContentBlocks(raw json.RawMessage, what string) ([]Block, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		if s == "" {
+			return nil, nil
+		}
+		return []Block{{Kind: BlockText, Text: s}}, nil
+	}
+	var parts []json.RawMessage
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		return nil, unsupported(what, "content must be a string or an array of parts")
+	}
+	var blocks []Block
+	for _, p := range parts {
+		var part struct {
+			Type     string `json:"type"`
+			Text     string `json:"text"`
+			ImageURL any    `json:"image_url"`
+		}
+		if err := json.Unmarshal(p, &part); err != nil {
+			return nil, unsupported(what, "unreadable content part")
+		}
+		switch part.Type {
+		case "text", "input_text", "output_text":
+			if part.Text != "" {
+				blocks = append(blocks, Block{Kind: BlockText, Text: part.Text})
+			}
+		case "":
+			// Some compatible upstreams send {text: "..."} with no type.
+			if part.Text != "" {
+				blocks = append(blocks, Block{Kind: BlockText, Text: part.Text})
+			}
+		case "image_url":
+			url := ""
+			switch v := part.ImageURL.(type) {
+			case string:
+				url = v
+			case map[string]any:
+				if u, ok := v["url"].(string); ok {
+					url = u
+				}
+			}
+			if url == "" {
+				// try re-decode as object with url
+				var alt struct {
+					ImageURL struct {
+						URL string `json:"url"`
+					} `json:"image_url"`
+				}
+				if json.Unmarshal(p, &alt) == nil {
+					url = alt.ImageURL.URL
+				}
+			}
+			if url == "" {
+				return nil, unsupported(what+".image_url", "missing image url")
+			}
+			blocks = append(blocks, Block{Kind: BlockImage, ImageURL: url})
+		default:
+			return nil, unsupported(what+"."+part.Type,
+				"only text and image content is portable across the three wires")
+		}
+	}
+	return blocks, nil
+}
+
 func chatTurn(m chatWireMessage) (Turn, error) {
 	switch m.Role {
 	case RoleSystem, RoleDeveloper, RoleUser:
-		text, err := textContent(m.Content, "chat.content")
+		blocks, err := chatContentBlocks(m.Content, "chat.content")
 		if err != nil {
 			return Turn{}, err
 		}
-		turn := Turn{Role: m.Role}
-		if len(m.Content) > 0 {
-			turn.Blocks = []Block{{Kind: BlockText, Text: text}}
-		}
-		return turn, nil
+		return Turn{Role: m.Role, Blocks: blocks}, nil
 
 	case RoleAssistant:
-		text, err := textContent(m.Content, "chat.content")
+		blocks, err := chatContentBlocks(m.Content, "chat.content")
 		if err != nil {
 			return Turn{}, err
 		}
-		turn := Turn{Role: RoleAssistant}
-		if text != "" {
-			turn.Blocks = append(turn.Blocks, Block{Kind: BlockText, Text: text})
-		}
+		turn := Turn{Role: RoleAssistant, Blocks: blocks}
 		for _, tc := range m.ToolCalls {
 			if tc.Type != "" && tc.Type != "function" {
 				return Turn{}, unsupported("chat.tool_calls.type",
@@ -212,7 +273,7 @@ type chatOutRequest struct {
 
 type chatOutMessage struct {
 	Role       string           `json:"role"`
-	Content    string           `json:"content,omitempty"`
+	Content    any              `json:"content"`
 	ToolCallID string           `json:"tool_call_id,omitempty"`
 	ToolCalls  []OpenAIToolCall `json:"tool_calls,omitempty"`
 }
@@ -246,7 +307,7 @@ func EncodeChatRequest(ir *RequestIR, upstreamModel string) ([]byte, error) {
 				})
 			}
 		case RoleAssistant:
-			msg := chatOutMessage{Role: RoleAssistant, Content: t.Text()}
+			msg := chatOutMessage{Role: RoleAssistant, Content: chatContentFromBlocks(t.Blocks)}
 			for _, b := range t.Blocks {
 				if b.Kind != BlockCall {
 					continue
@@ -262,7 +323,7 @@ func EncodeChatRequest(ir *RequestIR, upstreamModel string) ([]byte, error) {
 			}
 			out.Messages = append(out.Messages, msg)
 		default:
-			out.Messages = append(out.Messages, chatOutMessage{Role: t.Role, Content: t.Text()})
+			out.Messages = append(out.Messages, chatOutMessage{Role: t.Role, Content: chatContentFromBlocks(t.Blocks)})
 		}
 	}
 	for _, t := range ir.Tools {

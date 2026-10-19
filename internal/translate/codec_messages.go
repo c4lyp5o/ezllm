@@ -34,6 +34,7 @@ type messagesInBlock struct {
 	Input     json.RawMessage `json:"input"`
 	ToolUseID string          `json:"tool_use_id"`
 	Content   json.RawMessage `json:"content"`
+	Source    json.RawMessage `json:"source"`
 }
 
 // DecodeMessagesRequest parses an anthropic /v1/messages body into the IR.
@@ -182,6 +183,12 @@ func messagesTurns(m messagesInMessage) ([]Turn, error) {
 				Name:      b.Name,
 				Arguments: argumentsFromInput(b.Input, b.ID),
 			})
+		case "image":
+			url, err := anthropicImageSourceURL(b.Source)
+			if err != nil {
+				return nil, err
+			}
+			pending = append(pending, Block{Kind: BlockImage, ImageURL: url})
 		case "thinking", "redacted_thinking":
 			return nil, unsupported("messages.content."+b.Type,
 				"reasoning replay cannot be translated across wires")
@@ -196,8 +203,37 @@ func messagesTurns(m messagesInMessage) ([]Turn, error) {
 	return turns, nil
 }
 
-// argumentsFromInput renders an anthropic tool_use input object back to the
-// compact JSON string the other wires carry. Deterministic: Go sorts map keys.
+// anthropicImageSourceURL resolves an Anthropic image block's source into a URL.
+func anthropicImageSourceURL(raw json.RawMessage) (string, error) {
+	var src struct {
+		Type      string `json:"type"`
+		MediaType string `json:"media_type"`
+		Data      string `json:"data"`
+		URL       string `json:"url"`
+	}
+	if err := json.Unmarshal(raw, &src); err != nil {
+		return "", unsupported("messages.content.image.source", "unreadable image source")
+	}
+	switch src.Type {
+	case "base64":
+		if src.Data == "" {
+			return "", unsupported("messages.content.image.source", "empty base64 data")
+		}
+		mt := src.MediaType
+		if mt == "" {
+			mt = "image/png"
+		}
+		return "data:" + mt + ";base64," + src.Data, nil
+	case "url":
+		if src.URL == "" {
+			return "", unsupported("messages.content.image.source", "empty url")
+		}
+		return src.URL, nil
+	default:
+		return "", unsupported("messages.content.image.source",
+			fmt.Sprintf("unsupported source type %q", src.Type))
+	}
+}
 func argumentsFromInput(raw json.RawMessage, callID string) string {
 	if len(raw) == 0 || string(raw) == "null" {
 		return "{}"
@@ -242,6 +278,7 @@ type messagesOutBlock struct {
 	Input     any     `json:"input,omitempty"`
 	ToolUseID string  `json:"tool_use_id,omitempty"`
 	Content   *string `json:"content,omitempty"`
+	Source    any     `json:"source,omitempty"`
 }
 
 // EncodeMessagesRequest renders the IR as an anthropic /v1/messages body.
@@ -315,6 +352,11 @@ func EncodeMessagesRequest(ir *RequestIR, upstreamModel string) ([]byte, error) 
 					msg.Content = append(msg.Content, messagesOutBlock{
 						Type: "tool_use", ID: b.CallID, Name: b.Name, Input: input,
 					})
+				case BlockImage:
+					msg.Content = append(msg.Content, messagesOutBlock{
+						Type:   "image",
+						Source: anthropicImageSourceFromURL(b.ImageURL),
+					})
 				}
 			}
 			out.Messages = append(out.Messages, msg)
@@ -324,6 +366,12 @@ func EncodeMessagesRequest(ir *RequestIR, upstreamModel string) ([]byte, error) 
 			for _, b := range t.Blocks {
 				if b.Kind == BlockText && b.Text != "" {
 					msg.Content = append(msg.Content, messagesOutBlock{Type: "text", Text: b.Text})
+				}
+				if b.Kind == BlockImage {
+					msg.Content = append(msg.Content, messagesOutBlock{
+						Type:   "image",
+						Source: anthropicImageSourceFromURL(b.ImageURL),
+					})
 				}
 			}
 			out.Messages = append(out.Messages, msg)

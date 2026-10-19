@@ -47,7 +47,11 @@ func Request(body []byte, upstreamModel string) ([]byte, error) {
 	for _, m := range req.Messages {
 		switch m.Role {
 		case "user":
-			out.Messages = append(out.Messages, translateUserMessage(m.Content)...)
+			translated, err := translateUserMessage(m.Content)
+			if err != nil {
+				return nil, err
+			}
+			out.Messages = append(out.Messages, translated...)
 		case "assistant":
 			out.Messages = append(out.Messages, translateAssistantMessage(m.Content))
 		}
@@ -73,17 +77,18 @@ func Request(body []byte, upstreamModel string) ([]byte, error) {
 // with text becomes tool messages followed by a user message — OpenAI
 // requires tool messages to directly follow the assistant turn that
 // requested them, so the remaining text cannot be folded in.
-func translateUserMessage(content any) []OpenAIMessage {
+func translateUserMessage(content any) ([]OpenAIMessage, error) {
 	if s, ok := content.(string); ok {
-		return []OpenAIMessage{{Role: "user", Content: s}}
+		return []OpenAIMessage{{Role: "user", Content: s}}, nil
 	}
 	blocks, ok := content.([]any)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 
 	var msgs []OpenAIMessage
 	var rest []any
+	var imageParts []map[string]any
 	for _, b := range blocks {
 		block, ok := b.(map[string]any)
 		if !ok {
@@ -97,16 +102,68 @@ func translateUserMessage(content any) []OpenAIMessage {
 			})
 			continue
 		}
+		if block["type"] == "image" {
+			part, err := anthropicImageToOpenAI(block)
+			if err != nil {
+				return nil, err
+			}
+			imageParts = append(imageParts, part)
+			continue
+		}
 		rest = append(rest, b)
 	}
-	if text := flattenText(rest); text != "" {
+
+	text := flattenText(rest)
+	if len(imageParts) > 0 {
+		var parts []map[string]any
+		if text != "" {
+			parts = append(parts, map[string]any{"type": "text", "text": text})
+		}
+		parts = append(parts, imageParts...)
+		msgs = append(msgs, OpenAIMessage{Role: "user", Content: parts})
+	} else if text != "" {
 		msgs = append(msgs, OpenAIMessage{Role: "user", Content: text})
 	}
-	return msgs
+	return msgs, nil
+}
+
+// anthropicImageToOpenAI converts one Anthropic image block into the OpenAI
+// chat-completions image_url content part.
+func anthropicImageToOpenAI(block map[string]any) (map[string]any, error) {
+	src, _ := block["source"].(map[string]any)
+	srcType, _ := src["type"].(string)
+	switch srcType {
+	case "base64":
+		mediaType, _ := src["media_type"].(string)
+		if mediaType == "" {
+			mediaType = "image/png"
+		}
+		data, _ := src["data"].(string)
+		if data == "" {
+			return nil, fmt.Errorf("translate: image block has empty base64 data")
+		}
+		return map[string]any{
+			"type": "image_url",
+			"image_url": map[string]any{
+				"url": "data:" + mediaType + ";base64," + data,
+			},
+		}, nil
+	case "url":
+		url, _ := src["url"].(string)
+		if url == "" {
+			return nil, fmt.Errorf("translate: image block has empty url")
+		}
+		return map[string]any{
+			"type":      "image_url",
+			"image_url": map[string]any{"url": url},
+		}, nil
+	default:
+		return nil, fmt.Errorf("translate: unsupported image source type %q", srcType)
+	}
 }
 
 func translateAssistantMessage(content any) OpenAIMessage {
-	msg := OpenAIMessage{Role: "assistant"}
+	msg := OpenAIMessage{Role: "assistant", Content: ""}
 	if s, ok := content.(string); ok {
 		msg.Content = s
 		return msg

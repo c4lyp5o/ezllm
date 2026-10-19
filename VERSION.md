@@ -9,7 +9,44 @@ dashboard health strip, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v0.0.17**
+**Current: v0.0.18**
+
+---
+
+## v0.0.18 — 2026-10-19
+
+Claude subscription sidecar (`claude-bridge`) — milestone M1, text-only.
+
+- **New `cmd/claude-bridge` + `internal/claudebridge`**: an Anthropic Messages
+  surface that drives the official Claude Code CLI against a Claude subscription
+  login. The CLI is the only thing that speaks to the subscription — the
+  credential never leaves its own login store. ezllm dials the bridge as a plain
+  `anthropic-compatible` account, so no router kind, surface or translation cell
+  changes.
+- **Upstream body injection**: the client's Messages body reaches upstream through
+  `CLAUDE_CODE_EXTRA_BODY` (the official plugin's mechanism), with `system` held by
+  `--system-prompt-file` and stdin frames marked `shouldQuery:false` on replay.
+  Measured on CLI 2.1.299: the body drives the answer (a body saying "seven" beats
+  trigger frames saying "eight"), one generation per call, and the CLI's own
+  ~20k-token harness overhead disappears (170 input tokens for a three-message
+  body, vs ~20k on the naive `-p` path).
+- **M1 is text-only and says so**: tool-bearing requests are refused with
+  `chat_tools_unsupported` before a process is spawned.
+- Error mapping keeps the CLI's words and names the cause: `rate_limit`→429,
+  `billing_error`→402, `authentication_failed`→401, `overloaded`→529,
+  `max_output_tokens`→400 (a client-fixable ceiling, not a retryable 5xx).
+- Live proof `tests/prove_claude_bridge.py`: 13/13 against the real CLI and a real
+  Pro subscription — streaming SSE, native usage fields, refusal, and history
+  fidelity.
+- `Dockerfile.claude-bridge` + `compose.claude-bridge.yml`: distroless-static
+  image; the CLI binary (265 MB, read-only) and the login directory are mounted
+  and pinned by mount path; no published ports.
+
+## v0.0.17 — 2026-10-19
+
+Same-day batch: image content across all three wire surfaces (`f13ffdc`);
+geminiweb re-scrapes the SNlM0e access token after PSIDTS rotation and reverts on
+failure (`ce5c2dc`).
 
 ---
 

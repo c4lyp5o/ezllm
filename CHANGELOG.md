@@ -2,6 +2,39 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14); full history via `git log`.
 
+## 2026-10-19 — claude-bridge M1: the Claude subscription as an ezllm account
+
+The Claude subscription becomes an ezllm account without the router learning a new
+trick. A sidecar, `claude-bridge`, serves an Anthropic Messages surface by driving
+the **official Claude Code CLI** against a subscription login; ezllm dials it as an
+ordinary `anthropic-compatible` account. The CLI stays the only thing that speaks to
+the subscription — the credential never leaves its own login store — which is the
+whole point: no OAuth-bearer reuse, no client impersonation
+(`docs/claude-subscription-design.md`, locked decision 1).
+
+- **Request path.** The client's Messages body is handed to native through
+  `CLAUDE_CODE_EXTRA_BODY` (the mechanism the official Hermes plugin documents),
+  `system` travels via `--system-prompt-file`, and replayed history frames carry
+  `shouldQuery:false` so native acknowledges them with a zero-turn result instead of
+  generating — and charging the plan — once per frame.
+- **Measured, not assumed.** With the body carrying history and the stdin frames
+  carrying a *different* history, the answer followed the body: the injection is the
+  upstream request. One generation per call. And the CLI's own ~20k-token harness
+  overhead is gone — a three-message body measured 170 input tokens on the wire.
+- **M1 is text-only by declaration.** Tool-bearing requests are refused with
+  `chat_tools_unsupported` before a process is spawned; tools arrive in M2 through an
+  inert MCP server (advertise, deny execution, capture the call).
+- **Failures stay legible.** Native error codes map to honest statuses
+  (`rate_limit`→429, `billing_error`→402, `authentication_failed`→401,
+  `overloaded`→529) and the CLI's own words ride along unrewritten. A client's own
+  `max_tokens` ceiling is a 400, never a retryable 5xx.
+- **Proof.** `tests/prove_claude_bridge.py` runs the real binary against the real
+  CLI and a real Pro subscription: 13/13 (health contract, auth, catalog, streaming
+  SSE, native usage fields, tool refusal, history fidelity).
+- **Container.** `Dockerfile.claude-bridge` stays distroless-static: the 265 MB CLI
+  binary is mounted read-only and pinned by path, the login directory is mounted
+  read-write (the CLI refreshes its own token), and nothing is published.
+
 ## 2026-10-18 — security milestones, native surfaces, playground, per-key budgets
 
 - Security Milestone A: provider keys encrypted at rest (AES-256-GCM), master key, migration + tests.

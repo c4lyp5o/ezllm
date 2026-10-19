@@ -57,6 +57,7 @@ measured numbers: CONTRIBUTING.md § Memory.
 ```
 cmd/ezllm/          main (config, flags, run)
 cmd/m2verify/       live-ledger acceptance checker
+cmd/claude-bridge/  Claude subscription sidecar (drives the official Claude Code CLI)
 internal/server/    HTTP layer: routes, auth, admin API, healthz, version
 internal/router/    combo resolution, strategies, rules eligibility, pins
 internal/proxy/     attempt/commit split, retry, failover, usage sniff, TTFT
@@ -68,6 +69,7 @@ internal/registration/ key testing: paced probe chain, protocol sweep
 internal/rules/     token caps + allowed-hours windows
 internal/jsonbody/  single-parse request document
 internal/{claudeweb,geminiweb,githubcopilot}/  web-protocol providers
+internal/claudebridge/  claude-bridge sidecar: CLI spawn, body injection, SSE translation
 web/                React+Vite dashboard; web/tests/ = Playwright drivers
 tests/              Python live-proof scripts (not part of go test)
 docs/               design records + runbooks (decisions, not status)

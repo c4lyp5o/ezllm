@@ -1,0 +1,51 @@
+# claude-bridge — the Claude subscription sidecar. Bring it up beside ezllm:
+#
+#   docker compose -f compose.yml -f compose.claude-bridge.yml up -d
+#
+# It is never published: only ezllm, on this compose network, may dial it. ezllm
+# reaches it as an ordinary anthropic-compatible account whose base_url is
+# http://claude-bridge:8790 (see docs/claude-bridge-runbook.md).
+services:
+  claude-bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile.claude-bridge
+    image: ghcr.io/c4lyp5o/claude-bridge:latest
+    container_name: claude-bridge
+    restart: unless-stopped
+
+    # The CLI's local login check reads process identity: without these two the
+    # CLI reports logged-out instantly and every request 401s. They must name the
+    # owner of the mounted login directory below.
+    user: "${UID:-1000}:${GID:-1000}"
+    environment:
+      TZ: Asia/Kuala_Lumpur
+      USER: ${CLAUDE_BRIDGE_USER:-calypso}
+      LOGNAME: ${CLAUDE_BRIDGE_USER:-calypso}
+
+    volumes:
+      # The official Claude Code CLI, pinned by this path (2.1.299 measured and
+      # qualified). Swapping the pin is a deliberate act followed by the live
+      # proof — a CLI release can move the wire (see the boot flag assert).
+      - ${CLAUDE_CLI_BIN:-/home/calypso/.local/share/claude/versions/2.1.299}:/opt/claude/claude:ro
+      # The subscription login. Read-write: the CLI refreshes its own token here.
+      - ${CLAUDE_SUB_DIR:-/home/calypso/.claude-sub}:/claude-sub
+      # Shared secret ezllm presents as x-api-key. Generate with:
+      #   openssl rand -hex 24 > data/claude-bridge.token && chmod 600 data/claude-bridge.token
+      - ${CLAUDE_BRIDGE_TOKEN_FILE:-./data/claude-bridge.token}:/run/secrets/claude-bridge.token:ro
+
+    command:
+      - "-claude-bin"
+      - "/opt/claude/claude"
+      - "-claude-config-dir"
+      - "/claude-sub"
+      - "-token-file"
+      - "/run/secrets/claude-bridge.token"
+      - "-addr"
+      - "0.0.0.0:8790"
+      - "-timeout"
+      - "300s"
+      - "-concurrency"
+      - "2"
+
+    # No `ports:` — deliberate. The bridge is reachable only on this network.

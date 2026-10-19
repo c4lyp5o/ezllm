@@ -67,9 +67,17 @@ Findings that shape the build:
    bridge must assert its flags at boot instead of trusting help text.
 6. **The CLI auto-loads an MCP server** (`claude.ai Claude Docs`, `source: claudeai`) — suppressed
    with `--strict-mcp-config` plus a bridge-owned config.
-7. **Process startup is ~1.5–2s** of the 3.2–6.4s wall (api time 1.2–1.8s). Accepted in v1.
-8. **Opus is reachable on Pro** (no usage-credit refusal) at $0.10 list-equivalent for a trivial
-   call — 40x the haiku figure. It stays out of every automatic path.
+8. **Process startup is ~1.5–2s** of the 3.2–6.4s wall (api time 1.2–1.8s). Accepted in v1.
+9. **The harness overhead is not the floor.** It is the floor of the naive `-p` path only: handing
+   native the upstream body via `CLAUDE_CODE_EXTRA_BODY` measured **170 input tokens** for a
+   three-message body against ~20k for the same turn with tools on. This hop's economics are set by
+   the client's body, not by Claude Code's own prompt.
+10. **Opus is reachable on Pro** (no usage-credit refusal) at $0.10 list-equivalent for a trivial
+    call — 40x the haiku figure. It stays out of every automatic path.
+11. **Mandatory thinking changes `max_tokens` semantics.** Haiku 5.5 thinks whether asked or not, and
+    its thinking tokens count against `CLAUDE_CODE_MAX_OUTPUT_TOKENS`: a small `max_tokens` produced
+    `API Error: Claude's response exceeded the … output token maximum` (measured at 32, fine at 256)
+    rather than a truncated answer.
 
 ## 3. Architecture: sidecar bridge, ezllm core untouched
 
@@ -96,7 +104,9 @@ Anthropic-shaped HTTP surface on the compose network only (never published):
 Container requirements: the documented `USER` / `LOGNAME` environment (the CLI's local login check
 reads process identity; without it a logged-in CLI reports `loggedIn: false` instantly with no
 upstream request), the `~/.claude-sub` login directory mounted **read-write** (the CLI refreshes
-its own token there), CPU/memory limits, and a pinned CLI version baked into the image.
+its own token there), CPU/memory limits, and the pinned CLI binary mounted **read-only** — 265 MB
+with its own release cadence, so keeping it out of the image is what keeps the bridge image
+distroless-static and CI-buildable. Boot asserts the binary's version and flag surface.
 
 **ezllm side: no new code path.** It is an ordinary `anthropic-compatible` account — the existing
 adapter already speaks `/v1/messages` with `x-api-key`, the existing usage tap reads the native
@@ -110,11 +120,22 @@ upstream (two agent harnesses stacked in the request path).
 
 ## 4. Bridge request contract
 
-Per request: a private temporary `HOME`/config directory, `--settings` pointing at a bridge-owned
-settings file, `--strict-mcp-config` plus a bridge-owned MCP config, `--max-turns 1`,
-`--include-partial-messages`, model alias passed through unchanged (`sonnet`, `haiku`, `opus`, and
-the `[1m]` forms the CLI advertises).
+Per request: a private temporary `HOME` (so nothing touches the operator's `~/.claude` state),
+`--settings` carrying `CLAUDE_CODE_EXTRA_BODY`, `--system-prompt-file` carrying the client's system
+prompt, `--setting-sources ''`, `--strict-mcp-config` with a bridge-owned empty MCP config,
+`--tools ''`, `--max-turns 1`, `--permission-mode dontAsk`, `--no-session-persistence`, a
+conversation-stable `--session-id`, `--include-partial-messages`, and the model alias passed
+through unchanged (`sonnet`, `haiku`, `opus`, and the `[1m]` forms the CLI advertises).
 
+- **Body (`CLAUDE_CODE_EXTRA_BODY`)**: the client's own Messages body is what the subscription
+  sees — measured: with the body carrying one history and the stdin frames carrying a different
+  one, the answer followed the body. Rules discovered live and mirrored from the official plugin's
+  `request_body()`: no `system` (native owns that slot via `--system-prompt-file`), no message `id`s
+  (the strict schema rejects them: `messages.1.id: Extra inputs are not permitted`), no
+  `temperature`/`top_p` (subscription routes reject sampling controls).
+- **Replay**: non-final user frames carry `shouldQuery:false`, so native acknowledges them with a
+  zero-turn `result` instead of generating — without it, measured, every user frame produced its own
+  upstream request and its own plan draw. The last user frame is the only trigger.
 - **Streaming:** `stream_event` text deltas → Anthropic `content_block_delta`; final `result` frame
   → terminal usage; `rate_limit_event` → the plan state a 429 should carry.
 - **Usage:** the native envelope is already Anthropic-shaped (measured `input_tokens=2`,
@@ -144,12 +165,15 @@ that client as a 429 instead of silently spilling other traffic onto a capped ho
 
 ## 6. Staged build
 
-**M1 — transport, text only.** Bridge container + `/v1/messages` (stream and non-stream) + usage and
-error mapping + `/v1/models` + the ezllm `anthropic-compatible` account + the Claude-Code-only combo.
-Tool-bearing requests are **refused explicitly** with the existing `chat_tools_unsupported` cause
-rather than silently answered without tools. Live proof: a real request through ezllm's front door
-returns 200 and lands a ledger row with real token counts, `tokens_cached_read > 0` and the correct
-account.
+**M1 — transport, text only. SHIPPED 2026-10-19.** Bridge binary (`cmd/claude-bridge` +
+`internal/claudebridge`), container, `/v1/messages` (stream and non-stream), usage and error
+mapping, `/v1/models`, with tool-bearing requests **refused explicitly** via
+`chat_tools_unsupported` rather than silently answered without tools. Live proof
+`tests/prove_claude_bridge.py` runs the real binary against the real CLI and a real Pro
+subscription: 13/13 (health contract, auth, catalog, streaming SSE, native usage fields, refusal,
+history fidelity). Remaining and operator-side: create the `anthropic-compatible` account and the
+Claude-Code-only combo in the dashboard once the container is up (see
+`docs/claude-bridge-runbook.md`).
 
 **M2 — tools.** An in-bridge MCP server advertises the *request's* tools as `mcp__client__<name>`
 (stable 50-char hash alias above the length limit) with deny-execution, so the CLI emits the call

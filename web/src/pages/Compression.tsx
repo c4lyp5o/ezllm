@@ -27,6 +27,8 @@ const ENGINE_INFO: Record<string, { label: string; note: string; option?: { key:
   rtk: { label: 'RTK', note: 'Filters noisy CLI/tool output; errors and failures are retained.', option: { key: 'keep_lines', label: 'Keep lines', initial: '6' } },
   headroom: { label: 'Headroom', note: 'Lossless columnar compaction for homogeneous JSON tool payloads.', option: { key: 'min_rows', label: 'Minimum rows', initial: '4' } },
   lite: { label: 'Lite', note: 'Whitespace cleanup only; words and code fences remain unchanged.', option: { key: 'blank_lines', label: 'Blank lines', initial: '1' } },
+  ansi: { label: 'ANSI cleanup', note: 'Strips terminal escape codes and collapses carriage-return progress lines to what the terminal showed (log/search output only).' },
+  fold: { label: 'Fold repeats', note: 'Collapses runs of exactly identical log lines into one line plus a count (log/search output only).', option: { key: 'min_repeat', label: 'Minimum run', initial: '3' } },
   caveman: { label: 'Caveman', note: 'Deterministic prose condensation with protected spans and safety gates.', option: { key: 'intensity', label: 'Intensity', initial: 'lite', values: ['lite', 'standard'] } },
 };
 const ENGINE_IDS = Object.keys(ENGINE_INFO);
@@ -132,7 +134,7 @@ export default function Compression() {
     if (!draft) return;
     if (draft.stages.some((s) => s.engine === 'caveman' && !['lite', 'standard'].includes(s.option.trim())))
       return setErr('Caveman intensity must be lite or standard.');
-    if (draft.stages.some((s) => ['rtk', 'headroom', 'lite'].includes(s.engine) && (!Number.isInteger(Number(s.option)) || Number(s.option) < 0)))
+    if (draft.stages.some((s) => ['rtk', 'headroom', 'lite', 'fold'].includes(s.engine) && (!Number.isInteger(Number(s.option)) || Number(s.option) < 0)))
       return setErr('Numeric stage options must be non-negative whole numbers.');
     if (draft.stages.some((s) => s.engine === 'rtk' && s.toolClasses?.trim() && parseToolClasses(s.toolClasses) === null))
       return setErr('RTK tool classes must be "name=log|search|preserve", comma-separated.');

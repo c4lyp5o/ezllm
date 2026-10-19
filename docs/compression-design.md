@@ -216,6 +216,24 @@ Non-noise middle lines drop too — that is the point (line 2000 of a build log 
 the error-class always wins, so a wall-of-errors output simply fails the ratio floor and
 passes through untouched.
 
+### `ansi` and `fold` — terminal output, before `rtk` (2026-10-19)
+
+Both act on **log- and search-class** tool output only (the same classes as
+rtk, so `tool_classes` binds them); file reads and unknown tools are left
+alone, JSON is never edited. Place them before `rtk` so its head/tail budget
+is spent on real lines.
+
+- **`ansi`** removes what a terminal would never have displayed: escape
+  sequences (colour, cursor control, window titles, charset switches), and
+  lines rewritten in place — `\r` returns to column 0, `\b` steps left, later
+  characters overwrite earlier ones (a shorter overwrite keeps the old tail, as
+  on screen; a CRLF ending is just a line). Lossless for a reader of the screen.
+- **`fold`** collapses runs of **exactly** identical lines into the first line
+  plus `[ezllm/fold: previous line repeated N more times]`. Lines differing by
+  anything (a counter, a timestamp) are never folded; blank lines are lite's.
+  A run folds only when its marker is shorter than the lines it replaces.
+  Fences are atomic. Option `min_repeat` (default 3).
+
 ### `headroom` — lossless columnar JSON, `scope: tool_only`
 
 SmartCrusher-style tabular compaction (omniroute reference): a homogeneous JSON-array

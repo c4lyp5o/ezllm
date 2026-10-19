@@ -175,7 +175,7 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: read %s: %w", path, err)
 	}
 	cfg := Config{
-		Translation: Translation{Enabled: true},
+		Translation: Translation{Enabled: true, UniversalEnabled: true},
 		Retry:       Retry{RequestAttemptBudget: 8},
 		Compression: Compression{MinAbsoluteTokens: 24, MaxPipelineMS: 250, ShadowPct: 0},
 	}

@@ -47,7 +47,7 @@ const (
 // the full 36×3 = 108 inline calls a registration request would otherwise cost).
 const (
 	DefaultProbeMaxModels = 6
-	defaultStepTimeout    = 15 * time.Second
+	defaultStepTimeout    = 60 * time.Second
 )
 
 // Step is one completed stage, echoed to the UI as it finishes.
@@ -828,6 +828,28 @@ func (t *Tester) ProtocolSweep(
 			provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses,
 		}
 	}
+	// Anthropic-only providers never speak the OpenAI wire; probing them
+	// wastes time and leaves proto_openai NULL (which the router reads as
+	// "unproven" instead of "impossible"). Mark openai as proven-false up
+	// front so translated routing treats them correctly, and skip the
+	// openai surface in the sweep.
+	if isAnthropicOnlyKind(acct.Kind) {
+		filtered := surfaces[:0]
+		for _, s := range surfaces {
+			if s != provider.SurfaceOpenAI {
+				filtered = append(filtered, s)
+			}
+		}
+		surfaces = filtered
+		if t.db != nil {
+			for _, m := range models {
+				v := false
+				ptr := &v
+				t.setProto(acct.ID, m.ID, provider.SurfaceOpenAI, ptr)
+				_ = ptr
+			}
+		}
+	}
 	pace := &pacer{delay: acct.ProbeDelay}
 	counts := map[provider.Surface]int{}
 
@@ -1387,7 +1409,17 @@ func isPlanGatedError(status int, body []byte) bool {
 	return false
 }
 
-// sampleModels picks the protocol-probe sample: cheap-looking models first,
+// isAnthropicOnlyKind reports whether a provider kind natively speaks only
+// the Anthropic wire (POST /v1/messages). Such providers can never serve the
+// OpenAI wire natively, so marking proto_openai=false up front saves a
+// doomed probe and lets the router translate instead of refusing.
+func isAnthropicOnlyKind(k provider.Kind) bool {
+	switch k {
+	case provider.KindAnthropicCompat, provider.KindClaudeWeb:
+		return true
+	}
+	return false
+}
 // then the rest of the catalog, deduped and capped.
 func sampleModels(models []provider.ModelInfo, max int) []provider.ModelInfo {
 	if max <= 0 || len(models) == 0 {

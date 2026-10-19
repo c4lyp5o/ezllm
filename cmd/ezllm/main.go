@@ -95,10 +95,10 @@ func run() error {
 		}
 		cfg.Translation.Enabled = on
 	}
-	// Universal wire matrix: default OFF, opt-in at config or via this env
-	// (the no-rebuild rollback lever). A malformed value is a startup error,
-	// never a silent default: "off" turning "on" would activate three new
-	// cross-wire cells the operator did not ask for.
+	// Universal wire matrix: defaults ON now (LiteLLM-style: combos are universal
+	// by default). The env var EZLLM_TRANSLATION_UNIVERSAL_ENABLED remains the
+	// no-rebuild rollback lever (set to "false" to disable). A malformed value
+	// is a startup error, never a silent default.
 	if v := strings.TrimSpace(os.Getenv("EZLLM_TRANSLATION_UNIVERSAL_ENABLED")); v != "" {
 		on, perr := strconv.ParseBool(v)
 		if perr != nil {

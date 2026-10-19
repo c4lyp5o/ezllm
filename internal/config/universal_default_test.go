@@ -1,23 +1,33 @@
 package config
 
-// translation.universal_enabled is the opt-in for the three NEW matrix cells
+// translation.universal_enabled is the switch for the three NEW matrix cells
 // (chat→messages, responses→chat, responses→messages) and the universal
-// selection ordering. It defaults OFF: enabling it is an operator decision,
-// and a malformed value must fail boot NAMING the field — the yaml decoder's
-// own error only names the type, which leaves the operator guessing.
+// selection ordering. It defaults ON (LiteLLM-style: combos are universal by
+// default). A wrong-typed value still fails boot NAMING the field. The env var
+// EZLLM_TRANSLATION_UNIVERSAL_ENABLED remains the no-rebuild rollback lever.
 
 import (
 	"strings"
 	"testing"
 )
 
-func TestUniversalDefaultsOff(t *testing.T) {
+func TestUniversalDefaultsOn(t *testing.T) {
 	cfg, err := Load(writeTemp(t, validYAML))
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !cfg.Translation.UniversalEnabled {
+		t.Error("translation.universal_enabled must default ON when the key is absent")
+	}
+}
+
+func TestUniversalExplicitFalseWins(t *testing.T) {
+	cfg, err := Load(writeTemp(t, validYAML+"\ntranslation:\n  universal_enabled: false\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if cfg.Translation.UniversalEnabled {
-		t.Error("translation.universal_enabled must default OFF when the key is absent")
+		t.Error("an explicit universal_enabled: false must turn the matrix off")
 	}
 }
 
@@ -31,13 +41,13 @@ func TestUniversalExplicitTrueWins(t *testing.T) {
 	}
 }
 
-func TestUniversalPartialSectionKeepsOff(t *testing.T) {
+func TestUniversalPartialSectionKeepsOn(t *testing.T) {
 	cfg, err := Load(writeTemp(t, validYAML+"\ntranslation:\n  enabled: true\n  responses_models: [\"tp/openai/gpt-6.1-sol\"]\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Translation.UniversalEnabled {
-		t.Error("a partial translation section must keep universal_enabled OFF")
+	if !cfg.Translation.UniversalEnabled {
+		t.Error("a partial translation section must keep universal_enabled ON (default)")
 	}
 	if !cfg.Translation.Enabled {
 		t.Error("the partial section must keep translation.enabled ON")

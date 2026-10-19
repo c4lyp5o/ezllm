@@ -95,4 +95,7 @@ func TestAdminHealthServesRealCounts(t *testing.T) {
 	if !strings.Contains(body, "\"lost_rows\"") {
 		t.Errorf("health body lacks lost_rows: %s", body)
 	}
+	if !strings.Contains(body, "\"unmetered_rows\"") {
+		t.Errorf("health body lacks unmetered_rows: %s", body)
+	}
 }

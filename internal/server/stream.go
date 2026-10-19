@@ -47,10 +47,11 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	// 1) snapshot: the last 20 calls, same shape the dashboard already renders.
 	if recent, err := s.recentCalls(r.Context(), 20); err == nil {
 		if err := writeSSE(w, flusher, "snapshot", map[string]any{
-			"calls":   recent,
-			"ts":      time.Now().UTC().Format(time.RFC3339Nano),
-			"dropped": store.DroppedCalls(),
-			"lost":    store.LostRows(),
+			"calls":     recent,
+			"ts":        time.Now().UTC().Format(time.RFC3339Nano),
+			"dropped":   store.DroppedCalls(),
+			"lost":      store.LostRows(),
+			"unmetered": store.UnmeteredRows(),
 		}); err != nil {
 			return
 		}

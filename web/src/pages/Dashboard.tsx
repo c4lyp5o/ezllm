@@ -106,6 +106,14 @@ function HealthStrip({ o }: { o: Overview }) {
           dropped <Mono className="tnum text-[11px]">{nfmt(h.dropped_rows)}</Mono>
         </Chip>
       )}
+      {/* Recorded but not metered: the call is in the ledger, but model caps
+          and token budgets did not count it, so they read low by this much. */}
+      {(h.unmetered_rows ?? 0) > 0 && (
+        <Chip tone="warn" className="gap-2 px-2.5 py-1"
+          title="ledger rows the usage meter failed to count — model caps and token budgets under-count by these calls">
+          unmetered <Mono className="tnum text-[11px]">{nfmt(h.unmetered_rows ?? 0)}</Mono>
+        </Chip>
+      )}
       {/* A green "ok" pill signified nothing — the page responding IS ok. The
           pill earns its pixels only when the collector is actually degraded. */}
       {h.status !== 'ok' && (

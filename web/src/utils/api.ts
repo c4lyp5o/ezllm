@@ -297,7 +297,8 @@ export type UsageRow = { k: string; calls: number; tin: number; tout: number; cr
 
 export type Health = {
   status: string; version: string; schema_version: number; accounts: number; provider_keys: number;
-  models: number; combos: number; ledger_rows: number; dropped_rows: number; uptime_s: number;
+  models: number; combos: number; ledger_rows: number; dropped_rows: number;
+  lost_rows?: number; unmetered_rows?: number; uptime_s: number;
 };
 
 export type QuotaSnapshot = {

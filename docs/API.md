@@ -54,6 +54,12 @@ can never contain `/`, so a bare id is unambiguous. Disabled combos are never li
 
 Dashboard payload. One call so the first paint is a single round trip. (Admin-gated — this is
 where the detail that `/healthz` no longer leaks lives.)
+
+Ledger health counters (process lifetime, all should stay 0): `dropped_rows` — rows shed because
+the write queue was full; `lost_rows` — rows a failed flush discarded after its retry;
+`unmetered_rows` — rows that were recorded but not counted by the usage meter, so model caps and
+token budgets under-count by them. The live feed's `snapshot` event carries the same three as
+`dropped`, `lost` and `unmetered`.
 ```jsonc
 {
   "health": { "status":"ok", "version":"0.0.12", "schema_version":18, "accounts":5, "provider_keys":5,

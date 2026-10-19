@@ -446,6 +446,13 @@ func TestOverviewSingleRoundTrip(t *testing.T) {
 			t.Errorf("overview missing %q — the dashboard's first paint needs it", k)
 		}
 	}
+	// The dashboard's ledger warnings read these three counters.
+	health, _ := out["health"].(map[string]any)
+	for _, k := range []string{"dropped_rows", "lost_rows", "unmetered_rows"} {
+		if _, ok := health[k]; !ok {
+			t.Errorf("overview health missing %q", k)
+		}
+	}
 	if strings.Contains(resp, seededSecret) || strings.Contains(resp, "tok-admin") {
 		t.Errorf("overview leaked a secret")
 	}

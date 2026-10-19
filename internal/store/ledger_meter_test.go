@@ -25,14 +25,19 @@ func TestMeterFailureRollsBackTheWholeBatchMeter(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
+	before := UnmeteredRows()
 	if err := db.insertCalls(ctx, []Call{
 		{TS: now, AccountID: aid, Client: "c1", Model: "m1", TokensIn: 100, TokensOut: 50},
+		{TS: now, AccountID: aid, Client: "c1", Model: "m1", TokensIn: 1, TokensOut: 1},
 	}); err != nil {
 		t.Fatalf("a meter failure must not fail the insert: %v", err)
 	}
+	if got := UnmeteredRows() - before; got != 2 {
+		t.Errorf("unmetered_rows delta = %d, want 2 — an unmetered batch must be visible, not one Warn line", got)
+	}
 	var calls int
-	if err := db.r.QueryRow(`SELECT COUNT(*) FROM calls`).Scan(&calls); err != nil || calls != 1 {
-		t.Fatalf("calls rows = %d (err %v), want 1", calls, err)
+	if err := db.r.QueryRow(`SELECT COUNT(*) FROM calls`).Scan(&calls); err != nil || calls != 2 {
+		t.Fatalf("calls rows = %d (err %v), want 2", calls, err)
 	}
 	c, err := db.UsageFor(ctx, aid, "m1", CountBucket(now, "daily", time.UTC))
 	if err != nil {
@@ -81,5 +86,22 @@ func TestUsageDayReportTZMatchesSQLDayReport(t *testing.T) {
 	}
 	if byKey["2026-10-18"].AppliedSaved != 40 {
 		t.Errorf("applied_saved = %d, want 40 (only the applied row)", byKey["2026-10-18"].AppliedSaved)
+	}
+}
+
+// A healthy meter leaves the unmetered counter alone.
+func TestMeteredBatchLeavesUnmeteredRowsUnchanged(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+	aid := seedAccountForRule(t, db, "healthy")
+	if _, err := db.UpsertModelRule(ctx, ModelRule{AccountID: aid, ModelID: "m1", CapWindow: "daily", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	before := UnmeteredRows()
+	if err := db.insertCalls(ctx, []Call{{TS: time.Now().UTC(), AccountID: aid, Model: "m1", TokensIn: 5}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := UnmeteredRows() - before; got != 0 {
+		t.Errorf("unmetered_rows delta = %d on a healthy batch, want 0", got)
 	}
 }

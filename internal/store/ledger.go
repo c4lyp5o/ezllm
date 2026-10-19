@@ -274,6 +274,15 @@ var lostRows atomic.Int64
 // LostRows reports how many rows failed flushes discarded (should stay 0).
 func LostRows() int64 { return lostRows.Load() }
 
+// unmeteredRows counts rows that reached the ledger but not the usage meter:
+// the meter is best-effort inside the insert, so its failure rolls back only
+// the counter bumps — and model caps and client budgets under-count by those
+// rows. Without this number that gap was one Warn line and nothing to watch.
+var unmeteredRows atomic.Int64
+
+// UnmeteredRows reports how many committed rows were not metered (should stay 0).
+func UnmeteredRows() int64 { return unmeteredRows.Load() }
+
 // ledgerLoop batches inserts: flush every BatchSize rows or BatchWait, whichever
 // comes first, and on shutdown or an explicit barrier.
 func (d *DB) ledgerLoop(batchSize int, batchWait time.Duration) {
@@ -439,7 +448,9 @@ INSERT INTO calls (
 	if _, err := tx.ExecContext(ctx, `SAVEPOINT meter`); err != nil {
 		return err
 	}
+	metered := true
 	if err := d.meterInTx(ctx, tx, rows); err != nil {
+		metered = false
 		slog.Warn("usage meter bump failed; batch not metered", "rows", len(rows), "err", err)
 		if _, rerr := tx.ExecContext(ctx, `ROLLBACK TO meter`); rerr != nil {
 			return rerr
@@ -448,7 +459,15 @@ INSERT INTO calls (
 	if _, err := tx.ExecContext(ctx, `RELEASE meter`); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	// Counted only once the rows are durable: a commit that fails is retried
+	// by the ledger loop, and counting before it would count those rows twice.
+	if !metered {
+		unmeteredRows.Add(int64(len(rows)))
+	}
+	return nil
 }
 
 // meterInTx resolves each model's meter window (from its rule) then folds the

@@ -1115,6 +1115,7 @@ func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
 		"ledger_span":        map[string]string{"oldest": oldest, "newest": newest},
 		"dropped_rows":       store.DroppedCalls(),
 		"lost_rows":          store.LostRows(),
+		"unmetered_rows":     store.UnmeteredRows(),
 		"endpoint_cooldowns": cooldowns,
 		"uptime_s":           int(time.Since(s.started).Seconds()),
 	})

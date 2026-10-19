@@ -267,6 +267,7 @@ func (s *Server) healthSnapshot(ctx context.Context) (map[string]any, error) {
 		"ledger_span":    map[string]string{"oldest": oldest, "newest": newest},
 		"dropped_rows":   store.DroppedCalls(),
 		"lost_rows":      store.LostRows(),
+		"unmetered_rows": store.UnmeteredRows(),
 		"uptime_s":       int(time.Since(s.started).Seconds()),
 	}, nil
 }

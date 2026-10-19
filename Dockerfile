@@ -1,8 +1,10 @@
 # ezllm — OpenAI/Anthropic-compatible LLM router.
 #
 # Static by design: SQLite is pure-Go (modernc.org/sqlite), so CGO_ENABLED=0
-# yields a single static binary. That is what makes a distroless runtime
-# possible — no libc, no shell, no package manager for an attacker to reuse.
+# yields a single static binary. That is what keeps the BUILD free of libc — the
+# runtime stage below carries glibc only because the optional Claude
+# subscription surface execs the host-mounted Claude Code CLI (see below):
+# no shell, no package manager for an attacker to reuse.
 # README "Build & run" states this intent; keep it true.
 #
 # Build context needs web/dist because cmd/ezllm embeds it via //go:embed
@@ -33,10 +35,15 @@ RUN apk add --no-cache file >/dev/null 2>&1 \
  || { echo "FATAL: binary is not static; distroless runtime will fail"; exit 1; }
 
 # ── Stage 2: runtime ────────────────────────────────────────────────────────
-# :nonroot runs as uid 65532; static variant carries CA certs (needed for
-# HTTPS to every LLM provider) but NO shell — there is nothing to exec for a
-# HEALTHCHECK, so health is probed from outside the container (see README).
-FROM gcr.io/distroless/static-debian12:nonroot
+# distroless/base (NOT /static): the Claude subscription surface spawns the
+# official Claude Code CLI, which is bind-mounted from the host and is a
+# glibc-dynamic ELF (interpreter /lib64/ld-linux-x86-64.so.2, links libc/librt/
+# libpthread/libdl/libm — measured with ldd). On distroless/static that exec
+# fails with the misleading "no such file or directory" because the loader is
+# absent. base carries glibc + CA certs + NSS (DNS resolution needs libnss_dns,
+# which ldd does not list) but still no shell and no package manager. The ezllm
+# binary itself remains static.
+FROM gcr.io/distroless/base-debian12:nonroot
 
 COPY --from=builder /out/ezllm /app/ezllm
 
@@ -55,6 +62,13 @@ ENV EZLLM_DATA_DIR=/data
 # loopback, so container users MUST override this to serve anything.
 ENV EZLLM_ADDR=0.0.0.0:20129
 ENV TZ=Asia/Kuala_Lumpur
+
+# Claude subscription surface. OFF in a bare `docker run` — it needs the
+# official CLI binary and a subscription login bind-mounted, which only
+# compose.yml wires up. Never bake either into the image.
+ENV EZLLM_CLAUDE_BRIDGE=off
+ENV EZLLM_CLAUDE_BIN=/opt/claude/claude
+ENV EZLLM_CLAUDE_CONFIG_DIR=/claude-sub
 
 VOLUME ["/data"]
 EXPOSE 20129

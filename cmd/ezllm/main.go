@@ -299,6 +299,12 @@ func run() error {
 		srv.StartPriceRefresh(ctx, 3, usageLoc)
 	}
 
+	// Claude subscription surface: loopback-only, off unless EZLLM_CLAUDE_BRIDGE=on.
+	// Enabling it without a usable CLI or login fails the boot loudly.
+	if err := startClaudeBridge(ctx, log); err != nil {
+		return err
+	}
+
 	httpSrv := &http.Server{
 		Addr:              addr,
 		Handler:           srv.Handler(),

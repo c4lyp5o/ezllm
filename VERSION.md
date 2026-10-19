@@ -9,9 +9,40 @@ dashboard health strip, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v0.0.18**
+**Current: v0.0.19**
 
 ---
+
+## v0.0.19 — 2026-10-19
+
+Claude subscription surface: **one container**, no sidecar.
+
+- **Design pivot.** The `claude-bridge` sidecar (M1's first shape) is deleted:
+  a second image, a second container, an inter-service token and a published
+  port for what is fundamentally "spawn this binary". The surface now runs
+  **in-process**, on a loopback-only listener (`127.0.0.1:8790`), and an ordinary
+  `anthropic-compatible` account dials it — no new provider kind, no router
+  change, no inter-service credential.
+- **The CLI is bind-mounted, not baked.** `~/.local/share/claude/versions/2.1.299`
+  mounts read-only at `/opt/claude/claude`; the subscription login mounts
+  read-write at `/claude-sub` (the CLI refreshes its own token there). The
+  account's shared secret auto-generates into `/data` on first boot, like the
+  master key.
+- **Runtime base: `distroless/base-debian12`** (was `/static`). Measured: the
+  Claude Code CLI is a glibc-dynamic ELF (`ld-linux`, libc/librt/libpthread/
+  libdl/libm), and on `distroless/static` the exec fails with "no such file or
+  directory" because the loader is absent — that failure was observed live.
+  Alpine is smaller (7.81 MB) but musl, so it cannot run this binary at all.
+  `base` is 20.8 MB and the smallest maintained base that runs it: glibc + CA
+  certs + NSS (DNS needs `libnss_dns`, invisible to `ldd`), still no shell. The
+  ezllm binary itself remains static.
+- Same rails as M1: text-only (`chat_tools_unsupported` before any spawn),
+  `CLAUDE_CODE_EXTRA_BODY` body injection, `shouldQuery:false` history replay,
+  native error codes mapped to honest statuses, boot asserts the CLI version and
+  flag surface (`--max-turns`/`--system-prompt-file` are accepted but absent from
+  `--help` on 2.1.299).
+- `EZLLM_CLAUDE_BRIDGE=on` enables it; without a usable CLI or login the boot
+  fails loudly. Loopback is enforced — the surface refuses a non-loopback bind.
 
 ## v0.0.18 — 2026-10-19
 

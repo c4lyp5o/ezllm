@@ -5,10 +5,11 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M14); full histor
 ## 2026-10-19 — claude-bridge M1: the Claude subscription as an ezllm account
 
 The Claude subscription becomes an ezllm account without the router learning a new
-trick. A sidecar, `claude-bridge`, serves an Anthropic Messages surface by driving
-the **official Claude Code CLI** against a subscription login; ezllm dials it as an
-ordinary `anthropic-compatible` account. The CLI stays the only thing that speaks to
-the subscription — the credential never leaves its own login store — which is the
+trick. A **loopback-only surface inside the ezllm process** serves an Anthropic
+Messages shape by driving the **official Claude Code CLI** — bind-mounted from the
+host — against a subscription login, and ezllm dials it as an ordinary
+`anthropic-compatible` account. The CLI stays the only thing that speaks to the
+subscription — the credential never leaves its own login store — which is the
 whole point: no OAuth-bearer reuse, no client impersonation
 (`docs/claude-subscription-design.md`, locked decision 1).
 
@@ -31,9 +32,12 @@ whole point: no OAuth-bearer reuse, no client impersonation
 - **Proof.** `tests/prove_claude_bridge.py` runs the real binary against the real
   CLI and a real Pro subscription: 13/13 (health contract, auth, catalog, streaming
   SSE, native usage fields, tool refusal, history fidelity).
-- **Container.** `Dockerfile.claude-bridge` stays distroless-static: the 265 MB CLI
-  binary is mounted read-only and pinned by path, the login directory is mounted
-  read-write (the CLI refreshes its own token), and nothing is published.
+- **Container.** One container, `distroless/base` runtime: the CLI is glibc-dynamic,
+  and on `/static` the exec fails with a misleading "no such file or directory"
+  (observed live); Alpine is musl and cannot run it at all. The CLI binary mounts
+  read-only and pinned by path, the login directory read-write (the CLI refreshes
+  its own token), the account secret auto-generates into `/data` like the master
+  key, and the surface binds loopback only — it refuses any other bind.
 
 ## 2026-10-18 — security milestones, native surfaces, playground, per-key budgets
 

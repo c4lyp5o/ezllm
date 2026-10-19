@@ -85,38 +85,54 @@ Findings that shape the build:
 client (Claude Code / Hermes / VS Code)
    └─> ezllm  ── combo claude-cc ──> account "claude-sub"
                                         │  kind: anthropic-compatible
-                                        │  base_url: http://claude-bridge:8790
-                                        │  key: bridge shared secret
+                                        │  base_url: http://127.0.0.1:8790/v1
+                                        │  key: shared secret from /data
                                         v
-                                  claude-bridge (new container)
+                              loopback listener, SAME process
                                         │  spawns: claude -p --input-format stream-json …
                                         v
-                                  api.anthropic.com  (subscription plan)
+                              api.anthropic.com  (subscription plan)
 ```
 
-**Bridge container.** Owns the CLI binary and the subscription login. Exposes an
-Anthropic-shaped HTTP surface on the compose network only (never published):
+**Loopback surface, in-process.** One container, one process: `internal/claudebridge`
+serves an Anthropic Messages surface on `127.0.0.1:8790`, and the ordinary
+`anthropic-compatible` account dials it. It binds loopback and **refuses any other
+bind** — the surface exists for exactly one consumer. Endpoints: `POST /v1/messages`
+(inference), `GET /v1/models` (the catalog the account syncs and the key-test
+oracle), `GET /healthz` (two fields, house contract), `GET /status` (operator
+detail: CLI version, login state, plan).
 
-- `POST /v1/messages` — the inference path.
-- `GET /v1/models` — the catalog the account syncs and the key-test oracle.
-- `GET /healthz` — binary present, login state, plan type (for the operator, not the router).
+What is mounted into the container:
 
-Container requirements: the documented `USER` / `LOGNAME` environment (the CLI's local login check
-reads process identity; without it a logged-in CLI reports `loggedIn: false` instantly with no
-upstream request), the `~/.claude-sub` login directory mounted **read-write** (the CLI refreshes
-its own token there), CPU/memory limits, and the pinned CLI binary mounted **read-only** — 265 MB
-with its own release cadence, so keeping it out of the image is what keeps the bridge image
-distroless-static and CI-buildable. Boot asserts the binary's version and flag surface.
+- the **official CLI binary**, read-only, pinned by path
+  (`~/.local/share/claude/versions/2.1.299` → `/opt/claude/claude`);
+- the **subscription login directory**, read-write (`~/.claude-sub` → `/claude-sub`,
+  because the CLI refreshes its own token there);
+- the account's **shared secret**, auto-generated into `/data` on first boot (the
+  master-key pattern: on the data volume, backed up with the ledger).
+
+Container requirements: `USER`/`LOGNAME` must be set (the CLI's local login check
+reads process identity; without them a logged-in CLI reports `logged-out` instantly
+with no upstream request), and the runtime base must carry **glibc** — measured:
+the CLI is a glibc-dynamic ELF (`ld-linux`, libc/librt/libpthread/libdl/libm), and
+on `distroless/static` the exec fails with a misleading "no such file or directory".
+Alpine cannot run it at all (musl). `distroless/base-debian12` (20.8 MB) is the
+smallest maintained base that works: glibc + CA certs + NSS (`libnss_dns`, needed
+for DNS, is invisible to `ldd`), still no shell and no package manager.
 
 **ezllm side: no new code path.** It is an ordinary `anthropic-compatible` account — the existing
 adapter already speaks `/v1/messages` with `x-api-key`, the existing usage tap reads the native
 Anthropic envelope, and native SSE passes through byte-for-byte with no translation cell. Nothing
 in `internal/router`, `internal/proxy` or `internal/translate` needs a new concept.
 
-**Rejected alternatives.** Baking Node + the CLI into the ezllm image (drags a JS runtime and a
-version-coupled subprocess supervisor into the public gateway, and forces an image rebuild per CLI
-release); running a Hermes instance as a CLI-driving proxy and dialing it as an OpenAI-compatible
-upstream (two agent harnesses stacked in the request path).
+**Rejected alternatives.** A separate `claude-bridge` sidecar container — built first,
+then deleted: a second image, a second container, an inter-service token and a port
+for what is fundamentally "spawn this binary", and the isolation it bought is modest
+on one box (ezllm already holds every provider key, encrypted at rest). Baking Node +
+the CLI into the ezllm image (a JS runtime and a version-coupled subprocess supervisor
+inside the public gateway, plus an image rebuild per CLI release). Running a Hermes
+instance as a CLI-driving proxy and dialing it as an OpenAI-compatible upstream (two
+agent harnesses stacked in the request path).
 
 ## 4. Bridge request contract
 
@@ -209,7 +225,9 @@ is the container rollback. `claude-web` and every existing account are untouched
 1. The official Claude Code executable is the only driver of the subscription; no OAuth-bearer
    reuse, no client impersonation.
 2. Nothing is installed into Hermes; Hermes reaches the subscription only through ezllm.
-3. The CLI lives in a **separate bridge container**; no Node (or CLI) inside the ezllm image.
+3. The surface runs **in-process** on a loopback-only listener inside the ezllm container; the CLI
+   is **bind-mounted** from the host (never baked into an image) and there is no Node anywhere. The
+   runtime base is `distroless/base` because the CLI is a glibc-dynamic binary (measured).
 4. The ezllm side is a plain `anthropic-compatible` account — no new kind, surface or translation
    cell.
 5. The subscription is reachable only through a Claude-Code-only combo; never a default hop, never
@@ -218,9 +236,10 @@ is the container rollback. `claude-web` and every existing account are untouched
 7. Build order M1 → M2 → M3, M3 gated on measurement.
 8. M1 refuses tool-bearing requests explicitly instead of dropping tools silently.
 9. Usage is declared EXCLUSIVE (native Anthropic convention); nothing is synthesized.
-10. The login directory `~/.claude-sub` is mounted into the bridge read-write; `USER`/`LOGNAME` are
-    set in the container.
-11. The bridge image pins CLI 2.1.299 and asserts its flags and login at boot.
+10. The login directory `~/.claude-sub` mounts read-write (`/claude-sub`) and the CLI binary mounts
+    read-only (`/opt/claude/claude`, pinned to 2.1.299); `USER`/`LOGNAME` are set in the container.
+11. Boot asserts the CLI's version, flag surface and login state; a CLI upgrade means re-pointing
+    the mount and re-running the live proof.
 12. Calypso is the only gate for push and deploy.
 
 ## 10. Open items for M1

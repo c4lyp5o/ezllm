@@ -32,6 +32,18 @@ services:
       # path or set EZLLM_MASTER_KEY directly. Losing it loses every provider key.
       EZLLM_MASTER_KEY_FILE: ${EZLLM_MASTER_KEY_FILE:-/data/ezllm-master.key}
 
+      # Claude subscription surface (loopback-only, an ordinary
+      # anthropic-compatible account dials it). Needs the two mounts below; set
+      # EZLLM_CLAUDE_BRIDGE=off on a host without a Claude Code CLI + login.
+      EZLLM_CLAUDE_BRIDGE: ${EZLLM_CLAUDE_BRIDGE:-on}
+      EZLLM_CLAUDE_BIN: /opt/claude/claude
+      EZLLM_CLAUDE_CONFIG_DIR: /claude-sub
+      # The CLI's local login check reads process identity: without these two it
+      # reports logged-out instantly and every subscription request fails. They
+      # must name the owner of the mounted login directory.
+      USER: ${CLAUDE_BRIDGE_USER:-calypso}
+      LOGNAME: ${CLAUDE_BRIDGE_USER:-calypso}
+
     # All credentials are dashboard-managed and persisted in the SQLite volume.
 
     volumes:
@@ -42,6 +54,15 @@ services:
       # root — pointing a staging instance at it would open prod's SQLite from
       # a second process:  EZLLM_DATA=./data-staging docker compose up -d
       - "${EZLLM_DATA:-./data}:/data"
+
+      # Claude subscription surface: the official CLI binary (pinned by this
+      # path — a CLI upgrade means re-pointing it and re-running the live proof)
+      # and the subscription login. The CLI mount is read-only; the login is
+      # read-write because the CLI refreshes its own token there. The account's
+      # shared secret auto-generates into /data on first boot, so it is backed up
+      # with the ledger.
+      - ${CLAUDE_CLI_BIN:-/home/calypso/.local/share/claude/versions/2.1.299}:/opt/claude/claude:ro
+      - ${CLAUDE_SUB_DIR:-/home/calypso/.claude-sub}:/claude-sub
 
 # Optional: front the dashboard with traefik (uncomment and adjust the host).
 #   networks: { traefik_default: { external: true } }

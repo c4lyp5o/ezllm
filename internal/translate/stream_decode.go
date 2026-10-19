@@ -338,15 +338,17 @@ func (d *eventDecoder) messages(name string, b []byte, top map[string]json.RawMe
 			Usage json.RawMessage `json:"usage"`
 		} `json:"message"`
 		Block struct {
-			Type  string          `json:"type"`
-			Text  string          `json:"text"`
-			ID    string          `json:"id"`
-			Name  string          `json:"name"`
-			Input json.RawMessage `json:"input"`
+			Type     string          `json:"type"`
+			Text     string          `json:"text"`
+			Thinking string          `json:"thinking"`
+			ID       string          `json:"id"`
+			Name     string          `json:"name"`
+			Input    json.RawMessage `json:"input"`
 		} `json:"content_block"`
 		Delta struct {
 			Type     string  `json:"type"`
 			Text     string  `json:"text"`
+			Thinking string  `json:"thinking"`
 			Partial  string  `json:"partial_json"`
 			Stop     string  `json:"stop_reason"`
 			Sequence *string `json:"stop_sequence"`
@@ -381,12 +383,20 @@ func (d *eventDecoder) messages(name string, b []byte, top map[string]json.RawMe
 				out = append(out, Event{Kind: EventArgumentsDelta, Key: key, Delta: string(e.Block.Input)})
 			}
 			return out, nil
+		case "thinking":
+			// Visible reasoning (summarized when the request asked for
+			// it). The chat encoder carries it as reasoning_content; the
+			// others drop it. It is never part of the answer's text.
+			out := d.open(key, Block{Kind: BlockReasoning}, "", e.Index, 0)
+			if e.Block.Thinking != "" {
+				out = append(out, Event{Kind: EventTextDelta, Key: key, Delta: e.Block.Thinking})
+			}
+			return out, nil
 		default:
-			// thinking (current models always think), redacted_thinking,
-			// server-tool use and results: none is output a client of
-			// another wire can render or act on. The block is consumed
-			// whole — its deltas and stop included — so the answer that
-			// follows streams through.
+			// redacted_thinking, server-tool use and results: none is
+			// output a client of another wire can render or act on. The
+			// block is consumed whole — its deltas and stop included — so
+			// the answer that follows streams through.
 			if d.skipped == nil {
 				d.skipped = map[string]bool{}
 			}
@@ -403,11 +413,16 @@ func (d *eventDecoder) messages(name string, b []byte, top map[string]json.RawMe
 		switch e.Delta.Type {
 		case "text_delta":
 			return []Event{{Kind: EventTextDelta, Key: key, Delta: e.Delta.Text}}, nil
+		case "thinking_delta":
+			if e.Delta.Thinking == "" {
+				return nil, nil
+			}
+			return []Event{{Kind: EventTextDelta, Key: key, Delta: e.Delta.Thinking}}, nil
 		case "input_json_delta":
 			return []Event{{Kind: EventArgumentsDelta, Key: key, Delta: e.Delta.Partial}}, nil
 		default:
-			// thinking_delta, signature_delta, citations_delta: annotations
-			// of a block, not its text.
+			// signature_delta, citations_delta: annotations of a block,
+			// not its text.
 			return nil, nil
 		}
 	case "content_block_stop":

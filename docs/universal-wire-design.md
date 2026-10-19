@@ -97,6 +97,19 @@ refuses — it never falls through to the model swap.
   ids outside `[A-Za-z0-9_-]` are rewritten byte-wise (`functions.read:0` → `functions_read_0`,
   the same on the `tool_use` and its `tool_result`); empty turns are dropped and consecutive
   same-role turns merged; `parallel_tool_calls:false` becomes `disable_parallel_tool_use`.
+- **Messages encoding follows the destination model** (`translate/claude_models.go`, matched on
+  the Claude id wherever the provider puts it — `anthropic/claude-sonnet-5.5`,
+  `us.anthropic.claude-opus-4-8`, `claude-haiku-5-5[1m]`; any other id is untouched):
+  `temperature`/`top_p` are dropped for Opus 4.7+, every 5.x model, Fable and Mythos (they
+  reject them); a forced `tool_choice` on Fable 5.1, Mythos 5.1, Opus 5.5 and Sonnet 5.5 (which
+  reject forcing) becomes `auto` plus a one-line instruction appended after the cache
+  breakpoints, so the cached prefix is unchanged; and a model that thinks by default (5.x, Fable,
+  Mythos) gets `thinking: {type: adaptive, display: summarized}` — visibility only, same
+  thinking and billing — unless a forced choice remains, where an explicit thinking parameter
+  would be refused.
+- **Reasoning reaches chat clients**: a Messages `thinking` block (stream or not) becomes
+  `reasoning_content` on the chat wire, never part of `content`. The Responses and Messages
+  encoders drop it; it is never sent back upstream.
 - **Prompt caching crosses onto Messages**: the client's own `cache_control` markers (content
   parts, or a message-level marker) are carried, capped at four (the first plus the newest
   three). A body with none gets the standard two — end of system, end of the newest message —
@@ -108,9 +121,9 @@ refuses — it never falls through to the model swap.
   (comments, CRLF, multiline data, EOF-tail compatibility). Upstream item id, public tool call
   id, source index and client encoder index stay distinct; argument fragments stay strings until
   the block closes. Strict mode verifies the terminal output against the delivered deltas and
-  refuses a contradiction. A Messages source's non-portable blocks — `thinking` (current models
-  always think), `redacted_thinking`, server-tool use and results — are consumed whole, deltas
-  and stop included, and annotation deltas (`citations_delta`, `signature_delta`) are ignored;
+  refuses a contradiction. A Messages source's non-portable blocks — `redacted_thinking`,
+  server-tool use and results — are consumed whole, deltas and stop included (`thinking` is
+  carried as reasoning, above), and annotation deltas (`citations_delta`, `signature_delta`) are ignored;
   `model_context_window_exceeded` is a length stop and `pause_turn` a completed turn. A truly
   unknown stop reason still fails.
 

@@ -44,6 +44,10 @@ const (
 	// URL — a data: URI for base64 payloads, or an http(s) URL otherwise —
 	// so every wire can express it without a side channel.
 	BlockImage
+	// BlockReasoning is the model's visible reasoning (a Messages thinking
+	// summary) in a response. Only the chat encoders carry it, as
+	// reasoning_content; it is never sent back upstream.
+	BlockReasoning
 )
 
 // Block is one content element of a turn.

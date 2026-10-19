@@ -182,6 +182,8 @@ type eventEncoder struct {
 	current  string
 	calls    int
 	seq      int
+	// dropped holds reasoning block keys on a wire with no place for them.
+	dropped map[string]bool
 }
 
 func streamIdentity() string {
@@ -409,6 +411,20 @@ func (e *eventEncoder) Emit(out *bytes.Buffer, v Event) error {
 		}
 		return nil
 	}
+	// Reasoning reaches chat clients only (as reasoning_content): on the
+	// Messages and Responses encoders the whole block is dropped.
+	if e.surface != provider.SurfaceOpenAI {
+		if v.Kind == EventBlockStart && v.Block.Kind == BlockReasoning {
+			if e.dropped == nil {
+				e.dropped = map[string]bool{}
+			}
+			e.dropped[v.Key] = true
+			return nil
+		}
+		if e.dropped[v.Key] && (v.Kind == EventTextDelta || v.Kind == EventBlockEnd) {
+			return nil
+		}
+	}
 	if !e.started {
 		e.start(out, "", 0)
 	}
@@ -465,7 +481,8 @@ func (e *eventEncoder) Emit(out *bytes.Buffer, v Event) error {
 			}
 			return invalidResponse("upstream interleaved tool argument streams; cannot map delta into unopened/stopped block")
 		}
-		if v.Kind == EventArgumentsDelta && b.event.Block.Kind != BlockCall || v.Kind == EventTextDelta && b.event.Block.Kind != BlockText {
+		textual := b.event.Block.Kind == BlockText || b.event.Block.Kind == BlockReasoning
+		if v.Kind == EventArgumentsDelta && b.event.Block.Kind != BlockCall || v.Kind == EventTextDelta && !textual {
 			return invalidResponse("delta kind does not match block")
 		}
 		// Accumulate only when required: Responses terminal output, or strict
@@ -482,7 +499,9 @@ func (e *eventEncoder) Emit(out *bytes.Buffer, v Event) error {
 		}
 		switch e.surface {
 		case provider.SurfaceOpenAI:
-			if v.Kind == EventTextDelta {
+			if b.event.Block.Kind == BlockReasoning {
+				e.chatChunk(out, `{"reasoning_content":`+mustMarshalString(v.Delta)+`}`, "null")
+			} else if v.Kind == EventTextDelta {
 				e.chatChunk(out, `{"content":`+mustMarshalString(v.Delta)+`}`, "null")
 			} else {
 				e.chatChunk(out, fmt.Sprintf(`{"tool_calls":[{"index":%d,"function":{"arguments":%s}}]}`, b.callIndex, mustMarshalString(v.Delta)), "null")

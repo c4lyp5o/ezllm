@@ -302,9 +302,13 @@ func DecodeResponse(body []byte, surface provider.Surface, opts CodecOptions) (*
 					return nil, invalidResponse(err.Error())
 				}
 				ir.Blocks = append(ir.Blocks, Block{Kind: BlockCall, CallID: b.ID, Name: b.Name, Arguments: argumentsFromInput(b.Input, b.ID)})
+			case "thinking":
+				if b.Thinking != "" {
+					ir.Blocks = append(ir.Blocks, Block{Kind: BlockReasoning, Text: b.Thinking})
+				}
 			default:
-				// thinking, redacted_thinking, server-tool blocks: not
-				// output a client of another wire can render or act on.
+				// redacted_thinking, server-tool blocks: not output a client
+				// of another wire can render or act on.
 			}
 		}
 	default:
@@ -376,6 +380,9 @@ func EncodeResponse(ir *ResponseIR, surface provider.Surface, model string, opts
 				}
 				msg.Content += b.Text
 			}
+			if b.Kind == BlockReasoning {
+				msg.ReasoningContent += b.Text
+			}
 			if b.Kind == BlockCall {
 				msg.ToolCalls = append(msg.ToolCalls, chatWireOutToolCall{ID: b.CallID, Type: "function", Function: chatWireOutFunction{Name: b.Name, Arguments: b.Arguments}})
 			}
@@ -428,6 +435,9 @@ func EncodeResponse(ir *ResponseIR, surface provider.Surface, model string, opts
 			e.id = "resp_" + e.id
 		}
 		for i, b := range ir.Blocks {
+			if b.Kind == BlockReasoning {
+				continue // no Responses reasoning item is synthesized
+			}
 			key := fmt.Sprint(i)
 			prefix := "msg_"
 			if b.Kind == BlockCall {

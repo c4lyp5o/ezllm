@@ -81,6 +81,9 @@ type chatWireOutMessage struct {
 	Role      string                `json:"role"`
 	Content   string                `json:"content,omitempty"`
 	ToolCalls []chatWireOutToolCall `json:"tool_calls,omitempty"`
+	// ReasoningContent is the de-facto chat field for visible reasoning
+	// (DeepSeek's name, read by Hermes and most chat clients).
+	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
 type chatWireOutToolCall struct {

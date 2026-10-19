@@ -241,8 +241,17 @@ func TestMessagesStreamWithThinkingReachesChat(t *testing.T) {
 		if r.Outcome() != FinishCompleted || !bytes.Contains(out, []byte("answer")) {
 			t.Fatalf("%s: outcome %q\n%s", to, r.Outcome(), out)
 		}
-		if bytes.Contains(out, []byte("let me see")) || bytes.Contains(out, []byte("srv_1")) {
+		if bytes.Contains(out, []byte("srv_1")) || bytes.Contains(out, []byte("sig")) {
 			t.Errorf("%s: non-portable block leaked: %s", to, out)
+		}
+		// Chat clients (Hermes) show reasoning from reasoning_content; it
+		// never mixes into the answer's content. Responses gets none.
+		wantReasoning := to == provider.SurfaceOpenAI
+		if got := bytes.Contains(out, []byte(`"reasoning_content":"let me see"`)); got != wantReasoning {
+			t.Errorf("%s: reasoning_content present=%v, want %v:\n%s", to, got, wantReasoning, out)
+		}
+		if bytes.Contains(out, []byte(`"content":"let me see"`)) || to != provider.SurfaceOpenAI && bytes.Contains(out, []byte("let me see")) {
+			t.Errorf("%s: thinking leaked into the answer: %s", to, out)
 		}
 	}
 }
@@ -273,5 +282,123 @@ func TestMessagesNewStopReasons(t *testing.T) {
 	r, out := codecStream(t, in, provider.SurfaceAnthropic, provider.SurfaceOpenAI, CodecOptions{MessagesUsage: UsageExclusive})
 	if r.Outcome() != FinishLength || !bytes.Contains(out, []byte(`"finish_reason":"length"`)) {
 		t.Fatalf("outcome %q\n%s", r.Outcome(), out)
+	}
+}
+
+func messagesFor(t *testing.T, body, model string) map[string]any {
+	t.Helper()
+	out, err := RequestUniversal([]byte(body), provider.SurfaceOpenAI, provider.SurfaceAnthropic, model)
+	if err != nil {
+		t.Fatalf("%s: %v", model, err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(out, &m); err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+// The newest Claude models reject sampling controls (Opus 4.7+, every 5.x,
+// Fable, Mythos); older ones honor them. The translated body follows the
+// model it is going to, whatever prefix or suffix the provider puts on the id.
+func TestMessagesSamplingFollowsTheModel(t *testing.T) {
+	body := `{"model":"m","temperature":0.7,"top_p":0.9,"messages":[{"role":"user","content":"x"}]}`
+	for _, model := range []string{"claude-opus-5-5", "anthropic/claude-sonnet-5.5", "claude-opus-4-7", "claude-haiku-5-5[1m]", "claude-fable-5-1", "us.anthropic.claude-opus-4-8", "claude-mythos-5"} {
+		m := messagesFor(t, body, model)
+		if m["temperature"] != nil || m["top_p"] != nil {
+			t.Errorf("%s: sampling sent to a model that rejects it: %v %v", model, m["temperature"], m["top_p"])
+		}
+	}
+	for _, model := range []string{"claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-opus-4-5-20251101", "claude-sonnet-4-20250514", "claude-3-7-sonnet-latest", "glm-5"} {
+		m := messagesFor(t, body, model)
+		if m["temperature"] != 0.7 || m["top_p"] != 0.9 {
+			t.Errorf("%s: sampling dropped for a model that honors it: %v %v", model, m["temperature"], m["top_p"])
+		}
+	}
+}
+
+// Fable 5.1, Mythos 5.1, Opus 5.5 and Sonnet 5.5 reject forced tool use. A
+// forced choice becomes auto plus an instruction at the very end of the
+// request — after the cache breakpoint, so the cached prefix is unchanged.
+// Models that accept forcing keep it.
+func TestMessagesForcedToolChoiceOnModelsThatRejectIt(t *testing.T) {
+	required := `{"model":"m","tool_choice":"required","messages":[{"role":"system","content":"s"},{"role":"user","content":"x"}],"tools":[{"type":"function","function":{"name":"ls","parameters":{"type":"object"}}}]}`
+	named := `{"model":"m","tool_choice":{"type":"function","function":{"name":"ls"}},"messages":[{"role":"user","content":"x"}],"tools":[{"type":"function","function":{"name":"ls","parameters":{"type":"object"}}}]}`
+	for _, tc := range []struct {
+		body, model, instr string
+	}{
+		{required, "claude-opus-5-5", "Respond by calling one of the available tools."},
+		{required, "anthropic/claude-sonnet-5.5", "Respond by calling one of the available tools."},
+		{named, "claude-fable-5-1", "Respond by calling the ls tool."},
+		{named, "claude-mythos-5-1", "Respond by calling the ls tool."},
+	} {
+		m := messagesFor(t, tc.body, tc.model)
+		if c, _ := m["tool_choice"].(map[string]any); c == nil || c["type"] != "auto" || c["name"] != nil {
+			t.Errorf("%s: tool_choice = %v, want auto", tc.model, m["tool_choice"])
+		}
+		msgs := m["messages"].([]any)
+		last := msgs[len(msgs)-1].(map[string]any)
+		blocks := last["content"].([]any)
+		tail := blocks[len(blocks)-1].(map[string]any)
+		if last["role"] != "user" || tail["text"] != tc.instr || tail["cache_control"] != nil {
+			t.Errorf("%s: last block = %v, want the instruction %q with no breakpoint", tc.model, tail, tc.instr)
+		}
+		if blocks[len(blocks)-2].(map[string]any)["cache_control"] == nil {
+			t.Errorf("%s: the breakpoint must stay on the client's own last block: %v", tc.model, blocks)
+		}
+	}
+	for model, want := range map[string]string{"claude-sonnet-4-6": "any", "claude-haiku-5-5": "any", "claude-opus-5": "any"} {
+		if c, _ := messagesFor(t, required, model)["tool_choice"].(map[string]any); c == nil || c["type"] != want {
+			t.Errorf("%s: tool_choice = %v, want %s", model, c, want)
+		}
+	}
+	if c, _ := messagesFor(t, named, "claude-fable-5")["tool_choice"].(map[string]any); c == nil || c["type"] != "tool" {
+		t.Errorf("claude-fable-5 accepts forcing: tool_choice = %v", c)
+	}
+}
+
+// Models that think by default return empty thinking unless asked to
+// summarize it. The translated request asks (display only: the model thinks
+// the same and is billed the same), and only on those models — on Opus 4.7/
+// 4.8 or Sonnet 4.6 a thinking parameter would TURN thinking on.
+func TestMessagesThinkingDisplayOnDefaultThinkingModels(t *testing.T) {
+	body := `{"model":"m","messages":[{"role":"user","content":"x"}]}`
+	for _, model := range []string{"claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1", "claude-opus-5"} {
+		th, _ := messagesFor(t, body, model)["thinking"].(map[string]any)
+		if th == nil || th["type"] != "adaptive" || th["display"] != "summarized" {
+			t.Errorf("%s: thinking = %v, want adaptive/summarized", model, th)
+		}
+	}
+	for _, model := range []string{"claude-opus-4-7", "claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5", "glm-5"} {
+		if th := messagesFor(t, body, model)["thinking"]; th != nil {
+			t.Errorf("%s: thinking = %v, want none", model, th)
+		}
+	}
+	// An explicit thinking parameter next to a forced tool choice is a 400
+	// where forcing is still allowed; the display request yields to it.
+	forced := `{"model":"m","tool_choice":"required","messages":[{"role":"user","content":"x"}],"tools":[{"type":"function","function":{"name":"ls","parameters":{"type":"object"}}}]}`
+	if th := messagesFor(t, forced, "claude-opus-5")["thinking"]; th != nil {
+		t.Errorf("claude-opus-5 with a forced choice: thinking = %v, want none", th)
+	}
+	if th := messagesFor(t, forced, "claude-opus-5-5")["thinking"]; th == nil {
+		t.Error("claude-opus-5-5: the unforced request should still ask for summarized thinking")
+	}
+}
+
+// A non-streamed answer's thinking reaches a chat client as the message's
+// reasoning_content, and nowhere on the other wires.
+func TestMessagesThinkingReachesChatResponse(t *testing.T) {
+	body := []byte(`{"id":"msg_1","type":"message","role":"assistant","stop_reason":"end_turn","content":[{"type":"thinking","thinking":"weighing it","signature":"s"},{"type":"text","text":"done"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
+	ir, err := DecodeResponse(body, provider.SurfaceAnthropic, CodecOptions{MessagesUsage: UsageExclusive})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat, _ := EncodeResponse(ir, provider.SurfaceOpenAI, "m", CodecOptions{})
+	if !bytes.Contains(chat, []byte(`"reasoning_content":"weighing it"`)) || !bytes.Contains(chat, []byte(`"content":"done"`)) {
+		t.Errorf("chat = %s", chat)
+	}
+	resp, _ := EncodeResponse(ir, provider.SurfaceResponses, "m", CodecOptions{})
+	if bytes.Contains(resp, []byte("weighing it")) || !bytes.Contains(resp, []byte("done")) {
+		t.Errorf("responses = %s", resp)
 	}
 }

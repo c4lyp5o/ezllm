@@ -35,6 +35,7 @@ type messagesInBlock struct {
 	ToolUseID string          `json:"tool_use_id"`
 	Content   json.RawMessage `json:"content"`
 	Source    json.RawMessage `json:"source"`
+	Thinking  string          `json:"thinking"`
 }
 
 // DecodeMessagesRequest parses an anthropic /v1/messages body into the IR.
@@ -263,6 +264,12 @@ type messagesOutRequest struct {
 	Stream        bool                 `json:"stream,omitempty"`
 	Tools         []AnthropicTool      `json:"tools,omitempty"`
 	ToolChoice    *AnthropicToolChoice `json:"tool_choice,omitempty"`
+	Thinking      *messagesThinking    `json:"thinking,omitempty"`
+}
+
+type messagesThinking struct {
+	Type    string `json:"type"`
+	Display string `json:"display,omitempty"`
 }
 
 type messagesOutMessage struct {
@@ -342,6 +349,11 @@ func cacheOf(b Block) json.RawMessage {
 // prompt caching across: the client's own breakpoints when it marked any
 // (at most four), otherwise the standard two — end of system, end of the
 // newest message — so a translated conversation caches like a native one.
+//
+// Then it follows the destination model (claude_models.go): sampling is
+// dropped where the model rejects it, a forced tool choice becomes auto plus
+// an instruction where forcing is rejected, and a model that thinks by
+// default is asked to summarize its thinking so a chat client can show it.
 func EncodeMessagesRequest(ir *RequestIR, upstreamModel string) ([]byte, error) {
 	maxTokens := defaultMessagesMaxTokens
 	if ir.MaxOutputTokens != nil {
@@ -474,7 +486,39 @@ func EncodeMessagesRequest(ir *RequestIR, upstreamModel string) ([]byte, error) 
 			out.ToolChoice.DisableParallelToolUse = true
 		}
 	}
+	if cm, ok := parseClaudeModel(upstreamModel); ok {
+		if cm.rejectsSampling() {
+			out.Temperature, out.TopP = nil, nil
+		}
+		if cm.rejectsForcedTools() {
+			unforceToolChoice(&out)
+		}
+		if cm.thinksByDefault() && (out.ToolChoice == nil || out.ToolChoice.Type == "auto" || out.ToolChoice.Type == ToolChoiceNone) {
+			out.Thinking = &messagesThinking{Type: "adaptive", Display: "summarized"}
+		}
+	}
 	return json.Marshal(out)
+}
+
+// unforceToolChoice turns a forced choice (any / a named tool) into auto plus
+// an instruction appended after everything else — after the cache
+// breakpoints too, so the cached prefix is the same as an unforced request's.
+func unforceToolChoice(out *messagesOutRequest) {
+	tc := out.ToolChoice
+	if tc == nil || tc.Type != "any" && tc.Type != "tool" {
+		return
+	}
+	instr := "Respond by calling one of the available tools."
+	if tc.Type == "tool" {
+		instr = "Respond by calling the " + tc.Name + " tool."
+	}
+	tc.Type, tc.Name = "auto", ""
+	blk := messagesOutBlock{Type: "text", Text: instr}
+	if n := len(out.Messages); n > 0 && out.Messages[n-1].Role == RoleUser {
+		out.Messages[n-1].Content = append(out.Messages[n-1].Content, blk)
+		return
+	}
+	out.Messages = append(out.Messages, messagesOutMessage{Role: RoleUser, Content: []messagesOutBlock{blk}})
 }
 
 // placeCacheBreakpoints keeps the request within the wire's breakpoint limit

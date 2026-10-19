@@ -30,7 +30,7 @@ type Stage struct {
 
 // KnownEngines is the shipped engine registry (M5: session_dedup + rtk,
 // M6.5 phase 2: headroom + lite, M7: caveman).
-var KnownEngines = map[string]bool{"session_dedup": true, "rtk": true, "headroom": true, "lite": true, "caveman": true, "budget": true}
+var KnownEngines = map[string]bool{"session_dedup": true, "rtk": true, "headroom": true, "lite": true, "caveman": true}
 
 // Profile is the runtime view of a compression_profiles row.
 type Profile struct {
@@ -103,9 +103,7 @@ type Result struct {
 	// RulesFired is caveman attribution: how many pack rules rewrote
 	// something. Zero for every other engine. Recorded so a surprising
 	// saving can be traced to prose condensation rather than guessed at.
-	RulesFired   int
-	ContextPre   int64
-	ContextSaved int64
+	RulesFired int
 	// Stages is the per-engine attribution (addendum #7): every stage that
 	// RAN, in order, with its before/after. It reconciles with Saved via the
 	// documented rule on StageStat.
@@ -284,13 +282,6 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 			res.Err = st.Engine + ": " + err.Error()
 			return body, res // contract rule 5
 		}
-		if st.Engine == "budget" {
-			res.ContextPre = beforeStage
-			postStage := EstimateTokens(string(mustMarshal(next)))
-			if beforeStage > postStage {
-				res.ContextSaved = beforeStage - postStage
-			}
-		}
 		postStage := EstimateTokens(string(mustMarshal(next)))
 		st := StageStat{Engine: st.Engine, Pre: beforeStage, Post: postStage, Fired: fired}
 		if beforeStage > postStage {
@@ -356,10 +347,10 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 	}
 
 	// Reassemble. Positional mapping (exact original order) is used when the
-	// pipeline preserved the message count — every engine except budget.
-	// A dropping engine (budget) shortens the slice, so exact positions are
-	// no longer known: committed forms keep their relative order first, then
-	// the survivors of the new work, then the exempt tail.
+	// pipeline preserved the message count. A dropping engine (session_dedup
+	// removing a repeated system message) shortens the slice, so exact
+	// positions are no longer known: committed forms keep their relative
+	// order first, then the survivors of the new work, then the exempt tail.
 	var rebuilt []any
 	if len(cur) == len(newWork) {
 		rebuilt = make([]any, 0, len(editable))
@@ -430,8 +421,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 
 // commitShipped freezes the shipped form of every processed message. It is a
 // no-op in legacy mode (no session/memo) and when a dropping engine ran
-// (positions are no longer aligned; budget + memo is a documented non-goal
-// of this scope).
+// (positions are no longer aligned).
 func commitShipped(session string, memo *SessionMemo, profileVersion string, p *Profile, editable []any, hit []bool, forms []any, cur []any, newWork []any, last int, msgs []any) {
 	if profileVersion == "" || len(cur) != len(newWork) {
 		return
@@ -465,8 +455,6 @@ func runEngine(st Stage, msgs []any) ([]any, int, error) {
 		// is attributable to a rule rather than a mystery.
 		out, fired := caveman(msgs, st.Options)
 		return out, fired, nil
-	case "budget":
-		return budget(msgs, st.Options), 0, nil
 	}
 	return nil, 0, fmt.Errorf("unknown engine %q", st.Engine)
 }
@@ -489,6 +477,17 @@ func integrityFailure(msgs []any) string {
 }
 
 func fences(s string) int { return strings.Count(s, "```") }
+
+// isJSONPayload reports whether text is a whole JSON object or array. Line
+// filters must never edit such content (contract rule 2, "never mid-JSON"),
+// whichever wire shape carried it.
+func isJSONPayload(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if !strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, "[") {
+		return false
+	}
+	return json.Valid([]byte(trimmed))
+}
 
 // textPieces flattens a message content (string or text-block array) into its
 // text strings. Non-text content yields nothing.

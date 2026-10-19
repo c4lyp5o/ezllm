@@ -3,10 +3,12 @@ package server
 import (
 	"strings"
 	"testing"
+
+	"github.com/c4lyp5o/ezllm/internal/compress"
 )
 
 // The supported-engines message must not drift from the registry. It was
-// hardcoded to five engines and silently omitted `budget`, so an operator
+// once hardcoded and silently omitted a registered engine, so an operator
 // typing a valid engine got an error that didn't list it as valid.
 func TestValidateStagesErrorListsEveryRegisteredEngine(t *testing.T) {
 	_, err := validateStages([]byte(`[{"engine":"nope"}]`))
@@ -14,12 +16,18 @@ func TestValidateStagesErrorListsEveryRegisteredEngine(t *testing.T) {
 		t.Fatal("expected unknown engine to be rejected")
 	}
 	msg := err.Error()
-	// budget is the registry entry the hardcoded string forgot.
-	if !strings.Contains(msg, "budget") {
-		t.Errorf("error message must mention every registered engine, missing \"budget\": %s", msg)
+	for name := range compress.KnownEngines {
+		if !strings.Contains(msg, name) {
+			t.Errorf("error message must list every registered engine, missing %q: %s", name, msg)
+		}
 	}
-	if !strings.Contains(msg, "session_dedup") || !strings.Contains(msg, "caveman") {
-		t.Errorf("error message lost engines it used to list: %s", msg)
+}
+
+// budget was deleted (2026-10-19): dropping whole messages broke prompt
+// caching and tool pairing. A profile naming it is an unknown engine now.
+func TestValidateStagesRejectsDeletedBudgetEngine(t *testing.T) {
+	if _, err := validateStages([]byte(`[{"engine":"budget","options":{"max_tokens":100}}]`)); err == nil {
+		t.Fatal("budget must be rejected: the engine no longer exists")
 	}
 }
 

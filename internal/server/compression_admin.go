@@ -58,7 +58,7 @@ func validateStages(raw json.RawMessage) (json.RawMessage, error) {
 
 // supportedEngines renders the registry keys in a STABLE order so this error
 // can never drift from KnownEngines. It previously hardcoded a 5-engine list
-// that was missing `budget` — the symptom of building the string by hand.
+// that silently missed an engine — the symptom of building it by hand.
 func supportedEngines() string {
 	names := make([]string, 0, len(compress.KnownEngines))
 	for n := range compress.KnownEngines {

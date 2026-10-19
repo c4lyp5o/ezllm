@@ -73,7 +73,6 @@ func TestPerEngineAttributionReconcilesWithNet(t *testing.T) {
 	if _, err := json.Marshal(res.Stages); err != nil {
 		t.Errorf("stages must marshal for the ledger: %v", err)
 	}
-	// A budget stage is recorded too (it is a real stage with a real cost).
 	if string(out) == "" {
 		t.Error("output must not be empty")
 	}

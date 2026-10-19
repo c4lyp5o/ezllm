@@ -431,8 +431,22 @@ INSERT INTO calls (
 	// is best-effort here: a failed bump must not fail the insert (losing a
 	// dashboard row is worse than a briefly stale counter, and counters are
 	// rebuildable from `calls` if they ever drift).
+	//
+	// Best-effort must still be all-or-nothing: the meter runs inside a
+	// savepoint, so a failure partway through (model counters bumped, client
+	// counters not, or half the groups) rolls back every bump of this batch
+	// instead of committing a meter that disagrees with itself.
+	if _, err := tx.ExecContext(ctx, `SAVEPOINT meter`); err != nil {
+		return err
+	}
 	if err := d.meterInTx(ctx, tx, rows); err != nil {
-		slog.Warn("usage meter bump failed", "err", err)
+		slog.Warn("usage meter bump failed; batch not metered", "rows", len(rows), "err", err)
+		if _, rerr := tx.ExecContext(ctx, `ROLLBACK TO meter`); rerr != nil {
+			return rerr
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `RELEASE meter`); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -678,7 +692,7 @@ SELECT ts, ttft_ms,
        COALESCE(tokens_cached_read,0), COALESCE(tokens_cached_write,0),
        COALESCE(reasoning_tokens,0), COALESCE(tokens_saved,0),
        COALESCE(context_tokens_pre,0), COALESCE(context_tokens_saved,0),
-       status
+       status, COALESCE(compression_applied,0)
 FROM calls
 WHERE ts >= ? AND ts < ?`, from.UTC().Format("2006-01-02T15:04:05.000Z"), to.UTC().Format("2006-01-02T15:04:05.000Z"))
 	if err != nil {
@@ -695,8 +709,8 @@ WHERE ts >= ? AND ts < ?`, from.UTC().Format("2006-01-02T15:04:05.000Z"), to.UTC
 		var ts string
 		var ttft sql.NullInt64
 		var tin, tout, cread, cwrite, reasoning, saved, cpre, csaved int64
-		var status int
-		if err := rs.Scan(&ts, &ttft, &tin, &tout, &cread, &cwrite, &reasoning, &saved, &cpre, &csaved, &status); err != nil {
+		var status, applied int
+		if err := rs.Scan(&ts, &ttft, &tin, &tout, &cread, &cwrite, &reasoning, &saved, &cpre, &csaved, &status, &applied); err != nil {
 			return nil, err
 		}
 		t, err := time.Parse("2006-01-02T15:04:05.000Z", ts)
@@ -716,6 +730,9 @@ WHERE ts >= ? AND ts < ?`, from.UTC().Format("2006-01-02T15:04:05.000Z"), to.UTC
 		a.row.CachedWrite += cwrite
 		a.row.Reasoning += reasoning
 		a.row.TokensSaved += saved
+		if applied == 1 {
+			a.row.AppliedSaved += saved // the SQL path's applied_saved, row for row
+		}
 		a.row.ContextPre += cpre
 		a.row.ContextSaved += csaved
 		if status >= 400 {

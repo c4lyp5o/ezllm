@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -185,13 +186,17 @@ func (m *SessionMemo) evictBindingsLocked() {
 
 // memoKey derives the ledger key: sha256(session | profile | messageHash).
 // The session id never appears in the clear inside the map.
-func memoKey(session, profile string, msgHash string) string {
+func memoKey(session, profile string, msgHash string, ord int) string {
 	h := sha256.New()
 	h.Write([]byte(session))
 	h.Write([]byte{0})
 	h.Write([]byte(profile))
 	h.Write([]byte{0})
 	h.Write([]byte(msgHash))
+	if ord > 0 { // occurrence 0 keys exactly as before ordinals existed
+		h.Write([]byte{0})
+		h.Write([]byte(strconv.Itoa(ord)))
+	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -206,6 +211,20 @@ func messageHash(m any) string {
 // Get returns the committed form for (session, profile, message) if present
 // and unexpired. ok=false means "no commitment — treat as new work".
 func (m *SessionMemo) Get(session, profile string, msg any) (shipped any, ok bool) {
+	return m.GetAt(session, profile, msg, 0)
+}
+
+// memoDropped is the committed form of a message that shipped as NOTHING
+// (session_dedup removed a repeat). Replaying it omits the message again.
+type memoDropped struct{}
+
+// GetAt is Get for the ord-th identical occurrence of msg in the conversation
+// (0 = first). Decisions that depend on position — dedup keeps the first
+// copy and drops later ones — need the occurrence in the key, or committing
+// "dropped" for a repeat would also drop the original. In an append-only
+// conversation an earlier message's occurrence number never changes, so the
+// key is as stable as the content.
+func (m *SessionMemo) GetAt(session, profile string, msg any, ord int) (shipped any, ok bool) {
 	if m == nil || session == "" || profile == "" {
 		return nil, false
 	}
@@ -213,7 +232,7 @@ func (m *SessionMemo) Get(session, profile string, msg any) (shipped any, ok boo
 	if h == "" {
 		return nil, false
 	}
-	key := memoKey(session, profile, h)
+	key := memoKey(session, profile, h, ord)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	e, exists := m.entries[key]
@@ -233,6 +252,11 @@ func (m *SessionMemo) Get(session, profile string, msg any) (shipped any, ok boo
 
 // Put records the shipped form for (session, profile, message).
 func (m *SessionMemo) Put(session, profile string, msg any, shipped any) {
+	m.PutAt(session, profile, msg, 0, shipped)
+}
+
+// PutAt is Put for the ord-th identical occurrence of msg (see GetAt).
+func (m *SessionMemo) PutAt(session, profile string, msg any, ord int, shipped any) {
 	if m == nil || session == "" || profile == "" || shipped == nil {
 		return
 	}
@@ -240,7 +264,7 @@ func (m *SessionMemo) Put(session, profile string, msg any, shipped any) {
 	if h == "" {
 		return
 	}
-	key := memoKey(session, profile, h)
+	key := memoKey(session, profile, h, ord)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.entries[key] = &memoEntry{shipped: shipped, usedAt: m.now()}
@@ -300,4 +324,52 @@ func (m *SessionMemo) Clear() {
 	m.entries = map[string]*memoEntry{}
 	m.binding = map[string]string{}
 	m.lru = map[string]int64{}
+}
+
+// ConversationKey derives the memo session for a request that names none, so
+// committed-prefix stability holds for every client — not only those that
+// send X-Ezllm-Session. It hashes only what exists from a conversation's FIRST
+// request and never changes after it: the client, the leading instructions
+// (top-level system / Responses instructions, and any leading system or
+// developer messages), and the first message after them. Anything later would
+// move the key as the conversation grows and defeat the memo.
+//
+// Two conversations that open identically share a key, which is safe: memo
+// entries are keyed by message content and occurrence, so they share only
+// identical answers. A client whose history is rewritten (a compaction, a
+// fork) opens a new key, which is exactly a new conversation.
+//
+// "" when the body has no conversation list (nothing to stabilize).
+func ConversationKey(client string, root map[string]any) string {
+	list, ok := root["messages"].([]any)
+	if !ok {
+		switch in := root["input"].(type) {
+		case []any:
+			list = in
+		case string:
+			list = []any{in}
+		}
+	}
+	if len(list) == 0 {
+		return ""
+	}
+	h := sha256.New()
+	write := func(v any) {
+		h.Write(mustMarshal(v))
+		h.Write([]byte{0})
+	}
+	h.Write([]byte(client))
+	h.Write([]byte{0})
+	write(root["system"])
+	write(root["instructions"])
+	for _, m := range list {
+		write(m)
+		if mm, ok := m.(map[string]any); ok {
+			if r, _ := mm["role"].(string); r == "system" || r == "developer" {
+				continue // still the instruction envelope
+			}
+		}
+		break // the first real message closes the key
+	}
+	return "auto:" + hex.EncodeToString(h.Sum(nil))[:32]
 }

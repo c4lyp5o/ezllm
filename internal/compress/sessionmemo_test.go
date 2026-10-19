@@ -1,6 +1,7 @@
 package compress
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -319,4 +320,69 @@ func TestMemoConcurrentSessions(t *testing.T) {
 		}(s)
 	}
 	wg.Wait()
+}
+
+// The derived key must stay the same as a conversation grows — in every wire
+// shape — and differ per client and per conversation opening.
+func TestConversationKeyStableAcrossGrowthInEveryShape(t *testing.T) {
+	sys := map[string]any{"role": "system", "content": "be terse"}
+	first := map[string]any{"role": "user", "content": "first ask"}
+	later := []any{map[string]any{"role": "assistant", "content": "a"}, map[string]any{"role": "user", "content": "b"}}
+	shapes := map[string]func(extra []any) map[string]any{
+		"chat": func(extra []any) map[string]any {
+			return map[string]any{"messages": append([]any{sys, first}, extra...)}
+		},
+		"messages": func(extra []any) map[string]any {
+			return map[string]any{"system": "be terse", "messages": append([]any{first}, extra...)}
+		},
+		"responses": func(extra []any) map[string]any {
+			return map[string]any{"instructions": "be terse", "input": append([]any{map[string]any{"type": "message", "role": "user", "content": "first ask"}}, extra...)}
+		},
+	}
+	for name, mk := range shapes {
+		k1, k2 := ConversationKey("hermes", mk(nil)), ConversationKey("hermes", mk(later))
+		if k1 == "" || k1 != k2 {
+			t.Errorf("%s: key moved as the conversation grew: %q -> %q", name, k1, k2)
+		}
+		if ConversationKey("claude-code", mk(nil)) == k1 {
+			t.Errorf("%s: two clients share a key", name)
+		}
+	}
+	other := map[string]any{"messages": []any{sys, map[string]any{"role": "user", "content": "another ask"}}}
+	if ConversationKey("hermes", other) == ConversationKey("hermes", shapes["chat"](nil)) {
+		t.Error("two conversations with different openings share a key")
+	}
+}
+
+// A request where session_dedup drops a repeat still COMMITS what shipped —
+// the drop at its occurrence, and the exempt last turn verbatim. It used to
+// commit nothing whenever a message was dropped, so the next request
+// re-compressed the turn that had just shipped untouched (here: lite trimming
+// q1's padding), changing an already-sent message and breaking the prefix.
+func TestDedupDropIsCommittedPerOccurrence(t *testing.T) {
+	memo := NewSessionMemo(nil)
+	p := memoProfile(Stage{Engine: "session_dedup"}, Stage{Engine: "lite"})
+	p.MinCompressRatio = 0
+	sys := textMsg("system", strings.Repeat("follow the style guide exactly. ", 40))
+	msgs1 := []any{sys, textMsg("user", "a"), textMsg("assistant", "b"), sys, textMsg("user", "q1   \n\n\n\n\nplease")}
+	out1, r1 := ApplyWithSession(bodyOf(msgs1...), p, nil, "auto:x", memo)
+	if !r1.Applied {
+		t.Fatalf("first request did not drop the repeat: %s", r1.Err)
+	}
+	msgs2 := append(append([]any{}, msgs1...), textMsg("assistant", "c"), textMsg("user", "q2"))
+	out2, _ := ApplyWithSession(bodyOf(msgs2...), p, nil, "auto:x", memo)
+	var b1, b2 map[string][]any
+	_ = json.Unmarshal(out1, &b1)
+	_ = json.Unmarshal(out2, &b2)
+	if len(b1["messages"]) != 4 {
+		t.Fatalf("request 1 shipped %d messages, want 4 (repeat dropped)", len(b1["messages"]))
+	}
+	// Request 2's first four shipped messages are request 1's shipped history
+	// (q1 included, exempt then and frozen since).
+	if string(mustMarshal(b2["messages"][:4])) != string(mustMarshal(b1["messages"])) {
+		t.Fatalf("shipped prefix changed between requests:\n1: %s\n2: %s", string(mustMarshal(b1["messages"])), string(mustMarshal(b2["messages"][:4])))
+	}
+	if strings.Count(string(out2), "follow the style guide") != strings.Count(string(out1), "follow the style guide") {
+		t.Error("the first system copy was dropped or the repeat came back")
+	}
 }

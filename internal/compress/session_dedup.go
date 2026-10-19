@@ -14,6 +14,11 @@ package compress
 // Dropping user/assistant repetition needs its own opt-in stage plus a test
 // pinning the conversation shape after the rewrite; it is NOT the documented
 // 92.5% case and must not ride along with system dedup.
+//
+// A dropped message becomes a nil placeholder rather than vanishing, so every
+// engine keeps positions aligned and the pipeline knows exactly which message
+// shipped as nothing (it commits that, too). The pipeline removes the nils
+// when it assembles the body.
 func sessionDedup(msgs []any) []any {
 	seen := make(map[string]bool, len(msgs))
 	out := make([]any, 0, len(msgs))
@@ -40,7 +45,8 @@ func sessionDedup(msgs []any) []any {
 			continue
 		}
 		if seen[key] {
-			continue // exact duplicate of an earlier block: drop
+			out = append(out, nil) // exact duplicate of an earlier block: drop
+			continue
 		}
 		seen[key] = true
 		out = append(out, m)

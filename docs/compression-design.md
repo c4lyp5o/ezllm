@@ -67,8 +67,22 @@ history to its original bytes and breaking the upstream prefix cache.
 - Already-shipped messages replay verbatim; the ratio floor judges the
   **new work only**.
 - The ledger is bounded (512/session, 8192 global), memory-only, lost on
-  restart (re-derivation is deterministic), and absent session id ⇒ the
-  legacy stateless path, unchanged.
+  restart (re-derivation is deterministic).
+- **Every request is covered (2026-10-19).** An explicit `X-Ezllm-Session`
+  wins; otherwise `compress.ConversationKey` derives one from what exists
+  from a conversation's first request and never changes: the client, the
+  leading instructions (top-level `system` / Responses `instructions` /
+  leading system or developer messages) and the first message after them.
+  No app has to send a header for its prefix to stay stable. Conversations
+  that open identically share a key safely — entries are keyed by content —
+  and a rewritten history (compaction, fork) opens a new key. The derived key
+  feeds the memo only; the ledger's `session_id` stays the explicit id.
+- Entries are keyed by content **and occurrence** (the nth identical
+  message), so position-dependent decisions commit exactly: a repeat that
+  `session_dedup` dropped is committed as dropped at its occurrence, and the
+  first copy keeps its own entry. (It used to commit nothing on any request
+  that dropped a message, so the next request re-compressed the turn that had
+  just shipped untouched.)
 
 ### 4. Corrections to earlier claims
 

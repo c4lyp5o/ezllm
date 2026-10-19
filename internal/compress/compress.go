@@ -252,13 +252,17 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 	}
 	useMemo := profileVersion != ""
 	hit := make([]bool, len(editable))
-	forms := make([]any, len(editable)) // committed forms for hit positions
+	forms := make([]any, len(editable)) // committed forms for hit positions; nil = shipped as nothing
 	newWork := make([]any, 0, len(editable))
+	var ord []int
 	if useMemo {
+		ord = occurrences(msgs)
 		for i, m := range editable {
-			if form, ok := memo.Get(session, profileVersion, m); ok {
+			if form, ok := memo.GetAt(session, profileVersion, m, ord[i]); ok {
 				hit[i] = true
-				forms[i] = form
+				if _, dropped := form.(memoDropped); !dropped {
+					forms[i] = form
+				}
 				continue
 			}
 			newWork = append(newWork, m)
@@ -282,13 +286,21 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 			break
 		}
 		stageStart := time.Now()
-		beforeStage := EstimateTokens(string(mustMarshal(cur)))
+		beforeStage := EstimateTokens(string(mustMarshal(present(cur))))
 		next, fired, err := runEngine(st, cur)
 		if err != nil {
 			res.Err = st.Engine + ": " + err.Error()
 			return body, res // contract rule 5
 		}
-		postStage := EstimateTokens(string(mustMarshal(next)))
+		// Every engine is position-preserving (session_dedup marks a drop
+		// with a nil placeholder), which is what lets committed forms and the
+		// exempt tail be spliced back by position. A count change is an
+		// engine bug: fail open rather than guess where messages went.
+		if len(next) != len(cur) {
+			res.Err = fmt.Sprintf("%s changed the message count (%d -> %d)", st.Engine, len(cur), len(next))
+			return body, res
+		}
+		postStage := EstimateTokens(string(mustMarshal(present(next))))
 		st := StageStat{Engine: st.Engine, Pre: beforeStage, Post: postStage, Fired: fired}
 		if beforeStage > postStage {
 			st.Saved = beforeStage - postStage
@@ -315,7 +327,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 			}
 			shadow = next
 		}
-		shadowPost := EstimateTokens(string(mustMarshal(shadow)))
+		shadowPost := EstimateTokens(string(mustMarshal(present(shadow))))
 		if shadowPre > shadowPost {
 			res.ShadowSaved = shadowPre - shadowPost
 		}
@@ -336,7 +348,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 	floorNote := ""
 	if len(newWork) > 0 {
 		newPre := EstimateTokens(string(mustMarshal(newWork)))
-		newPost := EstimateTokens(string(mustMarshal(cur)))
+		newPost := EstimateTokens(string(mustMarshal(present(cur))))
 		wouldSave := newPre - newPost
 		// Ratio floor first (cheapest check), then the ABSOLUTE floor
 		// (addendum #5): a ratio that passes on a tiny saving is still not
@@ -352,31 +364,20 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 		}
 	}
 
-	// Reassemble. Positional mapping (exact original order) is used when the
-	// pipeline preserved the message count. A dropping engine (session_dedup
-	// removing a repeated system message) shortens the slice, so exact
-	// positions are no longer known: committed forms keep their relative
-	// order first, then the survivors of the new work, then the exempt tail.
-	var rebuilt []any
-	if len(cur) == len(newWork) {
-		rebuilt = make([]any, 0, len(editable))
-		ni := 0
-		for i := range editable {
-			if hit[i] {
-				rebuilt = append(rebuilt, forms[i])
-				continue
-			}
-			rebuilt = append(rebuilt, cur[ni])
+	// Reassemble by position, in the exact original order: committed forms
+	// where the memo hit, the new work's output everywhere else. A nil on
+	// either side is a message that ships as nothing (a dropped repeat).
+	rebuilt := make([]any, 0, len(editable))
+	ni := 0
+	for i := range editable {
+		f := forms[i]
+		if !hit[i] {
+			f = cur[ni]
 			ni++
 		}
-	} else {
-		rebuilt = make([]any, 0, len(editable)+len(cur))
-		for _, f := range forms {
-			if f != nil {
-				rebuilt = append(rebuilt, f)
-			}
+		if f != nil {
+			rebuilt = append(rebuilt, f)
 		}
-		rebuilt = append(rebuilt, cur...)
 	}
 	finalMsgs := rebuilt
 	if p.ExemptLastTurn && last > 0 {
@@ -396,7 +397,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 		// The engines RAN and this body is what ships: freeze it verbatim so
 		// the same bytes go upstream next request (the exempt tail commit
 		// lives here too — it went upstream untouched).
-		commitShipped(session, memo, profileVersion, p, editable, hit, forms, cur, newWork, last, msgs)
+		commitShipped(session, memo, profileVersion, p, editable, hit, ord, cur, last, msgs)
 		return body, res
 	}
 
@@ -421,27 +422,56 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 	// design protects. The two-directional crossing therefore happens only
 	// through an EXPLICIT transition (a profile change starts a fresh
 	// namespace), never through silent re-compression.
-	commitShipped(session, memo, profileVersion, p, editable, hit, forms, cur, newWork, last, msgs)
+	commitShipped(session, memo, profileVersion, p, editable, hit, ord, cur, last, msgs)
 	return out, res
 }
 
-// commitShipped freezes the shipped form of every processed message. It is a
-// no-op in legacy mode (no session/memo) and when a dropping engine ran
-// (positions are no longer aligned).
-func commitShipped(session string, memo *SessionMemo, profileVersion string, p *Profile, editable []any, hit []bool, forms []any, cur []any, newWork []any, last int, msgs []any) {
-	if profileVersion == "" || len(cur) != len(newWork) {
+// commitShipped freezes the shipped form of every processed message,
+// including "shipped as nothing" for a dropped repeat. It is a no-op in
+// legacy mode (no session/memo).
+func commitShipped(session string, memo *SessionMemo, profileVersion string, p *Profile, editable []any, hit []bool, ord []int, cur []any, last int, msgs []any) {
+	if profileVersion == "" {
 		return
 	}
 	ni := 0
 	for i, m := range editable {
-		if !hit[i] {
-			memo.Put(session, profileVersion, m, cur[ni])
-			ni++
+		if hit[i] {
+			continue
 		}
+		var form any = cur[ni]
+		if form == nil {
+			form = memoDropped{}
+		}
+		memo.PutAt(session, profileVersion, m, ord[i], form)
+		ni++
 	}
 	if p.ExemptLastTurn && last > 0 {
-		memo.Put(session, profileVersion, msgs[last], msgs[last])
+		memo.PutAt(session, profileVersion, msgs[last], ord[last], msgs[last])
 	}
+}
+
+// occurrences numbers each message by how many identical messages precede it
+// (0 = first copy) — the position fact the memo key needs (SessionMemo.GetAt).
+func occurrences(msgs []any) []int {
+	seen := make(map[string]int, len(msgs))
+	out := make([]int, len(msgs))
+	for i, m := range msgs {
+		h := messageHash(m)
+		out[i] = seen[h]
+		seen[h]++
+	}
+	return out
+}
+
+// present drops the nil placeholders of dropped messages.
+func present(msgs []any) []any {
+	out := make([]any, 0, len(msgs))
+	for _, m := range msgs {
+		if m != nil {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // runEngine applies one stage. fired is only meaningful for caveman (the count
@@ -469,6 +499,9 @@ func runEngine(st Stage, msgs []any) ([]any, int, error) {
 // unbalanced code fence (rule 3). Empty string = pass.
 func integrityFailure(msgs []any) string {
 	for i, m := range msgs {
+		if m == nil {
+			continue // a dropped repeat ships as nothing
+		}
 		mm, ok := m.(map[string]any)
 		if !ok {
 			return fmt.Sprintf("message %d is not an object", i)

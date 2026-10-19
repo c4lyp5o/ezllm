@@ -93,8 +93,6 @@ func (s *Server) applyCompression(r *http.Request, requested string, body []byte
 	if prof == nil {
 		return body, compress.Result{Profile: profileName(nil, skip)}
 	}
-	// Committed-prefix stability: the operator/client session id (bounded by
-	// sessionOf) scopes the ledger; absent -> legacy stateless compression.
 	rt := compressProfileToRuntime(prof)
 	rt.MinAbsoluteTokens = s.compressionMinAbs
 	rt.MaxPipelineMS = s.compressionMaxMS
@@ -103,7 +101,14 @@ func (s *Server) applyCompression(r *http.Request, requested string, body []byte
 	if s.shadowSampler != nil {
 		rt.Shadow = s.shadowSampler()
 	}
-	out, res := compress.ApplyWithSession(body, rt, doc, sessionOf(r), s.sessMemo)
+	// Every request gets committed-prefix stability: an explicit session id
+	// wins, otherwise the conversation's own opening derives one. Used only
+	// for the memo — the ledger's session_id column stays the explicit id.
+	session := sessionOf(r)
+	if session == "" && doc != nil && doc.Err() == nil && doc.Map() != nil {
+		session = compress.ConversationKey(clientName(r), doc.Map())
+	}
+	out, res := compress.ApplyWithSession(body, rt, doc, session, s.sessMemo)
 	return out, res
 }
 

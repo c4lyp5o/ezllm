@@ -418,3 +418,42 @@ SELECT tokens_saved FROM calls ORDER BY ts DESC LIMIT 1`).Scan(&saved); err != n
 			summed, saved, diff)
 	}
 }
+
+// Committed-prefix stability for every client: two requests WITHOUT an
+// X-Ezllm-Session header. The turn that shipped untouched as the exempt last
+// message must reach the upstream unchanged on the next request too; without
+// a derived session the stateless pipeline compressed it one request later,
+// rewriting already-cached history on every turn.
+func TestCompressionPrefixStableWithoutSessionHeader(t *testing.T) {
+	var gotBody []byte
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"c1","choices":[{"message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`))
+	})
+	if _, err := h.db.UpsertCompressionProfile(context.Background(), store.CompressionProfile{
+		Name: "stable", Enabled: true, Stages: json.RawMessage(`[{"engine":"lite"}]`),
+		ExemptLastTurn: true, MinCompressRatio: 0, FailOpen: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	padded := "second ask" + strings.Repeat("   \n\n\n\n", 30) + "end"
+	send := func(msgs []any) []any {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{"model": "up/gpt-6-luna", "messages": msgs})
+		if code, _, resp := h.doWithExtra("POST", "/v1/chat/completions", "tok-infer", string(body),
+			map[string]string{"x-ezllm-compression": "stable"}); code != 200 {
+			t.Fatalf("inference = %d: %s", code, resp)
+		}
+		var up struct{ Messages []any }
+		_ = json.Unmarshal(gotBody, &up)
+		return up.Messages
+	}
+	first := []any{map[string]any{"role": "user", "content": "first ask"}, map[string]any{"role": "user", "content": padded}}
+	send(first)
+	second := send(append(append([]any{}, first...),
+		map[string]any{"role": "assistant", "content": "done"}, map[string]any{"role": "user", "content": "third"}))
+	if got := second[1].(map[string]any)["content"]; got != padded {
+		t.Fatalf("the turn that shipped untouched was rewritten on the next request:\n%q", got)
+	}
+}

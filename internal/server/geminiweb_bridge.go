@@ -139,10 +139,41 @@ func (b *geminiWebBridge) maybeRotate(ctx context.Context, entry *geminiwebClien
 	}
 	entry.rotatedAt = b.now()
 	keyID := entry.keyID
+	oldKey := entry.key
 	b.mu.Unlock()
 
 	newKey, err := entry.client.Rotate(ctx)
 	if err != nil {
+		// Best-effort: leave the client usable with its previous cookie.
+		b.mu.Lock()
+		entry.rotatedAt = time.Time{}
+		b.mu.Unlock()
+		return
+	}
+	// Re-scrape the access token against the rotated cookie. The SNlM0e
+	// access token is tied to the cookie session and must be refreshed
+	// after a rotation; otherwise the cached client keeps a stale token.
+	if err := entry.client.Init(ctx); err != nil {
+		// Revert to the pre-rotation session: rebuild the client from the
+		// old key so the stale (but still valid) cookies keep working.
+		c, perr := geminiweb.NewFromKey(oldKey)
+		if perr == nil {
+			if b.geminiBase != "" {
+				c.WithBase(b.geminiBase)
+			}
+			if ierr := c.Init(ctx); ierr == nil {
+				b.mu.Lock()
+				entry.client = c
+				entry.key = oldKey
+				entry.rotatedAt = time.Time{}
+				b.mu.Unlock()
+				return
+			}
+		}
+		b.mu.Lock()
+		entry.key = oldKey
+		entry.rotatedAt = time.Time{}
+		b.mu.Unlock()
 		return
 	}
 	b.mu.Lock()

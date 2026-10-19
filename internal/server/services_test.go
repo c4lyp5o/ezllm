@@ -429,3 +429,26 @@ func TestServiceTestCustomPromptReachesUpstream(t *testing.T) {
 		t.Errorf("oversized prompt -> %d %s, want 400", code, body)
 	}
 }
+
+// A service probe is real spend: the tokens the upstream reported land on its
+// ledger row, like any other call — not just a status.
+func TestServiceTestLedgersUsage(t *testing.T) {
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"object":"list","data":[{"embedding":[0.1]}],"usage":{"prompt_tokens":7,"total_tokens":7}}`))
+	})
+	if code, _, body := h.do("POST", "/admin/services/embeddings/test", "tok-admin", `{"model":"up/gpt-6-luna"}`); code != 200 {
+		t.Fatalf("probe: %d %s", code, body)
+	}
+	h.db.Flush()
+	rows, _ := h.db.RecentCalls(context.Background(), 5)
+	for _, row := range rows {
+		if row.Client == "service-test" {
+			if row.TokensIn != 7 || row.RawUsage == "" {
+				t.Fatalf("service-test row tokens_in=%d raw=%q, want 7 and the raw usage", row.TokensIn, row.RawUsage)
+			}
+			return
+		}
+	}
+	t.Fatalf("no service-test row: %+v", rows)
+}

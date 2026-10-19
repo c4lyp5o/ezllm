@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -160,12 +161,6 @@ func run() error {
 	defer db.Close()
 	log.Info("store ready", "path", dbPath, "schema", db.SchemaVersion())
 
-	// Seed accounts + client tokens from config (idempotent; config is bootstrap
-	// only — everything after M3 is managed through the admin API).
-	if err := seed(openCtx, db, cfg, log); err != nil {
-		return fmt.Errorf("seed: %w", err)
-	}
-
 	// ── wiring ──
 	client := upstreamClient(cfg)
 	addr := cfg.Listen
@@ -177,17 +172,18 @@ func run() error {
 	}
 
 	registry := provider.NewRegistry(client)
-	// gemini-web hops are rewritten to the in-process bridge; its base is the
-	// server's own listen address (loopback always works in-process, even
-	// when the listener binds all interfaces).
-	bridgeHost := strings.TrimPrefix(addr, ":")
-	if bridgeHost == "" {
-		bridgeHost = "127.0.0.1"
+	// gemini-web and claude-web hops are rewritten to their in-process
+	// bridges, served on this server's own listener. NewRegistry assumes the
+	// default listen address; the real one is known only here.
+	origin := bridgeOrigin(addr)
+	registry.Register(provider.NewGeminiWeb(origin+"/internal/geminiweb/v1", client))
+	registry.Register(provider.NewClaudeWeb(origin+"/internal/claudeweb/v1", client))
+
+	// Seed accounts from config (idempotent; config is bootstrap only —
+	// everything after M3 is managed through the admin API).
+	if err := seed(openCtx, db, cfg, registry, log); err != nil {
+		return fmt.Errorf("seed: %w", err)
 	}
-	if strings.HasPrefix(bridgeHost, ":") {
-		bridgeHost = "127.0.0.1" + bridgeHost
-	}
-	registry.Register(provider.NewGeminiWeb("http://"+bridgeHost+"/internal/geminiweb/v1", client))
 	dispatcher := proxy.NewDispatcher(client, registry)
 	dispatcher.SetRetries(cfg.Retry.Retries)
 	// Request-wide attempt budget (addendum #3): retries + failovers counted
@@ -348,64 +344,7 @@ func refreshProviderModels(ctx context.Context, db *store.DB, registry *provider
 		log.Warn("model refresh disabled: invalid interval", "interval", interval)
 		return
 	}
-	refresh := func() {
-		accounts, err := db.ListAccounts(ctx)
-		if err != nil {
-			log.Warn("model refresh: list accounts failed", "err", err)
-			return
-		}
-		for _, summary := range accounts {
-			if !summary.Enabled {
-				continue
-			}
-			keys, err := db.ListKeys(ctx, summary.ID)
-			if err != nil {
-				log.Warn("model refresh: list keys failed", "account", summary.Namespace, "err", err)
-				continue
-			}
-			var key string
-			for _, k := range keys {
-				if k.Enabled {
-					_, key, err = db.KeyForTest(ctx, k.ID)
-					if err == nil {
-						break
-					}
-				}
-			}
-			if key == "" {
-				continue
-			}
-			kind, err := provider.ParseKind(summary.Kind)
-			if err != nil {
-				log.Warn("model refresh: unknown provider kind", "account", summary.Namespace, "err", err)
-				continue
-			}
-			adapter, err := registry.Get(kind)
-			if err != nil {
-				log.Warn("model refresh: adapter unavailable", "account", summary.Namespace, "err", err)
-				continue
-			}
-			acct := provider.Account{
-				ID: summary.ID, Name: summary.Name, Namespace: summary.Namespace,
-				Kind: kind, BaseURL: summary.BaseURL, Enabled: summary.Enabled,
-				RequiresSessionHeader: summary.RequiresSession,
-				ProbeDelay:            time.Duration(summary.ProbeDelayMS) * time.Millisecond,
-				QuotaMode:             summary.QuotaMode, CapWindow: summary.CapWindow,
-				CapTokens: summary.CapTokens, Notes: summary.Notes,
-			}
-			models, err := adapter.ListModels(ctx, acct, key)
-			if err != nil {
-				log.Warn("model refresh failed; keeping last catalog", "account", summary.Namespace, "err", err)
-				continue
-			}
-			if err := db.UpsertModels(ctx, summary.ID, models); err != nil {
-				log.Warn("model refresh: persist failed", "account", summary.Namespace, "err", err)
-				continue
-			}
-			log.Info("model catalog refreshed", "account", summary.Namespace, "models", len(models))
-		}
-	}
-	refresh()
+	refreshCatalogsOnce(ctx, db, registry, log)
 	ticker := time.NewTicker(d)
 	defer ticker.Stop()
 	for {
@@ -413,9 +352,78 @@ func refreshProviderModels(ctx context.Context, db *store.DB, registry *provider
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			refresh()
+			refreshCatalogsOnce(ctx, db, registry, log)
 		}
 	}
+}
+
+// refreshCatalogsOnce re-lists every enabled account's catalog. The account
+// is read in full (store.AccountByID — custom headers, management key, usage
+// convention), the same view the router and the key test use; a hand-built
+// subset here once dropped custom headers from every refresh.
+func refreshCatalogsOnce(ctx context.Context, db *store.DB, registry *provider.Registry, log *slog.Logger) {
+	accounts, err := db.ListAccounts(ctx)
+	if err != nil {
+		log.Warn("model refresh: list accounts failed", "err", err)
+		return
+	}
+	for _, summary := range accounts {
+		if !summary.Enabled {
+			continue
+		}
+		keys, err := db.ListKeys(ctx, summary.ID)
+		if err != nil {
+			log.Warn("model refresh: list keys failed", "account", summary.Namespace, "err", err)
+			continue
+		}
+		var key string
+		for _, k := range keys {
+			if k.Enabled {
+				_, key, err = db.KeyForTest(ctx, k.ID)
+				if err == nil {
+					break
+				}
+			}
+		}
+		if key == "" {
+			continue
+		}
+		acct, err := db.AccountByID(ctx, summary.ID)
+		if err != nil {
+			log.Warn("model refresh: read account failed", "account", summary.Namespace, "err", err)
+			continue
+		}
+		adapter, err := registry.Get(acct.Kind)
+		if err != nil {
+			log.Warn("model refresh: adapter unavailable", "account", summary.Namespace, "err", err)
+			continue
+		}
+		models, err := adapter.ListModels(ctx, *acct, key)
+		if err != nil {
+			log.Warn("model refresh failed; keeping last catalog", "account", summary.Namespace, "err", err)
+			continue
+		}
+		if err := db.UpsertModels(ctx, summary.ID, models); err != nil {
+			log.Warn("model refresh: persist failed", "account", summary.Namespace, "err", err)
+			continue
+		}
+		log.Info("model catalog refreshed", "account", summary.Namespace, "models", len(models))
+	}
+}
+
+// bridgeOrigin is the URL this process dials to reach its OWN listener. A
+// wildcard bind (":port", 0.0.0.0, [::]) is not a dialable address on every
+// platform; loopback always is, in-process.
+func bridgeOrigin(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "http://" + addr
+	}
+	switch host {
+	case "", "0.0.0.0", "::":
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port)
 }
 
 // seedRateLimiter preloads each budgeted account's recent requests from the
@@ -448,7 +456,7 @@ func seedRateLimiter(ctx context.Context, db *store.DB, l *ratelimit.Limiter, lo
 }
 
 // Provider API keys are entered through the dashboard, never environment variables.
-func seed(ctx context.Context, db *store.DB, cfg *config.Config, log *slog.Logger) error {
+func seed(ctx context.Context, db *store.DB, cfg *config.Config, registry *provider.Registry, log *slog.Logger) error {
 	for name, p := range cfg.Providers {
 		kind, err := provider.ParseKind(p.Kind)
 		if err != nil {
@@ -475,7 +483,7 @@ func seed(ctx context.Context, db *store.DB, cfg *config.Config, log *slog.Logge
 		// PickKey(0) fails with "store: not found" (this exact bug hid the
 		// catalog at boot).
 		acct.ID = id
-		if models, err := syncModels(ctx, db, cfg, acct); err != nil {
+		if models, err := syncModels(ctx, db, registry, acct); err != nil {
 			log.Warn("model sync failed at boot (routing still works; sync later via admin)",
 				"provider", name, "err", err)
 		} else {
@@ -489,8 +497,8 @@ func seed(ctx context.Context, db *store.DB, cfg *config.Config, log *slog.Logge
 
 // syncModels fetches and stores an account's catalog. Failures are non-fatal at
 // boot (an empty catalog still routes — the upstream is authoritative).
-func syncModels(ctx context.Context, db *store.DB, cfg *config.Config, acct provider.Account) ([]provider.ModelInfo, error) {
-	ad, err := provider.NewRegistry(upstreamClient(cfg)).Get(acct.Kind)
+func syncModels(ctx context.Context, db *store.DB, registry *provider.Registry, acct provider.Account) ([]provider.ModelInfo, error) {
+	ad, err := registry.Get(acct.Kind)
 	if err != nil {
 		return nil, err
 	}
@@ -510,7 +518,6 @@ func syncModels(ctx context.Context, db *store.DB, cfg *config.Config, acct prov
 	return models, nil
 }
 
-// upstreamClient builds the HTTP client for provider calls. No client-level
 // shadowSamplerFor arms the discarded shadow-compression pass (addendum #7)
 // for the configured percentage of requests. 0 = nil = never runs.
 func shadowSamplerFor(pct int) func() bool {
@@ -529,6 +536,7 @@ func shadowSamplerFor(pct int) func() bool {
 	}
 }
 
+// upstreamClient builds the HTTP client for provider calls. No client-level
 // Timeout by default: streaming responses are unbounded, and per-request
 // deadlines come from the caller's context.
 func upstreamClient(cfg *config.Config) *http.Client {

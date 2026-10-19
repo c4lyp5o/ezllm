@@ -17,7 +17,8 @@ Two traps this already solved (do not re-learn them):
 
 Env-overridable (scratch-instance defaults):
   EZLLM_BASE   gateway origin        default http://127.0.0.1:20129
-  EZLLM_TOKEN  infer token file      default ~/.hermes/secrets/ezllm-infer.token
+  EZLLM_TOKEN       infer token VALUE   (wins when set)
+  EZLLM_TOKEN_FILE  infer token file    default ~/.hermes/secrets/ezllm-infer.token
   EZLLM_LMEVAL path to lm_eval CLI   default ~/.venvs/lm-eval/bin/lm_eval
   EZLLM_TASK   task name             default gsm8k
   EZLLM_LIMIT  examples              default 100
@@ -38,7 +39,9 @@ from pathlib import Path
 from typing import NoReturn
 
 BASE = os.environ.get("EZLLM_BASE", "http://127.0.0.1:20129")
-TOKEN_FILE = Path(os.environ.get("EZLLM_TOKEN",
+# EZLLM_TOKEN is a token VALUE in every script (prove_claude_bridge reads it
+# that way); a path lives in EZLLM_TOKEN_FILE.
+TOKEN_FILE = Path(os.environ.get("EZLLM_TOKEN_FILE",
                                  str(Path.home() / ".hermes/secrets/ezllm-infer.token")))
 LM_EVAL = os.environ.get("EZLLM_LMEVAL",
                          str(Path.home() / ".venvs/lm-eval/bin/lm_eval"))
@@ -47,9 +50,9 @@ LIMIT = int(os.environ.get("EZLLM_LIMIT", "100"))
 REPO = Path(__file__).resolve().parent.parent
 DB = Path(os.environ.get("EZLLM_DB", str(REPO / "data" / "ezllm.sqlite")))
 OUT = Path(os.environ.get("EZLLM_OUT",
-                          "/home/calypso/.hermes/cache/scratch/ezllm-lmeval"))
+                          str(Path.home() / ".hermes/cache/scratch/ezllm-lmeval")))
 LOG = Path(os.environ.get("EZLLM_LOG",
-                          "/home/calypso/.hermes/cache/scratch/lmeval.log"))
+                          str(Path.home() / ".hermes/cache/scratch/lmeval.log")))
 
 # chat-endpoint-only shape: no loglikelihood, so generate_until tasks only.
 MODEL_ARGS = (
@@ -70,10 +73,12 @@ def run_harness(model: str) -> tuple[float, float, float]:
     """Launch lm-eval against the gateway. Returns (elapsed, flexible, strict)."""
     if not Path(LM_EVAL).exists():
         fail(f"lm-eval not found at {LM_EVAL} (uv pip install 'lm-eval[api]')")
-    if not TOKEN_FILE.exists():
-        fail(f"token file missing: {TOKEN_FILE}")
-
-    token = TOKEN_FILE.read_text().strip()
+    if os.environ.get("EZLLM_TOKEN"):
+        token = os.environ["EZLLM_TOKEN"].strip()
+    elif not TOKEN_FILE.exists():
+        fail(f"token file missing: {TOKEN_FILE} (or set EZLLM_TOKEN)")
+    else:
+        token = TOKEN_FILE.read_text().strip()
     args = MODEL_ARGS.format(model=model)
     cmd = [
         LM_EVAL, "run",

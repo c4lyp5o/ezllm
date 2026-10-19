@@ -76,3 +76,23 @@ func TestStreamCopyTTFTIgnoresKeepaliveComments(t *testing.T) {
 		t.Errorf("ttft = %s: the keepalive comment was counted as the first token", ttft)
 	}
 }
+
+// message_start's output_tokens is a placeholder (Anthropic sends 1; the
+// translated legacy frame does too); message_delta's is the final count. A
+// stream whose upstream reported no usage must ledger 0 output, not the
+// placeholder — but a later zero still never erases an input the start
+// reported and the delta omitted.
+func TestTapperFinalOutputCountWins(t *testing.T) {
+	tp := NewUsageTapper(provider.SurfaceAnthropic)
+	tp.Observe([]byte(`data: {"type":"message_start","message":{"usage":{"input_tokens":0,"output_tokens":1}}}`))
+	tp.Observe([]byte(`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":0,"output_tokens":0}}`))
+	if u := tp.Usage(); u == nil || u.Out != 0 {
+		t.Fatalf("placeholder output survived: %+v", u)
+	}
+	tp = NewUsageTapper(provider.SurfaceAnthropic)
+	tp.Observe([]byte(`data: {"type":"message_start","message":{"usage":{"input_tokens":120,"cache_read_input_tokens":900,"output_tokens":1}}}`))
+	tp.Observe([]byte(`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":0,"output_tokens":42}}`))
+	if u := tp.Usage(); u == nil || u.In != 120 || u.CachedRead != 900 || u.Out != 42 {
+		t.Fatalf("merge = %+v, want in=120 read=900 out=42", u)
+	}
+}

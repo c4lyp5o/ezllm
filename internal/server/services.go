@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/c4lyp5o/ezllm/internal/provider"
 	"github.com/c4lyp5o/ezllm/internal/router"
@@ -74,7 +75,6 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreErr(w, err)
 		return
 	}
-	out := make([]serviceCard, 0, len(serviceDefs))
 	bindings, err := s.db.ListServiceBindings(ctx)
 	if err != nil {
 		s.writeStoreErr(w, err)
@@ -84,58 +84,66 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 	for _, b := range bindings {
 		bySurface[b.Surface] = b
 	}
+	out := make([]serviceCard, 0, len(serviceDefs))
 	for _, def := range serviceDefs {
-		card := serviceCard{
-			Surface:     def.surface,
-			Endpoint:    def.endpoint,
-			Label:       def.label,
-			Description: def.description,
-			Mode:        "off",
-			Accounts:    enabled,
-		}
+		var binding *store.ServiceBinding
 		if b, found := bySurface[def.surface]; found {
-			card.Mode = b.Mode
-			card.ModelTarget = b.ModelTarget
+			binding = &b
 		}
-		switch card.Mode {
-		case "manual":
-			card.Resolved = card.ModelTarget
-			exists, err := s.serviceTargetExists(ctx, card.ModelTarget, def.surface)
-			if err != nil {
-				s.writeStoreErr(w, err)
-				return
-			}
-			card.TargetExists = exists
-		case "auto":
-			target, err := s.db.ResolveServiceDefault(ctx, def.surface)
-			if err != nil {
-				s.writeStoreErr(w, err)
-				return
-			}
-			card.Resolved = target
-			card.TargetExists = target != ""
-		}
-		probes, err := s.db.ListServiceProbes(ctx, def.surface)
+		card, err := s.buildServiceCard(ctx, def.surface, binding, enabled)
 		if err != nil {
 			s.writeStoreErr(w, err)
 			return
 		}
-		for _, p := range probes {
-			if p.OK {
-				card.Verified++
-			}
-		}
-		if card.Resolved != "" {
-			v, err := s.probeForTarget(ctx, probes, card.Resolved)
-			if err != nil {
-				s.writeStoreErr(w, err)
-				return
-			}
-			card.Verdict = v
-		}
 		out = append(out, card)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"services": out})
+}
+
+// buildServiceCard is the ONE card builder: the list endpoint and the
+// post-write response serve the same shape from the same code. binding nil =
+// unbound ("off").
+func (s *Server) buildServiceCard(ctx context.Context, surface string, binding *store.ServiceBinding, enabled int) (serviceCard, error) {
+	endpoint, label, description, _ := serviceDef(surface)
+	card := serviceCard{Surface: surface, Endpoint: endpoint, Label: label,
+		Description: description, Mode: "off", Accounts: enabled}
+	if binding != nil {
+		card.Mode = binding.Mode
+		card.ModelTarget = binding.ModelTarget
+	}
+	switch card.Mode {
+	case "manual":
+		card.Resolved = card.ModelTarget
+		exists, err := s.serviceTargetExists(ctx, card.ModelTarget, surface)
+		if err != nil {
+			return card, err
+		}
+		card.TargetExists = exists
+	case "auto":
+		target, err := s.db.ResolveServiceDefault(ctx, surface)
+		if err != nil {
+			return card, err
+		}
+		card.Resolved = target
+		card.TargetExists = target != ""
+	}
+	probes, err := s.db.ListServiceProbes(ctx, surface)
+	if err != nil {
+		return card, err
+	}
+	for _, p := range probes {
+		if p.OK {
+			card.Verified++
+		}
+	}
+	if card.Resolved != "" {
+		v, err := s.probeForTarget(ctx, probes, card.Resolved)
+		if err != nil {
+			return card, err
+		}
+		card.Verdict = v
+	}
+	return card, nil
 }
 
 // probeForTarget returns the stored verdict for a direct namespaced model
@@ -217,50 +225,30 @@ func (s *Server) handleServiceBinding(w http.ResponseWriter, r *http.Request) {
 			"\"mode\" must be one of manual, auto, off")
 		return
 	}
-	writeJSON(w, http.StatusOK, s.serviceCardFor(ctx, surface))
+	card, err := s.serviceCardFor(ctx, surface)
+	if err != nil {
+		s.writeStoreErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, card)
 }
 
 // serviceCardFor rebuilds one card after a write so the response is the same
 // shape the list endpoint serves (no second round trip needed to refresh).
-func (s *Server) serviceCardFor(ctx context.Context, surface string) serviceCard {
-	endpoint, label, description, _ := serviceDef(surface)
-	card := serviceCard{Surface: surface, Endpoint: endpoint, Label: label,
-		Description: description, Mode: "off"}
-	if b, err := s.db.ServiceBinding(ctx, surface); err == nil {
-		card.Mode = b.Mode
-		card.ModelTarget = b.ModelTarget
-	} else if !errors.Is(err, store.ErrNotFound) {
-		return card
+func (s *Server) serviceCardFor(ctx context.Context, surface string) (serviceCard, error) {
+	var binding *store.ServiceBinding
+	b, err := s.db.ServiceBinding(ctx, surface)
+	switch {
+	case err == nil:
+		binding = &b
+	case !errors.Is(err, store.ErrNotFound):
+		return serviceCard{}, err
 	}
 	enabled, err := s.db.CountEnabledAccounts(ctx)
-	if err == nil {
-		card.Accounts = enabled
+	if err != nil {
+		return serviceCard{}, err
 	}
-	switch card.Mode {
-	case "manual":
-		card.Resolved = card.ModelTarget
-		if exists, err := s.serviceTargetExists(ctx, card.ModelTarget, surface); err == nil {
-			card.TargetExists = exists
-		}
-	case "auto":
-		if target, err := s.db.ResolveServiceDefault(ctx, surface); err == nil {
-			card.Resolved = target
-			card.TargetExists = target != ""
-		}
-	}
-	if probes, err := s.db.ListServiceProbes(ctx, surface); err == nil {
-		for _, p := range probes {
-			if p.OK {
-				card.Verified++
-			}
-		}
-		if card.Resolved != "" {
-			if v, err := s.probeForTarget(ctx, probes, card.Resolved); err == nil {
-				card.Verdict = v
-			}
-		}
-	}
-	return card
+	return s.buildServiceCard(ctx, surface, binding, enabled)
 }
 
 // handleServiceTest runs one real, endpoint-appropriate request through the
@@ -373,13 +361,15 @@ func (s *Server) handleServiceTest(w http.ResponseWriter, r *http.Request) {
 	// The probe is a real call and must be recorded like one: invisible spend
 	// is unauditable spend. Client "service-test" separates probe rows from
 	// client traffic in every dashboard, exactly like "combo-test".
-	s.ledger(store.Call{
+	call := store.Call{
 		TS: start, Client: "service-test", Surface: store2surface(provider.Surface(surface)), Alias: servedRoute.Alias,
 		AccountID: servedRoute.Account.ID, Account: servedRoute.Account.Namespace,
 		KeyID: servedRoute.KeyID, KeyHint: servedRoute.KeyHint, Model: servedRoute.Model,
 		Status: status, Stream: res.Stream, Totalms: res.Totalms,
 		EndpointID: res.EndpointID, UpstreamModel: res.UpstreamModel, Err: detail,
-	})
+	}
+	applyUsage(&call, res.Usage)
+	s.ledger(call)
 	if err := s.db.UpsertServiceProbe(ctx, surface, servedRoute.Account.ID, servedRoute.Model, ok, detail); err != nil {
 		s.writeStoreErr(w, err)
 		return
@@ -489,10 +479,28 @@ func le32(b []byte, v uint32) {
 }
 
 // truncate keeps an upstream error detail readable in a verdict without
-// shipping a whole provider body into the card.
+// shipping a whole provider body into the card. It cuts on a rune boundary:
+// the text is stored and rendered, where half a rune is invalid UTF-8.
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
 	return s[:n] + "…"
+}
+
+// applyUsage copies the tapped usage onto a ledger row — the one mapping every
+// handler that ledgers a dispatched call shares.
+func applyUsage(call *store.Call, u *store.Usage) {
+	if u == nil {
+		return
+	}
+	call.TokensIn = u.In
+	call.TokensOut = u.Out
+	call.TokensCachedRead = u.CachedRead
+	call.TokensCachedWrite = u.CachedWrite
+	call.ReasoningTokens = u.Reasoning
+	call.RawUsage = store.RawJSON(u.Raw)
 }

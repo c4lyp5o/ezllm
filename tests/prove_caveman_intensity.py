@@ -17,7 +17,8 @@ import urllib.error
 import urllib.request
 
 BASE = os.environ.get('EZLLM_BASE', 'http://127.0.0.1:20199')
-TOK = open(os.path.expanduser('~/.hermes/secrets/ezllm-admin.token')).read().strip()
+TOK = open(os.environ.get('EZLLM_TOKEN_FILE',
+          os.path.expanduser('~/.hermes/secrets/ezllm-admin.token'))).read().strip()
 ECHO_LOG = os.environ.get('ECHO_LOG', '/tmp/ezllm-echo.log')
 MODEL = os.environ.get('EZLLM_MODEL', 'verify/echo-mini-long')
 

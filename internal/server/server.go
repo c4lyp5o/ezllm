@@ -804,14 +804,7 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			SessionID: sessionOf(r), ReqBytes: sh.ReqBytes,
 		}
 		attachCompressionMetrics(&call, compRes)
-		if res.Usage != nil {
-			call.TokensIn = res.Usage.In
-			call.TokensOut = res.Usage.Out
-			call.TokensCachedRead = res.Usage.CachedRead
-			call.TokensCachedWrite = res.Usage.CachedWrite
-			call.ReasoningTokens = res.Usage.Reasoning
-			call.RawUsage = store.RawJSON(res.Usage.Raw)
-		}
+		applyUsage(&call, res.Usage)
 		if ferr != nil {
 			call.Err = ferr.Error()
 		} else if res.Err != "" {

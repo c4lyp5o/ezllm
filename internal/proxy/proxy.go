@@ -105,8 +105,14 @@ func (t *UsageTapper) Usage() *store.Usage {
 // objects merge, and a later value wins unless it is a zero (or null)
 // standing in for a number the earlier event did report — Anthropic's
 // message_delta repeats input_tokens but may zero what it does not carry.
+// The output count is the exception: message_start's is a placeholder (1)
+// and the later event's is the final cumulative count, zero included.
 func mergeUsageRaw(dst, src map[string]any) {
 	for k, v := range src {
+		if k == "output_tokens" && v != nil {
+			dst[k] = v
+			continue
+		}
 		if sm, ok := v.(map[string]any); ok {
 			if dm, ok := dst[k].(map[string]any); ok {
 				mergeUsageRaw(dm, sm)

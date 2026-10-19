@@ -1700,13 +1700,7 @@ func (s *Server) handleComboTest(w http.ResponseWriter, r *http.Request) {
 		} else if res.Err != "" {
 			call.Err = res.Err
 		}
-		if res.Usage != nil {
-			call.TokensIn = res.Usage.In
-			call.TokensOut = res.Usage.Out
-			call.TokensCachedRead = res.Usage.CachedRead
-			call.TokensCachedWrite = res.Usage.CachedWrite
-			call.ReasoningTokens = res.Usage.Reasoning
-		}
+		applyUsage(&call, res.Usage)
 		s.ledger(call)
 		for _, c := range s.dispatcher.Cooldowns() {
 			if c.Namespace == rt.Account.Namespace && c.Model == rt.Model && c.Until.After(time.Now()) {

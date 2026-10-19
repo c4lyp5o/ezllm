@@ -244,6 +244,27 @@ string escapes stay byte-identical. Log, search and unknown tools qualify;
 edit). Text around the JSON, invalid JSON, JSON lines, or already-compact JSON
 ⇒ untouched. Before `headroom`, which then columnarizes uniform arrays.
 
+### `tool_ref` — repeated tool results become references (2026-10-19)
+
+A tool result **byte-identical** to an earlier shipped one (an agent
+re-reading a file, re-running a command) becomes
+`[ezllm/ref: identical to the tool result for call <id> above]`. The earlier
+copy stays where it was, so nothing the model needs leaves the conversation —
+which is why it applies to **every** tool, file reads included, and is the one
+engine class rules do not bind. It is the pipeline's one context engine: it
+reads the whole shipped history (committed forms plus this request's work)
+and rewrites only new messages.
+
+Cache safety: a reference is decided at the new message's first sight and
+frozen by the memo; the earlier copy never changes. Matches compare SHIPPED
+text, so a reference is always true about what the model sees — place
+`tool_ref` after the other tool-output engines so both copies went through
+the same ones. A replayed reference whose target the client has since
+dropped is never sent: that message ships its original instead (the client
+already changed its prefix, so no cache is lost that was not already).
+The final message is exempt unless `fresh_tool_output: compress` opens it.
+Option `min_bytes` (default 200).
+
 ### `headroom` — lossless columnar JSON, `scope: tool_only`
 
 SmartCrusher-style tabular compaction (omniroute reference): a homogeneous JSON-array

@@ -502,7 +502,7 @@ every hop returns `429`, not `502`.
 
 ### `GET|POST /admin/compression-profiles` · `GET|PATCH|DELETE /admin/compression-profiles/{id}` → `200`
 `stages` is an ordered engine pipeline over `session_dedup`, `ansi`, `fold`, `rtk`, `jsonmin`,
-`headroom`, `lite` and `caveman`, validated against the engine registry on write (`budget` was deleted 2026-10-19 and is
+`headroom`, `tool_ref`, `lite` and `caveman`, validated against the engine registry on write (`budget` was deleted 2026-10-19 and is
 rejected as an unknown engine). Stage options are engine-specific (e.g.
 `{"engine":"rtk","options":{"keep_lines":6,"tool_classes":{"terminal":"log","web_extract":"preserve"}}}`
 — `tool_classes` names an app's tools as `log`, `search` or `preserve`, overriding the built-in

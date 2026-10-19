@@ -31,7 +31,7 @@ type Stage struct {
 // KnownEngines is the shipped engine registry (M5: session_dedup + rtk,
 // M6.5 phase 2: headroom + lite, M7: caveman).
 var KnownEngines = map[string]bool{"session_dedup": true, "rtk": true, "headroom": true, "lite": true, "caveman": true,
-	"ansi": true, "fold": true, "jsonmin": true}
+	"ansi": true, "fold": true, "jsonmin": true, "tool_ref": true}
 
 // Profile is the runtime view of a compression_profiles row.
 type Profile struct {
@@ -298,7 +298,17 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 		}
 		stageStart := time.Now()
 		beforeStage := EstimateTokens(string(mustMarshal(present(cur))))
-		next, fired, err := runEngine(withProfileClasses(st, classes), cur)
+		var next []any
+		var fired int
+		var err error
+		if st.Engine == "tool_ref" {
+			// The one context engine: it reads the whole shipped history
+			// (committed forms + this request's work) and rewrites only the
+			// new work.
+			next = toolRefOverHistory(editable, hit, forms, cur, withProfileClasses(st, classes).Options)
+		} else {
+			next, fired, err = runEngine(withProfileClasses(st, classes), cur)
+		}
 		if err != nil {
 			res.Err = st.Engine + ": " + err.Error()
 			return body, res // contract rule 5
@@ -377,8 +387,11 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 
 	// Reassemble by position, in the exact original order: committed forms
 	// where the memo hit, the new work's output everywhere else. A nil on
-	// either side is a message that ships as nothing (a dropped repeat).
+	// either side is a message that ships as nothing (a dropped repeat). A
+	// tool_ref reference whose target did not ship above (the client dropped
+	// it) is never sent: that message ships its original instead.
 	rebuilt := make([]any, 0, len(editable))
+	have := map[string]bool{}
 	ni := 0
 	for i := range editable {
 		f := forms[i]
@@ -386,9 +399,14 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 			f = cur[ni]
 			ni++
 		}
-		if f != nil {
-			rebuilt = append(rebuilt, f)
+		if f == nil {
+			continue
 		}
+		if !refsResolve(f, have) {
+			f = editable[i]
+		}
+		realToolIDs(f, have)
+		rebuilt = append(rebuilt, f)
 	}
 	finalMsgs := rebuilt
 	if exemptTail {
@@ -500,6 +518,31 @@ func present(msgs []any) []any {
 	return out
 }
 
+// toolRefOverHistory runs tool_ref with the shipped history as context:
+// committed forms at memo hits, this request's work elsewhere. It returns
+// the new work only, in order.
+func toolRefOverHistory(editable []any, hit []bool, forms []any, cur []any, opts map[string]any) []any {
+	view := make([]any, len(editable))
+	isNew := make([]bool, len(editable))
+	ni := 0
+	for i := range editable {
+		if hit[i] {
+			view[i] = forms[i]
+			continue
+		}
+		view[i], isNew[i] = cur[ni], true
+		ni++
+	}
+	out := toolRef(view, isNew, opts)
+	next := make([]any, 0, len(cur))
+	for i := range out {
+		if isNew[i] {
+			next = append(next, out[i])
+		}
+	}
+	return next
+}
+
 // profileToolClasses merges every stage's tool_classes option: how an app
 // names its tools is a fact about the profile, so it binds every engine
 // (rtk's filtering, and lite/headroom's file-read preservation) alike.
@@ -550,6 +593,8 @@ func runEngine(st Stage, msgs []any) ([]any, int, error) {
 		return fold(msgs, st.Options), 0, nil
 	case "jsonmin":
 		return jsonmin(msgs, st.Options), 0, nil
+	case "tool_ref":
+		return toolRef(msgs, nil, st.Options), 0, nil
 	case "caveman":
 		// caveman also reports how many rules fired, so a surprising saving
 		// is attributable to a rule rather than a mystery.

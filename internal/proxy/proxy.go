@@ -768,12 +768,10 @@ func extractMultipartBoundary(body []byte) string {
 // prompt, etc.) is copied through byte-for-byte. The boundary is extracted
 // from the body's own first line, so no external Content-Type is needed.
 func swapModelMultipart(body []byte, newModel string) ([]byte, error) {
-	// Parse the boundary from the first line: --<boundary>\r\n
-	eol := bytes.IndexAny(body, "\r\n")
-	if eol < 0 {
+	if bytes.IndexAny(body, "\r\n") < 0 {
 		return nil, errors.New("proxy: multipart body has no boundary line")
 	}
-	boundary := strings.TrimPrefix(string(body[:eol]), "--")
+	boundary := extractMultipartBoundary(body)
 	if boundary == "" {
 		return nil, errors.New("proxy: multipart body has empty boundary")
 	}
@@ -828,6 +826,12 @@ func swapModelMultipart(body []byte, newModel string) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
+// isCloudflare reports whether the hop dials Cloudflare Workers AI, whose
+// image and audio models take native bodies at native paths.
+func isCloudflare(rt Route) bool {
+	return strings.Contains(rt.Account.BaseURL, "api.cloudflare.com")
+}
+
 // prepareHopBody rewrites the client's body for one hop: a byte-stable model
 // swap on the native path, or a full wire translation when the upstream wire
 // differs from the client's. The WIRE comes from EffectiveWire — the same
@@ -843,7 +847,7 @@ func prepareHopBody(body []byte, rt Route, doc *jsonbody.BodyDoc) ([]byte, error
 	}
 	// Cloudflare MeloTTS takes {"prompt": text}, not the OpenAI
 	// {"model","input","voice"} envelope.
-	if rt.Surface == provider.SurfaceAudioTTS && strings.Contains(rt.Account.BaseURL, "api.cloudflare.com") {
+	if rt.Surface == provider.SurfaceAudioTTS && isCloudflare(rt) {
 		var in struct {
 			Input string `json:"input"`
 			Text  string `json:"text"`
@@ -860,7 +864,7 @@ func prepareHopBody(body []byte, rt Route, doc *jsonbody.BodyDoc) ([]byte, error
 	// Cloudflare flux-2 models require a multipart body (prompt as a form
 	// field) rather than the JSON envelope. Build it here so the proxy's
 	// content-type detection picks up the boundary.
-	if rt.Surface == provider.SurfaceImagesGen && strings.Contains(rt.Account.BaseURL, "api.cloudflare.com") && strings.Contains(rt.Model, "flux-2") {
+	if rt.Surface == provider.SurfaceImagesGen && isCloudflare(rt) && strings.Contains(rt.Model, "flux-2") {
 		var in struct {
 			Prompt string `json:"prompt"`
 		}
@@ -879,7 +883,7 @@ func prepareHopBody(body []byte, rt Route, doc *jsonbody.BodyDoc) ([]byte, error
 	}
 	// Cloudflare Workers AI image models (non-flux-2) are native: the model is
 	// in the URL and the JSON body accepts ONLY prompt-like fields.
-	if rt.Surface == provider.SurfaceImagesGen && strings.Contains(rt.Account.BaseURL, "api.cloudflare.com") {
+	if rt.Surface == provider.SurfaceImagesGen && isCloudflare(rt) {
 		var in struct {
 			Prompt string `json:"prompt"`
 			Seed   any    `json:"seed"`
@@ -992,18 +996,15 @@ func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, bod
 	if isGeminiNativeAudio(rt, rt.Surface) {
 		url = geminiAudioURL(rt)
 	}
-	// Cloudflare Workers AI does not implement the OpenAI /images/generations
-	// path: its image models are served at the native /ai/run/<model> endpoint.
-	if dialSurface == provider.SurfaceImagesGen && strings.Contains(rt.Account.BaseURL, "api.cloudflare.com") {
-		base := strings.TrimSuffix(strings.TrimSuffix(rt.Account.BaseURL, "/"), "/v1")
-		url = base + "/run/" + rt.Model
-	}
-	// Cloudflare Workers AI does not implement the OpenAI audio/* paths either:
-	// TTS/STT models are served at the native /ai/run/<model> endpoint.
-	if (dialSurface == provider.SurfaceAudioTTS || dialSurface == provider.SurfaceAudioSTT) &&
-		strings.Contains(rt.Account.BaseURL, "api.cloudflare.com") {
-		base := strings.TrimSuffix(strings.TrimSuffix(rt.Account.BaseURL, "/"), "/v1")
-		url = base + "/run/" + rt.Model
+	// Cloudflare Workers AI implements neither the OpenAI /images/generations
+	// path nor the audio/* paths: image and TTS/STT models are served at the
+	// native /ai/run/<model> endpoint.
+	switch dialSurface {
+	case provider.SurfaceImagesGen, provider.SurfaceAudioTTS, provider.SurfaceAudioSTT:
+		if isCloudflare(rt) {
+			base := strings.TrimSuffix(strings.TrimSuffix(rt.Account.BaseURL, "/"), "/v1")
+			url = base + "/run/" + rt.Model
+		}
 	}
 
 	upReq, err := http.NewRequestWithContext(ctx, r.Method, url, bytes.NewReader(body))
@@ -1063,6 +1064,75 @@ func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, bod
 	return resp, res, start, nil
 }
 
+// gatewayFault answers the client with a 502 of ezllm's own making (body
+// already shaped for the client) and records why. It commits the status, so
+// nothing else may be written for this request afterwards.
+func gatewayFault(w http.ResponseWriter, res *Result, start time.Time, errNote string, body []byte) {
+	res.Status = http.StatusBadGateway
+	res.Err = errNote
+	w.Header().Set("Content-Type", "application/json")
+	res.Committed = true
+	w.WriteHeader(http.StatusBadGateway)
+	_, _ = w.Write(body)
+	res.Totalms = msPtr(time.Since(start))
+}
+
+// crossWire is how one translated hop re-encodes its upstream's answer for the
+// client. Every cell shares the same codecs (translate.NewStreamReader,
+// ResponseUniversal); the cells differ only in codec policy and in how an
+// upstream ERROR body and a translation failure are shaped, which this keeps
+// side by side so a change to one cell is visibly a change to that cell.
+type crossWire struct {
+	wire      provider.Surface
+	opts      translate.CodecOptions
+	optsErr   error                   // universal cell without a usable account fact
+	reshape   func(raw []byte) []byte // upstream error body → client shape; nil = pass through
+	errPrefix string                  // ledger err prefix for a failed translation
+	failBody  func(raw []byte) []byte // body of the 502 for a failed translation
+}
+
+// crossWireFor returns the hop's translation policy, or false for a native hop.
+func crossWireFor(rt Route) (crossWire, bool) {
+	wire := rt.EffectiveWire()
+	if wire == rt.Surface {
+		return crossWire{}, false
+	}
+	if translate.IsUniversalCell(rt.Surface, wire) {
+		// The three new cells: strict codecs, errors re-shaped into the
+		// client's family, failures in the client's own error shape.
+		opts, err := universalCodecOptions(rt)
+		return crossWire{
+			wire: wire, opts: opts, optsErr: err,
+			reshape:   func(raw []byte) []byte { return translate.ReorientError(raw, rt.Surface) },
+			errPrefix: "translate response: ",
+			failBody: func([]byte) []byte {
+				return translate.EncodeError(translate.ErrorIR{Type: "api_error", Message: "upstream response could not be translated"}, rt.Surface)
+			},
+		}, true
+	}
+	legacy := translate.CodecOptions{Legacy: true}
+	if wire == provider.SurfaceOpenAI {
+		// Legacy anthropic client on the chat wire: errors and failures are
+		// both rendered as an anthropic error envelope.
+		return crossWire{
+			wire: wire, opts: legacy,
+			reshape:   translate.Error,
+			errPrefix: "translate response: ",
+			failBody:  translate.Error,
+		}, true
+	}
+	// Legacy responses-wire hop (chat or anthropic client). Error bodies pass
+	// through byte-identical: the upstream's own words reach the client and
+	// the ledger err column untouched.
+	return crossWire{
+		wire: wire, opts: legacy,
+		errPrefix: "translate responses body: ",
+		failBody: func([]byte) []byte {
+			return []byte(`{"error":{"type":"upstream_error","message":"responses body could not be translated","code":502}}`)
+		},
+	}, true
+}
+
 // commit streams one upstream response to the client and closes resp.Body.
 // Nothing here may be called twice for one request — after the first
 // WriteHeader the status can no longer change.
@@ -1071,58 +1141,32 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 
 	// Propagate response headers that matter, minus hop-by-hop and identity.
 	copyResponseHeaders(w, resp)
+	cw, cross := crossWireFor(rt)
 
 	isSSE := strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")
 	if res.Stream && isSSE {
 		// A translated stream wraps the body BEFORE any byte is copied: the
-		// client sees a synthesized anthropic event stream, and streamCopy's
-		// usage tap then reads anthropic-shaped events — which matches
-		// rt.Surface, the CLIENT's surface, exactly. Close still reaches the
-		// ORIGINAL body (a NopCloser would leak the upstream connection).
-		wire := rt.EffectiveWire()
+		// client sees its own event shape synthesized from the upstream's, and
+		// streamCopy's usage tap then reads client-shaped events — which
+		// matches rt.Surface exactly. Close still reaches the ORIGINAL body (a
+		// NopCloser would leak the upstream connection).
+		//
 		// translated carries the reader whose terminal state becomes the
 		// delivery outcome; nil for a native stream.
 		var translated *translate.StreamReader
-		if wire != rt.Surface {
-			switch {
-			case translate.IsUniversalCell(rt.Surface, wire):
-				opts, oerr := universalCodecOptions(rt)
-				if oerr != nil {
-					// A cell that cannot be converted must not stream
-					// foreign-shaped bytes to the client.
-					res.Status = http.StatusBadGateway
-					res.Err = "translate stream: " + oerr.Error()
-					w.Header().Set("Content-Type", "application/json")
-					res.Committed = true
-					w.WriteHeader(http.StatusBadGateway)
-					_, _ = w.Write(translate.EncodeError(translate.ErrorIR{Type: "api_error", Message: oerr.Error()}, rt.Surface))
-					res.Totalms = msPtr(time.Since(start))
-					return res, nil
-				}
-				translated = translate.NewStreamReader(resp.Body, wire, rt.Surface, rt.Alias, opts)
-				resp.Body = struct {
-					io.Reader
-					io.Closer
-				}{translated, resp.Body}
-			case wire == provider.SurfaceOpenAI:
-				translated = translate.NewSSEReader(resp.Body, rt.Alias)
-				resp.Body = struct {
-					io.Reader
-					io.Closer
-				}{translated, resp.Body}
-			case wire == provider.SurfaceResponses:
-				// A responses-wire stream: the client sees its OWN shape
-				// synthesized from the upstream's responses events.
-				if rt.Surface == provider.SurfaceAnthropic {
-					translated = translate.NewResponsesAnthropicSSEReader(resp.Body, rt.Alias)
-				} else {
-					translated = translate.NewResponsesSSEReader(resp.Body, rt.Alias)
-				}
-				resp.Body = struct {
-					io.Reader
-					io.Closer
-				}{translated, resp.Body}
+		if cross {
+			if cw.optsErr != nil {
+				// A cell that cannot be converted must not stream
+				// foreign-shaped bytes to the client.
+				gatewayFault(w, &res, start, "translate stream: "+cw.optsErr.Error(),
+					translate.EncodeError(translate.ErrorIR{Type: "api_error", Message: cw.optsErr.Error()}, rt.Surface))
+				return res, nil
 			}
+			translated = translate.NewStreamReader(resp.Body, cw.wire, rt.Surface, rt.Alias, cw.opts)
+			resp.Body = struct {
+				io.Reader
+				io.Closer
+			}{translated, resp.Body}
 		}
 		// streamCopy writes the header before its first byte, so the status
 		// is committed the moment it returns — regardless of a copy error.
@@ -1178,13 +1222,8 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 			// The upstream kept sending past 32 MiB. Writing the truncated
 			// body would hand the client corrupt JSON, so refuse instead —
 			// and never raise the cap: this body is buffered in memory.
-			res.Status = http.StatusBadGateway
-			res.Err = fmt.Sprintf("upstream response exceeded %d bytes", maxBodyBytes)
-			w.Header().Set("Content-Type", "application/json")
-			res.Committed = true
-			w.WriteHeader(http.StatusBadGateway)
-			_, _ = w.Write([]byte(`{"error":{"type":"upstream_response_truncated","message":"upstream response exceeded 32 MiB","code":502}}`))
-			res.Totalms = msPtr(time.Since(start))
+			gatewayFault(w, &res, start, fmt.Sprintf("upstream response exceeded %d bytes", maxBodyBytes),
+				[]byte(`{"error":{"type":"upstream_response_truncated","message":"upstream response exceeded 32 MiB","code":502}}`))
 			return res, nil
 		}
 		// A 200 with a completely empty body is not a valid provider response
@@ -1193,108 +1232,37 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 		// call never looks like a clean success in the ledger, and tell the
 		// client with a 502 rather than an empty 200.
 		if resp.StatusCode == http.StatusOK && len(bytes.TrimSpace(raw)) == 0 {
-			res.Status = http.StatusBadGateway
-			res.Err = "upstream returned an empty body"
-			w.Header().Set("Content-Type", "application/json")
-			res.Committed = true
-			w.WriteHeader(http.StatusBadGateway)
-			_, _ = w.Write([]byte(`{"error":{"type":"upstream_error","message":"upstream returned an empty body","code":502}}`))
-			res.Totalms = msPtr(time.Since(start))
+			gatewayFault(w, &res, start, "upstream returned an empty body",
+				[]byte(`{"error":{"type":"upstream_error","message":"upstream returned an empty body","code":502}}`))
 			return res, nil
 		}
-		// For a hop on a DIFFERENT wire than the client's, every byte the
-		// client sees is re-encoded into its own shape. The err-column snippet
-		// is captured from the upstream's OWN words before translation, and
-		// usage is tapped on the translated body — the tap is surface-aware and
-		// rt.Surface is the client's surface.
-		// The three NEW cells re-encode through the strict shared codecs: the
-		// upstream's wire is decoded and the CLIENT's shape is emitted. Error
-		// bodies are re-shaped into the client's family (Messages wraps them
-		// as {"type":"error","error":{…}}), and the ledger snippet is
-		// captured from the upstream's own words first.
-		universalWire := translate.IsUniversalCell(rt.Surface, rt.EffectiveWire())
-		if wire := rt.EffectiveWire(); universalWire {
+		// A translated hop re-encodes every byte the client sees into its own
+		// shape. The err-column snippet is captured from the upstream's OWN
+		// words before any re-shaping, and usage is tapped on the translated
+		// body — the tap is surface-aware and rt.Surface is the client's.
+		if cross {
 			if res.Status >= 400 {
-				if res.Err == "" {
-					res.Err = upstreamErrorSnippet(res.Status, raw)
+				if cw.reshape != nil {
+					if res.Err == "" {
+						res.Err = upstreamErrorSnippet(res.Status, raw)
+					}
+					raw = cw.reshape(raw)
 				}
-				raw = translate.ReorientError(raw, rt.Surface)
 			} else {
-				opts, oerr := universalCodecOptions(rt)
-				if oerr == nil {
-					var terr error
+				terr := cw.optsErr
+				if terr == nil {
 					var translated []byte
-					translated, terr = translate.ResponseUniversal(raw, wire, rt.Surface, rt.Alias, opts)
-					if terr == nil {
+					if translated, terr = translate.ResponseUniversal(raw, cw.wire, rt.Surface, rt.Alias, cw.opts); terr == nil {
 						raw = translated
-					} else {
-						oerr = terr
 					}
 				}
-				if oerr != nil {
-					// A body we cannot translate is a gateway fault, and the
-					// client must never receive the upstream's foreign shape.
-					res.Status = http.StatusBadGateway
-					res.Err = "translate response: " + oerr.Error()
-					w.Header().Set("Content-Type", "application/json")
-					res.Committed = true
-					w.WriteHeader(http.StatusBadGateway)
-					_, _ = w.Write(translate.EncodeError(translate.ErrorIR{Type: "api_error", Message: "upstream response could not be translated"}, rt.Surface))
-					res.Totalms = msPtr(time.Since(start))
-					return res, nil
-				}
-			}
-		}
-		if wire := rt.EffectiveWire(); !universalWire && wire == provider.SurfaceOpenAI && wire != rt.Surface {
-			if res.Status >= 400 {
-				if res.Err == "" {
-					res.Err = upstreamErrorSnippet(res.Status, raw)
-				}
-				raw = translate.Error(raw)
-			} else {
-				translated, terr := translate.Response(raw, rt.Alias)
 				if terr != nil {
 					// A body we cannot translate is a gateway fault, and the
-					// client must never receive openai-shaped bytes: refuse
-					// with an anthropic error envelope instead.
-					res.Status = http.StatusBadGateway
-					res.Err = "translate response: " + terr.Error()
-					w.Header().Set("Content-Type", "application/json")
-					res.Committed = true
-					w.WriteHeader(http.StatusBadGateway)
-					_, _ = w.Write(translate.Error(raw))
-					res.Totalms = msPtr(time.Since(start))
+					// client must never receive the upstream's foreign shape.
+					gatewayFault(w, &res, start, cw.errPrefix+terr.Error(), cw.failBody(raw))
 					return res, nil
 				}
-				raw = translated
 			}
-		}
-		// A responses-wire hop answers a client on its own surface: chat
-		// clients get chat completions back, anthropic clients get a
-		// messages body. Error bodies pass through byte-identical — all
-		// wires share the {"error":{…}} family, and the upstream's own words
-		// must reach the client and the ledger err column untouched.
-		if wire := rt.EffectiveWire(); !universalWire && wire == provider.SurfaceResponses && wire != rt.Surface && res.Status < 400 {
-			var translated []byte
-			var terr error
-			if rt.Surface == provider.SurfaceAnthropic {
-				translated, terr = translate.ResponsesToAnthropic(raw, rt.Alias)
-			} else {
-				translated, terr = translate.ResponsesToChat(raw, rt.Alias)
-			}
-			if terr != nil {
-				// A body we cannot translate is a gateway fault; a chat
-				// client must never receive responses-shaped bytes.
-				res.Status = http.StatusBadGateway
-				res.Err = "translate responses body: " + terr.Error()
-				w.Header().Set("Content-Type", "application/json")
-				res.Committed = true
-				w.WriteHeader(http.StatusBadGateway)
-				_, _ = w.Write([]byte(`{"error":{"type":"upstream_error","message":"responses body could not be translated","code":502}}`))
-				res.Totalms = msPtr(time.Since(start))
-				return res, nil
-			}
-			raw = translated
 		}
 		if u := tapJSONUsage(raw, rt.Surface); u != nil {
 			res.Usage = u

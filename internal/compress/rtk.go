@@ -26,10 +26,11 @@ func rtk(msgs []any, opts map[string]any) []any {
 	if keep < 0 {
 		keep = 6
 	}
+	overrides := toolClassOverrides(opts)
 	// One rule for every shape (parts.go): tool output whose resolved tool
 	// is log- or search-class, never JSON, filtered only when it shrinks.
 	return editAll(msgs, toolNamesByCallID(msgs), func(p textPart) (string, bool) {
-		if p.kind != partToolOutput || p.text == "" || !toolClassFilterable(p.tool) || isJSONPayload(p.text) {
+		if p.kind != partToolOutput || p.text == "" || toolClassFor(p.tool, overrides) == toolPreserve || isJSONPayload(p.text) {
 			return "", false
 		}
 		filtered, ok := filterToolOutput(p.text, keep)
@@ -251,51 +252,79 @@ const (
 	toolSearch                    // ranked results with paths
 )
 
-// Bucket membership is a documented policy, not content sniffing. Exact
-// name first (so "read" never lands in search's codebase bucket), then
-// prefix, then substring.
+// Classification is a documented policy, not content sniffing, applied in
+// this order (first match wins):
+//
+//  1. the profile's tool_classes overrides (rtk stage option) — how an app
+//     names ITS tools is the operator's knowledge, not a guess baked in here;
+//  2. exact built-in names for widely used tools;
+//  3. prefixes (read_*, run_*, …);
+//  4. substrings — only long, distinctive tokens: a short token matched
+//     inside a name misfires ("rg" in merge_pr, "ls" in list_tools, "web" in
+//     webfetch) and head/tail-filters content that is not a log;
+//  5. preserve: an unknown tool is never truncated.
 var (
-	preserveToolTokens = []string{"read", "cat", "view", "open", "get_file", "show",
-		"edit", "write", "patch", "diff", "apply_patch", "str_replace", "create",
-		"insert", "notebook", "move", "rename", "delete", "undo", "commit", "push"}
-	logToolTokens = []string{"bash", "shell", "terminal", "exec", "command", "run",
-		"test", "pytest", "jest", "vitest", "mocha", "cargo", "npm", "pnpm", "yarn",
-		"make", "bundle", "docker", "kubectl", "tail", "system", "script", "build"}
-	searchToolTokens = []string{"grep", "glob", "search", "find", "rg", "ls", "list",
-		"codebase", "web", "scan", "query"}
+	preserveExact = toolSet("read", "read_file", "view", "cat", "open", "show", "get_file",
+		"edit", "edit_file", "multiedit", "write", "write_file", "create", "insert",
+		"patch", "apply_patch", "diff", "str_replace", "str_replace_editor",
+		"notebook", "notebookedit", "notebookread", "move", "rename", "delete", "undo",
+		"commit", "push", "fetch", "webfetch", "web_fetch", "task", "todowrite", "todoread")
+	logExact = toolSet("bash", "bashoutput", "shell", "terminal", "exec", "command",
+		"run", "run_command", "run_terminal_cmd", "execute_command", "test", "pytest", "jest",
+		"vitest", "mocha", "cargo", "npm", "pnpm", "yarn", "make", "bundle", "docker",
+		"kubectl", "tail", "system", "script", "build")
+	searchExact = toolSet("grep", "glob", "search", "find", "rg", "ls", "list", "list_dir",
+		"list_files", "codebase_search", "file_search", "websearch", "web_search", "scan", "query")
+
+	preservePrefixes = []string{"read", "view", "open", "get_file", "show", "edit", "write",
+		"patch", "diff", "apply_patch", "str_replace", "create", "insert", "notebook",
+		"move", "rename", "delete", "undo", "commit", "push", "fetch", "web_fetch"}
+	logPrefixes     = []string{"run", "exec", "npm", "pnpm", "yarn", "make", "test"}
+	logSubstrings   = []string{"bash", "shell", "terminal", "command", "pytest", "vitest", "mocha", "cargo", "docker", "kubectl"}
+	searchSubstring = []string{"grep", "glob", "search"}
 )
 
-// toolClassFor classifies a resolved tool name; empty/unknown -> preserve.
-func toolClassFor(name string) toolClass {
+func toolSet(names ...string) map[string]bool {
+	m := make(map[string]bool, len(names))
+	for _, n := range names {
+		m[n] = true
+	}
+	return m
+}
+
+// toolClassFor classifies a resolved (lowercase) tool name; overrides come
+// from the rtk stage's tool_classes option and may be nil.
+func toolClassFor(name string, overrides map[string]toolClass) toolClass {
 	if name == "" {
 		return toolPreserve
 	}
-	for _, t := range preserveToolTokens {
-		if name == t {
-			return toolPreserve
-		}
+	if c, ok := overrides[name]; ok {
+		return c
 	}
-	for _, t := range logToolTokens {
-		if name == t {
-			return toolLog
-		}
+	switch {
+	case preserveExact[name]:
+		return toolPreserve
+	case logExact[name]:
+		return toolLog
+	case searchExact[name]:
+		return toolSearch
 	}
-	for _, t := range searchToolTokens {
-		if name == t {
-			return toolSearch
-		}
-	}
-	for _, t := range preserveToolTokens {
+	for _, t := range preservePrefixes {
 		if strings.HasPrefix(name, t) {
 			return toolPreserve
 		}
 	}
-	for _, t := range logToolTokens {
+	for _, t := range logPrefixes {
+		if strings.HasPrefix(name, t) {
+			return toolLog
+		}
+	}
+	for _, t := range logSubstrings {
 		if strings.Contains(name, t) {
 			return toolLog
 		}
 	}
-	for _, t := range searchToolTokens {
+	for _, t := range searchSubstring {
 		if strings.Contains(name, t) {
 			return toolSearch
 		}
@@ -303,7 +332,29 @@ func toolClassFor(name string) toolClass {
 	return toolPreserve
 }
 
-// toolClassFilterable reports whether a resolved name may be filtered.
-func toolClassFilterable(name string) bool {
-	return toolClassFor(name) != toolPreserve
+// toolClassNames are the values the tool_classes option accepts.
+var toolClassNames = map[string]toolClass{"log": toolLog, "search": toolSearch, "preserve": toolPreserve}
+
+// toolClassOverrides reads the rtk stage's tool_classes option:
+// {"<tool name>": "log"|"search"|"preserve"}. Names match case-insensitively;
+// an unknown class value is ignored (admin validation rejects it on write).
+func toolClassOverrides(opts map[string]any) map[string]toolClass {
+	raw, ok := opts["tool_classes"].(map[string]any)
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string]toolClass, len(raw))
+	for name, v := range raw {
+		s, _ := v.(string)
+		if c, ok := toolClassNames[strings.ToLower(strings.TrimSpace(s))]; ok {
+			out[strings.ToLower(strings.TrimSpace(name))] = c
+		}
+	}
+	return out
+}
+
+// ValidToolClass reports whether v is an accepted tool_classes value.
+func ValidToolClass(v string) bool {
+	_, ok := toolClassNames[strings.ToLower(strings.TrimSpace(v))]
+	return ok
 }

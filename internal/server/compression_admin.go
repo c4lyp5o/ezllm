@@ -77,6 +77,9 @@ func supportedEngines() string {
 var cavemanIntensities = map[string]bool{"lite": true, "standard": true}
 
 func validateStageOptions(i int, st compress.Stage) error {
+	if st.Engine == "rtk" {
+		return validateToolClasses(i, st.Options["tool_classes"])
+	}
 	if st.Engine != "caveman" {
 		return nil
 	}
@@ -92,6 +95,26 @@ func validateStageOptions(i int, st compress.Stage) error {
 		return errStrf("stage %d: caveman intensity %q is not a prose level — caveman supports only "+
 			"\"lite\"/\"standard\". For omniroute-style aggressive/ultra, compose the pipeline instead: "+
 			"session_dedup -> rtk -> headroom -> caveman(standard)", i, v)
+	}
+	return nil
+}
+
+// validateToolClasses checks rtk's tool_classes override map: each key a tool
+// name, each value log|search|preserve. A typo'd class would otherwise be
+// ignored silently and the tool would keep its built-in class.
+func validateToolClasses(i int, raw any) error {
+	if raw == nil {
+		return nil
+	}
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return errStrf("stage %d: rtk tool_classes must be an object of tool name -> \"log\"|\"search\"|\"preserve\"", i)
+	}
+	for name, v := range m {
+		s, _ := v.(string)
+		if strings.TrimSpace(name) == "" || !compress.ValidToolClass(s) {
+			return errStrf("stage %d: rtk tool_classes[%q] = %v; want \"log\", \"search\" or \"preserve\"", i, name, v)
+		}
 	}
 	return nil
 }

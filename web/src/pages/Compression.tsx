@@ -7,7 +7,10 @@ import {
 import { BarList, Panel, VIZ } from '../components/charts';
 import { Chip, ConfirmModal, EmptyState, Mono, SectionLabel, btn, cx, formatTokens, inputCls, labelCls, nfmt, Spinner } from '../components/ui';
 
-type StageDraft = { engine: string; option: string };
+// extra carries every stage option this editor has no field for, so saving a
+// profile never silently drops options set through the API. toolClasses is
+// rtk's tool_classes override, edited as "name=class, name=class".
+type StageDraft = { engine: string; option: string; extra?: Record<string, unknown>; toolClasses?: string };
 type ProfileDraft = {
   name: string;
   enabled: boolean;
@@ -32,7 +35,7 @@ const freshDraft = (): ProfileDraft => ({ name: '', enabled: true, stages: [{ en
 const fromProfile = (p: CompressionProfile): ProfileDraft => ({
   name: p.name,
   enabled: p.enabled,
-  stages: (p.stages ?? []).map((s) => ({ engine: s.engine, option: optionValue(s) })),
+  stages: (p.stages ?? []).map((s) => ({ engine: s.engine, option: optionValue(s), extra: extraOptions(s), toolClasses: toolClassesText(s) })),
   exempt_last_turn: p.exempt_last_turn,
   min_compress_ratio: p.min_compress_ratio,
   auto_trigger_tokens: p.auto_trigger_tokens,
@@ -44,12 +47,36 @@ function optionValue(stage: CompressionStage): string {
   if (!info) return '';
   return String(stage.options?.[info.key] ?? info.initial);
 }
+function extraOptions(stage: CompressionStage): Record<string, unknown> {
+  const key = ENGINE_INFO[stage.engine]?.option?.key;
+  const rest: Record<string, unknown> = { ...(stage.options ?? {}) };
+  if (key) delete rest[key];
+  delete rest.tool_classes;
+  return rest;
+}
+function toolClassesText(stage: CompressionStage): string {
+  const tc = stage.options?.tool_classes;
+  if (!tc || typeof tc !== 'object') return '';
+  return Object.entries(tc as Record<string, unknown>).map(([k, v]) => `${k}=${String(v)}`).join(', ');
+}
+const TOOL_CLASSES = ['log', 'search', 'preserve'];
+// parseToolClasses reads "name=class, …"; null when any entry is malformed.
+function parseToolClasses(text: string): Record<string, string> | null {
+  const out: Record<string, string> = {};
+  for (const part of text.split(',').map((p) => p.trim()).filter(Boolean)) {
+    const [name, cls] = part.split('=').map((x) => x?.trim() ?? '');
+    if (!name || !TOOL_CLASSES.includes(cls.toLowerCase())) return null;
+    out[name] = cls.toLowerCase();
+  }
+  return out;
+}
 function packStages(stages: StageDraft[]): CompressionStage[] {
   return stages.map((s) => {
     const opt = ENGINE_INFO[s.engine]?.option;
-    if (!opt || !s.option.trim()) return { engine: s.engine };
-    const options: Record<string, unknown> = { [opt.key]: opt.key === 'intensity' ? s.option.trim() : Number(s.option) };
-    return { engine: s.engine, options };
+    const options: Record<string, unknown> = { ...(s.extra ?? {}) };
+    if (opt && s.option.trim()) options[opt.key] = opt.key === 'intensity' ? s.option.trim() : Number(s.option);
+    if (s.engine === 'rtk' && s.toolClasses?.trim()) options.tool_classes = parseToolClasses(s.toolClasses) ?? {};
+    return Object.keys(options).length ? { engine: s.engine, options } : { engine: s.engine };
   });
 }
 
@@ -107,6 +134,8 @@ export default function Compression() {
       return setErr('Caveman intensity must be lite or standard.');
     if (draft.stages.some((s) => ['rtk', 'headroom', 'lite'].includes(s.engine) && (!Number.isInteger(Number(s.option)) || Number(s.option) < 0)))
       return setErr('Numeric stage options must be non-negative whole numbers.');
+    if (draft.stages.some((s) => s.engine === 'rtk' && s.toolClasses?.trim() && parseToolClasses(s.toolClasses) === null))
+      return setErr('RTK tool classes must be "name=log|search|preserve", comma-separated.');
     setBusy(true); setErr(''); setNotice('');
     const body = {
       name: draft.name.trim(), enabled: draft.enabled, stages: packStages(draft.stages),
@@ -267,7 +296,7 @@ export default function Compression() {
             const info = ENGINE_INFO[stage.engine];
             return <div key={`${i}-${stage.engine}`} className="grid items-end gap-2 rounded-lg border border-line bg-raised/40 p-3 sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto]">
               <span className="pb-2 font-mono text-[11px] text-mute">{String(i + 1).padStart(2, '0')}</span>
-              <div><label className={labelCls} htmlFor={`cp-engine-${i}`}>Engine</label><select id={`cp-engine-${i}`} className={inputCls} value={stage.engine} onChange={(e) => updateStage(i, { engine: e.target.value, option: ENGINE_INFO[e.target.value]?.option?.initial ?? '' })}>{ENGINE_IDS.map((id) => <option key={id} value={id}>{stageLabel(id)}</option>)}{!ENGINE_IDS.includes(stage.engine) && <option value={stage.engine} disabled>{stageLabel(stage.engine)} (not offered)</option>}</select></div>
+              <div><label className={labelCls} htmlFor={`cp-engine-${i}`}>Engine</label><select id={`cp-engine-${i}`} className={inputCls} value={stage.engine} onChange={(e) => updateStage(i, { engine: e.target.value, option: ENGINE_INFO[e.target.value]?.option?.initial ?? '', extra: {}, toolClasses: '' })}>{ENGINE_IDS.map((id) => <option key={id} value={id}>{stageLabel(id)}</option>)}{!ENGINE_IDS.includes(stage.engine) && <option value={stage.engine} disabled>{stageLabel(stage.engine)} (not offered)</option>}</select></div>
               <div>{info?.option ? (
                 info.option.values ? (
                   <>
@@ -281,6 +310,11 @@ export default function Compression() {
                   <>
                     <label className={labelCls} htmlFor={`cp-option-${i}`}>{info.option.label}</label>
                     <input id={`cp-option-${i}`} className={inputCls} value={stage.option || info.option.initial} onChange={(e) => updateStage(i, { option: e.target.value })} />
+                    {stage.engine === 'rtk' && <>
+                      <label className={cx(labelCls, 'mt-2')} htmlFor={`cp-classes-${i}`}
+                        title="Name your app's tools: log and search output is head/tail filtered, preserve is never touched. Unlisted tools use the built-in table; unknown tools are preserved.">Tool classes (name=log|search|preserve)</label>
+                      <input id={`cp-classes-${i}`} className={cx(inputCls, 'font-mono')} placeholder="terminal=log, web_extract=preserve" value={stage.toolClasses ?? ''} onChange={(e) => updateStage(i, { toolClasses: e.target.value })} />
+                    </>}
                   </>
                 )
               ) : <p className="pb-2 text-[11px] text-mute">No stage options</p>}</div>

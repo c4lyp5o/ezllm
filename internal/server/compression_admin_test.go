@@ -73,3 +73,21 @@ func TestValidateStagesIgnoresOptionsOnOtherEngines(t *testing.T) {
 		t.Errorf("intensity is meaningless outside caveman and must not be validated: %v", err)
 	}
 }
+
+// rtk tool_classes: a typo'd class would be ignored silently and the tool
+// would keep its built-in class, so the write is refused instead.
+func TestValidateStagesChecksRTKToolClasses(t *testing.T) {
+	if _, err := validateStages([]byte(`[{"engine":"rtk","options":{"tool_classes":{"terminal":"log","web_extract":"preserve","finder":"Search"}}}]`)); err != nil {
+		t.Fatalf("valid tool_classes rejected: %v", err)
+	}
+	for _, bad := range []string{
+		`[{"engine":"rtk","options":{"tool_classes":{"terminal":"logs"}}}]`,
+		`[{"engine":"rtk","options":{"tool_classes":{"terminal":3}}}]`,
+		`[{"engine":"rtk","options":{"tool_classes":["terminal"]}}]`,
+		`[{"engine":"rtk","options":{"tool_classes":{"":"log"}}}]`,
+	} {
+		if _, err := validateStages([]byte(bad)); err == nil {
+			t.Errorf("accepted invalid tool_classes: %s", bad)
+		}
+	}
+}

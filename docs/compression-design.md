@@ -53,6 +53,17 @@ head/tail + error-unit behaviour; **file reads, diffs/patches, and every
 UNKNOWN or unresolvable tool are preserved verbatim**. Unknown must never
 mean "blindly truncate". Tool arguments are never read.
 
+Classification order (2026-10-19), first match wins: the profile's
+`tool_classes` override on the rtk stage (`{"terminal":"log",
+"web_extract":"preserve"}` — each app's own tool names are the operator's
+knowledge, not a guess baked into ezllm) → exact built-in names for widely
+used tools → prefixes (`read_*`, `run_*`, …) → substrings of long,
+distinctive tokens only (`bash`, `shell`, `terminal`, `grep`, `search`, …) →
+preserve. Short tokens are exact-only: matched as substrings they misfired
+(`rg` in `merge_pr`, `ls` in `list_tools`, `web` in `webfetch` all head/tail
+filtered non-log content). Web fetches are preserve: a fetched page is a
+document, not a log.
+
 ### 3. Committed-prefix stability (Workstream C, scoped)
 
 The full managed-session design (epochs, branches, durable storage) was

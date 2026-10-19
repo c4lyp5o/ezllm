@@ -504,7 +504,9 @@ every hop returns `429`, not `502`.
 `stages` is an ordered engine pipeline over `session_dedup`, `rtk`, `headroom`, `lite` and
 `caveman`, validated against the engine registry on write (`budget` was deleted 2026-10-19 and is
 rejected as an unknown engine). Stage options are engine-specific (e.g.
-`{"engine":"rtk","keep_lines":6}`). Every engine applies to all three request shapes
+`{"engine":"rtk","options":{"keep_lines":6,"tool_classes":{"terminal":"log","web_extract":"preserve"}}}`
+— `tool_classes` names an app's tools as `log`, `search` or `preserve`, overriding the built-in
+table; any other value is a 400). Every engine applies to all three request shapes
 (`/v1/chat/completions`, `/v1/messages`, `/v1/responses`).
 
 - `exempt_last_turn` (default true) · `min_compress_ratio` (0.05) · `fail_open` (true) ·

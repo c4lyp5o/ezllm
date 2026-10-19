@@ -206,3 +206,44 @@ func TestRTKNeverFiltersJSONInsideAnthropicToolResult(t *testing.T) {
 		t.Fatalf("JSON tool_result was line-filtered (valid JSON now: %v)", json.Valid([]byte(got)))
 	}
 }
+
+// The classification table, app-neutral: exact names for widely used tools,
+// prefixes, long substrings only, preserve by default. The short-substring
+// misfires the old matcher made (merge_pr→search via "rg", list_tools→search
+// via "ls", webfetch→search via "web") are pinned as preserve.
+func TestToolClassTable(t *testing.T) {
+	for name, want := range map[string]toolClass{
+		"bash": toolLog, "terminal": toolLog, "run_tests": toolLog, "execute_command": toolLog,
+		"npm_install": toolLog, "docker_logs": toolLog, "my_shell_tool": toolLog,
+		"grep": toolSearch, "glob": toolSearch, "websearch": toolSearch, "web_search": toolSearch,
+		"codebase_search": toolSearch, "ls": toolSearch,
+		"read": toolPreserve, "read_file": toolPreserve, "webfetch": toolPreserve, "web_fetch": toolPreserve,
+		"web_extract": toolPreserve, "merge_pr": toolPreserve, "list_tools": toolPreserve,
+		"task": toolPreserve, "todowrite": toolPreserve, "mcp__acme__fetch_everything": toolPreserve, "": toolPreserve,
+	} {
+		if got := toolClassFor(name, nil); got != want {
+			t.Errorf("toolClassFor(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+// A profile names its app's own tools: overrides win over every built-in
+// rule, case-insensitively, in both directions.
+func TestToolClassOverridesApplyThroughThePipeline(t *testing.T) {
+	content := bigLog()
+	body := bodyOf(
+		toolCallMsg("c1", "Terminal_Run"), // built-in: log
+		map[string]any{"role": "tool", "tool_call_id": "c1", "content": content},
+		toolCallMsg("c2", "deploy_status"), // built-in: preserve
+		map[string]any{"role": "tool", "tool_call_id": "c2", "content": content},
+		textMsg("user", "and now?"),
+	)
+	opts := map[string]any{"keep_lines": 3, "tool_classes": map[string]any{"terminal_run": "preserve", "DEPLOY_STATUS": "log"}}
+	out, _ := Apply(body, fullProfile(Stage{Engine: "rtk", Options: opts}))
+	if msgContent(t, out, 1) != content {
+		t.Error("override preserve was ignored: Terminal_Run was filtered")
+	}
+	if !strings.Contains(msgContent(t, out, 3), "[ezllm/rtk:") {
+		t.Error("override log was ignored: deploy_status was not filtered")
+	}
+}

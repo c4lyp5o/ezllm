@@ -417,6 +417,48 @@ func (d *DB) SetModelPin(ctx context.Context, accountID int64, modelID, pin stri
 	})
 }
 
+// ModelFacts is one model row's routing facts: its pin and its probed
+// capability per wire, with the same meanings ModelPin and
+// ModelSupportsSurface give them (a nil capability is UNTESTED).
+type ModelFacts struct {
+	Pin       string
+	OpenAI    *bool
+	Anthropic *bool
+	Responses *bool
+}
+
+// Supports returns the probed capability for one wire (nil = untested).
+func (f ModelFacts) Supports(s provider.Surface) *bool {
+	switch s {
+	case provider.SurfaceAnthropic:
+		return f.Anthropic
+	case provider.SurfaceResponses:
+		return f.Responses
+	}
+	return f.OpenAI
+}
+
+// ModelFacts reads the pin and every capability column in one query, so wire
+// selection costs one row read per hop instead of one per question. A model
+// absent from the catalog has no pin and untested capabilities, exactly as
+// ModelPin and ModelSupportsSurface report it.
+func (d *DB) ModelFacts(ctx context.Context, accountID int64, modelID string) (ModelFacts, error) {
+	var (
+		pin       sql.NullString
+		oa, an, r sql.NullInt64
+	)
+	err := d.r.QueryRowContext(ctx, `
+SELECT proto_pin, proto_openai, proto_anthropic, proto_responses
+FROM models WHERE account_id=? AND model_id=?`, accountID, modelID).Scan(&pin, &oa, &an, &r)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ModelFacts{}, nil
+	}
+	if err != nil {
+		return ModelFacts{}, err
+	}
+	return ModelFacts{Pin: pin.String, OpenAI: nullBoolPtr(oa), Anthropic: nullBoolPtr(an), Responses: nullBoolPtr(r)}, nil
+}
+
 // ModelSupportsSurface returns the recorded protocol capability for one
 // (account, model, surface). A non-nil false means probed INCOMPATIBLE, a
 // non-nil true means probed compatible, and NIL means UNTESTED — a state every
@@ -452,19 +494,17 @@ func (d *DB) ModelSupportsSurface(ctx context.Context, accountID int64, modelID 
 // An empty catalog (never synced) returns true so a fresh account still routes
 // — the upstream is authoritative and will reject an unknown model itself.
 func (d *DB) ModelExists(ctx context.Context, accountID int64, modelID string) (bool, error) {
-	var total int
-	if err := d.r.QueryRowContext(ctx, `SELECT COUNT(*) FROM models WHERE account_id=?`, accountID).Scan(&total); err != nil {
+	// One indexed query on the hot path (it runs per hop per request): the
+	// model row exists, or the account has no catalog rows at all.
+	var ok bool
+	err := d.r.QueryRowContext(ctx, `
+SELECT EXISTS(SELECT 1 FROM models WHERE account_id=? AND model_id=?)
+    OR NOT EXISTS(SELECT 1 FROM models WHERE account_id=?)`,
+		accountID, modelID, accountID).Scan(&ok)
+	if err != nil {
 		return false, err
 	}
-	if total == 0 {
-		return true, nil
-	}
-	var n int
-	if err := d.r.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM models WHERE account_id=? AND model_id=?`, accountID, modelID).Scan(&n); err != nil {
-		return false, err
-	}
-	return n > 0, nil
+	return ok, nil
 }
 
 // AllNamespaces lists every "<namespace>/<model>" pair, for helpful 404s and

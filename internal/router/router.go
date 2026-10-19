@@ -97,8 +97,8 @@ func surfaceName(s provider.Surface) string {
 // their OpenAI wire. An unpinned model passes unchanged. A lookup error FAILS CLOSED: an operator who pinned
 // a model away from a surface must not have that pin silently bypassed by a
 // transient DB error. The error is returned so the caller answers, not skips.
-func (r *Resolver) checkPin(ctx context.Context, accountID int64, model, requested string, surface provider.Surface) error {
-	pin, err := r.catalog.ModelPin(ctx, accountID, model)
+func (r *Resolver) checkPin(f *hopFacts, requested string, surface provider.Surface) error {
+	pin, err := f.pin()
 	if err != nil {
 		return fmt.Errorf("model pin lookup for %q: %w", requested, err)
 	}
@@ -301,6 +301,84 @@ type wireDecision struct {
 	refusePin error
 }
 
+// modelFactsCatalog is the optional one-row read of a model's pin and
+// capabilities (store.DB implements it). A Catalog without it is asked one
+// question at a time, as before.
+type modelFactsCatalog interface {
+	ModelFacts(ctx context.Context, accountID int64, modelID string) (store.ModelFacts, error)
+}
+
+// hopFacts memoizes one hop's pin and capability lookups for the duration of
+// one wire decision. selectWire may ask the same question several times (the
+// pin up to three times, a capability up to four); each answer is read once.
+// An error is memoized with its answer, so every check sees the same snapshot.
+type hopFacts struct {
+	ctx       context.Context
+	cat       Catalog
+	accountID int64
+	model     string
+
+	rowDone bool
+	row     store.ModelFacts
+	rowErr  error
+
+	pinDone bool
+	pinVal  string
+	pinErr  error
+	caps    map[provider.Surface]capAnswer
+}
+
+type capAnswer struct {
+	v   *bool
+	err error
+}
+
+func (r *Resolver) factsFor(ctx context.Context, accountID int64, model string) *hopFacts {
+	return &hopFacts{ctx: ctx, cat: r.catalog, accountID: accountID, model: model}
+}
+
+// loadRow reads the whole row once when the catalog supports it.
+func (f *hopFacts) loadRow() (bool, error) {
+	fc, ok := f.cat.(modelFactsCatalog)
+	if !ok {
+		return false, nil
+	}
+	if !f.rowDone {
+		f.row, f.rowErr = fc.ModelFacts(f.ctx, f.accountID, f.model)
+		f.rowDone = true
+	}
+	return true, f.rowErr
+}
+
+func (f *hopFacts) pin() (string, error) {
+	if ok, err := f.loadRow(); ok {
+		return f.row.Pin, err
+	}
+	if !f.pinDone {
+		f.pinVal, f.pinErr = f.cat.ModelPin(f.ctx, f.accountID, f.model)
+		f.pinDone = true
+	}
+	return f.pinVal, f.pinErr
+}
+
+func (f *hopFacts) supports(s provider.Surface) (*bool, error) {
+	if ok, err := f.loadRow(); ok {
+		if err != nil {
+			return nil, err
+		}
+		return f.row.Supports(s), nil
+	}
+	if a, ok := f.caps[s]; ok {
+		return a.v, a.err
+	}
+	v, err := f.cat.ModelSupportsSurface(f.ctx, f.accountID, f.model, s)
+	if f.caps == nil {
+		f.caps = make(map[provider.Surface]capAnswer, 3)
+	}
+	f.caps[s] = capAnswer{v, err}
+	return v, err
+}
+
 // selectWire decides, for one candidate, the wire the upstream is spoken to on
 // — BEFORE capability and pins can be consulted out of order:
 //
@@ -318,9 +396,10 @@ type wireDecision struct {
 // The pin is checked against the DECIDED wire inside this function, so a hop
 // cannot pass a pin that guards a different wire than the one it dials.
 func (r *Resolver) selectWire(ctx context.Context, acct *provider.Account, model, requested string, clientSurface provider.Surface) wireDecision {
+	f := r.factsFor(ctx, acct.ID, model)
 	// 1. Curated responses-wire override.
 	if r.needsResponsesWire(clientSurface, acct.Namespace, model) {
-		rcap, rerr := r.catalog.ModelSupportsSurface(ctx, acct.ID, model, provider.SurfaceResponses)
+		rcap, rerr := f.supports(provider.SurfaceResponses)
 		if rerr == nil && rcap != nil && !*rcap {
 			// The override names responses and the probe disproves it:
 			// dialing anyway spends a request on a wire that cannot answer.
@@ -331,7 +410,7 @@ func (r *Resolver) selectWire(ctx context.Context, acct *provider.Account, model
 				Reason: "probed unable to serve the responses surface",
 			}}
 		}
-		if err := r.checkPin(ctx, acct.ID, model, requested, provider.SurfaceResponses); err != nil {
+		if err := r.checkPin(f, requested, provider.SurfaceResponses); err != nil {
 			return wireDecision{refusePin: err}
 		}
 		return wireDecision{wire: provider.SurfaceResponses, responsesWire: true}
@@ -345,13 +424,13 @@ func (r *Resolver) selectWire(ctx context.Context, acct *provider.Account, model
 	// does not require the legacy translation.enabled gate (operator decision,
 	// 2026-10-13).
 	if r.universalEnabled {
-		if pin, perr := r.catalog.ModelPin(ctx, acct.ID, model); perr == nil && pin != "" && pin != surfaceName(clientSurface) {
+		if pin, perr := f.pin(); perr == nil && pin != "" && pin != surfaceName(clientSurface) {
 			wire, ok := pinSurface(pin)
 			if !ok {
 				return wireDecision{refuse: &ErrWireUnsupported{Requested: requested, Wire: clientSurface,
 					Reason: fmt.Sprintf("model is pinned to an unknown wire %q", pin)}}
 			}
-			capability, cerr := r.catalog.ModelSupportsSurface(ctx, acct.ID, model, wire)
+			capability, cerr := f.supports(wire)
 			if cerr != nil {
 				capability = nil
 			}
@@ -368,12 +447,12 @@ func (r *Resolver) selectWire(ctx context.Context, acct *provider.Account, model
 	}
 
 	// 2. Native when possible or unproven-impossible.
-	native, err := r.catalog.ModelSupportsSurface(ctx, acct.ID, model, clientSurface)
+	native, err := f.supports(clientSurface)
 	if err != nil {
 		native = nil // lookup error = untested, fail-open
 	}
 	if native == nil || *native {
-		if err := r.checkPin(ctx, acct.ID, model, requested, clientSurface); err != nil {
+		if err := r.checkPin(f, requested, clientSurface); err != nil {
 			return wireDecision{refusePin: err}
 		}
 		return wireDecision{wire: clientSurface}
@@ -389,7 +468,7 @@ func (r *Resolver) selectWire(ctx context.Context, acct *provider.Account, model
 	if r.universalEnabled {
 		blockedByConvention := false
 		for _, dest := range universalOrder(clientSurface) {
-			capability, cerr := r.catalog.ModelSupportsSurface(ctx, acct.ID, model, dest)
+			capability, cerr := f.supports(dest)
 			if cerr != nil {
 				capability = nil
 			}
@@ -400,7 +479,7 @@ func (r *Resolver) selectWire(ctx context.Context, acct *provider.Account, model
 				blockedByConvention = true
 				continue
 			}
-			if err := r.checkPin(ctx, acct.ID, model, requested, dest); err != nil {
+			if err := r.checkPin(f, requested, dest); err != nil {
 				return wireDecision{refusePin: err}
 			}
 			return wireDecision{wire: dest, translated: true}
@@ -412,12 +491,12 @@ func (r *Resolver) selectWire(ctx context.Context, acct *provider.Account, model
 	}
 
 	// Legacy (universal off): the single anthropic→openai alternative.
-	openai, oerr := r.catalog.ModelSupportsSurface(ctx, acct.ID, model, provider.SurfaceOpenAI)
+	openai, oerr := f.supports(provider.SurfaceOpenAI)
 	if oerr != nil {
 		openai = nil
 	}
 	if translate.Eligible(clientSurface, native, openai, r.translationEnabled) {
-		if err := r.checkPin(ctx, acct.ID, model, requested, provider.SurfaceOpenAI); err != nil {
+		if err := r.checkPin(f, requested, provider.SurfaceOpenAI); err != nil {
 			return wireDecision{refusePin: err}
 		}
 		return wireDecision{wire: provider.SurfaceOpenAI, translated: true}
@@ -600,11 +679,29 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 
 		first error // first hop's rejection, kept as the failure to report
 	)
+	// Hops commonly share an account (one account, several models). Its row
+	// and its key are the same for every such hop within one resolution, so
+	// each is read once per account rather than once per hop.
+	type acctAnswer struct {
+		acct *provider.Account
+		err  error
+	}
+	type keyAnswer struct {
+		key store.KeyPick
+		err error
+	}
+	accts := make(map[int64]acctAnswer, len(combo.Hops))
+	keys := make(map[int64]keyAnswer, len(combo.Hops))
 	for _, h := range combo.Hops {
 		if h.Enabled != nil && !*h.Enabled {
 			continue
 		}
-		acct, err := r.catalog.AccountByID(ctx, h.AccountID)
+		aa, seen := accts[h.AccountID]
+		if !seen {
+			aa.acct, aa.err = r.catalog.AccountByID(ctx, h.AccountID)
+			accts[h.AccountID] = aa
+		}
+		acct, err := aa.acct, aa.err
 		if err != nil {
 			if first == nil {
 				first = fmt.Errorf("hop account %d/%s: %w", h.AccountID, h.ModelID, err)
@@ -657,7 +754,12 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 			}
 			continue
 		}
-		key, err := r.catalog.PickKey(ctx, acct.ID)
+		ka, seen := keys[acct.ID]
+		if !seen {
+			ka.key, ka.err = r.catalog.PickKey(ctx, acct.ID)
+			keys[acct.ID] = ka
+		}
+		key, err := ka.key, ka.err
 		if err != nil {
 			if first == nil {
 				first = fmt.Errorf("hop %s/%s: no usable key: %w", acct.Namespace, h.ModelID, err)

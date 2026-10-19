@@ -144,3 +144,58 @@ func TestPartsLeaveNonTextUntouched(t *testing.T) {
 		}
 	}
 }
+
+// A file read reaches the model byte-identical in every shape, through every
+// engine: the agent's next edit quotes this text back, and a trimmed space or
+// collapsed blank line makes that edit fail to match. Unknown tools still get
+// the lossless tidy-up; a profile's "preserve" override protects them too.
+func TestFileReadsStayVerbatimThroughEveryEngine(t *testing.T) {
+	fileText := "     1\tfunc main() {   \n     2\t\n     3\t\n     4\t\n     5\t\tfmt.Println(\"hi\")  \n     6\t}\n"
+	jsonFile := shapeTable()
+	unknown := "status: ok   \n\n\n\n\ndone   "
+	p := &Profile{Name: "p", Enabled: true, ExemptLastTurn: true, MinCompressRatio: 0, Stages: []Stage{
+		{Engine: "rtk"}, {Engine: "headroom"}, {Engine: "lite"}, {Engine: "caveman", Options: map[string]any{"intensity": "standard"}}}}
+	mk := func(results map[string]string) map[string][]byte {
+		var chat, msgs, resp []any
+		var uses, blocks []any
+		for id, text := range results {
+			name := map[string]string{"f": "read_file", "j": "read_file", "u": "deploy_status"}[id]
+			chat = append(chat,
+				map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{"id": id, "type": "function", "function": map[string]any{"name": name, "arguments": "{}"}}}},
+				map[string]any{"role": "tool", "tool_call_id": id, "content": text})
+			uses = append(uses, map[string]any{"type": "tool_use", "id": id, "name": name, "input": map[string]any{}})
+			blocks = append(blocks, map[string]any{"type": "tool_result", "tool_use_id": id, "content": text})
+			resp = append(resp,
+				map[string]any{"type": "function_call", "call_id": id, "name": name, "arguments": "{}"},
+				map[string]any{"type": "function_call_output", "call_id": id, "output": text})
+		}
+		msgs = []any{map[string]any{"role": "assistant", "content": uses}, map[string]any{"role": "user", "content": blocks}}
+		end := map[string]any{"role": "user", "content": "go"}
+		b := func(key string, list []any) []byte {
+			out, _ := json.Marshal(map[string]any{"model": "m", key: append(list, end)})
+			return out
+		}
+		return map[string][]byte{"chat": b("messages", chat), "messages": b("messages", msgs), "responses": b("input", resp)}
+	}
+	for shape, body := range mk(map[string]string{"f": fileText, "j": jsonFile, "u": unknown}) {
+		out, _ := Apply(body, p)
+		texts := strings.Join(editedTexts(t, out), "\x00")
+		if !strings.Contains(texts, fileText) {
+			t.Errorf("%s: a file read was rewritten", shape)
+		}
+		if !strings.Contains(texts, jsonFile) {
+			t.Errorf("%s: a JSON file read was rewritten (headroom)", shape)
+		}
+		if strings.Contains(texts, unknown) {
+			t.Errorf("%s: an unknown tool's whitespace was not tidied", shape)
+		}
+	}
+	// The profile says deploy_status is verbatim: no engine touches it.
+	p.Stages[0].Options = map[string]any{"tool_classes": map[string]any{"deploy_status": "preserve"}}
+	for shape, body := range mk(map[string]string{"u": unknown}) {
+		out, _ := Apply(body, p)
+		if !strings.Contains(strings.Join(editedTexts(t, out), "\x00"), unknown) {
+			t.Errorf("%s: a preserve override did not reach lite", shape)
+		}
+	}
+}

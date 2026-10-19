@@ -26,10 +26,17 @@ func lite(msgs []any, opts map[string]any) []any {
 	if keepBlanks < 0 {
 		keepBlanks = 1
 	}
-	// Every text part, prose or tool output, in every shape (parts.go).
-	return editAll(msgs, nil, func(p textPart) (string, bool) {
+	// Every text part, prose or tool output, in every shape (parts.go) —
+	// except preserve-class tool output: a file read must reach the model
+	// byte-identical, or the agent's next edit (which quotes it back) fails
+	// to match.
+	classes := toolClassOverrides(opts)
+	return editAll(msgs, toolNamesByCallID(msgs), func(p textPart) (string, bool) {
 		if p.text == "" || isJSONPayload(p.text) {
 			return "", false // pure JSON payload: headroom's territory
+		}
+		if p.kind == partToolOutput && toolClassFor(p.tool, classes) == toolPreserve {
+			return "", false
 		}
 		cleaned, ok := cleanText(p.text, keepBlanks)
 		if !ok || len(cleaned) >= len(p.text) {

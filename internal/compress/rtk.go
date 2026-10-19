@@ -30,7 +30,10 @@ func rtk(msgs []any, opts map[string]any) []any {
 	// One rule for every shape (parts.go): tool output whose resolved tool
 	// is log- or search-class, never JSON, filtered only when it shrinks.
 	return editAll(msgs, toolNamesByCallID(msgs), func(p textPart) (string, bool) {
-		if p.kind != partToolOutput || p.text == "" || toolClassFor(p.tool, overrides) == toolPreserve || isJSONPayload(p.text) {
+		if p.kind != partToolOutput || p.text == "" || isJSONPayload(p.text) {
+			return "", false
+		}
+		if c := toolClassFor(p.tool, overrides); c != toolLog && c != toolSearch {
 			return "", false
 		}
 		filtered, ok := filterToolOutput(p.text, keep)
@@ -247,9 +250,15 @@ func toolNamesByCallID(msgs []any) map[string]string {
 type toolClass int
 
 const (
-	toolPreserve toolClass = iota // file reads, diffs, unknown tools
-	toolLog                       // build/test/terminal output
-	toolSearch                    // ranked results with paths
+	// toolPreserve is VERBATIM to every engine: file reads, edits and diffs
+	// (an agent's next edit quotes this text back and must match it
+	// exactly), and anything a profile marks "preserve".
+	toolPreserve toolClass = iota
+	toolLog                // build/test/terminal output
+	toolSearch             // ranked results with paths
+	// toolUnknown is an unrecognised tool: never truncated (rtk leaves it
+	// alone), but lossless engines (lite, headroom) may still tidy it.
+	toolUnknown
 )
 
 // Classification is a documented policy, not content sniffing, applied in
@@ -262,7 +271,7 @@ const (
 //  4. substrings — only long, distinctive tokens: a short token matched
 //     inside a name misfires ("rg" in merge_pr, "ls" in list_tools, "web" in
 //     webfetch) and head/tail-filters content that is not a log;
-//  5. preserve: an unknown tool is never truncated.
+//  5. unknown: never truncated (rtk skips it); lossless engines may tidy it.
 var (
 	preserveExact = toolSet("read", "read_file", "view", "cat", "open", "show", "get_file",
 		"edit", "edit_file", "multiedit", "write", "write_file", "create", "insert",
@@ -296,7 +305,7 @@ func toolSet(names ...string) map[string]bool {
 // from the rtk stage's tool_classes option and may be nil.
 func toolClassFor(name string, overrides map[string]toolClass) toolClass {
 	if name == "" {
-		return toolPreserve
+		return toolUnknown
 	}
 	if c, ok := overrides[name]; ok {
 		return c
@@ -329,7 +338,7 @@ func toolClassFor(name string, overrides map[string]toolClass) toolClass {
 			return toolSearch
 		}
 	}
-	return toolPreserve
+	return toolUnknown
 }
 
 // toolClassNames are the values the tool_classes option accepts.

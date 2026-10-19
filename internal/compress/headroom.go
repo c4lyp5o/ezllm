@@ -33,9 +33,13 @@ func headroom(msgs []any, opts map[string]any) []any {
 	if minRows < 1 {
 		minRows = 1
 	}
-	return editAll(msgs, nil, func(p textPart) (string, bool) {
+	classes := toolClassOverrides(opts)
+	return editAll(msgs, toolNamesByCallID(msgs), func(p textPart) (string, bool) {
 		if p.kind != partToolOutput || p.text == "" {
 			return "", false // scope: tool_only, in every shape
+		}
+		if toolClassFor(p.tool, classes) == toolPreserve {
+			return "", false // a file read ships byte-identical (see lite)
 		}
 		compacted, ok := compactTable(p.text, minRows)
 		if !ok || len(compacted) >= len(p.text) {

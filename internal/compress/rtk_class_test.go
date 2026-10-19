@@ -210,7 +210,7 @@ func TestRTKNeverFiltersJSONInsideAnthropicToolResult(t *testing.T) {
 // The classification table, app-neutral: exact names for widely used tools,
 // prefixes, long substrings only, preserve by default. The short-substring
 // misfires the old matcher made (merge_pr→search via "rg", list_tools→search
-// via "ls", webfetch→search via "web") are pinned as preserve.
+// via "ls", webfetch→search via "web") are pinned out of search.
 func TestToolClassTable(t *testing.T) {
 	for name, want := range map[string]toolClass{
 		"bash": toolLog, "terminal": toolLog, "run_tests": toolLog, "execute_command": toolLog,
@@ -218,8 +218,10 @@ func TestToolClassTable(t *testing.T) {
 		"grep": toolSearch, "glob": toolSearch, "websearch": toolSearch, "web_search": toolSearch,
 		"codebase_search": toolSearch, "ls": toolSearch,
 		"read": toolPreserve, "read_file": toolPreserve, "webfetch": toolPreserve, "web_fetch": toolPreserve,
-		"web_extract": toolPreserve, "merge_pr": toolPreserve, "list_tools": toolPreserve,
-		"task": toolPreserve, "todowrite": toolPreserve, "mcp__acme__fetch_everything": toolPreserve, "": toolPreserve,
+		"task": toolPreserve, "todowrite": toolPreserve, "edit_file": toolPreserve,
+		// unknown: never truncated by rtk, tidied only by lossless engines
+		"web_extract": toolUnknown, "merge_pr": toolUnknown, "list_tools": toolUnknown,
+		"mcp__acme__fetch_everything": toolUnknown, "": toolUnknown,
 	} {
 		if got := toolClassFor(name, nil); got != want {
 			t.Errorf("toolClassFor(%q) = %v, want %v", name, got, want)

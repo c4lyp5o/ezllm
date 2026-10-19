@@ -77,8 +77,10 @@ func supportedEngines() string {
 var cavemanIntensities = map[string]bool{"lite": true, "standard": true}
 
 func validateStageOptions(i int, st compress.Stage) error {
-	if st.Engine == "rtk" {
-		return validateToolClasses(i, st.Options["tool_classes"])
+	// tool_classes applies profile-wide (every engine reads it), so it is
+	// validated wherever a stage carries it.
+	if err := validateToolClasses(i, st.Options["tool_classes"]); err != nil {
+		return err
 	}
 	if st.Engine != "caveman" {
 		return nil
@@ -99,7 +101,7 @@ func validateStageOptions(i int, st compress.Stage) error {
 	return nil
 }
 
-// validateToolClasses checks rtk's tool_classes override map: each key a tool
+// validateToolClasses checks a stage's tool_classes override map: each key a tool
 // name, each value log|search|preserve. A typo'd class would otherwise be
 // ignored silently and the tool would keep its built-in class.
 func validateToolClasses(i int, raw any) error {
@@ -108,12 +110,12 @@ func validateToolClasses(i int, raw any) error {
 	}
 	m, ok := raw.(map[string]any)
 	if !ok {
-		return errStrf("stage %d: rtk tool_classes must be an object of tool name -> \"log\"|\"search\"|\"preserve\"", i)
+		return errStrf("stage %d: tool_classes must be an object of tool name -> \"log\"|\"search\"|\"preserve\"", i)
 	}
 	for name, v := range m {
 		s, _ := v.(string)
 		if strings.TrimSpace(name) == "" || !compress.ValidToolClass(s) {
-			return errStrf("stage %d: rtk tool_classes[%q] = %v; want \"log\", \"search\" or \"preserve\"", i, name, v)
+			return errStrf("stage %d: tool_classes[%q] = %v; want \"log\", \"search\" or \"preserve\"", i, name, v)
 		}
 	}
 	return nil

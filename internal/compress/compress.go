@@ -282,6 +282,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 
 	cur := newWork
 	stagesRan := 0
+	classes := profileToolClasses(p.Stages)
 	for _, st := range p.Stages {
 		if !KnownEngines[st.Engine] {
 			res.Err = "unknown engine " + st.Engine
@@ -296,7 +297,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 		}
 		stageStart := time.Now()
 		beforeStage := EstimateTokens(string(mustMarshal(present(cur))))
-		next, fired, err := runEngine(st, cur)
+		next, fired, err := runEngine(withProfileClasses(st, classes), cur)
 		if err != nil {
 			res.Err = st.Engine + ": " + err.Error()
 			return body, res // contract rule 5
@@ -330,7 +331,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 		shadowPre := EstimateTokens(string(mustMarshal(editable)))
 		shadow := editable
 		for _, st := range p.Stages {
-			next, _, err := runEngine(st, shadow)
+			next, _, err := runEngine(withProfileClasses(st, classes), shadow)
 			if err != nil {
 				break
 			}
@@ -496,6 +497,38 @@ func present(msgs []any) []any {
 		}
 	}
 	return out
+}
+
+// profileToolClasses merges every stage's tool_classes option: how an app
+// names its tools is a fact about the profile, so it binds every engine
+// (rtk's filtering, and lite/headroom's file-read preservation) alike.
+func profileToolClasses(stages []Stage) map[string]any {
+	var out map[string]any
+	for _, st := range stages {
+		if m, ok := st.Options["tool_classes"].(map[string]any); ok {
+			if out == nil {
+				out = map[string]any{}
+			}
+			for k, v := range m {
+				out[k] = v
+			}
+		}
+	}
+	return out
+}
+
+// withProfileClasses hands the profile-wide tool_classes to one stage.
+func withProfileClasses(st Stage, classes map[string]any) Stage {
+	if classes == nil {
+		return st
+	}
+	opts := make(map[string]any, len(st.Options)+1)
+	for k, v := range st.Options {
+		opts[k] = v
+	}
+	opts["tool_classes"] = classes
+	st.Options = opts
+	return st
 }
 
 // runEngine applies one stage. fired is only meaningful for caveman (the count

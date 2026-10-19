@@ -64,6 +64,15 @@ preserve. Short tokens are exact-only: matched as substrings they misfired
 filtered non-log content). Web fetches are preserve: a fetched page is a
 document, not a log.
 
+Classes bind **every** engine, not only rtk (2026-10-19): `tool_classes` on any
+stage applies profile-wide, and **preserve** output — file reads, edits and
+diffs, or anything a profile marks preserve — reaches the model
+byte-identical through `lite` and `headroom` too. An agent's next edit quotes
+a file read back and must match it exactly; a trimmed trailing space or a
+collapsed blank line made those edits fail. Unrecognised tools are a separate
+**unknown** class: rtk never truncates them, lossless engines may still tidy
+them.
+
 ### 3. Committed-prefix stability (Workstream C, scoped)
 
 The full managed-session design (epochs, branches, durable storage) was

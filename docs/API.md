@@ -175,7 +175,7 @@ every other metric.
 `^[a-z0-9][a-z0-9._-]{0,62}$` and must not contain `/`. Unique → `409`.
 `usage_convention` (schema v13, optional; default `auto`) is the operator-declared input
 accounting of the upstream **Messages** wire: `auto` = unstated (never inferred from `kind` or
-`base_url`; cross-wire conversions onto a Messages upstream are refused), `anthropic` =
+`base_url`; read as exclusive, in the ledger and on cross-wire conversions alike), `anthropic` =
 `input_tokens` EXCLUDES cache tokens, `total` = `input_tokens` INCLUDES cache tokens. See
 `docs/usage-convention-design.md`.
 `management_key` (schema v19, optional) is a second credential for providers whose balance

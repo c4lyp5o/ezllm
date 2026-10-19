@@ -156,6 +156,9 @@ type chatWireMessage struct {
 	Content    json.RawMessage    `json:"content"`
 	ToolCallID string             `json:"tool_call_id,omitempty"`
 	ToolCalls  []chatWireToolCall `json:"tool_calls,omitempty"`
+	// raw is the message's own bytes (DecodeChatRequest only), for keys the
+	// struct does not name.
+	raw json.RawMessage
 }
 
 type chatWireToolCall struct {

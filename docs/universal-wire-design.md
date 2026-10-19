@@ -61,14 +61,17 @@ Per candidate, wire-first:
    - Messages client → chat, then responses
    - chat client → responses, then messages
    - Responses client → chat, then messages
-4. **A Messages destination needs the operator's fact.** `accounts.usage_convention`
-   (`auto|anthropic|total`, schema v13) states how the upstream's own `input_tokens` counts
-   cache tokens. `auto` = unstated → the cell is skipped (the refusal names the field), never
-   guessed. See `docs/usage-convention-design.md`.
+4. **A Messages destination reads the operator's fact, and `auto` is not a gate.**
+   `accounts.usage_convention` (`auto|anthropic|total`, schema v13) states how the upstream's
+   own `input_tokens` counts cache tokens. `auto` reads as exclusive — the meaning the ledger has
+   always given it (usage-convention-design D1) — so a chat or Responses client reaches an
+   Anthropic hop the way Claude Code reaches an OpenAI one. (Revised 2026-10-20: the earlier
+   refusal turned every chat client away from every unconfigured Anthropic account.) An
+   `anthropic-compatible` account's Messages wire counts as proven by the kind itself when its
+   probe never ran; a probe that disproved it still wins.
 
 Pin semantics: with universal **off**, a pin to another wire is a hard refusal (unchanged). With
-universal **on**, the pin is intent — but a pin onto a wire the probe disproved is refused, and a
-Messages pin still requires the convention.
+universal **on**, the pin is intent — but a pin onto a wire the probe disproved is refused.
 
 ## Conversions (proxy)
 
@@ -77,11 +80,27 @@ The pair `(client surface, upstream wire)` decides the codec path in one shared 
 the strict codecs; the legacy cells keep their converters. A cross-wire pair with no converter
 refuses — it never falls through to the model swap.
 
-- **Requests**: decode the client's shape, encode the upstream's. Unsupported features are typed
-  refusals (media, reasoning replay, non-function tools, `allowed_tools`, `text.format`,
-  `include`, `background`, `top_k`, Messages reasoning effort, unknown fields) with a reason
-  each. A refusal happens **before any upstream call** (zero spend) and never blind-fails-over —
-  a 400 is the request's fault, not the hop's.
+- **Requests**: decode the client's shape, encode the upstream's. Only a feature whose loss would
+  change what the client gets back is a typed refusal: media the target cannot carry,
+  non-function tools, `allowed_tools`, a constrained output format (`response_format` /
+  `text.format` other than text), legacy `functions`, audio output, provider-side state
+  (`previous_response_id`, `conversation`, `item_reference`, `background`), `top_k`. A refusal
+  happens **before any upstream call** (zero spend); the candidate loop then skips that hop like
+  a cooling one and the refusal is the answer only when no later hop serves.
+- **Dropped, as the legacy converters drop them** (revised 2026-10-20): unknown top-level
+  fields (vendor extensions such as `prompt_cache_key`, `safety_identifier`, `verbosity`),
+  `include`, `reasoning.summary`, replayed Responses reasoning items (provider-private, often
+  encrypted), and `reasoning_effort` on the Messages wire (the upstream's default effort
+  applies; chat and Responses still carry it).
+- **Messages encoding fills what the wire requires**: `max_tokens` defaults to 32000 when the
+  client sent none; a tool without a schema gets `{"type":"object","properties":{}}`; tool-call
+  ids outside `[A-Za-z0-9_-]` are rewritten byte-wise (`functions.read:0` → `functions_read_0`,
+  the same on the `tool_use` and its `tool_result`); empty turns are dropped and consecutive
+  same-role turns merged; `parallel_tool_calls:false` becomes `disable_parallel_tool_use`.
+- **Prompt caching crosses onto Messages**: the client's own `cache_control` markers (content
+  parts, or a message-level marker) are carried, capped at four (the first plus the newest
+  three). A body with none gets the standard two — end of system, end of the newest message —
+  placed as a pure function of the body, so the prefix stays byte-stable across turns.
 - **Responses**: upstream error envelopes are re-shaped into the client's error family (chat and
   responses share `{"error":{…}}`; messages wraps it as `{"type":"error","error":{…}}`).
   Unparsable bodies pass through byte-identical.
@@ -89,7 +108,11 @@ refuses — it never falls through to the model swap.
   (comments, CRLF, multiline data, EOF-tail compatibility). Upstream item id, public tool call
   id, source index and client encoder index stay distinct; argument fragments stay strings until
   the block closes. Strict mode verifies the terminal output against the delivered deltas and
-  refuses a contradiction.
+  refuses a contradiction. A Messages source's non-portable blocks — `thinking` (current models
+  always think), `redacted_thinking`, server-tool use and results — are consumed whole, deltas
+  and stop included, and annotation deltas (`citations_delta`, `signature_delta`) are ignored;
+  `model_context_window_exceeded` is a length stop and `pause_turn` a completed turn. A truly
+  unknown stop reason still fails.
 
 ## Accounting and outcomes
 

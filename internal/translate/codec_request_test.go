@@ -209,10 +209,11 @@ func TestReasoningEffortCarriedWhereExpressible(t *testing.T) {
 	if r == nil || r["effort"] != "high" {
 		t.Errorf("responses reasoning = %v, want effort high", out["reasoning"])
 	}
-	// The messages wire has no portable reasoning-effort field: refuse rather
-	// than silently degrade model behavior.
-	if _, err := EncodeMessagesRequest(ir, "up/model"); err == nil {
-		t.Error("encoding reasoning_effort onto messages must be refused")
+	// The messages wire runs at the upstream's own effort: the field is
+	// dropped (as the legacy path drops thinking), never a failed hop.
+	m := enc(t, EncodeMessagesRequest, ir, "up/model")
+	if _, has := m["reasoning_effort"]; has {
+		t.Error("reasoning_effort leaked onto the messages wire")
 	}
 }
 
@@ -252,12 +253,15 @@ func TestMediaContentSupported(t *testing.T) {
 	}
 }
 
-func TestReasoningReplayRefused(t *testing.T) {
+func TestReasoningReplay(t *testing.T) {
 	if _, err := DecodeMessagesRequest([]byte(`{"model":"m","max_tokens":8,"thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"user","content":"x"}]}`)); err == nil {
 		t.Error("anthropic thinking must be refused cross-wire")
 	}
-	if _, err := DecodeResponsesRequest([]byte(`{"model":"m","input":[{"type":"reasoning","summary":[]}]}`)); err == nil {
-		t.Error("responses reasoning items must be refused cross-wire")
+	// A replayed Responses reasoning item is the provider's own (often
+	// encrypted) state: it is dropped, and the visible turns cross.
+	ir := dec(t, DecodeResponsesRequest, `{"model":"m","input":[{"type":"reasoning","summary":[]},{"type":"message","role":"user","content":"x"}]}`)
+	if len(ir.Turns) != 1 || ir.Turns[0].Role != RoleUser {
+		t.Errorf("turns = %+v, want only the user turn", ir.Turns)
 	}
 }
 
@@ -270,9 +274,15 @@ func TestNonFunctionToolsRefused(t *testing.T) {
 	}
 }
 
-func TestUnknownTopLevelFieldRefused(t *testing.T) {
-	if _, err := DecodeChatRequest([]byte(`{"model":"m","messages":[],"flibberty":1}`)); err == nil {
-		t.Error("an unknown extension must be refused on the portable path")
+// An unknown extension is dropped, not refused (the legacy converters do the
+// same); the named refusals still refuse.
+func TestUnknownTopLevelFieldDropped(t *testing.T) {
+	ir := dec(t, DecodeChatRequest, `{"model":"m","messages":[{"role":"user","content":"x"}],"flibberty":1}`)
+	if out := enc(t, EncodeChatRequest, ir, "up/model"); out["flibberty"] != nil {
+		t.Error("an unknown extension crossed wires")
+	}
+	if _, err := DecodeChatRequest([]byte(`{"model":"m","messages":[],"functions":[{"name":"f"}]}`)); err == nil {
+		t.Error("legacy functions must still be refused")
 	}
 }
 
@@ -343,10 +353,16 @@ func TestEncodeMessagesCoalescesSystemAndToolResults(t *testing.T) {
 	}
 }
 
-func TestEncodeMessagesRequiresMaxTokens(t *testing.T) {
+// The Messages wire requires an output limit; a client that named none gets
+// the default, and a client's own limit always wins.
+func TestEncodeMessagesSuppliesMaxTokens(t *testing.T) {
 	ir := dec(t, DecodeChatRequest, `{"model":"m","messages":[{"role":"user","content":"x"}]}`)
-	if _, err := EncodeMessagesRequest(ir, "up/model"); err == nil || !strings.Contains(err.Error(), "max_tokens") {
-		t.Errorf("err = %v, want an explicit max_tokens requirement", err)
+	if m := enc(t, EncodeMessagesRequest, ir, "up/model"); m["max_tokens"] != float64(defaultMessagesMaxTokens) {
+		t.Errorf("max_tokens = %v, want the default", m["max_tokens"])
+	}
+	ir = dec(t, DecodeChatRequest, `{"model":"m","max_tokens":77,"messages":[{"role":"user","content":"x"}]}`)
+	if m := enc(t, EncodeMessagesRequest, ir, "up/model"); m["max_tokens"] != float64(77) {
+		t.Errorf("max_tokens = %v, want the client's 77", m["max_tokens"])
 	}
 }
 

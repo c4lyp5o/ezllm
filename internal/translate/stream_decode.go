@@ -29,6 +29,9 @@ type eventDecoder struct {
 	created          int64
 	traces           map[string]*decodedTrace
 	traceBytes       int
+	// skipped holds the Messages block keys that carry no portable output
+	// (thinking, server-tool blocks): their deltas and stops are consumed.
+	skipped map[string]bool
 	// truncated records a source that ended WITHOUT a usable terminal event.
 	// The legacy policy synthesizes a successful close for such sources (its
 	// clients must not break), but the outcome plumbing needs the truth: a
@@ -230,7 +233,7 @@ func chatFinish(v string) FinishKind {
 }
 func messagesFinish(v string) FinishKind {
 	switch v {
-	case "max_tokens":
+	case "max_tokens", "model_context_window_exceeded":
 		return FinishLength
 	case "tool_use":
 		return FinishTools
@@ -378,12 +381,22 @@ func (d *eventDecoder) messages(name string, b []byte, top map[string]json.RawMe
 				out = append(out, Event{Kind: EventArgumentsDelta, Key: key, Delta: string(e.Block.Input)})
 			}
 			return out, nil
-		case "thinking", "redacted_thinking":
-			return nil, nil // not portable output; never replayed
 		default:
-			return nil, invalidResponse("unsupported messages content block " + e.Block.Type)
+			// thinking (current models always think), redacted_thinking,
+			// server-tool use and results: none is output a client of
+			// another wire can render or act on. The block is consumed
+			// whole — its deltas and stop included — so the answer that
+			// follows streams through.
+			if d.skipped == nil {
+				d.skipped = map[string]bool{}
+			}
+			d.skipped[key] = true
+			return nil, nil
 		}
 	case "content_block_delta":
+		if d.skipped[key] {
+			return nil, nil
+		}
 		if _, ok := d.blocks[key]; !ok {
 			return nil, invalidResponse("delta for unopened/stopped messages block")
 		}
@@ -392,12 +405,16 @@ func (d *eventDecoder) messages(name string, b []byte, top map[string]json.RawMe
 			return []Event{{Kind: EventTextDelta, Key: key, Delta: e.Delta.Text}}, nil
 		case "input_json_delta":
 			return []Event{{Kind: EventArgumentsDelta, Key: key, Delta: e.Delta.Partial}}, nil
-		case "thinking_delta", "signature_delta":
-			return nil, nil
 		default:
-			return nil, invalidResponse("unsupported messages delta " + e.Delta.Type)
+			// thinking_delta, signature_delta, citations_delta: annotations
+			// of a block, not its text.
+			return nil, nil
 		}
 	case "content_block_stop":
+		if d.skipped[key] {
+			delete(d.skipped, key)
+			return nil, nil
+		}
 		return d.end(key), nil
 	case "message_delta":
 		if e.Delta.Stop != "" {
@@ -427,7 +444,8 @@ func validChatFinish(s string) bool {
 }
 func validMessagesFinish(s string) bool {
 	switch s {
-	case "end_turn", "max_tokens", "tool_use", "refusal", "stop_sequence":
+	case "end_turn", "max_tokens", "tool_use", "refusal", "stop_sequence",
+		"pause_turn", "model_context_window_exceeded":
 		return true
 	}
 	return false

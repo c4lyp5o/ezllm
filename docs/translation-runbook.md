@@ -177,15 +177,16 @@ off; with universal on, that switch is not needed.)
 lever). A wrong-typed value fails boot naming `translation.universal_enabled`. With the flag
 off, nothing changes byte-for-byte.
 
-**Prerequisite for a Messages destination:** the hop's account must carry an explicit
-`usage_convention` (schema v13, `PATCH /admin/accounts/{id}` with `{"usage_convention":"anthropic"}`
-or `"total"`). `auto` means unstated and the router will skip that candidate with a refusal
-naming the field — it never guesses how the upstream counts `input_tokens`. Set it from the
-provider's docs, or with the per-account verification action once that ships
-(usage-convention-design D4).
+**Usage convention on a Messages destination:** `auto` (the default) reads the upstream's
+`input_tokens` as exclusive of cache, as the ledger does, so an unconfigured Anthropic account
+serves chat and Responses clients. Set `usage_convention` to `total` (schema v13,
+`PATCH /admin/accounts/{id}` with `{"usage_convention":"total"}`) for an upstream that counts
+cache inside `input_tokens` (tokenrouter does); left at `auto`, such an account over-reports
+`prompt_tokens` to the client by the cached amount, exactly as its ledger rows already do.
 
 **What you get when it is on:** requests on the new cells are translated through the strict
-IR codecs (unsupported features refuse with a reason, **zero upstream spend**), responses and
+IR codecs (a feature that would change the answer refuses with a reason at **zero upstream
+spend**, and the combo moves on to its next hop), responses and
 streams come back in the client's own shape, and error envelopes are re-shaped into the client's
 family. Ledger rows keep the `translated` marker and the inclusive `tokens_in` exception.
 

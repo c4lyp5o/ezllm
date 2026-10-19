@@ -74,17 +74,20 @@ const (
 )
 
 // UsageConventionOf maps the stored per-account fact onto the codec
-// primitive. 'auto' (or unset) is NOT a convention: a cross-wire Messages
-// destination must refuse rather than guess whether input_tokens already
-// includes cache tokens, so callers treat an error as "cannot convert".
+// primitive. 'auto' (or unset) reads as exclusive: that is what auto has
+// always meant to the ledger (docs/usage-convention-design.md D1), and real
+// Anthropic accounts are exclusive. A mis-set inclusive account over-reports
+// input on the client's usage exactly as it already does in the ledger; the
+// NormalizeMessagesUsage guard keeps the opposite mistake from going
+// negative. Only a value outside the vocabulary is an error.
 func UsageConventionOf(m provider.UsageConvention) (UsageConvention, error) {
 	switch m {
-	case provider.UsageConventionAnthropic:
+	case provider.UsageConventionAnthropic, provider.UsageConventionAuto, "":
 		return UsageExclusive, nil
 	case provider.UsageConventionTotal:
 		return UsageInclusive, nil
 	}
-	return UsageUnknown, fmt.Errorf("translate: account messages usage convention is unknown — set usage_convention to anthropic or total")
+	return UsageUnknown, fmt.Errorf("translate: account messages usage convention %q is not one of auto|anthropic|total — fix usage_convention", m)
 }
 
 type ErrorIR struct {

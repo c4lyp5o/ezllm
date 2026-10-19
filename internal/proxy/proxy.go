@@ -908,7 +908,7 @@ func prepareHopBody(body []byte, rt Route, doc *jsonbody.BodyDoc) ([]byte, error
 	if wire != rt.Surface {
 		// The three NEW cells ride the strict surface-neutral codecs; an
 		// unsupported request feature is a typed refusal BEFORE any upstream
-		// call (zero spend, no blind failover).
+		// call (zero spend): the candidate loop skips the hop.
 		if translate.IsUniversalCell(rt.Surface, wire) {
 			return translate.RequestUniversal(body, rt.Surface, wire, rt.Model)
 		}
@@ -938,10 +938,9 @@ func prepareHopBody(body []byte, rt Route, doc *jsonbody.BodyDoc) ([]byte, error
 }
 
 // universalCodecOptions builds the strict codec options for a universal cell.
-// When the UPSTREAM speaks Messages, the account's explicit usage convention
-// is required: the upstream response's own input_tokens meaning is the
-// operator-declared fact (schema v13), never a guess. The router already
-// refuses the cell without one; a hand-built route gets the same refusal here.
+// When the UPSTREAM speaks Messages, the account's usage convention (schema
+// v13) says what the upstream's own input_tokens means; auto reads as
+// exclusive, as it does in the ledger.
 func universalCodecOptions(rt Route) (translate.CodecOptions, error) {
 	opts := translate.CodecOptions{}
 	if rt.EffectiveWire() == provider.SurfaceAnthropic {
@@ -1478,6 +1477,9 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 	// served, in dispatch order. Attached to whatever Result goes back so the
 	// ledger row can show the hops that "hopped".
 	var attempts []Attempt
+	// refusal is the first typed translation refusal: the answer when every
+	// hop was skipped and none was even cooling for a better reason.
+	var refusal error
 	// Addendum #3: ONE request-wide budget across same-hop retries AND
 	// failover hops, and a selection deadline that governs only the choosing
 	// (never the winning attempt's stream).
@@ -1521,6 +1523,28 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 				})
 				continue
 			}
+		}
+		// The hop's body is prepared before any hop state is touched. A hop
+		// whose wire cannot carry this request (a typed translation refusal)
+		// is skipped like a cooling hop — no dial, no probe slot, no rate
+		// budget — and the combo moves on. The refusal is the answer only
+		// when no later hop serves.
+		swapped, err := prepareHopBody(body, rt, doc)
+		if err != nil {
+			var ufe *translate.UnsupportedFieldError
+			if !errors.As(err, &ufe) {
+				return Route{}, Result{}, err
+			}
+			d.log.Info("hop skipped: request not portable to its wire",
+				"account", rt.Account.Namespace, "model", rt.Model,
+				"alias", rt.Alias, "why", err.Error())
+			attempts = append(attempts, Attempt{
+				Namespace: rt.Account.Namespace, Model: rt.Model, Note: err.Error(),
+			})
+			if refusal == nil {
+				refusal = err
+			}
+			continue
 		}
 		allowed, probe := d.acquireHop(rt, time.Now())
 		if !allowed {
@@ -1571,13 +1595,6 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 		// the final response fallback. This preserves an actual upstream error
 		// without making an extra request that circumvents cooldown.
 		// A sole eligible endpoint is attempted normally below.
-		swapped, err := prepareHopBody(body, rt, doc)
-		if err != nil {
-			if probe {
-				d.releaseProbe(rt)
-			}
-			return Route{}, Result{}, err
-		}
 		resp, res, start, err := d.retryAttempt(ctx, r, rt, swapped, doc, led, sel)
 		res.UpstreamAttempts, res.AttemptBudget = led.used, d.attemptBudget
 		// Park the hop only when there is somewhere else to go. len(routes) is
@@ -1691,6 +1708,9 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 	// discovering this.
 	if rateRefusal != nil {
 		return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget}, rateRefusal
+	}
+	if refusal != nil {
+		return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget}, refusal
 	}
 	return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget}, errors.New("proxy: all combo endpoints are in five-minute cooldown")
 }

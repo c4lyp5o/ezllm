@@ -15,8 +15,11 @@ import (
 //	supported -> carried into the IR
 //	ignorable -> deliberately dropped (documented, harmless for the subset)
 //	refusal   -> refused with a named reason
-//	unknown   -> refused (the portable contract never guesses what a new field
-//	             means; guessing is how a body quietly loses meaning)
+//	unknown   -> dropped, as the legacy converters drop them. Clients add
+//	             vendor extensions faster than any list can track (cache keys,
+//	             safety ids, verbosity); refusing each one turned every new
+//	             client release into a failed hop. A field whose loss would
+//	             change the answer's contract is named in a refusal list.
 func keySet(keys ...string) map[string]bool {
 	m := make(map[string]bool, len(keys))
 	for _, k := range keys {
@@ -28,7 +31,7 @@ func keySet(keys ...string) map[string]bool {
 var (
 	chatSupported = keySet("model", "messages", "max_tokens", "max_completion_tokens",
 		"temperature", "top_p", "stream", "stop", "tools", "tool_choice",
-		"parallel_tool_calls", "reasoning_effort")
+		"parallel_tool_calls", "reasoning_effort", "response_format")
 	chatIgnorable = keySet("stream_options", "n", "seed", "user", "metadata", "store",
 		"service_tier", "logprobs", "top_logprobs", "logit_bias",
 		"presence_penalty", "frequency_penalty")
@@ -39,10 +42,18 @@ var (
 
 	responsesSupported = keySet("model", "input", "instructions", "tools", "tool_choice",
 		"max_output_tokens", "temperature", "top_p", "stream", "reasoning",
-		"parallel_tool_calls")
+		"parallel_tool_calls", "text")
 	responsesIgnorable = keySet("store", "metadata", "user", "service_tier",
-		"prompt_cache_key", "truncation")
+		"prompt_cache_key", "truncation", "include")
 )
+
+// chatRefusals names the chat fields whose loss would change what the client
+// gets back. response_format is checked by value (type "text" is harmless).
+var chatRefusals = map[string]string{
+	"functions":     "legacy function calling is not portable; send tools",
+	"function_call": "legacy function calling is not portable; send tool_choice",
+	"audio":         "audio output is not portable across wires",
+}
 
 // topKeys decodes the body into its top-level keys. A body that is not a JSON
 // object is a client error, reported as such.
@@ -54,8 +65,8 @@ func topKeys(body []byte) (map[string]json.RawMessage, error) {
 	return top, nil
 }
 
-// classify rejects every key that is neither supported nor ignorable, and
-// refuses the named ones with their own reason.
+// classify refuses the named keys with their own reason. Every other key
+// that is neither supported nor ignorable is dropped (see above).
 func classify(top map[string]json.RawMessage, what string, supported, ignorable map[string]bool, refusalReasons map[string]string) error {
 	for k := range top {
 		if supported[k] || ignorable[k] {
@@ -64,9 +75,51 @@ func classify(top map[string]json.RawMessage, what string, supported, ignorable 
 		if reason, ok := refusalReasons[k]; ok {
 			return unsupported(what+"."+k, reason)
 		}
-		return unsupported(what+"."+k, "unknown field: the portable cross-wire contract does not guess its meaning")
 	}
 	return nil
+}
+
+// formatType reads the "type" of a response-format object (chat
+// response_format, Responses text.format). Absent is "".
+func formatType(raw json.RawMessage) (string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", nil
+	}
+	var f struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return "", fmt.Errorf("expected a format object: %w", err)
+	}
+	return f.Type, nil
+}
+
+// cacheControlOf returns a content part's cache_control as raw JSON, or "".
+func cacheControlOf(raw json.RawMessage) string {
+	var p struct {
+		CacheControl json.RawMessage `json:"cache_control"`
+	}
+	if json.Unmarshal(raw, &p) != nil || len(p.CacheControl) == 0 || string(p.CacheControl) == "null" {
+		return ""
+	}
+	return string(p.CacheControl)
+}
+
+// partsCacheControl returns the last cache_control among a content array's
+// parts ("" for a string or unmarked content): the breakpoint of a value the
+// IR carries as one block.
+func partsCacheControl(raw json.RawMessage) string {
+	var parts []json.RawMessage
+	if json.Unmarshal(raw, &parts) != nil {
+		return ""
+	}
+	cc := ""
+	for _, p := range parts {
+		if c := cacheControlOf(p); c != "" {
+			cc = c
+		}
+	}
+	return cc
 }
 
 // intFromRaw returns a present integer (presence is preserved, so an explicit

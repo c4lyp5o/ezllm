@@ -9,6 +9,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -360,9 +361,9 @@ func TestWireMatrixLateStreamError(t *testing.T) {
 }
 
 func TestWireMatrixPreparationRefusalZeroSpend(t *testing.T) {
-	// A chat request without max_tokens cannot become a Messages request
-	// (that wire requires an explicit output limit): the refusal is typed,
-	// names the field, and no upstream call is made.
+	// A chat request carrying a non-function tool cannot become a Messages
+	// request: the refusal is typed, names the field, and no upstream call
+	// is made.
 	var mu sync.Mutex
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -373,7 +374,7 @@ func TestWireMatrixPreparationRefusalZeroSpend(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	clientBody := `{"model":"daily","messages":[{"role":"user","content":"hi"}]}`
+	clientBody := `{"model":"daily","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"custom","custom":{"name":"x"}}]}`
 	d := newDispatcher()
 	d.SetRetries(0)
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(clientBody))
@@ -382,7 +383,7 @@ func TestWireMatrixPreparationRefusalZeroSpend(t *testing.T) {
 		[]Route{wireRoute(srv.URL, provider.SurfaceOpenAI, provider.SurfaceAnthropic)}, []byte(clientBody))
 	var ufe *translate.UnsupportedFieldError
 	if err == nil {
-		t.Fatal("a messages-bound request without max_tokens must be refused")
+		t.Fatal("a messages-bound request with a non-function tool must be refused")
 	}
 	if !errors.As(err, &ufe) {
 		t.Fatalf("error = %T (%v), want *translate.UnsupportedFieldError", err, err)
@@ -397,18 +398,116 @@ func TestWireMatrixPreparationRefusalZeroSpend(t *testing.T) {
 	}
 }
 
-// The usage-convention guard is enforced in the codec path too, not only in
-// the router: a hand-built route onto a Messages wire with an unstated
-// convention cannot stream, even though the router would have refused it.
-func TestUniversalCodecOptionsRequiresConvention(t *testing.T) {
+// A hop that cannot carry the request is skipped like a cooling hop: the
+// combo moves on to a hop that can, at zero spend on the refused one, and the
+// client never sees the refusal.
+func TestWireMatrixPreparationRefusalFailsOver(t *testing.T) {
+	var mu sync.Mutex
+	refusedCalls := 0
+	refused := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		refusedCalls++
+		mu.Unlock()
+	}))
+	defer refused.Close()
+	native := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"c1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"served natively"},"finish_reason":"stop"}]}`))
+	}))
+	defer native.Close()
+
+	clientBody := `{"model":"daily","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"custom","custom":{"name":"x"}}]}`
+	d := newDispatcher()
+	d.SetRetries(0)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(clientBody))
+	recout := httptest.NewRecorder()
+	_, res, err := d.ForwardCandidates(context.Background(), recout, req, []Route{
+		wireRoute(refused.URL, provider.SurfaceOpenAI, provider.SurfaceAnthropic),
+		wireRoute(native.URL, provider.SurfaceOpenAI, provider.SurfaceOpenAI),
+	}, []byte(clientBody))
+	if err != nil {
+		t.Fatalf("the native hop must serve after the refused one: %v", err)
+	}
+	if !strings.Contains(recout.Body.String(), "served natively") {
+		t.Fatalf("client body = %s", recout.Body.String())
+	}
+	if len(res.Attempts) == 0 || !strings.Contains(res.Attempts[0].Note, "unsupported") {
+		t.Errorf("the skipped hop's reason must stay in the attempt trail: %+v", res.Attempts)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if refusedCalls != 0 {
+		t.Errorf("refused hop dialed %d times, want 0", refusedCalls)
+	}
+}
+
+// The codec path reads an unstated convention the way the ledger does
+// (exclusive) instead of refusing the hop; an explicit one is used as stated.
+func TestUniversalCodecOptionsConvention(t *testing.T) {
 	rt := testRoute("http://unused.invalid", provider.SurfaceOpenAI)
 	rt.WireSurface = provider.SurfaceAnthropic
-	rt.Account.UsageConvention = provider.UsageConventionAuto
-	if _, err := universalCodecOptions(rt); err == nil {
-		t.Fatal("an unstated convention must be refused for a Messages upstream")
+	for stored, want := range map[provider.UsageConvention]translate.UsageConvention{
+		provider.UsageConventionAuto:      translate.UsageExclusive,
+		provider.UsageConventionAnthropic: translate.UsageExclusive,
+		provider.UsageConventionTotal:     translate.UsageInclusive,
+	} {
+		rt.Account.UsageConvention = stored
+		opts, err := universalCodecOptions(rt)
+		if err != nil || opts.MessagesUsage != want {
+			t.Fatalf("%q: opts=%+v err=%v; want %q", stored, opts, err, want)
+		}
 	}
-	rt.Account.UsageConvention = provider.UsageConventionAnthropic
-	if _, err := universalCodecOptions(rt); err != nil {
-		t.Fatalf("explicit convention refused: %v", err)
+}
+
+// The Hermes path end to end: a chat client with no max_tokens and a
+// reasoning_effort, an Anthropic hop whose usage convention was never
+// stated, and an upstream that thinks before it answers (every current
+// Claude model does). The client gets the answer as a clean chat stream;
+// the upstream got a valid Messages body with caching on.
+func TestChatClientReachesThinkingMessagesUpstream(t *testing.T) {
+	var got []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		ev := func(name, data string) { _, _ = io.WriteString(w, "event: "+name+"\ndata: "+data+"\n\n") }
+		ev("message_start", `{"type":"message_start","message":{"id":"msg_1","usage":{"input_tokens":3,"cache_read_input_tokens":40}}}`)
+		ev("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`)
+		ev("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"hmm"}}`)
+		ev("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"s"}}`)
+		ev("content_block_stop", `{"type":"content_block_stop","index":0}`)
+		ev("content_block_start", `{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`)
+		ev("content_block_delta", `{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"hello from claude"}}`)
+		ev("content_block_stop", `{"type":"content_block_stop","index":1}`)
+		ev("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`)
+		ev("message_stop", `{"type":"message_stop"}`)
+	}))
+	defer srv.Close()
+
+	clientBody := `{"model":"daily","stream":true,"reasoning_effort":"medium","prompt_cache_key":"k","messages":[{"role":"system","content":"sys"},{"role":"user","content":"hi"}]}`
+	rt := wireRoute(srv.URL, provider.SurfaceOpenAI, provider.SurfaceAnthropic)
+	rt.Account.UsageConvention = provider.UsageConventionAuto
+	d := newDispatcher()
+	d.SetRetries(0)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(clientBody))
+	recout := httptest.NewRecorder()
+	if _, _, err := d.ForwardCandidates(context.Background(), recout, req, []Route{rt}, []byte(clientBody)); err != nil {
+		t.Fatalf("forward: %v", err)
+	}
+	body := recout.Body.String()
+	if !strings.Contains(body, "hello from claude") || strings.Contains(body, `"error"`) || !strings.Contains(body, "[DONE]") {
+		t.Fatalf("client stream:\n%s", body)
+	}
+	if !strings.Contains(body, `"prompt_tokens":43`) || !strings.Contains(body, `"cached_tokens":40`) {
+		t.Errorf("usage must read the auto convention as exclusive (3 + 40 cached):\n%s", body)
+	}
+	var up map[string]any
+	if err := json.Unmarshal(got, &up); err != nil {
+		t.Fatalf("upstream body: %v (%s)", err, got)
+	}
+	if up["max_tokens"] == nil || up["reasoning_effort"] != nil || up["prompt_cache_key"] != nil {
+		t.Errorf("upstream body = %s", got)
+	}
+	if !strings.Contains(string(got), `"cache_control"`) {
+		t.Errorf("no cache breakpoint reached the upstream: %s", got)
 	}
 }

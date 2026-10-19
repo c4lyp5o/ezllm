@@ -302,9 +302,9 @@ func DecodeResponse(body []byte, surface provider.Surface, opts CodecOptions) (*
 					return nil, invalidResponse(err.Error())
 				}
 				ir.Blocks = append(ir.Blocks, Block{Kind: BlockCall, CallID: b.ID, Name: b.Name, Arguments: argumentsFromInput(b.Input, b.ID)})
-			case "thinking", "redacted_thinking":
 			default:
-				return nil, invalidResponse("unsupported messages output " + b.Type)
+				// thinking, redacted_thinking, server-tool blocks: not
+				// output a client of another wire can render or act on.
 			}
 		}
 	default:

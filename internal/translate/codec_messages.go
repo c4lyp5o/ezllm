@@ -271,30 +271,85 @@ type messagesOutMessage struct {
 }
 
 type messagesOutBlock struct {
-	Type      string  `json:"type"`
-	Text      string  `json:"text,omitempty"`
-	ID        string  `json:"id,omitempty"`
-	Name      string  `json:"name,omitempty"`
-	Input     any     `json:"input,omitempty"`
-	ToolUseID string  `json:"tool_use_id,omitempty"`
-	Content   *string `json:"content,omitempty"`
-	Source    any     `json:"source,omitempty"`
+	Type         string          `json:"type"`
+	Text         string          `json:"text,omitempty"`
+	ID           string          `json:"id,omitempty"`
+	Name         string          `json:"name,omitempty"`
+	Input        any             `json:"input,omitempty"`
+	ToolUseID    string          `json:"tool_use_id,omitempty"`
+	Content      *string         `json:"content,omitempty"`
+	Source       any             `json:"source,omitempty"`
+	CacheControl json.RawMessage `json:"cache_control,omitempty"`
+}
+
+// defaultMessagesMaxTokens is the output limit sent when the client named
+// none. Chat and Responses clients may omit it ("the model's maximum"); the
+// Messages wire requires one. 32000 sits within every current Claude model's
+// output cap and leaves room for the thinking current models always do.
+const defaultMessagesMaxTokens = 32000
+
+// maxCacheBreakpoints is the Messages wire's per-request breakpoint limit.
+const maxCacheBreakpoints = 4
+
+// ephemeralCache is the breakpoint the encoder places itself.
+var ephemeralCache = json.RawMessage(`{"type":"ephemeral"}`)
+
+// emptyObjectSchema is the input_schema of a tool that declared none: the
+// Messages wire requires an object schema on every tool.
+var emptyObjectSchema = json.RawMessage(`{"type":"object","properties":{}}`)
+
+// messagesToolID makes a tool-call id legal on the Messages wire
+// (^[a-zA-Z0-9_-]+$). Ids minted by other providers (functions.read:0) are
+// rewritten byte by byte — a pure function, so the tool_use and the
+// tool_result that answers it always agree, and so does every later request.
+func messagesToolID(id string) string {
+	ok := id != ""
+	for i := 0; i < len(id) && ok; i++ {
+		ok = isToolIDByte(id[i])
+	}
+	if ok {
+		return id
+	}
+	if id == "" {
+		return "call"
+	}
+	b := []byte(id)
+	for i, c := range b {
+		if !isToolIDByte(c) {
+			b[i] = '_'
+		}
+	}
+	return string(b)
+}
+
+func isToolIDByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-'
+}
+
+func cacheOf(b Block) json.RawMessage {
+	if b.CacheControl == "" {
+		return nil
+	}
+	return json.RawMessage(b.CacheControl)
 }
 
 // EncodeMessagesRequest renders the IR as an anthropic /v1/messages body.
+//
+// What a chat or Responses client may leave out, it fills in: an output
+// limit, an object schema for a tool without one. What the Messages wire
+// rejects, it reshapes deterministically: tool ids outside the id alphabet,
+// empty turns (dropped), consecutive same-role turns (merged). And it carries
+// prompt caching across: the client's own breakpoints when it marked any
+// (at most four), otherwise the standard two — end of system, end of the
+// newest message — so a translated conversation caches like a native one.
 func EncodeMessagesRequest(ir *RequestIR, upstreamModel string) ([]byte, error) {
-	if ir.MaxOutputTokens == nil {
-		return nil, unsupported("max_tokens",
-			"the messages wire requires an explicit output limit and the source request had none")
+	maxTokens := defaultMessagesMaxTokens
+	if ir.MaxOutputTokens != nil {
+		maxTokens = *ir.MaxOutputTokens
 	}
-	if ir.ReasoningEffort != "" {
-		return nil, unsupported("reasoning_effort",
-			"the messages wire has no portable reasoning-effort control")
-	}
-
 	out := messagesOutRequest{
 		Model:         upstreamModel,
-		MaxTokens:     *ir.MaxOutputTokens,
+		MaxTokens:     maxTokens,
 		StopSequences: ir.Stop,
 		Temperature:   ir.Temperature,
 		TopP:          ir.TopP,
@@ -308,79 +363,95 @@ func EncodeMessagesRequest(ir *RequestIR, upstreamModel string) ([]byte, error) 
 			continue
 		}
 		if text := t.Text(); text != "" {
-			out.System = append(out.System, messagesOutBlock{Type: "text", Text: text})
+			blk := messagesOutBlock{Type: "text", Text: text}
+			for _, b := range t.Blocks {
+				if c := cacheOf(b); c != nil {
+					blk.CacheControl = c
+				}
+			}
+			out.System = append(out.System, blk)
 		}
 	}
 
-	for i := 0; i < len(ir.Turns); i++ {
-		t := ir.Turns[i]
+	// add appends a turn's blocks, merging into the previous message when the
+	// role repeats and dropping a turn with nothing to say.
+	add := func(role string, blocks []messagesOutBlock) {
+		if len(blocks) == 0 {
+			return
+		}
+		if n := len(out.Messages); n > 0 && out.Messages[n-1].Role == role {
+			out.Messages[n-1].Content = append(out.Messages[n-1].Content, blocks...)
+			return
+		}
+		out.Messages = append(out.Messages, messagesOutMessage{Role: role, Content: blocks})
+	}
+
+	for _, t := range ir.Turns {
+		var blocks []messagesOutBlock
+		role := t.Role
 		switch t.Role {
 		case RoleSystem, RoleDeveloper:
 			continue // lifted above
 
 		case RoleTool:
-			// One user message carries every consecutive tool result: that is
-			// the shape the API expects after a multi-call assistant turn.
-			msg := messagesOutMessage{Role: RoleUser}
-			for ; i < len(ir.Turns) && ir.Turns[i].Role == RoleTool; i++ {
-				for _, b := range ir.Turns[i].Blocks {
-					if b.Kind != BlockResult {
-						continue
-					}
-					text := b.Text
-					msg.Content = append(msg.Content, messagesOutBlock{
-						Type: "tool_result", ToolUseID: b.CallID, Content: &text,
-					})
+			// Tool results ride a user message; consecutive ones merge into
+			// one, the shape the API expects after a multi-call turn.
+			role = RoleUser
+			for _, b := range t.Blocks {
+				if b.Kind != BlockResult {
+					continue
 				}
+				text := b.Text
+				blocks = append(blocks, messagesOutBlock{
+					Type: "tool_result", ToolUseID: messagesToolID(b.CallID), Content: &text, CacheControl: cacheOf(b),
+				})
 			}
-			i-- // the outer loop increments
-			out.Messages = append(out.Messages, msg)
 
 		case RoleAssistant:
-			msg := messagesOutMessage{Role: RoleAssistant}
 			for _, b := range t.Blocks {
 				switch b.Kind {
 				case BlockText:
 					if b.Text != "" {
-						msg.Content = append(msg.Content, messagesOutBlock{Type: "text", Text: b.Text})
+						blocks = append(blocks, messagesOutBlock{Type: "text", Text: b.Text, CacheControl: cacheOf(b)})
 					}
 				case BlockCall:
 					input, err := argumentsObject(b.Arguments, b.CallID)
 					if err != nil {
 						return nil, err
 					}
-					msg.Content = append(msg.Content, messagesOutBlock{
-						Type: "tool_use", ID: b.CallID, Name: b.Name, Input: input,
+					blocks = append(blocks, messagesOutBlock{
+						Type: "tool_use", ID: messagesToolID(b.CallID), Name: b.Name, Input: input, CacheControl: cacheOf(b),
 					})
 				case BlockImage:
-					msg.Content = append(msg.Content, messagesOutBlock{
-						Type:   "image",
-						Source: anthropicImageSourceFromURL(b.ImageURL),
+					blocks = append(blocks, messagesOutBlock{
+						Type: "image", Source: anthropicImageSourceFromURL(b.ImageURL), CacheControl: cacheOf(b),
 					})
 				}
 			}
-			out.Messages = append(out.Messages, msg)
 
 		default:
-			msg := messagesOutMessage{Role: t.Role}
 			for _, b := range t.Blocks {
 				if b.Kind == BlockText && b.Text != "" {
-					msg.Content = append(msg.Content, messagesOutBlock{Type: "text", Text: b.Text})
+					blocks = append(blocks, messagesOutBlock{Type: "text", Text: b.Text, CacheControl: cacheOf(b)})
 				}
 				if b.Kind == BlockImage {
-					msg.Content = append(msg.Content, messagesOutBlock{
-						Type:   "image",
-						Source: anthropicImageSourceFromURL(b.ImageURL),
+					blocks = append(blocks, messagesOutBlock{
+						Type: "image", Source: anthropicImageSourceFromURL(b.ImageURL), CacheControl: cacheOf(b),
 					})
 				}
 			}
-			out.Messages = append(out.Messages, msg)
 		}
+		add(role, blocks)
 	}
+	placeCacheBreakpoints(&out)
 
 	for _, t := range ir.Tools {
+		schema := t.Schema
+		if len(schema) == 0 || string(schema) == "null" {
+			schema = emptyObjectSchema
+		}
 		out.Tools = append(out.Tools, AnthropicTool{
-			Name: t.Name, Description: t.Description, InputSchema: t.Schema,
+			Name: t.Name, Description: t.Description, InputSchema: schema,
 		})
 	}
 	if ir.ToolChoice != nil {
@@ -393,5 +464,48 @@ func EncodeMessagesRequest(ir *RequestIR, upstreamModel string) ([]byte, error) 
 			out.ToolChoice = &AnthropicToolChoice{Type: ir.ToolChoice.Mode}
 		}
 	}
+	// parallel_tool_calls=false is the Messages wire's
+	// disable_parallel_tool_use, which lives on the tool choice.
+	if ir.ParallelToolCalls != nil && !*ir.ParallelToolCalls && len(out.Tools) > 0 {
+		if out.ToolChoice == nil {
+			out.ToolChoice = &AnthropicToolChoice{Type: "auto"}
+		}
+		if out.ToolChoice.Type != ToolChoiceNone {
+			out.ToolChoice.DisableParallelToolUse = true
+		}
+	}
 	return json.Marshal(out)
+}
+
+// placeCacheBreakpoints keeps the request within the wire's breakpoint limit
+// and supplies the standard breakpoints when the client marked none.
+func placeCacheBreakpoints(out *messagesOutRequest) {
+	var marked []*messagesOutBlock
+	for i := range out.System {
+		if out.System[i].CacheControl != nil {
+			marked = append(marked, &out.System[i])
+		}
+	}
+	for i := range out.Messages {
+		for j := range out.Messages[i].Content {
+			if out.Messages[i].Content[j].CacheControl != nil {
+				marked = append(marked, &out.Messages[i].Content[j])
+			}
+		}
+	}
+	if len(marked) == 0 {
+		if n := len(out.System); n > 0 {
+			out.System[n-1].CacheControl = ephemeralCache
+		}
+		if n := len(out.Messages); n > 0 {
+			c := out.Messages[n-1].Content
+			c[len(c)-1].CacheControl = ephemeralCache
+		}
+		return
+	}
+	// Over the limit: the first breakpoint guards the stable prefix, the
+	// newest ones the growing conversation; the middle ones go.
+	for k := 1; k < len(marked)-(maxCacheBreakpoints-1); k++ {
+		marked[k].CacheControl = nil
+	}
 }

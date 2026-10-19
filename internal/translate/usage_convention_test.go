@@ -7,37 +7,27 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/provider"
 )
 
-// The stored per-account fact maps onto the codec convention. An unknown
-// fact is NOT a convention: a cross-wire Messages destination must refuse,
-// never guess whether input_tokens already includes cache tokens.
+// The stored per-account fact maps onto the codec convention. An unstated
+// fact (auto, or the pre-migration empty string) reads as exclusive — the
+// meaning the ledger has always given auto — so a cross-wire Messages hop is
+// never refused for it. Only a value outside the vocabulary is refused.
 
 func TestUsageConventionOfStoredFact(t *testing.T) {
 	for _, tc := range []struct {
 		stored provider.UsageConvention
 		want   UsageConvention
-		known  bool
 	}{
-		{provider.UsageConventionAnthropic, UsageExclusive, true},
-		{provider.UsageConventionTotal, UsageInclusive, true},
-		{provider.UsageConventionAuto, UsageUnknown, false},
+		{provider.UsageConventionAnthropic, UsageExclusive},
+		{provider.UsageConventionTotal, UsageInclusive},
+		{provider.UsageConventionAuto, UsageExclusive},
+		{provider.UsageConvention(""), UsageExclusive},
 	} {
-		got, err := UsageConventionOf(tc.stored)
-		if tc.known {
-			if err != nil || got != tc.want {
-				t.Fatalf("UsageConventionOf(%q) = %q, %v; want %q", tc.stored, got, err, tc.want)
-			}
-			continue
-		}
-		if err == nil || got != UsageUnknown {
-			t.Fatalf("UsageConventionOf(%q) = %q, %v; want a refusal", tc.stored, got, err)
-		}
-		if !strings.Contains(err.Error(), "usage_convention") {
-			t.Fatalf("refusal does not name the operator field: %v", err)
+		if got, err := UsageConventionOf(tc.stored); err != nil || got != tc.want {
+			t.Fatalf("UsageConventionOf(%q) = %q, %v; want %q", tc.stored, got, err, tc.want)
 		}
 	}
-	// An empty string is the pre-migration/default shape and must refuse too.
-	if _, err := UsageConventionOf(provider.UsageConvention("")); err == nil {
-		t.Fatal("empty convention was accepted")
+	if _, err := UsageConventionOf(provider.UsageConvention("bogus")); err == nil || !strings.Contains(err.Error(), "usage_convention") {
+		t.Fatalf("a value outside the vocabulary must be refused naming the field, got %v", err)
 	}
 	// The guard feeds the encoder: an exclusive convention adds the cache
 	// counters, an inclusive one keeps the total as reported.

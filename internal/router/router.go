@@ -281,11 +281,6 @@ func (r *Resolver) needsResponsesWire(clientSurface provider.Surface, namespace,
 	return false
 }
 
-// messagesConventionReason names the one non-capability blocker of a Messages
-// destination: the operator's usage_convention fact (schema v13) is unstated,
-// so a cross-wire conversion onto that wire cannot normalize input tokens.
-const messagesConventionReason = "messages destination needs an explicit usage_convention on the account (auto is unstated)"
-
 // wireDecision is the outcome of wire-first selection for one candidate: the
 // wire to dial plus the legacy flags that carry the same fact, or a typed
 // refusal.
@@ -418,10 +413,9 @@ func (r *Resolver) selectWire(ctx context.Context, acct *provider.Account, model
 
 	// 1b. Universal: an explicit PIN names the wire. A pin is operator intent
 	// (like the curated override), so it is honored BEFORE the native rule —
-	// but only when the probe has not disproved the pinned wire, and a
-	// Messages destination additionally needs the account's explicit usage
-	// convention. universal_enabled is the SINGLE switch for the matrix: it
-	// does not require the legacy translation.enabled gate (operator decision,
+	// but only when the probe has not disproved the pinned wire.
+	// universal_enabled is the SINGLE switch for the matrix: it does not
+	// require the legacy translation.enabled gate (operator decision,
 	// 2026-10-13).
 	if r.universalEnabled {
 		if pin, perr := f.pin(); perr == nil && pin != "" && pin != surfaceName(clientSurface) {
@@ -437,10 +431,6 @@ func (r *Resolver) selectWire(ctx context.Context, acct *provider.Account, model
 			if capability != nil && !*capability {
 				return wireDecision{refuse: &ErrWireUnsupported{Requested: requested, Wire: wire,
 					Reason: "model is pinned to a wire the probe disproved"}}
-			}
-			if wire == provider.SurfaceAnthropic && !acct.UsageConvention.Known() {
-				return wireDecision{refuse: &ErrWireUnsupported{Requested: requested, Wire: wire,
-					Reason: messagesConventionReason}}
 			}
 			return wireDecision{wire: wire, translated: true}
 		}
@@ -461,32 +451,27 @@ func (r *Resolver) selectWire(ctx context.Context, acct *provider.Account, model
 	// 3. Native is PROVEN impossible: the automatic alternatives.
 	//
 	// Universal: walk the fixed preference chain. A destination is used only
-	// when it is PROVEN capable (NULL or a lookup error is not evidence), and
-	// a Messages destination additionally requires the account's explicit
-	// usage convention — an unstated convention would make the input-token
-	// meaning of the upstream's own responses a guess.
+	// when it is PROVEN capable (NULL or a lookup error is not evidence) —
+	// except that an anthropic-compatible account's Messages wire is proven
+	// by the account kind itself. The usage convention is not a gate: auto
+	// reads Messages usage as exclusive, exactly as the ledger does.
 	if r.universalEnabled {
-		blockedByConvention := false
 		for _, dest := range universalOrder(clientSurface) {
 			capability, cerr := f.supports(dest)
 			if cerr != nil {
 				capability = nil
 			}
-			if capability == nil || !*capability {
-				continue
+			proven := capability != nil && *capability
+			if capability == nil && dest == provider.SurfaceAnthropic && acct.Kind == provider.KindAnthropicCompat {
+				proven = true
 			}
-			if dest == provider.SurfaceAnthropic && !acct.UsageConvention.Known() {
-				blockedByConvention = true
+			if !proven {
 				continue
 			}
 			if err := r.checkPin(f, requested, dest); err != nil {
 				return wireDecision{refusePin: err}
 			}
 			return wireDecision{wire: dest, translated: true}
-		}
-		if blockedByConvention {
-			return wireDecision{refuse: &ErrWireUnsupported{Requested: requested, Wire: clientSurface,
-				Reason: messagesConventionReason}}
 		}
 	}
 

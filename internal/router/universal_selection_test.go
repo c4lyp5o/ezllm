@@ -5,9 +5,8 @@ package router
 // OFF must keep every routing decision exactly as it is today. ON adds the
 // three NEW cross-wire cells (chat→messages, responses→chat,
 // responses→messages) through the fixed preference chains, lets an explicit
-// pin name the wire, and requires an explicit usage convention for any
-// Messages destination — an unstated convention would make the upstream
-// response's own input-token meaning a guess.
+// pin name the wire. A Messages destination with an unstated usage convention
+// (auto) reads usage as exclusive, the same meaning the ledger gives auto.
 
 import (
 	"context"
@@ -83,7 +82,7 @@ func TestUniversalMessagesClientPrefersChatThenResponses(t *testing.T) {
 }
 
 // Chat client: responses first (tools+reasoning parity), messages second —
-// and the messages fallback needs the account's explicit convention.
+// and the messages fallback is open whatever the account's convention.
 func TestUniversalChatClientPrefersResponsesThenMessages(t *testing.T) {
 	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceOpenAI)] = true
@@ -94,24 +93,40 @@ func TestUniversalChatClientPrefersResponsesThenMessages(t *testing.T) {
 		t.Fatalf("wire=%q err=%v; want responses first", wire, err)
 	}
 
-	// Responses disproved: the only remaining cell is chat→messages, which
-	// requires the operator's usage fact.
+	// Responses disproved: the only remaining cell is chat→messages. An
+	// unstated convention (auto) reads usage as exclusive — the ledger's own
+	// meaning of auto — so it is no reason to refuse the hop.
 	delete(cat.yesProto, probeKey(2, "gpt-6.1-sol", provider.SurfaceResponses))
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceResponses)] = true
 
-	_, _, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceOpenAI)
-	var wu *ErrWireUnsupported
-	if !errors.As(err, &wu) || !strings.Contains(wu.Reason, "usage_convention") {
-		t.Fatalf("error = %v; want a refusal naming usage_convention", err)
-	}
-
-	cat.accounts["super-ssn"].UsageConvention = provider.UsageConventionTotal
-	if wire, translated, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceOpenAI); err != nil || wire != provider.SurfaceAnthropic || !translated {
-		t.Fatalf("wire=%q translated=%v err=%v; want messages once the convention is explicit", wire, translated, err)
+	for _, conv := range []provider.UsageConvention{provider.UsageConventionAuto, provider.UsageConventionTotal} {
+		cat.accounts["super-ssn"].UsageConvention = conv
+		if wire, translated, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceOpenAI); err != nil || wire != provider.SurfaceAnthropic || !translated {
+			t.Fatalf("convention %q: wire=%q translated=%v err=%v; want messages", conv, wire, translated, err)
+		}
 	}
 }
 
-// Responses client: chat first, messages second (convention-gated).
+// An anthropic-compatible account speaks the Messages wire by definition: a
+// never-probed Messages capability on such an account is not "unproven". A
+// chat client reaches it translated instead of being refused.
+func TestUniversalAnthropicKindIsMessagesEvidence(t *testing.T) {
+	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
+	cat.accounts["super-ssn"].Kind = provider.KindAnthropicCompat
+	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceOpenAI)] = true
+	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceResponses)] = true
+
+	if wire, translated, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceOpenAI); err != nil || wire != provider.SurfaceAnthropic || !translated {
+		t.Fatalf("wire=%q translated=%v err=%v; want messages on an anthropic-compatible account", wire, translated, err)
+	}
+	// A disproved Messages capability still wins over the kind.
+	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceAnthropic)] = true
+	if _, _, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceOpenAI); err == nil {
+		t.Fatal("a probe that disproved messages must not be overridden by the account kind")
+	}
+}
+
+// Responses client: chat first, messages second.
 func TestUniversalResponsesClientPrefersChatThenMessages(t *testing.T) {
 	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceResponses)] = true
@@ -153,6 +168,22 @@ func TestUniversalPinNamesTheWire(t *testing.T) {
 
 	if wire, translated, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceOpenAI); err != nil || wire != provider.SurfaceResponses || !translated {
 		t.Fatalf("wire=%q translated=%v err=%v; want the pinned responses wire", wire, translated, err)
+	}
+}
+
+// A model pinned to the Messages wire (a real Anthropic account usually is)
+// serves a chat client translated, convention stated or not: the pin is the
+// whole reason Hermes-style clients were turned away before.
+func TestUniversalMessagesPinServesChatClients(t *testing.T) {
+	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
+	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceOpenAI)] = true
+	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceAnthropic)] = true
+	cat.pins = map[string]string{"2/gpt-6.1-sol": "anthropic"}
+
+	for _, target := range []string{wireCombo, "super-ssn/gpt-6.1-sol"} {
+		if wire, translated, err := resolveWire(t, universalResolver(cat), target, provider.SurfaceOpenAI); err != nil || wire != provider.SurfaceAnthropic || !translated {
+			t.Fatalf("%s: wire=%q translated=%v err=%v; want the pinned messages wire", target, wire, translated, err)
+		}
 	}
 }
 

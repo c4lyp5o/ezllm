@@ -105,15 +105,17 @@ prod redeploy to take effect. Items 2–3 are process-local and need neither.
   Absent PATCH keeps, `auto` is the documented reset, an invalid value is `422` naming the
   field and nothing is written. Rehearsed on an online-backup copy of the live DB:
   v11 → v13 with every table count preserved and all rows at `auto`; the copy was deleted.
-- **Meaning of `auto`** is "unstated", which is why it is both today's ledger behaviour
-  (D1) and a *refusal* for cross-wire conversions onto a Messages upstream (the wire-matrix
-  prerequisite: an unstated convention must never be guessed). `anthropic`/`total` are the
+- **Meaning of `auto`** is "unstated", read as exclusive (D1). It was at first also a *refusal*
+  for cross-wire conversions onto a Messages upstream; see the 2026-10-20 revision below. `anthropic`/`total` are the
   only values a cross-wire Messages destination accepts.
 - **D3's arithmetic guard** exists in the codec layer (`translate.NormalizeMessagesUsage`):
   a declared `total` whose `input_tokens < cache_read_input_tokens` is read as exclusive
   instead of producing a negative cache split. The ledger side of D3 rides with D2.
-- The universal wire matrix consumes the fact via `translate.UsageConventionOf` — the guard
-  that refuses a Messages destination on an unstated account.
+- The universal wire matrix consumes the fact via `translate.UsageConventionOf`. **Revised
+  2026-10-20:** `auto` no longer refuses a Messages destination; it reads as exclusive there
+  too, matching D1. The refusal kept every chat and Responses client off every unconfigured
+  Anthropic account, which was the larger harm than a mis-set inclusive account over-reporting
+  client-facing `prompt_tokens` (the ledger already counts it that way).
 
 ## Related
 

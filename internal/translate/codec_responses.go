@@ -17,8 +17,6 @@ var responsesRefusals = map[string]string{
 	"previous_response_id": "provider-side response history cannot cross wires; send the conversation explicitly",
 	"conversation":         "a provider-side conversation cannot cross wires; send the conversation explicitly",
 	"background":           "background responses are not portable across wires",
-	"include":              "include changes the returned payload; it has no equivalent on the other wires",
-	"text":                 "text.format is not portable across wires",
 }
 
 type responsesInItem struct {
@@ -41,6 +39,24 @@ func DecodeResponsesRequest(body []byte) (*RequestIR, error) {
 	}
 	if err := classify(top, "responses", responsesSupported, responsesIgnorable, responsesRefusals); err != nil {
 		return nil, err
+	}
+
+	// text carries verbosity (dropped) and the output format: plain text is
+	// what every wire returns, a constrained format is refused.
+	if raw := top["text"]; len(raw) > 0 {
+		var text struct {
+			Format json.RawMessage `json:"format"`
+		}
+		if err := json.Unmarshal(raw, &text); err != nil {
+			return nil, unsupported("responses.text", err.Error())
+		}
+		switch ft, err := formatType(text.Format); {
+		case err != nil:
+			return nil, unsupported("responses.text.format", err.Error())
+		case ft != "" && ft != "text":
+			return nil, unsupported("responses.text.format",
+				fmt.Sprintf("text.format %q constrains the answer; that constraint is not portable across wires", ft))
+		}
 	}
 
 	ir := &RequestIR{}
@@ -73,8 +89,12 @@ func DecodeResponsesRequest(body []byte) (*RequestIR, error) {
 		if err := json.Unmarshal(raw, &r); err != nil {
 			return nil, unsupported("responses.reasoning", err.Error())
 		}
+		// Only effort crosses; a summary request has nothing to summarize
+		// on a wire that returns no reasoning, so it is dropped.
 		for k := range r {
-			if k != "effort" {
+			switch k {
+			case "effort", "summary", "generate_summary":
+			default:
 				return nil, unsupported("responses.reasoning."+k,
 					"only reasoning.effort has an equivalent on the other wires")
 			}
@@ -195,8 +215,10 @@ func responsesTurns(it responsesInItem) ([]Turn, error) {
 		}}}}, nil
 
 	case "reasoning":
-		return nil, unsupported("responses.input.reasoning",
-			"reasoning replay cannot be translated across wires")
+		// Replayed reasoning (often encrypted) belongs to the provider that
+		// wrote it and is unreadable anywhere else: dropped, as the legacy
+		// path drops Anthropic thinking. The visible turns carry the history.
+		return nil, nil
 
 	case "item_reference":
 		return nil, unsupported("responses.input.item_reference",

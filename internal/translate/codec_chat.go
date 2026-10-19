@@ -16,8 +16,15 @@ func DecodeChatRequest(body []byte) (*RequestIR, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := classify(top, "chat", chatSupported, chatIgnorable, nil); err != nil {
+	if err := classify(top, "chat", chatSupported, chatIgnorable, chatRefusals); err != nil {
 		return nil, err
+	}
+	switch ft, err := formatType(top["response_format"]); {
+	case err != nil:
+		return nil, unsupported("chat.response_format", err.Error())
+	case ft != "" && ft != "text":
+		return nil, unsupported("chat.response_format",
+			fmt.Sprintf("response_format %q constrains the answer; that constraint is not portable across wires", ft))
 	}
 
 	ir := &RequestIR{}
@@ -61,11 +68,16 @@ func DecodeChatRequest(body []byte) (*RequestIR, error) {
 	}
 
 	if raw := top["messages"]; len(raw) > 0 {
-		var msgs []chatWireMessage
-		if err := json.Unmarshal(raw, &msgs); err != nil {
+		var raws []json.RawMessage
+		if err := json.Unmarshal(raw, &raws); err != nil {
 			return nil, unsupported("chat.messages", err.Error())
 		}
-		for _, m := range msgs {
+		for _, r := range raws {
+			var m chatWireMessage
+			if err := json.Unmarshal(r, &m); err != nil {
+				return nil, unsupported("chat.messages", err.Error())
+			}
+			m.raw = r
 			turn, err := chatTurn(m)
 			if err != nil {
 				return nil, err
@@ -133,22 +145,19 @@ func chatContentBlocks(raw json.RawMessage, what string) ([]Block, error) {
 	var blocks []Block
 	for _, p := range parts {
 		var part struct {
-			Type     string `json:"type"`
-			Text     string `json:"text"`
-			ImageURL any    `json:"image_url"`
+			Type         string          `json:"type"`
+			Text         string          `json:"text"`
+			ImageURL     any             `json:"image_url"`
+			CacheControl json.RawMessage `json:"cache_control"`
 		}
 		if err := json.Unmarshal(p, &part); err != nil {
 			return nil, unsupported(what, "unreadable content part")
 		}
 		switch part.Type {
-		case "text", "input_text", "output_text":
+		case "text", "input_text", "output_text", "":
+			// "" — some compatible upstreams send {text: "..."} with no type.
 			if part.Text != "" {
-				blocks = append(blocks, Block{Kind: BlockText, Text: part.Text})
-			}
-		case "":
-			// Some compatible upstreams send {text: "..."} with no type.
-			if part.Text != "" {
-				blocks = append(blocks, Block{Kind: BlockText, Text: part.Text})
+				blocks = append(blocks, Block{Kind: BlockText, Text: part.Text, CacheControl: cacheControlOf(p)})
 			}
 		case "image_url":
 			url := ""
@@ -174,7 +183,7 @@ func chatContentBlocks(raw json.RawMessage, what string) ([]Block, error) {
 			if url == "" {
 				return nil, unsupported(what+".image_url", "missing image url")
 			}
-			blocks = append(blocks, Block{Kind: BlockImage, ImageURL: url})
+			blocks = append(blocks, Block{Kind: BlockImage, ImageURL: url, CacheControl: cacheControlOf(p)})
 		default:
 			return nil, unsupported(what+"."+part.Type,
 				"only text and image content is portable across the three wires")
@@ -183,7 +192,20 @@ func chatContentBlocks(raw json.RawMessage, what string) ([]Block, error) {
 	return blocks, nil
 }
 
+// chatTurn decodes one message. A message-level cache_control (some clients
+// mark a tool message that way) is the breakpoint of its last block.
 func chatTurn(m chatWireMessage) (Turn, error) {
+	turn, err := chatTurnBlocks(m)
+	if err != nil {
+		return turn, err
+	}
+	if cc := cacheControlOf(m.raw); cc != "" && len(turn.Blocks) > 0 {
+		turn.Blocks[len(turn.Blocks)-1].CacheControl = cc
+	}
+	return turn, nil
+}
+
+func chatTurnBlocks(m chatWireMessage) (Turn, error) {
 	switch m.Role {
 	case RoleSystem, RoleDeveloper, RoleUser:
 		blocks, err := chatContentBlocks(m.Content, "chat.content")
@@ -219,6 +241,7 @@ func chatTurn(m chatWireMessage) (Turn, error) {
 		}
 		return Turn{Role: RoleTool, Blocks: []Block{{
 			Kind: BlockResult, CallID: m.ToolCallID, Text: text,
+			CacheControl: partsCacheControl(m.Content),
 		}}}, nil
 	}
 	return Turn{}, unsupported("chat.messages.role",

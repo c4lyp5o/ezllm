@@ -63,6 +63,10 @@ type Block struct {
 	// ImageURL is the resolved image location (data: URI or http URL) for
 	// BlockImage.
 	ImageURL string
+	// CacheControl is the client's prompt-cache breakpoint on this block, as
+	// raw JSON ("" = none). Only the Messages encoder reads it; it is a
+	// string so Block stays comparable.
+	CacheControl string
 }
 
 // Turn is one message: a role plus ordered blocks.
@@ -124,8 +128,9 @@ type RequestIR struct {
 	Stop              []string
 	Stream            bool
 	ParallelToolCalls *bool
-	// ReasoningEffort is carried because dropping it silently changes model
-	// behavior. A destination wire without an equivalent REFUSES it.
+	// ReasoningEffort is carried to the wires that have an equivalent (chat,
+	// Responses). The Messages encoder drops it, as the legacy path drops
+	// Anthropic thinking: the upstream's default effort applies.
 	ReasoningEffort string
 }
 

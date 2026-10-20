@@ -5,7 +5,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"math"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -501,4 +503,94 @@ func parseOpenAICreditGrants(body string) Quota {
 		Kind: QuotaMoney, Raw: body, ReadAt: time.Now().UTC(),
 		Balance: bal, BalanceUnit: "USD", CostTotal: jsonFloat(raw, "total_used"),
 	}
+}
+
+var claudeOrgIDRe = regexp.MustCompile(`^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$`)
+
+// claudePlatformCreds extracts what the Console's prepaid-credits read needs
+// from a pasted Cookie header: the sessionKey cookie and the org id, which the
+// console keeps in lastActiveOrg. The org id goes into a URL path, so it must
+// be a bare UUID — anything else is refused rather than escaped.
+func claudePlatformCreds(pasted string) (cookie, org string, ok bool) {
+	var session string
+	for _, part := range strings.Split(pasted, ";") {
+		part = strings.TrimSpace(part)
+		switch {
+		case strings.HasPrefix(part, "sessionKey="):
+			session = part
+		case strings.HasPrefix(part, "lastActiveOrg="):
+			org = strings.TrimPrefix(part, "lastActiveOrg=")
+		}
+	}
+	if session == "" || !claudeOrgIDRe.MatchString(org) {
+		return "", "", false
+	}
+	return session, org, true
+}
+
+// parseClaudePrepaidCredits parses GET platform.claude.com/api/organizations/
+// {org}/prepaid/credits:
+//
+//	{"amount":7,"currency":"USD","balance":{"money":null,"credits":
+//	  {"amount_minor":7,"exponent":2}},"tranches":[{"granted":{"credits":
+//	  {"amount_minor":500,"exponent":2}},…}],…}
+//
+// balance = balance.credits (or .money) minor units / 10^exponent — dollars,
+// not the raw "amount" cents. cost_total = granted across tranches minus the
+// balance (nil without tranches: nothing to derive it from).
+func parseClaudePrepaidCredits(body string) Quota {
+	type minor struct {
+		AmountMinor *float64 `json:"amount_minor"`
+		Exponent    float64  `json:"exponent"`
+	}
+	type amount struct {
+		Money   *minor `json:"money"`
+		Credits *minor `json:"credits"`
+	}
+	var raw struct {
+		Currency string  `json:"currency"`
+		Balance  *amount `json:"balance"`
+		Tranches []struct {
+			Granted *amount `json:"granted"`
+		} `json:"tranches"`
+	}
+	if err := jsonUnmarshal([]byte(body), &raw); err != nil || raw.Balance == nil {
+		return Quota{}
+	}
+	units := func(a *amount) *float64 {
+		if a == nil {
+			return nil
+		}
+		m := a.Credits
+		if m == nil || m.AmountMinor == nil {
+			m = a.Money
+		}
+		if m == nil || m.AmountMinor == nil {
+			return nil
+		}
+		v := *m.AmountMinor / math.Pow(10, m.Exponent)
+		return &v
+	}
+	bal := units(raw.Balance)
+	if bal == nil {
+		return Quota{}
+	}
+	unit := raw.Currency
+	if unit == "" {
+		unit = "USD"
+	}
+	q := Quota{Kind: QuotaMoney, Raw: body, ReadAt: time.Now().UTC(), Balance: bal, BalanceUnit: unit}
+	var granted float64
+	n := 0
+	for _, t := range raw.Tranches {
+		if g := units(t.Granted); g != nil {
+			granted += *g
+			n++
+		}
+	}
+	if n > 0 {
+		cost := granted - *bal
+		q.CostTotal = &cost
+	}
+	return q
 }

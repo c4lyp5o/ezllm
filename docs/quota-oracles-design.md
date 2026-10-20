@@ -118,3 +118,14 @@ inference key; the `openai-organization` header is not required (live-verified).
 `total_available` → balance (can be negative) and `total_used` → cost_total; the older
 `parseMoneyQuota` "classic" branch is NOT reused (it reports `total_granted` as the balance).
 No expiry hint: the session token carries none.
+
+## Addendum 2026-10-20 — Anthropic Console prepaid credits
+
+`GET platform.claude.com/api/organizations/{org}/prepaid/credits` answers `200` to the
+`sessionKey` cookie alone (no browser headers needed; live-verified). The org id lives in the
+`lastActiveOrg` cookie, so the operator pastes the whole Cookie header into `management_key`;
+`claudePlatformCreds` keeps those two cookies and refuses an org id that is not a bare UUID (it
+is interpolated into a URL path). Scoped to kind `anthropic-compatible` + host `api.anthropic.com`
+(other Anthropic-wire hosts never trigger it). `parseClaudePrepaidCredits`: balance =
+`balance.credits` (else `.money`) `amount_minor / 10^exponent` — the raw `amount` is cents —
+and cost_total = Σ tranche `granted` − balance. No expiry hint (the cookie carries none).

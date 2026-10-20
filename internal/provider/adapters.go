@@ -192,6 +192,14 @@ func isTokenRouter(acct Account) bool {
 	return err == nil && strings.EqualFold(u.Scheme, "https") && strings.EqualFold(u.Hostname(), "api.tokenrouter.com")
 }
 
+func isAnthropicAPI(acct Account) bool {
+	if acct.Kind != KindAnthropicCompat {
+		return false
+	}
+	u, err := url.Parse(strings.TrimSpace(acct.BaseURL))
+	return err == nil && strings.EqualFold(u.Scheme, "https") && strings.EqualFold(u.Hostname(), "api.anthropic.com")
+}
+
 func isOpenAI(acct Account) bool {
 	if acct.Kind != KindOpenAICompatible {
 		return false
@@ -393,7 +401,24 @@ const maxCatalogPages = 20
 
 func (a *anthropicCompatible) ReadQuota(ctx context.Context, acct Account, key string) (Quota, error) {
 	// No standard Anthropic quota endpoint; usage arrives in rate-limit headers
-	// on real calls instead. Report unsupported so the UI shows "measured".
+	// on real calls instead. The one exception is the Console's prepaid-credit
+	// balance, readable with the operator's web session (opt-in, stored in
+	// management_key) — else report unsupported so the UI shows "measured".
+	if !isAnthropicAPI(acct) {
+		return Quota{}, ErrQuotaUnsupported
+	}
+	cookie, org, ok := claudePlatformCreds(acct.ManagementKey)
+	if !ok {
+		return Quota{}, ErrQuotaUnsupported
+	}
+	hdrs := withCustomHeaders(map[string]string{"Cookie": cookie}, acct)
+	body, err := getJSON(ctx, a.client, "https://platform.claude.com/api/organizations/"+org+"/prepaid/credits", hdrs)
+	if err != nil {
+		return Quota{}, mapOracleErr(err)
+	}
+	if q := parseClaudePrepaidCredits(string(body)); q.Kind != "" {
+		return q, nil
+	}
 	return Quota{}, ErrQuotaUnsupported
 }
 

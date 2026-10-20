@@ -191,7 +191,8 @@ accounting of the upstream **Messages** wire: `auto` = unstated (never inferred 
 `docs/usage-convention-design.md`.
 `management_key` (schema v19, optional) is a second credential for providers whose balance
 endpoint needs a management key (TokenRouter), a platform session token (OpenAI: the `sess-…`
-bearer from platform.openai.com) or a web-session cookie (Command Code: the
+bearer from platform.openai.com), a web-session cookie (Anthropic Console: a pasted Cookie header
+with `sessionKey` + `lastActiveOrg`) or a web-session cookie (Command Code: the
 `__Secure-commandcode_prod_.session_token` value, bare or as a full cookie string). Stored encrypted at rest; the API never
 returns it, only `management_key_set: true|false` on `AccountSummary`, plus
 `management_key_expires_at` (RFC3339, omitted when unknown) for a Command Code cookie pasted as a
@@ -425,10 +426,13 @@ the request's timestamp.
 ### `GET /admin/accounts/{id}/quota` → `200`
 Live `ReadQuota` → classified shape + `raw`. `{"kind":"none"}` when the provider has no endpoint
 (`400`/`404`/`405` on the generic `{base}/usage` → NOT an error; OpenAI answers `400` there even
-for a valid key). A TokenRouter, OpenAI or Command Code account without a `management_key` is `none` without a call.
+for a valid key). A TokenRouter, OpenAI, Anthropic (`api.anthropic.com`) or Command Code account without a `management_key` is `none` without a call.
 OpenAI reads `GET api.openai.com/v1/dashboard/billing/credit_grants` with the session token (the
 `sk-` key draws a `401` there) and reports `money`: `balance` = `total_available` (negative once the
 grants are overspent), `cost_total` = `total_used`.
+Anthropic reads `GET platform.claude.com/api/organizations/{org}/prepaid/credits` with the
+sessionKey cookie (org id from `lastActiveOrg`, validated as a bare UUID) and reports `money`:
+`balance` = prepaid credits in dollars (minor units / 10^exponent), `cost_total` = granted − balance.
 Command Code reads `GET api.commandcode.ai/internal/billing/credits` with the cookie (never the
 inference key) and reports `percent` shape: 5h window, weekly window, monthly grant spent. An
 expired cookie answers `401`/`403` → `502`, so the last good snapshot is kept.

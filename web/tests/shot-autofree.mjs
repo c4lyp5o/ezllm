@@ -1,12 +1,14 @@
-// Drives the auto-free combo editor against a throwaway instance (BASE) with
-// the factory dashboard password. Not wired into CI; a manual proof like its
-// shot-* siblings.
+// Drives the auto-free combo editor against a throwaway instance (BASE). Start
+// it with EZLLM_DASHBOARD_PASSWORD equal to EZLLM_SHOT_PW (there is no factory
+// password). Not wired into CI; a manual proof like its shot-* siblings.
 import { chromium } from 'playwright';
 const BASE = process.env.BASE ?? 'http://127.0.0.1:20311';
 const shots = process.env.SHOTS ?? '.';
 const b = await chromium.launch();
 const ctx = await b.newContext({ viewport: { width: 1280, height: 1000 } });
-const login = await ctx.request.post(`${BASE}/admin/login`, { data: { password: 'STRONGPASSWORD' } });
+const PW = process.env.EZLLM_SHOT_PW;
+if (!PW) throw new Error('set EZLLM_SHOT_PW (and EZLLM_DASHBOARD_PASSWORD on the instance)');
+const login = await ctx.request.post(`${BASE}/admin/login`, { data: { password: PW } });
 if (!login.ok()) throw new Error(`login ${login.status()}`);
 const { token } = await login.json();
 await ctx.addInitScript((t) => {

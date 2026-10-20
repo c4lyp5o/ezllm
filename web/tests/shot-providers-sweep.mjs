@@ -4,7 +4,10 @@ import { chromium } from 'playwright';
 import { readFileSync } from 'node:fs';
 
 const BASE = process.env.EZLLM_SHOT_BASE || 'http://127.0.0.1:20199';
-const PW = process.env.EZLLM_SHOT_PW || 'STRONGPASSWORD';
+// No factory password: start the instance with EZLLM_DASHBOARD_PASSWORD equal
+// to EZLLM_SHOT_PW (see shot-dash-columns.mjs).
+const PW = process.env.EZLLM_SHOT_PW;
+if (!PW) throw new Error('set EZLLM_SHOT_PW (and EZLLM_DASHBOARD_PASSWORD on the instance)');
 const shots = '/home/calypso/.hermes/cache/scratch/ezllm-verify/shots';
 const TARGET = process.env.EZLLM_SHOT_ACCOUNT || 'space-stationine';
 

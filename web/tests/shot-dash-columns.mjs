@@ -4,10 +4,12 @@
 import { chromium } from 'playwright';
 
 const BASE = process.env.EZLLM_SHOT_BASE || 'http://127.0.0.1:20199';
-// The unlock gate wants the DASHBOARD PASSWORD (bcrypt), not the admin bearer:
-// a scratch copy carries prod's hash, so the verify instance gets a reset
-// dashboard_auth (first-run default) before the shots run.
-const PW = process.env.EZLLM_SHOT_PW || 'STRONGPASSWORD';
+// The unlock gate wants the DASHBOARD PASSWORD (bcrypt), not the admin bearer.
+// There is no factory password: a scratch copy carries prod's hash, so reset
+// it (DELETE FROM dashboard_auth) and start the verify instance with
+// EZLLM_DASHBOARD_PASSWORD set to the same value as EZLLM_SHOT_PW.
+const PW = process.env.EZLLM_SHOT_PW;
+if (!PW) throw new Error('set EZLLM_SHOT_PW (and EZLLM_DASHBOARD_PASSWORD on the instance)');
 const shots = '/home/calypso/.hermes/cache/scratch/ezllm-verify/shots';
 const ROUTES = ['/', '/stats', '/economics', '/requests', '/providers', '/combos',
   '/rules', '/compression', '/connect', '/chat', '/settings'];

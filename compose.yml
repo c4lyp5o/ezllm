@@ -31,6 +31,10 @@ services:
       # data volume so it is backed up with the DB; override with an absolute
       # path or set EZLLM_MASTER_KEY directly. Losing it loses every provider key.
       EZLLM_MASTER_KEY_FILE: ${EZLLM_MASTER_KEY_FILE:-/data/ezllm-master.key}
+      # First dashboard password. Without it, first boot prints a one-time
+      # setup code (`docker logs ezllm`) that the dashboard asks for. Used only
+      # while setup is pending; it never overwrites a password already set.
+      # EZLLM_DASHBOARD_PASSWORD_FILE: /data/ezllm-dashboard-password
 
       # Claude subscription surface (loopback-only, an ordinary
       # anthropic-compatible account dials it). Needs the two mounts below; set

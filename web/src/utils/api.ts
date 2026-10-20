@@ -22,6 +22,18 @@ export function markUnlocked(): void {
   try { sessionStorage.setItem(UNLOCK_KEY, '1'); } catch { /* noop */ }
 }
 
+/** An auth-gate failure that keeps the server's status and error type, so
+ *  callers branch on `type` (setup_required, setup_complete) — never on the
+ *  wording of the message. */
+export class GateError extends Error {
+  constructor(message: string, readonly status: number, readonly type: string) { super(message); }
+}
+
+async function gateError(response: Response, fallback: string): Promise<GateError> {
+  const body = await response.json().catch(() => ({})) as { error?: { message?: string; type?: string } };
+  return new GateError(body.error?.message ?? `${fallback} (HTTP ${response.status})`, response.status, body.error?.type ?? '');
+}
+
 export async function dashboardLogin(password: string): Promise<void> {
   const response = await fetch('/admin/login', {
     method: 'POST',
@@ -30,9 +42,9 @@ export async function dashboardLogin(password: string): Promise<void> {
     body: JSON.stringify({ password }),
   });
   if (response.ok) return;
-  const body = await response.json().catch(() => ({})) as { error?: { message?: string } };
-  if (response.status === 401) throw new Error('incorrect dashboard password');
-  throw new Error(body.error?.message ?? `login failed (HTTP ${response.status})`);
+  const err = await gateError(response, 'login failed');
+  if (response.status === 401) throw new GateError('incorrect dashboard password', err.status, err.type);
+  throw err;
 }
 
 /** First boot = no dashboard password yet: the app shows only the
@@ -54,8 +66,7 @@ export async function completeSetup(setupCode: string, password: string): Promis
     body: JSON.stringify({ setup_code: setupCode, password }),
   });
   if (response.ok) return;
-  const body = await response.json().catch(() => ({})) as { error?: { message?: string } };
-  throw new Error(body.error?.message ?? `setup failed (HTTP ${response.status})`);
+  throw await gateError(response, 'setup failed');
 }
 
 export async function changeDashboardPassword(currentPassword: string, newPassword: string): Promise<void> {

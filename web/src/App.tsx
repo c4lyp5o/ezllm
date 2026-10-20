@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react';
-import { clearToken, completeSetup, dashboardLogin, getSetupStatus, isUnlocked, markUnlocked } from './utils/api';
+import { GateError, clearToken, completeSetup, dashboardLogin, getSetupStatus, isUnlocked, markUnlocked } from './utils/api';
 import { DUR, SelectionLine, spring } from './components/motion';
 import RailwayBackground from './components/RailwayBackground';
 import { readTheme, setTheme, type Theme } from './utils/theme';
@@ -186,9 +186,8 @@ function SignInForm({ onDone, onSetupRequired }: { onDone: () => void; onSetupRe
     dashboardLogin(value)
       .then(onDone)
       .catch((error: unknown) => {
-        const msg = error instanceof Error ? error.message : 'login failed';
-        if (msg.includes('first-boot setup')) { onSetupRequired(); return; }
-        setErr(msg);
+        if (error instanceof GateError && error.type === 'setup_required') { onSetupRequired(); return; }
+        setErr(error instanceof Error ? error.message : 'login failed');
       })
       .finally(() => setBusy(false));
   };
@@ -226,9 +225,8 @@ function SetupForm({ onDone, onAlreadySet }: { onDone: () => void; onAlreadySet:
     completeSetup(code, password)
       .then(onDone)
       .catch((error: unknown) => {
-        const msg = error instanceof Error ? error.message : 'setup failed';
-        if (msg.includes('already set')) { onAlreadySet(); return; }
-        setErr(msg);
+        if (error instanceof GateError && error.type === 'setup_complete') { onAlreadySet(); return; }
+        setErr(error instanceof Error ? error.message : 'setup failed');
       })
       .finally(() => setBusy(false));
   };

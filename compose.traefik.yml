@@ -36,17 +36,18 @@ services:
 
       # control plane: public, guarded by the dashboard password + a per-source
       # rate limit. Priorities are explicit because the default (longer rule
-      # string wins) is a trap here: PathPrefix(`/admin`) is ONE character longer
-      # than Path(`/admin/login`), so without a priority the sign-in endpoint
-      # silently rides the dashboard's loose limiter instead of its own.
+      # string wins) is a trap here: without a priority the sign-in and setup
+      # endpoints could silently ride the dashboard's loose limiter instead of
+      # their own.
       - "traefik.http.routers.ezllm-admin.rule=Host(`${EZLLM_HOST:-llm.calypso.dedyn.io}`) && PathPrefix(`/admin`)"
       - "traefik.http.routers.ezllm-admin.entrypoints=websecure"
       - "traefik.http.routers.ezllm-admin.priority=100"
       - "traefik.http.routers.ezllm-admin.middlewares=ezllm-admin-limit@file,enhanced-security@file"
       - "traefik.http.routers.ezllm-admin.service=ezllm"
 
-      # the sign-in endpoint gets a tighter budget than the dashboard it opens
-      - "traefik.http.routers.ezllm-login.rule=Host(`${EZLLM_HOST:-llm.calypso.dedyn.io}`) && Path(`/admin/login`)"
+      # the sign-in and first-boot setup endpoints get a tighter budget than
+      # the dashboard they open: both accept guesses (a password, a setup code)
+      - "traefik.http.routers.ezllm-login.rule=Host(`${EZLLM_HOST:-llm.calypso.dedyn.io}`) && (Path(`/admin/login`) || Path(`/admin/setup`))"
       - "traefik.http.routers.ezllm-login.entrypoints=websecure"
       - "traefik.http.routers.ezllm-login.priority=200"
       - "traefik.http.routers.ezllm-login.middlewares=ezllm-login-limit@file,enhanced-security@file"

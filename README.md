@@ -64,12 +64,18 @@ keys from the Providers page — keys are validated by a live probe chain
 docker build -t ezllm .                    # distroless, static, non-root
 docker run -p 20129:20129 -v ./data:/data \
   -e EZLLM_ADDR=0.0.0.0:20129 ezllm
+docker logs ezllm                          # first boot: the setup code
 ```
+
+On first boot the dashboard asks for the setup code printed in the
+container log. To skip setup, pass the first password instead, ideally as a
+secret file: `-e EZLLM_DASHBOARD_PASSWORD_FILE=/run/secrets/ezllm-dashboard`.
 
 Or use the published image (`ghcr.io/c4lyp5o/ezllm:latest`) with
 [compose.yml](compose.yml); [compose.traefik.yml](compose.traefik.yml) adds a
-Traefik overlay that exposes only `/v1`, `/healthz`, and the dashboard shell
-publicly and keeps `/admin` LAN-only.
+Traefik overlay. It serves `/v1`, `/healthz` and the dashboard publicly; `/admin`
+is public too but guarded by the dashboard password and a per-source rate
+limit, with a tighter one on `/admin/login` and `/admin/setup`.
 
 ## API surface
 

@@ -25,6 +25,20 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M14); full histor
 - **Universal wire translation is default-on** — no yaml needed, and an
   anthropic-only account is pre-marked so the universal matrix translates
   instead of refusing. One translation path in `commit`.
+- **A hop that refuses the WIRE now fails over.** An upstream 400 that names a
+  wire-protocol gap (`ModelProtocolUnsupported`, `not supported for format`)
+  describes the HOP, not the body, so the next hop serves the identical
+  request and the refusing hop is parked. Ordinary 400s still pass through
+  unchanged, and a sole hop still returns its own 400 verbatim. Motivated by
+  `daily-pro`: the opencode-go hop refused `/v1/messages` while the command-code
+  hop was never tried.
+- **Combo hop auto-probe.** A combo write (`POST /admin/combos`, `PATCH`,
+  `POST|PUT …/hops`) starts a background protocol probe of that combo's
+  ENABLED hop models only — never the account catalog — on the surfaces still
+  lacking a verdict. An account sweep samples a 500+ model catalog, so the hop
+  an operator actually routes through was often never sampled; curated rows,
+  disabled hops and disabled combos cost nothing.
+  `EZLLM_COMBO_AUTOPROBE=off` disables it.
 - **Proxy**: every input token lands in one billed bucket, the account usage
   convention is honoured, the hop model is spliced into the client bytes
   instead of being re-marshalled, a hop stays parked after a transport error,
@@ -43,6 +57,16 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M14); full histor
   initial={false}` was suppressing every descendant entrance, and the
   committed bundle was carrying dead CSS classes because Tailwind was
   scanning the tracked `web/dist/` output. The build is now reproducible.
+- **Dashboard: the roster and rules re-read.** The Providers page is a roster
+  — one expandable row per account with a fixed-width quota column, so every
+  figure sits on one right edge instead of ragged per-card alignment. Rules
+  are one table row per SETTING rather than per model: rules on the same
+  provider with the same cap, window, state and note collapse into one group
+  listing its models (the wire stays one rule per account+model — a group is a
+  view, not a schema change). The Dashboard's health strip becomes a header
+  pill: an uptime indicator, with the account/model/combo counts gone from
+  it because inventory is not health and those counts live on their own
+  screens. Labels are sentence-case throughout.
 - `unmetered_rows` on health, overview, live feed and dashboard; the tz day
   report's `applied_saved`; the meter is all-or-nothing per batch; web
   bridges require a process secret.

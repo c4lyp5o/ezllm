@@ -23,7 +23,7 @@ function inline(src: string, key: string): ReactNode[] {
     const tok = m[0];
     const k = `${key}-${i++}`;
     if (tok.startsWith('`')) {
-      out.push(<code key={k} className="rounded border border-line bg-raised px-1 py-0.5 font-mono text-[12px] text-ink">{tok.slice(1, -1)}</code>);
+      out.push(<code key={k} className="rounded border border-line bg-raised px-1 py-0.5 font-mono text-[13px] text-ink">{tok.slice(1, -1)}</code>);
     } else if (tok.startsWith('**') || tok.startsWith('__')) {
       out.push(<strong key={k} className="font-semibold text-ink">{inline(tok.slice(2, -2), k)}</strong>);
     } else if (tok.startsWith('~~')) {
@@ -111,24 +111,24 @@ const HEADCLS: Record<number, string> = {
   1: 'text-[17px]',
   2: 'text-[16px]',
   3: 'text-[14.5px]',
-  4: 'text-[13.5px]',
+  4: 'text-[13px]',
 };
 
 export function Markdown({ text, className }: { text: string; className?: string }) {
   const blocks = parse(text);
   return (
-    <div className={className ?? 'space-y-2.5 text-[13.5px] leading-relaxed'}>
+    <div className={className ?? 'space-y-2.5 text-[13px] leading-relaxed'}>
       {blocks.map((b, bi) => {
         const k = `b${bi}`;
         switch (b.kind) {
           case 'code':
             return (
-              <pre key={k} className="overflow-x-auto rounded-lg border border-line bg-raised px-3 py-2.5 text-[12px]">
+              <pre key={k} className="overflow-x-auto rounded-lg border border-line bg-raised px-3 py-2.5 text-[13px]">
                 <code className="font-mono text-dim">{b.body}</code>
               </pre>
             );
           case 'heading':
-            return <div key={k} className={`font-semibold text-ink ${HEADCLS[b.level] ?? 'text-[13.5px]'}`}>{inline(b.text, k)}</div>;
+            return <div key={k} className={`font-semibold text-ink ${HEADCLS[b.level] ?? 'text-[13px]'}`}>{inline(b.text, k)}</div>;
           case 'quote':
             return (
               <blockquote key={k} className="border-l-2 border-accent/50 pl-3 text-mute italic">

@@ -132,7 +132,7 @@ function RuleModal({ open, editing, accounts, models, draft, setDraft,
       title={editing ? 'Edit rule' : 'New rule'}
       footer={
         <div className="flex items-center justify-between gap-3">
-          <span className="text-[12px] text-bad">{err}</span>
+          <span className="text-[13px] text-bad">{err}</span>
           <div className="flex gap-2">
             <button type="button" className={cx(btn.base, btn.ghost)} onClick={onClose}>Cancel</button>
             <button type="button" className={cx(btn.base, btn.primary)} disabled={saving || !!wErr} onClick={onSave}>
@@ -162,29 +162,29 @@ function RuleModal({ open, editing, accounts, models, draft, setDraft,
           <div id="rl-model-list" role="group" aria-label="models"
             className="max-h-44 space-y-0.5 overflow-y-auto rounded-lg border border-line bg-raised p-1.5">
             {models.length === 0 ? (
-              <p className="px-2 py-1.5 text-[11.5px] text-mute">No models in this account — sync it on Providers first.</p>
+              <p className="px-2 py-1.5 text-[12px] text-mute">No models in this account — sync it on Providers first.</p>
             ) : matchedModels.length === 0 ? (
-              <p className="px-2 py-1.5 text-[11.5px] text-mute">No model matches “{modelQuery.trim()}”.</p>
+              <p className="px-2 py-1.5 text-[12px] text-mute">No model matches “{modelQuery.trim()}”.</p>
             ) : matchedModels.slice(0, 300).map((m) => {
               const pinned = editing?.model_id === m.id;
               const on = pinned || d.model_ids.includes(m.id);
               const hasRule = existingRuleID(d.account_id, m.id) != null;
               return (
                 <label key={m.id} htmlFor={`rl-model-${m.id}`} className={cx(
-                  'flex items-center gap-2 rounded-md px-2 py-1.5 font-mono text-[11.5px] transition-colors',
+                  'flex items-center gap-2 rounded-md px-2 py-1.5 font-mono text-[12px] transition-colors',
                   pinned ? 'bg-wash text-ink' : 'cursor-pointer hover:bg-wash',
                   on && !pinned && 'bg-accent-dim text-accent', !on && !pinned && 'text-dim')}>
                   <input id={`rl-model-${m.id}`} type="checkbox" checked={on} disabled={pinned}
                     onChange={() => set({ model_ids: on ? d.model_ids.filter((x) => x !== m.id) : [...d.model_ids, m.id] })}
                     className="h-3.5 w-3.5 accent-accent" />
                   <span className="min-w-0 flex-1 truncate">{m.id}</span>
-                  {hasRule && <span className="text-[10px] text-mute">has rule</span>}
+                  {hasRule && <span className="text-[11px] text-mute">has rule</span>}
                 </label>
               );
             })}
           </div>
           {models.length > 0 && (
-            <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-[10.5px] text-mute">
+            <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-[11px] text-mute">
               <span>
                 {d.model_ids.length} selected
                 {matchedModels.length > 300 && <> · showing 300 of {matchedModels.length} matches</>}
@@ -234,7 +234,7 @@ function RuleModal({ open, editing, accounts, models, draft, setDraft,
             <input aria-label="window end" type="time" className={cx(inputCls, 'w-32 font-mono')}
               value={d.win_end} onChange={(e) => set({ win_end: e.target.value })} />
           </div>
-          <p className="mt-1 text-[11px] text-mute">end &lt; start wraps midnight; leave both empty for always-open</p>
+          <p className="mt-1 text-[12px] text-mute">end &lt; start wraps midnight; leave both empty for always-open</p>
         </div>
         <div>
           <label className={labelCls}>allowed days</label>
@@ -243,14 +243,14 @@ function RuleModal({ open, editing, accounts, models, draft, setDraft,
               const on = d.win_days.split(',').map((x) => x.trim()).filter(Boolean).map(Number).includes(i);
               return (
                 <button key={name} type="button" onClick={() => toggleDay(i)}
-                  className={cx('rounded-md border px-2 py-1 font-mono text-[11px] transition-colors',
+                  className={cx('rounded-md border px-2 py-1 font-mono text-[12px] transition-colors',
                     on ? 'border-accent bg-accent-dim text-accent' : 'border-line bg-raised text-mute hover:border-line-strong')}>
                   {name}
                 </button>
               );
             })}
           </div>
-          <p className="mt-1 text-[11px] text-mute">none selected = every day</p>
+          <p className="mt-1 text-[12px] text-mute">none selected = every day</p>
         </div>
 
         <div className="sm:col-span-2 flex flex-wrap items-center gap-4 border-t border-line pt-4">
@@ -364,7 +364,7 @@ export default function Rules() {
       <div className="flex items-center justify-between gap-3">
         <div>
           <SectionLabel>Model rules</SectionLabel>
-          <p className="mt-1 max-w-2xl text-[12.5px] text-mute">
+          <p className="mt-1 max-w-2xl text-[13px] text-mute">
             Eligibility per (account, model): a ledger usage cap plus an allowed-use window in the rule's timezone.
             A candidate outside its rule is skipped by the router — if no candidate is eligible the request is
             refused with <span className="font-mono text-dim">429 rule_refusal</span>.
@@ -383,9 +383,9 @@ export default function Rules() {
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-line bg-surface">
-          <table className="w-full min-w-[900px] text-[12.5px]">
+          <table className="w-full min-w-[900px] text-[13px]">
             <thead>
-              <tr className="text-left text-[10.5px] uppercase tracking-[0.1em] text-mute">
+              <tr className="text-left text-[11px] text-mute">
                 <th className="px-5 py-2.5 font-medium">enabled</th>
                 <th className="px-3 py-2.5 font-medium">account</th>
                 <th className="px-3 py-2.5 font-medium">model</th>
@@ -405,12 +405,12 @@ export default function Rules() {
                   <td className="px-3 py-2.5 text-dim">{accountName(r.account_id)}</td>
                   <td className="px-3 py-2.5 font-mono text-ink">{r.model_id}</td>
                   <td className={cx('px-3 py-2.5 font-mono tabular-nums', r.cap_tokens ? 'text-dim' : 'text-mute')}>{capLabel(r)}</td>
-                  <td className="px-3 py-2.5 font-mono text-[11.5px] text-dim">{windowLabel(r)}</td>
+                  <td className="px-3 py-2.5 font-mono text-[12px] text-dim">{windowLabel(r)}</td>
                   <td className="max-w-[200px] truncate px-3 py-2.5 text-mute" title={r.note}>{r.note || '—'}</td>
                   <td className="whitespace-nowrap px-5 py-2.5 text-right">
-                    <button type="button" className={cx(btn.base, btn.ghost, 'mr-2 px-3 py-1.5 text-[12px]')}
+                    <button type="button" className={cx(btn.base, btn.ghost, 'mr-2 px-3 py-1.5 text-[13px]')}
                       onClick={() => startEdit(r)}>Edit</button>
-                    <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px] text-bad')}
+                    <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px] text-bad')}
                       onClick={() => setPendingDelete(r)}>Delete</button>
                   </td>
                 </tr>

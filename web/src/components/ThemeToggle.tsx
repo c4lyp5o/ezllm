@@ -39,10 +39,10 @@ export default function ThemeToggle({ theme, onChange }: { theme: Theme; onChang
           <path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19" />
         </svg>
       </span>
-      <span className="text-[11.5px] text-mute transition-colors group-hover:text-ink">
+      <span className="text-[12px] text-mute transition-colors group-hover:text-ink">
         {theme === 'dark' ? 'Dark' : 'Light'} mode
       </span>
-      <span className="ml-auto text-[10.5px] text-mute/70">switch to {next}</span>
+      <span className="ml-auto text-[11px] text-mute/70">switch to {next}</span>
     </button>
   );
 }

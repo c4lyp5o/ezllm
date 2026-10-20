@@ -9,17 +9,29 @@
 export const cx = (...xs: Array<string | false | null | undefined>) => xs.filter(Boolean).join(' ');
 
 /**
- * Compact token count. The k/M/B steps are rounded to one decimal with a
- * trailing ".0" stripped, so 1,000,000 reads "1M" and 1,250,000 reads "1.3M".
- * Small numbers stay exact — a count of 612 must never render as "0.6k".
+ * A token count, exact, with thousands separators: 186,652, never "186.8k".
+ * (House rule: no abbreviated figures anywhere — the operator reads tokens to
+ * the unit, because they are what gets billed.)
  */
 export function formatTokens(n: number): string {
   if (!Number.isFinite(n)) return '–';
-  const a = Math.abs(n);
-  if (a >= 1e9) return `${(n / 1e9).toFixed(1).replace(/\.0$/, '')}B`;
-  if (a >= 1e6) return `${(n / 1e6).toFixed(1).replace(/\.0$/, '')}M`;
-  if (a >= 1e3) return `${(n / 1e3).toFixed(1).replace(/\.0$/, '')}k`;
-  return `${n}`;
+  return Math.round(n).toLocaleString('en-US');
+}
+
+/**
+ * Money: always two decimals, thousands separators, no space after the sign
+ * ($1,204.50, $0.03). A unit other than USD is a grey suffix the caller adds.
+ */
+export function fmtMoney(n: number, sign = '$'): string {
+  if (!Number.isFinite(n)) return '–';
+  const s = Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${n < 0 ? '-' : ''}${sign}${s}`;
+}
+
+/** A compression share as a whole percent (34%, never 34.2%). */
+export function pctWhole(part: number, total: number): string {
+  if (!Number.isFinite(part) || !Number.isFinite(total) || total <= 0) return '–';
+  return `${Math.round((part / total) * 100)}%`;
 }
 
 /**

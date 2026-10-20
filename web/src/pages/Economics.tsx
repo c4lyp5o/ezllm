@@ -13,6 +13,7 @@
 // per-row fact and not a global one.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { fmtMoney, pctWhole } from '../utils/lib';
 import {
   cost, normalizeFeedRow, requests, RANGE_LABEL,
   type CostRow, type CostTotals, type FeedRow, type RangeKey,
@@ -26,14 +27,14 @@ import {
 
 const RANGES: RangeKey[] = ['24h', '7d', '30d', '365d'];
 
-const usd = (n: number) => `$${n.toFixed(n >= 100 ? 2 : 4)}`;
+const usd = (n: number) => fmtMoney(n);
 
 function Metric({ label, value, note, tone }: { label: string; value: string; note?: string; tone?: string }) {
   return (
     <div className="rounded-xl border border-line bg-surface px-4 py-3.5">
       <SectionLabel>{label}</SectionLabel>
       <div className={cx('mt-1.5 font-mono text-[22px] font-semibold tracking-tight tnum', tone ?? 'text-ink')}>{value}</div>
-      {note && <div className="mt-0.5 text-[11px] text-mute">{note}</div>}
+      {note && <div className="mt-0.5 text-[12px] text-mute">{note}</div>}
     </div>
   );
 }
@@ -149,13 +150,13 @@ export default function Economics() {
       <section className="rounded-xl border border-line bg-surface px-5 py-4">
         <SectionLabel>large-request filter</SectionLabel>
         <div className="mt-3 flex flex-wrap items-end gap-3">
-          <label className="text-[11px] uppercase tracking-[0.08em] text-mute">
+          <label className="text-[12px] text-mute">
             Minimum actual input tokens
             <input value={minInput} onChange={(e) => setMinInput(e.target.value)} inputMode="numeric"
               placeholder="all" className={cx(inputCls, 'mt-1.5 w-44 font-mono tnum')} />
           </label>
           <button onClick={() => void load()} className={cx(btn.base, btn.primary)}>Analyze</button>
-          <span className="text-[11px] text-mute">
+          <span className="text-[12px] text-mute">
             Sorted largest first. Use Requests for full bounds and per-row inspection.
           </span>
         </div>
@@ -183,17 +184,17 @@ export default function Economics() {
             <Metric label="cached read" value={formatTokens(cached)} note={`${pct(cached, inputTotal)} of input re-read from cache`} />
             <Metric label="compression saved" value={formatTokens(saved)}
               tone={saved > 0 ? 'text-ok' : undefined}
-              note={`${saved > 0 ? pct(saved, before) : '0%'} approx. reduction (shipped rewrites)`} />
+              note={`${saved > 0 ? pctWhole(saved, before) : '0%'} approx. reduction (shipped rewrites)`} />
           </div>
 
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
             <Panel label={<SectionLabel>What the tokens were · {RANGE_LABEL[range]}</SectionLabel>}
-              aside={<span className="text-[11px] text-mute">{formatTokens(before)} before optimisation</span>}>
+              aside={<span className="text-[12px] text-mute">{formatTokens(before)} before optimisation</span>}>
               {/* Input composition (disjoint): the ledger's three counters
                   are already exclusive — tokens_in is cold input, so the
                   three parts sum to inputTotal (cold + read + write), not to
                   the cold column. */}
-              <div className="mb-1 text-[11px] uppercase tracking-wide text-mute">input composition</div>
+              <div className="mb-1 text-[12px] text-mute">input composition</div>
               <CompositionBar height={12} parts={[
                 { key: 'cold', label: 'cold input', value: cold, color: VIZ.in },
                 ...(cached > 0 ? [{ key: 'cached', label: 'cached read', value: cached, color: VIZ.cached }] : []),
@@ -205,7 +206,7 @@ export default function Economics() {
                   ...(cached > 0 ? [{ key: 'cached', label: 'cached read', value: cached, color: VIZ.cached }] : []),
                   ...(cwrite > 0 ? [{ key: 'cwrite', label: 'cached write', value: cwrite, color: VIZ.budget }] : []),
                 ].map((p) => (
-                  <li key={p.key} className="flex items-center gap-2 text-[12px]">
+                  <li key={p.key} className="flex items-center gap-2 text-[13px]">
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: p.color }} />
                     <span className="text-dim">{p.label}</span>
                     <span className="tnum ml-auto font-mono text-ink">{formatTokens(p.value)}</span>
@@ -215,7 +216,7 @@ export default function Economics() {
               </ul>
               {/* Output composition (disjoint): reasoning is a SUBSET of
                   output — visible output is the remainder. */}
-              <div className="mb-1 mt-5 text-[11px] uppercase tracking-wide text-mute">output composition</div>
+              <div className="mb-1 mt-5 text-[12px] text-mute">output composition</div>
               <CompositionBar height={12} parts={[
                 { key: 'vis', label: 'visible output', value: visibleOut, color: VIZ.out },
                 { key: 'reason', label: 'reasoning', value: reasoning, color: VIZ.reasoning },
@@ -225,7 +226,7 @@ export default function Economics() {
                   { key: 'vis', label: 'visible output', value: visibleOut, color: VIZ.out },
                   { key: 'reason', label: 'reasoning', value: reasoning, color: VIZ.reasoning },
                 ].map((p) => (
-                  <li key={p.key} className="flex items-center gap-2 text-[12px]">
+                  <li key={p.key} className="flex items-center gap-2 text-[13px]">
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: p.color }} />
                     <span className="text-dim">{p.label}</span>
                     <span className="tnum ml-auto font-mono text-ink">{formatTokens(p.value)}</span>
@@ -235,11 +236,11 @@ export default function Economics() {
               </ul>
               {saved > 0 && (
                 <div className="mt-3 border-t border-line pt-3">
-                  <div className="flex items-center gap-2 text-[12px]">
+                  <div className="flex items-center gap-2 text-[13px]">
                     <span className="h-2 w-2 shrink-0 rounded-full bg-ok" />
                     <span className="text-dim">removed before forwarding</span>
                     <span className="tnum ml-auto font-mono text-ok">−{formatTokens(saved)}</span>
-                    <span className="w-12 text-right font-mono text-mute">{pct(saved, before)}</span>
+                    <span className="w-12 text-right font-mono text-mute">{pctWhole(saved, before)}</span>
                   </div>
                 </div>
               )}
@@ -249,7 +250,7 @@ export default function Economics() {
               <Metric label="reasoning output" value={formatTokens(reasoning)}
                 tone={reasoning > 0 ? 'text-warn' : undefined}
                 note={`${pct(reasoning, output)} of tokens out`} />
-              <p className="mt-3 text-[12px] leading-relaxed text-dim">
+              <p className="mt-3 text-[13px] leading-relaxed text-dim">
                 Reasoning tokens are billed as output and never rendered in the reply. This is the single
                 number that explains an invoice the call count does not: a short answer from a thinking
                 model can cost more than a long answer from a fast one.
@@ -261,7 +262,7 @@ export default function Economics() {
                   <Metric label="context budget" value={formatTokens(context)}
                     tone={context > 0 ? 'text-ok' : undefined}
                     note="component of the reduction, NOT added to the headline" />
-                  <p className="mt-2 text-[12px] leading-relaxed text-dim">
+                  <p className="mt-2 text-[13px] leading-relaxed text-dim">
                     The budget-stage component, shown on its own because budget
                     attribution is part of the total reduction — not an extra
                     total. Zero today: no active profile runs the budget stage.
@@ -277,16 +278,16 @@ export default function Economics() {
             aside={
               <>
                 {minInput && (
-                  <span className="text-[11px] text-warn" title="The min-input filter scopes the token view above; the spend rows are the whole range.">
+                  <span className="text-[12px] text-warn" title="The min-input filter scopes the token view above; the spend rows are the whole range.">
                     min-input filter: tokens only — spend is the whole range
                   </span>
                 )}
                 {costTotals && costTotals.unpriced_calls > 0 ? (
-                  <span className="text-[11px] text-warn">
+                  <span className="text-[12px] text-warn">
                     {nfmt(costTotals.unpriced_calls)} calls unpriced — the total is a floor, not the bill
                   </span>
                 ) : costTotals?.pricing_complete && costRows.length > 0 ? (
-                  <span className="text-[11px] text-ok">all calls priced</span>
+                  <span className="text-[12px] text-ok">all calls priced</span>
                 ) : null}
               </>
             }>
@@ -308,23 +309,17 @@ export default function Economics() {
                   <div>
                     <div className="mb-2 flex items-baseline justify-between">
                       <SectionLabel>Spend by day</SectionLabel>
-                      <span className="text-[11px] text-mute">re-grouped from the priced rows below</span>
+                      <span className="text-[12px] text-mute">re-grouped from the priced rows below</span>
                     </div>
                     <div className="h-48">
                       <ResponsiveContainer width="100%" height="100%">
                         <AreaChart data={byDay} margin={{ top: 4, right: 8, bottom: 0, left: -8 }}>
-                          <defs>
-                            <linearGradient id="econ-spend" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="0%" stopColor={VIZ.saved} stopOpacity={0.3} />
-                              <stop offset="100%" stopColor={VIZ.saved} stopOpacity={0} />
-                            </linearGradient>
-                          </defs>
                           <CartesianGrid {...chartGrid} vertical={false} />
                           <XAxis dataKey="day" {...axisProps} />
-                          <YAxis {...axisProps} width={58} tickFormatter={(v: number) => usd(v)} />
+                          <YAxis {...axisProps} width={88} tickFormatter={(v: number) => usd(v)} />
                           <Tooltip content={<ChartTooltip format={(n) => usd(n)} />} cursor={cursorFill} />
-                          <Area type="monotone" dataKey="usd" name="spend" stroke={VIZ.saved} strokeWidth={2}
-                            fill="url(#econ-spend)" dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />
+                          <Area type="linear" dataKey="usd" name="spend" stroke={VIZ.in} strokeWidth={2}
+                            fill={VIZ.in} fillOpacity={0.08} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />
                         </AreaChart>
                       </ResponsiveContainer>
                     </div>
@@ -350,9 +345,9 @@ export default function Economics() {
                   <div className="min-w-0">
                     <SectionLabel>Every priced row</SectionLabel>
                     <div className="mt-3 max-h-80 overflow-y-auto rounded-lg border border-line">
-                      <table className="w-full min-w-[620px] text-[12px]">
+                      <table className="w-full min-w-[620px] text-[13px]">
                         <thead className="sticky top-0 bg-surface">
-                          <tr className="border-b border-line text-left text-[10.5px] uppercase tracking-[0.1em] text-mute">
+                          <tr className="border-b border-line text-left text-[11px] text-mute">
                             <th className="px-4 py-2 font-medium">day</th>
                             <th className="px-3 py-2 font-medium">account</th>
                             <th className="px-3 py-2 font-medium">model</th>
@@ -383,7 +378,7 @@ export default function Economics() {
                         </tbody>
                       </table>
                     </div>
-                    <p className="mt-2 text-[11px] leading-relaxed text-mute">
+                    <p className="mt-2 text-[12px] leading-relaxed text-mute">
                       * rows with unpriced calls cost 0 until a rate exists for that account+model on that
                       date. Rates are versioned by effective_from, so changing a price does not
                       retroactively rewrite what past calls cost.
@@ -395,16 +390,16 @@ export default function Economics() {
           </Panel>
 
           <Panel label={<SectionLabel>Largest requests · {RANGE_LABEL[range]}</SectionLabel>}
-            aside={<span className="text-[11px] text-mute">sorted by actual input, largest first</span>}
+            aside={<span className="text-[12px] text-mute">sorted by actual input, largest first</span>}
             bodyClass="p-0">
             {rows.length === 0 ? (
               <EmptyState title="No matching calls in this range"
                 hint="Raise the minimum input or widen the range. This is where the outliers answer whether the client is sending too much history, or the model is burning it on output." />
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[820px] text-[12px]">
+                <table className="w-full min-w-[820px] text-[13px]">
                   <thead>
-                    <tr className="border-b border-line text-left text-[10.5px] uppercase tracking-[0.1em] text-mute">
+                    <tr className="border-b border-line text-left text-[11px] text-mute">
                       <th className="px-5 py-2.5 font-medium">model</th>
                       <th className="px-3 py-2.5 text-right font-medium">actual in</th>
                       <th className="px-3 py-2.5 text-right font-medium" title="tokens the context-budget stage kept out of the prompt">context saved</th>

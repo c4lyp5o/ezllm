@@ -2,7 +2,7 @@
 // selector, one shared composer. Sending a message dispatches it to every
 // column whose model is set and streams each answer into its own column.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   accountModels, chatStream, get, messageText, type Account, type ChatMessage, type ChatPart, type ModelRow,
 } from '../utils/api';
@@ -60,12 +60,12 @@ function AttachmentChip({ name, size, preview, onRemove }: Attachment & { previe
       className="flex items-center gap-2.5 rounded-lg border border-line bg-raised px-2.5 py-1.5">
       {preview
         ? <img src={preview} alt="" className="h-8 w-8 shrink-0 rounded border border-line object-cover" />
-        : <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-line bg-surface font-mono text-[10px] text-mute">
+        : <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-line bg-surface font-mono text-[11px] text-mute">
             {ext}
           </span>}
       <span className="min-w-0">
-        <span className="block max-w-[180px] truncate text-[12px] text-ink" title={name}>{name}</span>
-        <span className="tnum block font-mono text-[10.5px] text-mute">{humanBytes(size)}</span>
+        <span className="block max-w-[180px] truncate text-[13px] text-ink" title={name}>{name}</span>
+        <span className="tnum block font-mono text-[11px] text-mute">{humanBytes(size)}</span>
       </span>
       <button type="button" onClick={onRemove} aria-label={`Remove ${name}`}
         className="-mr-1 ml-1 rounded p-1 text-mute transition-colors hover:bg-hover hover:text-bad">✕</button>
@@ -228,12 +228,12 @@ export default function Chat() {
     <div className="mx-auto flex max-w-7xl flex-col gap-4">
       <div className="flex flex-wrap items-center justify-end gap-2 rounded-xl border border-line bg-surface px-4 py-2.5">
         <button type="button" onClick={() => setSystemOpen((v) => !v)}
-          className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')} aria-expanded={systemOpen}>
+          className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px]')} aria-expanded={systemOpen}>
           {systemOpen ? 'Hide' : 'Edit'} system prompt
           {systemDirty && <span className="ml-1 h-1.5 w-1.5 rounded-full bg-accent" aria-label="modified" />}
         </button>
         <button type="button" onClick={addColumn} disabled={columns.length >= 3}
-          className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px] disabled:opacity-45')}
+          className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px] disabled:opacity-45')}
           title={columns.length >= 3 ? 'Maximum 3 columns' : 'Add a chat column'}>
           ＋ Add column
         </button>
@@ -249,17 +249,17 @@ export default function Chat() {
             className="overflow-hidden rounded-xl border border-line bg-surface px-4 py-3">
             <div className="flex flex-wrap items-baseline justify-between gap-3">
               <SectionLabel>System prompt</SectionLabel>
-              <span className="text-[11px] text-mute">sent on every request in every column · stored in this browser</span>
+              <span className="text-[12px] text-mute">sent on every request in every column · stored in this browser</span>
             </div>
             <textarea value={system} onChange={(e) => setSystem(e.target.value)} onBlur={() => writeStored(KEY_SYSTEM, system)}
               rows={4} placeholder={DEFAULT_SYSTEM_PROMPT} aria-label="System prompt"
               className={cx(inputCls, 'mt-2 w-full resize-y font-sans leading-relaxed')} />
             <div className="mt-2 flex flex-wrap items-center gap-3">
               <button type="button" onClick={() => { setSystem(DEFAULT_SYSTEM_PROMPT); writeStored(KEY_SYSTEM, DEFAULT_SYSTEM_PROMPT); }}
-                disabled={!systemDirty} className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px] disabled:opacity-45')}>
+                disabled={!systemDirty} className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px] disabled:opacity-45')}>
                 Reset to default
               </button>
-              <span className="text-[11px] text-mute">{system.trim() ? `${system.trim().length} chars` : 'empty — no system message will be sent'}</span>
+              <span className="text-[12px] text-mute">{system.trim() ? `${system.trim().length} chars` : 'empty — no system message will be sent'}</span>
             </div>
           </motion.div>
         )}
@@ -273,7 +273,7 @@ export default function Chat() {
           return (
             <section key={c.id} className="flex min-h-[520px] flex-col overflow-hidden rounded-xl border border-line bg-surface">
               <div className="flex items-center gap-2 border-b border-line px-3 py-2.5">
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line bg-raised font-mono text-[10px] text-mute">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line bg-raised font-mono text-[11px] text-mute">
                   {idx + 1}
                 </span>
                 <div className="min-w-0 flex-1">
@@ -289,7 +289,7 @@ export default function Chat() {
                 <div className="flex items-center gap-1.5 border-b border-line px-3 py-1.5">
                   <Chip tone="neutral">{selected.id}</Chip>
                   <button type="button" onClick={() => setAsDefault(c.model)}
-                    className="ml-auto text-[10.5px] text-mute hover:text-ink"
+                    className="ml-auto text-[11px] text-mute hover:text-ink"
                     title="Use this model for the first column on every visit">
                     {c.model === defaultModel ? '★ default' : '☆ set default'}
                   </button>
@@ -308,7 +308,7 @@ export default function Chat() {
                     <motion.div key={`${c.id}-${i}`} layout="position" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={spring}
                       className={cx('rounded-lg border px-3 py-2.5 text-[13px] leading-relaxed',
                         m.role === 'user' ? 'border-accent/30 bg-accent-dim' : 'border-line bg-surface')}>
-                      <div className="mb-1 text-[9.5px] font-semibold uppercase tracking-wide text-mute">{m.role}</div>
+                      <div className="mb-1 text-[9.5px] font-semibold text-mute">{m.role}</div>
                       {m.role === 'assistant'
                         ? <Markdown text={typeof m.content === 'string' ? m.content : body} />
                         : (
@@ -324,8 +324,8 @@ export default function Chat() {
                     </motion.div>
                   );
                 })}
-                {c.busy && <div className="flex items-center gap-2 text-[12px] text-mute"><Spinner /> Streaming…</div>}
-                {c.error && <p className="rounded-lg border border-bad/30 bg-bad-dim px-3 py-2 text-[11.5px] text-bad">{c.error}</p>}
+                {c.busy && <div className="flex items-center gap-2 text-[13px] text-mute"><Spinner /> Streaming…</div>}
+                {c.error && <p className="rounded-lg border border-bad/30 bg-bad-dim px-3 py-2 text-[12px] text-bad">{c.error}</p>}
               </div>
             </section>
           );
@@ -355,11 +355,11 @@ export default function Chat() {
               accept="image/*,text/*,.json,.csv,.md,.log,.ts,.tsx,.js,.jsx,.py,.go,.rs,.java,.rb,.sh,.yml,.yaml,.toml,.sql,.html,.css,.xml,.env,.conf,.ini"
               onChange={(e) => { void addFiles(e.target.files); if (fileRef.current) fileRef.current.value = ''; }} />
             <button type="button" onClick={() => fileRef.current?.click()} disabled={busy}
-              className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')}>＋ Attach</button>
-            <span className="text-[11px] text-mute">images → vision parts · text/code → inlined · ≤ {humanBytes(MAX_FILE_BYTES)} each</span>
+              className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px]')}>＋ Attach</button>
+            <span className="text-[12px] text-mute">images → vision parts · text/code → inlined · ≤ {humanBytes(MAX_FILE_BYTES)} each</span>
           </div>
           <div className="flex items-center gap-3">
-            <span className="hidden text-[11px] text-mute sm:inline">Enter to send · Shift+Enter for a new line</span>
+            <span className="hidden text-[12px] text-mute sm:inline">Enter to send · Shift+Enter for a new line</span>
             <button onClick={() => void send()} disabled={!sendable}
               className={cx(btn.base, btn.primary, 'disabled:cursor-not-allowed disabled:opacity-45')}>
               {busy ? <Spinner /> : null} Send to {columns.filter((c) => c.model).length || 0}

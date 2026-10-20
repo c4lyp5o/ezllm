@@ -14,3 +14,6 @@ web/.vite/
 # NOTE: web/dist/ is deliberately TRACKED — cmd/ezllm embeds it via
 # //go:embed (web/embed.go) so one binary serves the dashboard. Rebuild it
 # with `npm run build` in web/ whenever the UI changes.
+
+# design-skill working files (screenshots, sheets)
+/.taste-skill/

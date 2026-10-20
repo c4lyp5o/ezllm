@@ -72,8 +72,8 @@ function newDraft(): Draft {
 
 function HopArrow({ last }: { last: boolean }) {
   return last
-    ? <span className="select-none font-mono text-[11px] text-mute">·</span>
-    : <span className="select-none font-mono text-[11px] text-accent/60">→</span>;
+    ? <span className="select-none font-mono text-[12px] text-mute">·</span>
+    : <span className="select-none font-mono text-[12px] text-accent/60">→</span>;
 }
 
 function HopsEditor({ hops, setHops, accounts, strategy }: {
@@ -107,13 +107,13 @@ function HopsEditor({ hops, setHops, accounts, strategy }: {
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <SectionLabel>Hops — ordered, positions = array order</SectionLabel>
-        <button type="button" className={cx(btn.base, btn.ghost, 'px-2.5 py-1 text-[11.5px]')}
+        <button type="button" className={cx(btn.base, btn.ghost, 'px-2.5 py-1 text-[12px]')}
           onClick={() => setHops([...hops, emptyHop(accounts[0]?.id ?? 0)])}>
           ＋ Add hop
         </button>
       </div>
       {hops.length === 0 && (
-        <p className="rounded-lg border border-dashed border-line px-4 py-5 text-center text-[12px] text-mute">
+        <p className="rounded-lg border border-dashed border-line px-4 py-5 text-center text-[13px] text-mute">
           No hops yet — add the first one.
         </p>
       )}
@@ -127,13 +127,13 @@ function HopsEditor({ hops, setHops, accounts, strategy }: {
         const custom = h.custom ?? !models;
         return (
           <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-raised/60 px-3 py-2.5">
-            <span className="w-5 text-center font-mono text-[11px] text-mute">{i + 1}</span>
+            <span className="w-5 text-center font-mono text-[12px] text-mute">{i + 1}</span>
             {/* Grouped by provider (base_url): a provider with MORE THAN ONE
                 account gets the count in its group label — that count is what
                 tells the operator the account choice below is meaningful.
                 A single-account group stays bare, and the control stays enabled
                 either way, because it is also how the provider is chosen. */}
-            <select className={cx(inputCls, 'w-auto min-w-40 flex-1 py-1.5 text-[12px]')} value={h.account_id}
+            <select className={cx(inputCls, 'w-auto min-w-40 flex-1 py-1.5 text-[13px]')} value={h.account_id}
               onChange={(e) => set(i, { account_id: Number(e.target.value), custom: undefined })}>
               {groupAccounts(accounts).map((g) => (
                 <optgroup key={g.key} label={g.accounts.length > 1 ? `${g.label} · ${g.accounts.length} accounts` : g.label}>
@@ -143,23 +143,23 @@ function HopsEditor({ hops, setHops, accounts, strategy }: {
               {accounts.length === 0 && <option value={0}>— no accounts —</option>}
             </select>
             {custom || !models ? (
-              <input className={cx(inputCls, 'min-w-36 flex-[2] py-1.5 font-mono text-[12px]')} placeholder="model id · e.g. gpt-6-luna"
+              <input className={cx(inputCls, 'min-w-36 flex-[2] py-1.5 font-mono text-[13px]')} placeholder="model id · e.g. gpt-6-luna"
                 value={h.model_id} onChange={(e) => set(i, { model_id: e.target.value.trim() })} spellCheck={false} />
             ) : (
-              <select className={cx(inputCls, 'min-w-36 flex-[2] py-1.5 text-[12px]')} value={h.model_id}
+              <select className={cx(inputCls, 'min-w-36 flex-[2] py-1.5 text-[13px]')} value={h.model_id}
                 title="models synced from this account" onChange={(e) => set(i, { model_id: e.target.value })}>
                 {!models.includes(h.model_id) && <option value={h.model_id}>{h.model_id} · not in catalog</option>}
                 {models.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
             )}
-            <label className="flex items-center gap-1.5 text-[11px] text-mute"
+            <label className="flex items-center gap-1.5 text-[12px] text-mute"
               title="type a model id instead of picking from the account catalog">
               <input type="checkbox" checked={custom} onChange={(e) => set(i, { custom: e.target.checked })} />
               custom model id
             </label>
             <Toggle checked={h.enabled} onChange={(v) => set(i, { enabled: v })} label="hop enabled" />
             {strategy === 'block_round_robin' && (
-              <label className="flex items-center gap-1.5 text-[11px] text-mute"
+              <label className="flex items-center gap-1.5 text-[12px] text-mute"
                 title="hold the block while this hop keeps succeeding; release it on a hop-attributable failure (429/5xx/transport/failed stream). A 4xx is the request's fault and keeps the hold.">
                 <input type="checkbox" checked={h.hold_until_failure === true}
                   onChange={(e) => set(i, { hold_until_failure: e.target.checked })} />
@@ -269,7 +269,7 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
             <label className={labelCls} htmlFor="cb-context-size">Context size advertised to clients</label>
             <input id="cb-context-size" className={inputCls} type="number" min={1} max={10000000} step={1000}
               value={d.context_size} onChange={(e) => setD((p) => ({ ...p, context_size: Number(e.target.value) }))} />
-            <p className="mt-1 text-[11px] text-mute">Clients such as Hermes use this metadata. ezllm does not enforce the context limit; direct models keep their provider metadata.</p>
+            <p className="mt-1 text-[12px] text-mute">Clients such as Hermes use this metadata. ezllm does not enforce the context limit; direct models keep their provider metadata.</p>
           </div>
         </div>
 
@@ -281,8 +281,8 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
                 onClick={() => setD((p) => ({ ...p, strategy: s }))}
                 className={cx('rounded-lg border px-3.5 py-2.5 text-left transition-colors',
                   d.strategy === s ? 'border-accent/60 bg-accent-dim' : 'border-line bg-raised/60 hover:border-line-strong')}>
-                <span className="block font-mono text-[12.5px] font-medium">{s}</span>
-                <span className={cx('mt-0.5 block text-[11px] leading-snug', d.strategy === s ? 'text-accent/80' : 'text-mute')}>
+                <span className="block font-mono text-[13px] font-medium">{s}</span>
+                <span className={cx('mt-0.5 block text-[12px] leading-snug', d.strategy === s ? 'text-accent/80' : 'text-mute')}>
                   {STRATEGY_HINTS[s]}
                 </span>
               </button>
@@ -290,21 +290,21 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
           </div>
           {d.strategy === 'sticky_last_good' && (
             <div className="mt-2 flex items-center gap-3">
-              <label className="text-[11px] uppercase tracking-wide text-mute" htmlFor="cb-idle">sticky idle</label>
-              <input id="cb-idle" type="number" min={0} className={cx(inputCls, 'w-24 py-1.5 font-mono text-[12px] tabular-nums')}
+              <label className="text-[12px] text-mute" htmlFor="cb-idle">sticky idle</label>
+              <input id="cb-idle" type="number" min={0} className={cx(inputCls, 'w-24 py-1.5 font-mono text-[13px] tabular-nums')}
                 value={d.sticky_idle_s} onChange={(e) => setD((p) => ({ ...p, sticky_idle_s: Number(e.target.value) || 0 }))} />
-              <span className="text-[11px] text-mute">seconds — move on after this idle</span>
+              <span className="text-[12px] text-mute">seconds — move on after this idle</span>
             </div>
           )}
           {d.strategy === 'block_round_robin' && (
             <div className="mt-3 rounded-lg border border-line bg-raised/60 p-3.5">
               <div className="flex items-center gap-3">
-                <label className="text-[11px] uppercase tracking-wide text-mute" htmlFor="cb-block">block size</label>
-                <input id="cb-block" type="number" min={1} max={1000} className={cx(inputCls, 'w-24 py-1.5 font-mono text-[12px] tabular-nums')}
+                <label className="text-[12px] text-mute" htmlFor="cb-block">block size</label>
+                <input id="cb-block" type="number" min={1} max={1000} className={cx(inputCls, 'w-24 py-1.5 font-mono text-[13px] tabular-nums')}
                   value={d.block_size} onChange={(e) => setD((p) => ({ ...p, block_size: Number(e.target.value) || 1 }))} />
-                <span className="text-[11px] text-mute">requests per hop before the rotation moves on</span>
+                <span className="text-[12px] text-mute">requests per hop before the rotation moves on</span>
               </div>
-              <p className="mt-2 text-[11px] leading-snug text-mute">
+              <p className="mt-2 text-[12px] leading-snug text-mute">
                 One hop serves this many requests in a row, then the next hop does the same, and so on.
                 Because each account caches your prompt prefix, a run of consecutive requests to the same
                 account keeps that cache warm — call <Mono>k</Mono> reads the prefix call <Mono>k-1</Mono> just
@@ -322,7 +322,7 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
                   .filter((a): a is AccountLite => !!a && (a.rate_limit ?? 0) > 0 && (a.rate_limit ?? 0) < d.block_size);
                 if (tight.length === 0) return null;
                 return (
-                  <p className="mt-2 text-[11px] leading-snug text-warn">
+                  <p className="mt-2 text-[12px] leading-snug text-warn">
                     Block size {d.block_size} exceeds the request budget of{' '}
                     {tight.map((a) => `${a.name} (${a.rate_limit} per ${a.rate_window})`).join(', ')} —
                     those hops will drop out mid-block and the rotation will advance early. Set the block
@@ -338,10 +338,10 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
 
         <div className="flex items-center gap-3">
           <Toggle checked={d.enabled} onChange={(v) => setD((p) => ({ ...p, enabled: v }))} label="combo enabled" />
-          <span className="text-[12.5px] text-dim">Enabled</span>
+          <span className="text-[13px] text-dim">Enabled</span>
         </div>
 
-        {err && <div className="rounded-lg border border-bad/30 bg-bad-dim px-4 py-3 text-[12.5px] text-bad">{err}</div>}
+        {err && <div className="rounded-lg border border-bad/30 bg-bad-dim px-4 py-3 text-[13px] text-bad">{err}</div>}
       </div>
     </Modal>
   );
@@ -384,9 +384,9 @@ function TestComboModal({ combo, onClose }: { combo: Combo | null; onClose: () =
       title={combo ? `Test combo ${combo.name}` : 'Test combo'}
       subtitle="one real request per hop — tiny (16 tokens out), recorded in the ledger as combo-test"
       footer={<>
-        <span className="mr-auto flex items-center gap-2 text-[12px] text-mute">
+        <span className="mr-auto flex items-center gap-2 text-[13px] text-mute">
           surface
-          <select className={cx(inputCls, 'w-auto py-1 text-[12px]')} value={surface}
+          <select className={cx(inputCls, 'w-auto py-1 text-[13px]')} value={surface}
             onChange={(e) => setSurface(e.target.value as 'openai' | 'anthropic')}>
             <option value="openai">openai</option>
             <option value="anthropic">anthropic</option>
@@ -399,7 +399,7 @@ function TestComboModal({ combo, onClose }: { combo: Combo | null; onClose: () =
         </button>
       </>}>
       {err && (
-        <div className="mb-3 rounded-lg border border-bad/30 bg-bad-dim px-4 py-3 text-[12.5px] text-bad">{err}</div>
+        <div className="mb-3 rounded-lg border border-bad/30 bg-bad-dim px-4 py-3 text-[13px] text-bad">{err}</div>
       )}
       {running && !result && (
         <div className="flex items-center gap-2 px-2 py-6 text-[13px] text-mute">
@@ -411,7 +411,7 @@ function TestComboModal({ combo, onClose }: { combo: Combo | null; onClose: () =
           {result.hops.map((h, i) => (
             <div key={i} className="rounded-lg border border-line bg-raised/40 px-4 py-3">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                <span className="font-mono text-[12.5px] text-ink">{h.namespace ?? `#${h.account_id}`}/{h.model}</span>
+                <span className="font-mono text-[13px] text-ink">{h.namespace ?? `#${h.account_id}`}/{h.model}</span>
                 {!h.enabled && <Chip tone="neutral">hop disabled</Chip>}
                 {h.status === 200 && <Chip tone="ok">200</Chip>}
                 {h.status >= 400 && (
@@ -421,16 +421,16 @@ function TestComboModal({ combo, onClose }: { combo: Combo | null; onClose: () =
                 )}
                 {h.status === 0 && <Chip tone="bad">not dialed</Chip>}
                 {h.parked && <Chip tone="warn" title="the probe parked this hop exactly as a production 429 would">parked {h.cooldown_s}s</Chip>}
-                <span className="ml-auto font-mono text-[11px] text-mute">{h.ms} ms</span>
+                <span className="ml-auto font-mono text-[12px] text-mute">{h.ms} ms</span>
               </div>
               {h.err && (
-                <div className="mt-1.5 break-words font-mono text-[11px] leading-relaxed text-mute" title={h.err}>
+                <div className="mt-1.5 break-words font-mono text-[12px] leading-relaxed text-mute" title={h.err}>
                   {h.err.length > 220 ? h.err.slice(0, 220) + '…' : h.err}
                 </div>
               )}
             </div>
           ))}
-          <p className="pt-1 text-[11.5px] leading-relaxed text-mute">
+          <p className="pt-1 text-[12px] leading-relaxed text-mute">
             Probes run through the real dispatcher: a hop that earns a parkable failure stays parked, because
             it failed for real. No eligibility, capability or pin filtering — disabled and skipped hops are
             probed too, which is how you learn why the router avoids them.
@@ -490,7 +490,7 @@ export default function Combos() {
         </button>
       </div>
 
-      {err && <div className="mb-4 rounded-lg border border-bad/30 bg-bad-dim px-4 py-3 text-[12.5px] text-bad">{err}</div>}
+      {err && <div className="mb-4 rounded-lg border border-bad/30 bg-bad-dim px-4 py-3 text-[13px] text-bad">{err}</div>}
 
       {combos === null ? (
         <SkeletonCards n={2} />
@@ -516,24 +516,24 @@ export default function Combos() {
                   </Chip>
                 )}
                 <span className="ml-auto flex items-center gap-3">
-                  <label className="flex items-center gap-2 text-[12px] text-dim">
+                  <label className="flex items-center gap-2 text-[13px] text-dim">
                     <Toggle checked={c.enabled} disabled={busyID === c.id}
                       label={`${c.enabled ? 'Disable' : 'Enable'} combo ${c.name}`}
                       onChange={(v) => void setEnabled(c, v)} />
                     <span>{c.enabled ? 'Enabled' : 'Disabled'}</span>
                   </label>
                   <span className="flex items-center gap-2">
-                    <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')}
+                    <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px]')}
                       title="probe every hop with one tiny real request"
                       onClick={() => setTesting(c)}>Test</button>
-                    <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')} onClick={() => setModal({ open: true, editing: c })}>Edit</button>
-                    <button type="button" className={cx(btn.base, btn.danger, 'px-3 py-1.5 text-[12px]')} onClick={() => setPendingDelete(c)}>Delete</button>
+                    <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px]')} onClick={() => setModal({ open: true, editing: c })}>Edit</button>
+                    <button type="button" className={cx(btn.base, btn.danger, 'px-3 py-1.5 text-[13px]')} onClick={() => setPendingDelete(c)}>Delete</button>
                   </span>
                 </span>
               </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2 font-mono text-[11.5px]">
+              <div className="mt-3 flex flex-wrap items-center gap-2 font-mono text-[12px]">
                 {(c.hops ?? []).length === 0
-                  ? <span className="font-sans text-[12px] text-mute">no hops configured</span>
+                  ? <span className="font-sans text-[13px] text-mute">no hops configured</span>
                   : (c.hops ?? []).map((h, i) => (
                     <span key={i} className="flex items-center gap-2">
                       {i > 0 && <span className="text-accent/50">→</span>}
@@ -542,7 +542,7 @@ export default function Combos() {
                         <span className="mx-1 text-mute">/</span>
                         <span className={h.enabled ? 'text-ink' : 'text-mute'}>{h.model_id}</span>
                         {h.hold_until_failure && (
-                          <span className="ml-1.5 rounded border border-accent/40 px-1 text-[10px] text-accent"
+                          <span className="ml-1.5 rounded border border-accent/40 px-1 text-[11px] text-accent"
                             title="holds the block while it succeeds; releases on a hop-attributable failure">
                             hold
                           </span>
@@ -552,10 +552,10 @@ export default function Combos() {
                   ))}
               </div>
               {c.strategy === 'sticky_last_good' && (
-                <div className="mt-2 text-[11px] text-mute">sticky idle <Mono>{c.sticky_idle_s ?? '–'}s</Mono></div>
+                <div className="mt-2 text-[12px] text-mute">sticky idle <Mono>{c.sticky_idle_s ?? '–'}s</Mono></div>
               )}
               {c.strategy === 'block_round_robin' && (
-                <div className="mt-2 text-[11px] text-mute">
+                <div className="mt-2 text-[12px] text-mute">
                   block size <Mono>{c.block_size ?? 1}</Mono> — one hop serves {c.block_size ?? 1} request
                   {(c.block_size ?? 1) === 1 ? '' : 's'} in a row before rotating
                 </div>

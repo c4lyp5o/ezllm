@@ -1,4 +1,8 @@
 @import "tailwindcss";
+/* Public Sans, bundled into dist/ (and so into the binary): the dashboard is
+   self-hosted and must render the same offline, with no third-party font
+   request leaving the operator's browser. */
+@import "@fontsource-variable/public-sans";
 
 /* Class-based dark mode. The bare `dark:` variant from Tailwind v4 is
    media-query only; `@custom-variant` re-points it at the class so the toggle
@@ -33,40 +37,37 @@
    custom properties or @keyframes"). Outside @theme, // is fine. */
 
 @theme {
-  /* ── surfaces (light) ── */
-  --color-bg: #f6f7f9;
+  /* ── surfaces (light) ──
+     Data-terminal style, light variant: off-white ground, white panels, lines
+     in three steps (panel edge, row rule, control), text in three tiers that
+     all clear 4.5:1. Colour lives on data and status only; the accent is
+     ezllm's own sky (the favicon's stroke), deepened to hold contrast on white. */
+  --color-bg: #f9fafb;
   --color-surface: #ffffff;
-  --color-raised: #f1f2f5;
-  --color-hover: #e9eaee;
-  --color-overlay: rgba(17, 20, 24, 0.42);
+  --color-raised: #f4f4f5;
+  --color-hover: #eeeeef;
+  --color-overlay: rgba(17, 17, 17, 0.42);
 
-  --color-line: rgba(15, 18, 22, 0.11);
-  --color-line-strong: rgba(15, 18, 22, 0.2);
+  --color-line: #e8e8e8;
+  --color-line-strong: #d1d5db;
 
-  --color-ink: #14171c;
-  --color-dim: #4c5361;
-  --color-mute: #7c8494;
+  --color-ink: #111111;
+  --color-dim: #3f4146;
+  --color-mute: #5f6368;
 
-  --color-accent: #5e6ad2;
-  --color-accent-dim: rgba(94, 106, 210, 0.12);
-  /* Ink that goes ON TOP of an accent fill. It must invert with the accent:
-     light-mode accent is a dark blue (#0284c7) and wants white text, while
-     dark-mode accent is a bright sky (#38bdf8) and wants near-black. A single
-     hardcoded value is wrong in one of the two modes no matter which you pick
-     — this is why `text-white` / `text-[#082a3d]` both appear in the codebase
-     today and neither is correct everywhere. */
+  --color-accent: #0369a1;
+  --color-accent-dim: rgba(3, 105, 161, 0.1);
+  /* Ink that goes ON TOP of an accent fill (light accent is deep, wants white). */
   --color-accent-ink: #ffffff;
 
-  --color-ok: #047857;
-  --color-warn: #a16207;
-  --color-bad: #b91c1c;
-  /* Dim tints for the same three states: the fill behind a status chip or
-     alert border. Opaque percentages of the status hue, lightened/darkened
-     per theme, so a light-mode alert is a pale wash rather than a bright
-     emerald block that no text sits on readably. */
-  --color-ok-dim: rgba(4, 120, 87, 0.1);
-  --color-warn-dim: rgba(161, 98, 7, 0.12);
-  --color-bad-dim: rgba(185, 28, 28, 0.09);
+  --color-ok: #247b50;
+  --color-warn: #92400e;
+  --color-bad: #c4242a;
+  /* The pale pairs behind a status pill: opaque, so a pill reads the same on
+     any surface. */
+  --color-ok-dim: #dcfae5;
+  --color-warn-dim: #fffbeb;
+  --color-bad-dim: #ffedea;
 
   /* ── data-viz series: NOT in @theme — see :root below ───────────────── */
 
@@ -74,16 +75,28 @@
      Translucent fills sit on top of a surface and MUST invert with the theme.
      A `rgba(255,255,255,0.05)` row hover is visible on a dark surface and
      literally invisible on a white one — that is the grey-ghost failure. */
-  --color-wash: rgba(15, 18, 22, 0.045);
-  --color-wash-strong: rgba(15, 18, 22, 0.08);
-  --color-inset: rgba(15, 18, 22, 0.035);
-  --color-shade: rgba(15, 18, 22, 0.06);
+  --color-wash: rgba(17, 17, 17, 0.035);
+  --color-wash-strong: rgba(17, 17, 17, 0.07);
+  --color-inset: #f4f4f5;
+  --color-shade: #ececee;
 
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "JetBrains Mono", Consolas, monospace;
+  --font-sans: "Public Sans Variable", "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* `font-mono` is the FIGURE face, not a code face: every number, count and
+     time in this dashboard set it, and it now resolves to the text face with
+     tabular digits (see .font-mono below) so figures stack without the whole
+     screen reading as a terminal. Real code, keys and IDs (<code>, <pre>,
+     <kbd>, .font-code) keep a true monospace. */
+  --font-mono: "Public Sans Variable", "Public Sans", system-ui, sans-serif;
+  --font-code: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "JetBrains Mono", Consolas, monospace;
+
+  /* One radius family: tight. Cards, panels and controls at 6px; pills stay
+     fully round. Tailwind's rounded-lg/xl/2xl all land here. */
+  --radius-lg: 6px;
+  --radius-xl: 6px;
+  --radius-2xl: 6px;
 
   /* ── motion tokens ─────────────────────────────────────────────────────
-     framer-motion reads these and they double as the CSS animation
+     motion (motion.dev) reads these and they double as the CSS animation
      durations. Keep the fast tier ≤200ms: every one of these fires on data
      that re-polls on a timer, and a slow ease on a 15s refresh loop reads to
      the operator as lag, not polish. */
@@ -112,82 +125,84 @@
    surface and a 4.5:1 text contrast floor, which rules out #38bdf8 as
    anything but a fill on a dark chart. */
 :root {
+  /* One hue per chart: the accent goes on the main series (tokens in), the
+     companions are neutral greys, status series keep their status colour. */
   --color-viz-in: #0369a1;
-  --color-viz-out: #4f46e5;
-  --color-viz-cached: #0e7490;
-  --color-viz-reasoning: #a16207;
-  --color-viz-saved: #047857;
-  --color-viz-error: #b91c1c;
-  --color-viz-latency: #6d28d9;
-  /* budget = the context-budget stage's savings series. Distinct hue because
-     it appears BESIDE the compression series on the same Savings chart — two
-     mechanisms, two colours, never "two greens". */
-  --color-viz-budget: #be185d;
+  --color-viz-out: #6b6f76;
+  --color-viz-cached: #a3a7ae;
+  --color-viz-reasoning: #92400e;
+  --color-viz-saved: #247b50;
+  --color-viz-error: #c4242a;
+  --color-viz-latency: #3f4146;
+  --color-viz-budget: #5f6368;
   --color-viz-cat-1: #0369a1;
-  --color-viz-cat-2: #4f46e5;
-  --color-viz-cat-3: #047857;
-  --color-viz-cat-4: #a16207;
-  --color-viz-cat-5: #b91c1c;
-  --color-viz-cat-6: #6d28d9;
-  --color-viz-cat-7: #0f766e;
-  --color-viz-cat-8: #c2410c;
-  --color-viz-grid: rgba(15, 18, 22, 0.08);
-  --color-viz-axis: #6b7280;
-  --color-viz-crosshair: rgba(15, 18, 22, 0.05);
+  --color-viz-cat-2: #3f4146;
+  --color-viz-cat-3: #8a8e95;
+  --color-viz-cat-4: #247b50;
+  --color-viz-cat-5: #92400e;
+  --color-viz-cat-6: #c4242a;
+  --color-viz-cat-7: #5f6368;
+  --color-viz-cat-8: #b8bcc2;
+  --color-viz-grid: #ececee;
+  --color-viz-axis: #5f6368;
+  --color-viz-crosshair: rgba(17, 17, 17, 0.04);
 }
 
 /* The dark palette. Same names, dark values, applied by a class on <html>.
    A token listed here with no @theme counterpart is a bug — it would exist
    only in dark mode and every component using it would render unset in light. */
 .dark {
-  --color-bg: #0f1011;
-  --color-surface: #141516;
-  --color-raised: #191a1b;
-  --color-hover: #23252a;
-  --color-overlay: rgba(4, 4, 6, 0.66);
+  /* Data terminal: a #171719 ground with panels a step DARKER (#131217), so
+     elevation reads without borders or glow; lines barely above the ground;
+     two greys that read apart; colour on data and status only. */
+  --color-bg: #171719;
+  --color-surface: #131217;
+  --color-raised: #212023;
+  --color-hover: #26252a;
+  --color-overlay: rgba(0, 0, 0, 0.62);
 
-  --color-line: rgba(255, 255, 255, 0.08);
-  --color-line-strong: rgba(255, 255, 255, 0.14);
+  --color-line: #232326;
+  --color-line-strong: #3a3a3e;
 
-  --color-ink: #f7f8f8;
-  --color-dim: #c9cdd4;
-  --color-mute: #8a8f98;
+  --color-ink: #f2f2f3;
+  --color-dim: #bdbdc0;
+  --color-mute: #8a8c92;
 
-  --color-accent: #8b93ff;
-  --color-accent-dim: rgba(139, 147, 255, 0.14);
-  --color-accent-ink: #0b0c10;
+  --color-accent: #38bdf8;
+  --color-accent-dim: rgba(56, 189, 248, 0.12);
+  --color-accent-ink: #08131a;
 
-  --color-ok: #34d399;
-  --color-warn: #fbbf24;
-  --color-bad: #f87171;
-  --color-ok-dim: rgba(52, 211, 153, 0.1);
-  --color-warn-dim: rgba(251, 191, 36, 0.1);
-  --color-bad-dim: rgba(248, 113, 113, 0.1);
+  --color-ok: #44a282;
+  --color-warn: #d9a441;
+  --color-bad: #e5566f;
+  --color-ok-dim: #1b2828;
+  --color-warn-dim: #2a2416;
+  --color-bad-dim: #2c1a20;
 
   --color-viz-in: #38bdf8;
-  --color-viz-out: #818cf8;
-  --color-viz-cached: #22d3ee;
-  --color-viz-reasoning: #fbbf24;
-  --color-viz-saved: #34d399;
-  --color-viz-error: #f87171;
-  --color-viz-latency: #a78bfa;
-  --color-viz-budget: #f472b6;
+  --color-viz-out: #bdbdc0;
+  --color-viz-cached: #6e7076;
+  --color-viz-reasoning: #d9a441;
+  --color-viz-saved: #44a282;
+  --color-viz-error: #e5566f;
+  --color-viz-latency: #bdbdc0;
+  --color-viz-budget: #8a8c92;
   --color-viz-cat-1: #38bdf8;
-  --color-viz-cat-2: #818cf8;
-  --color-viz-cat-3: #34d399;
-  --color-viz-cat-4: #fbbf24;
-  --color-viz-cat-5: #f87171;
-  --color-viz-cat-6: #a78bfa;
-  --color-viz-cat-7: #2dd4bf;
-  --color-viz-cat-8: #fb923c;
-  --color-viz-grid: rgba(255, 255, 255, 0.055);
-  --color-viz-axis: #62626e;
-  --color-viz-crosshair: rgba(255, 255, 255, 0.05);
+  --color-viz-cat-2: #f2f2f3;
+  --color-viz-cat-3: #8a8c92;
+  --color-viz-cat-4: #44a282;
+  --color-viz-cat-5: #d9a441;
+  --color-viz-cat-6: #e5566f;
+  --color-viz-cat-7: #bdbdc0;
+  --color-viz-cat-8: #55575c;
+  --color-viz-grid: #232326;
+  --color-viz-axis: #8a8c92;
+  --color-viz-crosshair: rgba(255, 255, 255, 0.04);
 
-  --color-wash: rgba(255, 255, 255, 0.05);
-  --color-wash-strong: rgba(255, 255, 255, 0.09);
-  --color-inset: rgba(0, 0, 0, 0.22);
-  --color-shade: rgba(255, 255, 255, 0.06);
+  --color-wash: rgba(255, 255, 255, 0.035);
+  --color-wash-strong: rgba(255, 255, 255, 0.07);
+  --color-inset: #1c1b1f;
+  --color-shade: #26252a;
 }
 
 @keyframes pulse-soft { 0%, 100% { opacity: 0.45; } 50% { opacity: 0.85; } }
@@ -214,8 +229,9 @@ body {
   background: var(--color-bg);
   color: var(--color-ink);
   font-family: var(--font-sans);
-  font-size: 13.5px;
+  font-size: 13px;
   line-height: 1.55;
+  font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -233,12 +249,22 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--color-wash-strong); border-radius: 8px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--color-line-strong); }
 
-input, select, textarea, button { font: inherit; color: inherit; }
+/* In the base LAYER, not unlayered: an unlayered `color: inherit` on button
+   beats every Tailwind colour utility, which is how primary buttons rendered
+   their label in the page ink on an ink fill. */
+@layer base {
+  input, select, textarea, button { font: inherit; color: inherit; }
+}
 input::placeholder, textarea::placeholder { color: var(--color-mute); }
 
 /* Everything numeric in a dashboard is tabular by default: a column of figures
    that re-renders on a 15s poll must not change width mid-tween. */
-.tnum { font-variant-numeric: tabular-nums; }
+.tnum, .font-mono { font-variant-numeric: tabular-nums; }
+
+/* Real code keeps a real monospace whatever utility its parent set. These
+   selectors are unlayered on purpose: they beat Tailwind's layered
+   `font-mono` on the same element. */
+code, pre, kbd, samp, .font-code { font-family: var(--font-code); font-variant-numeric: normal; }
 
 /* The OS reduced-motion switch is the ONLY thing that can disable motion —
    MotionConfig reducedMotion="user" covers framer, this covers the CSS

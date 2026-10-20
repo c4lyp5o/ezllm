@@ -209,22 +209,23 @@ export default function Stats() {
       {/* ── totals ──────────────────────────────────────────────────────── */}
       {totals && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
-          <StatCard label="calls" value={nfmt(totals.calls)} sub={`${RANGE_LABEL[range]} window`} />
-          <StatCard label="tokens in" value={formatTokens(totals.tin)} />
-          <StatCard label="tokens out" value={formatTokens(totals.tout)} sub={`${pct(totals.tout, totals.tin + totals.tout)} of volume`} />
-          <StatCard label="cached read" value={formatTokens(totals.cread)}
-            sub={`${pct(totals.cread, totals.tin)} of input re-read from cache`} />
-          <StatCard label="reasoning" value={formatTokens(totals.reasoning)}
-            tone={totals.reasoning > 0 ? 'text-warn' : undefined}
-            sub="billed, never shown" />
-          <StatCard label="saved" value={formatTokens(totals.applied_saved)}
+          <StatCard label="Calls" value={nfmt(totals.calls)} sub={`${RANGE_LABEL[range]} window`} />
+          <StatCard label="Tokens in" value={formatTokens(totals.tin)} sub="not served from cache" />
+          <StatCard label="Tokens out" value={formatTokens(totals.tout)} sub={`${pct(totals.tout, totals.tin + totals.tout)} of volume`} />
+          {/* Share of ALL prompt tokens (in + cache reads + cache writes); the
+              old sub divided by tokens in alone and printed "3033%". */}
+          <StatCard label="Cache reads" value={formatTokens(totals.cread)}
+            sub={`${pct(totals.cread, totals.tin + totals.cread + totals.cwrite)} of prompt tokens`} />
+          <StatCard label="Reasoning" value={formatTokens(totals.reasoning)}
+            sub="billed as output, never shown" />
+          <StatCard label="Removed by compression" value={formatTokens(totals.applied_saved)}
             tone={totals.applied_saved > 0 ? 'text-ok' : undefined}
             sub={totals.context_saved > 0 ? `+${formatTokens(totals.context_saved)} context budget` : 'shipped rewrites only'} />
           <StatCard
-            label="p50 ttft"
+            label="Median first token"
             value={fmtMs(totals.p50_ttft_ms)}
-            tone={totals.p50_ttft_ms > 0 ? 'text-[color:var(--color-viz-latency)]' : 'text-mute'}
-            sub={totals.p50_ttft_ms > 0 ? 'median first token' : 'not measured yet'} />
+            tone={totals.p50_ttft_ms > 0 ? undefined : 'text-mute'}
+            sub={totals.p50_ttft_ms > 0 ? 'streaming calls only' : 'not measured yet'} />
         </div>
       )}
 
@@ -238,10 +239,10 @@ export default function Stats() {
       {totals && data && !isExpanded && (
         <Panel
           label={<SectionLabel>Everything · last {RANGE_LABEL[range]}</SectionLabel>}
-          aside={<Chip><Mono className="text-[10px]">totals only</Mono></Chip>}>
+          aside={<Chip><Mono className="text-[11px]">totals only</Mono></Chip>}>
           <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
             <div>
-              <p className="text-[12.5px] leading-relaxed text-dim">
+              <p className="text-[13px] leading-relaxed text-dim">
                 The range totals above are the whole ledger view. Pick a dimension
                 under <span className="text-ink">Split by</span> to break it down.
               </p>
@@ -262,7 +263,7 @@ export default function Stats() {
                     { key: 'cread', label: 'cached read', value: totals.cread, color: VIZ.cached },
                     { key: 'reasoning', label: 'reasoning', value: totals.reasoning, color: VIZ.reasoning },
                   ].map((p) => (
-                    <li key={p.key} className="flex items-center gap-2 text-[12px]">
+                    <li key={p.key} className="flex items-center gap-2 text-[13px]">
                       <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: p.color }} />
                       <span className="text-dim">{p.label}</span>
                       <span className="tnum ml-auto font-mono text-ink">{formatTokens(p.value)}</span>
@@ -277,7 +278,7 @@ export default function Stats() {
             <div>
               <SectionLabel>Trend · {FOCUS_LABEL[focus]}</SectionLabel>
               <div className="mt-2.5"><Sparkline data={focusSeries} color={focusColor(focus)} height={64} /></div>
-              <p className="mt-2 text-[11.5px] leading-relaxed text-mute">
+              <p className="mt-2 text-[12px] leading-relaxed text-mute">
                 Ranked order over {nfmt(rows.length)} group{rows.length === 1 ? '' : 's'}, not a time
                 series — the ledger's only time bucketing is the calendar day,
                 so switch <span className="text-dim">Split by</span> to Day for the trend.
@@ -310,11 +311,11 @@ export default function Stats() {
                 {FOCUS_LABEL[focus]} by {SPLIT_LABEL[split].toLowerCase()} · last {RANGE_LABEL[range]}
               </SectionLabel>
             }
-            aside={<Chip><Mono className="text-[10px]">{data.group_by}</Mono></Chip>}>
+            aside={<Chip><Mono className="text-[11px]">{data.group_by}</Mono></Chip>}>
             <div className="h-72">
               {chartRows.length === 0 ? (
                 <div className="flex h-full items-center justify-center px-6">
-                  <p className="max-w-sm text-center text-[12.5px] leading-relaxed text-mute">
+                  <p className="max-w-sm text-center text-[13px] leading-relaxed text-mute">
                     {FOCUS_LABEL[focus]} measured 0 across every {SPLIT_LABEL[split].toLowerCase()} group in this
                     window — nothing to plot. Switch the Focus, or widen the range.
                   </p>
@@ -323,23 +324,15 @@ export default function Stats() {
                 <ResponsiveContainer width="100%" height="100%">
                   {isTime ? (
                     <AreaChart data={[...chartRows].reverse()} margin={{ top: 4, right: 8, bottom: 0, left: -8 }}>
-                      <defs>
-                        {series.map((s) => (
-                          <linearGradient key={String(s.key)} id={`fill-${String(s.key)}`} x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor={s.color} stopOpacity={0.3} />
-                            <stop offset="100%" stopColor={s.color} stopOpacity={0} />
-                          </linearGradient>
-                        ))}
-                      </defs>
                       <CartesianGrid {...chartGrid} vertical={false} />
                       <XAxis dataKey="k" {...axisProps} />
-                      <YAxis {...axisProps} width={58} tickFormatter={(v: number) => fmt(v)} />
+                      <YAxis {...axisProps} width={88} tickFormatter={(v: number) => fmt(v)} />
                       <Tooltip content={<ChartTooltip format={fmt} />} cursor={cursorFill} />
                       {series.map((s) => (
                         <Area
                           key={String(s.key)}
-                          type="monotone" dataKey={s.key as string} name={s.label}
-                          stroke={s.color} strokeWidth={2} fill={`url(#fill-${String(s.key)})`}
+                          type="linear" dataKey={s.key as string} name={s.label}
+                          stroke={s.color} strokeWidth={2} fill={s.color} fillOpacity={0.08}
                           dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />
                       ))}
                     </AreaChart>
@@ -348,7 +341,7 @@ export default function Stats() {
                       <CartesianGrid {...chartGrid} vertical={false} />
                       <XAxis dataKey="k" {...axisProps} interval={0}
                         tickFormatter={(v: string) => (v.length > 12 ? `${v.slice(0, 11)}…` : v)} />
-                      <YAxis {...axisProps} width={58} tickFormatter={(v: number) => fmt(v)} />
+                      <YAxis {...axisProps} width={88} tickFormatter={(v: number) => fmt(v)} />
                       <Tooltip content={<ChartTooltip format={fmt} />} cursor={cursorFill} />
                       {series.map((s, i) => (
                         <Bar
@@ -363,7 +356,7 @@ export default function Stats() {
               )}
             </div>
             {isTime && (
-              <p className="mt-2 text-[11px] text-mute">
+              <p className="mt-2 text-[12px] text-mute">
                 One bucket per calendar day — the ledger's finest time grouping. A 24h
                 range therefore shows one or two points; that is the data, not a rendering gap.
               </p>
@@ -377,7 +370,7 @@ export default function Stats() {
           <div className="grid gap-4 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
             <Panel
               label={<SectionLabel>Ranked · {FOCUS_LABEL[focus]}</SectionLabel>}
-              aside={<span className="text-[11px] text-mute">{pct(rankedFocusSum, totalFocus)} of total</span>}>
+              aside={<span className="text-[12px] text-mute">{pct(rankedFocusSum, totalFocus)} of total</span>}>
               <BarList
                 rows={barRows.map((r, i) => ({
                   key: r.k,
@@ -395,9 +388,9 @@ export default function Stats() {
 
             <Panel label={<SectionLabel>Every column · {RANGE_LABEL[range]}</SectionLabel>} bodyClass="p-0">
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[720px] text-[12px]">
+                <table className="w-full min-w-[720px] text-[13px]">
                   <thead>
-                    <tr className="border-b border-line text-left text-[10.5px] uppercase tracking-[0.1em] text-mute">
+                    <tr className="border-b border-line text-left text-[11px] text-mute">
                       <th className="px-5 py-2.5 font-medium">{SPLIT_LABEL[split]}</th>
                       <th className="px-3 py-2.5 text-right font-medium">calls</th>
                       <th className="px-3 py-2.5 text-right font-medium">in</th>

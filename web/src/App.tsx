@@ -2,12 +2,12 @@
 // Nothing renders or fetches before the unlock screen hands back a token.
 import { useCallback, useEffect, useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, LayoutGroup, motion } from 'motion/react';
 import { clearToken, dashboardLogin, isUnlocked, markUnlocked, probeDefaultPassword } from './utils/api';
-import { DUR, spring } from './components/motion';
+import { DUR, SelectionLine, spring } from './components/motion';
 import RailwayBackground from './components/RailwayBackground';
 import { readTheme, setTheme, type Theme } from './utils/theme';
-import { Spinner, cx } from './components/ui';
+import { Spinner, btn, cx } from './components/ui';
 import ThemeToggle from './components/ThemeToggle';
 import Dashboard from './pages/Dashboard';
 import Providers from './pages/Providers';
@@ -24,6 +24,8 @@ import Chat from './pages/Chat';
 
 // One sidebar entry per destination — Stats / Token Economics / Requests live
 // together under Analytics (same data family, tabbed).
+// A labelled sidebar, not the dealt icon rail: ten destinations need words.
+// The hints are kept as each item's tooltip, not as a second line of text.
 type NavItem = { to: string; label: string; hint: string; match?: readonly string[] };
 
 const ANALYTICS_ROUTES = ['/stats', '/economics', '/requests'] as const;
@@ -92,13 +94,20 @@ const LOGO = (
   </svg>
 );
 
-// Version badge beside the wordmark. This is a PLACEHOLDER, deliberately a
-// plain constant rather than an import of web/package.json's version: the
-// dashboard is served from an embedded bundle inside the Go binary, so the JS
-// package version and the running build are not the same thing and reading
-// one to display the other would be a lie. Bump this at release; the title
-// names the milestone so the chip is not the only place that knowledge lives.
-const VERSION = 'v0.1.0';
+// The version beside the wordmark is the RUNNING server's, read from the
+// public /healthz (the one source of truth: the Go constant it serves). A
+// placeholder constant here once said v0.1.0 while the server was 0.0.19.
+function useServerVersion(): string {
+  const [version, setVersion] = useState('');
+  useEffect(() => {
+    let alive = true;
+    fetch('/healthz').then((r) => r.json()).then((h: { version?: string }) => {
+      if (alive && h.version) setVersion(`v${h.version}`);
+    }).catch(() => undefined);
+    return () => { alive = false; };
+  }, []);
+  return version;
+}
 
 // Where the source lives. Opened in a new tab with an explicit rel: this is a
 // cross-origin link out of the control plane, and without rel="noreferrer"
@@ -139,37 +148,38 @@ function Unlock({ onUnlock }: { onUnlock: () => void }) {
   };
 
   return (
-    // The railway backdrop (item 15) is the login page's own — the deep-blue
-    // gradient carries the canvas during its clear/fade so no white flash.
-    <div className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-bg px-4"
-      style={{ background: 'linear-gradient(135deg, #020205 0%, #0a1128 100%)' }}>
+    // The railway backdrop (item 15) is the login page's own. A flat night
+    // ground carries the canvas during its clear/fade so there is no white
+    // flash; the card is opaque, not frosted glass.
+    <div className="relative flex min-h-dvh items-center justify-center overflow-hidden px-4"
+      style={{ background: '#05070d' }}>
       <RailwayBackground />
-      <div className="relative w-full max-w-sm rounded-xl border border-line bg-surface/85 p-8 shadow-2xl backdrop-blur-sm animate-fade-up">
+      <div className="relative w-full max-w-sm rounded-xl border border-line bg-surface p-8">
         <div className="flex items-center gap-2.5">
           {LOGO}
           <span className="text-[15px] font-semibold tracking-tight">ezllm</span>
         </div>
-        <h1 className="mt-6 text-lg font-semibold">Login</h1>
+        <h1 className="mt-6 text-[20px] font-semibold">Sign in to ezllm</h1>
         {defaultPassword && (
           <p className="mt-3 rounded-lg border border-line bg-raised px-3 py-2 text-xs text-mute">
             First-run password: <code className="font-mono text-ink">STRONGPASSWORD</code>
           </p>
         )}
         <form onSubmit={submit} className="mt-6">
-          <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-mute" htmlFor="dashboard-password">
+          <label className="mb-1.5 block text-[12px] font-medium text-mute" htmlFor="dashboard-password">
             Dashboard password
           </label>
           <input
             id="dashboard-password" autoFocus type="password" autoComplete="current-password" spellCheck={false}
             value={value} onChange={(e) => { setValue(e.target.value); setErr(''); }}
             placeholder="Enter dashboard password"
-            className={cx('w-full rounded-lg border bg-raised px-3 py-2.5 font-mono text-[13px] transition-colors',
+            className={cx('h-10 w-full rounded-lg border bg-bg px-3 text-[14px] transition-colors',
               err ? 'border-bad' : 'border-line hover:border-line-strong focus:border-accent focus:outline-none')}
           />
           {err && <p className="mt-2 text-xs text-bad">{err}</p>}
           <button type="submit" disabled={busy}
-            className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-accent/60 bg-accent py-2.5 text-[13px] font-semibold text-[#082a3d] transition-all hover:brightness-110 active:brightness-95 disabled:opacity-50">
-            {busy ? <Spinner /> : null} Login
+            className={cx(btn.base, btn.primary, 'mt-4 w-full')}>
+            {busy ? <Spinner /> : null} Sign in
           </button>
         </form>
       </div>
@@ -180,48 +190,58 @@ function Unlock({ onUnlock }: { onUnlock: () => void }) {
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const location = useLocation();
   const [theme, setThemeState] = useState<Theme>(() => readTheme());
+  const version = useServerVersion();
 
   const changeTheme = useCallback((t: Theme) => { setThemeState(t); setTheme(t); }, []);
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2.5 px-5 py-5">
+      <div className="flex items-center gap-2.5 px-5 pb-6 pt-5">
         {LOGO}
         <span className="text-[15px] font-semibold tracking-tight">ezllm</span>
-        <a href={REPO_URL} target="_blank" rel="noreferrer noopener"
-          aria-label={`ezllm ${VERSION}`}
-          className="ml-auto cursor-help rounded-full border border-line bg-raised px-2 py-0.5 font-mono text-[10px] text-mute transition-colors hover:border-line-strong hover:text-ink">
-          {VERSION}
-        </a>
+        {version && (
+          <a href={REPO_URL} target="_blank" rel="noreferrer noopener"
+            aria-label={`ezllm ${version} — source on GitHub`} title="source on GitHub"
+            className="ml-auto text-[12px] text-mute transition-colors hover:text-ink">
+            {version}
+          </a>
+        )}
       </div>
-      <nav className="flex-1 space-y-1 px-3">
+      <LayoutGroup id={onNavigate ? 'nav-drawer' : 'nav-side'}>
+      <nav className="flex-1 space-y-0.5 px-3" aria-label="Main">
         {NAV.map((item) => {
           const active = item.match
             ? item.match.some((p) => location.pathname === p || location.pathname.startsWith(`${p}/`))
             : item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to);
           return (
-            <NavLink key={item.to} to={item.to} onClick={onNavigate} end={item.to === '/'}
-              className={cx('flex items-start gap-2.5 rounded-lg px-3 py-2 transition-colors', active ? 'bg-accent-dim text-ink' : 'text-dim hover:bg-hover hover:text-ink')}>
-              <span className={cx('mt-0.5', active ? 'text-accent' : 'text-mute')}><NavIcon label={item.label} /></span>
-              <span className="min-w-0">
-                <div className="text-[13px] font-medium">{item.label}</div>
-                <div className={cx('text-[10.5px]', active ? 'text-accent/70' : 'text-mute')}>{item.hint}</div>
+            <NavLink key={item.to} to={item.to} onClick={onNavigate} end={item.to === '/'} title={item.hint}
+              aria-current={active ? 'page' : undefined}
+              className={cx('flex h-[34px] items-center gap-2.5 rounded px-2.5 transition-colors',
+                active ? 'text-ink' : 'text-mute hover:bg-hover hover:text-ink')}>
+              <span className={active ? 'text-ink' : 'text-mute'}><NavIcon label={item.label} /></span>
+              {/* The selection mark: a 1px accent line exactly as wide as the
+                  label, on its baseline — the same mark every tab and toggle
+                  uses. No filled pill. */}
+              <span className={cx('relative pb-px text-[14px]', active && 'font-medium')}>
+                {item.label}
+                {active && <SelectionLine layoutId="nav-line" />}
               </span>
             </NavLink>
           );
         })}
       </nav>
+      </LayoutGroup>
       <div className="space-y-1 border-t border-line px-3 py-3">
         <ThemeToggle theme={theme} onChange={changeTheme} />
-        <div className="flex items-center px-3 py-1">
+        <div className="flex items-center px-2.5 py-1">
           <a href={PROFILE_URL} target="_blank" rel="noreferrer noopener"
             aria-label="GitHub profile (c4lyp5o)" title="github.com/c4lyp5o"
-            className="flex items-center gap-2 rounded-md p-1.5 text-[11.5px] text-mute transition-colors hover:bg-hover hover:text-ink">
+            className="flex items-center gap-2 rounded p-1.5 text-mute transition-colors hover:bg-hover hover:text-ink">
             <GitHubIcon />
           </a>
           <button
             type="button"
-            className="ml-auto rounded-md px-2.5 py-1.5 text-[11.5px] text-mute transition-colors hover:bg-bad-dim hover:text-bad"
+            className="ml-auto rounded px-2.5 py-1.5 text-[13px] text-mute transition-colors hover:bg-bad-dim hover:text-bad"
             onClick={() => { clearToken(); onNavigate?.(); window.location.reload(); }}
           >
             Log out
@@ -233,18 +253,18 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 const PAGE_HEADERS: Record<string, { title: string; sub: string }> = {
-  '/': { title: 'Dashboard', sub: 'traffic, health and the last 20 calls' },
-  '/stats': { title: 'Analytics', sub: 'usage by granularity and range' },
-  '/economics': { title: 'Analytics', sub: 'optimization savings and large requests' },
-  '/requests': { title: 'Analytics', sub: 'dissect tokens in and out' },
-  '/providers': { title: 'Providers', sub: 'accounts, keys, catalogs and quota' },
-  '/services': { title: 'Services', sub: 'default models for embeddings, images and audio' },
-  '/chat': { title: 'Chat', sub: 'test a routed provider model' },
-  '/combos': { title: 'Combos', sub: 'ordered routing chains' },
-  '/rules': { title: 'Rules', sub: 'usage caps and allowed-use windows' },
-  '/compression': { title: 'Compression', sub: 'profiles, engines and savings' },
-  '/connect': { title: 'Connect', sub: 'point clients at this gateway' },
-  '/settings': { title: 'Settings', sub: 'dashboard account security' },
+  '/': { title: 'Dashboard', sub: 'Traffic, health and the latest calls through the gateway.' },
+  '/stats': { title: 'Analytics', sub: 'Usage by provider, model, client and day.' },
+  '/economics': { title: 'Analytics', sub: 'What compression and caching saved, and the largest requests.' },
+  '/requests': { title: 'Analytics', sub: 'Every call in the ledger, filterable by tokens in and out.' },
+  '/providers': { title: 'Providers', sub: 'Accounts, keys, model catalogs and quota.' },
+  '/services': { title: 'Services', sub: 'Default models for embeddings, images and audio.' },
+  '/chat': { title: 'Chat', sub: 'Send a message through any routed model.' },
+  '/combos': { title: 'Combos', sub: 'Ordered routing chains with failover.' },
+  '/rules': { title: 'Rules', sub: 'Token caps and allowed-use windows per model.' },
+  '/compression': { title: 'Compression', sub: 'Profiles, engines and what they save.' },
+  '/connect': { title: 'Connect', sub: 'Point clients at this gateway and issue API keys.' },
+  '/settings': { title: 'Settings', sub: 'The dashboard password.' },
 };
 
 export default function App() {
@@ -267,7 +287,7 @@ export default function App() {
   return (
     <div className="flex min-h-dvh">
       {/* Top bar — mobile only */}
-      <header className="fixed inset-x-0 top-0 z-30 flex items-center gap-3 border-b border-line bg-surface/95 px-4 py-3 backdrop-blur lg:hidden">
+      <header className="fixed inset-x-0 top-0 z-30 flex h-12 items-center gap-3 border-b border-line bg-bg px-4 lg:hidden">
         <button type="button" aria-label="Open menu" onClick={() => setDrawer(true)}
           className="rounded-md border border-line p-1.5 text-dim hover:bg-hover hover:text-ink">
           <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
@@ -276,11 +296,10 @@ export default function App() {
         </button>
         {LOGO}
         <span className="text-[14px] font-semibold tracking-tight">ezllm</span>
-        <span className="ml-auto text-[12px] font-medium text-dim">{header.title}</span>
       </header>
 
       {/* Sidebar — desktop */}
-      <aside className="fixed bottom-0 left-0 top-0 z-30 hidden w-60 flex-col border-r border-line bg-surface lg:flex">
+      <aside className="fixed bottom-0 left-0 top-0 z-30 hidden w-56 flex-col border-r border-line bg-bg lg:flex">
         <SidebarContent />
       </aside>
 
@@ -290,11 +309,11 @@ export default function App() {
         {drawer && (
           <div className="fixed inset-0 z-50 lg:hidden">
             <motion.div
-              className="absolute inset-0 bg-overlay backdrop-blur-sm"
+              className="absolute inset-0 bg-overlay"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               transition={{ duration: DUR.fast }} onClick={closeDrawer} />
             <motion.aside
-              className="absolute bottom-0 left-0 top-0 w-64 border-r border-line bg-surface"
+              className="absolute bottom-0 left-0 top-0 w-64 border-r border-line bg-bg"
               initial={{ x: '-100%' }} animate={{ x: 0 }} exit={{ x: '-100%' }}
               transition={spring}>
               <SidebarContent onNavigate={closeDrawer} />
@@ -303,10 +322,11 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <main className="min-w-0 flex-1 px-4 pb-16 pt-20 lg:ml-60 lg:pl-8 lg:pr-8 lg:pt-8 xl:px-10">
-        <div className="hidden items-baseline gap-3 lg:flex">
-          <h1 className="text-[20px] font-semibold tracking-tight">{header.title}</h1>
-          <p className="text-[13px] text-mute">{header.sub}</p>
+      <main className="min-w-0 flex-1 px-4 pb-16 pt-16 lg:ml-56 lg:px-8 lg:pt-7">
+        {/* The screen's name at every width: the h1 is never hidden. */}
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <h1 className="text-[24px] font-semibold tracking-[-0.01em]">{header.title}</h1>
+          <p className="text-[14px] text-mute">{header.sub}</p>
         </div>
         {isAnalytics(location.pathname) && (
           <nav className="mt-5 flex gap-1 border-b border-line" aria-label="Analytics views">
@@ -324,7 +344,7 @@ export default function App() {
                     {isActive && (
                       <motion.span
                         layoutId="analytics-tab-underline"
-                        className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-accent"
+                        className="absolute inset-x-3 -bottom-px h-px bg-accent"
                         transition={spring} />
                     )}
                   </>
@@ -336,7 +356,11 @@ export default function App() {
         {/* Page header → content gap. Was mt-8 and read as a void between the
             title row and the first content row (the health pills on
             Dashboard). */}
-        <div className="mt-5">
+        {/* Each screen arrives with a short rise; keyed on the path so a
+            tab switch inside Analytics replays it, a poll never does. */}
+        <motion.div key={location.pathname} className="mt-5"
+          initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}>
           <Routes>
             <Route path="/" element={<Dashboard />} />
       <Route path="/stats" element={<Stats />} />
@@ -352,7 +376,7 @@ export default function App() {
             <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<Dashboard />} />
           </Routes>
-        </div>
+        </motion.div>
       </main>
     </div>
   );

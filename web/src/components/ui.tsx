@@ -1,8 +1,8 @@
 // Tiny shared UI primitives — hand-built with Tailwind, no component library.
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'motion/react';
 import { createPortal } from 'react-dom';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { DUR, spring } from './motion';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { DUR, SelectionLine, spring } from './motion';
 import { cx, fmtDuration, fmtMs, fmtUptime, formatTokens, nfmt, pct } from '../utils/lib';
 
 // formatTokens / fmtMs / fmtDuration / fmtUptime / cx / nfmt / pct are
@@ -13,16 +13,19 @@ export { cx, fmtDuration, fmtMs, fmtUptime, formatTokens, nfmt, pct };
 
 // ── labels ──────────────────────────────────────────────────────────────
 
+// A panel's title: sentence case, the text face, readable size. (It was a
+// 10.5px tracked-capitals label; at that size the operator read the figure
+// before knowing what it counted.)
 export function SectionLabel({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={cx('text-[10.5px] font-semibold uppercase tracking-[0.14em] text-mute', className)}>
+    <div className={cx('text-[13px] font-semibold text-ink', className)}>
       {children}
     </div>
   );
 }
 
 export function Mono({ children, className }: { children: ReactNode; className?: string }) {
-  return <span className={cx('font-mono text-[12px]', className)}>{children}</span>;
+  return <span className={cx('font-mono text-[13px]', className)}>{children}</span>;
 }
 
 // ── error-cause chip ────────────────────────────────────────────────────────
@@ -55,11 +58,12 @@ export function CauseChip({ err, status }: { err?: string; status: number }) {
 // ── chips & badges ──────────────────────────────────────────────────────
 
 const chipTones: Record<string, string> = {
-  neutral: 'border-line bg-raised text-dim',
-  accent: 'border-accent-dim bg-accent-dim text-accent',
-  ok: 'border-[rgba(52,211,153,0.25)] bg-ok-dim text-ok',
-  warn: 'border-[rgba(251,191,36,0.25)] bg-warn-dim text-warn',
-  bad: 'border-[rgba(248,113,113,0.25)] bg-bad-dim text-bad',
+  // Pale pairs: a tint of the status with text of the same hue; no border.
+  neutral: 'border-transparent bg-raised text-dim',
+  accent: 'border-transparent bg-accent-dim text-accent',
+  ok: 'border-transparent bg-ok-dim text-ok',
+  warn: 'border-transparent bg-warn-dim text-warn',
+  bad: 'border-transparent bg-bad-dim text-bad',
 };
 
 export function Chip({ tone = 'neutral', children, className, title }: {
@@ -67,7 +71,7 @@ export function Chip({ tone = 'neutral', children, className, title }: {
 }) {
   return (
     <span title={title} className={cx(
-      'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] font-medium leading-none',
+      'inline-flex flex-none items-center gap-1 whitespace-nowrap rounded-full border px-2 py-[3px] text-[12px] font-medium leading-none',
       chipTones[tone], className,
     )}>
       {children}
@@ -97,14 +101,9 @@ export function StaleBadge({ stale }: { stale: boolean }) {
 // ── skeleton shimmers ───────────────────────────────────────────────────
 
 export function Skeleton({ className }: { className?: string }) {
-  // Shimmer, not a pulse: a pulsing block and a loading block look identical
-  // to a "stale" state, while a sweep reads unambiguously as loading.
-  return (
-    <div aria-hidden className={cx(
-      'rounded-md bg-[linear-gradient(90deg,transparent_0%,var(--color-shade)_50%,transparent_100%)] bg-[length:200%_100%] animate-shimmer',
-      className,
-    )} />
-  );
+  // A flat block at the value's real size: the final layout with the figure
+  // missing, so nothing shifts when the data lands. No sweep, no gradient.
+  return <div aria-hidden className={cx('rounded bg-shade', className)} />;
 }
 
 export function SkeletonRows({ rows = 5, cols = 6, height = 'h-4' }: { rows?: number; cols?: number; height?: string }) {
@@ -177,7 +176,7 @@ export function Modal({ open, onClose, title, subtitle, children, footer, wide }
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6" onMouseDown={overlay}>
           <motion.div
-            className="absolute inset-0 bg-overlay backdrop-blur-sm"
+            className="absolute inset-0 bg-overlay"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             transition={{ duration: DUR.fast }} onClick={onClose} />
           <motion.div
@@ -198,7 +197,7 @@ export function Modal({ open, onClose, title, subtitle, children, footer, wide }
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</div>
             {footer && (
-              <div className="sticky bottom-0 flex items-center justify-end gap-3 border-t border-line bg-surface/95 px-6 py-4 backdrop-blur">
+              <div className="sticky bottom-0 flex items-center justify-end gap-3 border-t border-line bg-surface px-6 py-4">
                 {footer}
               </div>
             )}
@@ -231,7 +230,7 @@ export function ConfirmModal({ open, title, body, confirmLabel = 'Delete', busy,
 // ── form controls ───────────────────────────────────────────────────────
 
 export const inputCls = 'w-full rounded-lg border border-line bg-raised px-3 py-2 text-[13px] transition-colors placeholder:text-mute hover:border-line-strong focus:border-accent focus:outline-none focus:ring-0';
-export const labelCls = 'mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-mute';
+export const labelCls = 'mb-1.5 block text-[12px] font-medium text-mute';
 
 // ── searchable combobox ──────────────────────────────────────────────────
 // Shared by Chat (model picker) and Services (per-card binding picker). The
@@ -336,7 +335,7 @@ export function Combobox({ options, value, onChange, disabled, loadingText, plac
           className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-line bg-raised shadow-lg"
         >
           {filtered.length === 0 && (
-            <li className="px-3 py-2 text-[12px] text-mute">
+            <li className="px-3 py-2 text-[13px] text-mute">
               No model matches “{query.trim()}”
             </li>
           )}
@@ -351,7 +350,7 @@ export function Combobox({ options, value, onChange, disabled, loadingText, plac
                 data-active={isActive || undefined}
                 onClick={() => pick(o.value)}
                 className={cx(
-                  'cursor-pointer px-3 py-1.5 font-mono text-[12px]',
+                  'cursor-pointer px-3 py-1.5 font-mono text-[13px]',
                   isActive && 'bg-hover',
                   isSel ? 'text-ink' : 'text-dim',
                 )}
@@ -359,7 +358,7 @@ export function Combobox({ options, value, onChange, disabled, loadingText, plac
               >
                 <span className="block truncate">{o.label}</span>
                 {o.label !== o.value && (
-                  <span className="block truncate text-[10px] text-mute">{o.value}</span>
+                  <span className="block truncate text-[11px] text-mute">{o.value}</span>
                 )}
               </li>
             );
@@ -370,25 +369,28 @@ export function Combobox({ options, value, onChange, disabled, loadingText, plac
   );
 }
 
+// On is the semantic green, never the accent: a switch states a fact.
 export function Toggle({ checked, onChange, label, disabled }: { checked: boolean; onChange: (v: boolean) => void; label?: string; disabled?: boolean }) {
   return (
     <button type="button" role="switch" aria-checked={checked} aria-label={label} disabled={disabled}
       onClick={() => !disabled && onChange(!checked)}
-      className={cx('relative h-5 w-9 shrink-0 rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-45',
-        checked ? 'border-accent bg-accent-dim' : 'border-line-strong bg-raised')}>
-      <span className={cx('absolute top-0.5 h-3.5 w-3.5 rounded-full transition-all',
-        checked ? 'left-[18px] bg-accent' : 'left-0.5 bg-mute')} />
+      className={cx('relative h-[18px] w-8 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+        checked ? 'bg-ok' : 'bg-line-strong')}>
+      <span className={cx('absolute top-[3px] h-3 w-3 rounded-full bg-white transition-all',
+        checked ? 'left-[17px]' : 'left-[3px]')} />
     </button>
   );
 }
 
 // ── buttons ─────────────────────────────────────────────────────────────
 
+// One filled primary per screen, and it is the INK colour inverted (near-white
+// on dark, near-black on light) — never the accent, which belongs to data.
 export const btn = {
-  base: 'inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-[13px] font-medium transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-45',
-  primary: 'border border-accent/60 bg-accent text-accent-ink hover:brightness-110 active:brightness-95',
-  ghost: 'border border-line bg-transparent text-dim hover:border-line-strong hover:bg-hover hover:text-ink',
-  danger: 'border border-[rgba(248,113,113,0.3)] bg-transparent text-bad hover:bg-bad-dim',
+  base: 'inline-flex h-[34px] items-center justify-center gap-2 rounded-full px-4 text-[13px] font-medium transition-colors duration-150 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60',
+  primary: 'border border-ink bg-ink text-bg hover:border-dim hover:bg-dim',
+  ghost: 'border border-line-strong bg-transparent text-ink hover:bg-hover',
+  danger: 'border border-bad/50 bg-transparent text-bad hover:bg-bad-dim',
 };
 
 export function Spinner({ className }: { className?: string }) {
@@ -403,7 +405,7 @@ export function Spinner({ className }: { className?: string }) {
 // ── misc ────────────────────────────────────────────────────────────────
 
 export function Kbd({ children }: { children: ReactNode }) {
-  return <kbd className="rounded border border-line bg-raised px-1.5 py-0.5 font-mono text-[10.5px] text-mute">{children}</kbd>;
+  return <kbd className="rounded border border-line bg-raised px-1.5 py-0.5 font-mono text-[11px] text-mute">{children}</kbd>;
 }
 
 export function relTime(iso: string | null | undefined): string {
@@ -440,9 +442,11 @@ export function Segmented<T extends string>({
   label?: string;
   size?: 'sm' | 'md';
 }) {
+  const lineId = `seg-${useId()}`;
   return (
-    <div role="group" aria-label={label}
-      className="inline-flex flex-wrap gap-1 rounded-lg border border-line bg-surface p-1">
+    // The selection is the style's one mark: a 1px accent line exactly as
+    // wide as the chosen label, on its baseline. No filled pill.
+    <div role="group" aria-label={label} className="inline-flex flex-wrap items-center gap-1">
       {options.map((o) => (
         <button
           key={o.key}
@@ -451,12 +455,15 @@ export function Segmented<T extends string>({
           aria-pressed={o.key === value}
           onClick={() => onChange(o.key)}
           className={cx(
-            'rounded-md font-medium transition-colors',
-            size === 'sm' ? 'px-2 py-0.5 text-[11.5px]' : 'px-2.5 py-1 text-[12px]',
-            o.key === value ? 'bg-accent text-accent-ink' : 'text-mute hover:text-ink',
+            'rounded font-medium transition-colors hover:bg-hover',
+            size === 'sm' ? 'px-1.5 py-0.5 text-[12px]' : 'px-2 py-1 text-[13px]',
+            o.key === value ? 'text-ink' : 'text-mute hover:text-ink',
           )}
         >
-          {o.label}
+          <span className="relative inline-block pb-px">
+            {o.label}
+            {o.key === value && <SelectionLine layoutId={lineId} />}
+          </span>
         </button>
       ))}
     </div>
@@ -470,9 +477,11 @@ export function EmptyState({
   title, hint, action,
 }: { title: string; hint?: string; action?: ReactNode }) {
   return (
-    <div className="flex flex-col items-center gap-1 px-5 py-10 text-center">
+    // The frame stays, one dashed box with the sentence in it: an empty block
+    // reads as "nothing yet", never as a broken or unfinished screen.
+    <div className="flex flex-col items-start gap-1 rounded border border-dashed border-line-strong px-4 py-3">
       <p className="text-[13px] text-dim">{title}</p>
-      {hint && <p className="max-w-sm text-[11.5px] leading-relaxed text-mute">{hint}</p>}
+      {hint && <p className="max-w-prose text-[12px] leading-relaxed text-mute">{hint}</p>}
       {action && <div className="mt-3">{action}</div>}
     </div>
   );

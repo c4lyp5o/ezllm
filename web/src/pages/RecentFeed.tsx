@@ -92,7 +92,7 @@ export default function RecentFeed() {
     <section data-testid="recent-feed">
       <div className="flex items-baseline gap-3 mb-2">
         <SectionLabel>Recent requests</SectionLabel>
-        <span className="flex items-center gap-1.5 text-[11px] text-mute">
+        <span className="flex items-center gap-1.5 text-[12px] text-mute">
           <span
             className={cx(
               'size-1.5 rounded-full',
@@ -102,7 +102,7 @@ export default function RecentFeed() {
           {live ? 'live' : 'reconnecting…'}
         </span>
         {dropped > 0 && (
-          <span className="text-[11px] text-warn">
+          <span className="text-[12px] text-warn">
             {dropped} row{dropped === 1 ? '' : 's'} shed under load
           </span>
         )}
@@ -145,7 +145,7 @@ export default function RecentFeed() {
                               : `asked ${c.compression}, no change`
                         }
                         className={cx(
-                          'ml-1.5 rounded px-1 py-0.5 font-mono text-[10px] align-middle',
+                          'ml-1.5 rounded px-1 py-0.5 font-mono text-[11px] align-middle',
                           c.applied && c.saved > 0
                             ? 'bg-ok-dim text-ok'
                             : c.savedNotional > 0 && !c.applied
@@ -169,7 +169,7 @@ export default function RecentFeed() {
                     {c.translated && (
                       <span
                         title="translated hop: its wire differs from the client's surface; in-tokens below are the vendor's INCLUSIVE total (cache counted inside)"
-                        className="ml-1.5 rounded px-1 py-0.5 font-mono text-[10px] align-middle text-accent"
+                        className="ml-1.5 rounded px-1 py-0.5 font-mono text-[11px] align-middle text-accent"
                       >
                         ⇄ translated
                       </span>

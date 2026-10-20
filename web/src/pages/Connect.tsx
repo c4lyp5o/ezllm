@@ -90,7 +90,7 @@ function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) 
   return (
     <button
       type="button"
-      className={cx(btn.base, btn.ghost, 'px-2.5 py-1.5 text-[11.5px]')}
+      className={cx(btn.base, btn.ghost, 'px-2.5 py-1.5 text-[12px]')}
       onClick={async () => {
         if (await copyText(text)) {
           setDone(true);
@@ -108,8 +108,8 @@ function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) 
 function FieldRow({ label, value, mono = true }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="w-24 shrink-0 text-[11px] uppercase tracking-[0.08em] text-mute">{label}</span>
-      <code className={cx('min-w-0 flex-1 truncate rounded-md border border-line bg-raised px-2 py-1 text-[12px]', mono && 'font-mono')}>{value}</code>
+      <span className="w-24 shrink-0 text-[12px] text-mute">{label}</span>
+      <code className={cx('min-w-0 flex-1 truncate rounded-md border border-line bg-raised px-2 py-1 text-[13px]', mono && 'font-mono')}>{value}</code>
       <CopyButton text={value} />
     </div>
   );
@@ -259,14 +259,14 @@ export default function Connect() {
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 [&>*]:min-w-0">
           {SURFACES.map((s) => (
             <div key={s.key} className="rounded-xl border border-line bg-surface px-4 py-4 animate-fade-up">
-              <div className="text-[13.5px] font-semibold">{s.label}</div>
+              <div className="text-[13px] font-semibold">{s.label}</div>
               <div className="mt-3 space-y-2">
                 <FieldRow label="base url" value={base + s.path} />
               </div>
               {/* The paste-ready snippet lives with the protocol it belongs to,
                   not in a separate section further down: pick your protocol,
                   copy that box, done. */}
-              <pre className="mt-3 overflow-x-auto rounded-lg border border-line bg-bg px-3 py-2 font-mono text-[11.5px] leading-relaxed text-dim">
+              <pre className="mt-3 overflow-x-auto rounded-lg border border-line bg-bg px-3 py-2 font-mono text-[12px] leading-relaxed text-dim">
 {snippet(s.key, base, '<your-key>', sampleModel ?? '<model-id>')}
               </pre>
               <div className="mt-2 flex justify-end">
@@ -275,7 +275,7 @@ export default function Connect() {
             </div>
           ))}
         </div>
-        <p className="mt-2 text-[11.5px] text-mute">
+        <p className="mt-2 text-[12px] text-mute">
           Models list: <code className="font-mono text-dim">{base}/v1/models</code>
           {CORS_NOTE}
           {sampleModel && <> · {models.length} routable now, first is <code className="font-mono text-dim">{sampleModel}</code></>}
@@ -309,7 +309,7 @@ export default function Connect() {
                       ? 'Can add providers, read provider keys and mint other keys'
                       : 'Can call models only'}
                     className={cx(
-                      'rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors',
+                      'rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors',
                       role === r ? 'bg-accent-dim text-accent' : 'text-mute hover:text-dim',
                     )}
                   >{label}</button>
@@ -318,7 +318,7 @@ export default function Connect() {
             </div>
             <div className="min-w-[180px]">
               <label className={labelCls} htmlFor="tk-models">Allowed models <span className="text-mute">(optional)</span></label>
-              <input id="tk-models" className={cx(inputCls, 'font-mono text-[12px]')} placeholder="deepseek/*"
+              <input id="tk-models" className={cx(inputCls, 'font-mono text-[13px]')} placeholder="deepseek/*"
                 value={newModels} onChange={(e) => setNewModels(e.target.value)} />
             </div>
             <div>
@@ -334,7 +334,7 @@ export default function Connect() {
               {creating ? <Spinner /> : null}{creating ? 'Creating' : 'Create key'}
             </button>
           </div>
-          <p className="mt-3 text-[11.5px] text-mute">
+          <p className="mt-3 text-[12px] text-mute">
             <span className="text-dim">infer</span> can call /v1 only. <span className="text-dim">admin</span> can also call /admin — give that role to yourself, not to tools.
           </p>
         </div>
@@ -358,28 +358,28 @@ export default function Connect() {
                 <div key={t.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-line bg-surface px-4 py-3 animate-fade-up">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="truncate text-[13.5px] font-semibold">{t.name}</span>
+                      <span className="truncate text-[13px] font-semibold">{t.name}</span>
                       <Chip tone={t.roles.includes('admin') ? 'accent' : 'neutral'}>{t.roles.join(' · ')}</Chip>
                     </div>
-                    <div className="mt-1 flex items-center gap-3 text-[11.5px] text-mute">
+                    <div className="mt-1 flex items-center gap-3 text-[12px] text-mute">
                       <Mono>{t.hint}</Mono>
                       <span>used {t.last_used_at ? new Date(t.last_used_at).toLocaleString() : 'never'}</span>
                     </div>
                     {(t.expires_at || t.allowed_models) && (
-                      <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10.5px] text-mute">
+                      <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-mute">
                         {t.expires_at && <span>expires {t.expires_at.slice(0, 10)}</span>}
                         {t.allowed_models && <span className="truncate" title={t.allowed_models}>models: {t.allowed_models}</span>}
                       </div>
                     )}
                   </div>
-                  <div className="ml-auto flex items-center gap-4 text-[11.5px] text-dim">
+                  <div className="ml-auto flex items-center gap-4 text-[12px] text-dim">
                     <span>{(u?.calls ?? 0).toLocaleString()} calls · {(u?.tin ?? 0).toLocaleString()} in · {(u?.tout ?? 0).toLocaleString()} out</span>
                     <span className="min-w-[120px]">
                       {t.cap_tokens > 0 ? (
                         <>
                           <span className="flex items-center justify-between gap-2">
                             <span className="text-mute">budget · {t.cap_window || 'monthly'}</span>
-                            <span className="font-mono text-[10.5px]">{used.toLocaleString()} / {t.cap_tokens.toLocaleString()}</span>
+                            <span className="font-mono text-[11px]">{used.toLocaleString()} / {t.cap_tokens.toLocaleString()}</span>
                           </span>
                           <span className="mt-1 block h-1 overflow-hidden rounded-full bg-shade">
                             <span className={cx('block h-full rounded-full', capPct >= 90 ? 'bg-bad' : capPct >= 70 ? 'bg-warn' : 'bg-accent')}
@@ -389,7 +389,7 @@ export default function Connect() {
                       ) : <span className="text-mute">budget unlimited</span>}
                     </span>
                     <span className="flex items-center gap-2">
-                      <button type="button" className={cx(btn.base, btn.ghost, 'px-2.5 py-1.5 text-[11.5px]')}
+                      <button type="button" className={cx(btn.base, btn.ghost, 'px-2.5 py-1.5 text-[12px]')}
                         onClick={() => {
                           setBudgetTarget(t);
                           setBudgetCap(t.cap_tokens);
@@ -400,7 +400,7 @@ export default function Connect() {
                         Policy
                       </button>
                       <Toggle checked={t.enabled} onChange={(v) => void toggle(t, v)} disabled={busyId === t.id} />
-                      <button type="button" className={cx(btn.base, btn.danger, 'px-2.5 py-1.5 text-[11.5px]')} onClick={() => setPendingRevoke(t)} disabled={busyId === t.id}>Revoke</button>
+                      <button type="button" className={cx(btn.base, btn.danger, 'px-2.5 py-1.5 text-[12px]')} onClick={() => setPendingRevoke(t)} disabled={busyId === t.id}>Revoke</button>
                     </span>
                   </div>
                 </div>
@@ -438,14 +438,14 @@ export default function Connect() {
             <label className={labelCls}>Allowed models <span className="text-mute">(empty = all)</span></label>
             <input className={cx(inputCls, 'font-mono')} placeholder="deepseek/*, openai/gpt-5*"
               value={budgetModels} onChange={(e) => setBudgetModels(e.target.value)} />
-            <p className="mt-1 text-[11px] text-mute">Comma-separated ids or globs. Checked before a combo is expanded.</p>
+            <p className="mt-1 text-[12px] text-mute">Comma-separated ids or globs. Checked before a combo is expanded.</p>
           </div>
           <div>
             <label className={labelCls}>Expires <span className="text-mute">(empty = never)</span></label>
             <input type="date" className={inputCls} value={budgetExpiry}
               onChange={(e) => setBudgetExpiry(e.target.value)} />
           </div>
-          <p className="text-[11.5px] text-mute">
+          <p className="text-[12px] text-mute">
             Usage is the key's actual ledger spend (tokens in + out) inside the window. A spent key answers 429 until the window rolls; max_tokens is reserved before dispatch.
           </p>
         </div>
@@ -462,18 +462,18 @@ export default function Connect() {
             aria-label="New API key"
             className="w-full max-w-lg rounded-2xl border border-accent/40 bg-surface p-6 shadow-2xl animate-fade-up">
             <div className="text-[16px] font-semibold">Copy this key now</div>
-            <p className="mt-1.5 text-[12.5px] text-dim">
+            <p className="mt-1.5 text-[13px] text-dim">
               ezllm stores only a hash, so this is the <span className="text-ink">only time</span> it can be shown. If you close this without saving it, create a new key.
             </p>
             <div className="mt-4 flex items-center gap-2 rounded-lg border border-line bg-bg px-3 py-2.5">
-              <code className="min-w-0 flex-1 break-all font-mono text-[12.5px] text-accent">{fresh.plaintext}</code>
+              <code className="min-w-0 flex-1 break-all font-mono text-[13px] text-accent">{fresh.plaintext}</code>
               <CopyButton text={fresh.plaintext} label="Copy" />
             </div>
             <div className="mt-3 space-y-2">
               <FieldRow label="base" value={base} />
               <FieldRow label="role" value={fresh.roles.join(' · ')} mono={false} />
               {fresh.roles.includes('admin') && (
-                <p className="rounded-lg border border-warn/30 bg-warn-dim p-2.5 text-[12px] leading-relaxed text-warn">
+                <p className="rounded-lg border border-warn/30 bg-warn-dim p-2.5 text-[13px] leading-relaxed text-warn">
                   This key has admin role — it can add providers, read provider keys and mint other keys. For an
                   app that only needs models, create an <span className="text-ink">infer</span> key instead.
                 </p>

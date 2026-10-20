@@ -115,9 +115,9 @@ function ServiceCardView({
               <ServiceIcon surface={card.surface} />
             </span>
             <h2 id={`service-${card.surface}`} className="text-[15px] font-semibold">{card.label}</h2>
-            <code className="rounded border border-line bg-raised px-2 py-0.5 font-mono text-[11px] text-dim">{card.endpoint}</code>
+            <code className="rounded border border-line bg-raised px-2 py-0.5 font-mono text-[12px] text-dim">{card.endpoint}</code>
           </div>
-          <p className="mt-1.5 max-w-2xl text-[12.5px] leading-relaxed text-mute">{card.description}</p>
+          <p className="mt-1.5 max-w-2xl text-[13px] leading-relaxed text-mute">{card.description}</p>
         </div>
         <StateChip card={card} />
       </div>
@@ -126,7 +126,7 @@ function ServiceCardView({
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-raised px-4 py-3">
           <div>
             <p className="text-[13px] font-medium text-ink">No providers connected</p>
-            <p className="mt-0.5 text-[11.5px] text-mute">Connect a provider and sync its model catalog before choosing a default.</p>
+            <p className="mt-0.5 text-[12px] text-mute">Connect a provider and sync its model catalog before choosing a default.</p>
           </div>
           <Link to="/providers" className={cx(btn.base, btn.ghost)}>Add provider</Link>
         </div>
@@ -144,7 +144,7 @@ function ServiceCardView({
               <div className="mt-3">
                 <label className={labelCls} htmlFor={`model-${card.surface}`}>Default model for {card.endpoint}</label>
                 {models.length === 0 && !loadingModels ? (
-                  <div className="rounded-lg border border-line bg-raised px-3 py-2.5 text-[12px] text-mute">
+                  <div className="rounded-lg border border-line bg-raised px-3 py-2.5 text-[13px] text-mute">
                     No synced models yet. Open Providers, sync a provider’s catalog, then come back here.
                   </div>
                 ) : (
@@ -152,22 +152,22 @@ function ServiceCardView({
                     onChange={setTarget} loadingText={loadingModels ? 'Loading provider models…' : 'No synced models'}
                     disabled={loadingModels || options.length === 0} placeholder="Search provider models…" />
                 )}
-                {target && !selectedIsListed && <p className="mt-1 text-[11px] text-warn">The saved target is not in the current enabled-provider catalog.</p>}
+                {target && !selectedIsListed && <p className="mt-1 text-[12px] text-warn">The saved target is not in the current enabled-provider catalog.</p>}
               </div>
             )}
             {mode === 'auto' && (
-              <p className="mt-3 rounded-lg border border-line bg-raised px-3 py-2.5 text-[11.5px] leading-relaxed text-mute">
+              <p className="mt-3 rounded-lg border border-line bg-raised px-3 py-2.5 text-[12px] leading-relaxed text-mute">
                 Auto uses only models that passed a real test for this exact endpoint. It does not use chat compatibility checks. Currently verified: <strong className="font-mono text-ink">{card.verified_models}</strong> model{card.verified_models === 1 ? '' : 's'}.
               </p>
             )}
-            {mode === 'off' && <p className="mt-3 text-[11.5px] text-mute">Requests must include their own <code className="font-mono">model</code> value. This is the safest first-run state.</p>}
+            {mode === 'off' && <p className="mt-3 text-[12px] text-mute">Requests must include their own <code className="font-mono">model</code> value. This is the safest first-run state.</p>}
           </div>
 
           <div className="flex flex-col justify-between gap-4 rounded-lg border border-line bg-raised p-3.5">
             <div>
-              <p className="text-[10.5px] font-medium uppercase tracking-[0.08em] text-mute">Effective default</p>
-              <p className="mt-1 break-all font-mono text-[12px] text-ink">{card.resolved_target || (mode === 'manual' ? target : '') || 'None'}</p>
-              {card.verdict && <p className="mt-1 text-[10.5px] text-mute">Tested {new Date(card.verdict.tested_at).toLocaleString()}</p>}
+              <p className="text-[11px] font-medium text-mute">Effective default</p>
+              <p className="mt-1 break-all font-mono text-[13px] text-ink">{card.resolved_target || (mode === 'manual' ? target : '') || 'None'}</p>
+              {card.verdict && <p className="mt-1 text-[11px] text-mute">Tested {new Date(card.verdict.tested_at).toLocaleString()}</p>}
             </div>
             <div className="flex flex-wrap gap-2">
               {mode === 'manual' && (
@@ -185,7 +185,7 @@ function ServiceCardView({
               <div className="border-t border-line pt-3">
                 <label className={labelCls} htmlFor={`prompt-${card.surface}`}>{PROMPT_LABELS[card.surface]}</label>
                 {card.surface === 'audio_stt' ? (
-                  <p className="text-[11px] leading-relaxed text-mute">
+                  <p className="text-[12px] leading-relaxed text-mute">
                     This endpoint tests a file upload, not text — the test always sends a fixed 0.2 s silent WAV.
                   </p>
                 ) : (
@@ -193,24 +193,24 @@ function ServiceCardView({
                     <input id={`prompt-${card.surface}`} type="text" maxLength={2000} value={prompt}
                       onChange={(e) => setPrompt(e.target.value)} placeholder={PROMPT_DEFAULTS[card.surface]}
                       disabled={testing || busy}
-                      className="w-full rounded-lg border border-line bg-surface px-3 py-2 font-mono text-[12px] text-ink placeholder:text-mute focus:border-accent focus:outline-none disabled:opacity-50" />
-                    <p className="mt-1 text-[10.5px] leading-relaxed text-mute">
+                      className="w-full rounded-lg border border-line bg-surface px-3 py-2 font-mono text-[13px] text-ink placeholder:text-mute focus:border-accent focus:outline-none disabled:opacity-50" />
+                    <p className="mt-1 text-[11px] leading-relaxed text-mute">
                       Sent verbatim in the test request; empty = the default. Not saved — only the model default persists.
                     </p>
                   </>
                 )}
               </div>
             )}
-            {card.surface === 'images_gen' && <p className="text-[10.5px] leading-relaxed text-warn">Image tests may spend provider quota. You will be asked before each test.</p>}
+            {card.surface === 'images_gen' && <p className="text-[11px] leading-relaxed text-warn">Image tests may spend provider quota. You will be asked before each test.</p>}
           </div>
         </div>
       )}
 
       {(message || error || testResult) && (
         <div className="mt-4 space-y-2" aria-live="polite">
-          {message && <p className="text-[12px] text-ok">{message}</p>}
-          {error && <p className="rounded-lg border border-bad/30 bg-bad-dim px-3 py-2 text-[12px] text-bad">{error}</p>}
-          {testResult && <p className={cx('rounded-lg border px-3 py-2 text-[12px]',
+          {message && <p className="text-[13px] text-ok">{message}</p>}
+          {error && <p className="rounded-lg border border-bad/30 bg-bad-dim px-3 py-2 text-[13px] text-bad">{error}</p>}
+          {testResult && <p className={cx('rounded-lg border px-3 py-2 text-[13px]',
             testResult.dispatched ? (testResult.ok ? 'border-ok/30 bg-ok-dim text-ok' : 'border-bad/30 bg-bad-dim text-bad') : 'border-warn/30 bg-warn-dim text-warn')}>
             {!testResult.dispatched
               ? 'Test did not reach the provider — nothing was recorded as tested.'
@@ -275,13 +275,13 @@ export default function Services() {
     <div className="mx-auto max-w-6xl space-y-5">
       <div className="rounded-xl border border-line bg-surface px-5 py-4">
         <h2 className="text-[14px] font-semibold">Choose endpoint defaults</h2>
-        <p className="mt-1 text-[12px] leading-relaxed text-mute">
+        <p className="mt-1 text-[13px] leading-relaxed text-mute">
           Each setting is a default for its endpoint only. A request that includes <code className="font-mono text-ink">model</code> always uses that explicit choice. If nothing is configured, the endpoint stays available but returns a clear <code className="font-mono text-ink">service_not_configured</code> error instead of sending a blind upstream request.
         </p>
-        {models.length > 0 && <p className="mt-2 text-[11px] text-mute">Available models: <span className="font-mono text-dim">{models.length}</span> from enabled providers. Chat protocol checks do not verify image, audio, or embedding support.</p>}
+        {models.length > 0 && <p className="mt-2 text-[12px] text-mute">Available models: <span className="font-mono text-dim">{models.length}</span> from enabled providers. Chat protocol checks do not verify image, audio, or embedding support.</p>}
       </div>
 
-      {error && <p className="rounded-lg border border-bad/30 bg-bad-dim px-3 py-2 text-[12px] text-bad" role="alert">{error}</p>}
+      {error && <p className="rounded-lg border border-bad/30 bg-bad-dim px-3 py-2 text-[13px] text-bad" role="alert">{error}</p>}
       <div className="grid gap-4 xl:grid-cols-2">
         {cards.map((card) => <ServiceCardView key={card.surface} card={card} models={models}
           loadingModels={loadingModels} onSaved={onSaved} onTested={onTested} />)}

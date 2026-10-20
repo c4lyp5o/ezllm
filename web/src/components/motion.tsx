@@ -9,7 +9,7 @@
 //   2. Durations come from the CSS tokens, so one edit retimes the app.
 //   3. Nothing animates on a timer-driven repaint for longer than --dur-base:
 //      the overview polls every 15s and a long ease reads as lag.
-import { motion, useInView, useMotionValue, useMotionValueEvent, useReducedMotion, useSpring, type Transition } from 'framer-motion';
+import { motion, useMotionValue, useMotionValueEvent, useReducedMotion, useSpring, type Transition } from 'motion/react';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { cx } from '../utils/lib';
 
@@ -19,38 +19,39 @@ export const EASE = [0.22, 1, 0.36, 1] as const;
 export const rise: Transition = { duration: DUR.base, ease: EASE };
 export const spring: Transition = { type: 'spring', stiffness: 420, damping: 34, mass: 0.8 };
 
-/**
- * Fade + 4px rise. `once` (default) means a card does not re-animate every
- * time the 15s poll re-renders it — the animation is keyed to entering the
- * viewport, not to data changing.
- */
+// The motion layer (motion.dev). Modern and quick, never in the way:
+//   - sections rise 12px and fade in, staggered ~60ms, ONCE per visit (never
+//     on a poll's re-render);
+//   - everything is transform + opacity, 300-450ms on an expo-out curve;
+//   - MotionConfig reducedMotion="user" (main.tsx) turns every one of these
+//     into an instant state change when the OS asks for less motion.
+const ENTER = { duration: 0.42, ease: EASE } as const;
+
+/** A block that rises into place the first time it scrolls into view. */
 export function Reveal({
-  children, delay = 0, className, y = 4,
+  children, delay = 0, className, y = 12,
 }: { children: ReactNode; delay?: number; className?: string; y?: number }) {
-  const reduce = useReducedMotion();
-  const ref = useRef<HTMLDivElement>(null);
-  const inView = useInView(ref, { once: true, margin: '-40px' });
   return (
     <motion.div
-      ref={ref}
       className={className}
-      initial={reduce ? false : { opacity: 0, y }}
-      animate={reduce || inView ? { opacity: 1, y: 0 } : undefined}
-      transition={reduce ? { duration: 0 } : { ...rise, delay }}
+      initial={{ opacity: 0, y }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: '-40px' }}
+      transition={{ ...ENTER, delay }}
     >
       {children}
     </motion.div>
   );
 }
 
-/** Staggered list: children use <StaggerItem>. */
-export function Stagger({ children, className, step = 0.05 }: { children: ReactNode; className?: string; step?: number }) {
+/** Staggered group: children use <StaggerItem>. */
+export function Stagger({ children, className, step = 0.06 }: { children: ReactNode; className?: string; step?: number }) {
   return (
     <motion.div
       className={className}
       initial="hidden"
       animate="show"
-      variants={{ show: { transition: { staggerChildren: step } } }}
+      variants={{ show: { transition: { staggerChildren: step, delayChildren: 0.02 } } }}
     >
       {children}
     </motion.div>
@@ -58,12 +59,28 @@ export function Stagger({ children, className, step = 0.05 }: { children: ReactN
 }
 
 export const staggerItem = {
-  hidden: { opacity: 0, y: 4 },
-  show: { opacity: 1, y: 0, transition: { duration: DUR.base, ease: EASE } },
+  hidden: { opacity: 0, y: 12 },
+  show: { opacity: 1, y: 0, transition: ENTER },
 };
 
 export function StaggerItem({ children, className }: { children: ReactNode; className?: string }) {
   return <motion.div className={className} variants={staggerItem}>{children}</motion.div>;
+}
+
+/**
+ * The style's selection mark, animated: a 1px accent line under the chosen
+ * label that SLIDES to the next choice (shared layoutId) instead of blinking
+ * from one label to another. Render it inside a `relative` label.
+ */
+export function SelectionLine({ layoutId }: { layoutId: string }) {
+  return (
+    <motion.span
+      layoutId={layoutId}
+      aria-hidden
+      className="pointer-events-none absolute inset-x-0 -bottom-px h-px bg-accent"
+      transition={spring}
+    />
+  );
 }
 
 /**

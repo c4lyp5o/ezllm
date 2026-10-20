@@ -9,7 +9,7 @@ import {
   normalizeFeedRow, requests, RANGE_LABEL,
   type FeedRow, type RangeKey, type RequestSort, type RequestsResp,
 } from '../utils/api';
-import { CauseChip, SectionLabel, btn, cx, inputCls, labelCls } from '../components/ui';
+import { CauseChip, SectionLabel, Segmented, btn, cx, inputCls, labelCls } from '../components/ui';
 
 const RANGES: RangeKey[] = ['24h', '7d', '30d', '365d'];
 const SORTS: { key: RequestSort; label: string }[] = [
@@ -32,25 +32,11 @@ function parseField(raw: string): number | undefined | 'bad' {
   return n;
 }
 
-function Seg<T extends string>({ options, value, onChange }: {
+// The shared control: the selection is the 1px accent line under its label.
+function Seg<T extends string>(props: {
   options: { key: T; label: string }[]; value: T; onChange: (v: T) => void;
 }) {
-  return (
-    <div className="inline-flex flex-wrap gap-1 rounded-lg border border-line bg-surface p-1">
-      {options.map((o) => (
-        <button
-          key={o.key}
-          onClick={() => onChange(o.key)}
-          className={cx(
-            'rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors',
-            o.key === value ? 'bg-accent text-accent-ink' : 'text-mute hover:text-ink',
-          )}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
+  return <Segmented {...props} />;
 }
 
 function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
@@ -58,7 +44,7 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
     <div className="rounded-xl border border-line bg-surface px-4 py-3.5">
       <SectionLabel>{label}</SectionLabel>
       <div className="mt-1.5 font-mono text-[20px] font-semibold tabular-nums tracking-tight text-ink">{value}</div>
-      {sub && <div className="mt-0.5 text-[11px] text-mute">{sub}</div>}
+      {sub && <div className="mt-0.5 text-[12px] text-mute">{sub}</div>}
     </div>
   );
 }
@@ -166,9 +152,9 @@ export default function Requests() {
 
       {/* Result rows */}
       <div className="rounded-xl border border-line bg-surface">
-        {err && <div className="border-b border-line px-4 py-2.5 text-[12px] text-bad">{err}</div>}
+        {err && <div className="border-b border-line px-4 py-2.5 text-[13px] text-bad">{err}</div>}
         <div className="overflow-x-auto">
-          <table className="w-full text-[12px]">
+          <table className="w-full text-[13px]">
             <thead>
               <tr className="text-left text-mute">
                 <th className="px-4 py-2 font-medium">time</th>
@@ -195,7 +181,7 @@ export default function Requests() {
                 <tr key={`${r.ts}-${i}`} className="border-t border-line">
                   <td className="whitespace-nowrap px-4 py-2 font-mono text-mute">
                     {fmtTs(r.ts)}
-                    {r.ip && <div className="text-[10px] text-mute/70" title="caller address">{r.ip}</div>}
+                    {r.ip && <div className="text-[11px] text-mute/70" title="caller address">{r.ip}</div>}
                   </td>
                   <td className="px-4 py-2 font-mono">
                     {r.model}
@@ -204,7 +190,7 @@ export default function Requests() {
                         combo when it rode one. Direct routes carry no alias,
                         so the line is provider-only there. */}
                     {(r.account || r.alias) && (
-                      <div className="mt-0.5 truncate font-sans text-[10.5px] text-mute"
+                      <div className="mt-0.5 truncate font-sans text-[11px] text-mute"
                         title={[r.account, r.alias].filter(Boolean).join(' · ')}>
                         {r.account}{r.alias ? ` · ${r.alias}` : ''}
                       </div>
@@ -212,7 +198,7 @@ export default function Requests() {
                     {/* Wire-translated hop: its in-tokens are the vendor's
                         INCLUSIVE total — read before comparing tin. */}
                     {r.translated && (
-                      <div className="text-[10px] text-accent"
+                      <div className="text-[11px] text-accent"
                         title="translated hop: its wire differs from the client's surface (anthropic client -> openai-only hop, or a hop curated for /v1/responses). The in-tokens on this row are the vendor's INCLUSIVE total (cache counted inside), not ezllm's cold-token convention">
                         ⇄ translated
                       </div>

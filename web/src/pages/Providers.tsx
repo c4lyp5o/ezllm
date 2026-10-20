@@ -8,6 +8,7 @@ import {
   type Account, type ApiErrorDetail, type GhDeviceStart, type GhDeviceStatus, type KeyRow, type ModelRule, type ModelRow, type Price, type SweepStatus, type TestResult, type TestStep,
 } from '../utils/api';
 import { Chip, ConfirmModal, Modal, SectionLabel, Skeleton, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls, relTime, Mono } from '../components/ui';
+import { fmtMoney } from '../utils/lib';
 
 // ── helpers ─────────────────────────────────────────────────────────────
 
@@ -23,9 +24,9 @@ function ErrBox({ e, onDismiss }: { e: ApiErrorDetail | null; onDismiss: () => v
         <button onClick={onDismiss} className="shrink-0 text-mute hover:text-ink" aria-label="dismiss">✕</button>
       </div>
       {e.upstream_error?.message && (
-        <Mono className="mt-1 block text-[11.5px] text-dim">{e.upstream_error.type ? `${e.upstream_error.type}: ` : ''}{e.upstream_error.message}</Mono>
+        <Mono className="mt-1 block text-[12px] text-dim">{e.upstream_error.type ? `${e.upstream_error.type}: ` : ''}{e.upstream_error.message}</Mono>
       )}
-      {e.hint && <p className="mt-2 text-[11.5px] leading-relaxed text-mute">{e.hint}</p>}
+      {e.hint && <p className="mt-2 text-[12px] leading-relaxed text-mute">{e.hint}</p>}
       {e.combos && e.combos.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {e.combos.map((c) => <Chip key={c.id} tone="warn"><span className="font-mono">{c.name}</span></Chip>)}
@@ -57,7 +58,7 @@ function probeStatus(detail?: string): string | null {
 function StepList({ steps, running }: { steps: TestStep[] | null; running: boolean }) {
   const byStep = new Map((steps ?? []).map((s) => [s.step, s]));
   return (
-    <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-1 font-mono text-[11.5px]">
+    <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-1 font-mono text-[12px]">
       {STEP_ORDER.map((name, idx) => {
         const s = byStep.get(name);
         const state = s ? (s.ok ? 'ok' : 'bad') : running && idx <= byStep.size ? 'pending' : 'idle';
@@ -73,7 +74,7 @@ function StepList({ steps, running }: { steps: TestStep[] | null; running: boole
               state === 'idle' && 'border-line/60 text-mute/50')}>
               <span>{state === 'ok' ? '✓' : state === 'bad' ? '✕' : idx + 1}</span>
               <span>{name}</span>
-              {status && <span className="rounded bg-bad/15 px-1 text-[10px] text-bad">{status}</span>}
+              {status && <span className="rounded bg-bad/15 px-1 text-[11px] text-bad">{status}</span>}
             </span>
           </li>
         );
@@ -203,12 +204,12 @@ function QuotaBars({ quota }: { quota: NonNullable<Account['quota']> }) {
       <div className="space-y-1.5">
         {rows.map(([k, v]) => (
           <div key={k} className="flex items-center gap-2.5">
-            <span className="w-14 text-[10.5px] uppercase tracking-wide text-mute">{k}</span>
+            <span className="w-14 text-[11px] text-mute">{k}</span>
             <div className="h-1.5 min-w-16 flex-1 overflow-hidden rounded-full bg-shade">
               <div className={cx('h-full rounded-full', v >= 90 ? 'bg-bad' : v >= 70 ? 'bg-warn' : 'bg-ok')}
                 style={{ width: `${Math.min(100, Math.max(0, v))}%` }} />
             </div>
-            <span className="tnum w-10 text-right font-mono text-[11px] text-dim">{v}%</span>
+            <span className="tnum w-10 text-right font-mono text-[12px] text-dim">{v}%</span>
           </div>
         ))}
       </div>
@@ -216,10 +217,10 @@ function QuotaBars({ quota }: { quota: NonNullable<Account['quota']> }) {
   }
   if (quota.kind === 'money' && quota.balance != null) {
     return (
-      <div className="font-mono text-[12px]">
-        <span className="text-dim">{quota.balance}</span>
+      <div className="font-mono text-[13px]">
+        <span className="text-dim">{fmtMoney(Number(quota.balance), '')}</span>
         {quota.unit ? <span className="ml-1 text-mute">{quota.unit}</span> : null}
-        {quota.plan ? <div className="mt-0.5 text-[10.5px] text-mute">{quota.plan}</div> : null}
+        {quota.plan ? <div className="mt-0.5 text-[11px] text-mute">{quota.plan}</div> : null}
       </div>
     );
   }
@@ -230,11 +231,11 @@ function QuotaBars({ quota }: { quota: NonNullable<Account['quota']> }) {
     if (quota.requests_today != null) lines.push(['requests·24h', quota.requests_today]);
     if (quota.tokens_today != null) lines.push(['tokens', quota.tokens_today]);
     return (
-      <div className="space-y-0.5 font-mono text-[12px]">
+      <div className="space-y-0.5 font-mono text-[13px]">
         {lines.map(([k, v]) => (
           <div key={k} className="flex items-baseline gap-2">
             <span className="text-dim">{v.toLocaleString()}</span>
-            <span className="text-[10.5px] text-mute">{k}</span>
+            <span className="text-[11px] text-mute">{k}</span>
           </div>
         ))}
       </div>
@@ -402,7 +403,7 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
             <label className={labelCls} htmlFor="ap-ns">Namespace</label>
             <input id="ap-ns" className={cx(inputCls, 'font-mono')} value={d.namespace} placeholder="opengo" spellCheck={false}
               onChange={(e) => setD((p) => ({ ...p, namespace: slugify(e.target.value), nsTouched: true }))} />
-            <p className="mt-1 text-[11px] text-mute">lowercase slug used in model ids</p>
+            <p className="mt-1 text-[12px] text-mute">lowercase slug used in model ids</p>
           </div>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
@@ -434,13 +435,13 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
                 const accountId = e.target.value.trim();
                 setD((p) => ({ ...p, accountId, base_url: presetAccountID(accountId) }));
               }} />
-            <p className="mt-1 text-[11px] text-mute">
+            <p className="mt-1 text-[12px] text-mute">
               The account ID is part of the endpoint. It composes
               <Mono> /accounts/&lt;account_id&gt;/ai/v1</Mono> — Workers AI serves
               chat, responses and anthropic messages under that prefix.
             </p>
             {d.accountId && (
-              <div className="mt-2 rounded-lg border border-line bg-raised/60 px-3.5 py-2.5 text-[12px] text-dim">
+              <div className="mt-2 rounded-lg border border-line bg-raised/60 px-3.5 py-2.5 text-[13px] text-dim">
                 Endpoint preset: <Mono>{d.base_url}</Mono>
               </div>
             )}
@@ -451,12 +452,12 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
             <input id="ap-url" className={cx(inputCls, 'font-mono')} value={d.base_url}
               placeholder={isAnthropicKind ? 'https://api.anthropic.com' : 'https://api.provider.com/v1'} spellCheck={false}
               onChange={(e) => set('base_url', e.target.value.trim())} />
-            <p className="mt-1 text-[11px] text-mute">{isAnthropicKind
+            <p className="mt-1 text-[12px] text-mute">{isAnthropicKind
               ? 'Required for compatibility providers. Enter the host only — /v1 paths are added automatically.'
               : 'Required for compatibility providers. Use the base URL ending at the API version, e.g. /v1.'}</p>
           </div>
         ) : (
-          <div className="rounded-lg border border-line bg-raised/60 px-3.5 py-2.5 text-[12px] text-dim">
+          <div className="rounded-lg border border-line bg-raised/60 px-3.5 py-2.5 text-[13px] text-dim">
             {isKnownEndpoint(d.base_url) ? 'Known endpoint — fixed: ' : 'Endpoint preset: '}<Mono>{d.base_url}</Mono>
           </div>
         )}
@@ -465,7 +466,7 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
             <SectionLabel>GitHub login — device flow</SectionLabel>
             {!ghStart && (
               <div className="flex flex-wrap items-center gap-3">
-                <p className="text-[12.5px] text-dim">
+                <p className="text-[13px] text-dim">
                   No key to paste. Start a login and tap <span className="text-ink">Authorize</span> on your
                   phone — the session stays on the server and never reaches this browser.
                 </p>
@@ -477,7 +478,7 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
             )}
             {ghStart && (ghStatus == null || ghStatus.status === 'pending') && (
               <div className="space-y-2">
-                <ol className="space-y-1 text-[12.5px] text-dim">
+                <ol className="space-y-1 text-[13px] text-dim">
                   <li>
                     1. Open{' '}
                     <a className="text-ink underline underline-offset-2" href={ghStart.verification_uri}
@@ -485,10 +486,10 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
                   </li>
                   <li>
                     2. Enter code{' '}
-                    <Mono className="text-[15px] tracking-[0.18em] text-ink">{ghStart.user_code}</Mono>
+                    <Mono className="text-[15px] text-ink">{ghStart.user_code}</Mono>
                   </li>
                 </ol>
-                <div className="flex flex-wrap items-center gap-2 text-[12.5px] text-mute">
+                <div className="flex flex-wrap items-center gap-2 text-[13px] text-mute">
                   <Spinner /> Waiting for authorization…
                   <span className="text-mute/70">
                     code expires in {Math.max(1, Math.round(ghStart.expires_in / 60))} min
@@ -496,7 +497,7 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
                   </span>
                 </div>
                 {ghStatus?.detail && (
-                  <p className="text-[12.5px] text-warn">{ghStatus.detail}</p>
+                  <p className="text-[13px] text-warn">{ghStatus.detail}</p>
                 )}
                 <button type="button" className={cx(btn.base, btn.ghost)}
                   onClick={() => {
@@ -509,13 +510,13 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
               </div>
             )}
             {ghStatus?.status === 'authorized' && (
-              <p className="font-mono text-[12.5px] text-ok">
+              <p className="font-mono text-[13px] text-ok">
                 ✓ @{ghStatus.github_login} authorized — Save &amp; validate to store the key
               </p>
             )}
             {(ghStatus?.status === 'expired' || ghStatus?.status === 'error') && (
               <div className="space-y-2">
-                <p className="text-[12.5px] text-bad">
+                <p className="text-[13px] text-bad">
                   {ghStatus.status === 'expired'
                     ? 'The code expired before you authorized it.'
                     : ghStatus.detail || 'GitHub refused the authorization.'}
@@ -549,7 +550,7 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
                 value={d.apiKey} onChange={(e) => set('apiKey', e.target.value)} />
             )}
             {PROVIDER_PRESETS[d.preset]?.keyHint && (
-              <p className="mt-1 text-[11px] text-mute">{PROVIDER_PRESETS[d.preset].keyHint}</p>
+              <p className="mt-1 text-[12px] text-mute">{PROVIDER_PRESETS[d.preset].keyHint}</p>
             )}
           </div>
           <div>
@@ -563,7 +564,7 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
             <input id="ap-mgmt" type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
               placeholder="Paste the TokenRouter management key"
               value={d.managementKey} onChange={(e) => set('managementKey', e.target.value)} />
-            <p className="mt-1 text-[11px] text-mute">Used only to read the wallet balance — stored encrypted, never sent upstream.</p>
+            <p className="mt-1 text-[12px] text-mute">Used only to read the wallet balance — stored encrypted, never sent upstream.</p>
           </div>
         )}
         <div>
@@ -572,23 +573,23 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
         </div>
         <div className="flex items-center gap-3">
           <Toggle checked={d.skipInference} onChange={(v) => set('skipInference', v)} label="skip inference probe" />
-          <span className="text-[12.5px] text-dim">Skip inference probe <span className="text-mute">(saves a token spend)</span></span>
+          <span className="text-[13px] text-dim">Skip inference probe <span className="text-mute">(saves a token spend)</span></span>
         </div>
         <div className="rounded-lg border border-line bg-raised/60 px-4 py-3">
           <SectionLabel className="mb-2">Validation</SectionLabel>
           <StepList steps={result?.steps ?? liveSteps} running={busy} />
-          {result?.ok && <p className="mt-2 font-mono text-[11.5px] text-ok">✓ Key validated and stored.</p>}
+          {result?.ok && <p className="mt-2 font-mono text-[12px] text-ok">✓ Key validated and stored.</p>}
         </div>
         <details className="rounded-lg border border-line bg-raised/40 px-4 py-3">
-          <summary className="cursor-pointer text-[12px] font-medium text-dim">Advanced settings</summary>
+          <summary className="cursor-pointer text-[13px] font-medium text-dim">Advanced settings</summary>
           <div className="mt-4 space-y-4">
             <div className="flex items-center gap-3">
               <Toggle checked={d.requiresSessionHeader} onChange={(v) => set('requiresSessionHeader', v)} label="requires_session_header" />
-              <span className="text-[12.5px] text-dim">requires session header upstream</span>
+              <span className="text-[13px] text-dim">requires session header upstream</span>
             </div>
             <div>
               <label className={labelCls} htmlFor="ap-cH">Custom headers (JSON)</label>
-              <textarea id="ap-cH" rows={3} spellCheck={false} className={cx(inputCls, 'font-mono text-[12px]')}
+              <textarea id="ap-cH" rows={3} spellCheck={false} className={cx(inputCls, 'font-mono text-[13px]')}
                 placeholder={'{"x-team":"ops"}'} value={d.customHeaders} onChange={(e) => set('customHeaders', e.target.value)} />
             </div>
           </div>
@@ -669,7 +670,7 @@ function EditAccountModal({ account, onClose, onSaved }: { account: Account | nu
         <div>
           <label className={labelCls}>Base URL</label>
           {isKnownEndpoint(account.base_url) ? (
-            <div className="rounded-lg border border-line bg-raised/60 px-3.5 py-2.5 font-mono text-[12px] text-dim">
+            <div className="rounded-lg border border-line bg-raised/60 px-3.5 py-2.5 font-mono text-[13px] text-dim">
               {baseUrl} <span className="font-sans text-mute">— known endpoint, fixed</span>
             </div>
           ) : (
@@ -696,7 +697,7 @@ function EditAccountModal({ account, onClose, onSaved }: { account: Account | nu
         )}
         <div className="rounded-lg border border-line bg-raised/60 p-4">
           <SectionLabel>Request budget (account-wide)</SectionLabel>
-          <p className="mt-1 text-[11px] text-mute">
+          <p className="mt-1 text-[12px] text-mute">
             The provider's own request ceiling, stated its way. It applies to the credential, so every
             model routed through this account shares it. A spent account is skipped and the combo fails
             over — the provider is never asked a request it has already refused. Leave 0 for unlimited.
@@ -716,7 +717,7 @@ function EditAccountModal({ account, onClose, onSaved }: { account: Account | nu
             </div>
           </div>
           {rateLimit > 0 ? (
-            <p className="mt-2 text-[11px] text-accent">
+            <p className="mt-2 text-[12px] text-accent">
               {rateLimit} request{rateLimit === 1 ? '' : 's'} per {rateWindow} — a combo with another hop
               will fail over instead of failing.
             </p>
@@ -839,9 +840,9 @@ function ModelsDrawer({ id }: { id: number }) {
       .finally(() => setSweepBusy(false));
   };
 
-  if (err) return <div className="border-t border-line px-5 py-4 text-[12px] text-bad">{err}</div>;
+  if (err) return <div className="border-t border-line px-5 py-4 text-[13px] text-bad">{err}</div>;
   if (!models) return <div className="border-t border-line px-5 py-4"><Skeleton className="h-3.5 w-40" /><Skeleton className="mt-2 h-3.5 w-56" /></div>;
-  if (models.length === 0) return <div className="border-t border-line px-5 py-4 text-[12.5px] text-mute">No models synced — run “Sync models”.</div>;
+  if (models.length === 0) return <div className="border-t border-line px-5 py-4 text-[13px] text-mute">No models synced — run “Sync models”.</div>;
 
   const applyPin = (model: string, pin: string, force: boolean) => {
     setPinErr(null);
@@ -879,7 +880,7 @@ function ModelsDrawer({ id }: { id: number }) {
       {/* Test-all: probe the whole catalog, skip what is already proven, and
           stay stoppable — a 400-model × 3-surface sweep is minutes long. */}
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <span className="text-[11.5px] text-mute">
+        <span className="text-[12px] text-mute">
           {models.length} model{models.length === 1 ? '' : 's'} · {untested} untested
           {running && (
             <span className="ml-2 text-accent">
@@ -901,11 +902,11 @@ function ModelsDrawer({ id }: { id: number }) {
           )}
         </span>
       </div>
-      {sweepNote && <div className="mb-2 text-[11.5px] text-dim">{sweepNote}</div>}
+      {sweepNote && <div className="mb-2 text-[12px] text-dim">{sweepNote}</div>}
       <div className="max-h-72 overflow-y-auto pr-1">
-        <table className="w-full text-[12px]">
+        <table className="w-full text-[13px]">
           <thead>
-            <tr className="text-left text-[10px] uppercase tracking-[0.1em] text-mute">
+            <tr className="text-left text-[11px] text-mute">
               <th className="pb-1.5 font-medium">model</th>
               <th className="pb-1.5 font-medium">status</th>
               <th className="pb-1.5 font-medium">surface</th>
@@ -926,9 +927,9 @@ function ModelsDrawer({ id }: { id: number }) {
                 </td>
                 <td className="py-1.5">
                   {testingId === m.id ? (
-                    <span className="text-[11px] text-accent">testing…</span>
+                    <span className="text-[12px] text-accent">testing…</span>
                   ) : m.openai == null && m.anthropic == null && m.responses == null ? (
-                    <span className={running ? 'text-[11px] text-accent animate-pulse' : 'text-[11px] text-mute'}>
+                    <span className={running ? 'text-[12px] text-accent animate-pulse' : 'text-[12px] text-mute'}>
                       {running ? 'queued' : 'untested'}
                     </span>
                   ) : (
@@ -942,7 +943,7 @@ function ModelsDrawer({ id }: { id: number }) {
                           key={label}
                           title={v == null ? `${label}: no probe` : `${label}: ${v === true ? 'ok' : v === false ? 'failed' : `HTTP ${v}`}`}
                           className={cx(
-                            'inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px]',
+                            'inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[11px]',
                             v == null && 'border-line/60 text-mute/70',
                             v === true && 'border-ok/40 bg-ok-dim text-ok',
                             v === false && 'border-bad/40 bg-bad-dim text-bad',
@@ -955,7 +956,7 @@ function ModelsDrawer({ id }: { id: number }) {
                       ))}
                     </div>
                   )}
-                  <div className="mt-0.5 text-[10px] text-mute" title={m.note ?? undefined}>
+                  <div className="mt-0.5 text-[11px] text-mute" title={m.note ?? undefined}>
                     {m.source === 'curated' ? 'curated' : m.tested_at ? `probed ${relTime(m.tested_at)}` : 'not probed'}
                   </div>
                 </td>
@@ -964,7 +965,7 @@ function ModelsDrawer({ id }: { id: number }) {
                     aria-label={`surface for ${m.id}`}
                     value={m.pin ?? ''}
                     onChange={(e) => onPinChange(m, e.target.value)}
-                    className="rounded border border-line bg-transparent px-1.5 py-0.5 text-[11.5px] text-dim"
+                    className="rounded border border-line bg-transparent px-1.5 py-0.5 text-[12px] text-dim"
                   >
                     <option value="">auto</option>
                     {PIN_SURFACES.map((s) => {
@@ -996,7 +997,7 @@ function ModelsDrawer({ id }: { id: number }) {
             ))}
           </tbody>
         </table>
-        {pinErr && <div className="mt-2 text-[11.5px] text-bad">{pinErr}</div>}
+        {pinErr && <div className="mt-2 text-[12px] text-bad">{pinErr}</div>}
       </div>
       {pendingForce && (
         <ConfirmModal
@@ -1073,16 +1074,16 @@ function PricingModal({ account, onClose }: { account: Account; onClose: () => v
     finally { setBusy(false); }
   };
 
-  const cell = 'rounded border border-line bg-transparent px-2 py-1 text-[12px] text-ink';
+  const cell = 'rounded border border-line bg-transparent px-2 py-1 text-[13px] text-ink';
   return (
     <Modal open onClose={onClose} title={`Pricing — ${account.name}`}
       subtitle="USD per 1M tokens, versioned by date · cost derives from the rate effective on each call's day"
       footer={<button type="button" className={cx(btn.base, btn.ghost)} onClick={onClose}>Close</button>}>
       <div className="space-y-4">
-        {err && <div className="rounded-lg border border-bad/30 bg-bad/5 px-3 py-2 text-[12px] text-bad">{err}</div>}
+        {err && <div className="rounded-lg border border-bad/30 bg-bad/5 px-3 py-2 text-[13px] text-bad">{err}</div>}
         {rows === null ? <div className="space-y-2"><Skeleton className="h-3.5 w-40" /><Skeleton className="h-3.5 w-56" /></div>
-          : rows.length === 0 ? <p className="text-[12.5px] text-mute">No rates yet — every call from this account is UNPRICED until you add one.</p>
-          : <div className="overflow-x-auto"><table className="w-full text-[12px]"><thead><tr className="text-left text-[10px] uppercase tracking-[0.1em] text-mute"><th className="pb-1 font-medium">model</th><th className="pb-1 font-medium">from</th><th className="pb-1 text-right">in</th><th className="pb-1 text-right">out</th><th className="pb-1 text-right">cache r</th><th className="pb-1 text-right">cache w</th><th className="pb-1"></th></tr></thead>
+          : rows.length === 0 ? <p className="text-[13px] text-mute">No rates yet — every call from this account is UNPRICED until you add one.</p>
+          : <div className="overflow-x-auto"><table className="w-full text-[13px]"><thead><tr className="text-left text-[11px] text-mute"><th className="pb-1 font-medium">model</th><th className="pb-1 font-medium">from</th><th className="pb-1 text-right">in</th><th className="pb-1 text-right">out</th><th className="pb-1 text-right">cache r</th><th className="pb-1 text-right">cache w</th><th className="pb-1"></th></tr></thead>
             <tbody className="font-mono">{rows.map((p) => (
               <tr key={`${p.model_id}-${p.effective_from}`} className="border-t border-line/50">
                 <td className="max-w-[180px] truncate py-1.5 text-dim" title={p.model_id}>{p.model_id}</td>
@@ -1110,7 +1111,7 @@ function PricingModal({ account, onClose }: { account: Account; onClose: () => v
               {busy ? <Spinner /> : null} Save
             </button>
           </div>
-          {!models.length && <p className="mt-2 text-[11px] text-mute">Sync this account's models first — rates can only name a model the catalog knows.</p>}
+          {!models.length && <p className="mt-2 text-[12px] text-mute">Sync this account's models first — rates can only name a model the catalog knows.</p>}
         </div>
       </div>
     </Modal>
@@ -1164,11 +1165,11 @@ function QuotaModal({ account, onClose }: { account: Account; onClose: () => voi
           )}
           {live && live.kind !== 'none' && (
             <div className="mt-2 space-y-2">
-              <div className="flex flex-wrap items-center gap-2 text-[12px]">
-                <span className="rounded-full border border-line bg-bg px-2 py-0.5 font-mono text-[11px] text-accent">{live.kind}</span>
+              <div className="flex flex-wrap items-center gap-2 text-[13px]">
+                <span className="rounded-full border border-line bg-bg px-2 py-0.5 font-mono text-[12px] text-accent">{live.kind}</span>
                 <span className="text-mute">read {live.read_at ? relTime(live.read_at) : '—'}</span>
               </div>
-              <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-md border border-line bg-bg px-3 py-2 font-mono text-[11.5px] leading-relaxed text-dim">
+              <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-md border border-line bg-bg px-3 py-2 font-mono text-[12px] leading-relaxed text-dim">
                 {prettyBody(live.raw)}
               </pre>
             </div>
@@ -1196,9 +1197,9 @@ function QuotaModal({ account, onClose }: { account: Account; onClose: () => voi
             <p className="mt-2 text-[13px] text-mute">No caps set for this account — add one under <span className="text-ink">Rules</span>.</p>
           )}
           {caps.length > 0 && (
-            <table className="mt-2 w-full text-[12px]">
+            <table className="mt-2 w-full text-[13px]">
               <thead>
-                <tr className="text-left text-[10px] uppercase tracking-[0.1em] text-mute">
+                <tr className="text-left text-[11px] text-mute">
                   <th className="pb-1.5 font-medium">model</th>
                   <th className="pb-1.5 font-medium">cap tokens</th>
                   <th className="pb-1.5 font-medium">window</th>
@@ -1274,9 +1275,9 @@ function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
           <span className="text-[14px] font-semibold">{a.name}</span>
           <Chip><span className="font-mono">{a.namespace}</span></Chip>
           <Chip tone="neutral" className="text-mute"><span className="font-mono">{a.kind}</span></Chip>
-          <span className="font-mono text-[11px] text-mute">{a.models_count ?? '–'} models</span>
+          <span className="font-mono text-[12px] text-mute">{a.models_count ?? '–'} models</span>
           {!a.enabled && <Chip tone="warn">disabled</Chip>}
-          <span className="ml-auto hidden font-mono text-[11px] text-mute sm:block">{a.base_url}</span>
+          <span className="ml-auto hidden font-mono text-[12px] text-mute sm:block">{a.base_url}</span>
           <span className={cx('text-mute transition-transform', open && 'rotate-180')}>⌄</span>
         </div>
       </button>
@@ -1290,14 +1291,14 @@ function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
         <div className="min-w-44 flex-1">
           {a.quota && a.quota.kind !== 'none' && a.quota.kind !== 'unknown'
             ? <QuotaBars quota={a.quota} />
-            : <span className="text-[11.5px] text-mute">quota — no probe data yet</span>}
+            : <span className="text-[12px] text-mute">quota — no probe data yet</span>}
         </div>
         <div className="flex items-center gap-2">
           {a.quota?.kind && a.quota.kind !== 'none' && (
             <Chip tone="neutral"><span className="font-mono">{a.quota.kind}</span></Chip>
           )}
           {a.quota?.read_at && (
-            <span className="text-[10.5px] text-mute" title={`snapshot read ${a.quota.read_at}`}>
+            <span className="text-[11px] text-mute" title={`snapshot read ${a.quota.read_at}`}>
               read {relTime(a.quota.read_at)}
             </span>
           )}
@@ -1318,15 +1319,15 @@ function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
           <div className="rounded-lg border border-line bg-raised/40 px-3.5 py-3">
             <div className="flex flex-wrap items-center gap-2">
               {a.keys.length === 0
-                ? <span className="text-[12px] text-mute">no keys — add one when the upstream is confirmed</span>
+                ? <span className="text-[13px] text-mute">no keys — add one when the upstream is confirmed</span>
                 : a.keys.map((k) => (
                   <span key={k.id} className="flex items-center gap-2 rounded-full border border-line bg-raised px-2.5 py-1">
-                    <Mono className="text-[11.5px]">{k.label} · {k.hint}</Mono>
-                    <span className={cx('text-[11px]', k.last_test_ok === true ? 'text-ok' : k.last_test_ok === false ? 'text-bad' : 'text-mute')}
+                    <Mono className="text-[12px]">{k.label} · {k.hint}</Mono>
+                    <span className={cx('text-[12px]', k.last_test_ok === true ? 'text-ok' : k.last_test_ok === false ? 'text-bad' : 'text-mute')}
                       title={k.last_test_detail ?? ''}>
                       {k.last_test_ok === true ? '● tested ok' : k.last_test_ok === false ? '● test failed' : 'untested'}
                     </span>
-                    {k.last_test_at && <span className="text-[10px] text-mute" title={k.last_test_detail ?? ''}>{relTime(k.last_test_at)}</span>}
+                    {k.last_test_at && <span className="text-[11px] text-mute" title={k.last_test_detail ?? ''}>{relTime(k.last_test_at)}</span>}
                     <button type="button" title="Test key (retest)" disabled={menuBusy != null}
                       className="text-mute transition-colors hover:text-accent disabled:opacity-40"
                       onClick={(e) => { e.stopPropagation(); void act('retest', () => post(`/admin/accounts/${a.id}/keys/${k.id}/retest`, {})); }}>
@@ -1343,11 +1344,11 @@ function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')} disabled={menuBusy != null}
+            <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px]')} disabled={menuBusy != null}
               onClick={(e) => { e.stopPropagation(); void act('sync', () => post(`/admin/accounts/${a.id}/sync`, {})); }}>
               {menuBusy === 'sync' ? <Spinner /> : '⇄'} Sync models
             </button>
-            <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')} disabled={menuBusy != null || a.keys.length === 0}
+            <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px]')} disabled={menuBusy != null || a.keys.length === 0}
               onClick={(e) => { e.stopPropagation(); void act('retest', () => {
                 const k = a.keys[0];
                 return post(`/admin/accounts/${a.id}/keys/${k.id}/retest`, {});
@@ -1355,26 +1356,26 @@ function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
               {menuBusy === 'retest' ? <Spinner /> : null} Test key
             </button>
             <span title={quotaHint}>
-              <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')}
+              <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px]')}
                 disabled={!quotaExposed}
                 onClick={(e) => { e.stopPropagation(); setQuotaOpen(true); }}>
                 Quota
               </button>
             </span>
-            <button type="button" title="Set per-model USD rates for cost analysis" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')}
+            <button type="button" title="Set per-model USD rates for cost analysis" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px]')}
               onClick={(e) => { e.stopPropagation(); setPricingOpen(true); }}>
               Pricing
             </button>
-            <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[12px]')}
+            <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px]')}
               onClick={(e) => { e.stopPropagation(); setEditing(true); }}>
               Edit
             </button>
-            <button type="button" className={cx(btn.base, btn.danger, 'px-3 py-1.5 text-[12px]')}
+            <button type="button" className={cx(btn.base, btn.danger, 'px-3 py-1.5 text-[13px]')}
               onClick={(e) => { e.stopPropagation(); setConfirm({ kind: 'account' }); }}>
               Delete
             </button>
-            {flash && <span className="text-[11.5px] text-ok">{flash} ✓</span>}
-            {menuBusy && <span className="text-[11.5px] text-mute">{menuBusy}…</span>}
+            {flash && <span className="text-[12px] text-ok">{flash} ✓</span>}
+            {menuBusy && <span className="text-[12px] text-mute">{menuBusy}…</span>}
           </div>
           {editing && <EditAccountModal account={a} onClose={() => setEditing(false)} onSaved={onChanged} />}
           <ConfirmModal

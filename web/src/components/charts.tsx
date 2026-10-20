@@ -7,9 +7,9 @@
 //      series rendered as two different colours on two screens).
 //   2. Aggregates arrive pre-aggregated from SQL. Nothing here re-sums raw
 //      rows — these are presentation layers over /admin/usage groups.
-import { motion, useReducedMotion } from 'framer-motion';
+import { motion, useReducedMotion } from 'motion/react';
 import type { CSSProperties, ReactNode } from 'react';
-import { cx, formatTokens, pct, SectionLabel } from './ui';
+import { cx, formatTokens, pct } from './ui';
 
 // ── palette ───────────────────────────────────────────────────────────────
 // Read through CSS vars so a token rename re-skins every chart and recharts
@@ -33,16 +33,16 @@ export const catColor = (i: number) => CAT[i % CAT.length];
 // ── shared recharts furniture ──────────────────────────────────────────────
 // Every chart in the app passes these, so axis/grid/tooltip/crosshair cannot
 // drift between pages (Dashboard used the tokens, Stats hardcoded #111/#333).
-export const chartGrid = { stroke: v('--color-viz-grid'), strokeDasharray: '3 3' } as const;
+export const chartGrid = { stroke: v('--color-viz-grid') } as const;
 
 export const axisProps = {
-  tick: { fill: v('--color-viz-axis'), fontSize: 10.5, fontFamily: 'var(--font-mono)' },
+  tick: { fill: v('--color-viz-axis'), fontSize: 12, fontFamily: 'var(--font-sans)' },
   tickLine: false,
   axisLine: false,
 } as const;
 
 export const axisPropsCompact = {
-  tick: { fill: v('--color-viz-axis'), fontSize: 10 },
+  tick: { fill: v('--color-viz-axis'), fontSize: 11, fontFamily: 'var(--font-sans)' },
   tickLine: false,
   axisLine: false,
 } as const;
@@ -52,9 +52,10 @@ export const cursorFill = { fill: v('--color-viz-crosshair') } as const;
 export const tooltipBox: CSSProperties = {
   background: v('--color-raised'),
   border: `1px solid ${v('--color-line-strong')}`,
-  borderRadius: 8,
+  borderRadius: 6,
   fontSize: 12,
-  fontFamily: 'var(--font-mono)',
+  fontFamily: 'var(--font-sans)',
+  fontVariantNumeric: 'tabular-nums',
   color: v('--color-ink'),
   padding: '8px 10px',
   boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
@@ -72,16 +73,16 @@ export function ChartTooltip({ active, payload, label, format = formatTokens }: 
   return (
     <div style={tooltipBox}>
       {label != null && label !== '' && (
-        <div className="mb-1.5 text-[11px] font-semibold text-ink">{label}</div>
+        <div className="mb-1.5 text-[12px] font-semibold text-ink">{label}</div>
       )}
       <div className="space-y-1">
         {payload.map((row, i) => (
           <div key={`${row.dataKey ?? i}`} className="flex items-center gap-3">
-            <span className="flex items-center gap-1.5 text-[11px] text-dim">
+            <span className="flex items-center gap-1.5 text-[12px] text-dim">
               <span className="h-1.5 w-1.5 rounded-full" style={{ background: row.color }} />
               {row.name}
             </span>
-            <span className="ml-auto tnum text-[11.5px] text-ink">
+            <span className="ml-auto tnum text-[12px] text-ink">
               {typeof row.value === 'number' ? format(row.value) : String(row.value ?? '–')}
             </span>
           </div>
@@ -115,23 +116,13 @@ export function Sparkline({
   const x = (i: number) => (i / (points.length - 1)) * w;
   const y = (n: number) => (span === 0 ? h / 2 : pad + (1 - (n - min) / span) * (h - pad * 2));
   const line = points.map((n, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(2)},${y(n).toFixed(2)}`).join(' ');
-  const area = `${line} L${w},${h} L0,${h} Z`;
-  const gid = `spark-${color.replace(/[^a-z0-9]/gi, '')}`;
+  // A line, no fill: a gradient under a trend is decoration, and the flat
+  // 14% tint the house rules allow adds nothing at this height.
+  void filled;
   return (
     <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className={cx('w-full', className)}
       style={{ height }} aria-hidden focusable="false">
-      {filled && (
-        <>
-          <defs>
-            <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={color} stopOpacity="0.28" />
-              <stop offset="100%" stopColor={color} stopOpacity="0" />
-            </linearGradient>
-          </defs>
-          <path d={area} fill={`url(#${gid})`} />
-        </>
-      )}
-      <path d={line} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+      <path d={line} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
     </svg>
   );
 }
@@ -163,7 +154,7 @@ export function BarList({
   const display = order === 'asc' ? [...shown].reverse() : shown;
   const sum = total ?? rows.reduce((a, r) => a + r.value, 0);
   const max = Math.max(...shown.map((r) => r.value), 0);
-  if (display.length === 0) return <p className="px-5 py-8 text-center text-[12.5px] text-mute">{emptyLabel}</p>;
+  if (display.length === 0) return <p className="px-5 py-8 text-center text-[13px] text-mute">{emptyLabel}</p>;
   return (
     <ul className="space-y-2.5">
       {display.map((r, i) => {
@@ -171,18 +162,21 @@ export function BarList({
         return (
           <li key={`${r.key}-${i}`} className="group">
             <div className="flex items-baseline gap-3">
-              <span className="min-w-0 flex-1 truncate text-[12.5px] text-dim" title={r.hint ?? r.key}>{r.key}</span>
-              <span className="tnum shrink-0 font-mono text-[12px] text-ink">{format(r.value)}</span>
+              <span className="min-w-0 flex-1 truncate text-[13px] text-dim" title={r.hint ?? r.key}>{r.key}</span>
+              <span className="tnum shrink-0 font-mono text-[13px] text-ink">{format(r.value)}</span>
               {/* Share of the total, not of the bar: the bar is scaled to the
                   largest row, so a bar's length and its share only agree when
                   one row dominates. Both numbers are useful and they are not
                   the same number. */}
-              <span className="tnum w-11 shrink-0 text-right font-mono text-[11px] text-mute">{share}</span>
+              <span className="tnum w-11 shrink-0 text-right font-mono text-[12px] text-mute">{share}</span>
             </div>
-            <div className="mt-1 h-1 overflow-hidden rounded-full bg-shade">
+            {/* A 2px neutral bar: the ranking is seen, not only read, without
+                a hue per row. The leader is set in ink, the rest in grey —
+                row colours from callers are ignored on purpose. */}
+            <div className="mt-1 h-0.5 overflow-hidden bg-shade">
               <motion.div
-                className="h-full rounded-full"
-                style={{ background: r.color ?? VIZ.in }}
+                className="h-full"
+                style={{ background: i === 0 && order === 'desc' ? 'var(--color-ink)' : 'var(--color-mute)' }}
                 initial={reduce ? false : { width: 0 }}
                 animate={{ width: `${max > 0 ? (r.value / max) * 100 : 0}%` }}
                 transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1], delay: reduce ? 0 : Math.min(i * 0.035, 0.25) }}
@@ -209,15 +203,15 @@ export function CompositionBar({
   const reduce = useReducedMotion();
   const sum = parts.reduce((a, p) => a + Math.max(0, p.value), 0);
   if (sum <= 0) {
-    return <div className={cx('rounded-full bg-inset', className)} style={{ height }} />;
+    return <div className={cx('rounded-sm bg-inset', className)} style={{ height }} />;
   }
   return (
-    <div className={cx('flex gap-px overflow-hidden rounded-full bg-inset', className)}
+    <div className={cx('flex gap-[2px] overflow-hidden rounded-sm bg-inset', className)}
       style={{ height }} title={parts.map((p) => `${p.label} ${format(p.value)}`).join(' · ')}>
       {parts.filter((p) => p.value > 0).map((p, i) => (
         <motion.div
           key={p.key}
-          className="h-full first:rounded-l-full last:rounded-r-full"
+          className="h-full"
           style={{ background: p.color }}
           initial={reduce ? false : { width: 0 }}
           animate={{ width: `${(p.value / sum) * 100}%` }}
@@ -237,9 +231,9 @@ export function Delta({ current, previous, className }: { current: number; previ
   const pct = ((current - previous) / previous) * 100;
   const up = pct > 0;
   const flat = Math.abs(pct) < 0.05;
-  if (flat) return <span className={cx('text-[11px] text-mute', className)}>flat</span>;
+  if (flat) return <span className={cx('text-[12px] text-mute', className)}>flat</span>;
   return (
-    <span className={cx('tnum inline-flex items-center gap-0.5 text-[11px] font-medium', up ? 'text-warn' : 'text-ok', className)}
+    <span className={cx('tnum inline-flex items-center gap-0.5 text-[12px] font-medium', up ? 'text-warn' : 'text-ok', className)}
       title={`${formatTokens(current)} vs ${formatTokens(previous)} previously`}>
       <span aria-hidden>{up ? '▲' : '▼'}</span>
       {Math.abs(pct) >= 100 ? `${Math.abs(pct).toFixed(0)}%` : `${Math.abs(pct).toFixed(1)}%`}
@@ -258,12 +252,12 @@ export function Panel({
   return (
     <section className={cx('flex min-w-0 flex-col rounded-xl border border-line bg-surface', className)}>
       {(label || aside) && (
-        <header className="flex items-baseline justify-between gap-3 border-b border-line px-5 py-3.5">
+        <header className="flex items-baseline justify-between gap-3 px-5 pb-1 pt-4">
           {label}
           {aside}
         </header>
       )}
-      <div className={cx('min-w-0 flex-1 p-5', bodyClass)}>{children}</div>
+      <div className={cx('min-w-0 flex-1 px-5 pb-5 pt-3', bodyClass)}>{children}</div>
     </section>
   );
 }
@@ -274,26 +268,24 @@ export function Panel({
 // makes it worth unifying: a trend costs no recharts container, so a card can
 // show direction at the same weight as the number.
 export function StatCard({
-  label, value, sub, tone, spark, sparkColor, footer,
+  label, value, sub, tone, footer,
 }: {
   label: string;
   value: string;
   sub?: string;
   tone?: string;
+  /** Accepted for old call sites and ignored: a KPI carries no sparkline. */
   spark?: number[];
   sparkColor?: string;
   footer?: ReactNode;
 }) {
   return (
     <div className="flex min-w-0 flex-col rounded-xl border border-line bg-surface px-4 py-3.5">
-      <SectionLabel>{label}</SectionLabel>
-      <div className={cx('mt-1.5 font-mono text-[22px] font-semibold tracking-tight tnum', tone ?? 'text-ink')}>
+      <div className="text-[12px] text-mute">{label}</div>
+      <div className={cx('mt-1 text-[22px] font-medium leading-tight tnum', tone ?? 'text-ink')}>
         {value}
       </div>
-      {sub && <div className="mt-0.5 text-[11px] text-mute">{sub}</div>}
-      {spark && spark.length > 1 && (
-        <div className="mt-2 -mb-1"><Sparkline data={spark} color={sparkColor} height={26} /></div>
-      )}
+      {sub && <div className="mt-1 text-[12px] text-mute">{sub}</div>}
       {footer && <div className="mt-2 border-t border-line pt-2.5">{footer}</div>}
     </div>
   );
@@ -301,5 +293,5 @@ export function StatCard({
 
 // Label + value in the same compact shape the panels use, for card footers.
 export function StatLabel({ children }: { children: ReactNode }) {
-  return <div className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-mute">{children}</div>;
+  return <div className="text-[12px] text-mute">{children}</div>;
 }

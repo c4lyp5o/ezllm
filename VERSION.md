@@ -58,6 +58,15 @@ default, and the dashboard gets a data-terminal redesign.
 - `unmetered_rows` on health, overview, live feed and dashboard; the tz day
   report's `applied_saved`; the meter is all-or-nothing per batch; web
   bridges now require a process secret.
+- **CI actions move off deprecated Node 20.** `actions/checkout@v4`,
+  `actions/setup-go@v5` and `actions/setup-node@v4` all targeted Node 20,
+  which the runners have deprecated and were force-shimming onto Node 24.
+  They are now `checkout@v5`, `setup-go@v6` and `setup-node@v6` — every pin
+  runs on Node 24 natively. `setup-go@v7` and `setup-node@v7` were skipped on
+  purpose: both are ESM migrations with breaking changes, and v6 already
+  carries the `@actions/cache` and `undici`/`fast-xml-parser` security
+  updates. No product behaviour changes; the gate and the image build are
+  otherwise identical.
 
 ---
 

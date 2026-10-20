@@ -6,6 +6,8 @@ import { AnimatePresence, LayoutGroup, motion } from 'motion/react';
 import { GateError, clearToken, completeSetup, dashboardLogin, getSetupStatus, isUnlocked, markUnlocked } from './utils/api';
 import { DUR, SelectionLine, spring } from './components/motion';
 import RailwayBackground from './components/RailwayBackground';
+import PasswordStrength from './components/PasswordStrength';
+import { MIN_PASSWORD } from './utils/passwordStrength';
 import { readTheme, setTheme, type Theme } from './utils/theme';
 import { Spinner, btn, cx } from './components/ui';
 import ThemeToggle from './components/ThemeToggle';
@@ -122,8 +124,6 @@ function GitHubIcon({ className }: { className?: string }) {
     </svg>
   );
 }
-
-const MIN_PASSWORD = 12; // store.MinDashboardPasswordLen
 
 const fieldClass = (bad: boolean) => cx('h-10 w-full rounded-lg border bg-bg px-3 text-[14px] transition-colors',
   bad ? 'border-bad' : 'border-line hover:border-line-strong focus:border-accent focus:outline-none');
@@ -244,6 +244,7 @@ function SetupForm({ onDone, onAlreadySet }: { onDone: () => void; onAlreadySet:
           value={code} onChange={edit(setCode)} className={cx(fieldClass(false), 'font-mono uppercase tracking-widest')} />
         <Field id="setup-password" label={`New password (at least ${MIN_PASSWORD} characters)`} type="password"
           autoComplete="new-password" value={password} onChange={edit(setPassword)} className={fieldClass(false)} />
+        <PasswordStrength password={password} />
         <Field id="setup-confirm" label="Confirm password" type="password" autoComplete="new-password"
           value={confirm} onChange={edit(setConfirm)} className={fieldClass(false)} />
         {err && <p className="mt-2 text-xs text-bad">{err}</p>}

@@ -330,8 +330,9 @@ func run() error {
 	}
 
 	if setupCode != "" {
-		logx.FirstBootBanner(os.Stdout, color, bridgeOrigin(addr), setupCode)
-		log.Warn("dashboard setup pending: open the dashboard and enter the setup code above", "url", bridgeOrigin(addr))
+		url := bridgeOrigin(addr)
+		logx.FirstBootBanner(os.Stdout, color, url, setupCode)
+		log.Warn("dashboard setup pending: open the dashboard and enter the setup code above", "url", url)
 	}
 
 	errCh := make(chan error, 1)

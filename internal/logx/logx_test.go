@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestHandlerPlainLine(t *testing.T) {
@@ -67,10 +68,57 @@ func TestFirstBootBannerCarriesCode(t *testing.T) {
 	var buf bytes.Buffer
 	FirstBootBanner(&buf, false, "http://127.0.0.1:20129", "ABCD-EFGH")
 	out := buf.String()
-	if !strings.Contains(out, "ABCD-EFGH") || !strings.Contains(out, "http://127.0.0.1:20129") || !strings.Contains(out, "EZLLM_DASHBOARD_PASSWORD") {
+	if !strings.Contains(out, "A B C D - E F G H") || !strings.Contains(out, "http://127.0.0.1:20129") || !strings.Contains(out, "EZLLM_DASHBOARD_PASSWORD") {
 		t.Fatalf("banner missing code, url or env hint:\n%s", out)
 	}
 	if strings.Contains(out, "\x1b[") {
 		t.Fatal("plain banner must emit no escapes")
 	}
+	assertPanelAligned(t, out)
+}
+
+func TestColoredPanelsStayAligned(t *testing.T) {
+	var buf bytes.Buffer
+	FirstBootBanner(&buf, true, "http://127.0.0.1:20129", "ABCD-EFGH")
+	out := buf.String()
+	if !strings.Contains(out, codeStyle+" A B C D - E F G H "+reset) {
+		t.Fatalf("code not highlighted:\n%q", out)
+	}
+	// Escapes must not count toward width: strip them and the frame is square.
+	assertPanelAligned(t, stripANSI(out))
+}
+
+// assertPanelAligned checks every framed row has the same rune width as its
+// top border, so the right edge is straight.
+func assertPanelAligned(t *testing.T, out string) {
+	t.Helper()
+	width := -1
+	for _, l := range strings.Split(out, "\n") {
+		if !strings.HasPrefix(l, "╔") && !strings.HasPrefix(l, "║") && !strings.HasPrefix(l, "╚") {
+			width = -1
+			continue
+		}
+		n := utf8.RuneCountInString(l)
+		if strings.HasPrefix(l, "╔") {
+			width = n
+			continue
+		}
+		if n != width {
+			t.Fatalf("ragged panel row (%d runes, border %d): %q\n%s", n, width, l, out)
+		}
+	}
+}
+
+func stripANSI(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == 0x1b {
+			for i < len(s) && s[i] != 'm' {
+				i++
+			}
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }

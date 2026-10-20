@@ -38,6 +38,13 @@ file in the same commit, or the test fails.
 - **Fix: the Claude bridge no longer leaks on failed requests.** An early
   return (timeout, client disconnect) left a blocked reader goroutine and an
   unreaped zombie CLI process each time.
+- **Password strength bar** on the first-boot setup page and in Settings:
+  four segments plus a hint, estimated locally (length × character pool, cut
+  for repeats, keyboard runs and well-known passwords). It guides; the server
+  still enforces only the 12-character minimum.
+- **The first-boot setup code stands out**: a framed panel under the ezllm
+  art, with the code spaced out and, on a terminal, the only filled
+  highlight in ezllm's output.
 - **Console logs revamped**: timestamp, padded level and `key=value` on one
   line, with the level colored on a terminal (`EZLLM_LOG_COLOR`,
   `NO_COLOR`). `EZLLM_LOG_LEVEL` accepts `info` and warns on an unknown

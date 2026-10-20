@@ -1510,6 +1510,7 @@ func (s *Server) handleCombos(w http.ResponseWriter, r *http.Request) {
 			s.writeStoreErr(w, err)
 			return
 		}
+		s.probeComboHops(id)
 		combos, _ := s.db.ListCombos(r.Context())
 		for _, x := range combos {
 			if x.ID == id {
@@ -1836,6 +1837,7 @@ func (s *Server) handleCombo(w http.ResponseWriter, r *http.Request) {
 			s.writeStoreErr(w, err)
 			return
 		}
+		s.probeComboHops(newID)
 		combos, _ = s.db.ListCombos(r.Context())
 		for _, x := range combos {
 			if x.ID == newID {
@@ -1875,6 +1877,7 @@ func (s *Server) handleComboHops(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreErr(w, err)
 		return
 	}
+	s.probeComboHops(id)
 	combos, _ := s.db.ListCombos(r.Context())
 	for _, c := range combos {
 		if c.ID == id {

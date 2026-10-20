@@ -1176,6 +1176,7 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		totals.CachedWrite += x.CachedWrite
 		totals.Reasoning += x.Reasoning
 		totals.TokensSaved += x.TokensSaved
+		totals.AppliedSaved += x.AppliedSaved
 		totals.ContextPre += x.ContextPre
 		totals.ContextSaved += x.ContextSaved
 		totals.Errors += x.Errors

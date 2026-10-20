@@ -85,7 +85,6 @@ function HealthStrip({ o }: { o: Overview }) {
   const h = o.health;
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-mute">
-      <span>v{h.version}</span>
       <span><span className="tnum text-dim">{nfmt(h.accounts)}</span> accounts</span>
       <span><span className="tnum text-dim">{nfmt(h.models)}</span> models</span>
       <span><span className="tnum text-dim">{nfmt(h.combos)}</span> combos</span>

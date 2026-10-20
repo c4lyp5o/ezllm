@@ -982,15 +982,7 @@ function ModelsDrawer({ id }: { id: number }) {
                     className="rounded border border-line bg-transparent px-1.5 py-0.5 text-[12px] text-dim"
                   >
                     <option value="">auto</option>
-                    {PIN_SURFACES.map((s) => {
-                      const ok = s === 'openai' ? m.openai
-                        : s === 'anthropic' ? m.anthropic
-                        : s === 'responses' ? m.responses
-                        : undefined;
-                      // undefined = no probe column for this surface yet.
-                      const tag = ok === undefined ? ' (no probe)' : ok ? '' : ' (unconfirmed)';
-                      return <option key={s} value={s}>{s}{tag}</option>;
-                    })}
+                    {PIN_SURFACES.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </td>
                 <td className="py-1.5 text-right">

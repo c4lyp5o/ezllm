@@ -66,4 +66,40 @@ func TestUsageTotalsCarryWindowMedianAndContext(t *testing.T) {
 	}
 }
 
+// The totals row also dropped applied_saved — the column every UI savings
+// total reads — so Stats' "Removed by compression" card showed 0 while the
+// per-account table beneath it showed six-figure savings. Only shipped
+// rewrites count: the declined row's tokens_saved must stay out.
+func TestUsageTotalsCarryAppliedSaved(t *testing.T) {
+	h := newHarness(t, func(http.ResponseWriter, *http.Request) {})
+	now := time.Now()
+	for _, c := range []store.Call{
+		{TS: now, Client: "c", Account: "a", AccountID: 1, Model: "m", Status: 200,
+			TokensSaved: 400, CompressionApplied: true},
+		{TS: now, Client: "c", Account: "b", AccountID: 2, Model: "m", Status: 200,
+			TokensSaved: 100, CompressionApplied: true},
+		{TS: now, Client: "c", Account: "b", AccountID: 2, Model: "m", Status: 200,
+			TokensSaved: 999},
+	} {
+		h.db.RecordCall(c)
+	}
+	if err := h.db.Flush(); err != nil {
+		t.Fatal(err)
+	}
+
+	code, _, body := h.do("GET", "/admin/usage?group_by=account", "tok-admin", "")
+	if code != http.StatusOK {
+		t.Fatalf("usage = %d: %s", code, body)
+	}
+	var resp struct {
+		Totals store.UsageRow `json:"totals"`
+	}
+	if err := json.Unmarshal([]byte(body), &resp); err != nil {
+		t.Fatalf("body is not JSON: %s", body)
+	}
+	if resp.Totals.AppliedSaved != 500 {
+		t.Errorf("totals.applied_saved = %d, want 500 (sum of shipped rewrites; totals used to ship 0)", resp.Totals.AppliedSaved)
+	}
+}
+
 func i64ptr(v int64) *int64 { return &v }

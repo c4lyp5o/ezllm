@@ -83,8 +83,7 @@ export default function Economics() {
   // column sweeps legacy declined rows in (~21k tokens from before the
   // applied/notional split), and adding context_saved on top double-counts
   // the budget-stage component (budget attribution is a COMPONENT of total
-  // reduction, not an additional total). context is shown separately.
-  const context = summary?.context_saved ?? 0;
+  // reduction, not an additional total).
   const saved = summary?.applied_saved ?? 0;
   const input = summary?.tin ?? 0;
   const output = summary?.tout ?? 0;
@@ -267,16 +266,10 @@ export default function Economics() {
               <div className="mt-4 border-t border-line pt-4">
                 <Metric label="estimated pre-optimization" value={formatTokens(before)}
                   note="approx. — what would have shipped without ezllm" />
-                <div className="mt-3">
-                  <Metric label="context budget" value={formatTokens(context)}
-                    tone={context > 0 ? 'text-ok' : undefined}
-                    note="component of the reduction, NOT added to the headline" />
-                  <p className="mt-2 text-[13px] leading-relaxed text-dim">
-                    The budget-stage component, shown on its own because budget
-                    attribution is part of the total reduction — not an extra
-                    total. Zero today: no active profile runs the budget stage.
-                  </p>
-                </div>
+                <p className="mt-3 text-[13px] leading-relaxed text-dim">
+                  Tokens in plus everything compression removed before forwarding:
+                  the prompt your clients sent, as they sent it.
+                </p>
               </div>
             </Panel>
           </div>
@@ -293,7 +286,7 @@ export default function Economics() {
                 )}
                 {costTotals && costTotals.unpriced_calls > 0 ? (
                   <span className="text-[12px] text-warn">
-                    {nfmt(costTotals.unpriced_calls)} calls unpriced — the total is a floor, not the bill
+                    {nfmt(costTotals.unpriced_calls)} calls unpriced
                   </span>
                 ) : costTotals?.pricing_complete && costRows.length > 0 ? (
                   <span className="text-[12px] text-ok">all calls priced</span>
@@ -302,7 +295,7 @@ export default function Economics() {
             }>
             {costRows.length === 0 ? (
               <EmptyState title="No priced traffic yet"
-                hint="Cost is computed from the rates entered under Providers → account → Pricing. Until a rate exists for an account+model, those calls cost 0 and the total above is a floor rather than a bill." />
+                hint="Cost is computed from the rates entered under Providers → account → Pricing. Until a rate exists for an account+model, those calls cost 0." />
             ) : (
               <div className="space-y-5">
                 <div className="grid gap-3 sm:grid-cols-3">
@@ -311,7 +304,7 @@ export default function Economics() {
                     note="calls with a rate effective on their date" />
                   <Metric label="unpriced" value={nfmt(costTotals?.unpriced_calls ?? 0)}
                     tone={costTotals && costTotals.unpriced_calls > 0 ? 'text-warn' : undefined}
-                    note="contributing $0 — a floor, not a bill" />
+                    note="contributing $0" />
                 </div>
 
                 {byDay.length > 1 && (

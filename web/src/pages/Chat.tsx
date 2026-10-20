@@ -79,7 +79,7 @@ const newColumn = (model = ''): Column => ({ id: `c${nextColumn++}`, model, mess
 export default function Chat() {
   const [catalog, setCatalog] = useState<ModelRow[]>([]);
   const [defaultModel, setDefaultModel] = useState(() => readStored(KEY_MODEL, ''));
-  const [columns, setColumns] = useState<Column[]>(() => [newColumn(), newColumn()]);
+  const [columns, setColumns] = useState<Column[]>(() => [newColumn()]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');

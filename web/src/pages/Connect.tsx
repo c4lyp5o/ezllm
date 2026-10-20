@@ -263,7 +263,7 @@ export default function Connect() {
             <StaggerItem key={s.key} className="rounded-xl border border-line bg-surface px-4 py-4">
               <div className="text-[13px] font-semibold">{s.label}</div>
               <div className="mt-3 space-y-2">
-                <FieldRow label="base url" value={base + s.path} />
+                <FieldRow label="Base URL" value={base + s.path} />
               </div>
               {/* The paste-ready snippet lives with the protocol it belongs to,
                   not in a separate section further down: pick your protocol,
@@ -492,8 +492,8 @@ export default function Connect() {
               <CopyButton text={fresh.plaintext} label="Copy" />
             </div>
             <div className="mt-3 space-y-2">
-              <FieldRow label="base" value={base} />
-              <FieldRow label="role" value={fresh.roles.join(' · ')} mono={false} />
+              <FieldRow label="Base URL" value={base} />
+              <FieldRow label="Role" value={fresh.roles.join(' · ')} mono={false} />
               {fresh.roles.includes('admin') && (
                 <p className="rounded-lg border border-warn/30 bg-warn-dim p-2.5 text-[13px] leading-relaxed text-warn">
                   This key has admin role — it can add providers, read provider keys and mint other keys. For an

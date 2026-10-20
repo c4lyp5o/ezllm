@@ -33,7 +33,7 @@ const ANALYTICS_ROUTES = ['/stats', '/economics', '/requests'] as const;
 const NAV: NavItem[] = [
   { to: '/', label: 'Dashboard', hint: 'overview · health · ledger' },
   { to: '/stats', label: 'Analytics', hint: 'stats · economics · requests', match: ANALYTICS_ROUTES },
-  { to: '/providers', label: 'Providers', hint: 'accounts · keys · models' },
+  { to: '/providers', label: 'Providers', hint: 'keys · models · quota' },
   { to: '/services', label: 'Services', hint: 'embeddings · images · audio' },
   { to: '/chat', label: 'Chat', hint: 'test a model' },
   { to: '/combos', label: 'Combos', hint: 'routing chains' },
@@ -257,7 +257,7 @@ const PAGE_HEADERS: Record<string, { title: string; sub: string }> = {
   '/stats': { title: 'Analytics', sub: 'Usage by provider, model, client and day.' },
   '/economics': { title: 'Analytics', sub: 'What compression and caching saved, and the largest requests.' },
   '/requests': { title: 'Analytics', sub: 'Every call in the ledger, filterable by tokens in and out.' },
-  '/providers': { title: 'Providers', sub: 'Accounts, keys, model catalogs and quota.' },
+  '/providers': { title: 'Providers', sub: 'Keys, model catalogs and quota.' },
   '/services': { title: 'Services', sub: 'Default models for embeddings, images and audio.' },
   '/chat': { title: 'Chat', sub: 'Send a message through any routed model.' },
   '/combos': { title: 'Combos', sub: 'Ordered routing chains with failover.' },
@@ -339,6 +339,7 @@ export default function App() {
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <h1 className="text-[24px] font-semibold tracking-[-0.01em]">{header.title}</h1>
           <p className="text-[14px] text-mute">{header.sub}</p>
+          <div id="page-aside" className="flex flex-wrap items-center gap-2 self-center sm:ml-auto" />
         </div>
         {isAnalytics(location.pathname) && (
           <nav className="mt-5 flex gap-1 border-b border-line" aria-label="Analytics views">

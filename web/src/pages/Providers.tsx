@@ -1,5 +1,5 @@
 // PROVIDERS — account cards, add-provider wizard modal, per-key actions, model drawer.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { motion } from 'motion/react';
 import {
   ApiError, AuthError, del, get, ghDeviceCancel, ghDeviceStart, ghDeviceStatus,
@@ -10,7 +10,7 @@ import {
 } from '../utils/api';
 import { Chip, ConfirmModal, Modal, SectionLabel, Skeleton, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls, relTime, Mono } from '../components/ui';
 import { Collapse, Stagger, StaggerItem } from '../components/motion';
-import { fmtMoney } from '../utils/lib';
+import { fmtMoney, nfmt } from '../utils/lib';
 
 // ── helpers ─────────────────────────────────────────────────────────────
 
@@ -255,6 +255,87 @@ function QuotaBars({ quota }: { quota: NonNullable<Account['quota']> }) {
   return <span className="text-mute">–</span>;
 }
 
+// The roster's quota column: one compact line per reading, sized to a fixed
+// 216px column. The full bars live behind the Quota button.
+function QuotaSummary({ quota }: { quota: Account['quota'] }) {
+  if (!quota || quota.kind === 'none' || quota.kind === 'unknown') {
+    return <span className="text-[13px] text-mute" title="no quota read — this provider has not reported usage">–</span>;
+  }
+  const pcts: Array<[string, number]> = [];
+  if (quota.percent_rolling != null) pcts.push(['Rolling', quota.percent_rolling]);
+  if (quota.percent_weekly != null) pcts.push(['Weekly', quota.percent_weekly]);
+  if (quota.percent_monthly != null) pcts.push(['Monthly', quota.percent_monthly]);
+  if (pcts.length > 0) {
+    // The tightest window speaks for the provider: it is the one that refuses first.
+    const [k, v] = pcts.reduce((m, r) => (r[1] > m[1] ? r : m));
+    return (
+      <div className="flex items-center gap-2" title={pcts.map(([n, x]) => `${n} ${x}%`).join(' · ')}>
+        <span className="w-14 flex-none text-[12px] text-mute">{k}</span>
+        <div className="h-1 min-w-10 flex-1 overflow-hidden rounded-full bg-shade">
+          <motion.div
+            className={cx('h-full rounded-full', v >= 90 ? 'bg-bad' : v >= 70 ? 'bg-warn' : 'bg-ok')}
+            initial={{ width: 0 }}
+            animate={{ width: `${Math.min(100, Math.max(0, v))}%` }}
+            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }} />
+        </div>
+        <span className="tnum w-9 flex-none text-right text-[12px] text-ink">{v}%</span>
+      </div>
+    );
+  }
+  if (quota.kind === 'money' && quota.balance != null) {
+    return (
+      <span className="text-[13px]" title={quota.plan ?? undefined}>
+        <span className="tnum text-ink">{fmtMoney(Number(quota.balance), '')}</span>
+        {quota.unit ? <span className="ml-1 text-mute">{quota.unit}</span> : null}
+        <span className="ml-1.5 text-[12px] text-mute">balance</span>
+      </span>
+    );
+  }
+  if (quota.requests_today != null || quota.tokens_today != null) {
+    return (
+      <span className="text-[13px]">
+        {quota.requests_today != null
+          ? <><span className="tnum text-ink">{nfmt(quota.requests_today)}</span><span className="ml-1 text-[12px] text-mute">requests, 24h</span></>
+          : <><span className="tnum text-ink">{nfmt(quota.tokens_today ?? 0)}</span><span className="ml-1 text-[12px] text-mute">tokens</span></>}
+      </span>
+    );
+  }
+  return <span className="text-[12px] text-mute">–</span>;
+}
+
+const hostOf = (url: string) => {
+  try { return new URL(url).host || url; } catch { return url; }
+};
+
+// A button whose width never changes while it works: the label stays in the
+// flow (invisible while busy) and the spinner sits over it. Inserting a
+// spinner beside the label widened the button and shoved its neighbours.
+function BusyButton({ busy, disabled, onClick, children, className }: {
+  busy?: boolean; disabled?: boolean; onClick: () => void; children: ReactNode; className?: string;
+}) {
+  return (
+    <button type="button" disabled={disabled || busy} aria-busy={busy || undefined}
+      className={cx(btn.base, btn.ghost, 'relative h-[30px] px-3 text-[13px]', className)}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}>
+      <span className={cx(busy && 'invisible')}>{children}</span>
+      {busy && <span className="absolute inset-0 grid place-items-center"><Spinner className="h-3.5 w-3.5" /></span>}
+    </button>
+  );
+}
+
+function IconButton({ label, tone, busy, disabled, onClick, children }: {
+  label: string; tone?: 'bad'; busy?: boolean; disabled?: boolean; onClick: () => void; children: ReactNode;
+}) {
+  return (
+    <button type="button" title={label} aria-label={label} disabled={disabled || busy}
+      className={cx('grid h-7 w-7 place-items-center rounded-md text-[13px] text-mute transition-colors disabled:opacity-40',
+        tone === 'bad' ? 'hover:bg-bad-dim hover:text-bad' : 'hover:bg-hover hover:text-ink')}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}>
+      {busy ? <Spinner className="h-3 w-3" /> : children}
+    </button>
+  );
+}
+
 function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: () => void }) {
   const [d, setD] = useState<Draft>(emptyDraft);
   const [busy, setBusy] = useState(false);
@@ -391,7 +472,7 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
 
   return (
     <Modal open={open} onClose={onClose} wide title="Add provider"
-      subtitle="Add the account and validate its API key before the key is saved."
+      subtitle="Add the provider and validate its API key before the key is saved."
       footer={(
         <>
           <button type="button" className={cx(btn.base, btn.ghost)} onClick={onClose} disabled={busy}>Cancel</button>
@@ -707,10 +788,10 @@ function EditAccountModal({ account, onClose, onSaved }: { account: Account | nu
           </div>
         )}
         <div className="rounded-lg border border-line bg-raised/60 p-4">
-          <SectionLabel>Request budget (account-wide)</SectionLabel>
+          <SectionLabel>Request budget (provider-wide)</SectionLabel>
           <p className="mt-1 text-[12px] text-mute">
             The provider's own request ceiling, stated its way. It applies to the credential, so every
-            model routed through this account shares it. A spent account is skipped and the combo fails
+            model routed through this provider shares it. A spent provider is skipped and the combo fails
             over — the provider is never asked a request it has already refused. Leave 0 for unlimited.
           </p>
           <div className="mt-3 grid gap-4 sm:grid-cols-2">
@@ -890,7 +971,7 @@ function ModelsDrawer({ id }: { id: number }) {
     // No CSS fade here: the drawer is rendered inside a <Collapse>, which
     // animates the height. A second fade on top of it runs the same opacity
     // ramp twice and lands out of step with the height.
-    <div className="border-t border-line px-5 py-4">
+    <div className="border-t border-line/60 px-5 py-4 md:pl-10">
       {/* Test-all: probe the whole catalog, skip what is already proven, and
           stay stoppable — a 400-model × 3-surface sweep is minutes long. */}
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -898,109 +979,107 @@ function ModelsDrawer({ id }: { id: number }) {
           {models.length} model{models.length === 1 ? '' : 's'} · {untested} untested
           {running && (
             <span className="ml-2 text-accent">
-              testing… {sweep?.probing ?? 0} queued{sweep?.elapsed_s != null ? ` · ${sweep.elapsed_s}s` : ''}
+              Testing… {sweep?.probing ?? 0} queued{sweep?.elapsed_s != null ? ` · ${sweep.elapsed_s}s` : ''}
             </span>
           )}
         </span>
         <span className="flex items-center gap-2">
           {running ? (
-            <button type="button" className={cx(btn.base, btn.ghost)} disabled={sweepBusy} onClick={stopTestAll}>
-              {sweepBusy ? <Spinner /> : null} Stop
-            </button>
+            <BusyButton busy={sweepBusy} className="w-[132px]" onClick={stopTestAll}>Stop</BusyButton>
           ) : (
-            <button type="button" className={cx(btn.base, btn.primary)} disabled={sweepBusy || models.length === 0}
-              title="re-tests EVERY model (including proven ones) on all three surfaces — one tiny request each; Stop cancels what has not run"
-              onClick={startTestAll}>
-              {sweepBusy ? <Spinner /> : null} Test all models
-            </button>
+            <span title="re-tests EVERY model (including proven ones) on all three surfaces — one tiny request each; Stop cancels what has not run">
+              <BusyButton busy={sweepBusy} disabled={models.length === 0} className="w-[132px]" onClick={startTestAll}>Test all models</BusyButton>
+            </span>
           )}
         </span>
       </div>
-      {sweepNote && <div className="mb-2 text-[12px] text-dim">{sweepNote}</div>}
-      <div className="max-h-72 overflow-y-auto pr-1">
-        <table className="w-full text-[13px]">
-          <thead>
-            <tr className="text-left text-[11px] text-mute">
-              <th className="pb-1.5 font-medium">model</th>
-              <th className="pb-1.5 font-medium">status</th>
-              <th className="pb-1.5 font-medium">surface</th>
-              <th className="pb-1.5 text-right font-medium">test</th>
+      {/* The note line is always reserved, so a note arriving never pushes the table down. */}
+      <div className="mb-1 h-[18px] truncate text-[12px] text-dim" title={sweepNote ?? undefined}>{sweepNote}</div>
+      <div className="max-h-80 overflow-y-auto pr-1">
+        {/* Fixed geometry per row: nothing is inserted or removed while a
+            model is tested — the verdict marks dim in place and the second
+            line says "Testing…", so the row neither grows nor shifts. */}
+        <table className="w-full table-fixed text-[13px]">
+          <colgroup>
+            <col />
+            <col className="hidden w-[236px] md:table-column" />
+            <col className="w-[128px]" />
+            <col className="w-[76px]" />
+          </colgroup>
+          <thead className="sticky top-0 z-10 bg-surface">
+            <tr className="text-left text-[12px] text-mute">
+              <th className="py-2 font-normal">Model</th>
+              <th className="hidden py-2 font-normal md:table-cell">Protocols</th>
+              <th className="py-2 font-normal">Surface</th>
+              <th className="py-2"><span className="sr-only">Test</span></th>
             </tr>
           </thead>
-          <tbody className="font-mono">
-            {models.map((m) => (
-              <tr key={m.id} className="border-t border-line/50 align-middle">
-                <td className="max-w-[260px] py-1.5 pr-2 text-dim" title={m.id}>
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    {testingId === m.id && <Spinner />}
-                    {running && testingId !== m.id && m.openai == null && m.anthropic == null && m.responses == null && (
-                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent animate-pulse" aria-hidden="true" />
-                    )}
-                    <span className="truncate">{m.id}</span>
-                  </div>
-                </td>
-                <td className="py-1.5">
-                  {testingId === m.id ? (
-                    <span className="text-[12px] text-accent">testing…</span>
-                  ) : m.openai == null && m.anthropic == null && m.responses == null ? (
-                    <span className={running ? 'text-[12px] text-accent animate-pulse' : 'text-[12px] text-mute'}>
-                      {running ? 'queued' : 'untested'}
-                    </span>
-                  ) : (
-                    <div className="flex flex-wrap items-center gap-1">
+          <tbody>
+            {models.map((m) => {
+              const testing = testingId === m.id;
+              const unprobed = m.openai == null && m.anthropic == null && m.responses == null;
+              const queued = running && !testing && unprobed;
+              const verdicts = (
+                <>
+                  <div className={cx('flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[12px] transition-opacity', (testing || queued) && 'opacity-40')}>
                       {([
-                        ['chat', m.openai],
-                        ['msgs', m.anthropic],
-                        ['resp', m.responses],
+                        ['Chat', m.openai],
+                        ['Messages', m.anthropic],
+                        ['Responses', m.responses],
                       ] as const).map(([label, v]) => (
-                        <span
-                          key={label}
-                          title={v == null ? `${label}: no probe` : `${label}: ${v === true ? 'ok' : v === false ? 'failed' : `HTTP ${v}`}`}
-                          className={cx(
-                            'inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[11px]',
-                            v == null && 'border-line/60 text-mute/70',
-                            v === true && 'border-ok/40 bg-ok-dim text-ok',
-                            v === false && 'border-bad/40 bg-bad-dim text-bad',
-                            typeof v === 'number' && 'border-bad/40 bg-bad-dim text-bad',
-                          )}
-                        >
-                          <span className="font-sans">{label}</span>
-                          <span>{v == null ? '–' : v === true ? '✓' : v === false ? '✕' : v}</span>
+                        <span key={label} className="flex items-center gap-1"
+                          title={v == null ? `${label}: no probe` : `${label}: ${v === true ? 'ok' : v === false ? 'failed' : `HTTP ${v}`}`}>
+                          <span className={cx('h-1.5 w-1.5 rounded-full', v === true ? 'bg-ok' : v == null ? 'bg-line-strong' : 'bg-bad')} />
+                          <span className={v === true ? 'text-dim' : v == null ? 'text-mute' : 'text-bad'}>
+                            {label}{typeof v === 'number' ? ` ${v}` : ''}
+                          </span>
                         </span>
                       ))}
                     </div>
-                  )}
-                  <div className="mt-0.5 text-[11px] text-mute" title={m.note ?? undefined}>
-                    {m.source === 'curated' ? 'curated' : m.tested_at ? `probed ${relTime(m.tested_at)}` : 'not probed'}
-                  </div>
+                    <div className="mt-0.5 text-[11px]" title={m.note ?? undefined}>
+                      {testing ? <span className="text-accent">Testing…</span>
+                        : queued ? <span className="text-accent">Queued</span>
+                        : <span className="text-mute">{m.source === 'curated' ? 'Curated' : m.tested_at ? `Probed ${relTime(m.tested_at)}` : 'Not probed'}</span>}
+                    </div>
+                </>
+              );
+              return (
+              <tr key={m.id} className="h-12 border-t border-line/60 align-middle">
+                <td className="pr-3">
+                  {/* Wraps on a phone (no hover there, and ids often share a
+                      long prefix); one truncated line on desktop, full id on hover. */}
+                  <div title={m.id} className="break-all font-code text-[12px] text-ink md:truncate md:break-normal">{m.id}</div>
+                  {/* On a phone the protocols column folds under the name. */}
+                  <div className="mt-1 md:hidden">{verdicts}</div>
                 </td>
-                <td className="py-1.5">
+                <td className="hidden md:table-cell">
+                  {verdicts}
+                </td>
+                <td>
                   <select
                     aria-label={`surface for ${m.id}`}
                     value={m.pin ?? ''}
                     onChange={(e) => onPinChange(m, e.target.value)}
-                    className="rounded border border-line bg-transparent px-1.5 py-0.5 text-[12px] text-dim"
+                    className={cx('h-7 w-[112px] rounded-md border bg-transparent px-1.5 text-[12px] transition-colors hover:border-line-strong focus:border-accent focus:outline-none',
+                      m.pin ? 'border-line-strong text-ink' : 'border-transparent text-mute')}
                   >
-                    <option value="">auto</option>
+                    <option value="">Auto</option>
                     {PIN_SURFACES.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </td>
-                <td className="py-1.5 text-right">
-                  <button
-                    type="button"
-                    className={cx(btn.base, btn.ghost, 'px-2 py-0.5')}
+                <td className="text-right">
+                  <BusyButton busy={testing}
+                    className="h-7 w-[60px] px-0 text-[12px]"
                     disabled={running || sweepBusy || m.source === 'curated'}
-                    title={m.source === 'curated'
+                    onClick={() => testOne(m)}>
+                    <span title={m.source === 'curated'
                       ? 'this verdict is operator-curated — probes never overwrite it; release it first to re-test'
-                      : 'one tiny request for THIS model on all three surfaces — tests the wire, not the tool-dialect'}
-                    onClick={() => testOne(m)}
-                  >
-                    {testingId === m.id ? <Spinner /> : null}
-                    Test
-                  </button>
+                      : 'one tiny request for THIS model on all three surfaces — tests the wire, not the tool-dialect'}>Test</span>
+                  </BusyButton>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
         {pinErr && <div className="mt-2 text-[12px] text-bad">{pinErr}</div>}
@@ -1088,7 +1167,7 @@ function PricingModal({ account, onClose }: { account: Account; onClose: () => v
       <div className="space-y-4">
         {err && <div className="rounded-lg border border-bad/30 bg-bad/5 px-3 py-2 text-[13px] text-bad">{err}</div>}
         {rows === null ? <div className="space-y-2"><Skeleton className="h-3.5 w-40" /><Skeleton className="h-3.5 w-56" /></div>
-          : rows.length === 0 ? <p className="text-[13px] text-mute">No rates yet — every call from this account is UNPRICED until you add one.</p>
+          : rows.length === 0 ? <p className="text-[13px] text-mute">No rates yet — every call from this provider is UNPRICED until you add one.</p>
           : <div className="overflow-x-auto"><table className="w-full text-[13px]"><thead><tr className="text-left text-[11px] text-mute"><th className="pb-1 font-medium">model</th><th className="pb-1 font-medium">from</th><th className="pb-1 text-right">in</th><th className="pb-1 text-right">out</th><th className="pb-1 text-right">cache r</th><th className="pb-1 text-right">cache w</th><th className="pb-1"></th></tr></thead>
             <tbody className="font-mono">{rows.map((p) => (
               <tr key={`${p.model_id}-${p.effective_from}`} className="border-t border-line/50">
@@ -1274,118 +1353,125 @@ function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
     } finally { setMenuBusy(null); }
   };
 
-  return (
-    <div className="rounded-xl border border-line bg-surface transition-colors hover:border-line-strong">
-      <button type="button" className="w-full px-5 py-4 text-left" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <span className="text-[14px] font-semibold">{a.name}</span>
-          <Chip><span className="font-mono">{a.namespace}</span></Chip>
-          <Chip tone="neutral" className="text-mute"><span className="font-mono">{a.kind}</span></Chip>
-          <span className="font-mono text-[12px] text-mute">{a.models_count ?? '–'} models</span>
-          {!a.enabled && <Chip tone="warn">disabled</Chip>}
-          <span className="ml-auto hidden font-mono text-[12px] text-mute sm:block">{a.base_url}</span>
-          <span className={cx('text-mute transition-transform', open && 'rotate-180')}>⌄</span>
-        </div>
-      </button>
+  // One status mark per row: the worst key verdict (a failed key outranks
+  // an untested one, which outranks ok). No keys reads as untested.
+  const keyState: 'ok' | 'bad' | 'none' = a.keys.some((k) => k.last_test_ok === false) ? 'bad'
+    : a.keys.length > 0 && a.keys.every((k) => k.last_test_ok === true) ? 'ok' : 'none';
+  const keyStateText = keyState === 'ok' ? 'keys tested ok' : keyState === 'bad' ? 'a key failed its last test' : 'keys untested';
 
-      {/* Quota, slotted under the provider it describes (moved from the
-          dashboard's per-account quota panel). The stale pill is GONE by
-          request: freshness is now a reload icon that live-probes the
-          provider's usage endpoint and refreshes the snapshot — an action,
-          not an adjective. The icon glows accent when the snapshot is old. */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 pb-3">
-        <div className="min-w-44 flex-1">
-          {a.quota && a.quota.kind !== 'none' && a.quota.kind !== 'unknown'
-            ? <QuotaBars quota={a.quota} />
-            : <span className="text-[12px] text-mute">quota — no probe data yet</span>}
-        </div>
-        <div className="flex items-center gap-2">
-          {a.quota?.kind && a.quota.kind !== 'none' && (
-            <Chip tone="neutral"><span className="font-mono">{a.quota.kind}</span></Chip>
-          )}
-          {a.quota?.read_at && (
-            <span className="text-[11px] text-mute" title={`snapshot read ${a.quota.read_at}`}>
-              read {relTime(a.quota.read_at)}
+  return (
+    <div className={cx('transition-colors', !open && 'hover:bg-wash')}>
+      {/* The row: identity left, then three fixed columns (models, quota,
+          chevron) so every figure in the roster sits on one right edge. */}
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 px-5 py-3.5 md:grid-cols-[minmax(0,1fr)_88px_216px_20px]">
+        <button type="button" className="col-span-1 flex min-w-0 items-center gap-3 text-left" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+          <span title={keyStateText} className={cx('h-2 w-2 flex-none rounded-full',
+            keyState === 'ok' ? 'bg-ok' : keyState === 'bad' ? 'bg-bad' : 'bg-shade ring-1 ring-line-strong')} />
+          <span className="min-w-0">
+            <span className="flex items-center gap-2">
+              <span className="truncate text-[14px] font-semibold text-ink">{a.name}</span>
+              {!a.enabled && <Chip tone="warn">disabled</Chip>}
             </span>
-          )}
+            <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12px] text-mute">
+              <span className="font-code flex-none text-dim">{a.namespace}</span>
+              <span aria-hidden="true">·</span>
+              <span className="flex-none">{a.kind}</span>
+              <span aria-hidden="true" className="hidden sm:inline">·</span>
+              <span className="hidden truncate sm:inline" title={a.base_url}>{hostOf(a.base_url)}</span>
+            </span>
+          </span>
+        </button>
+        <button type="button" tabIndex={-1} aria-hidden="true" onClick={() => setOpen((o) => !o)}
+          className="hidden text-right text-[13px] md:block">
+          <span className="tnum text-ink">{a.models_count != null ? nfmt(a.models_count) : '–'}</span>
+          <span className="ml-1 text-mute">models</span>
+        </button>
+        <div className="col-span-2 flex min-w-0 items-center gap-2 md:col-span-1">
+          <div className="min-w-0 flex-1"><QuotaSummary quota={a.quota} /></div>
           <button type="button" disabled={quotaBusy}
-            title={stale(a.quota)
-              ? 'snapshot is stale — refresh from the provider\u2019s usage endpoint'
+            aria-label={`refresh quota for ${a.name}`}
+            title={a.quota?.read_at
+              ? `read ${relTime(a.quota.read_at)}${stale(a.quota) ? ' — stale, refresh from the provider\u2019s usage endpoint' : ''}`
               : 'refresh quota from the provider\u2019s usage endpoint'}
-            className={cx('rounded-md p-1 text-[13px] leading-none transition-colors disabled:opacity-40',
+            className={cx('grid h-6 w-6 flex-none place-items-center rounded-md text-[13px] leading-none transition-colors disabled:opacity-40',
               stale(a.quota) ? 'text-accent hover:bg-accent-dim' : 'text-mute hover:bg-hover hover:text-ink')}
-            onClick={(e) => { e.stopPropagation(); onReloadQuota(); }}>
-            {quotaBusy ? <Spinner /> : '↻'}
+            onClick={onReloadQuota}>
+            {quotaBusy ? <Spinner className="h-3 w-3" /> : '↻'}
           </button>
         </div>
+        <button type="button" tabIndex={-1} aria-hidden="true" onClick={() => setOpen((o) => !o)}
+          className="row-start-1 col-start-2 justify-self-end text-mute md:col-start-4">
+          <motion.span className="inline-block" animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.22 }}>⌄</motion.span>
+        </button>
       </div>
 
       {/* The expandable body animates its HEIGHT, not just its opacity: the
-          card below grows by a real, measurable amount, and a fade alone
+          row below moves by a real, measurable amount, and a fade alone
           leaves the layout snapping open under the operator's cursor. */}
       <Collapse open={open}>
-        <div className="px-5 pb-4">
-          <div className="rounded-lg border border-line bg-raised/40 px-3.5 py-3">
-            <div className="flex flex-wrap items-center gap-2">
-              {a.keys.length === 0
-                ? <span className="text-[13px] text-mute">no keys — add one when the upstream is confirmed</span>
-                : a.keys.map((k) => (
-                  <span key={k.id} className="flex items-center gap-2 rounded-full border border-line bg-raised px-2.5 py-1">
-                    <Mono className="text-[12px]">{k.label} · {k.hint}</Mono>
-                    <span className={cx('text-[12px]', k.last_test_ok === true ? 'text-ok' : k.last_test_ok === false ? 'text-bad' : 'text-mute')}
-                      title={k.last_test_detail ?? ''}>
-                      {k.last_test_ok === true ? '● tested ok' : k.last_test_ok === false ? '● test failed' : 'untested'}
-                    </span>
-                    {k.last_test_at && <span className="text-[11px] text-mute" title={k.last_test_detail ?? ''}>{relTime(k.last_test_at)}</span>}
-                    <button type="button" title="Test key (retest)" disabled={menuBusy != null}
-                      className="text-mute transition-colors hover:text-accent disabled:opacity-40"
-                      onClick={(e) => { e.stopPropagation(); void act('retest', () => post(`/admin/accounts/${a.id}/keys/${k.id}/retest`, {})); }}>
-                      ↻
-                    </button>
-                    <button type="button" title="Delete key" disabled={menuBusy != null}
-                      className="text-mute transition-colors hover:text-bad disabled:opacity-40"
-                      onClick={(e) => { e.stopPropagation(); setConfirm({ kind: 'key', keyID: k.id, label: `${k.label} · ${k.hint}` }); }}>
-                      ✕
-                    </button>
-                  </span>
-                ))}
-            </div>
+        <div className="px-5 pb-4 md:pl-10">
+          <div className="flex flex-wrap items-center gap-2">
+            <BusyButton busy={menuBusy === 'sync'} disabled={menuBusy != null}
+              onClick={() => void act('sync', () => post(`/admin/accounts/${a.id}/sync`, {}))}>Sync models</BusyButton>
+            <BusyButton busy={menuBusy === 'retest'} disabled={menuBusy != null || a.keys.length === 0}
+              onClick={() => void act('retest', () => post(`/admin/accounts/${a.id}/keys/${a.keys[0].id}/retest`, {}))}>Test key</BusyButton>
+            <span title={quotaHint}>
+              <BusyButton disabled={!quotaExposed} onClick={() => setQuotaOpen(true)}>Quota</BusyButton>
+            </span>
+            <span title="Set per-model USD rates for cost analysis">
+              <BusyButton onClick={() => setPricingOpen(true)}>Pricing</BusyButton>
+            </span>
+            <BusyButton onClick={() => setEditing(true)}>Edit</BusyButton>
+            {/* The result slot has a fixed place at the row's end, so a flash
+                or a busy word never pushes the buttons around. */}
+            <span className="min-w-24 text-[12px]" aria-live="polite">
+              {flash ? <span className="text-ok">{flash} ✓</span> : menuBusy ? <span className="text-mute">{menuBusy}…</span> : null}
+            </span>
+            <button type="button" className={cx(btn.base, 'ml-auto h-[30px] border border-transparent px-3 text-[13px] text-bad hover:bg-bad-dim')}
+              onClick={() => setConfirm({ kind: 'account' })}>
+              Delete provider
+            </button>
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px]')} disabled={menuBusy != null}
-              onClick={(e) => { e.stopPropagation(); void act('sync', () => post(`/admin/accounts/${a.id}/sync`, {})); }}>
-              {menuBusy === 'sync' ? <Spinner /> : '⇄'} Sync models
-            </button>
-            <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px]')} disabled={menuBusy != null || a.keys.length === 0}
-              onClick={(e) => { e.stopPropagation(); void act('retest', () => {
-                const k = a.keys[0];
-                return post(`/admin/accounts/${a.id}/keys/${k.id}/retest`, {});
-              }); }}>
-              {menuBusy === 'retest' ? <Spinner /> : null} Test key
-            </button>
-            <span title={quotaHint}>
-              <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px]')}
-                disabled={!quotaExposed}
-                onClick={(e) => { e.stopPropagation(); setQuotaOpen(true); }}>
-                Quota
-              </button>
-            </span>
-            <button type="button" title="Set per-model USD rates for cost analysis" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px]')}
-              onClick={(e) => { e.stopPropagation(); setPricingOpen(true); }}>
-              Pricing
-            </button>
-            <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px]')}
-              onClick={(e) => { e.stopPropagation(); setEditing(true); }}>
-              Edit
-            </button>
-            <button type="button" className={cx(btn.base, btn.danger, 'px-3 py-1.5 text-[13px]')}
-              onClick={(e) => { e.stopPropagation(); setConfirm({ kind: 'account' }); }}>
-              Delete
-            </button>
-            {flash && <span className="text-[12px] text-ok">{flash} ✓</span>}
-            {menuBusy && <span className="text-[12px] text-mute">{menuBusy}…</span>}
+          {/* Keys: one row each, the verdict in words beside its dot. */}
+          <div className="mt-4">
+            <div className="mb-1.5 text-[12px] text-mute">Keys</div>
+            {a.keys.length === 0
+              ? <p className="text-[13px] text-mute">No keys — add one when the upstream is confirmed.</p>
+              : (
+                <ul className="divide-y divide-line/60 rounded-lg border border-line bg-surface">
+                  {a.keys.map((k) => (
+                    <li key={k.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 px-3.5 py-2 sm:grid-cols-[minmax(0,1fr)_180px_auto]">
+                      <span className="min-w-0 truncate text-[13px]">
+                        <span className="text-ink">{k.label}</span>
+                        <span className="font-code ml-2 text-[12px] text-mute">{k.hint}</span>
+                      </span>
+                      <span className="hidden items-center gap-1.5 text-[12px] sm:flex" title={k.last_test_detail ?? ''}>
+                        <span className={cx('h-1.5 w-1.5 rounded-full', k.last_test_ok === true ? 'bg-ok' : k.last_test_ok === false ? 'bg-bad' : 'bg-line-strong')} />
+                        <span className={k.last_test_ok === true ? 'text-ok' : k.last_test_ok === false ? 'text-bad' : 'text-mute'}>
+                          {k.last_test_ok === true ? 'Tested ok' : k.last_test_ok === false ? 'Test failed' : 'Untested'}
+                        </span>
+                        {k.last_test_at && <span className="text-mute">· {relTime(k.last_test_at)}</span>}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <IconButton label="Test this key" disabled={menuBusy != null} busy={menuBusy === `retest ${k.id}`}
+                          onClick={() => void act(`retest ${k.id}`, () => post(`/admin/accounts/${a.id}/keys/${k.id}/retest`, {}))}>↻</IconButton>
+                        <IconButton label="Delete key" tone="bad" disabled={menuBusy != null}
+                          onClick={() => setConfirm({ kind: 'key', keyID: k.id, label: `${k.label} · ${k.hint}` })}>✕</IconButton>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
           </div>
+          {a.quota && a.quota.kind !== 'none' && a.quota.kind !== 'unknown' && (
+            <div className="mt-4 max-w-md">
+              <div className="mb-1.5 text-[12px] text-mute">
+                Quota{a.quota.read_at && <span title={`snapshot read ${a.quota.read_at}`}> · read {relTime(a.quota.read_at)}</span>}
+              </div>
+              <QuotaBars quota={a.quota} />
+            </div>
+          )}
           {editing && <EditAccountModal account={a} onClose={() => setEditing(false)} onSaved={onChanged} />}
           <ConfirmModal
             open={confirm != null}
@@ -1409,8 +1495,7 @@ function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
 
       {/* The models drawer is a SEPARATE collapse: it is its own long table
           and animating it inside the section above would nest two height
-          animations and leave the card's border out of step with its
-          content. */}
+          animations and leave the row's frame out of step with its content. */}
       <Collapse open={open}>
         <ModelsDrawer id={a.id} />
       </Collapse>
@@ -1450,7 +1535,9 @@ export default function Providers() {
     // stutter, not as polish.
     <div>
       <div className="mb-4 flex items-center justify-between">
-        <SectionLabel>Accounts</SectionLabel>
+        <span className="text-[13px] text-mute">
+          {accounts ? <><span className="tnum text-ink">{nfmt(accounts.length)}</span> provider{accounts.length === 1 ? '' : 's'}</> : '\u00a0'}
+        </span>
         <button type="button" className={cx(btn.base, btn.primary)} onClick={() => setAddOpen(true)}>
           <span className="text-[15px] leading-none">＋</span> Add provider
         </button>
@@ -1467,13 +1554,13 @@ export default function Providers() {
           <button type="button" className={cx(btn.base, btn.primary, 'mt-5')} onClick={() => setAddOpen(true)}>＋ Add your first provider</button>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="overflow-hidden rounded-xl border border-line bg-surface">
           {/* Alphabetical by namespace — the add-provider preset list sorts the
               same way, so the two lists read in one order.
               The Stagger lets the cards arrive as a sequence instead of all
               at once; it is a one-shot entrance, so the 60s quota refresh
               (which re-renders this list) never replays it. */}
-          <Stagger className="space-y-3">
+          <Stagger className="divide-y divide-line">
             {[...accounts].sort((a, b) => a.namespace.localeCompare(b.namespace)).map((a) => (
               <StaggerItem key={a.id}>
                 <AccountCard a={a} onChanged={() => load(true)}

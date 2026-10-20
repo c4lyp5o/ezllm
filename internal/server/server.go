@@ -96,6 +96,9 @@ type Server struct {
 	// this registry answers only "running since when" and holds the cancel.
 	sweepsMu sync.Mutex
 	sweeps   map[int64]*sweepRun
+	// comboAutoProbe: a combo write probes its untested hop models
+	// (combo_autoprobe.go). Off in unit tests unless they ask for it.
+	comboAutoProbe bool
 
 	// ghMu guards ghDevices: the in-flight GitHub device flows started from
 	// the dashboard (POST /admin/github/device). An entry holds GitHub's
@@ -156,6 +159,10 @@ type Options struct {
 	// Zero value = the production GitHub endpoints (public CLI client id);
 	// tests inject a routed HTTP client. See internal/githubcopilot.
 	GitHubDevice githubcopilot.Config
+	// ComboAutoProbe probes a combo's untested hop models, in the background,
+	// whenever the combo is created or its hops change. main.go turns it on
+	// unless EZLLM_COMBO_AUTOPROBE=off.
+	ComboAutoProbe bool
 }
 
 // usageTZOrDefault resolves the day-bucketing zone. Empty or whitespace means
@@ -189,9 +196,10 @@ func New(opts Options) *Server {
 		web: webFS(), corsOrigins: opts.CORSOrigins,
 		usageTZ:           usageTZOrDefault(opts.UsageTZ),
 		compressionMinAbs: opts.CompressionMinAbs, compressionMaxMS: opts.CompressionMaxMS,
-		shadowSampler: opts.ShadowSampler,
-		ghDevices:     map[string]*ghDevice{},
-		ghCfg:         opts.GitHubDevice,
+		shadowSampler:  opts.ShadowSampler,
+		ghDevices:      map[string]*ghDevice{},
+		ghCfg:          opts.GitHubDevice,
+		comboAutoProbe: opts.ComboAutoProbe,
 	}
 	// A server without a tester cannot run the key test; default one so the
 	// admin routes fail loudly at construction rather than nil-panic per request.

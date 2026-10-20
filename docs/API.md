@@ -445,6 +445,14 @@ still honored). A disabled combo refuses inference with `combo "x" is disabled` 
 ### `POST /admin/combos/{id}/hops` → `200`
 Replaces the hop list atomically (same body shape, `hops` only).
 
+**Hop auto-probe.** Every successful combo write (`POST /admin/combos`, `PATCH`,
+`POST|PUT …/hops`) starts a background protocol probe of that combo's **enabled hop
+models only** — never the account catalog — on just the surfaces still `NULL`.
+Curated rows, proven surfaces, disabled hops and disabled combos/accounts cost nothing.
+It holds the account's sweep slot (visible on `GET /admin/accounts/{id}/sync`) and is
+skipped if a sweep is already running. Probes are ledgered as `admin:test`. The
+response shape is unchanged. `EZLLM_COMBO_AUTOPROBE=off` disables it.
+
 ### `GET|POST /admin/tokens` · `PATCH|DELETE /admin/tokens/{id}`
 ```jsonc
 // POST  → 201 (token plaintext returned EXACTLY ONCE, never again)

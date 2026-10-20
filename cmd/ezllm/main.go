@@ -289,6 +289,8 @@ func run() error {
 		CompressionMaxMS:  cfg.Compression.MaxPipelineMS,
 		// Sampled shadow compression (addendum #7): off unless configured.
 		ShadowSampler: shadowSamplerFor(cfg.Compression.ShadowPct),
+		// A combo write probes only its own untested hops — never a catalog.
+		ComboAutoProbe: os.Getenv("EZLLM_COMBO_AUTOPROBE") != "off",
 	})
 
 	if os.Getenv("EZLLM_PRICE_REFRESH") != "off" {

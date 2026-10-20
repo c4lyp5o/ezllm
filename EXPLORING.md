@@ -206,8 +206,8 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
 
 ### M5 — compression: engines, stages, profiles ✅
 - `internal/compress/compress.go` — engine registry: `session_dedup`, `rtk`, `headroom`, `lite`,
-  `caveman`, `budget`; ordered stage pipeline with per-stage options; fail-open + final-turn /
-  tool-result exemption enforced here (see §6).
+  `caveman`, `ansi`, `fold`, `jsonmin`, `tool_ref`, `blobs`; ordered stage pipeline with
+  per-stage options; fail-open + final-turn / tool-result exemption enforced here (see §6).
 - `internal/server/compression.go` — `/admin/compression-profiles` CRUD; per-request profile
   resolution (`x-ezllm-compression` header → combo default → off).
 - `internal/compress/caveman.go`, `rtk.go` — the aggressive pair (levels / surface-aware);

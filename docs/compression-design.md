@@ -16,6 +16,10 @@ records every design decision where the plan left latitude.
 | Stats: compression/savings granularities | ✅ (already summed by `UsageReport`) | |
 | `headroom` + `lite` engines | ✅ (M6.5 phase 2, shipped) | |
 | `caveman` (prose condensation) | ✅ (M7, shipped) | deterministic rule packs, text-only, protected spans + span-integrity gate, `lite`/`standard`; aggressive+ultra = stage composition |
+| `ansi` + `fold` engines (terminal output) | ✅ 2026-10-20 | strip ANSI escapes; fold a long terminal log to its head/tail |
+| `jsonmin` engine | ✅ 2026-10-20 | whitespace-free JSON tool output |
+| `tool_ref` engine | ✅ 2026-10-20 | a repeated tool result becomes a reference to the first |
+| `blobs` engine | ✅ 2026-10-20 | base64 runs and data URIs become markers |
 | `budget` engine | deleted 2026-10-19 | Dropping whole messages to fit a token budget changed the prompt prefix every time it activated (an upstream cache miss) and could split a tool call from its result. No profile used it. |
 | Profile editor page (drag-order stages) | | M6.5 (Compression page stays a read-only preview) |
 | Every engine on every wire shape (chat, messages, responses) | ✅ 2026-10-19 | see "Wire shapes" below |

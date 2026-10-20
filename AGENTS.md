@@ -60,7 +60,7 @@ cmd/m2verify/       live-ledger acceptance checker
 internal/server/    HTTP layer: routes, auth, admin API, healthz, version
 internal/router/    combo resolution, strategies, rules eligibility, pins
 internal/proxy/     attempt/commit split, retry, failover, usage sniff, TTFT
-internal/compress/  staged engines (session_dedup, rtk, headroom, lite, caveman, budget)
+internal/compress/  staged engines (session_dedup, rtk, headroom, lite, caveman, ansi, fold, jsonmin, tool_ref, blobs)
 internal/translate/ wire-protocol IR + per-wire codecs (anthropic↔openai↔responses)
 internal/store/     SQLite schema + queries (migrations carry schema_version)
 internal/provider/  provider kinds, presets, catalog probes, quota oracles

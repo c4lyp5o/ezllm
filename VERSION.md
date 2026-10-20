@@ -9,7 +9,55 @@ dashboard health strip, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v0.0.19**
+**Current: v0.0.20**
+
+---
+
+## v0.0.20 — 2026-10-20
+
+The compression stack grows to ten engines, wire translation becomes the
+default, and the dashboard gets a data-terminal redesign.
+
+- **Five new compression engines**, all on one wire-neutral text walker so a
+  request is transformed identically whether it arrives on chat, messages or
+  responses: `ansi` and `fold` (terminal output), `jsonmin` (whitespace-free
+  JSON tool output), `tool_ref` (repeated tool results become references) and
+  `blobs` (base64 runs and data URIs become markers). The `budget` engine is
+  **deleted** — it needed a known `max_tokens` and silently did nothing
+  without one.
+- **The pipeline is now ordered by meaning.** A per-profile `tool_classes`
+  table says what each tool is (file read, edit, diff, …); a file read now
+  ships byte-identical so the agent's next edit still matches, and an unknown
+  tool is its own class — never truncated, only tidied by the lossless
+  engines. `fresh_tool_output` decides whether a final message that is purely
+  tool output may be trimmed on its first send (schema v24).
+- **A committed-prefix memo** per request, so the cached prefix is exactly
+  what was committed; when dedup drops a segment the commit is exact rather
+  than approximate.
+- **Universal wire translation is default-on** (no yaml needed; an
+  anthropic-only account is pre-marked so the universal matrix translates
+  instead of refusing). One translation path in `commit`, a `gatewayFault`
+  helper, and the `zz_` files renamed.
+- **The proxy bills every input token into one bucket**, honours the account
+  usage convention, and splices the hop model into the client bytes instead
+  of re-marshalling them. A hop stays parked after a transport error, and an
+  oversized body is a 413.
+- **Provider and registration honesty**: quota and catalog reads honour
+  custom headers, pagination and no-endpoint statuses; the management key
+  stays on tokenrouter; retries honour http statuses and sweeps keep proven
+  verdicts; a claude-web key keeps its wire.
+- **Perf**: one catalog read per hop, an in-memory routing catalog snapshot
+  invalidated by `catalog_gen` (schema v23), a throttled reservation prune
+  and an allocation-free header strip.
+- **The dashboard is a data terminal** — exact numbers (never abbreviated),
+  motion.dev throughout, and a screen-by-screen polish pass verified in a
+  browser. The build is now reproducible: `web/src/index.css` excludes
+  `web/dist/` from Tailwind's content scan, because `dist/` is a tracked
+  build output and Tailwind was reading the previous build's class names
+  back into the next one.
+- `unmetered_rows` on health, overview, live feed and dashboard; the tz day
+  report's `applied_saved`; the meter is all-or-nothing per batch; web
+  bridges now require a process secret.
 
 ---
 

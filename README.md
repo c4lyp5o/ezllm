@@ -30,8 +30,9 @@ suite · web build). `GET /healthz` reports the running release version — see
   versioned model prices with derived cost, and real-vs-notional compression
   savings.
 - **Compression that ships bytes, not promises.** Staged engines —
-  `session_dedup`, `rtk`, `headroom`, `lite`, `caveman`, `budget` — with
-  per-profile configuration and fail-open semantics.
+  `session_dedup`, `rtk`, `headroom`, `lite`, `caveman`, `ansi`, `fold`,
+  `jsonmin`, `tool_ref`, `blobs` — with per-profile configuration and
+  fail-open semantics.
 - **Ops surface included.** Dashboard, live request feed, analytics, key-test
   pipeline with protocol sweeps, and a disaster-recovery export — all served
   from the same binary.

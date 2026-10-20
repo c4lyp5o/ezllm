@@ -2,6 +2,46 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14); full history via `git log`.
 
+## 2026-10-20 — ten compression engines, universal translation, data-terminal dashboard
+
+- **Compression: ten engines on one wire-neutral text walker.** New: `ansi`
+  and `fold` (terminal output), `jsonmin` (whitespace-free JSON tool output),
+  `tool_ref` (repeated tool results become references), `blobs` (base64 runs
+  and data URIs become markers). The `budget` engine is deleted — it needed a
+  known `max_tokens` and did nothing without one. A request is transformed
+  identically whether it arrives on chat, messages or responses.
+- **The pipeline is ordered by meaning.** A per-profile `tool_classes` table
+  names what each tool is (file read, edit, diff, …); file reads ship
+  byte-identical so the agent's next edit still matches; an unknown tool is
+  its own class — never truncated, only tidied by the lossless engines.
+  `fresh_tool_output` decides whether a purely-tool final message may be
+  trimmed on its first send (schema v24). A committed-prefix memo keeps the
+  cached prefix exactly equal to what was committed.
+- **Universal wire translation is default-on** — no yaml needed, and an
+  anthropic-only account is pre-marked so the universal matrix translates
+  instead of refusing. One translation path in `commit`.
+- **Proxy**: every input token lands in one billed bucket, the account usage
+  convention is honoured, the hop model is spliced into the client bytes
+  instead of being re-marshalled, a hop stays parked after a transport error,
+  and an oversized body is a 413.
+- **Provider/registration**: quota and catalog reads honour custom headers,
+  pagination and no-endpoint statuses; the management key stays on
+  tokenrouter; retries honour http statuses; sweeps keep proven verdicts; a
+  claude-web key keeps its wire.
+- **Perf**: one catalog read per hop; an in-memory routing catalog snapshot
+  invalidated by `catalog_gen` (schema v23); a throttled reservation prune;
+  an allocation-free header strip.
+- **Dashboard: the data-terminal redesign.** Exact numbers (never
+  abbreviated), motion.dev throughout, and a screen-by-screen polish pass
+  verified in a live browser — including three fixes the pass surfaced: the
+  modal's exit animation was unreachable, a page-level `AnimatePresence
+  initial={false}` was suppressing every descendant entrance, and the
+  committed bundle was carrying dead CSS classes because Tailwind was
+  scanning the tracked `web/dist/` output. The build is now reproducible.
+- `unmetered_rows` on health, overview, live feed and dashboard; the tz day
+  report's `applied_saved`; the meter is all-or-nothing per batch; web
+  bridges require a process secret.
+
 ## 2026-10-19 — claude-bridge M1: the Claude subscription as an ezllm account
 
 The Claude subscription becomes an ezllm account without the router learning a new

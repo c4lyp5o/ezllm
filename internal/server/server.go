@@ -18,6 +18,7 @@ import (
 	"mime/multipart"
 	"net"
 	"net/http"
+	"net/netip"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -101,6 +102,8 @@ type Server struct {
 	comboAutoProbe bool
 	// setupCode gates first-boot setup (dashboard_auth.go).
 	setupCode string
+	// trustedProxies: whose forwarding headers sourceIP believes.
+	trustedProxies []netip.Prefix
 
 	// ghMu guards ghDevices: the in-flight GitHub device flows started from
 	// the dashboard (POST /admin/github/device). An entry holds GitHub's
@@ -169,6 +172,9 @@ type Options struct {
 	// (main.go mints and prints it). Empty = setup refused; the operator
 	// restarts for a code or sets EZLLM_DASHBOARD_PASSWORD.
 	SetupCode string
+	// TrustedProxies are the reverse proxies whose X-Forwarded-For the auth
+	// rate limiter believes (clientip.go). Empty = the socket peer only.
+	TrustedProxies []netip.Prefix
 }
 
 // usageTZOrDefault resolves the day-bucketing zone. Empty or whitespace means
@@ -207,6 +213,7 @@ func New(opts Options) *Server {
 		ghCfg:          opts.GitHubDevice,
 		comboAutoProbe: opts.ComboAutoProbe,
 		setupCode:      opts.SetupCode,
+		trustedProxies: opts.TrustedProxies,
 	}
 	// A server without a tester cannot run the key test; default one so the
 	// admin routes fail loudly at construction rather than nil-panic per request.

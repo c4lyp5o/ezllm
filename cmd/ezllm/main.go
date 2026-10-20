@@ -167,6 +167,16 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// Reverse proxies whose X-Forwarded-For the sign-in rate limiter
+	// believes. Unset = socket peer only (correct without a proxy; behind one,
+	// every client would share the proxy's bucket).
+	trustedProxies, err := server.ParseTrustedProxies(os.Getenv("EZLLM_TRUSTED_PROXIES"))
+	if err != nil {
+		return fmt.Errorf("EZLLM_TRUSTED_PROXIES: %w", err)
+	}
+	if len(trustedProxies) > 0 {
+		log.Info("trusted proxies for sign-in rate limiting", "proxies", os.Getenv("EZLLM_TRUSTED_PROXIES"))
+	}
 
 	// ── wiring ──
 	client := upstreamClient(cfg)
@@ -299,6 +309,7 @@ func run() error {
 		// A combo write probes only its own untested hops — never a catalog.
 		ComboAutoProbe: os.Getenv("EZLLM_COMBO_AUTOPROBE") != "off",
 		SetupCode:      setupCode,
+		TrustedProxies: trustedProxies,
 	})
 
 	if os.Getenv("EZLLM_PRICE_REFRESH") != "off" {

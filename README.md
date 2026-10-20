@@ -189,6 +189,11 @@ built-in defaults.
   warning and uses `info`)
 - `EZLLM_LOG_COLOR` — `auto` (default: color only on a terminal, honoring
   `NO_COLOR`) | `always` | `never`
+- `EZLLM_TRUSTED_PROXIES` — comma-separated IPs/CIDRs of reverse proxies in
+  front of ezllm (e.g. `172.18.0.0/16`). The sign-in/setup rate limiter reads
+  the client from `X-Forwarded-For` only when the connection comes from one of
+  these; unset, it keys on the socket peer. Set it behind any proxy, or every
+  client shares the proxy's limit.
 - `EZLLM_DASHBOARD_PASSWORD` / `EZLLM_DASHBOARD_PASSWORD_FILE` — the first
   dashboard password (at least 12 characters), used only while setup is
   pending; it never overwrites a password that is already set

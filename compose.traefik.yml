@@ -12,7 +12,7 @@
 # is redundant, and `tls: true` on the router breaks the ACME defaults).
 #
 # Three routers, deliberately:
-#   * ezllm-login  — the sign-in endpoint alone, behind a deliberately tight
+#   * ezllm-login  — sign-in and first-boot setup, behind a deliberately tight
 #     per-source rate limit (a brute-force budget, not a nicety).
 #   * ezllm-admin  — /admin/* is the CONTROL PLANE (dashboard password, provider
 #     keys, client tokens). It is public: the operator needs it from anywhere,
@@ -24,6 +24,12 @@ services:
   ezllm:
     networks:
       - traefik_default
+    environment:
+      # Every request reaches ezllm from traefik's address, so ezllm's own
+      # sign-in limiter must read X-Forwarded-For from traefik — or five wrong
+      # guesses from anyone lock sign-in for everyone. This is the
+      # traefik_default subnet (`docker network inspect traefik_default`).
+      EZLLM_TRUSTED_PROXIES: ${EZLLM_TRUSTED_PROXIES:-172.18.0.0/16}
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik_default"

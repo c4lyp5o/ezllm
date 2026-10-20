@@ -28,6 +28,10 @@ file in the same commit, or the test fails.
 - **Fix: the access log no longer prints VS Code path tokens.** The alias
   carries a client token as a URL segment; the log line now shows
   `/api/v1/vscode/***/…`. A reverse proxy in front must redact it too.
+- **Fix: behind a reverse proxy, one guesser no longer locks everyone out.**
+  The sign-in/setup limiter keyed on the socket peer, which behind traefik is
+  traefik for every client. `EZLLM_TRUSTED_PROXIES` names the proxies whose
+  `X-Forwarded-For` it believes; the traefik overlay sets it.
 - **Fix: sign-in can no longer be used to burn CPU.** Login, setup and
   password change share four concurrent bcrypt slots; past that, `429` with
   `Retry-After`.

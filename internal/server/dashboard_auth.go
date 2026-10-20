@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"errors"
-	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -18,14 +17,6 @@ var loginRateLimiter = struct {
 	attempts map[string][]time.Time
 }{
 	attempts: map[string][]time.Time{},
-}
-
-func loginClientIP(r *http.Request) string {
-	ip := r.RemoteAddr
-	if host, _, err := net.SplitHostPort(ip); err == nil {
-		ip = host
-	}
-	return ip
 }
 
 func loginAllowed(ip string) bool {
@@ -156,7 +147,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "server_error", "dashboard authentication unavailable")
 		return
 	}
-	ip := loginClientIP(r)
+	ip := s.sourceIP(r)
 	if !loginAllowed(ip) {
 		writeErr(w, http.StatusTooManyRequests, "rate_limited", "too many attempts; try again later")
 		return
@@ -220,7 +211,7 @@ func (s *Server) handleDashboardLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "server_error", "dashboard authentication unavailable")
 		return
 	}
-	ip := loginClientIP(r)
+	ip := s.sourceIP(r)
 	if !loginAllowed(ip) {
 		writeErr(w, http.StatusTooManyRequests, "rate_limited", "too many login attempts; try again later")
 		return

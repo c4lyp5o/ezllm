@@ -116,7 +116,8 @@ default, and the dashboard gets a data-terminal redesign.
 - **Command Code quota**: an optional session cookie (stored in the encrypted
   `management_key`) lets the quota read the account's 5h, weekly and monthly
   limits from the usage page's billing endpoint. Pasting the whole Cookie
-  header also shows "expires in N days" in the edit form.
+  header also shows "expires in N days" in the edit form. OpenAI gets the same
+  opt-in: a platform session token reads the credit balance.
 
 ---
 

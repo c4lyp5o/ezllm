@@ -192,6 +192,14 @@ func isTokenRouter(acct Account) bool {
 	return err == nil && strings.EqualFold(u.Scheme, "https") && strings.EqualFold(u.Hostname(), "api.tokenrouter.com")
 }
 
+func isOpenAI(acct Account) bool {
+	if acct.Kind != KindOpenAICompatible {
+		return false
+	}
+	u, err := url.Parse(strings.TrimSpace(acct.BaseURL))
+	return err == nil && strings.EqualFold(u.Scheme, "https") && strings.EqualFold(u.Hostname(), "api.openai.com")
+}
+
 func isCommandCode(acct Account) bool {
 	if acct.Kind != KindOpenAICompatible {
 		return false
@@ -275,6 +283,14 @@ func (a *openAICompatible) ReadQuota(ctx context.Context, acct Account, key stri
 			return Quota{}, ErrQuotaUnsupported
 		}
 		authKey = acct.ManagementKey
+	}
+	if isOpenAI(acct) {
+		// The credit read takes a platform SESSION token only; the sk- key
+		// draws a 401. Without one the account stays "measured".
+		authKey = openAISessionToken(acct.ManagementKey)
+		if authKey == "" {
+			return Quota{}, ErrQuotaUnsupported
+		}
 	}
 	hdrs := withCustomHeaders(map[string]string{"Authorization": "Bearer " + authKey}, acct)
 	if isCommandCode(acct) {

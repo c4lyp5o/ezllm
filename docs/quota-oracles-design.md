@@ -108,3 +108,13 @@ Non-batch findings (recorded, not built):
 - Live canary: copied-DB rig on a scratch port, `GET
   /admin/accounts/{12,13,14,9}/quota` → kinds + numbers must match the probe
   table above. Zero inference spend (all GET oracles).
+
+## Addendum 2026-10-20 — session-credential oracles (OpenAI)
+
+OpenAI's `GET api.openai.com/v1/dashboard/billing/credit_grants` answers `200` to a platform
+session token (`sess-…`, copied from the dashboard's Authorization header) and `401` to an `sk-`
+inference key; the `openai-organization` header is not required (live-verified). Stored in
+`management_key`; without it the account stays "measured". `parseOpenAICreditGrants` maps
+`total_available` → balance (can be negative) and `total_used` → cost_total; the older
+`parseMoneyQuota` "classic" branch is NOT reused (it reports `total_granted` as the balance).
+No expiry hint: the session token carries none.

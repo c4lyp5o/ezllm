@@ -169,6 +169,10 @@ func quotaOracleFor(acct Account) (urlStr string, parse func(string) Quota, ok b
 		// Management API, not the inference API: requires a MANAGEMENT key
 		// (sk-… from the TokenRouter dashboard), not the inference key.
 		return "https://api.tokenrouter.com/api/management/self/wallet", parseTokenRouterWallet, true
+	case "api.openai.com":
+		// Dashboard billing read: origin-rooted and authenticated with a
+		// platform SESSION token (sess-…), not the sk- inference key.
+		return u.Scheme + "://" + u.Host + "/v1/dashboard/billing/credit_grants", parseOpenAICreditGrants, true
 	case "api.commandcode.ai":
 		// Cookie-gated billing read (NOT the provider API): origin-rooted,
 		// authenticated with the operator's web session — see ReadQuota.
@@ -464,4 +468,37 @@ func CommandCodeCookieExpiry(pasted string) (time.Time, bool) {
 		return t, err == nil
 	}
 	return time.Time{}, false
+}
+
+// openAISessionToken normalises a pasted platform session token: bare
+// "sess-…" or with a "Bearer " prefix.
+func openAISessionToken(pasted string) string {
+	t := strings.TrimSpace(pasted)
+	if len(t) > 7 && strings.EqualFold(t[:7], "bearer ") {
+		t = strings.TrimSpace(t[7:])
+	}
+	return t
+}
+
+// parseOpenAICreditGrants parses GET /v1/dashboard/billing/credit_grants:
+//
+//	{"object":"credit_summary","total_granted":5.0,"total_used":6.39,
+//	 "total_available":-1.39,"total_paid_available":0.0,"grants":{…}}
+//
+// balance = total_available (may be negative once the grants are overspent —
+// shown as it is), cost_total = total_used. Not parseMoneyQuota's "classic"
+// branch: that one reports total_granted as the balance.
+func parseOpenAICreditGrants(body string) Quota {
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(body), &raw); err != nil || jsonStr(raw, "object") != "credit_summary" {
+		return Quota{}
+	}
+	bal := jsonFloat(raw, "total_available")
+	if bal == nil {
+		return Quota{}
+	}
+	return Quota{
+		Kind: QuotaMoney, Raw: body, ReadAt: time.Now().UTC(),
+		Balance: bal, BalanceUnit: "USD", CostTotal: jsonFloat(raw, "total_used"),
+	}
 }

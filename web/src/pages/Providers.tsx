@@ -667,6 +667,19 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
             <p className="mt-1 text-[12px] text-mute">Used only to read the wallet balance — stored encrypted, never sent upstream.</p>
           </div>
         )}
+        {d.preset === 'openai' && (
+          <div>
+            <label className={labelCls} htmlFor="ap-oa">Platform session token <span className="text-mute">(optional)</span></label>
+            <input id="ap-oa" type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
+              placeholder="Paste the sess-… bearer token from platform.openai.com"
+              value={d.managementKey} onChange={(e) => set('managementKey', e.target.value)} />
+            <p className="mt-1 text-[12px] text-mute">
+              Used only to read your credit balance — stored encrypted, sent only to api.openai.com. Copy it
+              from the Authorization header of a platform.openai.com request (DevTools → Network). It expires
+              with your web session; paste a fresh one when the quota shows an error.
+            </p>
+          </div>
+        )}
         {d.preset === 'commandcode' && (
           <div>
             <label className={labelCls} htmlFor="ap-cc">Session cookie <span className="text-mute">(optional)</span></label>
@@ -805,6 +818,14 @@ function EditAccountModal({ account, onClose, onSaved }: { account: Account | nu
             <label className={labelCls}>Management key (optional, rotates the stored value)</label>
             <input type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
               placeholder={account?.management_key_set ? '•••• (set — paste to replace)' : 'Paste the TokenRouter management key'}
+              value={managementKey} onChange={(e) => setManagementKey(e.target.value)} />
+          </div>
+        )}
+        {kind === 'openai-compatible' && account?.namespace === 'openai' && (
+          <div>
+            <label className={labelCls}>Platform session token (optional, rotates the stored value)</label>
+            <input type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
+              placeholder={account?.management_key_set ? '•••• (set — paste to replace)' : 'Paste the sess-… bearer token from platform.openai.com'}
               value={managementKey} onChange={(e) => setManagementKey(e.target.value)} />
           </div>
         )}

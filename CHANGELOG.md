@@ -17,6 +17,11 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M14); full histor
   `fresh_tool_output` decides whether a purely-tool final message may be
   trimmed on its first send (schema v24). A committed-prefix memo keeps the
   cached prefix exactly equal to what was committed.
+- **Dashboard**: the `/admin/usage` totals row now carries `applied_saved`
+  (Stats' "Removed by compression" card read 0 over non-zero rows); the
+  budget-stage box, the "context saved" column, the version in the Dashboard
+  strip and the "(unconfirmed)"/"(no probe)" surface tags are gone; Chat opens
+  with one column.
 - **Universal wire translation is default-on** — no yaml needed, and an
   anthropic-only account is pre-marked so the universal matrix translates
   instead of refusing. One translation path in `commit`.

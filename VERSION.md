@@ -5,7 +5,7 @@ on the same date share one version. The patch component increments by one per
 date (`v0.0.1`, `v0.0.2`, …).
 
 The current version is served by `GET /healthz` (`version` field), shown in the
-dashboard health strip, and asserted against this file by
+dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 

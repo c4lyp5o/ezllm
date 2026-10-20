@@ -161,8 +161,9 @@ during the year is still correct.
 (`order by ttft_ms`, position `n/2 + 1`). This is the historical behaviour, kept unchanged —
 it is directional dashboard guidance, not a statistical claim. The response's `totals` row
 carries its OWN `p50_ttft_ms` — a single median over the whole window (medians do not add,
-so it is never a sum of the group medians) — plus `context_pre`/`context_saved` summed like
-every other metric.
+so it is never a sum of the group medians) — plus `applied_saved`, `context_pre` and
+`context_saved` summed like every other metric (`applied_saved` is the token total the
+dashboard's savings cards read; a totals row that omitted it showed 0 over non-zero groups).
 
 ### `POST /admin/accounts` → `201`
 ```jsonc

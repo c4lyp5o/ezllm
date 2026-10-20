@@ -148,7 +148,7 @@ export default function Economics() {
       {/* Large-request filter. It commits on Analyze rather than on change: a
           six-digit number fires six requests as it is typed. */}
       <section className="rounded-xl border border-line bg-surface px-5 py-4">
-        <SectionLabel>large-request filter</SectionLabel>
+        <SectionLabel>Large-request filter</SectionLabel>
         <div className="mt-3 flex flex-wrap items-end gap-3">
           <label className="text-[12px] text-mute">
             Minimum actual input tokens
@@ -180,16 +180,16 @@ export default function Economics() {
               again it gets its OWN card, not an arithmetic resurrection. */}
           <Stagger className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <StaggerItem>
-              <Metric label="actual input" value={formatTokens(input)} note={`${nfmt(matching)} matching calls · cold, non-cached`} />
+              <Metric label="Actual input" value={formatTokens(input)} note={`${nfmt(matching)} matching calls · cold, non-cached`} />
             </StaggerItem>
             <StaggerItem>
-              <Metric label="output" value={formatTokens(output)} note={`${pct(output, inputTotal + output)} of volume`} />
+              <Metric label="Output" value={formatTokens(output)} note={`${pct(output, inputTotal + output)} of volume`} />
             </StaggerItem>
             <StaggerItem>
-              <Metric label="cached read" value={formatTokens(cached)} note={`${pct(cached, inputTotal)} of input re-read from cache`} />
+              <Metric label="Cached read" value={formatTokens(cached)} note={`${pct(cached, inputTotal)} of input re-read from cache`} />
             </StaggerItem>
             <StaggerItem>
-              <Metric label="compression saved" value={formatTokens(saved)}
+              <Metric label="Compression saved" value={formatTokens(saved)}
                 tone={saved > 0 ? 'text-ok' : undefined}
                 note={`${saved > 0 ? pctWhole(saved, before) : '0%'} approx. reduction (shipped rewrites)`} />
             </StaggerItem>
@@ -202,17 +202,17 @@ export default function Economics() {
                   are already exclusive — tokens_in is cold input, so the
                   three parts sum to inputTotal (cold + read + write), not to
                   the cold column. */}
-              <div className="mb-1 text-[12px] text-mute">input composition</div>
+              <div className="mb-1 text-[12px] text-mute">Input composition</div>
               <CompositionBar height={12} parts={[
-                { key: 'cold', label: 'cold input', value: cold, color: VIZ.in },
-                ...(cached > 0 ? [{ key: 'cached', label: 'cached read', value: cached, color: VIZ.cached }] : []),
-                ...(cwrite > 0 ? [{ key: 'cwrite', label: 'cached write', value: cwrite, color: VIZ.budget }] : []),
+                { key: 'cold', label: 'Cold input', value: cold, color: VIZ.in },
+                ...(cached > 0 ? [{ key: 'cached', label: 'Cached read', value: cached, color: VIZ.cached }] : []),
+                ...(cwrite > 0 ? [{ key: 'cwrite', label: 'Cached write', value: cwrite, color: VIZ.budget }] : []),
               ]} />
               <ul className="mt-3 space-y-1.5">
                 {[
-                  { key: 'cold', label: 'cold input', value: cold, color: VIZ.in },
-                  ...(cached > 0 ? [{ key: 'cached', label: 'cached read', value: cached, color: VIZ.cached }] : []),
-                  ...(cwrite > 0 ? [{ key: 'cwrite', label: 'cached write', value: cwrite, color: VIZ.budget }] : []),
+                  { key: 'cold', label: 'Cold input', value: cold, color: VIZ.in },
+                  ...(cached > 0 ? [{ key: 'cached', label: 'Cached read', value: cached, color: VIZ.cached }] : []),
+                  ...(cwrite > 0 ? [{ key: 'cwrite', label: 'Cached write', value: cwrite, color: VIZ.budget }] : []),
                 ].map((p) => (
                   <li key={p.key} className="flex items-center gap-2 text-[13px]">
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: p.color }} />
@@ -224,15 +224,15 @@ export default function Economics() {
               </ul>
               {/* Output composition (disjoint): reasoning is a SUBSET of
                   output — visible output is the remainder. */}
-              <div className="mb-1 mt-5 text-[12px] text-mute">output composition</div>
+              <div className="mb-1 mt-5 text-[12px] text-mute">Output composition</div>
               <CompositionBar height={12} parts={[
-                { key: 'vis', label: 'visible output', value: visibleOut, color: VIZ.out },
-                { key: 'reason', label: 'reasoning', value: reasoning, color: VIZ.reasoning },
+                { key: 'vis', label: 'Visible output', value: visibleOut, color: VIZ.out },
+                { key: 'reason', label: 'Reasoning', value: reasoning, color: VIZ.reasoning },
               ]} />
               <ul className="mt-3 space-y-1.5">
                 {[
-                  { key: 'vis', label: 'visible output', value: visibleOut, color: VIZ.out },
-                  { key: 'reason', label: 'reasoning', value: reasoning, color: VIZ.reasoning },
+                  { key: 'vis', label: 'Visible output', value: visibleOut, color: VIZ.out },
+                  { key: 'reason', label: 'Reasoning', value: reasoning, color: VIZ.reasoning },
                 ].map((p) => (
                   <li key={p.key} className="flex items-center gap-2 text-[13px]">
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: p.color }} />
@@ -246,7 +246,7 @@ export default function Economics() {
                 <div className="mt-3 border-t border-line pt-3">
                   <div className="flex items-center gap-2 text-[13px]">
                     <span className="h-2 w-2 shrink-0 rounded-full bg-ok" />
-                    <span className="text-dim">removed before forwarding</span>
+                    <span className="text-dim">Removed before forwarding</span>
                     <span className="tnum ml-auto font-mono text-ok">−{formatTokens(saved)}</span>
                     <span className="w-12 text-right font-mono text-mute">{pctWhole(saved, before)}</span>
                   </div>
@@ -255,7 +255,7 @@ export default function Economics() {
             </Panel>
 
             <Panel label={<SectionLabel>Reasoning · the tokens you never see</SectionLabel>}>
-              <Metric label="reasoning output" value={formatTokens(reasoning)}
+              <Metric label="Reasoning output" value={formatTokens(reasoning)}
                 tone={reasoning > 0 ? 'text-warn' : undefined}
                 note={`${pct(reasoning, output)} of tokens out`} />
               <p className="mt-3 text-[13px] leading-relaxed text-dim">
@@ -264,7 +264,7 @@ export default function Economics() {
                 model can cost more than a long answer from a fast one.
               </p>
               <div className="mt-4 border-t border-line pt-4">
-                <Metric label="estimated pre-optimization" value={formatTokens(before)}
+                <Metric label="Estimated pre-optimization" value={formatTokens(before)}
                   note="approx. — what would have shipped without ezllm" />
                 <p className="mt-3 text-[13px] leading-relaxed text-dim">
                   Tokens in plus everything compression removed before forwarding:
@@ -299,10 +299,10 @@ export default function Economics() {
             ) : (
               <div className="space-y-5">
                 <div className="grid gap-3 sm:grid-cols-3">
-                  <Metric label="spend" value={usd(costTotals?.usd ?? 0)} note={`${nfmt(costTotals?.calls ?? 0)} calls`} />
-                  <Metric label="priced" value={nfmt((costTotals?.calls ?? 0) - (costTotals?.unpriced_calls ?? 0))}
+                  <Metric label="Spend" value={usd(costTotals?.usd ?? 0)} note={`${nfmt(costTotals?.calls ?? 0)} calls`} />
+                  <Metric label="Priced" value={nfmt((costTotals?.calls ?? 0) - (costTotals?.unpriced_calls ?? 0))}
                     note="calls with a rate effective on their date" />
-                  <Metric label="unpriced" value={nfmt(costTotals?.unpriced_calls ?? 0)}
+                  <Metric label="Unpriced" value={nfmt(costTotals?.unpriced_calls ?? 0)}
                     tone={costTotals && costTotals.unpriced_calls > 0 ? 'text-warn' : undefined}
                     note="contributing $0" />
                 </div>
@@ -330,7 +330,7 @@ export default function Economics() {
 
                 <div className="grid gap-5 lg:grid-cols-2">
                   <div className="min-w-0">
-                    <SectionLabel>Most expensive · account + model</SectionLabel>
+                    <SectionLabel>Most expensive · provider + model</SectionLabel>
                     <div className="mt-3">
                       <BarList
                         rows={byModelCost.slice(0, 8).map((r) => ({
@@ -350,13 +350,13 @@ export default function Economics() {
                       <table className="w-full min-w-[620px] text-[13px]">
                         <thead className="sticky top-0 bg-surface">
                           <tr className="border-b border-line text-left text-[11px] text-mute">
-                            <th className="px-4 py-2 font-medium">day</th>
-                            <th className="px-3 py-2 font-medium">account</th>
-                            <th className="px-3 py-2 font-medium">model</th>
-                            <th className="px-3 py-2 text-right font-medium">calls</th>
-                            <th className="px-3 py-2 text-right font-medium">in / cached</th>
-                            <th className="px-3 py-2 text-right font-medium">out</th>
-                            <th className="px-4 py-2 text-right font-medium">usd</th>
+                            <th className="px-4 py-2 font-medium">Day</th>
+                            <th className="px-3 py-2 font-medium">Provider</th>
+                            <th className="px-3 py-2 font-medium">Model</th>
+                            <th className="px-3 py-2 text-right font-medium">Calls</th>
+                            <th className="px-3 py-2 text-right font-medium">In / cached</th>
+                            <th className="px-3 py-2 text-right font-medium">Out</th>
+                            <th className="px-4 py-2 text-right font-medium">USD</th>
                           </tr>
                         </thead>
                         <tbody className="font-mono tnum">
@@ -402,12 +402,12 @@ export default function Economics() {
                 <table className="w-full min-w-[820px] text-[13px]">
                   <thead>
                     <tr className="border-b border-line text-left text-[11px] text-mute">
-                      <th className="px-5 py-2.5 font-medium">model</th>
-                      <th className="px-3 py-2.5 text-right font-medium">actual in</th>
-                      <th className="px-3 py-2.5 text-right font-medium">compression</th>
-                      <th className="px-3 py-2.5 text-right font-medium">out</th>
-                      <th className="px-3 py-2.5 text-right font-medium" title="tokens the model spent thinking — billed as output, never shown">reasoning</th>
-                      <th className="px-5 py-2.5 text-right font-medium">status</th>
+                      <th className="px-5 py-2.5 font-medium">Model</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Actual in</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Compression</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Out</th>
+                      <th className="px-3 py-2.5 text-right font-medium" title="tokens the model spent thinking — billed as output, never shown">Reasoning</th>
+                      <th className="px-5 py-2.5 text-right font-medium">Status</th>
                     </tr>
                   </thead>
                   <tbody className="font-mono tnum">

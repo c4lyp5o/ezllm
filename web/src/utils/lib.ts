@@ -55,7 +55,7 @@ export function fmtDuration(ms: number | null | undefined): string {
 
 export function fmtUptime(s: number): string {
   const d = Math.floor(s / 86400); const h = Math.floor((s % 86400) / 3600); const m = Math.floor((s % 3600) / 60);
-  return d > 0 ? `${d}d${h}h` : h > 0 ? `${h}h${m}m` : m > 0 ? `${m}m` : `${s}s`;
+  return d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m` : `${s}s`;
 }
 
 /** Whole-number locale string, for exact counts that must not be abbreviated. */

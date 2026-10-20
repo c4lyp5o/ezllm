@@ -79,6 +79,16 @@ export function Chip({ tone = 'neutral', children, className, title }: {
   );
 }
 
+// The screen header's right-hand slot (App renders #page-aside beside the
+// h1). A page portals its status pills there; they mount and unmount with
+// the page. The target is looked up after mount — on a first render it is
+// created in the same commit as the page.
+export function HeaderAside({ children }: { children: ReactNode }) {
+  const [el, setEl] = useState<HTMLElement | null>(null);
+  useEffect(() => { setEl(document.getElementById('page-aside')); }, []);
+  return el ? createPortal(children, el) : null;
+}
+
 export function ProtocolChip({ state, label }: { state: 'yes' | 'no' | 'unknown'; label: string }) {
   const s = state === 'yes'
     ? <span className="text-ok">✓</span>

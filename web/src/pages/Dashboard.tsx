@@ -29,7 +29,7 @@ import {
 } from '../components/charts';
 import { CountUp, Stagger, StaggerItem } from '../components/motion';
 import {
-  Chip, CauseChip, EmptyState, SectionLabel, Skeleton, SkeletonRows,
+  Chip, CauseChip, EmptyState, HeaderAside, SectionLabel, Skeleton, SkeletonRows,
   clockTime, cx, fmtDuration, fmtMs, fmtUptime, formatTokens, nfmt, pct,
 } from '../components/ui';
 
@@ -80,15 +80,19 @@ function statusTone(s: number): string {
   return s >= 500 ? 'text-bad' : s >= 400 ? 'text-warn' : 'text-ok';
 }
 
-// ── health strip ──────────────────────────────────────────────────────────
-function HealthStrip({ o }: { o: Overview }) {
+// ── health pills ──────────────────────────────────────────────────────────
+// Status, not counts: the uptime pill (green while the gateway reports ok)
+// plus warnings that only appear when something is wrong. They sit in the
+// screen header beside the title — the counts of accounts, models and combos
+// were inventory, not health, and live on their own screens.
+function HealthPills({ o }: { o: Overview }) {
   const h = o.health;
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-mute">
-      <span><span className="tnum text-dim">{nfmt(h.accounts)}</span> accounts</span>
-      <span><span className="tnum text-dim">{nfmt(h.models)}</span> models</span>
-      <span><span className="tnum text-dim">{nfmt(h.combos)}</span> combos</span>
-      <span>up <span className="tnum text-dim">{fmtUptime(h.uptime_s)}</span></span>
+    <HeaderAside>
+      <Chip tone={h.status === 'ok' ? 'ok' : 'warn'} title={`gateway ${h.status}, up since the last restart`}>
+        <span className={cx('h-1.5 w-1.5 rounded-full', h.status === 'ok' ? 'bg-ok' : 'bg-warn')} />
+        {h.status === 'ok' ? 'Up' : h.status} <span className="tnum">{fmtUptime(h.uptime_s)}</span>
+      </Chip>
       {/* The ledger is asynchronous, so a write that could not be recorded is
           a real accounting gap, not a cosmetic one — it means the call
           happened and its tokens are not counted anywhere. */}
@@ -106,8 +110,7 @@ function HealthStrip({ o }: { o: Overview }) {
           {nfmt(h.unmetered_rows ?? 0)} rows unmetered
         </Chip>
       )}
-      {h.status !== 'ok' && <Chip tone="warn">{h.status}</Chip>}
-    </div>
+    </HeaderAside>
   );
 }
 
@@ -527,19 +530,9 @@ export default function Dashboard() {
   const compTotal = totals.tin + totals.tout + totals.cread;
   const fmtPct = (n: number) => `${n.toFixed(n < 10 ? 1 : 0)}%`;
 
-  // The finding, first: the one sentence an operator opening this screen
-  // needs, built from the same totals as the strip below.
-  const finding = totals.calls === 0
-    ? 'No calls in the last 24 hours.'
-    : `${nfmt(totals.calls)} calls in the last 24 hours; ${totals.errors > 0 ? `${nfmt(totals.errors)} failed (${fmtPct(errRate)})` : 'none failed'}.`
-      + (promptTotal > 0 ? ` ${fmtPct(cacheShare)} of prompt tokens were served from cache.` : '');
-
   return (
     <div className="space-y-6">
-      <div className="space-y-2">
-        <p className="text-[15px] text-ink">{finding}</p>
-        <HealthStrip o={o} />
-      </div>
+      <HealthPills o={o} />
 
       <Headline cells={[
         {

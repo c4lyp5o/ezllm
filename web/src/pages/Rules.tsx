@@ -89,15 +89,37 @@ function windowLabel(r: ModelRule): string {
   return `${r.win_start}–${r.win_end} · ${days === 'any day' ? 'daily' : days} · ${r.win_tz}`;
 }
 
+// One table row per SETTING, not per model: rules on the same provider with
+// identical cap, window, state and note are one group with several models.
+// The wire stays one rule per (account, model) — a group is a view, and
+// saving it fans out to its members.
+type RuleGroup = { key: string; account_id: number; rules: ModelRule[] };
+
+function groupKey(r: ModelRule): string {
+  return [r.account_id, r.cap_tokens, r.cap_tokens ? r.cap_window : '', r.win_start ?? '', r.win_end ?? '',
+    r.win_days ?? '', r.win_tz, r.enabled, r.note ?? ''].join('|');
+}
+
+function groupRules(rules: ModelRule[]): RuleGroup[] {
+  const out = new Map<string, RuleGroup>();
+  for (const r of rules) {
+    const k = groupKey(r);
+    const g = out.get(k);
+    if (g) g.rules.push(r);
+    else out.set(k, { key: k, account_id: r.account_id, rules: [r] });
+  }
+  return [...out.values()];
+}
+
 function RuleModal({ open, editing, accounts, models, draft, setDraft,
   onClose, onSave, saving, err, existingRuleID }: {
-  open: boolean; editing: ModelRule | null; accounts: Account[]; models: ModelRow[];
+  open: boolean; editing: RuleGroup | null; accounts: Account[]; models: ModelRow[];
   draft: Draft | null; setDraft: (d: Draft) => void;
   onClose: () => void; onSave: () => void; saving: boolean; err: string;
   existingRuleID: (accountID: number, modelID: string) => number | undefined;
 }) {
   const [modelQuery, setModelQuery] = useState('');
-  // Account swap invalidates the filter: results are account-scoped, so a
+  // Provider swap invalidates the filter: results are provider-scoped, so a
   // leftover query would silently hide everything and look like a bug.
   useEffect(() => { setModelQuery(''); }, [draft?.account_id]);
 
@@ -146,8 +168,9 @@ function RuleModal({ open, editing, accounts, models, draft, setDraft,
     >
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <label className={labelCls} htmlFor="rl-account">account</label>
-          <select id="rl-account" className={inputCls} value={d.account_id}
+          <label className={labelCls} htmlFor="rl-account">Provider</label>
+          {/* Fixed while editing: the group's rules belong to this provider. */}
+          <select id="rl-account" className={inputCls} value={d.account_id} disabled={!!editing}
             onChange={(e) => set({ account_id: Number(e.target.value) })}>
             {accounts.map((a) => (
               <option key={a.id} value={a.id}>{a.namespace} · {a.name}</option>
@@ -164,19 +187,18 @@ function RuleModal({ open, editing, accounts, models, draft, setDraft,
           <div id="rl-model-list" role="group" aria-label="models"
             className="max-h-44 space-y-0.5 overflow-y-auto rounded-lg border border-line bg-raised p-1.5">
             {models.length === 0 ? (
-              <p className="px-2 py-1.5 text-[12px] text-mute">No models in this account — sync it on Providers first.</p>
+              <p className="px-2 py-1.5 text-[12px] text-mute">No models on this provider — sync it on Providers first.</p>
             ) : matchedModels.length === 0 ? (
               <p className="px-2 py-1.5 text-[12px] text-mute">No model matches “{modelQuery.trim()}”.</p>
             ) : matchedModels.slice(0, 300).map((m) => {
-              const pinned = editing?.model_id === m.id;
-              const on = pinned || d.model_ids.includes(m.id);
-              const hasRule = existingRuleID(d.account_id, m.id) != null;
+              const on = d.model_ids.includes(m.id);
+              const inGroup = editing?.rules.some((r) => r.model_id === m.id) ?? false;
+              const hasRule = !inGroup && existingRuleID(d.account_id, m.id) != null;
               return (
                 <label key={m.id} htmlFor={`rl-model-${m.id}`} className={cx(
                   'flex items-center gap-2 rounded-md px-2 py-1.5 font-mono text-[12px] transition-colors',
-                  pinned ? 'bg-wash text-ink' : 'cursor-pointer hover:bg-wash',
-                  on && !pinned && 'bg-accent-dim text-accent', !on && !pinned && 'text-dim')}>
-                  <input id={`rl-model-${m.id}`} type="checkbox" checked={on} disabled={pinned}
+                  'cursor-pointer hover:bg-wash', on ? 'bg-accent-dim text-accent' : 'text-dim')}>
+                  <input id={`rl-model-${m.id}`} type="checkbox" checked={on}
                     onChange={() => set({ model_ids: on ? d.model_ids.filter((x) => x !== m.id) : [...d.model_ids, m.id] })}
                     className="h-3.5 w-3.5 accent-accent" />
                   <span className="min-w-0 flex-1 truncate">{m.id}</span>
@@ -205,7 +227,7 @@ function RuleModal({ open, editing, accounts, models, draft, setDraft,
         </div>
 
         <div>
-          <label className={labelCls} htmlFor="rl-cap">cap tokens (0 = unlimited)</label>
+          <label className={labelCls} htmlFor="rl-cap">Cap tokens (0 = unlimited)</label>
           <div className="flex gap-2">
             <input id="rl-cap" type="number" min={0} step={1000}
               className={cx(inputCls, 'w-40 font-mono tabular-nums')}
@@ -217,7 +239,7 @@ function RuleModal({ open, editing, accounts, models, draft, setDraft,
           </div>
         </div>
         <div>
-          <label className={labelCls} htmlFor="rl-tz">timezone</label>
+          <label className={labelCls} htmlFor="rl-tz">Timezone</label>
           <select id="rl-tz" className={cx(inputCls, 'font-mono')} value={d.win_tz}
             onChange={(e) => set({ win_tz: e.target.value })}>
             {/* The browser's own IANA list, so an exotic zone can't be typed
@@ -228,7 +250,7 @@ function RuleModal({ open, editing, accounts, models, draft, setDraft,
         </div>
 
         <div>
-          <label className={labelCls} htmlFor="rl-start">window start — end</label>
+          <label className={labelCls} htmlFor="rl-start">Window start — end</label>
           <div className="flex items-center gap-2">
             <input id="rl-start" type="time" className={cx(inputCls, 'w-32 font-mono')}
               value={d.win_start} onChange={(e) => set({ win_start: e.target.value })} />
@@ -239,7 +261,7 @@ function RuleModal({ open, editing, accounts, models, draft, setDraft,
           <p className="mt-1 text-[12px] text-mute">end &lt; start wraps midnight; leave both empty for always-open</p>
         </div>
         <div>
-          <label className={labelCls}>allowed days</label>
+          <label className={labelCls}>Allowed days</label>
           {/* The day chips are a MULTI-select, so the house selection mark (a
               1px accent line under a label) does not apply here — a filled
               chip is the honest affordance for a toggle. They do get the
@@ -261,7 +283,7 @@ function RuleModal({ open, editing, accounts, models, draft, setDraft,
         </div>
 
         <div className="sm:col-span-2 flex flex-wrap items-center gap-4 border-t border-line pt-4">
-          <Toggle checked={d.enabled} onChange={(v) => set({ enabled: v })} label="enabled" />
+          <Toggle checked={d.enabled} onChange={(v) => set({ enabled: v })} label="Enabled" />
           {/* No routing reveal here: the live "would allow/would refuse" chip
               told the operator exactly what the router decides right now, which
               is the sort of behaviour detail that belongs inside ezllm. Window
@@ -269,7 +291,7 @@ function RuleModal({ open, editing, accounts, models, draft, setDraft,
           <span className="ml-auto">{wErr && <Chip tone="bad">{wErr}</Chip>}</span>
         </div>
         <div className="sm:col-span-2">
-          <label className={labelCls} htmlFor="rl-note">note</label>
+          <label className={labelCls} htmlFor="rl-note">Note</label>
           <input id="rl-note" className={inputCls} placeholder="e.g. day model, night fallback"
             value={d.note} onChange={(e) => set({ note: e.target.value })} />
         </div>
@@ -283,13 +305,13 @@ export default function Rules() {
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [err, setErr] = useState('');
   const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState<ModelRule | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<ModelRule | null>(null);
+  const [editing, setEditing] = useState<RuleGroup | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<RuleGroup | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [models, setModels] = useState<ModelRow[]>([]);
   const [saving, setSaving] = useState(false);
   const [modalErr, setModalErr] = useState('');
-  const [busy, setBusy] = useState<number | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -316,9 +338,9 @@ export default function Rules() {
     setModalErr('');
     setOpen(true);
   };
-  const startEdit = (r: ModelRule) => {
-    setEditing(r);
-    setDraft(draftOf(r));
+  const startEdit = (g: RuleGroup) => {
+    setEditing(g);
+    setDraft({ ...draftOf(g.rules[0]), model_ids: g.rules.map((r) => r.model_id) });
     setModalErr('');
     setOpen(true);
   };
@@ -327,10 +349,12 @@ export default function Rules() {
     if (!draft) return;
     const modelIDs = [...new Set(draft.model_ids.map((m) => m.trim()).filter(Boolean))];
     if (modelIDs.length === 0) { setModalErr('select at least one model'); return; }
+    // Models unticked from the group being edited lose their rule.
+    const dropped = editing?.rules.filter((r) => !modelIDs.includes(r.model_id)) ?? [];
     // One request per model: honest about a large fan-out instead of hanging
     // silently while it fires hundreds of PATCH/POST calls.
-    if (modelIDs.length > 20 && !window.confirm(
-      `This will create or update ${modelIDs.length} rules (one request each). Continue?`)) {
+    if (modelIDs.length + dropped.length > 20 && !window.confirm(
+      `This will change ${modelIDs.length + dropped.length} rules (one request each). Continue?`)) {
       return;
     }
     setSaving(true); setModalErr('');
@@ -343,6 +367,7 @@ export default function Rules() {
         if (existing != null) await updateModelRule(existing, wireOf(draft, modelID));
         else await createModelRule(wireOf(draft, modelID));
       }
+      for (const r of dropped) await deleteModelRule(r.id);
       setOpen(false);
       await load();
     } catch (e) { setModalErr(errText(e)); }
@@ -350,16 +375,19 @@ export default function Rules() {
   };
 
   // row toggle: send the FULL row — a PATCH without window fields clears them
-  const setEnabled = async (r: ModelRule, enabled: boolean) => {
-    setBusy(r.id);
-    try { await updateModelRule(r.id, { ...wireOf(draftOf(r), r.model_id), enabled }); await load(); }
+  const setEnabled = async (g: RuleGroup, enabled: boolean) => {
+    setBusy(g.key);
+    try {
+      for (const r of g.rules) await updateModelRule(r.id, { ...wireOf(draftOf(r), r.model_id), enabled });
+      await load();
+    }
     catch (e) { setErr(errText(e)); }
     finally { setBusy(null); }
   };
 
-  const remove = async (r: ModelRule) => {
-    setBusy(r.id);
-    try { await deleteModelRule(r.id); await load(); }
+  const remove = async (g: RuleGroup) => {
+    setBusy(g.key);
+    try { for (const r of g.rules) await deleteModelRule(r.id); await load(); }
     catch (e) { setErr(errText(e)); }
     finally { setBusy(null); }
   };
@@ -372,7 +400,7 @@ export default function Rules() {
         <div>
           <SectionLabel>Model rules</SectionLabel>
           <p className="mt-1 max-w-2xl text-[13px] text-mute">
-            Eligibility per (account, model): a ledger usage cap plus an allowed-use window in the rule's timezone.
+            Eligibility per (provider, model): a ledger usage cap plus an allowed-use window in the rule's timezone.
             A candidate outside its rule is skipped by the router — if no candidate is eligible the request is
             refused with <span className="font-mono text-dim">429 rule_refusal</span>.
           </p>
@@ -394,39 +422,43 @@ export default function Rules() {
           <table className="w-full min-w-[900px] text-[13px]">
             <thead>
               <tr className="text-left text-[11px] text-mute">
-                <th className="px-5 py-2.5 font-medium">enabled</th>
-                <th className="px-3 py-2.5 font-medium">account</th>
-                <th className="px-3 py-2.5 font-medium">model</th>
-                <th className="px-3 py-2.5 font-medium">cap</th>
-                <th className="px-3 py-2.5 font-medium">window</th>
-                <th className="px-3 py-2.5 font-medium">note</th>
-                <th className="px-5 py-2.5 text-right font-medium">actions</th>
+                <th className="px-5 py-2.5 font-medium">Enabled</th>
+                <th className="px-3 py-2.5 font-medium">Provider</th>
+                <th className="px-3 py-2.5 font-medium">Models</th>
+                <th className="px-3 py-2.5 font-medium">Cap</th>
+                <th className="px-3 py-2.5 font-medium">Window</th>
+                <th className="px-3 py-2.5 font-medium">Note</th>
+                <th className="px-5 py-2.5 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {rules.map((r) => (
+              {groupRules(rules).map((g) => { const r = g.rules[0]; return (
                 // motion.tr: the rows fade in as a sequence. Only opacity
                 // animates — a translate on a table row detaches it from its
                 // own columns (see staggerRow).
-                <motion.tr key={r.id} variants={staggerRow}
+                <motion.tr key={g.key} variants={staggerRow}
                   className="border-t border-line/60 transition-colors hover:bg-wash">
                   <td className="px-5 py-2.5">
-                    <Toggle checked={r.enabled} disabled={busy === r.id}
-                      onChange={(v) => void setEnabled(r, v)} label={`enable ${r.model_id}`} />
+                    <Toggle checked={r.enabled} disabled={busy === g.key}
+                      onChange={(v) => void setEnabled(g, v)} label={`enable ${g.rules.map((x) => x.model_id).join(', ')}`} />
                   </td>
                   <td className="px-3 py-2.5 text-dim">{accountName(r.account_id)}</td>
-                  <td className="px-3 py-2.5 font-mono text-ink">{r.model_id}</td>
+                  <td className="px-3 py-2.5">
+                    <div className="flex max-w-[360px] flex-wrap gap-1.5">
+                      {g.rules.map((x) => <Chip key={x.id} className="font-code text-ink">{x.model_id}</Chip>)}
+                    </div>
+                  </td>
                   <td className={cx('px-3 py-2.5 font-mono tabular-nums', r.cap_tokens ? 'text-dim' : 'text-mute')}>{capLabel(r)}</td>
                   <td className="px-3 py-2.5 font-mono text-[12px] text-dim">{windowLabel(r)}</td>
                   <td className="max-w-[200px] truncate px-3 py-2.5 text-mute" title={r.note}>{r.note || '—'}</td>
                   <td className="whitespace-nowrap px-5 py-2.5 text-right">
                     <button type="button" className={cx(btn.base, btn.ghost, 'mr-2 px-3 py-1.5 text-[13px]')}
-                      onClick={() => startEdit(r)}>Edit</button>
+                      onClick={() => startEdit(g)}>Edit</button>
                     <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px] text-bad')}
-                      onClick={() => setPendingDelete(r)}>Delete</button>
+                      onClick={() => setPendingDelete(g)}>Delete</button>
                   </td>
                 </motion.tr>
-              ))}
+              ); })}
             </tbody>
           </table>
           </Stagger>
@@ -441,9 +473,11 @@ export default function Rules() {
       />
       <ConfirmModal
         open={pendingDelete != null}
-        title={pendingDelete ? `Delete rule for ${pendingDelete.model_id}?` : 'Delete rule?'}
+        title={pendingDelete
+          ? pendingDelete.rules.length === 1 ? `Delete rule for ${pendingDelete.rules[0].model_id}?` : `Delete rule for ${pendingDelete.rules.length} models?`
+          : 'Delete rule?'}
         body="The router stops enforcing this rule immediately."
-        busy={pendingDelete != null && busy === pendingDelete.id}
+        busy={pendingDelete != null && busy === pendingDelete.key}
         onClose={() => setPendingDelete(null)}
         onConfirm={() => { if (pendingDelete) void remove(pendingDelete).then(() => setPendingDelete(null)); }} />
     </div>

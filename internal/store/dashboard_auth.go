@@ -7,55 +7,113 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
 
-const DefaultDashboardPassword = "STRONGPASSWORD"
+// legacyDefaultPassword is the factory password seeded before schema v26. It
+// is never seeded now; a database whose hash still matches it is sent back
+// through first-boot setup, because the value is public.
+const legacyDefaultPassword = "STRONGPASSWORD"
 
-var ErrInvalidDashboardPassword = errors.New("store: invalid dashboard password")
+// MinDashboardPasswordLen is the shortest dashboard password setup or a
+// change accepts.
+const MinDashboardPasswordLen = 12
 
+var (
+	ErrInvalidDashboardPassword = errors.New("store: invalid dashboard password")
+	// ErrDashboardSetupRequired: no password exists yet (first boot), so
+	// nothing can log in until setup completes.
+	ErrDashboardSetupRequired = errors.New("store: dashboard setup required")
+	// ErrDashboardSetupDone: setup already ran; it never runs twice.
+	ErrDashboardSetupDone = errors.New("store: dashboard password already set")
+	// ErrDashboardPasswordTooShort carries the "at least 12 characters"
+	// wording the HTTP layer matches on.
+	ErrDashboardPasswordTooShort = fmt.Errorf("store: dashboard password must be at least %d characters", MinDashboardPasswordLen)
+)
+
+// EnsureDashboardPassword creates the dashboard_auth row on first boot with
+// no password and first_boot=1, so the dashboard shows only its set-password
+// page until setup completes. A row still holding the legacy factory
+// password is reset to that same first-boot state (and its sessions
+// revoked): the password is published, so it cannot stay a credential.
 func (d *DB) EnsureDashboardPassword(ctx context.Context) error {
 	var hash string
-	err := d.r.QueryRowContext(ctx, `SELECT password_hash FROM dashboard_auth WHERE id=1`).Scan(&hash)
-	if err == nil {
-		return nil
+	var firstBoot int
+	err := d.r.QueryRowContext(ctx, `SELECT password_hash, first_boot FROM dashboard_auth WHERE id=1`).Scan(&hash, &firstBoot)
+	if errors.Is(err, sql.ErrNoRows) {
+		return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, `
+INSERT INTO dashboard_auth (id, password_hash, first_boot) VALUES (1, '', 1)
+ON CONFLICT(id) DO NOTHING`)
+			return err
+		})
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	encoded, err := bcrypt.GenerateFromPassword([]byte(DefaultDashboardPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
+	if firstBoot == 1 || hash == "" || bcrypt.CompareHashAndPassword([]byte(hash), []byte(legacyDefaultPassword)) != nil {
+		return nil
+	}
 	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `
-INSERT INTO dashboard_auth (id, password_hash) VALUES (1, ?)
-ON CONFLICT(id) DO NOTHING`, string(encoded))
+		if _, err := tx.ExecContext(ctx, `UPDATE dashboard_auth SET password_hash='', first_boot=1, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=1`); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `DELETE FROM dashboard_sessions`)
 		return err
 	})
 }
 
-// DashboardPasswordIsDefault reports whether the stored hash still matches
-// the factory STRONGPASSWORD. Used by the login page to decide whether the
-// first-run hint is still relevant (docx item 13: compare the hash with the
-// hash of STRONGPASSWORD; same → show, changed → hide). Fail-closed: a
-// lookup or comparison error reports false so the hint stays hidden rather
-// than hinting at an attack surface that may not exist.
-func (d *DB) DashboardPasswordIsDefault(ctx context.Context) bool {
-	var hash string
-	if err := d.r.QueryRowContext(ctx, `SELECT password_hash FROM dashboard_auth WHERE id=1`).Scan(&hash); err != nil {
-		return false
+// DashboardFirstBoot reports whether the dashboard password has never been
+// set. One indexed read, no bcrypt — the login page asks it on every load.
+func (d *DB) DashboardFirstBoot(ctx context.Context) (bool, error) {
+	var firstBoot int
+	if err := d.r.QueryRowContext(ctx, `SELECT first_boot FROM dashboard_auth WHERE id=1`).Scan(&firstBoot); err != nil {
+		return false, err
 	}
-	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(DefaultDashboardPassword)) == nil
+	return firstBoot == 1, nil
+}
+
+// CompleteDashboardSetup sets the first dashboard password and flips
+// first_boot in the same statement. The WHERE first_boot=1 guard makes it
+// one-shot: a second call (or a race between two) gets ErrDashboardSetupDone.
+func (d *DB) CompleteDashboardSetup(ctx context.Context, password string) error {
+	if len(password) < MinDashboardPasswordLen {
+		return ErrDashboardPasswordTooShort
+	}
+	encoded, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `
+UPDATE dashboard_auth SET password_hash=?, first_boot=0, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+WHERE id=1 AND first_boot=1`, string(encoded))
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return ErrDashboardSetupDone
+		}
+		return nil
+	})
 }
 
 func (d *DB) DashboardLogin(ctx context.Context, password string) (string, error) {
 	var hash string
-	if err := d.r.QueryRowContext(ctx, `SELECT password_hash FROM dashboard_auth WHERE id=1`).Scan(&hash); err != nil {
+	var firstBoot int
+	if err := d.r.QueryRowContext(ctx, `SELECT password_hash, first_boot FROM dashboard_auth WHERE id=1`).Scan(&hash, &firstBoot); err != nil {
 		return "", err
+	}
+	if firstBoot == 1 {
+		return "", ErrDashboardSetupRequired
 	}
 	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
 		return "", ErrInvalidDashboardPassword
@@ -103,8 +161,8 @@ func (d *DB) ChangeDashboardPassword(ctx context.Context, currentPassword, newPa
 	if bcrypt.CompareHashAndPassword([]byte(currentHash), []byte(currentPassword)) != nil {
 		return ErrInvalidDashboardPassword
 	}
-	if len(newPassword) < 12 {
-		return errors.New("dashboard password must be at least 12 characters")
+	if len(newPassword) < MinDashboardPasswordLen {
+		return ErrDashboardPasswordTooShort
 	}
 	encoded, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {

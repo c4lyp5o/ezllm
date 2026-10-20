@@ -4,9 +4,12 @@
 -- must survive key or account deletion, so attribution fields are denormalized.
 
 -- Browser-only dashboard login; admin sessions are stored by token digest only.
+-- first_boot=1 (v26): no password set yet; password_hash is '' and the
+-- dashboard shows only its set-password page until setup flips it.
 CREATE TABLE IF NOT EXISTS dashboard_auth (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     password_hash TEXT NOT NULL,
+    first_boot INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 

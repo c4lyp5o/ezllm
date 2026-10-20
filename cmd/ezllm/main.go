@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/c4lyp5o/ezllm/internal/config"
+	"github.com/c4lyp5o/ezllm/internal/logx"
 	"github.com/c4lyp5o/ezllm/internal/provider"
 	"github.com/c4lyp5o/ezllm/internal/proxy"
 	"github.com/c4lyp5o/ezllm/internal/ratelimit"
@@ -59,18 +60,17 @@ func run() error {
 	addrOverride := flag.String("addr", "", "listen address override (precedence: -addr > EZLLM_ADDR > config.listen)")
 	flag.Parse()
 
-	// Log level: EZLLM_LOG_LEVEL is the only knob that has to work before the
-	// config is readable, so it is env-only (and container-friendly).
-	level := slog.LevelInfo
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("EZLLM_LOG_LEVEL"))) {
-	case "debug":
-		level = slog.LevelDebug
-	case "warn":
-		level = slog.LevelWarn
-	case "error":
-		level = slog.LevelError
+	// Log level and color: env-only, because they have to work before the
+	// config is readable (and are container-friendly). EZLLM_LOG_COLOR is
+	// auto|always|never; auto colors a terminal only and honors NO_COLOR.
+	rawLevel := os.Getenv("EZLLM_LOG_LEVEL")
+	level, levelOK := logx.ParseLevel(rawLevel)
+	color := logx.ColorEnabled(os.Getenv("EZLLM_LOG_COLOR"), os.Stdout)
+	log := slog.New(logx.NewHandler(os.Stdout, logx.Options{Level: level, Color: color}))
+	slog.SetDefault(log)
+	if !levelOK {
+		log.Warn("unknown EZLLM_LOG_LEVEL, using info", "value", rawLevel, "accepted", "debug|info|warn|error")
 	}
-	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
@@ -160,6 +160,13 @@ func run() error {
 	}
 	defer db.Close()
 	log.Info("store ready", "path", dbPath, "schema", db.SchemaVersion())
+
+	// First boot: no dashboard password exists. Seed it from the env, or
+	// mint the one-time setup code the set-password page asks for.
+	setupCode, err := prepareDashboardSetup(ctx, db, log)
+	if err != nil {
+		return err
+	}
 
 	// ── wiring ──
 	client := upstreamClient(cfg)
@@ -291,6 +298,7 @@ func run() error {
 		ShadowSampler: shadowSamplerFor(cfg.Compression.ShadowPct),
 		// A combo write probes only its own untested hops — never a catalog.
 		ComboAutoProbe: os.Getenv("EZLLM_COMBO_AUTOPROBE") != "off",
+		SetupCode:      setupCode,
 	})
 
 	if os.Getenv("EZLLM_PRICE_REFRESH") != "off" {
@@ -308,6 +316,11 @@ func run() error {
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		// No WriteTimeout: SSE streams are unbounded by design (M7 tunes the rest).
+	}
+
+	if setupCode != "" {
+		logx.FirstBootBanner(os.Stdout, color, bridgeOrigin(addr), setupCode)
+		log.Warn("dashboard setup pending: open the dashboard and enter the setup code above", "url", bridgeOrigin(addr))
 	}
 
 	errCh := make(chan error, 1)

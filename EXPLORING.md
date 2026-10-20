@@ -77,7 +77,9 @@ equal, something is buffering — go read `proxy/sse.go` and find out why).
 No narration, just landmarks. M1–M8 are all filled — keep them current as the code evolves.)*
 
 ### M1 — skeleton + health ✅ (2026-10-05, verified)
-- `cmd/ezllm/main.go:39` flags (`-config`, `-addr`), slog level via `EZLLM_LOG_LEVEL`
+- `cmd/ezllm/main.go:59` flags (`-config`, `-addr`); `:67` console logging via
+  `internal/logx` (`EZLLM_LOG_LEVEL`, `EZLLM_LOG_COLOR`); `:166` first-boot
+  dashboard setup (`cmd/ezllm/setup.go`: env password or one-time setup code)
   (`:43`, env-only by design — must work before config is read), addr precedence
   `-addr` > `EZLLM_ADDR` > config, `http.Server` (10s ReadHeaderTimeout,
   **no WriteTimeout on purpose** for SSE), SIGINT/SIGTERM → 15s drain shutdown.

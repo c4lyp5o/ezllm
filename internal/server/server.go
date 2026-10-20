@@ -99,6 +99,8 @@ type Server struct {
 	// comboAutoProbe: a combo write probes its untested hop models
 	// (combo_autoprobe.go). Off in unit tests unless they ask for it.
 	comboAutoProbe bool
+	// setupCode gates first-boot setup (dashboard_auth.go).
+	setupCode string
 
 	// ghMu guards ghDevices: the in-flight GitHub device flows started from
 	// the dashboard (POST /admin/github/device). An entry holds GitHub's
@@ -163,6 +165,10 @@ type Options struct {
 	// whenever the combo is created or its hops change. main.go turns it on
 	// unless EZLLM_COMBO_AUTOPROBE=off.
 	ComboAutoProbe bool
+	// SetupCode is the one-time first-boot code POST /admin/setup requires
+	// (main.go mints and prints it). Empty = setup refused; the operator
+	// restarts for a code or sets EZLLM_DASHBOARD_PASSWORD.
+	SetupCode string
 }
 
 // usageTZOrDefault resolves the day-bucketing zone. Empty or whitespace means
@@ -200,6 +206,7 @@ func New(opts Options) *Server {
 		ghDevices:      map[string]*ghDevice{},
 		ghCfg:          opts.GitHubDevice,
 		comboAutoProbe: opts.ComboAutoProbe,
+		setupCode:      opts.SetupCode,
 	}
 	// A server without a tester cannot run the key test; default one so the
 	// admin routes fail loudly at construction rather than nil-panic per request.
@@ -231,6 +238,9 @@ func New(opts Options) *Server {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
 	s.mux.HandleFunc("POST /admin/login", s.handleDashboardLogin)
+	// First-boot setup: public, one-shot, gated by the boot-log setup code.
+	s.mux.HandleFunc("GET /admin/setup", s.handleSetupStatus)
+	s.mux.HandleFunc("POST /admin/setup", s.handleSetup)
 	s.mux.HandleFunc("GET /v1/models", s.authed(s.handleModels))
 	// Public price catalog (infer token): current/historical rates per
 	// account+model, versioned by effective_from.

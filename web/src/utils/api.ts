@@ -22,39 +22,40 @@ export function markUnlocked(): void {
   try { sessionStorage.setItem(UNLOCK_KEY, '1'); } catch { /* noop */ }
 }
 
-export async function dashboardLogin(password: string): Promise<{ token: string; defaultPassword: boolean }> {
+export async function dashboardLogin(password: string): Promise<void> {
   const response = await fetch('/admin/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
     body: JSON.stringify({ password }),
   });
-  const body = await response.json().catch(() => ({})) as { token?: string; default_password?: boolean; error?: { default_password?: boolean } };
-  if (!response.ok) {
-    const msg = response.status === 401 ? 'incorrect dashboard password' : `login failed (HTTP ${response.status})`;
-    throw Object.assign(new Error(msg), { defaultPassword: body.error?.default_password === true });
-  }
-  // The 200 shape is flat: {token, default_password} (only errors nest under .error).
-  return { token: body.token ?? '', defaultPassword: body.default_password === true };
+  if (response.ok) return;
+  const body = await response.json().catch(() => ({})) as { error?: { message?: string } };
+  if (response.status === 401) throw new Error('incorrect dashboard password');
+  throw new Error(body.error?.message ?? `login failed (HTTP ${response.status})`);
 }
 
-// The login page needs the first-run hint state BEFORE any successful login
-// exists, so it probes the login endpoint with a wrong password and reads the
-// flag off the 401 (docx item 13). Fail-closed: a probe error hides the hint.
-export async function probeDefaultPassword(): Promise<boolean> {
-  try {
-    const response = await fetch('/admin/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ password: '' }),
-    });
-    const body = await response.json().catch(() => ({})) as { error?: { default_password?: boolean } };
-    if (response.status === 401) return body.error?.default_password === true;
-    return false;
-  } catch {
-    return false;
-  }
+/** First boot = no dashboard password yet: the app shows only the
+ *  set-password page until setup flips the flag. Public endpoint, no bcrypt. */
+export async function getSetupStatus(): Promise<{ firstBoot: boolean }> {
+  const response = await fetch('/admin/setup', { credentials: 'include' });
+  if (!response.ok) throw new Error(`setup status failed (HTTP ${response.status})`);
+  const body = await response.json() as { first_boot?: boolean };
+  return { firstBoot: body.first_boot === true };
+}
+
+/** Sets the first password with the one-time code from the boot log. Success
+ *  also signs in (the session cookie comes back on this response). */
+export async function completeSetup(setupCode: string, password: string): Promise<void> {
+  const response = await fetch('/admin/setup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ setup_code: setupCode, password }),
+  });
+  if (response.ok) return;
+  const body = await response.json().catch(() => ({})) as { error?: { message?: string } };
+  throw new Error(body.error?.message ?? `setup failed (HTTP ${response.status})`);
 }
 
 export async function changeDashboardPassword(currentPassword: string, newPassword: string): Promise<void> {

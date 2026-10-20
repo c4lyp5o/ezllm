@@ -10,11 +10,15 @@ func TestDashboardPasswordBootstrapAndChange(t *testing.T) {
 	defer db.Close()
 	ctx := context.Background()
 
-	// Open initializes the default dashboard password for every caller, not
-	// only the command binary.
-	token, err := db.DashboardLogin(ctx, DefaultDashboardPassword)
+	// Open leaves every caller in first-boot setup; the setup password is
+	// the first credential.
+	const initial = "initial-setup-password"
+	if err := db.CompleteDashboardSetup(ctx, initial); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	token, err := db.DashboardLogin(ctx, initial)
 	if err != nil {
-		t.Fatalf("login with bootstrap password: %v", err)
+		t.Fatalf("login with setup password: %v", err)
 	}
 	if !db.DashboardSession(ctx, token) {
 		t.Fatal("newly issued dashboard session should be valid")
@@ -24,7 +28,7 @@ func TestDashboardPasswordBootstrapAndChange(t *testing.T) {
 	if err := db.Reader().QueryRowContext(ctx, `SELECT password_hash FROM dashboard_auth WHERE id=1`).Scan(&storedHash); err != nil {
 		t.Fatal(err)
 	}
-	if storedHash == DefaultDashboardPassword {
+	if storedHash == initial {
 		t.Fatal("dashboard password must not be stored plaintext")
 	}
 
@@ -32,13 +36,13 @@ func TestDashboardPasswordBootstrapAndChange(t *testing.T) {
 	if err := db.ChangeDashboardPassword(ctx, "wrong-current-password", replacement); err != ErrInvalidDashboardPassword {
 		t.Fatalf("change with wrong current password = %v, want ErrInvalidDashboardPassword", err)
 	}
-	if err := db.ChangeDashboardPassword(ctx, DefaultDashboardPassword, replacement); err != nil {
+	if err := db.ChangeDashboardPassword(ctx, initial, replacement); err != nil {
 		t.Fatalf("change password: %v", err)
 	}
 	if db.DashboardSession(ctx, token) {
 		t.Fatal("password change must revoke existing dashboard sessions")
 	}
-	if _, err := db.DashboardLogin(ctx, DefaultDashboardPassword); err != ErrInvalidDashboardPassword {
+	if _, err := db.DashboardLogin(ctx, initial); err != ErrInvalidDashboardPassword {
 		t.Fatalf("old password login error = %v, want ErrInvalidDashboardPassword", err)
 	}
 	newToken, err := db.DashboardLogin(ctx, replacement)

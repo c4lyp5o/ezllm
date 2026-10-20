@@ -26,7 +26,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 25
+const schemaVersion = 26
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -848,6 +848,17 @@ CREATE TABLE IF NOT EXISTS dashboard_sessions (
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_dashboard_sessions_expiry ON dashboard_sessions(expires_at);`)
+	if err != nil {
+		return err
+	}
+	// v26: first_boot. Existing rows default to 0 (password set);
+	// EnsureDashboardPassword re-flags a row still on the legacy factory
+	// password.
+	exists, err := hasColumn(ctx, d.w, "dashboard_auth", "first_boot")
+	if err != nil || exists {
+		return err
+	}
+	_, err = d.w.ExecContext(ctx, `ALTER TABLE dashboard_auth ADD COLUMN first_boot INTEGER NOT NULL DEFAULT 0`)
 	return err
 }
 

@@ -1,8 +1,8 @@
 package server
 
-// docx item 13: the flag must reach the browser on the FAILURE path — the
-// login page decides whether the first-run hint is relevant before any
-// successful login exists. One endpoint, no new public surface.
+// First-boot setup (C1): a fresh install has no password. The dashboard shows
+// only its set-password page, and setting it needs the one-time code from the
+// boot log, so the first visitor cannot claim the instance.
 
 import (
 	"context"
@@ -11,70 +11,153 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/c4lyp5o/ezllm/internal/store"
 )
 
-func loginFlag(t *testing.T, body string) any {
+const testSetupCode = "ABCD-EFGH"
+
+func withSetupCode(o *Options) { o.SetupCode = testSetupCode }
+
+// setupDashboard completes first-boot setup directly in the store, for tests
+// about what happens after it.
+func setupDashboard(t *testing.T, h *harness, pw string) {
 	t.Helper()
-	var m map[string]any
-	if err := json.Unmarshal([]byte(body), &m); err != nil {
-		t.Fatalf("login body is not JSON: %v (%s)", err, body)
+	if err := h.db.CompleteDashboardSetup(context.Background(), pw); err != nil {
+		t.Fatalf("setup: %v", err)
 	}
-	e, _ := m["error"].(map[string]any)
-	if e == nil {
-		t.Fatalf("no error object in %s", body)
-	}
-	return e["default_password"]
 }
 
-func TestDashboardLoginCarriesDefaultPasswordFlag(t *testing.T) {
-	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
-	ctx := context.Background()
-
-	// Fresh harness DB bootstraps the factory password; a wrong attempt
-	// answers 401 WITH the flag so the page can show the hint.
-	code, _, body := h.do("POST", "/admin/login", "", `{"password":"definitely-wrong"}`)
-	if code != 401 {
-		t.Fatalf("wrong password = %d, want 401: %s", code, body)
-	}
-	if loginFlag(t, body) != true {
-		t.Fatalf("fresh install must report default_password=true on the 401: %s", body)
-	}
-
-	// Change it: the flag must flip (the hash compare is what changed).
-	if err := h.db.ChangeDashboardPassword(ctx, store.DefaultDashboardPassword, "a-much-longer-password"); err != nil {
-		t.Fatalf("change password: %v", err)
-	}
-	code, _, body = h.do("POST", "/admin/login", "", `{"password":"definitely-wrong"}`)
-	if code != 401 || loginFlag(t, body) != false {
-		t.Fatalf("after a change the flag must read false: %d %s", code, body)
-	}
-
-	// The success path carries the flag too, and still returns the token
-	// (the flag is additive — nothing about the contract moved).
-	code, _, body = h.do("POST", "/admin/login", "", `{"password":"a-much-longer-password"}`)
+func firstBoot(t *testing.T, h *harness) bool {
+	t.Helper()
+	code, _, body := h.do("GET", "/admin/setup", "", "")
 	if code != 200 {
-		t.Fatalf("correct password = %d, want 200: %s", code, body)
+		t.Fatalf("GET /admin/setup = %d: %s", code, body)
 	}
 	var m map[string]any
 	if err := json.Unmarshal([]byte(body), &m); err != nil {
-		t.Fatalf("success body: %v (%s)", err, body)
+		t.Fatalf("setup status body: %v (%s)", err, body)
 	}
-	if tok, _ := m["token"].(string); tok == "" {
-		t.Fatalf("success body lost the token: %s", body)
+	v, ok := m["first_boot"].(bool)
+	if !ok {
+		t.Fatalf("first_boot missing: %s", body)
 	}
-	if m["default_password"] != false {
-		t.Fatalf("success body flag = %v, want false after the change", m["default_password"])
+	return v
+}
+
+func TestFirstBootSetupFlow(t *testing.T) {
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {}, withSetupCode)
+	clearLoginAttempts("192.0.2.1")
+	defer clearLoginAttempts("192.0.2.1")
+
+	if !firstBoot(t, h) {
+		t.Fatal("fresh install must report first_boot=true")
 	}
-	if !strings.Contains(body, "token") {
-		t.Fatalf("success body shape changed: %s", body)
+	// No password exists, so login is refused as setup-required — the old
+	// factory password included.
+	for _, pw := range []string{"STRONGPASSWORD", ""} {
+		code, _, body := h.do("POST", "/admin/login", "", `{"password":"`+pw+`"}`)
+		if code != http.StatusConflict || !strings.Contains(body, "setup_required") {
+			t.Fatalf("login(%q) before setup = %d %s, want 409 setup_required", pw, code, body)
+		}
+	}
+
+	code, _, body := h.do("POST", "/admin/setup", "", `{"setup_code":"WXYZ-2345","password":"a-good-long-password"}`)
+	if code != http.StatusUnauthorized {
+		t.Fatalf("wrong setup code = %d %s, want 401", code, body)
+	}
+	// Correct code (typed loosely), password too short: refused, flag kept.
+	code, _, body = h.do("POST", "/admin/setup", "", `{"setup_code":" abcdefgh ","password":"short"}`)
+	if code != http.StatusBadRequest {
+		t.Fatalf("short password = %d %s, want 400", code, body)
+	}
+	if !firstBoot(t, h) {
+		t.Fatal("a refused setup must not flip first_boot")
+	}
+
+	code, hdr, body := h.do("POST", "/admin/setup", "", `{"setup_code":"abcd-efgh","password":"a-good-long-password"}`)
+	if code != 200 {
+		t.Fatalf("setup = %d %s, want 200", code, body)
+	}
+	if firstBoot(t, h) {
+		t.Fatal("setup must flip first_boot")
+	}
+	cookie, err := http.ParseSetCookie(hdr.Get("Set-Cookie"))
+	if err != nil || cookie.Name != "ezllm_session" || !cookie.HttpOnly {
+		t.Fatalf("setup must sign the caller in with the session cookie: %v %+v", err, cookie)
+	}
+	req := httptest.NewRequest("GET", "/admin/overview", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	h.handler.ServeHTTP(rec, req)
+	if rec.Code == http.StatusUnauthorized || rec.Code == http.StatusForbidden {
+		t.Fatalf("setup session rejected: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// One-shot: the code cannot reset the password afterwards.
+	code, _, body = h.do("POST", "/admin/setup", "", `{"setup_code":"ABCD-EFGH","password":"attacker-password-1"}`)
+	if code != http.StatusConflict || !strings.Contains(body, "setup_complete") {
+		t.Fatalf("second setup = %d %s, want 409 setup_complete", code, body)
+	}
+	if code, _, body := h.do("POST", "/admin/login", "", `{"password":"a-good-long-password"}`); code != 200 {
+		t.Fatalf("login with the setup password = %d %s", code, body)
+	}
+}
+
+func TestSetupRefusedWithoutIssuedCode(t *testing.T) {
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
+	clearLoginAttempts("192.0.2.1")
+	defer clearLoginAttempts("192.0.2.1")
+	// An empty server-side code must never match an empty submitted one.
+	code, _, body := h.do("POST", "/admin/setup", "", `{"setup_code":"","password":"a-good-long-password"}`)
+	if code != http.StatusServiceUnavailable {
+		t.Fatalf("setup without an issued code = %d %s, want 503", code, body)
+	}
+	if !firstBoot(t, h) {
+		t.Fatal("refused setup must leave first_boot set")
+	}
+}
+
+func TestSetupCodeGuessesAreRateLimited(t *testing.T) {
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {}, withSetupCode)
+	clearLoginAttempts("192.0.2.1")
+	defer clearLoginAttempts("192.0.2.1")
+	for i := 0; i < 5; i++ {
+		if code, _, _ := h.do("POST", "/admin/setup", "", `{"setup_code":"ZZZZ-ZZZZ","password":"a-good-long-password"}`); code != http.StatusUnauthorized {
+			t.Fatalf("guess %d = %d, want 401", i+1, code)
+		}
+	}
+	// Even the right code is refused once the window is spent.
+	code, _, body := h.do("POST", "/admin/setup", "", `{"setup_code":"ABCD-EFGH","password":"a-good-long-password"}`)
+	if code != http.StatusTooManyRequests {
+		t.Fatalf("sixth attempt = %d %s, want 429", code, body)
+	}
+}
+
+func TestNewSetupCodeShape(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 50; i++ {
+		c, err := NewSetupCode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(c) != 9 || c[4] != '-' {
+			t.Fatalf("code %q, want XXXX-XXXX", c)
+		}
+		for _, r := range strings.ReplaceAll(c, "-", "") {
+			if !strings.ContainsRune(setupCodeAlphabet, r) {
+				t.Fatalf("code %q has %q outside the alphabet", c, r)
+			}
+		}
+		seen[c] = true
+	}
+	if len(seen) < 45 {
+		t.Fatalf("only %d distinct codes in 50 draws", len(seen))
 	}
 }
 
 func TestDashboardLoginCookieSecureBehindProxy(t *testing.T) {
 	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
-	req := httptest.NewRequest("POST", "/admin/login", strings.NewReader(`{"password":"STRONGPASSWORD"}`))
+	setupDashboard(t, h, "proxy-test-password")
+	req := httptest.NewRequest("POST", "/admin/login", strings.NewReader(`{"password":"proxy-test-password"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Forwarded-Proto", "https")
 	rec := httptest.NewRecorder()
@@ -93,7 +176,8 @@ func TestDashboardLoginCookieSecureBehindProxy(t *testing.T) {
 
 func TestDashboardLoginSetsHttpOnlyCookieAndCookieAuthenticates(t *testing.T) {
 	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
-	code, hdr, body := h.do("POST", "/admin/login", "", `{"password":"STRONGPASSWORD"}`)
+	setupDashboard(t, h, "cookie-test-password")
+	code, hdr, body := h.do("POST", "/admin/login", "", `{"password":"cookie-test-password"}`)
 	if code != 200 {
 		t.Fatalf("login = %d: %s", code, body)
 	}
@@ -121,6 +205,7 @@ func TestDashboardLoginSetsHttpOnlyCookieAndCookieAuthenticates(t *testing.T) {
 
 func TestDashboardLoginRateLimitsPerIP(t *testing.T) {
 	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
+	setupDashboard(t, h, "rate-limit-password")
 	clearLoginAttempts("192.0.2.1")
 	defer clearLoginAttempts("192.0.2.1")
 	for i := 0; i < 5; i++ {
@@ -132,5 +217,22 @@ func TestDashboardLoginRateLimitsPerIP(t *testing.T) {
 	code, _, body := h.do("POST", "/admin/login", "", `{"password":"wrong"}`)
 	if code != http.StatusTooManyRequests {
 		t.Fatalf("sixth attempt = %d, want 429: %s", code, body)
+	}
+}
+
+// H3: empty passwords used to be exempt from the limiter (the old
+// default-password probe sent them), leaving an unthrottled bcrypt loop.
+func TestDashboardLoginEmptyPasswordsAreRateLimited(t *testing.T) {
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
+	setupDashboard(t, h, "empty-probe-password")
+	clearLoginAttempts("192.0.2.1")
+	defer clearLoginAttempts("192.0.2.1")
+	for i := 0; i < 5; i++ {
+		if code, _, _ := h.do("POST", "/admin/login", "", `{"password":""}`); code != http.StatusUnauthorized {
+			t.Fatalf("empty attempt %d = %d, want 401", i+1, code)
+		}
+	}
+	if code, _, body := h.do("POST", "/admin/login", "", `{"password":""}`); code != http.StatusTooManyRequests {
+		t.Fatalf("sixth empty attempt = %d %s, want 429", code, body)
 	}
 }

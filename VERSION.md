@@ -15,6 +15,17 @@ file in the same commit, or the test fails.
 
 ## v0.0.21 — 2026-10-21
 
+- **No default dashboard password (schema v26).** First boot prints an ezllm
+  banner with a one-time setup code; the dashboard shows only a set-password
+  page until the code and a new password are entered (`first_boot` flips).
+  `EZLLM_DASHBOARD_PASSWORD` / `_FILE` skips setup. Databases still on the
+  old published `STRONGPASSWORD` return to setup on upgrade and lose their
+  sessions. Login now rate-limits empty passwords too, and the 401 no longer
+  carries `default_password`.
+- **Console logs revamped**: timestamp, padded level and `key=value` on one
+  line, with the level colored on a terminal (`EZLLM_LOG_COLOR`,
+  `NO_COLOR`). `EZLLM_LOG_LEVEL` accepts `info` and warns on an unknown
+  value; package-level `slog` calls now share the same format.
 - **Cloudflare free models join auto-free combos.** Workers AI's free tier has
   no marker in the model id, so a built-in list (65 models, task class kept
   as the dashboard states it) names them. Auto-free combos take the 31

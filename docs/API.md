@@ -566,12 +566,26 @@ table; any other value is a 400). Every engine applies to all three request shap
 
 ## M6 — dashboard session & live feed
 
+### First-boot setup (schema v26): `GET /admin/setup` · `POST /admin/setup`
+There is no factory password. A fresh database (or one still holding the
+pre-v26 factory password) has `dashboard_auth.first_boot = 1` and no usable
+hash; the SPA shows only its set-password page until setup flips the flag.
+
+- `GET /admin/setup` (public) → `{"first_boot":true}`.
+- `POST /admin/setup` (public) `{"setup_code":"ABCD-EFGH","password":"…"}`.
+  The setup code is minted at boot, printed in the first-boot banner, and
+  changes on every restart; case, spaces and the hyphen are ignored.
+  `200 {"token":"…"}` + the `ezllm_session` cookie (setup signs you in) ·
+  `401` wrong code · `400` password under 12 characters · `409 setup_complete`
+  once the password exists · `503 setup_unavailable` when no code was issued ·
+  `429` after 5 failures per IP in 15 min (shared with login).
+- `EZLLM_DASHBOARD_PASSWORD` / `_FILE` completes setup at boot instead.
+
 ### `POST /admin/login` → `200` + session · `POST /admin/settings/password`
 bcrypt dashboard password; the SPA renders and fetches nothing pre-auth.
-Both answers carry `default_password` (bool): whether the stored hash still
-matches the factory `STRONGPASSWORD` — the login page uses it to show the
-first-run hint only while it is true (fail-closed on errors). Success:
-`{"token":"…","default_password":false}`; the 401 nests it under `error`.
+Success: `{"token":"…"}` + the `ezllm_session` cookie · `401` wrong password
+(every failure, empty included, counts toward the 5-per-15-min limit) ·
+`409 setup_required` while first-boot setup is pending.
 
 ### `GET /admin/stream` → SSE
 Two event types: `snapshot` (last 20 calls on connect, newest first) and `calls` (each committed

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react';
-import { clearToken, dashboardLogin, isUnlocked, markUnlocked, probeDefaultPassword } from './utils/api';
+import { clearToken, completeSetup, dashboardLogin, getSetupStatus, isUnlocked, markUnlocked } from './utils/api';
 import { DUR, SelectionLine, spring } from './components/motion';
 import RailwayBackground from './components/RailwayBackground';
 import { readTheme, setTheme, type Theme } from './utils/theme';
@@ -123,29 +123,36 @@ function GitHubIcon({ className }: { className?: string }) {
   );
 }
 
+const MIN_PASSWORD = 12; // store.MinDashboardPasswordLen
+
+const fieldClass = (bad: boolean) => cx('h-10 w-full rounded-lg border bg-bg px-3 text-[14px] transition-colors',
+  bad ? 'border-bad' : 'border-line hover:border-line-strong focus:border-accent focus:outline-none');
+
+function Field({ id, label, ...input }: { id: string; label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <div className="mt-4 first:mt-0">
+      <label className="mb-1.5 block text-[12px] font-medium text-mute" htmlFor={id}>{label}</label>
+      <input id={id} spellCheck={false} {...input} />
+    </div>
+  );
+}
+
+// The gate before the app. While the server reports first_boot (no password
+// set yet) it shows ONLY the set-password page; after that, sign-in.
 function Unlock({ onUnlock }: { onUnlock: () => void }) {
-  const [value, setValue] = useState('');
-  const [err, setErr] = useState('');
-  const [busy, setBusy] = useState(false);
-  // The first-run hint is only relevant while the stored hash still matches
-  // STRONGPASSWORD (docx item 13) — ask the flag on mount, fail-closed.
-  const [defaultPassword, setDefaultPassword] = useState(false);
+  const [mode, setMode] = useState<'loading' | 'setup' | 'login'>('loading');
 
   useEffect(() => {
     let alive = true;
-    probeDefaultPassword().then((v) => { if (alive) setDefaultPassword(v); }).catch(() => undefined);
+    // A failed status read falls back to sign-in: the server still refuses
+    // login with setup_required while setup is pending.
+    getSetupStatus()
+      .then((s) => { if (alive) setMode(s.firstBoot ? 'setup' : 'login'); })
+      .catch(() => { if (alive) setMode('login'); });
     return () => { alive = false; };
   }, []);
 
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!value) { setErr('enter the dashboard password'); return; }
-    setBusy(true);
-    dashboardLogin(value)
-      .then(() => { markUnlocked(); onUnlock(); })
-      .catch((error: unknown) => setErr(error instanceof Error ? error.message : 'login failed'))
-      .finally(() => setBusy(false));
-  };
+  const done = () => { markUnlocked(); onUnlock(); };
 
   return (
     // The railway backdrop (item 15) is the login page's own. A flat night
@@ -159,31 +166,94 @@ function Unlock({ onUnlock }: { onUnlock: () => void }) {
           {LOGO}
           <span className="text-[15px] font-semibold tracking-tight">ezllm</span>
         </div>
-        <h1 className="mt-6 text-[20px] font-semibold">Sign in to ezllm</h1>
-        {defaultPassword && (
-          <p className="mt-3 rounded-lg border border-line bg-raised px-3 py-2 text-xs text-mute">
-            First-run password: <code className="font-mono text-ink">STRONGPASSWORD</code>
-          </p>
-        )}
-        <form onSubmit={submit} className="mt-6">
-          <label className="mb-1.5 block text-[12px] font-medium text-mute" htmlFor="dashboard-password">
-            Dashboard password
-          </label>
-          <input
-            id="dashboard-password" autoFocus type="password" autoComplete="current-password" spellCheck={false}
-            value={value} onChange={(e) => { setValue(e.target.value); setErr(''); }}
-            placeholder="Enter dashboard password"
-            className={cx('h-10 w-full rounded-lg border bg-bg px-3 text-[14px] transition-colors',
-              err ? 'border-bad' : 'border-line hover:border-line-strong focus:border-accent focus:outline-none')}
-          />
-          {err && <p className="mt-2 text-xs text-bad">{err}</p>}
-          <button type="submit" disabled={busy}
-            className={cx(btn.base, btn.primary, 'mt-4 w-full')}>
-            {busy ? <Spinner /> : null} Sign in
-          </button>
-        </form>
+        {mode === 'loading' && <div className="mt-6 flex justify-center"><Spinner /></div>}
+        {mode === 'setup' && <SetupForm onDone={done} onAlreadySet={() => setMode('login')} />}
+        {mode === 'login' && <SignInForm onDone={done} onSetupRequired={() => setMode('setup')} />}
       </div>
     </div>
+  );
+}
+
+function SignInForm({ onDone, onSetupRequired }: { onDone: () => void; onSetupRequired: () => void }) {
+  const [value, setValue] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!value) { setErr('enter the dashboard password'); return; }
+    setBusy(true);
+    dashboardLogin(value)
+      .then(onDone)
+      .catch((error: unknown) => {
+        const msg = error instanceof Error ? error.message : 'login failed';
+        if (msg.includes('first-boot setup')) { onSetupRequired(); return; }
+        setErr(msg);
+      })
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <>
+      <h1 className="mt-6 text-[20px] font-semibold">Sign in to ezllm</h1>
+      <form onSubmit={submit} className="mt-6">
+        <Field id="dashboard-password" label="Dashboard password" autoFocus type="password"
+          autoComplete="current-password" placeholder="Enter dashboard password"
+          value={value} onChange={(e) => { setValue(e.target.value); setErr(''); }}
+          className={fieldClass(!!err)} />
+        {err && <p className="mt-2 text-xs text-bad">{err}</p>}
+        <button type="submit" disabled={busy} className={cx(btn.base, btn.primary, 'mt-4 w-full')}>
+          {busy ? <Spinner /> : null} Sign in
+        </button>
+      </form>
+    </>
+  );
+}
+
+function SetupForm({ onDone, onAlreadySet }: { onDone: () => void; onAlreadySet: () => void }) {
+  const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!code.trim()) { setErr('enter the setup code from the server log'); return; }
+    if (password.length < MIN_PASSWORD) { setErr(`the password needs at least ${MIN_PASSWORD} characters`); return; }
+    if (password !== confirm) { setErr('the passwords do not match'); return; }
+    setBusy(true);
+    completeSetup(code, password)
+      .then(onDone)
+      .catch((error: unknown) => {
+        const msg = error instanceof Error ? error.message : 'setup failed';
+        if (msg.includes('already set')) { onAlreadySet(); return; }
+        setErr(msg);
+      })
+      .finally(() => setBusy(false));
+  };
+
+  const edit = (set: (v: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => { set(e.target.value); setErr(''); };
+
+  return (
+    <>
+      <h1 className="mt-6 text-[20px] font-semibold">Set the dashboard password</h1>
+      <p className="mt-2 text-[13px] text-mute">
+        First boot. Enter the setup code printed in the ezllm server log, then choose a password.
+      </p>
+      <form onSubmit={submit} className="mt-6">
+        <Field id="setup-code" label="Setup code" autoFocus autoComplete="one-time-code" placeholder="XXXX-XXXX"
+          value={code} onChange={edit(setCode)} className={cx(fieldClass(false), 'font-mono uppercase tracking-widest')} />
+        <Field id="setup-password" label={`New password (at least ${MIN_PASSWORD} characters)`} type="password"
+          autoComplete="new-password" value={password} onChange={edit(setPassword)} className={fieldClass(false)} />
+        <Field id="setup-confirm" label="Confirm password" type="password" autoComplete="new-password"
+          value={confirm} onChange={edit(setConfirm)} className={fieldClass(false)} />
+        {err && <p className="mt-2 text-xs text-bad">{err}</p>}
+        <button type="submit" disabled={busy} className={cx(btn.base, btn.primary, 'mt-4 w-full')}>
+          {busy ? <Spinner /> : null} Set password
+        </button>
+      </form>
+    </>
   );
 }
 

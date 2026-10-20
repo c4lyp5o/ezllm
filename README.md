@@ -50,8 +50,11 @@ cp config.example.yaml config.yaml         # provider metadata only —
 make run                                   # http://127.0.0.1:20129
 ```
 
-First run serves the dashboard at `/`; log in with the seeded dashboard
-password and **change it immediately** (Settings). Add provider accounts and
+There is no default dashboard password. On first boot the server prints an
+ezllm banner with a one-time **setup code**, and the dashboard at `/` shows
+only a set-password page that asks for it. The code changes on every restart
+until setup is done. To skip the page, set `EZLLM_DASHBOARD_PASSWORD` (or
+`EZLLM_DASHBOARD_PASSWORD_FILE`) before the first boot. Add provider accounts and
 keys from the Providers page — keys are validated by a live probe chain
 (catalog → auth → quota → inference → protocol), never by format checks.
 
@@ -175,8 +178,14 @@ built-in defaults.
   is loopback)
 - `EZLLM_DATA_DIR` — ledger location (set inside containers, where the
   default is repo-relative)
-- `EZLLM_LOG_LEVEL` — `debug` | `warn` | `error` (env-only: needed before
-  the config is read)
+- `EZLLM_LOG_LEVEL` — `debug` | `info` (default) | `warn` | `error`
+  (env-only: needed before the config is read; an unknown value logs a
+  warning and uses `info`)
+- `EZLLM_LOG_COLOR` — `auto` (default: color only on a terminal, honoring
+  `NO_COLOR`) | `always` | `never`
+- `EZLLM_DASHBOARD_PASSWORD` / `EZLLM_DASHBOARD_PASSWORD_FILE` — the first
+  dashboard password (at least 12 characters), used only while setup is
+  pending; it never overwrites a password that is already set
 
 Provider credentials live in SQLite only, managed from the dashboard or the
 admin API — never in `config.yaml`. Upstream retry policy defaults to 3

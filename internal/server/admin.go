@@ -1224,10 +1224,11 @@ func (s *Server) handleSetModelPin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad_request", "pin must be a string")
 		return
 	}
-	switch pin {
-	case "", "openai", "anthropic", "responses", "embeddings", "images_gen", "audio_tts", "audio_stt":
+	switch {
+	case pin == "", pin == "openai", pin == "anthropic", pin == "responses", store.IsServiceSurface(pin):
 	default:
-		writeErr(w, http.StatusBadRequest, "bad_request", "pin must be openai, anthropic, responses, embeddings, images_gen, audio_tts, audio_stt, or empty")
+		writeErr(w, http.StatusBadRequest, "bad_request",
+			"pin must be openai, anthropic, responses, "+strings.Join(store.ServiceSurfaceNames, ", ")+", or empty")
 		return
 	}
 

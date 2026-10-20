@@ -21,6 +21,14 @@ file in the same commit, or the test fails.
   chat-capable ones, on a host-verified Workers AI account only; embedding,
   image, audio, translation and classifier models stay on the list as data
   but never become chat hops.
+- **Five more service endpoints**: `/v1/images/edits` (multipart),
+  `/v1/moderations`, `/v1/rerank`, `/v1/videos/generations` and
+  `/v1/music/generations`, each with a Services card, a test probe and a
+  pinnable surface.
+- **Fix: service endpoints no longer read the chat probe.** A model whose chat
+  probe failed (every embedding, image or rerank model) was refused on its own
+  endpoint; service surfaces now read as untested there.
+- **Local Ollama preset** (`http://localhost:11434/v1`, any placeholder key).
 
 ---
 

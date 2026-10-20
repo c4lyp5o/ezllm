@@ -148,6 +148,12 @@ const PROVIDER_PRESETS: Record<string, {
   // exactly like tokenrouter's slash-ids already do).
   'vercel-ai-gateway': { label: 'Vercel AI Gateway', kind: 'openai-compatible', baseURL: 'https://ai-gateway.vercel.sh/v1' },
   'ollama-cloud': { label: 'Ollama Cloud', kind: 'openai-compatible', baseURL: 'https://ollama.com/v1' },
+  // Local Ollama speaks the OpenAI wire (and /v1/messages) natively — no
+  // adapter. It ignores credentials, but ezllm stores a key per account.
+  'ollama-local': {
+    label: 'Ollama (local)', kind: 'openai-compatible', baseURL: 'http://localhost:11434/v1',
+    keyHint: 'Any non-empty value (e.g. ollama) — local Ollama ignores the key',
+  },
   'gemini': { label: 'Google AI Studio', kind: 'gemini-openai', baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai' },
   'gemini-web': {
     label: 'Google Gemini (web cookies)', kind: 'gemini-web', baseURL: 'internal://geminiweb',
@@ -895,7 +901,8 @@ function EditAccountModal({ account, onClose, onSaved }: { account: Account | nu
 
 // ── models drawer ───────────────────────────────────────────────────────
 
-const PIN_SURFACES = ['openai', 'anthropic', 'responses', 'embeddings', 'images_gen', 'audio_tts', 'audio_stt'] as const;
+const PIN_SURFACES = ['openai', 'anthropic', 'responses', 'embeddings', 'images_gen', 'audio_tts', 'audio_stt',
+  'images_edit', 'moderations', 'rerank', 'videos_gen', 'music_gen'] as const;
 
 function ModelsDrawer({ id }: { id: number }) {
   const [models, setModels] = useState<ModelRow[] | null>(null);

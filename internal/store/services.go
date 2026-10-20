@@ -10,7 +10,8 @@ import (
 
 // ServiceSurfaceNames are the non-chat endpoint surfaces configurable from the
 // Services page. Keep this list in one place; the server validates at its edge.
-var ServiceSurfaceNames = []string{"embeddings", "images_gen", "audio_tts", "audio_stt"}
+var ServiceSurfaceNames = []string{"embeddings", "images_gen", "audio_tts", "audio_stt",
+	"images_edit", "moderations", "rerank", "videos_gen", "music_gen"}
 
 func IsServiceSurface(surface string) bool {
 	for _, known := range ServiceSurfaceNames {

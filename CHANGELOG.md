@@ -11,6 +11,16 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M14); full histor
   `/ai/v1`); the other classes are data only — a chat combo cannot serve an
   embedding or an image model, and catalogs do not advertise capability
   (`docs/services-design.md`).
+- **Five more service endpoints.** `/v1/images/edits` (multipart, shares the
+  STT handler), `/v1/moderations`, `/v1/rerank`, `/v1/videos/generations`,
+  `/v1/music/generations` — routed, ledgered under their own surface,
+  pinnable, with Services cards and probes (paid ones confirmed first).
+- **Fix: service surfaces never read the chat probe column.** `proto_openai`
+  was consulted for every non-chat surface, so a model that failed the chat
+  probe was refused on `/v1/embeddings` & co.
+- **Local Ollama preset.** Ollama serves both wires natively
+  (`/v1/chat/completions` and `/v1/messages`); the preset only fills the
+  base URL.
 
 ## 2026-10-20 — ten compression engines, universal translation, data-terminal dashboard
 

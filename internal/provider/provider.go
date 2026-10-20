@@ -32,13 +32,18 @@ const (
 type Surface string
 
 const (
-	SurfaceOpenAI     Surface = "openai"     // POST /chat/completions
-	SurfaceAnthropic  Surface = "anthropic"  // POST /messages
-	SurfaceResponses  Surface = "responses"  // POST /responses
-	SurfaceEmbeddings Surface = "embeddings" // POST /embeddings
-	SurfaceImagesGen  Surface = "images_gen" // POST /images/generations
-	SurfaceAudioTTS   Surface = "audio_tts"  // POST /audio/speech
-	SurfaceAudioSTT   Surface = "audio_stt"  // POST /audio/transcriptions
+	SurfaceOpenAI     Surface = "openai"      // POST /chat/completions
+	SurfaceAnthropic  Surface = "anthropic"   // POST /messages
+	SurfaceResponses  Surface = "responses"   // POST /responses
+	SurfaceEmbeddings Surface = "embeddings"  // POST /embeddings
+	SurfaceImagesGen  Surface = "images_gen"  // POST /images/generations
+	SurfaceAudioTTS   Surface = "audio_tts"   // POST /audio/speech
+	SurfaceAudioSTT   Surface = "audio_stt"   // POST /audio/transcriptions
+	SurfaceImagesEdit Surface = "images_edit" // POST /images/edits (multipart)
+	SurfaceModeration Surface = "moderations" // POST /moderations
+	SurfaceRerank     Surface = "rerank"      // POST /rerank (Cohere/Voyage shape)
+	SurfaceVideosGen  Surface = "videos_gen"  // POST /videos/generations
+	SurfaceMusicGen   Surface = "music_gen"   // POST /music/generations
 )
 
 // SurfacePath returns the upstream path (relative to BaseURL) for a surface.
@@ -56,6 +61,16 @@ func SurfacePath(s Surface) string {
 		return "/audio/speech"
 	case SurfaceAudioSTT:
 		return "/audio/transcriptions"
+	case SurfaceImagesEdit:
+		return "/images/edits"
+	case SurfaceModeration:
+		return "/moderations"
+	case SurfaceRerank:
+		return "/rerank"
+	case SurfaceVideosGen:
+		return "/videos/generations"
+	case SurfaceMusicGen:
+		return "/music/generations"
 	default:
 		return "/chat/completions"
 	}

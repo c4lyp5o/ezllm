@@ -606,7 +606,8 @@ export type TestStep = { step: string; ok?: boolean; ms?: number; detail?: strin
 export type TestResult = { ok: boolean; steps: TestStep[]; catalog?: { id: string; owned_by?: string }[]; quota?: QuotaSnapshot | null; deferred?: string[] };
 export type TestOutcome = { key: KeyRow; test: TestResult };
 
-export type ServiceSurface = 'embeddings' | 'images_gen' | 'audio_tts' | 'audio_stt';
+export type ServiceSurface = 'embeddings' | 'images_gen' | 'audio_tts' | 'audio_stt'
+  | 'images_edit' | 'moderations' | 'rerank' | 'videos_gen' | 'music_gen';
 export type ServiceMode = 'off' | 'manual' | 'auto';
 export type ServiceVerdict = { model: string; ok: boolean; detail: string; tested_at: string };
 export type ServiceCard = {

@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"mime/multipart"
 	"net/http"
 	"strings"
@@ -54,6 +57,16 @@ var serviceDefs = []struct {
 		"Synthesize spoken audio from text."},
 	{"audio_stt", "/v1/audio/transcriptions", "Speech to text",
 		"Transcribe audio into text."},
+	{"images_edit", "/v1/images/edits", "Image editing",
+		"Edit or inpaint an uploaded image from a prompt."},
+	{"moderations", "/v1/moderations", "Moderation",
+		"Classify text against content-safety categories."},
+	{"rerank", "/v1/rerank", "Rerank",
+		"Order documents by relevance to a query (Cohere/Voyage shape)."},
+	{"videos_gen", "/v1/videos/generations", "Video generation",
+		"Generate video from a prompt."},
+	{"music_gen", "/v1/music/generations", "Music generation",
+		"Generate music or audio from a prompt."},
 }
 
 func serviceDef(surface string) (endpoint, label, description string, ok bool) {
@@ -180,7 +193,7 @@ func (s *Server) handleServiceBinding(w http.ResponseWriter, r *http.Request) {
 	surface := r.PathValue("surface")
 	if _, _, _, ok := serviceDef(surface); !ok {
 		writeErr(w, http.StatusBadRequest, "invalid_request_error",
-			fmt.Sprintf("unknown service %q — expected one of embeddings, images_gen, audio_tts, audio_stt", surface))
+			fmt.Sprintf("unknown service %q — expected one of %s", surface, strings.Join(store.ServiceSurfaceNames, ", ")))
 		return
 	}
 	var req serviceBindingRequest
@@ -260,7 +273,7 @@ func (s *Server) handleServiceTest(w http.ResponseWriter, r *http.Request) {
 	surface := r.PathValue("surface")
 	if _, _, _, ok := serviceDef(surface); !ok {
 		writeErr(w, http.StatusBadRequest, "invalid_request_error",
-			fmt.Sprintf("unknown service %q — expected one of embeddings, images_gen, audio_tts, audio_stt", surface))
+			fmt.Sprintf("unknown service %q — expected one of %s", surface, strings.Join(store.ServiceSurfaceNames, ", ")))
 		return
 	}
 	var req struct {
@@ -426,6 +439,38 @@ func serviceProbeBody(surface, model, prompt string) ([]byte, string) {
 		_, _ = part.Write(silentWAV())
 		_ = mw.Close()
 		return buf.Bytes(), mw.FormDataContentType()
+	case "images_edit":
+		// multipart, like STT: the image is a fixed 1x1 PNG, the prompt is
+		// the operator's (or the default).
+		if prompt == "" {
+			prompt = "make it red"
+		}
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		_ = mw.WriteField("model", model)
+		_ = mw.WriteField("prompt", prompt)
+		part, _ := mw.CreateFormFile("image", "test.png")
+		_, _ = part.Write(tinyPNG())
+		_ = mw.Close()
+		return buf.Bytes(), mw.FormDataContentType()
+	case "moderations":
+		if prompt == "" {
+			prompt = "ping"
+		}
+		body, _ := json.Marshal(map[string]any{"model": model, "input": prompt})
+		return body, "application/json"
+	case "rerank":
+		if prompt == "" {
+			prompt = "ping"
+		}
+		body, _ := json.Marshal(map[string]any{"model": model, "query": prompt, "documents": []string{"ping", "pong"}})
+		return body, "application/json"
+	case "videos_gen", "music_gen":
+		if prompt == "" {
+			prompt = "a short calm tone"
+		}
+		body, _ := json.Marshal(map[string]any{"model": model, "prompt": prompt})
+		return body, "application/json"
 	case "images_gen":
 		if prompt == "" {
 			prompt = "a small red circle"
@@ -448,6 +493,16 @@ func serviceProbeBody(surface, model, prompt string) ([]byte, string) {
 }
 
 // silentWAV returns a minimal valid WAV: 0.2 s of silence, 8 kHz, 16-bit mono.
+// tinyPNG is a valid 1x1 opaque white PNG — the smallest image an edit
+// endpoint will accept as input.
+func tinyPNG() []byte {
+	var buf bytes.Buffer
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.Set(0, 0, color.White)
+	_ = png.Encode(&buf, img)
+	return buf.Bytes()
+}
+
 func silentWAV() []byte {
 	const (
 		rate    = 8000

@@ -133,3 +133,18 @@ quality. The UI says so.
 - Auto-routing across providers, weights, or cost — that is what combos are for.
 - Chat-surface bindings.
 - Sweep/batch service probing (image probes cost money; per-card opt-in only).
+
+## Addendum 2026-10-21 — five more service surfaces
+
+`images_edit` (`/v1/images/edits`, multipart like STT — shares the multipart handler),
+`moderations`, `rerank`, `videos_gen`, `music_gen` join `ServiceSurfaceNames`, the pin
+vocabulary and the ledger surfaces. Probes: images_edit sends a 1x1 PNG + prompt (multipart),
+moderations `{model,input}`, rerank `{model,query,documents:["ping","pong"]}`, videos/music
+`{model,prompt}`; images_edit, videos and music are confirmed in the UI before each test (paid).
+Video and music have no common upstream wire: ezllm passes the body through, so "OpenAI-style"
+means whatever the bound provider accepts.
+
+Fix shipped alongside: `ModelFacts.Supports` / `ModelSupportsSurface` mapped every service
+surface to the CHAT probe column (`proto_openai`), so a model whose chat probe failed — every
+embedding/image/rerank model — was refused on its own endpoint. Service surfaces now read as
+unknown (NULL) there, and `SetModelProto` ignores them.

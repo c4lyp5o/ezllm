@@ -19,12 +19,29 @@ const PROMPT_DEFAULTS: Record<ServiceSurface, string> = {
   images_gen: 'a small red circle',
   audio_tts: 'ok',
   audio_stt: '',
+  images_edit: 'make it red',
+  moderations: 'ping',
+  rerank: 'ping',
+  videos_gen: 'a short calm tone',
+  music_gen: 'a short calm tone',
+};
+// Tests that generate media can spend real quota: confirmed before each send.
+const PAID_TESTS: Partial<Record<ServiceSurface, string>> = {
+  images_gen: 'Image generation tests can use provider quota or incur a charge. Send one small test image request?',
+  images_edit: 'Image edit tests can use provider quota or incur a charge. Send one small test edit of a 1×1 image?',
+  videos_gen: 'Video generation tests can use provider quota or incur a charge. Send one short test request?',
+  music_gen: 'Music generation tests can use provider quota or incur a charge. Send one short test request?',
 };
 const PROMPT_LABELS: Record<ServiceSurface, string> = {
   embeddings: 'Test text',
   images_gen: 'Prompt to generate',
   audio_tts: 'Text to speak',
   audio_stt: 'Test payload',
+  images_edit: 'Edit instruction',
+  moderations: 'Text to classify',
+  rerank: 'Query (ranks two fixed documents)',
+  videos_gen: 'Prompt to generate',
+  music_gen: 'Prompt to generate',
 };
 
 function ServiceIcon({ surface }: { surface: ServiceSurface }) {
@@ -40,6 +57,16 @@ function ServiceIcon({ surface }: { surface: ServiceSurface }) {
       return <svg {...common}><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="m21 15-4-4-5 5-4-4-5 5" /></svg>;
     case 'audio_tts':
       return <svg {...common}><path d="M4 9v6M8 6v12M12 4v16M16 7v10M20 10v4" /></svg>;
+    case 'images_edit':
+      return <svg {...common}><rect x="3" y="4" width="14" height="14" rx="2" /><path d="m14 20 6-6-2-2-6 6v2z" /></svg>;
+    case 'moderations':
+      return <svg {...common}><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z" /><path d="m9 12 2 2 4-4" /></svg>;
+    case 'rerank':
+      return <svg {...common}><path d="M4 6h10M4 12h7M4 18h4M17 4v16M14 17l3 3 3-3" /></svg>;
+    case 'videos_gen':
+      return <svg {...common}><rect x="3" y="6" width="13" height="12" rx="2" /><path d="m16 10 5-3v10l-5-3z" /></svg>;
+    case 'music_gen':
+      return <svg {...common}><path d="M9 18V5l11-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="17" cy="16" r="3" /></svg>;
     default:
       return <svg {...common}><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8" /></svg>;
   }
@@ -96,7 +123,8 @@ function ServiceCardView({
 
   const runTest = async () => {
     if (!target) return;
-    if (card.surface === 'images_gen' && !window.confirm('Image generation tests can use provider quota or incur a charge. Send one small test image request?')) return;
+    const paid = PAID_TESTS[card.surface];
+    if (paid && !window.confirm(paid)) return;
     setTesting(true); setError(''); setMessage(''); setTestResult(null);
     try {
       const result = await testService(card.surface, target, prompt.trim());
@@ -206,7 +234,7 @@ function ServiceCardView({
                 )}
               </div>
             )}
-            {card.surface === 'images_gen' && <p className="text-[11px] leading-relaxed text-warn">Image tests may spend provider quota. You will be asked before each test.</p>}
+            {PAID_TESTS[card.surface] && <p className="text-[11px] leading-relaxed text-warn">These tests may spend provider quota. You will be asked before each test.</p>}
           </div>
         </div>
       )}

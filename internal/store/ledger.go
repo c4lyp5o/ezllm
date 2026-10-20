@@ -18,13 +18,18 @@ import (
 type Surface string
 
 const (
-	SurfaceOpenAI     Surface = "openai"     // /v1/chat/completions
-	SurfaceAnthropic  Surface = "anthropic"  // /v1/messages
-	SurfaceResponses  Surface = "responses"  // /v1/responses
-	SurfaceEmbeddings Surface = "embeddings" // /v1/embeddings
-	SurfaceImagesGen  Surface = "images_gen" // /v1/images/generations
-	SurfaceAudioTTS   Surface = "audio_tts"  // /v1/audio/speech
-	SurfaceAudioSTT   Surface = "audio_stt"  // /v1/audio/transcriptions
+	SurfaceOpenAI     Surface = "openai"      // /v1/chat/completions
+	SurfaceAnthropic  Surface = "anthropic"   // /v1/messages
+	SurfaceResponses  Surface = "responses"   // /v1/responses
+	SurfaceEmbeddings Surface = "embeddings"  // /v1/embeddings
+	SurfaceImagesGen  Surface = "images_gen"  // /v1/images/generations
+	SurfaceAudioTTS   Surface = "audio_tts"   // /v1/audio/speech
+	SurfaceAudioSTT   Surface = "audio_stt"   // /v1/audio/transcriptions
+	SurfaceImagesEdit Surface = "images_edit" // /v1/images/edits
+	SurfaceModeration Surface = "moderations" // /v1/moderations
+	SurfaceRerank     Surface = "rerank"      // /v1/rerank
+	SurfaceVideosGen  Surface = "videos_gen"  // /v1/videos/generations
+	SurfaceMusicGen   Surface = "music_gen"   // /v1/music/generations
 )
 
 // Call is one ledger row. Token counters are NORMALIZED (surface-independent):

@@ -244,6 +244,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/images/generations", s.authed(s.inference(provider.SurfaceImagesGen)))
 	s.mux.HandleFunc("POST /v1/audio/speech", s.authed(s.inference(provider.SurfaceAudioTTS)))
 	s.mux.HandleFunc("POST /v1/audio/transcriptions", s.authed(s.inference(provider.SurfaceAudioSTT)))
+	s.mux.HandleFunc("POST /v1/images/edits", s.authed(s.inference(provider.SurfaceImagesEdit)))
+	s.mux.HandleFunc("POST /v1/moderations", s.authed(s.inference(provider.SurfaceModeration)))
+	s.mux.HandleFunc("POST /v1/rerank", s.authed(s.inference(provider.SurfaceRerank)))
+	s.mux.HandleFunc("POST /v1/videos/generations", s.authed(s.inference(provider.SurfaceVideosGen)))
+	s.mux.HandleFunc("POST /v1/music/generations", s.authed(s.inference(provider.SurfaceMusicGen)))
 
 	// VS Code / Headerless tokenized aliases (OmniRoute compatibility)
 	s.mux.HandleFunc("GET /api/v1/vscode/{token}/", s.vscodeAuthed(s.handleModels))
@@ -561,12 +566,11 @@ func maxOutputTokens(m map[string]any) int64 {
 func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		// Audio STT is multipart/form-data, not JSON: the model lives in a
-		// form field, not a JSON key, so the generic JSON reader below would
-		// reject it. Parse it here and re-serialize to a shape the rest of
-		// the pipeline can consume.
-		if surface == provider.SurfaceAudioSTT {
-			s.inferenceSTT(w, r)
+		// Audio STT and image edits are multipart/form-data, not JSON: the
+		// model lives in a form field, not a JSON key, so the generic JSON
+		// reader below would reject it.
+		if surface == provider.SurfaceAudioSTT || surface == provider.SurfaceImagesEdit {
+			s.inferenceMultipart(w, r, surface)
 			return
 		}
 		body, err := io.ReadAll(io.LimitReader(r.Body, s.maxBody+1))
@@ -857,10 +861,11 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 	}
 }
 
-// inferenceSTT handles /v1/audio/transcriptions: multipart/form-data, where the
-// model lives in a form field rather than a JSON key. The raw multipart body is
-// forwarded upstream with the model field swapped inside prepareHopBody.
-func (s *Server) inferenceSTT(w http.ResponseWriter, r *http.Request) {
+// inferenceMultipart handles the multipart/form-data surfaces
+// (/v1/audio/transcriptions, /v1/images/edits), where the model lives in a
+// form field rather than a JSON key. The raw multipart body is forwarded
+// upstream with the model field swapped inside prepareHopBody.
+func (s *Server) inferenceMultipart(w http.ResponseWriter, r *http.Request, surface provider.Surface) {
 	start := time.Now()
 	// Read the raw multipart body FIRST so it can be forwarded byte-for-byte
 	// (ParseMultipartForm would consume the stream).
@@ -892,7 +897,7 @@ func (s *Server) inferenceSTT(w http.ResponseWriter, r *http.Request) {
 	cip := clientIP(r)
 	if requested == "" {
 		var ok bool
-		requested, ok = s.resolveServiceRequestModel(w, r, provider.SurfaceAudioSTT, start, client, cip)
+		requested, ok = s.resolveServiceRequestModel(w, r, surface, start, client, cip)
 		if !ok {
 			return
 		}
@@ -907,10 +912,10 @@ func (s *Server) inferenceSTT(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if info := reqInfoOf(r); info != nil {
-		info.surface = string(provider.SurfaceAudioSTT)
+		info.surface = string(surface)
 	}
 
-	routes, err := s.resolver.ResolveCandidates(r.Context(), requested, provider.SurfaceAudioSTT, client)
+	routes, err := s.resolver.ResolveCandidates(r.Context(), requested, surface, client)
 	if err != nil {
 		var nf *router.ErrNotFound
 		var nu *router.ErrUnavailable
@@ -925,7 +930,7 @@ func (s *Server) inferenceSTT(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadGateway, "upstream_error", err.Error())
 		}
 		s.ledger(store.Call{
-			TS: start, Client: client, IP: cip, Surface: store.SurfaceAudioSTT,
+			TS: start, Client: client, IP: cip, Surface: store2surface(surface),
 			Alias: requested, Model: requested, Status: errorStatus(err), Err: err.Error(),
 		})
 		return
@@ -951,7 +956,7 @@ func (s *Server) inferenceSTT(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusBadGateway
 	}
 	call := store.Call{
-		TS: start, Client: client, IP: cip, Surface: store.SurfaceAudioSTT,
+		TS: start, Client: client, IP: cip, Surface: store2surface(surface),
 		Alias: served.Alias, AccountID: served.Account.ID, Account: served.Account.Namespace,
 		KeyID: served.KeyID, KeyHint: served.KeyHint, Model: served.Model,
 		Status: status, Stream: res.Stream, Totalms: res.Totalms,
@@ -1522,6 +1527,16 @@ func store2surface(s provider.Surface) store.Surface {
 		return store.SurfaceAudioTTS
 	case provider.SurfaceAudioSTT:
 		return store.SurfaceAudioSTT
+	case provider.SurfaceImagesEdit:
+		return store.SurfaceImagesEdit
+	case provider.SurfaceModeration:
+		return store.SurfaceModeration
+	case provider.SurfaceRerank:
+		return store.SurfaceRerank
+	case provider.SurfaceVideosGen:
+		return store.SurfaceVideosGen
+	case provider.SurfaceMusicGen:
+		return store.SurfaceMusicGen
 	default:
 		return store.SurfaceOpenAI
 	}

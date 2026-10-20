@@ -819,12 +819,9 @@ FROM models WHERE account_id=? ORDER BY model_id`, accountID)
 // A curated row is left alone: the operator's curation outranks a probe until
 // released via SetModelCurated, so a sweep can never silently undo one.
 func (d *DB) SetModelProto(ctx context.Context, accountID int64, modelID string, s provider.Surface, supported *bool) error {
-	col := "proto_openai"
-	switch s {
-	case provider.SurfaceAnthropic:
-		col = "proto_anthropic"
-	case provider.SurfaceResponses:
-		col = "proto_responses"
+	col, ok := protoColumn(s)
+	if !ok {
+		return nil // service surfaces keep their verdicts in service_probes
 	}
 	// Upsert on (account_id, model_id): the sweep may probe a model that the
 	// catalog sync has not inserted yet (or vice versa).

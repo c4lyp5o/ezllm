@@ -430,12 +430,32 @@ type ModelFacts struct {
 // Supports returns the probed capability for one wire (nil = untested).
 func (f ModelFacts) Supports(s provider.Surface) *bool {
 	switch s {
+	case provider.SurfaceOpenAI:
+		return f.OpenAI
 	case provider.SurfaceAnthropic:
 		return f.Anthropic
 	case provider.SurfaceResponses:
 		return f.Responses
 	}
-	return f.OpenAI
+	// A service surface (embeddings, images, audio, ...) has no probe column:
+	// the chat verdict says nothing about it, so it is unknown, never false.
+	return nil
+}
+
+// protoColumn names the probe-verdict column of a CHAT wire. ok=false for a
+// service surface: no probe covers it, and reading or writing the chat column
+// in its place would make every embedding/image model "unsupported" on the
+// endpoint it actually serves.
+func protoColumn(s provider.Surface) (string, bool) {
+	switch s {
+	case provider.SurfaceOpenAI:
+		return "proto_openai", true
+	case provider.SurfaceAnthropic:
+		return "proto_anthropic", true
+	case provider.SurfaceResponses:
+		return "proto_responses", true
+	}
+	return "", false
 }
 
 // ModelFacts reads the pin and every capability column in one query, so wire
@@ -465,12 +485,9 @@ FROM models WHERE account_id=? AND model_id=?`, accountID, modelID).Scan(&pin, &
 // caller must read as "allowed": the upstream stays authoritative, and
 // recording nothing beats dropping a hop that actually works.
 func (d *DB) ModelSupportsSurface(ctx context.Context, accountID int64, modelID string, s provider.Surface) (*bool, error) {
-	col := "proto_openai"
-	switch s {
-	case provider.SurfaceAnthropic:
-		col = "proto_anthropic"
-	case provider.SurfaceResponses:
-		col = "proto_responses"
+	col, ok := protoColumn(s)
+	if !ok {
+		return nil, nil
 	}
 	var v sql.NullInt64
 	err := d.r.QueryRowContext(ctx,

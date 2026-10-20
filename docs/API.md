@@ -18,6 +18,15 @@ Errors are OpenAI-shaped: `{"error":{"type":"...","message":"...","code":422}}`.
 | POST | `/v1/chat/completions` | OpenAI stream + non-stream |
 | POST | `/v1/messages` | Anthropic (`x-api-key` or Bearer) |
 | POST | `/v1/responses` | OpenAI Responses |
+| POST | `/v1/embeddings`, `/v1/images/generations`, `/v1/audio/speech`, `/v1/audio/transcriptions` | Service surfaces (M10); transcriptions is multipart |
+| POST | `/v1/images/edits` | OpenAI image edit/inpaint — **multipart** (`model` form field swapped per hop) |
+| POST | `/v1/moderations` | OpenAI Moderations |
+| POST | `/v1/rerank` | Cohere/Voyage-style rerank (`query` + `documents`) |
+| POST | `/v1/videos/generations`, `/v1/music/generations` | OpenAI-style media generation — passed through as-is; no common upstream standard, so the body is whatever the provider accepts |
+
+Service surfaces are never translated and have no probe column: a model's **chat** probe verdict
+never makes it "unsupported" on a service endpoint (only `/admin/services/{surface}/test` proves
+one).
 
 **Surface-pin refusal (all three POSTs).** If the resolved model carries a `proto_pin` and the
 client called a different surface, the request is refused **before any upstream dial** with
@@ -576,14 +585,16 @@ the dashboard's own Chat page.
 
 ## M10 — service defaults (schema v15)
 
-The four non-chat surfaces (`/v1/embeddings`, `/v1/images/generations`,
-`/v1/audio/speech`, `/v1/audio/transcriptions`) get per-endpoint default models,
+The non-chat surfaces (`/v1/embeddings`, `/v1/images/generations`,
+`/v1/audio/speech`, `/v1/audio/transcriptions`, and since v0.0.21 `/v1/images/edits`,
+`/v1/moderations`, `/v1/rerank`, `/v1/videos/generations`, `/v1/music/generations`) get
+per-endpoint default models,
 backed by `service_bindings` + `service_probes`. The default applies **only when a
 request omits `model`** — an explicit `model` always wins.
 
 ### `GET /admin/services` → `200` → `{services: [ServiceCard, …]}`
-Always all four cards in fixed order, including a first run with no providers:
-`surface` (`embeddings|images_gen|audio_tts|audio_stt`), `endpoint`, `label`,
+Always every card in fixed order, including a first run with no providers:
+`surface` (`embeddings|images_gen|audio_tts|audio_stt|images_edit|moderations|rerank|videos_gen|music_gen`), `endpoint`, `label`,
 `description`, `mode` (`off|manual|auto` — `off` = no row stored), `model_target`
 (stored binding, `manual` only), `resolved_target` (what a model-less request uses
 right now; `""` = it will refuse), `target_exists`, `verified_models` (green probes

@@ -9,7 +9,18 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v0.0.20**
+**Current: v0.0.21**
+
+---
+
+## v0.0.21 — 2026-10-21
+
+- **Cloudflare free models join auto-free combos.** Workers AI's free tier has
+  no marker in the model id, so a built-in list (65 models, task class kept
+  as the dashboard states it) names them. Auto-free combos take the 31
+  chat-capable ones, on a host-verified Workers AI account only; embedding,
+  image, audio, translation and classifier models stay on the list as data
+  but never become chat hops.
 
 ---
 

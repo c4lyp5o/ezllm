@@ -96,3 +96,56 @@ func TestFreshDBSeedsFreeComboOnce(t *testing.T) {
 		t.Fatalf("deleted seed came back: %+v", cs)
 	}
 }
+
+// Cloudflare Workers AI free-tier models carry no id marker; the built-in list
+// names them. Only chat-capable ones on a host-verified Workers AI account
+// join the pool — an embedding model, a same-id model on another host, and an
+// unlisted model all stay out.
+func TestAutoFreeCloudflareBuiltinList(t *testing.T) {
+	ctx := context.Background()
+	db := openTest(t)
+	mk := func(name, ns, base string) int64 {
+		id, err := db.UpsertAccount(ctx, provider.Account{Name: name, Namespace: ns, Kind: provider.Kind("openai-compatible"), BaseURL: base, Enabled: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	cf := mk("cf", "cloudflare", "https://api.cloudflare.com/client/v4/accounts/abc123/ai/v1")
+	spoof := mk("cf2", "cloudflare2", "https://gateway.example/v1")
+	cat := func(ids ...string) []provider.ModelInfo {
+		var out []provider.ModelInfo
+		for _, id := range ids {
+			out = append(out, provider.ModelInfo{ID: id})
+		}
+		return out
+	}
+	if err := db.UpsertModels(ctx, cf, cat("@cf/openai/gpt-oss-120b", "@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/baai/bge-m3", "@cf/meta/not-on-the-list")); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertModels(ctx, spoof, cat("@cf/openai/gpt-oss-20b")); err != nil {
+		t.Fatal(err)
+	}
+	cid, err := db.UpsertCombo(ctx, Combo{Name: "free", Strategy: "failover", Enabled: true, AutoFree: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs, _ := db.ListCombos(ctx)
+	var got []string
+	for _, c := range cs {
+		if c.ID == cid {
+			for _, h := range c.Hops {
+				got = append(got, h.ModelID)
+			}
+		}
+	}
+	want := map[string]bool{"@cf/openai/gpt-oss-120b": true, "@cf/meta/llama-3.3-70b-instruct-fp8-fast": true}
+	if len(got) != len(want) {
+		t.Fatalf("hops = %v, want exactly %v", got, want)
+	}
+	for _, id := range got {
+		if !want[id] {
+			t.Errorf("unexpected hop %q (embedding / unlisted / spoof host must stay out)", id)
+		}
+	}
+}

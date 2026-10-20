@@ -47,7 +47,7 @@ can never contain `/`, so a bare id is unambiguous. Disabled combos are never li
 | PATCH | `/admin/combos/{id}` | Partial update; omitted compression profile keeps current; explicit `compression_profile_id: null` clears it |
 | GET | `/v1/models` | Enabled combo rows include `context_size`; client-advertised only, not gateway enforcement |
 
-**Auto-free combos.** A combo with `auto_free: true` has no hand-written hop list: its hops are every model whose catalog id ends in `:free` or `-free` (OpenRouter, Command Code, Opencode Go, Vercel AI Gateway, ...), rebuilt whenever an account's catalog is replaced (adding or testing a provider, catalog refresh, boot), an account is enabled/disabled, or the combo is saved. Hops you send are replaced; a hop's `enabled`/`hold_until_failure` flags survive. Models whose protocol probe failed on every surface are left out.
+**Auto-free combos.** A combo with `auto_free: true` has no hand-written hop list: its hops are every model whose catalog id ends in `:free` or `-free` (OpenRouter, Command Code, Opencode Go, Vercel AI Gateway, ...), rebuilt whenever an account's catalog is replaced (adding or testing a provider, catalog refresh, boot), an account is enabled/disabled, or the combo is saved. Hops you send are replaced; a hop's `enabled`/`hold_until_failure` flags survive. Models whose protocol probe failed on every surface are left out. One built-in exception to the id-marker rule: on a Cloudflare Workers AI account (`api.cloudflare.com`, `…/ai/v1`) the chat-capable (`Text Generation`) models from a built-in free-tier list join the pool even though their ids carry no marker; embedding, image, audio and classifier models never do.
 
 | Field | Type | Meaning |
 |---|---|---|

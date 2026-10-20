@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/c4lyp5o/ezllm/internal/provider"
 )
 
 // An auto_free combo has no hand-written hop list: its hops are the free
@@ -17,7 +19,10 @@ import (
 // (Groq, Google AI Studio, ...) are not model-level facts, so they are out of
 // scope here, and so are promotions with no id marker (Ollama Cloud's
 // free-for-now `beam`): list those in auto_free_include and they join the pool
-// whenever the catalog still carries them.
+// whenever the catalog still carries them. One deliberate exception: Cloudflare
+// Workers AI's free-tier models carry no marker either, so a built-in list
+// (provider.IsCloudflareFreeChatModel) names them — chat-capable ones only,
+// and only on a host-verified Workers AI account.
 
 // IsFreeModelID reports whether a catalog model id is marked free by the vendor.
 func IsFreeModelID(id string) bool {
@@ -135,7 +140,7 @@ func (d *DB) syncAutoFree(ctx context.Context, tx *sql.Tx, comboID int64) error 
 	}
 
 	crows, err := tx.QueryContext(ctx, `
-SELECT m.account_id, m.model_id
+SELECT m.account_id, m.model_id, a.kind, a.base_url
 FROM models m JOIN accounts a ON a.id = m.account_id
 WHERE a.enabled = 1
   AND NOT (m.proto_tested_at IS NOT NULL AND COALESCE(m.proto_openai,0) = 0
@@ -145,11 +150,16 @@ ORDER BY m.account_id, m.model_id`)
 		return err
 	}
 	var cands []ComboHop
+	builtinFree := map[string]bool{} // "account/model" free by a built-in list, not by id suffix
 	for crows.Next() {
 		var h ComboHop
-		if err := crows.Scan(&h.AccountID, &h.ModelID); err != nil {
+		var kind, baseURL string
+		if err := crows.Scan(&h.AccountID, &h.ModelID, &kind, &baseURL); err != nil {
 			crows.Close()
 			return err
+		}
+		if provider.IsCloudflareFreeChatModel(kind, baseURL, h.ModelID) {
+			builtinFree[fmt.Sprintf("%d/%s", h.AccountID, h.ModelID)] = true
 		}
 		cands = append(cands, h)
 	}
@@ -193,7 +203,7 @@ WHERE combo_id = ? ORDER BY position`, t.id)
 		var nextOrder []string
 		for _, h := range cands {
 			k := fmt.Sprintf("%d/%s", h.AccountID, h.ModelID)
-			if !t.include[k] && (!IsFreeModelID(h.ModelID) || (len(allowed) > 0 && !allowed[h.AccountID])) {
+			if !t.include[k] && (!(IsFreeModelID(h.ModelID) || builtinFree[k]) || (len(allowed) > 0 && !allowed[h.AccountID])) {
 				continue
 			}
 			if p, ok := prev[k]; ok {

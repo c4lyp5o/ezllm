@@ -2,6 +2,16 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14); full history via `git log`.
 
+## 2026-10-21 — Cloudflare free models in auto-free combos
+
+- **Built-in Cloudflare free list.** `internal/provider/cloudflare_free.go`
+  names the 65 Workers AI models the dashboard shows free, with their task.
+  `syncAutoFree` adds the chat-capable ones (`Text Generation`) when the
+  account is a host-verified Workers AI account (`api.cloudflare.com`,
+  `/ai/v1`); the other classes are data only — a chat combo cannot serve an
+  embedding or an image model, and catalogs do not advertise capability
+  (`docs/services-design.md`).
+
 ## 2026-10-20 — ten compression engines, universal translation, data-terminal dashboard
 
 - **Auto-free combos (schema v25).** `combos.auto_free` makes a combo's hops

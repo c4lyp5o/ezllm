@@ -8,8 +8,10 @@
 //     hash, so if this UI loses it, it is gone — hence the blocking modal with
 //     no way to dismiss until copy, and the "I saved it" confirmation.
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { motion } from 'motion/react';
 import { ApiError, getToken, type UsageRow } from '../utils/api';
 import { Chip, ConfirmModal, Modal, Mono, SectionLabel, Spinner, Toggle, btn, cx, inputCls, labelCls } from '../components/ui';
+import { Stagger, StaggerItem } from '../components/motion';
 import {
   createToken, listTokens, patchToken, probeModels, revokeToken, usageByClient,
   type TokenCreated, type TokenInfo, type V1Model,
@@ -256,9 +258,9 @@ export default function Connect() {
             min-width:auto, so the unbreakable endpoint URLs inside the cards set
             the track's min-content width and blow the page out sideways on a
             390px phone (measured: 570px scrollWidth before this class). */}
-        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 [&>*]:min-w-0">
+        <Stagger className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 [&>*]:min-w-0">
           {SURFACES.map((s) => (
-            <div key={s.key} className="rounded-xl border border-line bg-surface px-4 py-4 animate-fade-up">
+            <StaggerItem key={s.key} className="rounded-xl border border-line bg-surface px-4 py-4">
               <div className="text-[13px] font-semibold">{s.label}</div>
               <div className="mt-3 space-y-2">
                 <FieldRow label="base url" value={base + s.path} />
@@ -272,9 +274,9 @@ export default function Connect() {
               <div className="mt-2 flex justify-end">
                 <CopyButton text={snippet(s.key, base, '<your-key>', sampleModel ?? '<model-id>')} label="Copy env" />
               </div>
-            </div>
+            </StaggerItem>
           ))}
-        </div>
+        </Stagger>
         <p className="mt-2 text-[12px] text-mute">
           Models list: <code className="font-mono text-dim">{base}/v1/models</code>
           {CORS_NOTE}
@@ -349,63 +351,77 @@ export default function Connect() {
           <p className="mt-3 text-[13px] text-mute">No keys yet — create one above.</p>
         ) : (
           <div className="mt-3 space-y-2">
-            {tokens.map((t) => {
-              const u = usageFor(t.name);
-              const bu = budgetUsageFor(t.name, t.cap_window || 'monthly');
-              const used = (bu?.tin ?? 0) + (bu?.tout ?? 0);
-              const capPct = t.cap_tokens > 0 ? Math.min(100, (used / t.cap_tokens) * 100) : 0;
-              return (
-                <div key={t.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-line bg-surface px-4 py-3 animate-fade-up">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="truncate text-[13px] font-semibold">{t.name}</span>
-                      <Chip tone={t.roles.includes('admin') ? 'accent' : 'neutral'}>{t.roles.join(' · ')}</Chip>
-                    </div>
-                    <div className="mt-1 flex items-center gap-3 text-[12px] text-mute">
-                      <Mono>{t.hint}</Mono>
-                      <span>used {t.last_used_at ? new Date(t.last_used_at).toLocaleString() : 'never'}</span>
-                    </div>
-                    {(t.expires_at || t.allowed_models) && (
-                      <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-mute">
-                        {t.expires_at && <span>expires {t.expires_at.slice(0, 10)}</span>}
-                        {t.allowed_models && <span className="truncate" title={t.allowed_models}>models: {t.allowed_models}</span>}
+            <Stagger className="space-y-2">
+              {tokens.map((t) => {
+                const u = usageFor(t.name);
+                const bu = budgetUsageFor(t.name, t.cap_window || 'monthly');
+                const used = (bu?.tin ?? 0) + (bu?.tout ?? 0);
+                const capPct = t.cap_tokens > 0 ? Math.min(100, (used / t.cap_tokens) * 100) : 0;
+                return (
+                  <StaggerItem key={t.id}>
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-line bg-surface px-4 py-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-[13px] font-semibold">{t.name}</span>
+                          <Chip tone={t.roles.includes('admin') ? 'accent' : 'neutral'}>{t.roles.join(' · ')}</Chip>
+                        </div>
+                        <div className="mt-1 flex items-center gap-3 text-[12px] text-mute">
+                          <Mono>{t.hint}</Mono>
+                          <span>used {t.last_used_at ? new Date(t.last_used_at).toLocaleString() : 'never'}</span>
+                        </div>
+                        {(t.expires_at || t.allowed_models) && (
+                          <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-mute">
+                            {t.expires_at && <span>expires {t.expires_at.slice(0, 10)}</span>}
+                            {t.allowed_models && <span className="truncate" title={t.allowed_models}>models: {t.allowed_models}</span>}
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                  <div className="ml-auto flex items-center gap-4 text-[12px] text-dim">
-                    <span>{(u?.calls ?? 0).toLocaleString()} calls · {(u?.tin ?? 0).toLocaleString()} in · {(u?.tout ?? 0).toLocaleString()} out</span>
-                    <span className="min-w-[120px]">
-                      {t.cap_tokens > 0 ? (
-                        <>
-                          <span className="flex items-center justify-between gap-2">
-                            <span className="text-mute">budget · {t.cap_window || 'monthly'}</span>
-                            <span className="font-mono text-[11px]">{used.toLocaleString()} / {t.cap_tokens.toLocaleString()}</span>
-                          </span>
-                          <span className="mt-1 block h-1 overflow-hidden rounded-full bg-shade">
-                            <span className={cx('block h-full rounded-full', capPct >= 90 ? 'bg-bad' : capPct >= 70 ? 'bg-warn' : 'bg-accent')}
-                              style={{ width: `${capPct}%` }} />
-                          </span>
-                        </>
-                      ) : <span className="text-mute">budget unlimited</span>}
-                    </span>
-                    <span className="flex items-center gap-2">
-                      <button type="button" className={cx(btn.base, btn.ghost, 'px-2.5 py-1.5 text-[12px]')}
-                        onClick={() => {
-                          setBudgetTarget(t);
-                          setBudgetCap(t.cap_tokens);
-                          setBudgetWindow(t.cap_window || 'monthly');
-                          setBudgetModels(t.allowed_models || '');
-                          setBudgetExpiry(t.expires_at ? t.expires_at.slice(0, 10) : '');
-                        }}>
-                        Policy
-                      </button>
-                      <Toggle checked={t.enabled} onChange={(v) => void toggle(t, v)} disabled={busyId === t.id} />
-                      <button type="button" className={cx(btn.base, btn.danger, 'px-2.5 py-1.5 text-[12px]')} onClick={() => setPendingRevoke(t)} disabled={busyId === t.id}>Revoke</button>
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
+                      <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px] text-dim">
+                        <span>{(u?.calls ?? 0).toLocaleString()} calls · {(u?.tin ?? 0).toLocaleString()} in · {(u?.tout ?? 0).toLocaleString()} out</span>
+                        <span className="min-w-[120px]">
+                          {t.cap_tokens > 0 ? (
+                            <>
+                              <span className="flex items-center justify-between gap-2">
+                                <span className="text-mute">budget · {t.cap_window || 'monthly'}</span>
+                                <span className="font-mono text-[11px]">{used.toLocaleString()} / {t.cap_tokens.toLocaleString()}</span>
+                              </span>
+                              {/* The budget meter FILLS: a key that has burned
+                                  a tenth of its cap should read as a tenth
+                                  full the moment it loads, not after a
+                                  refresh. The colour changes with the fill,
+                                  so a key near its cap is obvious at a
+                                  glance without reading the numbers. */}
+                              <span className="mt-1 block h-1 overflow-hidden rounded-full bg-shade">
+                                <motion.span
+                                  className={cx('block h-full rounded-full', capPct >= 90 ? 'bg-bad' : capPct >= 70 ? 'bg-warn' : 'bg-accent')}
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${capPct}%` }}
+                                  transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+                                />
+                              </span>
+                            </>
+                          ) : <span className="text-mute">budget unlimited</span>}
+                        </span>
+                        <span className="flex shrink-0 items-center gap-2">
+                          <button type="button" className={cx(btn.base, btn.ghost, 'px-2.5 py-1.5 text-[12px]')}
+                            onClick={() => {
+                              setBudgetTarget(t);
+                              setBudgetCap(t.cap_tokens);
+                              setBudgetWindow(t.cap_window || 'monthly');
+                              setBudgetModels(t.allowed_models || '');
+                              setBudgetExpiry(t.expires_at ? t.expires_at.slice(0, 10) : '');
+                            }}>
+                            Policy
+                          </button>
+                          <Toggle checked={t.enabled} onChange={(v) => void toggle(t, v)} disabled={busyId === t.id} />
+                          <button type="button" className={cx(btn.base, btn.danger, 'px-2.5 py-1.5 text-[12px]')} onClick={() => setPendingRevoke(t)} disabled={busyId === t.id}>Revoke</button>
+                        </span>
+                      </div>
+                    </div>
+                  </StaggerItem>
+                );
+              })}
+            </Stagger>
           </div>
         )}
       </section>
@@ -456,11 +472,17 @@ export default function Connect() {
         // Deliberately NOT <Modal>: backdrop clicks and Escape would dismiss a
         // one-time secret. The only way out is the button below.
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay px-4">
-          <div
+          {/* The panel SCALES in slightly rather than fading: a one-time
+              secret is the one moment in this app where the operator's
+              attention should be pulled to the middle of the screen. */}
+          <motion.div
             role="dialog"
             aria-modal="true"
             aria-label="New API key"
-            className="w-full max-w-lg rounded-2xl border border-accent/40 bg-surface p-6 shadow-2xl animate-fade-up">
+            initial={{ opacity: 0, scale: 0.96, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
+            className="w-full max-w-lg rounded-2xl border border-accent/40 bg-surface p-6 shadow-2xl">
             <div className="text-[16px] font-semibold">Copy this key now</div>
             <p className="mt-1.5 text-[13px] text-dim">
               ezllm stores only a hash, so this is the <span className="text-ink">only time</span> it can be shown. If you close this without saving it, create a new key.
@@ -485,7 +507,7 @@ export default function Connect() {
                 I saved it
               </button>
             </div>
-          </div>
+          </motion.div>
         </div>
       )}
       <ConfirmModal

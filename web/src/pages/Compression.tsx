@@ -5,6 +5,7 @@ import {
   type CompressionProfile, type CompressionStage, type RequestsSummary, type UsageRow,
 } from '../utils/api';
 import { BarList, Panel, VIZ } from '../components/charts';
+import { ReorderItem, Stagger, StaggerItem } from '../components/motion';
 import { Chip, ConfirmModal, EmptyState, Mono, SectionLabel, btn, cx, formatTokens, inputCls, labelCls, nfmt, Spinner } from '../components/ui';
 
 // extra carries every stage option this editor has no field for, so saving a
@@ -187,17 +188,23 @@ export default function Compression() {
   const hasSavings = rewritten > 0 || showHeld;
 
   return (
-    <div className="mx-auto max-w-4xl animate-fade-up space-y-4">
+    // No page-root fade: the route transition in App.tsx already owns the
+    // page entrance. A second entrance stacked on it reads as a stutter.
+    <div className="mx-auto max-w-4xl space-y-4">
       <section className="rounded-xl border border-line bg-surface px-5 py-5 sm:px-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div><SectionLabel>Compression engines</SectionLabel><p className="mt-1 text-[13px] text-mute">Order matters: each enabled stage receives the previous stage’s output.</p></div>
           <button type="button" className={cx(btn.base, btn.primary)} onClick={startNew}>＋ New profile</button>
         </div>
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
-          {ENGINE_IDS.map((id) => <div key={id} className="rounded-lg border border-line bg-raised/50 px-3.5 py-3">
-            <div className="flex items-center justify-between"><Mono className="font-semibold">{ENGINE_INFO[id].label}</Mono><Chip tone="ok">live</Chip></div>
-            <p className="mt-1.5 text-[12px] leading-relaxed text-mute">{ENGINE_INFO[id].note}</p>
-          </div>)}
+          <Stagger className="contents">
+            {ENGINE_IDS.map((id) => (
+              <StaggerItem key={id} className="rounded-lg border border-line bg-raised/50 px-3.5 py-3">
+                <div className="flex items-center justify-between"><Mono className="font-semibold">{ENGINE_INFO[id].label}</Mono><Chip tone="ok">live</Chip></div>
+                <p className="mt-1.5 text-[12px] leading-relaxed text-mute">{ENGINE_INFO[id].note}</p>
+              </StaggerItem>
+            ))}
+          </Stagger>
         </div>
       </section>
 
@@ -229,33 +236,35 @@ export default function Compression() {
         ) : (
           <div className="space-y-4">
             <div className={cx('grid gap-3', showHitRate || showHeld ? 'sm:grid-cols-2 lg:grid-cols-3' : 'sm:grid-cols-2')}>
-              <div className="rounded-lg border border-line bg-raised/40 px-4 py-3">
-                <SectionLabel>rewritten (shipped shorter)</SectionLabel>
-                <div className="mt-1 font-mono text-[20px] font-semibold text-ok tnum">{formatTokens(rewritten)}</div>
-                <p className="mt-1 text-[12px] leading-relaxed text-mute">
-                  {nfmt(appliedCalls)} call{appliedCalls === 1 ? '' : 's'} actually went out shorter than they arrived. A deterministic rewrite, auditable.
-                </p>
-              </div>
-              {showHitRate && (
-                <div className="rounded-lg border border-line bg-raised/40 px-4 py-3">
-                  <SectionLabel>rewrite acceptance</SectionLabel>
-                  <div className="mt-1 font-mono text-[20px] font-semibold text-ink tnum">
-                    {Math.round((appliedCalls / Math.max(1, rewritesDecided)) * 100)}%
-                  </div>
+              <Stagger className="contents">
+                <StaggerItem className="rounded-lg border border-line bg-raised/40 px-4 py-3">
+                  <SectionLabel>rewritten (shipped shorter)</SectionLabel>
+                  <div className="mt-1 font-mono text-[20px] font-semibold text-ok tnum">{formatTokens(rewritten)}</div>
                   <p className="mt-1 text-[12px] leading-relaxed text-mute">
-                    {nfmt(appliedCalls)} of {nfmt(rewritesDecided)} decided rewrites shipped; {nfmt(declinedCalls)} were declined by the ratio floor (tuning data — nothing is claimed as saved).
+                    {nfmt(appliedCalls)} call{appliedCalls === 1 ? '' : 's'} actually went out shorter than they arrived. A deterministic rewrite, auditable.
                   </p>
-                </div>
-              )}
-              {showHeld && (
-                <div className="rounded-lg border border-line bg-raised/40 px-4 py-3">
-                  <SectionLabel>held (declined rewrites)</SectionLabel>
-                  <div className="mt-1 font-mono text-[20px] font-semibold text-warn tnum">{formatTokens(heldNotional)}</div>
-                  <p className="mt-1 text-[12px] leading-relaxed text-mute">
-                    What the {nfmt(declinedCalls)} declined rewrites WOULD have saved — recorded as notional on the live feed (“held N”), never counted as real savings.
-                  </p>
-                </div>
-              )}
+                </StaggerItem>
+                {showHitRate && (
+                  <StaggerItem className="rounded-lg border border-line bg-raised/40 px-4 py-3">
+                    <SectionLabel>rewrite acceptance</SectionLabel>
+                    <div className="mt-1 font-mono text-[20px] font-semibold text-ink tnum">
+                      {Math.round((appliedCalls / Math.max(1, rewritesDecided)) * 100)}%
+                    </div>
+                    <p className="mt-1 text-[12px] leading-relaxed text-mute">
+                      {nfmt(appliedCalls)} of {nfmt(rewritesDecided)} decided rewrites shipped; {nfmt(declinedCalls)} were declined by the ratio floor (tuning data — nothing is claimed as saved).
+                    </p>
+                  </StaggerItem>
+                )}
+                {showHeld && (
+                  <StaggerItem className="rounded-lg border border-line bg-raised/40 px-4 py-3">
+                    <SectionLabel>held (declined rewrites)</SectionLabel>
+                    <div className="mt-1 font-mono text-[20px] font-semibold text-warn tnum">{formatTokens(heldNotional)}</div>
+                    <p className="mt-1 text-[12px] leading-relaxed text-mute">
+                      What the {nfmt(declinedCalls)} declined rewrites WOULD have saved — recorded as notional on the live feed (“held N”), never counted as real savings.
+                    </p>
+                  </StaggerItem>
+                )}
+              </Stagger>
             </div>
             <BarList
               rows={savings.filter((r) => r.saved > 0).map((r) => ({
@@ -299,7 +308,12 @@ export default function Compression() {
         <div className="mt-2 space-y-2">
           {draft.stages.map((stage, i) => {
             const info = ENGINE_INFO[stage.engine];
-            return <div key={`${i}-${stage.engine}`} className="grid items-end gap-2 rounded-lg border border-line bg-raised/40 p-3 sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto]">
+            // `layout`: reordering the pipeline SLIDES each stage to its new
+            // position. Order here is the execution order — each stage
+            // receives the previous one's output — so seeing the row move is
+            // the difference between "I moved a row" and "I changed the
+            // pipeline".
+            return <ReorderItem key={`${i}-${stage.engine}`} className="grid items-end gap-2 rounded-lg border border-line bg-raised/40 p-3 sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto]">
               <span className="pb-2 font-mono text-[12px] text-mute">{String(i + 1).padStart(2, '0')}</span>
               <div><label className={labelCls} htmlFor={`cp-engine-${i}`}>Engine</label><select id={`cp-engine-${i}`} className={inputCls} value={stage.engine} onChange={(e) => updateStage(i, { engine: e.target.value, option: ENGINE_INFO[e.target.value]?.option?.initial ?? '', extra: {}, toolClasses: '' })}>{ENGINE_IDS.map((id) => <option key={id} value={id}>{stageLabel(id)}</option>)}{!ENGINE_IDS.includes(stage.engine) && <option value={stage.engine} disabled>{stageLabel(stage.engine)} (not offered)</option>}</select></div>
               <div>{info?.option ? (
@@ -324,7 +338,7 @@ export default function Compression() {
                 )
               ) : <p className="pb-2 text-[12px] text-mute">No stage options</p>}</div>
               <div className="flex gap-1"><button type="button" className={cx(btn.base, btn.ghost, 'px-2 py-1.5')} aria-label="Move stage up" disabled={i === 0} onClick={() => moveStage(i, -1)}>↑</button><button type="button" className={cx(btn.base, btn.ghost, 'px-2 py-1.5')} aria-label="Move stage down" disabled={i === draft.stages.length - 1} onClick={() => moveStage(i, 1)}>↓</button><button type="button" className={cx(btn.base, btn.ghost, 'px-2 py-1.5 text-bad')} aria-label="Remove stage" onClick={() => update('stages', draft.stages.filter((_, j) => j !== i))}>×</button></div>
-            </div>;
+            </ReorderItem>;
           })}
           {draft.stages.length === 0 && <p className="rounded-lg border border-dashed border-line px-4 py-5 text-center text-[13px] text-mute">Add at least one stage before saving.</p>}
         </div>

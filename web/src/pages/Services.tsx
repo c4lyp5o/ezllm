@@ -7,6 +7,7 @@ import {
   type Account, type ModelRow, type ServiceCard, type ServiceMode, type ServiceSurface,
 } from '../utils/api';
 import { Chip, Combobox, EmptyState, Spinner, btn, cx, labelCls } from '../components/ui';
+import { Collapse, Stagger, StaggerItem } from '../components/motion';
 
 type CatalogModel = ModelRow & { id: string; display: string };
 
@@ -140,7 +141,11 @@ function ServiceCardView({
               <option value="manual">Manual default — use this model when omitted</option>
               <option value="auto">Auto — choose the most recently tested model</option>
             </select>
-            {mode === 'manual' && (
+            {/* The mode-dependent panels COLLAPSE rather than pop: switching
+                the mode swaps a whole block of controls, and a height
+                animation shows the block growing out of the select instead of
+                the page silently changing shape under the cursor. */}
+            <Collapse open={mode === 'manual'}>
               <div className="mt-3">
                 <label className={labelCls} htmlFor={`model-${card.surface}`}>Default model for {card.endpoint}</label>
                 {models.length === 0 && !loadingModels ? (
@@ -154,12 +159,12 @@ function ServiceCardView({
                 )}
                 {target && !selectedIsListed && <p className="mt-1 text-[12px] text-warn">The saved target is not in the current enabled-provider catalog.</p>}
               </div>
-            )}
-            {mode === 'auto' && (
+            </Collapse>
+            <Collapse open={mode === 'auto'}>
               <p className="mt-3 rounded-lg border border-line bg-raised px-3 py-2.5 text-[12px] leading-relaxed text-mute">
                 Auto uses only models that passed a real test for this exact endpoint. It does not use chat compatibility checks. Currently verified: <strong className="font-mono text-ink">{card.verified_models}</strong> model{card.verified_models === 1 ? '' : 's'}.
               </p>
-            )}
+            </Collapse>
             {mode === 'off' && <p className="mt-3 text-[12px] text-mute">Requests must include their own <code className="font-mono">model</code> value. This is the safest first-run state.</p>}
           </div>
 
@@ -282,10 +287,14 @@ export default function Services() {
       </div>
 
       {error && <p className="rounded-lg border border-bad/30 bg-bad-dim px-3 py-2 text-[13px] text-bad" role="alert">{error}</p>}
-      <div className="grid gap-4 xl:grid-cols-2">
-        {cards.map((card) => <ServiceCardView key={card.surface} card={card} models={models}
-          loadingModels={loadingModels} onSaved={onSaved} onTested={onTested} />)}
-      </div>
+      <Stagger className="grid gap-4 xl:grid-cols-2">
+        {cards.map((card) => (
+          <StaggerItem key={card.surface}>
+            <ServiceCardView card={card} models={models}
+              loadingModels={loadingModels} onSaved={onSaved} onTested={onTested} />
+          </StaggerItem>
+        ))}
+      </Stagger>
     </div>
   );
 }

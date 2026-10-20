@@ -1,5 +1,5 @@
 // Tiny shared UI primitives — hand-built with Tailwind, no component library.
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { createPortal } from 'react-dom';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { DUR, SelectionLine, spring } from './motion';
@@ -164,21 +164,29 @@ export function Modal({ open, onClose, title, subtitle, children, footer, wide }
     return () => document.removeEventListener('keydown', onKey);
   }, [open]);
 
-  if (!open) return null;
-
   const overlay = (e: React.MouseEvent) => { if (e.target === e.currentTarget) onClose(); };
 
   // No early return on !open: AnimatePresence needs the subtree mounted to
   // PLAY the exit. Returning null instead would snap the dialog away and the
   // `exit` props below would be dead code.
+  //
+  // The DIRECT child of AnimatePresence must be the motion element that
+  // carries the exit, or nothing animates out: AnimatePresence only keeps a
+  // removed child alive if that child is a motion component. The dialog was
+  // nested one level too deep (a plain <div> wrapper), so its exit never
+  // fired and the dialog vanished in a single frame.
   return createPortal((
     <AnimatePresence>
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6" onMouseDown={overlay}>
-          <motion.div
-            className="absolute inset-0 bg-overlay"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            transition={{ duration: DUR.fast }} onClick={onClose} />
+        <motion.div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
+          onMouseDown={overlay}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: DUR.fast }}
+        >
+          <div className="absolute inset-0 bg-overlay" />
           <motion.div
             ref={ref} role="dialog" aria-modal="true" aria-label={title}
             className="relative z-10 flex max-h-[90dvh] w-full flex-col overflow-hidden rounded-xl border border-line-strong bg-surface shadow-2xl shadow-black/60"
@@ -202,7 +210,7 @@ export function Modal({ open, onClose, title, subtitle, children, footer, wide }
               </div>
             )}
           </motion.div>
-        </div>
+        </motion.div>
       )}
     </AnimatePresence>
   ), document.body);
@@ -370,14 +378,20 @@ export function Combobox({ options, value, onChange, disabled, loadingText, plac
 }
 
 // On is the semantic green, never the accent: a switch states a fact.
+// The knob SLIDES with a spring rather than jumping the `left` offset: a
+// switch that teleports reads as a redraw, one that slides reads as a switch.
 export function Toggle({ checked, onChange, label, disabled }: { checked: boolean; onChange: (v: boolean) => void; label?: string; disabled?: boolean }) {
+  const reduce = useReducedMotion();
   return (
     <button type="button" role="switch" aria-checked={checked} aria-label={label} disabled={disabled}
       onClick={() => !disabled && onChange(!checked)}
       className={cx('relative h-[18px] w-8 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-60',
         checked ? 'bg-ok' : 'bg-line-strong')}>
-      <span className={cx('absolute top-[3px] h-3 w-3 rounded-full bg-white transition-all',
-        checked ? 'left-[17px]' : 'left-[3px]')} />
+      <motion.span
+        className="absolute top-[3px] left-[3px] h-3 w-3 rounded-full bg-white"
+        animate={{ x: reduce ? 0 : checked ? 14 : 0 }}
+        transition={spring}
+      />
     </button>
   );
 }

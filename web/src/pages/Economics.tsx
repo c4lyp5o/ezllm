@@ -21,6 +21,7 @@ import {
 import {
   BarList, ChartTooltip, CompositionBar, Panel, StatCard, VIZ, axisProps, chartGrid, cursorFill,
 } from '../components/charts';
+import { Stagger, StaggerItem } from '../components/motion';
 import {
   btn, cx, EmptyState, formatTokens, inputCls, nfmt, pct, SectionLabel, Segmented,
 } from '../components/ui';
@@ -178,14 +179,22 @@ export default function Economics() {
               (shipped rewrites only); context_saved is its own component and
               is never added into the headline. If a budget stage ever ships
               again it gets its OWN card, not an arithmetic resurrection. */}
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Metric label="actual input" value={formatTokens(input)} note={`${nfmt(matching)} matching calls · cold, non-cached`} />
-            <Metric label="output" value={formatTokens(output)} note={`${pct(output, inputTotal + output)} of volume`} />
-            <Metric label="cached read" value={formatTokens(cached)} note={`${pct(cached, inputTotal)} of input re-read from cache`} />
-            <Metric label="compression saved" value={formatTokens(saved)}
-              tone={saved > 0 ? 'text-ok' : undefined}
-              note={`${saved > 0 ? pctWhole(saved, before) : '0%'} approx. reduction (shipped rewrites)`} />
-          </div>
+          <Stagger className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <StaggerItem>
+              <Metric label="actual input" value={formatTokens(input)} note={`${nfmt(matching)} matching calls · cold, non-cached`} />
+            </StaggerItem>
+            <StaggerItem>
+              <Metric label="output" value={formatTokens(output)} note={`${pct(output, inputTotal + output)} of volume`} />
+            </StaggerItem>
+            <StaggerItem>
+              <Metric label="cached read" value={formatTokens(cached)} note={`${pct(cached, inputTotal)} of input re-read from cache`} />
+            </StaggerItem>
+            <StaggerItem>
+              <Metric label="compression saved" value={formatTokens(saved)}
+                tone={saved > 0 ? 'text-ok' : undefined}
+                note={`${saved > 0 ? pctWhole(saved, before) : '0%'} approx. reduction (shipped rewrites)`} />
+            </StaggerItem>
+          </Stagger>
 
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
             <Panel label={<SectionLabel>What the tokens were · {RANGE_LABEL[range]}</SectionLabel>}

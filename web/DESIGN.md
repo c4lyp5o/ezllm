@@ -62,6 +62,41 @@ weeks old. Motion is part of the product's feel, and it stays quick:
   reducedMotion="user"` turns all of it into instant state changes for anyone
   who asks the OS for less motion.
 
+### The exceptions, and why they exist
+
+Two animations are deliberately NOT transform-and-opacity, and both earn it:
+
+- **Height animates** (`Collapse`) when a panel opens or closes — a provider
+  account's details, a service's mode-dependent block, a combo's strategy
+  fields. A fade alone would leave the page snapping to a new shape under the
+  operator's cursor, which reads as a jump. Height is the one property that
+  makes the change legible, and the block is short-lived and user-initiated,
+  so the reflow cost is not on a repaint path.
+- **Layout animates** (`ReorderItem`) when a combo's hops or a profile's
+  compression stages are reordered. Order in both is meaning — hop order is
+  routing priority, stage order is the execution pipeline — so seeing the row
+  travel to its new position is the whole point. This is the one animation in
+  the app that carries information rather than decoration.
+
+### Rules the motion layer enforces
+
+- **A `StaggerItem` needs a `Stagger` parent.** Variants resolve by walking
+  up to the nearest orchestrator; an item with no parent resolves no variant
+  and sits at its final state from the first paint — it looks fine and animates
+  nothing.
+- **Never put `initial={false}` on a page-level `AnimatePresence`.** It
+  suppresses the initial animation for the entire descendant subtree, not just
+  the direct child.
+- **Table rows fade; they do not translate.** A transform on a `<tr>` does not
+  participate in the table's own row sizing, so the row slides while its cells
+  stay put and it detaches from its own columns (`staggerRow`).
+- **`StaggerItem` carries `min-w-0`.** It is a grid or flex child, and those
+  default to `min-width:auto`; without it the wrapper's min-content width —
+  set by the longest unbreakable token inside — becomes the track's minimum and
+  widens the page past the viewport.
+- **A panel that is a toggle animates its HEIGHT, not its opacity**, and the
+  `AnimatePresence` must directly own the animated child or the exit is dead.
+
 ## Layout
 
 - A labelled sidebar (ten destinations need words); the screen's h1 shows at

@@ -7,9 +7,11 @@
 //  - capped at 60 rows: this is a pulse monitor, not an archive
 //  - status >= 400 renders red; streaming rows show a live dot until done
 import { useEffect, useRef, useState } from 'react';
+import { AnimatePresence } from 'motion/react';
 import { openCallStream } from '../utils/stream';
 import type { FeedRow } from '../utils/api';
 import { SectionLabel, cx, formatTokens } from '../components/ui';
+import { SlideRow } from '../components/motion';
 
 // rows arrive normalized (stream.ts maps every snapshot + live row through
 // normalizeFeedRow), so the renderer reads the ledger names: tin/tout/saved.
@@ -115,95 +117,102 @@ export default function RecentFeed() {
           </p>
         ) : (
           <ul className="divide-y divide-line/60">
-            {rows.map((c) => {
-              const bad = c.status >= 400;
-              return (
-                <li
-                  key={rowKey(c)}
-                  className="flex items-center gap-3 px-4 py-2 text-[13px]"
-                >
-                  <span
-                    className={cx(
-                      'font-mono tabular-nums w-12 shrink-0',
-                      bad ? 'text-bad' : 'text-mute',
-                    )}
-                  >
-                    {c.status}
-                  </span>
-                  <span className="font-mono text-ink truncate min-w-0 flex-1">
-                    {c.model}
-                    {c.alias && c.alias !== c.model && (
-                      <span className="text-mute"> · {c.alias}</span>
-                    )}
-                    {c.compression && (
+            {/* AnimatePresence + SlideRow: a new call enters from the top and
+                the row it pushes down slides out of the way, so the live feed
+                reads as a stream rather than a table that redraws. The rows
+                are keyed on ts|model|tokens|status (STABLE across updates),
+                which is what makes this safe — a list keyed by array index
+                would re-key every row on every batch and the whole feed
+                would animate on each SSE frame. */}
+            <AnimatePresence initial={false}>
+              {rows.map((c) => {
+                const bad = c.status >= 400;
+                return (
+                  <SlideRow key={rowKey(c)} as="li"
+                    className="flex items-center gap-3 px-4 py-2 text-[13px]">
                       <span
-                        title={
-                          c.applied
-                            ? `compressed by ${c.compression}`
-                            : c.savedNotional > 0
-                              ? `asked ${c.compression}: ${formatTokens(c.savedNotional)} tokens were compressible but below the profile's minimum ratio — the rewrite was rejected rather than break the cached prefix`
-                              : `asked ${c.compression}, no change`
-                        }
                         className={cx(
-                          'ml-1.5 rounded px-1 py-0.5 font-mono text-[11px] align-middle',
-                          c.applied && c.saved > 0
-                            ? 'bg-ok-dim text-ok'
-                            : c.savedNotional > 0 && !c.applied
-                              ? 'bg-warn-dim text-warn'
-                              : 'bg-shade text-mute',
+                          'font-mono tabular-nums w-12 shrink-0',
+                          bad ? 'text-bad' : 'text-mute',
                         )}
                       >
-                        {c.compression === 'off'
-                          ? 'off'
-                          : c.applied && c.saved > 0
-                            ? `↓${formatTokens(c.saved)}`
-                            : c.applied
-                              ? 'ok 0'
-                              : c.savedNotional > 0
-                                ? `held ${formatTokens(c.savedNotional)}`
-                                : c.compression.replace('-profile', '')}
+                        {c.status}
                       </span>
-                    )}
-                    {/* Wire-translated hop → in-tokens are the vendor's
-                        INCLUSIVE total. */}
-                    {c.translated && (
-                      <span
-                        title="translated hop: its wire differs from the client's surface; in-tokens below are the vendor's INCLUSIVE total (cache counted inside)"
-                        className="ml-1.5 rounded px-1 py-0.5 font-mono text-[11px] align-middle text-accent"
-                      >
-                        ⇄ translated
+                      <span className="font-mono text-ink truncate min-w-0 flex-1">
+                        {c.model}
+                        {c.alias && c.alias !== c.model && (
+                          <span className="text-mute"> · {c.alias}</span>
+                        )}
+                        {c.compression && (
+                          <span
+                            title={
+                              c.applied
+                                ? `compressed by ${c.compression}`
+                                : c.savedNotional > 0
+                                  ? `asked ${c.compression}: ${formatTokens(c.savedNotional)} tokens were compressible but below the profile's minimum ratio — the rewrite was rejected rather than break the cached prefix`
+                                  : `asked ${c.compression}, no change`
+                            }
+                            className={cx(
+                              'ml-1.5 rounded px-1 py-0.5 font-mono text-[11px] align-middle',
+                              c.applied && c.saved > 0
+                                ? 'bg-ok-dim text-ok'
+                                : c.savedNotional > 0 && !c.applied
+                                  ? 'bg-warn-dim text-warn'
+                                  : 'bg-shade text-mute',
+                            )}
+                          >
+                            {c.compression === 'off'
+                              ? 'off'
+                              : c.applied && c.saved > 0
+                                ? `↓${formatTokens(c.saved)}`
+                                : c.applied
+                                  ? 'ok 0'
+                                  : c.savedNotional > 0
+                                    ? `held ${formatTokens(c.savedNotional)}`
+                                    : c.compression.replace('-profile', '')}
+                          </span>
+                        )}
+                        {/* Wire-translated hop → in-tokens are the vendor's
+                            INCLUSIVE total. */}
+                        {c.translated && (
+                          <span
+                            title="translated hop: its wire differs from the client's surface; in-tokens below are the vendor's INCLUSIVE total (cache counted inside)"
+                            className="ml-1.5 rounded px-1 py-0.5 font-mono text-[11px] align-middle text-accent"
+                          >
+                            ⇄ translated
+                          </span>
+                        )}
                       </span>
-                    )}
-                  </span>
-                  <span className="text-mute w-24 shrink-0 hidden sm:block truncate">
-                    {c.account}
-                  </span>
-                  <span className="font-mono tabular-nums text-mute w-28 shrink-0 text-right"
-                    title={`tokens in ${formatTokens(c.tin)} (↑, prompt with cache inside) · tokens out ${formatTokens(c.tout)} (↓, completion)`}>
-                    <span title="tokens in — prompt, cache counted inside">↑{formatTokens(c.tin)}</span>
-                    {' '}
-                    <span title="tokens out — completion">↓{formatTokens(c.tout)}</span>
-                    {c.saved > 0 && (
-                      <span className="text-ok" title="tokens saved by compression">
+                      <span className="text-mute w-24 shrink-0 hidden sm:block truncate">
+                        {c.account}
+                      </span>
+                      <span className="font-mono tabular-nums text-mute w-28 shrink-0 text-right"
+                        title={`tokens in ${formatTokens(c.tin)} (↑, prompt with cache inside) · tokens out ${formatTokens(c.tout)} (↓, completion)`}>
+                        <span title="tokens in — prompt, cache counted inside">↑{formatTokens(c.tin)}</span>
                         {' '}
-                        −{formatTokens(c.saved)}
+                        <span title="tokens out — completion">↓{formatTokens(c.tout)}</span>
+                        {c.saved > 0 && (
+                          <span className="text-ok" title="tokens saved by compression">
+                            {' '}
+                            −{formatTokens(c.saved)}
+                          </span>
+                        )}
                       </span>
-                    )}
-                  </span>
-                  <span className="font-mono tabular-nums text-mute w-14 shrink-0 text-right">
-                    {c.total_ms != null ? `${c.total_ms}ms` : '—'}
-                  </span>
-                  <span className="text-mute w-14 shrink-0 text-right">
-                    {timeAgo(c.ts)}
-                    {c.ip && (
-                      <div className="font-mono text-[9px] text-mute/70 truncate" title={`caller address: ${c.ip}`}>
-                        {c.ip}
-                      </div>
-                    )}
-                  </span>
-                </li>
-              );
-            })}
+                      <span className="font-mono tabular-nums text-mute w-14 shrink-0 text-right">
+                        {c.total_ms != null ? `${c.total_ms}ms` : '—'}
+                      </span>
+                      <span className="text-mute w-14 shrink-0 text-right">
+                        {timeAgo(c.ts)}
+                        {c.ip && (
+                          <div className="font-mono text-[9px] text-mute/70 truncate" title={`caller address: ${c.ip}`}>
+                            {c.ip}
+                          </div>
+                        )}
+                      </span>
+                  </SlideRow>
+                );
+              })}
+            </AnimatePresence>
           </ul>
         )}
       </div>

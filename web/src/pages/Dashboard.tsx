@@ -27,7 +27,7 @@ import {
   BarList, ChartTooltip, CompositionBar, Panel, VIZ,
   axisProps, chartGrid, cursorFill,
 } from '../components/charts';
-import { StaggerItem } from '../components/motion';
+import { CountUp, Stagger, StaggerItem } from '../components/motion';
 import {
   Chip, CauseChip, EmptyState, SectionLabel, Skeleton, SkeletonRows,
   clockTime, cx, fmtDuration, fmtMs, fmtUptime, formatTokens, nfmt, pct,
@@ -117,7 +117,22 @@ function HealthStrip({ o }: { o: Overview }) {
 // sparkline. The call count leads (the screen's question is "is traffic
 // flowing?"); a status colour appears only where it says something — on the
 // failures, when there are any.
-type HeadCell = { label: string; value: string; sub?: string; lead?: boolean; tone?: string };
+//
+// The LEAD figure (the call count) tweens: it is a large changing total and
+// the tween shows traffic arriving between two polls. The smaller figures do
+// not — a failed count is an exact small number, and animating it through
+// 612.4 would read as a rounded lie about a precise figure. So the lead
+// carries the raw number plus its formatter, and the rest carry a ready
+// string.
+type HeadCell = {
+  label: string;
+  value: string;
+  /** Raw number for the lead cell: enables the count-up tween. */
+  count?: { n: number; format: (n: number) => string };
+  sub?: string;
+  lead?: boolean;
+  tone?: string;
+};
 
 function Headline({ cells }: { cells: HeadCell[] }) {
   return (
@@ -129,7 +144,9 @@ function Headline({ cells }: { cells: HeadCell[] }) {
             i === cells.length - 1 && cells.length % 2 === 1 && 'col-span-2 sm:col-span-1')}>
           <div className="text-[13px] text-mute">{c.label}</div>
           <div className={cx('mt-1 font-medium leading-tight tnum', c.lead ? 'text-[30px]' : 'text-[22px]', c.tone ?? 'text-ink')}>
-            {c.value}
+            {c.count
+              ? <CountUp value={c.count.n} format={c.count.format} />
+              : c.value}
           </div>
           {c.sub && <div className="mt-1 text-[12px] text-mute">{c.sub}</div>}
         </div>
@@ -526,7 +543,12 @@ export default function Dashboard() {
       </div>
 
       <Headline cells={[
-        { label: `Calls, ${RANGE_LABEL[TOTAL_RANGE]}`, value: nfmt(totals.calls), lead: true },
+        {
+          label: `Calls, ${RANGE_LABEL[TOTAL_RANGE]}`,
+          value: nfmt(totals.calls),
+          count: { n: totals.calls, format: nfmt },
+          lead: true,
+        },
         {
           label: 'Failed', value: nfmt(totals.errors),
           sub: totals.calls > 0 ? `${fmtPct(errRate)} of calls` : undefined,
@@ -567,8 +589,11 @@ export default function Dashboard() {
       </Panel>
 
       {/* The breakdown trio — the three dimensions that answer "who is
-          spending", permanently visible rather than behind a toggle. */}
-      <div className="grid items-start gap-6 xl:grid-cols-3">
+          spending", permanently visible rather than behind a toggle.
+          One <Stagger> orchestrates all three so they arrive as a sequence:
+          three orphaned <StaggerItem>s (no parent orchestrator) resolved no
+          variant at all and sat at their final state from the first paint. */}
+      <Stagger className="grid items-start gap-6 xl:grid-cols-3">
         <StaggerItem>
           <Breakdown label="Tokens by provider" rows={byProvider}
             emptyHint="No provider traffic in the last 24h." />
@@ -581,7 +606,7 @@ export default function Dashboard() {
           <Breakdown label="Tokens by API key" rows={byKey}
             emptyHint="No keyed calls in the last 24h — unkeyed traffic reports as “(none)”." />
         </StaggerItem>
-      </div>
+      </Stagger>
 
       {/* Composition, latency and surface, so the breakdown is not only
           per-entity: "what were the tokens" and "how fast did they arrive". */}

@@ -7,12 +7,14 @@
 // the window column already says, one column wide at 8+ columns) — the
 // window column's times are the same data the chip summarised.
 import { useCallback, useEffect, useState } from 'react';
+import { motion } from 'motion/react';
 import {
   ApiError, accountModels, createModelRule, deleteModelRule, formatDays, get, modelRules,
   updateModelRule,
   type Account, type ModelRow, type ModelRule,
 } from '../utils/api';
 import { Chip, ConfirmModal, Modal, SectionLabel, SkeletonRows, Toggle, btn, cx, formatTokens, inputCls, labelCls } from '../components/ui';
+import { Stagger, staggerRow } from '../components/motion';
 
 const CAP_WINDOWS = ['5h', 'daily', 'weekly', 'monthly'] as const;
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -238,11 +240,16 @@ function RuleModal({ open, editing, accounts, models, draft, setDraft,
         </div>
         <div>
           <label className={labelCls}>allowed days</label>
+          {/* The day chips are a MULTI-select, so the house selection mark (a
+              1px accent line under a label) does not apply here — a filled
+              chip is the honest affordance for a toggle. They do get the
+              global press squeeze, and aria-pressed so a screen reader
+              announces the state. */}
           <div className="flex flex-wrap gap-1.5">
             {DAY_NAMES.map((name, i) => {
               const on = d.win_days.split(',').map((x) => x.trim()).filter(Boolean).map(Number).includes(i);
               return (
-                <button key={name} type="button" onClick={() => toggleDay(i)}
+                <button key={name} type="button" onClick={() => toggleDay(i)} aria-pressed={on}
                   className={cx('rounded-md border px-2 py-1 font-mono text-[12px] transition-colors',
                     on ? 'border-accent bg-accent-dim text-accent' : 'border-line bg-raised text-mute hover:border-line-strong')}>
                   {name}
@@ -383,6 +390,7 @@ export default function Rules() {
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-line bg-surface">
+          <Stagger>
           <table className="w-full min-w-[900px] text-[13px]">
             <thead>
               <tr className="text-left text-[11px] text-mute">
@@ -397,7 +405,11 @@ export default function Rules() {
             </thead>
             <tbody>
               {rules.map((r) => (
-                <tr key={r.id} className="border-t border-line/60 transition-colors hover:bg-wash">
+                // motion.tr: the rows fade in as a sequence. Only opacity
+                // animates — a translate on a table row detaches it from its
+                // own columns (see staggerRow).
+                <motion.tr key={r.id} variants={staggerRow}
+                  className="border-t border-line/60 transition-colors hover:bg-wash">
                   <td className="px-5 py-2.5">
                     <Toggle checked={r.enabled} disabled={busy === r.id}
                       onChange={(v) => void setEnabled(r, v)} label={`enable ${r.model_id}`} />
@@ -413,10 +425,11 @@ export default function Rules() {
                     <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px] text-bad')}
                       onClick={() => setPendingDelete(r)}>Delete</button>
                   </td>
-                </tr>
+                </motion.tr>
               ))}
             </tbody>
           </table>
+          </Stagger>
         </div>
       )}
 

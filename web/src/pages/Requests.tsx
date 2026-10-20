@@ -10,6 +10,7 @@ import {
   type FeedRow, type RangeKey, type RequestSort, type RequestsResp,
 } from '../utils/api';
 import { CauseChip, SectionLabel, Segmented, btn, cx, inputCls, labelCls } from '../components/ui';
+import { Stagger, StaggerItem } from '../components/motion';
 
 const RANGES: RangeKey[] = ['24h', '7d', '30d', '365d'];
 const SORTS: { key: RequestSort; label: string }[] = [
@@ -141,13 +142,23 @@ export default function Requests() {
 
       {/* Summary strip — over the WHOLE matching set, not the returned page. */}
       {s && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          <Stat label="requests" value={nfmt(s.count)} sub="matching the filter" />
-          <Stat label="tokens in" value={nfmt(s.tin)} sub="Σ across matches" />
-          <Stat label="tokens out" value={nfmt(s.tout)} sub="Σ across matches" />
-          <Stat label="max in" value={nfmt(s.max_tin)} sub={`max out ${nfmt(s.max_tout)}`} />
-          <Stat label="reasoning" value={nfmt(s.reasoning)} sub="Σ burned on thinking" />
-        </div>
+        <Stagger className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <StaggerItem>
+            <Stat label="requests" value={nfmt(s.count)} sub="matching the filter" />
+          </StaggerItem>
+          <StaggerItem>
+            <Stat label="tokens in" value={nfmt(s.tin)} sub="Σ across matches" />
+          </StaggerItem>
+          <StaggerItem>
+            <Stat label="tokens out" value={nfmt(s.tout)} sub="Σ across matches" />
+          </StaggerItem>
+          <StaggerItem>
+            <Stat label="max in" value={nfmt(s.max_tin)} sub={`max out ${nfmt(s.max_tout)}`} />
+          </StaggerItem>
+          <StaggerItem>
+            <Stat label="reasoning" value={nfmt(s.reasoning)} sub="Σ burned on thinking" />
+          </StaggerItem>
+        </Stagger>
       )}
 
       {/* Result rows */}

@@ -304,10 +304,22 @@ export default function App() {
       </aside>
 
       {/* Sidebar — mobile drawer. AnimatePresence plays the exit, so closing
-          is a slide-out rather than a snap. */}
+          is a slide-out rather than a snap.
+
+          The DRAWER WRAPPER must itself be the motion element: AnimatePresence
+          only holds a removed child alive when that child is a motion
+          component. The wrapper used to be a plain <div>, so the overlay's
+          and the aside's `exit` props were dead code and the drawer blinked
+          out in a single frame instead of sliding away. */}
       <AnimatePresence>
         {drawer && (
-          <div className="fixed inset-0 z-50 lg:hidden">
+          <motion.div
+            className="fixed inset-0 z-50 lg:hidden"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: DUR.fast }}
+          >
             <motion.div
               className="absolute inset-0 bg-overlay"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -318,7 +330,7 @@ export default function App() {
               transition={spring}>
               <SidebarContent onNavigate={closeDrawer} />
             </motion.aside>
-          </div>
+          </motion.div>
         )}
       </AnimatePresence>
 
@@ -357,26 +369,41 @@ export default function App() {
             title row and the first content row (the health pills on
             Dashboard). */}
         {/* Each screen arrives with a short rise; keyed on the path so a
-            tab switch inside Analytics replays it, a poll never does. */}
-        <motion.div key={location.pathname} className="mt-5"
-          initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
+            tab switch inside Analytics replays it, a poll never does.
+            AnimatePresence plays the OUTGOING screen's exit too — without
+            it the old screen is unmounted in the same frame the new one
+            starts, and the swap reads as a blink rather than a move.
+            mode="wait" keeps them from overlapping (both are in normal flow,
+            so a crossfade would push the page down); the exit is deliberately
+            FAST (DUR.fast) so navigation never feels like it waits.
+
+            Do NOT put initial={false} on this AnimatePresence. That flag is
+            inherited by EVERY motion descendant, not just the direct child:
+            it overrides each descendant's own `initial`, so the panels'
+            staggered entrances were silently skipped and the whole screen
+            appeared at its final state on the first paint. */}
+        <AnimatePresence mode="wait">
+          <motion.div key={location.pathname} className="mt-5"
+            initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6, transition: { duration: DUR.fast, ease: [0.22, 1, 0.36, 1] } }}
+            transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
       <Route path="/stats" element={<Stats />} />
       <Route path="/economics" element={<Economics />} />
       <Route path="/requests" element={<Requests />} />
-            <Route path="/providers" element={<Providers />} />
-            <Route path="/services" element={<Services />} />
-            <Route path="/chat" element={<Chat />} />
-            <Route path="/combos" element={<Combos />} />
-            <Route path="/rules" element={<Rules />} />
-            <Route path="/compression" element={<Compression />} />
-            <Route path="/connect" element={<Connect />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="*" element={<Dashboard />} />
-          </Routes>
-        </motion.div>
+              <Route path="/providers" element={<Providers />} />
+              <Route path="/services" element={<Services />} />
+              <Route path="/chat" element={<Chat />} />
+              <Route path="/combos" element={<Combos />} />
+              <Route path="/rules" element={<Rules />} />
+              <Route path="/compression" element={<Compression />} />
+              <Route path="/connect" element={<Connect />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="*" element={<Dashboard />} />
+            </Routes>
+          </motion.div>
+        </AnimatePresence>
       </main>
     </div>
   );

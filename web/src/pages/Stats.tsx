@@ -28,7 +28,7 @@ import {
   ChartTooltip, BarList, CompositionBar, Panel, Sparkline, StatCard, VIZ, axisProps,
   catColor, chartGrid, cursorFill,
 } from '../components/charts';
-import { Reveal } from '../components/motion';
+import { Reveal, Stagger, StaggerItem } from '../components/motion';
 import {
   Chip, EmptyState, Mono, SectionLabel, Segmented, cx, fmtMs, formatTokens, nfmt, pct,
 } from '../components/ui';
@@ -208,25 +208,39 @@ export default function Stats() {
 
       {/* ── totals ──────────────────────────────────────────────────────── */}
       {totals && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
-          <StatCard label="Calls" value={nfmt(totals.calls)} sub={`${RANGE_LABEL[range]} window`} />
-          <StatCard label="Tokens in" value={formatTokens(totals.tin)} sub="not served from cache" />
-          <StatCard label="Tokens out" value={formatTokens(totals.tout)} sub={`${pct(totals.tout, totals.tin + totals.tout)} of volume`} />
+        <Stagger className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
+          <StaggerItem>
+            <StatCard label="Calls" value={nfmt(totals.calls)} sub={`${RANGE_LABEL[range]} window`} />
+          </StaggerItem>
+          <StaggerItem>
+            <StatCard label="Tokens in" value={formatTokens(totals.tin)} sub="not served from cache" />
+          </StaggerItem>
+          <StaggerItem>
+            <StatCard label="Tokens out" value={formatTokens(totals.tout)} sub={`${pct(totals.tout, totals.tin + totals.tout)} of volume`} />
+          </StaggerItem>
           {/* Share of ALL prompt tokens (in + cache reads + cache writes); the
               old sub divided by tokens in alone and printed "3033%". */}
-          <StatCard label="Cache reads" value={formatTokens(totals.cread)}
-            sub={`${pct(totals.cread, totals.tin + totals.cread + totals.cwrite)} of prompt tokens`} />
-          <StatCard label="Reasoning" value={formatTokens(totals.reasoning)}
-            sub="billed as output, never shown" />
-          <StatCard label="Removed by compression" value={formatTokens(totals.applied_saved)}
-            tone={totals.applied_saved > 0 ? 'text-ok' : undefined}
-            sub={totals.context_saved > 0 ? `+${formatTokens(totals.context_saved)} context budget` : 'shipped rewrites only'} />
-          <StatCard
-            label="Median first token"
-            value={fmtMs(totals.p50_ttft_ms)}
-            tone={totals.p50_ttft_ms > 0 ? undefined : 'text-mute'}
-            sub={totals.p50_ttft_ms > 0 ? 'streaming calls only' : 'not measured yet'} />
-        </div>
+          <StaggerItem>
+            <StatCard label="Cache reads" value={formatTokens(totals.cread)}
+              sub={`${pct(totals.cread, totals.tin + totals.cread + totals.cwrite)} of prompt tokens`} />
+          </StaggerItem>
+          <StaggerItem>
+            <StatCard label="Reasoning" value={formatTokens(totals.reasoning)}
+              sub="billed as output, never shown" />
+          </StaggerItem>
+          <StaggerItem>
+            <StatCard label="Removed by compression" value={formatTokens(totals.applied_saved)}
+              tone={totals.applied_saved > 0 ? 'text-ok' : undefined}
+              sub={totals.context_saved > 0 ? `+${formatTokens(totals.context_saved)} context budget` : 'shipped rewrites only'} />
+          </StaggerItem>
+          <StaggerItem>
+            <StatCard
+              label="Median first token"
+              value={fmtMs(totals.p50_ttft_ms)}
+              tone={totals.p50_ttft_ms > 0 ? undefined : 'text-mute'}
+              sub={totals.p50_ttft_ms > 0 ? 'streaming calls only' : 'not measured yet'} />
+          </StaggerItem>
+        </Stagger>
       )}
 
       {/* ── chart ───────────────────────────────────────────────────────── */}

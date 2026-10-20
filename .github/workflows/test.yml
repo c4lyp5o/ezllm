@@ -16,6 +16,13 @@
 #     output hash depends on the absolute checkout path and would differ on
 #     every machine. Freshness of the committed bundle stays a local
 #     repo-path rebuild before commit.
+#
+#     NOTE (2026-10-20): the checkout-path caveat above is now only true of
+#     the JS bundle name. The CSS no longer depends on the previous build:
+#     web/src/index.css carries `@source not "../dist"`, because Tailwind
+#     otherwise scans the tracked web/dist/ output and feeds the previous
+#     build's class names into the next one. With that exclusion the CSS
+#     hash is a function of the sources alone and reproduces across paths.
 name: Tests
 
 on:

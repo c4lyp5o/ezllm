@@ -1,4 +1,17 @@
 @import "tailwindcss";
+/* Keep Tailwind's content scan OFF web/dist/. dist/ is a TRACKED build
+   output (cmd/ezllm embeds it via go:embed), and Tailwind v4 scans every
+   non-gitignored file for class names — so without this line each build
+   reads the PREVIOUS build's output, picks up whatever utilities are in it,
+   and emits them again. The build then feeds on itself: the CSS grows a
+   little every round, a class deleted from the source keeps shipping
+   because the last build's bundle still mentions it, and two builds of the
+   same sources do not produce the same bytes. Excluding dist/ makes the
+   bundle a function of the sources alone, so `npm run build` is
+   reproducible and the committed bundle says what the source says.
+   Path is relative to THIS file (web/src/) → web/dist. */
+@source not "../dist";
+
 /* Public Sans, bundled into dist/ (and so into the binary): the dashboard is
    self-hosted and must render the same offline, with no third-party font
    request leaving the operator's browser. */
@@ -260,6 +273,31 @@ input::placeholder, textarea::placeholder { color: var(--color-mute); }
 /* Everything numeric in a dashboard is tabular by default: a column of figures
    that re-renders on a 15s poll must not change width mid-tween. */
 .tnum, .font-mono { font-variant-numeric: tabular-nums; }
+
+/* Press feedback on EVERY button, not just the ones built from btn.base —
+   89 of them are hand-rolled and had no press state at all. The squeeze is a
+   scale, not a translate: a translate nudges the button out of its row and
+   leaves a visible gap, a scale presses it in place.
+
+   `scale` is the independent CSS property, so it composes with the
+   `translate` that Tailwind's active:translate-y-px sets — the two never
+   fight over the transform. Buttons that already carry a transition utility
+   keep it: transition-property lists colour AND background-color, and this
+   rule only adds scale to the list.
+
+   The primary button's own active:translate-y-px is left in place — it is
+   the house style's press cue and the two together read as one press. */
+button {
+  transition-property: color, background-color, border-color, opacity, scale;
+  transition-duration: 150ms;
+  transition-timing-function: var(--ease-out);
+}
+button:not(:disabled):active {
+  scale: 0.97;
+}
+button:disabled {
+  cursor: not-allowed;
+}
 
 /* Real code keeps a real monospace whatever utility its parent set. These
    selectors are unlayered on purpose: they beat Tailwind's layered

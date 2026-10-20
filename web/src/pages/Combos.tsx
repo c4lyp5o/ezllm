@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError, accountModels, del, get, patch, post, STRATEGY_HINTS, type Combo, type Hop } from '../utils/api';
 import { CAUSE_TONES, Chip, ConfirmModal, Modal, Mono, SectionLabel, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls } from '../components/ui';
+import { Collapse, ReorderItem, Stagger, StaggerItem } from '../components/motion';
 
 // Strategies offered by the combo form. least_used is deliberately absent: it
 // is accepted by the backend (where it keeps position order, with a comment
@@ -126,7 +127,11 @@ function HopsEditor({ hops, setHops, accounts, strategy }: {
         // free-text input, so the checkbox reads checked to match what is shown.
         const custom = h.custom ?? !models;
         return (
-          <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-raised/60 px-3 py-2.5">
+          // `layout` makes the row SLIDE to its new position when the operator
+          // reorders the hops. In a combo, order IS the routing priority, so
+          // this is the one animation in the app that carries information:
+          // you see which hop moved where instead of re-reading the list.
+          <ReorderItem key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-raised/60 px-3 py-2.5">
             <span className="w-5 text-center font-mono text-[12px] text-mute">{i + 1}</span>
             {/* Grouped by provider (base_url): a provider with MORE THAN ONE
                 account gets the count in its group label — that count is what
@@ -175,7 +180,7 @@ function HopsEditor({ hops, setHops, accounts, strategy }: {
                 onClick={() => setHops(hops.filter((_, k) => k !== i))}>✕</button>
             </div>
             {i < hops.length - 1 && <HopArrow last={false} />}
-          </div>
+          </ReorderItem>
         );
       })}
     </div>
@@ -288,15 +293,19 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
               </button>
             ))}
           </div>
-          {d.strategy === 'sticky_last_good' && (
+          {/* The strategy's own extra fields COLLAPSE in: picking a strategy
+              changes how much the form asks for, and a height animation shows
+              the new fields arriving instead of the dialog silently
+              resizing under the operator's hands. */}
+          <Collapse open={d.strategy === 'sticky_last_good'}>
             <div className="mt-2 flex items-center gap-3">
               <label className="text-[12px] text-mute" htmlFor="cb-idle">sticky idle</label>
               <input id="cb-idle" type="number" min={0} className={cx(inputCls, 'w-24 py-1.5 font-mono text-[13px] tabular-nums')}
                 value={d.sticky_idle_s} onChange={(e) => setD((p) => ({ ...p, sticky_idle_s: Number(e.target.value) || 0 }))} />
               <span className="text-[12px] text-mute">seconds — move on after this idle</span>
             </div>
-          )}
-          {d.strategy === 'block_round_robin' && (
+          </Collapse>
+          <Collapse open={d.strategy === 'block_round_robin'}>
             <div className="mt-3 rounded-lg border border-line bg-raised/60 p-3.5">
               <div className="flex items-center gap-3">
                 <label className="text-[12px] text-mute" htmlFor="cb-block">block size</label>
@@ -331,7 +340,7 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
                 );
               })()}
             </div>
-          )}
+          </Collapse>
         </div>
 
         <HopsEditor hops={d.hops} setHops={setHops} accounts={accounts} strategy={d.strategy} />
@@ -482,7 +491,9 @@ export default function Combos() {
   };
 
   return (
-    <div className="animate-fade-up">
+    // No page-root fade: the route transition in App.tsx already owns the
+    // page entrance. A second entrance stacked on it reads as a stutter.
+    <div>
       <div className="mb-4 flex items-center justify-between">
         <SectionLabel>Routing chains</SectionLabel>
         <button type="button" className={cx(btn.base, btn.primary)} onClick={() => setModal({ open: true, editing: null })}>
@@ -502,66 +513,70 @@ export default function Combos() {
         </div>
       ) : (
         <div className="space-y-3">
-          {combos.map((c) => (
-            <div key={c.id} className="rounded-xl border border-line bg-surface px-5 py-4 animate-fade-up">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                <span className="text-[14px] font-semibold">{c.name}</span>
-                <Chip><span className="font-mono">{c.strategy}</span></Chip>
-                {/* Item 10: the combo's compression profile, visible without
-                    opening the editor. "none" renders nothing — an empty pill
-                    on every card is noise. */}
-                {!!c.compression_profile_id && (
-                  <Chip tone="accent" title="compression profile applied to requests routed through this combo">
-                    <span className="font-mono">{profiles.find((p) => p.id === c.compression_profile_id)?.name ?? `profile #${c.compression_profile_id}`}</span>
-                  </Chip>
-                )}
-                <span className="ml-auto flex items-center gap-3">
-                  <label className="flex items-center gap-2 text-[13px] text-dim">
-                    <Toggle checked={c.enabled} disabled={busyID === c.id}
-                      label={`${c.enabled ? 'Disable' : 'Enable'} combo ${c.name}`}
-                      onChange={(v) => void setEnabled(c, v)} />
-                    <span>{c.enabled ? 'Enabled' : 'Disabled'}</span>
-                  </label>
-                  <span className="flex items-center gap-2">
-                    <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px]')}
-                      title="probe every hop with one tiny real request"
-                      onClick={() => setTesting(c)}>Test</button>
-                    <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px]')} onClick={() => setModal({ open: true, editing: c })}>Edit</button>
-                    <button type="button" className={cx(btn.base, btn.danger, 'px-3 py-1.5 text-[13px]')} onClick={() => setPendingDelete(c)}>Delete</button>
-                  </span>
-                </span>
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2 font-mono text-[12px]">
-                {(c.hops ?? []).length === 0
-                  ? <span className="font-sans text-[13px] text-mute">no hops configured</span>
-                  : (c.hops ?? []).map((h, i) => (
-                    <span key={i} className="flex items-center gap-2">
-                      {i > 0 && <span className="text-accent/50">→</span>}
-                      <span className={cx('rounded-md border px-2 py-1', h.enabled ? 'border-line bg-raised' : 'border-line/50 bg-transparent opacity-40')}>
-                        {accounts.find((a) => a.id === h.account_id)?.name ?? `#${h.account_id}`}
-                        <span className="mx-1 text-mute">/</span>
-                        <span className={h.enabled ? 'text-ink' : 'text-mute'}>{h.model_id}</span>
-                        {h.hold_until_failure && (
-                          <span className="ml-1.5 rounded border border-accent/40 px-1 text-[11px] text-accent"
-                            title="holds the block while it succeeds; releases on a hop-attributable failure">
-                            hold
-                          </span>
-                        )}
+          <Stagger className="space-y-3">
+            {combos.map((c) => (
+              <StaggerItem key={c.id}>
+                <div className="rounded-xl border border-line bg-surface px-5 py-4">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                    <span className="text-[14px] font-semibold">{c.name}</span>
+                    <Chip><span className="font-mono">{c.strategy}</span></Chip>
+                    {/* Item 10: the combo's compression profile, visible without
+                        opening the editor. "none" renders nothing — an empty pill
+                        on every card is noise. */}
+                    {!!c.compression_profile_id && (
+                      <Chip tone="accent" title="compression profile applied to requests routed through this combo">
+                        <span className="font-mono">{profiles.find((p) => p.id === c.compression_profile_id)?.name ?? `profile #${c.compression_profile_id}`}</span>
+                      </Chip>
+                    )}
+                    <span className="ml-auto flex items-center gap-3">
+                      <label className="flex items-center gap-2 text-[13px] text-dim">
+                        <Toggle checked={c.enabled} disabled={busyID === c.id}
+                          label={`${c.enabled ? 'Disable' : 'Enable'} combo ${c.name}`}
+                          onChange={(v) => void setEnabled(c, v)} />
+                        <span>{c.enabled ? 'Enabled' : 'Disabled'}</span>
+                      </label>
+                      <span className="flex items-center gap-2">
+                        <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px]')}
+                          title="probe every hop with one tiny real request"
+                          onClick={() => setTesting(c)}>Test</button>
+                        <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px]')} onClick={() => setModal({ open: true, editing: c })}>Edit</button>
+                        <button type="button" className={cx(btn.base, btn.danger, 'px-3 py-1.5 text-[13px]')} onClick={() => setPendingDelete(c)}>Delete</button>
                       </span>
                     </span>
-                  ))}
-              </div>
-              {c.strategy === 'sticky_last_good' && (
-                <div className="mt-2 text-[12px] text-mute">sticky idle <Mono>{c.sticky_idle_s ?? '–'}s</Mono></div>
-              )}
-              {c.strategy === 'block_round_robin' && (
-                <div className="mt-2 text-[12px] text-mute">
-                  block size <Mono>{c.block_size ?? 1}</Mono> — one hop serves {c.block_size ?? 1} request
-                  {(c.block_size ?? 1) === 1 ? '' : 's'} in a row before rotating
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2 font-mono text-[12px]">
+                    {(c.hops ?? []).length === 0
+                      ? <span className="font-sans text-[13px] text-mute">no hops configured</span>
+                      : (c.hops ?? []).map((h, i) => (
+                        <span key={i} className="flex items-center gap-2">
+                          {i > 0 && <span className="text-accent/50">→</span>}
+                          <span className={cx('rounded-md border px-2 py-1', h.enabled ? 'border-line bg-raised' : 'border-line/50 bg-transparent opacity-40')}>
+                            {accounts.find((a) => a.id === h.account_id)?.name ?? `#${h.account_id}`}
+                            <span className="mx-1 text-mute">/</span>
+                            <span className={h.enabled ? 'text-ink' : 'text-mute'}>{h.model_id}</span>
+                            {h.hold_until_failure && (
+                              <span className="ml-1.5 rounded border border-accent/40 px-1 text-[11px] text-accent"
+                                title="holds the block while it succeeds; releases on a hop-attributable failure">
+                                hold
+                              </span>
+                            )}
+                          </span>
+                        </span>
+                      ))}
+                  </div>
+                  {c.strategy === 'sticky_last_good' && (
+                    <div className="mt-2 text-[12px] text-mute">sticky idle <Mono>{c.sticky_idle_s ?? '–'}s</Mono></div>
+                  )}
+                  {c.strategy === 'block_round_robin' && (
+                    <div className="mt-2 text-[12px] text-mute">
+                      block size <Mono>{c.block_size ?? 1}</Mono> — one hop serves {c.block_size ?? 1} request
+                      {(c.block_size ?? 1) === 1 ? '' : 's'} in a row before rotating
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          ))}
+              </StaggerItem>
+            ))}
+          </Stagger>
         </div>
       )}
 

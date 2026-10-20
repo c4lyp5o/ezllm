@@ -1,5 +1,6 @@
 // PROVIDERS — account cards, add-provider wizard modal, per-key actions, model drawer.
 import { useCallback, useEffect, useState } from 'react';
+import { motion } from 'motion/react';
 import {
   ApiError, AuthError, del, get, ghDeviceCancel, ghDeviceStart, ghDeviceStatus,
   modelRules, patch, post, postKeyTestStream, setModelPin,
@@ -8,6 +9,7 @@ import {
   type Account, type ApiErrorDetail, type GhDeviceStart, type GhDeviceStatus, type KeyRow, type ModelRule, type ModelRow, type Price, type SweepStatus, type TestResult, type TestStep,
 } from '../utils/api';
 import { Chip, ConfirmModal, Modal, SectionLabel, Skeleton, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls, relTime, Mono } from '../components/ui';
+import { Collapse, Stagger, StaggerItem } from '../components/motion';
 import { fmtMoney } from '../utils/lib';
 
 // ── helpers ─────────────────────────────────────────────────────────────
@@ -206,8 +208,17 @@ function QuotaBars({ quota }: { quota: NonNullable<Account['quota']> }) {
           <div key={k} className="flex items-center gap-2.5">
             <span className="w-14 text-[11px] text-mute">{k}</span>
             <div className="h-1.5 min-w-16 flex-1 overflow-hidden rounded-full bg-shade">
-              <div className={cx('h-full rounded-full', v >= 90 ? 'bg-bad' : v >= 70 ? 'bg-warn' : 'bg-ok')}
-                style={{ width: `${Math.min(100, Math.max(0, v))}%` }} />
+              {/* The bar DRAWS IN from zero: a quota reading is a live probe
+                  of the provider, and a bar that springs to its width says
+                  "this was just measured" in a way a static bar does not.
+                  The width is capped at 100 so a provider reporting 140%
+                  still shows a full bar instead of overflowing its track. */}
+              <motion.div
+                className={cx('h-full rounded-full', v >= 90 ? 'bg-bad' : v >= 70 ? 'bg-warn' : 'bg-ok')}
+                initial={{ width: 0 }}
+                animate={{ width: `${Math.min(100, Math.max(0, v))}%` }}
+                transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+              />
             </div>
             <span className="tnum w-10 text-right font-mono text-[12px] text-dim">{v}%</span>
           </div>
@@ -876,7 +887,10 @@ function ModelsDrawer({ id }: { id: number }) {
   const untested = models.filter((m) => m.openai == null && m.anthropic == null && m.responses == null).length;
 
   return (
-    <div className="border-t border-line px-5 py-4 animate-fade-in">
+    // No CSS fade here: the drawer is rendered inside a <Collapse>, which
+    // animates the height. A second fade on top of it runs the same opacity
+    // ramp twice and lands out of step with the height.
+    <div className="border-t border-line px-5 py-4">
       {/* Test-all: probe the whole catalog, skip what is already proven, and
           stay stoppable — a 400-model × 3-surface sweep is minutes long. */}
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -1269,7 +1283,7 @@ function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
   };
 
   return (
-    <div className="rounded-xl border border-line bg-surface transition-colors hover:border-line-strong animate-fade-up">
+    <div className="rounded-xl border border-line bg-surface transition-colors hover:border-line-strong">
       <button type="button" className="w-full px-5 py-4 text-left" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <span className="text-[14px] font-semibold">{a.name}</span>
@@ -1314,8 +1328,11 @@ function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
         </div>
       </div>
 
-      {open && (
-        <div className="px-5 pb-4 animate-fade-in">
+      {/* The expandable body animates its HEIGHT, not just its opacity: the
+          card below grows by a real, measurable amount, and a fade alone
+          leaves the layout snapping open under the operator's cursor. */}
+      <Collapse open={open}>
+        <div className="px-5 pb-4">
           <div className="rounded-lg border border-line bg-raised/40 px-3.5 py-3">
             <div className="flex flex-wrap items-center gap-2">
               {a.keys.length === 0
@@ -1396,9 +1413,15 @@ function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
           {pricingOpen && <PricingModal account={a} onClose={() => setPricingOpen(false)} />}
           <ErrBox e={err} onDismiss={() => setErr(null)} />
         </div>
-      )}
+      </Collapse>
 
-      {open && <ModelsDrawer id={a.id} />}
+      {/* The models drawer is a SEPARATE collapse: it is its own long table
+          and animating it inside the section above would nest two height
+          animations and leave the card's border out of step with its
+          content. */}
+      <Collapse open={open}>
+        <ModelsDrawer id={a.id} />
+      </Collapse>
     </div>
   );
 }
@@ -1430,7 +1453,10 @@ export default function Providers() {
   useEffect(() => { load(false); }, [load]);
 
   return (
-    <div className="animate-fade-up">
+    // No page-root fade here: the route transition in App.tsx already fades
+    // the page in. Two entrances stacked on the same surface reads as a
+    // stutter, not as polish.
+    <div>
       <div className="mb-4 flex items-center justify-between">
         <SectionLabel>Accounts</SectionLabel>
         <button type="button" className={cx(btn.base, btn.primary)} onClick={() => setAddOpen(true)}>
@@ -1451,12 +1477,19 @@ export default function Providers() {
       ) : (
         <div className="space-y-3">
           {/* Alphabetical by namespace — the add-provider preset list sorts the
-              same way, so the two lists read in one order. */}
-          {[...accounts].sort((a, b) => a.namespace.localeCompare(b.namespace)).map((a) => (
-            <AccountCard key={a.id} a={a} onChanged={() => load(true)}
-              quotaBusy={quotaBusy === a.id}
-              onReloadQuota={() => void reloadQuota(a.id)} />
-          ))}
+              same way, so the two lists read in one order.
+              The Stagger lets the cards arrive as a sequence instead of all
+              at once; it is a one-shot entrance, so the 60s quota refresh
+              (which re-renders this list) never replays it. */}
+          <Stagger className="space-y-3">
+            {[...accounts].sort((a, b) => a.namespace.localeCompare(b.namespace)).map((a) => (
+              <StaggerItem key={a.id}>
+                <AccountCard a={a} onChanged={() => load(true)}
+                  quotaBusy={quotaBusy === a.id}
+                  onReloadQuota={() => void reloadQuota(a.id)} />
+              </StaggerItem>
+            ))}
+          </Stagger>
         </div>
       )}
 

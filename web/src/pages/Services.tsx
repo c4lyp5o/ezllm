@@ -8,6 +8,7 @@ import {
 } from '../utils/api';
 import { Chip, Combobox, EmptyState, Spinner, btn, cx, labelCls } from '../components/ui';
 import { Collapse, Stagger, StaggerItem } from '../components/motion';
+import { GENERATABLE, ServiceTryIt } from '../components/ServiceTryIt';
 
 type CatalogModel = ModelRow & { id: string; display: string };
 
@@ -234,8 +235,18 @@ function ServiceCardView({
                 )}
               </div>
             )}
-            {PAID_TESTS[card.surface] && <p className="text-[11px] leading-relaxed text-warn">These tests may spend provider quota. You will be asked before each test.</p>}
           </div>
+        </div>
+      )}
+
+      {hasProviders && GENERATABLE.has(card.surface) && (
+        <div className="mt-5 border-t border-line pt-4">
+          <h3 className="mb-2 text-[13px] font-semibold">Try it</h3>
+          {card.resolved_target ? (
+            <ServiceTryIt key={card.resolved_target} surface={card.surface} model={card.resolved_target} />
+          ) : (
+            <p className="text-[12px] text-mute">Save a default model for this service to generate with it here.</p>
+          )}
         </div>
       )}
 

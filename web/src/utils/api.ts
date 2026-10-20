@@ -622,6 +622,53 @@ export const setServiceBinding = (surface: ServiceSurface, mode: ServiceMode, mo
 export const testService = (surface: ServiceSurface, model: string, prompt = '') =>
   post<ServiceTestResult>(`/admin/services/${encodeURIComponent(surface)}/test`, { model, prompt });
 
+/** What a Services "Try it" generation answered: parsed JSON, or the raw
+ *  bytes when the upstream returned media (TTS audio, an image, a video). */
+export type GenerateOutput =
+  | { kind: 'json'; data: unknown; ms: number }
+  | { kind: 'blob'; blob: Blob; contentType: string; ms: number };
+
+/** Generate with a service's DEFAULT model (the body carries no model). JSON
+ *  bodies are sent as JSON, FormData as multipart (image edit, transcription). */
+export async function generateService(
+  surface: ServiceSurface, body: Record<string, unknown> | FormData, signal?: AbortSignal,
+): Promise<GenerateOutput> {
+  const token = getToken();
+  const multipart = body instanceof FormData;
+  const started = performance.now();
+  let res: Response;
+  try {
+    res = await fetch(`/admin/services/${encodeURIComponent(surface)}/generate`, {
+      method: 'POST',
+      headers: {
+        ...(multipart ? {} : { 'Content-Type': 'application/json' }),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: multipart ? body : JSON.stringify(body),
+      credentials: 'include',
+      signal,
+    });
+  } catch (e) {
+    if (signal?.aborted) throw e;
+    throw new ApiError({ status: 0, type: 'network', message: 'upstream unreachable — is ezllm running?' });
+  }
+  const contentType = res.headers.get('Content-Type') ?? '';
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    let parsed: unknown;
+    try { parsed = JSON.parse(text) as unknown; } catch { parsed = undefined; }
+    const detail = parseOpenAIError(parsed, res.status);
+    if (res.status === 401 && detail.code === 401) { clearToken(); throw new AuthError(401, detail.message); }
+    throw new ApiError(detail);
+  }
+  if (contentType.includes('json')) {
+    const data = await res.json() as unknown;
+    return { kind: 'json', data, ms: Math.round(performance.now() - started) };
+  }
+  const blob = await res.blob();
+  return { kind: 'blob', blob, contentType, ms: Math.round(performance.now() - started) };
+}
+
 export type ModelRow = {
   id: string; display?: string | null; owned_by?: string | null;
   openai?: boolean | number | null; anthropic?: boolean | number | null; responses?: boolean | number | null;

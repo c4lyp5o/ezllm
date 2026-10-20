@@ -603,6 +603,16 @@ for THIS surface), `accounts` (enabled providers; `0` drives the "connect a
 provider" state), `verdict` (`{model, ok, detail, tested_at}` for the resolved
 target, or `null`).
 
+### `POST /admin/services/{surface}/generate` → upstream answer, as-is
+Admin-only "Try it" for the media services (`images_gen`, `images_edit`, `audio_tts`,
+`audio_stt`, `videos_gen`, `music_gen`; any other surface → `400`). The body is the
+operator's request **without `model`** — JSON, or multipart for `images_edit` / `audio_stt` —
+and runs through the same pipeline as `/v1/*` (routing, failover, ledger), exactly as
+`/admin/chat` does for chat. The saved service default serves it; with none, the usual
+`service_not_configured` refusal. The upstream response is returned unchanged (image JSON,
+audio bytes with their `Content-Type`, a transcript), and nothing is stored beyond the
+ledger row.
+
 ### `PUT /admin/services/{surface}` → `200` (echoes the card) | `400` | `404`
 Body `{"mode": "manual"|"auto"|"off", "model": "ns/model"}` (unknown keys rejected).
 `manual` requires `model`, validated against what EXISTS — a namespaced id in the

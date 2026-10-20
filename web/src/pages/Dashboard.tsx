@@ -534,9 +534,14 @@ export default function Dashboard() {
     <div className="space-y-6">
       <HealthPills o={o} />
 
+      {/* One statement of the window for the whole screen, instead of a
+          suffix on the first tile only: the totals and every breakdown below
+          share it; the trend panel names its own 7-day window. */}
+      <p className="text-[12px] text-mute">Showing the last 24 hours · the token trend covers the last 7 days</p>
+
       <Headline cells={[
         {
-          label: `Calls, ${RANGE_LABEL[TOTAL_RANGE]}`,
+          label: 'Calls',
           value: nfmt(totals.calls),
           count: { n: totals.calls, format: nfmt },
           lead: true,

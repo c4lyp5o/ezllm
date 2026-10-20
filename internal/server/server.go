@@ -297,6 +297,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /admin/services", s.admin(s.handleServices))
 	s.mux.HandleFunc("PUT /admin/services/{surface}", s.admin(s.handleServiceBinding))
 	s.mux.HandleFunc("POST /admin/services/{surface}/test", s.admin(s.handleServiceTest))
+	s.mux.HandleFunc("POST /admin/services/{surface}/generate", s.admin(s.handleServiceGenerate))
 	s.mux.HandleFunc("PUT /admin/accounts/{id}/model-pin", s.admin(s.handleSetModelPin))
 	// Curated capability verdicts (operator-set, probe-protected). Same
 	// body-carried model id as model-pin: ids can contain "/".

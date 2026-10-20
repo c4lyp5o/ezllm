@@ -24,6 +24,11 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M14); full histor
   is now chat-wire only. The multipart handler shares `writeResolveErr`, so
   `pinned_surface` / `wire_unsupported` are 400 there too, and the ledger
   records `wire_unsupported` as 400 rather than 502.
+- **Services "Try it".** `POST /admin/services/{surface}/generate` runs the
+  operator's model-less request through the normal pipeline with the saved
+  default (like `/admin/chat`); the card renders images, audio, video,
+  transcripts or the raw JSON. Video/music have no common upstream format,
+  so only the prompt is sent and async job answers are shown as they come.
 - **Local Ollama preset.** Ollama serves both wires natively
   (`/v1/chat/completions` and `/v1/messages`); the preset only fills the
   base URL.

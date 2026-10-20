@@ -33,6 +33,9 @@ file in the same commit, or the test fails.
   rerank/moderation requests, and the multipart endpoints answered pin and
   wire refusals with 502 instead of 400. A pin now admits exactly its own
   endpoint everywhere, with the same 400 `pinned_surface` refusal.
+- **Services "Try it".** The media services (image generation and editing,
+  text to speech, speech to text, video, music) can be generated from their
+  card with the saved default model; images, audio and video play inline.
 - **Local Ollama preset** (`http://localhost:11434/v1`, any placeholder key).
 
 ---

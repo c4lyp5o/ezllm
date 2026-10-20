@@ -559,3 +559,32 @@ func applyUsage(call *store.Call, u *store.Usage) {
 	call.ReasoningTokens = u.Reasoning
 	call.RawUsage = store.RawJSON(u.Raw)
 }
+
+// generatableSurfaces are the services the dashboard can generate with: the
+// ones whose output is something to look at or listen to. Embeddings,
+// moderations and rerank return numbers/labels — their Test is enough.
+var generatableSurfaces = map[string]provider.Surface{
+	"images_gen":  provider.SurfaceImagesGen,
+	"images_edit": provider.SurfaceImagesEdit,
+	"audio_tts":   provider.SurfaceAudioTTS,
+	"audio_stt":   provider.SurfaceAudioSTT,
+	"videos_gen":  provider.SurfaceVideosGen,
+	"music_gen":   provider.SurfaceMusicGen,
+}
+
+// handleServiceGenerate is the Services card's "Try it": the operator's own
+// request (JSON or multipart, without a model) through the SAME inference
+// pipeline as /v1/* — routing, failover, ledger — exactly as /admin/chat is
+// for chat. The page sends no model, so the service's default binding
+// serves it, and a service with no default answers the usual
+// service_not_configured refusal. The upstream response is returned
+// as-is (image JSON, audio bytes, transcript), so the page can render it.
+func (s *Server) handleServiceGenerate(w http.ResponseWriter, r *http.Request) {
+	surface, ok := generatableSurfaces[r.PathValue("surface")]
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "invalid_request_error",
+			fmt.Sprintf("service %q cannot generate here — expected one of images_gen, images_edit, audio_tts, audio_stt, videos_gen, music_gen", r.PathValue("surface")))
+		return
+	}
+	s.inference(surface)(w, r)
+}

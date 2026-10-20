@@ -148,3 +148,16 @@ Fix shipped alongside: `ModelFacts.Supports` / `ModelSupportsSurface` mapped eve
 surface to the CHAT probe column (`proto_openai`), so a model whose chat probe failed — every
 embedding/image/rerank model — was refused on its own endpoint. Service surfaces now read as
 unknown (NULL) there, and `SetModelProto` ignores them.
+
+## Addendum 2026-10-21 — "Try it" (generation from the card)
+
+Media services (`images_gen`, `images_edit`, `audio_tts`, `audio_stt`, `videos_gen`,
+`music_gen`) get a generator in their card; embeddings, moderations and rerank do not (their
+output is numbers/labels — Test is enough). It requires a SAVED default: the request carries no
+model, so the binding serves it and the generation is exactly what a model-less client gets.
+Backend: `POST /admin/services/{surface}/generate` → `s.inference(surface)` behind admin auth
+(the `/admin/chat` pattern) — no new dispatch code, full output, a ledger row. Kept separate
+from Test: a generation never writes a service verdict. Output rendering walks the JSON for
+playable media (`web/src/utils/media.ts`): data URIs, URLs with a media extension or under a
+media-named key (`url`, `video_url`, …), long base64 typed by the surface; a `status_url` /
+job id is shown as a link, not played. Every run is confirmed first (it spends quota).

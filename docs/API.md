@@ -190,8 +190,11 @@ accounting of the upstream **Messages** wire: `auto` = unstated (never inferred 
 `input_tokens` EXCLUDES cache tokens, `total` = `input_tokens` INCLUDES cache tokens. See
 `docs/usage-convention-design.md`.
 `management_key` (schema v19, optional) is a second credential for providers whose balance
-endpoint needs a management key (TokenRouter). Stored encrypted at rest; the API never
-returns it, only `management_key_set: true|false` on `AccountSummary`. An empty value on
+endpoint needs a management key (TokenRouter) or a web-session cookie (Command Code: the
+`__Secure-commandcode_prod_.session_token` value, bare or as a full cookie string). Stored encrypted at rest; the API never
+returns it, only `management_key_set: true|false` on `AccountSummary`, plus
+`management_key_expires_at` (RFC3339, omitted when unknown) for a Command Code cookie pasted as a
+full Cookie header containing `session_data` — the expiry at paste time; a bare token has none. An empty value on
 `PATCH` keeps the stored one.
 For `anthropic-compatible`, `base_url` is the host only (e.g. `https://api.anthropic.com`) —
 the `/v1` version segment is appended automatically (`/v1/messages`, `/v1/models`).
@@ -421,7 +424,10 @@ the request's timestamp.
 ### `GET /admin/accounts/{id}/quota` → `200`
 Live `ReadQuota` → classified shape + `raw`. `{"kind":"none"}` when the provider has no endpoint
 (`400`/`404`/`405` on the generic `{base}/usage` → NOT an error; OpenAI answers `400` there even
-for a valid key). A TokenRouter account without a `management_key` is `none` without a call.
+for a valid key). A TokenRouter or Command Code account without a `management_key` is `none` without a call.
+Command Code reads `GET api.commandcode.ai/internal/billing/credits` with the cookie (never the
+inference key) and reports `percent` shape: 5h window, weekly window, monthly grant spent. An
+expired cookie answers `401`/`403` → `502`, so the last good snapshot is kept.
 `401`/`429`/`5xx` stay errors (`502`, retryable), so a transient fault never records `none`.
 
 ## M3 — combos, tokens, export

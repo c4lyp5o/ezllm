@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/base64"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -199,5 +200,41 @@ func TestManagementKeyEncryptedAtRestAndReturnedDecrypted(t *testing.T) {
 	}
 	if acct.ManagementKey != "sk-mgmt-secret" {
 		t.Fatalf("reopened management key = %q", acct.ManagementKey)
+	}
+}
+
+// A Command Code account whose pasted cookie carries session_data surfaces its
+// expiry on the summary (decrypted from the encrypted column); a bare token
+// surfaces none.
+func TestListAccountsCommandCodeCookieExpiry(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "t.sqlite"), MasterSecret: "test-master"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	j := `{"session":{"session":{"expiresAt":"2026-10-27T15:00:19.970Z"}}}`
+	cookie := "__Secure-commandcode_prod_.session_token=tok; __Secure-commandcode_prod_.session_data=" +
+		strings.TrimRight(base64.StdEncoding.EncodeToString([]byte(j)), "=")
+	for ns, mk := range map[string]string{"commandcode": cookie, "bare": "tok"} {
+		if _, err := db.CreateAccount(ctx, AccountInput{
+			Name: ns, Namespace: ns, Kind: "openai-compatible",
+			BaseURL: "https://api.commandcode.ai/provider/v1", ManagementKey: mk,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list, err := db.ListAccounts(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range list {
+		want := ""
+		if a.Namespace == "commandcode" {
+			want = "2026-10-27T15:00:19Z"
+		}
+		if a.ManagementKeyExpiresAt != want {
+			t.Errorf("%s: expires_at = %q, want %q", a.Namespace, a.ManagementKeyExpiresAt, want)
+		}
 	}
 }

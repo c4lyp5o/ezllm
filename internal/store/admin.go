@@ -44,17 +44,21 @@ type AccountSummary struct {
 	// provider states it ("5 requests per 1 minute"), not as a token budget:
 	// five calls to five different models spend the same 5/min tier, which no
 	// per-model cap can express.
-	RateLimit        int64          `json:"rate_limit"`
-	RateWindow       string         `json:"rate_window"`
-	ProbeDelayMS     int            `json:"probe_delay_ms"`
-	Notes            string         `json:"notes,omitempty"`
-	ManagementKeySet bool           `json:"management_key_set"`
-	CreatedAt        string         `json:"created_at"`
-	UpdatedAt        string         `json:"updated_at"`
-	Keys             []KeySummary   `json:"keys"`
-	Quota            *QuotaSummary  `json:"quota"`
-	ModelsCount      int            `json:"models_count"`
-	ProtocolSupport  map[string]int `json:"protocol_support"`
+	RateLimit        int64  `json:"rate_limit"`
+	RateWindow       string `json:"rate_window"`
+	ProbeDelayMS     int    `json:"probe_delay_ms"`
+	Notes            string `json:"notes,omitempty"`
+	ManagementKeySet bool   `json:"management_key_set"`
+	// ManagementKeyExpiresAt: when the stored web-session cookie (Command
+	// Code) expires, RFC3339, as read from the pasted session_data. Empty
+	// when unknown — never guessed.
+	ManagementKeyExpiresAt string         `json:"management_key_expires_at,omitempty"`
+	CreatedAt              string         `json:"created_at"`
+	UpdatedAt              string         `json:"updated_at"`
+	Keys                   []KeySummary   `json:"keys"`
+	Quota                  *QuotaSummary  `json:"quota"`
+	ModelsCount            int            `json:"models_count"`
+	ProtocolSupport        map[string]int `json:"protocol_support"`
 }
 
 // KeySummary is the only surviving shape of a credential: hint + test history.
@@ -112,6 +116,14 @@ FROM accounts ORDER BY namespace`)
 			return nil, err
 		}
 		a.ManagementKeySet = strings.TrimSpace(managementKey) != ""
+		if a.ManagementKeySet && d.crypto != nil && strings.HasPrefix(managementKey, cryptoPrefix) {
+			if dec, err := d.crypto.Decrypt(managementKey); err == nil {
+				managementKey = dec
+			}
+		}
+		if t, ok := provider.CommandCodeCookieExpiry(managementKey); ok {
+			a.ManagementKeyExpiresAt = t.UTC().Format(time.RFC3339)
+		}
 		out = append(out, a)
 	}
 	if err := rows.Err(); err != nil {

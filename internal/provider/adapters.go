@@ -192,6 +192,14 @@ func isTokenRouter(acct Account) bool {
 	return err == nil && strings.EqualFold(u.Scheme, "https") && strings.EqualFold(u.Hostname(), "api.tokenrouter.com")
 }
 
+func isCommandCode(acct Account) bool {
+	if acct.Kind != KindOpenAICompatible {
+		return false
+	}
+	u, err := url.Parse(strings.TrimSpace(acct.BaseURL))
+	return err == nil && strings.EqualFold(u.Scheme, "https") && strings.EqualFold(u.Hostname(), "api.commandcode.ai")
+}
+
 // AuthOracle: GET /usage — verified live on ssn-gpt: 401 INVALID_API_KEY on a
 // bad key, 401 API_KEY_REQUIRED with no header, 200 on a good one. Costs zero
 // tokens. Some OpenAI-shaped gateways lack /usage entirely; registration treats
@@ -269,6 +277,15 @@ func (a *openAICompatible) ReadQuota(ctx context.Context, acct Account, key stri
 		authKey = acct.ManagementKey
 	}
 	hdrs := withCustomHeaders(map[string]string{"Authorization": "Bearer " + authKey}, acct)
+	if isCommandCode(acct) {
+		// The billing read is cookie-gated (web session), not key-gated: the
+		// inference key is never sent there.
+		cookie := commandCodeCookieHeader(acct.ManagementKey)
+		if cookie == "" {
+			return Quota{}, ErrQuotaUnsupported
+		}
+		hdrs = withCustomHeaders(map[string]string{"Cookie": cookie}, acct)
+	}
 	if oracleURL, parse, ok := quotaOracleFor(acct); ok {
 		body, err := getJSON(ctx, a.client, oracleURL, hdrs)
 		if err != nil {

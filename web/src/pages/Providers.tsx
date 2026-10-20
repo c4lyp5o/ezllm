@@ -196,6 +196,14 @@ function stale(quota: { read_at?: string | null } | null | undefined): boolean {
   return !Number.isNaN(t) && Date.now() - t > 5 * 60 * 1000;
 }
 
+function CookieExpiry({ at }: { at?: string }) {
+  if (!at) return null;
+  const days = Math.ceil((new Date(at).getTime() - Date.now()) / 86_400_000);
+  if (Number.isNaN(days)) return null;
+  const text = days < 0 ? 'Cookie expired — paste a fresh one' : days === 0 ? 'Cookie expires today' : `Cookie expires in ${days} ${days === 1 ? 'day' : 'days'}`;
+  return <p className={cx('mt-1 text-[12px]', days <= 1 ? 'text-warn' : 'text-mute')}>{text} (as of when it was pasted).</p>;
+}
+
 function QuotaBars({ quota }: { quota: NonNullable<Account['quota']> }) {
   const rows: Array<[string, number]> = [];
   if (quota.percent_rolling != null) rows.push(['rolling', quota.percent_rolling]);
@@ -659,6 +667,19 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
             <p className="mt-1 text-[12px] text-mute">Used only to read the wallet balance — stored encrypted, never sent upstream.</p>
           </div>
         )}
+        {d.preset === 'commandcode' && (
+          <div>
+            <label className={labelCls} htmlFor="ap-cc">Session cookie <span className="text-mute">(optional)</span></label>
+            <input id="ap-cc" type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
+              placeholder="Paste the __Secure-commandcode_prod_.session_token value"
+              value={d.managementKey} onChange={(e) => set('managementKey', e.target.value)} />
+            <p className="mt-1 text-[12px] text-mute">
+              Used only to read your usage page's limits — stored encrypted, sent only to api.commandcode.ai.
+              It expires with your web session; paste a fresh one when the quota shows an error. Paste the whole
+              Cookie header (DevTools → Network → request headers) to also see how many days are left.
+            </p>
+          </div>
+        )}
         <div>
           <label className={labelCls} htmlFor="ap-notes">Notes</label>
           <input id="ap-notes" className={inputCls} value={d.notes} onChange={(e) => set('notes', e.target.value)} placeholder="optional" />
@@ -785,6 +806,15 @@ function EditAccountModal({ account, onClose, onSaved }: { account: Account | nu
             <input type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
               placeholder={account?.management_key_set ? '•••• (set — paste to replace)' : 'Paste the TokenRouter management key'}
               value={managementKey} onChange={(e) => setManagementKey(e.target.value)} />
+          </div>
+        )}
+        {kind === 'openai-compatible' && account?.namespace === 'commandcode' && (
+          <div>
+            <label className={labelCls}>Session cookie (optional, rotates the stored value)</label>
+            <input type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
+              placeholder={account?.management_key_set ? '•••• (set — paste to replace)' : 'Paste the __Secure-commandcode_prod_.session_token value'}
+              value={managementKey} onChange={(e) => setManagementKey(e.target.value)} />
+            <CookieExpiry at={account?.management_key_expires_at} />
           </div>
         )}
         <div className="rounded-lg border border-line bg-raised/60 p-4">

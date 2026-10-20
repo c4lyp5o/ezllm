@@ -329,6 +329,7 @@ export type Account = {
   requires_session_header?: boolean; custom_headers?: Record<string, unknown> | null;
   cap_window?: string | null; cap_tokens?: number;
   management_key_set?: boolean;
+  management_key_expires_at?: string;
   /** Account-WIDE request budget: requests per rate_window (Go duration, e.g.
    *  "60s"). 0 / absent = unlimited. Enforced by the proxy before dispatch, so
    *  a spent account is SKIPPED and the combo fails over. */

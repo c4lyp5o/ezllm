@@ -21,7 +21,10 @@ Live-probed 2026-10-14 with the operator's own keys (zero-token GETs, UA
 Non-batch findings (recorded, not built):
 - **Command Code** — usage page `commandcode.ai/inqm7y1/settings/usage` is a
   sign-in SPA; `/api/*` paths answer app-level 404 with a browser UA, provider
-  API has no usage route. **Cookie-gated class → phase 2** (opt-in credential).
+  API has no usage route. **Cookie-gated class → phase 2** (opt-in credential). IMPLEMENTED 2026-10-20: the
+  page's XHR is `GET api.commandcode.ai/internal/billing/credits`, authenticated by the
+  `__Secure-commandcode_prod_.session_token` cookie alone (live-verified; `session_data` not
+  needed). Cookie stored in `management_key`; parser `parseCommandCodeCredits` (percent shape).
 - **TokenRouter** — balance needs the separate Management key
   (`/api/management/self/wallet`, live-verified `$3.69` top-up left). Phase 2.
 - **Cloudflare billable-usage** — official API but the live token 403s it

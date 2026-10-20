@@ -113,6 +113,10 @@ default, and the dashboard gets a data-terminal redesign.
   image is already pushed, and the worst acceptable outcome is a cold cache,
   not a red build. arm64 *binaries* are unchanged — `release.yml` still
   ships linux/arm64 and darwin/arm64, cross-compiled natively by Go.
+- **Command Code quota**: an optional session cookie (stored in the encrypted
+  `management_key`) lets the quota read the account's 5h, weekly and monthly
+  limits from the usage page's billing endpoint. Pasting the whole Cookie
+  header also shows "expires in N days" in the edit form.
 
 ---
 

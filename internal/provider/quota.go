@@ -2,6 +2,7 @@ package provider
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/url"
@@ -168,6 +169,10 @@ func quotaOracleFor(acct Account) (urlStr string, parse func(string) Quota, ok b
 		// Management API, not the inference API: requires a MANAGEMENT key
 		// (sk-… from the TokenRouter dashboard), not the inference key.
 		return "https://api.tokenrouter.com/api/management/self/wallet", parseTokenRouterWallet, true
+	case "api.commandcode.ai":
+		// Cookie-gated billing read (NOT the provider API): origin-rooted,
+		// authenticated with the operator's web session — see ReadQuota.
+		return u.Scheme + "://" + u.Host + "/internal/billing/credits", parseCommandCodeCredits, true
 	case "ai-gateway.vercel.sh":
 		return base + "/credits", parseVercelCredits, true
 	case "ollama.com":
@@ -333,4 +338,130 @@ func parseOllamaUsage(body string) Quota {
 	q := Quota{Kind: QuotaTokens, Raw: body, ReadAt: time.Now().UTC()}
 	q.ReqsToday = &raw.Totals.RequestCount
 	return q
+}
+
+// commandCodeSessionCookie is the better-auth session cookie the Command Code
+// web app authenticates its billing reads with.
+const commandCodeSessionCookie = "__Secure-commandcode_prod_.session_token"
+
+// commandCodeCookieHeader builds the Cookie header from whatever the operator
+// pasted: the bare token value, "name=value", or a full browser cookie string
+// (the session_token pair is picked out of it). "" when nothing usable.
+func commandCodeCookieHeader(pasted string) string {
+	pasted = strings.TrimSpace(pasted)
+	if pasted == "" {
+		return ""
+	}
+	for _, part := range strings.Split(pasted, ";") {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, commandCodeSessionCookie+"=") {
+			return part
+		}
+	}
+	if !strings.Contains(pasted, ";") && !strings.Contains(pasted, " ") {
+		return commandCodeSessionCookie + "=" + pasted
+	}
+	return ""
+}
+
+// parseCommandCodeCredits parses GET /internal/billing/credits:
+//
+//	{"credits":{"monthlyCredits":45.75,"monthlyCreditsGranted":70,…},
+//	 "windowLimits":{"fiveHour":{"used":0,"cap":14,"resetAt":0},
+//	                 "weekly":{"used":2.08,"cap":35,"resetAt":1792986424541}},…}
+//
+// Percent shape: rolling = 5h window used/cap, weekly = weekly used/cap,
+// monthly = share of the monthly grant already spent (monthlyCredits is the
+// REMAINING balance). resetAt is epoch milliseconds, 0 when the window is idle.
+func parseCommandCodeCredits(body string) Quota {
+	type window struct {
+		Used    *float64 `json:"used"`
+		Cap     *float64 `json:"cap"`
+		ResetAt float64  `json:"resetAt"`
+	}
+	var raw struct {
+		Credits *struct {
+			Monthly *float64 `json:"monthlyCredits"`
+			Granted *float64 `json:"monthlyCreditsGranted"`
+		} `json:"credits"`
+		WindowLimits *struct {
+			FiveHour *window `json:"fiveHour"`
+			Weekly   *window `json:"weekly"`
+		} `json:"windowLimits"`
+	}
+	if err := jsonUnmarshal([]byte(body), &raw); err != nil || (raw.Credits == nil && raw.WindowLimits == nil) {
+		return Quota{}
+	}
+	pct := func(used, limit *float64) *float64 {
+		if used == nil || limit == nil || *limit <= 0 {
+			return nil
+		}
+		v := *used / *limit * 100
+		return &v
+	}
+	resets := func(ms float64) string {
+		if ms <= 0 {
+			return ""
+		}
+		return time.UnixMilli(int64(ms)).UTC().Format(time.RFC3339)
+	}
+	q := Quota{Raw: body, ReadAt: time.Now().UTC()}
+	if w := raw.WindowLimits; w != nil {
+		if w.FiveHour != nil {
+			q.PercentRolling = pct(w.FiveHour.Used, w.FiveHour.Cap)
+			q.RollingResetsAt = resets(w.FiveHour.ResetAt)
+		}
+		if w.Weekly != nil {
+			q.PercentWeekly = pct(w.Weekly.Used, w.Weekly.Cap)
+			q.WeeklyResetsAt = resets(w.Weekly.ResetAt)
+		}
+	}
+	if c := raw.Credits; c != nil && c.Monthly != nil && c.Granted != nil && *c.Granted > 0 {
+		spent := *c.Granted - *c.Monthly
+		q.PercentMonthly = pct(&spent, c.Granted)
+	}
+	if q.PercentRolling == nil && q.PercentWeekly == nil && q.PercentMonthly == nil {
+		return Quota{}
+	}
+	q.Kind = QuotaPercent
+	return q
+}
+
+// CommandCodeCookieExpiry reads the web session's expiry from a pasted full
+// cookie string: the better-auth session_data cookie is base64 JSON carrying
+// session.session.expiresAt. ok=false when the paste has no session_data (a
+// bare token carries no expiry) or it does not parse — then no hint is shown.
+// The value is the expiry AT PASTE TIME: the session slides while it is used.
+func CommandCodeCookieExpiry(pasted string) (time.Time, bool) {
+	const name = "__Secure-commandcode_prod_.session_data="
+	for _, part := range strings.Split(pasted, ";") {
+		part = strings.TrimSpace(part)
+		if !strings.HasPrefix(part, name) {
+			continue
+		}
+		v, err := url.QueryUnescape(strings.TrimPrefix(part, name))
+		if err != nil {
+			return time.Time{}, false
+		}
+		v = strings.TrimRight(v, "=")
+		b, err := base64.RawStdEncoding.DecodeString(v)
+		if err != nil {
+			if b, err = base64.RawURLEncoding.DecodeString(v); err != nil {
+				return time.Time{}, false
+			}
+		}
+		var raw struct {
+			Session struct {
+				Session struct {
+					ExpiresAt string `json:"expiresAt"`
+				} `json:"session"`
+			} `json:"session"`
+		}
+		if json.Unmarshal(b, &raw) != nil {
+			return time.Time{}, false
+		}
+		t, err := time.Parse(time.RFC3339Nano, raw.Session.Session.ExpiresAt)
+		return t, err == nil
+	}
+	return time.Time{}, false
 }

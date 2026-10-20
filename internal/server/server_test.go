@@ -532,8 +532,10 @@ func TestModelsListsNamespacedIDs(t *testing.T) {
 	if resp.Object != "list" {
 		t.Errorf("object = %q", resp.Object)
 	}
-	if len(resp.Data) != 1 || resp.Data[0].ID != "up/gpt-6-luna" {
-		t.Errorf("models = %+v, want one namespaced id", resp.Data)
+	// A fresh database is seeded with the auto-free combo (bare name, no
+	// namespace), so it lists alongside the one namespaced account model.
+	if len(resp.Data) != 2 || resp.Data[0].ID != "up/gpt-6-luna" || resp.Data[1].ID != store.DefaultFreeComboName {
+		t.Errorf("models = %+v, want the namespaced id then the seeded combo", resp.Data)
 	}
 }
 
@@ -551,7 +553,7 @@ func TestModelsAnthropicShape(t *testing.T) {
 		HasMore bool `json:"has_more"`
 	}
 	json.Unmarshal([]byte(body), &resp)
-	if len(resp.Data) != 1 || resp.Data[0].Type != "model" {
+	if len(resp.Data) != 2 || resp.Data[0].Type != "model" || resp.Data[1].ID != store.DefaultFreeComboName {
 		t.Errorf("anthropic model shape wrong: %s", body)
 	}
 }

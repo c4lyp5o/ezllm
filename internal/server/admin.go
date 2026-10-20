@@ -1760,9 +1760,12 @@ func (s *Server) handleCombo(w http.ResponseWriter, r *http.Request) {
 		// Pointer = tri-state: nil keeps the current value.
 		var body struct {
 			store.Combo
-			Enabled               *bool           `json:"enabled"`
-			CompressionProfileRaw json.RawMessage `json:"compression_profile_id"`
-			ContextSizeRaw        json.RawMessage `json:"context_size"`
+			Enabled               *bool                `json:"enabled"`
+			AutoFree              *bool                `json:"auto_free"`
+			AutoFreeAccounts      *[]int64             `json:"auto_free_accounts"`
+			AutoFreeInclude       *[]store.FreeInclude `json:"auto_free_include"`
+			CompressionProfileRaw json.RawMessage      `json:"compression_profile_id"`
+			ContextSizeRaw        json.RawMessage      `json:"context_size"`
 		}
 		if !decodeBody(w, r, &body) {
 			return
@@ -1824,6 +1827,16 @@ func (s *Server) handleCombo(w http.ResponseWriter, r *http.Request) {
 		}
 		if c.Hops == nil {
 			c.Hops = cur.Hops
+		}
+		c.AutoFree, c.AutoFreeAccounts, c.AutoFreeInclude = cur.AutoFree, cur.AutoFreeAccounts, cur.AutoFreeInclude
+		if body.AutoFree != nil {
+			c.AutoFree = *body.AutoFree
+		}
+		if body.AutoFreeAccounts != nil {
+			c.AutoFreeAccounts = *body.AutoFreeAccounts
+		}
+		if body.AutoFreeInclude != nil {
+			c.AutoFreeInclude = *body.AutoFreeInclude
 		}
 		c.Enabled = cur.Enabled
 		if body.Enabled != nil {

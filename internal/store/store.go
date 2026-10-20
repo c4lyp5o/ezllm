@@ -26,7 +26,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 24
+const schemaVersion = 25
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -237,8 +237,14 @@ func (d *DB) migrate() error {
 		if err := d.rebuildCombosV9(context.Background()); err != nil {
 			return fmt.Errorf("store: rebuild combos: %w", err)
 		}
+		if err := d.alterComboAutoFree(context.Background()); err != nil {
+			return fmt.Errorf("store: alter combo auto_free: %w", err)
+		}
 		if _, err := d.w.Exec(schemaSQL); err != nil {
 			return fmt.Errorf("store: reapply schema: %w", err)
+		}
+		if err := d.seedFreeCombo(context.Background()); err != nil {
+			return fmt.Errorf("store: seed free combo: %w", err)
 		}
 		if _, err := d.w.Exec(`INSERT INTO schema_version(version) VALUES(?)`, schemaVersion); err != nil {
 			return fmt.Errorf("store: stamp version: %w", err)
@@ -319,6 +325,9 @@ func (d *DB) migrate() error {
 		}
 		if err := d.rebuildCombosV9(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate combos: %w", err)
+		}
+		if err := d.alterComboAutoFree(context.Background()); err != nil {
+			return fmt.Errorf("store: alter combo auto_free: %w", err)
 		}
 		if _, err := d.w.Exec(schemaSQL); err != nil {
 			return fmt.Errorf("store: migrate %d->%d: %w", cur, schemaVersion, err)

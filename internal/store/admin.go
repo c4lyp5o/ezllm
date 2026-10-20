@@ -488,7 +488,8 @@ func (d *DB) UpdateAccount(ctx context.Context, id int64, in AccountInput) error
 		}
 		return err
 	}
-	return nil
+	// An enable/disable flip changes which accounts the auto_free pools draw on.
+	return d.WithWriteTx(ctx, func(tx *sql.Tx) error { return d.syncAutoFree(ctx, tx, 0) })
 }
 
 func (d *DB) writeAccount(ctx context.Context, id int64, in AccountInput, kind provider.Kind) (int64, error) {
@@ -1054,13 +1055,21 @@ type Combo struct {
 	StickyIdleS int    `json:"sticky_idle_s"`
 	// BlockSize is how many consecutive dispatches one hop serves before the
 	// rotation advances (block_round_robin). 1 = plain per-request round robin.
-	BlockSize            int        `json:"block_size"`
-	Enabled              bool       `json:"enabled"`
-	CompressionProfileID *int64     `json:"compression_profile_id"`
-	ContextSize          int64      `json:"context_size"`
-	Notes                string     `json:"notes,omitempty"`
-	CreatedAt            string     `json:"created_at"`
-	Hops                 []ComboHop `json:"hops"`
+	BlockSize            int    `json:"block_size"`
+	Enabled              bool   `json:"enabled"`
+	CompressionProfileID *int64 `json:"compression_profile_id"`
+	ContextSize          int64  `json:"context_size"`
+	Notes                string `json:"notes,omitempty"`
+	// AutoFree makes the hop list derived: every free model in the catalogs
+	// (see autofree.go), optionally limited to AutoFreeAccounts. Hops written
+	// by hand are replaced on the next sync, except their enabled/hold flags.
+	AutoFree         bool    `json:"auto_free"`
+	AutoFreeAccounts []int64 `json:"auto_free_accounts"`
+	// AutoFreeInclude lists models that join the pool even without a free
+	// marker in their id (promotions, account-level free tiers).
+	AutoFreeInclude []FreeInclude `json:"auto_free_include"`
+	CreatedAt       string        `json:"created_at"`
+	Hops            []ComboHop    `json:"hops"`
 }
 
 // ValidStrategies is the single source of truth for strategy names.
@@ -1116,7 +1125,7 @@ func ValidateCombo(c Combo) error {
 func (d *DB) ListCombos(ctx context.Context) ([]Combo, error) {
 	rows, err := d.r.QueryContext(ctx, `
 SELECT id, name, strategy, sticky_idle_s, enabled, compression_profile_id, context_size,
-       block_size, COALESCE(notes,''), created_at
+       block_size, COALESCE(notes,''), created_at, auto_free, auto_free_accounts, auto_free_include
 FROM combos ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -1127,10 +1136,13 @@ FROM combos ORDER BY name`)
 	for rows.Next() {
 		var c Combo
 		var cpid sql.NullInt64
+		var autoAccts, autoIncl string
 		if err := rows.Scan(&c.ID, &c.Name, &c.Strategy, &c.StickyIdleS, &c.Enabled,
-			&cpid, &c.ContextSize, &c.BlockSize, &c.Notes, &c.CreatedAt); err != nil {
+			&cpid, &c.ContextSize, &c.BlockSize, &c.Notes, &c.CreatedAt, &c.AutoFree, &autoAccts, &autoIncl); err != nil {
 			return nil, err
 		}
+		c.AutoFreeAccounts = parseAccountIDs(autoAccts)
+		c.AutoFreeInclude = parseFreeIncludes(autoIncl)
 		if c.ContextSize == 0 {
 			c.ContextSize = 200000
 		}
@@ -1191,20 +1203,27 @@ func (d *DB) UpsertCombo(ctx context.Context, c Combo) (int64, error) {
 			cpid = *c.CompressionProfileID
 		}
 		_, err := tx.ExecContext(ctx, `
-INSERT INTO combos (name, strategy, sticky_idle_s, enabled, compression_profile_id, context_size, block_size, notes)
-VALUES (?,?,?,?,COALESCE(?, (SELECT id FROM compression_profiles WHERE 0)),?,?,?)
+INSERT INTO combos (name, strategy, sticky_idle_s, enabled, compression_profile_id, context_size, block_size, notes,
+                    auto_free, auto_free_accounts, auto_free_include)
+VALUES (?,?,?,?,COALESCE(?, (SELECT id FROM compression_profiles WHERE 0)),?,?,?,?,?,?)
 ON CONFLICT(name) DO UPDATE SET
   strategy=excluded.strategy, sticky_idle_s=excluded.sticky_idle_s,
   enabled=excluded.enabled, compression_profile_id=excluded.compression_profile_id,
-  context_size=excluded.context_size, block_size=excluded.block_size, notes=excluded.notes`,
-			c.Name, c.Strategy, c.StickyIdleS, boolToInt(c.Enabled), cpid, c.ContextSize, c.BlockSize, c.Notes)
+  context_size=excluded.context_size, block_size=excluded.block_size, notes=excluded.notes,
+  auto_free=excluded.auto_free, auto_free_accounts=excluded.auto_free_accounts,
+  auto_free_include=excluded.auto_free_include`,
+			c.Name, c.Strategy, c.StickyIdleS, boolToInt(c.Enabled), cpid, c.ContextSize, c.BlockSize, c.Notes,
+			boolToInt(c.AutoFree), formatAccountIDs(c.AutoFreeAccounts), formatFreeIncludes(c.AutoFreeInclude))
 		if err != nil {
 			return err
 		}
 		if err := tx.QueryRowContext(ctx, `SELECT id FROM combos WHERE name=?`, c.Name).Scan(&id); err != nil {
 			return err
 		}
-		return d.replaceHops(ctx, tx, id, c.Hops)
+		if err := d.replaceHops(ctx, tx, id, c.Hops); err != nil {
+			return err
+		}
+		return d.syncAutoFree(ctx, tx, id)
 	})
 	return id, err
 }
@@ -1219,7 +1238,10 @@ func (d *DB) ReplaceHops(ctx context.Context, comboID int64, hops []ComboHop) er
 		if exists == 0 {
 			return ErrNotFound
 		}
-		return d.replaceHops(ctx, tx, comboID, hops)
+		if err := d.replaceHops(ctx, tx, comboID, hops); err != nil {
+			return err
+		}
+		return d.syncAutoFree(ctx, tx, comboID)
 	})
 }
 

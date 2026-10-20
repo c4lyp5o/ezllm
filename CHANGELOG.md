@@ -4,6 +4,13 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M14); full histor
 
 ## 2026-10-20 — ten compression engines, universal translation, data-terminal dashboard
 
+- **Auto-free combos (schema v25).** `combos.auto_free` makes a combo's hops
+  the free-marked models (`:free` / `-free` ids) of the account catalogs,
+  kept in sync on every catalog write, account enable flip and combo save;
+  `auto_free_accounts` narrows the sources and `auto_free_include` pulls in
+  unmarked promos such as Ollama's `beam`. Fresh databases are seeded with
+  an empty `ezllm-auto-free` combo that fills as providers are added.
+
 - **Compression: ten engines on one wire-neutral text walker.** New: `ansi`
   and `fold` (terminal output), `jsonmin` (whitespace-free JSON tool output),
   `tool_ref` (repeated tool results become references), `blobs` (base64 runs

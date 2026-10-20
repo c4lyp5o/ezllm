@@ -379,7 +379,7 @@ WHERE account_id=? AND model_id=?`,
 				return err
 			}
 		}
-		return nil
+		return d.syncAutoFree(ctx, tx, 0)
 	})
 }
 

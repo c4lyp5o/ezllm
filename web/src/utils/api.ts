@@ -649,6 +649,9 @@ export type Hop = {
   hold_until_failure?: boolean;
 };
 
+/** A model that joins an auto_free pool although its id carries no free marker. */
+export type FreeInclude = { account_id: number; model_id: string };
+
 export type Combo = {
   id: number; name: string; strategy: string; sticky_idle_s: number | null; enabled: boolean;
   /** block_round_robin: consecutive requests served by one hop before the
@@ -656,6 +659,11 @@ export type Combo = {
   block_size: number;
   compression_profile_id?: number | null; context_size: number;
   hops: Hop[];
+  /** auto_free: hops are derived from the catalogs' free-marked models. */
+  auto_free?: boolean;
+  /** Account ids the id-marker match draws from; empty = every enabled account. */
+  auto_free_accounts?: number[];
+  auto_free_include?: FreeInclude[];
 };
 
 // ── model rules: eligibility (usage cap + allowed-use window) ──

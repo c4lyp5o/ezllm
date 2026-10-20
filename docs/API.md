@@ -47,6 +47,16 @@ can never contain `/`, so a bare id is unambiguous. Disabled combos are never li
 | PATCH | `/admin/combos/{id}` | Partial update; omitted compression profile keeps current; explicit `compression_profile_id: null` clears it |
 | GET | `/v1/models` | Enabled combo rows include `context_size`; client-advertised only, not gateway enforcement |
 
+**Auto-free combos.** A combo with `auto_free: true` has no hand-written hop list: its hops are every model whose catalog id ends in `:free` or `-free` (OpenRouter, Command Code, Opencode Go, Vercel AI Gateway, ...), rebuilt whenever an account's catalog is replaced (adding or testing a provider, catalog refresh, boot), an account is enabled/disabled, or the combo is saved. Hops you send are replaced; a hop's `enabled`/`hold_until_failure` flags survive. Models whose protocol probe failed on every surface are left out.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `auto_free` | bool | Derive hops from free-marked catalog models (default `false`) |
+| `auto_free_accounts` | int[] | Limit the id-marker match to these account ids; empty = every enabled account |
+| `auto_free_include` | `{account_id, model_id}[]` | Models that join the pool even without a marker (e.g. Ollama Cloud's `beam`); not limited by `auto_free_accounts`, and only while still in that account's catalog |
+
+A fresh database is seeded with an empty, enabled `ezllm-auto-free` combo (`true_round_robin`, `auto_free: true`); it fills when the first provider's catalog arrives. It is seeded once — deleting it sticks. Until it has a hop, requests to it fail with `combo "ezllm-auto-free" has no hops`.
+
 **Combo PATCH semantics:** omitted fields keep their stored value; `compression_profile_id: null` clears the binding. `context_size` is required positive integer when supplied, defaults to 200000 on creation, and is emitted only on combo rows.
 
 **Combo failover cooldown:** transport failures/timeouts and upstream 5xx responses cool only that account endpoint for 5 minutes. Model-specific 401/403/404/429 responses remain failover-able but do not mark the endpoint dead. After expiry exactly one half-open probe is admitted; if every candidate is cooling down, no upstream request is sent. When all attempted hops returned an upstream failover response, the last permitted response is returned rather than issuing another call.

@@ -1,6 +1,6 @@
 // COMBOS — list cards + create/edit modal with an ordered hops editor.
 import { useCallback, useEffect, useState } from 'react';
-import { ApiError, accountModels, del, get, patch, post, STRATEGY_HINTS, type Combo, type Hop } from '../utils/api';
+import { ApiError, accountModels, del, get, patch, post, STRATEGY_HINTS, type Combo, type FreeInclude, type Hop } from '../utils/api';
 import { CAUSE_TONES, Chip, ConfirmModal, Modal, Mono, SectionLabel, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls } from '../components/ui';
 import { Collapse, ReorderItem, Stagger, StaggerItem } from '../components/motion';
 
@@ -65,10 +65,11 @@ type Draft = {
   name: string; strategy: string; sticky_idle_s: number; enabled: boolean;
   compression_profile_id: number | null; context_size: number; hops: HopRow[];
   block_size: number;
+  auto_free: boolean; auto_free_accounts: number[]; auto_free_include: FreeInclude[];
 };
 
 function newDraft(): Draft {
-  return { name: '', strategy: 'failover', sticky_idle_s: 1800, context_size: 200000, enabled: true, compression_profile_id: null, hops: [], block_size: 5 };
+  return { name: '', strategy: 'failover', sticky_idle_s: 1800, context_size: 200000, enabled: true, compression_profile_id: null, hops: [], block_size: 5, auto_free: false, auto_free_accounts: [], auto_free_include: [] };
 }
 
 function HopArrow({ last }: { last: boolean }) {
@@ -187,6 +188,120 @@ function HopsEditor({ hops, setHops, accounts, strategy }: {
   );
 }
 
+// FreePool — the editor body of an auto_free combo: which providers feed it,
+// which unmarked models are added by hand, and the live pool (read-only: the
+// server derives it; only a hop's enabled flag survives a sync, so that is the
+// one thing editable here).
+function FreePool({ d, setD, accounts }: {
+  d: Draft; setD: (f: (p: Draft) => Draft) => void; accounts: AccountLite[];
+}) {
+  const nameOf = (id: number) => accounts.find((a) => a.id === id)?.name ?? `#${id}`;
+  const [pickAcct, setPickAcct] = useState<number>(0);
+  const [pickModel, setPickModel] = useState('');
+  const [models, setModels] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    setPickModel('');
+    if (pickAcct <= 0) { setModels(null); return; }
+    let live = true;
+    accountModels(pickAcct).then((rows) => { if (live) setModels(rows.map((r) => r.id).sort()); }).catch(() => { if (live) setModels([]); });
+    return () => { live = false; };
+  }, [pickAcct]);
+
+  const toggleAcct = (id: number) => setD((p) => ({
+    ...p,
+    auto_free_accounts: p.auto_free_accounts.includes(id) ? p.auto_free_accounts.filter((x) => x !== id) : [...p.auto_free_accounts, id],
+  }));
+  const addInclude = () => {
+    if (pickAcct <= 0 || !pickModel) return;
+    setD((p) => p.auto_free_include.some((i) => i.account_id === pickAcct && i.model_id === pickModel)
+      ? p
+      : { ...p, auto_free_include: [...p.auto_free_include, { account_id: pickAcct, model_id: pickModel }] });
+    setPickModel('');
+  };
+  const includeKey = new Set(d.auto_free_include.map((i) => `${i.account_id}/${i.model_id}`));
+  const setHopEnabled = (i: number, enabled: boolean) =>
+    setD((p) => ({ ...p, hops: p.hops.map((h, k) => (k === i ? { ...h, enabled } : h)) }));
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <div className="mb-2 flex items-baseline justify-between gap-3">
+          <SectionLabel>Draw from</SectionLabel>
+          <span className="text-[12px] text-mute">All providers when none are picked</span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {accounts.map((a) => {
+            const on = d.auto_free_accounts.includes(a.id);
+            return (
+              <button key={a.id} type="button" aria-pressed={on} onClick={() => toggleAcct(a.id)}
+                className={cx('rounded-md border px-2.5 py-1.5 text-[13px]',
+                  on ? 'border-accent/60 bg-accent-dim text-accent' : 'border-line text-mute hover:border-line-strong hover:text-ink')}>
+                {a.name}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div>
+        <SectionLabel className="mb-2">Also include — models with no free marker in their name</SectionLabel>
+        <div className="flex flex-wrap items-center gap-2">
+          {d.auto_free_include.map((i) => (
+            <span key={`${i.account_id}/${i.model_id}`} className="inline-flex items-center gap-2 rounded-md border border-line-strong px-2.5 py-1.5 text-[13px]">
+              {nameOf(i.account_id)} · <span className="font-mono">{i.model_id}</span>
+              <button type="button" aria-label={`Remove ${i.model_id}`} className="text-mute hover:text-ink"
+                onClick={() => setD((p) => ({ ...p, auto_free_include: p.auto_free_include.filter((x) => x !== i) }))}>✕</button>
+            </span>
+          ))}
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <div className="min-w-[10rem] flex-1">
+            <select aria-label="Provider" className={inputCls} value={pickAcct}
+              onChange={(e) => setPickAcct(Number(e.target.value))}>
+              <option value={0}>Provider…</option>
+              {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          </div>
+          <div className="min-w-[12rem] flex-[2]">
+            <select aria-label="Model" className={inputCls} value={pickModel} disabled={!models?.length}
+              onChange={(e) => setPickModel(e.target.value)}>
+              <option value="">{pickAcct > 0 && models === null ? 'Loading…' : 'Model…'}</option>
+              {(models ?? []).map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+          <button type="button" className={cx(btn.base, btn.ghost)} disabled={!pickModel} onClick={addInclude}>Add a model</button>
+        </div>
+      </div>
+
+      <div className="overflow-hidden rounded-lg border border-line">
+        <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line bg-raised/40 px-4 py-3">
+          <span className="text-[13px] font-semibold">Pool · {d.hops.length.toLocaleString()} model{d.hops.length === 1 ? '' : 's'}</span>
+          <span className="text-[12px] text-mute">Order follows the strategy. Switch a model off to keep it out.</span>
+        </div>
+        {d.hops.length === 0 ? (
+          <p className="px-4 py-4 text-[13px] text-mute">
+            Nothing yet. The pool is filled from your providers' catalogs when you save, and again whenever a catalog changes.
+          </p>
+        ) : (
+          <div className="max-h-64 divide-y divide-line overflow-y-auto">
+            {d.hops.map((h, i) => (
+              <div key={`${h.account_id}/${h.model_id}`} className="flex items-center gap-3 px-4 py-2 text-[13px]">
+                <span className={cx('min-w-0 flex-1 truncate font-mono', h.enabled ? 'text-ink' : 'text-mute')}>{h.model_id}</span>
+                <span className="text-mute">{nameOf(h.account_id)}</span>
+                <span className={cx('w-24 text-right text-[12px]', includeKey.has(`${h.account_id}/${h.model_id}`) ? 'text-ink' : 'text-accent')}>
+                  {includeKey.has(`${h.account_id}/${h.model_id}`) ? 'added by hand' : 'free marker'}
+                </span>
+                <Toggle checked={h.enabled !== false} onChange={(v) => setHopEnabled(i, v)} label={`${h.model_id} enabled`} />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
   open: boolean; editing: Combo | null;
   accounts: AccountLite[];
@@ -207,6 +322,9 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
         context_size: editing.context_size ?? 200000,
         block_size: editing.block_size ?? 1,
         hops: (editing.hops ?? []).map((h) => ({ ...h })),
+        auto_free: editing.auto_free === true,
+        auto_free_accounts: editing.auto_free_accounts ?? [],
+        auto_free_include: editing.auto_free_include ?? [],
       });
     } else setD(newDraft());
   }, [open, editing]);
@@ -221,6 +339,7 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
       // Always sent: the server keeps the stored value when this is 0, and 1 is
       // the smallest meaningful block, so a real value always wins.
       block_size: d.strategy === 'block_round_robin' ? d.block_size : 1,
+      auto_free: d.auto_free, auto_free_accounts: d.auto_free_accounts, auto_free_include: d.auto_free_include,
       // strip the UI-only `custom` flag: the wire shape is the plain Hop.
       hops: d.hops.map((h) => ({
         account_id: h.account_id, model_id: h.model_id, weight: h.weight, enabled: h.enabled,
@@ -237,7 +356,7 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
     } finally { setBusy(false); }
   };
 
-  const valid = d.name.trim().length > 0 && d.hops.length > 0 && d.hops.every((h) => h.model_id.trim().length > 0 && h.account_id > 0);
+  const valid = d.name.trim().length > 0 && (d.auto_free || d.hops.length > 0) && d.hops.every((h) => h.model_id.trim().length > 0 && h.account_id > 0);
 
   return (
     <Modal open={open} onClose={onClose} wide
@@ -343,7 +462,19 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
           </Collapse>
         </div>
 
-        <HopsEditor hops={d.hops} setHops={setHops} accounts={accounts} strategy={d.strategy} />
+        <div className="flex items-center gap-4 rounded-lg border border-line bg-raised/40 px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <div className="text-[13px] font-semibold">Fill with free models</div>
+            <p className="mt-0.5 text-[12px] leading-snug text-mute">
+              Hops come from every free model your providers list, and stay in sync as catalogs change.
+            </p>
+          </div>
+          <Toggle checked={d.auto_free} onChange={(v) => setD((p) => ({ ...p, auto_free: v }))} label="fill with free models" />
+        </div>
+
+        {d.auto_free
+          ? <FreePool d={d} setD={setD} accounts={accounts} />
+          : <HopsEditor hops={d.hops} setHops={setHops} accounts={accounts} strategy={d.strategy} />}
 
         <div className="flex items-center gap-3">
           <Toggle checked={d.enabled} onChange={(v) => setD((p) => ({ ...p, enabled: v }))} label="combo enabled" />
@@ -353,6 +484,41 @@ function ComboModal({ open, editing, accounts, profiles, onClose, onSaved }: {
         {err && <div className="rounded-lg border border-bad/30 bg-bad-dim px-4 py-3 text-[13px] text-bad">{err}</div>}
       </div>
     </Modal>
+  );
+}
+
+// FreeSummary — an auto_free card shows the pool as counts, not as dozens of
+// hop chips: how many models, from how many providers, and the split.
+function FreeSummary({ combo, accounts }: { combo: Combo; accounts: AccountLite[] }) {
+  const live = (combo.hops ?? []).filter((h) => h.enabled !== false);
+  if (live.length === 0) {
+    return (
+      <div className="mt-3 border-t border-line pt-3 text-[13px] text-mute">
+        <span className="mr-2 text-[22px] font-semibold text-mute">–</span>
+        No free models yet. Add a provider and its free models appear here on their own. Requests to this combo fail until there is one.
+      </div>
+    );
+  }
+  const by = new Map<number, number>();
+  for (const h of live) by.set(h.account_id, (by.get(h.account_id) ?? 0) + 1);
+  const rows = [...by.entries()].sort((a, b) => b[1] - a[1]);
+  return (
+    <div className="mt-3 space-y-3">
+      <div className="flex items-baseline gap-2">
+        <span className="text-[22px] font-semibold">{live.length.toLocaleString()}</span>
+        <span className="text-[13px] text-mute">
+          free model{live.length === 1 ? '' : 's'} from {rows.length.toLocaleString()} provider{rows.length === 1 ? '' : 's'}
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {rows.map(([id, n]) => (
+          <span key={id} className="flex gap-2 rounded-md border border-line px-2.5 py-1.5 text-[13px]">
+            <span>{accounts.find((a) => a.id === id)?.name ?? `#${id}`}</span>
+            <span className="text-mute">{n.toLocaleString()}</span>
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -520,6 +686,9 @@ export default function Combos() {
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                     <span className="text-[14px] font-semibold">{c.name}</span>
                     <Chip><span className="font-mono">{c.strategy}</span></Chip>
+                    {c.auto_free && (
+                      <Chip tone="accent" title="hops are derived from your providers' free models and kept in sync">Auto</Chip>
+                    )}
                     {/* Item 10: the combo's compression profile, visible without
                         opening the editor. "none" renders nothing — an empty pill
                         on every card is noise. */}
@@ -544,7 +713,8 @@ export default function Combos() {
                       </span>
                     </span>
                   </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-2 font-mono text-[12px]">
+                  {c.auto_free && <FreeSummary combo={c} accounts={accounts} />}
+                  {!c.auto_free && <div className="mt-3 flex flex-wrap items-center gap-2 font-mono text-[12px]">
                     {(c.hops ?? []).length === 0
                       ? <span className="font-sans text-[13px] text-mute">no hops configured</span>
                       : (c.hops ?? []).map((h, i) => (
@@ -563,7 +733,7 @@ export default function Combos() {
                           </span>
                         </span>
                       ))}
-                  </div>
+                  </div>}
                   {c.strategy === 'sticky_last_good' && (
                     <div className="mt-2 text-[12px] text-mute">sticky idle <Mono>{c.sticky_idle_s ?? '–'}s</Mono></div>
                   )}

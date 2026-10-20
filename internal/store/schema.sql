@@ -148,6 +148,12 @@ CREATE TABLE IF NOT EXISTS combos (
   rr_cursor   INTEGER NOT NULL DEFAULT 0,       -- UNUSED (rotation cursor is in-process)
   rr_epoch    INTEGER NOT NULL DEFAULT 0,       -- UNUSED (see rr_cursor)
   notes       TEXT,
+  -- auto_free: hops are derived from the catalogs' free models (see
+  -- store/autofree.go). auto_free_accounts is a comma list of account ids the
+  -- pool draws from; '' = every enabled account.
+  auto_free   INTEGER NOT NULL DEFAULT 0,
+  auto_free_accounts TEXT NOT NULL DEFAULT '',
+  auto_free_include TEXT NOT NULL DEFAULT '',  -- JSON [{account_id,model_id}]: always in the pool
   created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 CREATE TABLE IF NOT EXISTS combo_hops (

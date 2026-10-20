@@ -1467,6 +1467,26 @@ func failoverStatus(code int) bool {
 	return code >= 500
 }
 
+// refusesWire reports a 4xx whose body says the hop cannot serve this wire
+// at all (opencode-go's ModelProtocolUnsupported on /v1/messages). Unlike an
+// ordinary 400 it describes the hop, not the body, so another hop can serve
+// the identical request. The peeked prefix is restored, so the response stays
+// committable as the final fallback.
+func refusesWire(resp *http.Response) bool {
+	if resp == nil || resp.Body == nil || resp.StatusCode != http.StatusBadRequest {
+		return false
+	}
+	head := make([]byte, maxErrPeek)
+	n, _ := io.ReadFull(resp.Body, head)
+	if n > 0 {
+		resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(head[:n]), resp.Body))
+	}
+	// Only the vendor's explicit capability words count: ErrorCause also maps
+	// "does not allow" here, which on a 400 can just as well describe a body.
+	s := strings.ToLower(string(head[:n]))
+	return strings.Contains(s, "modelprotocolunsupported") || strings.Contains(s, "not supported for format")
+}
+
 // drainClose releases an abandoned response so its connection can be reused.
 func drainClose(resp *http.Response) {
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxBodyBytes))
@@ -1674,6 +1694,12 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 			d.recordHop(rt, oc, time.Now())
 		default:
 			oc = d.classifyHop(err, res.Status, hdr, len(routes) > 1)
+			if err == nil && refusesWire(resp) {
+				oc = hopOutcome{failed: true, reason: "protocol unsupported"}
+				if len(routes) > 1 {
+					oc.cooldown = defaultHopCooldown
+				}
+			}
 			d.recordHop(rt, oc, time.Now())
 		}
 		if probe {
@@ -1724,7 +1750,7 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 				Note: words,
 			})
 		}
-		if failoverStatus(res.Status) {
+		if failoverStatus(res.Status) || oc.failed {
 			if fallbackResp != nil {
 				drainClose(fallbackResp)
 			}

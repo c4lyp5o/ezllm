@@ -635,3 +635,57 @@ func TestCooldownsOrderIsStableWithinAnAccount(t *testing.T) {
 		}
 	}
 }
+
+// A 400 that says the hop cannot speak this wire at all (opencode-go's
+// ModelProtocolUnsupported on /v1/messages) describes the HOP, not the body:
+// the next hop must serve it. Live 2026-10-20: daily-pro's opencode-go hop
+// returned this to Claude Code while its command-code hop sat unused.
+func TestProtocolUnsupportedFailsOver(t *testing.T) {
+	refused := upstub(t, http.StatusBadRequest,
+		`{"type":"error","error":{"type":"ModelProtocolUnsupported","message":"Model does not support this protocol."}}`)
+	defer refused.Close()
+	good := upstub(t, http.StatusOK, `{"ok":true,"model":"night"}`)
+	defer good.Close()
+
+	d := newDispatcher()
+	req, body := reqWithBody(`{"model":"day","messages":[]}`)
+	rec := httptest.NewRecorder()
+
+	routes := []Route{textRoute(refused.URL, "day"), textRoute(good.URL, "night")}
+	_, res, err := d.ForwardCandidates(context.Background(), rec, req, routes, body)
+	if err != nil {
+		t.Fatalf("ForwardCandidates: %v", err)
+	}
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "night") {
+		t.Fatalf("client saw %d %s, want hop 2's 200", rec.Code, rec.Body.String())
+	}
+	if len(res.Attempts) != 1 || !strings.Contains(res.Attempts[0].Note, "[protocol_unsupported]") {
+		t.Errorf("attempt trail = %+v, want the refused hop with its cause", res.Attempts)
+	}
+	// The refusal will not change in five minutes: the hop is parked so the
+	// next call does not pay for the same 400.
+	if d.maxStrikes > 1 {
+		t.Fatalf("test assumes park-on-first-strike, dispatcher has maxStrikes=%d", d.maxStrikes)
+	}
+	if allowed, _ := d.acquireHop(routes[0], time.Now()); allowed {
+		t.Error("refused hop not parked")
+	}
+}
+
+// When the refusing hop is the only one, the client still gets the upstream's
+// real 400 — failover must not invent a different answer.
+func TestProtocolUnsupportedSoleHopPassesThrough(t *testing.T) {
+	refused := upstub(t, http.StatusBadRequest,
+		`{"type":"error","error":{"type":"ModelProtocolUnsupported","message":"Model does not support this protocol."}}`)
+	defer refused.Close()
+
+	d := newDispatcher()
+	req, body := reqWithBody(`{"model":"day","messages":[]}`)
+	rec := httptest.NewRecorder()
+	if _, _, err := d.ForwardCandidates(context.Background(), rec, req, []Route{textRoute(refused.URL, "day")}, body); err != nil {
+		t.Fatalf("ForwardCandidates: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "ModelProtocolUnsupported") {
+		t.Errorf("client saw %d %s, want the upstream 400 verbatim", rec.Code, rec.Body.String())
+	}
+}

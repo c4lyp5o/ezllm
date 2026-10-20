@@ -76,6 +76,19 @@ default, and the dashboard gets a data-terminal redesign.
   and dropping two deprecated env vars this repo never set) do not touch the
   inputs used here. No product behaviour changes; the gate and the image
   build are otherwise identical.
+- **The image build stops pretending to be multi-arch.** The container was
+  built for `linux/amd64,linux/arm64`, but the arm64 half ran the whole
+  `golang:1.27-alpine` + distroless + Go toolchain under QEMU emulation on
+  an amd64 runner — 7 of the 8 minutes of every push — and no host in the
+  fleet is arm64 (calypsocloud-1, Media-Server, GAME-PC and the OVH VPS are
+  all x86_64). The image is now `linux/amd64` only, the QEMU setup step is
+  gone, and the build uses the GitHub Actions layer cache
+  (`cache-from`/`cache-to: type=gha,mode=max`) so the Go module download and
+  the compile are cached between pushes instead of redone from scratch every
+  time. `ignore-error=true` on the export: a cache write can fail after the
+  image is already pushed, and the worst acceptable outcome is a cold cache,
+  not a red build. arm64 *binaries* are unchanged — `release.yml` still
+  ships linux/arm64 and darwin/arm64, cross-compiled natively by Go.
 
 ---
 

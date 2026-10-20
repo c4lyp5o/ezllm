@@ -22,6 +22,15 @@ file in the same commit, or the test fails.
   old published `STRONGPASSWORD` return to setup on upgrade and lose their
   sessions. Login now rate-limits empty passwords too, and the 401 no longer
   carries `default_password`.
+- **Fix: the VS Code path token now hits the per-key budget.** It shared
+  bearer auth's lookup but skipped the budget check, so a capped key kept
+  working through `/api/v1/vscode/{token}/…`. Both now run one gate.
+- **Fix: sign-in can no longer be used to burn CPU.** Login, setup and
+  password change share four concurrent bcrypt slots; past that, `429` with
+  `Retry-After`.
+- **Fix: the Claude bridge no longer leaks on failed requests.** An early
+  return (timeout, client disconnect) left a blocked reader goroutine and an
+  unreaped zombie CLI process each time.
 - **Console logs revamped**: timestamp, padded level and `key=value` on one
   line, with the level colored on a terminal (`EZLLM_LOG_COLOR`,
   `NO_COLOR`). `EZLLM_LOG_LEVEL` accepts `info` and warns on an unknown

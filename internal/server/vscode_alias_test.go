@@ -88,6 +88,40 @@ func TestVSCodeAliasRoutes(t *testing.T) {
 	}
 }
 
+// TestVSCodeAliasEnforcesTokenBudget (H2): the path-token alias must run the
+// same per-key budget gate as bearer auth. It used to skip it, so a capped
+// key kept working past its cap by switching to the VS Code URL.
+func TestVSCodeAliasEnforcesTokenBudget(t *testing.T) {
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("an exhausted key must never reach the upstream")
+	})
+	ctx := context.Background()
+	bucket := store.CountBucket(time.Now(), "monthly", time.Local)
+	if _, err := h.db.Writer().ExecContext(ctx,
+		`UPDATE client_tokens SET cap_tokens=100, cap_window='monthly' WHERE name='hermes'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.Writer().ExecContext(ctx,
+		`INSERT INTO client_usage_counters (client, bucket, tokens, calls, updated_at) VALUES ('hermes', ?, 100, 1, '2026-01-01T00:00:00Z')`, bucket); err != nil {
+		t.Fatal(err)
+	}
+
+	// Bearer path: refused (the existing behaviour, as the control).
+	if code, _, body := h.do("GET", "/v1/models", "tok-infer", ""); code != http.StatusTooManyRequests {
+		t.Fatalf("bearer with spent budget = %d %s, want 429", code, body)
+	}
+	for _, path := range []string{"/api/v1/vscode/tok-infer/models", "/api/v1/vscode/tok-infer/chat/completions"} {
+		method, body := http.MethodGet, ""
+		if strings.HasSuffix(path, "completions") {
+			method, body = http.MethodPost, `{"model":"up/gpt-6-luna","messages":[{"role":"user","content":"hi"}]}`
+		}
+		code, _, resp := h.do(method, path, "", body)
+		if code != http.StatusTooManyRequests || !strings.Contains(resp, "token budget reached") {
+			t.Fatalf("%s %s with spent budget = %d %s, want 429 token budget reached", method, path, code, resp)
+		}
+	}
+}
+
 // TestVSCodeAliasInvalidToken verifies invalid token in URL is rejected.
 func TestVSCodeAliasInvalidToken(t *testing.T) {
 	dir := t.TempDir()

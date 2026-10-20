@@ -585,7 +585,10 @@ hash; the SPA shows only its set-password page until setup flips the flag.
 bcrypt dashboard password; the SPA renders and fetches nothing pre-auth.
 Success: `{"token":"…"}` + the `ezllm_session` cookie · `401` wrong password
 (every failure, empty included, counts toward the 5-per-15-min limit) ·
-`409 setup_required` while first-boot setup is pending.
+`409 setup_required` while first-boot setup is pending. Login, setup and
+password change share 4 concurrent bcrypt slots process-wide; a request that
+waits 2 s without one gets `429` + `Retry-After: 1`, which does not count as
+a failed attempt.
 
 ### `GET /admin/stream` → SSE
 Two event types: `snapshot` (last 20 calls on connect, newest first) and `calls` (each committed

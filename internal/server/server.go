@@ -1283,36 +1283,47 @@ func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 			writeErr(w, http.StatusUnauthorized, "invalid_request_error", "missing bearer token")
 			return
 		}
-		name, roles, err := s.auth.ClientByToken(r.Context(), token)
-		if err != nil || name == "" {
-			if errors.Is(err, store.ErrTokenExpired) {
-				writeErr(w, http.StatusUnauthorized, "invalid_request_error", "token expired")
-				return
-			}
-			writeErr(w, http.StatusUnauthorized, "invalid_request_error", "invalid bearer token")
-			return
+		if r, ok := s.authenticate(w, r, token); ok {
+			next(w, r)
 		}
-		// Per-key token budget. Checked before any upstream work, so an
-		// exhausted key costs one indexed lookup and zero provider calls.
-		if s.db != nil {
-			if budget, berr := s.db.ClientBudgetStatus(r.Context(), name); berr == nil {
-				if budget.Limit > 0 && budget.Used >= budget.Limit {
-					writeErrExtra(w, http.StatusTooManyRequests, "rate_limited",
-						fmt.Sprintf("token budget reached (%d of %d tokens this %s)", budget.Used, budget.Limit, budget.Window),
-						map[string]any{"limit": budget.Limit, "used": budget.Used, "window": budget.Window})
-					return
-				}
-			} else if !errors.Is(berr, store.ErrNotFound) {
-				slog.Warn("client budget check failed", "client", name, "err", berr)
-			}
-		}
-		ctx := context.WithValue(r.Context(), rolesKey{}, roles)
-		ctx = context.WithValue(ctx, clientKey{}, name)
-		if info := reqInfoOf(r); info != nil {
-			info.client = name
-		}
-		next(w, r.WithContext(ctx))
 	}
+}
+
+// authenticate is the one client-token gate: identity, expiry, then the
+// per-key token budget. Every way a token can arrive (bearer/x-api-key, the
+// VS Code path alias) goes through it, so a new check can never cover one
+// route and miss another. On refusal it has already written the response
+// and reports false; on success it returns r carrying the client's identity.
+func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, token string) (*http.Request, bool) {
+	name, roles, err := s.auth.ClientByToken(r.Context(), token)
+	if err != nil || name == "" {
+		if errors.Is(err, store.ErrTokenExpired) {
+			writeErr(w, http.StatusUnauthorized, "invalid_request_error", "token expired")
+			return r, false
+		}
+		writeErr(w, http.StatusUnauthorized, "invalid_request_error", "invalid bearer token")
+		return r, false
+	}
+	// Per-key token budget. Checked before any upstream work, so an
+	// exhausted key costs one indexed lookup and zero provider calls.
+	if s.db != nil {
+		if budget, berr := s.db.ClientBudgetStatus(r.Context(), name); berr == nil {
+			if budget.Limit > 0 && budget.Used >= budget.Limit {
+				writeErrExtra(w, http.StatusTooManyRequests, "rate_limited",
+					fmt.Sprintf("token budget reached (%d of %d tokens this %s)", budget.Used, budget.Limit, budget.Window),
+					map[string]any{"limit": budget.Limit, "used": budget.Used, "window": budget.Window})
+				return r, false
+			}
+		} else if !errors.Is(berr, store.ErrNotFound) {
+			slog.Warn("client budget check failed", "client", name, "err", berr)
+		}
+	}
+	ctx := context.WithValue(r.Context(), rolesKey{}, roles)
+	ctx = context.WithValue(ctx, clientKey{}, name)
+	if info := reqInfoOf(r); info != nil {
+		info.client = name
+	}
+	return r.WithContext(ctx), true
 }
 
 type rolesKey struct{}

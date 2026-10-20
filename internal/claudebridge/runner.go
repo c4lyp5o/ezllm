@@ -137,7 +137,22 @@ func (r *Runner) Run(ctx context.Context, req Request, alias string, sink func(F
 		return Result{}, &NativeError{Status: 503, Type: "api_error", Code: "claude_missing",
 			Message: "claude-bridge: cannot start the Claude Code CLI: " + err.Error()}
 	}
-	defer killGroup(cmd)
+	// Every exit path kills the group AND reaps the child: an early return
+	// (timeout, client gone, bad frame) that only killed it left a zombie
+	// per failed request. waited avoids a second Wait after the clean path.
+	waited := false
+	defer func() {
+		killGroup(cmd)
+		if !waited {
+			_ = cmd.Wait()
+		}
+	}()
+	// done releases the stdout reader on an early return; without it the
+	// reader blocks forever on an unbuffered send nobody receives (one leaked
+	// goroutine plus its 8 MiB scanner buffer per failed request). Deferred
+	// after the kill/reap above, so it runs first.
+	done := make(chan struct{})
+	defer close(done)
 
 	var stderrTail tailBuffer
 	go func() {
@@ -162,7 +177,11 @@ func (r *Runner) Run(ctx context.Context, req Request, alias string, sink func(F
 		sc := bufio.NewScanner(stdout)
 		sc.Buffer(make([]byte, 0, 256*1024), 8*1024*1024)
 		for sc.Scan() {
-			lines <- append([]byte(nil), sc.Bytes()...)
+			select {
+			case lines <- append([]byte(nil), sc.Bytes()...):
+			case <-done:
+				return
+			}
 		}
 		readErr <- sc.Err()
 	}()
@@ -260,6 +279,7 @@ func (r *Runner) Run(ctx context.Context, req Request, alias string, sink func(F
 		}
 	}
 	_ = cmd.Wait()
+	waited = true
 	if res.NativeError != "" {
 		status, errType := MapNativeError(res.ErrorCode, res.NativeError)
 		return res, &NativeError{Status: status, Type: errType, Code: res.ErrorCode,

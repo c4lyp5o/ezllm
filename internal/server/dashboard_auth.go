@@ -55,6 +55,32 @@ func clearLoginAttempts(ip string) {
 	delete(loginRateLimiter.attempts, ip)
 }
 
+// bcryptSlots bounds concurrent password hashing across login, setup and
+// password change. The per-IP limiter cannot stop many source addresses
+// (or every client behind one proxy address sharing a bucket) from running
+// bcrypt in parallel; this caps the CPU an unauthenticated flood can take.
+var bcryptSlots = make(chan struct{}, 4)
+
+// bcryptWait is how long a request queues for a slot before it is refused.
+// A var so tests can shorten it.
+var bcryptWait = 2 * time.Second
+
+// acquireBcrypt takes a hashing slot, or writes 429 + Retry-After and
+// reports false when none frees up within bcryptWait.
+func acquireBcrypt(w http.ResponseWriter, r *http.Request) (release func(), ok bool) {
+	timer := time.NewTimer(bcryptWait)
+	defer timer.Stop()
+	select {
+	case bcryptSlots <- struct{}{}:
+		return func() { <-bcryptSlots }, true
+	case <-timer.C:
+	case <-r.Context().Done():
+	}
+	w.Header().Set("Retry-After", "1")
+	writeErr(w, http.StatusTooManyRequests, "rate_limited", "too many sign-in attempts in progress; retry shortly")
+	return nil, false
+}
+
 // setupCodeAlphabet drops look-alikes (0/O, 1/I/L) so a code read off a
 // terminal is typed right the first time.
 const setupCodeAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
@@ -162,6 +188,11 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "invalid_request_error", "invalid setup code")
 		return
 	}
+	release, ok := acquireBcrypt(w, r)
+	if !ok {
+		return
+	}
+	defer release()
 	if err := s.db.CompleteDashboardSetup(r.Context(), in.Password); err != nil {
 		switch {
 		case errors.Is(err, store.ErrDashboardPasswordTooShort):
@@ -200,7 +231,12 @@ func (s *Server) handleDashboardLogin(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &in) {
 		return
 	}
+	release, ok := acquireBcrypt(w, r)
+	if !ok {
+		return
+	}
 	token, err := s.db.DashboardLogin(r.Context(), in.Password)
+	release()
 	if err != nil {
 		switch {
 		case errors.Is(err, store.ErrDashboardSetupRequired):
@@ -236,6 +272,11 @@ func (s *Server) handleDashboardPassword(w http.ResponseWriter, r *http.Request)
 	if !decodeBody(w, r, &in) {
 		return
 	}
+	release, ok := acquireBcrypt(w, r)
+	if !ok {
+		return
+	}
+	defer release()
 	if err := s.db.ChangeDashboardPassword(r.Context(), in.CurrentPassword, in.NewPassword); err != nil {
 		if errors.Is(err, store.ErrInvalidDashboardPassword) {
 			writeErr(w, http.StatusUnauthorized, "invalid_request_error", "current password is incorrect")

@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 const testSetupCode = "ABCD-EFGH"
@@ -217,6 +218,40 @@ func TestDashboardLoginRateLimitsPerIP(t *testing.T) {
 	code, _, body := h.do("POST", "/admin/login", "", `{"password":"wrong"}`)
 	if code != http.StatusTooManyRequests {
 		t.Fatalf("sixth attempt = %d, want 429: %s", code, body)
+	}
+}
+
+// H3: the per-IP limiter cannot stop many source addresses hashing at once,
+// so bcrypt work is capped globally. With every slot busy, a login is
+// refused with 429 + Retry-After instead of starting another bcrypt.
+func TestDashboardLoginRefusedWhenBcryptSlotsBusy(t *testing.T) {
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
+	setupDashboard(t, h, "slot-test-password")
+	clearLoginAttempts("192.0.2.1")
+	defer clearLoginAttempts("192.0.2.1")
+
+	old := bcryptWait
+	bcryptWait = 20 * time.Millisecond
+	defer func() { bcryptWait = old }()
+	for i := 0; i < cap(bcryptSlots); i++ {
+		bcryptSlots <- struct{}{}
+	}
+	code, hdr, body := h.do("POST", "/admin/login", "", `{"password":"slot-test-password"}`)
+	for i := 0; i < cap(bcryptSlots); i++ {
+		<-bcryptSlots
+	}
+	if code != http.StatusTooManyRequests || hdr.Get("Retry-After") == "" {
+		t.Fatalf("login with every slot busy = %d (Retry-After %q) %s, want 429 + Retry-After", code, hdr.Get("Retry-After"), body)
+	}
+	// A refusal for load is not a failed guess: it must not burn the IP's budget.
+	if !loginAllowed("192.0.2.1") {
+		t.Fatal("a busy refusal must not count as a failed attempt")
+	}
+	if code, _, body := h.do("POST", "/admin/login", "", `{"password":"slot-test-password"}`); code != 200 {
+		t.Fatalf("login once slots free = %d %s", code, body)
+	}
+	if len(bcryptSlots) != 0 {
+		t.Fatalf("slots leaked: %d still held", len(bcryptSlots))
 	}
 }
 

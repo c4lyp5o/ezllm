@@ -58,15 +58,24 @@ default, and the dashboard gets a data-terminal redesign.
 - `unmetered_rows` on health, overview, live feed and dashboard; the tz day
   report's `applied_saved`; the meter is all-or-nothing per batch; web
   bridges now require a process secret.
-- **CI actions move off deprecated Node 20.** `actions/checkout@v4`,
-  `actions/setup-go@v5` and `actions/setup-node@v4` all targeted Node 20,
-  which the runners have deprecated and were force-shimming onto Node 24.
-  They are now `checkout@v5`, `setup-go@v6` and `setup-node@v6` — every pin
-  runs on Node 24 natively. `setup-go@v7` and `setup-node@v7` were skipped on
-  purpose: both are ESM migrations with breaking changes, and v6 already
-  carries the `@actions/cache` and `undici`/`fast-xml-parser` security
-  updates. No product behaviour changes; the gate and the image build are
-  otherwise identical.
+- **CI actions move off deprecated Node 20.** Eight pins were still on Node
+  20 targets that the runners have deprecated and were force-shimming onto
+  Node 24: `actions/checkout@v4`, `actions/setup-go@v5`,
+  `actions/setup-node@v4`, `docker/setup-qemu-action@v3`,
+  `docker/setup-buildx-action@v3`, `docker/login-action@v3`,
+  `docker/build-push-action@v5` and `softprops/action-gh-release@v2`. They
+  are now `checkout@v5`, `setup-go@v6`, `setup-node@v6`,
+  `setup-qemu-action@v4`, `setup-buildx-action@v4`, `login-action@v4`,
+  `build-push-action@v7` and `action-gh-release@v3` — every pin resolves to
+  a Node 24 action natively, and a pin audit asserts it.
+  `setup-go@v7` and `setup-node@v7` were skipped on purpose: both are ESM
+  migrations with breaking changes, and v6 already carries the
+  `@actions/cache` and `undici`/`fast-xml-parser` security updates.
+  `build-push-action` had no such choice — v5 and v6 are both still Node 20,
+  so v7 is the only Node 24 line, and its breaking changes (the ESM switch
+  and dropping two deprecated env vars this repo never set) do not touch the
+  inputs used here. No product behaviour changes; the gate and the image
+  build are otherwise identical.
 
 ---
 

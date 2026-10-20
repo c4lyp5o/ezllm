@@ -82,14 +82,14 @@ func (e *ErrPinned) Error() string {
 
 // surfaceName maps a wire surface to its pin name.
 func surfaceName(s provider.Surface) string {
-	switch s {
-	case provider.SurfaceAnthropic:
-		return "anthropic"
-	case provider.SurfaceResponses:
-		return "responses"
-	default:
-		return "openai"
+	// The pin vocabulary IS the surface vocabulary (chat wires and service
+	// surfaces alike). Collapsing service surfaces to "openai" made a model
+	// pinned to embeddings unreachable on /v1/embeddings, and let a chat pin
+	// admit rerank/moderation requests.
+	if s == "" {
+		return string(provider.SurfaceOpenAI)
 	}
+	return string(s)
 }
 
 // checkPin enforces a model's pin against the supplied dispatch surface.
@@ -418,11 +418,15 @@ func (r *Resolver) selectWire(ctx context.Context, acct *provider.Account, model
 	// require the legacy translation.enabled gate (operator decision,
 	// 2026-10-13).
 	if r.universalEnabled {
-		if pin, perr := f.pin(); perr == nil && pin != "" && pin != surfaceName(clientSurface) {
+		// Only a chat client pinned to ANOTHER chat wire is translated. A
+		// service request never is (its body has no chat shape), and a pin
+		// to a service surface is not a wire to dial: both fall through to
+		// checkPin below, which refuses with ErrPinned naming the pin.
+		_, clientChat := pinSurface(string(clientSurface))
+		if pin, perr := f.pin(); clientChat && perr == nil && pin != "" && pin != surfaceName(clientSurface) {
 			wire, ok := pinSurface(pin)
 			if !ok {
-				return wireDecision{refuse: &ErrWireUnsupported{Requested: requested, Wire: clientSurface,
-					Reason: fmt.Sprintf("model is pinned to an unknown wire %q", pin)}}
+				return wireDecision{refusePin: &ErrPinned{Requested: requested, Pinned: pin, Got: surfaceName(clientSurface)}}
 			}
 			capability, cerr := f.supports(wire)
 			if cerr != nil {

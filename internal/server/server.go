@@ -650,52 +650,7 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 		// hop 1 is invisible when hop 2 answers.
 		routes, err := s.resolver.ResolveCandidates(r.Context(), requested, surface, client)
 		if err != nil {
-			var nf *router.ErrNotFound
-			var nu *router.ErrUnavailable
-			var np *router.ErrPinned
-			var nw *router.ErrWireUnsupported
-			switch {
-			case errors.As(err, &nf):
-				writeErrExtra(w, http.StatusNotFound, "model_not_found", err.Error(),
-					map[string]any{"available": nf.Hints})
-			case errors.As(err, &np):
-				// The operator pinned this model to a surface and the
-				// client called a different one. That is a client
-				// mistake, not an upstream failure: 400, and the body
-				// says which endpoint to use. Never rerouted — ezllm
-				// passes bodies through untranslated, so switching the
-				// path upstream would send the wrong shape.
-				writeErrExtra(w, http.StatusBadRequest, "pinned_surface", err.Error(),
-					map[string]any{"pinned": np.Pinned, "requested_surface": np.Got})
-			case errors.As(err, &nw):
-				// Wire-first selection found no wire to dial: the model's own
-				// surface is probed impossible and nothing entitles it to
-				// another (no responses override, no translation). The
-				// request problem is the answer — 400, not a gateway 502.
-				writeErrExtra(w, http.StatusBadRequest, "wire_unsupported", err.Error(),
-					map[string]any{"requested_surface": string(nw.Wire)})
-			case errors.As(err, &nu):
-				// A rule (cap / allowed hours) says no — not a routing miss.
-				// The cause (when it is a *rules.Refusal) carries the
-				// structured fields a client can act on: WHICH kind of rule
-				// refused, and (for windows) when the model opens next, so it
-				// can sleep until then instead of blind-retrying.
-				extra := map[string]any{"reason": nu.Reason}
-				var ref *rules.Refusal
-				if errors.As(err, &ref) {
-					extra["rule"] = map[string]any{
-						"kind":   ref.Reason.Kind,
-						"detail": ref.Reason.Detail,
-					}
-					if !ref.Reason.NextAllowed.IsZero() {
-						extra["rule"].(map[string]any)["next_allowed"] =
-							ref.Reason.NextAllowed.Format(time.RFC3339)
-					}
-				}
-				writeErrExtra(w, http.StatusTooManyRequests, "model_unavailable", err.Error(), extra)
-			default:
-				writeErr(w, http.StatusBadGateway, "upstream_error", err.Error())
-			}
+			writeResolveErr(w, err)
 			s.ledger(store.Call{
 				TS: start, Client: client, IP: cip, Surface: store2surface(surface), Alias: requested,
 				Model: requested, Status: errorStatus(err), Err: err.Error(),
@@ -917,18 +872,7 @@ func (s *Server) inferenceMultipart(w http.ResponseWriter, r *http.Request, surf
 
 	routes, err := s.resolver.ResolveCandidates(r.Context(), requested, surface, client)
 	if err != nil {
-		var nf *router.ErrNotFound
-		var nu *router.ErrUnavailable
-		switch {
-		case errors.As(err, &nf):
-			writeErrExtra(w, http.StatusNotFound, "model_not_found", err.Error(),
-				map[string]any{"available": nf.Hints})
-		case errors.As(err, &nu):
-			writeErrExtra(w, http.StatusTooManyRequests, "model_unavailable", err.Error(),
-				map[string]any{"reason": nu.Reason})
-		default:
-			writeErr(w, http.StatusBadGateway, "upstream_error", err.Error())
-		}
+		writeResolveErr(w, err)
 		s.ledger(store.Call{
 			TS: start, Client: client, IP: cip, Surface: store2surface(surface),
 			Alias: requested, Model: requested, Status: errorStatus(err), Err: err.Error(),
@@ -1004,6 +948,58 @@ func extractModelMultipart(body []byte) (string, error) {
 	return "", nil
 }
 
+// writeResolveErr answers a resolution failure — one mapping for the JSON and
+// multipart handlers, so a pin or wire refusal is a 400 on every endpoint
+// rather than a 502 on the multipart ones.
+func writeResolveErr(w http.ResponseWriter, err error) {
+	var nf *router.ErrNotFound
+	var nu *router.ErrUnavailable
+	var np *router.ErrPinned
+	var nw *router.ErrWireUnsupported
+	switch {
+	case errors.As(err, &nf):
+		writeErrExtra(w, http.StatusNotFound, "model_not_found", err.Error(),
+			map[string]any{"available": nf.Hints})
+	case errors.As(err, &np):
+		// The operator pinned this model to a surface and the
+		// client called a different one. That is a client
+		// mistake, not an upstream failure: 400, and the body
+		// says which endpoint to use. Never rerouted — ezllm
+		// passes bodies through untranslated, so switching the
+		// path upstream would send the wrong shape.
+		writeErrExtra(w, http.StatusBadRequest, "pinned_surface", err.Error(),
+			map[string]any{"pinned": np.Pinned, "requested_surface": np.Got})
+	case errors.As(err, &nw):
+		// Wire-first selection found no wire to dial: the model's own
+		// surface is probed impossible and nothing entitles it to
+		// another (no responses override, no translation). The
+		// request problem is the answer — 400, not a gateway 502.
+		writeErrExtra(w, http.StatusBadRequest, "wire_unsupported", err.Error(),
+			map[string]any{"requested_surface": string(nw.Wire)})
+	case errors.As(err, &nu):
+		// A rule (cap / allowed hours) says no — not a routing miss.
+		// The cause (when it is a *rules.Refusal) carries the
+		// structured fields a client can act on: WHICH kind of rule
+		// refused, and (for windows) when the model opens next, so it
+		// can sleep until then instead of blind-retrying.
+		extra := map[string]any{"reason": nu.Reason}
+		var ref *rules.Refusal
+		if errors.As(err, &ref) {
+			extra["rule"] = map[string]any{
+				"kind":   ref.Reason.Kind,
+				"detail": ref.Reason.Detail,
+			}
+			if !ref.Reason.NextAllowed.IsZero() {
+				extra["rule"].(map[string]any)["next_allowed"] =
+					ref.Reason.NextAllowed.Format(time.RFC3339)
+			}
+		}
+		writeErrExtra(w, http.StatusTooManyRequests, "model_unavailable", err.Error(), extra)
+	default:
+		writeErr(w, http.StatusBadGateway, "upstream_error", err.Error())
+	}
+}
+
 func errorStatus(err error) int {
 	var nf *router.ErrNotFound
 	if errors.As(err, &nf) {
@@ -1015,6 +1011,10 @@ func errorStatus(err error) int {
 	}
 	var np *router.ErrPinned
 	if errors.As(err, &np) {
+		return http.StatusBadRequest
+	}
+	var nw *router.ErrWireUnsupported
+	if errors.As(err, &nw) {
 		return http.StatusBadRequest
 	}
 	return http.StatusBadGateway

@@ -28,8 +28,9 @@ Service surfaces are never translated and have no probe column: a model's **chat
 never makes it "unsupported" on a service endpoint (only `/admin/services/{surface}/test` proves
 one).
 
-**Surface-pin refusal (all three POSTs).** If the resolved model carries a `proto_pin` and the
-client called a different surface, the request is refused **before any upstream dial** with
+**Surface-pin refusal (every inference POST, JSON and multipart).** A pin names one surface —
+a chat wire or a service surface (`embeddings`, `rerank`, …) — and admits only that endpoint. If
+the resolved model carries a `proto_pin` and the client called a different surface, the request is refused **before any upstream dial** with
 `400 {"error":{"type":"pinned_surface","message":"...","pinned":"openai","requested_surface":"anthropic","code":400}}`.
 The pin never reroutes the request — native paths pass bodies through untranslated, so the
 honest answer is a refusal that names the endpoint to use instead. (Translated hops — the

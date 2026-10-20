@@ -18,6 +18,12 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M14); full histor
 - **Fix: service surfaces never read the chat probe column.** `proto_openai`
   was consulted for every non-chat surface, so a model that failed the chat
   probe was refused on `/v1/embeddings` & co.
+- **Fix: service-surface pins and multipart refusals.** `surfaceName` named
+  every service surface "openai", so an `embeddings` pin refused
+  `/v1/embeddings` and an `openai` pin admitted `/v1/rerank`; pin translation
+  is now chat-wire only. The multipart handler shares `writeResolveErr`, so
+  `pinned_surface` / `wire_unsupported` are 400 there too, and the ledger
+  records `wire_unsupported` as 400 rather than 502.
 - **Local Ollama preset.** Ollama serves both wires natively
   (`/v1/chat/completions` and `/v1/messages`); the preset only fills the
   base URL.

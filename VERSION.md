@@ -28,6 +28,11 @@ file in the same commit, or the test fails.
 - **Fix: service endpoints no longer read the chat probe.** A model whose chat
   probe failed (every embedding, image or rerank model) was refused on its own
   endpoint; service surfaces now read as untested there.
+- **Fix: pins on service surfaces.** A model pinned to `embeddings` (or any
+  service surface) was refused on its own endpoint, a chat pin admitted
+  rerank/moderation requests, and the multipart endpoints answered pin and
+  wire refusals with 502 instead of 400. A pin now admits exactly its own
+  endpoint everywhere, with the same 400 `pinned_surface` refusal.
 - **Local Ollama preset** (`http://localhost:11434/v1`, any placeholder key).
 
 ---

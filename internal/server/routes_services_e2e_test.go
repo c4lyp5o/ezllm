@@ -129,6 +129,33 @@ func TestServiceEndpointsForwardEndToEnd(t *testing.T) {
 		}
 	}
 
+	// A service pin admits its own endpoint, and refuses another one with the
+	// SAME 400 pinned_surface on the multipart path as on the JSON path (the
+	// multipart handler used to answer every routing refusal 502).
+	if err := db.SetModelPin(ctx, id, "svc-model", "moderations"); err != nil {
+		t.Fatal(err)
+	}
+	post := func(route, ctype string, body []byte) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, route, bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer tok-infer")
+		req.Header.Set("Content-Type", ctype)
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := post("/v1/moderations", "application/json", cases[1].body); rec.Code != http.StatusOK {
+		t.Errorf("moderations-pinned model on /v1/moderations: %d — %s", rec.Code, rec.Body.String())
+	}
+	for _, tc := range []struct {
+		route, ctype string
+		body         []byte
+	}{{cases[0].route, cases[0].ctype, cases[0].body}, {cases[2].route, cases[2].ctype, cases[2].body}} {
+		rec := post(tc.route, tc.ctype, tc.body)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"pinned_surface"`) {
+			t.Errorf("%s on a moderations-pinned model: %d — %s; want 400 pinned_surface", tc.route, rec.Code, rec.Body.String())
+		}
+	}
+
 	if err := db.Flush(); err != nil {
 		t.Fatal(err)
 	}

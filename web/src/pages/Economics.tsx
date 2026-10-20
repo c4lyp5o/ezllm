@@ -404,7 +404,6 @@ export default function Economics() {
                     <tr className="border-b border-line text-left text-[11px] text-mute">
                       <th className="px-5 py-2.5 font-medium">model</th>
                       <th className="px-3 py-2.5 text-right font-medium">actual in</th>
-                      <th className="px-3 py-2.5 text-right font-medium" title="tokens the context-budget stage kept out of the prompt">context saved</th>
                       <th className="px-3 py-2.5 text-right font-medium">compression</th>
                       <th className="px-3 py-2.5 text-right font-medium">out</th>
                       <th className="px-3 py-2.5 text-right font-medium" title="tokens the model spent thinking — billed as output, never shown">reasoning</th>
@@ -416,7 +415,6 @@ export default function Economics() {
                       <tr key={`${r.ts}-${i}`} className="border-b border-line/50 transition-colors last:border-0 hover:bg-wash">
                         <td className="max-w-[300px] truncate px-5 py-2 font-sans text-ink" title={r.model}>{r.model}</td>
                         <td className="px-3 py-2 text-right text-ink">{nfmt(r.tin)}</td>
-                        <td className="px-3 py-2 text-right text-accent">{formatTokens(r.contextSaved ?? 0)}</td>
                         <td className="px-3 py-2 text-right text-ok">{formatTokens(r.saved)}</td>
                         <td className="px-3 py-2 text-right text-dim">{nfmt(r.tout)}</td>
                         <td className={cx('px-3 py-2 text-right', (r.reasoning ?? 0) > 0 ? 'text-warn' : 'text-mute')}>

@@ -1,12 +1,15 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -120,6 +123,57 @@ func TestVSCodeAliasEnforcesTokenBudget(t *testing.T) {
 			t.Fatalf("%s %s with spent budget = %d %s, want 429 token budget reached", method, path, code, resp)
 		}
 	}
+}
+
+// TestVSCodeAliasTokenNotInAccessLog (H1): the access log printed
+// r.URL.Path verbatim, which for this alias is a working client token.
+func TestVSCodeAliasTokenNotInAccessLog(t *testing.T) {
+	var logBuf syncBuffer
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {}, func(o *Options) {
+		o.Log = slog.New(slog.NewTextHandler(&logBuf, nil))
+	})
+	for _, path := range []string{"/api/v1/vscode/tok-infer/models", "/api/v1/vscode/tok-infer/", "/api/v1/vscode/wrong-secret-token/models"} {
+		h.do(http.MethodGet, path, "", "")
+	}
+	out := logBuf.String()
+	if strings.Contains(out, "tok-infer") || strings.Contains(out, "wrong-secret-token") {
+		t.Fatalf("access log leaked a path token:\n%s", out)
+	}
+	if !strings.Contains(out, "path=/api/v1/vscode/***/models") {
+		t.Fatalf("redacted path missing from the access log:\n%s", out)
+	}
+}
+
+func TestLogPath(t *testing.T) {
+	for in, want := range map[string]string{
+		"/api/v1/vscode/abc/chat/completions": "/api/v1/vscode/***/chat/completions",
+		"/api/v1/vscode/abc/":                 "/api/v1/vscode/***/",
+		"/api/v1/vscode/abc":                  "/api/v1/vscode/***",
+		"/api/v1/vscode/":                     "/api/v1/vscode/",
+		"/v1/chat/completions":                "/v1/chat/completions",
+	} {
+		if got := logPath(in); got != want {
+			t.Errorf("logPath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// syncBuffer is a bytes.Buffer safe for the logger's concurrent writes.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // TestVSCodeAliasInvalidToken verifies invalid token in URL is rejected.

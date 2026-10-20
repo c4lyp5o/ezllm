@@ -1450,7 +1450,7 @@ func (s *Server) accessLog(next http.Handler) http.Handler {
 		}
 		// Attribution only — never a token, key, or Authorization value.
 		s.log.Info("request",
-			"method", r.Method, "path", r.URL.Path, "status", status,
+			"method", r.Method, "path", logPath(r.URL.Path), "status", status,
 			"ms", time.Since(start).Milliseconds(), "bytes", sw.bytes,
 			"client", info.client, "account", info.account,
 			"model", info.model, "surface", info.surface,
@@ -1459,6 +1459,24 @@ func (s *Server) accessLog(next http.Handler) http.Handler {
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────
+
+const vscodePathPrefix = "/api/v1/vscode/"
+
+// logPath is the request path as the access log may show it. The VS Code
+// alias carries a live client token as a path segment
+// (/api/v1/vscode/{token}/…), so that segment is masked; every other path is
+// logged as-is. A reverse proxy in front logs the raw path itself and needs
+// its own redaction.
+func logPath(p string) string {
+	rest, ok := strings.CutPrefix(p, vscodePathPrefix)
+	if !ok || rest == "" {
+		return p
+	}
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		return vscodePathPrefix + "***" + rest[i:]
+	}
+	return vscodePathPrefix + "***"
+}
 
 // bearerToken accepts both auth shapes: OpenAI-style Bearer and Anthropic-style
 // x-api-key. Claude Code sends the latter.

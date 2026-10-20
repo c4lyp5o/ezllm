@@ -25,6 +25,9 @@ file in the same commit, or the test fails.
 - **Fix: the VS Code path token now hits the per-key budget.** It shared
   bearer auth's lookup but skipped the budget check, so a capped key kept
   working through `/api/v1/vscode/{token}/…`. Both now run one gate.
+- **Fix: the access log no longer prints VS Code path tokens.** The alias
+  carries a client token as a URL segment; the log line now shows
+  `/api/v1/vscode/***/…`. A reverse proxy in front must redact it too.
 - **Fix: sign-in can no longer be used to burn CPU.** Login, setup and
   password change share four concurrent bcrypt slots; past that, `429` with
   `Retry-After`.

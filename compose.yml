@@ -21,7 +21,6 @@ services:
       - "${EZLLM_PORT:-20129}:20129"
 
     environment:
-      TZ: Asia/Kuala_Lumpur
       # Default zone for group_by=day bucketing, so the dashboard's day view
       # agrees with a usage rule's day (both use store.CountBucket). A tz that
       # will not load is a BOOT error, never a silent UTC shift. Per-request
@@ -40,8 +39,6 @@ services:
       # anthropic-compatible account dials it). Needs the two mounts below; set
       # EZLLM_CLAUDE_BRIDGE=off on a host without a Claude Code CLI + login.
       EZLLM_CLAUDE_BRIDGE: ${EZLLM_CLAUDE_BRIDGE:-on}
-      EZLLM_CLAUDE_BIN: /opt/claude/claude
-      EZLLM_CLAUDE_CONFIG_DIR: /claude-sub
       # The CLI's local login check reads process identity: without these two it
       # reports logged-out instantly and every subscription request fails. They
       # must name the owner of the mounted login directory.

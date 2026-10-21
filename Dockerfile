@@ -56,19 +56,17 @@ COPY --chown=nonroot:nonroot config.example.yaml /app/config.example.yaml
 WORKDIR /app
 
 # data_dir in config is repo-relative (./data); this env var OVERRIDES it
-# (cmd/ezllm/main.go:66), giving one predictable place to bind-mount.
+# (cmd/ezllm/main.go:84), giving one predictable place to bind-mount.
 ENV EZLLM_DATA_DIR=/data
-# -addr > EZLLM_ADDR > config.listen (main.go:131). Config defaults to
+# -addr > EZLLM_ADDR > config.listen (main.go:184). Config defaults to
 # loopback, so container users MUST override this to serve anything.
 ENV EZLLM_ADDR=0.0.0.0:20129
 ENV TZ=Asia/Kuala_Lumpur
 
-# Claude subscription surface. OFF in a bare `docker run` — it needs the
-# official CLI binary and a subscription login bind-mounted, which only
-# compose.yml wires up. Never bake either into the image.
-ENV EZLLM_CLAUDE_BRIDGE=off
-ENV EZLLM_CLAUDE_BIN=/opt/claude/claude
-ENV EZLLM_CLAUDE_CONFIG_DIR=/claude-sub
+# Claude subscription surface: off unless EZLLM_CLAUDE_BRIDGE=on, and it
+# expects the official CLI at /opt/claude/claude and the subscription login at
+# /claude-sub (claudebridge.go defaults), bind-mounted by compose.yml. Never
+# bake either into the image.
 
 VOLUME ["/data"]
 EXPOSE 20129

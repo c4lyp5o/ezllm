@@ -219,9 +219,9 @@ through unchanged (`sonnet`, `haiku`, `opus`, and the `[1m]` forms the CLI adver
   `cache_read_input_tokens=8609`, `output_tokens=4`, i.e. cache **excluded** from `input_tokens`).
   The bridge account therefore declares `usage_convention=anthropic` (the vocabulary is
   `auto|anthropic|total`) so `tokens_in` means cache-COLD spend and `tokens_cached_read` is real.
-  The router only *requires* an explicit convention for a **translated** Messages destination
-  (`internal/router/router.go:362` and `:399`, reason string `messagesConventionReason`); our hop
-  serves Messages natively, so this is declared for honest accounting rather than to pass a gate.
+  The convention is not a routing gate (the router's `messagesConventionReason` gate was removed
+  in `61a403c`; `auto` reads Messages usage as exclusive, `internal/router/router.go:462`), so
+  this is declared for honest accounting, not to pass a check.
 - **Errors:** plan or session limit → 429; missing login → 401; binary missing → 503; malformed
   native output → 502. Each carries the CLI's own words, unrewritten.
 - **Lifecycle:** one process per request; writes go to the bridge-owned MCP server over stdio;

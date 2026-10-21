@@ -74,27 +74,28 @@ equal, something is buffering — go read `proxy/sse.go` and find out why).
 ## 4. Milestone landmarks
 
 *(5–10 bullets per milestone: file → line range → what's there. Half a screen each max.
-No narration, just landmarks. M1–M8 are all filled — keep them current as the code evolves.)*
+No narration, just landmarks. M1–M8 are all filled — keep them current as the code evolves.
+Line numbers re-verified 2026-10-22; M10's "the problem was" list cites the pre-fix code.)*
 
 ### M1 — skeleton + health ✅ (2026-10-05, verified)
-- `cmd/ezllm/main.go:59` flags (`-config`, `-addr`); `:67` console logging via
+- `cmd/ezllm/main.go:59` flags (`-config`, `-addr`); `:69` console logging via
   `internal/logx` (`EZLLM_LOG_LEVEL`, `EZLLM_LOG_COLOR`); `:166` first-boot
   dashboard setup (`cmd/ezllm/setup.go`: env password or one-time setup code)
-  (`:43`, env-only by design — must work before config is read), addr precedence
+  (`:66`, env-only by design — must work before config is read), addr precedence
   `-addr` > `EZLLM_ADDR` > config, `http.Server` (10s ReadHeaderTimeout,
   **no WriteTimeout on purpose** for SSE), SIGINT/SIGTERM → 15s drain shutdown.
-- `internal/config/config.go:96` `Load` / `:113` `Validate` — collects ALL problems into one
+- `internal/config/config.go:172` `Load` / `:219` `Validate` — collects ALL problems into one
   error (missing env vars reported by NAME, never value); defaults applied here
-  (`DefaultDataDir = "data"` at `:22`, cooldown defaults/validation at `:209`).
+  (`DefaultDataDir = "data"` at `:22`, cooldown defaults/validation at `:350`).
 - Auth moved out of config (M2+): the server resolves tokens through the store —
-  `Auth` interface (`internal/server/server.go:53`, `ClientByToken`) implemented by
-  `internal/store/catalog.go` (tokens matched by SHA-256 hash, `crypto.go:147 HashToken`).
-- `internal/server/server.go:175` `New` — route table starts at `:223`: `GET /healthz` (public,
+  `Auth` interface (`internal/server/server.go:55`, `ClientByToken`) implemented by
+  `internal/store/catalog.go` (tokens matched by SHA-256 hash, `crypto.go:143 HashToken`).
+- `internal/server/server.go:204` `New` — route table in `routes()` at `:254`: `GET /healthz` (public,
   liveness + `version` since 2026-10-17), `GET /v1/models`, `POST /v1/chat/completions` (both `authed`).
-- `internal/server/server.go:333` `Handler()` — stack = `accessLog(recoverer(mux))`.
-- `:1172 authed` → writes `reqInfo.client` at `:1187` (holder created by accessLog at
-  `:1308` — this wiring was buggy in the first cut, log showed `client=""`; fixed + re-verified).
-- `:1273 statusWriter` — records status/bytes, **`Flush()` forwarded** (the M2 SSE
+- `internal/server/server.go:382` `Handler()` — stack = `accessLog(recoverer(securityHeaders(mux)))`.
+- `:1124 authed` → writes `reqInfo.client` at `:1170` (holder created by accessLog at
+  `:1287` — this wiring was buggy in the first cut, log showed `client=""`; fixed + re-verified).
+- `:1255 statusWriter` — records status/bytes, **`Flush()` forwarded** (the M2 SSE
   dependency lives here, not in the proxy).
 - `internal/config/config_test.go` — 4 tests: valid+defaults, aggregate-error, bad fallback
   provider, duplicate token.
@@ -104,55 +105,55 @@ No narration, just landmarks. M1–M8 are all filled — keep them current as th
   #7 loopback default. (#2 SSE, #3 passthrough, #4 retry policy, #5 ledger async = M2/M4)
 
 ### M2 — store + crypto + 3-surface passthrough ✅ (2026-10-06, LIVE-verified vs 2 real providers)
-**Where to look first:** `internal/proxy/proxy.go:333 Forward` — it is the whole request path in
-one function. Then `store.NormalizeUsage` (`ledger.go:91`) for the accounting rules.
+**Where to look first:** `internal/proxy/proxy.go:1387 Forward` — it is the whole request path in
+one function. Then `store.NormalizeUsage` (`ledger.go:136`) for the accounting rules.
 
 - `internal/store/schema.sql` — 11 tables + `proto_pin` (v7), embedded via `go:embed`. **FK order matters**:
   `compression_profiles` is declared *before* `combos` (combos references it). `calls` and
   `quota_snapshots` are append-only/immutable; `account`+`key_hint` are denormalized onto `calls`
   so history survives key/account deletion (proved by `TestLedgerRowsAreImmutableHistory`).
-- `internal/store/store.go:56 Open` — WAL, `busy_timeout=5000`, `foreign_keys=ON`,
+- `internal/store/store.go:69 Open` — WAL, `busy_timeout=5000`, `foreign_keys=ON`,
   **single writer conn (`SetMaxOpenConns(1)`) + read pool**. A write pool would only manufacture
-  `SQLITE_BUSY`. `migrate()` at `:163` is idempotent and refuses to start on a *newer* schema
-  (`schemaVersion` const at `:27`; the v7 `alterModelProtoPin` migration at `:234`).
-- `internal/store/crypto.go:39 NewFieldCrypto` — scrypt(N=32768,r=8,p=1) → AES-256-GCM,
-  wire format `enc:v1:<iv>:<ct>:<tag>`. `KeyHint` (`:122`) masks anything ≤8 chars rather than
+  `SQLITE_BUSY`. `migrate()` at `:190` is idempotent and refuses to start on a *newer* schema
+  (`schemaVersion` const at `:29`; the v7 `alterModelProtoPin` migration at `:487`).
+- `internal/store/crypto.go:41 NewFieldCrypto` — scrypt(N=32768,r=8,p=1) → AES-256-GCM,
+  wire format `enc:v1:<iv>:<ct>:<tag>`. `KeyHint` (`:118`) masks anything ≤8 chars rather than
   truncating, so a hint can never reconstruct its key. Master key is loaded from OUTSIDE `data/`.
-  **Not wired in v1** — provider keys ship plaintext by explicit choice (commit `dfe323c`); this
-  path is kept for a future hardening pass.
-- `internal/store/ledger.go:249 RecordCall` — **non-blocking by design** (drops + counts rather
-  than adding latency to a stream; invariant #5). `Flush()` (`:293`) uses an **in-band barrier on
+  Unwired in v1 (plaintext keys, commit `dfe323c`); **wired since `81359d4`** — `AddKey` and
+  management keys encrypt through it (`store.go:113`), see `docs/master-key-runbook.md`.
+- `internal/store/ledger.go:284 RecordCall` — **non-blocking by design** (drops + counts rather
+  than adding latency to a stream; invariant #5). `Flush()` (`:407`) uses an **in-band barrier on
   the same FIFO channel** so it's deterministic — an earlier 2-channel version let `select` serve a
   flush while rows were still queued, silently losing ledger rows.
-- `internal/store/ledger.go:91 NormalizeUsage` — **THE accounting decision.** Three surfaces
+- `internal/store/ledger.go:136 NormalizeUsage` — **THE accounting decision.** Three surfaces
   disagree about cache: OpenAI includes `cached_tokens` in `prompt_tokens`; Anthropic EXCLUDES
   `cache_read` from `input_tokens`; Responses includes cached and is the only one reporting
   `cache_write`. Read the doc comment before touching this.
-- `internal/provider/provider.go:101 Adapter` — the 4-method contract (`PrepareRequest`,
+- `internal/provider/provider.go:172 Adapter` — the 4-method contract (`PrepareRequest`,
   `StripHeaders`, `ReadQuota`, `ListModels`). Adding a provider = one file + one `Kind`.
-- `internal/provider/adapters.go:39 openCodeGo.PrepareRequest` — injects a **per-request**
+- `internal/provider/adapters.go:46 openCodeGo.PrepareRequest` — injects a **per-request**
   `x-opencode-session` (a shared one grows server-side until it blows context) and strips any
-  client-supplied copy. `:168 anthropicCompatible` is its own kind because auth is `x-api-key`,
+  client-supplied copy. `:338 anthropicCompatible` is its own kind because auth is `x-api-key`,
   not Bearer. `gemini-openai` (M8) reuses the openai-compatible adapter shape; its quirk lives in
   the probe gate (`AuthRejectStatuser`), not the adapter.
-- `internal/provider/quota.go:22 parsePercentQuota` / `:57 parseMoneyQuota` / `:110 ClassifyQuota`
+- `internal/provider/quota.go:28 parsePercentQuota` / `:63 parseMoneyQuota` / `:116 ClassifyQuota`
   — quota shapes differ per provider, so the result is discriminated (`percent|money|tokens|none`)
   and the verbatim JSON is always kept.
-- `internal/proxy/proxy.go:197 SwapModel` — `map[string]any` round-trip with `UseNumber()`;
+- `internal/proxy/proxy.go:767 SwapModel` — `map[string]any` round-trip with `UseNumber()`;
   only `model` changes, all 16 observed provider fields survive, big ints don't become floats.
   Rejects `null` explicitly (assigning into a nil map panics — a client could have crashed us).
-- `internal/proxy/proxy.go:500 streamCopy` — scanner + `Flush()` per line, re-emitting the `\n`
+- `internal/proxy/proxy.go:1864 streamCopy` — scanner + `Flush()` per line, re-emitting the `\n`
   the scanner strips so forwarding stays byte-exact. Over-long lines fall back to a raw `io.Copy`.
-- `internal/proxy/proxy.go:578 tapSSELine` + `:49 UsageTapper` — **merges** usage across events
+- `internal/proxy/proxy.go:1981 tapSSELine` + `:65 UsageTapper` — **merges** usage across events
   rather than taking the first hit. Two live-only bugs hid here: Anthropic's `message_start` has
   `output_tokens:0` (final totals come in `message_delta`), and a `max_output_tokens`-truncated
   Responses stream ends on `response.incomplete`, not `.completed`.
-- `internal/router/router.go:172 Resolve` — combo name → `<namespace>/<model>` → else 404 **with
+- `internal/router/router.go:522 Resolve` — combo name → `<namespace>/<model>` → else 404 **with
   hints** listing which namespaces serve that model. **No default account** (a bare model id is
   ambiguous: `gpt-6-luna` exists on both his providers).
-- `internal/server/server.go` routes table (`New`, from `:112`) — three POSTs + `/v1/models`
-  (+`?protocol=anthropic` shape) + admin surface. `inference()` (`:378`) is one shared body for all
-  three surfaces. `bearerToken` (`:746`) accepts Bearer *and* `x-api-key` (Claude Code).
+- `internal/server/server.go` routes table (`routes()`, from `:254`) — three POSTs + `/v1/models`
+  (+`?protocol=anthropic` shape) + admin surface. `inference()` (`:605`) is one shared body for all
+  three surfaces. `bearerToken` (`:1354`) accepts Bearer *and* `x-api-key` (Claude Code).
 - `cmd/m2verify/main.go` — acceptance checker that queries the live DB and prints PASS/FAIL per
   invariant. Run `go run ./cmd/m2verify` after any live soak.
 
@@ -163,8 +164,8 @@ one function. Then `store.NormalizeUsage` (`ledger.go:91`) for the accounting ru
 - `super-ssn/gpt-6.1-sol` → 200 (second provider, second adapter kind)
 - Cached repeat: raw `prompt=2496 cached=2048` → ledger **`tokens_in=448 + cached_read=2048`** ✅
 - Bare `gpt-6-luna` → 404 listing **both** `opengo/` and `super-ssn/` ✅
-- Keys at rest: **plaintext** (`key_plain`) — explicit operator choice; the crypto path
-  (`internal/store/crypto.go`) is implemented + test-covered but deliberately unwired — hints only;
+- Keys at rest (at M2): **plaintext** (`key_plain`) — the crypto path was implemented +
+  test-covered but unwired until `81359d4`; hints only;
   `dropped_rows=0`; `CGO_ENABLED=0` static build ✅
 
 **M2 invariants proven:** #1 no secrets in logs/responses (grep + `TestNoSecretsInResponses`) ·
@@ -180,7 +181,7 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
 
 ### M3 — namespaces, registration + paced key test, protocol sync, smart quota ✅
 - `internal/store/schema.sql` — `accounts`, `provider_keys`, `models`, `client_tokens`, `calls`;
-  keys stored plaintext in `key_plain` (explicit operator choice, commit `dfe323c`); `key_hint`
+  keys stored in `key_plain` (plaintext at M3, commit `dfe323c`; AES-GCM ciphertext since `81359d4`); `key_hint`
   is the only key material any API returns.
 - `internal/registration/registration.go` — paced registration flow (step chain + `oracle`);
   a new key is tested before it joins a pool.
@@ -236,28 +237,28 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
   places — that's why §4 says re-verify, not trust).
 
 ### M8 — providers batch + surface pin ✅ (2026-10-10, live-proved on prod)
-- `internal/provider/provider.go:26` `KindGeminiOpenAI` — 4th kind (`ValidKinds()` at `:66`).
+- `internal/provider/provider.go:28` `KindGeminiOpenAI` — 4th kind (`ValidKinds()` at `:95`).
   Its bad-key signal is `400` (Google says "Please pass a valid API key"), accepted as an auth
   rejection **only for this kind** via the optional `AuthRejectStatuser` interface
   (`internal/provider/probe.go`); the auth gate reads it, the inference step still treats only
   401/403 as auth failure (a 400 there can mean a malformed request).
 - `internal/registration/registration.go` — all key **shape** checks deleted (`9aa9cf1`);
-  `StepFormat` survives only as the unregistered-kind failure (`:202`). The probe chain is the
+  `StepFormat` survives only as the unregistered-kind failure (`:230`). The probe chain is the
   sole validator.
-- `internal/server/server.go:392` `handleHealth` — liveness + release version
+- `internal/server/server.go:450` `handleHealth` — liveness + release version
   (`{"status":"ok","version":…}`) after a 2s DB ping (503 `{"status":"down","version":…"}` on
   failure); `TestHealthIsPublic` greps the body for leak fields and pins the two-field shape.
-  The detail moved to `GET /admin/overview` (`internal/server/admin.go:150`).
-- **Surface pin** (`340442b`, schema v7): `models.proto_pin` (`schema.sql:92`), migration
-  `alterModelProtoPin` (`store.go:234`), store API `ModelPin`/`SetModelPin`
-  (`internal/store/catalog.go`), router gate `checkPin` (`router.go:91`, called at `:222`
-  direct + `:315` combo — **before any upstream dial**; lookup errors fail CLOSED; resync
+  The detail moved to `GET /admin/overview` (`internal/server/admin.go:159`).
+- **Surface pin** (`340442b`, schema v7): `models.proto_pin` (`schema.sql:130`), migration
+  `alterModelProtoPin` (`store.go:487`), store API `ModelPin`/`SetModelPin`
+  (`internal/store/catalog.go`), router gate `checkPin` (`router.go:102`, called from `selectWire` at `:410`
+  responses override + `:451` native — **before any upstream dial**; lookup errors fail CLOSED; resync
   preserves pins via snapshot/restore in `UpsertModels`). Admin write
-  `PUT /admin/accounts/{id}/model-pin` (route `server.go:283`, handler
-  `admin.go:1195 handleSetModelPin` — model id in
+  `PUT /admin/accounts/{id}/model-pin` (route `server.go:330`, handler
+  `admin.go:1229 handleSetModelPin` — model id in
   the body because ids contain `/`; `pin` is `json.RawMessage` so absent/""/value are three
   states; unconfirmed surface → 409 unless `force`). Client-facing refusal:
-  `400 pinned_surface` (`server.go:585`) — **never a reroute**: ezllm passes bodies through
+  `400 pinned_surface` (`server.go:838`) — **never a reroute**: ezllm passes bodies through
   untranslated, so switching the path would send the wrong shape to upstream.
   - Trap found by live prod test (`03a6317`): `errorStatus()` mapped `ErrPinned`→400 for the
     LEDGER, but the proxy error switch had no case and answered clients 502. Text-only tests
@@ -266,9 +267,9 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
   Providers key status is text (`tested ok`/`test failed`/`untested`, still driven by
   `last_test_ok`); pin select lives in the model drawer (auto + three surfaces, unconfirmed
   goes through force-confirm); Connect shows two surfaces (Responses dropped from the PICKER —
-  the server route `POST /v1/responses` still exists, `server.go:117`).
+  the server route `POST /v1/responses` still exists, `server.go:267`).
 - **`web/dist` ships the UI.** The image build embeds it (`go:embed`, Dockerfile comment at
-  `:8-9`), so a `web/src`-only commit deploys the OLD interface with every test green. Rebuild
+  `:10-12`), so a `web/src`-only commit deploys the OLD interface with every test green. Rebuild
   + commit dist in the same push; after deploy verify the served hash
   (`curl https://llm.calypso.dedyn.io/ | grep assets/index-`) + grep one marker string.
 
@@ -282,13 +283,15 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
   per-destination encoders, bounded SSE framing), `universal.go` (`IsUniversalCell`,
   `RequestUniversal`, `ReorientError`), `eligibility.go` (`Eligible`, `IsUniversalCell`).
 - `internal/router/router.go` — `selectWire` (wire-first), `universalOrder` (fixed fallback
-  chains), `pinSurface`, `messagesConventionReason`, `WithUniversal`.
+  chains), `pinSurface`, `WithUniversal` (the `messagesConventionReason` gate was removed in
+  `61a403c`: usage convention no longer gates a translated Messages hop).
 - `internal/proxy/proxy.go` — `prepareHopBody` (pair-aware codecs), the stream wrapper +
   `streamOutcomeFrom`, `Result.StreamOutcome` / `StreamCompleted`, `universalCodecOptions`.
 - `internal/store/{schema.sql,store.go,admin.go}` — `accounts.usage_convention` (schema v13),
   `alterAccountUsageConvention`; `internal/provider/provider.go` — the `UsageConvention`
-  vocabulary; `internal/config/config.go` — `translation.universal_enabled` +
-  `universalValueError` (field-named boot failure); `cmd/ezllm/main.go` — env override + boot log.
+  vocabulary; `internal/config/config.go` — `translation.universal_enabled` (deprecated 2026-10-22,
+  folded into `translation.enabled` by `Load`) + `universalValueError` (field-named boot
+  failure); `cmd/ezllm/main.go` — `translationFromEnv` (env override) + boot log.
 - Proof files: `internal/proxy/wire_matrix_{e2e,paths}_test.go` (9 cells × stream/nonstream,
   tool loops, 429/400/preparation/late-error paths), `internal/router/universal_selection_test.go`,
   `internal/server/wire_matrix_test.go`, `internal/translate/usage_convention_test.go`.

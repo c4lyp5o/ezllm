@@ -167,7 +167,7 @@ does not revive `accounts.cap_tokens`.
   honest 429 that names the rule and the window, and their meter is updated inside
   the ledger transaction (`internal/store/usage_counters.go`). `accounts.cap_tokens`
   is stored but never checked anywhere, and the provider modal deliberately stopped
-  showing it (`web/src/pages/Providers.tsx:446`: "cap_window + cap_tokens live on
+  showing it (`web/src/pages/Providers.tsx:448`: "cap_window + cap_tokens live on
   Rules"). Putting that field back in the modal would add a second, competing cap
   path.
 - **How:** set one rule on `claude-sub` for each model Max can use (`sonnet`,

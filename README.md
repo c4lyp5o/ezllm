@@ -136,10 +136,11 @@ auto). A pinned model called on the wrong surface is refused with
 silent reroute, because ezllm passes bodies through untranslated on native
 paths and switching the shape behind the client's back would be dishonest.
 
-### Protocol translation (opt-in)
+### Protocol translation
 
 Any client surface can be routed onto any upstream wire, gated behind
-`translation.universal_enabled` (default **off**) and per-hop probe verdicts.
+`translation.enabled` (default **on**; `EZLLM_TRANSLATION_ENABLED=false`
+turns it off) and per-hop probe verdicts.
 Native passthrough remains the default for every unmarked hop. Design and
 runbooks: [docs/universal-wire-design.md](docs/universal-wire-design.md),
 [docs/translation-runbook.md](docs/translation-runbook.md).
@@ -180,23 +181,9 @@ counts, and uptime.
 Precedence: command-line flags → `EZLLM_*` environment → `config.yaml` →
 built-in defaults.
 
-- `EZLLM_ADDR` — listening address (set inside containers, where the default
-  is loopback)
-- `EZLLM_DATA_DIR` — ledger location (set inside containers, where the
-  default is repo-relative)
-- `EZLLM_LOG_LEVEL` — `debug` | `info` (default) | `warn` | `error`
-  (env-only: needed before the config is read; an unknown value logs a
-  warning and uses `info`)
-- `EZLLM_LOG_COLOR` — `auto` (default: color only on a terminal, honoring
-  `NO_COLOR`) | `always` | `never`
-- `EZLLM_TRUSTED_PROXIES` — comma-separated IPs/CIDRs of reverse proxies in
-  front of ezllm (e.g. `172.18.0.0/16`). The sign-in/setup rate limiter reads
-  the client from `X-Forwarded-For` only when the connection comes from one of
-  these; unset, it keys on the socket peer. Set it behind any proxy, or every
-  client shares the proxy's limit.
-- `EZLLM_DASHBOARD_PASSWORD` / `EZLLM_DASHBOARD_PASSWORD_FILE` — the first
-  dashboard password (at least 12 characters), used only while setup is
-  pending; it never overwrites a password that is already set
+New install? Set `EZLLM_USAGE_TZ` to your time zone, and
+`EZLLM_CLAUDE_BRIDGE=off` unless you run the Claude subscription bridge.
+Every variable and its default: **[docs/environment.md](docs/environment.md)**.
 
 Provider credentials live in SQLite only, managed from the dashboard or the
 admin API — never in `config.yaml`. Upstream retry policy defaults to 3
@@ -205,10 +192,10 @@ and backed up.
 
 ## Security
 
-- **Provider keys** are stored in SQLite as plaintext (explicit design choice
-  for this deployment class) — protect the database and its backups with
-  filesystem access controls. AES-GCM field crypto is implemented and
-  test-covered, intentionally unwired.
+- **Provider keys** (and per-account management keys) are encrypted at rest
+  with AES-256-GCM under a master key that never enters the database. Back up
+  the master key with the database, or the stored keys are unrecoverable — see
+  [docs/master-key-runbook.md](docs/master-key-runbook.md).
 - `GET /healthz` is the only unauthenticated route: liveness plus the release
   version, nothing else. All counts, paths, and uptime live behind `/admin/*`.
 - Client tokens are SHA-256 hashed, dashboard passwords bcrypt-hashed;
@@ -249,6 +236,7 @@ an image or a release asset.
 | Document | What it holds |
 |---|---|
 | [docs/API.md](docs/API.md) | the admin + public API contract |
+| [docs/environment.md](docs/environment.md) | every environment variable and its default; what a new install sets |
 | [docs/master-key-runbook.md](docs/master-key-runbook.md) | at-rest key encryption: paths, backup, rotation |
 | [docs/pricing-runbook.md](docs/pricing-runbook.md) | price catalog: refresh cadence, import, query |
 | [VERSION.md](VERSION.md) | release history; what changed on each date |

@@ -83,25 +83,17 @@ Lingering items — fix or close them deliberately, don't rediscover them:
    is unit-covered and the endpoint composition is implemented, but the
    account-scoped live proof was still pending an account ID (open as of
    2026-10-13).
-2. **Seeded dashboard password.** First-run login uses the factory password
-   from `internal/store/dashboard_auth.go`. Mitigated by Traefik's LAN-only
-   `/admin` router, but any deployment without that router must change the
-   password before exposing the dashboard.
-3. **Provider keys are plaintext in SQLite** by explicit design choice;
-   AES-GCM field crypto (`internal/store/crypto.go`) is implemented and
-   tested but intentionally unwired. Wiring it is a schema + migration +
-   rotation-project, not a patch.
-4. **No `goleak` in the suite.** Goroutine-leak detection was deliberately
+2. **No `goleak` in the suite.** Goroutine-leak detection was deliberately
    out of scope for the perf work; adding it will surface real findings and
    some noise in the proxy/server packages — budget a pass for it.
-5. **No CI latency gate.** Percentile numbers exist in `docs/perf-baseline-m1.md`
+3. **No CI latency gate.** Percentile numbers exist in `docs/perf-baseline-m1.md`
    but nothing enforces them — a stable reference environment is needed
    before a regression gate means anything.
-6. **Playwright drivers hardcode absolute paths.** `web/tests/*.mjs` read a
+4. **Playwright drivers hardcode absolute paths.** `web/tests/*.mjs` read a
    fixed secrets file, a fixed screenshot dir, and a fixed port (20199).
    They work on one machine; parameterize via env before relying on them
    elsewhere.
-7. **`docs/API.md` JSON examples are hand-curated.** Refresh them from live
+5. **`docs/API.md` JSON examples are hand-curated.** Refresh them from live
    responses after contract changes (curl the endpoint, reshape
    field-for-field) rather than editing from memory.
 

@@ -33,9 +33,9 @@ entitlement catalog is reachable (premium models included).
   authorizes, then exchanges the Copilot token and persists. Interactive by
   nature — the router itself only ever runs the autonomous refresh chain.
 - **Client ID = public Copilot CLI client ID** (constant, public; env override
-  `EZLLM_GITHUB_OAUTH_CLIENT_ID` for operators who prefer their own app —
+  `GITHUB_OAUTH_CLIENT_ID` for operators who prefer their own app —
   documented that custom apps hit the restricted tier).
-- **CLI version pin configurable** (`EZLLM_GITHUB_COPILOT_CLI_VERSION`, default
+- **CLI version pin configurable** (`GITHUB_COPILOT_CLI_VERSION`, default
   `1.0.81-6`): GitHub raises a minimum floor and rejects older with
   `466 This version of the Copilot CLI is no longer supported`. This is the
   one operational setting that will need periodic bumps.

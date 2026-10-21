@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -145,4 +146,40 @@ func freeComboHops(t *testing.T, h *harness) map[string]bool {
 	}
 	t.Fatalf("%s combo not seeded", store.DefaultFreeComboName)
 	return nil
+}
+
+// The first pass waits bootDelay: at process start the bridge and the main
+// listener are not accepting yet, so an immediate pass failed claude-sub on
+// every restart.
+func TestModelRefreshFirstPassWaitsForBootDelay(t *testing.T) {
+	var hits atomic.Int32
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"m1"}]}`))
+	}))
+	defer up.Close()
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	id, err := h.db.UpsertAccount(ctx, provider.Account{Name: "g", Namespace: "g", Kind: provider.KindOpenAICompatible,
+		BaseURL: up.URL + "/v1", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := h.db.AddKey(ctx, id, "primary", "sk-test-key-123456"); err != nil {
+		t.Fatal(err)
+	}
+	h.server.StartModelRefresh(ctx, time.Hour, 400*time.Millisecond)
+	time.Sleep(150 * time.Millisecond)
+	if n := hits.Load(); n != 0 {
+		t.Fatalf("catalog listed %d times before the boot delay elapsed", n)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for hits.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if hits.Load() == 0 {
+		t.Fatal("first pass never ran after the boot delay")
+	}
 }

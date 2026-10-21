@@ -15,6 +15,9 @@ file in the same commit, or the test fails.
 
 ## v0.0.21 — 2026-10-21
 
+- **Fix: the first catalog refresh waits 30 s after boot.** It ran before the
+  Claude bridge and the listener were up, so claude-sub failed (and raised a
+  bell entry) on every restart.
 - **No default dashboard password (schema v26).** First boot prints an ezllm
   banner with a one-time setup code; the dashboard shows only a set-password
   page until the code and a new password are entered (`first_boot` flips).

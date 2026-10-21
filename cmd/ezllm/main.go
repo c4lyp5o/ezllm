@@ -313,7 +313,7 @@ func run() error {
 	// Catalogs at boot and every model_refresh.interval (default 12h); each
 	// saved catalog resyncs the auto-free combos and probes its free models.
 	refreshEvery, _ := time.ParseDuration(cfg.ModelRefresh.Interval) // validated by config.Load
-	srv.StartModelRefresh(ctx, refreshEvery)
+	srv.StartModelRefresh(ctx, refreshEvery, 30*time.Second)
 
 	if os.Getenv("EZLLM_PRICE_REFRESH") != "off" {
 		srv.StartPriceRefresh(ctx, 3, usageLoc)

@@ -15,13 +15,20 @@ import (
 // rebuilds the auto_free combos in the same transaction (store.UpsertModels),
 // so models a provider adds or drops reach the free pools on their own; new
 // free models are then probed (probeFreeModels) so a broken one never sits in
-// a pool untested.
-func (s *Server) StartModelRefresh(ctx context.Context, interval time.Duration) {
+// a pool untested. The first pass waits bootDelay: the Claude bridge and the
+// main listener are not accepting yet at process start, so an immediate pass
+// fails claude-sub (and the internal routes behind gemini-web) on every restart.
+func (s *Server) StartModelRefresh(ctx context.Context, interval, bootDelay time.Duration) {
 	if interval < time.Minute {
 		s.log.Warn("model refresh disabled: interval under 1m", "interval", interval)
 		return
 	}
 	go func() {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(bootDelay):
+		}
 		s.refreshCatalogsOnce(ctx)
 		t := time.NewTicker(interval)
 		defer t.Stop()

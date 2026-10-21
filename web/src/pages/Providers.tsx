@@ -552,13 +552,15 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
               </div>
             )}
           </div>
-        ) : isCompat && !isKnownEndpoint(d.base_url) ? (
+        ) : isCompat && (!isKnownEndpoint(d.base_url) || d.preset === 'ollama-local') ? (
           <div>
             <label className={labelCls} htmlFor="ap-url">Provider API base URL</label>
             <input id="ap-url" className={cx(inputCls, 'font-mono')} value={d.base_url}
-              placeholder={isAnthropicKind ? 'https://api.anthropic.com' : 'https://api.provider.com/v1'} spellCheck={false}
+              placeholder={isAnthropicKind ? 'https://api.anthropic.com' : d.preset === 'ollama-local' ? 'http://localhost:11434/v1' : 'https://api.provider.com/v1'} spellCheck={false}
               onChange={(e) => set('base_url', e.target.value.trim())} />
-            <p className="mt-1 text-[12px] text-mute">{isAnthropicKind
+            <p className="mt-1 text-[12px] text-mute">{d.preset === 'ollama-local'
+              ? 'Where Ollama listens — change the host for a remote machine. Keep the /v1 suffix.'
+              : isAnthropicKind
               ? 'Required for compatibility providers. Enter the host only — /v1 paths are added automatically.'
               : 'Required for compatibility providers. Use the base URL ending at the API version, e.g. /v1.'}</p>
           </div>

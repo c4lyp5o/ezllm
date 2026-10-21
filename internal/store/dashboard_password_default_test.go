@@ -126,3 +126,25 @@ func TestDashboardRealPasswordSurvivesReopen(t *testing.T) {
 		t.Fatalf("login after reopen: %v", err)
 	}
 }
+
+// Logging in prunes expired sessions; they used to linger until someone
+// presented that exact token.
+func TestDashboardLoginPrunesExpiredSessions(t *testing.T) {
+	db := openEventsDB(t, 4)
+	defer db.Close()
+	ctx := context.Background()
+	if err := db.CompleteDashboardSetup(ctx, "prune-test-password"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Writer().ExecContext(ctx,
+		`INSERT INTO dashboard_sessions (token_hash, expires_at) VALUES ('stale', '2020-01-01T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.DashboardLogin(ctx, "prune-test-password"); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.Reader().QueryRowContext(ctx, `SELECT COUNT(*) FROM dashboard_sessions WHERE token_hash='stale'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("expired session still present (%d, %v)", n, err)
+	}
+}

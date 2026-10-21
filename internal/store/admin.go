@@ -822,28 +822,27 @@ FROM models WHERE account_id=? ORDER BY model_id`, accountID)
 // A curated row is left alone: the operator's curation outranks a probe until
 // released via SetModelCurated, so a sweep can never silently undo one.
 func (d *DB) SetModelProto(ctx context.Context, accountID int64, modelID string, s provider.Surface, supported *bool) error {
-	col, ok := protoColumn(s)
-	if !ok {
-		return nil // service surfaces keep their verdicts in service_probes
-	}
-	// Upsert on (account_id, model_id): the sweep may probe a model that the
-	// catalog sync has not inserted yet (or vice versa).
-	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, fmt.Sprintf(`
+	return d.SetModelProtos(ctx, accountID, map[string]map[string]*bool{modelID: {string(s): supported}})
+}
+
+// protoUpsertSQL upserts one capability column for (account_id, model_id): the
+// sweep may probe a model the catalog sync has not inserted yet (or vice
+// versa), and a curated row is never overwritten. col comes only from
+// protoColumn, never from input.
+func protoUpsertSQL(col string) string {
+	return fmt.Sprintf(`
 INSERT INTO models (account_id, model_id, %s, proto_tested_at, proto_source)
 VALUES (?,?,?,strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ','now'),'probe')
 ON CONFLICT(account_id, model_id) DO UPDATE SET
   %s=excluded.%s, proto_tested_at=excluded.proto_tested_at, proto_source='probe'
-WHERE COALESCE(proto_source,'') <> 'curated'`,
-			col, col, col),
-			accountID, modelID, boolPtrToInt(supported))
-		return err
-	})
+WHERE COALESCE(proto_source,'') <> 'curated'`, col, col, col)
 }
 
 // SetModelProtos applies a whole sweep in ONE transaction — the common case
 // after a background protocol probe, and the reason the sweep does not take
-// the write lock 108 times.
+// the write lock 108 times. Service surfaces keep their verdicts in
+// service_probes and are skipped here (they used to fall through to the chat
+// proto_openai column).
 func (d *DB) SetModelProtos(ctx context.Context, accountID int64, rows map[string]map[string]*bool) error {
 	if len(rows) == 0 {
 		return nil
@@ -855,34 +854,19 @@ func (d *DB) SetModelProtos(ctx context.Context, accountID int64, rows map[strin
 				s.Close()
 			}
 		}()
-		get := func(col string) (*sql.Stmt, error) {
-			if st, ok := stmts[col]; ok {
-				return st, nil
-			}
-			st, err := tx.PrepareContext(ctx, fmt.Sprintf(`
-INSERT INTO models (account_id, model_id, %s, proto_tested_at, proto_source)
-VALUES (?,?,?,strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ','now'),'probe')
-ON CONFLICT(account_id, model_id) DO UPDATE SET
-  %s=excluded.%s, proto_tested_at=excluded.proto_tested_at, proto_source='probe'
-WHERE COALESCE(proto_source,'') <> 'curated'`, col, col, col))
-			if err != nil {
-				return nil, err
-			}
-			stmts[col] = st
-			return st, nil
-		}
 		for modelID, perSurface := range rows {
 			for surf, val := range perSurface {
-				col := "proto_openai"
-				switch provider.Surface(surf) {
-				case provider.SurfaceAnthropic:
-					col = "proto_anthropic"
-				case provider.SurfaceResponses:
-					col = "proto_responses"
+				col, ok := protoColumn(provider.Surface(surf))
+				if !ok {
+					continue
 				}
-				st, err := get(col)
-				if err != nil {
-					return err
+				st, ok := stmts[col]
+				if !ok {
+					var err error
+					if st, err = tx.PrepareContext(ctx, protoUpsertSQL(col)); err != nil {
+						return err
+					}
+					stmts[col] = st
 				}
 				if _, err := st.ExecContext(ctx, accountID, modelID, boolPtrToInt(val)); err != nil {
 					return err

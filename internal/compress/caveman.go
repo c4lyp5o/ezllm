@@ -287,28 +287,3 @@ func spansIntact(original, rewritten string, spans []string) bool {
 	}
 	return true
 }
-
-// intOptionOrNil reads an int option, reporting presence separately from value
-// so a caller can distinguish "unset" from "explicitly 0".
-func intOptionOrNil(opts map[string]any, key string) (int, bool) {
-	if opts == nil {
-		return 0, false
-	}
-	raw, ok := opts[key]
-	if !ok {
-		return 0, false
-	}
-	switch v := raw.(type) {
-	case float64:
-		return int(v), true
-	case int:
-		return v, true
-	case json.Number:
-		n, err := v.Int64()
-		if err != nil {
-			return 0, false
-		}
-		return int(n), true
-	}
-	return 0, false
-}

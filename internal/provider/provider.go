@@ -335,6 +335,4 @@ func jsonStr(m map[string]any, path string) string {
 	return ""
 }
 
-func f64ptr(f float64) *float64 { return &f }
-
 func i64ptr(i int64) *int64 { return &i }

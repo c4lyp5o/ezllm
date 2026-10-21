@@ -179,12 +179,8 @@ func PrepareBody(model string, body map[string]any) {
 			if !ok || msg["role"] != "assistant" {
 				continue
 			}
-			if _, has := msg["reasoning_text"]; has {
-				delete(msg, "reasoning_text")
-			}
-			if _, has := msg["reasoning_content"]; has {
-				delete(msg, "reasoning_content")
-			}
+			delete(msg, "reasoning_text")
+			delete(msg, "reasoning_content")
 			msgs[i] = msg
 		}
 	}

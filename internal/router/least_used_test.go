@@ -61,3 +61,22 @@ func TestNoteUseIgnoresDirectRoutes(t *testing.T) {
 		t.Fatal("a direct namespace/model route is not a combo and must not be counted")
 	}
 }
+
+// A renamed block_round_robin combo: a held hop's failure (reported by the
+// NEW name) must still release the block.
+func TestBlockCursorFollowsComboRename(t *testing.T) {
+	r := &Resolver{}
+	id := time.Now().UnixNano() // a cursor key no other test uses
+	hop := luRoute(1, "held")
+	hop.HoldUntilFailure = true
+	routes := []proxy.Route{hop, luRoute(1, "next")}
+	before := &store.Combo{ID: id, Name: "old-name", BlockSize: 5}
+	blockOrder(before, routes)
+	renamed := &store.Combo{ID: id, Name: "new-name", BlockSize: 5}
+	blockOrder(renamed, routes)
+	r.MarkHopBad("new-name", hop)
+	got, _ := blockOrder(renamed, routes)
+	if got[0].Model != "next" {
+		t.Fatalf("after the held hop failed under the new name, order = %v, want next first", order(got))
+	}
+}

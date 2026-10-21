@@ -101,3 +101,29 @@ func TestUpsertModelsStampsCatalogSyncedAt(t *testing.T) {
 		t.Fatal("a saved catalog must stamp catalog_synced_at")
 	}
 }
+
+// A service-surface verdict in a sweep batch must not land in the chat
+// proto_openai column (it used to fall through to it).
+func TestSetModelProtosSkipsServiceSurfaces(t *testing.T) {
+	db := openEventsDB(t, 4)
+	defer db.Close()
+	ctx := context.Background()
+	id, err := db.UpsertAccount(ctx, provider.Account{Name: "p", Namespace: "p", Kind: provider.KindOpenAICompatible, BaseURL: "http://x", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertModels(ctx, id, []provider.ModelInfo{{ID: "m"}}); err != nil {
+		t.Fatal(err)
+	}
+	yes, no := true, false
+	if err := db.SetModelProtos(ctx, id, map[string]map[string]*bool{"m": {"openai": &yes, "embeddings": &no}}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.ListModels(ctx, id)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("rows %v err %v", rows, err)
+	}
+	if rows[0].OpenAI == nil || !*rows[0].OpenAI {
+		t.Fatalf("openai verdict = %v, want true (the embeddings 'false' must not overwrite it)", rows[0].OpenAI)
+	}
+}

@@ -152,7 +152,7 @@ LIMIT 8`, accountID, now)
 	}
 	defer rows.Close()
 
-	for rows.Next() {
+	if rows.Next() {
 		var p KeyPick
 		if err := rows.Scan(&p.ID, &p.Hint, &p.Plaintext); err != nil {
 			return KeyPick{}, err

@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"errors"
@@ -126,8 +125,14 @@ func (d *DB) DashboardLogin(ctx context.Context, password string) (string, error
 	token := hex.EncodeToString(raw)
 	expires := time.Now().UTC().Add(12 * time.Hour)
 	err := d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		// Expired sessions were only deleted when someone presented that
+		// exact token, so the table grew by one row per login. Prune here.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM dashboard_sessions WHERE expires_at < ?`,
+			time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx, `
-INSERT INTO dashboard_sessions (token_hash, expires_at) VALUES (?, ?)`, hashDashboardToken(token), expires.Format(time.RFC3339Nano))
+INSERT INTO dashboard_sessions (token_hash, expires_at) VALUES (?, ?)`, HashToken(token), expires.Format(time.RFC3339Nano))
 		return err
 	})
 	if err != nil {
@@ -141,13 +146,13 @@ func (d *DB) DashboardSession(ctx context.Context, token string) bool {
 		return false
 	}
 	var expires string
-	err := d.r.QueryRowContext(ctx, `SELECT expires_at FROM dashboard_sessions WHERE token_hash=?`, hashDashboardToken(token)).Scan(&expires)
+	err := d.r.QueryRowContext(ctx, `SELECT expires_at FROM dashboard_sessions WHERE token_hash=?`, HashToken(token)).Scan(&expires)
 	if err != nil {
 		return false
 	}
 	when, err := time.Parse(time.RFC3339Nano, expires)
 	if err != nil || !when.After(time.Now().UTC()) {
-		_, _ = d.w.ExecContext(ctx, `DELETE FROM dashboard_sessions WHERE token_hash=?`, hashDashboardToken(token))
+		_, _ = d.w.ExecContext(ctx, `DELETE FROM dashboard_sessions WHERE token_hash=?`, HashToken(token))
 		return false
 	}
 	return true
@@ -159,7 +164,7 @@ func (d *DB) EndDashboardSession(ctx context.Context, token string) error {
 	if strings.TrimSpace(token) == "" {
 		return nil
 	}
-	_, err := d.w.ExecContext(ctx, `DELETE FROM dashboard_sessions WHERE token_hash=?`, hashDashboardToken(token))
+	_, err := d.w.ExecContext(ctx, `DELETE FROM dashboard_sessions WHERE token_hash=?`, HashToken(token))
 	return err
 }
 
@@ -185,9 +190,4 @@ func (d *DB) ChangeDashboardPassword(ctx context.Context, currentPassword, newPa
 		_, err := tx.ExecContext(ctx, `DELETE FROM dashboard_sessions`)
 		return err
 	})
-}
-
-func hashDashboardToken(token string) string {
-	sum := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(sum[:])
 }

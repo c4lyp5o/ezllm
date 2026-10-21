@@ -97,24 +97,11 @@ func (b *claudeWebBridge) register(mux *http.ServeMux) {
 // The account id is returned too: callers serialize per-account generation
 // with lockFor.
 func (b *claudeWebBridge) resolve(r *http.Request) (*claudeweb.Client, int64, error) {
-	// This route shares the public listener: only a request carrying this
-	// process's secret (stamped by the claude-web adapter) may name an
-	// account, since an account id alone would unlock its stored cookie.
-	if !provider.ValidBridgeSecret(r.Header.Get(provider.BridgeSecretHeader)) {
-		return nil, 0, errors.New("missing or wrong bridge secret")
+	acct, err := bridgeAccount(r, b.db, provider.KindClaudeWeb, provider.ClaudeWebAccountHeader)
+	if err != nil {
+		return nil, 0, err
 	}
-	h := r.Header.Get(provider.ClaudeWebAccountHeader)
-	if h == "" {
-		return nil, 0, errors.New("missing account header")
-	}
-	var acctID int64
-	if _, err := fmt.Sscan(h, &acctID); err != nil || acctID <= 0 {
-		return nil, 0, errors.New("bad account header")
-	}
-	acct, err := b.db.AccountByID(r.Context(), acctID)
-	if err != nil || acct == nil || acct.Kind != provider.KindClaudeWeb || !acct.Enabled {
-		return nil, 0, errors.New("not an enabled claude-web account")
-	}
+	acctID := acct.ID
 	key := r.Header.Get(provider.ClaudeWebKeyHeader)
 	if key == "" {
 		pick, err := b.db.PickKey(r.Context(), acctID)
@@ -147,14 +134,14 @@ func (b *claudeWebBridge) lockFor(acctID int64) *sync.Mutex {
 func (b *claudeWebBridge) handleModels(w http.ResponseWriter, r *http.Request) {
 	c, acctID, err := b.resolve(r)
 	if err != nil {
-		b.writeErr(w, http.StatusUnauthorized, "authentication_error", err.Error())
+		writeErr(w, http.StatusUnauthorized, "authentication_error", err.Error())
 		return
 	}
 	lock := b.lockFor(acctID)
 	lock.Lock()
 	defer lock.Unlock()
 	if _, err := c.OrganizationID(r.Context()); err != nil {
-		b.writeErr(w, claudeWebStatus(err), "authentication_error", err.Error())
+		writeErr(w, claudeWebStatus(err), "authentication_error", err.Error())
 		return
 	}
 	type modelEntry struct {
@@ -179,7 +166,7 @@ func (b *claudeWebBridge) handleModels(w http.ResponseWriter, r *http.Request) {
 func (b *claudeWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	c, acctID, err := b.resolve(r)
 	if err != nil {
-		b.writeErr(w, http.StatusUnauthorized, "authentication_error", err.Error())
+		writeErr(w, http.StatusUnauthorized, "authentication_error", err.Error())
 		return
 	}
 	// Serialize generation per account: the cached client owns mutable
@@ -189,7 +176,7 @@ func (b *claudeWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.R
 	defer lock.Unlock()
 	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 	if err != nil {
-		b.writeErr(w, http.StatusBadRequest, "invalid_request_error", "cannot read body")
+		writeErr(w, http.StatusBadRequest, "invalid_request_error", "cannot read body")
 		return
 	}
 	var req struct {
@@ -203,18 +190,18 @@ func (b *claudeWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.R
 		ResponseFormat any  `json:"response_format"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		b.writeErr(w, http.StatusBadRequest, "invalid_request_error", "invalid JSON body")
+		writeErr(w, http.StatusBadRequest, "invalid_request_error", "invalid JSON body")
 		return
 	}
 	if req.Model == "" {
-		b.writeErr(w, http.StatusBadRequest, "invalid_request_error", "model is required")
+		writeErr(w, http.StatusBadRequest, "invalid_request_error", "model is required")
 		return
 	}
 	// Typed refusal: the web protocol has no structured output (design scope
 	// fences). Tools DO exist on this wire (Anthropic-native) and pass
 	// through unchanged.
 	if req.ResponseFormat != nil {
-		b.writeErr(w, http.StatusBadRequest, "unsupported_feature",
+		writeErr(w, http.StatusBadRequest, "unsupported_feature",
 			"claude-web does not support structured output (response_format)")
 		return
 	}
@@ -230,7 +217,7 @@ func (b *claudeWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.R
 	if !req.Stream {
 		res, err := c.Generate(r.Context(), opts, nil)
 		if err != nil {
-			b.writeErr(w, claudeWebStatus(err), "upstream_error", err.Error())
+			writeErr(w, claudeWebStatus(err), "upstream_error", err.Error())
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -275,14 +262,6 @@ func (b *claudeWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.R
 	if fl != nil {
 		fl.Flush()
 	}
-}
-
-func (b *claudeWebBridge) writeErr(w http.ResponseWriter, status int, errType, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"error": map[string]any{"message": msg, "type": errType, "code": status},
-	})
 }
 
 // claudeWebStatus maps the typed client failures to HTTP: expired 401

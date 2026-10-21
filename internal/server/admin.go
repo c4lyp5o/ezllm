@@ -627,7 +627,7 @@ func (s *Server) persistTest(ctx context.Context, accountID, keyID int64, test *
 // its 201/200 — the paced 6-model × 3-surface probe takes ~30s inline and the
 // design says registration must answer in seconds.
 func (s *Server) deferProtocol(accountID, keyID int64, acct provider.Account, key string, test *registration.TestResult, maxModels int) {
-	if test.Catalog == nil || len(test.Catalog) == 0 {
+	if len(test.Catalog) == 0 {
 		return
 	}
 	models := test.Catalog
@@ -1460,46 +1460,6 @@ func (s *Server) anyKey(ctx context.Context, accountID int64) (string, int64, er
 	return "", 0, store.ErrNotFound
 }
 
-func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeErr(w, http.StatusMethodNotAllowed, "invalid_request_error", "method not allowed")
-		return
-	}
-	var body struct {
-		Model    string `json:"model"`
-		Messages []struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-		} `json:"messages"`
-	}
-	if !decodeBody(w, r, &body) {
-		return
-	}
-	if strings.TrimSpace(body.Model) == "" || len(body.Messages) == 0 {
-		writeErr(w, http.StatusBadRequest, "invalid_request_error", "model and at least one message are required")
-		return
-	}
-	payload := map[string]any{"model": body.Model, "messages": body.Messages, "stream": false}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "server_error", "could not encode chat request")
-		return
-	}
-	requested := body.Model
-	routes, err := s.resolver.ResolveCandidates(r.Context(), requested, provider.SurfaceOpenAI, "dashboard")
-	if err != nil {
-		writeErr(w, http.StatusNotFound, "model_not_found", err.Error())
-		return
-	}
-	// The dispatcher writes the upstream answer to w itself. Nothing may be
-	// written here afterwards: a second body would be appended to the first
-	// (surviving only while the upstream sets Content-Length, and corrupting
-	// the JSON the moment it streams chunked).
-	if _, _, ferr := s.dispatcher.ForwardCandidates(r.Context(), w, r, routes, raw); ferr != nil {
-		writeErr(w, http.StatusBadGateway, "upstream_error", "chat request failed: "+ferr.Error())
-	}
-}
-
 // ── combos ──────────────────────────────────────────────────────────────────
 func (s *Server) handleCombos(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -1753,7 +1713,8 @@ func (s *Server) handleComboTest(w http.ResponseWriter, r *http.Request) {
 // both wires (both accept model/max_tokens/messages), so the surface only
 // changes the path.
 func probeBody(model string) []byte {
-	return []byte(fmt.Sprintf(`{"model":%q,"max_tokens":16,"messages":[{"role":"user","content":"ezllm combo test: reply ok"}]}`, model))
+	m, _ := json.Marshal(model) // %q is not JSON for control bytes / invalid UTF-8
+	return []byte(fmt.Sprintf(`{"model":%s,"max_tokens":16,"messages":[{"role":"user","content":"ezllm combo test: reply ok"}]}`, m))
 }
 
 func probePath(surface provider.Surface) string {

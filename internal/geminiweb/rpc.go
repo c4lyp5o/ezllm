@@ -94,8 +94,9 @@ func (m Model) modelHeader() map[string]string {
 	if m.CapacityField == 13 {
 		tail = "null," + strconv.Itoa(m.Capacity)
 	}
+	id, _ := json.Marshal(m.ID) // a JSON array: %q is not JSON for control bytes / invalid UTF-8
 	return map[string]string{
-		modelHeaderKey: fmt.Sprintf(`[1,null,null,null,%q,null,null,0,[4,5,6,8],null,null,%s,null,null,%d]`, m.ID, tail, m.ModelNumber),
+		modelHeaderKey: fmt.Sprintf(`[1,null,null,null,%s,null,null,0,[4,5,6,8],null,null,%s,null,null,%d]`, id, tail, m.ModelNumber),
 		headerAux1:     "[0]",
 		headerAux2:     "[0,0,0]",
 	}

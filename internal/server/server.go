@@ -15,7 +15,6 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
-	"mime/multipart"
 	"net"
 	"net/http"
 	"net/netip"
@@ -387,7 +386,7 @@ func (s *Server) Handler() http.Handler {
 	// "POST /v1/chat/completions" registered it answers OPTIONS with 405 before
 	// any handler — so CORS headers can never be attached there. Pre-dispatch
 	// interception is the only correct place for it.
-	return s.withCORS(s.mux, inner)
+	return s.withCORS(inner)
 }
 
 // securityHeaders sets the headers every response gets: no MIME sniffing
@@ -403,11 +402,11 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-// withCORS routes: OPTIONS on an allowed origin is answered immediately (no
-// body, never reaching inference or the ledger); everything else passes to next
-// with CORS headers attached when the origin is allowed. Scope decides where it
-// is mounted — /v1/* only — see cors.go.
-func (s *Server) withCORS(next http.Handler, respond http.Handler) http.Handler {
+// withCORS routes: OPTIONS on /v1/* is answered immediately (no body, never
+// reaching inference or the ledger); everything else passes to next, with
+// CORS headers attached when the origin is allowed. Scope: /v1/* only — see
+// cors.go.
+func (s *Server) withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// The grant is scoped to the inference surface. /admin stays
 		// same-origin on purpose: the dashboard keeps the admin token in
@@ -428,10 +427,6 @@ func (s *Server) withCORS(next http.Handler, respond http.Handler) http.Handler 
 		// inference or the ledger. It is only granted for /v1/*.
 		if r.Method == http.MethodOptions && onV1 {
 			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		if respond != nil {
-			respond.ServeHTTP(w, r)
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -669,7 +664,11 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 		if s.db != nil {
 			if n := maxOutputTokens(doc.Map()); n > 0 {
 				if id, ok, rerr := s.db.ReserveClientBudget(r.Context(), client, n); rerr != nil {
-					slog.Warn("client budget reservation failed", "client", client, "err", rerr)
+					// No token row (the dashboard's own chat) means no budget,
+					// not a failure worth a warning on every request.
+					if !errors.Is(rerr, store.ErrNotFound) {
+						slog.Warn("client budget reservation failed", "client", client, "err", rerr)
+					}
 				} else if !ok {
 					writeErr(w, http.StatusTooManyRequests, "rate_limited",
 						fmt.Sprintf("token budget cannot cover max_tokens=%d for %q", n, client))
@@ -816,105 +815,65 @@ func (s *Server) inferenceMultipart(w http.ResponseWriter, r *http.Request, surf
 
 // extractModelMultipart reads the "model" form field from a multipart body.
 func extractModelMultipart(body []byte) (string, error) {
-	// Parse the boundary from the first line: --<boundary>\r\n
-	eol := bytes.IndexAny(body, "\r\n")
-	if eol < 0 {
-		return "", errors.New("multipart body has no boundary line")
-	}
-	boundary := strings.TrimPrefix(string(body[:eol]), "--")
-	if boundary == "" {
-		return "", errors.New("multipart body has empty boundary")
-	}
-	mr := multipart.NewReader(bytes.NewReader(body), boundary)
-	for {
-		part, err := mr.NextPart()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return "", fmt.Errorf("read multipart part: %w", err)
-		}
-		if part.FormName() == "model" {
-			value, err := io.ReadAll(part)
-			if err != nil {
-				return "", fmt.Errorf("read model field: %w", err)
-			}
-			return strings.TrimSpace(string(value)), nil
-		}
-	}
-	return "", nil
+	return proxy.MultipartField(body, "model")
 }
 
-// writeResolveErr answers a resolution failure — one mapping for the JSON and
-// multipart handlers, so a pin or wire refusal is a 400 on every endpoint
-// rather than a 502 on the multipart ones.
-func writeResolveErr(w http.ResponseWriter, err error) {
+// resolveErrInfo is the one mapping from a resolution failure to its HTTP
+// answer: status, error type and the structured extras a client can act on.
+// writeResolveErr sends it and errorStatus reads its status for the ledger,
+// so the row and the wire can never disagree.
+func resolveErrInfo(err error) (status int, typ string, extra map[string]any) {
 	var nf *router.ErrNotFound
 	var nu *router.ErrUnavailable
 	var np *router.ErrPinned
 	var nw *router.ErrWireUnsupported
 	switch {
 	case errors.As(err, &nf):
-		writeErrExtra(w, http.StatusNotFound, "model_not_found", err.Error(),
-			map[string]any{"available": nf.Hints})
+		return http.StatusNotFound, "model_not_found", map[string]any{"available": nf.Hints}
 	case errors.As(err, &np):
-		// The operator pinned this model to a surface and the
-		// client called a different one. That is a client
-		// mistake, not an upstream failure: 400, and the body
-		// says which endpoint to use. Never rerouted — ezllm
-		// passes bodies through untranslated, so switching the
-		// path upstream would send the wrong shape.
-		writeErrExtra(w, http.StatusBadRequest, "pinned_surface", err.Error(),
-			map[string]any{"pinned": np.Pinned, "requested_surface": np.Got})
+		// The operator pinned this model to a surface and the client called
+		// a different one. That is a client mistake, not an upstream
+		// failure: 400, and the body says which endpoint to use. Never
+		// rerouted — switching the path upstream would send the wrong shape.
+		return http.StatusBadRequest, "pinned_surface",
+			map[string]any{"pinned": np.Pinned, "requested_surface": np.Got}
 	case errors.As(err, &nw):
 		// Wire-first selection found no wire to dial: the model's own
-		// surface is probed impossible and nothing entitles it to
-		// another (no responses override, no translation). The
-		// request problem is the answer — 400, not a gateway 502.
-		writeErrExtra(w, http.StatusBadRequest, "wire_unsupported", err.Error(),
-			map[string]any{"requested_surface": string(nw.Wire)})
+		// surface is probed impossible and nothing entitles it to another
+		// (no responses override, no translation). 400, not a gateway 502.
+		return http.StatusBadRequest, "wire_unsupported",
+			map[string]any{"requested_surface": string(nw.Wire)}
 	case errors.As(err, &nu):
-		// A rule (cap / allowed hours) says no — not a routing miss.
-		// The cause (when it is a *rules.Refusal) carries the
-		// structured fields a client can act on: WHICH kind of rule
-		// refused, and (for windows) when the model opens next, so it
-		// can sleep until then instead of blind-retrying.
+		// A rule (cap / allowed hours) says no — not a routing miss. The
+		// cause (a *rules.Refusal) carries WHICH kind of rule refused and,
+		// for windows, when the model opens next, so a client can sleep
+		// until then instead of blind-retrying.
 		extra := map[string]any{"reason": nu.Reason}
 		var ref *rules.Refusal
 		if errors.As(err, &ref) {
-			extra["rule"] = map[string]any{
-				"kind":   ref.Reason.Kind,
-				"detail": ref.Reason.Detail,
-			}
+			rule := map[string]any{"kind": ref.Reason.Kind, "detail": ref.Reason.Detail}
 			if !ref.Reason.NextAllowed.IsZero() {
-				extra["rule"].(map[string]any)["next_allowed"] =
-					ref.Reason.NextAllowed.Format(time.RFC3339)
+				rule["next_allowed"] = ref.Reason.NextAllowed.Format(time.RFC3339)
 			}
+			extra["rule"] = rule
 		}
-		writeErrExtra(w, http.StatusTooManyRequests, "model_unavailable", err.Error(), extra)
+		return http.StatusTooManyRequests, "model_unavailable", extra
 	default:
-		writeErr(w, http.StatusBadGateway, "upstream_error", err.Error())
+		return http.StatusBadGateway, "upstream_error", nil
 	}
 }
 
+// writeResolveErr answers a resolution failure — one mapping for the JSON and
+// multipart handlers, so a pin or wire refusal is a 400 on every endpoint
+// rather than a 502 on the multipart ones.
+func writeResolveErr(w http.ResponseWriter, err error) {
+	status, typ, extra := resolveErrInfo(err)
+	writeErrExtra(w, status, typ, err.Error(), extra)
+}
+
 func errorStatus(err error) int {
-	var nf *router.ErrNotFound
-	if errors.As(err, &nf) {
-		return http.StatusNotFound
-	}
-	var nu *router.ErrUnavailable
-	if errors.As(err, &nu) {
-		return http.StatusTooManyRequests
-	}
-	var np *router.ErrPinned
-	if errors.As(err, &np) {
-		return http.StatusBadRequest
-	}
-	var nw *router.ErrWireUnsupported
-	if errors.As(err, &nw) {
-		return http.StatusBadRequest
-	}
-	return http.StatusBadGateway
+	status, _, _ := resolveErrInfo(err)
+	return status
 }
 
 // maxWindowSpan bounds any [from,to) the admin APIs will aggregate over.

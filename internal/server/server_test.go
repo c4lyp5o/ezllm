@@ -21,11 +21,9 @@ import (
 
 // harness wires a real store + real dispatcher against a fake upstream.
 type harness struct {
-	srv      *http.Server
 	server   *Server // the instance behind handler, for background-job tests
 	handler  http.Handler
 	db       *store.DB
-	base     string // ezllm base URL
 	upstream *httptest.Server
 	t        testing.TB
 }

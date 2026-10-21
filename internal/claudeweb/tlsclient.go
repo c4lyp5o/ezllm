@@ -9,11 +9,15 @@
 // No image input, no artifacts, no model discovery (ids pass through).
 package claudeweb
 
+//lint:file-ignore SA1019 x/net/http2.Transport is required here: the
+// connection is a uTLS Chrome-fingerprinted conn, not a *tls.Conn, and
+// net/http's Transport only negotiates HTTP/2 over *tls.Conn. The
+// "use http.Transport" replacement cannot speak h2 on this connection.
+
 import (
 	"compress/gzip"
 	"context"
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -29,10 +33,6 @@ import (
 
 // apiBase is the claude.ai API root.
 const apiBase = "https://claude.ai/api"
-
-// chromeMajor is the TLS-fingerprint profile (omniroute: chrome_146). bump
-// when Cloudflare starts rejecting the profile.
-const chromeMajor = 146
 
 // Response is one completed upstream read.
 type Response struct {
@@ -179,32 +179,6 @@ func decodeBody(resp *http.Response) (io.ReadCloser, error) {
 	}
 }
 
-// plainFetcher is the test fetcher: plain HTTP against a local mock. It
-// intentionally carries NO browser fingerprint.
-type plainFetcher struct {
-	base string // e.g. http://127.0.0.1:PORT
-}
-
-func (p plainFetcher) Fetch(ctx context.Context, method, url string, body []byte, headers http.Header) (*Response, error) {
-	if strings.HasPrefix(url, apiBase) {
-		url = p.base + strings.TrimPrefix(url, apiBase)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, url, byteReader(body))
-	if err != nil {
-		return nil, err
-	}
-	for k, vs := range headers {
-		for _, v := range vs {
-			req.Header.Add(k, v)
-		}
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	return &Response{Status: resp.StatusCode, Header: resp.Header, Body: resp.Body}, nil
-}
-
 func byteReader(b []byte) io.Reader {
 	if b == nil {
 		return http.NoBody
@@ -248,5 +222,3 @@ func firstNon(vs ...string) string {
 	}
 	return ""
 }
-
-var errUnauthorized = errors.New("claudeweb: session expired or invalid")

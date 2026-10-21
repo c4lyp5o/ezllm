@@ -213,7 +213,7 @@ func (b *geminiWebBridge) models(ctx context.Context, entry *geminiwebClientEntr
 func (b *geminiWebBridge) handleModels(w http.ResponseWriter, r *http.Request) {
 	entry, err := b.resolve(r)
 	if err != nil {
-		b.writeErr(w, http.StatusUnauthorized, "authentication_error", err.Error())
+		writeErr(w, http.StatusUnauthorized, "authentication_error", err.Error())
 		return
 	}
 	lock := b.lockFor(entry.accountID)
@@ -222,7 +222,7 @@ func (b *geminiWebBridge) handleModels(w http.ResponseWriter, r *http.Request) {
 	b.maybeRotate(r.Context(), entry)
 	models, err := b.models(r.Context(), entry)
 	if err != nil {
-		b.writeErr(w, http.StatusUnauthorized, "authentication_error", err.Error())
+		writeErr(w, http.StatusUnauthorized, "authentication_error", err.Error())
 		return
 	}
 	type modelEntry struct {
@@ -263,7 +263,7 @@ type chatReq struct {
 func (b *geminiWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	entry, err := b.resolve(r)
 	if err != nil {
-		b.writeErr(w, http.StatusUnauthorized, "authentication_error", err.Error())
+		writeErr(w, http.StatusUnauthorized, "authentication_error", err.Error())
 		return
 	}
 	// Serialize generation per account: the cached client owns mutable
@@ -274,33 +274,33 @@ func (b *geminiWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.R
 	b.maybeRotate(r.Context(), entry)
 	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 	if err != nil {
-		b.writeErr(w, http.StatusBadRequest, "invalid_request_error", "cannot read body")
+		writeErr(w, http.StatusBadRequest, "invalid_request_error", "cannot read body")
 		return
 	}
 	var req chatReq
 	if err := json.Unmarshal(body, &req); err != nil {
-		b.writeErr(w, http.StatusBadRequest, "invalid_request_error", "invalid JSON body")
+		writeErr(w, http.StatusBadRequest, "invalid_request_error", "invalid JSON body")
 		return
 	}
 	if req.Model == "" {
-		b.writeErr(w, http.StatusBadRequest, "invalid_request_error", "model is required")
+		writeErr(w, http.StatusBadRequest, "invalid_request_error", "model is required")
 		return
 	}
 	// Typed refusals — the web protocol has no tool calling, no structured
 	// output, no image input (docs/gemini-web-design.md scope fences).
 	if req.Tools != nil {
-		b.writeErr(w, http.StatusBadRequest, "unsupported_feature",
+		writeErr(w, http.StatusBadRequest, "unsupported_feature",
 			"gemini-web does not support tool calling; use a gemini-openai account for tools")
 		return
 	}
 	if req.ResponseFormat != nil {
-		b.writeErr(w, http.StatusBadRequest, "unsupported_feature",
+		writeErr(w, http.StatusBadRequest, "unsupported_feature",
 			"gemini-web does not support structured output (response_format)")
 		return
 	}
 	model, err := b.resolveModel(r.Context(), entry, req.Model)
 	if err != nil {
-		b.writeErr(w, http.StatusBadRequest, "model_not_found", err.Error())
+		writeErr(w, http.StatusBadRequest, "model_not_found", err.Error())
 		return
 	}
 
@@ -310,7 +310,7 @@ func (b *geminiWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.R
 	if !req.Stream {
 		res, err := entry.client.Generate(r.Context(), opts, func(geminiweb.Delta) {})
 		if err != nil {
-			b.writeErr(w, mapUpstreamStatus(err), "upstream_error", err.Error())
+			writeErr(w, mapUpstreamStatus(err), "upstream_error", err.Error())
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -389,33 +389,11 @@ func (b *geminiWebBridge) resolveModel(ctx context.Context, entry *geminiwebClie
 
 // resolve maps the stamped headers to an enabled gemini-web account.
 func (b *geminiWebBridge) resolve(r *http.Request) (*geminiwebClientEntry, error) {
-	// This route shares the public listener: only a request carrying this
-	// process's secret (stamped by the gemini-web adapter) may name an
-	// account, since an account id alone would unlock its stored cookie.
-	if !provider.ValidBridgeSecret(r.Header.Get(provider.BridgeSecretHeader)) {
-		return nil, errors.New("missing or wrong bridge secret")
+	acct, err := bridgeAccount(r, b.db, provider.KindGeminiWeb, provider.GeminiWebAccountHeader)
+	if err != nil {
+		return nil, err
 	}
-	h := r.Header.Get(provider.GeminiWebAccountHeader)
-	if h == "" {
-		return nil, errors.New("missing account header")
-	}
-	var acctID int64
-	if _, err := fmt.Sscan(h, &acctID); err != nil || acctID <= 0 {
-		return nil, errors.New("bad account header")
-	}
-	acct, err := b.db.AccountByID(r.Context(), acctID)
-	if err != nil || acct == nil || acct.Kind != provider.KindGeminiWeb || !acct.Enabled {
-		return nil, errors.New("not an enabled gemini-web account")
-	}
-	return b.clientFor(r.Context(), acctID, r.Header.Get(provider.GeminiWebKeyHeader))
-}
-
-func (b *geminiWebBridge) writeErr(w http.ResponseWriter, status int, errType, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"error": map[string]any{"message": msg, "type": errType, "code": status},
-	})
+	return b.clientFor(r.Context(), acct.ID, r.Header.Get(provider.GeminiWebKeyHeader))
 }
 
 // mapUpstreamStatus maps a geminiweb error to an HTTP status: auth failures

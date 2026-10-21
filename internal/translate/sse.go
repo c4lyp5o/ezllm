@@ -21,25 +21,6 @@ func mustMarshalString(s string) string {
 
 // --- upstream chunk decode types (OpenAI streaming shape) -------------
 
-type openaiChunk struct {
-	ID      string         `json:"id"`
-	Choices []openaiChoice `json:"choices"`
-	Usage   *OpenAIUsage   `json:"usage,omitempty"`
-	Error   *openaiError   `json:"error,omitempty"`
-}
-
-type openaiChoice struct {
-	Index        int         `json:"index"`
-	Delta        openaiDelta `json:"delta"`
-	FinishReason *string     `json:"finish_reason"`
-}
-
-type openaiDelta struct {
-	Role      string            `json:"role,omitempty"`
-	Content   string            `json:"content,omitempty"`
-	ToolCalls []openaiToolDelta `json:"tool_calls,omitempty"`
-}
-
 type openaiToolDelta struct {
 	Index    int              `json:"index"`
 	ID       string           `json:"id,omitempty"`
@@ -49,8 +30,4 @@ type openaiToolDelta struct {
 type openaiFuncDelta struct {
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
-}
-
-type openaiError struct {
-	Message string `json:"message"`
 }

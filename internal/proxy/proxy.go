@@ -97,7 +97,7 @@ func (t *UsageTapper) Usage() *store.Usage {
 	if t.raw == nil {
 		return nil
 	}
-	n := store.NormalizeUsageWith(store2surface(t.surface), t.raw, t.conv)
+	n := store.NormalizeUsageWith(usageSurface(t.surface), t.raw, t.conv)
 	return &n
 }
 
@@ -820,12 +820,43 @@ func extractMultipartBoundary(body []byte) string {
 	return strings.TrimPrefix(string(body[:eol]), "--")
 }
 
+// MultipartField reads one form field's value from a raw multipart body,
+// using the same body-carried boundary the per-hop rewrite uses
+// (extractMultipartBoundary), so what the handler reads and what each hop
+// rewrites can never disagree. An absent field is ("", nil).
+func MultipartField(body []byte, name string) (string, error) {
+	if !bytes.ContainsAny(body, "\r\n") {
+		return "", errors.New("multipart body has no boundary line")
+	}
+	boundary := extractMultipartBoundary(body)
+	if boundary == "" {
+		return "", errors.New("multipart body has empty boundary")
+	}
+	mr := multipart.NewReader(bytes.NewReader(body), boundary)
+	for {
+		part, err := mr.NextPart()
+		if err == io.EOF {
+			return "", nil
+		}
+		if err != nil {
+			return "", fmt.Errorf("read multipart part: %w", err)
+		}
+		if part.FormName() == name {
+			value, err := io.ReadAll(part)
+			if err != nil {
+				return "", fmt.Errorf("read %s field: %w", name, err)
+			}
+			return strings.TrimSpace(string(value)), nil
+		}
+	}
+}
+
 // swapModelMultipart rebuilds a multipart/form-data body with the "model" form
 // field replaced by newModel. Every other part (the audio file, language,
 // prompt, etc.) is copied through byte-for-byte. The boundary is extracted
 // from the body's own first line, so no external Content-Type is needed.
 func swapModelMultipart(body []byte, newModel string) ([]byte, error) {
-	if bytes.IndexAny(body, "\r\n") < 0 {
+	if !bytes.ContainsAny(body, "\r\n") {
 		return nil, errors.New("proxy: multipart body has no boundary line")
 	}
 	boundary := extractMultipartBoundary(body)
@@ -1235,7 +1266,7 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 		// streamCopy writes the header before its first byte, so the status
 		// is committed the moment it returns — regardless of a copy error.
 		res.Committed = true
-		ttft, usage, copyErr, first := d.streamCopy(ctx, w, resp, rt.Surface, tapConvention(rt, cross), start)
+		ttft, usage, first, copyErr := d.streamCopy(ctx, w, resp, rt.Surface, tapConvention(rt, cross), start)
 		res.TTFTms = msAtLeastOne(ttft)
 		if usage != nil {
 			res.Usage = usage
@@ -1476,20 +1507,38 @@ func refusesWire(resp *http.Response) bool {
 	if resp == nil || resp.Body == nil || resp.StatusCode != http.StatusBadRequest {
 		return false
 	}
-	head := make([]byte, maxErrPeek)
-	n, _ := io.ReadFull(resp.Body, head)
-	if n > 0 {
-		resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(head[:n]), resp.Body))
-	}
 	// Only the vendor's explicit capability words count: ErrorCause also maps
 	// "does not allow" here, which on a 400 can just as well describe a body.
-	s := strings.ToLower(string(head[:n]))
+	s := strings.ToLower(string(peekBody(resp, maxErrPeek)))
 	return strings.Contains(s, "modelprotocolunsupported") || strings.Contains(s, "not supported for format")
 }
 
-// drainClose releases an abandoned response so its connection can be reused.
+// peekBody reads up to n bytes of resp's body and puts them back in front of
+// the rest, so the response stays committable byte-for-byte. The restored
+// body still closes the ORIGINAL one: wrapping it in io.NopCloser (as both
+// peekers used to) dropped Close, and a response abandoned before EOF then
+// held its upstream connection.
+func peekBody(resp *http.Response, n int) []byte {
+	head := make([]byte, n)
+	k, _ := io.ReadFull(resp.Body, head) // a short body yields ErrUnexpectedEOF; k holds what there was
+	if k > 0 {
+		resp.Body = struct {
+			io.Reader
+			io.Closer
+		}{io.MultiReader(bytes.NewReader(head[:k]), resp.Body), resp.Body}
+	}
+	return head[:k]
+}
+
+// drainCap bounds how much of an abandoned body is read so its connection can
+// be reused. Error bodies are tiny; past this it is cheaper to let the
+// connection go than to read megabytes nobody will see.
+const drainCap = 64 << 10
+
+// drainClose releases an abandoned response, reusing its connection when the
+// rest of the body is small.
 func drainClose(resp *http.Response) {
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxBodyBytes))
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, drainCap))
 	_ = resp.Body.Close()
 }
 
@@ -1809,10 +1858,10 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 // function — after headers already arrived — reports a meaningless 1-3ms and
 // hides exactly the cache/prefill latency the number exists to reveal.
 //
-// The fourth return is the first non-terminal SSE data payload. A streamed
+// The third return is the first non-terminal SSE data payload. A streamed
 // error response carries its reason in there, and the ledger's err column is
 // blank for streams unless the caller is handed it.
-func (d *Dispatcher) streamCopy(ctx context.Context, w http.ResponseWriter, resp *http.Response, surface provider.Surface, conv provider.UsageConvention, start time.Time) (time.Duration, *store.Usage, error, []byte) {
+func (d *Dispatcher) streamCopy(ctx context.Context, w http.ResponseWriter, resp *http.Response, surface provider.Surface, conv provider.UsageConvention, start time.Time) (time.Duration, *store.Usage, []byte, error) {
 	var ttft time.Duration
 	var firstEvent bool
 	var firstPayload []byte
@@ -1843,7 +1892,7 @@ func (d *Dispatcher) streamCopy(ctx context.Context, w http.ResponseWriter, resp
 		piece, rerr := br.ReadSlice('\n')
 		if len(piece) > 0 {
 			if _, err := w.Write(piece); err != nil {
-				return ttft, tapper.Usage(), fmt.Errorf("client write: %w", err), firstPayload
+				return ttft, tapper.Usage(), firstPayload, fmt.Errorf("client write: %w", err)
 			}
 			complete := rerr == nil || rerr == io.EOF
 			line := piece
@@ -1897,14 +1946,14 @@ func (d *Dispatcher) streamCopy(ctx context.Context, w http.ResponseWriter, resp
 			ttft = time.Since(start)
 		}
 		if rerr == io.EOF {
-			return ttft, tapper.Usage(), nil, firstPayload
+			return ttft, tapper.Usage(), firstPayload, nil
 		}
 		// The upstream died mid-stream. The 200 is already committed, so the
 		// only honest signal left is a terminal SSE error frame in the
 		// client's dialect — otherwise the client is left with a silent EOF.
 		writeStreamErrorFrame(w, surface, "upstream connection lost")
 		flush()
-		return ttft, tapper.Usage(), fmt.Errorf("upstream read: %w", rerr), firstPayload
+		return ttft, tapper.Usage(), firstPayload, fmt.Errorf("upstream read: %w", rerr)
 	}
 }
 
@@ -1934,7 +1983,7 @@ func tapSSELine(line []byte, surface provider.Surface) *store.Usage {
 	if u == nil {
 		return nil
 	}
-	n := store.NormalizeUsage(store2surface(surface), u)
+	n := store.NormalizeUsage(usageSurface(surface), u)
 	return &n
 }
 
@@ -1997,7 +2046,7 @@ func tapJSONUsage(body []byte, surface provider.Surface, conv provider.UsageConv
 		return nil
 	}
 	if u, ok := ev["usage"].(map[string]any); ok {
-		n := store.NormalizeUsageWith(store2surface(surface), u, conv)
+		n := store.NormalizeUsageWith(usageSurface(surface), u, conv)
 		return &n
 	}
 	return nil
@@ -2150,14 +2199,9 @@ func peekUpstreamError(resp *http.Response) string {
 	if resp == nil || resp.Body == nil || resp.StatusCode < 400 {
 		return ""
 	}
-	head := make([]byte, maxErrPeek)
-	n, _ := io.ReadFull(resp.Body, head) // a short body yields ErrUnexpectedEOF; n holds what there was
-	if n > 0 {
-		resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(head[:n]), resp.Body))
-	}
 	// Same rendering as the ledger's err column, so a log line and a row read
 	// identically.
-	return upstreamErrorSnippet(resp.StatusCode, head[:n])
+	return upstreamErrorSnippet(resp.StatusCode, peekBody(resp, maxErrPeek))
 }
 
 // upstreamErrorSnippet renders a bounded, single-line summary of an upstream
@@ -2208,8 +2252,11 @@ func msAtLeastOne(d time.Duration) *int64 {
 	return &v
 }
 
-// store2surface maps the wire surface onto the ledger's surface enum.
-func store2surface(s provider.Surface) store.Surface {
+// usageSurface picks the usage-parsing shape for a surface: Anthropic and
+// Responses have their own; every other surface (chat and the OpenAI-shaped
+// service endpoints) reads as OpenAI. It is NOT the ledger surface — the
+// server's store2surface maps every service surface to its own value.
+func usageSurface(s provider.Surface) store.Surface {
 	switch s {
 	case provider.SurfaceAnthropic:
 		return store.SurfaceAnthropic

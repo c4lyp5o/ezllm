@@ -38,6 +38,17 @@ file in the same commit, or the test fails.
 - **Fix: the Claude bridge no longer leaks on failed requests.** An early
   return (timeout, client disconnect) left a blocked reader goroutine and an
   unreaped zombie CLI process each time.
+- **Cleanup**: staticcheck now reports nothing (dead code removed, the one
+  intentional deprecation documented); one table maps resolution errors for
+  both the wire and the ledger; the web bridges share one admission check;
+  multipart field parsing and body peeking each live in one place; the
+  model-protocol upsert is written once. Fixes found on the way: a peeked
+  upstream body no longer swallows `Close` (a connection leak on abandoned
+  responses), a sweep batch no longer writes service-surface verdicts into
+  the chat column, abandoned error bodies drain at most 64 KiB, the field
+  cipher is built once, probe bodies quote model ids as real JSON, expired
+  dashboard sessions are pruned at login, a renamed combo's held hop can be
+  released again, and a CORS test that could never fail now asserts.
 - **Notification bell** (top right; schema v27): new, gone and broken free
   models, failed catalog and price refreshes, and client tokens at their
   budget. Repeats fold into one entry with a count; clicking one opens the

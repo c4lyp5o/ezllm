@@ -968,9 +968,9 @@ func blockOrder(combo *store.Combo, routes []proxy.Route) ([]proxy.Route, int) {
 	e := v.(*blockEntry)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.combo == "" {
-		e.combo = combo.Name
-	}
+	// Refreshed every dispatch, not set once: MarkHopBad finds the cursor by
+	// combo NAME, so a renamed combo's held hop could never be released.
+	e.combo = combo.Name
 
 	target := -1
 	for i, rt := range routes {

@@ -61,6 +61,9 @@ func TestMigrateV17ToV18AddsMaxContextTokens(t *testing.T) {
 		Name: "test-ctx", Namespace: "test-ctx-ns", Kind: provider.KindOpenAICompatible,
 		BaseURL: "http://localhost", Enabled: true, MaxContextTokens: 128000,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	_ = id
 	// UpsertAccount doesn't set max_context_tokens (boot seeding uses 0).
 	// Use AccountByID after a direct UPDATE to verify the round-trip.

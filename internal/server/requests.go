@@ -110,10 +110,7 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 		Count, Tin, Tout, Cread, Cwrite, Reasoning, ContextPre, ContextSaved, CompressionSaved, MaxTin, MaxTout int64
 		AppliedCalls, AppliedSaved, DeclinedCalls, HeldNotional                                                 int64
 	}
-	var sargs []any
-	for _, a := range args {
-		sargs = append(sargs, a)
-	}
+	sargs := append([]any(nil), args...)
 	row := s.db.Reader().QueryRowContext(r.Context(), `
 SELECT COUNT(*), COALESCE(SUM(tokens_in),0), COALESCE(SUM(tokens_out),0),
        COALESCE(SUM(tokens_cached_read),0), COALESCE(SUM(tokens_cached_write),0), COALESCE(SUM(reasoning_tokens),0),

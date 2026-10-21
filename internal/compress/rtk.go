@@ -145,8 +145,14 @@ func isErrorUnit(u unit) bool {
 	}
 	// exit codes: "exit code 1", "exit status 1", "exit: 1"
 	if i := strings.Index(ls, "exit"); i >= 0 {
-		tail := ls[min(i+4, len(ls)):]
-		tail = strings.TrimLeft(tail, " :code status")
+		// Skip the separator and an optional "code"/"status" word. (This was
+		// TrimLeft with a cutset of those letters, which also ate the start
+		// of unrelated words.)
+		tail := strings.TrimLeft(ls[min(i+4, len(ls)):], " :")
+		for _, w := range []string{"code", "status"} {
+			tail = strings.TrimPrefix(tail, w)
+		}
+		tail = strings.TrimLeft(tail, " :")
 		if tail != "" && tail[0] >= '1' && tail[0] <= '9' {
 			return true
 		}

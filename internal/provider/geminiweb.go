@@ -21,8 +21,6 @@ import (
 // translation.
 const KindGeminiWeb Kind = "gemini-web"
 
-const geminiWebSentinelBase = "internal://geminiweb"
-
 // Loopback headers stamped for the bridge. Both are stripped from inbound
 // client requests (StripHeaders) so a client can never address an account's
 // cookie material or impersonate another account row.

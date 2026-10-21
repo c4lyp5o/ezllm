@@ -41,7 +41,7 @@ func TestStreamCopyIsByteExactAndTapsPastLongLines(t *testing.T) {
 	in := "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\r\n\r\n" + huge +
 		"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":7}}\r\n\r\ndata: [DONE]\r\n\r\n"
 	rec := httptest.NewRecorder()
-	_, u, err, _ := newDispatcher().streamCopy(context.Background(), rec, streamResponse([]byte(in), 0),
+	_, u, _, err := newDispatcher().streamCopy(context.Background(), rec, streamResponse([]byte(in), 0),
 		provider.SurfaceOpenAI, provider.UsageConventionAuto, time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +67,7 @@ func TestStreamCopyTTFTIgnoresKeepaliveComments(t *testing.T) {
 		_ = pw.Close()
 	}()
 	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: pr}
-	ttft, _, err, _ := newDispatcher().streamCopy(context.Background(), httptest.NewRecorder(), resp,
+	ttft, _, _, err := newDispatcher().streamCopy(context.Background(), httptest.NewRecorder(), resp,
 		provider.SurfaceOpenAI, provider.UsageConventionAuto, time.Now())
 	if err != nil {
 		t.Fatal(err)

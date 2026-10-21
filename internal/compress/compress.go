@@ -467,7 +467,7 @@ func commitShipped(session string, memo *SessionMemo, profileVersion string, exe
 		if hit[i] {
 			continue
 		}
-		var form any = cur[ni]
+		form := cur[ni]
 		if form == nil {
 			form = memoDropped{}
 		}

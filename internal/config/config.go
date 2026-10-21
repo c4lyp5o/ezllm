@@ -417,12 +417,5 @@ func contains(list []string, v string) bool {
 	return false
 }
 
-func orDefault(v, def string) string {
-	if strings.TrimSpace(v) == "" {
-		return def
-	}
-	return v
-}
-
 // ErrNoProviders is returned by helpers that require at least one provider.
 var ErrNoProviders = errors.New("config: no providers configured")

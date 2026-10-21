@@ -37,23 +37,6 @@ func parseToolArguments(arguments string) any {
 	return input
 }
 
-// mapStopReason converts an OpenAI finish_reason to the Anthropic
-// stop_reason vocabulary. Unknown or empty values become end_turn.
-func mapStopReason(finishReason string) string {
-	switch finishReason {
-	case "stop", "":
-		return "end_turn"
-	case "length":
-		return "max_tokens"
-	case "tool_calls", "function_call":
-		return "tool_use"
-	case "content_filter":
-		return "refusal"
-	default:
-		return "end_turn"
-	}
-}
-
 // anthropicErrorEnvelope is the error shape Anthropic clients parse.
 type anthropicErrorEnvelope struct {
 	Type  string                  `json:"type"`

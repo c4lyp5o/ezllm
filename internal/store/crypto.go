@@ -31,7 +31,9 @@ var ErrKeyFormat = errors.New("store: invalid ciphertext")
 // The master key is NEVER stored in the database or in data/: it lives in a
 // separate 0600 file (or env), so copying the DB alone leaks nothing.
 type FieldCrypto struct {
-	key []byte // 32 bytes, derived once at construction
+	// aead is AES-256-GCM over the derived key, built once: cipher.AEAD is
+	// safe for concurrent use, and every key pick used to rebuild it.
+	aead cipher.AEAD
 }
 
 // NewFieldCrypto derives the AES-256 key from the master secret via scrypt.
@@ -45,7 +47,15 @@ func NewFieldCrypto(masterSecret string) (*FieldCrypto, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: derive key: %w", err)
 	}
-	return &FieldCrypto{key: k}, nil
+	block, err := aes.NewCipher(k)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	return &FieldCrypto{aead: gcm}, nil
 }
 
 // Encrypt returns "enc:v1:<iv>:<ct>:<tag>" (all hex).
@@ -53,14 +63,7 @@ func (f *FieldCrypto) Encrypt(plaintext string) (string, error) {
 	if plaintext == "" {
 		return "", errors.New("store: refusing to encrypt empty value")
 	}
-	block, err := aes.NewCipher(f.key)
-	if err != nil {
-		return "", err
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", err
-	}
+	gcm := f.aead
 	iv := make([]byte, gcm.NonceSize())
 	if _, err := rand.Read(iv); err != nil {
 		return "", fmt.Errorf("store: read iv: %w", err)
@@ -97,14 +100,7 @@ func (f *FieldCrypto) Decrypt(encoded string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%w: tag: %v", ErrKeyFormat, err)
 	}
-	block, err := aes.NewCipher(f.key)
-	if err != nil {
-		return "", err
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", err
-	}
+	gcm := f.aead
 	if len(iv) != gcm.NonceSize() {
 		return "", fmt.Errorf("%w: iv size %d != %d", ErrKeyFormat, len(iv), gcm.NonceSize())
 	}

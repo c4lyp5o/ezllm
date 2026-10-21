@@ -157,8 +157,8 @@ func TestV1PathPreservedAfterCORSWrapper(t *testing.T) {
 	}
 	// 3rd: another preflight, then the exact same POST again
 	serve(h, http.MethodOptions, "/v1/messages", origin, "")
-	if code, _, _ := serve(h, http.MethodPost, "/v1/chat/completions", origin, "tok-infer"); code != code || code == 0 {
-		t.Fatal("unreachable")
+	if again, _, body2 := serve(h, http.MethodPost, "/v1/chat/completions", origin, "tok-infer"); again != code {
+		t.Fatalf("same POST after another preflight = %d, the first answered %d: %s", again, code, body2)
 	}
 	// finally: outside /v1 nothing changed — admin still requires the token
 	if code, _, _ := serve(h, http.MethodGet, "/admin/overview", origin, ""); code != http.StatusUnauthorized {

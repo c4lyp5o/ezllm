@@ -21,11 +21,14 @@ const PATH_COLORS = ['#38bdf8', '#60a5fa', '#818cf8', '#22d3ee', '#7dd3fc']; // 
 // old white core was a hard spark against the dark field.
 const PACKET_COLORS = ['#38bdf8', '#60a5fa', '#818cf8', '#22d3ee', '#7dd3fc', '#a78bfa', '#c084fc'];
 
-// Calm by design: at most 9 packets in flight (2 original + 7 added),
-// spawned at random gaps on random tracks. Still light — each packet is
-// a single arc + a short trail, no offscreen canvas or per-packet state
+// Busy but readable: up to 24 packets in flight, spawned at short random gaps
+// on random tracks, with a handful already mid-track on load so the page
+// never opens empty. Still light — each packet is a single arc + a short
+// trail, no offscreen canvas or per-packet state
 // beyond t/speed/size/color.
-const MAX_PACKETS = 9;
+const MAX_PACKETS = 24;
+// Packets already in flight when the page opens (and in the static frame).
+const SEED_PACKETS = 8;
 
 export default function RailwayBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -145,10 +148,11 @@ export default function RailwayBackground() {
 
       lastPathIndex = -1;
       nextSpawnAt = 0;
-      if (reducedMotion) {
-        // Static frame: one packet frozen mid-track, so the still picture
-        // still carries a packet without running the loop.
-        spawnPacket(0.45);
+      // Seed packets spread along their tracks: the animated page opens with
+      // traffic already flowing, and the reduced-motion still frame carries
+      // the same picture without running the loop.
+      for (let i = 0; i < SEED_PACKETS; i++) {
+        spawnPacket(0.05 + (0.9 * (i + Math.random())) / SEED_PACKETS);
       }
     };
 
@@ -206,11 +210,11 @@ export default function RailwayBackground() {
       ctx.fillStyle = 'rgba(125, 211, 252, 0.45)';
       ctx.fillText('router', centerX, centerY + 18);
 
-      // 4. Packets with comet trails — one or two at a time, each spawned at
-      // a random gap on a track the previous packet did not use.
+      // 4. Packets with comet trails — each spawned at a short random gap on
+      // a track the previous packet did not use.
       if (now >= nextSpawnAt && packets.length < MAX_PACKETS) {
         spawnPacket();
-        nextSpawnAt = now + 700 + Math.random() * 1500; // 0.7–2.2s of quiet
+        nextSpawnAt = now + 180 + Math.random() * 420; // 0.18–0.6s apart
       }
       ctx.globalCompositeOperation = 'screen';
       for (let i = packets.length - 1; i >= 0; i--) {

@@ -562,9 +562,9 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
               ? 'Required for compatibility providers. Enter the host only — /v1 paths are added automatically.'
               : 'Required for compatibility providers. Use the base URL ending at the API version, e.g. /v1.'}</p>
           </div>
-        ) : (
+        ) : isKnownEndpoint(d.base_url) ? null : (
           <div className="rounded-lg border border-line bg-raised/60 px-3.5 py-2.5 text-[13px] text-dim">
-            {isKnownEndpoint(d.base_url) ? 'Known endpoint — fixed: ' : 'Endpoint preset: '}<Mono>{d.base_url}</Mono>
+            Endpoint preset: <Mono>{d.base_url}</Mono>
           </div>
         )}
         {isGitHub && (

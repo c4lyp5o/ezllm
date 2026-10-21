@@ -1374,8 +1374,9 @@ func pickProbeModel(models []provider.ModelInfo, acct provider.Account) string {
 // isModelUnavailable reports a refusal about THIS MODEL rather than about the
 // credential or the provider: Gemini's retired-model 404 ("This model
 // models/gemini-2.5-flash is no longer available to new users"), a
-// model_not_found body, or a bare 404 on the generation path. Auth statuses are
-// excluded on purpose — a 401/403 stays a credential verdict.
+// model_not_found body, a bare 404 on the generation path, or a 410 Gone
+// (Ollama's retired-model answer). Auth statuses are excluded on purpose — a
+// 401/403 stays a credential verdict.
 func isModelUnavailable(status int, body []byte) bool {
 	if status < 400 || status >= 500 || isAuthStatus(status) {
 		return false
@@ -1383,13 +1384,13 @@ func isModelUnavailable(status int, body []byte) bool {
 	text := strings.ToLower(string(body))
 	for _, marker := range []string{
 		"no longer available", "does not exist", "deactivated",
-		"model_not_found", "unknown model", "not a valid model",
+		"model_not_found", "unknown model", "not a valid model", "was retired",
 	} {
 		if strings.Contains(text, marker) {
 			return true
 		}
 	}
-	return status == http.StatusNotFound
+	return status == http.StatusNotFound || status == http.StatusGone
 }
 
 func isOllamaCloud(acct provider.Account) bool {

@@ -363,3 +363,47 @@ func TestAllCandidatesTimingOutFailsHonestNotAsRejection(t *testing.T) {
 		t.Fatalf("a timeout is not a provider rejection: %+v", failure)
 	}
 }
+
+// Ollama answers a retired model with 410 Gone (seen live 2026-10-21 on a
+// local Ollama's deepseek-v4-flash:cloud). That is the model's verdict, not the
+// key's: the probe must advance instead of failing the account.
+type goneFirstTransport struct{}
+
+func (goneFirstTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	body, _ := io.ReadAll(req.Body)
+	var payload struct {
+		Model string `json:"model"`
+	}
+	_ = json.Unmarshal(body, &payload)
+	switch payload.Model {
+	case "deepseek-v4-flash:cloud":
+		return jsonHTTPResponse(req, http.StatusGone,
+			`{"error":{"message":"deepseek-v4-flash:0731 was retired on September 25, 2026. Try gemma4:31b-cloud, which is in the Free plan.","type":"api_error","param":null,"code":null}}`), nil
+	case "qwen3.5:2b":
+		return jsonHTTPResponse(req, http.StatusOK,
+			`{"id":"chatcmpl-1","choices":[{"index":0,"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1}}`), nil
+	default:
+		return jsonHTTPResponse(req, http.StatusBadRequest, `{"error":{"message":"unexpected model in test"}}`), nil
+	}
+}
+
+func TestProbeAdvancesPastAGoneModel(t *testing.T) {
+	client := &http.Client{Transport: goneFirstTransport{}}
+	registry := provider.NewRegistry(client)
+	adapter, err := registry.Get(provider.KindOpenAICompatible)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tester := NewTester(client, registry, nil)
+	acct := provider.Account{Kind: provider.KindOpenAICompatible, BaseURL: "http://192.168.1.50:11434/v1", Namespace: "ol"}
+	res := &TestResult{Steps: []Step{}}
+
+	ok, failure := tester.inferenceStep(context.Background(), adapter, acct, "ollama",
+		[]string{"deepseek-v4-flash:cloud", "qwen3.5:2b"}, &pacer{}, res)
+	if !ok || failure != nil {
+		t.Fatalf("a 410 Gone model must not fail the key test: ok=%v failure=%+v", ok, failure)
+	}
+	if joined := stepDetails(res.Steps); !strings.Contains(joined, "falling back to qwen3.5:2b") {
+		t.Fatalf("fallback trail missing from steps: %s", joined)
+	}
+}

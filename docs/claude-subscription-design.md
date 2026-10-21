@@ -79,6 +79,61 @@ Findings that shape the build:
     `API Error: Claude's response exceeded the … output token maximum` (measured at 32, fine at 256)
     rather than a truncated answer.
 
+### 2.1 M2 spike — client tools through the extra body (live, 2026-10-21)
+
+CLI **2.1.306** (2.1.299 had been removed by the CLI's auto-updater; requalified and
+pinned as a copy, see the runbook). The bridge's exact argv and env; the only change is
+`tools`/`tool_choice` added to `CLAUDE_CODE_EXTRA_BODY`. Redacted frames:
+`internal/claudebridge/testdata/m2_*.jsonl`.
+
+| case | result | upstream generations |
+| --- | --- | --- |
+| one tool, `auto` | `tool_use` named `get_weather`, `stop_reason: tool_use` | 1 |
+| `write_file` sentinel | `tool_use` emitted, the file was never written | 1 |
+| history: `tool_use` → `tool_result` | final text uses the result | 1 (plus a zero-turn replay ack) |
+| `tool_choice` `tool` / `any` | forced `tool_use` | 1 |
+| parallel (3 cities) | 3 `tool_use` blocks in one message | 1 |
+| "list your tools" | answers `get_weather` only | 1 |
+| `tool_choice: none` + tool history | text answer | 1 |
+| history with tool blocks, no `tools` field | text answer, accepted | 1 |
+
+Findings that shape M2:
+
+12. **Approach A holds; the inert MCP server is not needed.** Upstream sees exactly the
+    client's tools (the CLI's `init` frame reports `tools: []`), names come back
+    unchanged, and nothing executes.
+13. **Native then answers its own tool call locally.** After a `tool_use` it emits a
+    `user` frame with `tool_result` "No such tool available" (`is_error`), and
+    `--max-turns 1` ends the run with `result.subtype: error_max_turns`,
+    `is_error: true`, `stop_reason: tool_use`, while `usage.iterations` has one
+    entry. The bridge must treat that as success and never relay the synthetic result.
+14. **One `assistant` frame per content block.** Parallel calls arrive as three
+    `assistant` frames, so the non-stream body has to accumulate blocks, not keep the
+    last frame. Blocks carry an extra `caller: {"type":"direct"}` field.
+15. **The empty-reply nudge can run a second generation.** An empty first answer made
+    native append "[Your previous response had no visible output…]" and generate
+    again: two `message_start`s on the stream and two billed iterations. It is not
+    tool-specific; the bridge relays only the first upstream message.
+16. **The prefix cache works for agent tool lists, so M3 is not triggered.** With
+    Hermes's real 57 tools (~65 KB) plus a ~1.5 KB system prompt, request 1 wrote
+    **24,112** tokens to the cache (`ephemeral_1h`, a one-hour lifetime), and requests
+    2–5 wrote **0** and read **24,112** each:
+
+    | req | haiku in / create / read / out | sonnet in / create / read / out |
+    | --- | --- | --- |
+    | 1 | 122 / 24112 / 0 / 286 | 122 / 24112 / 0 / 152 |
+    | 2 | 568 / 0 / 24112 / 287 | 434 / 0 / 24112 / 209 |
+    | 3 | 906 / 0 / 24112 / 141 | 674 / 0 / 24112 / 78 |
+    | 4 | 1078 / 0 / 24112 / 78 | 809 / 0 / 24112 / 63 |
+    | 5 | 1213 / 0 / 24112 / 80 | 900 / 0 / 24112 / 47 |
+
+    Cold input grows with the uncached history tail, roughly 100–350 tokens per turn
+    here. Revisit M3 if long sessions show that tail dominating.
+17. **`rate_limit_event` reports the plan's real window state.** It includes
+    `unifiedWindows.five_hour.utilization` and `seven_day.utilization` with reset
+    times, which is a better cap signal than any local meter. This is recorded for
+    later and not used by M2.
+
 ## 3. Architecture: sidecar bridge, ezllm core untouched
 
 ```

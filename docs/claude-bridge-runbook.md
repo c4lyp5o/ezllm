@@ -13,8 +13,18 @@ nothing else ever holds the subscription credential. One container, no sidecar.
 
 ## Prerequisites
 
-- The official CLI binary, pinned by path (qualified: **2.1.299**):
-  `/home/calypso/.local/share/claude/versions/2.1.299`.
+- The official CLI binary, pinned by path (qualified: **2.1.306**):
+  `/home/calypso/.local/share/claude-bridge/claude-2.1.306`. Pin a **copy**, never
+  a file under `~/.local/share/claude/versions/`: the CLI's auto-updater deletes old
+  versions there, and a deleted file under a live bind mount keeps working only
+  until the next container recreate, which then fails the boot (2.1.299 was lost
+  this way, 2026-10-21).
+
+  ```sh
+  mkdir -p ~/.local/share/claude-bridge
+  cp ~/.local/share/claude/versions/<ver> ~/.local/share/claude-bridge/claude-<ver>
+  # then point compose.yml (or CLAUDE_CLI_BIN) at it and re-run the live proof
+  ```
 - A subscription login in its own config dir, never the interactive one:
 
   ```sh

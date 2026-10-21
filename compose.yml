@@ -60,12 +60,14 @@ services:
       - "${EZLLM_DATA:-./data}:/data"
 
       # Claude subscription surface: the official CLI binary (pinned by this
-      # path — a CLI upgrade means re-pointing it and re-running the live proof)
+      # path, a copy outside ~/.local/share/claude/versions so the CLI auto-updater
+      # cannot delete it under a running mount — a CLI upgrade means copying the
+      # new version there, re-pointing this, and re-running the live proof)
       # and the subscription login. The CLI mount is read-only; the login is
       # read-write because the CLI refreshes its own token there. The account's
       # shared secret auto-generates into /data on first boot, so it is backed up
       # with the ledger.
-      - ${CLAUDE_CLI_BIN:-/home/calypso/.local/share/claude/versions/2.1.299}:/opt/claude/claude:ro
+      - ${CLAUDE_CLI_BIN:-/home/calypso/.local/share/claude-bridge/claude-2.1.306}:/opt/claude/claude:ro
       - ${CLAUDE_SUB_DIR:-/home/calypso/.claude-sub}:/claude-sub
 
 # Optional: front the dashboard with traefik (uncomment and adjust the host).

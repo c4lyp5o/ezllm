@@ -1,17 +1,38 @@
 # VERSION
 
-Version history for ezllm. One version per change date — all patches committed
-on the same date share one version. The patch component increments by one per
-date (`v0.0.1`, `v0.0.2`, …).
+Version history for ezllm. From v1.0.0 the scheme is semantic versioning:
+MAJOR for a breaking change to the API, config or data, MINOR for a feature,
+PATCH for fixes. A release is a git tag `vX.Y.Z` that matches this file
+(`release.yml` and `docker-publish.yml` refuse a tag that does not). Before
+1.0.0 the scheme was one version per change date (`v0.0.1` … `v0.0.21`).
 
 The current version is served by `GET /healthz` (`version` field), shown in the
 dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v0.0.21**
+**Current: v1.0.0**
 
 ---
+
+## v1.0.0 — 2026-10-22
+
+First stable release. Binaries for linux, macOS and Windows (amd64 and arm64
+where applicable) on the GitHub release; the image `ghcr.io/c4lyp5o/ezllm` is
+now built for `linux/amd64` and `linux/arm64` again, cross-compiled by Go
+on the runner instead of emulated, so arm64 costs no QEMU time.
+
+- **Behaviour change: `translation.enabled` is the one translation switch.**
+  `translation.universal_enabled` and `EZLLM_TRANSLATION_UNIVERSAL_ENABLED`
+  still work with a boot warning; an explicit `universal_enabled: false` now
+  turns all translation off.
+- **Every environment variable documented** in `docs/environment.md`, with
+  what a new install sets first.
+- **Fix: a retired model (410 Gone) no longer fails a key test**; the probe
+  moves to the next candidate.
+- **Fix: Ollama (local) keeps the operator's base URL**; the models drawer
+  refreshes after a catalog sync; quota percentages render whole.
+- **CI: a release tag must match `internal/server/version.go`.**
 
 ## v0.0.21 — 2026-10-21
 

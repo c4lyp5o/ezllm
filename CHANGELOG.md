@@ -2,7 +2,7 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14); full history via `git log`.
 
-## 2026-10-22 — 1.0 prep: one translation switch, env reference, probe fixes
+## 2026-10-22 — v1.0.0: one translation switch, env reference, probe fixes, arm64 image
 
 - **Behaviour change: `translation.enabled` is the one switch.** It now covers the
   pairwise translators and the universal matrix together. `translation.universal_enabled`
@@ -23,6 +23,11 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M14); full histor
 - **Fix: Ollama (local) keeps the operator's base URL**, so a remote Ollama host
   is no longer replaced by `localhost`; quota percentages render whole.
 - **Fix: the models drawer refreshes after a catalog sync** without a page reload.
+- **arm64 image again.** `ghcr.io/c4lyp5o/ezllm` is built for `linux/amd64` and
+  `linux/arm64`; the Dockerfile cross-compiles on the runner (`GOARCH=$TARGETARCH`),
+  so arm64 adds no emulated build time.
+- **Semantic versioning from v1.0.0.** A release tag must match
+  `internal/server/version.go`; both release workflows refuse one that does not.
 - **Docs accuracy pass.** README Security now states keys are AES-256-GCM
   encrypted at rest (it said plaintext); EXPLORING.md landmarks re-verified;
   resolved known issues removed from CONTRIBUTING.md.

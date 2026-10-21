@@ -7,6 +7,6 @@ package server
 // "Current:" line in VERSION.md — version_test.go asserts that pairing, so a
 // bump that updates only one side fails the suite.
 //
-// Versioning scheme (see VERSION.md): one version per change date, all
-// patches on a date share a version, patch component increments per date.
-const Version = "0.0.21"
+// Versioning scheme (see VERSION.md): semantic versioning from 1.0.0; a
+// release tag vX.Y.Z must match this constant (the release workflows check).
+const Version = "1.0.0"

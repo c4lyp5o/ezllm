@@ -146,7 +146,7 @@ Change `/status` from `"tools": "unsupported (M1 text-only)"` to the new capabil
 **Acceptance criteria:**
 - [ ] The proof passes in full against the real CLI and Pro login (the refusal case is replaced by tool cases)
 - [ ] The sentinel file is absent after the run; the CLI's `init` frame lists no built-in tools
-- [ ] `/status` reports tool support accurately
+- [x] `/status` reports tool support accurately
 
 **Verification:**
 - [ ] Manual check: `python3 tests/prove_claude_bridge.py` output pasted into the PR
@@ -156,7 +156,7 @@ Change `/status` from `"tools": "unsupported (M1 text-only)"` to the new capabil
 **Files likely touched:** `tests/prove_claude_bridge.py`, `cmd/ezllm/claudebridge.go`
 **Estimated scope:** S
 
-## Task 7: Docs + version bump 0.0.22
+## Task 7: Docs (version stays v0.0.21: same change date)
 
 **Description:** Mark design doc §6 M2 SHIPPED and record the A/B decision. Amend locked
 decision 5 for capped agent traffic. Update the runbook (drop `chat_tools_unsupported`, add tool
@@ -164,13 +164,13 @@ and cap notes). Add the CHANGELOG milestone. Bump `VERSION.md` `Current:` and
 `internal/server/version.go` in the same commit.
 
 **Acceptance criteria:**
-- [ ] `version_test.go` passes with 0.0.22
-- [ ] No `TBD`/`TODO`/`⏳` markers in the touched `*.md` files; `file.go:NN` landmarks re-verified
-- [ ] SPEC.md marked shipped (or removed per Calypso)
+- [x] `version_test.go` passes; M2 lands under v0.0.21 per VERSION.md's one-version-per-date rule
+- [x] No stale markers in the touched `*.md` files; `file.go:NN` landmarks re-verified
+- [x] SPEC.md marked implemented, awaiting deploy
 
 **Verification:**
-- [ ] Tests pass: `go test -short -count=1 ./internal/server/`
-- [ ] `grep -nE 'TBD|TODO|⏳' docs/claude-*.md CHANGELOG.md VERSION.md` empty
+- [x] Tests pass: `go test -short -count=1 ./internal/server/`
+- [x] stale-marker grep over docs/claude-*.md, CHANGELOG.md, VERSION.md is empty
 
 **Dependencies:** Task 6
 **Files likely touched:** `docs/claude-subscription-design.md`, `docs/claude-bridge-runbook.md`, `CHANGELOG.md`, `VERSION.md`, `internal/server/version.go`
@@ -191,7 +191,7 @@ Rules page or the admin API; no code changes.
 **Acceptance criteria:**
 - [ ] Three rules exist with the approved values
 - [ ] An over-cap request returns 429 naming the rule and window (verify with a temporary tiny cap, then restore)
-- [ ] The runbook records the values and the rationale (done within Task 7 if the timing works)
+- [x] The runbook records the values and the rationale (done within Task 7 if the timing works)
 
 **Verification:**
 - [ ] Manual check: the Rules page shows the caps; the 429 body is captured

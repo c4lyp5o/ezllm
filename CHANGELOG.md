@@ -2,6 +2,29 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14); full history via `git log`.
 
+## 2026-10-21 — Claude subscription M2: tools on claude-sub
+
+- **Agents can run on the subscription.** Hermes sends tools on every turn, so M1's
+  blanket refusal answered every agent message with a 400. Client `tools` and
+  `tool_choice` now travel in `CLAUDE_CODE_EXTRA_BODY`; upstream sees exactly the
+  client's tools and the `tool_use` blocks come back under their names
+  (`docs/claude-subscription-design.md` §2.1, §6).
+- **Measured, not assumed (CLI 2.1.306).** A live spike replaced the planned inert
+  MCP server: one generation per call, a `write_file` sentinel never written, and
+  Hermes's real 57-tool list cached normally (24,112 tokens written once, then read
+  on every later turn).
+- **Native's quirks stay inside the bridge.** Its synthetic "No such tool"
+  `tool_result`, the `error_max_turns` ending, the empty-reply nudge (a second
+  message), and its one-frame-per-block output are all handled: the client sees one
+  well-formed message, with every parallel call.
+- **Cache breakpoint budget.** Native spends two of upstream's four
+  `cache_control` slots; four client markers were a live
+  `400 … Found 6`, so the newest two are kept.
+- **Drain cap through Rules.** sonnet/haiku 300,000 tokens per 5h, opus 1, set
+  before an agent is moved onto the combo (runbook).
+- **CLI pin survives updates.** 2.1.306 is pinned as a copy outside the
+  auto-updater's directory, which had deleted 2.1.299 under the live mount.
+
 ## 2026-10-21 — Cloudflare free models in auto-free combos
 
 - **Built-in Cloudflare free list.** `internal/provider/cloudflare_free.go`

@@ -15,6 +15,16 @@ file in the same commit, or the test fails.
 
 ## v0.0.21 — 2026-10-21
 
+- **Claude subscription M2: tools.** claude-sub now accepts client tools and
+  returns `tool_use` under the client's own names, streaming and non-stream; the
+  M1 `chat_tools_unsupported` refusal for all tools is gone (server tools and
+  `parallel_tool_calls` are still refused). Tools ride in the extra body; native
+  runs none of them. Hermes agents work through the normal OpenAI → Messages
+  translation. The bridge keeps only the newest two cache markers, since native
+  spends two of upstream's four (`Found 6` was a live 400).
+- **claude-bridge CLI pinned at 2.1.306 as a copy.** The auto-updater had deleted
+  2.1.299 from under the live mount; the pin now lives in
+  `~/.local/share/claude-bridge/`.
 - **Fix: the first catalog refresh waits 30 s after boot.** It ran before the
   Claude bridge and the listener were up, so claude-sub failed (and raised a
   bell entry) on every restart.

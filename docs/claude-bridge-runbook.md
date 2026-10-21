@@ -61,9 +61,33 @@ address is refused.
    - `usage_convention`: `anthropic` (cache excluded from `input_tokens`, matching
      the native envelope the surface emits)
    - Sync the catalog, then **Test** — expect the `claude-haiku-5-5` probe to pass.
-2. **Combo** — one hop, this account, and *only* Claude Code clients may use it.
-   Never add it to `daily`, never make it an automatic fallback: the plan's real
-   limit is a shared rolling window the router cannot observe.
+2. **Combo** — one hop, this account. Never add it to `daily`, never make it an
+   automatic fallback: the plan's real limit is a shared rolling window the router
+   cannot observe.
+3. **Drain cap (Rules) — required before any agent uses the combo.** On the Rules
+   page, for the claude-sub account:
+
+   | model | cap_tokens | cap_window |
+   | --- | --- | --- |
+   | `claude-sonnet-5-5` | 300,000 | `5h` |
+   | `claude-haiku-5-5` | 300,000 | `5h` |
+   | `claude-opus-5-5` | 1 | `5h` |
+
+   Rules count cache-cold input plus output (cache reads excluded). A measured agent
+   turn counts about 300–1,000 tokens early in a session and more as history grows,
+   so 300,000 is roughly 300+ short turns, about half the plan's window
+   (design §2.1). The 5h block is calendar-aligned (00–04, 05–09, …), not
+   Anthropic's rolling window. Over cap, the hop answers 429 naming the rule. Opus
+   stays out of agent combos; its cap of 1 is a backstop, since one call still
+   passes per block.
+
+## Tools (M2)
+
+Client tools pass through to upstream unchanged and come back as `tool_use` under
+their own names; nothing runs inside the bridge or the CLI. The client executes its
+tools and sends `tool_result`s on the next request, as with any Messages endpoint.
+OpenAI chat clients (Hermes) work through ezllm's normal translation. Only the newest
+two `cache_control` markers survive (native spends two of upstream's four).
 
 ## Verify
 
@@ -79,7 +103,9 @@ python3 tests/prove_claude_bridge.py     # through ezllm's front door; real plan
   the window is full). Wait for the reset; the CLI's own words are in the body.
 - **400 `max_output_tokens`** — the request's `max_tokens` is smaller than the
   model's thinking budget needs. Raise it (256+ is comfortable for Haiku 5.5).
-- **400 `chat_tools_unsupported`** — M1 is text-only; tools arrive in M2.
+- **400 `chat_tools_unsupported`** — the request carried a server tool
+  (`web_search_*`, `code_execution_*`, …), an OpenAI-shaped tool on `/v1/messages`,
+  or `parallel_tool_calls`. The message names the field; send client tools only.
 - **Boot: "does not resolve to the official Claude Code CLI"** — the
   `CLAUDE_CLI_BIN` mount is missing or points at nothing.
 

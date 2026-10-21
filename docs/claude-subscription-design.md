@@ -1,6 +1,6 @@
 # Claude subscription via the official Claude Code CLI — design
 
-**Status:** signed off 2026-10-19 (implementation not started)
+**Status:** signed off 2026-10-19 · M1 shipped 2026-10-19 · M2 shipped 2026-10-21
 **Author:** melissa · **Operator gate:** Calypso (pushes/deploys)
 
 ## 1. Goal and the hard constraint
@@ -252,11 +252,18 @@ history fidelity). Remaining and operator-side: create the `anthropic-compatible
 Claude-Code-only combo in the dashboard once the container is up (see
 `docs/claude-bridge-runbook.md`).
 
-**M2 — tools.** An in-bridge MCP server advertises the *request's* tools as `mcp__client__<name>`
-(stable 50-char hash alias above the length limit) with deny-execution, so the CLI emits the call
-without running anything; the bridge captures the `tool_use` block and maps it back to the client's
-original names. The CLI's own tools stay denied (`--disallowedTools '*'`), which also keeps the
-harness overhead near the 6.1k-token floor.
+**M2 — tools. SHIPPED 2026-10-21 (approach A, extra-body passthrough).** The spike
+(§2.1) showed the planned inert MCP server is unnecessary. The client's `tools` and
+`tool_choice` ride in `CLAUDE_CODE_EXTRA_BODY` next to its messages, so upstream sees
+exactly the client's tools and returns `tool_use` under their own names. Native is
+still spawned with `--tools ''` and an empty MCP config, so it has nothing to run; it
+answers the unknown call locally and stops at `--max-turns 1` (`error_max_turns`),
+which the bridge treats as success. Only the first upstream message is relayed, which
+drops native's synthetic `tool_result` and its empty-reply nudge. Blocks accumulate
+across native's one-frame-per-block output. The newest two client `cache_control`
+markers are kept (native spends two of upstream's four). Server tools
+(`web_search_*` & co.) and the OpenAI-only `parallel_tool_calls` are refused before
+spawn. The original MCP plan stays the fallback if a CLI release breaks passthrough.
 
 **M3 — cache/replay normalization.** Only if M2 measurements show poor cache reads on long
 agent-style conversations. The mechanics to port (replaying the native date line, stripping the
@@ -291,11 +298,14 @@ is the container rollback. `claude-web` and every existing account are untouched
    runtime base is `distroless/base` because the CLI is a glibc-dynamic binary (measured).
 4. The ezllm side is a plain `anthropic-compatible` account — no new kind, surface or translation
    cell.
-5. The subscription is reachable only through a Claude-Code-only combo; never a default hop, never
+5. *(Amended 2026-10-21: agent traffic such as Hermes's Max may use it, but only behind M5 Rules caps
+   on the account — sonnet and haiku 300,000 tokens per 5h block, opus 1 — set before the agent is moved.)*
+   The subscription is reachable only through a dedicated combo; never a default hop, never
    in `daily`, never an automatic fallback.
 6. `claude-web` stays.
 7. Build order M1 → M2 → M3, M3 gated on measurement.
-8. M1 refuses tool-bearing requests explicitly instead of dropping tools silently.
+8. M1 refused tool-bearing requests explicitly instead of dropping tools silently. M2 honours client
+   tools and keeps that rule for what it still cannot do (server tools, `parallel_tool_calls`).
 9. Usage is declared EXCLUSIVE (native Anthropic convention); nothing is synthesized.
 10. The login directory `~/.claude-sub` mounts read-write (`/claude-sub`) and the CLI binary mounts
     read-only (`/opt/claude/claude`, pinned to 2.1.299); `USER`/`LOGNAME` are set in the container.

@@ -1,13 +1,13 @@
 # Spec: claude-bridge M2 — tool calls on the claude-sub hop
 
-**Status:** draft for review (2026-10-21) · **Gate:** Calypso
+**Status:** implemented 2026-10-21 on `feat/claude-bridge-m2-tools` (approach A); awaiting deploy · **Gate:** Calypso
 **Parent design:** [docs/claude-subscription-design.md](docs/claude-subscription-design.md) §6 (M2)
 
 ## Objective
 
 Hermes agents (e.g. Max) reach `claude-sub` through ezllm and send a tool list on
 **every** turn. M1 rejects any request that carries `tools`, `tool_choice` or
-`parallel_tool_calls` before spawning the CLI (`internal/claudebridge/frames.go:52-58`),
+`parallel_tool_calls` before spawning the CLI (M1's `ParseRequest`),
 so every agent turn on this hop fails with:
 
 ```

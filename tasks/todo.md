@@ -80,12 +80,12 @@ final user turn made only of `tool_result`s) replays correctly. Adjust `BuildFra
 last-message check in `ParseRequest`) to match what the spike showed native accepts.
 
 **Acceptance criteria:**
-- [ ] `ParseRequest` accepts a final user message whose content is only `tool_result` blocks
-- [ ] `BuildFrames` output for tool history matches the shape the spike showed native accepting (fixture test)
-- [ ] `ConversationSessionID` stays stable across the turns of one tool conversation
+- [x] `ParseRequest` accepts a final user message whose content is only `tool_result` blocks
+- [x] `BuildFrames` output for tool history matches the shape the spike showed native accepting (fixture test)
+- [x] `ConversationSessionID` stays stable across the turns of one tool conversation
 
 **Verification:**
-- [ ] Tests pass: focused test command
+- [x] Tests pass: focused test command
 
 **Dependencies:** Task 2
 **Files likely touched:** `internal/claudebridge/frames.go`, `frames_test.go`
@@ -99,12 +99,12 @@ Anthropic server tools (`web_search_*`, `code_execution_*`, …) and an OpenAI-o
 longer says "M1 is text-only".
 
 **Acceptance criteria:**
-- [ ] Every `tool_choice` form round-trips into the extra body unchanged (table test)
-- [ ] A server-tool entry returns 400 `Unsupported{Field:"tools[n].type=…"}` before any spawn
-- [ ] The refusal message names the field and the reason, with no stale milestone wording
+- [x] Every `tool_choice` form round-trips into the extra body unchanged (table test)
+- [x] A server-tool entry returns 400 `Unsupported{Field:"tools[n].type=…"}` before any spawn
+- [x] The refusal message names the field and the reason, with no stale milestone wording
 
 **Verification:**
-- [ ] Tests pass: focused test command
+- [x] Tests pass: focused test command
 
 **Dependencies:** Task 2
 **Files likely touched:** `internal/claudebridge/frames.go`, `frames_test.go`, `errors.go`
@@ -118,19 +118,21 @@ an `anthropic-compatible` account pointing at a fake bridge, returns `tool_calls
 a `tool_result`. Add a translate or server test only where coverage is missing.
 
 **Acceptance criteria:**
-- [ ] An in-package test drives OpenAI chat → Messages → fake bridge tool_use → OpenAI `tool_calls` (stream and non-stream)
-- [ ] `parallel_tool_calls=false` arrives as `tool_choice.disable_parallel_tool_use`, never as a top-level field the bridge refuses
+- [x] An in-package test drives OpenAI chat → Messages → fake bridge tool_use → OpenAI `tool_calls` (stream and non-stream)
+- [x] `parallel_tool_calls=false` arrives as `tool_choice.disable_parallel_tool_use`, never as a top-level field the bridge refuses
 
 **Verification:**
-- [ ] Tests pass: `go test -short -count=1 ./internal/translate/ ./internal/server/`
+- [x] Tests pass: `go test -short -count=1 ./internal/claudebridge/` (path test imports translate)
 
 **Dependencies:** Task 4
-**Files likely touched:** `internal/server/*_test.go` or `internal/translate/*_test.go` (tests only, unless a gap is found)
+**Files likely touched:** `internal/claudebridge/hermes_path_test.go`, `internal/claudebridge/frames.go`
+
+**Found and fixed:** translated Hermes turns carry up to 3–4 message `cache_control` markers, and native adds 2 more. Upstream caps a request at 4, so live it returned `400 … Found 6`. The bridge now keeps the newest 2 (`clientCacheMarkers`). Existing proxy coverage: `TestWireMatrixToolLoopCrossCells`, `TestChatToMessagesHermesBody`.
 **Estimated scope:** S
 
 ## Checkpoint 2: Core
-- [ ] Focused packages green: `go test -short -count=1 ./internal/claudebridge/ ./cmd/ezllm/ ./internal/translate/ ./internal/server/`
-- [ ] `make test-quiet` green
+- [x] Focused packages green: `go test -short -count=1 ./internal/claudebridge/ ./cmd/ezllm/ ./internal/translate/ ./internal/server/`
+- [x] `make test-quiet` green
 - [ ] Review the diff with Calypso
 
 ---

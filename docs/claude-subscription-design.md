@@ -133,6 +133,12 @@ Findings that shape M2:
     `unifiedWindows.five_hour.utilization` and `seven_day.utilization` with reset
     times, which is a better cap signal than any local meter. This is recorded for
     later and not used by M2.
+18. **Native spends two of upstream's four cache breakpoints.** Two client
+    `cache_control` markers plus Hermes's tools cached normally (23,512 read). Four
+    were refused: `API Error: 400 A maximum of 4 blocks with cache_control may be
+    provided. Found 6.` Hermes marks its system prompt and last three messages, so the
+    bridge keeps only the newest two client markers (`clientCacheMarkers`,
+    `internal/claudebridge/frames.go`).
 
 ## 3. Architecture: sidecar bridge, ezllm core untouched
 

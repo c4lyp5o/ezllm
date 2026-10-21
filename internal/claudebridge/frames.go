@@ -1,6 +1,7 @@
 package claudebridge
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -164,6 +165,20 @@ func BuildExtraBody(req Request) (string, error) {
 		}
 		msgs = append(msgs, map[string]any{"role": m.Role, "content": content})
 	}
+	// Tools pass through byte for byte unless they carry a cache marker the
+	// trim may need to remove; only then are they decoded.
+	var tools any
+	if len(req.Tools) > 0 && string(req.Tools) != "null" {
+		tools = req.Tools
+		if bytes.Contains(req.Tools, []byte(`"cache_control"`)) {
+			var decoded any
+			if err := json.Unmarshal(req.Tools, &decoded); err != nil {
+				return "", fmt.Errorf("claude-bridge: tools are not valid JSON: %w", err)
+			}
+			tools = decoded
+		}
+	}
+	trimCacheMarkers(msgs, tools)
 	body := map[string]any{
 		"model":    req.Model,
 		"messages": msgs,
@@ -178,8 +193,8 @@ func BuildExtraBody(req Request) (string, error) {
 	// Measured on CLI 2.1.306: tools in the extra body are the only tools upstream
 	// sees (asked to list them, the model names exactly the client's), and the
 	// resulting tool_use blocks come back under the client's own names.
-	if len(req.Tools) > 0 && string(req.Tools) != "null" {
-		body["tools"] = req.Tools
+	if tools != nil {
+		body["tools"] = tools
 	}
 	if len(req.ToolChoice) > 0 && string(req.ToolChoice) != "null" {
 		body["tool_choice"] = req.ToolChoice
@@ -189,6 +204,48 @@ func BuildExtraBody(req Request) (string, error) {
 		return "", fmt.Errorf("claude-bridge: cannot encode upstream body: %w", err)
 	}
 	return string(out), nil
+}
+
+// clientCacheMarkers is how many cache_control breakpoints the client may keep.
+// Upstream allows four per request and native spends two of its own. Measured
+// on CLI 2.1.306: two client markers cached normally, four were refused with
+// "A maximum of 4 blocks with cache_control may be provided. Found 6." Hermes
+// marks its system prompt and last three messages by default, so without the
+// trim every agent turn on this hop would be a 400.
+const clientCacheMarkers = 2
+
+// trimCacheMarkers keeps the newest clientCacheMarkers breakpoints and strips
+// the rest. Newest first, messages before tools: a marker late in the
+// conversation caches everything before it, tools included, so the older
+// markers are the ones that add least.
+func trimCacheMarkers(msgs []map[string]any, tools any) {
+	kept := 0
+	visit := func(block any) {
+		b, ok := block.(map[string]any)
+		if !ok {
+			return
+		}
+		if _, has := b["cache_control"]; !has {
+			return
+		}
+		if kept < clientCacheMarkers {
+			kept++
+			return
+		}
+		delete(b, "cache_control")
+	}
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if blocks, ok := msgs[i]["content"].([]any); ok {
+			for j := len(blocks) - 1; j >= 0; j-- {
+				visit(blocks[j])
+			}
+		}
+	}
+	if list, ok := tools.([]any); ok {
+		for j := len(list) - 1; j >= 0; j-- {
+			visit(list[j])
+		}
+	}
 }
 
 // BuildFrames renders the conversation as native stream-json input frames. Frames

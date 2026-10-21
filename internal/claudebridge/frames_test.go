@@ -273,3 +273,55 @@ func TestParseRequestAcceptsCustomTypedTool(t *testing.T) {
 		t.Fatalf("type custom is a client tool: %v", err)
 	}
 }
+
+// Hermes marks its system prompt and the last three messages; native adds two
+// markers of its own and upstream allows four. Without the trim, measured on
+// 2.1.306: "A maximum of 4 blocks with cache_control may be provided. Found 6."
+func TestExtraBodyKeepsOnlyTheNewestTwoCacheMarkers(t *testing.T) {
+	mark := `,"cache_control":{"type":"ephemeral"}`
+	req, err := ParseRequest([]byte(`{"model":"claude-haiku-5-5",` +
+		`"tools":[{"name":"t","input_schema":{"type":"object"}` + mark + `}],"messages":[` +
+		`{"role":"user","content":[{"type":"text","text":"u0"` + mark + `}]},` +
+		`{"role":"assistant","content":[{"type":"text","text":"a0"` + mark + `}]},` +
+		`{"role":"user","content":[{"type":"text","text":"u1"` + mark + `}]},` +
+		`{"role":"assistant","content":[{"type":"text","text":"a1"}]},` +
+		`{"role":"user","content":[{"type":"text","text":"u2"` + mark + `}]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Tools    []map[string]any `json:"tools"`
+		Messages []struct {
+			Content []map[string]any `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(body(t, req)), &got); err != nil {
+		t.Fatal(err)
+	}
+	var kept []string
+	for _, m := range got.Messages {
+		for _, b := range m.Content {
+			if b["cache_control"] != nil {
+				kept = append(kept, b["text"].(string))
+			}
+		}
+	}
+	if strings.Join(kept, ",") != "u1,u2" {
+		t.Errorf("message markers kept on %v, want u1,u2 (the newest two)", kept)
+	}
+	if got.Tools[0]["cache_control"] != nil {
+		t.Error("tool marker survived past the two-marker budget")
+	}
+}
+
+func TestExtraBodyKeepsToolMarkerWithinBudget(t *testing.T) {
+	req, err := ParseRequest([]byte(`{"model":"claude-haiku-5-5",` +
+		`"tools":[{"name":"t","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}}],` +
+		`"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral"}}]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := body(t, req); strings.Count(b, "cache_control") != 2 {
+		t.Errorf("two markers fit the budget and must both survive: %s", b)
+	}
+}

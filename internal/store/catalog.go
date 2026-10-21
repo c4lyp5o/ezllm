@@ -379,6 +379,10 @@ WHERE account_id=? AND model_id=?`,
 				return err
 			}
 		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE accounts SET catalog_synced_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, accountID); err != nil {
+			return err
+		}
 		return d.syncAutoFree(ctx, tx, 0)
 	})
 }

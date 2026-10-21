@@ -26,7 +26,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 26
+const schemaVersion = 27
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -240,6 +240,9 @@ func (d *DB) migrate() error {
 		if err := d.alterComboAutoFree(context.Background()); err != nil {
 			return fmt.Errorf("store: alter combo auto_free: %w", err)
 		}
+		if err := d.alterAccountCatalogSynced(context.Background()); err != nil {
+			return fmt.Errorf("store: alter accounts catalog_synced_at: %w", err)
+		}
 		if _, err := d.w.Exec(schemaSQL); err != nil {
 			return fmt.Errorf("store: reapply schema: %w", err)
 		}
@@ -329,6 +332,9 @@ func (d *DB) migrate() error {
 		if err := d.alterComboAutoFree(context.Background()); err != nil {
 			return fmt.Errorf("store: alter combo auto_free: %w", err)
 		}
+		if err := d.alterAccountCatalogSynced(context.Background()); err != nil {
+			return fmt.Errorf("store: alter accounts catalog_synced_at: %w", err)
+		}
 		if _, err := d.w.Exec(schemaSQL); err != nil {
 			return fmt.Errorf("store: migrate %d->%d: %w", cur, schemaVersion, err)
 		}
@@ -337,6 +343,22 @@ func (d *DB) migrate() error {
 		}
 	}
 	return nil
+}
+
+// alterAccountCatalogSynced adds accounts.catalog_synced_at on databases
+// created before v27. Guarded by a column check: ALTER TABLE ADD COLUMN is
+// not idempotent. Existing rows read as never synced until the next refresh.
+func (d *DB) alterAccountCatalogSynced(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "accounts")
+	if err != nil || !exists {
+		return err
+	}
+	has, err := hasColumn(ctx, d.w, "accounts", "catalog_synced_at")
+	if err != nil || has {
+		return err
+	}
+	_, err = d.w.ExecContext(ctx, `ALTER TABLE accounts ADD COLUMN catalog_synced_at TEXT`)
+	return err
 }
 
 // alterAccountUsageConvention adds accounts.usage_convention on databases created

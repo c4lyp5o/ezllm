@@ -38,6 +38,18 @@ file in the same commit, or the test fails.
 - **Fix: the Claude bridge no longer leaks on failed requests.** An early
   return (timeout, client disconnect) left a blocked reader goroutine and an
   unreaped zombie CLI process each time.
+- **Notification bell** (top right; schema v27): new, gone and broken free
+  models, failed catalog and price refreshes, and client tokens at their
+  budget. Repeats fold into one entry with a count; clicking one opens the
+  page it concerns. `GET /admin/notifications`, `POST …/read`.
+- **Catalog saves are observable**: every save logs exactly which models came
+  and went, the Providers page shows when each catalog last synced, and models
+  that just arrived are priced at once instead of at the next daily run.
+- **Fix: "Test all" no longer deletes proven models from the catalog.** Its
+  untested-only filter ran in place over the very list the catalog was saved
+  from, so every model that already had verdicts was dropped (with them).
+  And a test-all with nothing left to probe now saves the catalog it listed
+  instead of answering "synced" and keeping the old one.
 - **Fix: audio transcription and image edits answer 429 when rate-limited.**
   The multipart path kept its own copy of the post-dispatch code and had
   drifted: it answered 502, and skipped hop health and the failover trail.

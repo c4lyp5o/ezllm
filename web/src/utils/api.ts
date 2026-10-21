@@ -358,6 +358,8 @@ export type Account = {
   keys: KeyRow[];
   quota?: QuotaSnapshot | null;
   models_count?: number;
+  /** When a catalog listing was last saved (refresh, key add, manual sync). */
+  catalog_synced_at?: string;
   protocol_support?: ProtocolSupport | null;
 };
 
@@ -993,3 +995,21 @@ export const STRATEGY_HINTS: Record<string, string> = {
   sticky_last_good: 'stay on the last working hop, and release it after sticky_idle_s of quiet',
   least_used: 'send each request to the hop with the least recent traffic',
 };
+
+// ── notifications (the bell) ──
+export type Notification = {
+  id: number;
+  kind: string;
+  severity: 'info' | 'warn' | 'error';
+  title: string;
+  body?: string;
+  data?: Record<string, unknown>;
+  count: number;
+  created_at: string;
+  updated_at: string;
+  read_at: string | null;
+};
+export const listNotifications = (limit = 30) =>
+  get<{ items: Notification[]; unread: number }>(`/admin/notifications?limit=${limit}`);
+export const markNotificationsRead = (ids: number[] | 'all') =>
+  post<null>('/admin/notifications/read', ids === 'all' ? { all: true } : { ids });

@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -100,6 +101,12 @@ type Server struct {
 	// comboAutoProbe: a combo write probes its untested hop models
 	// (combo_autoprobe.go). Off in unit tests unless they ask for it.
 	comboAutoProbe bool
+	// pricesWanted is set when a catalog save added models, so the refresh
+	// pass prices them now instead of at the next daily price run.
+	pricesWanted atomic.Bool
+	// priceRefreshOn: StartPriceRefresh ran (EZLLM_PRICE_REFRESH not off),
+	// so pricing new models is wanted. Never set in unit tests: no network.
+	priceRefreshOn atomic.Bool
 	// cspOnce/csp cache the dashboard Content-Security-Policy (spa.go).
 	cspOnce sync.Once
 	csp     string
@@ -286,6 +293,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /admin/overview", s.admin(s.handleOverview))
 	s.mux.HandleFunc("GET /admin/requests", s.admin(s.handleRequests))
 	s.mux.HandleFunc("GET /admin/stream", s.admin(s.handleStream))
+	s.mux.HandleFunc("GET /admin/notifications", s.admin(s.handleNotifications))
+	s.mux.HandleFunc("POST /admin/notifications/read", s.admin(s.handleNotificationsRead))
 
 	// Dashboard GitHub device flow: the browser taps Authorize, the server
 	// does every other step (code request, poll, mint, session storage) so
@@ -1186,6 +1195,7 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, token stri
 	if s.db != nil {
 		if budget, berr := s.db.ClientBudgetStatus(r.Context(), name); berr == nil {
 			if budget.Limit > 0 && budget.Used >= budget.Limit {
+				s.noteBudgetReached(name, budget)
 				writeErrExtra(w, http.StatusTooManyRequests, "rate_limited",
 					fmt.Sprintf("token budget reached (%d of %d tokens this %s)", budget.Used, budget.Limit, budget.Window),
 					map[string]any{"limit": budget.Limit, "used": budget.Used, "window": budget.Window})

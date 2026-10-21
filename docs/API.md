@@ -597,6 +597,26 @@ past trusted hops) when the peer is in `EZLLM_TRUSTED_PROXIES`; a request that
 waits 2 s without one gets `429` + `Retry-After: 1`, which does not count as
 a failed attempt.
 
+### `GET /admin/notifications` · `POST /admin/notifications/read` (schema v27)
+The dashboard bell. `GET ?limit=N` (default 50, max 200) →
+`{"items":[{id, kind, severity, title, body, data, count, created_at, updated_at, read_at}], "unread": N}`,
+newest update first. `POST …/read` takes `{"ids":[…]}` or `{"all":true}` → `204`.
+
+| `kind` | `severity` | Raised when |
+|---|---|---|
+| `free_models_added` | info | a catalog save brings free models (first catalog: "available") |
+| `free_models_removed` | info | free models leave a provider's catalog |
+| `free_model_broken` | warn | a free model's probe fails on every surface (it leaves the pools) |
+| `catalog_refresh_failed` | warn | the periodic refresh cannot list an account (repeats fold) |
+| `client_budget_reached` | warn | a client token hits its cap (once per window) |
+| `price_refresh_failed` | warn | the daily price refresh fails (repeats fold) |
+
+A repeat of an unread event with the same dedup key updates that row (`count`
++ 1) instead of adding one. Read rows older than 30 days are pruned; the table
+keeps at most 500. Every catalog save also logs exactly which models were added
+and removed, stamps `catalog_synced_at` on the account (`GET /admin/accounts`),
+and, when models were added and the price refresh is on, prices them right away.
+
 ### `GET /admin/stream` → SSE
 Two event types: `snapshot` (last 20 calls on connect, newest first) and `calls` (each committed
 ledger batch).

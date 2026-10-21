@@ -7,6 +7,7 @@ import { GateError, completeSetup, dashboardLogin, getSetupStatus, isUnlocked, l
 import { DUR, SelectionLine, spring } from './components/motion';
 import RailwayBackground from './components/RailwayBackground';
 import PasswordStrength from './components/PasswordStrength';
+import NotificationBell from './components/NotificationBell';
 import { MIN_PASSWORD } from './utils/passwordStrength';
 import { readTheme, setTheme, type Theme } from './utils/theme';
 import { Spinner, btn, cx } from './components/ui';
@@ -340,6 +341,16 @@ export default function App() {
   const [token, setTokenState] = useState<string | null>(() => (isUnlocked() ? 'cookie' : null));
   const [drawer, setDrawer] = useState(false);
   const location = useLocation();
+  // One bell, placed by width: in the mobile top bar, or beside the page
+  // title on desktop (lg). Rendering only one keeps a single poller.
+  const [desktop, setDesktop] = useState(() => window.matchMedia?.('(min-width: 1024px)').matches ?? true);
+  useEffect(() => {
+    const mq = window.matchMedia?.('(min-width: 1024px)');
+    if (!mq) return;
+    const on = () => setDesktop(mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
 
   const closeDrawer = useCallback(() => setDrawer(false), []);
 
@@ -365,6 +376,7 @@ export default function App() {
         </button>
         {LOGO}
         <span className="text-[14px] font-semibold tracking-tight">ezllm</span>
+        <div className="ml-auto">{!desktop && <NotificationBell />}</div>
       </header>
 
       {/* Sidebar — desktop */}
@@ -408,7 +420,10 @@ export default function App() {
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <h1 className="text-[24px] font-semibold tracking-[-0.01em]">{header.title}</h1>
           <p className="text-[14px] text-mute">{header.sub}</p>
-          <div id="page-aside" className="flex flex-wrap items-center gap-2 self-center sm:ml-auto" />
+          <div className="flex flex-wrap items-center gap-2 self-center sm:ml-auto">
+            <div id="page-aside" className="flex flex-wrap items-center gap-2" />
+            {desktop && <NotificationBell />}
+          </div>
         </div>
         {isAnalytics(location.pathname) && (
           <nav className="mt-5 flex gap-1 border-b border-line" aria-label="Analytics views">

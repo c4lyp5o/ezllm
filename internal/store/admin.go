@@ -52,13 +52,16 @@ type AccountSummary struct {
 	// ManagementKeyExpiresAt: when the stored web-session cookie (Command
 	// Code) expires, RFC3339, as read from the pasted session_data. Empty
 	// when unknown — never guessed.
-	ManagementKeyExpiresAt string         `json:"management_key_expires_at,omitempty"`
-	CreatedAt              string         `json:"created_at"`
-	UpdatedAt              string         `json:"updated_at"`
-	Keys                   []KeySummary   `json:"keys"`
-	Quota                  *QuotaSummary  `json:"quota"`
-	ModelsCount            int            `json:"models_count"`
-	ProtocolSupport        map[string]int `json:"protocol_support"`
+	ManagementKeyExpiresAt string `json:"management_key_expires_at,omitempty"`
+	// CatalogSyncedAt is when a catalog listing was last saved (refresh, key
+	// add, manual sync); empty = never.
+	CatalogSyncedAt string         `json:"catalog_synced_at,omitempty"`
+	CreatedAt       string         `json:"created_at"`
+	UpdatedAt       string         `json:"updated_at"`
+	Keys            []KeySummary   `json:"keys"`
+	Quota           *QuotaSummary  `json:"quota"`
+	ModelsCount     int            `json:"models_count"`
+	ProtocolSupport map[string]int `json:"protocol_support"`
 }
 
 // KeySummary is the only surviving shape of a credential: hint + test history.
@@ -98,7 +101,7 @@ SELECT id, name, namespace, kind, base_url, enabled, requires_session_header,
        quota_mode, cap_window, cap_tokens, COALESCE(probe_delay_ms,400),
        COALESCE(rate_limit,0), COALESCE(rate_window,''),
        COALESCE(notes,''), created_at, updated_at, COALESCE(usage_convention,'auto'),
-       COALESCE(management_key_plain,'')
+       COALESCE(management_key_plain,''), COALESCE(catalog_synced_at,'')
 FROM accounts ORDER BY namespace`)
 	if err != nil {
 		return nil, err
@@ -112,7 +115,7 @@ FROM accounts ORDER BY namespace`)
 		if err := rows.Scan(&a.ID, &a.Name, &a.Namespace, &a.Kind, &a.BaseURL, &a.Enabled,
 			&a.RequiresSession, &a.QuotaMode, &a.CapWindow, &a.CapTokens,
 			&a.ProbeDelayMS, &a.RateLimit, &a.RateWindow,
-			&a.Notes, &a.CreatedAt, &a.UpdatedAt, &a.UsageConvention, &managementKey); err != nil {
+			&a.Notes, &a.CreatedAt, &a.UpdatedAt, &a.UsageConvention, &managementKey, &a.CatalogSyncedAt); err != nil {
 			return nil, err
 		}
 		a.ManagementKeySet = strings.TrimSpace(managementKey) != ""

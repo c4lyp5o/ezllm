@@ -1461,9 +1461,13 @@ function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
           </span>
         </button>
         <button type="button" tabIndex={-1} aria-hidden="true" onClick={() => setOpen((o) => !o)}
+          title={a.catalog_synced_at ? `catalog synced ${relTime(a.catalog_synced_at)}` : 'catalog not synced yet'}
           className="hidden text-right text-[13px] md:block">
           <span className="tnum text-ink">{a.models_count != null ? nfmt(a.models_count) : '–'}</span>
           <span className="ml-1 text-mute">models</span>
+          <span className="block text-[11px] text-mute">
+            {a.catalog_synced_at ? `synced ${relTime(a.catalog_synced_at)}` : 'not synced yet'}
+          </span>
         </button>
         <div className="col-span-2 flex min-w-0 items-center gap-2 md:col-span-1">
           <div className="min-w-0 flex-1"><QuotaSummary quota={a.quota} /></div>

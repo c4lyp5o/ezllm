@@ -213,6 +213,7 @@ func (s *Server) StartPriceRefresh(ctx context.Context, hour int, loc *time.Loca
 	if loc == nil {
 		loc = time.UTC
 	}
+	s.priceRefreshOn.Store(true)
 	go s.priceRefreshLoop(ctx, hour, loc)
 }
 
@@ -247,6 +248,12 @@ func (s *Server) runScheduledPriceRefresh(ctx context.Context) {
 		if s.log != nil {
 			s.log.Error("scheduled price refresh failed", "err", err)
 		}
+		s.notify(store.NotificationInput{
+			Kind: store.NotePriceRefreshFailed, Severity: "warn",
+			Title:    "Price refresh failed",
+			Body:     "Costs keep yesterday's prices until the next run. " + err.Error(),
+			DedupKey: "price_refresh_failed",
+		})
 		return
 	}
 	if s.log != nil {

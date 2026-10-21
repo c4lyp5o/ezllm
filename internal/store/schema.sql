@@ -20,6 +20,27 @@ CREATE TABLE IF NOT EXISTS dashboard_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_dashboard_sessions_expiry ON dashboard_sessions(expires_at);
 
+-- Operator notifications (v27): the dashboard bell. A repeat of the same
+-- event (same dedup_key) updates its one UNREAD row — count + 1, newest
+-- title/body/data — instead of stacking up; once read, the next occurrence
+-- starts a new row.
+CREATE TABLE IF NOT EXISTS notifications (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind       TEXT NOT NULL,
+    severity   TEXT NOT NULL DEFAULT 'info',   -- info|warn|error
+    title      TEXT NOT NULL,
+    body       TEXT NOT NULL DEFAULT '',
+    data       TEXT NOT NULL DEFAULT '',       -- JSON detail (account, models, …)
+    dedup_key  TEXT NOT NULL DEFAULT '',
+    count      INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    read_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_updated ON notifications(updated_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_open_dedup
+    ON notifications(dedup_key) WHERE read_at IS NULL AND dedup_key <> '';
+
 CREATE TABLE IF NOT EXISTS schema_version (
   version    INTEGER PRIMARY KEY,
   applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
@@ -54,6 +75,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   usage_convention TEXT NOT NULL DEFAULT 'auto',
   notes       TEXT,
   management_key_plain TEXT,                    -- optional second credential (e.g. TokenRouter management key), encrypted at rest
+  catalog_synced_at TEXT,                       -- v27: last time a catalog listing was saved (NULL = never)
   created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );

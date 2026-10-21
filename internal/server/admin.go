@@ -607,7 +607,11 @@ func (s *Server) persistTest(ctx context.Context, accountID, keyID int64, test *
 		return err
 	}
 	if len(test.Catalog) > 0 {
-		if err := s.db.UpsertModels(ctx, accountID, test.Catalog); err != nil {
+		ns := ""
+		if acc, err := s.db.GetAccount(ctx, accountID); err == nil {
+			ns = acc.Namespace
+		}
+		if err := s.saveCatalog(ctx, accountID, ns, test.Catalog, "key added"); err != nil {
 			return err
 		}
 	}
@@ -1040,10 +1044,17 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"retryable": true})
 		return
 	}
+	// Save the full listed catalog FIRST, before any scoping or early
+	// return: a test-all with nothing left to probe used to answer
+	// "synced: N" while keeping the old catalog.
+	if err := s.saveCatalog(r.Context(), id, acct.Namespace, models, "manual sync"); err != nil {
+		s.writeStoreErr(w, err)
+		return
+	}
 	// Optional scope: the SWEEP probes only the named models. The catalog
-	// refresh ALWAYS upserts the full fetched catalog — handing the filtered
-	// list to UpsertModels would delete every unnamed row (a scoped sync once
-	// pruned command-code 87→3 in prod before this was fixed).
+	// was saved in full above — handing a filtered list to UpsertModels
+	// would delete every unnamed row (a scoped sync once pruned command-code
+	// 87→3 in prod before this was fixed).
 	sweepModels := models
 	if len(body.Models) > 0 {
 		want := map[string]bool{}
@@ -1083,7 +1094,10 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		for _, e := range verdicts {
 			byID[e.ID] = e
 		}
-		kept := sweepModels[:0]
+		// A fresh slice, never sweepModels[:0]: without a scope sweepModels
+		// IS models, and filtering in place overwrote the catalog (proven
+		// models replaced by untested ones) before it was saved.
+		kept := make([]provider.ModelInfo, 0, len(sweepModels))
 		for _, m := range sweepModels {
 			e, ok := byID[m.ID]
 			if !ok {
@@ -1110,10 +1124,6 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			"note":             "nothing to probe: every model already carries a verdict on the requested surfaces",
 			"protocol_support": protocolCounts(entries),
 		})
-		return
-	}
-	if err := s.db.UpsertModels(r.Context(), id, models); err != nil {
-		s.writeStoreErr(w, err)
 		return
 	}
 

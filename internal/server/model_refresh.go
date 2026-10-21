@@ -2,7 +2,12 @@ package server
 
 import (
 	"context"
+	"fmt"
+	"sort"
+	"strconv"
 	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/store"
 )
 
 // StartModelRefresh re-lists every enabled account's catalog at boot and on
@@ -77,14 +82,31 @@ func (s *Server) refreshCatalogsOnce(ctx context.Context) {
 		models, err := adapter.ListModels(ctx, *acct, key)
 		if err != nil {
 			s.log.Warn("model refresh failed; keeping last catalog", "account", summary.Namespace, "err", err)
+			s.notify(store.NotificationInput{
+				Kind: store.NoteCatalogRefreshFailed, Severity: "warn",
+				Title:    "Catalog refresh failed for " + summary.Namespace,
+				Body:     "Routing keeps the last catalog. " + err.Error(),
+				Data:     map[string]any{"account_id": summary.ID, "account": summary.Namespace},
+				DedupKey: "catalog_refresh_failed:" + strconv.FormatInt(summary.ID, 10),
+			})
 			continue
 		}
-		if err := s.db.UpsertModels(ctx, summary.ID, models); err != nil {
+		if err := s.saveCatalog(ctx, summary.ID, summary.Namespace, models, "catalog refresh"); err != nil {
 			s.log.Warn("model refresh: persist failed", "account", summary.Namespace, "err", err)
 			continue
 		}
 		s.log.Info("model catalog refreshed", "account", summary.Namespace, "models", len(models))
 		go s.probeFreeModels(summary.ID, "catalog refresh")
+	}
+	// Models that just arrived get prices now, not at the next daily run.
+	// One pass covers every account (the price source is one document).
+	if s.pricesWanted.CompareAndSwap(true, false) && s.priceRefreshOn.Load() {
+		res, err := s.refreshPrices(ctx, "litellm", "")
+		if err != nil {
+			s.log.Warn("price refresh for new models failed", "err", err)
+		} else {
+			s.log.Info("priced new models", "matched", res.Matched)
+		}
 	}
 }
 
@@ -108,5 +130,51 @@ func (s *Server) probeFreeModels(acctID int64, origin string) {
 	if len(ids) == 0 {
 		return
 	}
+	brokenBefore := s.brokenModels(acctID)
 	s.probeAccountModels(origin, acctID, ids)
+	brokenAfter := s.brokenModels(acctID)
+	free := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		free[id] = true
+	}
+	var newlyBroken []string
+	for id := range brokenAfter {
+		if free[id] && !brokenBefore[id] {
+			newlyBroken = append(newlyBroken, id)
+		}
+	}
+	if len(newlyBroken) == 0 {
+		return
+	}
+	sort.Strings(newlyBroken)
+	ns := strconv.FormatInt(acctID, 10)
+	if acc, err := s.db.GetAccount(context.Background(), acctID); err == nil {
+		ns = acc.Namespace
+	}
+	n := len(newlyBroken)
+	s.notify(store.NotificationInput{
+		Kind: store.NoteFreeModelBroken, Severity: "warn",
+		Title: fmt.Sprintf("%d free %s on %s failed every probe", n, plural(n, "model", "models"), ns),
+		Body:  "Left out of the auto-free combos: " + noteList(newlyBroken),
+		Data:  map[string]any{"account_id": acctID, "account": ns, "models": newlyBroken},
+	})
+}
+
+// brokenModels is the set of an account's models whose probe verdict is
+// "unsupported" on every surface — the ones auto-free pools leave out.
+func (s *Server) brokenModels(acctID int64) map[string]bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out := map[string]bool{}
+	rows, err := s.db.ListModels(ctx, acctID)
+	if err != nil {
+		return out
+	}
+	no := func(b *bool) bool { return b != nil && !*b }
+	for _, m := range rows {
+		if no(m.OpenAI) && no(m.Anthropic) && no(m.Responses) {
+			out[m.ID] = true
+		}
+	}
+	return out
 }

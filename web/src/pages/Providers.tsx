@@ -908,7 +908,9 @@ function EditAccountModal({ account, onClose, onSaved }: { account: Account | nu
 const PIN_SURFACES = ['openai', 'anthropic', 'responses', 'embeddings', 'images_gen', 'audio_tts', 'audio_stt',
   'images_edit', 'moderations', 'rerank', 'videos_gen', 'music_gen'] as const;
 
-function ModelsDrawer({ id }: { id: number }) {
+// syncedAt is the account's catalog_synced_at: a manual sync bumps it, so the
+// drawer refetches instead of keeping the list it loaded when it opened.
+function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
   const [models, setModels] = useState<ModelRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [pinErr, setPinErr] = useState<string | null>(null);
@@ -938,7 +940,7 @@ function ModelsDrawer({ id }: { id: number }) {
       .catch((e) => { if (alive) setErr(e instanceof Error ? e.message : 'failed to load models'); });
     sweepStatus(id).then((s) => { if (alive) setSweep(s); }).catch(() => undefined);
     return () => { alive = false; };
-  }, [id]);
+  }, [id, syncedAt]);
 
   // Poll while a sweep runs: status for the clock, models for the verdicts.
   const running = sweep?.running === true;
@@ -1584,7 +1586,7 @@ function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
           and animating it inside the section above would nest two height
           animations and leave the row's frame out of step with its content. */}
       <Collapse open={open}>
-        <ModelsDrawer id={a.id} />
+        <ModelsDrawer id={a.id} syncedAt={a.catalog_synced_at} />
       </Collapse>
     </div>
   );

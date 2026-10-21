@@ -234,7 +234,7 @@ function QuotaBars({ quota }: { quota: NonNullable<Account['quota']> }) {
                 transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
               />
             </div>
-            <span className="tnum w-10 text-right font-mono text-[12px] text-dim">{v}%</span>
+            <span className="tnum w-10 text-right font-mono text-[12px] text-dim">{Math.round(v)}%</span>
           </div>
         ))}
       </div>
@@ -283,7 +283,7 @@ function QuotaSummary({ quota }: { quota: Account['quota'] }) {
     // The tightest window speaks for the provider: it is the one that refuses first.
     const [k, v] = pcts.reduce((m, r) => (r[1] > m[1] ? r : m));
     return (
-      <div className="flex items-center gap-2" title={pcts.map(([n, x]) => `${n} ${x}%`).join(' · ')}>
+      <div className="flex items-center gap-2" title={pcts.map(([n, x]) => `${n} ${Math.round(x)}%`).join(' · ')}>
         <span className="w-14 flex-none text-[12px] text-mute">{k}</span>
         <div className="h-1 min-w-10 flex-1 overflow-hidden rounded-full bg-shade">
           <motion.div
@@ -292,7 +292,7 @@ function QuotaSummary({ quota }: { quota: Account['quota'] }) {
             animate={{ width: `${Math.min(100, Math.max(0, v))}%` }}
             transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }} />
         </div>
-        <span className="tnum w-9 flex-none text-right text-[12px] text-ink">{v}%</span>
+        <span className="tnum w-9 flex-none text-right text-[12px] text-ink">{Math.round(v)}%</span>
       </div>
     );
   }
@@ -438,7 +438,9 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
       const preset = PROVIDER_PRESETS[d.preset];
       const payload = {
         name: d.name.trim(), namespace: d.namespace.trim(), kind: preset.kind,
-        base_url: preset.baseURL ?? d.base_url.trim(), probe_delay_ms: d.probe_delay_ms,
+        // Local Ollama is the one preset whose URL field stays editable (a remote
+        // box) — send what the operator typed, not the preset's localhost default.
+        base_url: d.preset === 'ollama-local' ? d.base_url.trim() : preset.baseURL ?? d.base_url.trim(), probe_delay_ms: d.probe_delay_ms,
         requires_session_header: preset.sessionHeader ?? d.requiresSessionHeader,
         custom_headers: customHeaders, notes: d.notes.trim(),
         management_key: d.managementKey.trim(),

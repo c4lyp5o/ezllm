@@ -32,13 +32,20 @@ type Message struct {
 	Content json.RawMessage `json:"content"`
 }
 
-// Unsupported names a request field the bridge cannot honour yet. It is a typed
-// refusal, not a silent drop: a client that asked for tools must not get a
-// tool-less answer and a 200.
-type Unsupported struct{ Field string }
+// Unsupported names a request field the bridge cannot honour. It is a typed
+// refusal, not a silent drop: a client that asked for something this hop cannot
+// do must not get an answer without it and a 200.
+type Unsupported struct {
+	Field  string
+	Reason string
+}
 
 func (u Unsupported) Error() string {
-	return "claude-bridge: " + u.Field + " is not supported on this hop (M1 is text-only)"
+	msg := "claude-bridge: " + u.Field + " is not supported on this hop"
+	if u.Reason != "" {
+		msg += " (" + u.Reason + ")"
+	}
+	return msg
 }
 
 // ParseRequest decodes and validates a /v1/messages body.
@@ -56,11 +63,13 @@ func ParseRequest(body []byte) (Request, error) {
 	// Raw-map pass to see fields the typed struct ignores.
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(body, &raw); err == nil {
-		for _, field := range []string{"parallel_tool_calls"} {
-			if _, ok := raw[field]; ok {
-				return Request{}, Unsupported{Field: field}
-			}
+		if _, ok := raw["parallel_tool_calls"]; ok {
+			return Request{}, Unsupported{Field: "parallel_tool_calls",
+				Reason: "an OpenAI field; on Messages use tool_choice.disable_parallel_tool_use"}
 		}
+	}
+	if err := checkClientTools(req.Tools); err != nil {
+		return Request{}, err
 	}
 	last := req.Messages[len(req.Messages)-1]
 	if last.Role != "user" {
@@ -83,6 +92,33 @@ func ParseRequest(body []byte) (Request, error) {
 		}
 	}
 	return req, nil
+}
+
+// checkClientTools refuses Anthropic server tools (web_search_*, code_execution_*,
+// …): upstream would run those itself and draw the plan for it, which breaks this
+// hop's promise that nothing executes on the client's behalf. Client tools carry
+// no type, or type "custom".
+func checkClientTools(raw json.RawMessage) error {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var tools []struct {
+		Type string `json:"type"`
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(raw, &tools); err != nil {
+		return fmt.Errorf("claude-bridge: tools must be an array of tool definitions: %w", err)
+	}
+	for i, tool := range tools {
+		if tool.Type != "" && tool.Type != "custom" {
+			return Unsupported{Field: fmt.Sprintf("tools[%d].type=%s", i, tool.Type),
+				Reason: "server tools execute upstream; only client tools pass through"}
+		}
+		if tool.Name == "" {
+			return fmt.Errorf("claude-bridge: tools[%d] has no name", i)
+		}
+	}
+	return nil
 }
 
 // SystemText renders the system field (string or text blocks) for --system-prompt-file.

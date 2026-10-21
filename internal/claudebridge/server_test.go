@@ -247,3 +247,20 @@ func TestHealthzKeepsTheTwoFieldContract(t *testing.T) {
 		t.Errorf("healthz must carry exactly {status,version}, got %v", got)
 	}
 }
+
+// A refused tool set never reaches the CLI: no process, no plan draw.
+func TestMessagesRefusesServerToolsBeforeSpawn(t *testing.T) {
+	f := &fakeExec{}
+	rec := post(t, testServer(f), `{"model":"claude-haiku-5-5","max_tokens":8,`+
+		`"tools":[{"type":"code_execution_20250522","name":"code_execution"}],`+
+		`"messages":[{"role":"user","content":"hi"}]}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400", rec.Code)
+	}
+	if f.req.Model != "" {
+		t.Fatal("a refused request must never reach the CLI")
+	}
+	if !strings.Contains(rec.Body.String(), "chat_tools_unsupported") {
+		t.Errorf("body = %s, want code chat_tools_unsupported", rec.Body)
+	}
+}

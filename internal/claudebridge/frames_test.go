@@ -220,3 +220,56 @@ func TestSessionIDStableAcrossToolTurns(t *testing.T) {
 		t.Errorf("session id moved across tool turns: %s vs %s", a, b)
 	}
 }
+
+// Every tool_choice form reaches upstream as sent; measured on 2.1.306, native
+// honours auto, any, a named tool and none.
+func TestToolChoiceFormsPassThroughUnchanged(t *testing.T) {
+	for _, choice := range []string{
+		`{"type":"auto"}`,
+		`{"type":"any"}`,
+		`{"type":"tool","name":"get_weather"}`,
+		`{"type":"none"}`,
+		`{"type":"auto","disable_parallel_tool_use":true}`,
+	} {
+		req, err := ParseRequest([]byte(`{"model":"claude-haiku-5-5","tool_choice":` + choice +
+			`,"tools":[{"name":"get_weather","input_schema":{"type":"object"}}],` +
+			`"messages":[{"role":"user","content":"hi"}]}`))
+		if err != nil {
+			t.Fatalf("%s: %v", choice, err)
+		}
+		var got struct {
+			ToolChoice json.RawMessage `json:"tool_choice"`
+		}
+		if err := json.Unmarshal([]byte(body(t, req)), &got); err != nil {
+			t.Fatal(err)
+		}
+		if string(got.ToolChoice) != choice {
+			t.Errorf("tool_choice = %s, want %s", got.ToolChoice, choice)
+		}
+	}
+}
+
+func TestParseRequestRefusesServerTools(t *testing.T) {
+	_, err := ParseRequest([]byte(`{"model":"claude-haiku-5-5","tools":[` +
+		`{"name":"get_weather","input_schema":{"type":"object"}},` +
+		`{"type":"web_search_20250305","name":"web_search"}],` +
+		`"messages":[{"role":"user","content":"hi"}]}`))
+	u, ok := err.(Unsupported)
+	if !ok {
+		t.Fatalf("want Unsupported, got %T: %v", err, err)
+	}
+	if u.Field != "tools[1].type=web_search_20250305" {
+		t.Errorf("Field = %q", u.Field)
+	}
+	if msg := u.Error(); strings.Contains(msg, "M1") || !strings.Contains(msg, "server tools execute upstream") {
+		t.Errorf("refusal must name its reason, without stale milestone wording: %q", msg)
+	}
+}
+
+func TestParseRequestAcceptsCustomTypedTool(t *testing.T) {
+	if _, err := ParseRequest([]byte(`{"model":"claude-haiku-5-5","tools":[` +
+		`{"type":"custom","name":"get_weather","input_schema":{"type":"object"}}],` +
+		`"messages":[{"role":"user","content":"hi"}]}`)); err != nil {
+		t.Fatalf("type custom is a client tool: %v", err)
+	}
+}

@@ -37,7 +37,7 @@ services:
       # public surface: /v1, /healthz, the dashboard shell
       - "traefik.http.routers.ezllm.rule=Host(`${EZLLM_HOST:-llm.calypso.dedyn.io}`)"
       - "traefik.http.routers.ezllm.entrypoints=websecure"
-      - "traefik.http.routers.ezllm.middlewares=enhanced-security@file"
+      - "traefik.http.routers.ezllm.middlewares=ezllm-security@file"
       - "traefik.http.services.ezllm.loadbalancer.server.port=20129"
 
       # control plane: public, guarded by the dashboard password + a per-source
@@ -48,7 +48,7 @@ services:
       - "traefik.http.routers.ezllm-admin.rule=Host(`${EZLLM_HOST:-llm.calypso.dedyn.io}`) && PathPrefix(`/admin`)"
       - "traefik.http.routers.ezllm-admin.entrypoints=websecure"
       - "traefik.http.routers.ezllm-admin.priority=100"
-      - "traefik.http.routers.ezllm-admin.middlewares=ezllm-admin-limit@file,enhanced-security@file"
+      - "traefik.http.routers.ezllm-admin.middlewares=ezllm-admin-limit@file,ezllm-security@file"
       - "traefik.http.routers.ezllm-admin.service=ezllm"
 
       # the sign-in and first-boot setup endpoints get a tighter budget than
@@ -56,7 +56,7 @@ services:
       - "traefik.http.routers.ezllm-login.rule=Host(`${EZLLM_HOST:-llm.calypso.dedyn.io}`) && (Path(`/admin/login`) || Path(`/admin/setup`))"
       - "traefik.http.routers.ezllm-login.entrypoints=websecure"
       - "traefik.http.routers.ezllm-login.priority=200"
-      - "traefik.http.routers.ezllm-login.middlewares=ezllm-login-limit@file,enhanced-security@file"
+      - "traefik.http.routers.ezllm-login.middlewares=ezllm-login-limit@file,ezllm-security@file"
       - "traefik.http.routers.ezllm-login.service=ezllm"
 
 networks:

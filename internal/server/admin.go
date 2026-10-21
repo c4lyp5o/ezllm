@@ -623,6 +623,10 @@ func (s *Server) deferProtocol(accountID, keyID int64, acct provider.Account, ke
 	}
 	models := test.Catalog
 	go func() {
+		// The sample sweep is capped at a few models; free models it did not
+		// reach are probed after it (they cost no credits), sequenced so the
+		// two never hit the account at once.
+		defer s.probeFreeModels(accountID, "key added")
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 		res := s.tester.ProtocolSweep(ctx, acct, key, models, registration.Options{ProbeMaxModels: maxModels})
@@ -1134,6 +1138,15 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	runCtx, cancel := context.WithTimeout(context.Background(), budget)
 	s.attachCancel(id, run, cancel)
 	go func() {
+		// Deferred first so it runs LAST, after endSweep frees the slot: free
+		// models a sampled sweep skipped are probed next. A sweep the operator
+		// stopped (or that ran out of budget) is not followed by more probing.
+		stopped := false
+		defer func() {
+			if !stopped {
+				s.probeFreeModels(id, "manual sync")
+			}
+		}()
 		defer s.endSweep(id, run)
 		defer cancel()
 		res := s.tester.ProtocolSweep(runCtx, acct, key, sweepModels, registration.Options{
@@ -1145,6 +1158,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		// managed to record was written per model as it ran, and a final write
 		// on a dead context only produces a misleading "persist failed" line.
 		if runCtx.Err() != nil {
+			stopped = true
 			return
 		}
 		if res != nil && len(res.Rows) > 0 {

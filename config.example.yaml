@@ -71,4 +71,4 @@ retry:
 
 # Refresh each provider's model catalog at startup and on this interval.
 model_refresh:
-  interval: 6h
+  interval: 12h

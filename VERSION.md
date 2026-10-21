@@ -45,6 +45,13 @@ file in the same commit, or the test fails.
 - **The first-boot setup code stands out**: a framed panel under the ezllm
   art, with the code spaced out and, on a terminal, the only filled
   highlight in ezllm's output.
+- **Catalogs refresh every 12 hours** (was 6), and **new free models are
+  probed as soon as they land**: after a refresh, a new key or a manual
+  sync, the account's free models are protocol-probed on every surface
+  still untested (they cost no credits), and the auto-free combos are
+  rebuilt from the verdicts, so a free model broken everywhere drops out
+  immediately instead of at the next refresh. The refresh moved into the
+  server next to the price refresh.
 - **Console logs revamped**: timestamp, padded level and `key=value` on one
   line, with the level colored on a terminal (`EZLLM_LOG_COLOR`,
   `NO_COLOR`). `EZLLM_LOG_LEVEL` accepts `info` and warns on an unknown

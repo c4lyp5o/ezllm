@@ -274,7 +274,7 @@ func (c *Config) Validate() error {
 		errs = append(errs, "compression.shadow_pct: must be between 0 and 100")
 	}
 	if c.ModelRefresh.Interval == "" {
-		c.ModelRefresh.Interval = "6h"
+		c.ModelRefresh.Interval = "12h"
 	} else if d, err := time.ParseDuration(c.ModelRefresh.Interval); err != nil || d < time.Minute {
 		errs = append(errs, "model_refresh.interval: must be a duration of at least 1m")
 	}

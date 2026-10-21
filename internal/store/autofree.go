@@ -30,6 +30,42 @@ func IsFreeModelID(id string) bool {
 	return strings.HasSuffix(id, ":free") || strings.HasSuffix(id, "-free")
 }
 
+// FreeModelIDs lists the models in one account's catalog that auto_free
+// pools treat as free: an id marked free by the vendor, or a built-in free
+// list (Cloudflare Workers AI). The same rule syncAutoFree applies, so what
+// gets probed is exactly what can join a free combo.
+func (d *DB) FreeModelIDs(ctx context.Context, accountID int64) ([]string, error) {
+	rows, err := d.r.QueryContext(ctx, `
+SELECT m.model_id, a.kind, a.base_url
+FROM models m JOIN accounts a ON a.id = m.account_id
+WHERE m.account_id = ?
+ORDER BY m.model_id`, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id, kind, baseURL string
+		if err := rows.Scan(&id, &kind, &baseURL); err != nil {
+			return nil, err
+		}
+		if IsFreeModelID(id) || provider.IsCloudflareFreeChatModel(kind, baseURL, id) {
+			out = append(out, id)
+		}
+	}
+	return out, rows.Err()
+}
+
+// SyncAutoFree rebuilds every auto_free combo. Catalog and combo writes
+// already do this in their own transaction; this is for writes that change
+// eligibility from outside them — a probe verdict that proves a free model
+// broken on every surface drops it from the pools now, not at the next
+// catalog refresh.
+func (d *DB) SyncAutoFree(ctx context.Context) error {
+	return d.WithWriteTx(ctx, func(tx *sql.Tx) error { return d.syncAutoFree(ctx, tx, 0) })
+}
+
 // alterComboAutoFree adds combos.auto_free / auto_free_accounts on databases
 // created before v25. Guarded by column checks: ALTER TABLE ADD COLUMN is not
 // idempotent. Existing combos stay hand-managed (auto_free = 0).

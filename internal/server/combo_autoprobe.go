@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -70,14 +71,17 @@ func (s *Server) runComboProbe(comboID int64) {
 		byAcct[h.AccountID] = append(byAcct[h.AccountID], h.ModelID)
 	}
 	for acctID, models := range byAcct {
-		go s.probeAccountModels(comboID, acctID, models)
+		go s.probeAccountModels("combo "+strconv.FormatInt(comboID, 10), acctID, models)
 	}
 }
 
 // probeAccountModels probes the named models of one account on the surfaces
 // each still lacks. It holds the account's sweep slot, so it never overlaps a
 // manual sweep (and shows up in GET /admin/accounts/{id}/sync while running).
-func (s *Server) probeAccountModels(comboID, acctID int64, models []string) {
+// origin names the trigger in the log ("combo 7", "catalog refresh"). Fresh
+// verdicts resync the auto_free combos, so a model proven broken on every
+// surface leaves the free pools at once.
+func (s *Server) probeAccountModels(origin string, acctID int64, models []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	acc, err := s.db.GetAccount(ctx, acctID)
@@ -86,7 +90,7 @@ func (s *Server) probeAccountModels(comboID, acctID int64, models []string) {
 	}
 	entries, err := s.db.ListModels(ctx, acctID)
 	if err != nil {
-		s.log.Warn("combo auto-probe: list models failed", "account", acctID, "err", err)
+		s.log.Warn("auto-probe: list models failed", "origin", origin, "account", acctID, "err", err)
 		return
 	}
 	byID := make(map[string]store.ModelEntryRow, len(entries))
@@ -130,7 +134,7 @@ func (s *Server) probeAccountModels(comboID, acctID int64, models []string) {
 	}
 	key, _, err := s.anyKey(ctx, acctID)
 	if err != nil {
-		s.log.Info("combo auto-probe skipped: no enabled key", "combo", comboID, "account", acctID)
+		s.log.Info("auto-probe skipped: no enabled key", "origin", origin, "account", acctID)
 		return
 	}
 	acct := accountFromSummary(acc)
@@ -145,8 +149,8 @@ func (s *Server) probeAccountModels(comboID, acctID int64, models []string) {
 	}
 	run, err := s.beginSweep(acctID, surfaceNames, total, budget)
 	if err != nil {
-		// A running sweep owns the account; the next combo write retries.
-		s.log.Info("combo auto-probe skipped: sweep already running", "combo", comboID, "account", acctID)
+		// A running sweep owns the account; the next trigger retries.
+		s.log.Info("auto-probe skipped: sweep already running", "origin", origin, "account", acctID)
 		return
 	}
 	runCtx, runCancel := context.WithTimeout(context.Background(), budget)
@@ -159,21 +163,34 @@ func (s *Server) probeAccountModels(comboID, acctID int64, models []string) {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	s.log.Info("combo auto-probe", "combo", comboID, "account", acct.Namespace, "probes", total)
+	persisted := false
+	s.log.Info("auto-probe", "origin", origin, "account", acct.Namespace, "probes", total)
 	for _, k := range keys {
 		res := s.tester.ProtocolSweep(runCtx, acct, key, groups[k], registration.Options{
 			Surfaces: wires[k],
 			ProbeAll: true,
 		})
 		if runCtx.Err() != nil {
-			return // verdicts already written per model as the probes ran
+			// Verdicts were written per model as the probes ran; still resync
+			// so the ones that landed take effect.
+			persisted = true
+			break
 		}
 		if res != nil && len(res.Rows) > 0 {
 			pctx, pcancel := context.WithTimeout(context.Background(), 30*time.Second)
 			if err := s.db.SetModelProtos(pctx, acctID, res.Rows); err != nil {
-				s.log.Error("combo auto-probe persist failed", "account", acctID, "err", err)
+				s.log.Error("auto-probe persist failed", "origin", origin, "account", acctID, "err", err)
+			} else {
+				persisted = true
 			}
 			pcancel()
 		}
+	}
+	if persisted {
+		sctx, scancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if err := s.db.SyncAutoFree(sctx); err != nil {
+			s.log.Warn("auto-probe: auto-free resync failed", "origin", origin, "err", err)
+		}
+		scancel()
 	}
 }

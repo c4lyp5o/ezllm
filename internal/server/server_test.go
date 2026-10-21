@@ -22,6 +22,7 @@ import (
 // harness wires a real store + real dispatcher against a fake upstream.
 type harness struct {
 	srv      *http.Server
+	server   *Server // the instance behind handler, for background-job tests
 	handler  http.Handler
 	db       *store.DB
 	base     string // ezllm base URL
@@ -82,7 +83,7 @@ func newHarnessAt(tb testing.TB, up *httptest.Server, opts ...func(*Options)) *h
 		o(&serverOpts)
 	}
 	s := New(serverOpts)
-	h := &harness{handler: s.Handler(), db: db, upstream: up, t: tb}
+	h := &harness{server: s, handler: s.Handler(), db: db, upstream: up, t: tb}
 	tb.Cleanup(func() { db.Close(); up.Close() })
 	return h
 }

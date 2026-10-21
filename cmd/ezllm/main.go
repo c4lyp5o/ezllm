@@ -273,8 +273,6 @@ func run() error {
 		"universal_enabled", cfg.Translation.UniversalEnabled,
 		"responses_wire_models", cfg.Translation.ResponsesModels)
 
-	go refreshProviderModels(ctx, db, registry, cfg.ModelRefresh.Interval, log)
-
 	// EZLLM_USAGE_TZ sets the default zone for group_by=day bucketing so the
 	// dashboard's day view agrees with a usage rule's day. Validated HERE,
 	// at boot, with the real resolver — not with a regex. A typo must be a
@@ -311,6 +309,11 @@ func run() error {
 		SetupCode:      setupCode,
 		TrustedProxies: trustedProxies,
 	})
+
+	// Catalogs at boot and every model_refresh.interval (default 12h); each
+	// saved catalog resyncs the auto-free combos and probes its free models.
+	refreshEvery, _ := time.ParseDuration(cfg.ModelRefresh.Interval) // validated by config.Load
+	srv.StartModelRefresh(ctx, refreshEvery)
 
 	if os.Getenv("EZLLM_PRICE_REFRESH") != "off" {
 		srv.StartPriceRefresh(ctx, 3, usageLoc)
@@ -363,79 +366,6 @@ func run() error {
 	}
 	log.Info("stopped")
 	return nil
-}
-
-func refreshProviderModels(ctx context.Context, db *store.DB, registry *provider.Registry, interval string, log *slog.Logger) {
-	d, err := time.ParseDuration(interval)
-	if err != nil || d < time.Minute {
-		log.Warn("model refresh disabled: invalid interval", "interval", interval)
-		return
-	}
-	refreshCatalogsOnce(ctx, db, registry, log)
-	ticker := time.NewTicker(d)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			refreshCatalogsOnce(ctx, db, registry, log)
-		}
-	}
-}
-
-// refreshCatalogsOnce re-lists every enabled account's catalog. The account
-// is read in full (store.AccountByID — custom headers, management key, usage
-// convention), the same view the router and the key test use; a hand-built
-// subset here once dropped custom headers from every refresh.
-func refreshCatalogsOnce(ctx context.Context, db *store.DB, registry *provider.Registry, log *slog.Logger) {
-	accounts, err := db.ListAccounts(ctx)
-	if err != nil {
-		log.Warn("model refresh: list accounts failed", "err", err)
-		return
-	}
-	for _, summary := range accounts {
-		if !summary.Enabled {
-			continue
-		}
-		keys, err := db.ListKeys(ctx, summary.ID)
-		if err != nil {
-			log.Warn("model refresh: list keys failed", "account", summary.Namespace, "err", err)
-			continue
-		}
-		var key string
-		for _, k := range keys {
-			if k.Enabled {
-				_, key, err = db.KeyForTest(ctx, k.ID)
-				if err == nil {
-					break
-				}
-			}
-		}
-		if key == "" {
-			continue
-		}
-		acct, err := db.AccountByID(ctx, summary.ID)
-		if err != nil {
-			log.Warn("model refresh: read account failed", "account", summary.Namespace, "err", err)
-			continue
-		}
-		adapter, err := registry.Get(acct.Kind)
-		if err != nil {
-			log.Warn("model refresh: adapter unavailable", "account", summary.Namespace, "err", err)
-			continue
-		}
-		models, err := adapter.ListModels(ctx, *acct, key)
-		if err != nil {
-			log.Warn("model refresh failed; keeping last catalog", "account", summary.Namespace, "err", err)
-			continue
-		}
-		if err := db.UpsertModels(ctx, summary.ID, models); err != nil {
-			log.Warn("model refresh: persist failed", "account", summary.Namespace, "err", err)
-			continue
-		}
-		log.Info("model catalog refreshed", "account", summary.Namespace, "models", len(models))
-	}
 }
 
 // bridgeOrigin is the URL this process dials to reach its OWN listener. A

@@ -794,7 +794,7 @@ function EditAccountModal({ account, onClose, onSaved }: { account: Account | nu
   };
 
   return (
-    <Modal open={account != null} onClose={onClose} title={`Edit ${account.name}`} subtitle="PATCH /admin/accounts/{id}"
+    <Modal open={account != null} onClose={onClose} title={`Edit ${account.name}`}
       footer={<>
         <button type="button" className={cx(btn.base, btn.ghost)} onClick={onClose}>Cancel</button>
         <button type="button" disabled={busy || !name.trim() || !baseUrl.trim()} className={cx(btn.base, btn.primary)} onClick={() => void save()}>
@@ -858,7 +858,7 @@ function EditAccountModal({ account, onClose, onSaved }: { account: Account | nu
               value={managementKey} onChange={(e) => setManagementKey(e.target.value)} />
           </div>
         )}
-        {kind === 'openai-compatible' && account?.namespace === 'commandcode' && (
+        {kind === 'openai-compatible' && account?.base_url?.includes('api.commandcode.ai') && (
           <div>
             <label className={labelCls}>Session cookie (optional, rotates the stored value)</label>
             <input type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}

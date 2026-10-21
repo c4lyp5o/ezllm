@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -101,5 +102,36 @@ func TestRunTreatsToolUseMaxTurnsAsSuccess(t *testing.T) {
 	}
 	if got := sw.Message(req.Model)["stop_reason"]; got != "tool_use" {
 		t.Errorf("message stop_reason = %v, want tool_use", got)
+	}
+}
+
+// The recorded round-trip: native acknowledges the replayed user frame with a
+// zero-turn result, then answers from the tool_result.
+func TestRunReplaysToolHistory(t *testing.T) {
+	dir := t.TempDir()
+	fixture, err := filepath.Abs(filepath.Join("testdata", "m2_roundtrip.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "fake-claude")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\ncat "+fixture+"\ncat >/dev/null\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	req, err := ParseRequest([]byte(toolHistory))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &Runner{Bin: bin, ConfigDir: dir, Timeout: 10 * time.Second}
+	sw := &StreamWriter{}
+	if _, err := r.Run(context.Background(), req, "haiku", sw.Handle); err != nil {
+		t.Fatalf("Run = %v", err)
+	}
+	msg := sw.Message(req.Model)
+	blocks, _ := msg["content"].([]map[string]any)
+	if len(blocks) != 1 || !strings.Contains(fmt.Sprint(blocks[0]["text"]), "17") {
+		t.Errorf("content = %v, want the answer built from the tool_result", blocks)
+	}
+	if msg["stop_reason"] != "end_turn" {
+		t.Errorf("stop_reason = %v, want end_turn", msg["stop_reason"])
 	}
 }

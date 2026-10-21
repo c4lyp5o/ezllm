@@ -164,3 +164,59 @@ func TestConversationSessionIDStablePerConversation(t *testing.T) {
 		t.Errorf("session id %q is not uuid-shaped", a)
 	}
 }
+
+// A Hermes agent loop ends most requests on a user turn made only of
+// tool_result blocks; that is a real query, not an empty message.
+const toolHistory = `{"model":"claude-haiku-5-5","max_tokens":1024,` +
+	`"tools":[{"name":"get_weather","input_schema":{"type":"object"}}],"messages":[` +
+	`{"role":"user","content":"Weather in Paris?"},` +
+	`{"role":"assistant","content":[{"type":"text","text":"Checking."},` +
+	`{"type":"tool_use","id":"toolu_01SPIKEPARIS","name":"get_weather","input":{"city":"Paris"}}]},` +
+	`{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01SPIKEPARIS","content":"17C, light rain"}]}]}`
+
+func TestParseRequestAcceptsToolResultTurn(t *testing.T) {
+	req, err := ParseRequest([]byte(toolHistory))
+	if err != nil {
+		t.Fatalf("tool_result-only final turn must be accepted: %v", err)
+	}
+	frames, err := BuildFrames(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(frames) != 3 {
+		t.Fatalf("frames = %d, want 3", len(frames))
+	}
+	if frames[0]["shouldQuery"] != false {
+		t.Error("replayed user frame must carry shouldQuery:false")
+	}
+	if _, ok := frames[2]["shouldQuery"]; ok {
+		t.Error("the final tool_result turn is the trigger and must query")
+	}
+	// Measured on 2.1.306: native accepts tool_use/tool_result blocks in its
+	// frames verbatim, so they are not flattened or rewritten.
+	raw, _ := json.Marshal(frames)
+	for _, want := range []string{`"type":"tool_use"`, `"tool_use_id":"toolu_01SPIKEPARIS"`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("frames lost %s: %s", want, raw)
+		}
+	}
+	if b := body(t, req); !strings.Contains(b, `"tool_use_id":"toolu_01SPIKEPARIS"`) {
+		t.Errorf("extra body lost the tool_result: %s", b)
+	}
+}
+
+// Every request of one tool conversation replays the same opening, so the
+// session id (and native's cached prefix) holds across tool turns.
+func TestSessionIDStableAcrossToolTurns(t *testing.T) {
+	first, err := ParseRequest([]byte(`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"Weather in Paris?"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	later, err := ParseRequest([]byte(toolHistory))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a, b := ConversationSessionID("sys", first), ConversationSessionID("sys", later); a != b {
+		t.Errorf("session id moved across tool turns: %s vs %s", a, b)
+	}
+}

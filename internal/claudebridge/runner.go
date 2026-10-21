@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -119,7 +118,7 @@ func (r *Runner) Run(ctx context.Context, req Request, alias string, sink func(F
 	cmd := exec.Command(r.Bin, argv...)
 	cmd.Dir = tmp
 	cmd.Env = r.childEnv(tmp, req.MaxTokens)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setProcessGroup(cmd)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

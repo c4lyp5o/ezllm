@@ -4,11 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 )
 
 func writeJSON(path string, v any) error {
@@ -43,18 +41,6 @@ func (t *tailBuffer) tail() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return strings.Join(t.lines, " | ")
-}
-
-// killGroup kills the whole process group: a cancelled request must not leave a
-// CLI (or anything it spawned) running on the plan's meter.
-func killGroup(cmd *exec.Cmd) {
-	if cmd == nil || cmd.Process == nil {
-		return
-	}
-	if pgid, err := syscall.Getpgid(cmd.Process.Pid); err == nil {
-		_ = syscall.Kill(-pgid, syscall.SIGKILL)
-	}
-	_ = cmd.Process.Kill()
 }
 
 // firstText renders an assistant message's text blocks for error reports.

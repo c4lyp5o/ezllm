@@ -62,6 +62,16 @@ jobs:
           GOGC: "50"
         run: go test -count=1 -timeout 15m ./...
 
+      # Every release.yml target must compile, so an OS-specific API breaks
+      # the gate on master, not the release job after a tag (v1.0.0's first
+      # run failed on windows: syscall.Setpgid).
+      - name: 🧩 Cross-build release targets
+        run: |
+          for t in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            echo "--- $t"
+            CGO_ENABLED=0 GOOS="${t%/*}" GOARCH="${t#*/}" go build -o /dev/null ./cmd/ezllm
+          done
+
       - name: 🟢 Setup Node
         uses: actions/setup-node@v6
         with:

@@ -261,7 +261,7 @@ func TestParseRequestRefusesServerTools(t *testing.T) {
 	if u.Field != "tools[1].type=web_search_20250305" {
 		t.Errorf("Field = %q", u.Field)
 	}
-	if msg := u.Error(); strings.Contains(msg, "M1") || !strings.Contains(msg, "server tools execute upstream") {
+	if msg := u.Error(); strings.Contains(msg, "M1") || !strings.Contains(msg, "only client tools") {
 		t.Errorf("refusal must name its reason, without stale milestone wording: %q", msg)
 	}
 }

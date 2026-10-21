@@ -113,7 +113,7 @@ func checkClientTools(raw json.RawMessage) error {
 	for i, tool := range tools {
 		if tool.Type != "" && tool.Type != "custom" {
 			return Unsupported{Field: fmt.Sprintf("tools[%d].type=%s", i, tool.Type),
-				Reason: "server tools execute upstream; only client tools pass through"}
+				Reason: "only client tools (no type, or type custom) pass through; server tools would execute upstream"}
 		}
 		if tool.Name == "" {
 			return fmt.Errorf("claude-bridge: tools[%d] has no name", i)

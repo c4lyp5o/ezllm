@@ -93,7 +93,7 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger) error {
 			"claude_config_dir": dir,
 			"login":             login,
 			"subscription":      plan,
-			"tools":             "unsupported (M1 text-only)",
+			"tools":             "client tools pass through; never executed by the bridge (M2)",
 		},
 		Logf: log.Info,
 	}

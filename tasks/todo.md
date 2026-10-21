@@ -144,13 +144,13 @@ round-trip, forced `tool_choice`, the no-execution sentinel, and the Hermes path
 Change `/status` from `"tools": "unsupported (M1 text-only)"` to the new capability.
 
 **Acceptance criteria:**
-- [ ] The proof passes in full against the real CLI and Pro login (the refusal case is replaced by tool cases)
-- [ ] The sentinel file is absent after the run; the CLI's `init` frame lists no built-in tools
+- [x] The proof passes in full against the real CLI and Pro login (the refusal case is replaced by tool cases)
+- [x] The sentinel file is absent after the run; the CLI's `init` frame lists no built-in tools
 - [x] `/status` reports tool support accurately
 
 **Verification:**
-- [ ] Manual check: `python3 tests/prove_claude_bridge.py` output pasted into the PR
-- [ ] Tests pass: focused test command
+- [x] Manual check: `python3 tests/prove_claude_bridge.py` output pasted into the PR
+- [x] Tests pass: focused test command
 
 **Dependencies:** Checkpoint 2
 **Files likely touched:** `tests/prove_claude_bridge.py`, `cmd/ezllm/claudebridge.go`
@@ -177,8 +177,8 @@ and cap notes). Add the CHANGELOG milestone. Bump `VERSION.md` `Current:` and
 **Estimated scope:** M (docs-heavy)
 
 ## Checkpoint 3: Complete
-- [ ] CI full gate green: `gh workflow run test.yml --ref <branch>`
-- [ ] Calypso pushes/deploys
+- [x] CI full gate green: `gh workflow run test.yml --ref <branch>`
+- [x] Calypso pushes/deploys
 
 ---
 

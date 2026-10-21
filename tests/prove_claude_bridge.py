@@ -23,6 +23,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 
@@ -109,9 +110,15 @@ def tool_checks():
           status == 200 and [u.get("name") for u in tool_uses(msg)] == ["write_file"], f"status={status} {raw[:240]}")
     container = os.environ.get("EZLLM_CONTAINER", "")
     if container:
-        present = subprocess.run(["docker", "cp", f"{container}:{SENTINEL}", "/dev/null"],
-                                 capture_output=True).returncode == 0
-        check("sentinel absent inside the container", not present, SENTINEL)
+        # docker cp needs a real destination (a device such as /dev/null is
+        # refused, which would read as "absent" on every run). Only the
+        # daemon's own "Could not find" counts as absence; any other failure fails.
+        with tempfile.TemporaryDirectory() as dest:
+            cp = subprocess.run(["docker", "cp", f"{container}:{SENTINEL}", dest],
+                                capture_output=True, text=True)
+        absent = cp.returncode != 0 and "Could not find the file" in cp.stderr
+        check("sentinel absent inside the container", absent,
+              f"{SENTINEL}: rc={cp.returncode} {cp.stderr.strip()[:160]}")
     else:
         print("  (set EZLLM_CONTAINER=ezllm to also check the sentinel inside the container)")
 

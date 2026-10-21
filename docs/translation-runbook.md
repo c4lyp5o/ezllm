@@ -9,7 +9,8 @@ exception**, and it is double-gated so it can never happen by accident:
    an absent key keeps it and an explicit `enabled: false` still wins;
    `EZLLM_TRANSLATION_ENABLED=false` is the no-rebuild rollback lever (flag >
    env > config > default). The effective state is logged at boot:
-   `translation enabled=true|false`.
+   `translation enabled=true|false`. Since 2026-10-22 this is the **one switch**
+   for every translated wire, the universal matrix included.
 2. **Proven capability** — the hop's probed/curated `proto_*` facts must say
    `proto_openai = true` AND `proto_anthropic` false-or-NULL. Both flags are
    **NULL until a probe sweep marks them or an operator curates them**, so a
@@ -169,19 +170,14 @@ Design: `docs/universal-wire-design.md`. Adds **chat→messages**, **responses�
 **responses→messages** through the strict codecs, plus the fixed fallback ordering for any
 client whose native wire a hop provably cannot serve.
 
-**Enabling (ONE switch — it is self-sufficient, no other flag required):**
+**Enabling:** on by default, under the same `translation.enabled` /
+`EZLLM_TRANSLATION_ENABLED` switch as every other translated wire (merged 2026-10-22).
 
-```yaml
-translation:
-  universal_enabled: true  # default false — the three new cells + the chains
-```
-
-(`translation.enabled` keeps gating the legacy anthropic→chat alternative when universal is
-off; with universal on, that switch is not needed.)
-
-`EZLLM_TRANSLATION_UNIVERSAL_ENABLED=true|false` overrides it without a rebuild (rollback
-lever). A wrong-typed value fails boot naming `translation.universal_enabled`. With the flag
-off, nothing changes byte-for-byte.
+The former matrix switch, `translation.universal_enabled` /
+`EZLLM_TRANSLATION_UNIVERSAL_ENABLED`, is **deprecated** and logs a warning at boot. It still
+works as a rollback: an explicit `false` in config turns translation off, and the env var
+applies when `EZLLM_TRANSLATION_ENABLED` is unset. A wrong-typed value still fails boot naming
+the field.
 
 **Usage convention on a Messages destination:** `auto` (the default) reads the upstream's
 `input_tokens` as exclusive of cache, as the ledger does, so an unconfigured Anthropic account
@@ -202,8 +198,8 @@ terminal event is recorded in the ledger error column (`translated stream failed
 saw), and the hop is not marked good. A translated hop is an ordinary member of the combo
 strategy: it is ordered, rotated and marked good on exactly the same terms as a native one.
 
-**Rollback:** `EZLLM_TRANSLATION_UNIVERSAL_ENABLED=false`, or `translation.universal_enabled: false`
-+ restart. No data migration is involved; the curated `responses_models` list keeps working
+**Rollback:** `EZLLM_TRANSLATION_ENABLED=false`, or `translation.enabled: false` + restart.
+This turns off every translated wire; there is no matrix-only switch any more. No data migration is involved; the curated `responses_models` list keeps working
 independently.
 
 ## Responses-wire hops (chat client → /v1/responses hop)

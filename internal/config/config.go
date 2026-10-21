@@ -97,6 +97,10 @@ type ModelRefresh struct {
 // until a probe sweep or an operator curation sets them. Set `enabled: false`
 // in config.yaml, or EZLLM_TRANSLATION_ENABLED=false (the env wins, kept as the
 // rollback lever with no rebuild), to turn it back off.
+//
+// enabled is the ONE switch (merged 2026-10-22): it covers the pairwise
+// translators and the universal matrix alike. universal_enabled is the
+// deprecated former matrix switch; Load folds it into enabled.
 type Translation struct {
 	Enabled bool `yaml:"enabled"`
 	// ResponsesModels lists hops that must be dialed on OpenAI's Responses wire
@@ -112,17 +116,11 @@ type Translation struct {
 	// wire override is inert. This list is its own opt-in; translation.enabled
 	// gates the separate anthropic→chat leg.
 	ResponsesModels []string `yaml:"responses_models"`
-	// UniversalEnabled (default FALSE) turns on the three NEW cross-wire
-	// cells — chat→messages, responses→chat, responses→messages — and the
-	// universal selection ordering (a Messages client falls back to Chat
-	// then Responses; Chat to Responses then Messages; Responses to Chat
-	// then Messages). Every alternative destination must be PROVEN capable
-	// and, for a Messages destination, the account must carry an explicit
-	// usage_convention (schema v13). A wrong-typed value fails boot naming
-	// the field; EZLLM_TRANSLATION_UNIVERSAL_ENABLED is the no-rebuild
-	// rollback lever. This is the SINGLE switch for the matrix — it does not
-	// require translation.enabled (operator decision 2026-10-13). OFF keeps
-	// every legacy behaviour byte-for-byte.
+	// UniversalEnabled is DEPRECATED (merged into Enabled 2026-10-22). After
+	// Load it always equals Enabled. An explicit `universal_enabled: false`
+	// still turns translation off (either key can switch it off, so an old
+	// rollback keeps working) and records a deprecation warning. A
+	// wrong-typed value still fails boot naming the field.
 	UniversalEnabled bool `yaml:"universal_enabled"`
 }
 
@@ -157,6 +155,10 @@ type Config struct {
 	ModelRefresh       ModelRefresh        `yaml:"model_refresh"`
 	Translation        Translation         `yaml:"translation"`
 
+	// Warnings are non-fatal findings from Load (deprecated keys); main logs
+	// them at boot.
+	Warnings []string `yaml:"-"`
+
 	// derived
 	UpstreamTimeout time.Duration
 	LedgerBatchWait time.Duration
@@ -187,10 +189,31 @@ func Load(path string) (*Config, error) {
 		}
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
+	if universalKeySet(raw) {
+		cfg.Warnings = append(cfg.Warnings,
+			"translation.universal_enabled is deprecated: translation.enabled is the one switch now")
+	}
+	cfg.Translation.Enabled = cfg.Translation.Enabled && cfg.Translation.UniversalEnabled
+	cfg.Translation.UniversalEnabled = cfg.Translation.Enabled
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 	return &cfg, nil
+}
+
+// universalKeySet reports whether config.yaml names the deprecated
+// translation.universal_enabled key at all.
+func universalKeySet(raw []byte) bool {
+	var tree map[string]any
+	if yaml.Unmarshal(raw, &tree) != nil {
+		return false
+	}
+	sec, ok := tree["translation"].(map[string]any)
+	if !ok {
+		return false
+	}
+	_, ok = sec["universal_enabled"]
+	return ok
 }
 
 // universalValueError reports a non-boolean translation.universal_enabled as

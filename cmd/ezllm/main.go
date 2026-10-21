@@ -84,28 +84,15 @@ func run() error {
 	if v := strings.TrimSpace(os.Getenv("EZLLM_DATA_DIR")); v != "" {
 		cfg.DataDir = v
 	}
-	// Translation DEFAULTS ON (config.go seeds it); this env var is the
-	// override — the no-rebuild rollback lever. Eligibility still needs a hop
-	// proven/curated openai-only, so the knob alone changes no routing. A
-	// malformed value is a startup error: silently defaulting an "off" to "on"
-	// would leave the operator wondering why traffic still translates.
-	if v := strings.TrimSpace(os.Getenv("EZLLM_TRANSLATION_ENABLED")); v != "" {
-		on, perr := strconv.ParseBool(v)
-		if perr != nil {
-			return fmt.Errorf("EZLLM_TRANSLATION_ENABLED=%q is not a boolean (want true/false/1/0): %w", v, perr)
-		}
-		cfg.Translation.Enabled = on
+	// Translation DEFAULTS ON (config.go seeds it); EZLLM_TRANSLATION_ENABLED
+	// is the no-rebuild rollback lever for the ONE switch (translationFromEnv).
+	for _, w := range cfg.Warnings {
+		log.Warn(w)
 	}
-	// Universal wire matrix: defaults ON now (LiteLLM-style: combos are universal
-	// by default). The env var EZLLM_TRANSLATION_UNIVERSAL_ENABLED remains the
-	// no-rebuild rollback lever (set to "false" to disable). A malformed value
-	// is a startup error, never a silent default.
-	if v := strings.TrimSpace(os.Getenv("EZLLM_TRANSLATION_UNIVERSAL_ENABLED")); v != "" {
-		on, perr := strconv.ParseBool(v)
-		if perr != nil {
-			return fmt.Errorf("EZLLM_TRANSLATION_UNIVERSAL_ENABLED=%q is not a boolean (want true/false/1/0): %w", v, perr)
-		}
-		cfg.Translation.UniversalEnabled = on
+	if w, err := translationFromEnv(&cfg.Translation, os.Getenv); err != nil {
+		return err
+	} else if w != "" {
+		log.Warn(w)
 	}
 
 	// ── master key (at-rest encryption of provider keys) ────────────────
@@ -268,9 +255,9 @@ func run() error {
 	// The universal matrix: three NEW cross-wire cells plus the fixed
 	// fallback ordering. Logged at boot because a set-but-unread knob looks
 	// identical to a working one.
-	resolver = resolver.WithUniversal(cfg.Translation.UniversalEnabled)
+	// translation.enabled covers it too: one switch for every translated wire.
+	resolver = resolver.WithUniversal(cfg.Translation.Enabled)
 	log.Info("translation", "enabled", cfg.Translation.Enabled,
-		"universal_enabled", cfg.Translation.UniversalEnabled,
 		"responses_wire_models", cfg.Translation.ResponsesModels)
 
 	// EZLLM_USAGE_TZ sets the default zone for group_by=day bucketing so the
@@ -506,4 +493,44 @@ func upstreamClient(cfg *config.Config) *http.Client {
 		IdleConnTimeout:     90 * time.Second,
 	}
 	return &http.Client{Transport: tr, Timeout: cfg.UpstreamTimeout}
+}
+
+// translationFromEnv applies the env override of the ONE translation switch.
+// EZLLM_TRANSLATION_ENABLED wins; the deprecated
+// EZLLM_TRANSLATION_UNIVERSAL_ENABLED still applies when it is the only one
+// set, so an old rollback keeps working, and returns a deprecation warning
+// either way. A malformed value is a startup error: silently defaulting an
+// "off" to "on" would leave the operator wondering why traffic still
+// translates.
+func translationFromEnv(t *config.Translation, getenv func(string) string) (string, error) {
+	parse := func(name string) (bool, bool, error) {
+		v := strings.TrimSpace(getenv(name))
+		if v == "" {
+			return false, false, nil
+		}
+		on, err := strconv.ParseBool(v)
+		if err != nil {
+			return false, false, fmt.Errorf("%s=%q is not a boolean (want true/false/1/0): %w", name, v, err)
+		}
+		return on, true, nil
+	}
+	on, set, err := parse("EZLLM_TRANSLATION_ENABLED")
+	if err != nil {
+		return "", err
+	}
+	legacyOn, legacySet, err := parse("EZLLM_TRANSLATION_UNIVERSAL_ENABLED")
+	if err != nil {
+		return "", err
+	}
+	warning := ""
+	if legacySet {
+		warning = "EZLLM_TRANSLATION_UNIVERSAL_ENABLED is deprecated: EZLLM_TRANSLATION_ENABLED is the one switch now"
+		if !set {
+			on, set = legacyOn, true
+		}
+	}
+	if set {
+		t.Enabled, t.UniversalEnabled = on, on
+	}
+	return warning, nil
 }

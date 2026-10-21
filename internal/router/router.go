@@ -184,9 +184,8 @@ type Resolver struct {
 	responsesModels []*regexp.Regexp
 	// universalEnabled turns on the three NEW cross-wire cells
 	// (chat→messages, responses→chat, responses→messages) and the fixed
-	// fallback ordering, and lets an explicit pin name the wire. It is
-	// ANDed with translationEnabled: the universal matrix cannot resurrect a
-	// translation layer the operator switched off.
+	// fallback ordering, and lets an explicit pin name the wire. It does not
+	// read translationEnabled; the binary sets both from translation.enabled.
 	universalEnabled bool
 }
 
@@ -207,8 +206,8 @@ func (r *Resolver) WithTranslation(enabled bool) *Resolver {
 	return r
 }
 
-// WithUniversal enables the universal wire matrix (config
-// translation.universal_enabled, default off). Unset keeps every routing
+// WithUniversal enables the universal wire matrix (the binary passes
+// translation.enabled, the one switch). Unset keeps every routing
 // decision exactly as it is today: the single anthropic→openai alternative
 // plus the curated responses-wire override.
 func (r *Resolver) WithUniversal(enabled bool) *Resolver {

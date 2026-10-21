@@ -86,10 +86,11 @@ jobs:
       with:
         context: .
         push: true
-        # One platform: no host in the fleet is arm64, and an emulated
-        # cross-build cost 7 of the 8 minutes of every push. arm64 binaries
-        # are still shipped by release.yml (native Go cross-compile).
-        platforms: linux/amd64
+        # amd64 + arm64 without emulation: the Dockerfile's builder runs on
+        # the runner's platform and cross-compiles (GOARCH=$TARGETARCH), and
+        # the runtime stage only copies — an emulated build once cost 7 of
+        # the 8 minutes of every push.
+        platforms: linux/amd64,linux/arm64
         # GHA layer cache. mode=max is what exports the BUILDER stage, which
         # is where the Go module download and the compile live — mode=min
         # would only cache the final image layers and save us nothing.

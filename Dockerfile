@@ -12,7 +12,11 @@
 # image build needs Go but NOT Node.
 
 # ── Stage 1: build ───────────────────────────────────────────────────────────
-FROM golang:1.27-alpine AS builder
+# Runs on the BUILD host's platform and cross-compiles for the target
+# (TARGETARCH, set by buildx): an arm64 image never compiles under QEMU, and the
+# runtime stage below has no RUN step, so it needs no emulation either.
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS builder
+ARG TARGETARCH
 WORKDIR /src
 
 # go.sum is the cache key: unchanged deps do not re-download.
@@ -23,7 +27,7 @@ COPY . .
 
 # -trimpath: no local paths in the binary (reproducible + nothing to leak).
 # -s -w: drop the symbol/DWARF tables (smaller; symbols live in releases).
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -trimpath \
       -ldflags="-s -w" \
       -o /out/ezllm ./cmd/ezllm
 
@@ -40,7 +44,8 @@ RUN apk add --no-cache file >/dev/null 2>&1 \
 # glibc-dynamic ELF (interpreter /lib64/ld-linux-x86-64.so.2, links libc/librt/
 # libpthread/libdl/libm — measured with ldd). On distroless/static that exec
 # fails with the misleading "no such file or directory" because the loader is
-# absent. base carries glibc + CA certs + NSS (DNS resolution needs libnss_dns,
+# absent. On arm64 the mounted CLI must be the arm64 build (loader
+# /lib/ld-linux-aarch64.so.1, also in base). base carries glibc + CA certs + NSS (DNS resolution needs libnss_dns,
 # which ldd does not list) but still no shell and no package manager. The ezllm
 # binary itself remains static.
 FROM gcr.io/distroless/base-debian12:nonroot

@@ -1,10 +1,13 @@
 package claudebridge
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -66,24 +69,81 @@ func TestMessagesRequiresTheSharedSecret(t *testing.T) {
 	}
 }
 
-func TestMessagesRefusesToolRequests(t *testing.T) {
-	f := &fakeExec{}
-	rec := post(t, testServer(f), `{"model":"claude-haiku-5-5","max_tokens":8,`+
-		`"tools":[{"type":"function","function":{"name":"read_file"}}],`+
-		`"messages":[{"role":"user","content":"hi"}]}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status %d, want 400", rec.Code)
+// fixtureFrames loads native output recorded live on CLI 2.1.306 (redacted;
+// design §2.1), so the tests replay what native really emits.
+func fixtureFrames(t *testing.T, name string) []Frame {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", name))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if f.sawSink {
-		t.Fatal("a refused request must never reach the CLI")
+	var frames []Frame
+	for _, line := range bytes.Split(bytes.TrimSpace(raw), []byte("\n")) {
+		f, err := ParseFrame(line)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		frames = append(frames, f)
 	}
-	var env map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+	return frames
+}
+
+const weatherToolRequest = `{"model":"claude-haiku-5-5","max_tokens":1024,` +
+	`"tools":[{"name":"get_weather","input_schema":{"type":"object","properties":{"city":{"type":"string"}}}}],` +
+	`"messages":[{"role":"user","content":"Weather in Paris?"}]`
+
+// M2 replaces M1's refusal: a tool-bearing request reaches the CLI and the
+// tool call comes back. Native's own error_max_turns ending (it answers the
+// unknown tool locally, then hits --max-turns 1) is the success path.
+func TestMessagesReturnsToolUseNonStream(t *testing.T) {
+	f := &fakeExec{frames: fixtureFrames(t, "m2_single.jsonl")}
+	rec := post(t, testServer(f), weatherToolRequest+`}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(string(f.req.Tools), "get_weather") {
+		t.Errorf("tools did not reach the runner: %s", f.req.Tools)
+	}
+	var msg struct {
+		StopReason string `json:"stop_reason"`
+		Content    []struct {
+			Type  string         `json:"type"`
+			ID    string         `json:"id"`
+			Name  string         `json:"name"`
+			Input map[string]any `json:"input"`
+			Text  string         `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &msg); err != nil {
 		t.Fatalf("body is not JSON: %s", rec.Body)
 	}
-	inner, _ := env["error"].(map[string]any)
-	if inner["code"] != "chat_tools_unsupported" {
-		t.Errorf("code = %v, want chat_tools_unsupported (a refusal names its reason)", inner["code"])
+	if msg.StopReason != "tool_use" {
+		t.Errorf("stop_reason = %q, want tool_use", msg.StopReason)
+	}
+	if len(msg.Content) != 1 || msg.Content[0].Type != "tool_use" || msg.Content[0].Name != "get_weather" ||
+		msg.Content[0].ID == "" || msg.Content[0].Input["city"] != "Paris" {
+		t.Errorf("content = %+v, want one get_weather tool_use for Paris", msg.Content)
+	}
+	if strings.Contains(rec.Body.String(), "No such tool available") {
+		t.Error("native's synthetic tool_result leaked to the client")
+	}
+}
+
+func TestMessagesStreamsToolUse(t *testing.T) {
+	f := &fakeExec{frames: fixtureFrames(t, "m2_single.jsonl")}
+	rec := post(t, testServer(f), weatherToolRequest+`,"stream":true}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200: %s", rec.Code, rec.Body)
+	}
+	out := rec.Body.String()
+	for _, want := range []string{`"type":"tool_use"`, `"name":"get_weather"`, "input_json_delta",
+		`"stop_reason":"tool_use"`, "event: message_stop"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stream missing %q\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "No such tool available") {
+		t.Error("native's synthetic tool_result leaked into the stream")
 	}
 }
 

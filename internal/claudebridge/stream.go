@@ -108,9 +108,18 @@ type StreamWriter struct {
 
 // Handle consumes one frame. Frames that are not part of the stream (system,
 // rate_limit_event, result bookkeeping) are absorbed and reported through fields.
+//
+// Only the first upstream message reaches the client. Measured on CLI 2.1.306: an
+// empty first answer makes native append its own "[Your previous response had no
+// visible output…]" user turn and generate a second message, and a tool call is
+// followed by native's synthetic "No such tool available" tool_result. Neither is
+// the client's conversation, so everything after the first message_stop is dropped.
 func (s *StreamWriter) Handle(f Frame) error {
 	switch f.Type {
 	case "stream_event":
+		if s.stopped {
+			return nil
+		}
 		var ev map[string]any
 		if err := json.Unmarshal(f.Event, &ev); err != nil {
 			return fmt.Errorf("claude-bridge: malformed native event: %w", err)
@@ -148,11 +157,18 @@ func (s *StreamWriter) Handle(f Frame) error {
 		}
 		return s.writeEvent(kind, f.Event)
 	case "assistant":
+		// Native emits one assistant frame per content block (measured: three
+		// parallel tool calls arrive as three frames sharing one message id), so
+		// blocks accumulate rather than the last frame replacing the rest.
 		var msg struct {
+			ID      string           `json:"id"`
 			Content []map[string]any `json:"content"`
 		}
 		if err := json.Unmarshal(f.Message, &msg); err == nil && len(msg.Content) > 0 {
-			s.blocks = msg.Content
+			if s.msgID != "" && msg.ID != "" && msg.ID != s.msgID {
+				return nil
+			}
+			s.blocks = append(s.blocks, msg.Content...)
 		}
 	}
 	return nil

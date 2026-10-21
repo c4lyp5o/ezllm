@@ -8,15 +8,21 @@ import (
 )
 
 // Request is the subset of an Anthropic Messages request this hop honours. Anything
-// else arrives as Unsupported and is refused before a process is spawned (M1 is
-// text-only; see docs/claude-subscription-design.md).
+// else arrives as Unsupported and is refused before a process is spawned (see
+// docs/claude-subscription-design.md).
+//
+// Tools and ToolChoice stay raw: they reach upstream through the extra body
+// exactly as the client sent them, and native never runs them (it is spawned
+// with --tools ” and an empty MCP config; design §2.1).
 type Request struct {
-	Model     string          `json:"model"`
-	MaxTokens int             `json:"max_tokens"`
-	System    json.RawMessage `json:"system,omitempty"`
-	Messages  []Message       `json:"messages"`
-	Stream    bool            `json:"stream,omitempty"`
-	Stop      []string        `json:"stop_sequences,omitempty"`
+	Model      string          `json:"model"`
+	MaxTokens  int             `json:"max_tokens"`
+	System     json.RawMessage `json:"system,omitempty"`
+	Messages   []Message       `json:"messages"`
+	Stream     bool            `json:"stream,omitempty"`
+	Stop       []string        `json:"stop_sequences,omitempty"`
+	Tools      json.RawMessage `json:"tools,omitempty"`
+	ToolChoice json.RawMessage `json:"tool_choice,omitempty"`
 }
 
 // Message is one conversation turn. Content stays raw: string or block array both
@@ -50,7 +56,7 @@ func ParseRequest(body []byte) (Request, error) {
 	// Raw-map pass to see fields the typed struct ignores.
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(body, &raw); err == nil {
-		for _, field := range []string{"tools", "tool_choice", "parallel_tool_calls"} {
+		for _, field := range []string{"parallel_tool_calls"} {
 			if _, ok := raw[field]; ok {
 				return Request{}, Unsupported{Field: field}
 			}
@@ -132,6 +138,15 @@ func BuildExtraBody(req Request) (string, error) {
 	}
 	if len(req.Stop) > 0 {
 		body["stop_sequences"] = req.Stop
+	}
+	// Measured on CLI 2.1.306: tools in the extra body are the only tools upstream
+	// sees (asked to list them, the model names exactly the client's), and the
+	// resulting tool_use blocks come back under the client's own names.
+	if len(req.Tools) > 0 && string(req.Tools) != "null" {
+		body["tools"] = req.Tools
+	}
+	if len(req.ToolChoice) > 0 && string(req.ToolChoice) != "null" {
+		body["tool_choice"] = req.ToolChoice
 	}
 	out, err := json.Marshal(body)
 	if err != nil {

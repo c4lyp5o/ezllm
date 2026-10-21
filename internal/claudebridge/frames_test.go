@@ -15,18 +15,51 @@ func body(t *testing.T, req Request) string {
 	return s
 }
 
-func TestParseRequestRefusesToolsWithACause(t *testing.T) {
-	_, err := ParseRequest([]byte(`{"model":"claude-haiku-5-5","max_tokens":16,"tools":[{"type":"function"}],` +
-		`"messages":[{"role":"user","content":"hi"}]}`))
-	if err == nil {
-		t.Fatal("tool-bearing request must be refused, not silently answered without tools")
+// M2: tools are honoured, not refused — they travel to upstream unchanged.
+func TestParseRequestCarriesToolsIntoExtraBody(t *testing.T) {
+	tools := `[{"name":"get_weather","description":"Get weather.","input_schema":{"type":"object","properties":{"city":{"type":"string"}}}}]`
+	choice := `{"type":"tool","name":"get_weather"}`
+	req, err := ParseRequest([]byte(`{"model":"claude-haiku-5-5","max_tokens":16,"tools":` + tools +
+		`,"tool_choice":` + choice + `,"messages":[{"role":"user","content":"hi"}]}`))
+	if err != nil {
+		t.Fatalf("tool-bearing request must be accepted: %v", err)
 	}
+	var got struct {
+		Tools      json.RawMessage `json:"tools"`
+		ToolChoice json.RawMessage `json:"tool_choice"`
+	}
+	if err := json.Unmarshal([]byte(body(t, req)), &got); err != nil {
+		t.Fatal(err)
+	}
+	if string(got.Tools) != tools {
+		t.Errorf("tools = %s, want the client's definitions verbatim %s", got.Tools, tools)
+	}
+	if string(got.ToolChoice) != choice {
+		t.Errorf("tool_choice = %s, want %s", got.ToolChoice, choice)
+	}
+}
+
+func TestExtraBodyOmitsToolsWhenAbsent(t *testing.T) {
+	req, err := ParseRequest([]byte(`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"hi"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := body(t, req); strings.Contains(b, "tools") || strings.Contains(b, "tool_choice") {
+		t.Errorf("text-only body grew tool fields: %s", b)
+	}
+}
+
+// parallel_tool_calls is an OpenAI field; on the Messages wire it is
+// tool_choice.disable_parallel_tool_use. Arriving here it is refused, not dropped.
+func TestParseRequestRefusesForeignParallelToolCalls(t *testing.T) {
+	_, err := ParseRequest([]byte(`{"model":"claude-haiku-5-5","max_tokens":16,"parallel_tool_calls":false,` +
+		`"messages":[{"role":"user","content":"hi"}]}`))
 	u, ok := err.(Unsupported)
 	if !ok {
 		t.Fatalf("want Unsupported, got %T: %v", err, err)
 	}
-	if u.Field != "tools" {
-		t.Errorf("Field = %q, want tools", u.Field)
+	if u.Field != "parallel_tool_calls" {
+		t.Errorf("Field = %q, want parallel_tool_calls", u.Field)
 	}
 }
 

@@ -73,3 +73,33 @@ func TestRunEarlyReturnReapsChildAndReader(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// Measured on CLI 2.1.306: after a tool call native answers the unknown tool
+// itself, then --max-turns 1 ends the run with is_error:true,
+// subtype error_max_turns. That ending is the M2 success path, not a failure.
+func TestRunTreatsToolUseMaxTurnsAsSuccess(t *testing.T) {
+	dir := t.TempDir()
+	fixture, err := filepath.Abs(filepath.Join("testdata", "m2_single.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "fake-claude")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\ncat >/dev/null\ncat "+fixture+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r := &Runner{Bin: bin, ConfigDir: dir, Timeout: 10 * time.Second}
+	req := Request{Model: "claude-haiku-5-5", MaxTokens: 1024,
+		Tools:    json.RawMessage(`[{"name":"get_weather","input_schema":{"type":"object"}}]`),
+		Messages: []Message{{Role: "user", Content: json.RawMessage(`"Weather in Paris?"`)}}}
+	sw := &StreamWriter{}
+	res, err := r.Run(context.Background(), req, "haiku", sw.Handle)
+	if err != nil {
+		t.Fatalf("Run = %v, want success for a tool_use ending", err)
+	}
+	if res.StopReason != "tool_use" {
+		t.Errorf("StopReason = %q, want tool_use", res.StopReason)
+	}
+	if got := sw.Message(req.Model)["stop_reason"]; got != "tool_use" {
+		t.Errorf("message stop_reason = %v, want tool_use", got)
+	}
+}

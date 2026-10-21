@@ -197,3 +197,54 @@ func TestChildEnvIsAnAllowlist(t *testing.T) {
 		t.Errorf("forced vars wrong: CLAUDE_CONFIG_DIR=%q HOME=%q", got["CLAUDE_CONFIG_DIR"], got["HOME"])
 	}
 }
+
+// Measured: native emits one assistant frame per content block. Keeping only the
+// last frame (M1) would answer three parallel tool calls with one.
+func TestStreamWriterKeepsEveryParallelToolUse(t *testing.T) {
+	sw := &StreamWriter{}
+	for _, f := range fixtureFrames(t, "m2_parallel.jsonl") {
+		if err := sw.Handle(f); err != nil {
+			t.Fatalf("Handle: %v", err)
+		}
+	}
+	msg := sw.Message("claude-haiku-5-5")
+	blocks, _ := msg["content"].([]map[string]any)
+	var cities []string
+	for _, b := range blocks {
+		if b["type"] != "tool_use" {
+			t.Errorf("unexpected block %v", b)
+			continue
+		}
+		in, _ := b["input"].(map[string]any)
+		city, _ := in["city"].(string)
+		cities = append(cities, city)
+	}
+	if strings.Join(cities, ",") != "Paris,Tokyo,Lima" {
+		t.Errorf("tool calls = %v, want Paris,Tokyo,Lima", cities)
+	}
+	if msg["stop_reason"] != "tool_use" {
+		t.Errorf("stop_reason = %v, want tool_use", msg["stop_reason"])
+	}
+}
+
+// Measured: an empty first answer makes native append its own "no visible
+// output" nudge and generate a second message. The client sees one message.
+func TestStreamWriterRelaysOnlyTheFirstMessage(t *testing.T) {
+	var buf bytes.Buffer
+	sw := &StreamWriter{W: &buf}
+	for _, f := range fixtureFrames(t, "m2_none.jsonl") {
+		if err := sw.Handle(f); err != nil {
+			t.Fatalf("Handle: %v", err)
+		}
+	}
+	if err := sw.Finish(); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if n := strings.Count(out, "event: message_start"); n != 1 {
+		t.Errorf("message_start count = %d, want 1\n%s", n, out)
+	}
+	if n := strings.Count(out, "event: message_stop"); n != 1 {
+		t.Errorf("message_stop count = %d, want 1", n)
+	}
+}

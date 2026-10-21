@@ -650,17 +650,9 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 				return
 			}
 		}
-		// Per-key model allowlist: an empty list means every model. Checked
-		// against the requested id before a combo is expanded, so a key
-		// cannot reach a disallowed hop through an alias.
-		if s.db != nil {
-			if allowed, aerr := s.db.ClientAllowsModel(r.Context(), client, requested); aerr == nil && !allowed {
-				writeErr(w, http.StatusForbidden, "model_not_allowed",
-					fmt.Sprintf("token %q is not allowed to use model %q", client, requested))
-				return
-			} else if aerr != nil && !errors.Is(aerr, store.ErrNotFound) {
-				slog.Warn("client allowlist check failed", "client", client, "err", aerr)
-			}
+		// Per-key model allowlist, checked before a combo is expanded.
+		if !s.allowModel(w, r, client, requested) {
+			return
 		}
 		// Reserve the request's max output tokens against the key budget
 		// before dispatch; the defer releases the reservation when the
@@ -725,132 +717,18 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 		// changes nothing about the request.
 		sh := captureShapeDoc(doc, surface)
 
-		// served is the route that ACTUALLY committed a response — it may be
-		// hop 2 or 3 after failover. Every ledger field below (account, key,
-		// model) must describe that hop: crediting routes[0] would bill a
-		// failed hop for work it did not do, which is exactly the number a
-		// per-account usage cap would later be measured against.
+		// served is the route that ACTUALLY committed a response (see
+		// finishDispatch); the request-shape and compression fields are this
+		// surface's own, the rest is shared with the multipart path.
 		served, res, ferr := s.dispatcher.ForwardCandidatesDoc(r.Context(), w, r, routes, body, doc)
-		if served.Alias == "" {
-			// Resolution or swap failed before any hop committed: the ledger
-			// still needs the REQUESTED target, or the row lands with no alias
-			// and disappears from alias-grouped usage.
-			served = routes[0]
-		}
-		// Record which hop actually served. sticky_last_good needs an OUTCOME and
-		// cannot get one from resolution alone: it keeps using the hop that last
-		// answered. Only a delivered 2xx counts — a failed attempt must not move
-		// that cursor, or a hop that just broke would look like one that
-		// worked. A bare model name is always a combo, so an alias without '/'
-		// identifies one; a direct namespace/model route has no rotation to
-		// inform.
-		// A hop-attributable failure releases a hold_until_failure block so the
-		// next dispatch rotates; a 4xx is the REQUEST's fault and keeps the
-		// hold (operator decision 2026-10-13).
-		if hopAttributableFailure(res, ferr) && !strings.Contains(served.Alias, "/") {
-			s.resolver.MarkHopBad(served.Alias, served)
-		}
-		// A translated stream that ended in a late error frame or a truncated
-		// source delivered a 200 header but did NOT serve the request: the
-		// positive signal must not fire, or a hop that cuts its answers looks
-		// healthy and sticky_last_good keeps choosing it. The ledger row keeps
-		// the delivered status (that is what the client saw) and carries the
-		// outcome in its err column.
-		if ferr == nil && res.Status >= 200 && res.Status < 300 && res.StreamCompleted() && !strings.Contains(served.Alias, "/") {
-			s.resolver.MarkHopGood(served.Alias, served)
-		}
-		if info := reqInfoOf(r); info != nil {
-			info.account = served.Account.Namespace
-			info.model = served.Model
-		}
-		status := res.Status
-		if ferr != nil {
-			var rl *proxy.RateLimited
-			if errors.As(ferr, &rl) {
-				// Every candidate hop was out of its configured request budget,
-				// so NO upstream call was made. That is a refusal, not a gateway
-				// fault: answer 429 and name the earliest moment the request
-				// could succeed, so a client can wait instead of blind-retrying.
-				status = http.StatusTooManyRequests
-				extra := map[string]any{
-					"reason": ferr.Error(),
-					"rule": map[string]any{
-						"kind":   "rate",
-						"detail": fmt.Sprintf("%d requests per %s", rl.Limit, rl.Window),
-					},
-				}
-				if !rl.NextAllowed.IsZero() {
-					extra["rule"].(map[string]any)["next_allowed"] = rl.NextAllowed.Format(time.RFC3339)
-				}
-				writeErrExtra(w, status, "model_unavailable", ferr.Error(), extra)
-			} else {
-				// Nothing (or only headers) reached the client. Emit an explicit
-				// 502 so a transport failure never looks like an empty 200 —
-				// ResponseWriter defaults to 200 when WriteHeader is never called.
-				// The gate is Committed, NOT Status: commit can fail on the
-				// non-stream body read while still carrying the upstream's 200,
-				// and guarding on Status would let that through as an empty 200.
-				status = http.StatusBadGateway
-				if !res.Committed {
-					writeErr(w, status, "upstream_error", "upstream request failed: "+ferr.Error())
-				}
-			}
-		} else if status == 0 {
-			status = http.StatusBadGateway
-		}
 		call := store.Call{
-			TS: start, Client: client, IP: cip, Surface: store2surface(surface), Alias: served.Alias,
-			AccountID: served.Account.ID,
-			Account:   served.Account.Namespace, KeyID: served.KeyID, KeyHint: served.KeyHint, Model: served.Model,
-			Status: status, Stream: res.Stream, TTFTms: res.TTFTms, Totalms: res.Totalms,
-			EndpointID: res.EndpointID, UpstreamModel: res.UpstreamModel,
+			TS: start, Client: client, IP: cip, Surface: store2surface(surface),
 			// v8 research capture: request shape + operator session key.
 			PrefixSHA: sh.PrefixSHA, MsgCount: sh.MsgCount, ToolCount: sh.ToolCount,
 			SessionID: sessionOf(r), ReqBytes: sh.ReqBytes,
 		}
 		attachCompressionMetrics(&call, compRes)
-		applyUsage(&call, res.Usage)
-		if ferr != nil {
-			call.Err = ferr.Error()
-		} else if res.Err != "" {
-			call.Err = res.Err
-		}
-		// Failover trail: every candidate that did NOT serve, appended to the
-		// served row's err. One request stays ONE ledger row (the billing
-		// truth), but the hops that "hopped" become visible in the dashboard —
-		// the operator asked for exactly this, and without it a fallback run
-		// looks like the rotation never moved.
-		if note := failoverTrail(res.Attempts); note != "" {
-			if call.Err == "" {
-				call.Err = note
-			} else {
-				call.Err = call.Err + "; " + note
-			}
-		}
-		// Request-wide attempt usage (addendum #3): what the budget allowed
-		// and what was spent, on every dispatched row. Unlimited is a word,
-		// never a zero-left ambiguity.
-		if res.UpstreamAttempts > 0 {
-			budget := "unlimited"
-			if res.AttemptBudget > 0 {
-				budget = fmt.Sprintf("%d", res.AttemptBudget)
-			}
-			note := fmt.Sprintf("upstream attempts %d/%s", res.UpstreamAttempts, budget)
-			if call.Err == "" {
-				call.Err = note
-			} else {
-				call.Err = call.Err + "; " + note
-			}
-		}
-		call.BlockPos = served.BlockPos
-		// Attribution for hops whose WIRE differs from the client's surface —
-		// the request/response bodies were translated, so the row's tokens_in
-		// is the vendor's INCLUSIVE total rather than our cold-token
-		// convention. That covers both the anthropic->openai-chat leg
-		// (Translated) and a hop curated onto the Responses wire
-		// (ResponsesWire): one marker, one meaning, no second vocabulary.
-		call.Translated = served.Translated || served.ResponsesWire
-		s.ledger(call)
+		s.finishDispatch(w, r, call, routes, served, res, ferr)
 	}
 }
 
@@ -897,14 +775,8 @@ func (s *Server) inferenceMultipart(w http.ResponseWriter, r *http.Request, surf
 			return
 		}
 	}
-	if s.db != nil {
-		if allowed, aerr := s.db.ClientAllowsModel(r.Context(), client, requested); aerr == nil && !allowed {
-			writeErr(w, http.StatusForbidden, "model_not_allowed",
-				fmt.Sprintf("token %q is not allowed to use model %q", client, requested))
-			return
-		} else if aerr != nil && !errors.Is(aerr, store.ErrNotFound) {
-			slog.Warn("client allowlist check failed", "client", client, "err", aerr)
-		}
+	if !s.allowModel(w, r, client, requested) {
+		return
 	}
 	if info := reqInfoOf(r); info != nil {
 		info.surface = string(surface)
@@ -925,36 +797,12 @@ func (s *Server) inferenceMultipart(w http.ResponseWriter, r *http.Request, surf
 	}
 
 	// Forward the raw multipart body; prepareHopBody detects multipart and
-	// swaps the model field per hop.
+	// swaps the model field per hop. The outcome goes through the same
+	// finishDispatch as JSON: 429 for a rate-limited combo, hop health, the
+	// failover trail.
 	served, res, ferr := s.dispatcher.ForwardCandidates(r.Context(), w, r, routes, body)
-	if served.Alias == "" {
-		served = routes[0]
-	}
-	status := res.Status
-	if ferr != nil {
-		status = http.StatusBadGateway
-		if !res.Committed {
-			writeErr(w, status, "upstream_error", "upstream request failed: "+ferr.Error())
-		}
-	} else if status == 0 {
-		status = http.StatusBadGateway
-	}
-	call := store.Call{
-		TS: start, Client: client, IP: cip, Surface: store2surface(surface),
-		Alias: served.Alias, AccountID: served.Account.ID, Account: served.Account.Namespace,
-		KeyID: served.KeyID, KeyHint: served.KeyHint, Model: served.Model,
-		Status: status, Stream: res.Stream, Totalms: res.Totalms,
-	}
-	if res.Usage != nil {
-		call.TokensIn = res.Usage.In
-		call.TokensOut = res.Usage.Out
-	}
-	if ferr != nil {
-		call.Err = ferr.Error()
-	} else if res.Err != "" {
-		call.Err = res.Err
-	}
-	s.ledger(call)
+	s.finishDispatch(w, r, store.Call{TS: start, Client: client, IP: cip, Surface: store2surface(surface)},
+		routes, served, res, ferr)
 }
 
 // extractModelMultipart reads the "model" form field from a multipart body.

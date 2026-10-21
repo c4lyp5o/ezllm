@@ -11,9 +11,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"math/rand/v2"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -835,10 +837,7 @@ func orderRoutes(combo *store.Combo, routes []proxy.Route) ([]proxy.Route, int) 
 	case "block_round_robin":
 		return blockOrder(combo, routes)
 	case "least_used":
-		// Caller supplies hop order already; least-used needs usage data the
-		// router does not hold, so keep position order until M4's ledger hook
-		// lands. Ordering wrongly here would be worse than not ordering.
-		return routes, 0
+		return leastUsedOrder(combo, routes, time.Now()), 0
 	case "sticky_last_good":
 		return stickyOrder(combo, routes), 0
 	default: // "failover"
@@ -1136,6 +1135,79 @@ func stickyOrder(combo *store.Combo, routes []proxy.Route) []proxy.Route {
 		}
 	}
 	return routes
+}
+
+// hopUse is one combo hop's recent-traffic score: each served request adds
+// 1, and the score halves every useHalfLife. In-process like every other
+// cursor here — a restart starts every hop at zero, which is a fair start.
+var hopUse sync.Map // "combo\x00accountID/model" -> *useEntry
+
+const useHalfLife = 10 * time.Minute
+
+type useEntry struct {
+	mu    sync.Mutex
+	score float64
+	at    time.Time
+}
+
+func useKey(combo string, accountID int64, model string) string {
+	return combo + "\x00" + strconv.FormatInt(accountID, 10) + "/" + model
+}
+
+// decayed is the score as of now.
+func (e *useEntry) decayed(now time.Time) float64 {
+	if e.at.IsZero() {
+		return 0
+	}
+	return e.score * math.Exp2(-now.Sub(e.at).Seconds()/useHalfLife.Seconds())
+}
+
+// NoteUse records that a combo hop served a request, for least_used. Called
+// by the server for every combo-routed request a hop committed, success or
+// not: "used" is load placed on the hop, which is what spreading balances.
+func (r *Resolver) NoteUse(comboName string, rt proxy.Route) {
+	r.noteUseAt(comboName, rt, time.Now())
+}
+
+func (r *Resolver) noteUseAt(comboName string, rt proxy.Route, now time.Time) {
+	if comboName == "" || strings.Contains(comboName, "/") {
+		return
+	}
+	v, _ := hopUse.LoadOrStore(useKey(comboName, rt.Account.ID, rt.Model), &useEntry{})
+	e := v.(*useEntry)
+	e.mu.Lock()
+	e.score = e.decayed(now) + 1
+	e.at = now
+	e.mu.Unlock()
+}
+
+// leastUsedOrder implements least_used: the hop with the least recent
+// traffic goes first, the rest follow by the same measure, and ties keep the
+// combo's position order (so a cold combo behaves like failover until load
+// arrives). Failover inside the request still walks the whole list.
+func leastUsedOrder(combo *store.Combo, routes []proxy.Route, now time.Time) []proxy.Route {
+	if len(routes) < 2 {
+		return routes
+	}
+	scores := make([]float64, len(routes))
+	for i, rt := range routes {
+		if v, ok := hopUse.Load(useKey(combo.Name, rt.Account.ID, rt.Model)); ok {
+			e := v.(*useEntry)
+			e.mu.Lock()
+			scores[i] = e.decayed(now)
+			e.mu.Unlock()
+		}
+	}
+	idx := make([]int, len(routes))
+	for i := range idx {
+		idx[i] = i
+	}
+	sort.SliceStable(idx, func(a, b int) bool { return scores[idx[a]] < scores[idx[b]] })
+	out := make([]proxy.Route, len(routes))
+	for i, j := range idx {
+		out[i] = routes[j]
+	}
+	return out
 }
 
 // randomOrder implements true_round_robin: a genuine dice roll over the eligible

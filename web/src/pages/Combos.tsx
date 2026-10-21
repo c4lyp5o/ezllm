@@ -4,11 +4,8 @@ import { ApiError, accountModels, del, get, patch, post, STRATEGY_HINTS, type Co
 import { CAUSE_TONES, Chip, ConfirmModal, Modal, Mono, SectionLabel, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls } from '../components/ui';
 import { Collapse, ReorderItem, Stagger, StaggerItem } from '../components/motion';
 
-// Strategies offered by the combo form. least_used is deliberately absent: it
-// is accepted by the backend (where it keeps position order, with a comment
-// explaining why) but is NOT offered here, because a selectable option that
-// silently equals another one is a knob that appears to work and does not.
-const STRATEGIES = ['failover', 'block_round_robin', 'true_round_robin', 'sticky_last_good'] as const;
+// Strategies offered by the combo form — every one the backend implements.
+const STRATEGIES = ['failover', 'block_round_robin', 'true_round_robin', 'sticky_last_good', 'least_used'] as const;
 
 // AccountLite keeps each account's request budget alongside its name so the
 // block-size field can warn when a block could not be served in full.

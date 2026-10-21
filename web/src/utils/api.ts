@@ -991,5 +991,5 @@ export const STRATEGY_HINTS: Record<string, string> = {
   block_round_robin: 'keep one hop for N requests, then move to the next — keeps that account’s prompt cache warm; needs N <= the hop’s request budget',
   true_round_robin: 'a dice roll per request — perfectly even in expectation and stateless, but no cache reuse and it will streak',
   sticky_last_good: 'stay on the last working hop, and release it after sticky_idle_s of quiet',
-  least_used: 'not implemented yet — falls back to hop order',
+  least_used: 'send each request to the hop with the least recent traffic',
 };

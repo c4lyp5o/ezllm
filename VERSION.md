@@ -38,6 +38,14 @@ file in the same commit, or the test fails.
 - **Fix: the Claude bridge no longer leaks on failed requests.** An early
   return (timeout, client disconnect) left a blocked reader goroutine and an
   unreaped zombie CLI process each time.
+- **Fix: audio transcription and image edits answer 429 when rate-limited.**
+  The multipart path kept its own copy of the post-dispatch code and had
+  drifted: it answered 502, and skipped hop health and the failover trail.
+  Both paths now share one `finishDispatch`.
+- **`least_used` works.** It was accepted and documented but kept hop order.
+  Each combo hop now carries a recent-traffic count (halving every 10
+  minutes) and the least-loaded hop goes first; it is back in the combo
+  form's strategy picker.
 - **Fix: "Log out" now ends the session.** It cleared only browser storage,
   so the HttpOnly cookie kept opening `/admin` for 12 hours.
   `POST /admin/logout` revokes it server-side.

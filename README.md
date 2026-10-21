@@ -120,7 +120,7 @@ plus a strategy:
 | `true_round_robin` | stateless uniform roll across healthy hops |
 | `block_round_robin` | consecutive dispatches per hop; with *hold-until-failure*, a hop keeps its block while it succeeds |
 | `sticky_last_good` | stick to the hop that last served, until it fails |
-| `least_used` | prefer the hop with the least ledger traffic |
+| `least_used` | send each request to the hop with the least recent traffic (in-process; each hop's count halves every 10 minutes, ties keep hop order) |
 
 Hop eligibility layers on top: per-(account, model) **rules** (token caps and
 allowed-hours windows, see [docs/rules-engine-design.md](docs/rules-engine-design.md)),

@@ -2,6 +2,31 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14); full history via `git log`.
 
+## 2026-10-22 — 1.0 prep: one translation switch, env reference, probe fixes
+
+- **Behaviour change: `translation.enabled` is the one switch.** It now covers the
+  pairwise translators and the universal matrix together. `translation.universal_enabled`
+  and `EZLLM_TRANSLATION_UNIVERSAL_ENABLED` still work but warn at boot; an explicit
+  `universal_enabled: false` now turns all translation off, not just the matrix
+  (`docs/translation-runbook.md`).
+- **Every environment variable documented.** `docs/environment.md` lists each one
+  with its default and opens with what a new install sets (`EZLLM_USAGE_TZ`, the
+  first dashboard password, `EZLLM_CLAUDE_BRIDGE=off` without a Claude CLI). The
+  duplicate Claude bridge defaults left `compose.yml` and the `Dockerfile`; the
+  binary's own defaults (`/opt/claude/claude`, `/claude-sub`) are unchanged.
+- **Shipped compose still turns the Claude bridge on**, with paths for this
+  maintainer's host. Installs without the Claude CLI and a subscription login set
+  `EZLLM_CLAUDE_BRIDGE=off`, or the boot fails.
+- **Fix: a retired model no longer fails a key test.** Ollama answers a retired
+  model with `410 Gone` ("… was retired on …"); the probe now treats it like
+  Gemini's retired-model 404 and moves to the next candidate.
+- **Fix: Ollama (local) keeps the operator's base URL**, so a remote Ollama host
+  is no longer replaced by `localhost`; quota percentages render whole.
+- **Fix: the models drawer refreshes after a catalog sync** without a page reload.
+- **Docs accuracy pass.** README Security now states keys are AES-256-GCM
+  encrypted at rest (it said plaintext); EXPLORING.md landmarks re-verified;
+  resolved known issues removed from CONTRIBUTING.md.
+
 ## 2026-10-21 — Claude subscription M2: tools on claude-sub
 
 - **Agents can run on the subscription.** Hermes sends tools on every turn, so M1's

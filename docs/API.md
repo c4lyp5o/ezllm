@@ -13,7 +13,7 @@ Errors are OpenAI-shaped: `{"error":{"type":"...","message":"...","code":422}}`.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/healthz` | no auth; **liveness + release version** — `{"status":"ok","version":"0.0.12"}` after a DB ping (503 `{"status":"down","version":"…"}` if the ping fails). Version is the only extra field; no counts/paths/uptime. |
+| GET | `/healthz` | no auth; **liveness + release version** — `{"status":"ok","version":"0.0.21"}` after a DB ping (503 `{"status":"down","version":"…"}` if the ping fails). Version is the only extra field; no counts/paths/uptime. |
 | GET | `/v1/models?protocol=` | `openai` (default) / `anthropic` shape; ids are `<namespace>/<model>`, plus one bare id per **enabled** combo |
 | POST | `/v1/chat/completions` | OpenAI stream + non-stream |
 | POST | `/v1/messages` | Anthropic (`x-api-key` or Bearer) |
@@ -82,9 +82,9 @@ token budgets under-count by them. The live feed's `snapshot` event carries the 
 `dropped`, `lost` and `unmetered`.
 ```jsonc
 {
-  "health": { "status":"ok", "version":"0.0.12", "schema_version":18, "accounts":5, "provider_keys":5,
-               "models":51, "combos":2, "ledger_rows":1065, "dropped_rows":0,
-               "ledger_span":{"oldest":"…","newest":"…"}, "uptime_s":18119,
+  "health": { "status":"ok", "version":"0.0.21", "schema_version":27, "accounts":19, "provider_keys":19,
+               "models":1551, "combos":12, "ledger_rows":22309, "dropped_rows":0, "lost_rows":0,
+               "unmetered_rows":0, "ledger_span":{"oldest":"…","newest":"…"}, "uptime_s":4115,
                "db_path":"/data/ezllm.sqlite" },
   "usage":  [ {"k":"opengo","calls":64,"tin":1200000,"tout":84000,"cread":300000,"cwrite":21000,
                 "reasoning":4000,"saved":0,"errors":1} ],          // group_by=account, last 24h

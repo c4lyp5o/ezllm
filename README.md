@@ -84,7 +84,7 @@ Full contract — every endpoint, request/response shape, and error code — in
 
 | Layer | Routes | Auth |
 |---|---|---|
-| Liveness | `GET /healthz` → `{"status":"ok","version":"0.0.12"}` | none |
+| Liveness | `GET /healthz` → `{"status":"ok","version":"0.0.21"}` | none |
 | Inference | `POST /v1/chat/completions` · `/v1/messages` · `/v1/responses` | client token |
 | Extended | `POST /v1/embeddings` · `/v1/images/generations` · `/v1/audio/speech` · `/v1/audio/transcriptions` | client token |
 | Catalog | `GET /v1/models` (namespaced ids + combos; `?protocol=anthropic`) | client token |

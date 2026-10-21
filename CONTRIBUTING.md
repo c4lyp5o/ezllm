@@ -79,6 +79,10 @@ Known, measured (2026-10-17):
 
 Lingering items — fix or close them deliberately, don't rediscover them:
 
+Reviewed for 1.0 (2026-10-22): none blocks the release. They concern proof,
+test tooling and docs upkeep, not a running install, and stay open as
+post-1.0 work.
+
 1. **Cloudflare Workers AI has no live end-to-end proof.** The key-test path
    is unit-covered and the endpoint composition is implemented, but the
    account-scoped live proof was still pending an account ID (open as of

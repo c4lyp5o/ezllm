@@ -12,6 +12,15 @@ export function clearToken(): void {
   try { localStorage.removeItem(TOKEN_KEY); } catch { /* noop */ }
   try { sessionStorage.removeItem(UNLOCK_KEY); } catch { /* noop */ }
 }
+/** Sign out: revoke the session server-side (the HttpOnly cookie cannot be
+ *  cleared from JS), then forget the local markers. Best-effort on the
+ *  network — local state is cleared either way. */
+export async function logout(): Promise<void> {
+  try {
+    await fetch('/admin/logout', { method: 'POST', credentials: 'include' });
+  } catch { /* offline: still clear local state */ }
+  clearToken();
+}
 /** Cookie sessions are httpOnly, so JS cannot inspect them. This marker only
  *  says "this tab logged in"; the cookie is what actually authenticates. */
 export function isUnlocked(): boolean {

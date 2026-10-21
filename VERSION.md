@@ -38,6 +38,19 @@ file in the same commit, or the test fails.
 - **Fix: the Claude bridge no longer leaks on failed requests.** An early
   return (timeout, client disconnect) left a blocked reader goroutine and an
   unreaped zombie CLI process each time.
+- **Fix: "Log out" now ends the session.** It cleared only browser storage,
+  so the HttpOnly cookie kept opening `/admin` for 12 hours.
+  `POST /admin/logout` revokes it server-side.
+- **Fix: request bodies have a read budget** (30 s for admin JSON, 2 min for
+  inference) and idle connections close after 2 minutes. A client could
+  trickle a body forever and pin a handler — on `/admin/login`, without
+  authenticating. Streaming responses are unaffected.
+- **The dashboard shell sends a Content-Security-Policy** (scripts from this
+  origin plus the theme bootstrap by hash, no framing) and every response
+  sends `X-Content-Type-Options: nosniff`.
+- **Toolchain pinned to go1.27.2**: picks up ten standard-library security
+  fixes (HTTP/2, MIME header limits, Range parsing); govulncheck reports
+  nothing reachable.
 - **Password strength bar** on the first-boot setup page and in Settings:
   four segments plus a hint, estimated locally (length × character pool, cut
   for repeats, keyboard runs and well-known passwords). It guides; the server

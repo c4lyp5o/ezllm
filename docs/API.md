@@ -581,6 +581,11 @@ hash; the SPA shows only its set-password page until setup flips the flag.
   `429` after 5 failures per IP in 15 min (shared with login).
 - `EZLLM_DASHBOARD_PASSWORD` / `_FILE` completes setup at boot instead.
 
+### `POST /admin/logout` → `204`
+Revokes the presented dashboard session (cookie, else bearer) server-side and
+expires the `ezllm_session` cookie. No auth needed — it can only end the session
+it is handed — and signing out twice is a no-op.
+
 ### `POST /admin/login` → `200` + session · `POST /admin/settings/password`
 bcrypt dashboard password; the SPA renders and fetches nothing pre-auth.
 Success: `{"token":"…"}` + the `ezllm_session` cookie · `401` wrong password

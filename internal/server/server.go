@@ -100,6 +100,9 @@ type Server struct {
 	// comboAutoProbe: a combo write probes its untested hop models
 	// (combo_autoprobe.go). Off in unit tests unless they ask for it.
 	comboAutoProbe bool
+	// cspOnce/csp cache the dashboard Content-Security-Policy (spa.go).
+	cspOnce sync.Once
+	csp     string
 	// setupCode gates first-boot setup (dashboard_auth.go).
 	setupCode string
 	// trustedProxies: whose forwarding headers sourceIP believes.
@@ -245,6 +248,7 @@ func New(opts Options) *Server {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
 	s.mux.HandleFunc("POST /admin/login", s.handleDashboardLogin)
+	s.mux.HandleFunc("POST /admin/logout", s.handleLogout)
 	// First-boot setup: public, one-shot, gated by the boot-log setup code.
 	s.mux.HandleFunc("GET /admin/setup", s.handleSetupStatus)
 	s.mux.HandleFunc("POST /admin/setup", s.handleSetup)
@@ -368,13 +372,26 @@ func (s *Server) routes() {
 // Handler wires the middleware stack: access log outermost, recover inside it
 // so panics surface as logged 500s, mux innermost.
 func (s *Server) Handler() http.Handler {
-	inner := s.accessLog(s.recoverer(s.mux))
+	inner := s.accessLog(s.recoverer(securityHeaders(s.mux)))
 	// A preflight must be answered BEFORE the mux. Go's ServeMux only offers
 	// HEAD/OPTIONS on a path when no method-specific pattern matches it; with
 	// "POST /v1/chat/completions" registered it answers OPTIONS with 405 before
 	// any handler — so CORS headers can never be attached there. Pre-dispatch
 	// interception is the only correct place for it.
 	return s.withCORS(s.mux, inner)
+}
+
+// securityHeaders sets the headers every response gets: no MIME sniffing
+// (an error body is never reinterpreted as HTML or script) and a referrer
+// that stays on this origin. The dashboard shell adds CSP and framing rules
+// in spa.go.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "same-origin")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // withCORS routes: OPTIONS on an allowed origin is answered immediately (no
@@ -591,6 +608,8 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			s.inferenceMultipart(w, r, surface)
 			return
 		}
+		// The deadline is lifted only after a complete read (see limitBodyRead).
+		liftDeadline := limitBodyRead(w, inferenceBodyTimeout)
 		body, err := io.ReadAll(io.LimitReader(r.Body, s.maxBody+1))
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, "invalid_request_error", "could not read body: "+err.Error())
@@ -608,6 +627,7 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			writeErr(w, http.StatusBadRequest, "invalid_request_error", "empty body")
 			return
 		}
+		liftDeadline()
 
 		// Single-parse dispatch (docs/single-parse-dispatch-design.md): one
 		// decode of the client body serves model extraction, compression,
@@ -842,6 +862,7 @@ func (s *Server) inferenceMultipart(w http.ResponseWriter, r *http.Request, surf
 	start := time.Now()
 	// Read the raw multipart body FIRST so it can be forwarded byte-for-byte
 	// (ParseMultipartForm would consume the stream).
+	liftDeadline := limitBodyRead(w, inferenceBodyTimeout)
 	body, err := io.ReadAll(io.LimitReader(r.Body, s.maxBody+1))
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid_request_error", "could not read multipart body: "+err.Error())
@@ -859,6 +880,7 @@ func (s *Server) inferenceMultipart(w http.ResponseWriter, r *http.Request, surf
 		writeErr(w, http.StatusBadRequest, "invalid_request_error", "empty body")
 		return
 	}
+	liftDeadline()
 	// Extract the model from the multipart form (read a copy — the original
 	// body bytes stay intact for forwarding).
 	requested, err := extractModelMultipart(body)
@@ -1466,6 +1488,31 @@ func (s *Server) accessLog(next http.Handler) http.Handler {
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────
+
+// Request-body read budgets. The server sets only ReadHeaderTimeout (no
+// global ReadTimeout: a response may stream for minutes), so without these a
+// client could trickle a body forever and pin the handler — on /admin/login
+// without even authenticating. Vars so tests can shorten them.
+var (
+	adminBodyTimeout     = 30 * time.Second // JSON admin bodies, ≤1 MiB
+	inferenceBodyTimeout = 2 * time.Minute  // up to max_body_mib on a slow link
+)
+
+// limitBodyRead puts a deadline on reading this request's body and returns
+// the func that lifts it. Call lift after the body was read completely, so
+// the budget covers the body and nothing after it (TestStreamOutlivesThe-
+// BodyBudget guards that a long response is unaffected). On a failed or
+// oversized read, do NOT lift: after the handler returns, net/http drains the
+// unread body before it sends the reply, and without the deadline that drain
+// waits on the stalled client forever (TestTrickledBodyIsCutOff). Writers
+// that cannot take deadlines (httptest recorders) are a no-op.
+func limitBodyRead(w http.ResponseWriter, d time.Duration) (lift func()) {
+	rc := http.NewResponseController(w)
+	if err := rc.SetReadDeadline(time.Now().Add(d)); err != nil {
+		return func() {}
+	}
+	return func() { _ = rc.SetReadDeadline(time.Time{}) }
+}
 
 const vscodePathPrefix = "/api/v1/vscode/"
 

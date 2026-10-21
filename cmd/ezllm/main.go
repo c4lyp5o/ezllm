@@ -329,6 +329,9 @@ func run() error {
 		Addr:              addr,
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
+		// Idle keep-alive connections are closed after 2 minutes. Request
+		// bodies get their own read budget per handler (server.limitBodyRead).
+		IdleTimeout: 2 * time.Minute,
 		// No WriteTimeout: SSE streams are unbounded by design (M7 tunes the rest).
 	}
 

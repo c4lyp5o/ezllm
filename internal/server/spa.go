@@ -1,10 +1,13 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"io/fs"
 	"net/http"
 	"os"
 	"path"
+	"regexp"
 	"strings"
 
 	"github.com/c4lyp5o/ezllm/web"
@@ -78,6 +81,10 @@ func (s *Server) spa(w http.ResponseWriter, r *http.Request) {
 	case p == "index.html":
 		// must revalidate or a rebuilt dashboard never reaches the browser
 		w.Header().Set("Cache-Control", "no-cache")
+		// The admin shell: never framed (clickjacking), and scripts only from
+		// this origin plus the hashed inline theme bootstrap.
+		w.Header().Set("Content-Security-Policy", s.dashboardCSP())
+		w.Header().Set("X-Frame-Options", "DENY")
 	}
 
 	r2 := r.Clone(r.Context())
@@ -90,4 +97,42 @@ func (s *Server) spa(w http.ResponseWriter, r *http.Request) {
 		r2.URL.Path = "/" + p
 	}
 	http.FileServer(http.FS(s.web)).ServeHTTP(w, r2)
+}
+
+// inlineScriptRe matches inline <script> blocks (no src): index.html carries
+// one, the theme bootstrap that must run before first paint.
+var inlineScriptRe = regexp.MustCompile(`(?s)<script>(.*?)</script>`)
+
+// dashboardCSP is the shell's Content-Security-Policy. Inline scripts are
+// allowed by hash, computed from the index.html actually being served, so a
+// rebuilt dashboard can never ship a bootstrap the policy blocks — and no
+// 'unsafe-inline' is needed for scripts. Styles keep 'unsafe-inline' (React
+// and the chart library set style attributes). Computed once per process.
+func (s *Server) dashboardCSP() string {
+	s.cspOnce.Do(func() {
+		var hashes []string
+		if b, err := fs.ReadFile(s.web, "index.html"); err == nil {
+			for _, m := range inlineScriptRe.FindAllSubmatch(b, -1) {
+				sum := sha256.Sum256(m[1])
+				hashes = append(hashes, "'sha256-"+base64.StdEncoding.EncodeToString(sum[:])+"'")
+			}
+		}
+		script := "'self'"
+		if len(hashes) > 0 {
+			script += " " + strings.Join(hashes, " ")
+		}
+		s.csp = strings.Join([]string{
+			"default-src 'self'",
+			"script-src " + script,
+			"style-src 'self' 'unsafe-inline'",
+			"img-src 'self' data:",
+			"font-src 'self' data:",
+			"connect-src 'self'",
+			"object-src 'none'",
+			"base-uri 'self'",
+			"form-action 'self'",
+			"frame-ancestors 'none'",
+		}, "; ")
+	})
+	return s.csp
 }

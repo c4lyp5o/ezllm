@@ -98,7 +98,7 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger) error {
 		Logf: log.Info,
 	}
 
-	httpSrv := &http.Server{Addr: addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	httpSrv := &http.Server{Addr: addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	go func() {
 		log.Info("claude bridge listening", "addr", addr, "cli", cliVersion, "login", login, "plan", plan, "flags_drift", drift)
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

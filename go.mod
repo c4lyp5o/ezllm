@@ -2,6 +2,8 @@ module github.com/c4lyp5o/ezllm
 
 go 1.27
 
+toolchain go1.27.2
+
 require (
 	github.com/andybalholm/brotli v1.0.6
 	github.com/klauspost/compress v1.17.4

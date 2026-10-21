@@ -153,6 +153,16 @@ func (d *DB) DashboardSession(ctx context.Context, token string) bool {
 	return true
 }
 
+// EndDashboardSession revokes one dashboard session (sign-out). Unknown or
+// empty tokens are a no-op: signing out twice is not an error.
+func (d *DB) EndDashboardSession(ctx context.Context, token string) error {
+	if strings.TrimSpace(token) == "" {
+		return nil
+	}
+	_, err := d.w.ExecContext(ctx, `DELETE FROM dashboard_sessions WHERE token_hash=?`, hashDashboardToken(token))
+	return err
+}
+
 func (d *DB) ChangeDashboardPassword(ctx context.Context, currentPassword, newPassword string) error {
 	var currentHash string
 	if err := d.r.QueryRowContext(ctx, `SELECT password_hash FROM dashboard_auth WHERE id=1`).Scan(&currentHash); err != nil {

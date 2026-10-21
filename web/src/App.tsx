@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react';
-import { GateError, clearToken, completeSetup, dashboardLogin, getSetupStatus, isUnlocked, markUnlocked } from './utils/api';
+import { GateError, completeSetup, dashboardLogin, getSetupStatus, isUnlocked, logout, markUnlocked } from './utils/api';
 import { DUR, SelectionLine, spring } from './components/motion';
 import RailwayBackground from './components/RailwayBackground';
 import PasswordStrength from './components/PasswordStrength';
@@ -311,7 +311,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           <button
             type="button"
             className="ml-auto rounded px-2.5 py-1.5 text-[13px] text-mute transition-colors hover:bg-bad-dim hover:text-bad"
-            onClick={() => { clearToken(); onNavigate?.(); window.location.reload(); }}
+            onClick={() => { void logout().finally(() => { onNavigate?.(); window.location.reload(); }); }}
           >
             Log out
           </button>

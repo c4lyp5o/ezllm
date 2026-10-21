@@ -59,6 +59,10 @@ func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 // decodeBody reads a bounded JSON body into dst. Unknown fields are rejected:
 // a typo'd field name silently ignored is how a "saved" setting never saves.
 func decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {
+	// Lifted only after a clean read: on failure the deadline must stay, so
+	// net/http's post-handler drain of the unread body fails fast too
+	// (see limitBodyRead).
+	lift := limitBodyRead(w, adminBodyTimeout)
 	limited := io.LimitReader(r.Body, 1<<20)
 	dec := json.NewDecoder(limited)
 	dec.DisallowUnknownFields()
@@ -73,6 +77,7 @@ func decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {
 			"body must contain a single JSON object")
 		return false
 	}
+	lift()
 	return true
 }
 

@@ -247,6 +247,33 @@ func (s *Server) handleDashboardLogin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"token": token})
 }
 
+// handleLogout ends the presented dashboard session server-side and expires
+// the cookie. The sign-out button used to clear only browser storage, so the
+// HttpOnly cookie kept authenticating for the rest of its 12 hours. Needs no
+// auth: it can only revoke the session it is handed, and SameSite=Strict
+// keeps the cookie off cross-site requests.
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	token := ""
+	if c, err := r.Cookie("ezllm_session"); err == nil {
+		token = c.Value
+	}
+	if bt := bearerToken(r); bt != "" && token == "" {
+		token = bt
+	}
+	if s.db != nil {
+		if err := s.db.EndDashboardSession(r.Context(), token); err != nil {
+			s.writeStoreErr(w, err)
+			return
+		}
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name: "ezllm_session", Value: "", Path: "/admin", MaxAge: -1,
+		HttpOnly: true, SameSite: http.SameSiteStrictMode,
+		Secure: r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https"),
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleDashboardPassword(w http.ResponseWriter, r *http.Request) {
 	if s.db == nil {
 		writeErr(w, http.StatusServiceUnavailable, "server_error", "dashboard authentication unavailable")

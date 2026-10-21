@@ -221,6 +221,52 @@ func TestDashboardLoginRateLimitsPerIP(t *testing.T) {
 	}
 }
 
+// M1: sign-out used to clear only browser storage; the HttpOnly cookie kept
+// opening /admin for the rest of its 12 hours.
+func TestLogoutRevokesTheSession(t *testing.T) {
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
+	setupDashboard(t, h, "logout-test-password")
+	clearLoginAttempts("192.0.2.1")
+	defer clearLoginAttempts("192.0.2.1")
+	code, hdr, body := h.do("POST", "/admin/login", "", `{"password":"logout-test-password"}`)
+	if code != 200 {
+		t.Fatalf("login = %d %s", code, body)
+	}
+	cookie, err := http.ParseSetCookie(hdr.Get("Set-Cookie"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	overview := func() int {
+		req := httptest.NewRequest("GET", "/admin/overview", nil)
+		req.AddCookie(cookie)
+		rec := httptest.NewRecorder()
+		h.handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if c := overview(); c != 200 {
+		t.Fatalf("cookie before logout = %d, want 200", c)
+	}
+
+	req := httptest.NewRequest("POST", "/admin/logout", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	h.handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("logout = %d %s, want 204", rec.Code, rec.Body.String())
+	}
+	expired, err := http.ParseSetCookie(rec.Header().Get("Set-Cookie"))
+	if err != nil || expired.Name != "ezllm_session" || expired.MaxAge >= 0 {
+		t.Fatalf("logout must expire the cookie: %v %+v", err, expired)
+	}
+	if c := overview(); c != http.StatusUnauthorized {
+		t.Fatalf("old cookie after logout = %d, want 401", c)
+	}
+	// Signing out again (or with no session) is harmless.
+	if code, _, body := h.do("POST", "/admin/logout", "", ""); code != http.StatusNoContent {
+		t.Fatalf("logout without a session = %d %s", code, body)
+	}
+}
+
 // H3: the per-IP limiter cannot stop many source addresses hashing at once,
 // so bcrypt work is capped globally. With every slot busy, a login is
 // refused with 429 + Retry-After instead of starting another bcrypt.

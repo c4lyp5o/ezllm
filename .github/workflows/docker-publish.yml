@@ -25,10 +25,29 @@ on:
   workflow_dispatch:
 
 jobs:
+  # A tag must name the version the binary reports (internal/server/version.go
+  # serves /healthz). A prerelease suffix (v1.0.0-rc1) is allowed; branch
+  # builds pass straight through.
+  version:
+    runs-on: ubuntu-latest
+    steps:
+    - name: 🧾 Checkout source
+      uses: actions/checkout@v5
+    - name: 🏷️ Tag matches version.go
+      if: startsWith(github.ref, 'refs/tags/')
+      run: |
+        want=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' internal/server/version.go)
+        tag="${GITHUB_REF_NAME#v}"; tag="${tag%%-*}"
+        if [ -z "$want" ] || [ "$tag" != "$want" ]; then
+          echo "::error::tag $GITHUB_REF_NAME does not match internal/server/version.go ($want)"
+          exit 1
+        fi
+
   # The gate: gofmt + go vet + go test + web build must pass before the
   # image build is even attempted (reusable workflow, same file can gate
   # release.yml later).
   test:
+    needs: version
     uses: ./.github/workflows/test.yml
 
   build_and_push:

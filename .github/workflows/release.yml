@@ -5,7 +5,7 @@
 # needs no toolchains, no cross-C compilers and no Docker — GOOS/GOARCH alone.
 #
 # Artifact layout per platform:  ezllm_<version>_<os>_<arch>.tar.gz
-#   bin/ezllm                 static binary
+#   ezllm (ezllm.exe)         static binary
 #   config.example.yaml       bootstrap config (provider keys are entered in dashboard)
 #   README.md
 # plus SHA256SUMS for verification.

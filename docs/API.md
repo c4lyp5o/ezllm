@@ -4,7 +4,9 @@ Status codes: `200` ok · `201` created · `400` bad request (incl. an admin JSO
 unknown fields, or trailing data after the object) **or surface-pin refusal** ·
 `401` no/invalid client token · `403` token lacks `admin`, or a cookie-authenticated write
 from another origin · `404` unknown id · `409` conflict (refs exist; unconfirmed pin surface) ·
-`413` inference body over `max_body_mib` · `422` **key test failed** (with `step`) · `429` at cap.
+`413` inference body over `max_body_mib` · `422` **key test failed** (with `step`) · `429` at cap ·
+`503 authorization_unavailable` when a client token's model allowlist cannot be read (inference
+fails closed; a token with no row still has no policy).
 Every route except `/healthz`, the dashboard's static files and the sign-in/setup endpoints
 (`GET|POST /admin/setup`, `POST /admin/login`, `POST /admin/logout`) needs credentials: a client
 token (`Authorization: Bearer …` or `x-api-key`) on `/v1/*`; on `/admin/*` an admin token or the
@@ -80,7 +82,7 @@ A fresh database is seeded with an empty, enabled `ezllm-auto-free` combo (`true
 
 **Combo PATCH semantics:** omitted fields keep their stored value; `compression_profile_id: null` clears the binding. `context_size` is required positive integer when supplied, defaults to 200000 on creation, and is emitted only on combo rows.
 
-**Combo failover cooldown:** transport failures/timeouts and upstream 5xx responses cool only that account endpoint for 5 minutes. Model-specific 401/403/404/429 responses remain failover-able but do not mark the endpoint dead. After expiry exactly one half-open probe is admitted; if every candidate is cooling down, no upstream request is sent. When all attempted hops returned an upstream failover response, the last permitted response is returned rather than issuing another call.
+**Combo failover cooldown:** transport failures/timeouts and upstream 5xx responses cool only that account endpoint for 5 minutes. Model-specific 401/403/404/429 responses remain failover-able but do not mark the endpoint dead. A 401/403 whose body names model access (`access to model denied`, `model access denied`, `does not have access to`, `no access to model`) parks only that model on that endpoint for the same 5 minutes, and only when another candidate exists. After expiry exactly one half-open probe is admitted; if every candidate is cooling down, no upstream request is sent. When all attempted hops returned an upstream failover response, the last permitted response is returned rather than issuing another call.
 
 
 Dashboard payload. One call so the first paint is a single round trip. (Admin-gated — this is
@@ -660,6 +662,10 @@ ledger batch).
 inference path** (router → rules → compression → proxy → ledger) under an admin session — it is
 the dashboard's own Chat page.
 
+### `GET /admin/routable-models?protocol=` → `200`
+The same handler and body as `GET /v1/models`, behind the admin gate instead of a client token:
+the dashboard session lists what the gateway can route without holding a bearer key.
+
 ---
 
 ## M10 — service defaults (schema v15)
@@ -748,6 +754,16 @@ and only then releases their reservations. Recovery survives restarts.
 Admission returns `503 budget_unavailable` while client-meter recovery fails;
 model rules retain their existing refusal when their meter is unavailable.
 No HTTP response field or application release version changes with this schema.
+
+### Reasoning vocabulary (schema v29)
+
+`models.reasoning_vocab` (CSV, in the provider's order) and `models.reasoning_required` record
+what a model accepts for `reasoning_effort`, read from its own 4xx refusal during live traffic or a
+key-test probe. The next request to that model has a top-level `reasoning_effort` clamped down to
+an accepted value (or dropped when reasoning is mandatory and the client sent `none`/`off`); a
+model with nothing learned receives the body untouched. Facts merge: a refusal that names only a
+mandate keeps the stored list, and a mandate is never lowered. Only catalogued models are
+learned. No HTTP response field changes; design: docs/reasoning-effort-design.md.
 
 ### Usage reported by retries and failed hops
 

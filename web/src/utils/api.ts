@@ -125,7 +125,7 @@ function parseOpenAIError(body: unknown, status: number): ApiErrorDetail {
   return { status, type: 'error', message: typeof o === 'object' && 'message' in o ? String(o.message) : `HTTP ${status}` };
 }
 
-/** Shared fetch: bearer token from localStorage, OpenAI-shaped error parsing, 401/403 → AuthError. */
+/** Shared fetch: session cookie, OpenAI-shaped error parsing, 401/403 → AuthError. */
 export async function apiFetch<T = unknown>(path: string, init: RequestInit = {}, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {};
   if (body !== undefined) { headers['Content-Type'] = 'application/json'; }

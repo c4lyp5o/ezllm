@@ -2,6 +2,26 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
 
+## Unreleased — reasoning-effort clamp, model-access park, fail-closed allowlist
+
+- **Reasoning effort follows the model's own vocabulary** (schema v29). A 4xx
+  that enumerates accepted `reasoning_effort` values, or says reasoning cannot
+  be disabled, is stored per account and model; later requests are clamped
+  down into it instead of refused. Key-test probes learn it too, and an
+  invalid-effort 400 no longer records a wire as unsupported.
+- **A 403 that names model access parks that model on that hop** for the
+  normal cooldown when another candidate exists, so a block of requests stops
+  re-dialling it and losing its prompt cache to a fallback.
+- **The per-key model allowlist fails closed.** A store error now answers
+  `503 authorization_unavailable` instead of suspending the allowlist.
+- **Key tests:** Copilot credentials refused at token exchange count as proven
+  discrimination; an endpoint-mismatch refusal is re-probed on `/responses` and
+  the wire recorded; failed probes write their reason into the ledger `err`.
+- **Leaks:** parked fallback responses and failed Gemini audio rewrites close
+  their upstream bodies on every exit.
+- **Dashboard:** the Connect page reads `GET /admin/routable-models` through
+  the session; the unused localStorage bearer path is gone.
+
 ## 2026-10-23 — v1.1.1: audit fixes — security, compression sessions, dashboard, recovery, performance
 
 - **Same-origin cookie writes.** A signed-in operator's browser sends the

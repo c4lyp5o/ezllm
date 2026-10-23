@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 )
@@ -29,7 +30,7 @@ func TestMasterKeyExistingAndEmpty(t *testing.T) {
 }
 
 func TestMasterKeyReadFailurePreservesFile(t *testing.T) {
-	if os.Geteuid() == 0 {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
 		t.Skip("requires normal permission checks")
 	}
 	path := filepath.Join(t.TempDir(), "key")
@@ -66,7 +67,7 @@ func TestMasterKeyConcurrentFirstBoot(t *testing.T) {
 		}
 	}
 	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm() != 0600 {
+	if err != nil || runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
 		t.Fatalf("permissions %v %v", info, err)
 	}
 }

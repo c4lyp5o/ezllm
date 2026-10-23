@@ -2,82 +2,54 @@
 
 Updated: 2026-10-23
 
-Reviewed commit: `19489a2` (`fix/audit-findings`, application v1.1.1, schema v28)
+Branch: `fix/audit-findings`
 
-One recovery and upgrade finding remains open: export failure signaling (medium).
-Previously resolved findings remain removed. This sweep changed no production
-code, release version, database schema, or deployment.
+Application version: v1.1.1 (unchanged); database schema: v28 (unchanged)
 
-## Recovery and upgrades sweep
+No open findings remain from the completed sweeps. All five recovery and
+upgrade findings have verified fixes, and their resolved entries are removed.
+This tracks the audited findings, not a guarantee that no other defects exist.
 
-Reviewed startup/key handling, schema migration and restart behavior, WAL
-backup instructions, export completeness and errors, shutdown ownership,
-durable meter recovery, and release/container workflows. Local probes used
-only disposable databases, dummy secrets, and local processes.
+## Verification
 
-### RU5 — Medium: export read failures become successful-looking empty backups
+Permanent regressions cover:
 
-**Locations:** `internal/server/admin.go:2090`,
-`internal/server/admin.go:2096`, and `internal/server/admin.go:2122`.
+- Preserving unreadable/empty master-key files, exclusive concurrent first
+  boot, and private key-file permissions.
+- Transactional legacy combo rebuild, interrupted staging before/after DROP,
+  rollback on failed validation, restored foreign-key checks, and repeat open.
+  Ambiguous current/staged copies are preserved and startup refuses to choose.
+- A real online SQLite backup of committed WAL rows, the active key copy,
+  integrity/completion metadata, a matching database checksum, and refusal to
+  overwrite existing backup output.
+- Versioned non-secret exports including model rules, prices, capability/pin
+  records, service bindings, and explicit database-backup requirements.
+- Export preflight query failures, midstream scan errors with incomplete
+  manifests, successful empty/non-ledger completion, and client disconnects
+  without a false success marker. Existing 12,000-row streaming coverage and
+  credential-exclusion assertions remain intact.
 
-The handler commits HTTP 200 before opening the ledger cursor. If the ledger
-query fails, it logs the error and closes a valid JSON document with
-`ledger:[]`. Row scan or iteration failures likewise close the document after
-the rows already emitted. The download has no error, completeness flag,
-expected-row count, or completion manifest to distinguish a failed export
-from a genuinely empty/smaller ledger. The documentation explicitly favors
-valid JSON on failure, but supplies no in-file failure signal.
+Checks passed on the final code:
 
-**Reproduction:** `TestRecoveryAuditExportLooksSuccessfulWithoutLedger` seeds
-a ledger row, then renames one projected column in the disposable database to
-inject a query error while leaving config reads intact. The export returns
-HTTP 200 and valid JSON containing `ledger:[]`, with no error marker. The
-server log is the only indication the ledger was not exported.
+- `make test-short` — all packages; output:
+  `/tmp/ezllm-recovery-fix-functional.txt`.
+- Focused race checks for master keys, recovery, migrations, exports, meter
+  restart recovery, and shutdown across store/server/command packages —
+  passed without race warnings; output: `/tmp/ezllm-recovery-fix-race.txt`.
+- `go vet ./...` and native gateway build — passed.
+- Windows amd64 static cross-build — passed; binary:
+  `/tmp/ezllm-recovery-fix-windows.exe`.
+- Formatting and diff checks — clean.
 
-**Impact:** backup automation that checks HTTP success and JSON validity can
-accept an incomplete recovery artifact and discover the missing history only
-at restore time. Comparing with a separate live health count is not an atomic
-completion check for this specific export.
+The optional online backup tool requires Python 3.11+. Configuration exports
+are an inspection/manual-configuration aid, not full database restore images.
+Full recovery uses a verified SQLite/key backup and separately preserved
+runtime configuration/subscription data; the recovery and master-key runbooks
+include the backup/restore and rollback procedure. Unknown ambiguous migration
+remnants require manual reconciliation on a copy rather than automatic deletion.
 
-**Suggested fix:** validate/open required cursors before committing headers,
-and make streaming failures machine-detectable in the artifact. Use an
-explicit final completeness manifest or fail the document/transport rather
-than representing an error as a complete empty ledger. Exercise initial query,
-mid-stream scan, iteration, and client-disconnect failures.
-
-## Verification and limits
-
-- `make test-short` — passed across all packages; output:
-  `/tmp/ezllm-recovery-functional.txt`.
-- `go test -race -count=1 -run '^TestRecoveryAudit' -v ./internal/store ./internal/server`
-  — all database/export reproduction probes passed without race warnings;
-  output: `/tmp/ezllm-recovery-probes.txt`.
-- `go test -count=1 -run '^TestRecoveryAudit' -v ./cmd/ezllm`
-  — the master-key overwrite probe passed as a non-root user; output:
-  `/tmp/ezllm-recovery-masterkey-probe.txt`.
-- `go test -race -short -count=1 -timeout 3m -run 'Test(Migrate.*|Open.*|PickKeyFailsWithWrongMasterKey|AccountingMeter.*|Export.*|DrainWaits.*)$' ./internal/store ./internal/server ./cmd/ezllm`
-  — existing migration, encryption, export, meter recovery, and shutdown
-  checks passed without race warnings; output:
-  `/tmp/ezllm-recovery-existing-race.txt`.
-
-Probe success means the stated failure was reproduced, not that the behavior
-is correct. Temporary probe sources were removed and preserved in
-`/tmp/ezllm-recovery-audit/` as:
-
-- `store_recovery_audit_temp_test.go.txt`
-- `server_recovery_audit_temp_test.go.txt`
-- `cmd_recovery_audit_temp_test.go.txt`
-
-Restore the matching file as
-`recovery_audit_temp_test.go` in its original package to rerun. The command
-probe uses `/tmp/ezllm-accounting-fix`, the gateway binary built from the same
-production code during the preceding verified fix turn; rebuild that path
-before reproducing elsewhere.
-
-This audit did not restore a real production backup, interrupt a live process,
-run a deployment, publish artifacts, or use provider credentials. Release
-workflows were inspected locally; CI and container builds were not executed.
-Newer-schema refusal, successful legacy migrations, clean shutdown ownership,
-and recent durable meter recovery were reviewed without relisting their
-resolved issues. The performance harness was skipped per the repository's
-memory constraint. Application version remains v1.1.1 and schema remains v28.
+All verification used disposable databases, dummy keys, local processes, and
+mock upstreams. No real production backup was restored, no deployment occurred,
+and no provider credentials or paid quota were used. The full performance
+harness was skipped per the repository's memory constraint. The preexisting
+Python cache remains untouched.

@@ -1635,7 +1635,15 @@ type ExportModel struct {
 	ModelEntryRow
 }
 
+type ExportCompletion struct {
+	Complete        bool   `json:"complete"`
+	LedgerRequested bool   `json:"ledger_requested"`
+	LedgerRows      int    `json:"ledger_rows"`
+	Error           string `json:"error,omitempty"`
+}
+
 type Export struct {
+	Completion             ExportCompletion     `json:"completion"`
 	FormatVersion          int                  `json:"format_version"`
 	Kind                   string               `json:"kind"`
 	DatabaseBackupRequired bool                 `json:"database_backup_required"`
@@ -1743,7 +1751,8 @@ func (d *DB) ExportConfig(ctx context.Context) (*Export, error) {
 	}
 	return &Export{
 		FormatVersion: 1, Kind: "configuration_export", DatabaseBackupRequired: true,
-		Models: models, Rules: rules, Prices: prices, Bindings: bindings,
+		Completion: ExportCompletion{Complete: true},
+		Models:     models, Rules: rules, Prices: prices, Bindings: bindings,
 		ExportedAt:    time.Now().UTC().Format(time.RFC3339),
 		SchemaVersion: d.SchemaVersion(),
 		Accounts:      accounts,
@@ -1773,6 +1782,7 @@ func (d *DB) ExportAll(ctx context.Context, includeLedger bool) (*Export, error)
 		return nil, err
 	}
 	defer rows.Close()
+	exp.Completion.LedgerRequested = true
 	exp.Ledger = []map[string]any{}
 	for rows.Next() {
 		m, err := ScanExportRow(rows)
@@ -1780,6 +1790,7 @@ func (d *DB) ExportAll(ctx context.Context, includeLedger bool) (*Export, error)
 			return nil, err
 		}
 		exp.Ledger = append(exp.Ledger, m)
+		exp.Completion.LedgerRows++
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

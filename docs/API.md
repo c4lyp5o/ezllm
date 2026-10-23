@@ -522,6 +522,14 @@ compression profiles, per-model rules, versioned prices, individual model
 capability/pin records with account IDs, service bindings, and latest quotas.
 `?include_ledger=true` adds a streamed ledger projection, without a row cap.
 
+The response ends with `completion:{complete,ledger_requested,ledger_rows}`.
+Accept an export only if HTTP succeeds, JSON parses, and `completion.complete`
+is true. Missing completion metadata means an incomplete download. Initial
+cursor/first-row failures return an error before attachment headers; later
+source failures set `completion.complete:false` and an `error` message, even
+though HTTP 200 was already committed. Client-write failures leave no success
+marker. `ledger_rows` counts only rows successfully emitted by this export.
+
 This is an inspection/manual-configuration aid, not a database restore image
 or an atomic point-in-time backup. It excludes credentials, authentication
 state, accounting/reconciliation internals, and some ledger columns. Full

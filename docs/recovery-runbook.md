@@ -39,3 +39,9 @@ The versioned file is useful for inspection and manually re-creating operator
 configuration. It is not a full database backup or a lossless restore format;
 its `database_backup_required` marker makes that limitation explicit. Keep the
 verified SQLite/key pair for full recovery and accounting history.
+
+Require the configuration export's final `completion.complete:true` marker as
+well as successful HTTP and JSON parsing. An absent/false completion marker is
+not a successful export; a false marker includes an error and emitted row count.
+Never interpret a failed ledger read as an empty ledger. The SQLite backup
+helper separately uses its `COMPLETE.json` completion file.

@@ -129,6 +129,29 @@ func TestLearnModelReasoningMergesFacts(t *testing.T) {
 	}
 }
 
+// A row in models IS a catalog entry: learning for a model the catalog does not
+// hold must not create one, or the model would list in /v1/models and route.
+func TestLearnModelReasoningNeverCreatesACatalogRow(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "r.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	aid := seedReasoningModel(t, db)
+
+	if err := db.LearnModelReasoning(ctx, aid, "retired", provider.ReasoningRule{Allowed: []string{"low", "high"}, Known: true}); err != nil {
+		t.Fatal(err)
+	}
+	exists, err := db.ModelExists(ctx, aid, "retired")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exists {
+		t.Fatal("learning a rule created a catalog row for an uncatalogued model")
+	}
+}
+
 // The trap the skill names: UpsertModels replaces the catalog WHOLESALE, so any
 // column it does not carry in its snapshot is wiped by the next refresh — and a
 // refresh runs at every boot.

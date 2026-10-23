@@ -543,14 +543,20 @@ func (d *DB) LearnModelReasoning(ctx context.Context, accountID int64, modelID s
 		required = 0
 	}
 	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		// UPDATE only, never INSERT: a row here is a catalog entry — it lists in
+		// /v1/models and passes the router's ModelExists check — so learning
+		// for a model the catalog does not hold (a combo hop, or one a refresh
+		// retired mid-request) would make it routable. Direct routes cannot
+		// reach an uncatalogued model anyway, and a refresh would drop the
+		// phantom row's vocabulary with it.
 		_, err := tx.ExecContext(ctx, `
-INSERT INTO models (account_id, model_id, reasoning_vocab, reasoning_required) VALUES (?,?,?,?)
-ON CONFLICT(account_id, model_id) DO UPDATE SET
-  reasoning_vocab=COALESCE(excluded.reasoning_vocab, reasoning_vocab),
+UPDATE models SET
+  reasoning_vocab=COALESCE(?1, reasoning_vocab),
   reasoning_required=CASE
-    WHEN excluded.reasoning_required IS NULL OR reasoning_required = 1 THEN reasoning_required
-    ELSE excluded.reasoning_required END`,
-			accountID, modelID, nullIfEmpty(vocab), required)
+    WHEN ?2 IS NULL OR reasoning_required = 1 THEN reasoning_required
+    ELSE ?2 END
+WHERE account_id=?3 AND model_id=?4`,
+			nullIfEmpty(vocab), required, accountID, modelID)
 		return err
 	})
 }

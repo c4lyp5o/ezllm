@@ -30,6 +30,14 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/store"
 )
 
+// cookieOrigins refuses cookie-authenticated writes from another origin.
+// SameSite=Strict only separates sites: a page on another port of the same
+// host, or a sibling subdomain, still sends the session cookie, and a
+// text/plain POST needs no preflight. The browser's Sec-Fetch-Site (or Origin
+// against Host) tells those apart; bearer clients and non-browser callers send
+// neither and are unaffected.
+var cookieOrigins = http.NewCrossOriginProtection()
+
 // admin wraps a handler in auth + the admin role. 403 without the role, so a
 // token that can only infer never sees account/key surfaces.
 func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
@@ -38,6 +46,10 @@ func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 		if token == "" {
 			if c, err := r.Cookie("ezllm_session"); err == nil {
 				token = c.Value
+				if err := cookieOrigins.Check(r); err != nil {
+					writeErr(w, http.StatusForbidden, "forbidden", "cross-origin request refused")
+					return
+				}
 			}
 		}
 		if s.db != nil && s.db.DashboardSession(r.Context(), token) {

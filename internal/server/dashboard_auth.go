@@ -250,11 +250,15 @@ func (s *Server) handleDashboardLogin(w http.ResponseWriter, r *http.Request) {
 // handleLogout ends the presented dashboard session server-side and expires
 // the cookie. The sign-out button used to clear only browser storage, so the
 // HttpOnly cookie kept authenticating for the rest of its 12 hours. Needs no
-// auth: it can only revoke the session it is handed, and SameSite=Strict
-// keeps the cookie off cross-site requests.
+// auth: it can only revoke the session it is handed; a cookie from another
+// origin is refused like any cookie-authenticated write.
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	token := ""
 	if c, err := r.Cookie("ezllm_session"); err == nil {
+		if err := cookieOrigins.Check(r); err != nil {
+			writeErr(w, http.StatusForbidden, "forbidden", "cross-origin request refused")
+			return
+		}
 		token = c.Value
 	}
 	if bt := bearerToken(r); bt != "" && token == "" {

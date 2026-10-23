@@ -3,9 +3,9 @@
 Operating the ChatGPT subscription surface (codex-bridge). Decisions live in
 `codex-subscription-design.md`; this is the how.
 
-**Status:** stages 1–3 (text, streaming, images, reasoning effort and summaries,
-structured output, plan windows, client tools with continuation) are built on
-`feat/codex-bridge` and not in a release yet. Read the [platform requirements](#platform-requirements--read-this-first)
+**Status:** shipped in v1.1.0 and deployed: text, streaming, images, reasoning
+effort and summaries, structured output, plan windows, client tools with
+continuation. Read the [platform requirements](#platform-requirements--read-this-first)
 before you rely on tools.
 
 ## What it is

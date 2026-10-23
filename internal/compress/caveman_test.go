@@ -382,3 +382,29 @@ func mustCompileRe(t *testing.T, p string) *regexp.Regexp {
 	}
 	return re
 }
+
+// Savings and intact spans do not prove a rewrite kept its meaning. These
+// phrases carry literal quantity, time or certainty and must survive every
+// intensity; the plain filler next to them still condenses.
+func TestCavemanKeepsQuantityTimeAndCertainty(t *testing.T) {
+	keep := []string{
+		"Grant access to a small number of accounts.",
+		"Retry a number of times before failing.",
+		"Rotate the keys at the end of the day, after review.",
+		"I think that the migration already ran.",
+	}
+	for _, intensity := range []string{"lite", "standard"} {
+		for _, in := range keep {
+			msgs := []any{map[string]any{"role": "user", "content": in}, map[string]any{"role": "user", "content": "ok"}}
+			out, _ := caveman(msgs, map[string]any{"intensity": intensity})
+			if got := out[0].(map[string]any)["content"].(string); got != in {
+				t.Errorf("%s: %q changed meaning -> %q", intensity, in, got)
+			}
+		}
+		msgs := []any{map[string]any{"role": "user", "content": "It is important to note that a large number of files changed."}, map[string]any{"role": "user", "content": "ok"}}
+		out, _ := caveman(msgs, map[string]any{"intensity": intensity})
+		if got := out[0].(map[string]any)["content"].(string); !strings.Contains(got, "many files changed") || strings.Contains(got, "important to note") {
+			t.Errorf("%s: plain filler no longer condenses: %q", intensity, got)
+		}
+	}
+}

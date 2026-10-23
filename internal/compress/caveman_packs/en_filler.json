@@ -40,15 +40,6 @@
       "description": "Six words of throat-clearing before the actual point."
     },
     {
-      "name": "drop_at_the_end_of_the_day",
-      "pattern": "\\bat the end of the day,?\\s+",
-      "replacement": "",
-      "flags": "gi",
-      "category": "filler",
-      "minIntensity": "lite",
-      "description": "Idiomatic filler with no semantic payload."
-    },
-    {
       "name": "drop_in_order_to",
       "pattern": "\\bin order to\\s+",
       "replacement": "to ",
@@ -67,13 +58,13 @@
       "description": "Seven words for one. Meaning preserved exactly."
     },
     {
-      "name": "collapse_a_number_of",
-      "pattern": "\\ba (?:large |small )?number of\\s+",
+      "name": "collapse_a_large_number_of",
+      "pattern": "\\ba large number of\\s+",
       "replacement": "many ",
       "flags": "gi",
       "category": "filler",
       "minIntensity": "lite",
-      "description": "\"a large number of files\" → \"many files\"."
+      "description": "\"a large number of files\" → \"many files\". Only \"large\": \"a small number of\" means few and a bare \"a number of\" means several, so neither is \"many\"."
     },
     {
       "name": "drop_as_a_matter_of_fact",
@@ -101,15 +92,6 @@
       "category": "filler",
       "minIntensity": "lite",
       "description": "Hedging adverbs that qualify nothing."
-    },
-    {
-      "name": "drop_i_think_that",
-      "pattern": "\\bI think that\\s+",
-      "replacement": "",
-      "flags": "gi",
-      "category": "filler",
-      "minIntensity": "lite",
-      "description": "\"I think that X is wrong\" → \"X is wrong\". The assertion survives; only the hedge goes."
     },
     {
       "name": "drop_very_really_quite",

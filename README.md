@@ -38,8 +38,8 @@ suite · web build). `GET /healthz` reports the running release version — see
   ([runbook](docs/codex-bridge-runbook.md)) subscription behind the router
   through each vendor's official CLI, with plan windows on the provider card.
 - **Ops surface included.** Dashboard, live request feed, analytics, key-test
-  pipeline with protocol sweeps, and a disaster-recovery export — all served
-  from the same binary.
+  pipeline with protocol sweeps, and configuration exports — all served from the same binary. Full recovery
+  uses the [database/key backup procedure](docs/master-key-runbook.md).
 
 ## Quick start
 

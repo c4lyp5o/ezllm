@@ -2067,6 +2067,13 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		name string
 		v    any
 	}{
+		{"format_version", exp.FormatVersion},
+		{"kind", exp.Kind},
+		{"database_backup_required", exp.DatabaseBackupRequired},
+		{"models", exp.Models},
+		{"model_rules", exp.Rules},
+		{"model_prices", exp.Prices},
+		{"service_bindings", exp.Bindings},
 		{"exported_at", exp.ExportedAt},
 		{"schema_version", exp.SchemaVersion},
 		{"accounts", exp.Accounts},

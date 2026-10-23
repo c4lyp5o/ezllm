@@ -4,7 +4,7 @@ Updated: 2026-10-23
 
 Reviewed commit: `19489a2` (`fix/audit-findings`, application v1.1.1, schema v28)
 
-Two recovery and upgrade findings remain open, both medium.
+One recovery and upgrade finding remains open: export failure signaling (medium).
 Previously resolved findings remain removed. This sweep changed no production
 code, release version, database schema, or deployment.
 
@@ -14,36 +14,6 @@ Reviewed startup/key handling, schema migration and restart behavior, WAL
 backup instructions, export completeness and errors, shutdown ownership,
 durable meter recovery, and release/container workflows. Local probes used
 only disposable databases, dummy secrets, and local processes.
-
-### RU4 — Medium: disaster-recovery export omits non-secret configuration
-
-**Locations:** `internal/store/admin.go:1633`,
-`internal/store/admin.go:1689`, `internal/server/admin.go:2069`, and
-`docs/API.md:517`.
-
-The export is documented as a file that can re-seed a fresh instance minus
-credentials, but it contains only account summaries, combos, token summaries,
-compression profiles, quota summaries, and optional projected ledger rows.
-It does not include per-model rules, effective-dated prices, or individual
-model capability/pin records. Account-level counts and protocol counts do not
-reconstruct those records. These omissions are distinct from the deliberate
-exclusion of secrets.
-
-**Reproduction:** `TestRecoveryAuditConfigExportOmitsState` stores a model rule
-with a daily cap and a model price, then downloads the export. The valid
-response has no representation for those configured rules or price records,
-and models are represented only by aggregate account counts. Source inspection
-confirms the projection has no corresponding collections.
-
-**Impact:** restoring from this file cannot reproduce enforcement policy,
-price history, or operator routing pins. Re-entering provider credentials or
-rediscovering the catalog does not recover those operator decisions.
-
-**Suggested fix:** define a versioned recovery format covering non-secret
-persistent configuration, with a tested re-seed/restore procedure and explicit
-handling of identifiers and omitted secrets. If this endpoint remains a
-partial diagnostic export, label its limitations and require a database-plus-
-key backup for disaster recovery. Add round-trip recovery coverage.
 
 ### RU5 — Medium: export read failures become successful-looking empty backups
 

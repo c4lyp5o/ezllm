@@ -1630,15 +1630,27 @@ func (d *DB) ListCompressionProfiles(ctx context.Context) ([]CompressionProfile,
 
 // Export is the disaster-recovery dump: everything needed to re-seed a fresh
 // instance EXCEPT credentials (hints only — key_plain is deliberately absent).
+type ExportModel struct {
+	AccountID int64 `json:"account_id"`
+	ModelEntryRow
+}
+
 type Export struct {
-	ExportedAt    string               `json:"exported_at"`
-	SchemaVersion int                  `json:"schema_version"`
-	Accounts      []AccountSummary     `json:"accounts"`
-	Combos        []Combo              `json:"combos"`
-	Tokens        []TokenSummary       `json:"tokens"`
-	Compression   []CompressionProfile `json:"compression_profiles"`
-	Quotas        []map[string]any     `json:"latest_quotas"`
-	Ledger        []map[string]any     `json:"ledger,omitempty"`
+	FormatVersion          int                  `json:"format_version"`
+	Kind                   string               `json:"kind"`
+	DatabaseBackupRequired bool                 `json:"database_backup_required"`
+	Models                 []ExportModel        `json:"models"`
+	Rules                  []ModelRule          `json:"model_rules"`
+	Prices                 []Price              `json:"model_prices"`
+	Bindings               []ServiceBinding     `json:"service_bindings"`
+	ExportedAt             string               `json:"exported_at"`
+	SchemaVersion          int                  `json:"schema_version"`
+	Accounts               []AccountSummary     `json:"accounts"`
+	Combos                 []Combo              `json:"combos"`
+	Tokens                 []TokenSummary       `json:"tokens"`
+	Compression            []CompressionProfile `json:"compression_profiles"`
+	Quotas                 []map[string]any     `json:"latest_quotas"`
+	Ledger                 []map[string]any     `json:"ledger,omitempty"`
 }
 
 // ExportLedgerRows returns a LIVE row cursor over the whole call ledger,
@@ -1707,7 +1719,31 @@ func (d *DB) ExportConfig(ctx context.Context) (*Export, error) {
 	if err != nil {
 		return nil, err
 	}
+	rules, err := d.ListModelRules(ctx, 0)
+	if err != nil {
+		return nil, err
+	}
+	prices, err := d.ListPrices(ctx)
+	if err != nil {
+		return nil, err
+	}
+	bindings, err := d.ListServiceBindings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	models := []ExportModel{}
+	for _, account := range accounts {
+		entries, err := d.ListModels(ctx, account.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, entry := range entries {
+			models = append(models, ExportModel{AccountID: account.ID, ModelEntryRow: entry})
+		}
+	}
 	return &Export{
+		FormatVersion: 1, Kind: "configuration_export", DatabaseBackupRequired: true,
+		Models: models, Rules: rules, Prices: prices, Bindings: bindings,
 		ExportedAt:    time.Now().UTC().Format(time.RFC3339),
 		SchemaVersion: d.SchemaVersion(),
 		Accounts:      accounts,

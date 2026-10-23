@@ -515,13 +515,18 @@ handler returns, so concurrent requests cannot all pass the same remaining
 budget. Reservations expire after 15 minutes if a process dies.
 
 ### `GET /admin/export` → `200`
-Full config dump: accounts (no key plaintext — hints + `key_ct` omitted), combos, tokens (hints),
-compression profiles, and per-key latest quota. `?include_ledger=true` adds the call ledger.
-This is the disaster-recovery file; it must re-seed a fresh instance minus credentials.
-The config half is written first and the ledger is **streamed** row by row, so the response is
-chunked (no `Content-Length`) and memory stays flat regardless of ledger size — the ledger is
-**complete**, with no row cap. If the ledger stream fails mid-way the document is still closed
-validly rather than truncated, and `/admin/health` carries the row counts to reconcile against.
+Versioned non-secret configuration export, with `format_version:1`,
+`kind:"configuration_export"`, and `database_backup_required:true`.
+Includes accounts (credential hints only), combos, token policies (no tokens),
+compression profiles, per-model rules, versioned prices, individual model
+capability/pin records with account IDs, service bindings, and latest quotas.
+`?include_ledger=true` adds a streamed ledger projection, without a row cap.
+
+This is an inspection/manual-configuration aid, not a database restore image
+or an atomic point-in-time backup. It excludes credentials, authentication
+state, accounting/reconciliation internals, and some ledger columns. Full
+recovery uses the SQLite database plus its active master key and deployment
+configuration; see [recovery-runbook.md](recovery-runbook.md).
 
 ## M3 — quota snapshots
 

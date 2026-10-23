@@ -497,14 +497,15 @@ func shadowSamplerFor(pct int) func() bool {
 
 // upstreamClient builds the HTTP client for provider calls. No client-level
 // Timeout by default: streaming responses are unbounded, and per-request
-// deadlines come from the caller's context.
+// deadlines come from the caller's context. Redirects stay on the origin the
+// request was sent to: provider keys and prompts never follow one elsewhere.
 func upstreamClient(cfg *config.Config) *http.Client {
 	tr := &http.Transport{
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 20,
 		IdleConnTimeout:     90 * time.Second,
 	}
-	return &http.Client{Transport: tr, Timeout: cfg.UpstreamTimeout}
+	return &http.Client{Transport: tr, Timeout: cfg.UpstreamTimeout, CheckRedirect: provider.SameOriginRedirect}
 }
 
 // translationFromEnv applies the env override of the ONE translation switch.

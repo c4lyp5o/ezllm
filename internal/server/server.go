@@ -231,7 +231,8 @@ func New(opts Options) *Server {
 	// admin routes fail loudly at construction rather than nil-panic per request.
 	if s.tester == nil && opts.Registry != nil && opts.DB != nil {
 		s.tester = registration.NewTester(&http.Client{
-			Timeout: 30 * time.Second,
+			Timeout:       30 * time.Second,
+			CheckRedirect: provider.SameOriginRedirect, // key tests send real keys
 			Transport: &http.Transport{
 				MaxIdleConnsPerHost: 4,
 				IdleConnTimeout:     30 * time.Second,

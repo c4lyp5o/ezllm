@@ -80,7 +80,7 @@ func newHarnessWithStore(tb testing.TB, up *httptest.Server, storeOpt func(*stor
 		tb.Fatal(err)
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: provider.SameOriginRedirect} // as upstreamClient
 	registry := provider.NewRegistry(client)
 	serverOpts := Options{
 		Auth: db, Resolver: router.New(db),

@@ -413,3 +413,62 @@ func TestMemoEvictsLeastRecentlyUsed(t *testing.T) {
 		t.Errorf("expired entries not swept on insert: entries=%d, want 1", memo.Len())
 	}
 }
+
+// The entry cap alone is no memory bound: entries hold prompt-sized forms.
+// MaxPerKey keeps one session from filling the memo (and evicting everyone
+// else), the byte budgets bound what is actually retained, an entry over
+// MaxEntryBytes is never retained, and Sweep drops idle entries without
+// waiting for the next request.
+func TestMemoEnforcesPerSessionAndByteBudgets(t *testing.T) {
+	clock := time.Unix(1700000000, 0)
+	msg := func(i int, n int) (map[string]any, map[string]any) {
+		return map[string]any{"role": "user", "content": fmt.Sprintf("m%d %s", i, strings.Repeat("x", 10))},
+			map[string]any{"role": "user", "content": strings.Repeat("y", n)}
+	}
+	memo := NewSessionMemo(&SessionMemoOptions{TTL: time.Minute, MaxPerKey: 2, MaxEntries: 20, Now: func() time.Time { return clock }})
+	other, otherForm := msg(100, 10)
+	memo.Put("other", "p", other, otherForm)
+	for i := 0; i < 6; i++ {
+		m, f := msg(i, 10)
+		memo.Put("s", "p", m, f)
+	}
+	if got := memo.Len(); got != 3 {
+		t.Errorf("MaxPerKey=2: entries=%d, want 2 for the busy session + 1 for the other", got)
+	}
+	if _, ok := memo.Get("other", "p", other); !ok {
+		t.Error("a busy session evicted another session's entry")
+	}
+	newest, _ := msg(5, 10)
+	if _, ok := memo.Get("s", "p", newest); !ok {
+		t.Error("the newest entry of the busy session was evicted")
+	}
+
+	memo = NewSessionMemo(&SessionMemoOptions{TTL: time.Minute, MaxBytes: 4 << 10, MaxBytesPerKey: 1 << 30, MaxEntryBytes: 3 << 10, Now: func() time.Time { return clock }})
+	for i := 0; i < 6; i++ {
+		m, f := msg(i, 1<<10) // ~1 KiB form each, 4 KiB total budget
+		memo.Put("s"+fmt.Sprint(i), "p", m, f)
+	}
+	if got, b := memo.Len(), memo.Bytes(); b > 4<<10 || got >= 6 {
+		t.Errorf("MaxBytes=4KiB: entries=%d bytes=%d", got, b)
+	}
+	huge, hugeForm := msg(50, 4<<10)
+	memo.Put("big", "p", huge, hugeForm)
+	if _, ok := memo.Get("big", "p", huge); ok {
+		t.Error("an entry over MaxEntryBytes was retained")
+	}
+
+	memo = NewSessionMemo(&SessionMemoOptions{TTL: time.Minute, MaxBytesPerKey: 2 << 10, Now: func() time.Time { return clock }})
+	for i := 0; i < 6; i++ {
+		m, f := msg(i, 1<<10)
+		memo.Put("s", "p", m, f)
+	}
+	if b := memo.Bytes(); b > 2<<10 {
+		t.Errorf("MaxBytesPerKey=2KiB: one session retains %d bytes", b)
+	}
+
+	clock = clock.Add(2 * time.Minute)
+	memo.Sweep()
+	if memo.Len() != 0 || memo.Bytes() != 0 {
+		t.Errorf("Sweep left %d idle entries (%d bytes)", memo.Len(), memo.Bytes())
+	}
+}

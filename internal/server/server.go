@@ -148,6 +148,9 @@ type sweepRun struct {
 // final batch persist; grace covers the goroutine's wind-down.
 const sweepDeadlineGrace = 5 * time.Minute
 
+// memoSweepEvery paces the session memo's idle sweep (a var for tests).
+var memoSweepEvery = time.Minute
+
 // Options configures New.
 type Options struct {
 	Auth        Auth
@@ -187,6 +190,9 @@ type Options struct {
 	// TrustedProxies are the reverse proxies whose X-Forwarded-For the auth
 	// rate limiter believes (clientip.go). Empty = the socket peer only.
 	TrustedProxies []netip.Prefix
+	// SessionMemo overrides the committed-prefix ledger (tests inject a clock
+	// and small limits); nil builds the default.
+	SessionMemo *compress.SessionMemo
 }
 
 // usageTZOrDefault resolves the day-bucketing zone. Empty or whitespace means
@@ -226,6 +232,7 @@ func New(opts Options) *Server {
 		comboAutoProbe: opts.ComboAutoProbe,
 		setupCode:      opts.SetupCode,
 		trustedProxies: opts.TrustedProxies,
+		sessMemo:       opts.SessionMemo,
 	}
 	// A server without a tester cannot run the key test; default one so the
 	// admin routes fail loudly at construction rather than nil-panic per request.
@@ -249,6 +256,20 @@ func New(opts Options) *Server {
 		s.sessMemo = compress.NewSessionMemo(nil)
 	}
 	s.bg = newBackground()
+	// Idle memo entries hold prompt-derived text; drop them on a timer rather
+	// than only when the next request happens to touch the memo.
+	s.goBackground(func(ctx context.Context) {
+		t := time.NewTicker(memoSweepEvery)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				s.sessMemo.Sweep()
+			}
+		}
+	})
 	s.reports = newReportCache(reportTTL, time.Now)
 	if opts.DB != nil {
 		newGeminiWebBridge(opts.DB, "").register(s.mux)

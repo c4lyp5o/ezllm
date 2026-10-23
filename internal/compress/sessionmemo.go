@@ -28,8 +28,11 @@ import (
 // never re-judged, so the prefix is byte-stable for the life of the session.
 //
 // Properties (plan WS-C requirements, honestly scoped):
-//   - bounded: per-session and global entry caps with LRU/TTL eviction
-//   - TTL'd: entries expire after ttl of disuse
+//   - bounded: per-session and global entry caps AND byte budgets with
+//     LRU/TTL eviction; a form over MaxEntryBytes is never retained (that
+//     message is simply re-judged each request, as without a memo)
+//   - TTL'd: entries expire after ttl of disuse; Sweep drops idle ones
+//     without waiting for the next request
 //   - process-local: never written to disk or the ledger; lost on restart
 //     (re-derivation is deterministic, so the cost is one re-acceptance)
 //   - session-scoped: no cross-session state (the key includes the session)
@@ -46,6 +49,12 @@ const (
 	DefaultSessionTTL        = 30 * time.Minute
 	DefaultSessionMaxEntries = 512 // per session+profile
 	DefaultMemoMaxEntries    = 8192
+	// Entry counts are no memory bound (one entry can hold a whole prompt-
+	// sized message), so retention is also capped in bytes of shipped form.
+	DefaultMemoMaxBytes      = 256 << 20
+	DefaultSessionMaxBytes   = 32 << 20 // per session+profile
+	DefaultMemoMaxEntryBytes = 4 << 20
+	memoEntryOverhead        = 256 // key, list and map bookkeeping per entry
 )
 
 // SessionMemo is the commit ledger. Safe for concurrent use.
@@ -54,7 +63,11 @@ type SessionMemo struct {
 	ttl        time.Duration
 	maxPerKey  int
 	maxEntries int
+	maxBytes   int64
+	maxKeyB    int64
+	maxEntryB  int64
 	now        func() time.Time
+	bytes      int64 // retained across all entries
 
 	// key = sha256(session | profileVersion | messageHash); ships form.
 	entries map[string]*memoEntry
@@ -66,22 +79,36 @@ type SessionMemo struct {
 	// usedAt = now, so the back is also the oldest: capacity eviction and
 	// TTL expiry both pop from the back, O(1) per entry dropped.
 	lru *list.List
-	ops uint64 // paces binding eviction (Bind)
+	// groups holds each session+profile's entries in its own LRU order, so
+	// the per-session caps evict that session's oldest, not someone else's.
+	groups map[string]*memoGroup
+	ops    uint64 // paces binding eviction (Bind)
 }
 
 type memoEntry struct {
 	key     string
+	group   string
 	shipped any // the exact message object that went upstream (nil = original)
+	size    int64
 	usedAt  time.Time
-	elem    *list.Element
+	elem    *list.Element // in SessionMemo.lru
+	gelem   *list.Element // in its group's lru
+}
+
+type memoGroup struct {
+	lru   *list.List
+	bytes int64
 }
 
 // SessionMemoOptions tunes the ledger; zero values take the defaults.
 type SessionMemoOptions struct {
-	TTL        time.Duration
-	MaxPerKey  int
-	MaxEntries int
-	Now        func() time.Time
+	TTL            time.Duration
+	MaxPerKey      int
+	MaxEntries     int
+	MaxBytes       int64 // all entries
+	MaxBytesPerKey int64 // one session+profile
+	MaxEntryBytes  int64 // larger forms are not retained
+	Now            func() time.Time
 }
 
 // NewSessionMemo builds a ledger with defaults or the given overrides.
@@ -90,10 +117,14 @@ func NewSessionMemo(opts *SessionMemoOptions) *SessionMemo {
 		ttl:        DefaultSessionTTL,
 		maxPerKey:  DefaultSessionMaxEntries,
 		maxEntries: DefaultMemoMaxEntries,
+		maxBytes:   DefaultMemoMaxBytes,
+		maxKeyB:    DefaultSessionMaxBytes,
+		maxEntryB:  DefaultMemoMaxEntryBytes,
 		now:        time.Now,
 		entries:    map[string]*memoEntry{},
 		binding:    map[string]string{},
 		lru:        list.New(),
+		groups:     map[string]*memoGroup{},
 	}
 	if opts != nil {
 		if opts.TTL > 0 {
@@ -104,6 +135,15 @@ func NewSessionMemo(opts *SessionMemoOptions) *SessionMemo {
 		}
 		if opts.MaxEntries > 0 {
 			m.maxEntries = opts.MaxEntries
+		}
+		if opts.MaxBytes > 0 {
+			m.maxBytes = opts.MaxBytes
+		}
+		if opts.MaxBytesPerKey > 0 {
+			m.maxKeyB = opts.MaxBytesPerKey
+		}
+		if opts.MaxEntryBytes > 0 {
+			m.maxEntryB = opts.MaxEntryBytes
 		}
 		if opts.Now != nil {
 			m.now = opts.Now
@@ -273,16 +313,30 @@ func (m *SessionMemo) PutAt(session, profile string, msg any, ord int, shipped a
 		return
 	}
 	key := memoKey(session, profile, h, ord)
+	size := int64(len(mustMarshal(shipped))) + memoEntryOverhead
+	group := session + "\x00" + profile
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := m.now()
 	if e, ok := m.entries[key]; ok {
-		e.shipped, e.usedAt = shipped, now
-		m.lru.MoveToFront(e.elem)
-	} else {
-		e := &memoEntry{key: key, shipped: shipped, usedAt: now}
-		e.elem = m.lru.PushFront(e)
-		m.entries[key] = e
+		m.removeLocked(e) // re-inserted below at its new size
+	}
+	if size > m.maxEntryB {
+		return // not retained: the message is re-judged next request
+	}
+	g := m.groups[group]
+	if g == nil {
+		g = &memoGroup{lru: list.New()}
+		m.groups[group] = g
+	}
+	e := &memoEntry{key: key, group: group, shipped: shipped, size: size, usedAt: now}
+	e.elem = m.lru.PushFront(e)
+	e.gelem = g.lru.PushFront(e)
+	m.entries[key] = e
+	g.bytes += size
+	m.bytes += size
+	for g.lru.Len() > m.maxPerKey || g.bytes > m.maxKeyB {
+		m.removeLocked(g.lru.Back().Value.(*memoEntry))
 	}
 	m.evictLocked(now)
 }
@@ -294,17 +348,47 @@ func (m *SessionMemo) PutAt(session, profile string, msg any, ord int, shipped a
 func (m *SessionMemo) evictLocked(now time.Time) {
 	for back := m.lru.Back(); back != nil; back = m.lru.Back() {
 		e := back.Value.(*memoEntry)
-		if now.Sub(e.usedAt) <= m.ttl && len(m.entries) <= m.maxEntries {
+		if now.Sub(e.usedAt) <= m.ttl && len(m.entries) <= m.maxEntries && m.bytes <= m.maxBytes {
 			return
 		}
 		m.removeLocked(e)
 	}
 }
 
+// Sweep drops entries idle past the TTL. Expiry otherwise happens only when
+// the memo is next used, so an idle gateway would keep prompt-derived forms
+// resident indefinitely; the server calls this on a timer.
+func (m *SessionMemo) Sweep() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.evictLocked(m.now())
+}
+
 // removeLocked drops one entry. Caller holds the lock.
 func (m *SessionMemo) removeLocked(e *memoEntry) {
 	m.lru.Remove(e.elem)
 	delete(m.entries, e.key)
+	m.bytes -= e.size
+	if g := m.groups[e.group]; g != nil {
+		g.lru.Remove(e.gelem)
+		g.bytes -= e.size
+		if g.lru.Len() == 0 {
+			delete(m.groups, e.group)
+		}
+	}
+}
+
+// Bytes reports the retained size estimate (tests/ops visibility).
+func (m *SessionMemo) Bytes() int64 {
+	if m == nil {
+		return 0
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.bytes
 }
 
 // Len reports the entry count (tests/ops visibility).
@@ -327,6 +411,8 @@ func (m *SessionMemo) Clear() {
 	m.entries = map[string]*memoEntry{}
 	m.binding = map[string]string{}
 	m.lru = list.New()
+	m.groups = map[string]*memoGroup{}
+	m.bytes = 0
 }
 
 // ClientSession scopes a caller-chosen X-Ezllm-Session id to the client that

@@ -90,8 +90,11 @@ history to its original bytes and breaking the upstream prefix cache.
   `sha256(session|profile|messageHash)` stores the form that SHIPPED.
 - Already-shipped messages replay verbatim; the ratio floor judges the
   **new work only**.
-- The ledger is bounded (512/session, 8192 global), memory-only, lost on
-  restart (re-derivation is deterministic).
+- The ledger is bounded by entries (512/session, 8192 global) and by bytes of
+  retained form (32 MiB/session, 256 MiB global; a form over 4 MiB is not
+  retained and that message is re-judged each request). Idle entries are
+  swept every minute past their 30-minute TTL. Memory-only, lost on restart
+  (re-derivation is deterministic).
 - **Every request is covered (2026-10-19).** An explicit `X-Ezllm-Session`
   wins, scoped to the authenticated client (`compress.ClientSession`, so two
   clients naming the same id never share forms or a profile binding);

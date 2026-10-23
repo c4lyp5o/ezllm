@@ -258,8 +258,9 @@ func New(opts Options) *Server {
 	s.bg = newBackground()
 	// Idle memo entries hold prompt-derived text; drop them on a timer rather
 	// than only when the next request happens to touch the memo.
+	every := memoSweepEvery
 	s.goBackground(func(ctx context.Context) {
-		t := time.NewTicker(memoSweepEvery)
+		t := time.NewTicker(every)
 		defer t.Stop()
 		for {
 			select {

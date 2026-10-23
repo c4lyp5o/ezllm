@@ -1561,6 +1561,39 @@ func refusesWire(resp *http.Response) bool {
 	return strings.Contains(s, "modelprotocolunsupported") || strings.Contains(s, "not supported for format")
 }
 
+// deniesModelAccess reports a 401/403 whose body says the HOP cannot reach the
+// model it was asked for ("Access to model denied", "model access denied",
+// "does not have access to"). Measured 2026-10-23: an account answered 403 for
+// one model, was re-dialled on all 12 remaining requests of its block, and
+// every one of them fell over to a hop whose prompt cache hit 27% instead of
+// 98% — the wasted dial is cheap, the cache it forces is not.
+//
+// Deliberately narrow: the words must name MODEL access. A 403 that describes
+// the request (a policy on the body, a bad tool shape) keeps its old treatment
+// — fail over, leave hop health alone — because parking a healthy hop on a
+// caller's mistake is worse than one wasted round trip. The park is keyed by
+// account+base+model (hopKey), so only that one model stops being dialled.
+func deniesModelAccess(resp *http.Response) bool {
+	if resp == nil || resp.Body == nil {
+		return false
+	}
+	if resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden {
+		return false
+	}
+	body := strings.ToLower(string(peekBody(resp, maxErrPeek)))
+	for _, phrase := range []string{
+		"access to model denied",
+		"model access denied",
+		"does not have access to",
+		"no access to model",
+	} {
+		if strings.Contains(body, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
 // peekBody reads up to n bytes of resp's body and puts them back in front of
 // the rest, so the response stays committable byte-for-byte. The restored
 // body still closes the ORIGINAL one: wrapping it in io.NopCloser (as both
@@ -1798,6 +1831,14 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 				if len(routes) > 1 {
 					oc.cooldown = defaultHopCooldown
 				}
+			}
+			// A 403 that names model access is a fact about the hop, so park it
+			// exactly as a 429 would be: same model-scoped key, same TTL, same
+			// half-open probe. hasAlternate is required for the same reason as
+			// the 429 path — a sole hop is better retried than refused from the
+			// in-process park.
+			if err == nil && !oc.failed && len(routes) > 1 && deniesModelAccess(resp) {
+				oc = hopOutcome{failed: true, cooldown: defaultHopCooldown, reason: "model access denied"}
 			}
 			d.recordHop(rt, oc, time.Now())
 		}

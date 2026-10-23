@@ -26,7 +26,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 28
+const schemaVersion = 29
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -311,6 +311,9 @@ func (d *DB) migrate() error {
 		if err := d.alterModelProtoSource(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate model proto source: %w", err)
 		}
+		if err := d.alterModelReasoning(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate model reasoning vocabulary: %w", err)
+		}
 		if err := d.alterCallsResearch(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate calls research columns: %w", err)
 		}
@@ -528,6 +531,27 @@ func (d *DB) alterModelProtoSource(ctx context.Context) error {
 		return err
 	}
 	_, err = d.w.ExecContext(ctx, `ALTER TABLE models ADD COLUMN proto_note TEXT`)
+	return err
+}
+
+// alterModelReasoning adds models.reasoning_vocab / reasoning_required on
+// databases created before v29 — what a model accepts for `reasoning_effort`,
+// learned from its own 400. NULL on a fresh row means "nothing known", which is
+// the pre-learning behaviour: the clamp is inert until a rule exists.
+// Guarded by a column check: ALTER TABLE ADD COLUMN is not idempotent.
+func (d *DB) alterModelReasoning(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "models")
+	if err != nil || !exists {
+		return err
+	}
+	has, err := hasColumn(ctx, d.w, "models", "reasoning_vocab")
+	if err != nil || has {
+		return err
+	}
+	if _, err = d.w.ExecContext(ctx, `ALTER TABLE models ADD COLUMN reasoning_vocab TEXT`); err != nil {
+		return err
+	}
+	_, err = d.w.ExecContext(ctx, `ALTER TABLE models ADD COLUMN reasoning_required INTEGER`)
 	return err
 }
 

@@ -121,8 +121,10 @@ func TestAccountingMeterMigrationFrom27(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if db.SchemaVersion() != 28 {
-		t.Fatalf("schema=%d", db.SchemaVersion())
+	// The claim is "migrated up to THIS binary's version", never a literal: a
+	// hardcoded 28 failed the suite on every schema bump for no reason.
+	if db.SchemaVersion() != schemaVersion {
+		t.Fatalf("schema=%d, want %d", db.SchemaVersion(), schemaVersion)
 	}
 	var count int
 	if err = db.r.QueryRow(`SELECT COUNT(*) FROM calls WHERE model='preserved' AND tokens_in=7`).Scan(&count); err != nil || count != 1 {

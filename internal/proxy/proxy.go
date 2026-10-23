@@ -1960,24 +1960,27 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 		// pointer first: the deferred cleaner must not close it a second time.
 		toCommit := fallbackResp
 		fallbackResp = nil
-		result, err := d.commit(ctx, w, toCommit, *fallbackRoute, fallbackResult, fallbackStart)
-		result.Attempts = attempts
-		return *fallbackRoute, result, err
+		res, err := d.commit(ctx, w, toCommit, *fallbackRoute, fallbackResult, fallbackStart)
+		res.Attempts = attempts
+		// commit builds its own Result, as on the in-loop path: a hop that
+		// taught us a vocabulary and then failed over must still report it.
+		res.LearnedReasoning = result.LearnedReasoning
+		return *fallbackRoute, res, err
 	}
 	if fallbackTransportErr != nil {
-		return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget}, fallbackTransportErr
+		return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget, LearnedReasoning: result.LearnedReasoning}, fallbackTransportErr
 	}
 	// Nothing was attempted at all because every hop was out of request budget.
 	// Report the refusal with the earliest release time so the client can wait
 	// instead of blind-retrying — and note that no upstream request was wasted
 	// discovering this.
 	if rateRefusal != nil {
-		return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget}, rateRefusal
+		return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget, LearnedReasoning: result.LearnedReasoning}, rateRefusal
 	}
 	if refusal != nil {
-		return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget}, refusal
+		return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget, LearnedReasoning: result.LearnedReasoning}, refusal
 	}
-	return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget}, errors.New("proxy: all combo endpoints are in five-minute cooldown")
+	return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget, LearnedReasoning: result.LearnedReasoning}, errors.New("proxy: all combo endpoints are in five-minute cooldown")
 }
 
 // streamCopy copies SSE upstream->client with a Flush per chunk, observing

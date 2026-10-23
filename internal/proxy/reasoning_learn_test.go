@@ -86,6 +86,43 @@ func TestUnrelatedRefusalLearnsNothing(t *testing.T) {
 	}
 }
 
+// hostTransport answers per upstream host, so each hop of a combo can fail its
+// own way.
+type hostTransport map[string]staticTransport
+
+func (t hostTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	st := t[r.URL.Host]
+	return st.RoundTrip(r)
+}
+
+// A hop whose refusal names a vocabulary and then fails over (404 here) must
+// still report what it taught when EVERY hop fails and the last error is the
+// one committed — commit builds a fresh Result on that path too.
+func TestFallbackCommitKeepsTheLearnedVocabulary(t *testing.T) {
+	tr := hostTransport{
+		"a.invalid": {status: http.StatusNotFound, body: sparkRefusalBody},
+		"b.invalid": {status: http.StatusBadGateway, body: `{"error":{"message":"bad gateway"}}`},
+	}
+	d := NewDispatcher(
+		&http.Client{Transport: tr, Timeout: 5 * time.Second},
+		provider.NewRegistry(&http.Client{Timeout: 5 * time.Second}))
+	d.SetRetries(0)
+
+	req, body := reqWithBody(`{"model":"alias","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"none"}`)
+	a := testRoute("http://a.invalid", "real-model")
+	b := testRoute("http://b.invalid", "real-model")
+	b.Account.ID, b.Account.Namespace = 2, "b"
+
+	rec := httptest.NewRecorder()
+	served, res, _ := d.ForwardCandidatesDoc(context.Background(), rec, req, []Route{a, b}, body, nil)
+	if served.Account.ID != b.Account.ID || rec.Code != http.StatusBadGateway {
+		t.Fatalf("want the last hop's 502 committed, got account %d status %d", served.Account.ID, rec.Code)
+	}
+	if res.LearnedReasoning == nil || res.LearnedReasoning.AccountID != a.Account.ID {
+		t.Fatalf("the first hop's vocabulary was lost on the fallback commit: %+v", res.LearnedReasoning)
+	}
+}
+
 // staticTransport answers one canned response.
 type staticTransport struct {
 	status int

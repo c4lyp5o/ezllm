@@ -235,8 +235,8 @@ func (rt Route) EffectiveWire() provider.Surface {
 
 // Attempt is one candidate that did NOT serve the request, in the order the
 // dispatcher abandoned it. It exists because a failed or skipped hop writes no
-// ledger row of its own (one request = one row, and that row is the billing
-// truth) — without the trail, the hops that "hopped" are invisible to the
+// delivery row of its own; observed usage is carried separately in
+// DiscardedUsage. Without the trail, unmetered/skipped hops are invisible to the
 // operator's recent-calls view and only exist in logs.
 type Attempt struct {
 	Namespace string // hop namespace
@@ -257,6 +257,8 @@ type Result struct {
 	UpstreamModel string
 	Err           string
 	Attempts      []Attempt
+	// DiscardedUsage contains source-accounted attempts that did not deliver.
+	DiscardedUsage []store.Call
 	// UpstreamAttempts is how many upstream calls this REQUEST actually made
 	// — same-hop retries and failover hops counted together (addendum #3).
 	// AttemptBudget is the configured request-wide budget; 0 means UNLIMITED
@@ -749,6 +751,7 @@ func (d *Dispatcher) SetDispatchDeadline(deadline time.Duration) {
 type attemptLedger struct {
 	limit int // <=0 unlimited
 	used  int
+	spent []store.Call
 }
 
 // consume records one upstream attempt. ok=false means the budget is spent.
@@ -1417,8 +1420,9 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 // Forward sends the (already model-swapped) body upstream and copies the
 // response to w. It returns the ledger Result. Single-candidate form: nothing
 // to fail over to, so attempt and commit happen back to back.
-func (d *Dispatcher) Forward(ctx context.Context, w http.ResponseWriter, r *http.Request, rt Route, body []byte) (Result, error) {
+func (d *Dispatcher) Forward(ctx context.Context, w http.ResponseWriter, r *http.Request, rt Route, body []byte) (result Result, resultErr error) {
 	led := &attemptLedger{limit: d.attemptBudget}
+	defer func() { result.DiscardedUsage = led.spent }()
 	var sel time.Time
 	if d.dispatchDeadline > 0 {
 		sel = time.Now().Add(d.dispatchDeadline)
@@ -1460,8 +1464,13 @@ func (d *Dispatcher) retryAttempt(ctx context.Context, r *http.Request, rt Route
 		if attempt+1 == maxAttempts || ctx.Err() != nil || (err != nil && !retryableUpstreamError(err)) {
 			return resp, result, start, err
 		}
+		if led != nil && led.exhausted() {
+			discardAttempt(resp, rt, result, start, led)
+			return nil, result, start, errAttemptBudgetSpent
+		}
 		if resp != nil {
-			drainClose(resp)
+			discardAttempt(resp, rt, result, start, led)
+			lastResp = nil // the consumed response can no longer be a final fallback
 		}
 		delay := time.Duration(1<<attempt) * time.Second
 		if delay > 8*time.Second {
@@ -1563,18 +1572,6 @@ func peekBody(resp *http.Response, n int) []byte {
 	return head[:k]
 }
 
-// drainCap bounds how much of an abandoned body is read so its connection can
-// be reused. Error bodies are tiny; past this it is cheaper to let the
-// connection go than to read megabytes nobody will see.
-const drainCap = 64 << 10
-
-// drainClose releases an abandoned response, reusing its connection when the
-// rest of the body is small.
-func drainClose(resp *http.Response) {
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, drainCap))
-	_ = resp.Body.Close()
-}
-
 // ForwardCandidates tries routes in order and commits the first one that the
 // client may see. This is combo failover.
 //
@@ -1597,7 +1594,7 @@ func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWrite
 
 // ForwardCandidatesDoc is ForwardCandidates with the request body's shared
 // decode threaded through. See ForwardCandidates for the failover contract.
-func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWriter, r *http.Request, routes []Route, body []byte, doc *jsonbody.BodyDoc) (Route, Result, error) {
+func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWriter, r *http.Request, routes []Route, body []byte, doc *jsonbody.BodyDoc) (served Route, result Result, resultErr error) {
 	if len(routes) == 0 {
 		return Route{}, Result{}, errors.New("proxy: no candidate routes")
 	}
@@ -1643,6 +1640,7 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 	// failover hops, and a selection deadline that governs only the choosing
 	// (never the winning attempt's stream).
 	led := &attemptLedger{limit: d.attemptBudget}
+	defer func() { result.DiscardedUsage = led.spent }()
 	var sel time.Time
 	if d.dispatchDeadline > 0 {
 		sel = time.Now().Add(d.dispatchDeadline)
@@ -1806,7 +1804,7 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 				Note: note,
 			})
 			if fallbackResp != nil {
-				drainClose(fallbackResp)
+				discardAttempt(fallbackResp, *fallbackRoute, fallbackResult, fallbackStart, led)
 				fallbackResp = nil
 			}
 			fallbackTransportErr = err
@@ -1834,14 +1832,14 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 		}
 		if failoverStatus(res.Status) || oc.failed {
 			if fallbackResp != nil {
-				drainClose(fallbackResp)
+				discardAttempt(fallbackResp, *fallbackRoute, fallbackResult, fallbackStart, led)
 			}
 			rtCopy, resCopy, startCopy := rt, res, start
 			fallbackRoute, fallbackResp, fallbackResult, fallbackStart = &rtCopy, resp, resCopy, startCopy
 			continue
 		}
 		if fallbackResp != nil {
-			drainClose(fallbackResp)
+			discardAttempt(fallbackResp, *fallbackRoute, fallbackResult, fallbackStart, led)
 		}
 		res2, err2 := d.commit(ctx, w, resp, rt, res, start)
 		// The committed route travels back with the result: the ledger must

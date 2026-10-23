@@ -1725,6 +1725,7 @@ func (s *Server) handleComboTest(w http.ResponseWriter, r *http.Request) {
 			call.Err = res.Err
 		}
 		applyUsage(&call, res.Usage)
+		s.ledgerAttempts(call, res)
 		s.ledger(call)
 		for _, c := range s.dispatcher.Cooldowns() {
 			if c.Namespace == rt.Account.Namespace && c.Model == rt.Model && c.Until.After(time.Now()) {

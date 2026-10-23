@@ -123,8 +123,8 @@ func (s *Server) finishDispatch(w http.ResponseWriter, r *http.Request, call sto
 		call.Err = res.Err
 	}
 	// Failover trail: every candidate that did NOT serve, appended to the
-	// served row's err. One request stays ONE ledger row (the billing
-	// truth), but the hops that "hopped" become visible in the dashboard.
+	// served row's err. Attempts with observed usage also have independent
+	// accounting rows; the trail still shows skipped or unmetered failures.
 	call.Err = appendNote(call.Err, failoverTrail(res.Attempts))
 	// Request-wide attempt usage (addendum #3): what the budget allowed and
 	// what was spent. Unlimited is a word, never a zero-left ambiguity.
@@ -141,6 +141,7 @@ func (s *Server) finishDispatch(w http.ResponseWriter, r *http.Request, call sto
 	// convention observed on the upstream wire. That covers both the
 	// anthropic->openai-chat leg and a hop curated onto the Responses wire.
 	call.Translated = served.Translated || served.ResponsesWire
+	s.ledgerAttempts(call, res)
 	s.ledger(call)
 }
 
@@ -153,4 +154,13 @@ func appendNote(err, note string) string {
 		return note
 	}
 	return err + "; " + note
+}
+
+// Attempt rows carry their own account/key/model and usage. Only the delivery
+// row owns compression attribution and the request's budget reservation.
+func (s *Server) ledgerAttempts(delivery store.Call, res proxy.Result) {
+	for _, c := range res.DiscardedUsage {
+		c.Client, c.IP, c.SessionID = delivery.Client, delivery.IP, delivery.SessionID
+		s.ledger(c)
+	}
 }

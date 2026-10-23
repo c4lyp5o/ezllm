@@ -718,3 +718,19 @@ and only then releases their reservations. Recovery survives restarts.
 Admission returns `503 budget_unavailable` while client-meter recovery fails;
 model rules retain their existing refusal when their meter is unavailable.
 No HTTP response field or application release version changes with this schema.
+
+### Usage reported by retries and failed hops
+
+A delivered request retains its normal ledger row. Each earlier upstream
+attempt that reports usage also produces an accounting row under its own
+account, provider key, model, and status. These rows share the client/session
+identity, use `err: "upstream attempt discarded before delivery"`, and contain
+source `raw_usage`. They do not duplicate compression savings or the delivery
+row's budget reservation. Usage and cost totals include all observed attempts;
+call counts can exceed the number of client requests. Attempts without reported
+usage are kept in diagnostics, without estimated token charges.
+
+The discarded-body observer reads at most 32 MiB (the normal JSON response
+cap), including bounded SSE events. Usage outside an unread/oversized body or
+after transport failure is not estimated. The final fallback response is
+accounted once as the delivery row, rather than as an extra discarded attempt.

@@ -2,75 +2,50 @@
 
 Updated: 2026-10-23
 
-Reviewed commit: `4059482` (`fix/audit-findings`, v1.1.1)
+Branch: `fix/audit-findings`
 
-One accounting integrity finding remains open: medium-priority attempt accounting.
-Previously resolved findings remain removed. No production fixes or version
-changes were made during this sweep.
+Application version: v1.1.1 (unchanged)
 
-## Accounting integrity sweep
+No open findings remain from the completed sweeps. All five accounting
+integrity findings have verified fixes, and resolved entries have been removed.
+This tracks the audited findings; it does not claim the absence of other defects.
 
-Traced upstream usage normalization, JSON/SSE translation and tapping, retry
-and failover attribution, ledger writes, client/model meters, reservations,
-and effective-dated cost reporting. Reproductions used mock upstreams and
-disposable SQLite databases, with no live provider calls or credentials.
+## Verification
 
-### AI4 — Medium: failover omits usage explicitly reported by earlier hops
+Permanent regression coverage checks:
 
-**Locations:** `internal/proxy/proxy.go:1802`,
-`internal/proxy/proxy.go:1810`, and `internal/server/dispatch.go:119`.
+- Source usage and raw evidence across all nine wire pairs, JSON and SSE,
+  plus usage retained when client conversion fails.
+- Native multiline SSE usage, CRLF, bounded events, and recovery after an
+  oversized event, with byte-exact forwarding.
+- Durable meter reconciliation across restart, model/client counters,
+  fail-closed capped admission, uncapped operator access, and exactly-once
+  reservation release. Migration from schema v27 to v28 preserves ledger rows.
+- Same-hop retries, JSON/SSE failover, final-error fallback, attempt-budget
+  exhaustion, account/key attribution, and total client spend. Errors without
+  reported usage do not receive estimated charges.
+- USD-only price validation and legacy non-USD rates treated as unpriced
+  without silently falling back to older USD rates.
 
-When another hop succeeds, the earlier error response is closed without
-normalizing its usage. Only the committed hop's usage enters `Result.Usage`
-and the single final call row. Attempt diagnostics carry namespace/model,
-status, and text, but no structured usage to meter against the earlier
-account. An error snippet can happen to contain some usage text; it does not
-feed token counters or cost aggregation.
+Checks passed on the completed fixes:
 
-**Reproduction:** `TestAccountingAuditDiscardedAttemptUsage` uses a first hop
-returning HTTP 503 with reported prompt=100/output=42, followed by a successful
-hop reporting prompt=10/output=5. Both upstreams were called. The returned
-accounting is only 10/5, while the first hop appears only in diagnostics. Total
-reported usage across the two attempts was 110/47.
+- `make test-short` — all packages; output:
+  `/tmp/ezllm-accounting-fix-functional-final.txt`.
+- `go test -race -short -count=1 -timeout 3m ./internal/proxy ./internal/store ./internal/translate`
+  — no race warnings; output: `/tmp/ezllm-accounting-fix-race-final.txt`.
+- Focused server accounting, pricing, reservation, health, and version race
+  checks — passed; output: `/tmp/ezllm-accounting-fix-server-race.txt`.
+- Final attempt-accounting race regressions — passed; output:
+  `/tmp/ezllm-accounting-attempt-final.txt`.
+- `go vet ./...`, gateway build, formatting, and diff checks — passed.
 
-**Impact:** the ledger and account/client meters cannot reconcile all reported
-upstream work on a failover request. This finding does not assume every 503 or
-429 is billable; it is limited to attempts that explicitly report usage. The
-current one-row-per-committed-request policy explains the omission but does
-not make that row a complete upstream-spend record.
+The application version remains v1.1.1. The database schema advances to v28
+for durable pending-meter debits, with migration coverage. Usage reported by
+discarded attempts now has separate ledger rows, so ledger call counts can
+exceed client request counts. Unknown usage is not estimated. Existing lost
+usage history is not rewritten by these changes.
 
-**Suggested fix:** record per-attempt usage with its actual account, key,
-model, status, and source wire, separately from the client delivery row.
-Avoid adding the earlier account's tokens to the successful account's row.
-Apply retries and final fallback through the same accounting path, and define
-how attempt charges reconcile with the request's reservation exactly once.
-
-## Verification and limits
-
-- `make test-short` — passed across all packages; output:
-  `/tmp/ezllm-accounting-functional.txt`.
-- `go test -race -count=1 -run '^TestAccountingAudit' -v ./internal/proxy ./internal/store`
-  — all reproduction probes passed with no race warnings; output:
-  `/tmp/ezllm-accounting-probes.txt`. These probes assert that the defects
-  reproduce, so passing does not establish correct accounting.
-- `go test -race -short -count=1 -timeout 3m ./internal/store ./internal/proxy ./internal/translate`
-  — passed with no race warnings after removing the temporary probes; output:
-  `/tmp/ezllm-accounting-race.txt`.
-
-Temporary probe sources were removed from the repository and preserved as:
-
-- `/tmp/ezllm-accounting-audit/proxy_accounting_audit_temp_test.go.txt`
-- `/tmp/ezllm-accounting-audit/store_accounting_audit_temp_test.go.txt`
-
-Restore each as `accounting_audit_temp_test.go` in its original package to
-reproduce. All local upstreams and disposable databases were cleaned up.
-The preexisting Python cache remains untouched.
-
-Existing effective-date pricing, unpriced-call reporting, usage conventions,
-ordinary reservation handoff, and meter-savepoint tests were reviewed. The
-meter's deliberate cache exclusions and nonblocking ledger shedding policy
-were not relabeled as newly discovered bugs. Unreported usage after a client
-cancels cannot be established from these fixtures and was not estimated.
-No full performance harness, live invoice reconciliation, exchange-rate
-lookup, or credentialed provider verification was performed. The functional
-gate follows the repository's memory constraint.
+Validation used mock upstreams and disposable databases, without live provider
+calls, credentials, or paid quota. The full performance harness was not run;
+the repository's memory-safe functional gate was used. The preexisting Python
+cache remains untouched.

@@ -4,7 +4,7 @@ Updated: 2026-10-23
 
 Reviewed commit: `19489a2` (`fix/audit-findings`, application v1.1.1, schema v28)
 
-Four recovery and upgrade findings remain open: two high and two medium.
+Three recovery and upgrade findings remain open: one high and two medium.
 Previously resolved findings remain removed. This sweep changed no production
 code, release version, database schema, or deployment.
 
@@ -14,43 +14,6 @@ Reviewed startup/key handling, schema migration and restart behavior, WAL
 backup instructions, export completeness and errors, shutdown ownership,
 durable meter recovery, and release/container workflows. Local probes used
 only disposable databases, dummy secrets, and local processes.
-
-### RU2 — High: interrupted legacy combo migration can block restart or strand configuration
-
-**Locations:** `internal/store/store.go:564`,
-`internal/store/store.go:608`, `internal/store/store.go:619`, and
-`internal/store/store.go:623`.
-
-The pre-v9 combo rebuild creates/copies a staging table, drops the original,
-and renames the staging table using separate autocommit statements. Neither
-the rebuild nor its schema-version stamp is one transaction. Restart has no
-recovery for an existing `combos_v9` table or for a missing `combos` table with
-its data still staged.
-
-**Reproduction:** `TestRecoveryAuditInterruptedComboRebuild` reconstructs
-intermediate rebuild states in a disposable pre-v9 fixture and reopens it:
-
-- With `combos` and `combos_v9` present, startup fails because `combos_v9`
-  already exists. Restart does not resume the rebuild.
-- With the original table dropped but the staging copy present, startup
-  creates an empty `combos` table and stamps schema v28. The original combo
-  remains in `combos_v9`, absent from the active configuration.
-
-The fixture uses a simplified staging copy to simulate these persisted
-states; it does not inject a process kill at a particular instruction. The
-failure and silent-stranding paths depend on table presence, not the staging
-copy's unused extra columns. The ordinary successful migration is covered by
-existing tests and still passes.
-
-**Impact:** a crash or statement failure in the rebuild window can require
-manual database repair, or let an upgrade appear successful with routing
-configuration missing. This affects the supported legacy rebuild path, not
-the ordinary additive v27-to-v28 migration.
-
-**Suggested fix:** make the rebuild atomic on one connection, with foreign-key
-state restored reliably and integrity checked before commit. Handle previously
-interrupted staging states explicitly rather than dropping or ignoring their
-data. Test recovery from both failure points and repeat open/restart checks.
 
 ### RU3 — High: documented live SQLite backup omits committed WAL data
 

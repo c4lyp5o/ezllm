@@ -95,6 +95,22 @@ two `cache_control` markers survive (native spends two of upstream's four).
 python3 tests/prove_claude_bridge.py     # through ezllm's front door; real plan draw
 ```
 
+## Plan windows on the provider card
+
+Every CLI run reports the plan's state in a `rate_limit_event`: the 5-hour and
+7-day windows as a utilization fraction plus reset times. The bridge keeps the
+last reading and serves it on `GET /v1/usage` (same `x-api-key`) in the percent
+shape the Providers page already draws — **rolling** = the 5-hour window,
+**weekly** = the 7-day window. Press **Quota** on the claude-sub account to read it.
+
+- The reading is only as fresh as the **last call** (`observed_at` in the raw
+  body); the CLI has no way to read it without making one.
+- Before the first call after a restart the bridge answers 404 and the card shows
+  `–` ("measured"). The first request through the account fills it in.
+- These are Anthropic's own numbers for the whole subscription, including use
+  from claude.ai and other devices — they will not match ezllm's ledger, and
+  they are not the Rules caps (those count only ezllm traffic, in calendar blocks).
+
 ## Failure modes
 
 - **401** — no usable login where the CLI runs it. Check `USER`/`LOGNAME` are set

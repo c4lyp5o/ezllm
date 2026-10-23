@@ -17,6 +17,14 @@ file in the same commit, or the test fails.
 
 ## v1.1.1 — 2026-10-23
 
+- **Request fidelity:** Chat-to-Responses preserves completion limits and
+  refuses conflicting limit spellings; Messages-to-Responses preserves
+  disabled tool selection. Function definitions retain explicit strict settings.
+- **Tool identity:** Messages requests disambiguate tool IDs that would otherwise
+  collide after sanitization, keeping each result paired with its call.
+- **Refusal streaming:** Chat refusal fragments remain readable until the actual
+  finish reason; truncated streams and content after finish still fail.
+
 - **Bounded Codex delivery:** queued output is capped by bytes and event count;
   backlog overflow reports `output_backpressure` and reaps the child even while
   the client sink is blocked.

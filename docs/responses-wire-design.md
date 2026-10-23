@@ -51,10 +51,10 @@ its normal combo position (this is a wire quirk, not a last-resort hop).
 | assistant message, `content` string (may be null with tool_calls) | `input[] {role:"assistant", content:"<string>"}` — omitted when empty | |
 | assistant `tool_calls[{id, function:{name, arguments}}]` | one `input[] {type:"function_call", call_id:"<id>", name, arguments}` per tool call, AFTER the assistant text item | arguments stays a string, verbatim |
 | tool role message `{tool_call_id, content}` | `input[] {type:"function_call_output", call_id:"<tool_call_id>", output:"<content>"}` | content may be string or blocks → flatten to text |
-| `tools[{type:"function", function:{name, description, parameters}}]` | `tools[{type:"function", name, description, parameters}]` | flatten one level |
+| `tools[{type:"function", function:{name, description, parameters, strict}}]` | `tools[{type:"function", name, description, parameters, strict}]` | flatten one level; preserve absent/true/false strict settings |
 | `tool_choice:"auto"|"none"|"required"` | same string | |
 | `tool_choice:{type:"function", function:{name}}` | `{type:"function", name}` | |
-| `max_tokens` | `max_output_tokens` | |
+| `max_tokens` / `max_completion_tokens` | `max_output_tokens` | if both are present they must agree; conflicting values are refused |
 | `temperature`, `top_p` | same, omitted when absent | |
 | `stop` | dropped | no responses equivalent (comment in code) |
 | `stream` | `stream` | omitted when false (omitempty) |
@@ -142,3 +142,16 @@ lines). Golden fixtures pin the bytes.
 - A `wire` sweep probe carrying tools+reasoning (the minimal probe can't see
   this limitation; revisit if curation becomes tedious).
 - Images/multipart input beyond string and simple text blocks.
+
+### Protocol corrections — 2026-10-23
+
+Messages clients on Responses hops retain `tool_choice:{"type":"none"}` as
+`tool_choice:"none"`, even with a nonempty tools array. Explicit function
+`strict` settings are preserved by the legacy request converters as well as
+the universal codecs.
+
+Chat refusal deltas do not establish stream completion. The strict decoder
+accepts all refusal fragments until an actual finish reason, rejects content
+after that finish reason, and treats a refusal cut off before any terminal
+marker as truncated. A completed Chat refusal is projected through the
+existing Responses `incomplete` / `content_filter` representation.

@@ -95,8 +95,12 @@ refuses — it never falls through to the model swap.
 - **Messages encoding fills what the wire requires**: `max_tokens` defaults to 32000 when the
   client sent none; a tool without a schema gets `{"type":"object","properties":{}}`; tool-call
   ids outside `[A-Za-z0-9_-]` are rewritten byte-wise (`functions.read:0` → `functions_read_0`,
-  the same on the `tool_use` and its `tool_result`); empty turns are dropped and consecutive
+  the same on the `tool_use` and its `tool_result`). When distinct IDs sanitize to the same
+  spelling, the encoder appends a deterministic hash suffix to disambiguate them, reserving
+  existing legal IDs before assigning suffixes. Empty turns are dropped and consecutive
   same-role turns merged; `parallel_tool_calls:false` becomes `disable_parallel_tool_use`.
+- **Function tools retain explicit `strict` settings** across Chat, Responses, and Messages;
+  absent and false remain distinct. Parameter schema bytes remain unchanged.
 - **Messages encoding follows the destination model** (`translate/claude_models.go`, matched on
   the Claude id wherever the provider puts it — `anthropic/claude-sonnet-5.5`,
   `us.anthropic.claude-opus-4-8`, `claude-haiku-5-5[1m]`; any other id is untouched):

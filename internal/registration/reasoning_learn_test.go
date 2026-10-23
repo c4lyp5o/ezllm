@@ -2,6 +2,7 @@ package registration
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -116,4 +117,50 @@ func (s *reasoningStub) RoundTrip(r *http.Request) (*http.Response, error) {
 		body = sparkReasoningRefusal
 	}
 	return reply(http.StatusBadRequest, body)
+}
+
+func TestProtocolSweepLearnsReasoningWithoutDisablingWire(t *testing.T) {
+	for _, surface := range []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses} {
+		for _, proven := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/proven=%t", surface, proven), func(t *testing.T) {
+				ctx := context.Background()
+				db := newProbeTestStore(t)
+				acct := provider.Account{Name: "oc", Namespace: "oc", Kind: provider.KindOpenAICompatible, BaseURL: "https://up.invalid", Enabled: true}
+				aid, err := db.UpsertAccount(ctx, acct)
+				if err != nil {
+					t.Fatal(err)
+				}
+				acct.ID = aid
+				if err := db.UpsertModels(ctx, aid, []provider.ModelInfo{{ID: "muse-spark"}}); err != nil {
+					t.Fatal(err)
+				}
+				if proven {
+					yes := true
+					if err := db.SetModelProto(ctx, aid, "muse-spark", surface, &yes); err != nil {
+						t.Fatal(err)
+					}
+				}
+				client := &http.Client{Transport: &reasoningStub{}}
+				tester := NewTester(client, provider.NewRegistry(client), db)
+				result := tester.ProtocolSweep(ctx, acct, "k", []provider.ModelInfo{{ID: "muse-spark"}}, Options{Surfaces: []provider.Surface{surface}, ProbeAll: true})
+				facts, err := db.ModelFacts(ctx, aid, "muse-spark")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !facts.Reasoning.Known || len(facts.Reasoning.Allowed) != 6 {
+					t.Errorf("sweep lost vocabulary: %+v", facts.Reasoning)
+				}
+				support := facts.Supports(surface)
+				if proven && (support == nil || !*support) {
+					t.Error("sweep erased proven wire support")
+				}
+				if !proven && support != nil {
+					t.Error("a reasoning refusal must leave untested support unknown")
+				}
+				if len(result.Rows) != 0 {
+					t.Errorf("reasoning refusal produced wire verdicts: %+v", result.Rows)
+				}
+			})
+		}
+	}
 }

@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -165,5 +166,32 @@ func TestHopBodySendsTheClampedEffortUpstream(t *testing.T) {
 	// The client's own bytes are never mutated in place.
 	if string(body) != string(original) {
 		t.Fatalf("the shared client body was mutated:\n got %s\nwant %s", body, original)
+	}
+}
+
+func TestClampReasoningLeadingWhitespace(t *testing.T) {
+	for _, prefix := range []string{" ", "\n", "\r\n\t "} {
+		t.Run(fmt.Sprintf("%q", prefix), func(t *testing.T) {
+			body := []byte(prefix + `{"model":"alias","reasoning_effort":"none"}`)
+			rt := testRoute("http://up.invalid", "real-model")
+			rt.Reasoning = sparkRule()
+			doc := jsonbody.Open(body)
+			got, err := prepareHopBody(body, rt, doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var parsed map[string]any
+			if err := json.Unmarshal(got, &parsed); err != nil {
+				t.Fatal(err)
+			}
+			if parsed["reasoning_effort"] != "minimal" || parsed["model"] != rt.Model {
+				t.Fatalf("hop body = %s, want clamped effort and upstream model", got)
+			}
+			unchanged := []byte(prefix + `{"reasoning_effort":"low"}`)
+			out, changed := clampReasoning(unchanged, sparkRule())
+			if changed || &out[0] != &unchanged[0] {
+				t.Fatal("allowed effort must preserve the original slice")
+			}
+		})
 	}
 }

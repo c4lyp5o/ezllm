@@ -1052,6 +1052,16 @@ func (t *Tester) probeSurface(
 		// Transport failure → unknown, never "unsupported".
 		return provider.VerdictUnknown, false, status
 	}
+	if rule := provider.ParseReasoningRule(status, resp); rule.Known {
+		t.setReasoning(acct.ID, model, rule)
+		// An invalid effort is a request-value refusal, not evidence that
+		// the wire is unsupported. Keep prior capability evidence (including
+		// unknown) until a valid probe proves otherwise. Authentication
+		// failures still go through the normal classifier below.
+		if status == http.StatusBadRequest || status == http.StatusUnprocessableEntity {
+			return provider.VerdictUnknown, false, status
+		}
+	}
 	verdict, authDead := provider.ClassifyProbeResult(status, string(resp))
 	return verdict, authDead, status
 }

@@ -22,7 +22,13 @@ import (
 // is a different vocabulary and is not touched here — guessing would be worse
 // than leaving it alone.
 func clampReasoning(body []byte, rule provider.ReasoningRule) (out []byte, changed bool) {
-	if !rule.Known || len(body) == 0 || body[0] != '{' {
+	if !rule.Known {
+		return body, false
+	}
+	// JSON permits whitespace before the opening object. Inspect a view while
+	// retaining the original slice for every unchanged request.
+	trimmed := bytes.TrimLeft(body, " \t\r\n")
+	if len(trimmed) == 0 || trimmed[0] != '{' {
 		return body, false
 	}
 	var doc map[string]any

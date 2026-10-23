@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -52,6 +53,17 @@ func (s *Server) allowModel(w http.ResponseWriter, r *http.Request, client, requ
 // rate-limited combo answered 502 instead of 429, and hop health and the
 // failover trail were never recorded.
 func (s *Server) finishDispatch(w http.ResponseWriter, r *http.Request, call store.Call, routes []proxy.Route, served proxy.Route, res proxy.Result, ferr error) {
+	// What a refusal taught us about a model's reasoning vocabulary is kept for
+	// the NEXT request: the router will clamp into it before dialling, so the
+	// 400 that taught us is the last one this hop costs. Detached from the
+	// request context on purpose — the client may already be gone, and this
+	// write must still land.
+	if lr := res.LearnedReasoning; lr != nil && s.db != nil {
+		if err := s.db.LearnModelReasoning(context.WithoutCancel(r.Context()), lr.AccountID, lr.Model, lr.Rule); err != nil {
+			slog.Warn("could not record a model's reasoning vocabulary",
+				"account_id", lr.AccountID, "model", lr.Model, "err", err)
+		}
+	}
 	if served.Alias == "" {
 		// Resolution or swap failed before any hop committed: the ledger
 		// still needs the REQUESTED target, or the row lands with no alias

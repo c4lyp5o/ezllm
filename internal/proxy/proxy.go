@@ -214,6 +214,10 @@ type Route struct {
 	// path, the pin target and the codec choice — Translated/ResponsesWire are
 	// the same fact in legacy form (see EffectiveWire). Empty = native.
 	WireSurface provider.Surface
+	// Reasoning is what THIS model accepts for `reasoning_effort`, learned from
+	// its own refusal. The zero value means nothing is known, and prepareHopBody
+	// then sends the client's request byte-identical.
+	Reasoning provider.ReasoningRule
 }
 
 // EffectiveWire is THE wire selector: what we speak upstream. Native routes
@@ -247,6 +251,15 @@ type Attempt struct {
 
 // Result carries what the ledger needs after a dispatch. Attempts lists every
 // candidate that did not serve, dispatch order; the serving hop is never listed.
+// LearnedReasoning is one fact a refusal taught us, tagged with the hop that
+// taught it: the vocabulary is per (account, model), never global.
+type LearnedReasoning struct {
+	AccountID int64
+	Model     string
+	Rule      provider.ReasoningRule
+}
+
+// Result reports the outcome of one request.
 type Result struct {
 	Status        int
 	Stream        bool
@@ -259,6 +272,11 @@ type Result struct {
 	Attempts      []Attempt
 	// DiscardedUsage contains source-accounted attempts that did not deliver.
 	DiscardedUsage []store.Call
+	// LearnedReasoning is what an upstream refusal taught us about a model's
+	// `reasoning_effort` vocabulary. The proxy has no store, so it reports the
+	// fact and the server persists it (store.LearnModelReasoning); nil means
+	// nothing was learned on this request.
+	LearnedReasoning *LearnedReasoning
 	// UpstreamAttempts is how many upstream calls this REQUEST actually made
 	// — same-hop retries and failover hops counted together (addendum #3).
 	// AttemptBudget is the configured request-wide budget; 0 means UNLIMITED
@@ -958,6 +976,19 @@ func isCloudflare(rt Route) bool {
 // wire while its body is encoded for another. Translation REPLACES the swap:
 // it rewrites the whole wire shape, model included, so the paths never compose.
 func prepareHopBody(body []byte, rt Route, doc *jsonbody.BodyDoc) ([]byte, error) {
+	// What THIS model accepts for reasoning_effort, from its own refusal. It
+	// runs first so both the native swap and every translation below inherit
+	// the clamped value — the client asked for a level this model names
+	// differently, and the ledger's 400s are all this one field.
+	//
+	// A clamp invalidates the shared doc: it describes bytes we no longer send,
+	// so the native path re-parses the clamped body instead of splicing the
+	// model into the original. That costs one parse on the rare changed path and
+	// none at all on the common one.
+	if clamped, changed := clampReasoning(body, rt.Reasoning); changed {
+		body = clamped
+		doc = nil
+	}
 	// Google AI Studio native audio (TTS/STT) needs a generateContent
 	// translation, not the OpenAI envelope. It runs before the multipart
 	// branch because the STT input IS multipart and must be unwrapped.
@@ -1806,6 +1837,18 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 		// A sole eligible endpoint is attempted normally below.
 		resp, res, start, err := d.retryAttempt(ctx, r, rt, swapped, doc, led, sel)
 		res.UpstreamAttempts, res.AttemptBudget = led.used, d.attemptBudget
+		// A refusal that names its own `reasoning_effort` vocabulary is worth
+		// keeping: the next request to this hop gets clamped instead of refused.
+		// Read here — before the failover/commit split — so a SOLE hop that
+		// answers 400 teaches us too, not only one that failed over. Only 4xx:
+		// a 200 body may be a stream, and peeking it would break the delivery.
+		if err == nil && resp != nil && res.Status >= 400 && res.Status < 500 && result.LearnedReasoning == nil {
+			if rule := provider.ParseReasoningRule(res.Status, peekBody(resp, maxErrPeek)); rule.Known {
+				result.LearnedReasoning = &LearnedReasoning{
+					AccountID: rt.Account.ID, Model: rt.Model, Rule: rule,
+				}
+			}
+		}
 		// Park the hop only when there is somewhere else to go. len(routes) is
 		// the full candidate list the router resolved; a single entry means a
 		// cooled hop has no alternate, and classifyHop declines to park a rate
@@ -1900,6 +1943,8 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 		// would attribute a failed hop's spend — and, worse, would make a
 		// per-account cap meter the wrong budget entirely.
 		res2.Attempts = attempts
+		// commit builds its own Result; the fact learned above rides with it.
+		res2.LearnedReasoning = result.LearnedReasoning
 		return rt, res2, err2
 	}
 

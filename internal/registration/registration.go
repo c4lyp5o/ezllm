@@ -631,6 +631,14 @@ func (t *Tester) probeModel(
 		Err:     probeErrNote(status, resp, err),
 	})
 
+	// A refusal that names its own reasoning vocabulary is a fact worth keeping:
+	// the very next request to this model gets clamped instead of refused. This
+	// is the same read the proxy does on live traffic, so a dashboard "test"
+	// teaches it before a single real request is spent.
+	if rule := provider.ParseReasoningRule(status, resp); rule.Known {
+		t.setReasoning(acct.ID, model, rule)
+	}
+
 	// A wire mismatch is a signpost, not a dead end: the provider just named the
 	// wire this model lives on. Probe the SAME model once on /responses. Two
 	// things come out of it when it answers — the key test gets a real
@@ -1757,4 +1765,13 @@ func (t *Tester) setProto(accountID int64, modelID string, s provider.Surface, s
 		return
 	}
 	_ = t.db.SetModelProto(context.Background(), accountID, modelID, s, supported)
+}
+
+// setReasoning records a model's learned effort vocabulary. Best-effort like
+// setProto: a probe that taught us something must not fail on the write.
+func (t *Tester) setReasoning(accountID int64, modelID string, rule provider.ReasoningRule) {
+	if t.db == nil {
+		return
+	}
+	_ = t.db.LearnModelReasoning(context.Background(), accountID, modelID, rule)
 }

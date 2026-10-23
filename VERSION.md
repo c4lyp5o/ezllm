@@ -17,6 +17,53 @@ file in the same commit, or the test fails.
 
 ## v1.1.1 — 2026-10-23
 
+Fixes only; one additive schema step (v27 → v28, `pending_usage_meter`). An
+older binary refuses a v28 database, so roll back from a backup taken before
+the upgrade.
+
+- **Security boundaries:**
+  - Cookie-authenticated admin writes and sign-out from another origin are
+    refused with `403`, even from another port on the same host;
+    `SameSite=Strict` alone let such a page mint an admin token with the
+    operator's session.
+  - Provider and key-test clients no longer follow a redirect to another
+    origin, so a 307 cannot carry `x-api-key` and the prompt to another host.
+- **Compression sessions:**
+  - An explicit `X-Ezllm-Session` is scoped to the authenticated client.
+  - A replayed `tool_ref` reference ships only while its target holds the
+    same output.
+  - A session keeps running the profile snapshot it was bound to, so its
+    version stamp names the rules that actually ran.
+  - The memo enforces its per-session entry cap, holds at most 32 MiB per
+    session and 256 MiB in all, skips forms over 4 MiB, and sweeps idle
+    entries every minute.
+  - A file read that follows a memoized tool call stays byte-identical.
+  - Caveman lite no longer turns "a small number of" into "many", and keeps
+    "at the end of the day" and "I think that".
+- **Dashboard:**
+  - A Policy save no longer moves a key's expiry it did not change.
+  - Provider pricing saves again (the page sent `model_id`, but the API
+    expects `model`).
+  - Chat shows a stream error or a cut-off stream as a failure and keeps the
+    partial answer out of later history.
+  - Analytics ignore a late response for an older selection.
+  - A grouped rule action that fails partway reloads what was stored and
+    names the rules that changed and the ones that failed.
+- **Metering and pricing:**
+  - Only USD rates are accepted; stored non-USD rates count as unpriced.
+  - Usage is captured from the upstream wire before translation back to the
+    client, including multi-line SSE events.
+  - Usage reported by retries and failed hops is ledgered.
+  - A meter debit that failed to apply is replayed exactly once before the
+    next budget admission (schema v28).
+- **Recovery:**
+  - Master keys are preserved on read errors and when two boots race.
+  - The legacy combo rebuild is atomic and recovers an interrupted copy.
+  - `scripts/backup_sqlite.py` takes a verified, WAL-safe backup of the
+    database and key.
+  - Configuration exports are versioned, include policy and pricing, and
+    mark completion explicitly.
+
 - **Request fidelity:** Chat-to-Responses preserves completion limits and
   refuses conflicting limit spellings; Messages-to-Responses preserves
   disabled tool selection. Function definitions retain explicit strict settings.
@@ -32,6 +79,29 @@ file in the same commit, or the test fails.
   its first transport initialization.
 - **Accurate report caching:** completed failed computations retain their error,
   and explicit usage time filters preserve their full precision in cache keys.
+- **Audit fixes:**
+  - The Claude web provider verifies TLS certificates and opens a fresh
+    upstream conversation per request instead of chaining every caller into
+    one.
+  - Rules retry the real store after a failed boot load.
+  - Compression exempts the final message of a one-message request.
+  - The Gemini web bridge resolves its client under the per-account lock.
+  - JSON bodies must end after their value; admin bodies over 1 MiB get `400`.
+  - Shutdown drains in-flight handlers and background probes before the
+    ledger closes.
+  - Bridge children end with their request.
+  - A budget reservation is released by the ledger flush that counts it.
+  - The dashboard CSP admits `data:`, `blob:` and `https:` image and media
+    previews.
+- **Performance:**
+  - Session memo eviction runs in O(1).
+  - The shape hash streams instead of marshaling the request history.
+  - The local-timezone day report is faster.
+  - Usage reports are shared for 10 s (`Age` header), and the dashboard stops
+    polling in hidden tabs.
+  - Request bodies of known length are read into one buffer.
+  - The Claude web provider reuses one HTTP/2 connection.
+  - Dashboard pages load on demand (sign-in screen 290 KB → 124 KB gzipped).
 
 ---
 

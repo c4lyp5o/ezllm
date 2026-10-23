@@ -435,7 +435,7 @@ corrections section.
 - Both bridges are loopback-only accounts of the compatible kinds; children end with their
   request, and the runner timeout covers the wait for a slot.
 
-### v1.1.2 — audit fixes ✅ (2026-10-23)
+### v1.1.1 — audit fixes ✅ (2026-10-23)
 - Security boundaries: `cookieOrigins` (`internal/server/admin.go`) refuses cookie writes
   from another origin; `provider.SameOriginRedirect` (`internal/provider/redirect.go`) keeps
   provider keys and prompts from following a redirect to another host.

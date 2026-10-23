@@ -170,6 +170,21 @@ func looksLikeValidation(err error) bool {
 
 // ── GET /admin/overview ─────────────────────────────────────────────────────
 
+// overviewUsage is the overview's trailing-24h report for one grouping,
+// shared across callers for reportTTL.
+func (s *Server) overviewUsage(groupBy string) ([]store.UsageRow, error) {
+	v, _, err := s.reports.do("overview|"+groupBy, func() (any, error) {
+		ctx, cancel := context.WithTimeout(s.bg.ctx, reportTimeout)
+		defer cancel()
+		now := time.Now()
+		return s.db.UsageReport(ctx, now.Add(-24*time.Hour), now, groupBy)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.([]store.UsageRow), nil
+}
+
 // handleOverview is the dashboard's single first-paint round trip.
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -178,12 +193,15 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreErr(w, err)
 		return
 	}
-	usage, err := s.db.UsageReport(ctx, time.Now().Add(-24*time.Hour), time.Now(), "account")
+	// The two 24h breakdowns are the overview's heavy part (window scans with
+	// per-group medians); every tab polls them, so they are shared through
+	// the report cache for reportTTL.
+	usage, err := s.overviewUsage("account")
 	if err != nil {
 		s.writeStoreErr(w, err)
 		return
 	}
-	surfaceUsage, err := s.db.UsageReport(ctx, time.Now().Add(-24*time.Hour), time.Now(), "surface")
+	surfaceUsage, err := s.overviewUsage("surface")
 	if err != nil {
 		s.writeStoreErr(w, err)
 		return

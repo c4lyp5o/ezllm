@@ -108,6 +108,8 @@ type Server struct {
 	priceRefreshOn atomic.Bool
 	// bg owns detached background work (background.go).
 	bg *background
+	// reports shares dashboard usage reports across callers (reportcache.go).
+	reports *reportCache
 	// cspOnce/csp cache the dashboard Content-Security-Policy (spa.go).
 	cspOnce sync.Once
 	csp     string
@@ -247,6 +249,7 @@ func New(opts Options) *Server {
 		s.sessMemo = compress.NewSessionMemo(nil)
 	}
 	s.bg = newBackground()
+	s.reports = newReportCache(reportTTL, time.Now)
 	if opts.DB != nil {
 		newGeminiWebBridge(opts.DB, "").register(s.mux)
 		newClaudeWebBridge(opts.DB, nil).register(s.mux)
@@ -1036,19 +1039,52 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		loc = l
 	}
 
-	var rows []store.UsageRow
 	var usedTZ string
-	var err error
 	if groupBy == "day" {
-		rows, err = s.db.UsageDayReportTZ(r.Context(), from, to, loc)
 		usedTZ = loc.String()
-	} else {
-		rows, err = s.db.UsageReport(r.Context(), from, to, groupBy)
 	}
+	// Shared across callers for reportTTL (reportcache.go). An open-ended
+	// window ("until now", no `to`) is keyed by its from rounded down to the
+	// TTL: every poll computes a fresh from, which would otherwise defeat the
+	// cache; within the TTL the served window is at most that much older.
+	key := fmt.Sprintf("usage|%s|%s|%s|", groupBy, usedTZ, from.Truncate(reportTTL).Format(time.RFC3339))
+	if r.URL.Query().Get("to") != "" {
+		key = fmt.Sprintf("usage|%s|%s|%s|%s", groupBy, usedTZ, from.Format(time.RFC3339Nano), to.Format(time.RFC3339Nano))
+	}
+	v, age, err := s.reports.do(key, func() (any, error) {
+		ctx, cancel := context.WithTimeout(s.bg.ctx, reportTimeout)
+		defer cancel()
+		var res usageResult
+		var err error
+		if groupBy == "day" {
+			res.rows, err = s.db.UsageDayReportTZ(ctx, from, to, loc)
+		} else {
+			res.rows, err = s.db.UsageReport(ctx, from, to, groupBy)
+		}
+		if err != nil {
+			return nil, usageErr{http.StatusBadRequest, "invalid_request_error", err}
+		}
+		// The totals P50 cannot be a sum of group P50s — medians don't add
+		// up — so it was never set and the card read "0ms · not measured
+		// yet" forever. One separate median over the whole window, same
+		// convention as the per-group fillP50 (upper of the two middle values).
+		if res.tp50, err = s.db.TotalP50TTFTms(ctx, from, to); err != nil {
+			return nil, usageErr{http.StatusInternalServerError, "api_error", err}
+		}
+		return res, nil
+	})
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid_request_error", err.Error())
+		var ue usageErr
+		if errors.As(err, &ue) {
+			writeErr(w, ue.status, ue.typ, ue.err.Error())
+		} else {
+			writeErr(w, http.StatusInternalServerError, "api_error", err.Error())
+		}
 		return
 	}
+	res := v.(usageResult)
+	rows := res.rows // shared with other callers: read only
+	w.Header().Set("Age", strconv.Itoa(int(age.Seconds())))
 	var totals store.UsageRow
 	totals.Key = "total"
 	for _, x := range rows {
@@ -1064,16 +1100,7 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		totals.ContextSaved += x.ContextSaved
 		totals.Errors += x.Errors
 	}
-	// The totals P50 cannot be a sum of group P50s — medians don't add up —
-	// so it was never set and the card read "0ms · not measured yet" forever.
-	// One separate median over the whole window, same convention as the
-	// per-group fillP50 (upper of the two middle values).
-	tp50, err := s.db.TotalP50TTFTms(r.Context(), from, to)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "api_error", err.Error())
-		return
-	}
-	totals.P50TTFTms = tp50
+	totals.P50TTFTms = res.tp50
 	out := map[string]any{
 		"from": from.Format(time.RFC3339), "to": to.Format(time.RFC3339),
 		"group_by": orDefault(groupBy, "account"),
@@ -1088,6 +1115,31 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, out)
 }
+
+// reportTTL bounds how stale a shared dashboard report may be: under the
+// 15s overview poll, so one open tab still sees every refresh as fresh work
+// while extra tabs and simultaneous polls share it.
+const reportTTL = 10 * time.Second
+
+// reportTimeout bounds one shared report computation. It runs on the server's
+// background context, not the first caller's request, so one caller going
+// away cannot fail the others waiting on it.
+const reportTimeout = 30 * time.Second
+
+// usageResult is one /admin/usage computation, shared through reportCache.
+type usageResult struct {
+	rows []store.UsageRow
+	tp50 int64
+}
+
+// usageErr carries the status a failed usage computation answers with.
+type usageErr struct {
+	status int
+	typ    string
+	err    error
+}
+
+func (e usageErr) Error() string { return e.err.Error() }
 
 func orDefault(v, def string) string {
 	if strings.TrimSpace(v) == "" {

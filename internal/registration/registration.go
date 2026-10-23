@@ -448,6 +448,16 @@ func (t *Tester) authGate(
 				Detail: "oracle public (200 for any key) — deferring to inference"})
 			res.authDeferred = true
 			return true // not a failure yet: inference may still gate
+		case errors.Is(calErr, provider.ErrCredentialRefused):
+			// The adapter could not turn a bogus credential into a request at
+			// all: it exchanges the key for a token before it dials, so a bad
+			// key dies while the request is being BUILT, with no status to
+			// read. That refusal is the discrimination itself — the real key
+			// just minted one and the oracle answered 200, so the endpoint is
+			// not public: it authenticates a step earlier than the wire.
+			res.addStep(Step{Step: StepAuth, OK: true,
+				Detail: "oracle 200; a bogus credential is refused before the wire"})
+			return true
 		case isAuthRejectFor(adapter, calStatus):
 			res.addStep(Step{Step: StepAuth, OK: true,
 				Detail: "oracle 200, calibration rejected the fake key"})
@@ -477,6 +487,19 @@ func (t *Tester) authGate(
 			Detail: "no oracle endpoint (" + httpStatusWord(status) + ") — deferring to inference"})
 		res.authDeferred = true
 		return true
+
+	case errors.Is(authErr, provider.ErrCredentialRefused):
+		// The adapter refused the credential while PREPARING the request, so
+		// the oracle never dialled. Name the layer that said no instead of
+		// blaming reachability.
+		f := &Failure{
+			Step:    StepAuth,
+			Message: "the credential was refused before any request could be sent: " + shortErr(authErr),
+			Hint:    "This provider exchanges the key for a session token first. The stored credential is not in the shape it needs, or the exchange rejected it.",
+		}
+		res.Fail = f
+		res.addStep(Step{Step: StepAuth, OK: false, Detail: f.Message})
+		return false
 
 	case retryableStatus(status):
 		// Rate-limited or broken upstream after retries: honest failure with a
@@ -737,13 +760,26 @@ func (t *Tester) calibrateCatalog(
 		func(c context.Context) ([]provider.ModelInfo, error) {
 			return adapter.ListModels(c, acct, fakeKey())
 		})
-	if cerr == nil || !isAuthRejectFor(adapter, statusOf(cerr)) {
+	if cerr == nil {
 		return false, cerr
 	}
-	res.authDeferred = false
-	res.addStep(Step{Step: StepAuth, OK: true,
-		Detail: "catalog rejected a fake key — the real key is proven"})
-	return true, cerr
+	switch {
+	case isAuthRejectFor(adapter, statusOf(cerr)):
+		res.authDeferred = false
+		res.addStep(Step{Step: StepAuth, OK: true,
+			Detail: "catalog rejected a fake key — the real key is proven"})
+		return true, cerr
+	case errors.Is(cerr, provider.ErrCredentialRefused):
+		// Same fact, one step earlier: this adapter exchanges the key for a
+		// token while building the request, so the fake key is refused before
+		// any wire traffic. The real key was just accepted by that same
+		// exchange, which is discrimination enough.
+		res.authDeferred = false
+		res.addStep(Step{Step: StepAuth, OK: true,
+			Detail: "catalog refused a fake credential before the wire — the real key is proven"})
+		return true, cerr
+	}
+	return false, cerr
 }
 
 // noteInferenceUnverified appends the OK follow-up to the failed inference

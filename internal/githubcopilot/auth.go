@@ -275,6 +275,18 @@ func PollAccessToken(ctx context.Context, cfg Config, dc DeviceCode) (Session, e
 	}
 }
 
+// MintError is a token-exchange failure carrying the provider's own status, so
+// a caller can tell a REFUSED credential (401/403) from a broken exchange
+// (5xx/timeout) without reading the message text.
+type MintError struct {
+	Status int
+	Body   string
+}
+
+func (e *MintError) Error() string {
+	return fmt.Sprintf("githubcopilot: copilot token mint: status %d: %s", e.Status, e.Body)
+}
+
 // MintCopilotToken exchanges a GitHub token for a short-lived Copilot
 // session token. The header set is the one the official CLI uses.
 func MintCopilotToken(ctx context.Context, cfg Config, githubToken string) (string, time.Time, error) {
@@ -296,7 +308,7 @@ func MintCopilotToken(ctx context.Context, cfg Config, githubToken string) (stri
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	if resp.StatusCode != http.StatusOK {
-		return "", time.Time{}, fmt.Errorf("githubcopilot: copilot token mint: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return "", time.Time{}, &MintError{Status: resp.StatusCode, Body: strings.TrimSpace(string(body))}
 	}
 	var out struct {
 		Token     string `json:"token"`

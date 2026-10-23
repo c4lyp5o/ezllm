@@ -24,6 +24,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/andybalholm/brotli"
@@ -49,11 +50,65 @@ type Fetcher interface {
 	Fetch(ctx context.Context, method, url string, body []byte, headers http.Header) (*Response, error)
 }
 
-// TLSFetcher is the production fetcher: uTLS Chrome ClientHello + h2.
+// TLSFetcher is the production fetcher: uTLS Chrome ClientHello + h2. One
+// transport serves every Fetch, so successive organization and completion
+// requests share a connection instead of each paying a TCP and TLS
+// handshake. h2 multiplexes concurrent requests as streams: cancelling one
+// resets only its stream. Credentials ride each request's headers, never the
+// transport, so a shared connection carries no session state of its own.
 type TLSFetcher struct {
 	Timeout       time.Duration // total request timeout; 0 = none (ctx governs)
 	chromeHelloID utls.ClientHelloID
 	rootCAs       *x509.CertPool // nil = system roots; tests pin a local CA
+
+	once sync.Once
+	tr   *http2.Transport
+}
+
+// fetcherIdleTimeout closes a connection nothing has used for a while — in
+// particular the one held by a fetcher whose session was replaced.
+const fetcherIdleTimeout = 90 * time.Second
+
+// Close drops the fetcher's idle connections.
+func (f *TLSFetcher) Close() {
+	if f.tr != nil {
+		f.tr.CloseIdleConnections()
+	}
+}
+
+func (f *TLSFetcher) transport() *http2.Transport {
+	f.once.Do(func() {
+		f.tr = &http2.Transport{
+			AllowHTTP:       false,
+			IdleConnTimeout: fetcherIdleTimeout,
+			DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
+				host, _, err := net.SplitHostPort(addr)
+				if err != nil {
+					host = addr
+				}
+				raw, err := (&net.Dialer{}).DialContext(ctx, network, addr)
+				if err != nil {
+					return nil, err
+				}
+				// HelloChrome_Auto carries Chrome's ClientHello AND its ALPN
+				// (h2, http/1.1); http2.Transport keys off the negotiated proto.
+				uconn := utls.UClient(raw, &utls.Config{
+					ServerName: host,
+					MinVersion: tls.VersionTLS13,
+					// Chain and hostname verification stay on: the session cookie
+					// and every prompt ride this connection. The fingerprint only
+					// shapes the ClientHello; it never needs verification off.
+					RootCAs: f.rootCAs,
+				}, f.chromeHelloID)
+				if err := uconn.HandshakeContext(ctx); err != nil {
+					raw.Close()
+					return nil, fmt.Errorf("claudeweb: tls handshake: %w", err)
+				}
+				return uconn, nil
+			},
+		}
+	})
+	return f.tr
 }
 
 // NewTLSFetcher builds the browser-impersonating fetcher.
@@ -75,34 +130,7 @@ func (f *TLSFetcher) Fetch(ctx context.Context, method, url string, body []byte,
 	} else {
 		cancel = func() {}
 	}
-	tr := &http2.Transport{
-		AllowHTTP: false,
-		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-			host, _, err := net.SplitHostPort(addr)
-			if err != nil {
-				host = addr
-			}
-			raw, err := (&net.Dialer{}).DialContext(ctx, network, addr)
-			if err != nil {
-				return nil, err
-			}
-			// HelloChrome_Auto carries Chrome's ClientHello AND its ALPN
-			// (h2, http/1.1); http2.Transport keys off the negotiated proto.
-			uconn := utls.UClient(raw, &utls.Config{
-				ServerName: host,
-				MinVersion: tls.VersionTLS13,
-				// Chain and hostname verification stay on: the session cookie
-				// and every prompt ride this connection. The fingerprint only
-				// shapes the ClientHello; it never needs verification off.
-				RootCAs: f.rootCAs,
-			}, f.chromeHelloID)
-			if err := uconn.HandshakeContext(ctx); err != nil {
-				raw.Close()
-				return nil, fmt.Errorf("claudeweb: tls handshake: %w", err)
-			}
-			return uconn, nil
-		},
-	}
+	tr := f.transport()
 	req, err := http.NewRequestWithContext(ctx, method, url, byteReader(body))
 	if err != nil {
 		cancel()

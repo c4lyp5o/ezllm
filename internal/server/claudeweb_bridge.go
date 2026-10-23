@@ -56,8 +56,9 @@ func newClaudeWebBridge(db *store.DB, fetcher claudeweb.Fetcher) *claudeWebBridg
 // cachedClaudeWebClient is one account's session client and the cookie it
 // was built from.
 type cachedClaudeWebClient struct {
-	client *claudeweb.Client
-	cookie string
+	client  *claudeweb.Client
+	cookie  string
+	fetcher claudeweb.Fetcher // closed when a new cookie replaces this client
 }
 
 // clientFor is the production client builder: normalizes the stamped
@@ -71,15 +72,22 @@ func (b *claudeWebBridge) clientFor(_ context.Context, acct *provider.Account, k
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if c, ok := b.clients[acct.ID]; ok && c.cookie == cookie {
-		return c.client, nil
+	if c, ok := b.clients[acct.ID]; ok {
+		if c.cookie == cookie {
+			return c.client, nil
+		}
+		// The replaced session's fetcher holds a live connection: drop it
+		// now rather than at its idle timeout.
+		if closer, ok := c.fetcher.(interface{ Close() }); ok && c.fetcher != b.fetcher {
+			closer.Close()
+		}
 	}
 	var f claudeweb.Fetcher = claudeweb.NewTLSFetcher()
 	if b.fetcher != nil {
 		f = b.fetcher
 	}
 	c := claudeweb.New(f, cookie, "")
-	b.clients[acct.ID] = cachedClaudeWebClient{client: c, cookie: cookie}
+	b.clients[acct.ID] = cachedClaudeWebClient{client: c, cookie: cookie, fetcher: f}
 	return c, nil
 }
 

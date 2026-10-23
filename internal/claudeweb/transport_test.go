@@ -7,10 +7,25 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestTLSFetcherConcurrentCloseAndInitialization(t *testing.T) {
+	for i := 0; i < 200; i++ {
+		f := NewTLSFetcher()
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		wg.Add(2)
+		go func() { defer wg.Done(); <-start; f.transport() }()
+		go func() { defer wg.Done(); <-start; f.Close() }()
+		close(start)
+		wg.Wait()
+		f.Close()
+	}
+}
 
 // h2Server is a local TLS+h2 server that counts the TLS connections it accepts
 // and a fetcher that trusts it.

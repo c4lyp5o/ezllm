@@ -71,9 +71,9 @@ const fetcherIdleTimeout = 90 * time.Second
 
 // Close drops the fetcher's idle connections.
 func (f *TLSFetcher) Close() {
-	if f.tr != nil {
-		f.tr.CloseIdleConnections()
-	}
+	// Share transport's once barrier: a cookie replacement may close this
+	// fetcher while its first request is still initializing the transport.
+	f.transport().CloseIdleConnections()
 }
 
 func (f *TLSFetcher) transport() *http2.Transport {

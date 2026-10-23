@@ -770,8 +770,12 @@ export type Price = {
 
 export const prices = () => get<Price[]>('/admin/prices');
 
+/** The PUT body: the write side names the model `model` (the read side's
+ *  `model_id` is an unknown field there and fails the whole request). */
+export type PriceWrite = Omit<Price, 'account_id' | 'model_id'> & { model: string };
+
 /** Upsert one rate version. All four prices are required (absent is NOT zero/free). */
-export const setPrice = (accountId: number, p: Omit<Price, 'account_id'>) =>
+export const setPrice = (accountId: number, p: PriceWrite) =>
   apiFetch<Price>(`/admin/accounts/${accountId}/prices`, { method: 'PUT' }, p);
 
 export const deletePrice = (accountId: number, model: string, effectiveFrom: string) =>

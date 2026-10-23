@@ -1226,7 +1226,7 @@ function PricingModal({ account, onClose }: { account: Account; onClose: () => v
     setBusy(true); setErr(null);
     try {
       await setPrice(account.id, {
-        model_id: form.model, effective_from: form.effective_from, currency: 'USD',
+        model: form.model, effective_from: form.effective_from, currency: 'USD',
         price_in: Number(form.price_in), price_out: Number(form.price_out),
         price_cache_read: Number(form.price_cache_read), price_cache_write: Number(form.price_cache_write),
         note: form.note,

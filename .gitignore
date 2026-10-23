@@ -19,3 +19,6 @@ web/.vite/
 
 # design-skill working files (screenshots, sheets)
 /.taste-skill/
+
+# python bytecode from the live proofs
+__pycache__/

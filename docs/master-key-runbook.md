@@ -28,23 +28,27 @@ recovery path; the only fix is re-entering every key in the dashboard.
 
 ## Rotation
 
-There is no in-place re-encrypt command yet. To rotate:
+In-place master-key rotation is not implemented. Do not replace the secret on
+an existing database: startup correctly refuses credentials encrypted with a
+different key, so the dashboard cannot be used to repair that mismatch.
 
-1. Stop the service.
-2. Back up the DB and the current key.
-3. Set the new key (env or file).
-4. Start the service — the migration sees ciphertext it cannot decrypt and
-   **fails fast** instead of returning ciphertext as plaintext.
-5. Re-enter every provider key in the dashboard (they will be encrypted with the
-   new key on write).
+To move the key, stop the service, copy the existing key without changing its
+contents, set `EZLLM_MASTER_KEY_FILE` to the new location, then restart and
+verify access. Retain the original database/key backup until verification.
 
-A future `ezllm rotate-master-key` command can decrypt with the old key and
-re-encrypt with the new one; not shipped.
+If changing the secret is required, retain a verified backup and prepare a
+separate fresh database with the new secret. Re-create non-secret configuration
+from the configuration snapshot and re-enter provider/management credentials.
+Verify the replacement instance before switching traffic; keep the original
+instance and key available for rollback. This is a replacement-instance
+procedure, not in-place re-encryption or a lossless ledger restore.
 
 ## Failure modes
 
 - **Wrong key / lost key**: boot fails with
   `store: cannot decrypt provider key N — wrong master key?`.
+- **Unreadable or empty key file**: startup fails without modifying the file.
+  Correct its permissions/content; do not replace an existing encryption key.
 - **No key in a container**: set `EZLLM_MASTER_KEY_FILE=/data/ezllm-master.key`
   (the compose default) and make sure `/data` is writable by the container user.
 - **Key backed up with the DB**: that is intentional; the pair is the unit of

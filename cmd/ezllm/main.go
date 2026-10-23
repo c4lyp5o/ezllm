@@ -7,8 +7,6 @@ package main
 
 import (
 	"context"
-	crand "crypto/rand"
-	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
@@ -114,23 +112,15 @@ func run() error {
 			}
 			masterPath = filepath.Join(home, ".hermes", "secrets", "ezllm-master.key")
 		}
-		if b, err := os.ReadFile(masterPath); err == nil {
-			masterSecret = strings.TrimSpace(string(b))
-		} else {
-			// auto-generate on first boot
-			buf := make([]byte, 32)
-			if _, err := crand.Read(buf); err != nil {
-				return fmt.Errorf("master key: %w", err)
-			}
-			masterSecret = base64.StdEncoding.EncodeToString(buf)
-			if err := os.MkdirAll(filepath.Dir(masterPath), 0o700); err != nil {
-				return fmt.Errorf("master key: %w", err)
-			}
-			if err := os.WriteFile(masterPath, []byte(masterSecret+"\n"), 0o600); err != nil {
-				return fmt.Errorf("master key: %w", err)
-			}
+		var created bool
+		masterSecret, created, err = loadOrCreateMasterKey(masterPath)
+		if err != nil {
+			return fmt.Errorf("master key: %w", err)
+		}
+		if created {
 			log.Info("generated new master key", "path", masterPath, "action", "back up with the DB")
 		}
+
 	}
 
 	// ── data dir + store ──

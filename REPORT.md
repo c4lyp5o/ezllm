@@ -2,50 +2,173 @@
 
 Updated: 2026-10-23
 
-Branch: `fix/audit-findings`
+Reviewed commit: `19489a2` (`fix/audit-findings`, application v1.1.1, schema v28)
 
-Application version: v1.1.1 (unchanged)
+Four recovery and upgrade findings remain open: two high and two medium.
+Previously resolved findings remain removed. This sweep changed no production
+code, release version, database schema, or deployment.
 
-No open findings remain from the completed sweeps. All five accounting
-integrity findings have verified fixes, and resolved entries have been removed.
-This tracks the audited findings; it does not claim the absence of other defects.
+## Recovery and upgrades sweep
 
-## Verification
+Reviewed startup/key handling, schema migration and restart behavior, WAL
+backup instructions, export completeness and errors, shutdown ownership,
+durable meter recovery, and release/container workflows. Local probes used
+only disposable databases, dummy secrets, and local processes.
 
-Permanent regression coverage checks:
+### RU2 — High: interrupted legacy combo migration can block restart or strand configuration
 
-- Source usage and raw evidence across all nine wire pairs, JSON and SSE,
-  plus usage retained when client conversion fails.
-- Native multiline SSE usage, CRLF, bounded events, and recovery after an
-  oversized event, with byte-exact forwarding.
-- Durable meter reconciliation across restart, model/client counters,
-  fail-closed capped admission, uncapped operator access, and exactly-once
-  reservation release. Migration from schema v27 to v28 preserves ledger rows.
-- Same-hop retries, JSON/SSE failover, final-error fallback, attempt-budget
-  exhaustion, account/key attribution, and total client spend. Errors without
-  reported usage do not receive estimated charges.
-- USD-only price validation and legacy non-USD rates treated as unpriced
-  without silently falling back to older USD rates.
+**Locations:** `internal/store/store.go:564`,
+`internal/store/store.go:608`, `internal/store/store.go:619`, and
+`internal/store/store.go:623`.
 
-Checks passed on the completed fixes:
+The pre-v9 combo rebuild creates/copies a staging table, drops the original,
+and renames the staging table using separate autocommit statements. Neither
+the rebuild nor its schema-version stamp is one transaction. Restart has no
+recovery for an existing `combos_v9` table or for a missing `combos` table with
+its data still staged.
 
-- `make test-short` — all packages; output:
-  `/tmp/ezllm-accounting-fix-functional-final.txt`.
-- `go test -race -short -count=1 -timeout 3m ./internal/proxy ./internal/store ./internal/translate`
-  — no race warnings; output: `/tmp/ezllm-accounting-fix-race-final.txt`.
-- Focused server accounting, pricing, reservation, health, and version race
-  checks — passed; output: `/tmp/ezllm-accounting-fix-server-race.txt`.
-- Final attempt-accounting race regressions — passed; output:
-  `/tmp/ezllm-accounting-attempt-final.txt`.
-- `go vet ./...`, gateway build, formatting, and diff checks — passed.
+**Reproduction:** `TestRecoveryAuditInterruptedComboRebuild` reconstructs
+intermediate rebuild states in a disposable pre-v9 fixture and reopens it:
 
-The application version remains v1.1.1. The database schema advances to v28
-for durable pending-meter debits, with migration coverage. Usage reported by
-discarded attempts now has separate ledger rows, so ledger call counts can
-exceed client request counts. Unknown usage is not estimated. Existing lost
-usage history is not rewritten by these changes.
+- With `combos` and `combos_v9` present, startup fails because `combos_v9`
+  already exists. Restart does not resume the rebuild.
+- With the original table dropped but the staging copy present, startup
+  creates an empty `combos` table and stamps schema v28. The original combo
+  remains in `combos_v9`, absent from the active configuration.
 
-Validation used mock upstreams and disposable databases, without live provider
-calls, credentials, or paid quota. The full performance harness was not run;
-the repository's memory-safe functional gate was used. The preexisting Python
-cache remains untouched.
+The fixture uses a simplified staging copy to simulate these persisted
+states; it does not inject a process kill at a particular instruction. The
+failure and silent-stranding paths depend on table presence, not the staging
+copy's unused extra columns. The ordinary successful migration is covered by
+existing tests and still passes.
+
+**Impact:** a crash or statement failure in the rebuild window can require
+manual database repair, or let an upgrade appear successful with routing
+configuration missing. This affects the supported legacy rebuild path, not
+the ordinary additive v27-to-v28 migration.
+
+**Suggested fix:** make the rebuild atomic on one connection, with foreign-key
+state restored reliably and integrity checked before commit. Handle previously
+interrupted staging states explicitly rather than dropping or ignoring their
+data. Test recovery from both failure points and repeat open/restart checks.
+
+### RU3 — High: documented live SQLite backup omits committed WAL data
+
+**Location:** `docs/master-key-runbook.md:18`.
+
+The backup instructions copy only `data/ezllm.sqlite` with `cp`, then copy the
+master key. They do not require stopping the service or obtaining a consistent
+SQLite snapshot. The database runs in WAL mode; committed changes can reside
+in the WAL while the main file still holds an older checkpoint.
+
+**Reproduction:** `TestRecoveryAuditLiveCopyLosesCommittedRows` checkpoints a
+disposable database, disables automatic checkpoints for a deterministic test,
+and commits a new client token. Copying just the main file as documented
+produces a readable backup containing zero copies of that token, while the
+live database contains one. No concurrent write was needed during the copy.
+
+**Impact:** the documented backup can silently lose committed credentials,
+configuration, ledger usage, or pending meter debits. Possessing the matching
+master key does not compensate for the missing database pages.
+
+**Suggested fix:** document and verify an online SQLite backup/snapshot method,
+or require a clean service stop before copying. Do not suggest separately
+copying live DB/WAL files as an atomic snapshot. Restore a produced backup to
+a separate location and verify integrity plus representative recent rows.
+
+### RU4 — Medium: disaster-recovery export omits non-secret configuration
+
+**Locations:** `internal/store/admin.go:1633`,
+`internal/store/admin.go:1689`, `internal/server/admin.go:2069`, and
+`docs/API.md:517`.
+
+The export is documented as a file that can re-seed a fresh instance minus
+credentials, but it contains only account summaries, combos, token summaries,
+compression profiles, quota summaries, and optional projected ledger rows.
+It does not include per-model rules, effective-dated prices, or individual
+model capability/pin records. Account-level counts and protocol counts do not
+reconstruct those records. These omissions are distinct from the deliberate
+exclusion of secrets.
+
+**Reproduction:** `TestRecoveryAuditConfigExportOmitsState` stores a model rule
+with a daily cap and a model price, then downloads the export. The valid
+response has no representation for those configured rules or price records,
+and models are represented only by aggregate account counts. Source inspection
+confirms the projection has no corresponding collections.
+
+**Impact:** restoring from this file cannot reproduce enforcement policy,
+price history, or operator routing pins. Re-entering provider credentials or
+rediscovering the catalog does not recover those operator decisions.
+
+**Suggested fix:** define a versioned recovery format covering non-secret
+persistent configuration, with a tested re-seed/restore procedure and explicit
+handling of identifiers and omitted secrets. If this endpoint remains a
+partial diagnostic export, label its limitations and require a database-plus-
+key backup for disaster recovery. Add round-trip recovery coverage.
+
+### RU5 — Medium: export read failures become successful-looking empty backups
+
+**Locations:** `internal/server/admin.go:2090`,
+`internal/server/admin.go:2096`, and `internal/server/admin.go:2122`.
+
+The handler commits HTTP 200 before opening the ledger cursor. If the ledger
+query fails, it logs the error and closes a valid JSON document with
+`ledger:[]`. Row scan or iteration failures likewise close the document after
+the rows already emitted. The download has no error, completeness flag,
+expected-row count, or completion manifest to distinguish a failed export
+from a genuinely empty/smaller ledger. The documentation explicitly favors
+valid JSON on failure, but supplies no in-file failure signal.
+
+**Reproduction:** `TestRecoveryAuditExportLooksSuccessfulWithoutLedger` seeds
+a ledger row, then renames one projected column in the disposable database to
+inject a query error while leaving config reads intact. The export returns
+HTTP 200 and valid JSON containing `ledger:[]`, with no error marker. The
+server log is the only indication the ledger was not exported.
+
+**Impact:** backup automation that checks HTTP success and JSON validity can
+accept an incomplete recovery artifact and discover the missing history only
+at restore time. Comparing with a separate live health count is not an atomic
+completion check for this specific export.
+
+**Suggested fix:** validate/open required cursors before committing headers,
+and make streaming failures machine-detectable in the artifact. Use an
+explicit final completeness manifest or fail the document/transport rather
+than representing an error as a complete empty ledger. Exercise initial query,
+mid-stream scan, iteration, and client-disconnect failures.
+
+## Verification and limits
+
+- `make test-short` — passed across all packages; output:
+  `/tmp/ezllm-recovery-functional.txt`.
+- `go test -race -count=1 -run '^TestRecoveryAudit' -v ./internal/store ./internal/server`
+  — all database/export reproduction probes passed without race warnings;
+  output: `/tmp/ezllm-recovery-probes.txt`.
+- `go test -count=1 -run '^TestRecoveryAudit' -v ./cmd/ezllm`
+  — the master-key overwrite probe passed as a non-root user; output:
+  `/tmp/ezllm-recovery-masterkey-probe.txt`.
+- `go test -race -short -count=1 -timeout 3m -run 'Test(Migrate.*|Open.*|PickKeyFailsWithWrongMasterKey|AccountingMeter.*|Export.*|DrainWaits.*)$' ./internal/store ./internal/server ./cmd/ezllm`
+  — existing migration, encryption, export, meter recovery, and shutdown
+  checks passed without race warnings; output:
+  `/tmp/ezllm-recovery-existing-race.txt`.
+
+Probe success means the stated failure was reproduced, not that the behavior
+is correct. Temporary probe sources were removed and preserved in
+`/tmp/ezllm-recovery-audit/` as:
+
+- `store_recovery_audit_temp_test.go.txt`
+- `server_recovery_audit_temp_test.go.txt`
+- `cmd_recovery_audit_temp_test.go.txt`
+
+Restore the matching file as
+`recovery_audit_temp_test.go` in its original package to rerun. The command
+probe uses `/tmp/ezllm-accounting-fix`, the gateway binary built from the same
+production code during the preceding verified fix turn; rebuild that path
+before reproducing elsewhere.
+
+This audit did not restore a real production backup, interrupt a live process,
+run a deployment, publish artifacts, or use provider credentials. Release
+workflows were inspected locally; CI and container builds were not executed.
+Newer-schema refusal, successful legacy migrations, clean shutdown ownership,
+and recent durable meter recovery were reviewed without relisting their
+resolved issues. The performance harness was skipped per the repository's
+memory constraint. Application version remains v1.1.1 and schema remains v28.

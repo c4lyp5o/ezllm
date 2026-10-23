@@ -865,30 +865,42 @@ export async function chatStream(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = '';
+  // A stream is complete only once it says so ([DONE] or a finish_reason);
+  // an error frame or an EOF before that rejects, so a cut-off answer is
+  // never presented as a finished one.
+  let complete = false;
   const emit = (frame: string) => {
     for (const raw of frame.split('\n')) {
       const line = raw.replace(/\r$/, '');
       if (!line.startsWith('data:')) continue;
       const data = line.slice(5).trim();
-      if (!data || data === '[DONE]') continue;
-      try {
-        const o = JSON.parse(data) as { choices?: { delta?: { content?: unknown } }[] };
-        const delta = o?.choices?.[0]?.delta?.content;
-        if (typeof delta === 'string' && delta.length > 0) onDelta(delta);
-      } catch { /* keepalive comment or partial frame — next read finishes it */ }
+      if (!data) continue;
+      if (data === '[DONE]') { complete = true; continue; }
+      let o: { choices?: { delta?: { content?: unknown }; finish_reason?: unknown }[]; error?: unknown };
+      try { o = JSON.parse(data); } catch { continue; /* keepalive comment or partial frame — next read finishes it */ }
+      if (o?.error) throw new ApiError(parseOpenAIError(o, 502));
+      const delta = o?.choices?.[0]?.delta?.content;
+      if (typeof delta === 'string' && delta.length > 0) onDelta(delta);
+      if (o?.choices?.[0]?.finish_reason) complete = true;
     }
   };
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
-    let sep: number;
-    while ((sep = buf.indexOf('\n\n')) !== -1) {
-      emit(buf.slice(0, sep));
-      buf = buf.slice(sep + 2);
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+      let sep: number;
+      while ((sep = buf.indexOf('\n\n')) !== -1) {
+        emit(buf.slice(0, sep));
+        buf = buf.slice(sep + 2);
+      }
     }
+  } catch (e) {
+    reader.cancel().catch(() => {}); // an error frame ends the answer; stop reading
+    throw e;
   }
   if (buf.trim()) emit(buf);
+  if (!complete) throw new ApiError({ status: 0, type: 'stream_incomplete', message: 'the response stream ended before the answer completed' });
 }
 export const createModelRule = (r: Partial<ModelRule> & { account_id: number; model_id: string }) =>
   post<ModelRule>('/admin/model-rules', r);

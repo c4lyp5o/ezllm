@@ -73,6 +73,11 @@ function AttachmentChip({ name, size, preview, onRemove }: Attachment & { previe
   );
 }
 
+// Assistant turns whose stream failed partway. They stay on screen, marked,
+// but are never sent back as history: the model would take the cut-off text
+// as its own finished answer.
+const incomplete = new WeakSet<ChatMessage>();
+
 let nextColumn = 1;
 const newColumn = (model = ''): Column => ({ id: `c${nextColumn++}`, model, messages: [], busy: false, error: '' });
 
@@ -185,7 +190,7 @@ export default function Chat() {
     setError('');
 
     // Snapshot each target's history BEFORE the optimistic user turn lands.
-    const history = new Map(targets.map((c) => [c.id, c.messages]));
+    const history = new Map(targets.map((c) => [c.id, c.messages.filter((m) => !incomplete.has(m))]));
 
     setColumns((prev) => prev.map((c) => (targets.some((t) => t.id === c.id)
       ? { ...c, busy: true, error: '', messages: [...c.messages, { role: 'user', content } as ChatMessage, { role: 'assistant', content: '' }] }
@@ -209,7 +214,12 @@ export default function Chat() {
         });
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'chat request failed';
-        setColumns((prev) => prev.map((c) => (c.id === target.id ? { ...c, error: msg } : c)));
+        setColumns((prev) => prev.map((c) => {
+          if (c.id !== target.id) return c;
+          const last = c.messages[c.messages.length - 1];
+          if (last?.role === 'assistant' && last.content !== '') incomplete.add(last);
+          return { ...c, error: msg };
+        }));
       } finally {
         setColumns((prev) => prev.map((c) => {
           if (c.id !== target.id) return c;
@@ -308,7 +318,9 @@ export default function Chat() {
                     <motion.div key={`${c.id}-${i}`} layout="position" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={spring}
                       className={cx('rounded-lg border px-3 py-2.5 text-[13px] leading-relaxed',
                         m.role === 'user' ? 'border-accent/30 bg-accent-dim' : 'border-line bg-surface')}>
-                      <div className="mb-1 text-[9.5px] font-semibold text-mute">{m.role}</div>
+                      <div className="mb-1 text-[9.5px] font-semibold text-mute">
+                        {m.role}{incomplete.has(m) && <span className="text-bad"> · incomplete, not sent as history</span>}
+                      </div>
                       {m.role === 'assistant'
                         ? <Markdown text={typeof m.content === 'string' ? m.content : body} />
                         : (

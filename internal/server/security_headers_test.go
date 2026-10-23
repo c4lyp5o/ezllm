@@ -51,3 +51,33 @@ func TestDashboardShellSecurityHeaders(t *testing.T) {
 		t.Fatalf("API response %d: nosniff=%q referrer=%q", code, hdr.Get("X-Content-Type-Options"), hdr.Get("Referrer-Policy"))
 	}
 }
+
+// Audit finding 7: the Services panel previews generated media from data:
+// URIs, blob: object URLs (a raw-bytes response) and the provider's own https
+// URLs. img-src admitted only self and data:, and with no media-src audio and
+// video fell back to default-src 'self', so successful generations showed
+// broken previews. Scripts stay locked down (the test above).
+func TestDashboardCSPAdmitsMediaPreviews(t *testing.T) {
+	csp := New(Options{}).dashboardCSP()
+	directive := func(name string) []string {
+		for _, d := range strings.Split(csp, ";") {
+			f := strings.Fields(d)
+			if len(f) > 0 && f[0] == name {
+				return f[1:]
+			}
+		}
+		return nil
+	}
+	for _, name := range []string{"img-src", "media-src"} {
+		got := directive(name)
+		for _, want := range []string{"'self'", "data:", "blob:", "https:"} {
+			found := false
+			for _, g := range got {
+				found = found || g == want
+			}
+			if !found {
+				t.Errorf("%s %v missing %s (CSP %q)", name, got, want, csp)
+			}
+		}
+	}
+}

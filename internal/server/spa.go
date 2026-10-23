@@ -125,7 +125,11 @@ func (s *Server) dashboardCSP() string {
 			"default-src 'self'",
 			"script-src " + script,
 			"style-src 'self' 'unsafe-inline'",
-			"img-src 'self' data:",
+			// Generated media previews (Services panel): data: URIs, blob:
+			// object URLs for raw-bytes responses, and the provider's own
+			// https URLs. Media never executes; scripts stay self + hash.
+			"img-src 'self' data: blob: https:",
+			"media-src 'self' data: blob: https:",
 			"font-src 'self' data:",
 			"connect-src 'self'",
 			"object-src 'none'",

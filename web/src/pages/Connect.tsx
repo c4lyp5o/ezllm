@@ -9,11 +9,11 @@
 //     no way to dismiss until copy, and the "I saved it" confirmation.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
-import { ApiError, getToken, type UsageRow } from '../utils/api';
+import { ApiError, type UsageRow } from '../utils/api';
 import { Chip, ConfirmModal, Modal, Mono, SectionLabel, Spinner, Toggle, btn, cx, inputCls, labelCls } from '../components/ui';
 import { Stagger, StaggerItem } from '../components/motion';
 import {
-  createToken, listTokens, patchToken, probeModels, revokeToken, usageByClient,
+  createToken, listTokens, patchToken, revokeToken, usageByClient,
   type TokenCreated, type TokenInfo, type V1Model,
 } from '../utils/tokens';
 
@@ -173,15 +173,12 @@ export default function Connect() {
       setTokens(tk);
       setUsage(us);
       setUsageWindows({ '5h': us5h, daily: usDaily, weekly: usWeekly, monthly: us });
-      // Probe the live route with the admin token (a valid bearer for /v1 too),
-      // so the "supported" chips below are observations, not labels.
-      try {
-        const admin = getToken();
-        const ms = admin ? await probeModels(admin) : [];
-        setModels(ms);
-      } catch {
-        setModels([]);
-      }
+      // No live /v1 probe from here: /v1 authenticates a gateway KEY, and the
+      // dashboard holds a session cookie, not a key (it never did — the browser
+      // token this used to read was never written). The chips below come from
+      // the stored capability data. A dashboard-scoped probe endpoint is the
+      // way to make them observations again.
+      setModels([]);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'could not load');
     }

@@ -213,7 +213,11 @@ Send ordinary OpenAI `tools`. What happens behind the bridge:
    restarted — still works: the bridge replays the conversation, calls and
    results included, as a transcript on a fresh child. Correct, but slower and
    without the paused script's state. `/status` → `parked_tool_turns` shows how
-   many are waiting.
+   many are waiting. Shutting ezllm down reaps every paused turn's child.
+5. A request's 300-second budget covers the wait for a free slot as well as the
+   run (a full bridge answers 504 instead of queueing forever). Cancelling a
+   request ends its child even when the CLI or the client has stopped reading;
+   a stream write the client leaves undrained for 60 seconds ends the request.
 
 Mappings and limits:
 

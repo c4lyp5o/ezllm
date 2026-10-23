@@ -59,3 +59,14 @@ func (l *requestLifetime) drain(srv *http.Server, drain, abort time.Duration, lo
 		log.Error("http shutdown: handlers still running after cancel; their ledger rows are counted as dropped", "waited", abort)
 	}
 }
+
+// shutdownBridgeHTTP drains a loopback bridge surface, then force-closes what
+// is left: closing a connection cancels its request context, which ends the
+// CLI child bound to that request.
+func shutdownBridgeHTTP(srv *http.Server) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		_ = srv.Close()
+	}
+}

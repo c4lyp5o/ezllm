@@ -73,6 +73,7 @@ type Runner struct {
 
 	pmu    sync.Mutex
 	parked map[string]*parkedTurn
+	shut   bool // Shutdown ran: close tool stops instead of parking them
 }
 
 // Usage is the turn's token envelope (tokenUsage.total of a one-turn,
@@ -139,6 +140,26 @@ type child struct {
 	stderr   *tailBuffer
 	readDone chan struct{}
 	once     sync.Once
+	unbind   func() bool // set by bind; stops the cancellation hook
+}
+
+// bind ties the child to the request using it: cancelling ctx closes the
+// child. Killing the process group is what unblocks a stdin write stuck on a
+// CLI that stopped reading, and frees the writer mutex queued behind it.
+func (c *child) bind(ctx context.Context) {
+	c.unbind = context.AfterFunc(ctx, c.close)
+}
+
+// release detaches the child from its request before it parks (a parked
+// child outlives the request by design). False means cancellation already
+// started closing it: the child must not be parked.
+func (c *child) release() bool {
+	if c.unbind == nil {
+		return true
+	}
+	ok := c.unbind()
+	c.unbind = nil
+	return ok
 }
 
 type spawnOpts struct {
@@ -202,6 +223,7 @@ func (r *Runner) spawn(ctx context.Context, opts spawnOpts, onNotify func(string
 		_ = c.conn.readLoop(stdout)
 		close(c.readDone)
 	}()
+	c.bind(ctx)
 
 	init := map[string]any{"clientInfo": map[string]any{"name": "ezllm-codex-bridge", "version": r.Version}}
 	if opts.tools {
@@ -281,10 +303,12 @@ const toolBatchWindow = 250 * time.Millisecond
 
 // turnState collects one turn's notifications and tool calls. Its methods run
 // on the child's reader goroutine; wake tells the waiting request to look.
+// Deltas are queued, not delivered here: a sink blocked on a client that
+// stopped reading must never stall the reader (and with it child cleanup).
 type turnState struct {
 	mu       sync.Mutex
 	sink     func(Delta) error
-	sinkErr  error
+	out      []Delta // queued for the request goroutine; the reader never calls sink
 	text     strings.Builder
 	lastItem string
 
@@ -335,7 +359,7 @@ func (t *turnState) handle(method string, params json.RawMessage) {
 		}
 		t.lastItem = p.ItemID
 		t.text.WriteString(delta)
-		t.emit(Delta{Content: delta})
+		t.queue(Delta{Content: delta})
 	case "item/reasoning/summaryPartAdded":
 		t.reasoningPart = t.reasoning.Len() > 0
 	case "item/reasoning/summaryTextDelta":
@@ -350,7 +374,7 @@ func (t *turnState) handle(method string, params json.RawMessage) {
 			delta, t.reasoningPart = "\n\n"+delta, false
 		}
 		t.reasoning.WriteString(delta)
-		t.emit(Delta{Reasoning: delta})
+		t.queue(Delta{Reasoning: delta})
 	case "thread/tokenUsage/updated":
 		var p struct {
 			TokenUsage struct {
@@ -387,14 +411,10 @@ func (t *turnState) handle(method string, params json.RawMessage) {
 	}
 }
 
-// emit forwards one delta to the sink; mu is held.
-func (t *turnState) emit(d Delta) {
-	if t.sink != nil && t.sinkErr == nil {
-		if err := t.sink(d); err != nil {
-			t.sinkErr = err
-			t.signal()
-		}
-	}
+// queue hands one delta to the request goroutine; mu is held.
+func (t *turnState) queue(d Delta) {
+	t.out = append(t.out, d)
+	t.signal()
 }
 
 // onRequest serves server→client requests for a tool-bearing turn: a dynamic
@@ -447,11 +467,24 @@ func toolArguments(raw json.RawMessage) string {
 func (r *Runner) segment(ctx context.Context, c *child, st *turnState) (res Result, park bool, err error) {
 	for {
 		st.mu.Lock()
-		finished, ready, sinkErr := st.finished, st.callsReady, st.sinkErr
+		out, sink := st.out, st.sink
+		st.out = nil
+		finished, ready := st.finished, st.callsReady
 		st.mu.Unlock()
+		// Deliver in order, outside the lock, on this (the request's)
+		// goroutine. A blocked delivery holds no lock the reader or
+		// cancellation needs; the child stays bound to ctx meanwhile.
+		for _, d := range out {
+			if sink != nil {
+				if err := sink(d); err != nil {
+					return Result{}, false, err
+				}
+			}
+		}
+		if len(out) > 0 {
+			continue // look again: more may have queued during delivery
+		}
 		switch {
-		case sinkErr != nil:
-			return Result{}, false, sinkErr
 		case finished || ready:
 			st.mu.Lock()
 			defer st.mu.Unlock()
@@ -489,6 +522,11 @@ func (r *Runner) segment(ctx context.Context, c *child, st *turnState) (res Resu
 // An app-server child that dies before its first byte is retried once on the
 // exec channel (§4.1) — text requests only, exec has no client tools.
 func (r *Runner) Run(ctx context.Context, req Request, sink func(Delta) error) (Result, error) {
+	// The timeout bounds the whole request, the wait for a slot included: a
+	// caller with no deadline of its own must not queue forever behind
+	// stuck slots.
+	ctx, cancel := context.WithTimeout(ctx, r.timeout())
+	defer cancel()
 	select {
 	case r.slots() <- struct{}{}:
 		defer func() { <-r.slots() }()
@@ -496,8 +534,6 @@ func (r *Runner) Run(ctx context.Context, req Request, sink func(Delta) error) (
 		return Result{}, &NativeError{Status: 504, Type: "api_error", Code: "timeout",
 			Message: "codex-bridge: timed out waiting for a free slot"}
 	}
-	ctx, cancel := context.WithTimeout(ctx, r.timeout())
-	defer cancel()
 
 	if len(req.ToolResults) > 0 {
 		if pt := r.takeParked(req.ToolResults); pt != nil {
@@ -593,6 +629,9 @@ func (r *Runner) runAppServer(ctx context.Context, req Request, sink func(Delta)
 		return Result{}, err
 	}
 	if park {
+		if !c.release() {
+			return Result{}, r.childErr(ctx, c, "turn", ctx.Err())
+		}
 		r.park(c, st, res.ToolCalls)
 		parked = true
 	}

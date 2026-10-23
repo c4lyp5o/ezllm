@@ -310,11 +310,14 @@ func run() error {
 
 	// Claude subscription surface: loopback-only, off unless EZLLM_CLAUDE_BRIDGE=on.
 	// Enabling it without a usable CLI or login fails the boot loudly.
-	if err := startClaudeBridge(ctx, log); err != nil {
+	stopClaude, err := startClaudeBridge(ctx, log)
+	if err != nil {
 		return err
 	}
 	// ChatGPT subscription surface: loopback-only, off unless EZLLM_CODEX_BRIDGE=on.
-	if err := startCodexBridge(ctx, log); err != nil {
+	stopCodex, err := startCodexBridge(ctx, log)
+	if err != nil {
+		stopClaude()
 		return err
 	}
 
@@ -354,6 +357,10 @@ func run() error {
 	// The store closes only after every handler has returned (or the abort
 	// wait expires), so in-flight requests still get their ledger rows.
 	reqs.drain(httpSrv, 15*time.Second, 5*time.Second, log)
+	// Bridges after the gateway (its handlers proxy into them), joined here
+	// so no CLI child outlives the process's own shutdown.
+	stopCodex()
+	stopClaude()
 	// Stop the rules-engine ticker first so it cannot reload against a closing
 	// store, then db.Close() drains the ledger queue and flushes the pools.
 	ruleEngine.Close()

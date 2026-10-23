@@ -16,7 +16,13 @@ func TestAccountingMeterRecoverySurvivesRestart(t *testing.T) {
 	}
 	defer func() { db.Close() }()
 	aid := seedAccountForRule(t, db, "recovery")
-	if _, err = db.UpsertModelRule(ctx, ModelRule{AccountID: aid, ModelID: "m", CapWindow: "daily", Enabled: true}); err != nil {
+	// Pin the rule's window timezone: an empty WinTZ defaults to
+	// Asia/Kuala_Lumpur, so the meter buckets "daily" in KL while this test
+	// reads the bucket back in UTC. West of UTC that is the same day and the
+	// test passed by luck; east of it (this box, UTC+8) the assertion looked
+	// for yesterday's bucket and read zero. The meter was right; only the
+	// test's assumption was wrong.
+	if _, err = db.UpsertModelRule(ctx, ModelRule{AccountID: aid, ModelID: "m", CapWindow: "daily", WinTZ: "UTC", Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	id, err := db.AddClientToken(ctx, "recovery", "token", "infer")

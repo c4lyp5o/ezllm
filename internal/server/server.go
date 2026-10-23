@@ -318,6 +318,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /admin/health", s.admin(s.handleAdminHealth))
 	s.mux.HandleFunc("GET /admin/usage", s.admin(s.handleUsage))
 	s.mux.HandleFunc("GET /admin/overview", s.admin(s.handleOverview))
+	// The same routable catalog /v1/models serves, behind the dashboard
+	// session: the UI needs to know which ids the gateway can actually route
+	// without holding a bearer key (it never has one — see web/src/utils/api.ts).
+	s.mux.HandleFunc("GET /admin/routable-models", s.admin(s.handleModels))
 	s.mux.HandleFunc("GET /admin/requests", s.admin(s.handleRequests))
 	s.mux.HandleFunc("GET /admin/stream", s.admin(s.handleStream))
 	s.mux.HandleFunc("GET /admin/notifications", s.admin(s.handleNotifications))

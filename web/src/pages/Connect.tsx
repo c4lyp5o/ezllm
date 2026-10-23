@@ -13,7 +13,7 @@ import { ApiError, type UsageRow } from '../utils/api';
 import { Chip, ConfirmModal, Modal, Mono, SectionLabel, Spinner, Toggle, btn, cx, inputCls, labelCls } from '../components/ui';
 import { Stagger, StaggerItem } from '../components/motion';
 import {
-  createToken, listTokens, patchToken, revokeToken, usageByClient,
+  createToken, listTokens, patchToken, revokeToken, routableModels, usageByClient,
   type TokenCreated, type TokenInfo, type V1Model,
 } from '../utils/tokens';
 
@@ -173,12 +173,10 @@ export default function Connect() {
       setTokens(tk);
       setUsage(us);
       setUsageWindows({ '5h': us5h, daily: usDaily, weekly: usWeekly, monthly: us });
-      // No live /v1 probe from here: /v1 authenticates a gateway KEY, and the
-      // dashboard holds a session cookie, not a key (it never did — the browser
-      // token this used to read was never written). The chips below come from
-      // the stored capability data. A dashboard-scoped probe endpoint is the
-      // way to make them observations again.
-      setModels([]);
+      // Live check through the dashboard session: the ids below are what the
+      // gateway can route RIGHT NOW, so the "supported" chips are observations,
+      // not labels.
+      try { setModels(await routableModels()); } catch { setModels([]); }
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'could not load');
     }

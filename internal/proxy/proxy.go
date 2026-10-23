@@ -983,8 +983,8 @@ func prepareHopBody(body []byte, rt Route, doc *jsonbody.BodyDoc) ([]byte, error
 	//
 	// A clamp invalidates the shared doc: it describes bytes we no longer send,
 	// so the native path re-parses the clamped body instead of splicing the
-	// model into the original. That costs one parse on the rare changed path and
-	// none at all on the common one.
+	// model into the original. That costs one parse on the rare changed path,
+	// and only a byte scan on a body that does not carry the field.
 	if clamped, changed := clampReasoning(body, rt.Reasoning); changed {
 		body = clamped
 		doc = nil

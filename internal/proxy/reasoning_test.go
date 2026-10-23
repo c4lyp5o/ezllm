@@ -87,6 +87,21 @@ func TestClampReasoningLeavesAnAbsentFieldAbsent(t *testing.T) {
 	}
 }
 
+// Once a model has a rule, every request to it reaches the clamp. One without
+// the field must cost a byte scan, not a decode of the whole body.
+func TestClampReasoningDoesNotDecodeABodyWithoutTheField(t *testing.T) {
+	body := []byte(`{"model":"m","messages":[{"role":"user","content":"` + strings.Repeat("x", 64<<10) + `"}]}`)
+	rule := sparkRule()
+	allocs := testing.AllocsPerRun(20, func() {
+		if _, changed := clampReasoning(body, rule); changed {
+			t.Fatal("a body without reasoning_effort must not be rewritten")
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("clampReasoning allocated %.0f times on a body without the field; want 0", allocs)
+	}
+}
+
 // captureTransport records what actually went upstream.
 type captureTransport struct {
 	mu     sync.Mutex

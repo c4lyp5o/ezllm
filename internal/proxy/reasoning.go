@@ -25,6 +25,15 @@ func clampReasoning(body []byte, rule provider.ReasoningRule) (out []byte, chang
 	if !rule.Known {
 		return body, false
 	}
+	// Once a model has a rule, EVERY request to it reaches this point, and most
+	// do not carry the field at all. Decoding a whole agent body to find that
+	// out would be a second parse on the common path, so look for the key
+	// first. A false positive only falls through to the decode below; a key
+	// spelled with JSON escapes is missed and goes out untouched, which is the
+	// no-rule behaviour.
+	if !bytes.Contains(body, []byte(`"reasoning_effort"`)) {
+		return body, false
+	}
 	// JSON permits whitespace before the opening object. Inspect a view while
 	// retaining the original slice for every unchanged request.
 	trimmed := bytes.TrimLeft(body, " \t\r\n")

@@ -124,7 +124,7 @@ func (r *Runner) ParkedTurns() int {
 
 // resume answers a parked turn's pending calls with the client's results and
 // streams the rest of the turn — possibly to the next tool stop.
-func (r *Runner) resume(ctx context.Context, pt *parkedTurn, req Request, sink func(string) error) (Result, error) {
+func (r *Runner) resume(ctx context.Context, pt *parkedTurn, req Request, sink func(Delta) error) (Result, error) {
 	st := pt.st
 	st.mu.Lock()
 	st.sink = sink

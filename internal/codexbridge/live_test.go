@@ -25,7 +25,7 @@ func TestLiveTurnStreamsAndCountsUsage(t *testing.T) {
 	r := liveRunner(t)
 	var deltas int
 	res, err := r.Run(context.Background(), Request{Model: "gpt-5.6-luna", Instructions: DefaultInstructions,
-		Input: []UserInput{{Type: "text", Text: "Reply with exactly: pong"}}}, func(string) error { deltas++; return nil })
+		Input: []UserInput{{Type: "text", Text: "Reply with exactly: pong"}}}, func(Delta) error { deltas++; return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,4 +171,45 @@ func TestLiveSentinelWithCodeModeOn(t *testing.T) {
 		t.Fatalf("a file appeared: %v (answer %q)", entries, res.Text)
 	}
 	t.Logf("answer %q calls %+v", res.Text, res.ToolCalls)
+}
+
+func TestLiveStructuredOutputAndSummaries(t *testing.T) {
+	r := liveSandboxedRunner(t)
+	req, err := ParseRequest([]byte(`{"model":"gpt-6.1-sol","reasoning_effort":"xhigh","reasoning":{"summary":"detailed"},
+		"response_format":{"type":"json_schema","json_schema":{"name":"answer","schema":{"type":"object",
+			"properties":{"count":{"type":"integer"},"method":{"type":"string"}},"required":["count","method"],"additionalProperties":false}}},
+		"messages":[{"role":"user","content":"How many positive integers below 1000 are divisible by 3 or 5 but not by 15? Reason carefully."}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reasoningDeltas int
+	res, err := r.Run(context.Background(), req, func(d Delta) error {
+		if d.Reasoning != "" {
+			reasoningDeltas++
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Count  int    `json:"count"`
+		Method string `json:"method"`
+	}
+	if err := json.Unmarshal([]byte(res.Text), &got); err != nil || got.Count != 400 || got.Method == "" {
+		t.Fatalf("schema-shaped answer: %q (%v)", res.Text, err)
+	}
+	t.Logf("answer %s · %d reasoning deltas · summary %q", res.Text, reasoningDeltas, res.Reasoning)
+}
+
+func TestLiveExecReasoningAndSchema(t *testing.T) {
+	r := liveRunner(t)
+	r.Channel = ChannelExec
+	res, err := r.Run(context.Background(), Request{Model: "gpt-6.1-sol", Instructions: DefaultInstructions, Effort: "xhigh", Summary: "detailed",
+		OutputSchema: json.RawMessage(`{"type":"object","properties":{"count":{"type":"integer"}},"required":["count"],"additionalProperties":false}`),
+		Input:        []UserInput{{Type: "text", Text: "How many positive integers below 1000 are divisible by 3 or 5 but not by 15? Reason carefully."}}}, nil)
+	if err != nil || !strings.Contains(res.Text, `"count":400`) {
+		t.Fatalf("text=%q err=%v", res.Text, err)
+	}
+	t.Logf("exec answer %s · summary %q", res.Text, res.Reasoning)
 }

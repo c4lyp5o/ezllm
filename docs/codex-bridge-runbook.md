@@ -3,9 +3,9 @@
 Operating the ChatGPT subscription surface (codex-bridge). Decisions live in
 `codex-subscription-design.md`; this is the how.
 
-**Status:** stages 1–2 (text, streaming, images, reasoning effort, plan windows,
-client tools with continuation) are built on `feat/codex-bridge` and not in a
-release yet. Read the [platform requirements](#platform-requirements--read-this-first)
+**Status:** stages 1–3 (text, streaming, images, reasoning effort and summaries,
+structured output, plan windows, client tools with continuation) are built on
+`feat/codex-bridge` and not in a release yet. Read the [platform requirements](#platform-requirements--read-this-first)
 before you rely on tools.
 
 ## What it is
@@ -224,6 +224,22 @@ Usage attribution: Codex reports a sampling's tokens when the sampling ends, and
 the sampling that makes a tool call ends only after the result comes back. So the
 response carrying `tool_calls` can report 0 tokens and the follow-up carries the
 whole turn. The sum is exact; the split between the two requests is not.
+
+## Structured output and reasoning
+
+| request | what the bridge does |
+| --- | --- |
+| `response_format: {type: "json_schema", json_schema: {schema}}` | the schema constrains the final message (`turn/start outputSchema`; `--output-schema` on the exec fallback) |
+| `response_format: {type: "json_object"}` | an instruction to answer with one JSON object — no schema exists to enforce |
+| `reasoning_effort` (or `reasoning.effort`) | the turn's effort; `minimal`/`none` → `low`; anything the model does not offer → 400 naming what it does |
+| `reasoning.summary`: `auto` (default) · `concise` · `detailed` · `none` | Codex's reasoning summaries stream as `reasoning_content` (chat delta and message), before the answer |
+
+Summaries appear only when the model reasons enough to summarize: a trivial
+prompt at low effort produces none. `max_tokens`, `temperature`, `top_p` and
+`stop` have no Codex equivalent and are ignored.
+
+There is no `/v1/responses` surface: Responses clients reach this account
+through ezllm's router translation, like any other Chat Completions account.
 
 ## Plan windows on the provider card
 

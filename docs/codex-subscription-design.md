@@ -1,6 +1,6 @@
 # ChatGPT subscription via the official Codex CLI — design
 
-**Status:** M0 measured 2026-10-23 · decisions recorded (§4) · stages 1–2 built on `feat/codex-bridge` (§2.13)
+**Status:** M0 measured 2026-10-23 · decisions recorded (§4) · stages 1–3 built on `feat/codex-bridge` (§2.13, §2.14)
 **Operator gate:** Calypso (pushes/deploys)
 **Spec:** [SPEC-codex-bridge.md](../SPEC-codex-bridge.md) · **Pattern:** [claude-subscription-design.md](claude-subscription-design.md)
 
@@ -250,6 +250,18 @@ Bridge argv, real login, every child inside Landlock (ABI 4, kernel 6.8):
   humid in Kuala Lumpur…") and a `/data` write sentinel all passed (9/9); `/data` was
   unchanged. The startup probes the CLI shells out to (`lsb_release`, `getconf`) are
   absent from distroless and cost nothing.
+
+### 2.14 Stage 3 live results (2026-10-23)
+
+- `turn/start{outputSchema}` constrains the final message: a `{count, method}` schema
+  came back as exactly that object (`"count":400`). The exec fallback takes the same
+  schema as `--output-schema FILE`.
+- Reasoning summaries: `turn/start{summary}` (`auto|concise|detailed|none`) streams
+  `item/reasoning/summaryPartAdded` + `item/reasoning/summaryTextDelta` (96 deltas at
+  `xhigh`); exec reports the summary as `item.completed{type:"reasoning", text}`. A
+  12-reasoning-token turn produced no summary at all — summaries are the model's call.
+- `/v1/responses` was not built: no client needs it, and the router's translation
+  already serves Responses clients from a Chat Completions account.
 
 ## 3. Proposed surface — full function, built in stages
 

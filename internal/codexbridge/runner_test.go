@@ -21,8 +21,8 @@ func simpleRequest() Request {
 func TestRunStreamsDeltasAndReturnsTheTurnUsage(t *testing.T) {
 	r, home := fakeRunner(t, "ok")
 	var deltas []string
-	res, err := r.Run(context.Background(), simpleRequest(), func(d string) error {
-		deltas = append(deltas, d)
+	res, err := r.Run(context.Background(), simpleRequest(), func(d Delta) error {
+		deltas = append(deltas, d.Content)
 		return nil
 	})
 	if err != nil {
@@ -132,7 +132,7 @@ func TestCancelMidStreamReapsTheChild(t *testing.T) {
 	r, home := fakeRunner(t, "hang")
 	ctx, cancel := context.WithCancel(context.Background())
 	got := 0
-	_, err := r.Run(ctx, simpleRequest(), func(string) error {
+	_, err := r.Run(ctx, simpleRequest(), func(Delta) error {
 		got++
 		if got == 3 {
 			cancel()
@@ -161,7 +161,7 @@ func TestCancelMidStreamReapsTheChild(t *testing.T) {
 func TestSinkErrorEndsTheRun(t *testing.T) {
 	r, _ := fakeRunner(t, "hang")
 	gone := errors.New("client went away")
-	_, err := r.Run(context.Background(), simpleRequest(), func(string) error { return gone })
+	_, err := r.Run(context.Background(), simpleRequest(), func(Delta) error { return gone })
 	if !errors.Is(err, gone) {
 		t.Fatalf("err = %v, want the sink error", err)
 	}

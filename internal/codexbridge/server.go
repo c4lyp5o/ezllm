@@ -24,7 +24,7 @@ const catalogTTL = 10 * time.Minute
 // Executor is what the HTTP layer needs from the CLI. *Runner implements it;
 // tests inject a fake so the surface runs without spawning anything.
 type Executor interface {
-	Run(ctx context.Context, req Request, sink func(delta string) error) (Result, error)
+	Run(ctx context.Context, req Request, sink func(Delta) error) (Result, error)
 	Models(ctx context.Context) ([]Model, error)
 	RateLimits(ctx context.Context) (RateLimits, error)
 }
@@ -213,6 +213,9 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		msg := map[string]any{"role": "assistant", "content": res.Text}
+		if res.Reasoning != "" {
+			msg["reasoning_content"] = res.Reasoning
+		}
 		finish := "stop"
 		if len(res.ToolCalls) > 0 {
 			msg["tool_calls"] = openAIToolCalls(res.ToolCalls, false)
@@ -329,9 +332,12 @@ func (s *sseWriter) chunk(delta map[string]any, finish string) error {
 		"created": s.created, "model": s.model, "choices": []any{choice}})
 }
 
-func (s *sseWriter) delta(text string) error {
+func (s *sseWriter) delta(d Delta) error {
 	s.begin()
-	return s.chunk(map[string]any{"content": text}, "")
+	if d.Reasoning != "" {
+		return s.chunk(map[string]any{"reasoning_content": d.Reasoning}, "")
+	}
+	return s.chunk(map[string]any{"content": d.Content}, "")
 }
 
 func (s *sseWriter) done() {

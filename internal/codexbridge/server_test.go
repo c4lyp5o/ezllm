@@ -11,26 +11,35 @@ import (
 )
 
 type fakeExec struct {
-	calls  []ToolCall
-	deltas []string
-	err    error
-	errAt  int // fail after this many deltas (0 = before any)
-	usage  Usage
-	runs   int
-	last   Request
+	reasoning []string
+	calls     []ToolCall
+	deltas    []string
+	err       error
+	errAt     int // fail after this many deltas (0 = before any)
+	usage     Usage
+	runs      int
+	last      Request
 }
 
-func (f *fakeExec) Run(_ context.Context, req Request, sink func(string) error) (Result, error) {
+func (f *fakeExec) Run(_ context.Context, req Request, sink func(Delta) error) (Result, error) {
 	f.runs++
 	f.last = req
-	var text strings.Builder
+	var text, reasoning strings.Builder
+	for _, r := range f.reasoning {
+		reasoning.WriteString(r)
+		if sink != nil {
+			if err := sink(Delta{Reasoning: r}); err != nil {
+				return Result{}, err
+			}
+		}
+	}
 	for i, d := range f.deltas {
 		if f.err != nil && i == f.errAt {
 			return Result{}, f.err
 		}
 		text.WriteString(d)
 		if sink != nil {
-			if err := sink(d); err != nil {
+			if err := sink(Delta{Content: d}); err != nil {
 				return Result{}, err
 			}
 		}
@@ -38,7 +47,7 @@ func (f *fakeExec) Run(_ context.Context, req Request, sink func(string) error) 
 	if f.err != nil {
 		return Result{}, f.err
 	}
-	return Result{Text: text.String(), Usage: f.usage, ToolCalls: f.calls}, nil
+	return Result{Text: text.String(), Reasoning: reasoning.String(), Usage: f.usage, ToolCalls: f.calls}, nil
 }
 
 func (f *fakeExec) Models(context.Context) ([]Model, error) {

@@ -33,7 +33,7 @@ func errUnavailableOnExec(what string) error {
 		Message: "codex-bridge: " + what + " needs the app-server channel; this bridge runs on the exec fallback"}
 }
 
-func (r *Runner) runExec(ctx context.Context, req Request, sink func(string) error) (Result, error) {
+func (r *Runner) runExec(ctx context.Context, req Request, sink func(Delta) error) (Result, error) {
 	tmp, err := os.MkdirTemp("", "codex-bridge-")
 	if err != nil {
 		return Result{}, fmt.Errorf("codex-bridge: cannot create work dir: %w", err)
@@ -52,6 +52,16 @@ func (r *Runner) runExec(ctx context.Context, req Request, sink func(string) err
 	args = append(args, "-m", req.Model, "-c", "instructions="+strconv.Quote(req.Instructions))
 	if req.Effort != "" {
 		args = append(args, "-c", "model_reasoning_effort="+strconv.Quote(req.Effort))
+	}
+	if req.Summary != "" {
+		args = append(args, "-c", "model_reasoning_summary="+strconv.Quote(req.Summary))
+	}
+	if present(req.OutputSchema) {
+		schema := filepath.Join(tmp, "output-schema.json")
+		if err := os.WriteFile(schema, req.OutputSchema, 0o600); err != nil {
+			return Result{}, err
+		}
+		args = append(args, "--output-schema", schema)
 	}
 	var prompt []string
 	for i, in := range req.Input {
@@ -127,6 +137,18 @@ func (r *Runner) runExec(ctx context.Context, req Request, sink func(string) err
 		}
 		switch ev.Type {
 		case "item.completed":
+			if ev.Item.Type == "reasoning" && ev.Item.Text != "" {
+				if res.Reasoning != "" {
+					ev.Item.Text = "\n\n" + ev.Item.Text
+				}
+				res.Reasoning += ev.Item.Text
+				if sink != nil {
+					if err := sink(Delta{Reasoning: ev.Item.Text}); err != nil {
+						return Result{}, err
+					}
+				}
+				continue
+			}
 			if ev.Item.Type != "agent_message" || ev.Item.Text == "" {
 				continue // "error" items are CLI warnings, not the answer
 			}
@@ -137,7 +159,7 @@ func (r *Runner) runExec(ctx context.Context, req Request, sink func(string) err
 			written = true
 			res.Text += text
 			if sink != nil {
-				if err := sink(text); err != nil {
+				if err := sink(Delta{Content: text}); err != nil {
 					return Result{}, err
 				}
 			}

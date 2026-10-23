@@ -31,7 +31,12 @@ func TestExecChannelRunsWithTheSameLockdown(t *testing.T) {
 	req := simpleRequest()
 	req.Effort = "high"
 	var chunks []string
-	res, err := r.Run(context.Background(), req, func(d string) error { chunks = append(chunks, d); return nil })
+	res, err := r.Run(context.Background(), req, func(d Delta) error {
+		if d.Content != "" {
+			chunks = append(chunks, d.Content)
+		}
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +78,7 @@ func TestAppServerFailureBeforeFirstByteFallsBackToExec(t *testing.T) {
 // After the first byte the client holds part of an answer: no retry.
 func TestAppServerFailureAfterFirstByteDoesNotFallBack(t *testing.T) {
 	r, home := fakeRunner(t, "exit_midturn")
-	if _, err := r.Run(context.Background(), simpleRequest(), func(string) error { return nil }); err == nil {
+	if _, err := r.Run(context.Background(), simpleRequest(), func(Delta) error { return nil }); err == nil {
 		t.Fatal("want the mid-turn failure")
 	}
 	if _, err := os.Stat(filepath.Join(home, "exec.json")); err == nil {

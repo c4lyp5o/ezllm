@@ -24,6 +24,13 @@ type Request struct {
 	// ToolResults are the trailing tool messages, by tool_call_id: present
 	// when this request continues a turn that stopped on tool calls.
 	ToolResults map[string]string
+
+	// OutputSchema constrains the final message (response_format json_schema →
+	// turn/start outputSchema, stage 3).
+	OutputSchema json.RawMessage
+	// Summary is the reasoning-summary mode: auto (default), concise,
+	// detailed or none. Summaries reach the client as reasoning_content.
+	Summary string
 }
 
 // ToolSpec is one client function tool.
@@ -71,6 +78,16 @@ type chatRequest struct {
 	ToolChoice      json.RawMessage `json:"tool_choice"`
 	Functions       json.RawMessage `json:"functions"`
 	ParallelTools   *bool           `json:"parallel_tool_calls"`
+	ResponseFormat  *struct {
+		Type       string `json:"type"`
+		JSONSchema *struct {
+			Schema json.RawMessage `json:"schema"`
+		} `json:"json_schema"`
+	} `json:"response_format"`
+	Reasoning *struct {
+		Summary string `json:"summary"`
+		Effort  string `json:"effort"`
+	} `json:"reasoning"`
 }
 
 type chatTool struct {
@@ -135,7 +152,21 @@ func ParseRequest(body []byte) (Request, error) {
 		return Request{}, Unsupported{Code: "invalid_request", Msg: "messages must not be empty"}
 	}
 
-	req := Request{Model: cr.Model, Stream: cr.Stream, Effort: normalizeEffort(cr.ReasoningEffort)}
+	req := Request{Model: cr.Model, Stream: cr.Stream, Effort: normalizeEffort(cr.ReasoningEffort), Summary: "auto"}
+	if cr.Reasoning != nil {
+		// The Responses-style reasoning object some chat clients send.
+		if cr.Reasoning.Summary != "" {
+			req.Summary = cr.Reasoning.Summary
+		}
+		if req.Effort == "" {
+			req.Effort = normalizeEffort(cr.Reasoning.Effort)
+		}
+	}
+	switch req.Summary {
+	case "auto", "concise", "detailed", "none":
+	default:
+		return Request{}, Unsupported{Code: "invalid_request", Msg: fmt.Sprintf("reasoning.summary %q must be auto, concise, detailed or none", req.Summary)}
+	}
 	if cr.StreamOptions != nil {
 		req.IncludeUsage = cr.StreamOptions.IncludeUsage
 	}
@@ -167,6 +198,22 @@ func ParseRequest(body []byte) (Request, error) {
 	}
 	if err := parseTools(&req, cr); err != nil {
 		return Request{}, err
+	}
+	if rf := cr.ResponseFormat; rf != nil {
+		switch rf.Type {
+		case "", "text":
+		case "json_schema":
+			if rf.JSONSchema == nil || !present(rf.JSONSchema.Schema) {
+				return Request{}, Unsupported{Code: "invalid_request", Msg: "response_format json_schema needs json_schema.schema"}
+			}
+			req.OutputSchema = rf.JSONSchema.Schema
+		case "json_object":
+			// No schema to constrain with: an instruction, as with OpenAI's own
+			// JSON mode, which also requires the prompt to ask for JSON.
+			req.Instructions += "\n\nRespond with a single valid JSON object and nothing else."
+		default:
+			return Request{}, Unsupported{Code: "invalid_request", Msg: fmt.Sprintf("response_format type %q is not supported", rf.Type)}
+		}
 	}
 	if turns[len(turns)-1].Role == "tool" {
 		req.ToolResults = map[string]string{}

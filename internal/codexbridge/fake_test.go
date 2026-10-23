@@ -148,6 +148,12 @@ func fakeAppServer(home string) {
 			_ = os.WriteFile(filepath.Join(home, "turn_start.json"), m.Params, 0o600)
 			reply(map[string]any{"turn": map[string]any{"id": "turn-1", "status": "inProgress", "items": []any{}}})
 			switch mode {
+			case "reasoning":
+				notify("item/reasoning/summaryPartAdded", map[string]any{"itemId": "r1", "summaryIndex": 0, "threadId": "thr-1", "turnId": "turn-1"})
+				notify("item/reasoning/summaryTextDelta", map[string]any{"itemId": "r1", "summaryIndex": 0, "delta": "**Counting**", "threadId": "thr-1", "turnId": "turn-1"})
+				notify("item/reasoning/summaryPartAdded", map[string]any{"itemId": "r1", "summaryIndex": 1, "threadId": "thr-1", "turnId": "turn-1"})
+				notify("item/reasoning/summaryTextDelta", map[string]any{"itemId": "r1", "summaryIndex": 1, "delta": "333+199-2*66", "threadId": "thr-1", "turnId": "turn-1"})
+				finishWith("400")
 			case "tools", "tools_seq":
 				notify("item/agentMessage/delta", map[string]any{"itemId": "m1", "delta": "Checking.", "threadId": "thr-1", "turnId": "turn-1"})
 				notify("thread/tokenUsage/updated", map[string]any{"threadId": "thr-1", "turnId": "turn-1", "tokenUsage": map[string]any{
@@ -254,6 +260,7 @@ func fakeExecCLI(home string) {
 		fmt.Println(`{"type":"turn.failed","error":{"message":"{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-nope' model is not supported when using Codex with a ChatGPT account.\"}}"}}`)
 		return
 	}
+	fmt.Println(`{"type":"item.completed","item":{"id":"item_r","type":"reasoning","text":"**Greeting** in French"}}`)
 	fmt.Println(`{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"Bonjour !"}}`)
 	fmt.Println(`{"type":"turn.completed","usage":{"input_tokens":2999,"cached_input_tokens":2176,"cache_write_input_tokens":0,"output_tokens":6,"reasoning_output_tokens":0}}`)
 }

@@ -93,8 +93,16 @@ func (u Usage) minus(o Usage) Usage {
 // Result is what one turn — or one segment of it, up to tool calls — produced.
 type Result struct {
 	Text      string
+	Reasoning string
 	Usage     Usage
 	ToolCalls []ToolCall
+}
+
+// Delta is one streamed piece: answer text, or reasoning-summary text (which
+// reaches chat clients as reasoning_content).
+type Delta struct {
+	Content   string
+	Reasoning string
 }
 
 func (r *Runner) logf(format string, args ...any) {
@@ -275,14 +283,17 @@ const toolBatchWindow = 250 * time.Millisecond
 // on the child's reader goroutine; wake tells the waiting request to look.
 type turnState struct {
 	mu       sync.Mutex
-	sink     func(delta string) error
+	sink     func(Delta) error
 	sinkErr  error
 	text     strings.Builder
 	lastItem string
-	usage    Usage
-	reported Usage
-	fail     *NativeError
-	finished bool
+
+	reasoning     strings.Builder
+	reasoningPart bool // a new summary part began: separate it
+	usage         Usage
+	reported      Usage
+	fail          *NativeError
+	finished      bool
 
 	calls      []ToolCall
 	replyTo    map[string]json.RawMessage // callId → JSON-RPC id
@@ -292,7 +303,7 @@ type turnState struct {
 	wake chan struct{}
 }
 
-func newTurnState(sink func(string) error) *turnState {
+func newTurnState(sink func(Delta) error) *turnState {
 	return &turnState{sink: sink, replyTo: map[string]json.RawMessage{}, wake: make(chan struct{}, 1)}
 }
 
@@ -324,12 +335,22 @@ func (t *turnState) handle(method string, params json.RawMessage) {
 		}
 		t.lastItem = p.ItemID
 		t.text.WriteString(delta)
-		if t.sink != nil && t.sinkErr == nil {
-			if err := t.sink(delta); err != nil {
-				t.sinkErr = err
-				t.signal()
-			}
+		t.emit(Delta{Content: delta})
+	case "item/reasoning/summaryPartAdded":
+		t.reasoningPart = t.reasoning.Len() > 0
+	case "item/reasoning/summaryTextDelta":
+		var p struct {
+			Delta string `json:"delta"`
 		}
+		if json.Unmarshal(params, &p) != nil || p.Delta == "" {
+			return
+		}
+		delta := p.Delta
+		if t.reasoningPart {
+			delta, t.reasoningPart = "\n\n"+delta, false
+		}
+		t.reasoning.WriteString(delta)
+		t.emit(Delta{Reasoning: delta})
 	case "thread/tokenUsage/updated":
 		var p struct {
 			TokenUsage struct {
@@ -363,6 +384,16 @@ func (t *turnState) handle(method string, params json.RawMessage) {
 		}
 		t.finished = true
 		t.signal()
+	}
+}
+
+// emit forwards one delta to the sink; mu is held.
+func (t *turnState) emit(d Delta) {
+	if t.sink != nil && t.sinkErr == nil {
+		if err := t.sink(d); err != nil {
+			t.sinkErr = err
+			t.signal()
+		}
 	}
 }
 
@@ -427,9 +458,10 @@ func (r *Runner) segment(ctx context.Context, c *child, st *turnState) (res Resu
 			if st.fail != nil {
 				return Result{}, false, st.fail
 			}
-			res = Result{Text: st.text.String(), Usage: st.usage.minus(st.reported)}
+			res = Result{Text: st.text.String(), Reasoning: st.reasoning.String(), Usage: st.usage.minus(st.reported)}
 			st.reported = st.usage
 			st.text.Reset()
+			st.reasoning.Reset()
 			st.lastItem = ""
 			if ready && !finished {
 				res.ToolCalls = st.calls
@@ -456,7 +488,7 @@ func (r *Runner) segment(ctx context.Context, c *child, st *turnState) (res Resu
 // turn's tool calls resumes that turn; otherwise a new ephemeral thread runs.
 // An app-server child that dies before its first byte is retried once on the
 // exec channel (§4.1) — text requests only, exec has no client tools.
-func (r *Runner) Run(ctx context.Context, req Request, sink func(delta string) error) (Result, error) {
+func (r *Runner) Run(ctx context.Context, req Request, sink func(Delta) error) (Result, error) {
 	select {
 	case r.slots() <- struct{}{}:
 		defer func() { <-r.slots() }()
@@ -481,7 +513,7 @@ func (r *Runner) Run(ctx context.Context, req Request, sink func(delta string) e
 		return r.runExec(ctx, req, sink)
 	}
 	emitted := false
-	res, err := r.runAppServer(ctx, req, func(d string) error {
+	res, err := r.runAppServer(ctx, req, func(d Delta) error {
 		emitted = true
 		if sink != nil {
 			return sink(d)
@@ -496,7 +528,7 @@ func (r *Runner) Run(ctx context.Context, req Request, sink func(delta string) e
 	return res, err
 }
 
-func (r *Runner) runAppServer(ctx context.Context, req Request, sink func(delta string) error) (Result, error) {
+func (r *Runner) runAppServer(ctx context.Context, req Request, sink func(Delta) error) (Result, error) {
 	st := newTurnState(sink)
 	tools := len(req.Tools) > 0
 	handler := RequestHandler(declineRequests)
@@ -545,6 +577,12 @@ func (r *Runner) runAppServer(ctx context.Context, req Request, sink func(delta 
 	turn := map[string]any{"threadId": started.Thread.ID, "input": req.Input}
 	if req.Effort != "" {
 		turn["effort"] = req.Effort
+	}
+	if req.Summary != "" {
+		turn["summary"] = req.Summary
+	}
+	if present(req.OutputSchema) {
+		turn["outputSchema"] = req.OutputSchema
 	}
 	if _, err := c.conn.call(ctx, "turn/start", turn); err != nil {
 		return Result{}, r.startErr(ctx, c, "turn/start", err)

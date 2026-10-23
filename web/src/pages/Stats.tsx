@@ -15,7 +15,7 @@
 //
 // Every combination is still ONE /admin/usage query. Nothing here aggregates
 // raw ledger rows in the browser; the SQL does it and this renders it.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area,
 } from 'recharts';
@@ -96,15 +96,20 @@ export default function Stats() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
+  // Only the newest load may write state: an older selection's response that
+  // lands late is dropped instead of overwriting the current one.
+  const loadGen = useRef(0);
   const load = useCallback(async () => {
+    const gen = ++loadGen.current;
     setLoading(true);
     setErr(null);
     try {
-      setData(await usage(split, range));
+      const r = await usage(split, range);
+      if (gen === loadGen.current) setData(r);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      if (gen === loadGen.current) setErr(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      if (gen === loadGen.current) setLoading(false);
     }
   }, [split, range]);
 

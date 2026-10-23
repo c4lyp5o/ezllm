@@ -4,7 +4,7 @@
 // to surface the fattest calls. The question this page exists to answer: is
 // the client sending too much history, or is the model burning it on output
 // and reasoning? (row shape = the dashboard's recentCalls projection.)
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   normalizeFeedRow, requests, RANGE_LABEL,
   type FeedRow, type RangeKey, type RequestSort, type RequestsResp,
@@ -73,17 +73,22 @@ export default function Requests() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
+  // Only the newest load may write state: an older selection's response that
+  // lands late is dropped instead of overwriting the current one.
+  const loadGen = useRef(0);
   const load = useCallback(async () => {
+    const gen = ++loadGen.current;
     setLoading(true);
     setErr(null);
     try {
       const r = await requests({ ...applied, range, sort });
+      if (gen !== loadGen.current) return;
       setData(r);
       setRows(r.rows.map(normalizeFeedRow));
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      if (gen === loadGen.current) setErr(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      if (gen === loadGen.current) setLoading(false);
     }
   }, [applied, range, sort]);
 

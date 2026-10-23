@@ -74,7 +74,7 @@ func decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {
 		return false
 	}
 	if len(body) > adminBodyMax {
-		writeErr(w, http.StatusRequestEntityTooLarge, "invalid_request_error",
+		writeErr(w, http.StatusBadRequest, "invalid_request_error",
 			fmt.Sprintf("request body exceeds %d bytes", adminBodyMax))
 		return false
 	}

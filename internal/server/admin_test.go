@@ -700,7 +700,7 @@ func TestDecodeBodyRejectsTrailingAndOversize(t *testing.T) {
 		{"trailing whitespace", "{\"name\":\"x\"}  \n", true, 0},
 		{"trailing close bracket", `{"name":"x"}]`, false, http.StatusBadRequest},
 		{"trailing second value", `{"name":"x"}{}`, false, http.StatusBadRequest},
-		{"second value past the cap", `{"name":"x"}` + pad + `{"name":"y"}`, false, http.StatusRequestEntityTooLarge},
+		{"second value past the cap", `{"name":"x"}` + pad + `{"name":"y"}`, false, http.StatusBadRequest},
 	} {
 		var dst struct {
 			Name string `json:"name"`

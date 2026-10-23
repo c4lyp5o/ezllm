@@ -3,7 +3,11 @@
 **Question asked (Calypso, 2026-10-15):** can ezllm add GitHub Copilot as an OAuth provider
 (device flow) calling an OpenAI-compatible completions endpoint?
 
-**Short answer: NO.** Not for third-party OAuth apps against the raw completions
+> **Superseded the same day:** see "UPDATE 2026-10-16" below — the CLI's public client id with
+> the device flow works, and the provider shipped as M13 (`docs/github-copilot-design.md`). The
+> original answer is kept as the record of what was checked.
+
+**Short answer (original): NO.** Not for third-party OAuth apps against the raw completions
 endpoint. The only officially supported programmatic path today is the **Copilot SDK**
 (agent runtime, GA 2026-06-02), which is *not* an OpenAI-compatible completions API.
 Evidence with URLs and dates below. All citations from the public web, researched

@@ -140,7 +140,7 @@ Findings that shape M2:
     bridge keeps only the newest two client markers (`clientCacheMarkers`,
     `internal/claudebridge/frames.go`).
 
-## 3. Architecture: sidecar bridge, ezllm core untouched
+## 3. Architecture: in-process loopback bridge, ezllm core untouched
 
 ```
 client (Claude Code / Hermes / VS Code)
@@ -220,7 +220,7 @@ through unchanged (`sonnet`, `haiku`, `opus`, and the `[1m]` forms the CLI adver
   The bridge account therefore declares `usage_convention=anthropic` (the vocabulary is
   `auto|anthropic|total`) so `tokens_in` means cache-COLD spend and `tokens_cached_read` is real.
   The convention is not a routing gate (the router's `messagesConventionReason` gate was removed
-  in `61a403c`; `auto` reads Messages usage as exclusive, `internal/router/router.go:462`), so
+  in `61a403c`; `auto` reads Messages usage as exclusive, see `internal/router/router.go`), so
   this is declared for honest accounting, not to pass a check.
 - **Errors:** plan or session limit → 429; missing login → 401; binary missing → 503; malformed
   native output → 502. Each carries the CLI's own words, unrewritten.
@@ -242,8 +242,9 @@ that client as a 429 instead of silently spilling other traffic onto a capped ho
 
 ## 6. Staged build
 
-**M1 — transport, text only. SHIPPED 2026-10-19.** Bridge binary (`cmd/claude-bridge` +
-`internal/claudebridge`), container, `/v1/messages` (stream and non-stream), usage and error
+**M1 — transport, text only. SHIPPED 2026-10-19.** Bridge (`internal/claudebridge`; first a
+separate `cmd/claude-bridge` binary and container, folded in-process since — see §3),
+`/v1/messages` (stream and non-stream), usage and error
 mapping, `/v1/models`, with tool-bearing requests **refused explicitly** via
 `chat_tools_unsupported` rather than silently answered without tools. Live proof
 `tests/prove_claude_bridge.py` runs the real binary against the real CLI and a real Pro
@@ -317,13 +318,9 @@ is the container rollback. `claude-web` and every existing account are untouched
     else — `EZLLM_MASTER_KEY`, provider and cloud credentials, `ANTHROPIC_*` — stays out of a process
     that has no reason to see it.
 
-## 10. Open items for M1
+## 10. M1 open items — how they closed
 
-- Spawn semaphore default (measured cold-start cost suggests a small number).
-- Whether `/v1/models` serves the CLI's live picker via the offline `initialize` handshake or a
-  static pinned list for the first cut.
-- Whether subscription hops carry any dollar representation in the dashboard. Cost is derived at
-  query time from the versioned `model_prices` table, and unpriced calls are **counted, not
-  zeroed** — so the honest default is to leave the bridge account (and its models) with **no price
-  rows**, which makes those calls read as unpriced rather than as a fake $0.00. To confirm at M1
-  against the live cost panel.
+- Spawn semaphore: two concurrent CLI children by default (`Runner.MaxConcurrent`).
+- `/v1/models` serves a static pinned list of the routes the CLI resolves its family aliases to.
+- Dollars: leave the bridge account without price rows, so its calls read as unpriced rather
+  than as a fake $0.00 (cost is derived at query time from `model_prices`).

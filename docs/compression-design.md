@@ -1,8 +1,8 @@
 # ezllm compression design (M5)
 
-Source of truth: rev4 plan §4 (`~/.hermes/plans/2026-10-05_223000-ezllm-v1-rev4-namespace-compression.md`)
-+ `compression_profiles` schema. This doc restates the contract as shipped code and
-records every design decision where the plan left latitude.
+Origin: the v1 rev4 plan §4 (private planning notes) + the `compression_profiles` schema. This
+doc restates the contract as shipped code and records every design decision where the plan left
+latitude; it is the reference now.
 
 ## Scope (M5)
 

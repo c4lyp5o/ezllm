@@ -1,8 +1,6 @@
 # Universal wire matrix — one request, any wire
 
-Design record for the work shipped 2026-10-12/13 (`f7ee36b`, `7294755`, `5a145dd`; local,
-not pushed at writing). Source of truth for decisions: the approved plan
-`~/workspace/.hermes/plans/2026-10-12_215619-ezllm-universal-wire-matrix-rev1.md`.
+Design record for the work shipped 2026-10-12/13 (`f7ee36b`, `7294755`, `5a145dd`).
 Operator knobs: `docs/translation-runbook.md`. This file is the architecture.
 
 ## The problem

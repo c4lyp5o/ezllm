@@ -95,7 +95,7 @@ Full contract — every endpoint, request/response shape, and error code — in
 
 | Layer | Routes | Auth |
 |---|---|---|
-| Liveness | `GET /healthz` → `{"status":"ok","version":"1.1.0"}` | none |
+| Liveness | `GET /healthz` → `{"status":"ok","version":"<release>"}` | none |
 | Inference | `POST /v1/chat/completions` · `/v1/messages` · `/v1/responses` | client token |
 | Extended | `POST /v1/embeddings` · `/v1/images/generations` · `/v1/audio/speech` · `/v1/audio/transcriptions` | client token |
 | Catalog | `GET /v1/models` (namespaced ids + combos; `?protocol=anthropic`) | client token |
@@ -158,10 +158,12 @@ runbooks: [docs/universal-wire-design.md](docs/universal-wire-design.md),
 
 ## Compression
 
-Profiles of ordered stages over six engines, selected per request
+Profiles of ordered stages over the ten engines, selected per request
 (`x-ezllm-compression` header → combo default → off). Contract: the final
-user message, tool calls, and structured tool results are never touched;
-engine errors fail open. Savings are ledgered as **real** (bytes that
+message is exempt (a profile can open a purely tool-output final message to
+tool-output engines), tool-call arguments are never touched, tool results are
+never dropped or structurally changed, and engine errors fail open. A session
+replays what it already shipped, so history stays byte-stable across requests. Savings are ledgered as **real** (bytes that
 actually shipped shorter) vs **notional** (rejected by ratio floor), so
 dashboards are never inflated. Design and measured numbers:
 [docs/compression-design.md](docs/compression-design.md).
@@ -183,9 +185,10 @@ verbatim `raw_usage` JSON for audit.
 ## Dashboard
 
 Same binary, served at `/`; the UI renders and fetches nothing until
-unlocked. Everything under `/admin/*` requires an admin session or an admin
-client token. The health strip shows the running **version**, account/model
-counts, and uptime.
+unlocked. Everything under `/admin/*` except sign-in and first-boot setup
+requires an admin session or an admin client token. The sidebar shows the
+running **version**; the overview shows uptime and account, model and combo
+counts.
 
 ## Configuration
 
@@ -208,15 +211,22 @@ and backed up.
   with AES-256-GCM under a master key that never enters the database. Back up
   the master key with the database, or the stored keys are unrecoverable — see
   [docs/master-key-runbook.md](docs/master-key-runbook.md).
-- `GET /healthz` is the only unauthenticated route: liveness plus the release
-  version, nothing else. All counts, paths, and uptime live behind `/admin/*`.
+- `GET /healthz` is the only unauthenticated data route: liveness plus the
+  release version, nothing else. Besides it, only the dashboard's static files
+  and the sign-in/setup endpoints answer without credentials; all counts,
+  paths, and uptime live behind `/admin/*`.
+- The dashboard session cookie is `HttpOnly`, `SameSite=Strict`, and
+  cookie-authenticated writes from another origin (even another port on the
+  same host) are refused with `403`.
 - Client tokens are SHA-256 hashed, dashboard passwords bcrypt-hashed;
   plaintext credentials are never returned after creation. Only a masked key
   hint is ever exposed.
 - The upstream's own credentials replace the client's on forwarding:
   `Authorization`, `x-api-key`, `Cookie`, and `Origin` (Anthropic rejects
   foreign browser Origins with a 401) are stripped, along with
-  `X-Ezllm-Session`.
+  `X-Ezllm-Session`, `X-Ezllm-Compression` and `X-Ezllm-Bridge-Secret`.
+- Provider clients never follow a redirect to another origin, so provider
+  keys and prompts stay with the host they were sent to.
 - Loopback by default; the dashboard hides all data pre-auth.
 
 ## Development
@@ -236,7 +246,7 @@ Repository layout:
 - `tests/` — live proof scripts (Python) run against a real instance
 - `web/tests/` — Playwright screenshot/verification drivers for the dashboard
 - `docs/` — design records and runbooks; `EXPLORING.md` is the codebase tour
-- `VERSION.md` — release history (one version per change date)
+- `VERSION.md` — release history (semantic versioning)
 
 CI: [test.yml](.github/workflows/test.yml) gates
 [docker-publish.yml](.github/workflows/docker-publish.yml) and

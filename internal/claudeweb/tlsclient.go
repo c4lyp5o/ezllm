@@ -4,8 +4,8 @@
 // docs/claude-web-design.md, cross-ref: the stale community digest
 // ~/workspace/claude-ai-re-client-protocol-digest.md).
 //
-// M14 scope: sessionKey cookie auth, organization discovery, one
-// conversation per router session, SSE completion parsing into deltas.
+// M14 scope: sessionKey cookie auth, organization discovery, one upstream
+// conversation per bridge request, SSE completion parsing into deltas.
 // No image input, no artifacts, no model discovery (ids pass through).
 package claudeweb
 

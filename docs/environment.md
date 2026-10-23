@@ -121,4 +121,5 @@ mount paths are written into your `compose.yml` directly.
 | Variable | What it does |
 |---|---|
 | `EZLLM_CODEX_LIVE` | `1` runs the Codex bridge live tests against the real CLI and login (`go test ./internal/codexbridge/ -run Live -v`). |
+| `EZLLM_CODEX_LIVE_BIN`, `EZLLM_CODEX_LIVE_HOME` | The CLI and `CODEX_HOME` those live tests use; default `codex` on `PATH` and `~/.codex-sub`. |
 | `EZLLM_REHEARSE_DB` | Path to a **copy** of the production database; runs the store rehearsal test (`go test ./internal/store/ -run Rehearse -v`). |

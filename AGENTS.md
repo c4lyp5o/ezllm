@@ -7,7 +7,7 @@ Instructions for AI agents (and new maintainers) working on this repository.
 ezllm — a self-hosted LLM router/gateway: one static Go binary serving three
 inference surfaces (OpenAI chat, Anthropic messages, OpenAI Responses) plus
 extended endpoints (embeddings, images, audio), with namespace routing, combo
-failover, per-model rules, opt-in wire-protocol translation, staged request
+failover, per-model rules, probe-gated wire-protocol translation, staged request
 compression, a SQLite usage ledger, and an embedded operator dashboard
 (`web/` → `web/dist/` → `go:embed`).
 
@@ -55,8 +55,9 @@ measured numbers: CONTRIBUTING.md § Memory.
 ## Layout map
 
 ```
-cmd/ezllm/          main (config, flags, run)
+cmd/ezllm/          main (config, flags, run, in-process bridge wiring)
 cmd/m2verify/       live-ledger acceptance checker
+internal/config/    config.yaml + EZLLM_* environment loading
 internal/server/    HTTP layer: routes, auth, admin API, healthz, version
 internal/router/    combo resolution, strategies, rules eligibility, pins
 internal/proxy/     attempt/commit split, retry, failover, usage sniff, TTFT
@@ -66,7 +67,9 @@ internal/store/     SQLite schema + queries (migrations carry schema_version)
 internal/provider/  provider kinds, presets, catalog probes, quota oracles
 internal/registration/ key testing: paced probe chain, protocol sweep
 internal/rules/     token caps + allowed-hours windows
+internal/ratelimit/ per-account request limiter
 internal/jsonbody/  single-parse request document
+internal/logx/      structured logging setup and the first-boot banner
 internal/{claudeweb,geminiweb,githubcopilot}/  web-protocol providers
 internal/claudebridge/  Claude subscription surface (loopback-only): CLI spawn, body injection, SSE
 internal/codexbridge/   ChatGPT subscription surface (loopback-only): Codex app-server JSON-RPC, lockdown, exec fallback
@@ -91,7 +94,9 @@ docs/               design records + runbooks (decisions, not status)
 
 ## Docs hygiene
 
-- Verify every `file.go:NN` landmark before citing it; drift is common.
+- Cite code as `file.go` plus the symbol (`proxy.go` `Forward`), not a line
+  number: line landmarks drift with every edit. Verify a symbol exists before
+  citing it.
 - Zero stale markers (`TBD`/`TODO`/`⏳`) in `*.md`.
 - JSON examples in docs/API.md come from live responses, not memory.
 - README = front door (what/how/where); CHANGELOG = milestone narrative;

@@ -5,6 +5,8 @@
 > `docs/single-parse-dispatch-design.md`). Every number below predates that
 > change; measured after-deltas live in the design doc's results section and
 > the CHANGELOG. `EXPLORING.md`'s flow map (parse sites) is updated too.
+> `file.go:NN` references below describe the code as measured on that date and
+> have since drifted; grep the named function instead.
 
 Date: 2026-10-15 (+08). Status: measured, all gates green.
 Scope per task brief: measurement foundation only — no model-visible behavior

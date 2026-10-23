@@ -55,6 +55,23 @@ const errText = (e: unknown) =>
     ? `${e.detail.message}${e.detail.hint ? ` — ${e.detail.hint}` : ''}`
     : e instanceof Error ? e.message : String(e);
 
+// A grouped action is one request per rule, and a failure partway leaves the
+// earlier writes stored. Runs the steps in order; on a failure the error says
+// which rules already changed, which failed and which were not tried, and the
+// caller reloads so the page shows what is actually persisted.
+type RuleStep = { model: string; run: () => Promise<unknown> };
+async function runRuleSteps(steps: RuleStep[]) {
+  for (let i = 0; i < steps.length; i++) {
+    try { await steps[i].run(); } catch (e) {
+      const list = (xs: RuleStep[]) => xs.map((s) => s.model).join(', ');
+      const done = steps.slice(0, i), rest = steps.slice(i + 1);
+      throw new Error(`${steps[i].model}: ${errText(e)}`
+        + (done.length ? ` — already changed: ${list(done)}` : '')
+        + (rest.length ? ` — not attempted: ${list(rest)}` : ''));
+    }
+  }
+}
+
 // write-side validation mirror (store.ValidateModelRule): windows are
 // both-or-neither and start!=end — reject before the round-trip.
 // Draft.model_ids is UI state; the wire is ONE model_id per rule
@@ -362,15 +379,20 @@ export default function Rules() {
       // Each checked model is its own rule. A model that already has one is
       // PATCHed with these settings instead of re-POSTed (that is one row per
       // (account, model) by schema), so multi-select also acts as apply-to-many.
-      for (const modelID of modelIDs) {
-        const existing = rules?.find((r) => r.account_id === draft.account_id && r.model_id === modelID)?.id;
-        if (existing != null) await updateModelRule(existing, wireOf(draft, modelID));
-        else await createModelRule(wireOf(draft, modelID));
-      }
-      for (const r of dropped) await deleteModelRule(r.id);
+      await runRuleSteps([
+        ...modelIDs.map((modelID) => ({ model: modelID, run: () => {
+          const existing = rules?.find((r) => r.account_id === draft.account_id && r.model_id === modelID)?.id;
+          return existing != null ? updateModelRule(existing, wireOf(draft, modelID)) : createModelRule(wireOf(draft, modelID));
+        } })),
+        ...dropped.map((r) => ({ model: r.model_id, run: () => deleteModelRule(r.id) })),
+      ]);
       setOpen(false);
       await load();
-    } catch (e) { setModalErr(errText(e)); }
+    } catch (e) {
+      // Reload first: a retry then PATCHes the rules this attempt created.
+      await load();
+      setModalErr(errText(e));
+    }
     finally { setSaving(false); }
   };
 
@@ -378,17 +400,17 @@ export default function Rules() {
   const setEnabled = async (g: RuleGroup, enabled: boolean) => {
     setBusy(g.key);
     try {
-      for (const r of g.rules) await updateModelRule(r.id, { ...wireOf(draftOf(r), r.model_id), enabled });
+      await runRuleSteps(g.rules.map((r) => ({ model: r.model_id, run: () => updateModelRule(r.id, { ...wireOf(draftOf(r), r.model_id), enabled }) })));
       await load();
     }
-    catch (e) { setErr(errText(e)); }
+    catch (e) { await load(); setErr(errText(e)); }
     finally { setBusy(null); }
   };
 
   const remove = async (g: RuleGroup) => {
     setBusy(g.key);
-    try { for (const r of g.rules) await deleteModelRule(r.id); await load(); }
-    catch (e) { setErr(errText(e)); }
+    try { await runRuleSteps(g.rules.map((r) => ({ model: r.model_id, run: () => deleteModelRule(r.id) }))); await load(); }
+    catch (e) { await load(); setErr(errText(e)); }
     finally { setBusy(null); }
   };
 

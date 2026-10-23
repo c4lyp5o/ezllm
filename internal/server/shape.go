@@ -30,6 +30,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"sync"
 
 	"github.com/c4lyp5o/ezllm/internal/jsonbody"
 	"github.com/c4lyp5o/ezllm/internal/provider"
@@ -145,14 +146,32 @@ func captureShapeDoc(doc *jsonbody.BodyDoc, surface provider.Surface) shape {
 	// otherwise identical tool block will NOT read as a break here). Content
 	// changes — an added/removed/edited field — always change this hash, which
 	// is the dominant signal we are after.
-	canon, err := json.Marshal(prefix)
-	if err != nil {
-		return s
+	//
+	// The canonical bytes stream straight into the hash (canonEncoder is
+	// byte-identical to json.Marshal), so a long history is never copied
+	// into a temporary buffer just to be hashed.
+	h := sha256.New()
+	e := canonEncoders.Get().(*canonEncoder)
+	e.w = h
+	ok := e.encode(prefix)
+	e.w, e.buf = nil, e.buf[:0]
+	canonEncoders.Put(e)
+	if !ok {
+		canon, err := json.Marshal(prefix)
+		if err != nil {
+			return s
+		}
+		h.Reset()
+		h.Write(canon)
 	}
-	sum := sha256.Sum256(canon)
+	sum := h.Sum(nil)
 	s.PrefixSHA = hex.EncodeToString(sum[:8]) // 16 hex chars: ample for grouping
 	return s
 }
+
+// canonEncoders pools the encoders (and their chunk buffers) that feed the
+// prefix hash.
+var canonEncoders = sync.Pool{New: func() any { return &canonEncoder{buf: make([]byte, 0, canonChunk+4<<10)} }}
 
 // sessionOf reads the operator's optional grouping key. A client that sends
 // X-Ezllm-Session (Hermes, Claude Code via a wrapper) turns per-session cost

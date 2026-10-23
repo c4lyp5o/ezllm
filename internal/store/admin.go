@@ -1430,7 +1430,8 @@ func (in TokenInput) Validate() error {
 }
 
 // normalizeExpiry stores RFC3339 UTC. A bare YYYY-MM-DD means end of that day
-// (UTC) so a date picker does not expire a key at midnight at the start.
+// in the gateway's local timezone (the same day the budget windows use) so a
+// date picker does not expire a key at midnight at the start.
 func normalizeExpiry(s string) (string, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {

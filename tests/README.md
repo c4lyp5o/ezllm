@@ -29,6 +29,7 @@ written against, so a bare run never hits production by accident:
 | `prove_nim_keytest.py` | `http://127.0.0.1:20139` | NIM canary instance |
 | `prove_lmeval.py` | `http://127.0.0.1:20129` | local gateway |
 | `prove_claude_bridge.py` | `EZLLM_URL`, default the public front door | spends real subscription tokens; needs `EZLLM_TOKEN` |
+| `prove_codex_bridge.py` | `EZLLM_URL`, default the public front door | spends real ChatGPT subscription tokens; needs `EZLLM_TOKEN` |
 
 Exit 0 means every assertion in the script held.
 

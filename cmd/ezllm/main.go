@@ -311,6 +311,10 @@ func run() error {
 	if err := startClaudeBridge(ctx, log); err != nil {
 		return err
 	}
+	// ChatGPT subscription surface: loopback-only, off unless EZLLM_CODEX_BRIDGE=on.
+	if err := startCodexBridge(ctx, log); err != nil {
+		return err
+	}
 
 	httpSrv := &http.Server{
 		Addr:              addr,

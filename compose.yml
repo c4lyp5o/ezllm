@@ -48,6 +48,11 @@ services:
       USER: ${CLAUDE_BRIDGE_USER:-calypso}
       LOGNAME: ${CLAUDE_BRIDGE_USER:-calypso}
 
+      # ChatGPT subscription surface (loopback-only, an ordinary
+      # openai-compatible account dials it). Off by default: turn it on only
+      # after the two mounts below exist — docs/codex-bridge-runbook.md.
+      EZLLM_CODEX_BRIDGE: ${EZLLM_CODEX_BRIDGE:-off}
+
     # All credentials are dashboard-managed and persisted in the SQLite volume.
 
     volumes:
@@ -69,6 +74,14 @@ services:
       # with the ledger.
       - ${CLAUDE_CLI_BIN:-/home/calypso/.local/share/claude-bridge/claude-2.1.306}:/opt/claude/claude:ro
       - ${CLAUDE_SUB_DIR:-/home/calypso/.claude-sub}:/claude-sub
+
+      # ChatGPT subscription surface: the pinned Codex CLI copy (outside
+      # ~/.codex/packages, which the updater manages) read-only, and the
+      # isolated login read-write (the CLI refreshes its token and keeps state
+      # there). Uncomment with EZLLM_CODEX_BRIDGE=on: a bind mount whose source
+      # is missing makes Docker create an empty directory in its place.
+      # - ${CODEX_CLI_BIN:-/home/calypso/.local/share/codex-bridge/codex-0.163.0}:/opt/codex/codex:ro
+      # - ${CODEX_SUB_DIR:-/home/calypso/.codex-sub}:/codex-sub
 
 # Optional: front the dashboard with traefik (uncomment and adjust the host).
 #   networks: { traefik_default: { external: true } }

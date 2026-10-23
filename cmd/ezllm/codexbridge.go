@@ -1,0 +1,175 @@
+package main
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"log/slog"
+	"net"
+	"net/http"
+	"os"
+	"os/exec"
+	"runtime"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/codexbridge"
+	"github.com/c4lyp5o/ezllm/internal/server"
+)
+
+// ChatGPT subscription surface: codexbridge's OpenAI Chat Completions surface on
+// a LOOPBACK-ONLY listener, dialled by an ordinary `openai-compatible` account,
+// while the official Codex CLI — bind-mounted from the host — stays the only
+// thing that talks to the subscription. Decisions:
+// docs/codex-subscription-design.md; operation: docs/codex-bridge-runbook.md.
+const (
+	envCodexBridge      = "EZLLM_CODEX_BRIDGE"            // "on" enables the surface
+	envCodexBin         = "EZLLM_CODEX_BIN"               // official CLI binary (mounted)
+	envCodexHome        = "EZLLM_CODEX_HOME"              // isolated ChatGPT login (CODEX_HOME)
+	envCodexAddr        = "EZLLM_CODEX_BRIDGE_ADDR"       // default 127.0.0.1:8791
+	envCodexToken       = "EZLLM_CODEX_BRIDGE_TOKEN_FILE" // shared secret for the account key
+	envCodexConcurrency = "EZLLM_CODEX_BRIDGE_CONCURRENCY"
+)
+
+// startCodexBridge brings up the loopback surface when enabled. A missing
+// binary or login, a lockdown flag the CLI refuses, or a protocol method it
+// dropped is a boot failure, never a silent degrade.
+func startCodexBridge(ctx context.Context, log *slog.Logger) error {
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv(envCodexBridge)), "on") {
+		return nil
+	}
+	if runtime.GOOS != "linux" {
+		return fmt.Errorf("codex bridge: %s=on is a Linux feature (this build is %s); run ezllm in a Linux container — docs/codex-bridge-runbook.md", envCodexBridge, runtime.GOOS)
+	}
+	bin := strings.TrimSpace(os.Getenv(envCodexBin))
+	if bin == "" {
+		bin = "/opt/codex/codex"
+	}
+	resolved, err := exec.LookPath(bin)
+	if err != nil {
+		return fmt.Errorf("codex bridge: %s=%q does not resolve to the official Codex CLI: %w", envCodexBin, bin, err)
+	}
+	home := strings.TrimSpace(os.Getenv(envCodexHome))
+	if home == "" {
+		home = "/codex-sub"
+	}
+	addr := strings.TrimSpace(os.Getenv(envCodexAddr))
+	if addr == "" {
+		addr = "127.0.0.1:8791"
+	}
+	if err := assertCodexLoopback(addr); err != nil {
+		return err
+	}
+	concurrency := 2
+	if v := strings.TrimSpace(os.Getenv(envCodexConcurrency)); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			return fmt.Errorf("codex bridge: %s=%q must be a positive integer", envCodexConcurrency, v)
+		}
+		concurrency = n
+	}
+
+	pre, err := codexbridge.RunPreflight(ctx, resolved, home)
+	if err != nil {
+		return err
+	}
+	token, err := codexBridgeToken(strings.TrimSpace(os.Getenv(envCodexToken)))
+	if err != nil {
+		return err
+	}
+	qualified := "qualified"
+	if !pre.Qualified {
+		qualified = "unqualified (measured on " + codexbridge.QualifiedVersion + "; re-run the live proof)"
+	}
+
+	srv := &codexbridge.Server{
+		Runner: &codexbridge.Runner{
+			Bin:           resolved,
+			CodexHome:     home,
+			Timeout:       300 * time.Second,
+			MaxConcurrent: concurrency,
+			Version:       server.Version,
+			Logf:          log.Info,
+			Channel:       pre.Channel,
+		},
+		Token:   token,
+		Version: server.Version,
+		Info: map[string]any{
+			"status":       "ok",
+			"version":      server.Version,
+			"cli_bin":      resolved,
+			"cli_version":  pre.Version,
+			"cli_release":  qualified,
+			"codex_home":   home,
+			"login":        pre.Login,
+			"lockdown":     "verified at boot",
+			"channel":      channelInfo(pre),
+			"concurrency":  concurrency,
+			"client_tools": "not in this build yet (stage 2) — requests with tools get 400 chat_tools_unsupported",
+		},
+		Logf: log.Info,
+	}
+
+	httpSrv := &http.Server{Addr: addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
+	go func() {
+		if pre.Channel == codexbridge.ChannelExec {
+			log.Warn("codex bridge on the exec fallback: no streaming deltas, no catalog, no plan windows",
+				"missing", strings.Join(pre.MissingRPCs, ","))
+		}
+		log.Info("codex bridge listening", "addr", addr, "cli", pre.Version, "release", qualified, "login", pre.Login,
+			"channel", pre.Channel, "client_tools", "stage 2")
+		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Error("codex bridge serve", "err", err)
+		}
+	}()
+	go func() {
+		<-ctx.Done()
+		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = httpSrv.Shutdown(shutCtx)
+	}()
+	return nil
+}
+
+func channelInfo(p codexbridge.Preflight) string {
+	if p.Channel == codexbridge.ChannelExec {
+		return "exec fallback (app-server lacks " + strings.Join(p.MissingRPCs, ", ") + "): answers arrive as one chunk; /v1/models and /v1/usage answer 404"
+	}
+	return "app-server"
+}
+
+// assertCodexLoopback keeps this surface invisible from outside the container:
+// it fronts the subscription login and has one consumer (this process).
+func assertCodexLoopback(addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("codex bridge: bad %s %q: %w", envCodexAddr, addr, err)
+	}
+	switch host {
+	case "127.0.0.1", "::1", "localhost":
+		return nil
+	}
+	return fmt.Errorf("codex bridge: %s=%q must be loopback (127.0.0.1): this surface holds the subscription login", envCodexAddr, addr)
+}
+
+// codexBridgeToken returns the shared secret the account key carries. The
+// default lives on the data volume so it is backed up with the ledger.
+func codexBridgeToken(path string) (string, error) {
+	if path == "" {
+		path = "/data/codex-bridge.token"
+	}
+	if b, err := os.ReadFile(path); err == nil && strings.TrimSpace(string(b)) != "" {
+		return strings.TrimSpace(string(b)), nil
+	}
+	raw := make([]byte, 24)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("codex bridge: cannot generate token: %w", err)
+	}
+	token := hex.EncodeToString(raw)
+	if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
+		return "", fmt.Errorf("codex bridge: cannot write %s: %w", path, err)
+	}
+	return token, nil
+}

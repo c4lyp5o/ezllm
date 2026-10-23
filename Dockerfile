@@ -72,6 +72,11 @@ ENV TZ=Asia/Kuala_Lumpur
 # expects the official CLI at /opt/claude/claude and the subscription login at
 # /claude-sub (claudebridge.go defaults), bind-mounted by compose.yml. Never
 # bake either into the image.
+#
+# ChatGPT subscription surface: off unless EZLLM_CODEX_BRIDGE=on; it expects the
+# official Codex CLI at /opt/codex/codex (a static musl binary — any base runs
+# it) and the isolated ChatGPT login at /codex-sub (codexbridge.go defaults).
+# Same rule: mounted, never baked. docs/codex-bridge-runbook.md.
 
 VOLUME ["/data"]
 EXPOSE 20129

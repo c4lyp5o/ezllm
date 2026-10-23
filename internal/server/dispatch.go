@@ -26,7 +26,17 @@ func (s *Server) allowModel(w http.ResponseWriter, r *http.Request, client, requ
 		return false
 	}
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		slog.Warn("client allowlist check failed", "client", client, "err", err)
+		// An authorization control must not degrade silently. The budget check
+		// a few lines later in the same handler already refuses with a 503 when
+		// the store is unavailable; failing OPEN here was the inconsistent half
+		// of that pair, and it suspended the per-key allowlist for every
+		// request in the window. ErrNotFound stays an allow: no token row means
+		// the key carries no policy (the dashboard's own chat).
+		slog.Warn("client allowlist check failed; refusing the request",
+			"client", client, "err", err)
+		writeErr(w, http.StatusServiceUnavailable, "authorization_unavailable",
+			"cannot verify the model allowlist; retry shortly")
+		return false
 	}
 	return true
 }

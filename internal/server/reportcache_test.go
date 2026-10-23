@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -27,6 +28,36 @@ func TestReportCacheCompletedFailureIsNotASuccess(t *testing.T) {
 	})
 	if v != nil || !errors.Is(err, boom) {
 		t.Fatalf("completed failure = (%v, %v), want (nil, %v)", v, err, boom)
+	}
+}
+
+func TestUsageCachePreservesExplicitFromPrecision(t *testing.T) {
+	h := newHarness(t, func(http.ResponseWriter, *http.Request) {})
+	base := time.Now().UTC().Add(-time.Hour).Truncate(reportTTL)
+	h.db.RecordCall(store.Call{TS: base.Add(5 * time.Second), Account: "up", Model: "m", Status: 200, TokensIn: 10})
+	if err := h.db.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		offset time.Duration
+		want   int64
+	}{{time.Second, 1}, {9 * time.Second, 0}} {
+		path := "/admin/usage?group_by=account&from=" + url.QueryEscape(base.Add(tc.offset).Format(time.RFC3339Nano))
+		code, _, body := h.do("GET", path, "tok-admin", "")
+		if code != http.StatusOK {
+			t.Fatalf("usage = %d %s", code, body)
+		}
+		var out struct {
+			Totals struct {
+				Calls int64 `json:"calls"`
+			} `json:"totals"`
+		}
+		if err := json.Unmarshal([]byte(body), &out); err != nil {
+			t.Fatal(err)
+		}
+		if out.Totals.Calls != tc.want {
+			t.Errorf("from offset %s: got %d calls, want %d", tc.offset, out.Totals.Calls, tc.want)
+		}
 	}
 }
 

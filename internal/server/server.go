@@ -1041,10 +1041,14 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		usedTZ = loc.String()
 	}
 	// Shared across callers for reportTTL (reportcache.go). An open-ended
-	// window ("until now", no `to`) is keyed by its from rounded down to the
-	// TTL: every poll computes a fresh from, which would otherwise defeat the
-	// cache; within the TTL the served window is at most that much older.
-	key := fmt.Sprintf("usage|%s|%s|%s|", groupBy, usedTZ, from.Truncate(reportTTL).Format(time.RFC3339))
+	// default window is rounded to the TTL so simultaneous polls share it.
+	// Explicit boundaries retain their precision: rounding a caller's from
+	// can include rows that a different caller deliberately excluded.
+	keyFrom := from.Truncate(reportTTL).Format(time.RFC3339Nano)
+	if r.URL.Query().Get("from") != "" {
+		keyFrom = from.Format(time.RFC3339Nano)
+	}
+	key := fmt.Sprintf("usage|%s|%s|%s|", groupBy, usedTZ, keyFrom)
 	if r.URL.Query().Get("to") != "" {
 		key = fmt.Sprintf("usage|%s|%s|%s|%s", groupBy, usedTZ, from.Format(time.RFC3339Nano), to.Format(time.RFC3339Nano))
 	}

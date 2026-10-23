@@ -4,7 +4,7 @@ package proxy
 // against the deterministic mock in internal/proxy/benchutil.
 //
 //	phase 3  BenchmarkUpstreamRoundTrip  ForwardCandidates: prepareHopBody + dial + copy
-//	phase 4  BenchmarkStreamCopy         the SSE forwarding loop alone (scanner + tap + write + flush)
+//	phase 4  BenchmarkStreamCopy         the SSE forwarding loop alone (ReadSlice + tap + write + burst flush)
 //
 // The server half (ingestion, inspection/routing) lives in
 // internal/server/bench_test.go. Every benchmark here runs with -benchmem.
@@ -99,15 +99,16 @@ func warmupRoundTrip(b *testing.B, d *Dispatcher, rt Route, body []byte) {
 
 // ── phase 4: stream forwarding and flushing ─────────────────────────────────
 
-// BenchmarkStreamCopy measures streamCopy alone: the bufio.Scanner over the SSE
-// byte stream, the usage tap, one Write per line plus the re-emitted newline,
-// and a Flush per line. The mock's own precomputed frames are the payload, so
-// the bytes under test are exactly what a mock request would emit.
+// BenchmarkStreamCopy measures streamCopy alone: ReadSlice over the SSE byte
+// stream, the usage tap, each line written back verbatim, and one Flush per
+// burst (when nothing more is buffered), not per line. The mock's own
+// precomputed frames are the payload, so the bytes under test are exactly
+// what a mock request would emit.
 //
 // The ResponseWriter is a no-op sink whose Flush is a no-op, which isolates the
 // ROUTER's per-event work from the socket's — phase 3 and the end-to-end
 // benchmark measure the socket. `frag` sets how many bytes one upstream Read
-// returns, which is what a fragmented frame looks like to the scanner.
+// returns, which is what a fragmented frame looks like to the reader.
 func BenchmarkStreamCopy(b *testing.B) {
 	d := NewDispatcher(benchutil.NewClient(), provider.NewRegistry(benchutil.NewClient()))
 	for _, events := range []int{32, 256} {
@@ -117,7 +118,7 @@ func BenchmarkStreamCopy(b *testing.B) {
 			name string
 			read int
 		}{
-			{"whole", 0}, // one Read hands the scanner everything available
+			{"whole", 0}, // one Read hands the reader everything available
 			{"8B", 8},    // frames split mid-`data: {...}` every 8 bytes
 		} {
 			for _, c := range proxyConcurrency() {

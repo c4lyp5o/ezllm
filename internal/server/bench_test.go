@@ -28,6 +28,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/c4lyp5o/ezllm/internal/jsonbody"
 	"github.com/c4lyp5o/ezllm/internal/provider"
 	"github.com/c4lyp5o/ezllm/internal/proxy"
 	"github.com/c4lyp5o/ezllm/internal/proxy/benchutil"
@@ -115,12 +116,14 @@ func BenchmarkInspectAndRoute(b *testing.B) {
 	resolver := router.New(h.db)
 
 	for _, p := range payloadSizes {
-		body := benchutil.ChatBody(benchServerModel, p.bytes)
 		for _, target := range []string{benchServerModel, benchCombo} {
 			name := "direct"
 			if target == benchCombo {
 				name = "combo"
 			}
+			// Each case routes ITS target: a shared direct-model body once
+			// made the "combo" case measure direct routing.
+			body := benchutil.ChatBody(target, p.bytes)
 			b.Run(name+"/"+p.name, func(b *testing.B) {
 				b.SetBytes(int64(len(body)))
 				b.ReportAllocs()
@@ -137,9 +140,31 @@ func BenchmarkInspectAndRoute(b *testing.B) {
 					if len(routes) != 1 {
 						b.Fatalf("routes = %d, want 1", len(routes))
 					}
+					if routes[0].Alias != target {
+						b.Fatalf("route alias = %q, want %q (the case must route its own target)", routes[0].Alias, target)
+					}
 				}
 			})
 		}
+	}
+}
+
+// BenchmarkShapeCapture hashes the reusable history of an agent-loop body
+// (HistoryChatBody): the per-request canonicalization cost that the
+// single-final-message fixtures above never reach.
+func BenchmarkShapeCapture(b *testing.B) {
+	for _, p := range payloadSizes {
+		body := benchutil.HistoryChatBody(benchServerModel, p.bytes, 40)
+		doc := jsonbody.Open(body)
+		b.Run(p.name, func(b *testing.B) {
+			b.SetBytes(int64(len(body)))
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if sh := captureShapeDoc(doc, provider.SurfaceOpenAI); sh.PrefixSHA == "" {
+					b.Fatal("no prefix hash")
+				}
+			}
+		})
 	}
 }
 

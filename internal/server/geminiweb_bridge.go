@@ -92,9 +92,8 @@ func (b *geminiWebBridge) clientFor(ctx context.Context, acctID int64, stampedKe
 	entry, ok := b.clients[acctID]
 	if ok && entry.client.Initialized() && (stampedKey == "" || stampedKey == entry.key) {
 		b.mu.Unlock()
-		// Rotation is deferred to the caller's per-account lock (rotate()
-		// below): doing it here would mutate the cached client while a
-		// concurrent generation is reading it.
+		// The caller (resolve) holds the per-account lock, so reading the
+		// session state above cannot overlap rotation's Init.
 		return entry, nil
 	}
 	b.mu.Unlock()
@@ -211,14 +210,12 @@ func (b *geminiWebBridge) models(ctx context.Context, entry *geminiwebClientEntr
 // handleModels is the auth oracle + catalog: 200 with the OpenAI-shaped
 // model list on a live cookie, 401 on a dead one.
 func (b *geminiWebBridge) handleModels(w http.ResponseWriter, r *http.Request) {
-	entry, err := b.resolve(r)
+	entry, unlock, err := b.resolve(r)
 	if err != nil {
 		writeErr(w, http.StatusUnauthorized, "authentication_error", err.Error())
 		return
 	}
-	lock := b.lockFor(entry.accountID)
-	lock.Lock()
-	defer lock.Unlock()
+	defer unlock()
 	b.maybeRotate(r.Context(), entry)
 	models, err := b.models(r.Context(), entry)
 	if err != nil {
@@ -261,16 +258,14 @@ type chatReq struct {
 // handleChatCompletions translates one OpenAI chat turn into a gemini-web
 // generation and answers OpenAI wire (SSE when stream=true).
 func (b *geminiWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
-	entry, err := b.resolve(r)
+	// Serialize generation per account: the cached client owns mutable
+	// session/cookie state and is not safe for concurrent use.
+	entry, unlock, err := b.resolve(r)
 	if err != nil {
 		writeErr(w, http.StatusUnauthorized, "authentication_error", err.Error())
 		return
 	}
-	// Serialize generation per account: the cached client owns mutable
-	// session/cookie state and is not safe for concurrent use.
-	lock := b.lockFor(entry.accountID)
-	lock.Lock()
-	defer lock.Unlock()
+	defer unlock()
 	b.maybeRotate(r.Context(), entry)
 	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 	if err != nil {
@@ -387,13 +382,23 @@ func (b *geminiWebBridge) resolveModel(ctx context.Context, entry *geminiwebClie
 	return geminiweb.Model{}, fmt.Errorf("model %q not in this account's catalog (%d models)", requested, len(models))
 }
 
-// resolve maps the stamped headers to an enabled gemini-web account.
-func (b *geminiWebBridge) resolve(r *http.Request) (*geminiwebClientEntry, error) {
+// resolve maps the stamped headers to an enabled gemini-web account and
+// returns its client with the per-account lock HELD; the caller defers the
+// returned unlock. The lock covers the cache lookup too: clientFor reads the
+// client's session state, which rotation rewrites under this same lock.
+func (b *geminiWebBridge) resolve(r *http.Request) (*geminiwebClientEntry, func(), error) {
 	acct, err := bridgeAccount(r, b.db, provider.KindGeminiWeb, provider.GeminiWebAccountHeader)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return b.clientFor(r.Context(), acct.ID, r.Header.Get(provider.GeminiWebKeyHeader))
+	lock := b.lockFor(acct.ID)
+	lock.Lock()
+	entry, err := b.clientFor(r.Context(), acct.ID, r.Header.Get(provider.GeminiWebKeyHeader))
+	if err != nil {
+		lock.Unlock()
+		return nil, nil, err
+	}
+	return entry, lock.Unlock, nil
 }
 
 // mapUpstreamStatus maps a geminiweb error to an HTTP status: auth failures

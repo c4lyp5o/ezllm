@@ -147,9 +147,16 @@ long as it is set.
 
 ## Enable
 
-In `compose.yml`: uncomment the two codex mounts (the release directory →
-`/opt/codex`, the login → `/codex-sub`), set `EZLLM_CODEX_BRIDGE=on`, recreate
-the container. Boot fails loudly — the process does not start — when:
+Add the `compose.codex.yml` overlay, which sets `EZLLM_CODEX_BRIDGE=on` and
+mounts the release directory at `/opt/codex` and the login at `/codex-sub`
+(`CODEX_CLI_DIR`, `CODEX_SUB_DIR` point them at your copies), and recreate the
+container:
+
+```bash
+docker compose -f compose.yml -f compose.traefik.yml -f compose.codex.yml up -d
+```
+
+Boot fails loudly — the process does not start — when:
 
 - the binary is missing (`EZLLM_CODEX_BIN`, default `/opt/codex/bin/codex`);
 - the CLI refuses a lockdown flag, or reports a locked feature as still enabled

@@ -80,6 +80,8 @@ Or use the published image (`ghcr.io/c4lyp5o/ezllm:latest`) with
 Traefik overlay. It serves `/v1`, `/healthz` and the dashboard publicly; `/admin`
 is public too but guarded by the dashboard password and a per-source rate
 limit, with a tighter one on `/admin/login` and `/admin/setup`.
+[compose.codex.yml](compose.codex.yml) turns on the ChatGPT subscription
+bridge with its mounts ([runbook](docs/codex-bridge-runbook.md)).
 
 ## API surface
 

@@ -348,6 +348,10 @@ Catalog resyncs **preserve** pins (models that vanish upstream lose their pin wi
   "price_cache_read":0.04, "price_cache_write":0.25, "note":"source + date",
   "source":"litellm", "fetched_at":"2026-10-18T03:00:00Z" }
 ```
+Only USD rates are accepted (currency is normalized; an omitted currency defaults to USD).
+Existing non-USD rates are counted as unpriced in cost reports, without falling back to an
+older USD rate or converting the amount.
+
 Rates are **USD per 1M tokens**, versioned per `(account, model, effective_from)`. Same
 version re-set = overwrite; new date = new version. Cost joins each call to the newest
 rate effective **on or before the call's date**, so a reprice never rewrites history.

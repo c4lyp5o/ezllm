@@ -66,8 +66,12 @@ func (d *DB) SetPrice(ctx context.Context, p Price) error {
 		return fmt.Errorf("store: price effective_from must be YYYY-MM-DD, got %q", p.EffectiveFrom)
 	}
 	p.EffectiveFrom = day
+	p.Currency = strings.ToUpper(strings.TrimSpace(p.Currency))
 	if p.Currency == "" {
 		p.Currency = "USD"
+	}
+	if p.Currency != "USD" {
+		return fmt.Errorf("store: price currency must be USD")
 	}
 	if p.Source == "" {
 		p.Source = "manual"
@@ -201,19 +205,19 @@ const priceJoin = `
 WITH priced AS (
   SELECT c.id, c.ts, COALESCE(c.account_id,0) AS account_id, c.account, c.model,
          c.tokens_in, c.tokens_out, c.tokens_cached_read, c.tokens_cached_write,
-         (SELECT p.price_in          FROM model_prices p
+         (SELECT CASE WHEN UPPER(TRIM(p.currency)) = 'USD' THEN p.price_in END          FROM model_prices p
             WHERE p.account_id = c.account_id AND p.model_id = c.model
               AND p.effective_from <= date(c.ts)
             ORDER BY p.effective_from DESC LIMIT 1) AS pin,
-         (SELECT p.price_out         FROM model_prices p
+         (SELECT CASE WHEN UPPER(TRIM(p.currency)) = 'USD' THEN p.price_out END         FROM model_prices p
             WHERE p.account_id = c.account_id AND p.model_id = c.model
               AND p.effective_from <= date(c.ts)
             ORDER BY p.effective_from DESC LIMIT 1) AS pout,
-         (SELECT p.price_cache_read  FROM model_prices p
+         (SELECT CASE WHEN UPPER(TRIM(p.currency)) = 'USD' THEN p.price_cache_read END  FROM model_prices p
             WHERE p.account_id = c.account_id AND p.model_id = c.model
               AND p.effective_from <= date(c.ts)
             ORDER BY p.effective_from DESC LIMIT 1) AS pcr,
-         (SELECT p.price_cache_write FROM model_prices p
+         (SELECT CASE WHEN UPPER(TRIM(p.currency)) = 'USD' THEN p.price_cache_write END FROM model_prices p
             WHERE p.account_id = c.account_id AND p.model_id = c.model
               AND p.effective_from <= date(c.ts)
             ORDER BY p.effective_from DESC LIMIT 1) AS pcw

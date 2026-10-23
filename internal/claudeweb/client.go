@@ -156,6 +156,12 @@ func (c *Client) WithTimezone(tz string) *Client {
 	return c
 }
 
+// NewConversation drops the conversation state so the next Generate opens a
+// fresh upstream conversation. The org id stays cached.
+func (c *Client) NewConversation() {
+	c.convID, c.humanUUID, c.parentUUID = "", "", ""
+}
+
 // OrganizationID resolves and caches the org (also the key-test oracle:
 // GET /api/organizations is one request, zero quota).
 func (c *Client) OrganizationID(ctx context.Context) (string, error) {

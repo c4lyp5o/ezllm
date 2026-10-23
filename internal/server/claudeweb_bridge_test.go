@@ -320,3 +320,44 @@ func TestClaudeWebBridgeSerializesPerAccount(t *testing.T) {
 		t.Fatalf("max concurrent upstream completions = %d, want 1 (per-account lock)", got)
 	}
 }
+
+// TestClaudeWebBridgeFreshConversationPerRequest pins conversation isolation:
+// the bridge resends the whole flattened history as the prompt, so each
+// request must open its OWN upstream conversation. Reusing the account's
+// cached conversation chained unrelated callers into one claude.ai thread,
+// where each saw the others' turns as context.
+func TestClaudeWebBridgeFreshConversationPerRequest(t *testing.T) {
+	var mu sync.Mutex
+	var paths []string
+	var creates []bool
+	mock := &claudeWebMock{complet: func(w http.ResponseWriter, r *http.Request) {
+		var p map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&p)
+		_, create := p["create_conversation_params"]
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		creates = append(creates, create)
+		mu.Unlock()
+		claudeWebSSE(w, "ok")
+	}}
+	b, id, _ := claudeWebFixture(t, mock)
+
+	for _, prompt := range []string{"caller A secret", "caller B question"} {
+		w := claudeWebReq(t, b, "POST", claudeWebBridgePrefix+"/chat/completions",
+			`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"`+prompt+`"}]}`, id)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d body=%s", w.Code, w.Body)
+		}
+	}
+	if len(paths) != 2 {
+		t.Fatalf("completions = %d, want 2", len(paths))
+	}
+	if paths[0] == paths[1] {
+		t.Errorf("both requests used conversation %s; want a fresh one each", paths[0])
+	}
+	for i, c := range creates {
+		if !c {
+			t.Errorf("request %d was a follow-up, want create_conversation_params", i+1)
+		}
+	}
+}

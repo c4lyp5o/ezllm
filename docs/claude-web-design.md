@@ -40,9 +40,12 @@ used only for corroboration, never as the source of truth).
   - 403 + Cloudflare challenge markers → `errCloudflareChallenge` (typed)
   - 403 otherwise → `errForbidden`
   - other non-200 → `errUnavailable`
-- **Conversation**: one conversation per router session (create-on-first-turn
-  via `create_conversation_params`, then reuse the conversation id + parent
-  message uuids). `DELETE .../chat_conversations/{id}` cleanup on invalidate.
+- **Conversation**: one upstream conversation per bridge request
+  (create-on-first-turn via `create_conversation_params`). The prompt is the
+  caller's whole flattened history, so chaining requests into one
+  conversation added nothing and leaked one caller's turns into another's
+  context (2026-10-23). The client still chains conversation id + parent
+  message uuids for follow-ups within a conversation.
 - **Routing**: `POST /api/organizations/{org}/chat_conversations/{conv}/completion`,
   SSE.
 - **Payload** (exact ports): prompt = OpenAI messages flattened to text (user

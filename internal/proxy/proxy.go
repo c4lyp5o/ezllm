@@ -1641,6 +1641,19 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 	// (never the winning attempt's stream).
 	led := &attemptLedger{limit: d.attemptBudget}
 	defer func() { result.DiscardedUsage = led.spent }()
+	// A parked fallback response is owned by this function until it is either
+	// committed or discarded. Every discard below clears the pointer, so this
+	// defer only ever fires on an EARLY return — the path where a later hop's
+	// body cannot be prepared and the loop leaves before reaching the code that
+	// would have closed it. Without it that return abandoned the parked body
+	// and its upstream connection.
+	discardFallback := func() {
+		if fallbackResp != nil {
+			discardAttempt(fallbackResp, *fallbackRoute, fallbackResult, fallbackStart, led)
+			fallbackResp = nil
+		}
+	}
+	defer discardFallback()
 	var sel time.Time
 	if d.dispatchDeadline > 0 {
 		sel = time.Now().Add(d.dispatchDeadline)
@@ -1803,10 +1816,7 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 				Namespace: rt.Account.Namespace, Model: rt.Model,
 				Note: note,
 			})
-			if fallbackResp != nil {
-				discardAttempt(fallbackResp, *fallbackRoute, fallbackResult, fallbackStart, led)
-				fallbackResp = nil
-			}
+			discardFallback()
 			fallbackTransportErr = err
 			continue
 		}
@@ -1831,16 +1841,12 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 			})
 		}
 		if failoverStatus(res.Status) || oc.failed {
-			if fallbackResp != nil {
-				discardAttempt(fallbackResp, *fallbackRoute, fallbackResult, fallbackStart, led)
-			}
+			discardFallback()
 			rtCopy, resCopy, startCopy := rt, res, start
 			fallbackRoute, fallbackResp, fallbackResult, fallbackStart = &rtCopy, resp, resCopy, startCopy
 			continue
 		}
-		if fallbackResp != nil {
-			discardAttempt(fallbackResp, *fallbackRoute, fallbackResult, fallbackStart, led)
-		}
+		discardFallback()
 		res2, err2 := d.commit(ctx, w, resp, rt, res, start)
 		// The committed route travels back with the result: the ledger must
 		// credit the hop that ACTUALLY served the call. Reporting routes[0]
@@ -1858,7 +1864,11 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 			"status", fallbackResult.Status,
 			"account", fallbackRoute.Account.Namespace, "model", fallbackRoute.Model,
 			"alias", fallbackRoute.Alias)
-		result, err := d.commit(ctx, w, fallbackResp, *fallbackRoute, fallbackResult, fallbackStart)
+		// commit owns the body from here (it closes it), so clear the parked
+		// pointer first: the deferred cleaner must not close it a second time.
+		toCommit := fallbackResp
+		fallbackResp = nil
+		result, err := d.commit(ctx, w, toCommit, *fallbackRoute, fallbackResult, fallbackStart)
 		result.Attempts = attempts
 		return *fallbackRoute, result, err
 	}

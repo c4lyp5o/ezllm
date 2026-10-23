@@ -34,8 +34,13 @@ type rpcMsg struct {
 }
 
 // RequestHandler answers one server→client request. A nil error result is sent
-// as the JSON-RPC result.
-type RequestHandler func(method string, params json.RawMessage) (any, *rpcError)
+// as the JSON-RPC result. Deferred (errDeferred) means the handler kept id and
+// will answer later with reply — a client tool call waits for the client's
+// next HTTP request.
+type RequestHandler func(id json.RawMessage, method string, params json.RawMessage) (any, *rpcError)
+
+// errDeferred marks a request the handler will answer later.
+var errDeferred = &rpcError{Code: 0, Message: "deferred"}
 
 type rpcConn struct {
 	w io.Writer
@@ -155,9 +160,17 @@ func (c *rpcConn) answer(m rpcMsg) {
 		rerr   = &rpcError{Code: -32601, Message: "codex-bridge does not serve " + m.Method}
 	)
 	if c.onRequest != nil {
-		result, rerr = c.onRequest(m.Method, m.Params)
+		result, rerr = c.onRequest(m.ID, m.Method, m.Params)
 	}
-	reply := map[string]any{"jsonrpc": "2.0", "id": m.ID}
+	if rerr == errDeferred {
+		return
+	}
+	c.reply(m.ID, result, rerr)
+}
+
+// reply answers a server→client request by id.
+func (c *rpcConn) reply(id json.RawMessage, result any, rerr *rpcError) {
+	reply := map[string]any{"jsonrpc": "2.0", "id": id}
 	if rerr != nil {
 		reply["error"] = rerr
 	} else {

@@ -25,6 +25,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/c4lyp5o/ezllm/internal/codexbridge"
 	"github.com/c4lyp5o/ezllm/internal/config"
 	"github.com/c4lyp5o/ezllm/internal/logx"
 	"github.com/c4lyp5o/ezllm/internal/provider"
@@ -37,6 +38,11 @@ import (
 )
 
 func main() {
+	// The codex bridge re-execs this binary as its Landlock helper: it confines
+	// itself and execs the Codex CLI. It never returns.
+	if len(os.Args) > 1 && os.Args[1] == codexbridge.LandlockHelperArg {
+		codexbridge.LandlockMain(os.Args[2:])
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "ezllm:", err)
 		os.Exit(1)

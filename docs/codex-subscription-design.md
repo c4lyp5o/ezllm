@@ -1,6 +1,6 @@
 # ChatGPT subscription via the official Codex CLI — design
 
-**Status:** M0 spike measured 2026-10-23 · all operator decisions recorded (§4); build plan next
+**Status:** M0 measured 2026-10-23 · decisions recorded (§4) · stages 1–2 built on `feat/codex-bridge` (§2.13)
 **Operator gate:** Calypso (pushes/deploys)
 **Spec:** [SPEC-codex-bridge.md](../SPEC-codex-bridge.md) · **Pattern:** [claude-subscription-design.md](claude-subscription-design.md)
 
@@ -217,6 +217,29 @@ capability-free V8 isolate whose only effects are the client's tools (answered b
 bridge) and Codex's own `apply_patch`, which the read-only policy refuses". The one
 remaining trust in Codex's code is that refusal. §3 adds a kernel-enforced layer
 (Landlock) so the bridge no longer depends on it.
+
+### 2.13 Stage 2 live results (2026-10-23)
+
+Bridge argv, real login, every child inside Landlock (ABI 4, kernel 6.8):
+
+- **Landlock needs the resolver's real paths.** The first sandboxed runs timed out:
+  `/etc/resolv.conf` → `/run/systemd/resolve/stub-resolv.conf` on Ubuntu, and Landlock
+  checks the symlink target, so DNS failed. The helper now adds the resolved targets of
+  `/etc/{resolv.conf,hosts,nsswitch.conf,localtime,host.conf}` as read-only file rules.
+  Codex also logs that its own bubblewrap sandbox cannot create user namespaces
+  (`uid_map` is denied) — harmless: it runs no commands.
+- **Tool round trip with continuation works.** `gpt-6.1-sol` called
+  `get_weather({"city":"Kuala Lumpur"})` from code-mode; the call reached the bridge as
+  `item/tool/call`; the follow-up answered it on the same child and the model finished
+  from the result (6.4 s for both requests, 10,335 input tokens).
+- **Usage lands on the follow-up.** The segment that ends on a tool call reported 0
+  tokens: Codex emits `thread/tokenUsage/updated` when a sampling ends, and that
+  sampling ends only after the call is answered. Totals are exact; per-request
+  attribution shifts to the follow-up.
+- **Sentinel with code-mode on:** asked to `apply_patch` a file, the model reported
+  "the sandbox is read-only" and the target directory stayed empty.
+- In unit tests, a child inside the domain was refused both a write outside it and a
+  read of a file outside it (`internal/codexbridge/landlock_test.go`).
 
 ## 3. Proposed surface — full function, built in stages
 

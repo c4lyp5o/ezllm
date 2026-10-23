@@ -11,6 +11,7 @@ import (
 )
 
 type fakeExec struct {
+	calls  []ToolCall
 	deltas []string
 	err    error
 	errAt  int // fail after this many deltas (0 = before any)
@@ -37,7 +38,7 @@ func (f *fakeExec) Run(_ context.Context, req Request, sink func(string) error) 
 	if f.err != nil {
 		return Result{}, f.err
 	}
-	return Result{Text: text.String(), Usage: f.usage}, nil
+	return Result{Text: text.String(), Usage: f.usage, ToolCalls: f.calls}, nil
 }
 
 func (f *fakeExec) Models(context.Context) ([]Model, error) {
@@ -180,12 +181,58 @@ func TestStreamFailureMidStreamIsAnErrorEvent(t *testing.T) {
 	}
 }
 
-func TestToolsAreRefusedBeforeAnySpawn(t *testing.T) {
+// Without Landlock (and no override) tool requests are refused before any
+// spawn, with the reason and the runbook pointer (decision §4.7).
+func TestToolsAreRefusedWhenTheHostHasNoLandlock(t *testing.T) {
 	f := &fakeExec{}
-	rec := do(t, testServer(f), "POST", "/v1/chat/completions",
+	s := testServer(f)
+	s.ToolsOff = "Landlock is unavailable (the kernel has no Landlock (needs Linux 5.13+))"
+	rec := do(t, s, "POST", "/v1/chat/completions",
 		`{"model":"gpt-6.1-sol","tools":[{"type":"function","function":{"name":"f"}}],"messages":[{"role":"user","content":"hi"}]}`, "secret")
-	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "chat_tools_unsupported") || f.runs != 0 {
-		t.Fatalf("%d %s runs=%d", rec.Code, rec.Body, f.runs)
+	body := rec.Body.String()
+	if rec.Code != 400 || !strings.Contains(body, "chat_tools_unsupported") || !strings.Contains(body, "client tools are disabled on this host: Landlock is unavailable") ||
+		!strings.Contains(body, "docs/codex-bridge-runbook.md#platform-requirements--read-this-first") || f.runs != 0 {
+		t.Fatalf("%d %s runs=%d", rec.Code, body, f.runs)
+	}
+	// Plain text still works on the same host.
+	f.deltas = []string{"ok"}
+	if rec := do(t, s, "POST", "/v1/chat/completions", hiBody, "secret"); rec.Code != 200 {
+		t.Fatalf("text request on a no-Landlock host: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestToolCallsAreReturnedInBothShapes(t *testing.T) {
+	f := &fakeExec{calls: []ToolCall{{ID: "call-a", Name: "get_weather", Arguments: `{"city":"KL"}`}}}
+	s := testServer(f)
+	body := `{"model":"gpt-6.1-sol","tools":[{"type":"function","function":{"name":"get_weather"}}],"messages":[{"role":"user","content":"weather?"}]}`
+	rec := do(t, s, "POST", "/v1/chat/completions", body, "secret")
+	var got struct {
+		Choices []struct {
+			Message struct {
+				Content   *string `json:"content"`
+				ToolCalls []struct {
+					ID       string `json:"id"`
+					Type     string `json:"type"`
+					Function struct{ Name, Arguments string }
+				} `json:"tool_calls"`
+			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	c := got.Choices[0]
+	if c.FinishReason != "tool_calls" || c.Message.Content != nil || len(c.Message.ToolCalls) != 1 ||
+		c.Message.ToolCalls[0].ID != "call-a" || c.Message.ToolCalls[0].Function.Arguments != `{"city":"KL"}` || len(f.last.Tools) != 1 {
+		t.Fatalf("non-stream = %+v (tools passed: %d)", c, len(f.last.Tools))
+	}
+
+	rec = do(t, s, "POST", "/v1/chat/completions", strings.Replace(body, `"model"`, `"stream":true,"model"`, 1), "secret")
+	stream := rec.Body.String()
+	if !strings.Contains(stream, `"tool_calls":[{"function":{"arguments":"{\"city\":\"KL\"}","name":"get_weather"},"id":"call-a","index":0,"type":"function"}]`) ||
+		!strings.Contains(stream, `"finish_reason":"tool_calls"`) || !strings.HasSuffix(strings.TrimSpace(stream), "data: [DONE]") {
+		t.Fatalf("stream = %s", stream)
 	}
 }
 

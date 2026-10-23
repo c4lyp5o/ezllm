@@ -19,8 +19,8 @@ import (
 // them off, the M0 sentinel ("create a file, touch a marker, curl a URL",
 // default instructions) produced no model-driven execve under strace; with
 // them on, Codex ran all three inside its own sandbox
-// (docs/codex-subscription-design.md §2.5). code_mode_host stays off until
-// stage 2 brings Landlock; in_app_updates keeps the pinned binary pinned.
+// (docs/codex-subscription-design.md §2.5). in_app_updates keeps the pinned
+// binary pinned.
 var LockdownFeatures = []string{
 	"shell_tool", "unified_exec", "unified_exec_tty", "shell_snapshot",
 	"apps", "plugins", "remote_plugin", "multi_agent",
@@ -32,10 +32,15 @@ var LockdownFeatures = []string{
 	"tool_call_mcp_elicitation", "in_app_updates",
 }
 
-// LockdownArgs is the argv tail for `codex app-server --stdio`.
-func LockdownArgs() []string {
+// LockdownArgs is the argv tail for a Codex child. codeMode leaves the
+// code-mode host on: client tools are reachable only through its JavaScript
+// isolate in 0.163.0 (§2.12), so it is on exactly for tool-bearing requests.
+func LockdownArgs(codeMode bool) []string {
 	args := make([]string, 0, 2*len(LockdownFeatures)+4)
 	for _, f := range LockdownFeatures {
+		if codeMode && f == "code_mode_host" {
+			continue
+		}
 		args = append(args, "--disable", f)
 	}
 	return append(args, "-c", "tools.web_search=false", "-c", `web_search="disabled"`)
@@ -43,7 +48,8 @@ func LockdownArgs() []string {
 
 // Runner spawns one app-server child per request (claude-bridge's shape): a
 // private temp HOME and CWD, an allowlisted environment, its own process
-// group, and a concurrency cap.
+// group, and a concurrency cap. A turn that stops on client tool calls parks
+// its child until the client's follow-up request answers them (§4.6).
 type Runner struct {
 	Bin           string
 	CodexHome     string
@@ -54,9 +60,19 @@ type Runner struct {
 	// Channel is ChannelAppServer (default) or ChannelExec, the fallback boot
 	// selects when the app-server lacks a method this bridge needs.
 	Channel string
+	// Sandbox, when set, runs every child inside Landlock.
+	Sandbox *Sandbox
+	// ToolHold bounds how long a parked turn waits for its tool results
+	// (default 10 minutes); MaxParked caps parked children (default 8, the
+	// oldest is evicted). An evicted or expired turn's follow-up replays.
+	ToolHold  time.Duration
+	MaxParked int
 
 	sem  chan struct{}
 	once sync.Once
+
+	pmu    sync.Mutex
+	parked map[string]*parkedTurn
 }
 
 // Usage is the turn's token envelope (tokenUsage.total of a one-turn,
@@ -69,10 +85,16 @@ type Usage struct {
 	ReasoningTokens int64 `json:"reasoningOutputTokens"`
 }
 
-// Result is what one turn produced.
+func (u Usage) minus(o Usage) Usage {
+	return Usage{InputTokens: u.InputTokens - o.InputTokens, CachedTokens: u.CachedTokens - o.CachedTokens,
+		OutputTokens: u.OutputTokens - o.OutputTokens, ReasoningTokens: u.ReasoningTokens - o.ReasoningTokens}
+}
+
+// Result is what one turn — or one segment of it, up to tool calls — produced.
 type Result struct {
-	Text  string
-	Usage Usage
+	Text      string
+	Usage     Usage
+	ToolCalls []ToolCall
 }
 
 func (r *Runner) logf(format string, args ...any) {
@@ -108,26 +130,37 @@ type child struct {
 	cwd      string
 	stderr   *tailBuffer
 	readDone chan struct{}
+	once     sync.Once
+}
+
+type spawnOpts struct {
+	tools bool
 }
 
 // spawn starts the child and completes the initialize handshake.
-func (r *Runner) spawn(ctx context.Context, onNotify func(string, json.RawMessage), onRequest RequestHandler) (*child, error) {
+func (r *Runner) spawn(ctx context.Context, opts spawnOpts, onNotify func(string, json.RawMessage), onRequest RequestHandler) (*child, error) {
 	tmp, err := os.MkdirTemp("", "codex-bridge-")
 	if err != nil {
 		return nil, fmt.Errorf("codex-bridge: cannot create work dir: %w", err)
 	}
 	c := &child{tmp: tmp, cwd: filepath.Join(tmp, "cwd"), stderr: &tailBuffer{}, readDone: make(chan struct{})}
-	home := filepath.Join(tmp, "home")
-	for _, d := range []string{c.cwd, home} {
+	home, tmpdir := filepath.Join(tmp, "home"), filepath.Join(tmp, "tmp")
+	for _, d := range []string{c.cwd, home, tmpdir} {
 		if err := os.Mkdir(d, 0o700); err != nil {
 			os.RemoveAll(tmp)
 			return nil, fmt.Errorf("codex-bridge: cannot create work dir: %w", err)
 		}
 	}
 
-	cmd := exec.Command(r.Bin, append([]string{"app-server", "--stdio"}, LockdownArgs()...)...)
+	bin, args := r.Bin, append([]string{"app-server", "--stdio"}, LockdownArgs(opts.tools)...)
+	env := childEnv(home, r.CodexHome)
+	if r.Sandbox != nil {
+		bin, args = r.Sandbox.wrap(bin, args, tmp, r.CodexHome)
+		env = append(env, "TMPDIR="+tmpdir) // the only writable temp dir inside the domain
+	}
+	cmd := exec.Command(bin, args...)
 	cmd.Dir = c.cwd
-	cmd.Env = childEnv(home, r.CodexHome)
+	cmd.Env = env
 	setProcessGroup(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -162,9 +195,11 @@ func (r *Runner) spawn(ctx context.Context, onNotify func(string, json.RawMessag
 		close(c.readDone)
 	}()
 
-	if _, err := c.conn.call(ctx, "initialize", map[string]any{
-		"clientInfo": map[string]any{"name": "ezllm-codex-bridge", "version": r.Version},
-	}); err != nil {
+	init := map[string]any{"clientInfo": map[string]any{"name": "ezllm-codex-bridge", "version": r.Version}}
+	if opts.tools {
+		init["capabilities"] = map[string]any{"experimentalApi": true} // dynamicTools is experimental
+	}
+	if _, err := c.conn.call(ctx, "initialize", init); err != nil {
 		c.close()
 		return nil, r.childErr(ctx, c, "initialize", err)
 	}
@@ -178,15 +213,17 @@ func (r *Runner) spawn(ctx context.Context, onNotify func(string, json.RawMessag
 // close ends the child and everything it spawned, reaps it, and removes the
 // work dir. Safe to call more than once.
 func (c *child) close() {
-	if c.stdin != nil {
-		_ = c.stdin.Close()
-	}
-	killGroup(c.cmd)
-	if c.cmd != nil && c.cmd.Process != nil {
-		_ = c.cmd.Wait()
-	}
-	<-c.readDone
-	os.RemoveAll(c.tmp)
+	c.once.Do(func() {
+		if c.stdin != nil {
+			_ = c.stdin.Close()
+		}
+		killGroup(c.cmd)
+		if c.cmd != nil && c.cmd.Process != nil {
+			_ = c.cmd.Wait()
+		}
+		<-c.readDone
+		os.RemoveAll(c.tmp)
+	})
 }
 
 func (r *Runner) childErr(ctx context.Context, c *child, step string, err error) error {
@@ -205,10 +242,10 @@ func (r *Runner) childErr(ctx context.Context, c *child, step string, err error)
 	return &NativeError{Status: 502, Type: "api_error", Code: "native_closed", Message: msg}
 }
 
-// declineRequests answers every server→client request in a text-only run:
+// declineRequests answers every server→client request a run does not serve:
 // approvals are declined (approvalPolicy=never should prevent them) and
 // nothing else is served.
-func declineRequests(method string, _ json.RawMessage) (any, *rpcError) {
+func declineRequests(_ json.RawMessage, method string, _ json.RawMessage) (any, *rpcError) {
 	if strings.Contains(strings.ToLower(method), "approval") {
 		return map[string]any{"decision": "decline"}, nil
 	}
@@ -219,7 +256,7 @@ func declineRequests(method string, _ json.RawMessage) (any, *rpcError) {
 func (r *Runner) Session(ctx context.Context, fn func(ctx context.Context, c *rpcConn) error) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	c, err := r.spawn(ctx, nil, declineRequests)
+	c, err := r.spawn(ctx, spawnOpts{}, nil, declineRequests)
 	if err != nil {
 		return err
 	}
@@ -230,7 +267,12 @@ func (r *Runner) Session(ctx context.Context, fn func(ctx context.Context, c *rp
 	return nil
 }
 
-// turnState collects one turn's notifications (called on the reader goroutine).
+// toolBatchWindow is how long the bridge waits after a tool call for siblings
+// (Promise.all in the model's script) before returning the batch.
+const toolBatchWindow = 250 * time.Millisecond
+
+// turnState collects one turn's notifications and tool calls. Its methods run
+// on the child's reader goroutine; wake tells the waiting request to look.
 type turnState struct {
 	mu       sync.Mutex
 	sink     func(delta string) error
@@ -238,15 +280,26 @@ type turnState struct {
 	text     strings.Builder
 	lastItem string
 	usage    Usage
+	reported Usage
 	fail     *NativeError
-	done     chan struct{}
 	finished bool
+
+	calls      []ToolCall
+	replyTo    map[string]json.RawMessage // callId → JSON-RPC id
+	batch      *time.Timer
+	callsReady bool
+
+	wake chan struct{}
 }
 
-func (t *turnState) finish() {
-	if !t.finished {
-		t.finished = true
-		close(t.done)
+func newTurnState(sink func(string) error) *turnState {
+	return &turnState{sink: sink, replyTo: map[string]json.RawMessage{}, wake: make(chan struct{}, 1)}
+}
+
+func (t *turnState) signal() {
+	select {
+	case t.wake <- struct{}{}:
+	default:
 	}
 }
 
@@ -274,7 +327,7 @@ func (t *turnState) handle(method string, params json.RawMessage) {
 		if t.sink != nil && t.sinkErr == nil {
 			if err := t.sink(delta); err != nil {
 				t.sinkErr = err
-				t.finish()
+				t.signal()
 			}
 		}
 	case "thread/tokenUsage/updated":
@@ -308,14 +361,101 @@ func (t *turnState) handle(method string, params json.RawMessage) {
 			}
 			t.fail = MapTurnError(te)
 		}
-		t.finish()
+		t.finished = true
+		t.signal()
 	}
 }
 
-// Run executes one request as a single turn on an ephemeral thread. sink, when
-// set, receives text deltas as they stream. An app-server child that dies
-// before its first byte is retried once on the exec channel (§4.1); after the
-// first byte the client already holds part of the answer, so it is not.
+// onRequest serves server→client requests for a tool-bearing turn: a dynamic
+// tool call is held (deferred) until the client answers it; the rest decline.
+func (t *turnState) onRequest(id json.RawMessage, method string, params json.RawMessage) (any, *rpcError) {
+	if method != "item/tool/call" {
+		return declineRequests(id, method, params)
+	}
+	var p struct {
+		CallID    string          `json:"callId"`
+		Tool      string          `json:"tool"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil || p.CallID == "" {
+		return nil, &rpcError{Code: -32602, Message: "codex-bridge: malformed tool call"}
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.calls = append(t.calls, ToolCall{ID: p.CallID, Name: p.Tool, Arguments: toolArguments(p.Arguments)})
+	t.replyTo[p.CallID] = id
+	if t.batch == nil {
+		t.batch = time.AfterFunc(toolBatchWindow, func() {
+			t.mu.Lock()
+			t.callsReady = true
+			t.mu.Unlock()
+			t.signal()
+		})
+	} else {
+		t.batch.Reset(toolBatchWindow)
+	}
+	return nil, errDeferred
+}
+
+// toolArguments renders a call's arguments as the JSON text OpenAI expects.
+// The code-mode script may pass an object or a string (its tool methods take
+// either); a string that already holds JSON passes through.
+func toolArguments(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) == nil && json.Valid([]byte(s)) && strings.HasPrefix(strings.TrimSpace(s), "{") {
+		return s
+	}
+	if len(raw) == 0 {
+		return "{}"
+	}
+	return string(raw)
+}
+
+// segment waits until the turn completes, stops on tool calls, or fails.
+// park reports a tool stop: the child must stay alive.
+func (r *Runner) segment(ctx context.Context, c *child, st *turnState) (res Result, park bool, err error) {
+	for {
+		st.mu.Lock()
+		finished, ready, sinkErr := st.finished, st.callsReady, st.sinkErr
+		st.mu.Unlock()
+		switch {
+		case sinkErr != nil:
+			return Result{}, false, sinkErr
+		case finished || ready:
+			st.mu.Lock()
+			defer st.mu.Unlock()
+			if st.fail != nil {
+				return Result{}, false, st.fail
+			}
+			res = Result{Text: st.text.String(), Usage: st.usage.minus(st.reported)}
+			st.reported = st.usage
+			st.text.Reset()
+			st.lastItem = ""
+			if ready && !finished {
+				res.ToolCalls = st.calls
+				return res, true, nil
+			}
+			return res, false, nil
+		}
+		select {
+		case <-st.wake:
+		case <-c.readDone:
+			st.mu.Lock()
+			finished := st.finished
+			st.mu.Unlock()
+			if !finished {
+				return Result{}, false, r.childErr(ctx, c, "turn", errors.New("the CLI exited mid-turn"))
+			}
+		case <-ctx.Done():
+			return Result{}, false, r.childErr(ctx, c, "turn", ctx.Err())
+		}
+	}
+}
+
+// Run executes one request. A request carrying the results for a parked
+// turn's tool calls resumes that turn; otherwise a new ephemeral thread runs.
+// An app-server child that dies before its first byte is retried once on the
+// exec channel (§4.1) — text requests only, exec has no client tools.
 func (r *Runner) Run(ctx context.Context, req Request, sink func(delta string) error) (Result, error) {
 	select {
 	case r.slots() <- struct{}{}:
@@ -326,7 +466,18 @@ func (r *Runner) Run(ctx context.Context, req Request, sink func(delta string) e
 	}
 	ctx, cancel := context.WithTimeout(ctx, r.timeout())
 	defer cancel()
+
+	if len(req.ToolResults) > 0 {
+		if pt := r.takeParked(req.ToolResults); pt != nil {
+			return r.resume(ctx, pt, req, sink)
+		}
+		r.logf("codex-bridge: tool results match no parked turn, replaying the transcript")
+	}
 	if r.Channel == ChannelExec {
+		if len(req.Tools) > 0 {
+			return Result{}, &NativeError{Status: 400, Type: "invalid_request_error", Code: "chat_tools_unsupported",
+				Message: "codex-bridge: client tools need the app-server channel; this bridge runs on the exec fallback"}
+		}
 		return r.runExec(ctx, req, sink)
 	}
 	emitted := false
@@ -338,7 +489,7 @@ func (r *Runner) Run(ctx context.Context, req Request, sink func(delta string) e
 		return nil
 	})
 	var ne *NativeError
-	if err != nil && !emitted && ctx.Err() == nil && errors.As(err, &ne) && ne.Code == "native_closed" {
+	if err != nil && !emitted && len(req.Tools) == 0 && ctx.Err() == nil && errors.As(err, &ne) && ne.Code == "native_closed" {
 		r.logf("codex-bridge: app-server failed before the first byte, retrying on exec", "err", ne.Message)
 		return r.runExec(ctx, req, sink)
 	}
@@ -346,21 +497,40 @@ func (r *Runner) Run(ctx context.Context, req Request, sink func(delta string) e
 }
 
 func (r *Runner) runAppServer(ctx context.Context, req Request, sink func(delta string) error) (Result, error) {
-	st := &turnState{sink: sink, done: make(chan struct{})}
-	c, err := r.spawn(ctx, st.handle, declineRequests)
+	st := newTurnState(sink)
+	tools := len(req.Tools) > 0
+	handler := RequestHandler(declineRequests)
+	if tools {
+		handler = st.onRequest
+	}
+	c, err := r.spawn(ctx, spawnOpts{tools: tools}, st.handle, handler)
 	if err != nil {
 		return Result{}, err
 	}
-	defer c.close()
+	parked := false
+	defer func() {
+		if !parked {
+			c.close()
+		}
+	}()
 
-	raw, err := c.conn.call(ctx, "thread/start", map[string]any{
+	thread := map[string]any{
 		"model":            req.Model,
 		"cwd":              c.cwd,
 		"ephemeral":        true,
 		"sandbox":          "read-only",
 		"approvalPolicy":   "never",
 		"baseInstructions": req.Instructions,
-	})
+	}
+	if tools {
+		specs := make([]map[string]any, 0, len(req.Tools))
+		for _, t := range req.Tools {
+			specs = append(specs, map[string]any{"type": "function", "name": t.Name,
+				"description": t.Description, "inputSchema": t.Parameters})
+		}
+		thread["dynamicTools"] = specs
+	}
+	raw, err := c.conn.call(ctx, "thread/start", thread)
 	if err != nil {
 		return Result{}, r.startErr(ctx, c, "thread/start", err)
 	}
@@ -380,28 +550,15 @@ func (r *Runner) runAppServer(ctx context.Context, req Request, sink func(delta 
 		return Result{}, r.startErr(ctx, c, "turn/start", err)
 	}
 
-	select {
-	case <-st.done:
-	case <-c.readDone:
-		st.mu.Lock()
-		finished := st.finished
-		st.mu.Unlock()
-		if !finished {
-			return Result{}, r.childErr(ctx, c, "turn", errors.New("the CLI exited mid-turn"))
-		}
-	case <-ctx.Done():
-		return Result{}, r.childErr(ctx, c, "turn", ctx.Err())
+	res, park, err := r.segment(ctx, c, st)
+	if err != nil {
+		return Result{}, err
 	}
-
-	st.mu.Lock()
-	defer st.mu.Unlock()
-	if st.sinkErr != nil {
-		return Result{}, st.sinkErr
+	if park {
+		r.park(c, st, res.ToolCalls)
+		parked = true
 	}
-	if st.fail != nil {
-		return Result{}, st.fail
-	}
-	return Result{Text: st.text.String(), Usage: st.usage}, nil
+	return res, nil
 }
 
 // startErr maps a JSON-RPC refusal of thread/start or turn/start (a model or

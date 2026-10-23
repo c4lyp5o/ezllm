@@ -67,7 +67,7 @@ func RunPreflight(ctx context.Context, bin, codexHome string) (Preflight, error)
 	p.Version = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(out), "codex-cli"))
 	p.Qualified = p.Version == QualifiedVersion
 
-	out, err = run(append(LockdownArgs(), "features", "list")...)
+	out, err = run(append(LockdownArgs(false), "features", "list")...)
 	if err != nil || strings.Contains(out, "Unknown feature flag") {
 		return p, fmt.Errorf("codex bridge: the CLI refused the lockdown flags (%s): this release renamed or dropped a feature the no-execution guarantee depends on", strings.TrimSpace(firstLine(out)))
 	}

@@ -3,10 +3,10 @@
 Operating the ChatGPT subscription surface (codex-bridge). Decisions live in
 `codex-subscription-design.md`; this is the how.
 
-**Status:** stage 1 (text, streaming, images, reasoning effort, plan windows) is
-built on `feat/codex-bridge` and not in a release yet; client tools land in stage 2.
-Read the [platform requirements](#platform-requirements--read-this-first) before
-you plan on tools.
+**Status:** stages 1–2 (text, streaming, images, reasoning effort, plan windows,
+client tools with continuation) are built on `feat/codex-bridge` and not in a
+release yet. Read the [platform requirements](#platform-requirements--read-this-first)
+before you rely on tools.
 
 ## What it is
 
@@ -42,6 +42,8 @@ the spike tried; Landlock makes that refusal a **kernel guarantee** instead of a
 promise from Codex's code. With client tools off, `exec` is disabled and
 `apply_patch` is unreachable, so the guarantee holds without Landlock.
 Measurements: `codex-subscription-design.md` §2.5 and §2.12.
+When Landlock is available, **every** Codex child runs inside it, text-only
+requests included; tools additionally switch the code-mode runtime on.
 
 ### What works where
 
@@ -114,13 +116,17 @@ long as it is set.
 
 ## Prerequisites
 
-- **The official CLI, pinned by path** (qualified: **0.163.0**, the standalone musl
-  build). Pin a **copy** outside `~/.codex/packages/`, which the CLI's updater
-  manages:
+- **The official CLI release, pinned by path** (qualified: **0.163.0**, the
+  standalone musl build). Pin a **copy of the whole release directory** outside
+  `~/.codex/packages/`, which the CLI's updater manages. The directory matters:
+  `bin/` holds the CLI **and** `codex-code-mode-host`, the runtime client tools
+  need — copy only the CLI and tools stay off (`/status` → `client_tools:
+  disabled (code-mode host missing)`).
 
   ```sh
   mkdir -p ~/.local/share/codex-bridge
-  cp "$(readlink -f "$(command -v codex)")" ~/.local/share/codex-bridge/codex-0.163.0
+  cp -a "$(dirname "$(dirname "$(readlink -f "$(command -v codex)")")")" ~/.local/share/codex-bridge/0.163.0
+  ls ~/.local/share/codex-bridge/0.163.0/bin    # codex  codex-code-mode-host
   ```
 
   The bridge also starts the CLI with `--disable in_app_updates`, so a running
@@ -140,10 +146,11 @@ long as it is set.
 
 ## Enable
 
-In `compose.yml`: uncomment the two codex mounts, set `EZLLM_CODEX_BRIDGE=on`,
-recreate the container. Boot fails loudly — the process does not start — when:
+In `compose.yml`: uncomment the two codex mounts (the release directory →
+`/opt/codex`, the login → `/codex-sub`), set `EZLLM_CODEX_BRIDGE=on`, recreate
+the container. Boot fails loudly — the process does not start — when:
 
-- the binary is missing (`EZLLM_CODEX_BIN`, default `/opt/codex/codex`);
+- the binary is missing (`EZLLM_CODEX_BIN`, default `/opt/codex/bin/codex`);
 - the CLI refuses a lockdown flag, or reports a locked feature as still enabled
   (one exception, `unified_exec`, is explained in design §2.5);
 - the app-server lacks a method **and** `codex exec` lacks a fallback flag;
@@ -154,11 +161,12 @@ recreate the container. Boot fails loudly — the process does not start — whe
 | variable | default | meaning |
 | --- | --- | --- |
 | `EZLLM_CODEX_BRIDGE` | `off` | `on` starts the surface |
-| `EZLLM_CODEX_BIN` | `/opt/codex/codex` | the mounted CLI |
+| `EZLLM_CODEX_BIN` | `/opt/codex/bin/codex` | the CLI inside the mounted release |
 | `EZLLM_CODEX_HOME` | `/codex-sub` | the mounted login (`CODEX_HOME`) |
 | `EZLLM_CODEX_BRIDGE_ADDR` | `127.0.0.1:8791` | loopback listener |
 | `EZLLM_CODEX_BRIDGE_TOKEN_FILE` | `/data/codex-bridge.token` | shared secret, generated on first boot |
-| `EZLLM_CODEX_BRIDGE_CONCURRENCY` | `2` | CLI children at once |
+| `EZLLM_CODEX_BRIDGE_CONCURRENCY` | `2` | CLI children at once (a turn parked on tool calls holds none) |
+| `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK` | `off` | `on` = client tools without Landlock ([what you give up](#the-override-and-what-you-give-up)) |
 
 ```sh
 docker logs ezllm | grep -i "codex bridge"   # cli version, release, login, channel
@@ -176,6 +184,45 @@ docker logs ezllm | grep -i "codex bridge"   # cli version, release, login, chan
    - Sync the catalog (every model the login serves, hidden ones included), then **Test**.
 2. **Combo / fallback chains:** allowed (operator decision). Cap the account with
    **Rules** before agents use it — the bridge itself has no cap.
+
+## Client tools
+
+Send ordinary OpenAI `tools`. What happens behind the bridge:
+
+1. The client's function tools are declared to Codex as dynamic tools. In 0.163.0
+   the model calls them from inside its code-mode JavaScript
+   (`await tools.get_weather({city: "KL"})`), which runs in a V8 isolate with no
+   file system, network or process access, inside the Landlock domain.
+2. Each call comes back to the client as a normal `tool_calls` entry,
+   `finish_reason: "tool_calls"`. Calls the script makes together
+   (`Promise.all`) arrive together in one response.
+3. **Continuation:** the Codex child stays alive with the script paused on the
+   pending calls. Your next request — the usual one carrying the `tool` messages,
+   matched by `tool_call_id` — answers those calls, and the **same script
+   resumes**, its variables intact. A script that awaits one result before making
+   the next call simply stops twice.
+4. A paused turn is held for **10 minutes**, at most **8** at once (the oldest is
+   dropped). A follow-up that finds nothing held — expired, dropped, or the bridge
+   restarted — still works: the bridge replays the conversation, calls and
+   results included, as a transcript on a fresh child. Correct, but slower and
+   without the paused script's state. `/status` → `parked_tool_turns` shows how
+   many are waiting.
+
+Mappings and limits:
+
+| OpenAI | Codex |
+| --- | --- |
+| `tools` (function) | dynamic tools; other tool types → 400 |
+| `tool_choice: "auto"` | default |
+| `tool_choice: "none"` | no tools declared |
+| `tool_choice: "required"` / `{function: {name}}` | an instruction to call (Codex has no forced choice; best effort) |
+| `parallel_tool_calls: false` | an instruction to call one at a time (best effort) |
+| legacy `functions` | 400 — send `tools` |
+
+Usage attribution: Codex reports a sampling's tokens when the sampling ends, and
+the sampling that makes a tool call ends only after the result comes back. So the
+response carrying `tool_calls` can report 0 tokens and the follow-up carries the
+whole turn. The sum is exact; the split between the two requests is not.
 
 ## Plan windows on the provider card
 
@@ -200,7 +247,8 @@ python3 tests/prove_codex_bridge.py                                     # throug
 | 429 `rate_limit` naming a usage limit | the plan window is spent | wait for `resetsAt` on the card; a combo skips the hop |
 | 401 `unauthorized` | the login expired or was revoked | `CODEX_HOME=~/.codex-sub codex login --device-auth` |
 | 400 `model_not_found` | the model is not on this login | Sync the catalog |
-| 400 `chat_tools_unsupported` | the request carries tools | stage 2; see the platform requirements |
+| 400 `chat_tools_unsupported` | tools are off on this host: no Landlock, the code-mode host is missing, or the exec fallback is active | `/status` → `landlock`, `client_tools`, `channel`; see the platform requirements |
+| a tool follow-up is slow and the model "forgets" what it was doing | the paused turn expired (10 min) or was dropped (8 held) and the bridge replayed | answer tool calls promptly; check `parked_tool_turns` |
 | 503 `binary_missing` | the mount is gone | re-copy the pinned binary, recreate |
 | 502 `native_closed` | the CLI died mid-answer | `docker logs ezllm`; the message carries the CLI's stderr |
 | answers arrive in one chunk, `/v1/models` 404 | the bridge is on the **exec fallback** (`/status` → `channel`) | the CLI release dropped an app-server method; pin the qualified release |

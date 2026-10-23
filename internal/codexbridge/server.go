@@ -37,6 +37,9 @@ type Server struct {
 	Info    map[string]any
 	Logf    func(format string, args ...any)
 	Now     func() time.Time
+	// ToolsOff, when set, is why client tools are refused on this host
+	// (decision §4.7: no Landlock and no operator override).
+	ToolsOff string
 
 	mu        sync.Mutex
 	catalog   []Model
@@ -65,7 +68,14 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "version": s.Version})
 	})
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, s.Info)
+		info := make(map[string]any, len(s.Info)+1)
+		for k, v := range s.Info {
+			info[k] = v
+		}
+		if p, ok := s.Runner.(interface{ ParkedTurns() int }); ok {
+			info["parked_tool_turns"] = p.ParkedTurns()
+		}
+		writeJSON(w, http.StatusOK, info)
 	})
 	mux.HandleFunc("GET /v1/models", s.authed(s.listModels))
 	mux.HandleFunc("GET /v1/usage", s.authed(s.usage))
@@ -183,6 +193,12 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", err.Error(), code))
 		return
 	}
+	if len(req.Tools) > 0 && s.ToolsOff != "" {
+		writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error",
+			"client tools are disabled on this host: "+s.ToolsOff+". See docs/codex-bridge-runbook.md#platform-requirements--read-this-first",
+			"chat_tools_unsupported"))
+		return
+	}
 	if err := s.validate(r.Context(), req); err != nil {
 		s.writeErr(w, err)
 		return
@@ -196,14 +212,19 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 			s.writeErr(w, err)
 			return
 		}
+		msg := map[string]any{"role": "assistant", "content": res.Text}
+		finish := "stop"
+		if len(res.ToolCalls) > 0 {
+			msg["tool_calls"] = openAIToolCalls(res.ToolCalls, false)
+			if res.Text == "" {
+				msg["content"] = nil
+			}
+			finish = "tool_calls"
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"id": id, "object": "chat.completion", "created": created, "model": req.Model,
-			"choices": []map[string]any{{
-				"index":         0,
-				"message":       map[string]any{"role": "assistant", "content": res.Text},
-				"finish_reason": "stop",
-			}},
-			"usage": openAIUsage(res.Usage),
+			"choices": []map[string]any{{"index": 0, "message": msg, "finish_reason": finish}},
+			"usage":   openAIUsage(res.Usage),
 		})
 		return
 	}
@@ -223,12 +244,31 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sw.begin()
-	sw.chunk(map[string]any{}, "stop")
+	if len(res.ToolCalls) > 0 {
+		sw.chunk(map[string]any{"tool_calls": openAIToolCalls(res.ToolCalls, true)}, "")
+		sw.chunk(map[string]any{}, "tool_calls")
+	} else {
+		sw.chunk(map[string]any{}, "stop")
+	}
 	if req.IncludeUsage {
 		sw.event(map[string]any{"id": id, "object": "chat.completion.chunk", "created": created,
 			"model": req.Model, "choices": []any{}, "usage": openAIUsage(res.Usage)})
 	}
 	sw.done()
+}
+
+// openAIToolCalls renders calls as OpenAI tool_calls (indexed in a stream).
+func openAIToolCalls(calls []ToolCall, indexed bool) []map[string]any {
+	out := make([]map[string]any, 0, len(calls))
+	for i, c := range calls {
+		tc := map[string]any{"id": c.ID, "type": "function",
+			"function": map[string]any{"name": c.Name, "arguments": c.Arguments}}
+		if indexed {
+			tc["index"] = i
+		}
+		out = append(out, tc)
+	}
+	return out
 }
 
 // openAIUsage maps the turn envelope to OpenAI usage. Reasoning tokens are

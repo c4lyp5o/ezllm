@@ -18,6 +18,9 @@ import (
 // reads its mode from $CODEX_HOME/mode and records what it was started with in
 // $CODEX_HOME/started.json.
 func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == LandlockHelperArg {
+		LandlockMain(os.Args[2:])
+	}
 	if len(os.Args) > 2 && os.Args[1] == "app-server" && os.Args[2] == "--stdio" && os.Getenv("CODEX_HOME") != "" {
 		fakeAppServer(os.Getenv("CODEX_HOME"))
 		os.Exit(0)
@@ -37,6 +40,21 @@ func fakeAppServer(home string) {
 	wd, _ := os.Getwd()
 	started, _ := json.Marshal(map[string]any{"args": os.Args[1:], "env": os.Environ(), "pid": os.Getpid(), "cwd": wd})
 	_ = os.WriteFile(filepath.Join(home, "started.json"), started, 0o600)
+	if f, err := os.OpenFile(filepath.Join(home, "spawns"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+		fmt.Fprintln(f, os.Getpid())
+		f.Close()
+	}
+	if mode == "write_probe" {
+		// Running inside the Landlock domain: try to escape, record the outcome
+		// in CODEX_HOME (writable by design).
+		target, _ := os.ReadFile(filepath.Join(home, "probe_target"))
+		parts := strings.SplitN(strings.TrimSpace(string(target)), "\n", 2)
+		werr := os.WriteFile(parts[0], []byte("escaped"), 0o600)
+		_, rerr := os.ReadFile(parts[1])
+		rec, _ := json.Marshal(map[string]any{"write": fmt.Sprint(werr), "read": fmt.Sprint(rerr)})
+		_ = os.WriteFile(filepath.Join(home, "probe_result.json"), rec, 0o600)
+		mode = "ok"
+	}
 
 	out := bufio.NewWriter(os.Stdout)
 	send := func(v any) {
@@ -47,6 +65,30 @@ func fakeAppServer(home string) {
 	notify := func(method string, params any) {
 		send(map[string]any{"jsonrpc": "2.0", "method": method, "params": params})
 	}
+	toolCall := func(srvID, callID, city string) {
+		send(map[string]any{"jsonrpc": "2.0", "id": srvID, "method": "item/tool/call", "params": map[string]any{
+			"threadId": "thr-1", "turnId": "turn-1", "callId": callID, "tool": "get_weather", "arguments": map[string]any{"city": city}}})
+	}
+	finishWith := func(text string) {
+		notify("item/agentMessage/delta", map[string]any{"itemId": "m2", "delta": text, "threadId": "thr-1", "turnId": "turn-1"})
+		notify("thread/tokenUsage/updated", map[string]any{"threadId": "thr-1", "turnId": "turn-1", "tokenUsage": map[string]any{
+			"total": map[string]any{"inputTokens": 9000, "cachedInputTokens": 4000, "outputTokens": 40, "reasoningOutputTokens": 0},
+			"last":  map[string]any{"inputTokens": 4500, "cachedInputTokens": 4000, "outputTokens": 20, "reasoningOutputTokens": 0}}})
+		notify("turn/completed", map[string]any{"threadId": "thr-1", "turn": map[string]any{"id": "turn-1", "status": "completed", "items": []any{}}})
+	}
+	results := map[string]string{} // tool-call replies by server request id
+	resultText := func(raw json.RawMessage) string {
+		var r struct {
+			ContentItems []struct {
+				Text string `json:"text"`
+			} `json:"contentItems"`
+		}
+		_ = json.Unmarshal(raw, &r)
+		if len(r.ContentItems) == 0 {
+			return ""
+		}
+		return r.ContentItems[0].Text
+	}
 	sc := bufio.NewScanner(os.Stdin)
 	sc.Buffer(make([]byte, 0, 1<<20), 64<<20)
 	for sc.Scan() {
@@ -54,8 +96,25 @@ func fakeAppServer(home string) {
 			ID     json.RawMessage `json:"id"`
 			Method string          `json:"method"`
 			Params json.RawMessage `json:"params"`
+			Result json.RawMessage `json:"result"`
 		}
 		if json.Unmarshal(sc.Bytes(), &m) != nil || len(m.ID) == 0 {
+			continue
+		}
+		if m.Method == "" { // the bridge answering one of our tool calls
+			var id string
+			_ = json.Unmarshal(m.ID, &id)
+			results[id] = resultText(m.Result)
+			switch {
+			case mode == "tools" && id == "srv-1":
+				finishWith("KL is " + results["srv-1"])
+			case mode == "tools_parallel" && len(results) == 2:
+				finishWith("KL " + results["srv-1"] + ", Paris " + results["srv-2"])
+			case mode == "tools_seq" && id == "srv-1":
+				toolCall("srv-2", "call-b", "Paris")
+			case mode == "tools_seq" && id == "srv-2":
+				finishWith("KL " + results["srv-1"] + " then Paris " + results["srv-2"])
+			}
 			continue
 		}
 		reply := func(result any) { send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": result}) }
@@ -89,6 +148,15 @@ func fakeAppServer(home string) {
 			_ = os.WriteFile(filepath.Join(home, "turn_start.json"), m.Params, 0o600)
 			reply(map[string]any{"turn": map[string]any{"id": "turn-1", "status": "inProgress", "items": []any{}}})
 			switch mode {
+			case "tools", "tools_seq":
+				notify("item/agentMessage/delta", map[string]any{"itemId": "m1", "delta": "Checking.", "threadId": "thr-1", "turnId": "turn-1"})
+				notify("thread/tokenUsage/updated", map[string]any{"threadId": "thr-1", "turnId": "turn-1", "tokenUsage": map[string]any{
+					"total": map[string]any{"inputTokens": 4500, "cachedInputTokens": 0, "outputTokens": 20, "reasoningOutputTokens": 0},
+					"last":  map[string]any{"inputTokens": 4500, "cachedInputTokens": 0, "outputTokens": 20, "reasoningOutputTokens": 0}}})
+				toolCall("srv-1", "call-a", "KL")
+			case "tools_parallel":
+				toolCall("srv-1", "call-a", "KL")
+				toolCall("srv-2", "call-b", "Paris")
 			case "hang":
 				for i := 0; ; i++ {
 					notify("item/agentMessage/delta", map[string]any{"itemId": "m1", "delta": fmt.Sprint(i), "threadId": "thr-1", "turnId": "turn-1"})

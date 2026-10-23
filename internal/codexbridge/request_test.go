@@ -66,10 +66,10 @@ func TestParseRequestCarriesImages(t *testing.T) {
 
 func TestParseRequestRefusals(t *testing.T) {
 	for name, tc := range map[string]struct{ body, code string }{
-		"tools":        {`{"model":"m","tools":[{"type":"function","function":{"name":"f"}}],"messages":[{"role":"user","content":"x"}]}`, "chat_tools_unsupported"},
-		"tool_choice":  {`{"model":"m","tool_choice":"auto","messages":[{"role":"user","content":"x"}]}`, "chat_tools_unsupported"},
-		"functions":    {`{"model":"m","functions":[{"name":"f"}],"messages":[{"role":"user","content":"x"}]}`, "chat_tools_unsupported"},
-		"parallel":     {`{"model":"m","parallel_tool_calls":true,"messages":[{"role":"user","content":"x"}]}`, "chat_tools_unsupported"},
+		"functions":    {`{"model":"m","functions":[{"name":"f"}],"messages":[{"role":"user","content":"x"}]}`, "invalid_request"},
+		"web tool":     {`{"model":"m","tools":[{"type":"web_search"}],"messages":[{"role":"user","content":"x"}]}`, "invalid_request"},
+		"bad choice":   {`{"model":"m","tools":[{"type":"function","function":{"name":"f"}}],"tool_choice":42,"messages":[{"role":"user","content":"x"}]}`, "invalid_request"},
+		"tool no id":   {`{"model":"m","messages":[{"role":"user","content":"x"},{"role":"assistant","tool_calls":[{"id":"c1","function":{"name":"f","arguments":"{}"}}]},{"role":"tool","content":"r"}]}`, "invalid_request"},
 		"no model":     {`{"messages":[{"role":"user","content":"x"}]}`, "invalid_request"},
 		"n=2":          {`{"model":"m","n":2,"messages":[{"role":"user","content":"x"}]}`, "invalid_request"},
 		"empty":        {`{"model":"m","messages":[]}`, "invalid_request"},
@@ -114,6 +114,51 @@ func TestMapTurnError(t *testing.T) {
 		ne := MapTurnError(turnError{Message: "boom", CodexErrorInfo: []byte(raw)})
 		if ne.Status != want || !strings.Contains(ne.Message, "boom") {
 			t.Errorf("%s → %d %q, want %d carrying the message", raw, ne.Status, ne.Message, want)
+		}
+	}
+}
+
+func TestParseRequestMapsToolsAndChoice(t *testing.T) {
+	req, err := ParseRequest([]byte(`{"model":"m","tool_choice":{"type":"function","function":{"name":"get_weather"}},"parallel_tool_calls":false,
+		"tools":[{"type":"function","function":{"name":"get_weather","description":"weather","parameters":{"type":"object","properties":{"city":{"type":"string"}}}}},
+		         {"type":"function","function":{"name":"now"}}],
+		"messages":[{"role":"user","content":"weather?"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Tools) != 2 || req.Tools[0].Name != "get_weather" || !strings.Contains(string(req.Tools[0].Parameters), "city") ||
+		string(req.Tools[1].Parameters) != `{"type":"object","properties":{}}` {
+		t.Fatalf("tools = %+v", req.Tools)
+	}
+	if !strings.Contains(req.Instructions, "You must call the tool get_weather") || !strings.Contains(req.Instructions, "at most one tool") {
+		t.Fatalf("instructions lack the tool_choice/parallel guidance: %q", req.Instructions)
+	}
+	none, _ := ParseRequest([]byte(`{"model":"m","tool_choice":"none","tools":[{"type":"function","function":{"name":"f"}}],"messages":[{"role":"user","content":"x"}]}`))
+	if len(none.Tools) != 0 {
+		t.Fatal("tool_choice none must declare no tools")
+	}
+}
+
+// A request ending in tool results is a continuation: the results are keyed by
+// tool_call_id, and the transcript (the stateless fallback) carries the calls.
+func TestParseRequestContinuation(t *testing.T) {
+	req, err := ParseRequest([]byte(`{"model":"m","tools":[{"type":"function","function":{"name":"get_weather"}}],"messages":[
+		{"role":"user","content":"weather in KL and Paris?"},
+		{"role":"assistant","content":null,"tool_calls":[
+			{"id":"call-a","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"KL\"}"}},
+			{"id":"call-b","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}]},
+		{"role":"tool","tool_call_id":"call-a","content":"31C"},
+		{"role":"tool","tool_call_id":"call-b","content":"18C"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.ToolResults) != 2 || req.ToolResults["call-a"] != "31C" || req.ToolResults["call-b"] != "18C" {
+		t.Fatalf("tool results = %v", req.ToolResults)
+	}
+	text := req.Input[0].Text
+	for _, want := range []string{"called tool get_weather (call-a)", `role="tool result call-b"`, "18C", "Continue from there."} {
+		if !strings.Contains(text, want) {
+			t.Errorf("replay transcript lacks %q:\n%s", want, text)
 		}
 	}
 }

@@ -17,6 +17,27 @@ type Request struct {
 	Effort       string
 	Instructions string
 	Input        []UserInput
+
+	// Tools are the client's function tools (stage 2): declared to Codex as
+	// dynamicTools, called by the model from code-mode, answered by the client.
+	Tools []ToolSpec
+	// ToolResults are the trailing tool messages, by tool_call_id: present
+	// when this request continues a turn that stopped on tool calls.
+	ToolResults map[string]string
+}
+
+// ToolSpec is one client function tool.
+type ToolSpec struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Parameters  json.RawMessage `json:"parameters"`
+}
+
+// ToolCall is one call the model made, returned to the client as tool_calls.
+type ToolCall struct {
+	ID        string
+	Name      string
+	Arguments string
 }
 
 // UserInput is one app-server turn/start input item.
@@ -49,7 +70,16 @@ type chatRequest struct {
 	Tools           json.RawMessage `json:"tools"`
 	ToolChoice      json.RawMessage `json:"tool_choice"`
 	Functions       json.RawMessage `json:"functions"`
-	ParallelTools   json.RawMessage `json:"parallel_tool_calls"`
+	ParallelTools   *bool           `json:"parallel_tool_calls"`
+}
+
+type chatTool struct {
+	Type     string `json:"type"`
+	Function struct {
+		Name        string          `json:"name"`
+		Description string          `json:"description"`
+		Parameters  json.RawMessage `json:"parameters"`
+	} `json:"function"`
 }
 
 type streamOptions struct {
@@ -95,9 +125,8 @@ func ParseRequest(body []byte) (Request, error) {
 	if strings.TrimSpace(cr.Model) == "" {
 		return Request{}, Unsupported{Code: "invalid_request", Msg: "model is required"}
 	}
-	if present(cr.Tools) || present(cr.ToolChoice) || present(cr.Functions) || present(cr.ParallelTools) {
-		return Request{}, Unsupported{Code: "chat_tools_unsupported",
-			Msg: "client tools are not served by this build of the bridge yet (stage 2); send the request without tools, tool_choice, functions or parallel_tool_calls"}
+	if present(cr.Functions) {
+		return Request{}, Unsupported{Code: "invalid_request", Msg: "the legacy functions field is not supported; send tools"}
 	}
 	if cr.N != nil && *cr.N != 1 {
 		return Request{}, Unsupported{Code: "invalid_request", Msg: "n must be 1: the subscription generates one choice per turn"}
@@ -129,12 +158,28 @@ func ParseRequest(body []byte) (Request, error) {
 			return Request{}, Unsupported{Code: "invalid_request", Msg: fmt.Sprintf("unknown message role %q", m.Role)}
 		}
 	}
-	if len(turns) == 0 || turns[len(turns)-1].Role != "user" {
-		return Request{}, Unsupported{Code: "invalid_request", Msg: "the last message must be from the user"}
+	if len(turns) == 0 || (turns[len(turns)-1].Role != "user" && turns[len(turns)-1].Role != "tool") {
+		return Request{}, Unsupported{Code: "invalid_request", Msg: "the last message must be from the user or a tool result"}
 	}
 	req.Instructions = strings.Join(system, "\n\n")
 	if req.Instructions == "" {
 		req.Instructions = DefaultInstructions
+	}
+	if err := parseTools(&req, cr); err != nil {
+		return Request{}, err
+	}
+	if turns[len(turns)-1].Role == "tool" {
+		req.ToolResults = map[string]string{}
+		for i := len(turns) - 1; i >= 0 && turns[i].Role == "tool"; i-- {
+			text, _, err := contentText(turns[i].Content)
+			if err != nil {
+				return Request{}, err
+			}
+			if turns[i].ToolCallID == "" {
+				return Request{}, Unsupported{Code: "invalid_request", Msg: "a tool message needs tool_call_id"}
+			}
+			req.ToolResults[turns[i].ToolCallID] = text
+		}
 	}
 
 	text, images, err := buildTranscript(turns)
@@ -146,6 +191,61 @@ func ParseRequest(body []byte) (Request, error) {
 		req.Input = append(req.Input, UserInput{Type: "image", URL: url})
 	}
 	return req, nil
+}
+
+// parseTools maps OpenAI function tools and tool_choice. Codex has no forced
+// tool choice, so "required" and a named function become an instruction; "none"
+// declares no tools at all.
+func parseTools(req *Request, cr chatRequest) error {
+	if !present(cr.Tools) {
+		return nil
+	}
+	var tools []chatTool
+	if err := json.Unmarshal(cr.Tools, &tools); err != nil {
+		return Unsupported{Code: "invalid_request", Msg: "tools must be an array of function tools"}
+	}
+	choice := "auto"
+	if present(cr.ToolChoice) {
+		var s string
+		var named struct {
+			Function struct {
+				Name string `json:"name"`
+			} `json:"function"`
+		}
+		switch {
+		case json.Unmarshal(cr.ToolChoice, &s) == nil:
+			choice = s
+		case json.Unmarshal(cr.ToolChoice, &named) == nil && named.Function.Name != "":
+			choice = "function:" + named.Function.Name
+		default:
+			return Unsupported{Code: "invalid_request", Msg: "tool_choice must be auto, none, required or {type:function,function:{name}}"}
+		}
+	}
+	if choice == "none" {
+		return nil
+	}
+	for _, t := range tools {
+		if t.Type != "function" || t.Function.Name == "" {
+			return Unsupported{Code: "invalid_request", Msg: fmt.Sprintf("tool type %q is not supported: only function tools pass through", t.Type)}
+		}
+		params := t.Function.Parameters
+		if !present(params) {
+			params = json.RawMessage(`{"type":"object","properties":{}}`)
+		}
+		req.Tools = append(req.Tools, ToolSpec{Name: t.Function.Name, Description: t.Function.Description, Parameters: params})
+	}
+	switch {
+	case choice == "required":
+		req.Instructions += "\n\nYou must call at least one of the provided tools before you answer."
+	case strings.HasPrefix(choice, "function:"):
+		req.Instructions += "\n\nYou must call the tool " + strings.TrimPrefix(choice, "function:") + " before you answer."
+	case choice != "auto":
+		return Unsupported{Code: "invalid_request", Msg: fmt.Sprintf("tool_choice %q is not supported", choice)}
+	}
+	if cr.ParallelTools != nil && !*cr.ParallelTools {
+		req.Instructions += "\n\nCall at most one tool at a time."
+	}
+	return nil
 }
 
 // normalizeEffort maps OpenAI's effort words onto Codex's. Codex has no
@@ -173,9 +273,17 @@ func buildTranscript(turns []chatMessage) (string, []string, error) {
 	if len(turns) == 1 {
 		return latest, imgs, nil
 	}
+	history := turns[:len(turns)-1]
+	closing := "\nReply to the latest user message:\n\n" + latest
+	if last.Role == "tool" {
+		// A stateless continuation (§4.6 fallback): the calls and their results
+		// are all in the transcript; the model picks up from there.
+		history, imgs = turns, nil
+		closing = "\nThe results of your tool calls are above. Continue from there."
+	}
 	var b strings.Builder
 	b.WriteString("Earlier turns of this conversation, oldest first:\n\n")
-	for _, m := range turns[:len(turns)-1] {
+	for _, m := range history {
 		text, mi, err := contentText(m.Content)
 		if err != nil {
 			return "", nil, err
@@ -196,8 +304,7 @@ func buildTranscript(turns []chatMessage) (string, []string, error) {
 		}
 		fmt.Fprintf(&b, "<turn role=%q>\n%s\n</turn>\n", role, strings.TrimSpace(text))
 	}
-	b.WriteString("\nReply to the latest user message:\n\n")
-	b.WriteString(latest)
+	b.WriteString(closing)
 	return b.String(), append(images, imgs...), nil
 }
 

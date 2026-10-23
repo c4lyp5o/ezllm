@@ -26,12 +26,53 @@ import (
 // docs/codex-subscription-design.md; operation: docs/codex-bridge-runbook.md.
 const (
 	envCodexBridge      = "EZLLM_CODEX_BRIDGE"            // "on" enables the surface
-	envCodexBin         = "EZLLM_CODEX_BIN"               // official CLI binary (mounted)
+	envCodexBin         = "EZLLM_CODEX_BIN"               // official CLI binary (mounted release: /opt/codex/bin/codex)
 	envCodexHome        = "EZLLM_CODEX_HOME"              // isolated ChatGPT login (CODEX_HOME)
 	envCodexAddr        = "EZLLM_CODEX_BRIDGE_ADDR"       // default 127.0.0.1:8791
 	envCodexToken       = "EZLLM_CODEX_BRIDGE_TOKEN_FILE" // shared secret for the account key
 	envCodexConcurrency = "EZLLM_CODEX_BRIDGE_CONCURRENCY"
+	envCodexToolsNoLL   = "EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK" // "on" = client tools without Landlock
 )
+
+// codexTools decides client tools for this host (decision §4.7): with Landlock
+// every child is confined and tools are on; without it they are off unless the
+// operator overrides, and a missing code-mode host turns them off regardless.
+type codexTools struct {
+	sandbox  *codexbridge.Sandbox
+	landlock string // /status: available (ABI n) | unavailable: reason
+	status   string // /status: enabled | disabled (…) | enabled without Landlock (operator override)
+	off      string // non-empty: why tool requests are refused
+}
+
+func decideCodexTools(helper, bin string, override bool) codexTools {
+	var t codexTools
+	abi, err := codexbridge.ProbeLandlock(helper)
+	if err == nil {
+		t.sandbox = &codexbridge.Sandbox{Helper: helper}
+		t.landlock = "available (ABI " + strconv.Itoa(abi) + ")"
+	} else {
+		t.landlock = "unavailable: " + err.Error()
+	}
+	host := codexbridge.CodeModeHost(bin)
+	switch {
+	case !fileExists(host):
+		t.status = "disabled (code-mode host missing)"
+		t.off = "the code-mode host the CLI needs for tools is missing (" + host + ")"
+	case err == nil:
+		t.status = "enabled"
+	case override:
+		t.status = "enabled without Landlock (operator override)"
+	default:
+		t.status = "disabled (no Landlock)"
+		t.off = "Landlock is unavailable (" + err.Error() + ")"
+	}
+	return t
+}
+
+func fileExists(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && !fi.IsDir()
+}
 
 // startCodexBridge brings up the loopback surface when enabled. A missing
 // binary or login, a lockdown flag the CLI refuses, or a protocol method it
@@ -45,7 +86,7 @@ func startCodexBridge(ctx context.Context, log *slog.Logger) error {
 	}
 	bin := strings.TrimSpace(os.Getenv(envCodexBin))
 	if bin == "" {
-		bin = "/opt/codex/codex"
+		bin = "/opt/codex/bin/codex"
 	}
 	resolved, err := exec.LookPath(bin)
 	if err != nil {
@@ -79,6 +120,11 @@ func startCodexBridge(ctx context.Context, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	helper, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("codex bridge: cannot locate this binary for the Landlock helper: %w", err)
+	}
+	tools := decideCodexTools(helper, resolved, strings.EqualFold(strings.TrimSpace(os.Getenv(envCodexToolsNoLL)), "on"))
 	qualified := "qualified"
 	if !pre.Qualified {
 		qualified = "unqualified (measured on " + codexbridge.QualifiedVersion + "; re-run the live proof)"
@@ -93,9 +139,11 @@ func startCodexBridge(ctx context.Context, log *slog.Logger) error {
 			Version:       server.Version,
 			Logf:          log.Info,
 			Channel:       pre.Channel,
+			Sandbox:       tools.sandbox,
 		},
-		Token:   token,
-		Version: server.Version,
+		ToolsOff: tools.off,
+		Token:    token,
+		Version:  server.Version,
 		Info: map[string]any{
 			"status":       "ok",
 			"version":      server.Version,
@@ -107,7 +155,8 @@ func startCodexBridge(ctx context.Context, log *slog.Logger) error {
 			"lockdown":     "verified at boot",
 			"channel":      channelInfo(pre),
 			"concurrency":  concurrency,
-			"client_tools": "not in this build yet (stage 2) — requests with tools get 400 chat_tools_unsupported",
+			"landlock":     tools.landlock,
+			"client_tools": tools.status,
 		},
 		Logf: log.Info,
 	}
@@ -119,7 +168,7 @@ func startCodexBridge(ctx context.Context, log *slog.Logger) error {
 				"missing", strings.Join(pre.MissingRPCs, ","))
 		}
 		log.Info("codex bridge listening", "addr", addr, "cli", pre.Version, "release", qualified, "login", pre.Login,
-			"channel", pre.Channel, "client_tools", "stage 2")
+			"channel", pre.Channel, "landlock", tools.landlock, "client_tools", tools.status)
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Error("codex bridge serve", "err", err)
 		}

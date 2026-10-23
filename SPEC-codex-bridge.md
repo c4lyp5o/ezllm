@@ -1,6 +1,6 @@
 # Spec: codex-bridge — ChatGPT subscription via the official Codex CLI
 
-**Status:** M0 measured 2026-10-23 (ChatGPT Plus) — see docs/codex-subscription-design.md §2; awaiting operator review before M1
+**Status:** M0 measured 2026-10-23; stages 1–2 built on `feat/codex-bridge` (design §2.13); stage 3 next
 **Scope:** Codex only. Gemini CLI is deferred: it needs Node, which conflicts with
 locked decision #3 in `docs/claude-subscription-design.md`. `geminiweb` already covers that path.
 **Pattern:** the claude-bridge (`internal/claudebridge`, `docs/claude-subscription-design.md`).

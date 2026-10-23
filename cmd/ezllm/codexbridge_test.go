@@ -52,3 +52,32 @@ func TestCodexBridgeTokenPersists(t *testing.T) {
 		t.Fatal("a second boot generated a new token: the account key would break on restart")
 	}
 }
+
+// The tools policy (decision §4.7). The helper is a stub that fails its
+// self-test, exactly as on a host whose kernel refuses Landlock.
+func TestDecideCodexTools(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "codex")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	helper := filepath.Join(dir, "no-landlock-helper")
+	if err := os.WriteFile(helper, []byte("#!/bin/sh\necho refused >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := decideCodexTools(helper, bin, false); got.status != "disabled (code-mode host missing)" || got.off == "" {
+		t.Fatalf("no code-mode host: %+v", got)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "codex-code-mode-host"), []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got := decideCodexTools(helper, bin, false)
+	if got.status != "disabled (no Landlock)" || !strings.HasPrefix(got.off, "Landlock is unavailable (") ||
+		!strings.HasPrefix(got.landlock, "unavailable: ") || got.sandbox != nil {
+		t.Fatalf("no Landlock: %+v", got)
+	}
+	got = decideCodexTools(helper, bin, true)
+	if got.status != "enabled without Landlock (operator override)" || got.off != "" || got.sandbox != nil {
+		t.Fatalf("override: %+v", got)
+	}
+}

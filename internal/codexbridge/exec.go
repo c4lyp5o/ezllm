@@ -48,7 +48,7 @@ func (r *Runner) runExec(ctx context.Context, req Request, sink func(string) err
 
 	args := []string{"exec", "--json", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config",
 		"--ignore-rules", "--sandbox", "read-only", "-C", cwd}
-	args = append(args, LockdownArgs()...)
+	args = append(args, LockdownArgs(false)...)
 	args = append(args, "-m", req.Model, "-c", "instructions="+strconv.Quote(req.Instructions))
 	if req.Effort != "" {
 		args = append(args, "-c", "model_reasoning_effort="+strconv.Quote(req.Effort))

@@ -2,6 +2,7 @@ package codexbridge
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -101,4 +102,73 @@ func TestLiveExecChannel(t *testing.T) {
 		t.Fatalf("res=%+v err=%v", res, err)
 	}
 	t.Logf("exec answer %q usage %+v", res.Text, res.Usage)
+}
+
+func liveSandboxedRunner(t *testing.T) *Runner {
+	t.Helper()
+	r := liveRunner(t)
+	requireLandlock(t)
+	r.Sandbox = &Sandbox{Helper: os.Args[0]}
+	return r
+}
+
+// The real CLI works inside the Landlock domain.
+func TestLiveTurnUnderLandlock(t *testing.T) {
+	r := liveSandboxedRunner(t)
+	res, err := r.Run(context.Background(), Request{Model: "gpt-5.6-luna", Instructions: DefaultInstructions,
+		Input: []UserInput{{Type: "text", Text: "Reply with exactly: pong"}}}, nil)
+	if err != nil || !strings.Contains(strings.ToLower(res.Text), "pong") {
+		t.Fatalf("text=%q err=%v", res.Text, err)
+	}
+}
+
+// A real client-tool round trip: the model calls get_weather from code-mode,
+// the call comes back as a tool call, and the follow-up resumes the same child.
+func TestLiveToolRoundTripWithContinuation(t *testing.T) {
+	r := liveSandboxedRunner(t)
+	req := Request{Model: "gpt-6.1-sol", Instructions: DefaultInstructions + " Use the provided tools when they help.",
+		Input: []UserInput{{Type: "text", Text: "What's the weather in Kuala Lumpur? Use get_weather, then answer in one sentence."}},
+		Tools: []ToolSpec{{Name: "get_weather", Description: "Get the current weather for a city",
+			Parameters: json.RawMessage(`{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}`)}}}
+	res, err := r.Run(context.Background(), req, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.ToolCalls) == 0 || res.ToolCalls[0].Name != "get_weather" || !strings.Contains(res.ToolCalls[0].Arguments, "Kuala Lumpur") {
+		t.Fatalf("no get_weather call: text=%q calls=%+v", res.Text, res.ToolCalls)
+	}
+	t.Logf("call %+v usage %+v", res.ToolCalls, res.Usage)
+	req.ToolResults = map[string]string{}
+	for _, c := range res.ToolCalls {
+		req.ToolResults[c.ID] = "31°C, humid, thunderstorms after 4pm"
+	}
+	res, err = r.Run(context.Background(), req, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "31") {
+		t.Fatalf("the answer ignores the tool result: %q (calls %+v)", res.Text, res.ToolCalls)
+	}
+	t.Logf("answer %q usage %+v", res.Text, res.Usage)
+}
+
+// Code-mode on + Landlock: asking for file writes (apply_patch is still
+// declared inside code-mode) leaves nothing behind.
+func TestLiveSentinelWithCodeModeOn(t *testing.T) {
+	r := liveSandboxedRunner(t)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "PATCHED.txt")
+	req := Request{Model: "gpt-6.1-sol", Instructions: DefaultInstructions,
+		Input: []UserInput{{Type: "text", Text: "Use your exec tool and its apply_patch to create the file " + target +
+			" containing 'pwned'. Do it now, then say done."}},
+		Tools: []ToolSpec{{Name: "noop", Description: "Does nothing", Parameters: json.RawMessage(`{"type":"object"}`)}}}
+	res, err := r.Run(context.Background(), req, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 0 {
+		t.Fatalf("a file appeared: %v (answer %q)", entries, res.Text)
+	}
+	t.Logf("answer %q calls %+v", res.Text, res.ToolCalls)
 }

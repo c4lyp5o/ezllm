@@ -23,7 +23,9 @@ func (s *Server) StartModelRefresh(ctx context.Context, interval, bootDelay time
 		s.log.Warn("model refresh disabled: interval under 1m", "interval", interval)
 		return
 	}
-	go func() {
+	s.goBackground(func(bg context.Context) {
+		ctx, stop := either(ctx, bg)
+		defer stop()
 		select {
 		case <-ctx.Done():
 			return
@@ -40,7 +42,7 @@ func (s *Server) StartModelRefresh(ctx context.Context, interval, bootDelay time
 				s.refreshCatalogsOnce(ctx)
 			}
 		}
-	}()
+	})
 }
 
 // refreshCatalogsOnce re-lists every enabled account's catalog. The account
@@ -103,7 +105,8 @@ func (s *Server) refreshCatalogsOnce(ctx context.Context) {
 			continue
 		}
 		s.log.Info("model catalog refreshed", "account", summary.Namespace, "models", len(models))
-		go s.probeFreeModels(summary.ID, "catalog refresh")
+		acctID := summary.ID
+		s.goBackground(func(bg context.Context) { s.probeFreeModels(bg, acctID, "catalog refresh") })
 	}
 	// Models that just arrived get prices now, not at the next daily run.
 	// One pass covers every account (the price source is one document).
@@ -123,11 +126,11 @@ func (s *Server) refreshCatalogsOnce(ctx context.Context) {
 // rather than waiting to be sampled. Proven models are skipped, so a steady
 // catalog costs nothing; the probes are paced and hold the account's sweep
 // slot like any other auto-probe. Off with EZLLM_COMBO_AUTOPROBE=off.
-func (s *Server) probeFreeModels(acctID int64, origin string) {
+func (s *Server) probeFreeModels(bg context.Context, acctID int64, origin string) {
 	if !s.comboAutoProbe || s.tester == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(bg, 30*time.Second)
 	ids, err := s.db.FreeModelIDs(ctx, acctID)
 	cancel()
 	if err != nil {
@@ -137,9 +140,9 @@ func (s *Server) probeFreeModels(acctID int64, origin string) {
 	if len(ids) == 0 {
 		return
 	}
-	brokenBefore := s.brokenModels(acctID)
-	s.probeAccountModels(origin, acctID, ids)
-	brokenAfter := s.brokenModels(acctID)
+	brokenBefore := s.brokenModels(bg, acctID)
+	s.probeAccountModels(bg, origin, acctID, ids)
+	brokenAfter := s.brokenModels(bg, acctID)
 	free := make(map[string]bool, len(ids))
 	for _, id := range ids {
 		free[id] = true
@@ -155,7 +158,7 @@ func (s *Server) probeFreeModels(acctID int64, origin string) {
 	}
 	sort.Strings(newlyBroken)
 	ns := strconv.FormatInt(acctID, 10)
-	if acc, err := s.db.GetAccount(context.Background(), acctID); err == nil {
+	if acc, err := s.db.GetAccount(bg, acctID); err == nil {
 		ns = acc.Namespace
 	}
 	n := len(newlyBroken)
@@ -169,8 +172,8 @@ func (s *Server) probeFreeModels(acctID int64, origin string) {
 
 // brokenModels is the set of an account's models whose probe verdict is
 // "unsupported" on every surface — the ones auto-free pools leave out.
-func (s *Server) brokenModels(acctID int64) map[string]bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (s *Server) brokenModels(bg context.Context, acctID int64) map[string]bool {
+	ctx, cancel := context.WithTimeout(bg, 10*time.Second)
 	defer cancel()
 	out := map[string]bool{}
 	rows, err := s.db.ListModels(ctx, acctID)

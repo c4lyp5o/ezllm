@@ -646,23 +646,23 @@ func (s *Server) deferProtocol(accountID, keyID int64, acct provider.Account, ke
 		return
 	}
 	models := test.Catalog
-	go func() {
+	s.goBackground(func(bg context.Context) {
 		// The sample sweep is capped at a few models; free models it did not
 		// reach are probed after it (they cost no credits), sequenced so the
 		// two never hit the account at once.
-		defer s.probeFreeModels(accountID, "key added")
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer s.probeFreeModels(bg, accountID, "key added")
+		ctx, cancel := context.WithTimeout(bg, 10*time.Minute)
 		defer cancel()
 		res := s.tester.ProtocolSweep(ctx, acct, key, models, registration.Options{ProbeMaxModels: maxModels})
 		if res == nil || len(res.Rows) == 0 {
 			return
 		}
-		if err := s.db.SetModelProtos(context.Background(), accountID, res.Rows); err != nil {
+		if err := s.db.SetModelProtos(bg, accountID, res.Rows); err != nil {
 			s.log.Error("protocol sweep persist failed", "err", err, "account", acct.Namespace)
 		}
 		s.log.Info("protocol sweep done",
 			"account", acct.Namespace, "models", res.Tested, "support", res.Support)
-	}()
+	})
 }
 
 // writeKeyTestFailure renders the 422 contract from docs/API.md.
@@ -1165,16 +1165,16 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			"a protocol sweep is already running for this account — stop it first (DELETE /admin/accounts/"+fmt.Sprint(id)+"/sync)")
 		return
 	}
-	runCtx, cancel := context.WithTimeout(context.Background(), budget)
+	runCtx, cancel := context.WithTimeout(s.bg.ctx, budget)
 	s.attachCancel(id, run, cancel)
-	go func() {
+	s.goBackground(func(bg context.Context) {
 		// Deferred first so it runs LAST, after endSweep frees the slot: free
 		// models a sampled sweep skipped are probed next. A sweep the operator
 		// stopped (or that ran out of budget) is not followed by more probing.
 		stopped := false
 		defer func() {
 			if !stopped {
-				s.probeFreeModels(id, "manual sync")
+				s.probeFreeModels(bg, id, "manual sync")
 			}
 		}()
 		defer s.endSweep(id, run)
@@ -1197,13 +1197,13 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			// a 20-minute sweep to an expired context would be absurd. The
 			// probes already wrote per-model rows as they ran; this batch is
 			// the same values, and it is what keeps a stopped sweep's work.
-			pctx, pcancel := context.WithTimeout(context.Background(), 30*time.Second)
+			pctx, pcancel := context.WithTimeout(bg, 30*time.Second)
 			if err := s.db.SetModelProtos(pctx, id, res.Rows); err != nil {
 				s.log.Error("sync protocol sweep persist failed", "err", err)
 			}
 			pcancel()
 		}
-	}()
+	})
 
 	entries, _ := s.db.ListModels(r.Context(), id)
 	support := protocolCounts(entries)

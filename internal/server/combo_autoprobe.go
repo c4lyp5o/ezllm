@@ -31,11 +31,11 @@ func (s *Server) probeComboHops(comboID int64) {
 	if !s.comboAutoProbe || s.tester == nil {
 		return
 	}
-	go s.runComboProbe(comboID)
+	s.goBackground(func(ctx context.Context) { s.runComboProbe(ctx, comboID) })
 }
 
-func (s *Server) runComboProbe(comboID int64) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+func (s *Server) runComboProbe(ctx context.Context, comboID int64) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	combos, err := s.db.ListCombos(ctx)
 	if err != nil {
@@ -71,7 +71,9 @@ func (s *Server) runComboProbe(comboID int64) {
 		byAcct[h.AccountID] = append(byAcct[h.AccountID], h.ModelID)
 	}
 	for acctID, models := range byAcct {
-		go s.probeAccountModels("combo "+strconv.FormatInt(comboID, 10), acctID, models)
+		s.goBackground(func(ctx context.Context) {
+			s.probeAccountModels(ctx, "combo "+strconv.FormatInt(comboID, 10), acctID, models)
+		})
 	}
 }
 
@@ -81,8 +83,8 @@ func (s *Server) runComboProbe(comboID int64) {
 // origin names the trigger in the log ("combo 7", "catalog refresh"). Fresh
 // verdicts resync the auto_free combos, so a model proven broken on every
 // surface leaves the free pools at once.
-func (s *Server) probeAccountModels(origin string, acctID int64, models []string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+func (s *Server) probeAccountModels(bg context.Context, origin string, acctID int64, models []string) {
+	ctx, cancel := context.WithTimeout(bg, 30*time.Second)
 	defer cancel()
 	acc, err := s.db.GetAccount(ctx, acctID)
 	if err != nil || !acc.Enabled {
@@ -153,7 +155,7 @@ func (s *Server) probeAccountModels(origin string, acctID int64, models []string
 		s.log.Info("auto-probe skipped: sweep already running", "origin", origin, "account", acctID)
 		return
 	}
-	runCtx, runCancel := context.WithTimeout(context.Background(), budget)
+	runCtx, runCancel := context.WithTimeout(bg, budget)
 	s.attachCancel(acctID, run, runCancel)
 	defer s.endSweep(acctID, run)
 	defer runCancel()
@@ -177,7 +179,7 @@ func (s *Server) probeAccountModels(origin string, acctID int64, models []string
 			break
 		}
 		if res != nil && len(res.Rows) > 0 {
-			pctx, pcancel := context.WithTimeout(context.Background(), 30*time.Second)
+			pctx, pcancel := context.WithTimeout(bg, 30*time.Second)
 			if err := s.db.SetModelProtos(pctx, acctID, res.Rows); err != nil {
 				s.log.Error("auto-probe persist failed", "origin", origin, "account", acctID, "err", err)
 			} else {
@@ -187,7 +189,7 @@ func (s *Server) probeAccountModels(origin string, acctID int64, models []string
 		}
 	}
 	if persisted {
-		sctx, scancel := context.WithTimeout(context.Background(), 30*time.Second)
+		sctx, scancel := context.WithTimeout(bg, 30*time.Second)
 		if err := s.db.SyncAutoFree(sctx); err != nil {
 			s.log.Warn("auto-probe: auto-free resync failed", "origin", origin, "err", err)
 		}

@@ -305,9 +305,14 @@ func (d *DB) RecordCall(c Call) {
 	default:
 		droppedCalls.Add(1)
 		// No row will release it, so release here — off this goroutine,
-		// which must never wait on the database.
+		// which must never wait on the database. Counted in wg (added under
+		// recMu, before Close can start waiting) so Close outlasts it.
 		if cp.ReservationID != 0 {
-			go d.ReleaseClientBudget(context.Background(), cp.ReservationID)
+			d.wg.Add(1)
+			go func() {
+				defer d.wg.Done()
+				d.ReleaseClientBudget(context.Background(), cp.ReservationID)
+			}()
 		}
 	}
 }

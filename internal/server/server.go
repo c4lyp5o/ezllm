@@ -106,6 +106,8 @@ type Server struct {
 	// priceRefreshOn: StartPriceRefresh ran (EZLLM_PRICE_REFRESH not off),
 	// so pricing new models is wanted. Never set in unit tests: no network.
 	priceRefreshOn atomic.Bool
+	// bg owns detached background work (background.go).
+	bg *background
 	// cspOnce/csp cache the dashboard Content-Security-Policy (spa.go).
 	cspOnce sync.Once
 	csp     string
@@ -244,6 +246,7 @@ func New(opts Options) *Server {
 	if s.sessMemo == nil {
 		s.sessMemo = compress.NewSessionMemo(nil)
 	}
+	s.bg = newBackground()
 	if opts.DB != nil {
 		newGeminiWebBridge(opts.DB, "").register(s.mux)
 		newClaudeWebBridge(opts.DB, nil).register(s.mux)

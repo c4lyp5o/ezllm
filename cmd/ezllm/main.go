@@ -361,6 +361,11 @@ func run() error {
 	// so no CLI child outlives the process's own shutdown.
 	stopCodex()
 	stopClaude()
+	// Background probes and refresh loops write to the store: cancel them
+	// and wait before it closes.
+	if !srv.StopBackground(10 * time.Second) {
+		log.Error("background jobs still running at store close; their writes may fail")
+	}
 	// Stop the rules-engine ticker first so it cannot reload against a closing
 	// store, then db.Close() drains the ledger queue and flushes the pools.
 	ruleEngine.Close()

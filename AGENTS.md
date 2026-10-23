@@ -26,6 +26,14 @@ compression, a SQLite usage ledger, and an embedded operator dashboard
 
 - **Run the gate.** `make check` (or `make test-short` under a memory cap —
   see below). Never report a change as tested without it.
+- **NEVER run the test suite without `-short`.** Not `go test ./...`, not
+  `go test ./internal/server/`, not a single package, not "just to see". The
+  perf harnesses (`TestLatencyPercentiles`, `TestRetainedMemory`,
+  `TestSlowConsumer`) are not skipped by a package selector, peak ~4.21 GiB
+  RSS, and will OOM-kill or hang the shell — an agent hit this on 2026-10-23
+  and lost six minutes to a package run that `-short` finishes in 106 s.
+  Always `go test -short …` / `make test-short`. The only exception is the
+  deliberate `make perf`, which is a requested measurement, not a gate.
 - **Version discipline:** bump `internal/server/version.go` and the
   `Current:` line of `VERSION.md` in the same commit. `version_test.go`
   enforces the pairing; `GET /healthz` serves the constant.

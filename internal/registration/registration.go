@@ -350,9 +350,12 @@ func (t *Tester) Run(ctx context.Context, acct provider.Account, opts Options) *
 		// key. When some OTHER authenticated endpoint vouches for it (the
 		// oracle already passed, or an authenticated catalog rejects a fake
 		// key on calibration), record the generation as unverified and keep
-		// the test: the objective is to prove the key was ACCEPTED. Anything
-		// else — 401/403, a 400, a retired model — still fails: a key that is
-		// never proven is a key we must not store.
+		// the test: the objective is to prove the key was ACCEPTED. The same
+		// holds for a model-shaped refusal (a 400 "not accessible via
+		// /chat/completions", every candidate retired) once a proof exists:
+		// generation is then evidence, not the gate. 401/403 still fails, and
+		// so does anything without a proof: a key that is never proven is a
+		// key we must not store.
 		if !t.credentialAcceptedDespiteGeneration(ctx, adapter, acct, pace, res, f) {
 			res.Fail = f
 			res.Detail = "failed at " + f.Step
@@ -663,10 +666,10 @@ func (t *Tester) probeModel(
 	}
 }
 
-// credentialAcceptedDespiteGeneration handles a capacity-shaped inference
-// failure (f comes from inferenceStep; only 429/5xx/no-answer qualify —
-// never an auth-shaped status). Such a failure carries no credential
-// verdict, so it must not sink a key that some OTHER authenticated endpoint
+// credentialAcceptedDespiteGeneration handles a non-auth inference failure
+// (f comes from inferenceStep: 429/5xx/no-answer, or a model-shaped 4xx —
+// never an auth-shaped status or a non-JSON 2xx). Such a failure carries no
+// credential verdict, so it must not sink a key that some OTHER authenticated endpoint
 // already proved: the usage oracle (with calibration), or the catalog,
 // which discriminates because a deliberately-wrong key gets rejected where
 // the real one was just listed.
@@ -689,7 +692,10 @@ func (t *Tester) credentialAcceptedDespiteGeneration(
 	res *TestResult,
 	f *Failure,
 ) bool {
-	if f == nil || !f.Retryable || isAuthRejectFor(adapter, f.UpstreamStatus) {
+	// Only an upstream refusal or no answer at all qualifies: a 2xx that is
+	// not JSON points at a wrong base_url, which no proof elsewhere excuses.
+	if f == nil || isAuthRejectFor(adapter, f.UpstreamStatus) ||
+		(f.UpstreamStatus >= 200 && f.UpstreamStatus < 300) {
 		return false
 	}
 	if !res.authDeferred {
@@ -743,8 +749,11 @@ func (t *Tester) calibrateCatalog(
 // be verified this run.
 func noteInferenceUnverified(res *TestResult, f *Failure) {
 	cause := "provider did not answer"
-	if f.UpstreamStatus > 0 {
+	switch {
+	case f.UpstreamStatus > 0 && f.Retryable:
 		cause = httpStatusWord(f.UpstreamStatus) + " — provider capacity"
+	case f.UpstreamStatus > 0:
+		cause = f.Message
 	}
 	res.addStep(Step{Step: StepInference, OK: true,
 		Detail: "key accepted; generation unverified (" + cause + ")"})
@@ -1375,7 +1384,8 @@ func pickProbeModel(models []provider.ModelInfo, acct provider.Account) string {
 // credential or the provider: Gemini's retired-model 404 ("This model
 // models/gemini-2.5-flash is no longer available to new users"), a
 // model_not_found body, a bare 404 on the generation path, or a 410 Gone
-// (Ollama's retired-model answer). Auth statuses are excluded on purpose — a
+// (Ollama's retired-model answer), or a model served only on another
+// endpoint. Auth statuses are excluded on purpose — a
 // 401/403 stays a credential verdict.
 func isModelUnavailable(status int, body []byte) bool {
 	if status < 400 || status >= 500 || isAuthStatus(status) {
@@ -1385,6 +1395,9 @@ func isModelUnavailable(status int, body []byte) bool {
 	for _, marker := range []string{
 		"no longer available", "does not exist", "deactivated",
 		"model_not_found", "unknown model", "not a valid model", "was retired",
+		// Endpoint mismatch: the model lives on another surface (Copilot's
+		// codex models answer /chat/completions with "not accessible via").
+		"not accessible via", "unsupported_api_for_model", "not supported", "does not support",
 	} {
 		if strings.Contains(text, marker) {
 			return true

@@ -1169,6 +1169,12 @@ func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, bod
 	}
 	if isGeminiNativeAudio(rt, rt.Surface) {
 		if err := geminiAudioResponse(resp, dialSurface); err != nil {
+			// geminiAudioResponse closes the body itself once it has READ it;
+			// the read-failure path returns before that point, and this
+			// response is discarded (nil is returned to the caller), so the
+			// body would be abandoned unclosed. Close is idempotent on the
+			// paths that already closed it.
+			_ = resp.Body.Close()
 			return nil, Result{Stream: stream, Totalms: msPtr(time.Since(start)), Err: err.Error()}, time.Time{}, err
 		}
 	}

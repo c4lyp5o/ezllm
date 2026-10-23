@@ -31,7 +31,7 @@ func terminalClass(p textPart, classes map[string]toolClass) bool {
 // visible text is unchanged, so this is lossless for a reader of the screen.
 func ansi(msgs []any, opts map[string]any) []any {
 	classes := toolClassOverrides(opts)
-	return editAll(msgs, toolNamesByCallID(msgs), func(p textPart) (string, bool) {
+	return editAll(msgs, callNames(msgs, opts), func(p textPart) (string, bool) {
 		if !terminalClass(p, classes) || !strings.ContainsAny(p.text, "\x1b\r\b") {
 			return "", false
 		}
@@ -103,7 +103,7 @@ func fold(msgs []any, opts map[string]any) []any {
 		minRepeat = 3
 	}
 	classes := toolClassOverrides(opts)
-	return editAll(msgs, toolNamesByCallID(msgs), func(p textPart) (string, bool) {
+	return editAll(msgs, callNames(msgs, opts), func(p textPart) (string, bool) {
 		if !terminalClass(p, classes) {
 			return "", false
 		}

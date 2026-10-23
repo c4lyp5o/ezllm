@@ -26,7 +26,7 @@ func blobs(msgs []any, opts map[string]any) []any {
 		minBytes = 1024
 	}
 	classes := toolClassOverrides(opts)
-	return editAll(msgs, toolNamesByCallID(msgs), func(p textPart) (string, bool) {
+	return editAll(msgs, callNames(msgs, opts), func(p textPart) (string, bool) {
 		if p.kind != partToolOutput || len(p.text) < minBytes {
 			return "", false
 		}

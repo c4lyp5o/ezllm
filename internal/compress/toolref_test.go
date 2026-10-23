@@ -150,3 +150,29 @@ func TestToolRefFinalMessageFollowsFreshToolOutput(t *testing.T) {
 		}
 	}
 }
+
+// A memo hit removes the committed assistant tool call from the engines'
+// work, but the result that follows it on the next request still belongs to
+// that call. Its file-read class must come from the whole request, or lite
+// rewrites a file read that has to reach the model byte-identical.
+func TestPreserveClassSurvivesMemoizedToolCall(t *testing.T) {
+	file := "line with meaningful trailing spaces     \n\n\n" + strings.Repeat("another file line     \n", 30)
+	p := &Profile{Name: "lite", Enabled: true, ExemptLastTurn: true, FreshToolOutput: true, Stages: []Stage{{Engine: "lite"}}}
+	for _, shape := range refShapes {
+		full := refConv(shape, [][2]string{{"read-1", file}}, true)
+		var root map[string]any
+		json.Unmarshal(full, &root)
+		key := "messages"
+		if shape == "responses" {
+			key = "input"
+		}
+		list := root[key].([]any)
+		first, _ := json.Marshal(map[string]any{"model": "m", key: list[:1]})
+		memo := NewSessionMemo(nil)
+		ApplyWithSession(first, p, nil, "s", memo)
+		out, _ := ApplyWithSession(full, p, nil, "s", memo)
+		if got := editedTexts(t, out); got[len(got)-1] != file {
+			t.Errorf("%s: file read after a memoized call shipped %d bytes, want the original %d", shape, len(got[len(got)-1]), len(file))
+		}
+	}
+}

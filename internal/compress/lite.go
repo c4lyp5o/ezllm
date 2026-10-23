@@ -31,7 +31,7 @@ func lite(msgs []any, opts map[string]any) []any {
 	// byte-identical, or the agent's next edit (which quotes it back) fails
 	// to match.
 	classes := toolClassOverrides(opts)
-	return editAll(msgs, toolNamesByCallID(msgs), func(p textPart) (string, bool) {
+	return editAll(msgs, callNames(msgs, opts), func(p textPart) (string, bool) {
 		if p.text == "" || isJSONPayload(p.text) {
 			return "", false // pure JSON payload: headroom's territory
 		}

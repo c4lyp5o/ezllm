@@ -34,7 +34,7 @@ func headroom(msgs []any, opts map[string]any) []any {
 		minRows = 1
 	}
 	classes := toolClassOverrides(opts)
-	return editAll(msgs, toolNamesByCallID(msgs), func(p textPart) (string, bool) {
+	return editAll(msgs, callNames(msgs, opts), func(p textPart) (string, bool) {
 		if p.kind != partToolOutput || p.text == "" {
 			return "", false // scope: tool_only, in every shape
 		}

@@ -284,6 +284,10 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 	cur := newWork
 	stagesRan := 0
 	classes := profileToolClasses(p.Stages)
+	// Tool names come from the WHOLE request: a memo hit takes a committed
+	// assistant call out of the work, but the result after it still needs
+	// that call's name to be classed (a file read stays byte-identical).
+	names := toolNamesByCallID(msgs)
 	for _, st := range p.Stages {
 		if !KnownEngines[st.Engine] {
 			res.Err = "unknown engine " + st.Engine
@@ -307,7 +311,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 			// new work.
 			next = toolRefOverHistory(editable, hit, forms, cur, withProfileClasses(st, classes).Options)
 		} else {
-			next, fired, err = runEngine(withProfileClasses(st, classes), cur)
+			next, fired, err = runEngine(withToolNames(withProfileClasses(st, classes), names), cur)
 		}
 		if err != nil {
 			res.Err = st.Engine + ": " + err.Error()
@@ -574,6 +578,31 @@ func withProfileClasses(st Stage, classes map[string]any) Stage {
 	opts["tool_classes"] = classes
 	st.Options = opts
 	return st
+}
+
+// toolNamesOption carries the request-wide call id -> tool name map into a
+// stage. The NUL keeps it out of any option an operator can write.
+const toolNamesOption = "\x00tool_names"
+
+// withToolNames hands the request-wide tool names to one stage.
+func withToolNames(st Stage, names map[string]string) Stage {
+	opts := make(map[string]any, len(st.Options)+1)
+	for k, v := range st.Options {
+		opts[k] = v
+	}
+	opts[toolNamesOption] = names
+	st.Options = opts
+	return st
+}
+
+// callNames is the tool-name map an engine classes outputs by: the request-
+// wide map the pipeline supplies, or, when an engine runs alone, the names
+// in msgs itself.
+func callNames(msgs []any, opts map[string]any) map[string]string {
+	if names, ok := opts[toolNamesOption].(map[string]string); ok {
+		return names
+	}
+	return toolNamesByCallID(msgs)
 }
 
 // runEngine applies one stage. fired is only meaningful for caveman (the count

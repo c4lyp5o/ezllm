@@ -2,6 +2,18 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14); full history via `git log`.
 
+## 2026-10-23 — v1.1.1: audit review corrections
+
+- **Bound Codex output buffering:** a pending queue holds at most 1 MiB or
+  4,096 deltas, in addition to the batch currently being delivered. Overflow
+  fails with `output_backpressure` and independently reaps the child; the stdout
+  reader never waits on a stalled client while holding a state lock.
+- **Fix Claude web transport cleanup races:** closing a fetcher uses the same
+  initialization barrier as its first request.
+- **Keep report-cache errors and filters honest:** a completed failed computation
+  cannot become a successful nil result, and explicit `from` boundaries no
+  longer collide after rounding into the same ten-second interval.
+
 ## 2026-10-23 — v1.1.0: ChatGPT subscription bridge, plan windows, probe and Copilot fixes
 
 - **ChatGPT subscription as an account** (`internal/codexbridge`, off by default).

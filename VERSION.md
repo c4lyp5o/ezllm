@@ -11,7 +11,19 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.1.0**
+**Current: v1.1.1**
+
+---
+
+## v1.1.1 — 2026-10-23
+
+- **Bounded Codex delivery:** queued output is capped by bytes and event count;
+  backlog overflow reports `output_backpressure` and reaps the child even while
+  the client sink is blocked.
+- **Concurrent transport cleanup:** Claude web fetcher closing synchronizes with
+  its first transport initialization.
+- **Accurate report caching:** completed failed computations retain their error,
+  and explicit usage time filters preserve their full precision in cache keys.
 
 ---
 

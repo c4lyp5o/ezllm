@@ -18,6 +18,7 @@ type eventDecoder struct {
 	started          bool
 	terminal         bool
 	finish           FinishKind
+	chatRefusal      bool
 	stopSequence     *string
 	usage            UsageIR
 	rawMessagesUsage UsageIR
@@ -287,7 +288,7 @@ func (d *eventDecoder) chat(b []byte) ([]Event, error) {
 			text := delta.Content
 			if delta.Refusal != "" {
 				text = delta.Refusal
-				d.finish = FinishRefusal
+				d.chatRefusal = true
 			}
 			out = append(out, Event{Kind: EventTextDelta, Key: key, Delta: text})
 		}
@@ -314,6 +315,9 @@ func (d *eventDecoder) chat(b []byte) ([]Event, error) {
 				return nil, invalidResponse("unknown chat finish_reason")
 			}
 			d.finish = chatFinish(*ch.Finish)
+			if d.chatRefusal && d.finish == FinishCompleted {
+				d.finish = FinishRefusal
+			}
 		}
 	}
 	u, err := d.usageEvents(c.Usage)

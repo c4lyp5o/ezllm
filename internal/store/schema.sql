@@ -455,3 +455,10 @@ CREATE TRIGGER IF NOT EXISTS catalog_gen_combos_del AFTER DELETE ON combos BEGIN
 CREATE TRIGGER IF NOT EXISTS catalog_gen_combo_hops_ins AFTER INSERT ON combo_hops BEGIN UPDATE catalog_gen SET gen = gen + 1 WHERE id = 1; END;
 CREATE TRIGGER IF NOT EXISTS catalog_gen_combo_hops_upd AFTER UPDATE ON combo_hops BEGIN UPDATE catalog_gen SET gen = gen + 1 WHERE id = 1; END;
 CREATE TRIGGER IF NOT EXISTS catalog_gen_combo_hops_del AFTER DELETE ON combo_hops BEGIN UPDATE catalog_gen SET gen = gen + 1 WHERE id = 1; END;
+
+-- Missed counter debits persist alongside their calls, surviving restarts.
+-- Reservations are released only when this debit has been reconciled.
+CREATE TABLE IF NOT EXISTS pending_usage_meter (
+  call_id INTEGER PRIMARY KEY REFERENCES calls(id) ON DELETE CASCADE,
+  reservation_id INTEGER NOT NULL DEFAULT 0
+);

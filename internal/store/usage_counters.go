@@ -82,6 +82,9 @@ func CountBucket(t time.Time, window string, loc *time.Location) string {
 // UsageFor reads one bucket. Missing bucket = 0 usage (never an error: a model
 // that has never been called is simply not over its cap).
 func (d *DB) UsageFor(ctx context.Context, accountID int64, modelID, bucket string) (UsageCounter, error) {
+	if err := d.ensureMeter(ctx); err != nil {
+		return UsageCounter{}, err
+	}
 	var c UsageCounter
 	err := d.r.QueryRowContext(ctx,
 		`SELECT account_id, model_id, bucket, tokens, calls, updated_at

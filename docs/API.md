@@ -708,3 +708,13 @@ using the account's usage convention before client response projection.
 Client-visible usage may expose a smaller subset. Failed client conversion
 still retains reported upstream usage. SSE accounting observes bounded source
 frames as they are consumed; native response bytes remain unchanged.
+
+### Meter recovery (schema v28)
+
+`pending_usage_meter` records the call ID and budget reservation ID for durable
+ledger rows whose counter updates failed. The normal ledger flush or the next
+budget/model-meter read replays these debits transactionally, exactly once,
+and only then releases their reservations. Recovery survives restarts.
+Admission returns `503 budget_unavailable` while client-meter recovery fails;
+model rules retain their existing refusal when their meter is unavailable.
+No HTTP response field or application release version changes with this schema.

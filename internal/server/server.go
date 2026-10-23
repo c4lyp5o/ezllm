@@ -676,6 +676,8 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 					// not a failure worth a warning on every request.
 					if !errors.Is(rerr, store.ErrNotFound) {
 						slog.Warn("client budget reservation failed", "client", client, "err", rerr)
+						writeErr(w, http.StatusServiceUnavailable, "budget_unavailable", "usage meter unavailable")
+						return
 					}
 				} else if !ok {
 					writeErr(w, http.StatusTooManyRequests, "rate_limited",
@@ -1229,6 +1231,8 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, token stri
 			}
 		} else if !errors.Is(berr, store.ErrNotFound) {
 			slog.Warn("client budget check failed", "client", name, "err", berr)
+			writeErr(w, http.StatusServiceUnavailable, "budget_unavailable", "usage meter unavailable")
+			return r, false
 		}
 	}
 	ctx := context.WithValue(r.Context(), rolesKey{}, roles)

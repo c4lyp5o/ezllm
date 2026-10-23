@@ -474,6 +474,7 @@ INSERT INTO calls (
 	}
 	defer stmt.Close()
 
+	ids := make([]int64, 0, len(rows))
 	for _, c := range rows {
 		var keyID any
 		if c.KeyID != 0 {
@@ -483,7 +484,7 @@ INSERT INTO calls (
 		if c.AccountID != 0 {
 			acctID = c.AccountID
 		}
-		_, err := stmt.ExecContext(ctx,
+		result, err := stmt.ExecContext(ctx,
 			c.TS.UTC().Format("2006-01-02T15:04:05.000Z"),
 			acctID,
 			c.Client, c.IP, string(c.Surface), c.Alias, c.Account, keyID, c.KeyHint, c.Model,
@@ -498,17 +499,11 @@ INSERT INTO calls (
 		if err != nil {
 			return fmt.Errorf("insert call: %w", err)
 		}
-	}
-
-	// Budget reservations end in the SAME transaction that counts their
-	// rows' usage. Outside the meter savepoint: a reservation must not
-	// outlive its committed row even when metering fails.
-	for _, c := range rows {
-		if c.ReservationID != 0 {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM client_budget_reservations WHERE id = ?`, c.ReservationID); err != nil {
-				return err
-			}
+		id, err := result.LastInsertId()
+		if err != nil {
+			return err
 		}
+		ids = append(ids, id)
 	}
 
 	// M5: advance the usage meter in the SAME transaction as the calls rows so
@@ -525,7 +520,11 @@ INSERT INTO calls (
 		return err
 	}
 	metered := true
-	if err := d.meterInTx(ctx, tx, rows); err != nil {
+	meterErr := d.replayMeter(ctx, tx)
+	if meterErr == nil {
+		meterErr = d.meterInTx(ctx, tx, rows)
+	}
+	if err := meterErr; err != nil {
 		metered = false
 		slog.Warn("usage meter bump failed; batch not metered", "rows", len(rows), "err", err)
 		if _, rerr := tx.ExecContext(ctx, `ROLLBACK TO meter`); rerr != nil {
@@ -534,6 +533,19 @@ INSERT INTO calls (
 	}
 	if _, err := tx.ExecContext(ctx, `RELEASE meter`); err != nil {
 		return err
+	}
+	// A failed meter keeps a durable debit and its reservation. Successful
+	// metering deletes reservations in the same commit as the counter updates.
+	for i, c := range rows {
+		if !metered {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO pending_usage_meter(call_id,reservation_id) VALUES(?,?)`, ids[i], c.ReservationID); err != nil {
+				return err
+			}
+		} else if c.ReservationID != 0 {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM client_budget_reservations WHERE id=?`, c.ReservationID); err != nil {
+				return err
+			}
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return err

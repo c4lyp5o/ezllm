@@ -4,7 +4,7 @@ Updated: 2026-10-23
 
 Reviewed commit: `4059482` (`fix/audit-findings`, v1.1.1)
 
-Two accounting integrity findings remain open: one high and one medium.
+One accounting integrity finding remains open: medium-priority attempt accounting.
 Previously resolved findings remain removed. No production fixes or version
 changes were made during this sweep.
 
@@ -14,44 +14,6 @@ Traced upstream usage normalization, JSON/SSE translation and tapping, retry
 and failover attribution, ledger writes, client/model meters, reservations,
 and effective-dated cost reporting. Reproductions used mock upstreams and
 disposable SQLite databases, with no live provider calls or credentials.
-
-### AI2 — High: a metering failure releases budget without counting the spend
-
-**Locations:** `internal/store/ledger.go:507`,
-`internal/store/ledger.go:525`, `internal/store/client_budget.go:176`, and
-`internal/store/client_budget.go:94`.
-
-`insertCalls` deletes reservations before entering the best-effort meter
-savepoint. If a meter update fails, it rolls back the meter but commits both
-the ledger row and reservation deletion. An existing client counter remains
-stale; `ClientBudgetStatus` backfills only a missing counter. There is no
-automatic replay of the missed batch. The `UnmeteredRows` counter exposes the
-failure but does not restore enforcement after the database fault clears.
-
-**Reproduction:** `TestAccountingAuditReservationMeterFailure` creates a
-100-token cap with one token already counted, then reserves 99. A temporary
-SQLite trigger injects a client-meter error while the corresponding 99-token
-ledger row is inserted. After removing the trigger:
-
-- Durable ledger usage is 100.
-- The budget counter still reports 1.
-- No reservation remains for the spent 99 tokens.
-- A fresh 99-token reservation is admitted.
-
-This is a deterministic database-failure injection, not an assertion that the
-production schema contains such a trigger. It establishes the ordering and
-recovery behavior when the existing best-effort failure path executes.
-
-**Impact:** a transient meter fault can leave client/model caps understated
-for the rest of their bucket. The recent reservation fix protects the normal
-flush path, but its unreserved-and-uncounted gap remains on this failure path.
-Preserving ledger rows on meter failure is deliberate; losing enforcement
-without reconciliation is the remaining problem.
-
-**Suggested fix:** retain an enforceable pending debit or durable reconciliation
-record until the meter catches up, or rebuild dirty counters from the ledger
-before admission. Recovery must avoid charging the same row twice and must
-not discard the durable call to preserve counter consistency.
 
 ### AI4 — Medium: failover omits usage explicitly reported by earlier hops
 

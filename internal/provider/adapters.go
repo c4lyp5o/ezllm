@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -190,6 +191,21 @@ func isTokenRouter(acct Account) bool {
 	}
 	u, err := url.Parse(strings.TrimSpace(acct.BaseURL))
 	return err == nil && strings.EqualFold(u.Scheme, "https") && strings.EqualFold(u.Hostname(), "api.tokenrouter.com")
+}
+
+// isLoopbackBase reports a base URL on this host (127.0.0.0/8, ::1,
+// localhost): the in-process subscription bridges, never a remote gateway.
+func isLoopbackBase(base string) bool {
+	u, err := url.Parse(strings.TrimSpace(base))
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func isAnthropicAPI(acct Account) bool {
@@ -404,6 +420,19 @@ func (a *anthropicCompatible) ReadQuota(ctx context.Context, acct Account, key s
 	// on real calls instead. The one exception is the Console's prepaid-credit
 	// balance, readable with the operator's web session (opt-in, stored in
 	// management_key) — else report unsupported so the UI shows "measured".
+	// A loopback base is ezllm's own claude-bridge, which serves the plan's
+	// 5h/weekly windows on {base}/usage in the percent shape.
+	if isLoopbackBase(acct.BaseURL) {
+		body, err := getJSON(ctx, a.client, UpstreamURL(acct.BaseURL, acct.Kind, "/usage"),
+			withCustomHeaders(map[string]string{"x-api-key": key}, acct))
+		if err != nil {
+			return Quota{}, mapUsageErr(err)
+		}
+		if q := ClassifyQuota(string(body)); q.Kind == QuotaPercent {
+			return q, nil
+		}
+		return Quota{}, ErrQuotaUnsupported
+	}
 	if !isAnthropicAPI(acct) {
 		return Quota{}, ErrQuotaUnsupported
 	}

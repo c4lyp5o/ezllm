@@ -11,7 +11,27 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.0.0**
+**Current: v1.1.0**
+
+---
+
+## v1.1.0 — 2026-10-23
+
+- **ChatGPT subscription through the Codex bridge** (`internal/codexbridge`,
+  off by default, `EZLLM_CODEX_BRIDGE=on`): the official `codex app-server`
+  behind a loopback OpenAI-compatible surface, locked down so Codex runs no
+  commands of its own; client tools through code-mode with continuation,
+  every child confined by Landlock; structured output, reasoning summaries
+  and an `exec` fallback. See `docs/codex-bridge-runbook.md`.
+- **Plan windows on provider cards:** the Claude and Codex bridges serve their
+  5h/weekly usage on `/v1/usage`, read for loopback accounts.
+- **Key test** advances past models the endpoint does not serve and no longer
+  blocks a proven key on a non-auth generation failure.
+- **GitHub Copilot** presents CLI 1.0.103 (GitHub's HTTP 466 floor rejected
+  1.0.81-6); `GITHUB_COPILOT_CLI_VERSION` passes through compose.
+- **Deploy change:** `compose.yml` is no longer shipped. Copy
+  `compose.example.yml` to `compose.yml` (gitignored); `compose.traefik.yml` is
+  gone. Back up your `compose.yml` before pulling.
 
 ---
 

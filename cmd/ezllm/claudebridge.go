@@ -95,7 +95,8 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger) error {
 			"subscription":      plan,
 			"tools":             "client tools pass through; never executed by the bridge (M2)",
 		},
-		Logf: log.Info,
+		Logf:   log.Info,
+		Limits: &claudebridge.Limits{},
 	}
 
 	httpSrv := &http.Server{Addr: addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}

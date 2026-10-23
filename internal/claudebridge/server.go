@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // maxBodyBytes caps a request. The upstream body is replayed to native through a
@@ -48,6 +49,8 @@ type Server struct {
 	Models  []CatalogModel
 	Info    map[string]any
 	Logf    func(format string, args ...any)
+	// Limits holds the last plan-window reading; nil disables GET /v1/usage.
+	Limits *Limits
 }
 
 func (s *Server) logf(format string, args ...any) {
@@ -57,7 +60,7 @@ func (s *Server) logf(format string, args ...any) {
 }
 
 // Handler builds the mux. Endpoints: /healthz (two fields, house contract),
-// /status (operator detail), /v1/models, /v1/messages.
+// /status (operator detail), /v1/models, /v1/usage (plan windows), /v1/messages.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -67,6 +70,7 @@ func (s *Server) Handler() http.Handler {
 		writeJSONBytes(w, http.StatusOK, mustJSON(s.Info))
 	})
 	mux.HandleFunc("GET /v1/models", s.authed(s.listModels))
+	mux.HandleFunc("GET /v1/usage", s.authed(s.usage))
 	mux.HandleFunc("POST /v1/messages", s.authed(s.messages))
 	return mux
 }
@@ -92,6 +96,19 @@ func (s *Server) listModels(w http.ResponseWriter, _ *http.Request) {
 		models = DefaultCatalog()
 	}
 	writeJSONBytes(w, http.StatusOK, mustJSON(map[string]any{"data": models, "has_more": false}))
+}
+
+// usage serves the plan's 5h and weekly windows for the provider card. 404
+// until a call has reported them: the account then reads as "measured", and
+// the first request fills it in.
+func (s *Server) usage(w http.ResponseWriter, _ *http.Request) {
+	body, ok := s.Limits.UsageBody()
+	if !ok {
+		writeJSONBytes(w, http.StatusNotFound, ErrorEnvelope("not_found_error",
+			"claude-bridge: no plan-limit reading yet; the CLI reports one with every call", "no_reading"))
+		return
+	}
+	writeJSONBytes(w, http.StatusOK, body)
 }
 
 func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
@@ -127,6 +144,7 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 	}
 	sw := &StreamWriter{}
 	res, err := s.Runner.Run(r.Context(), req, alias, sw.Handle)
+	s.Limits.Observe(res.RateLimit, time.Now())
 	if err != nil {
 		s.writeRunError(w, res, err)
 		return
@@ -148,7 +166,8 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request, req Request, ali
 			flusher.Flush()
 		}
 	}}
-	_, err := s.Runner.Run(r.Context(), req, alias, sw.Handle)
+	res, err := s.Runner.Run(r.Context(), req, alias, sw.Handle)
+	s.Limits.Observe(res.RateLimit, time.Now())
 	if err != nil {
 		// The stream is already open: the failure travels as an Anthropic error
 		// event, with the CLI's own words, never as a silent truncation.

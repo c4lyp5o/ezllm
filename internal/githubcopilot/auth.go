@@ -31,7 +31,7 @@ const (
 	copilotAPIBase    = "https://api.githubcopilot.com"
 	apiVersion        = "2026-08-01"
 	defaultScope      = "read:user"
-	defaultCLIVersion = "1.0.81-6"
+	defaultCLIVersion = "1.0.103"
 )
 
 // Session is the stored credential row (provider_keys). It carries the

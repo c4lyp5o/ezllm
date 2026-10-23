@@ -23,7 +23,7 @@ nothing else ever holds the subscription credential. One container, no sidecar.
   ```sh
   mkdir -p ~/.local/share/claude-bridge
   cp ~/.local/share/claude/versions/<ver> ~/.local/share/claude-bridge/claude-<ver>
-  # then point compose.yml (or CLAUDE_CLI_BIN) at it and re-run the live proof
+  # then point the mount in your compose.yml at it and re-run the live proof
   ```
 - A subscription login in its own config dir, never the interactive one:
 
@@ -38,12 +38,13 @@ nothing else ever holds the subscription credential. One container, no sidecar.
 
 ## Enable
 
-`compose.yml` already wires it: the CLI mounts read-only at `/opt/claude/claude`,
-the login read-write at `/claude-sub`, `USER`/`LOGNAME` are set (the CLI's login
-check reads process identity), and `EZLLM_CLAUDE_BRIDGE=on` turns the surface on.
+In your `compose.yml` (from `compose.example.yml`): uncomment the two Claude
+mounts (the CLI read-only at `/opt/claude/claude`, the login read-write at
+`/claude-sub`), set `USER`/`LOGNAME` to the login's owner (the CLI's login check
+reads process identity), and set `EZLLM_CLAUDE_BRIDGE: "on"`.
 
 ```sh
-docker compose -f compose.yml -f compose.traefik.yml up -d
+docker compose up -d
 docker logs ezllm | grep -i "claude bridge"   # cli version + login + plan + flag drift
 ```
 
@@ -95,6 +96,22 @@ two `cache_control` markers survive (native spends two of upstream's four).
 python3 tests/prove_claude_bridge.py     # through ezllm's front door; real plan draw
 ```
 
+## Plan windows on the provider card
+
+Every CLI run reports the plan's state in a `rate_limit_event`: the 5-hour and
+7-day windows as a utilization fraction plus reset times. The bridge keeps the
+last reading and serves it on `GET /v1/usage` (same `x-api-key`) in the percent
+shape the Providers page already draws — **rolling** = the 5-hour window,
+**weekly** = the 7-day window. Press **Quota** on the claude-sub account to read it.
+
+- The reading is only as fresh as the **last call** (`observed_at` in the raw
+  body); the CLI has no way to read it without making one.
+- Before the first call after a restart the bridge answers 404 and the card shows
+  `–` ("measured"). The first request through the account fills it in.
+- These are Anthropic's own numbers for the whole subscription, including use
+  from claude.ai and other devices — they will not match ezllm's ledger, and
+  they are not the Rules caps (those count only ezllm traffic, in calendar blocks).
+
 ## Failure modes
 
 - **401** — no usable login where the CLI runs it. Check `USER`/`LOGNAME` are set
@@ -107,7 +124,7 @@ python3 tests/prove_claude_bridge.py     # through ezllm's front door; real plan
   (`web_search_*`, `code_execution_*`, …), an OpenAI-shaped tool on `/v1/messages`,
   or `parallel_tool_calls`. The message names the field; send client tools only.
 - **Boot: "does not resolve to the official Claude Code CLI"** — the
-  `CLAUDE_CLI_BIN` mount is missing or points at nothing.
+  `/opt/claude/claude` mount in your `compose.yml` is missing or points at nothing.
 
 ## Rollback
 

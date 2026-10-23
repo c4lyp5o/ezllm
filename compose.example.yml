@@ -1,0 +1,108 @@
+# Run ezllm in Docker. Copy this file and edit the copy; compose.yml is
+# gitignored, so your paths, hostnames and proxy labels stay out of the repo.
+#
+#   cp config.example.yaml config.yaml
+#   cp compose.example.yml compose.yml
+#   docker compose up -d
+#   docker logs ezllm              # first boot: the dashboard setup code
+#
+# Every variable is listed below with its default; commented lines are
+# optional. The full reference is docs/environment.md.
+#
+# Both paths work: `build: .` compiles from source, or drop it and use
+# `image:` to pull the published GHCR build.
+services:
+  ezllm:
+    image: ghcr.io/c4lyp5o/ezllm:latest
+    build: .
+    container_name: ezllm
+    restart: unless-stopped
+
+    # Run as your own user so the database and the master key are yours.
+    user: "${UID:-1000}:${GID:-1000}"
+
+    ports:
+      # Overridable so a second instance (staging, a test) does not need its
+      # own file:  EZLLM_PORT=20130 EZLLM_DATA=./data-staging docker compose up -d
+      - "${EZLLM_PORT:-20129}:20129"
+
+    environment:
+      # ── server ──
+      # Where a "day" starts on the dashboard and in daily usage rules. An IANA
+      # name that does not resolve fails the boot. Unset = UTC.
+      EZLLM_USAGE_TZ: UTC
+      # Container clock, log timestamps only (the image sets Asia/Kuala_Lumpur).
+      # TZ: UTC
+      # Reverse proxies whose X-Forwarded-For the sign-in limiter trusts. Set it
+      # behind any proxy, or every client shares the proxy's limit.
+      # EZLLM_TRUSTED_PROXIES: 172.18.0.0/16
+      # EZLLM_LOG_LEVEL: info        # debug | info | warn | error
+      # EZLLM_LOG_COLOR: auto        # auto | always | never
+      # The image already sets these two; change them only with the mounts.
+      # EZLLM_ADDR: 0.0.0.0:20129
+      # EZLLM_DATA_DIR: /data
+
+      # ── secrets ──
+      # Master key for provider keys at rest; generated on first boot. Back it
+      # up with the database: losing it loses every stored provider key.
+      EZLLM_MASTER_KEY_FILE: /data/ezllm-master.key
+      # First dashboard password (12+ characters), used only while setup is
+      # pending. Without it, first boot prints a one-time setup code.
+      # EZLLM_DASHBOARD_PASSWORD_FILE: /data/ezllm-dashboard-password
+
+      # ── features ──
+      # EZLLM_TRANSLATION_ENABLED: "true"
+      # EZLLM_COMBO_AUTOPROBE: "on"
+      # EZLLM_PRICE_REFRESH: "on"
+
+      # ── GitHub Copilot provider ──
+      # Copilot CLI version presented upstream. GitHub raises a floor and
+      # answers 466 below it; bump to `npm view @github/copilot version`.
+      GITHUB_COPILOT_CLI_VERSION: 1.0.103
+      # GITHUB_OAUTH_CLIENT_ID: <built-in>
+
+      # ── Claude subscription bridge ── docs/claude-bridge-runbook.md
+      # Loopback-only; an anthropic-compatible account dials it. `on` without
+      # the CLI and a login (the two mounts below) fails the boot.
+      EZLLM_CLAUDE_BRIDGE: "off"
+      # The CLI's login check reads process identity: with the bridge on, both
+      # must name the owner of the mounted login directory.
+      # USER: you
+      # LOGNAME: you
+      # EZLLM_CLAUDE_BIN: /opt/claude/claude
+      # EZLLM_CLAUDE_CONFIG_DIR: /claude-sub
+      # EZLLM_CLAUDE_BRIDGE_ADDR: 127.0.0.1:8790
+      # EZLLM_CLAUDE_BRIDGE_TOKEN_FILE: /data/claude-bridge.token
+
+      # ── ChatGPT subscription bridge ── docs/codex-bridge-runbook.md
+      # Loopback-only; an openai-compatible account dials it. Linux only. `on`
+      # without the CLI and a login (the two mounts below) fails the boot.
+      EZLLM_CODEX_BRIDGE: "off"
+      # EZLLM_CODEX_BIN: /opt/codex/bin/codex
+      # EZLLM_CODEX_HOME: /codex-sub
+      # EZLLM_CODEX_BRIDGE_ADDR: 127.0.0.1:8791
+      # EZLLM_CODEX_BRIDGE_TOKEN_FILE: /data/codex-bridge.token
+      # EZLLM_CODEX_BRIDGE_CONCURRENCY: "2"
+      # Client tools without Landlock: read the runbook before setting this.
+      # EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK: "on"
+
+    volumes:
+      # Non-secret runtime defaults; credentials stay in SQLite.
+      - ./config.yaml:/app/config.yaml:ro
+      # The ledger, master key and bridge tokens. Without it, a restart loses
+      # everything.
+      - "${EZLLM_DATA:-./data}:/data"
+
+      # Claude bridge: a pinned copy of the CLI binary (outside the CLI's own
+      # versions directory, so its auto-updater cannot delete it under a running
+      # mount), read-only, and the login, read-write (the CLI refreshes its
+      # token there). A bind mount whose source is missing makes Docker create
+      # an empty directory, so uncomment these only when both exist.
+      # - /path/to/claude-bridge/claude-<version>:/opt/claude/claude:ro
+      # - /path/to/.claude-sub:/claude-sub
+
+      # Codex bridge: a pinned copy of the whole Codex CLI release (bin/ holds
+      # the CLI and the code-mode host that client tools need), read-only, and
+      # the isolated login (CODEX_HOME), read-write.
+      # - /path/to/codex-bridge/<version>:/opt/codex:ro
+      # - /path/to/.codex-sub:/codex-sub

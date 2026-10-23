@@ -33,6 +33,10 @@ suite · web build). `GET /healthz` reports the running release version — see
   `session_dedup`, `rtk`, `headroom`, `lite`, `caveman`, `ansi`, `fold`,
   `jsonmin`, `tool_ref`, `blobs` — with per-profile configuration and
   fail-open semantics.
+- **Subscriptions as accounts.** Optional loopback bridges put a Claude
+  ([runbook](docs/claude-bridge-runbook.md)) or ChatGPT
+  ([runbook](docs/codex-bridge-runbook.md)) subscription behind the router
+  through each vendor's official CLI, with plan windows on the provider card.
 - **Ops surface included.** Dashboard, live request feed, analytics, key-test
   pipeline with protocol sweeps, and a disaster-recovery export — all served
   from the same binary.
@@ -71,11 +75,18 @@ On first boot the dashboard asks for the setup code printed in the
 container log. To skip setup, pass the first password instead, ideally as a
 secret file: `-e EZLLM_DASHBOARD_PASSWORD_FILE=/run/secrets/ezllm-dashboard`.
 
-Or use the published image (`ghcr.io/c4lyp5o/ezllm:latest`) with
-[compose.yml](compose.yml); [compose.traefik.yml](compose.traefik.yml) adds a
-Traefik overlay. It serves `/v1`, `/healthz` and the dashboard publicly; `/admin`
-is public too but guarded by the dashboard password and a per-source rate
-limit, with a tighter one on `/admin/login` and `/admin/setup`.
+Or use the published image (`ghcr.io/c4lyp5o/ezllm:latest`) with compose:
+
+```bash
+cp compose.example.yml compose.yml         # gitignored: your paths and labels
+docker compose up -d
+```
+
+[compose.example.yml](compose.example.yml) lists every environment variable
+with its default, and the bridge mounts commented out. Behind a reverse proxy,
+add its network and labels to your copy and set `EZLLM_TRUSTED_PROXIES`;
+`/admin` is public there too, so keep the dashboard password long and put a
+per-source rate limit on `/admin/login` and `/admin/setup`.
 
 ## API surface
 
@@ -84,7 +95,7 @@ Full contract — every endpoint, request/response shape, and error code — in
 
 | Layer | Routes | Auth |
 |---|---|---|
-| Liveness | `GET /healthz` → `{"status":"ok","version":"1.0.0"}` | none |
+| Liveness | `GET /healthz` → `{"status":"ok","version":"1.1.0"}` | none |
 | Inference | `POST /v1/chat/completions` · `/v1/messages` · `/v1/responses` | client token |
 | Extended | `POST /v1/embeddings` · `/v1/images/generations` · `/v1/audio/speech` · `/v1/audio/transcriptions` | client token |
 | Catalog | `GET /v1/models` (namespaced ids + combos; `?protocol=anthropic`) | client token |
@@ -182,7 +193,8 @@ Precedence: command-line flags → `EZLLM_*` environment → `config.yaml` →
 built-in defaults.
 
 New install? Set `EZLLM_USAGE_TZ` to your time zone, and
-`EZLLM_CLAUDE_BRIDGE=off` unless you run the Claude subscription bridge.
+keep both subscription bridges off unless you run them (they are off in
+`compose.example.yml`).
 Every variable and its default: **[docs/environment.md](docs/environment.md)**.
 
 Provider credentials live in SQLite only, managed from the dashboard or the
@@ -239,6 +251,8 @@ an image or a release asset.
 | [docs/environment.md](docs/environment.md) | every environment variable and its default; what a new install sets |
 | [docs/master-key-runbook.md](docs/master-key-runbook.md) | at-rest key encryption: paths, backup, rotation |
 | [docs/pricing-runbook.md](docs/pricing-runbook.md) | price catalog: refresh cadence, import, query |
+| [docs/claude-bridge-runbook.md](docs/claude-bridge-runbook.md) | Claude subscription bridge: setup, account, plan windows |
+| [docs/codex-bridge-runbook.md](docs/codex-bridge-runbook.md) | ChatGPT subscription bridge: platform requirements, lockdown, tools, setup |
 | [VERSION.md](VERSION.md) | release history; what changed on each date |
 | [CHANGELOG.md](CHANGELOG.md) | milestone-tagged change narrative |
 | [EXPLORING.md](EXPLORING.md) | codebase tour: reading order, invariants, landmarks |

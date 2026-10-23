@@ -249,7 +249,7 @@ func TestChatHeaders(t *testing.T) {
 	if h.Get("copilot-harness-id") != "copilot-sdk" || h.Get("x-github-api-version") != "2026-08-01" {
 		t.Errorf("headers = %v", h)
 	}
-	if !strings.Contains(h.Get("user-agent"), "copilot/1.0.81-6") {
+	if !strings.Contains(h.Get("user-agent"), "copilot/1.0.103") {
 		t.Errorf("ua = %q", h.Get("user-agent"))
 	}
 	if h.Get("x-stainless-helper-method") != "stream" {

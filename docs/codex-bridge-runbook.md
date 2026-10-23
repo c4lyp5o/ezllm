@@ -53,6 +53,7 @@ requests included; tools additionally switch the code-mode runtime on.
 | Linux without Landlock (old kernel, disabled LSM, or blocked by seccomp) | no | ✅ | ❌ — 400 `chat_tools_unsupported` |
 | Linux without Landlock + `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK=on` | no | ✅ | ✅ — weaker guarantee, see below |
 | macOS, Windows (native binaries) | — | ❌ bridge refuses to start | ❌ |
+| Docker on Linux, **default** seccomp profile (verified 2026-10-23, kernel 6.8) | yes | ✅ | ✅ |
 | Docker Desktop (Mac/Windows) | depends on its Linux VM kernel | check `/status` | check `/status` |
 
 ### Check your host

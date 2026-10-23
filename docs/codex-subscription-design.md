@@ -240,6 +240,16 @@ Bridge argv, real login, every child inside Landlock (ABI 4, kernel 6.8):
   "the sandbox is read-only" and the target directory stayed empty.
 - In unit tests, a child inside the domain was refused both a write outside it and a
   read of a file outside it (`internal/codexbridge/landlock_test.go`).
+- **In the container (2026-10-23).** The branch image (`distroless/base-debian12`,
+  Docker's **default** seccomp profile, `--user 1000:1000`, the release mounted at
+  `/opt/codex`) booted with `landlock="available (ABI 4)" client_tools=enabled
+  channel=app-server release=qualified` — the boot self-test (a write and a read outside
+  the domain, both refused) passed inside the container. From the container's network
+  namespace: `/healthz`, `/v1/models` (hidden included), `/v1/usage`, a text turn, a
+  stream, a tool call (parked: `parked_tool_turns: 1`), its continuation ("It's 31°C and
+  humid in Kuala Lumpur…") and a `/data` write sentinel all passed (9/9); `/data` was
+  unchanged. The startup probes the CLI shells out to (`lsb_release`, `getconf`) are
+  absent from distroless and cost nothing.
 
 ## 3. Proposed surface — full function, built in stages
 

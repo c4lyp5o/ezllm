@@ -29,7 +29,7 @@ func rtk(msgs []any, opts map[string]any) []any {
 	overrides := toolClassOverrides(opts)
 	// One rule for every shape (parts.go): tool output whose resolved tool
 	// is log- or search-class, never JSON, filtered only when it shrinks.
-	return editAll(msgs, toolNamesByCallID(msgs), func(p textPart) (string, bool) {
+	return editAll(msgs, callNames(msgs, opts), func(p textPart) (string, bool) {
 		if p.kind != partToolOutput || p.text == "" || isJSONPayload(p.text) {
 			return "", false
 		}

@@ -12,7 +12,7 @@ import (
 
 func TestCodexBridgeIsOffByDefault(t *testing.T) {
 	t.Setenv(envCodexBridge, "")
-	if err := startCodexBridge(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+	if _, err := startCodexBridge(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
 		t.Fatalf("off must be a no-op: %v", err)
 	}
 }
@@ -22,7 +22,7 @@ func TestCodexBridgeIsOffByDefault(t *testing.T) {
 func TestCodexBridgeOnWithoutTheCLIFailsBoot(t *testing.T) {
 	t.Setenv(envCodexBridge, "on")
 	t.Setenv(envCodexBin, filepath.Join(t.TempDir(), "no-codex"))
-	err := startCodexBridge(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	_, err := startCodexBridge(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err == nil || !strings.Contains(err.Error(), envCodexBin) {
 		t.Fatalf("err = %v, want a boot failure naming %s", err, envCodexBin)
 	}

@@ -1,8 +1,8 @@
 # ezllm compression design (M5)
 
-Source of truth: rev4 plan §4 (`~/.hermes/plans/2026-10-05_223000-ezllm-v1-rev4-namespace-compression.md`)
-+ `compression_profiles` schema. This doc restates the contract as shipped code and
-records every design decision where the plan left latitude.
+Origin: the v1 rev4 plan §4 (private planning notes) + the `compression_profiles` schema. This
+doc restates the contract as shipped code and records every design decision where the plan left
+latitude; it is the reference now.
 
 ## Scope (M5)
 
@@ -90,15 +90,22 @@ history to its original bytes and breaking the upstream prefix cache.
   `sha256(session|profile|messageHash)` stores the form that SHIPPED.
 - Already-shipped messages replay verbatim; the ratio floor judges the
   **new work only**.
-- The ledger is bounded (512/session, 8192 global), memory-only, lost on
-  restart (re-derivation is deterministic).
+- The ledger is bounded by entries (512/session, 8192 global) and by bytes of
+  retained form (32 MiB/session, 256 MiB global; a form over 4 MiB is not
+  retained and that message is re-judged each request). Idle entries are
+  swept every minute past their 30-minute TTL. Memory-only, lost on restart
+  (re-derivation is deterministic).
 - **Every request is covered (2026-10-19).** An explicit `X-Ezllm-Session`
-  wins; otherwise `compress.ConversationKey` derives one from what exists
+  wins, scoped to the authenticated client (`compress.ClientSession`, so two
+  clients naming the same id never share forms or a profile binding);
+  otherwise `compress.ConversationKey` derives one from what exists
   from a conversation's first request and never changes: the client, the
   leading instructions (top-level `system` / Responses `instructions` /
   leading system or developer messages) and the first message after them.
   No app has to send a header for its prefix to stay stable. Conversations
-  that open identically share a key safely — entries are keyed by content —
+  that open identically share a key safely — entries are keyed by content,
+  and a replayed `tool_ref` reference ships only while its target still holds
+  the same output —
   and a rewritten history (compaction, fork) opens a new key. The derived key
   feeds the memo only; the ledger's `session_id` stays the explicit id.
 - Entries are keyed by content **and occurrence** (the nth identical

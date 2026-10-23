@@ -11,7 +11,7 @@
 // that looks complete. Rates are versioned by effective_from, so a price change
 // does not retroactively rewrite history, which is also why "unpriced" is a
 // per-row fact and not a global one.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { fmtMoney, pctWhole } from '../utils/lib';
 import {
@@ -50,7 +50,11 @@ export default function Economics() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  // Only the newest load may write state: an older selection's response that
+  // lands late is dropped instead of overwriting the current one.
+  const loadGen = useRef(0);
   const load = useCallback(async () => {
+    const gen = ++loadGen.current;
     setLoading(true); setError('');
     try {
       // Token flow and money are two endpoints; fetched together so one range
@@ -65,14 +69,15 @@ export default function Economics() {
         }),
         cost(range).catch(() => null),
       ]);
+      if (gen !== loadGen.current) return;
       setRows(r.rows.map(normalizeFeedRow));
       setSummary(r.summary);
       setCostRows(c?.rows ?? []);
       setCostTotals(c?.totals ?? null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'could not load token economics');
+      if (gen === loadGen.current) setError(e instanceof Error ? e.message : 'could not load token economics');
     } finally {
-      setLoading(false);
+      if (gen === loadGen.current) setLoading(false);
     }
   }, [range, minInput]);
 

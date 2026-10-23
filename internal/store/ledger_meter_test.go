@@ -39,13 +39,19 @@ func TestMeterFailureRollsBackTheWholeBatchMeter(t *testing.T) {
 	if err := db.r.QueryRow(`SELECT COUNT(*) FROM calls`).Scan(&calls); err != nil || calls != 2 {
 		t.Fatalf("calls rows = %d (err %v), want 2", calls, err)
 	}
-	c, err := db.UsageFor(ctx, aid, "m1", CountBucket(now, "daily", time.UTC))
-	if err != nil {
+	// Inspect the persisted counters directly: both halves still roll back.
+	var c UsageCounter
+	if err := db.r.QueryRow(`SELECT COALESCE(SUM(tokens),0),COALESCE(SUM(calls),0) FROM usage_counters WHERE account_id=? AND model_id='m1'`, aid).Scan(&c.Tokens, &c.Calls); err != nil {
 		t.Fatal(err)
 	}
 	if c.Tokens != 0 || c.Calls != 0 {
 		t.Errorf("model counter = %+v after a failed meter, want zero (rolled back with the client half)", c)
 	}
+	// The public cap reader must now refuse the unreconciled state.
+	if _, err := db.UsageFor(ctx, aid, "m1", CountBucket(now, "daily", time.UTC)); err == nil {
+		t.Fatal("unreconciled model meter was available to admission")
+	}
+
 }
 
 // The tz-aware day report is the Go form of the SQL day report: for UTC both

@@ -1,6 +1,6 @@
 # ChatGPT subscription via the official Codex CLI — design
 
-**Status:** M0 measured 2026-10-23 · decisions recorded (§4) · stages 1–3 built on `feat/codex-bridge` (§2.13, §2.14)
+**Status:** M0 measured 2026-10-23 · decisions recorded (§4) · stages 1–3 (§2.13, §2.14) shipped in v1.1.0 and deployed
 **Operator gate:** Calypso (pushes/deploys)
 **Spec:** [SPEC-codex-bridge.md](../SPEC-codex-bridge.md) · **Pattern:** [claude-subscription-design.md](claude-subscription-design.md)
 

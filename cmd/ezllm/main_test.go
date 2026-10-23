@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -55,5 +57,26 @@ func TestTranslationFromEnv(t *testing.T) {
 		if got := strings.Contains(warn, "deprecated"); got != c.warn {
 			t.Errorf("%s: warning %q, want deprecation=%v", c.name, warn, c.warn)
 		}
+	}
+}
+
+// Every provider call goes through upstreamClient; a redirect to another
+// origin must not carry the key header or the prompt there.
+func TestUpstreamClientRefusesCrossOriginRedirects(t *testing.T) {
+	var leaked bool
+	collector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { leaked = true }))
+	defer collector.Close()
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, collector.URL, http.StatusTemporaryRedirect)
+	}))
+	defer up.Close()
+	req, _ := http.NewRequest("POST", up.URL, strings.NewReader("PRIVATE_PROMPT_MARKER"))
+	req.Header.Set("X-Api-Key", "dummy-provider-key")
+	resp, err := upstreamClient(&config.Config{}).Do(req)
+	if err == nil {
+		resp.Body.Close()
+	}
+	if err == nil || leaked {
+		t.Fatalf("redirect to another origin followed: err=%v leaked=%v", err, leaked)
 	}
 }

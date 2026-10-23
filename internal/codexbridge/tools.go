@@ -43,6 +43,11 @@ func (r *Runner) park(c *child, st *turnState, calls []ToolCall) {
 		pt.ids = append(pt.ids, call.ID)
 	}
 	r.pmu.Lock()
+	if r.shut {
+		r.pmu.Unlock()
+		c.close() // shutting down: nothing will ever resume it
+		return
+	}
 	if r.parked == nil {
 		r.parked = map[string]*parkedTurn{}
 	}
@@ -125,10 +130,10 @@ func (r *Runner) ParkedTurns() int {
 // resume answers a parked turn's pending calls with the client's results and
 // streams the rest of the turn — possibly to the next tool stop.
 func (r *Runner) resume(ctx context.Context, pt *parkedTurn, req Request, sink func(Delta) error) (Result, error) {
+	pt.c.bind(ctx) // the follow-up request now owns the child's lifetime
 	st := pt.st
 	st.mu.Lock()
 	st.sink = sink
-	st.sinkErr = nil
 	pending := st.replyTo
 	st.replyTo = map[string]json.RawMessage{}
 	st.calls = nil
@@ -156,9 +161,32 @@ func (r *Runner) resume(ctx context.Context, pt *parkedTurn, req Request, sink f
 		return Result{}, err
 	}
 	if park {
+		if !pt.c.release() {
+			pt.c.close()
+			return Result{}, r.childErr(ctx, pt.c, "turn", ctx.Err())
+		}
 		r.park(pt.c, st, res.ToolCalls)
 		return res, nil
 	}
 	pt.c.close()
 	return res, nil
+}
+
+// Shutdown reaps every parked child and stops their hold timers; a turn that
+// stops on tool calls afterwards is closed instead of parked. Parked children
+// outlive their HTTP request by design, so an HTTP drain alone never reached
+// them. Active runs end through their own request contexts.
+func (r *Runner) Shutdown() {
+	r.pmu.Lock()
+	r.shut = true
+	var reap []*parkedTurn
+	for pt := range r.uniqueParked() {
+		r.unregister(pt)
+		pt.timer.Stop()
+		reap = append(reap, pt)
+	}
+	r.pmu.Unlock()
+	for _, pt := range reap {
+		pt.c.close()
+	}
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Live proof for the ChatGPT subscription surface (codex-bridge stage 1) — through
+"""Live proof for the ChatGPT subscription surface (codex-bridge) — through
 ezllm's FRONT DOOR, not the internal loopback listener.
 
 Requires the account to be wired first (docs/codex-bridge-runbook.md): an
@@ -10,7 +10,8 @@ subscription tokens (a few small calls) and proves:
      cached and reasoning details).
   2. Streaming ends in [DONE] with the text intact.
   3. The conversation history drives the answer (flattened transcript, §4.2).
-  4. Tool-bearing requests are refused with 400 chat_tools_unsupported (stage 1).
+  4. Client tools round-trip: the call comes back as tool_calls, and the
+     follow-up with the result answers from it (continuation, stage 2).
   5. Nothing executes: a request for a file write leaves no file behind.
   6. The call lands in the ledger against this account.
 
@@ -98,11 +99,22 @@ def main():
     check("answered from the conversation history", status == 200 and ("seven" in said or said == "7"),
           f"status={status} said={said!r}")
 
-    print("== 4. tools are refused explicitly (stage 1) ==")
-    status, raw = call("/v1/chat/completions", {
-        "model": MODEL, "messages": [{"role": "user", "content": "weather in Paris?"}],
-        "tools": [{"type": "function", "function": {"name": "get_weather", "parameters": {"type": "object"}}}]})
-    check("400 chat_tools_unsupported", status == 400 and "chat_tools_unsupported" in raw, f"status={status} body={raw[:200]}")
+    print("== 4. client tools round-trip (continuation) ==")
+    tools = [{"type": "function", "function": {
+        "name": "get_weather", "description": "Get the current weather for a city",
+        "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}]
+    msgs = [{"role": "user", "content": "What's the weather in Kuala Lumpur? Use get_weather, then answer in one sentence."}]
+    status, raw = call("/v1/chat/completions", {"model": MODEL, "tools": tools, "messages": msgs})
+    choice = (json.loads(raw).get("choices") or [{}])[0] if status == 200 else {}
+    calls = choice.get("message", {}).get("tool_calls") or []
+    check("tool_calls returned", status == 200 and choice.get("finish_reason") == "tool_calls" and calls
+          and calls[0]["function"]["name"] == "get_weather", f"status={status} body={raw[:300]}")
+    if calls:
+        msgs += [{"role": "assistant", "content": None, "tool_calls": calls}] + [
+            {"role": "tool", "tool_call_id": c["id"], "content": "31°C, humid, thunderstorms after 4pm"} for c in calls]
+        status, raw = call("/v1/chat/completions", {"model": MODEL, "tools": tools, "messages": msgs})
+        check("the answer uses the tool result", status == 200 and "31" in text_of(raw),
+              f"status={status} body={raw[:300]}")
 
     print("== 5. nothing executes ==")
     status, raw = call("/v1/chat/completions", {

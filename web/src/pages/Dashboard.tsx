@@ -20,7 +20,7 @@
 // 24h window yields one or two points. That is why the trend panel asks for
 // 7d — a two-dot "trend" is worse than no chart — and why the panel says so
 // rather than implying a resolution the data does not have.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { get, usage, RANGE_LABEL, type Overview, type RangeKey, type UsageRow } from '../utils/api';
 import {
@@ -441,37 +441,68 @@ export default function Dashboard() {
   // Overview is the fast pulse; the breakdowns refresh on their own cadence
   // (see SLOW_MS). Splitting the timers means a token total does not twiddle
   // every 15s on a tab left open, while the call feed still feels live.
+  // A tick that finds its previous request still running is skipped: on a
+  // large ledger a slow report must not stack up behind itself.
+  const fastBusy = useRef(false);
+  const slowBusy = useRef(false);
   const loadFast = useCallback(async (silent: boolean) => {
+    if (fastBusy.current) return;
+    fastBusy.current = true;
     if (!silent) setErr(null);
     try {
       setO(await get<Overview>('/admin/overview'));
       setErr(null);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'failed to load');
+    } finally {
+      fastBusy.current = false;
     }
   }, []);
 
   const loadSlow = useCallback(async () => {
-    // Three independent SQL aggregates in parallel. A failure in one must not
-    // blank the other two, so each is caught separately and simply leaves its
-    // own panel empty — an empty panel says "no data", which is true and
-    // useful, whereas a thrown error would take the whole page down.
-    const [m, k, d] = await Promise.all([
-      usage('model', TOTAL_RANGE).catch(() => null),
-      usage('key', TOTAL_RANGE).catch(() => null),
-      usage('day', TREND_RANGE).catch(() => null),
-    ]);
-    if (m) setByModel(m.groups);
-    if (k) setByKey(k.groups);
-    if (d) setTrend(d.groups);
+    if (slowBusy.current) return;
+    slowBusy.current = true;
+    try {
+      // Three independent SQL aggregates in parallel. A failure in one must not
+      // blank the other two, so each is caught separately and simply leaves its
+      // own panel empty — an empty panel says "no data", which is true and
+      // useful, whereas a thrown error would take the whole page down.
+      const [m, k, d] = await Promise.all([
+        usage('model', TOTAL_RANGE).catch(() => null),
+        usage('key', TOTAL_RANGE).catch(() => null),
+        usage('day', TREND_RANGE).catch(() => null),
+      ]);
+      if (m) setByModel(m.groups);
+      if (k) setByKey(k.groups);
+      if (d) setTrend(d.groups);
+    } finally {
+      slowBusy.current = false;
+    }
   }, []);
 
+  // Polling runs only while the tab is visible: a background tab re-running
+  // every report on the server's reader pool helps nobody. Coming back
+  // refreshes at once, then resumes the timers.
   useEffect(() => {
     void loadFast(false);
     void loadSlow();
-    const fast = setInterval(() => void loadFast(true), HEARTBEAT_MS);
-    const slow = setInterval(() => void loadSlow(), SLOW_MS);
-    return () => { clearInterval(fast); clearInterval(slow); };
+    let fast: ReturnType<typeof setInterval> | undefined;
+    let slow: ReturnType<typeof setInterval> | undefined;
+    const stop = () => { clearInterval(fast); clearInterval(slow); fast = slow = undefined; };
+    const start = () => {
+      stop();
+      fast = setInterval(() => void loadFast(true), HEARTBEAT_MS);
+      slow = setInterval(() => void loadSlow(), SLOW_MS);
+    };
+    const onVisibility = () => {
+      if (document.hidden) { stop(); return; }
+      void loadFast(true);
+      void loadSlow();
+      start();
+    };
+    if (!document.hidden) start();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => { stop(); document.removeEventListener('visibilitychange', onVisibility); };
   }, [loadFast, loadSlow]);
 
   // The API ranks day groups by call count (`ORDER BY calls DESC` — right for

@@ -26,7 +26,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 27
+const schemaVersion = 28
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -43,7 +43,12 @@ type DB struct {
 	// ledger batching
 	callCh  chan ledgerItem
 	closeCh chan struct{}
-	wg      sync.WaitGroup
+	// recMu orders RecordCall against Close: a row enqueued under RLock is
+	// in callCh before closeCh closes (so the final drain sees it), and a row
+	// arriving after Close sees closed and is counted as dropped.
+	recMu  sync.RWMutex
+	closed bool
+	wg     sync.WaitGroup
 
 	// crypto at rest for provider keys (nil = plaintext, dev/back-compat)
 	crypto *FieldCrypto
@@ -154,7 +159,12 @@ func (d *DB) Ping(ctx context.Context) error {
 // hasColumn reports whether a table already has the named column, so the
 // non-idempotent ALTER below can be guarded. (schema.sql is re-applied
 // wholesale and IS idempotent; ALTER is not, hence this check.)
-func hasColumn(ctx context.Context, db *sql.DB, table, col string) (bool, error) {
+type schemaReader interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func hasColumn(ctx context.Context, db schemaReader, table, col string) (bool, error) {
 	rows, err := db.QueryContext(ctx, `SELECT name FROM pragma_table_info(?)`, table)
 	if err != nil {
 		return false, err
@@ -174,7 +184,7 @@ func hasColumn(ctx context.Context, db *sql.DB, table, col string) (bool, error)
 
 // hasTable reports whether a table exists — lets a guarded ALTER no-op (and
 // defer to CREATE TABLE) on databases where the table is not there yet.
-func hasTable(ctx context.Context, db *sql.DB, table string) (bool, error) {
+func hasTable(ctx context.Context, db schemaReader, table string) (bool, error) {
 	var name string
 	err := db.QueryRowContext(ctx,
 		`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&name)
@@ -256,6 +266,11 @@ func (d *DB) migrate() error {
 	}
 	if cur > schemaVersion {
 		return fmt.Errorf("store: database schema version %d is newer than this binary (%d) — refusing to start", cur, schemaVersion)
+	}
+	// Resume an interrupted legacy rebuild even if an old process stamped
+	// the current version after recreating an empty table. Ambiguity fails closed.
+	if err := d.rebuildCombosV9(context.Background()); err != nil {
+		return err
 	}
 	if cur < schemaVersion {
 		// Order matters: legacy columns must exist BEFORE schema.sql re-runs.
@@ -556,34 +571,73 @@ func (d *DB) alterAccountRate(ctx context.Context) error {
 // Row ids are preserved, which is load-bearing — combo_hops.combo_id references
 // them. The deferred foreign key means we must toggle enforcement off around the
 // DROP/RENAME and verify with foreign_key_check afterwards.
-func (d *DB) rebuildCombosV9(ctx context.Context) error {
+func (d *DB) rebuildCombosV9(ctx context.Context) (retErr error) {
 	exists, err := hasTable(ctx, d.w, "combos")
-	if err != nil || !exists {
+	if err != nil {
 		return err
 	}
-	has, err := hasColumn(ctx, d.w, "combos", "block_size")
-	if err != nil || has {
+	staged, err := hasTable(ctx, d.w, "combos_v9")
+	if err != nil {
 		return err
 	}
-
-	// context_size arrived as a later ALTER, so an older database may not have
-	// it. Its absence is not data loss — 200000 IS its default.
-	contextExpr := "200000"
-	if hasContext, err := hasColumn(ctx, d.w, "combos", "context_size"); err == nil && hasContext {
-		contextExpr = "COALESCE(context_size, 200000)"
+	if !exists && !staged {
+		return nil
 	}
-
-	// PRAGMA foreign_keys is a no-op inside a transaction, so it is set in
-	// autocommit around the rebuild.
-	if _, err := d.w.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
-		return fmt.Errorf("combos rebuild: disable fk: %w", err)
+	current := false
+	if exists {
+		current, err = hasColumn(ctx, d.w, "combos", "block_size")
+		if err != nil {
+			return err
+		}
 	}
-	done := func() {
-		_, _ = d.w.ExecContext(ctx, `PRAGMA foreign_keys=ON`)
+	if current && !staged {
+		return nil
 	}
-
-	if _, err := d.w.ExecContext(ctx, `
-CREATE TABLE combos_v9 (
+	if current && staged {
+		return fmt.Errorf("combos rebuild: both current and staged tables exist; preserve both for manual reconciliation")
+	}
+	conn, err := d.w.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err = conn.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
+		return err
+	}
+	defer func() {
+		_, err := conn.ExecContext(context.Background(), `PRAGMA foreign_keys=ON`)
+		retErr = errors.Join(retErr, err)
+	}()
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if staged && !exists {
+		// The old process dropped the original but did not rename its copy.
+		if _, err = tx.ExecContext(ctx, `ALTER TABLE combos_v9 RENAME TO combos`); err != nil {
+			return err
+		}
+	} else if staged {
+		// Original is authoritative until DROP. Discard only the incomplete copy.
+		if _, err = tx.ExecContext(ctx, `DROP TABLE combos_v9`); err != nil {
+			return err
+		}
+	}
+	hasBlock, err := hasColumn(ctx, tx, "combos", "block_size")
+	if err != nil {
+		return err
+	}
+	if !hasBlock {
+		contextExpr := "200000"
+		hasContext, err := hasColumn(ctx, tx, "combos", "context_size")
+		if err != nil {
+			return err
+		}
+		if hasContext {
+			contextExpr = "COALESCE(context_size, 200000)"
+		}
+		if _, err = tx.ExecContext(ctx, `CREATE TABLE combos_v9 (
   id          INTEGER PRIMARY KEY,
   name        TEXT NOT NULL UNIQUE,
   enabled     INTEGER NOT NULL DEFAULT 1,
@@ -597,43 +651,33 @@ CREATE TABLE combos_v9 (
   notes       TEXT,
   created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 )`); err != nil {
-		done()
-		return fmt.Errorf("combos rebuild: create: %w", err)
+			return fmt.Errorf("combos rebuild: create: %w", err)
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO combos_v9 (id,name,enabled,strategy,sticky_idle_s,compression_profile_id,context_size,block_size,rr_cursor,rr_epoch,notes,created_at)
+SELECT id,name,enabled,strategy,sticky_idle_s,compression_profile_id,`+contextExpr+`,1,0,0,notes,created_at FROM combos`); err != nil {
+			return fmt.Errorf("combos rebuild: copy: %w", err)
+		}
+		if _, err = tx.ExecContext(ctx, `DROP TABLE combos`); err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `ALTER TABLE combos_v9 RENAME TO combos`); err != nil {
+			return err
+		}
 	}
-	if _, err := d.w.ExecContext(ctx, `
-INSERT INTO combos_v9 (id, name, enabled, strategy, sticky_idle_s,
-                       compression_profile_id, context_size, block_size,
-                       rr_cursor, rr_epoch, notes, created_at)
-SELECT id, name, enabled, strategy, sticky_idle_s,
-       compression_profile_id, `+contextExpr+`, 1,
-       0, 0, notes, created_at
-FROM combos`); err != nil {
-		done()
-		return fmt.Errorf("combos rebuild: copy: %w", err)
+	hasHops, err := hasTable(ctx, tx, "combo_hops")
+	if err != nil {
+		return err
 	}
-	if _, err := d.w.ExecContext(ctx, `DROP TABLE combos`); err != nil {
-		done()
-		return fmt.Errorf("combos rebuild: drop: %w", err)
+	if hasHops {
+		var orphans int
+		if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM combo_hops h LEFT JOIN combos c ON c.id=h.combo_id WHERE c.id IS NULL`).Scan(&orphans); err != nil {
+			return err
+		}
+		if orphans != 0 {
+			return fmt.Errorf("combos rebuild: %d combo_hops rows lost their combo", orphans)
+		}
 	}
-	if _, err := d.w.ExecContext(ctx, `ALTER TABLE combos_v9 RENAME TO combos`); err != nil {
-		done()
-		return fmt.Errorf("combos rebuild: rename: %w", err)
-	}
-	done()
-
-	// The rebuild is only trustworthy if every combo_hops row still resolves to
-	// a combo. Check it rather than assume the id-preserving copy worked.
-	var orphans int
-	if err := d.w.QueryRowContext(ctx, `
-SELECT COUNT(*) FROM combo_hops h
-LEFT JOIN combos c ON c.id = h.combo_id
-WHERE c.id IS NULL`).Scan(&orphans); err != nil {
-		return fmt.Errorf("combos rebuild: orphan check: %w", err)
-	}
-	if orphans != 0 {
-		return fmt.Errorf("combos rebuild: %d combo_hops rows lost their combo", orphans)
-	}
-	return nil
+	return tx.Commit()
 }
 
 // alterCallsResearch adds the v8 (M9) research columns to `calls` on databases
@@ -945,11 +989,12 @@ func (d *DB) Close() error {
 	var firstErr error
 	// ask the ledger loop to flush + exit, and wait for it
 	done := make(chan struct{})
-	select {
-	case <-d.closeCh: // already closed
-	default:
+	d.recMu.Lock()
+	if !d.closed {
+		d.closed = true
 		close(d.closeCh)
 	}
+	d.recMu.Unlock()
 	go func() { d.wg.Wait(); close(done) }()
 	select {
 	case <-done:

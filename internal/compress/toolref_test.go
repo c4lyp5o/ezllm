@@ -117,6 +117,23 @@ func TestToolRefNeverShipsADanglingReference(t *testing.T) {
 	}
 }
 
+// A frozen reference is valid only while its target still holds the same
+// content. A client that rewrites history under one session (a compaction, a
+// retried tool) can keep the call id with different output; the memoized
+// reference would then claim the wrong text, so that message ships its
+// original instead.
+func TestToolRefNeverReplaysAReferenceToChangedContent(t *testing.T) {
+	file, changed := fileBody(30), fileBody(40)
+	for _, shape := range refShapes {
+		memo := NewSessionMemo(nil)
+		ApplyWithSession(refConv(shape, [][2]string{{"a", file}, {"b", file}}, false), refProfile(false, nil), nil, "auto:"+shape, memo)
+		out, _ := ApplyWithSession(refConv(shape, [][2]string{{"a", changed}, {"b", file}}, false), refProfile(false, nil), nil, "auto:"+shape, memo)
+		if got := editedTexts(t, out); got[0] != changed || got[1] != file {
+			t.Errorf("%s: call b shipped %q although call a now holds different content", shape, got[1])
+		}
+	}
+}
+
 // The final message is exempt unless fresh_tool_output: compress opens a
 // purely tool-output final message — then it is referenced at first send.
 func TestToolRefFinalMessageFollowsFreshToolOutput(t *testing.T) {
@@ -130,6 +147,32 @@ func TestToolRefFinalMessageFollowsFreshToolOutput(t *testing.T) {
 		comp, _ := Apply(body, refProfile(true, nil))
 		if got := editedTexts(t, comp); got[len(got)-1] != refMarker("a") {
 			t.Errorf("%s: compress did not reference the fresh final result: %q", shape, got[len(got)-1])
+		}
+	}
+}
+
+// A memo hit removes the committed assistant tool call from the engines'
+// work, but the result that follows it on the next request still belongs to
+// that call. Its file-read class must come from the whole request, or lite
+// rewrites a file read that has to reach the model byte-identical.
+func TestPreserveClassSurvivesMemoizedToolCall(t *testing.T) {
+	file := "line with meaningful trailing spaces     \n\n\n" + strings.Repeat("another file line     \n", 30)
+	p := &Profile{Name: "lite", Enabled: true, ExemptLastTurn: true, FreshToolOutput: true, Stages: []Stage{{Engine: "lite"}}}
+	for _, shape := range refShapes {
+		full := refConv(shape, [][2]string{{"read-1", file}}, true)
+		var root map[string]any
+		json.Unmarshal(full, &root)
+		key := "messages"
+		if shape == "responses" {
+			key = "input"
+		}
+		list := root[key].([]any)
+		first, _ := json.Marshal(map[string]any{"model": "m", key: list[:1]})
+		memo := NewSessionMemo(nil)
+		ApplyWithSession(first, p, nil, "s", memo)
+		out, _ := ApplyWithSession(full, p, nil, "s", memo)
+		if got := editedTexts(t, out); got[len(got)-1] != file {
+			t.Errorf("%s: file read after a memoized call shipped %d bytes, want the original %d", shape, len(got[len(got)-1]), len(file))
 		}
 	}
 }

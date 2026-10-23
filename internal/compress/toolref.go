@@ -75,25 +75,52 @@ func toolRef(view []any, isNew []bool, opts map[string]any) []any {
 	return out
 }
 
-// refsResolve reports whether every reference in msg points at a call id in
-// have (ids whose real content shipped earlier).
-func refsResolve(msg any, have map[string]bool) bool {
-	ok := true
+// toolOutputs maps each call id to the tool output msg carries for it.
+func toolOutputs(msg any) map[string]string {
+	out := map[string]string{}
 	editParts(msg, nil, func(p textPart) (string, bool) {
-		if id, isRef := refTarget(p.text); isRef && p.kind == partToolOutput && !have[id] {
-			ok = false
+		if p.kind == partToolOutput && p.id != "" {
+			out[p.id] = p.text
+		}
+		return "", false
+	})
+	return out
+}
+
+// refsResolve reports whether every reference in form (the shipped form of
+// orig) points at a call whose real output shipped earlier with exactly the
+// content orig holds for the referencing call. Checking only that the target
+// id exists is not enough: a memoized reference outlives a history rewrite
+// that keeps the id but changes its output, and would then claim text the
+// target no longer has. have maps call id -> original output.
+func refsResolve(form, orig any, have map[string]string) bool {
+	var own map[string]string
+	ok := true
+	editParts(form, nil, func(p textPart) (string, bool) {
+		if id, isRef := refTarget(p.text); isRef && p.kind == partToolOutput {
+			if own == nil {
+				own = toolOutputs(orig)
+			}
+			if target, shipped := have[id]; !shipped || target != own[p.id] {
+				ok = false
+			}
 		}
 		return "", false
 	})
 	return ok
 }
 
-// realToolIDs adds the call ids msg carries real (non-reference) output for.
-func realToolIDs(msg any, have map[string]bool) {
-	editParts(msg, nil, func(p textPart) (string, bool) {
+// realToolIDs records, for each call id form carries real (non-reference)
+// output for, the original output orig holds for it.
+func realToolIDs(form, orig any, have map[string]string) {
+	var own map[string]string
+	editParts(form, nil, func(p textPart) (string, bool) {
 		if p.kind == partToolOutput && p.id != "" {
 			if _, isRef := refTarget(p.text); !isRef {
-				have[p.id] = true
+				if own == nil {
+					own = toolOutputs(orig)
+				}
+				have[p.id] = own[p.id]
 			}
 		}
 		return "", false

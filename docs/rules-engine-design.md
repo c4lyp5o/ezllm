@@ -6,7 +6,7 @@ Author: m3lis5a · 2026-10-06
 ## 1. What we're building
 
 Two per-model rules, both answering the same question the resolver already asks
-at `router.go:257` — **"may this hop be used RIGHT NOW?"** — via the existing
+in `router.go` — **"may this hop be used RIGHT NOW?"** — via the existing
 `Eligible func(ctx, accountID int64, modelID string) error` seam:
 
 1. **Usage cap** — "how much of this model can we use?" (Calypso's rough idea)
@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS model_rules (
   model_id      TEXT    NOT NULL,
   -- usage cap
   cap_tokens    INTEGER NOT NULL DEFAULT 0,   -- 0 = unlimited
-  cap_window    TEXT    NOT NULL DEFAULT 'monthly',  -- 5h|daily|weekly|monthly (matches store.ValidateAccountInput, internal/store/admin.go:277)
+  cap_window    TEXT    NOT NULL DEFAULT 'monthly',  -- 5h|daily|weekly|monthly (matches store.ValidateAccountInput, internal/store/admin.go)
   -- allowed-hours window (NULL/empty = always allowed)
   win_start     TEXT,   -- 'HH:MM' local to win_tz
   win_end       TEXT,   -- 'HH:MM'; end < start means it wraps midnight
@@ -161,7 +161,7 @@ better error (a night-only model at noon should say "not until 22:00", not
 | `weekly` | `YYYY-Www` (ISO) | `2026-W41` |
 | `monthly` | `YYYY-MM` | `2026-10` |
 
-**Verified against the code**: `store.ValidateAccountInput` (`internal/store/admin.go:277`) accepts
+**Verified against the code**: `store.ValidateAccountInput` (`internal/store/admin.go`) accepts
 exactly `5h|daily|weekly|monthly` and rejects anything else. There is **no
 `hourly`** — I had invented it in the first draft. `model_rules.cap_window`
 must accept the same set so one validator covers both, and the `5h` question
@@ -234,7 +234,7 @@ scope creep otherwise.
   (already the `first != nil` path).
 - **`/v1/models`** → unaffected. Lists everything (locked decision).
 
-**Verified**: `errorStatus` (`server.go:424`) is a chain of `errors.As` against
+**Verified**: `errorStatus` (`server.go`) is a chain of `errors.As` against
 *concrete pointer types* (`*router.ErrNotFound` → 404, `*router.ErrUnavailable`
 → 429) with a **502 default**. So an unwrapped `ErrRule` would fall through to
 502 — the wrong status for a policy refusal. `ErrRule` must therefore either
@@ -258,7 +258,7 @@ self-describing so the handler can put `kind`/`next_allowed` in the body.
    two layers can be wired later without reshaping the error surface.
 4. **API + tests first, dashboard editor after.** Matches the M3.2 sequence.
 5. **`least_used` gets implemented** — the counter table is exactly the usage
-   data `router.go:302` was waiting for, so it is nearly free once §4.2 exists.
+   data the `least_used` strategy in `router.go` was waiting for, so it is nearly free once §4.2 exists.
    Ordering by real usage replaces the current position-order fallback.
 
 ## 10. Build order (once signed off)

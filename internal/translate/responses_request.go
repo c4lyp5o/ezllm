@@ -23,9 +23,13 @@ func ChatToResponses(body []byte, upstreamModel string) ([]byte, error) {
 		return nil, fmt.Errorf("unmarshal chat request: %w", err)
 	}
 
+	limit, err := chatOutputLimit(req.MaxTokens, req.MaxCompletionTokens)
+	if err != nil {
+		return nil, err
+	}
 	out := responsesWireRequest{
 		Model:           upstreamModel,
-		MaxOutputTokens: req.MaxTokens,
+		MaxOutputTokens: limit,
 		Temperature:     req.Temperature,
 		TopP:            req.TopP,
 		Stream:          req.Stream,
@@ -80,6 +84,7 @@ func ChatToResponses(body []byte, upstreamModel string) ([]byte, error) {
 			Name:        t.Function.Name,
 			Description: t.Function.Description,
 			Parameters:  t.Function.Parameters,
+			Strict:      t.Function.Strict,
 		})
 	}
 
@@ -139,16 +144,17 @@ func chatContentText(raw json.RawMessage) string {
 // ── chat wire decode types ─────────────────────────────────────────────────
 
 type chatWireRequest struct {
-	Model             string            `json:"model"`
-	Messages          []chatWireMessage `json:"messages"`
-	MaxTokens         int               `json:"max_tokens"`
-	Temperature       *float64          `json:"temperature,omitempty"`
-	TopP              *float64          `json:"top_p,omitempty"`
-	Stream            bool              `json:"stream"`
-	Tools             []chatWireTool    `json:"tools,omitempty"`
-	ToolChoice        json.RawMessage   `json:"tool_choice,omitempty"`
-	ReasoningEffort   string            `json:"reasoning_effort,omitempty"`
-	ParallelToolCalls *bool             `json:"parallel_tool_calls,omitempty"`
+	Model               string            `json:"model"`
+	Messages            []chatWireMessage `json:"messages"`
+	MaxTokens           *int              `json:"max_tokens"`
+	MaxCompletionTokens *int              `json:"max_completion_tokens"`
+	Temperature         *float64          `json:"temperature,omitempty"`
+	TopP                *float64          `json:"top_p,omitempty"`
+	Stream              bool              `json:"stream"`
+	Tools               []chatWireTool    `json:"tools,omitempty"`
+	ToolChoice          json.RawMessage   `json:"tool_choice,omitempty"`
+	ReasoningEffort     string            `json:"reasoning_effort,omitempty"`
+	ParallelToolCalls   *bool             `json:"parallel_tool_calls,omitempty"`
 }
 
 type chatWireMessage struct {
@@ -177,6 +183,7 @@ type chatWireFunction struct {
 	Description string          `json:"description,omitempty"`
 	Parameters  json.RawMessage `json:"parameters,omitempty"`
 	Arguments   string          `json:"arguments,omitempty"`
+	Strict      *bool           `json:"strict,omitempty"`
 }
 
 type chatWireToolChoice struct {
@@ -218,6 +225,7 @@ type responsesTool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Parameters  json.RawMessage `json:"parameters,omitempty"`
+	Strict      *bool           `json:"strict,omitempty"`
 }
 
 // input item kinds — heterogeneous array, so each kind owns its MarshalJSON.
@@ -274,4 +282,19 @@ func (i responsesInputItem) MarshalJSON() ([]byte, error) {
 		}{"input_image", i.imageURL})
 	}
 	return nil, fmt.Errorf("translate: unknown input item kind %d", i.kind)
+}
+
+// chatOutputLimit accepts both client spellings without silently choosing
+// between contradictory ceilings. The legacy wire omits an absent/zero limit.
+func chatOutputLimit(max, completion *int) (int, error) {
+	if max != nil && completion != nil && *max != *completion {
+		return 0, unsupported("chat.max_tokens", "max_tokens and max_completion_tokens disagree; refusing to guess which limit applies")
+	}
+	if completion != nil {
+		return *completion, nil
+	}
+	if max != nil {
+		return *max, nil
+	}
+	return 0, nil
 }

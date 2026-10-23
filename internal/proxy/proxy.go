@@ -63,9 +63,11 @@ const maxScanToken = 4 << 20
 // key, and normalize once at the end. Normalizing each event alone and then
 // mixing counters could pair one event's input with another's cache split.
 type UsageTapper struct {
-	surface provider.Surface
-	conv    provider.UsageConvention
-	raw     map[string]any
+	surface   provider.Surface
+	conv      provider.UsageConvention
+	raw       map[string]any
+	event     []byte
+	skipEvent bool
 }
 
 // NewUsageTapper builds a tapper for one surface (usage_convention auto).
@@ -79,11 +81,38 @@ func NewUsageTapperFor(surface provider.Surface, conv provider.UsageConvention) 
 	return &UsageTapper{surface: surface, conv: conv}
 }
 
-// Observe inspects one SSE data line (read-only; bytes are forwarded untouched).
+// Observe inspects a physical SSE line without changing forwarded bytes.
+// Single-line JSON stays on the fast path; incomplete JSON is assembled only
+// up to maxScanToken. An oversized event is ignored until its blank separator.
 func (t *UsageTapper) Observe(line []byte) {
-	if len(line) < 6 || !bytes.HasPrefix(line, []byte("data:")) {
+	line = bytes.TrimRight(line, "\r\n")
+	if len(line) == 0 {
+		t.event = nil
+		t.skipEvent = false
 		return
 	}
+	if t.skipEvent || !bytes.HasPrefix(line, []byte("data:")) {
+		return
+	}
+	data := bytes.TrimPrefix(line, []byte("data:"))
+	if len(t.event) == 0 && len(data) <= maxScanToken && json.Valid(data) {
+		t.observePayload(line)
+		return
+	}
+	if len(t.event)+len(data)+1 > maxScanToken {
+		t.event = nil
+		t.skipEvent = true
+		return
+	}
+	t.event = append(t.event, data...)
+	t.event = append(t.event, '\n')
+	if json.Valid(t.event) {
+		t.observePayload(append([]byte("data:"), t.event...))
+		t.event = nil
+	}
+}
+
+func (t *UsageTapper) observePayload(line []byte) {
 	if u := sseUsageRaw(line, t.surface); u != nil {
 		if t.raw == nil {
 			t.raw = map[string]any{}
@@ -160,8 +189,7 @@ type Route struct {
 	// Translated marks a hop that speaks only the OpenAI wire shape while
 	// the client speaks anthropic: the request body is translated on the
 	// way out and the response on the way back, while Surface stays the
-	// CLIENT's surface (the ledger and the usage tap must never see the
-	// translation). Set by the router from probed capability; nothing else
+	// CLIENT's surface; accounting observes the effective upstream wire. Set by the router from probed capability; nothing else
 	// about the hop's failover/park semantics changes.
 	Translated bool
 	// HoldUntilFailure (block_round_robin only) marks a hop the operator
@@ -207,8 +235,8 @@ func (rt Route) EffectiveWire() provider.Surface {
 
 // Attempt is one candidate that did NOT serve the request, in the order the
 // dispatcher abandoned it. It exists because a failed or skipped hop writes no
-// ledger row of its own (one request = one row, and that row is the billing
-// truth) — without the trail, the hops that "hopped" are invisible to the
+// delivery row of its own; observed usage is carried separately in
+// DiscardedUsage. Without the trail, unmetered/skipped hops are invisible to the
 // operator's recent-calls view and only exist in logs.
 type Attempt struct {
 	Namespace string // hop namespace
@@ -229,6 +257,8 @@ type Result struct {
 	UpstreamModel string
 	Err           string
 	Attempts      []Attempt
+	// DiscardedUsage contains source-accounted attempts that did not deliver.
+	DiscardedUsage []store.Call
 	// UpstreamAttempts is how many upstream calls this REQUEST actually made
 	// — same-hop retries and failover hops counted together (addendum #3).
 	// AttemptBudget is the configured request-wide budget; 0 means UNLIMITED
@@ -721,6 +751,7 @@ func (d *Dispatcher) SetDispatchDeadline(deadline time.Duration) {
 type attemptLedger struct {
 	limit int // <=0 unlimited
 	used  int
+	spent []store.Call
 }
 
 // consume records one upstream attempt. ok=false means the budget is spent.
@@ -1075,7 +1106,7 @@ func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, bod
 		return nil, Result{}, time.Time{}, err
 	}
 	// A translated hop dials the upstream on ITS wire while everything
-	// client-facing (ledger, usage tap) keeps the client surface. One
+	// client-facing keeps the client surface. Accounting reads the dial wire. One
 	// selector: the same value prepareHopBody encodes for and commit unwraps.
 	dialSurface := rt.EffectiveWire()
 	url := provider.UpstreamURL(rt.Account.BaseURL, rt.Account.Kind, provider.SurfacePath(dialSurface))
@@ -1242,13 +1273,14 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 	if res.Stream && isSSE {
 		// A translated stream wraps the body BEFORE any byte is copied: the
 		// client sees its own event shape synthesized from the upstream's, and
-		// streamCopy's usage tap then reads client-shaped events — which
-		// matches rt.Surface exactly. Close still reaches the ORIGINAL body (a
+		// the independent source tap retains the upstream accounting before any
+		// lossy client projection. Close still reaches the ORIGINAL body (a
 		// NopCloser would leak the upstream connection).
 		//
 		// translated carries the reader whose terminal state becomes the
 		// delivery outcome; nil for a native stream.
 		var translated *translate.StreamReader
+		var sourceTap *UsageTapper
 		if cross {
 			if cw.optsErr != nil {
 				// A cell that cannot be converted must not stream
@@ -1257,6 +1289,8 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 					translate.EncodeError(translate.ErrorIR{Type: "api_error", Message: cw.optsErr.Error()}, rt.Surface))
 				return res, nil
 			}
+			sourceTap = NewUsageTapperFor(cw.wire, rt.Account.UsageConvention)
+			resp.Body = &sourceUsageReader{ReadCloser: resp.Body, tap: sourceTap}
 			translated = translate.NewStreamReader(resp.Body, cw.wire, rt.Surface, rt.Alias, cw.opts)
 			resp.Body = struct {
 				io.Reader
@@ -1268,7 +1302,9 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 		res.Committed = true
 		ttft, usage, first, copyErr := d.streamCopy(ctx, w, resp, rt.Surface, tapConvention(rt, cross), start)
 		res.TTFTms = msAtLeastOne(ttft)
-		if usage != nil {
+		if sourceTap != nil {
+			res.Usage = sourceTap.Usage()
+		} else if usage != nil {
 			res.Usage = usage
 		}
 		if copyErr != nil {
@@ -1331,10 +1367,12 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 				[]byte(`{"error":{"type":"upstream_error","message":"upstream returned an empty body","code":502}}`))
 			return res, nil
 		}
+		// Accounting belongs to the source wire, even if client conversion fails.
+		res.Usage = tapJSONUsage(raw, rt.EffectiveWire(), rt.Account.UsageConvention)
 		// A translated hop re-encodes every byte the client sees into its own
 		// shape. The err-column snippet is captured from the upstream's OWN
-		// words before any re-shaping, and usage is tapped on the translated
-		// body — the tap is surface-aware and rt.Surface is the client's.
+		// words before any re-shaping. The codec produces the translated
+		// body only for delivery; usage was already captured on the source wire.
 		if cross {
 			if res.Status >= 400 {
 				if cw.reshape != nil {
@@ -1359,9 +1397,7 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 				}
 			}
 		}
-		if u := tapJSONUsage(raw, rt.Surface, tapConvention(rt, cross)); u != nil {
-			res.Usage = u
-		}
+
 		// Record WHY an error status happened. Before this, the err column was
 		// populated only for transport and stream failures, so a provider 429
 		// left a fully blank row — status 429, err "". The upstream's own
@@ -1384,8 +1420,9 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 // Forward sends the (already model-swapped) body upstream and copies the
 // response to w. It returns the ledger Result. Single-candidate form: nothing
 // to fail over to, so attempt and commit happen back to back.
-func (d *Dispatcher) Forward(ctx context.Context, w http.ResponseWriter, r *http.Request, rt Route, body []byte) (Result, error) {
+func (d *Dispatcher) Forward(ctx context.Context, w http.ResponseWriter, r *http.Request, rt Route, body []byte) (result Result, resultErr error) {
 	led := &attemptLedger{limit: d.attemptBudget}
+	defer func() { result.DiscardedUsage = led.spent }()
 	var sel time.Time
 	if d.dispatchDeadline > 0 {
 		sel = time.Now().Add(d.dispatchDeadline)
@@ -1427,8 +1464,13 @@ func (d *Dispatcher) retryAttempt(ctx context.Context, r *http.Request, rt Route
 		if attempt+1 == maxAttempts || ctx.Err() != nil || (err != nil && !retryableUpstreamError(err)) {
 			return resp, result, start, err
 		}
+		if led != nil && led.exhausted() {
+			discardAttempt(resp, rt, result, start, led)
+			return nil, result, start, errAttemptBudgetSpent
+		}
 		if resp != nil {
-			drainClose(resp)
+			discardAttempt(resp, rt, result, start, led)
+			lastResp = nil // the consumed response can no longer be a final fallback
 		}
 		delay := time.Duration(1<<attempt) * time.Second
 		if delay > 8*time.Second {
@@ -1530,18 +1572,6 @@ func peekBody(resp *http.Response, n int) []byte {
 	return head[:k]
 }
 
-// drainCap bounds how much of an abandoned body is read so its connection can
-// be reused. Error bodies are tiny; past this it is cheaper to let the
-// connection go than to read megabytes nobody will see.
-const drainCap = 64 << 10
-
-// drainClose releases an abandoned response, reusing its connection when the
-// rest of the body is small.
-func drainClose(resp *http.Response) {
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, drainCap))
-	_ = resp.Body.Close()
-}
-
 // ForwardCandidates tries routes in order and commits the first one that the
 // client may see. This is combo failover.
 //
@@ -1564,7 +1594,7 @@ func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWrite
 
 // ForwardCandidatesDoc is ForwardCandidates with the request body's shared
 // decode threaded through. See ForwardCandidates for the failover contract.
-func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWriter, r *http.Request, routes []Route, body []byte, doc *jsonbody.BodyDoc) (Route, Result, error) {
+func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWriter, r *http.Request, routes []Route, body []byte, doc *jsonbody.BodyDoc) (served Route, result Result, resultErr error) {
 	if len(routes) == 0 {
 		return Route{}, Result{}, errors.New("proxy: no candidate routes")
 	}
@@ -1610,6 +1640,7 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 	// failover hops, and a selection deadline that governs only the choosing
 	// (never the winning attempt's stream).
 	led := &attemptLedger{limit: d.attemptBudget}
+	defer func() { result.DiscardedUsage = led.spent }()
 	var sel time.Time
 	if d.dispatchDeadline > 0 {
 		sel = time.Now().Add(d.dispatchDeadline)
@@ -1773,7 +1804,7 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 				Note: note,
 			})
 			if fallbackResp != nil {
-				drainClose(fallbackResp)
+				discardAttempt(fallbackResp, *fallbackRoute, fallbackResult, fallbackStart, led)
 				fallbackResp = nil
 			}
 			fallbackTransportErr = err
@@ -1801,14 +1832,14 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 		}
 		if failoverStatus(res.Status) || oc.failed {
 			if fallbackResp != nil {
-				drainClose(fallbackResp)
+				discardAttempt(fallbackResp, *fallbackRoute, fallbackResult, fallbackStart, led)
 			}
 			rtCopy, resCopy, startCopy := rt, res, start
 			fallbackRoute, fallbackResp, fallbackResult, fallbackStart = &rtCopy, resp, resCopy, startCopy
 			continue
 		}
 		if fallbackResp != nil {
-			drainClose(fallbackResp)
+			discardAttempt(fallbackResp, *fallbackRoute, fallbackResult, fallbackStart, led)
 		}
 		res2, err2 := d.commit(ctx, w, resp, rt, res, start)
 		// The committed route travels back with the result: the ledger must
@@ -1926,8 +1957,12 @@ func (d *Dispatcher) streamCopy(ctx context.Context, w http.ResponseWriter, resp
 					}
 					tapper.Observe(line)
 				} else if !firstEvent {
+					tapper.event, tapper.skipEvent = nil, true
 					ttft = time.Since(start)
 					firstEvent = true
+				}
+				if overlong {
+					tapper.event, tapper.skipEvent = nil, true
 				}
 				long, overlong = nil, false
 			}

@@ -1,6 +1,7 @@
 package compress
 
 import (
+	"container/list"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -27,8 +28,11 @@ import (
 // never re-judged, so the prefix is byte-stable for the life of the session.
 //
 // Properties (plan WS-C requirements, honestly scoped):
-//   - bounded: per-session and global entry caps with LRU/TTL eviction
-//   - TTL'd: entries expire after ttl of disuse
+//   - bounded: per-session and global entry caps AND byte budgets with
+//     LRU/TTL eviction; a form over MaxEntryBytes is never retained (that
+//     message is simply re-judged each request, as without a memo)
+//   - TTL'd: entries expire after ttl of disuse; Sweep drops idle ones
+//     without waiting for the next request
 //   - process-local: never written to disk or the ledger; lost on restart
 //     (re-derivation is deterministic, so the cost is one re-acceptance)
 //   - session-scoped: no cross-session state (the key includes the session)
@@ -45,6 +49,12 @@ const (
 	DefaultSessionTTL        = 30 * time.Minute
 	DefaultSessionMaxEntries = 512 // per session+profile
 	DefaultMemoMaxEntries    = 8192
+	// Entry counts are no memory bound (one entry can hold a whole prompt-
+	// sized message), so retention is also capped in bytes of shipped form.
+	DefaultMemoMaxBytes      = 256 << 20
+	DefaultSessionMaxBytes   = 32 << 20 // per session+profile
+	DefaultMemoMaxEntryBytes = 4 << 20
+	memoEntryOverhead        = 256 // key, list and map bookkeeping per entry
 )
 
 // SessionMemo is the commit ledger. Safe for concurrent use.
@@ -53,30 +63,59 @@ type SessionMemo struct {
 	ttl        time.Duration
 	maxPerKey  int
 	maxEntries int
+	maxBytes   int64
+	maxKeyB    int64
+	maxEntryB  int64
 	now        func() time.Time
+	bytes      int64 // retained across all entries
 
 	// key = sha256(session | profileVersion | messageHash); ships form.
 	entries map[string]*memoEntry
-	// binding: session -> the profile fingerprint it was FIRST seen with (the
-	// immutable version binding, addendum #4). Bounded like entries; a session
-	// absent here binds on its next use.
-	binding map[string]string
-	lru     map[string]int64 // key -> logical clock of last use
-	clock   int64
-	ops     uint64
+	// binding: session -> the profile it was FIRST seen with, fingerprint and
+	// snapshot (the immutable version binding, addendum #4). The snapshot is
+	// what the session keeps RUNNING, so the stamped version is the ruleset
+	// that produced its bytes. Bounded like entries; a session absent here
+	// binds on its next use.
+	binding map[string]boundProfile
+	// lru orders entries by last use, newest at the front. Every use stamps
+	// usedAt = now, so the back is also the oldest: capacity eviction and
+	// TTL expiry both pop from the back, O(1) per entry dropped.
+	lru *list.List
+	// groups holds each session+profile's entries in its own LRU order, so
+	// the per-session caps evict that session's oldest, not someone else's.
+	groups map[string]*memoGroup
+	ops    uint64 // paces binding eviction (Bind)
 }
 
 type memoEntry struct {
+	key     string
+	group   string
 	shipped any // the exact message object that went upstream (nil = original)
+	size    int64
 	usedAt  time.Time
+	elem    *list.Element // in SessionMemo.lru
+	gelem   *list.Element // in its group's lru
+}
+
+type boundProfile struct {
+	version string
+	prof    *Profile
+}
+
+type memoGroup struct {
+	lru   *list.List
+	bytes int64
 }
 
 // SessionMemoOptions tunes the ledger; zero values take the defaults.
 type SessionMemoOptions struct {
-	TTL        time.Duration
-	MaxPerKey  int
-	MaxEntries int
-	Now        func() time.Time
+	TTL            time.Duration
+	MaxPerKey      int
+	MaxEntries     int
+	MaxBytes       int64 // all entries
+	MaxBytesPerKey int64 // one session+profile
+	MaxEntryBytes  int64 // larger forms are not retained
+	Now            func() time.Time
 }
 
 // NewSessionMemo builds a ledger with defaults or the given overrides.
@@ -85,10 +124,14 @@ func NewSessionMemo(opts *SessionMemoOptions) *SessionMemo {
 		ttl:        DefaultSessionTTL,
 		maxPerKey:  DefaultSessionMaxEntries,
 		maxEntries: DefaultMemoMaxEntries,
+		maxBytes:   DefaultMemoMaxBytes,
+		maxKeyB:    DefaultSessionMaxBytes,
+		maxEntryB:  DefaultMemoMaxEntryBytes,
 		now:        time.Now,
 		entries:    map[string]*memoEntry{},
-		binding:    map[string]string{},
-		lru:        map[string]int64{},
+		binding:    map[string]boundProfile{},
+		lru:        list.New(),
+		groups:     map[string]*memoGroup{},
 	}
 	if opts != nil {
 		if opts.TTL > 0 {
@@ -99,6 +142,15 @@ func NewSessionMemo(opts *SessionMemoOptions) *SessionMemo {
 		}
 		if opts.MaxEntries > 0 {
 			m.maxEntries = opts.MaxEntries
+		}
+		if opts.MaxBytes > 0 {
+			m.maxBytes = opts.MaxBytes
+		}
+		if opts.MaxBytesPerKey > 0 {
+			m.maxKeyB = opts.MaxBytesPerKey
+		}
+		if opts.MaxEntryBytes > 0 {
+			m.maxEntryB = opts.MaxEntryBytes
 		}
 		if opts.Now != nil {
 			m.now = opts.Now
@@ -141,25 +193,65 @@ func ProfileFingerprint(p *Profile) string {
 	return "v" + hex.EncodeToString(h.Sum(nil)[:8])
 }
 
-// Bind returns the profile fingerprint a session is BOUND to. The first use
-// of a session binds the CURRENT fingerprint; later calls return the binding
-// even after the effective profile changes — an active session is never
-// silently re-versioned. An empty session binds nothing (legacy path).
-func (m *SessionMemo) Bind(session, currentFingerprint string) string {
-	if m == nil || session == "" || currentFingerprint == "" {
-		return ""
+// Bind returns the profile a session is BOUND to: its fingerprint and a
+// snapshot of the versioned settings. The first use of a session binds the
+// CURRENT profile; later calls return the binding even after the effective
+// profile changes — an active session is never silently re-versioned, and
+// it keeps running the rules it was bound to, not merely their name. An
+// empty session binds nothing (legacy path).
+// fp is ProfileFingerprint(current), which the caller already holds.
+func (m *SessionMemo) Bind(session, fp string, current *Profile) (string, *Profile) {
+	if m == nil || session == "" || fp == "" {
+		return "", nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if v, ok := m.binding[session]; ok {
-		return v
+	if b, ok := m.binding[session]; ok {
+		return b.version, b.prof
 	}
-	m.binding[session] = currentFingerprint
+	snap := snapshotProfile(current)
+	m.binding[session] = boundProfile{version: fp, prof: snap}
 	m.ops++
 	if m.ops%1024 == 0 {
 		m.evictBindingsLocked()
 	}
-	return currentFingerprint
+	return fp, snap
+}
+
+// snapshotProfile copies what ProfileFingerprint covers, so a later edit of
+// the caller's profile (or its stage options) cannot reach the binding.
+func snapshotProfile(p *Profile) *Profile {
+	q := *p
+	q.Stages = make([]Stage, len(p.Stages))
+	for i, st := range p.Stages {
+		q.Stages[i] = Stage{Engine: st.Engine, Options: cloneOptions(st.Options)}
+	}
+	return &q
+}
+
+func cloneOptions(v map[string]any) map[string]any {
+	if v == nil {
+		return nil
+	}
+	out := make(map[string]any, len(v))
+	for k, x := range v {
+		out[k] = cloneValue(x)
+	}
+	return out
+}
+
+func cloneValue(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		return cloneOptions(x)
+	case []any:
+		out := make([]any, len(x))
+		for i, e := range x {
+			out[i] = cloneValue(e)
+		}
+		return out
+	}
+	return v
 }
 
 // BoundFingerprint reports a session's binding without creating one.
@@ -169,8 +261,8 @@ func (m *SessionMemo) BoundFingerprint(session string) (string, bool) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	v, ok := m.binding[session]
-	return v, ok
+	b, ok := m.binding[session]
+	return b.version, ok
 }
 
 // evictBindingsLocked keeps the session->version map bounded: dropping a
@@ -245,13 +337,11 @@ func (m *SessionMemo) GetAt(session, profile string, msg any, ord int) (shipped 
 		return nil, false
 	}
 	if m.now().Sub(e.usedAt) > m.ttl {
-		delete(m.entries, key)
-		delete(m.lru, key)
+		m.removeLocked(e)
 		return nil, false
 	}
-	m.clock++
-	m.lru[key] = m.clock
 	e.usedAt = m.now()
+	m.lru.MoveToFront(e.elem)
 	return e.shipped, true
 }
 
@@ -270,43 +360,82 @@ func (m *SessionMemo) PutAt(session, profile string, msg any, ord int, shipped a
 		return
 	}
 	key := memoKey(session, profile, h, ord)
+	size := int64(len(mustMarshal(shipped))) + memoEntryOverhead
+	group := session + "\x00" + profile
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.entries[key] = &memoEntry{shipped: shipped, usedAt: m.now()}
-	m.clock++
-	m.lru[key] = m.clock
-	m.ops++
-	if m.ops%1024 == 0 || len(m.entries) > m.maxEntries {
-		m.evictLocked()
+	now := m.now()
+	if e, ok := m.entries[key]; ok {
+		m.removeLocked(e) // re-inserted below at its new size
+	}
+	if size > m.maxEntryB {
+		return // not retained: the message is re-judged next request
+	}
+	g := m.groups[group]
+	if g == nil {
+		g = &memoGroup{lru: list.New()}
+		m.groups[group] = g
+	}
+	e := &memoEntry{key: key, group: group, shipped: shipped, size: size, usedAt: now}
+	e.elem = m.lru.PushFront(e)
+	e.gelem = g.lru.PushFront(e)
+	m.entries[key] = e
+	g.bytes += size
+	m.bytes += size
+	for g.lru.Len() > m.maxPerKey || g.bytes > m.maxKeyB {
+		m.removeLocked(g.lru.Back().Value.(*memoEntry))
+	}
+	m.evictLocked(now)
+}
+
+// evictLocked drops expired entries, then the least-recently-used ones while
+// over the global cap — both from the back of the LRU list, so a full memo
+// pays O(1) per eviction instead of sorting every entry under the lock.
+// Caller holds the lock.
+func (m *SessionMemo) evictLocked(now time.Time) {
+	for back := m.lru.Back(); back != nil; back = m.lru.Back() {
+		e := back.Value.(*memoEntry)
+		if now.Sub(e.usedAt) <= m.ttl && len(m.entries) <= m.maxEntries && m.bytes <= m.maxBytes {
+			return
+		}
+		m.removeLocked(e)
 	}
 }
 
-// evictLocked drops expired entries and, if still over the global cap, the
-// least-recently-used ones. Caller holds the lock.
-func (m *SessionMemo) evictLocked() {
-	now := m.now()
-	for k, e := range m.entries {
-		if now.Sub(e.usedAt) > m.ttl {
-			delete(m.entries, k)
-			delete(m.lru, k)
-		}
-	}
-	if len(m.entries) <= m.maxEntries {
+// Sweep drops entries idle past the TTL. Expiry otherwise happens only when
+// the memo is next used, so an idle gateway would keep prompt-derived forms
+// resident indefinitely; the server calls this on a timer.
+func (m *SessionMemo) Sweep() {
+	if m == nil {
 		return
 	}
-	type kv struct {
-		key string
-		clk int64
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.evictLocked(m.now())
+}
+
+// removeLocked drops one entry. Caller holds the lock.
+func (m *SessionMemo) removeLocked(e *memoEntry) {
+	m.lru.Remove(e.elem)
+	delete(m.entries, e.key)
+	m.bytes -= e.size
+	if g := m.groups[e.group]; g != nil {
+		g.lru.Remove(e.gelem)
+		g.bytes -= e.size
+		if g.lru.Len() == 0 {
+			delete(m.groups, e.group)
+		}
 	}
-	all := make([]kv, 0, len(m.lru))
-	for k, c := range m.lru {
-		all = append(all, kv{k, c})
+}
+
+// Bytes reports the retained size estimate (tests/ops visibility).
+func (m *SessionMemo) Bytes() int64 {
+	if m == nil {
+		return 0
 	}
-	sort.Slice(all, func(i, j int) bool { return all[i].clk < all[j].clk })
-	for i := 0; i < len(all) && len(m.entries) > m.maxEntries; i++ {
-		delete(m.entries, all[i].key)
-		delete(m.lru, all[i].key)
-	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.bytes
 }
 
 // Len reports the entry count (tests/ops visibility).
@@ -327,8 +456,24 @@ func (m *SessionMemo) Clear() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.entries = map[string]*memoEntry{}
-	m.binding = map[string]string{}
-	m.lru = map[string]int64{}
+	m.binding = map[string]boundProfile{}
+	m.lru = list.New()
+	m.groups = map[string]*memoGroup{}
+	m.bytes = 0
+}
+
+// ClientSession scopes a caller-chosen X-Ezllm-Session id to the client that
+// sent it. The id is free text, so two clients can name the same session (or
+// one can name another's derived "auto:" key); unscoped, one client's
+// committed forms and profile binding would replay into the other's requests.
+// The length prefix keeps the client/id boundary unambiguous.
+func ClientSession(client, id string) string {
+	if id == "" {
+		return ""
+	}
+	h := sha256.New()
+	fmt.Fprintf(h, "%d:%s\x00%s", len(client), client, id)
+	return "explicit:" + hex.EncodeToString(h.Sum(nil))[:32]
 }
 
 // ConversationKey derives the memo session for a request that names none, so

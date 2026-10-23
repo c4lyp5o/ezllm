@@ -26,6 +26,10 @@ func TestOpen(t *testing.T) {
 		{"trailing garbage", `{"model":"m"} junk`, true, true},
 		{"trailing second value", `{"model":"m"}{"x":1}`, true, true},
 		{"trailing space ok", `{"model":"m"}  `, false, false},
+		// Decoder.More() reports false before a closing delimiter, so these
+		// passed the old trailing-data check.
+		{"trailing close bracket", `{"model":"m"}]`, true, true},
+		{"trailing close brace", `{"model":"m"}}`, true, true},
 	} {
 		d := Open([]byte(tc.body))
 		if (d.Err() != nil) != tc.wantE {

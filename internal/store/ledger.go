@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -108,6 +107,11 @@ type Call struct {
 	SessionID string // operator grouping key from X-Ezllm-Session
 	ReqBytes  int    // exact body bytes posted upstream
 
+	// ReservationID is the client-budget reservation this row's usage
+	// replaces (not persisted). The flush deletes it in the transaction that
+	// counts the usage, so the budget is never both unreserved and uncounted.
+	ReservationID int64
+
 	// BlockPos is block_round_robin's per-dispatch tag: the 1-based position
 	// of THIS call inside its block (the "N requests finished" evidence).
 	// 0 = not counted (direct routes, non-block strategies).
@@ -116,9 +120,8 @@ type Call struct {
 	// Translated marks a hop whose WIRE differed from the client's surface, so
 	// the bodies were translated in one or both directions: the
 	// anthropic->openai-chat leg (Route.Translated) and a hop curated onto the
-	// Responses wire (Route.ResponsesWire). The tap reads the client-shaped
-	// body the codec synthesized, which carries the cache split in the
-	// client's own convention — see schema.sql calls.translated.
+	// Responses wire (Route.ResponsesWire). Usage is observed on the upstream
+	// wire before projection; normalized buckets do not depend on this marker.
 	Translated bool
 
 	Err string
@@ -280,16 +283,35 @@ type ledgerItem struct {
 
 // RecordCall enqueues a ledger row. It NEVER blocks the caller: if the queue is
 // full the row is dropped and counted, because a slow database must not add
-// latency to a token stream (invariant #5).
+// latency to a token stream (invariant #5). A row arriving after Close is
+// counted separately (DroppedAfterClose).
 func (d *DB) RecordCall(c Call) {
 	if c.TS.IsZero() {
 		c.TS = time.Now().UTC()
 	}
 	cp := c
+	d.recMu.RLock()
+	defer d.recMu.RUnlock()
+	if d.closed {
+		// The ledger loop has exited: queueing would lose the row silently.
+		// Its reservation stays to expire: the pools are closing.
+		droppedAfterClose.Add(1)
+		return
+	}
 	select {
 	case d.callCh <- ledgerItem{call: &cp}:
 	default:
 		droppedCalls.Add(1)
+		// No row will release it, so release here — off this goroutine,
+		// which must never wait on the database. Counted in wg (added under
+		// recMu, before Close can start waiting) so Close outlasts it.
+		if cp.ReservationID != 0 {
+			d.wg.Add(1)
+			go func() {
+				defer d.wg.Done()
+				d.ReleaseClientBudget(context.Background(), cp.ReservationID)
+			}()
+		}
 	}
 }
 
@@ -298,6 +320,14 @@ var droppedCalls atomic.Int64
 
 // DroppedCalls reports how many ledger rows were shed (should stay 0).
 func DroppedCalls() int64 { return droppedCalls.Load() }
+
+// droppedAfterClose counts rows recorded after Close, when no ledger loop is
+// left to persist them. Kept apart from backpressure drops: it means a
+// producer outlived shutdown, not that the database was slow.
+var droppedAfterClose atomic.Int64
+
+// DroppedAfterClose reports how many ledger rows arrived after Close.
+func DroppedAfterClose() int64 { return droppedAfterClose.Load() }
 
 // lostRows counts rows a FAILED FLUSH discarded. It is separate from
 // droppedCalls on purpose: dropping counts the queue-full path, while a
@@ -444,6 +474,7 @@ INSERT INTO calls (
 	}
 	defer stmt.Close()
 
+	ids := make([]int64, 0, len(rows))
 	for _, c := range rows {
 		var keyID any
 		if c.KeyID != 0 {
@@ -453,7 +484,7 @@ INSERT INTO calls (
 		if c.AccountID != 0 {
 			acctID = c.AccountID
 		}
-		_, err := stmt.ExecContext(ctx,
+		result, err := stmt.ExecContext(ctx,
 			c.TS.UTC().Format("2006-01-02T15:04:05.000Z"),
 			acctID,
 			c.Client, c.IP, string(c.Surface), c.Alias, c.Account, keyID, c.KeyHint, c.Model,
@@ -468,6 +499,11 @@ INSERT INTO calls (
 		if err != nil {
 			return fmt.Errorf("insert call: %w", err)
 		}
+		id, err := result.LastInsertId()
+		if err != nil {
+			return err
+		}
+		ids = append(ids, id)
 	}
 
 	// M5: advance the usage meter in the SAME transaction as the calls rows so
@@ -484,7 +520,11 @@ INSERT INTO calls (
 		return err
 	}
 	metered := true
-	if err := d.meterInTx(ctx, tx, rows); err != nil {
+	meterErr := d.replayMeter(ctx, tx)
+	if meterErr == nil {
+		meterErr = d.meterInTx(ctx, tx, rows)
+	}
+	if err := meterErr; err != nil {
 		metered = false
 		slog.Warn("usage meter bump failed; batch not metered", "rows", len(rows), "err", err)
 		if _, rerr := tx.ExecContext(ctx, `ROLLBACK TO meter`); rerr != nil {
@@ -493,6 +533,19 @@ INSERT INTO calls (
 	}
 	if _, err := tx.ExecContext(ctx, `RELEASE meter`); err != nil {
 		return err
+	}
+	// A failed meter keeps a durable debit and its reservation. Successful
+	// metering deletes reservations in the same commit as the counter updates.
+	for i, c := range rows {
+		if !metered {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO pending_usage_meter(call_id,reservation_id) VALUES(?,?)`, ids[i], c.ReservationID); err != nil {
+				return err
+			}
+		} else if c.ReservationID != 0 {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM client_budget_reservations WHERE id=?`, c.ReservationID); err != nil {
+				return err
+			}
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return err
@@ -736,9 +789,28 @@ WHERE rn = n / 2 + 1`,
 //
 // Every other group_by (and the no-tz default) still aggregates in SQL; this
 // path is opt-in via tz, and the window is capped by the caller.
+//
+// Days are computed once, not per row: localDays gives each local day's
+// [start, end) in UTC (time.Date, so DST is honoured) keyed by CountBucket,
+// and a row finds its day by comparing its ts string against the day edges.
+// Parsing and re-formatting every row's timestamp cost ~590k allocations per
+// 50k calls. (Aggregating in SQL over the day ranges was measured too: on the
+// pure-Go SQLite driver its window-function median ran 30-60% slower.)
 func (d *DB) UsageDayReportTZ(ctx context.Context, from, to time.Time, loc *time.Location) ([]UsageRow, error) {
 	if loc == nil {
 		loc = time.UTC
+	}
+	days := localDays(from, to, loc)
+	if len(days) == 0 {
+		return []UsageRow{}, nil
+	}
+	const tsFmt = "2006-01-02T15:04:05.000Z"
+	// Day edges as ledger timestamp strings: the stored format sorts
+	// lexically in time order, so a row finds its day by comparing strings —
+	// no per-row time.Parse or date formatting.
+	edges := make([]string, len(days))
+	for i, dr := range days {
+		edges[i] = dr.end.UTC().Format(tsFmt)
 	}
 	rs, err := d.r.QueryContext(ctx, `
 SELECT ts, ttft_ms,
@@ -748,71 +820,116 @@ SELECT ts, ttft_ms,
        COALESCE(context_tokens_pre,0), COALESCE(context_tokens_saved,0),
        status, COALESCE(compression_applied,0)
 FROM calls
-WHERE ts >= ? AND ts < ?`, from.UTC().Format("2006-01-02T15:04:05.000Z"), to.UTC().Format("2006-01-02T15:04:05.000Z"))
+WHERE ts >= ? AND ts < ?`, days[0].start.UTC().Format(tsFmt), days[len(days)-1].end.UTC().Format(tsFmt))
 	if err != nil {
 		return nil, err
 	}
 	defer rs.Close()
 
-	type acc struct {
-		row   UsageRow
-		ttfts []int64
-	}
-	byDay := map[string]*acc{}
+	rows := make([]UsageRow, len(days))
+	ttfts := make([][]int64, len(days))
+	seen := make([]bool, len(days))
+	var ts sql.RawBytes // valid until the next Next: compared, never kept
 	for rs.Next() {
-		var ts string
 		var ttft sql.NullInt64
 		var tin, tout, cread, cwrite, reasoning, saved, cpre, csaved int64
 		var status, applied int
 		if err := rs.Scan(&ts, &ttft, &tin, &tout, &cread, &cwrite, &reasoning, &saved, &cpre, &csaved, &status, &applied); err != nil {
 			return nil, err
 		}
-		t, err := time.Parse("2006-01-02T15:04:05.000Z", ts)
-		if err != nil {
-			continue // a corrupt stamp must not abort the whole report
+		// First day whose end is after ts; the WHERE clause bounds ts to
+		// [first start, last end), so one always exists for a well-formed
+		// stamp. A corrupt stamp falls outside and is skipped.
+		i, _ := slices.BinarySearchFunc(edges, ts, func(edge string, t sql.RawBytes) int {
+			if edge <= string(t) {
+				return -1
+			}
+			return 1
+		})
+		if i >= len(days) {
+			continue
 		}
-		day := CountBucket(t, "daily", loc) // the meter's own bucketing
-		a := byDay[day]
-		if a == nil {
-			a = &acc{row: UsageRow{Key: day}}
-			byDay[day] = a
-		}
-		a.row.Calls++
-		a.row.TokensIn += tin
-		a.row.TokensOut += tout
-		a.row.CachedRead += cread
-		a.row.CachedWrite += cwrite
-		a.row.Reasoning += reasoning
-		a.row.TokensSaved += saved
+		r := &rows[i]
+		seen[i] = true
+		r.Calls++
+		r.TokensIn += tin
+		r.TokensOut += tout
+		r.CachedRead += cread
+		r.CachedWrite += cwrite
+		r.Reasoning += reasoning
+		r.TokensSaved += saved
 		if applied == 1 {
-			a.row.AppliedSaved += saved // the SQL path's applied_saved, row for row
+			r.AppliedSaved += saved // the SQL path's applied_saved, row for row
 		}
-		a.row.ContextPre += cpre
-		a.row.ContextSaved += csaved
+		r.ContextPre += cpre
+		r.ContextSaved += csaved
 		if status >= 400 {
-			a.row.Errors++
+			r.Errors++
 		}
 		if ttft.Valid {
-			a.ttfts = append(a.ttfts, ttft.Int64)
+			ttfts[i] = append(ttfts[i], ttft.Int64)
 		}
 	}
 	if err := rs.Err(); err != nil {
 		return nil, err
 	}
 
-	out := make([]UsageRow, 0, len(byDay))
-	for _, a := range byDay {
-		if len(a.ttfts) > 0 {
-			slices.Sort(a.ttfts)
-			// Same convention as fillP50: the UPPER of the two middle values
-			// for an even count. Documented there; kept identical here so the
-			// tz path and the SQL path report the same statistic.
-			a.row.P50TTFTms = a.ttfts[len(a.ttfts)/2]
+	out := make([]UsageRow, 0, len(days))
+	for i := range days {
+		if !seen[i] {
+			continue // a day with no calls has no row, as before
 		}
-		out = append(out, a.row)
+		rows[i].Key = days[i].key
+		if t := ttfts[i]; len(t) > 0 {
+			slices.Sort(t)
+			// Same convention as fillP50: the UPPER of the two middle values
+			// for an even count.
+			rows[i].P50TTFTms = t[len(t)/2]
+		}
+		out = append(out, rows[i])
 	}
-	slices.SortFunc(out, func(x, y UsageRow) int { return strings.Compare(x.Key, y.Key) })
-	return out, nil
+	return out, nil // days ascend, so out is already in key order
+}
+
+// localDay is one local calendar day as a half-open UTC range.
+type localDay struct {
+	key        string // CountBucket(start, "daily", loc)
+	start, end time.Time
+}
+
+// localDays splits [from, to) into local calendar days in loc, clipped to the
+// window. Day edges come from time.Date, so a 23- or 25-hour DST day keeps its
+// true length. Where DST skips midnight itself, time.Date may resolve it into
+// the previous day; the edge then moves forward an hour at a time until it
+// belongs to its own day.
+func localDays(from, to time.Time, loc *time.Location) []localDay {
+	if !from.Before(to) {
+		return nil
+	}
+	dayStart := func(t time.Time) time.Time {
+		lt := t.In(loc)
+		key := lt.Format("2006-01-02")
+		s := time.Date(lt.Year(), lt.Month(), lt.Day(), 0, 0, 0, 0, loc)
+		for CountBucket(s, "daily", loc) != key {
+			s = s.Add(time.Hour)
+		}
+		return s
+	}
+	var out []localDay
+	for s := dayStart(from); s.Before(to); {
+		lt := s.In(loc)
+		e := dayStart(time.Date(lt.Year(), lt.Month(), lt.Day()+1, 12, 0, 0, 0, loc))
+		start, end := s, e
+		if start.Before(from) {
+			start = from
+		}
+		if end.After(to) {
+			end = to
+		}
+		out = append(out, localDay{key: CountBucket(s, "daily", loc), start: start, end: end})
+		s = e
+	}
+	return out
 }
 
 // RecentCalls returns the newest N ledger rows (drilldown / debugging).

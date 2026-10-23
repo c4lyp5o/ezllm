@@ -393,3 +393,35 @@ func TestBridgeRotateRevertsOnBadInit(t *testing.T) {
 		t.Fatalf("second call code = %d body=%s", w2.Code, w2.Body.String())
 	}
 }
+
+// TestBridgeResolveVersusReinitRace pins C1 from the 2026-10-23 audit:
+// resolve read the cached client's access token under the bridge map mutex
+// while rotation re-ran Init under the per-account lock, so the two had no
+// common lock. Meaningful under -race: the detector flags the old ordering.
+func TestBridgeResolveVersusReinitRace(t *testing.T) {
+	b, id, _ := newBridgeFixture(t, genFrame("x", true, "c"))
+	if w := bridgeReq(t, b, "GET", geminiWebBridgePrefix+"/models", "", id); w.Code != http.StatusOK {
+		t.Fatalf("warm-up status = %d body=%s", w.Code, w.Body)
+	}
+	b.mu.Lock()
+	entry := b.clients[id]
+	b.mu.Unlock()
+
+	const n = 20
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < n; i++ {
+			lock := b.lockFor(id) // rotation's lock (maybeRotate runs under it)
+			lock.Lock()
+			_ = entry.client.Init(context.Background())
+			lock.Unlock()
+		}
+	}()
+	for i := 0; i < n; i++ {
+		if w := bridgeReq(t, b, "GET", geminiWebBridgePrefix+"/models", "", id); w.Code != http.StatusOK {
+			t.Fatalf("status = %d body=%s", w.Code, w.Body)
+		}
+	}
+	<-done
+}

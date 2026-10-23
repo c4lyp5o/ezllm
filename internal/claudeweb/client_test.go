@@ -2,6 +2,7 @@ package claudeweb
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -376,6 +377,8 @@ func TestTLSFetcherRealHandshake(t *testing.T) {
 	srv.StartTLS()
 	defer srv.Close()
 	f := NewTLSFetcher()
+	f.rootCAs = x509.NewCertPool()
+	f.rootCAs.AddCert(srv.Certificate())
 	url := strings.Replace(srv.URL, "127.0.0.1", "127.0.0.1", 1) + "/api/organizations"
 	// Point the fetcher at the test server by rewriting via the fetcher's
 	// URL argument (the transport dials whatever host the URL names).
@@ -389,6 +392,33 @@ func TestTLSFetcherRealHandshake(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), "/api/organizations") {
 		t.Errorf("body = %q", body)
+	}
+}
+
+// TestTLSFetcherRejectsUntrustedCert pins certificate verification: a server
+// whose certificate does not chain to a trusted root must fail the handshake
+// before the session cookie is sent. With InsecureSkipVerify this connected.
+func TestTLSFetcherRejectsUntrustedCert(t *testing.T) {
+	reached := false
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = true
+	}))
+	srv.EnableHTTP2 = true
+	srv.StartTLS()
+	defer srv.Close()
+	f := NewTLSFetcher() // system roots: the httptest CA is not among them
+	h := http.Header{}
+	h.Set("Cookie", "sessionKey=x")
+	resp, err := f.Fetch(context.Background(), http.MethodGet, srv.URL+"/api/organizations", nil, h)
+	if err == nil {
+		resp.Body.Close()
+		t.Fatal("Fetch succeeded against an untrusted certificate")
+	}
+	if !strings.Contains(err.Error(), "certificate") {
+		t.Fatalf("err = %v, want a certificate verification failure", err)
+	}
+	if reached {
+		t.Fatal("request reached the server despite the untrusted certificate")
 	}
 }
 

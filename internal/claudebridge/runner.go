@@ -64,10 +64,19 @@ func (r *Runner) slots() chan struct{} {
 
 // Run executes one request: spawn, replay, generate once, translate frames to sink.
 func (r *Runner) Run(ctx context.Context, req Request, alias string, sink func(Frame) error) (Result, error) {
+	// The timeout bounds the whole request, the wait for a slot included: a
+	// caller with no deadline of its own must not queue forever behind
+	// stuck slots.
+	runCtx := ctx
+	if r.Timeout > 0 {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(ctx, r.Timeout)
+		defer cancel()
+	}
 	select {
 	case r.slots() <- struct{}{}:
 		defer func() { <-r.slots() }()
-	case <-ctx.Done():
+	case <-runCtx.Done():
 		return Result{}, &NativeError{Status: 504, Type: "api_error", Code: "timeout",
 			Message: "claude-bridge: timed out waiting for a free slot"}
 	}
@@ -162,12 +171,11 @@ func (r *Runner) Run(ctx context.Context, req Request, alias string, sink func(F
 		}
 	}()
 
-	runCtx := ctx
-	if r.Timeout > 0 {
-		var cancel context.CancelFunc
-		runCtx, cancel = context.WithTimeout(ctx, r.Timeout)
-		defer cancel()
-	}
+	// Cancellation closes our end of stdin: a replay write blocked on a CLI
+	// that stopped reading returns at once (the deferred kill and reap then
+	// run), instead of holding the slot past the deadline.
+	stopStdin := context.AfterFunc(runCtx, func() { _ = stdin.Close() })
+	defer stopStdin()
 
 	lines := make(chan []byte)
 	readErr := make(chan error, 1)
@@ -205,6 +213,9 @@ func (r *Runner) Run(ctx context.Context, req Request, alias string, sink func(F
 	for i, frame := range frames {
 		payload, _ := json.Marshal(frame)
 		if _, err := stdin.Write(append(payload, '\n')); err != nil {
+			if runCtx.Err() != nil {
+				return Result{}, r.deadlineErr(runCtx.Err(), &stderrTail, i)
+			}
 			return Result{}, &NativeError{Status: 502, Type: "api_error", Code: "native_closed",
 				Message: "claude-bridge: native stopped reading input: " + err.Error()}
 		}

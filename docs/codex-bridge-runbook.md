@@ -3,9 +3,9 @@
 Operating the ChatGPT subscription surface (codex-bridge). Decisions live in
 `codex-subscription-design.md`; this is the how.
 
-**Status:** stages 1–3 (text, streaming, images, reasoning effort and summaries,
-structured output, plan windows, client tools with continuation) are built on
-`feat/codex-bridge` and not in a release yet. Read the [platform requirements](#platform-requirements--read-this-first)
+**Status:** shipped in v1.1.0 and deployed: text, streaming, images, reasoning
+effort and summaries, structured output, plan windows, client tools with
+continuation. Read the [platform requirements](#platform-requirements--read-this-first)
 before you rely on tools.
 
 ## What it is
@@ -213,7 +213,16 @@ Send ordinary OpenAI `tools`. What happens behind the bridge:
    restarted — still works: the bridge replays the conversation, calls and
    results included, as a transcript on a fresh child. Correct, but slower and
    without the paused script's state. `/status` → `parked_tool_turns` shows how
-   many are waiting.
+   many are waiting. Shutting ezllm down reaps every paused turn's child.
+5. A request's 300-second budget covers the wait for a free slot as well as the
+   run (a full bridge answers 504 instead of queueing forever). Cancelling a
+   request ends its child even when the CLI or the client has stopped reading;
+   a stream write the client leaves undrained for 60 seconds ends the request.
+   Pending output is capped at **1 MiB or 4,096 deltas**, plus the delivery batch
+   already in progress (at most the same size). If the pending backlog exceeds
+   either cap, the bridge ends the turn with `output_backpressure` and reaps its
+   child independently of the stalled write. It never silently drops deltas
+   from an otherwise successful answer.
 
 Mappings and limits:
 
@@ -274,6 +283,7 @@ python3 tests/prove_codex_bridge.py                                     # throug
 | a tool follow-up is slow and the model "forgets" what it was doing | the paused turn expired (10 min) or was dropped (8 held) and the bridge replayed | answer tool calls promptly; check `parked_tool_turns` |
 | 503 `binary_missing` | the mount is gone | re-copy the pinned binary, recreate |
 | 502 `native_closed` | the CLI died mid-answer | `docker logs ezllm`; the message carries the CLI's stderr |
+| 502 `output_backpressure` (or a terminal stream error) | pending output exceeded 1 MiB or 4,096 deltas behind a slow consumer | drain the response promptly and check downstream buffering; the turn has ended and its child was reaped |
 | answers arrive in one chunk, `/v1/models` 404 | the bridge is on the **exec fallback** (`/status` → `channel`) | the CLI release dropped an app-server method; pin the qualified release |
 
 ## Rollback

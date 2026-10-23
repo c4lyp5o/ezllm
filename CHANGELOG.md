@@ -1,6 +1,77 @@
 # Changelog
 
-Notable changes, reverse-chronological. Milestone-tagged (M1–M14); full history via `git log`.
+Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
+
+## 2026-10-23 — v1.1.1: audit fixes — security, compression sessions, dashboard, recovery, performance
+
+- **Same-origin cookie writes.** A signed-in operator's browser sends the
+  `SameSite=Strict` session cookie to every origin of the same site, and a
+  `text/plain` POST needs no preflight, so a page on another port could mint an
+  admin token. Cookie-authenticated writes and sign-out now pass
+  `http.CrossOriginProtection` (`cookieOrigins`) or get `403`; bearer and
+  non-browser clients are unaffected.
+- **No cross-origin redirects with provider keys.** Go drops `Authorization` on
+  a cross-host redirect but keeps `x-api-key`, and a 307 replays the prompt.
+  The upstream client and the key tester now use `provider.SameOriginRedirect`.
+- **Compression sessions are per client and honest about their version.** An
+  explicit session is scoped to the authenticated client. A `tool_ref`
+  reference is replayed only while its target still holds the same output. A
+  bound session runs its bound profile snapshot, not just its version stamp.
+  The memo has per-session and global byte budgets and an idle sweep. Tool
+  outputs are classed with names from the whole request, so a file read after
+  a memoized call stays byte-identical. Caveman lite lost the rules that
+  changed quantity, time or certainty.
+- **Dashboard fixes**, each with a Playwright regression driver on the new
+  `web/tests/mockdash.mjs` harness:
+  - Policy saves no longer move the key's expiry.
+  - Pricing saves work.
+  - Chat surfaces stream errors.
+  - Analytics ignore stale responses.
+  - Grouped rule writes reconcile after a partial failure.
+- **Metering, pricing and recovery:**
+  - USD-only rates.
+  - Source-wire usage capture.
+  - Retries and failed hops are ledgered.
+  - Missed meter debits are replayed (schema v28).
+  - Master keys are preserved.
+  - Atomic legacy combo rebuild.
+  - Verified WAL-safe backups (`scripts/backup_sqlite.py`).
+  - Versioned configuration exports.
+- **Docs pass:**
+  - Landmarks cite symbols instead of line numbers.
+  - The README, AGENTS, CONTRIBUTING and EXPLORING claims are re-verified
+    against the code.
+  - The translation plan is reduced to a design record.
+
+- **Audit fixes** (the first pass on `fix/audit-findings`):
+  - The Claude web provider verifies TLS and opens one upstream conversation
+    per request.
+  - Rules retry after a failed boot load.
+  - The Gemini web client resolves under the per-account lock.
+  - Strict JSON body endings.
+  - Shutdown drains handlers and background jobs before the ledger closes.
+  - Bridge children end with their request.
+  - Budget reservations are released by the flush that counts them.
+  - The CSP admits generated media previews.
+- **Performance pass:**
+  - O(1) memo eviction.
+  - Streamed shape hashing (1 MiB history: 1.4 KB allocated instead of
+    1.9–3.5 MB).
+  - A faster local-timezone day report.
+  - 10 s shared usage reports.
+  - Preallocated body reads.
+  - One HTTP/2 connection for Claude web.
+  - Lazy dashboard pages (290 KB → 124 KB gzipped at sign-in).
+
+- **Bound Codex output buffering:** a pending queue holds at most 1 MiB or
+  4,096 deltas, in addition to the batch currently being delivered. Overflow
+  fails with `output_backpressure` and independently reaps the child; the stdout
+  reader never waits on a stalled client while holding a state lock.
+- **Fix Claude web transport cleanup races:** closing a fetcher uses the same
+  initialization barrier as its first request.
+- **Keep report-cache errors and filters honest:** a completed failed computation
+  cannot become a successful nil result, and explicit `from` boundaries no
+  longer collide after rounding into the same ten-second interval.
 
 ## 2026-10-23 — v1.1.0: ChatGPT subscription bridge, plan windows, probe and Copilot fixes
 

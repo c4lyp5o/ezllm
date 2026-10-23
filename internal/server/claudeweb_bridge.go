@@ -24,9 +24,10 @@ import (
 // Auth: the stamped account header maps to an ENABLED claude-web account;
 // the credential is the stamped key (or the account's stored key).
 //
-// Conversation scope (documented): ONE conversation per account-client. The
-// upstream state machine chains conversation_id + parent uuids inside that
-// conversation; multi-conversation routing is out of M14 scope.
+// Conversation scope: ONE upstream conversation per request. The prompt is
+// the caller's whole flattened history, so chaining requests into a shared
+// conversation adds nothing and leaks one caller's turns into another's
+// context. The cached per-account client only saves org discovery.
 
 const claudeWebBridgePrefix = "/internal/claudeweb/v1"
 
@@ -48,25 +49,16 @@ type claudeWebBridge struct {
 
 func newClaudeWebBridge(db *store.DB, fetcher claudeweb.Fetcher) *claudeWebBridge {
 	b := &claudeWebBridge{db: db, fetcher: fetcher, clients: map[int64]cachedClaudeWebClient{}, genLocks: map[int64]*sync.Mutex{}}
-	if fetcher == nil {
-		b.newClient = b.clientFor
-	} else {
-		b.newClient = func(ctx context.Context, acct *provider.Account, key string) (*claudeweb.Client, error) {
-			cookie, err := claudeweb.NormalizeSessionCookie(key)
-			if err != nil {
-				return nil, err
-			}
-			return claudeweb.New(fetcher, cookie, claudeweb.DeviceIDFromCookie(cookie)), nil
-		}
-	}
+	b.newClient = b.clientFor
 	return b
 }
 
 // cachedClaudeWebClient is one account's session client and the cookie it
 // was built from.
 type cachedClaudeWebClient struct {
-	client *claudeweb.Client
-	cookie string
+	client  *claudeweb.Client
+	cookie  string
+	fetcher claudeweb.Fetcher // closed when a new cookie replaces this client
 }
 
 // clientFor is the production client builder: normalizes the stamped
@@ -80,11 +72,22 @@ func (b *claudeWebBridge) clientFor(_ context.Context, acct *provider.Account, k
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if c, ok := b.clients[acct.ID]; ok && c.cookie == cookie {
-		return c.client, nil
+	if c, ok := b.clients[acct.ID]; ok {
+		if c.cookie == cookie {
+			return c.client, nil
+		}
+		// The replaced session's fetcher holds a live connection: drop it
+		// now rather than at its idle timeout.
+		if closer, ok := c.fetcher.(interface{ Close() }); ok && c.fetcher != b.fetcher {
+			closer.Close()
+		}
 	}
-	c := claudeweb.New(claudeweb.NewTLSFetcher(), cookie, "")
-	b.clients[acct.ID] = cachedClaudeWebClient{client: c, cookie: cookie}
+	var f claudeweb.Fetcher = claudeweb.NewTLSFetcher()
+	if b.fetcher != nil {
+		f = b.fetcher
+	}
+	c := claudeweb.New(f, cookie, "")
+	b.clients[acct.ID] = cachedClaudeWebClient{client: c, cookie: cookie, fetcher: f}
 	return c, nil
 }
 
@@ -213,6 +216,7 @@ func (b *claudeWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.R
 		opts.Tools = tools
 	}
 	chatID := "chatcmpl-cw-" + claudeweb.NewUUID()[:13]
+	c.NewConversation() // under the account lock: never chain another caller's thread
 
 	if !req.Stream {
 		res, err := c.Generate(r.Context(), opts, nil)

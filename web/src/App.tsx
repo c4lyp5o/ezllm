@@ -1,6 +1,6 @@
 // App shell: token unlock gate → sidebar layout → routes.
 // Nothing renders or fetches before the unlock screen hands back a token.
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react';
 import { GateError, completeSetup, dashboardLogin, getSetupStatus, isUnlocked, logout, markUnlocked } from './utils/api';
@@ -12,18 +12,23 @@ import { MIN_PASSWORD } from './utils/passwordStrength';
 import { readTheme, setTheme, type Theme } from './utils/theme';
 import { Spinner, btn, cx } from './components/ui';
 import ThemeToggle from './components/ThemeToggle';
-import Dashboard from './pages/Dashboard';
-import Providers from './pages/Providers';
-import Services from './pages/Services';
-import Combos from './pages/Combos';
-import Compression from './pages/Compression';
-import Connect from './pages/Connect';
-import Rules from './pages/Rules';
-import Stats from './pages/Stats';
-import Economics from './pages/Economics';
-import Requests from './pages/Requests';
-import Settings from './pages/Settings';
-import Chat from './pages/Chat';
+import { PageBoundary, PageLoading } from './components/PageBoundary';
+
+// Pages load on demand: the unlock screen downloads none of them (nor the
+// chart library most of them pull in), and each page's code arrives the first
+// time it is opened.
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Providers = lazy(() => import('./pages/Providers'));
+const Services = lazy(() => import('./pages/Services'));
+const Combos = lazy(() => import('./pages/Combos'));
+const Compression = lazy(() => import('./pages/Compression'));
+const Connect = lazy(() => import('./pages/Connect'));
+const Rules = lazy(() => import('./pages/Rules'));
+const Stats = lazy(() => import('./pages/Stats'));
+const Economics = lazy(() => import('./pages/Economics'));
+const Requests = lazy(() => import('./pages/Requests'));
+const Settings = lazy(() => import('./pages/Settings'));
+const Chat = lazy(() => import('./pages/Chat'));
 
 // One sidebar entry per destination — Stats / Token Economics / Requests live
 // together under Analytics (same data family, tabbed).
@@ -472,6 +477,8 @@ export default function App() {
             initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -6, transition: { duration: DUR.fast, ease: [0.22, 1, 0.36, 1] } }}
             transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}>
+            <PageBoundary key={location.pathname}>
+            <Suspense fallback={<PageLoading />}>
             <Routes>
               <Route path="/" element={<Dashboard />} />
       <Route path="/stats" element={<Stats />} />
@@ -487,6 +494,8 @@ export default function App() {
               <Route path="/settings" element={<Settings />} />
               <Route path="*" element={<Dashboard />} />
             </Routes>
+            </Suspense>
+            </PageBoundary>
           </motion.div>
         </AnimatePresence>
       </main>

@@ -3,6 +3,7 @@ package rules
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -135,6 +136,43 @@ func TestEvaluateDisabledRuleIgnored(t *testing.T) {
 	e := engine(t, time.Date(2026, 10, 6, 12, 0, 0, 0, kl), []Rule{r}, &fakeUsage{tokens: 999})
 	if err := e.Evaluate(context.Background(), 1, "m", "ns/m"); err != nil {
 		t.Errorf("a disabled rule must impose nothing, got %v", err)
+	}
+}
+
+// flakySource fails AllRules until healed, then serves its rules.
+type flakySource struct {
+	healed atomic.Bool
+	rules  []Rule
+}
+
+func (f *flakySource) AllRules(context.Context) ([]Rule, error) {
+	if !f.healed.Load() {
+		return nil, errors.New("store unavailable")
+	}
+	return f.rules, nil
+}
+
+// TestRetryingEngineRecoversAfterFailedBoot pins the boot fallback: a failed
+// initial load starts the engine unrestricted, and the ticker's retries hit
+// the real source, so rules return once it recovers. The old fallback swapped
+// in an always-empty source, and the rules stayed off until restart.
+func TestRetryingEngineRecoversAfterFailedBoot(t *testing.T) {
+	src := &flakySource{rules: []Rule{{AccountID: 1, ModelID: "m", Enabled: true}}}
+	e, err := NewEngineRetrying(src, &fakeUsage{}, nil, 5*time.Millisecond)
+	if err == nil {
+		t.Fatal("initial load error must be reported")
+	}
+	defer e.Close()
+	if e.Get(1, "m") != nil {
+		t.Fatal("failed boot must start with no rules")
+	}
+	src.healed.Store(true)
+	deadline := time.Now().Add(2 * time.Second)
+	for e.Get(1, "m") == nil {
+		if time.Now().After(deadline) {
+			t.Fatal("rule never loaded after the source recovered")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 

@@ -77,12 +77,12 @@ func fileExists(path string) bool {
 // startCodexBridge brings up the loopback surface when enabled. A missing
 // binary or login, a lockdown flag the CLI refuses, or a protocol method it
 // dropped is a boot failure, never a silent degrade.
-func startCodexBridge(ctx context.Context, log *slog.Logger) error {
+func startCodexBridge(ctx context.Context, log *slog.Logger) (func(), error) {
 	if !strings.EqualFold(strings.TrimSpace(os.Getenv(envCodexBridge)), "on") {
-		return nil
+		return func() {}, nil
 	}
 	if runtime.GOOS != "linux" {
-		return fmt.Errorf("codex bridge: %s=on is a Linux feature (this build is %s); run ezllm in a Linux container — docs/codex-bridge-runbook.md", envCodexBridge, runtime.GOOS)
+		return nil, fmt.Errorf("codex bridge: %s=on is a Linux feature (this build is %s); run ezllm in a Linux container — docs/codex-bridge-runbook.md", envCodexBridge, runtime.GOOS)
 	}
 	bin := strings.TrimSpace(os.Getenv(envCodexBin))
 	if bin == "" {
@@ -90,7 +90,7 @@ func startCodexBridge(ctx context.Context, log *slog.Logger) error {
 	}
 	resolved, err := exec.LookPath(bin)
 	if err != nil {
-		return fmt.Errorf("codex bridge: %s=%q does not resolve to the official Codex CLI: %w", envCodexBin, bin, err)
+		return nil, fmt.Errorf("codex bridge: %s=%q does not resolve to the official Codex CLI: %w", envCodexBin, bin, err)
 	}
 	home := strings.TrimSpace(os.Getenv(envCodexHome))
 	if home == "" {
@@ -101,28 +101,28 @@ func startCodexBridge(ctx context.Context, log *slog.Logger) error {
 		addr = "127.0.0.1:8791"
 	}
 	if err := assertCodexLoopback(addr); err != nil {
-		return err
+		return nil, err
 	}
 	concurrency := 2
 	if v := strings.TrimSpace(os.Getenv(envCodexConcurrency)); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 {
-			return fmt.Errorf("codex bridge: %s=%q must be a positive integer", envCodexConcurrency, v)
+			return nil, fmt.Errorf("codex bridge: %s=%q must be a positive integer", envCodexConcurrency, v)
 		}
 		concurrency = n
 	}
 
 	pre, err := codexbridge.RunPreflight(ctx, resolved, home)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	token, err := codexBridgeToken(strings.TrimSpace(os.Getenv(envCodexToken)))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	helper, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("codex bridge: cannot locate this binary for the Landlock helper: %w", err)
+		return nil, fmt.Errorf("codex bridge: cannot locate this binary for the Landlock helper: %w", err)
 	}
 	tools := decideCodexTools(helper, resolved, strings.EqualFold(strings.TrimSpace(os.Getenv(envCodexToolsNoLL)), "on"))
 	qualified := "qualified"
@@ -130,17 +130,18 @@ func startCodexBridge(ctx context.Context, log *slog.Logger) error {
 		qualified = "unqualified (measured on " + codexbridge.QualifiedVersion + "; re-run the live proof)"
 	}
 
+	runner := &codexbridge.Runner{
+		Bin:           resolved,
+		CodexHome:     home,
+		Timeout:       300 * time.Second,
+		MaxConcurrent: concurrency,
+		Version:       server.Version,
+		Logf:          log.Info,
+		Channel:       pre.Channel,
+		Sandbox:       tools.sandbox,
+	}
 	srv := &codexbridge.Server{
-		Runner: &codexbridge.Runner{
-			Bin:           resolved,
-			CodexHome:     home,
-			Timeout:       300 * time.Second,
-			MaxConcurrent: concurrency,
-			Version:       server.Version,
-			Logf:          log.Info,
-			Channel:       pre.Channel,
-			Sandbox:       tools.sandbox,
-		},
+		Runner:   runner,
 		ToolsOff: tools.off,
 		Token:    token,
 		Version:  server.Version,
@@ -173,13 +174,13 @@ func startCodexBridge(ctx context.Context, log *slog.Logger) error {
 			log.Error("codex bridge serve", "err", err)
 		}
 	}()
-	go func() {
-		<-ctx.Done()
-		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = httpSrv.Shutdown(shutCtx)
-	}()
-	return nil
+	// main calls stop after the gateway drain (its handlers proxy here):
+	// drain this surface, then reap the parked tool turns that outlive any
+	// HTTP request by design.
+	return func() {
+		shutdownBridgeHTTP(httpSrv)
+		runner.Shutdown()
+	}, nil
 }
 
 func channelInfo(p codexbridge.Preflight) string {

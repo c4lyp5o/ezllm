@@ -101,6 +101,7 @@ type Tool struct {
 	Name        string
 	Description string
 	Schema      json.RawMessage
+	Strict      *bool
 }
 
 // ToolChoice modes. "" means the source did not send one (the encoders then

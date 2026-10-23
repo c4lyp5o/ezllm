@@ -183,6 +183,20 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 		return body, res
 	}
 
+	// A session runs the profile it was BOUND to (addendum #4): after an
+	// operator edit, a live session keeps its committed bytes AND the rules
+	// that produced them, so the stamped version is what actually ran. Only
+	// the versioned settings come from the binding; the per-request floor,
+	// CPU cap and shadow sampling stay current. Disabling the profile still
+	// takes effect at once (the check above runs first).
+	boundVersion, bound := memo.Bind(session, res.ProfileVersion, p)
+	if bound != nil {
+		q := *bound
+		q.MinAbsoluteTokens, q.MaxPipelineMS, q.Shadow = p.MinAbsoluteTokens, p.MaxPipelineMS, p.Shadow
+		p = &q
+		res.ProfileVersion = boundVersion
+	}
+
 	// The conversation list: chat and messages carry `messages`, the
 	// Responses API carries an `input` item array. Anything else (a bare
 	// string input, no list at all) passes through untouched with the profile
@@ -237,7 +251,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 	// — unless it is purely tool output and the profile compresses fresh tool
 	// output, in which case it is new work like any other message.
 	last := len(msgs) - 1
-	exemptTail := p.ExemptLastTurn && last > 0 && !(p.FreshToolOutput && pureToolOutput(msgs[last]))
+	exemptTail := p.ExemptLastTurn && !(p.FreshToolOutput && pureToolOutput(msgs[last]))
 	editable := msgs
 	if exemptTail {
 		editable = msgs[:last]
@@ -250,16 +264,12 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 	// conversation grows, and a message that shipped untouched stays
 	// untouched when the exempt window slides off it. Order is preserved:
 	// hit[] marks the replayed positions, cur carries the new work in order.
-	// The session binds ONCE to the effective profile's fingerprint
-	// (addendum #4): an operator editing the profile never silently
-	// re-versions a live session — its committed bytes keep replaying under
-	// the version it was first seen with, and only new sessions bind fresh.
-	profileVersion := memo.Bind(session, res.ProfileVersion)
-	if profileVersion != "" {
-		// The DECISION ran under the bound version (its committed forms are
-		// from it), so that is what the row must name.
-		res.ProfileVersion = profileVersion
-	}
+	// The session bound ONCE to the effective profile (addendum #4, see the
+	// Bind above): an operator editing the profile never silently
+	// re-versions a live session — its committed bytes keep replaying, and
+	// its new work runs, under the version it was first seen with; only new
+	// sessions bind fresh.
+	profileVersion := boundVersion // stamped on res above
 	useMemo := profileVersion != ""
 	hit := make([]bool, len(editable))
 	forms := make([]any, len(editable)) // committed forms for hit positions; nil = shipped as nothing
@@ -284,6 +294,10 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 	cur := newWork
 	stagesRan := 0
 	classes := profileToolClasses(p.Stages)
+	// Tool names come from the WHOLE request: a memo hit takes a committed
+	// assistant call out of the work, but the result after it still needs
+	// that call's name to be classed (a file read stays byte-identical).
+	names := toolNamesByCallID(msgs)
 	for _, st := range p.Stages {
 		if !KnownEngines[st.Engine] {
 			res.Err = "unknown engine " + st.Engine
@@ -307,7 +321,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 			// new work.
 			next = toolRefOverHistory(editable, hit, forms, cur, withProfileClasses(st, classes).Options)
 		} else {
-			next, fired, err = runEngine(withProfileClasses(st, classes), cur)
+			next, fired, err = runEngine(withToolNames(withProfileClasses(st, classes), names), cur)
 		}
 		if err != nil {
 			res.Err = st.Engine + ": " + err.Error()
@@ -389,9 +403,10 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 	// where the memo hit, the new work's output everywhere else. A nil on
 	// either side is a message that ships as nothing (a dropped repeat). A
 	// tool_ref reference whose target did not ship above (the client dropped
-	// it) is never sent: that message ships its original instead.
+	// it) or now holds different content (history rewritten under the same
+	// session) is never sent: that message ships its original instead.
 	rebuilt := make([]any, 0, len(editable))
-	have := map[string]bool{}
+	have := map[string]string{}
 	ni := 0
 	for i := range editable {
 		f := forms[i]
@@ -402,10 +417,10 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 		if f == nil {
 			continue
 		}
-		if !refsResolve(f, have) {
+		if !refsResolve(f, editable[i], have) {
 			f = editable[i]
 		}
-		realToolIDs(f, have)
+		realToolIDs(f, editable[i], have)
 		rebuilt = append(rebuilt, f)
 	}
 	finalMsgs := rebuilt
@@ -573,6 +588,31 @@ func withProfileClasses(st Stage, classes map[string]any) Stage {
 	opts["tool_classes"] = classes
 	st.Options = opts
 	return st
+}
+
+// toolNamesOption carries the request-wide call id -> tool name map into a
+// stage. The NUL keeps it out of any option an operator can write.
+const toolNamesOption = "\x00tool_names"
+
+// withToolNames hands the request-wide tool names to one stage.
+func withToolNames(st Stage, names map[string]string) Stage {
+	opts := make(map[string]any, len(st.Options)+1)
+	for k, v := range st.Options {
+		opts[k] = v
+	}
+	opts[toolNamesOption] = names
+	st.Options = opts
+	return st
+}
+
+// callNames is the tool-name map an engine classes outputs by: the request-
+// wide map the pipeline supplies, or, when an engine runs alone, the names
+// in msgs itself.
+func callNames(msgs []any, opts map[string]any) map[string]string {
+	if names, ok := opts[toolNamesOption].(map[string]string); ok {
+		return names
+	}
+	return toolNamesByCallID(msgs)
 }
 
 // runEngine applies one stage. fired is only meaningful for caveman (the count

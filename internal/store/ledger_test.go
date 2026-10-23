@@ -378,3 +378,18 @@ func TestTTFTAndDurationsPersist(t *testing.T) {
 		t.Error("stream flag lost")
 	}
 }
+
+// TestRecordCallAfterCloseCountsDrop pins audit C4's store half: a row
+// recorded after Close used to land in the abandoned queue — never persisted
+// and never counted. It must be shed as an observable drop instead.
+func TestRecordCallAfterCloseCountsDrop(t *testing.T) {
+	db := openTest(t)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before := DroppedAfterClose()
+	db.RecordCall(Call{Client: "late", Model: "m", Status: 200})
+	if got := DroppedAfterClose() - before; got != 1 {
+		t.Fatalf("dropped after close = %d, want 1", got)
+	}
+}

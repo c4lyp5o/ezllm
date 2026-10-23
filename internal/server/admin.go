@@ -30,6 +30,14 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/store"
 )
 
+// cookieOrigins refuses cookie-authenticated writes from another origin.
+// SameSite=Strict only separates sites: a page on another port of the same
+// host, or a sibling subdomain, still sends the session cookie, and a
+// text/plain POST needs no preflight. The browser's Sec-Fetch-Site (or Origin
+// against Host) tells those apart; bearer clients and non-browser callers send
+// neither and are unaffected.
+var cookieOrigins = http.NewCrossOriginProtection()
+
 // admin wraps a handler in auth + the admin role. 403 without the role, so a
 // token that can only infer never sees account/key surfaces.
 func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
@@ -38,6 +46,10 @@ func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 		if token == "" {
 			if c, err := r.Cookie("ezllm_session"); err == nil {
 				token = c.Value
+				if err := cookieOrigins.Check(r); err != nil {
+					writeErr(w, http.StatusForbidden, "forbidden", "cross-origin request refused")
+					return
+				}
 			}
 		}
 		if s.db != nil && s.db.DashboardSession(r.Context(), token) {
@@ -56,6 +68,9 @@ func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// adminBodyMax caps an admin JSON body.
+const adminBodyMax = 1 << 20
+
 // decodeBody reads a bounded JSON body into dst. Unknown fields are rejected:
 // a typo'd field name silently ignored is how a "saved" setting never saves.
 func decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {
@@ -63,16 +78,28 @@ func decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {
 	// net/http's post-handler drain of the unread body fails fast too
 	// (see limitBodyRead).
 	lift := limitBodyRead(w, adminBodyTimeout)
-	limited := io.LimitReader(r.Body, 1<<20)
-	dec := json.NewDecoder(limited)
+	// An oversized body is refused, never truncated: the cut prefix would
+	// decode as the whole body.
+	body, tooLarge, err := readBody(r, adminBodyMax)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_request_error", "could not read body: "+err.Error())
+		return false
+	}
+	if tooLarge {
+		writeErr(w, http.StatusBadRequest, "invalid_request_error",
+			fmt.Sprintf("request body exceeds %d bytes", adminBodyMax))
+		return false
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid_request_error",
 			"invalid JSON body: "+err.Error())
 		return false
 	}
-	// Refuse trailing garbage ("{}{}").
-	if dec.More() {
+	// Refuse trailing data ("{}{}", "{}]"): only EOF may follow the value.
+	// More() is not enough — it reports false before a closing delimiter.
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
 		writeErr(w, http.StatusBadRequest, "invalid_request_error",
 			"body must contain a single JSON object")
 		return false
@@ -155,6 +182,21 @@ func looksLikeValidation(err error) bool {
 
 // ── GET /admin/overview ─────────────────────────────────────────────────────
 
+// overviewUsage is the overview's trailing-24h report for one grouping,
+// shared across callers for reportTTL.
+func (s *Server) overviewUsage(groupBy string) ([]store.UsageRow, error) {
+	v, _, err := s.reports.do("overview|"+groupBy, func() (any, error) {
+		ctx, cancel := context.WithTimeout(s.bg.ctx, reportTimeout)
+		defer cancel()
+		now := time.Now()
+		return s.db.UsageReport(ctx, now.Add(-24*time.Hour), now, groupBy)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.([]store.UsageRow), nil
+}
+
 // handleOverview is the dashboard's single first-paint round trip.
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -163,12 +205,15 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreErr(w, err)
 		return
 	}
-	usage, err := s.db.UsageReport(ctx, time.Now().Add(-24*time.Hour), time.Now(), "account")
+	// The two 24h breakdowns are the overview's heavy part (window scans with
+	// per-group medians); every tab polls them, so they are shared through
+	// the report cache for reportTTL.
+	usage, err := s.overviewUsage("account")
 	if err != nil {
 		s.writeStoreErr(w, err)
 		return
 	}
-	surfaceUsage, err := s.db.UsageReport(ctx, time.Now().Add(-24*time.Hour), time.Now(), "surface")
+	surfaceUsage, err := s.overviewUsage("surface")
 	if err != nil {
 		s.writeStoreErr(w, err)
 		return
@@ -631,23 +676,23 @@ func (s *Server) deferProtocol(accountID, keyID int64, acct provider.Account, ke
 		return
 	}
 	models := test.Catalog
-	go func() {
+	s.goBackground(func(bg context.Context) {
 		// The sample sweep is capped at a few models; free models it did not
 		// reach are probed after it (they cost no credits), sequenced so the
 		// two never hit the account at once.
-		defer s.probeFreeModels(accountID, "key added")
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer s.probeFreeModels(bg, accountID, "key added")
+		ctx, cancel := context.WithTimeout(bg, 10*time.Minute)
 		defer cancel()
 		res := s.tester.ProtocolSweep(ctx, acct, key, models, registration.Options{ProbeMaxModels: maxModels})
 		if res == nil || len(res.Rows) == 0 {
 			return
 		}
-		if err := s.db.SetModelProtos(context.Background(), accountID, res.Rows); err != nil {
+		if err := s.db.SetModelProtos(bg, accountID, res.Rows); err != nil {
 			s.log.Error("protocol sweep persist failed", "err", err, "account", acct.Namespace)
 		}
 		s.log.Info("protocol sweep done",
 			"account", acct.Namespace, "models", res.Tested, "support", res.Support)
-	}()
+	})
 }
 
 // writeKeyTestFailure renders the 422 contract from docs/API.md.
@@ -1150,16 +1195,16 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			"a protocol sweep is already running for this account — stop it first (DELETE /admin/accounts/"+fmt.Sprint(id)+"/sync)")
 		return
 	}
-	runCtx, cancel := context.WithTimeout(context.Background(), budget)
+	runCtx, cancel := context.WithTimeout(s.bg.ctx, budget)
 	s.attachCancel(id, run, cancel)
-	go func() {
+	s.goBackground(func(bg context.Context) {
 		// Deferred first so it runs LAST, after endSweep frees the slot: free
 		// models a sampled sweep skipped are probed next. A sweep the operator
 		// stopped (or that ran out of budget) is not followed by more probing.
 		stopped := false
 		defer func() {
 			if !stopped {
-				s.probeFreeModels(id, "manual sync")
+				s.probeFreeModels(bg, id, "manual sync")
 			}
 		}()
 		defer s.endSweep(id, run)
@@ -1182,13 +1227,13 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			// a 20-minute sweep to an expired context would be absurd. The
 			// probes already wrote per-model rows as they ran; this batch is
 			// the same values, and it is what keeps a stopped sweep's work.
-			pctx, pcancel := context.WithTimeout(context.Background(), 30*time.Second)
+			pctx, pcancel := context.WithTimeout(bg, 30*time.Second)
 			if err := s.db.SetModelProtos(pctx, id, res.Rows); err != nil {
 				s.log.Error("sync protocol sweep persist failed", "err", err)
 			}
 			pcancel()
 		}
-	}()
+	})
 
 	entries, _ := s.db.ListModels(r.Context(), id)
 	support := protocolCounts(entries)
@@ -1692,6 +1737,7 @@ func (s *Server) handleComboTest(w http.ResponseWriter, r *http.Request) {
 			call.Err = res.Err
 		}
 		applyUsage(&call, res.Usage)
+		s.ledgerAttempts(call, res)
 		s.ledger(call)
 		for _, c := range s.dispatcher.Cooldowns() {
 			if c.Namespace == rt.Account.Namespace && c.Model == rt.Model && c.Until.After(time.Now()) {
@@ -2003,10 +2049,9 @@ func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
 // is COMPLETE (no row cap: silently omitting history from the thing you recover
 // WITH is the worst possible failure for this endpoint).
 //
-// Ordering matters: every small config query is answered BEFORE the first
-// ledger byte is written, because a status can no longer change once the body
-// starts. A config failure therefore still answers a proper error, not a
-// half-written file.
+// Config and the first ledger row are checked before headers. Later source
+// failures produce an explicit incomplete manifest; write failures leave no
+// successful completion marker. The ledger stays streaming and uncapped.
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	includeLedger := r.URL.Query().Get("include_ledger") == "true"
 	exp, err := s.db.ExportConfig(r.Context())
@@ -2014,18 +2059,31 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreErr(w, err)
 		return
 	}
-
+	// Validate the cursor and first row before promising a successful download.
+	var rows *sql.Rows
+	var first map[string]any
+	if includeLedger {
+		rows, err = s.db.ExportLedgerRows(r.Context())
+		if err != nil {
+			s.writeStoreErr(w, err)
+			return
+		}
+		defer rows.Close()
+		if rows.Next() {
+			first, err = store.ScanExportRow(rows)
+		} else {
+			err = rows.Err()
+		}
+		if err != nil {
+			s.writeStoreErr(w, err)
+			return
+		}
+	}
+	completion := store.ExportCompletion{Complete: true, LedgerRequested: includeLedger}
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Content-Disposition",
-		fmt.Sprintf(`attachment; filename="ezllm-export-%s.json"`,
-			time.Now().UTC().Format("20060102-150405")))
-	// 200 is decided here: everything below can fail, and after this point the
-	// status is fixed. The config half is already validated, so only the ledger
-	// stream can still fail — and that failure can only truncate, never 500.
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="ezllm-export-%s.json"`, time.Now().UTC().Format("20060102-150405")))
 	w.WriteHeader(http.StatusOK)
-
-	flusher, _ := w.(http.Flusher)
-	if _, err := io.WriteString(w, "{"); err != nil {
+	if _, err = io.WriteString(w, "{"); err != nil {
 		return
 	}
 	obj := newJSONObject(w)
@@ -2033,71 +2091,78 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		name string
 		v    any
 	}{
-		{"exported_at", exp.ExportedAt},
-		{"schema_version", exp.SchemaVersion},
-		{"accounts", exp.Accounts},
-		{"combos", exp.Combos},
-		{"tokens", exp.Tokens},
-		{"compression_profiles", exp.Compression},
-		{"latest_quotas", exp.Quotas},
+		{"format_version", exp.FormatVersion}, {"kind", exp.Kind}, {"database_backup_required", exp.DatabaseBackupRequired},
+		{"models", exp.Models}, {"model_rules", exp.Rules}, {"model_prices", exp.Prices}, {"service_bindings", exp.Bindings},
+		{"exported_at", exp.ExportedAt}, {"schema_version", exp.SchemaVersion}, {"accounts", exp.Accounts}, {"combos", exp.Combos},
+		{"tokens", exp.Tokens}, {"compression_profiles", exp.Compression}, {"latest_quotas", exp.Quotas},
 	} {
-		if err := obj.field(f.name, f.v); err != nil {
+		if err = obj.field(f.name, f.v); err != nil {
 			return
 		}
 	}
-
+	flusher, _ := w.(http.Flusher)
 	if includeLedger {
-		if err := obj.beginField("ledger"); err != nil {
+		if err = obj.beginField("ledger"); err != nil {
 			return
 		}
-		if err := obj.raw("["); err != nil {
+		if err = obj.raw("["); err != nil {
 			return
 		}
-		rows, rerr := s.db.ExportLedgerRows(r.Context())
-		if rerr != nil {
-			// Nothing has been promised yet beyond the opening bracket, so
-			// close the array and object: the client still gets a VALID JSON
-			// document with an empty ledger rather than a truncated one.
-			s.log.Error("export ledger stream failed", "err", rerr)
-			_, _ = io.WriteString(w, "]}")
-			if flusher != nil {
-				flusher.Flush()
-			}
-			return
-		}
-		n := 0
-		for rows.Next() {
-			m, serr := store.ScanExportRow(rows)
-			if serr != nil {
-				s.log.Error("export ledger row scan failed", "err", serr)
-				break
-			}
-			if n > 0 {
-				if _, werr := io.WriteString(w, ","); werr != nil {
-					break // client went away; stop reading
+		writeRow := func(row map[string]any) error {
+			if completion.LedgerRows > 0 {
+				if _, err := io.WriteString(w, ","); err != nil {
+					return err
 				}
 			}
-			if eerr := json.NewEncoder(w).Encode(m); eerr != nil {
-				break
+			if err := json.NewEncoder(w).Encode(row); err != nil {
+				return err
 			}
-			n++
-			if flusher != nil && n%500 == 0 { // batch the flushes: one per 500 rows
+			completion.LedgerRows++
+			if flusher != nil && completion.LedgerRows%500 == 0 {
 				flusher.Flush()
 			}
+			return nil
 		}
-		if err := rows.Err(); err != nil {
-			s.log.Error("export ledger iteration failed", "err", err)
+		if first != nil {
+			if err = writeRow(first); err != nil {
+				return
+			}
 		}
-		_ = rows.Close() // released before the tail so the read pool is free
-		if _, werr := io.WriteString(w, "]"); werr != nil {
+		for rows.Next() {
+			row, scanErr := store.ScanExportRow(rows)
+			if scanErr != nil {
+				err = scanErr
+				break
+			}
+			if writeErr := writeRow(row); writeErr != nil {
+				return
+			}
+		}
+		if err == nil {
+			err = rows.Err()
+		}
+		rows.Close()
+		if err != nil {
+			s.log.Error("export ledger did not complete", "err", err, "rows", completion.LedgerRows)
+			completion.Complete = false
+			completion.Error = "ledger export did not complete"
+		}
+		if _, err = io.WriteString(w, "]"); err != nil {
 			return
 		}
-		if flusher != nil {
-			flusher.Flush()
-		}
 	}
-	if _, err := io.WriteString(w, "}"); err != nil {
+	if r.Context().Err() != nil {
+		completion.Complete = false
+		completion.Error = "export request cancelled"
+	}
+	if err = obj.field("completion", completion); err != nil {
 		return
+	}
+	if _, err = io.WriteString(w, "}"); err != nil {
+		return
+	}
+	if flusher != nil {
+		flusher.Flush()
 	}
 }
 

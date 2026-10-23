@@ -232,7 +232,8 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sw := &sseWriter{w: w, id: id, created: created, model: req.Model}
+	sw := &sseWriter{w: w, id: id, created: created, model: req.Model, rc: http.NewResponseController(w)}
+	defer sw.bind(r.Context())()
 	res, err := s.Runner.Run(r.Context(), req, sw.delta)
 	if err != nil {
 		if !sw.started {
@@ -286,6 +287,11 @@ func openAIUsage(u Usage) map[string]any {
 	}
 }
 
+// streamWriteStall bounds one stream write. A client that has not drained a
+// write in this long has stopped reading; the bound is per write, never on
+// the stream's total duration.
+const streamWriteStall = 60 * time.Second
+
 // sseWriter emits chat.completion.chunk events. Headers are written on the
 // first delta, so a failure before any output still gets its real status.
 type sseWriter struct {
@@ -294,6 +300,43 @@ type sseWriter struct {
 	created int64
 	model   string
 	started bool
+
+	// rc sets write deadlines; dmu orders them so a write can never push
+	// back the immediate deadline cancellation set.
+	rc        *http.ResponseController
+	dmu       sync.Mutex
+	cancelled bool
+}
+
+// bind makes cancelling ctx interrupt a write stuck on a client that stopped
+// reading (an immediate write deadline). The returned func detaches and
+// clears the deadline so a reused keep-alive connection starts clean.
+func (s *sseWriter) bind(ctx context.Context) func() {
+	stop := context.AfterFunc(ctx, func() {
+		s.dmu.Lock()
+		s.cancelled = true
+		_ = s.rc.SetWriteDeadline(time.Now())
+		s.dmu.Unlock()
+	})
+	return func() {
+		if stop() {
+			_ = s.rc.SetWriteDeadline(time.Time{})
+		}
+	}
+}
+
+// arm sets the per-write stall deadline unless cancellation already fired.
+func (s *sseWriter) arm() error {
+	if s.rc == nil {
+		return nil
+	}
+	s.dmu.Lock()
+	defer s.dmu.Unlock()
+	if s.cancelled {
+		return context.Canceled
+	}
+	_ = s.rc.SetWriteDeadline(time.Now().Add(streamWriteStall))
+	return nil
 }
 
 func (s *sseWriter) begin() {
@@ -312,6 +355,9 @@ func (s *sseWriter) begin() {
 func (s *sseWriter) event(v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
+		return err
+	}
+	if err := s.arm(); err != nil {
 		return err
 	}
 	if _, err := s.w.Write([]byte("data: " + string(b) + "\n\n")); err != nil {

@@ -28,6 +28,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/c4lyp5o/ezllm/internal/jsonbody"
 	"github.com/c4lyp5o/ezllm/internal/provider"
 	"github.com/c4lyp5o/ezllm/internal/proxy"
 	"github.com/c4lyp5o/ezllm/internal/proxy/benchutil"
@@ -53,11 +54,11 @@ const benchCombo = "benchcombo"
 
 // ── phase 1: request-body ingestion ─────────────────────────────────────────
 
-// BenchmarkIngestBody measures the ingestion primitive itself —
-// `io.ReadAll(io.LimitReader(r.Body, s.maxBody))`, the exact expression at
-// internal/server/server.go:464, against the cap a real Server computes from
-// Options.MaxBodyMiB (server.go:141; the production default is 32 MiB, so none
-// of these payloads is truncated).
+// BenchmarkIngestBody measures the ingestion primitive itself — readBody, the
+// helper both inference read sites use, against the cap a real Server
+// computes from Options.MaxBodyMiB (production default 32 MiB, so none of
+// these payloads is refused). `known` carries a Content-Length (the common
+// case: preallocated read); `chunked` does not (the capped ReadAll path).
 //
 // Scope, stated honestly: this isolates the read + cap, not the socket read.
 // httptest.NewRequest is hoisted out of the loop so the number is not
@@ -69,21 +70,27 @@ func BenchmarkIngestBody(b *testing.B) {
 
 	for _, p := range payloadSizes {
 		body := benchutil.ChatBody(benchServerModel, p.bytes)
-		b.Run(p.name, func(b *testing.B) {
-			b.SetBytes(int64(len(body)))
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				r.Body = io.NopCloser(bytes.NewReader(body))
-				got, err := io.ReadAll(io.LimitReader(r.Body, s.maxBody))
-				if err != nil {
-					b.Fatal(err)
+		for _, mode := range []string{"known", "chunked"} {
+			b.Run(mode+"/"+p.name, func(b *testing.B) {
+				b.SetBytes(int64(len(body)))
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					r.Body = io.NopCloser(bytes.NewReader(body))
+					r.ContentLength = int64(len(body))
+					if mode == "chunked" {
+						r.ContentLength = -1
+					}
+					got, tooLarge, err := readBody(r, s.maxBody)
+					if err != nil || tooLarge {
+						b.Fatal(err, tooLarge)
+					}
+					if len(got) != len(body) {
+						b.Fatalf("read %d of %d bytes", len(got), len(body))
+					}
 				}
-				if len(got) != len(body) {
-					b.Fatalf("read %d of %d bytes — the cap truncated a payload under it", len(got), len(body))
-				}
-			}
-		})
+			})
+		}
 	}
 }
 
@@ -115,12 +122,14 @@ func BenchmarkInspectAndRoute(b *testing.B) {
 	resolver := router.New(h.db)
 
 	for _, p := range payloadSizes {
-		body := benchutil.ChatBody(benchServerModel, p.bytes)
 		for _, target := range []string{benchServerModel, benchCombo} {
 			name := "direct"
 			if target == benchCombo {
 				name = "combo"
 			}
+			// Each case routes ITS target: a shared direct-model body once
+			// made the "combo" case measure direct routing.
+			body := benchutil.ChatBody(target, p.bytes)
 			b.Run(name+"/"+p.name, func(b *testing.B) {
 				b.SetBytes(int64(len(body)))
 				b.ReportAllocs()
@@ -137,9 +146,31 @@ func BenchmarkInspectAndRoute(b *testing.B) {
 					if len(routes) != 1 {
 						b.Fatalf("routes = %d, want 1", len(routes))
 					}
+					if routes[0].Alias != target {
+						b.Fatalf("route alias = %q, want %q (the case must route its own target)", routes[0].Alias, target)
+					}
 				}
 			})
 		}
+	}
+}
+
+// BenchmarkShapeCapture hashes the reusable history of an agent-loop body
+// (HistoryChatBody): the per-request canonicalization cost that the
+// single-final-message fixtures above never reach.
+func BenchmarkShapeCapture(b *testing.B) {
+	for _, p := range payloadSizes {
+		body := benchutil.HistoryChatBody(benchServerModel, p.bytes, 40)
+		doc := jsonbody.Open(body)
+		b.Run(p.name, func(b *testing.B) {
+			b.SetBytes(int64(len(body)))
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if sh := captureShapeDoc(doc, provider.SurfaceOpenAI); sh.PrefixSHA == "" {
+					b.Fatal("no prefix hash")
+				}
+			}
+		})
 	}
 }
 

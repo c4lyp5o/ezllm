@@ -58,13 +58,6 @@ func (a storeAdapter) UsageFor(ctx context.Context, accountID int64, modelID, bu
 	return c.Tokens, nil
 }
 
-// emptyRuleSource reports no rules — used as the permissive fallback when the
-// store-backed load fails at boot, so the gateway still routes (M2 behaviour)
-// while the background ticker retries the real source.
-type emptyRuleSource struct{}
-
-func (emptyRuleSource) AllRules(context.Context) ([]rules.Rule, error) { return nil, nil }
-
 // parseDaysCSV turns "1,2,3,4,5" into []int{1,2,3,4,5}. Empty → nil (every
 // day). Entries were validated at write time by ValidateModelRule; a stray
 // non-integer is skipped rather than failing the reload (a partially-parsed

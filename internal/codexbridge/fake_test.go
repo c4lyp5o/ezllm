@@ -125,6 +125,9 @@ func fakeAppServer(home string) {
 				continue
 			}
 			reply(map[string]any{"userAgent": "fake", "codexHome": home})
+			if mode == "no_read" {
+				select {} // a wedged CLI: alive, never reads stdin again
+			}
 		case "model/list":
 			reply(map[string]any{"data": []any{
 				map[string]any{"id": "gpt-6.1-sol", "displayName": "GPT-6.1 Sol", "hidden": false, "isDefault": true,

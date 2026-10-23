@@ -7,8 +7,6 @@ package main
 
 import (
 	"context"
-	crand "crypto/rand"
-	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
@@ -114,23 +112,15 @@ func run() error {
 			}
 			masterPath = filepath.Join(home, ".hermes", "secrets", "ezllm-master.key")
 		}
-		if b, err := os.ReadFile(masterPath); err == nil {
-			masterSecret = strings.TrimSpace(string(b))
-		} else {
-			// auto-generate on first boot
-			buf := make([]byte, 32)
-			if _, err := crand.Read(buf); err != nil {
-				return fmt.Errorf("master key: %w", err)
-			}
-			masterSecret = base64.StdEncoding.EncodeToString(buf)
-			if err := os.MkdirAll(filepath.Dir(masterPath), 0o700); err != nil {
-				return fmt.Errorf("master key: %w", err)
-			}
-			if err := os.WriteFile(masterPath, []byte(masterSecret+"\n"), 0o600); err != nil {
-				return fmt.Errorf("master key: %w", err)
-			}
+		var created bool
+		masterSecret, created, err = loadOrCreateMasterKey(masterPath)
+		if err != nil {
+			return fmt.Errorf("master key: %w", err)
+		}
+		if created {
 			log.Info("generated new master key", "path", masterPath, "action", "back up with the DB")
 		}
+
 	}
 
 	// ── data dir + store ──
@@ -238,14 +228,10 @@ func run() error {
 	// on a load failure we log it and fall back to a permissive engine — the
 	// background ticker keeps retrying via Reload, so rules reappear once the
 	// store recovers.
-	ruleEngine, err := rules.NewEngine(
-		storeAdapter{db}, storeAdapter{db}, rules.SystemClock, 30*time.Second, true)
+	ruleEngine, err := rules.NewEngineRetrying(
+		storeAdapter{db}, storeAdapter{db}, rules.SystemClock, 30*time.Second)
 	if err != nil {
 		log.Warn("rules engine failed to load at boot; running unrestricted (ticker will retry)", "err", err)
-		ruleEngine, err = rules.NewEngine(emptyRuleSource{}, storeAdapter{db}, rules.SystemClock, 30*time.Second, true)
-		if err != nil {
-			return fmt.Errorf("rules engine: %w", err) // permissive engine failing = real bug
-		}
 	}
 	resolver = resolver.WithEligibility(ruleEngine.Eligible)
 	// Translation of anthropic requests onto openai-only hops. Opt-in at
@@ -314,17 +300,22 @@ func run() error {
 
 	// Claude subscription surface: loopback-only, off unless EZLLM_CLAUDE_BRIDGE=on.
 	// Enabling it without a usable CLI or login fails the boot loudly.
-	if err := startClaudeBridge(ctx, log); err != nil {
+	stopClaude, err := startClaudeBridge(ctx, log)
+	if err != nil {
 		return err
 	}
 	// ChatGPT subscription surface: loopback-only, off unless EZLLM_CODEX_BRIDGE=on.
-	if err := startCodexBridge(ctx, log); err != nil {
+	stopCodex, err := startCodexBridge(ctx, log)
+	if err != nil {
+		stopClaude()
 		return err
 	}
 
+	reqs := newRequestLifetime()
 	httpSrv := &http.Server{
 		Addr:              addr,
-		Handler:           srv.Handler(),
+		Handler:           reqs.track(srv.Handler()),
+		BaseContext:       reqs.baseContext,
 		ReadHeaderTimeout: 10 * time.Second,
 		// Idle keep-alive connections are closed after 2 minutes. Request
 		// bodies get their own read budget per handler (server.limitBodyRead).
@@ -353,16 +344,27 @@ func run() error {
 	}
 
 	log.Info("shutting down", "drain_max", "15s")
-	shutCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	if err := httpSrv.Shutdown(shutCtx); err != nil {
-		log.Error("http shutdown", "err", err)
+	// The store closes only after every handler has returned (or the abort
+	// wait expires), so in-flight requests still get their ledger rows.
+	reqs.drain(httpSrv, 15*time.Second, 5*time.Second, log)
+	// Bridges after the gateway (its handlers proxy into them), joined here
+	// so no CLI child outlives the process's own shutdown.
+	stopCodex()
+	stopClaude()
+	// Background probes and refresh loops write to the store: cancel them
+	// and wait before it closes.
+	if !srv.StopBackground(10 * time.Second) {
+		log.Error("background jobs still running at store close; their writes may fail")
 	}
 	// Stop the rules-engine ticker first so it cannot reload against a closing
 	// store, then db.Close() drains the ledger queue and flushes the pools.
 	ruleEngine.Close()
 	if err := db.Close(); err != nil {
 		return fmt.Errorf("store close: %w", err)
+	}
+	// Rows from handlers that outlived the abort wait; nonzero = lost usage.
+	if n := store.DroppedAfterClose(); n > 0 {
+		log.Error("ledger rows recorded after store close were dropped", "rows", n)
 	}
 	log.Info("stopped")
 	return nil
@@ -495,14 +497,15 @@ func shadowSamplerFor(pct int) func() bool {
 
 // upstreamClient builds the HTTP client for provider calls. No client-level
 // Timeout by default: streaming responses are unbounded, and per-request
-// deadlines come from the caller's context.
+// deadlines come from the caller's context. Redirects stay on the origin the
+// request was sent to: provider keys and prompts never follow one elsewhere.
 func upstreamClient(cfg *config.Config) *http.Client {
 	tr := &http.Transport{
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 20,
 		IdleConnTimeout:     90 * time.Second,
 	}
-	return &http.Client{Transport: tr, Timeout: cfg.UpstreamTimeout}
+	return &http.Client{Transport: tr, Timeout: cfg.UpstreamTimeout, CheckRedirect: provider.SameOriginRedirect}
 }
 
 // translationFromEnv applies the env override of the ONE translation switch.

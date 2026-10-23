@@ -44,9 +44,9 @@ var claudeRequiredFlags = []string{
 // startClaudeBridge brings up the loopback surface when enabled. Enabling it
 // without a usable CLI or login is a boot failure, not a silent no-op: this
 // process would otherwise look healthy while every subscription request 503s.
-func startClaudeBridge(ctx context.Context, log *slog.Logger) error {
+func startClaudeBridge(ctx context.Context, log *slog.Logger) (func(), error) {
 	if !strings.EqualFold(strings.TrimSpace(os.Getenv(envBridge)), "on") {
-		return nil
+		return func() {}, nil
 	}
 	bin := strings.TrimSpace(os.Getenv(envBridgeBin))
 	if bin == "" {
@@ -54,7 +54,7 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger) error {
 	}
 	resolved, err := exec.LookPath(bin)
 	if err != nil {
-		return fmt.Errorf("claude bridge: %s=%q does not resolve to the official Claude Code CLI: %w", envBridgeBin, bin, err)
+		return nil, fmt.Errorf("claude bridge: %s=%q does not resolve to the official Claude Code CLI: %w", envBridgeBin, bin, err)
 	}
 	dir := strings.TrimSpace(os.Getenv(envBridgeDir))
 	if dir == "" {
@@ -65,14 +65,14 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger) error {
 		addr = "127.0.0.1:8790"
 	}
 	if err := assertLoopback(addr); err != nil {
-		return err
+		return nil, err
 	}
 
 	cliVersion, drift := claudeCLICheck(resolved)
 	login, plan := claudeLoginCheck(resolved, dir)
 	token, err := claudeBridgeToken(strings.TrimSpace(os.Getenv(envBridgeToken)))
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	srv := &claudebridge.Server{
@@ -106,13 +106,7 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger) error {
 			log.Error("claude bridge serve", "err", err)
 		}
 	}()
-	go func() {
-		<-ctx.Done()
-		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = httpSrv.Shutdown(shutCtx)
-	}()
-	return nil
+	return func() { shutdownBridgeHTTP(httpSrv) }, nil
 }
 
 // assertLoopback keeps this surface invisible from outside the container: it

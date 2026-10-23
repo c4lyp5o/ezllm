@@ -214,7 +214,11 @@ func (s *Server) StartPriceRefresh(ctx context.Context, hour int, loc *time.Loca
 		loc = time.UTC
 	}
 	s.priceRefreshOn.Store(true)
-	go s.priceRefreshLoop(ctx, hour, loc)
+	s.goBackground(func(bg context.Context) {
+		ctx, stop := either(ctx, bg)
+		defer stop()
+		s.priceRefreshLoop(ctx, hour, loc)
+	})
 }
 
 func (s *Server) priceRefreshLoop(ctx context.Context, hour int, loc *time.Location) {

@@ -39,9 +39,11 @@ completion). Ported from omniroute's production implementation; design:
 
 ## How turns work
 
-- **One conversation per account-client.** The upstream state machine
-  chains `conversation_id` + `parent_message_uuid` inside it. A cut stream
-  (no `message_stop`) commits NOTHING — no phantom parent state.
+- **One fresh upstream conversation per request.** The prompt already carries
+  the caller's whole flattened history, so nothing is chained across requests
+  (chaining leaked one caller's turns into another's context until
+  2026-10-23). Each conversation appears in the account's claude.ai chat list.
+  A cut stream (no `message_stop`) commits nothing.
 - History is flattened into one prompt (user/tool turns joined with blank
   lines) — the web protocol has no message array. Fine for chat, lossy for
   agent scaffolding.

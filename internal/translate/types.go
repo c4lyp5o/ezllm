@@ -34,6 +34,7 @@ type AnthropicTool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	InputSchema json.RawMessage `json:"input_schema"`
+	Strict      *bool           `json:"strict,omitempty"`
 }
 
 type AnthropicToolChoice struct {
@@ -124,6 +125,7 @@ type OpenAIFunction struct {
 	Description string          `json:"description,omitempty"`
 	Parameters  json.RawMessage `json:"parameters,omitempty"`
 	Arguments   string          `json:"arguments,omitempty"`
+	Strict      *bool           `json:"strict,omitempty"`
 }
 
 type OpenAIToolCall struct {

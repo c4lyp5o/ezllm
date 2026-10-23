@@ -9,6 +9,7 @@ package translate
 // turn.
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 )
@@ -99,7 +100,7 @@ func DecodeMessagesRequest(body []byte) (*RequestIR, error) {
 			return nil, unsupported("messages.tools", err.Error())
 		}
 		for _, t := range tools {
-			ir.Tools = append(ir.Tools, Tool{Name: t.Name, Description: t.Description, Schema: t.InputSchema})
+			ir.Tools = append(ir.Tools, Tool{Name: t.Name, Description: t.Description, Schema: t.InputSchema, Strict: t.Strict})
 		}
 	}
 
@@ -307,8 +308,8 @@ var emptyObjectSchema = json.RawMessage(`{"type":"object","properties":{}}`)
 
 // messagesToolID makes a tool-call id legal on the Messages wire
 // (^[a-zA-Z0-9_-]+$). Ids minted by other providers (functions.read:0) are
-// rewritten byte by byte — a pure function, so the tool_use and the
-// tool_result that answers it always agree, and so does every later request.
+// rewritten byte by byte to form a base spelling. messagesToolIDs resolves
+// collisions across the request before encoding tool uses and their results.
 func messagesToolID(id string) string {
 	ok := id != ""
 	for i := 0; i < len(id) && ok; i++ {
@@ -327,6 +328,43 @@ func messagesToolID(id string) string {
 		}
 	}
 	return string(b)
+}
+
+// Reserve every original's sanitized spelling before assigning suffixes, so a
+// generated identity cannot steal a legal identity elsewhere in the history.
+func messagesToolIDs(ir *RequestIR) map[string]string {
+	ids := []string{}
+	seen := map[string]bool{}
+	counts := map[string]int{}
+	used := map[string]bool{}
+	for _, turn := range ir.Turns {
+		for _, b := range turn.Blocks {
+			if (b.Kind != BlockCall && b.Kind != BlockResult) || seen[b.CallID] {
+				continue
+			}
+			seen[b.CallID] = true
+			ids = append(ids, b.CallID)
+			base := messagesToolID(b.CallID)
+			counts[base]++
+			used[base] = true
+		}
+	}
+	out := make(map[string]string, len(ids))
+	for _, id := range ids {
+		base := messagesToolID(id)
+		if counts[base] == 1 || id == base {
+			out[id] = base
+			continue
+		}
+		sum := sha256.Sum256([]byte(id))
+		candidate := fmt.Sprintf("%s_%x", base, sum[:8])
+		for n := 1; used[candidate]; n++ {
+			candidate = fmt.Sprintf("%s_%x_%d", base, sum[:8], n)
+		}
+		used[candidate] = true
+		out[id] = candidate
+	}
+	return out
 }
 
 func isToolIDByte(c byte) bool {
@@ -355,6 +393,7 @@ func cacheOf(b Block) json.RawMessage {
 // an instruction where forcing is rejected, and a model that thinks by
 // default is asked to summarize its thinking so a chat client can show it.
 func EncodeMessagesRequest(ir *RequestIR, upstreamModel string) ([]byte, error) {
+	toolIDs := messagesToolIDs(ir)
 	maxTokens := defaultMessagesMaxTokens
 	if ir.MaxOutputTokens != nil {
 		maxTokens = *ir.MaxOutputTokens
@@ -415,7 +454,7 @@ func EncodeMessagesRequest(ir *RequestIR, upstreamModel string) ([]byte, error) 
 				}
 				text := b.Text
 				blocks = append(blocks, messagesOutBlock{
-					Type: "tool_result", ToolUseID: messagesToolID(b.CallID), Content: &text, CacheControl: cacheOf(b),
+					Type: "tool_result", ToolUseID: toolIDs[b.CallID], Content: &text, CacheControl: cacheOf(b),
 				})
 			}
 
@@ -432,7 +471,7 @@ func EncodeMessagesRequest(ir *RequestIR, upstreamModel string) ([]byte, error) 
 						return nil, err
 					}
 					blocks = append(blocks, messagesOutBlock{
-						Type: "tool_use", ID: messagesToolID(b.CallID), Name: b.Name, Input: input, CacheControl: cacheOf(b),
+						Type: "tool_use", ID: toolIDs[b.CallID], Name: b.Name, Input: input, CacheControl: cacheOf(b),
 					})
 				case BlockImage:
 					blocks = append(blocks, messagesOutBlock{
@@ -463,7 +502,7 @@ func EncodeMessagesRequest(ir *RequestIR, upstreamModel string) ([]byte, error) 
 			schema = emptyObjectSchema
 		}
 		out.Tools = append(out.Tools, AnthropicTool{
-			Name: t.Name, Description: t.Description, InputSchema: schema,
+			Name: t.Name, Description: t.Description, InputSchema: schema, Strict: t.Strict,
 		})
 	}
 	if ir.ToolChoice != nil {

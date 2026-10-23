@@ -134,6 +134,9 @@ function snippet(surface: SurfaceKey, base: string, key: string, model: string):
   ].join('\n');
 }
 
+// The Policy modal's date-picker value for a key's stored RFC3339 expiry.
+const expiryDate = (t: TokenInfo) => (t.expires_at ? t.expires_at.slice(0, 10) : '');
+
 export default function Connect() {
   const [tokens, setTokens] = useState<TokenInfo[] | null>(null);
   const [usage, setUsage] = useState<UsageRow[] | null>(null);
@@ -220,7 +223,9 @@ export default function Connect() {
         cap_tokens: budgetCap,
         cap_window: budgetWindow,
         allowed_models: budgetModels.trim(),
-        expires_at: budgetExpiry,
+        // The picker shows only the date; resending an untouched one would be
+        // re-read as end of the server's local day and move the deadline.
+        ...(budgetExpiry !== expiryDate(budgetTarget) ? { expires_at: budgetExpiry } : {}),
       });
       setTokens((cur) => cur?.map((t) => (t.id === updated.id ? updated : t)) ?? null);
       setBudgetTarget(null);
@@ -409,7 +414,7 @@ export default function Connect() {
                               setBudgetCap(t.cap_tokens);
                               setBudgetWindow(t.cap_window || 'monthly');
                               setBudgetModels(t.allowed_models || '');
-                              setBudgetExpiry(t.expires_at ? t.expires_at.slice(0, 10) : '');
+                              setBudgetExpiry(expiryDate(t));
                             }}>
                             Policy
                           </button>

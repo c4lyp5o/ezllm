@@ -340,6 +340,7 @@ func (s *Server) handleServiceTest(w http.ResponseWriter, r *http.Request) {
 	servedRoute, res, ferr := s.dispatcher.ForwardCandidates(ctx, &captureWriter{}, reqUp, routes, body)
 	ms := time.Since(start).Milliseconds()
 	if servedRoute.Account.ID == 0 {
+		s.ledgerAttempts(store.Call{Client: "service-test"}, res)
 		// Nothing left the box (every candidate was skipped or refused before
 		// dispatch). This is NOT evidence about the wire: no verdict row, no
 		// ledger row — exactly the dispatcher's "a skipped hop writes no
@@ -382,6 +383,7 @@ func (s *Server) handleServiceTest(w http.ResponseWriter, r *http.Request) {
 		EndpointID: res.EndpointID, UpstreamModel: res.UpstreamModel, Err: detail,
 	}
 	applyUsage(&call, res.Usage)
+	s.ledgerAttempts(call, res)
 	s.ledger(call)
 	if err := s.db.UpsertServiceProbe(ctx, surface, servedRoute.Account.ID, servedRoute.Model, ok, detail); err != nil {
 		s.writeStoreErr(w, err)

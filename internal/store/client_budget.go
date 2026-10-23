@@ -78,6 +78,9 @@ func (d *DB) ReserveClientBudget(ctx context.Context, client string, tokens int6
 	if limit <= 0 {
 		return 0, true, nil
 	}
+	if err := d.ensureMeter(ctx); err != nil {
+		return 0, false, err
+	}
 	now := time.Now()
 	bucket := CountBucket(now, window, time.Local)
 	err = d.WithWriteTx(ctx, func(tx *sql.Tx) error {
@@ -172,6 +175,9 @@ func (d *DB) ClientBudgetStatus(ctx context.Context, name string) (ClientBudget,
 	}
 	if limit <= 0 {
 		return ClientBudget{Limit: 0, Window: window}, nil
+	}
+	if err := d.ensureMeter(ctx); err != nil {
+		return ClientBudget{}, err
 	}
 	now := time.Now()
 	bucket := CountBucket(now, window, time.Local)

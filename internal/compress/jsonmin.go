@@ -15,7 +15,7 @@ import (
 // qualify. Not strictly smaller (already compact) ⇒ untouched.
 func jsonmin(msgs []any, opts map[string]any) []any {
 	classes := toolClassOverrides(opts)
-	return editAll(msgs, toolNamesByCallID(msgs), func(p textPart) (string, bool) {
+	return editAll(msgs, callNames(msgs, opts), func(p textPart) (string, bool) {
 		if p.kind != partToolOutput || p.text == "" || !isJSONPayload(p.text) {
 			return "", false
 		}

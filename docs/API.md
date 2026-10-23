@@ -1,8 +1,19 @@
-# ezllm admin API — contract (v1 · M1–M9 shipped, current through 2026-10-10)
+# ezllm admin API — contract
 
-Status codes: `200` ok · `201` created · `400` bad request **or surface-pin refusal** ·
-`401` no/invalid client token · `403` token lacks `admin` · `404` unknown id · `409` conflict (refs exist; unconfirmed pin surface) · `413` inference body over `max_body_mib` · `422` **key test failed** (with `step`) · `429` at cap.
-All routes except `/healthz` require `Authorization: Bearer ***
+Status codes: `200` ok · `201` created · `400` bad request (incl. an admin JSON body over 1 MiB,
+unknown fields, or trailing data after the object) **or surface-pin refusal** ·
+`401` no/invalid client token · `403` token lacks `admin`, or a cookie-authenticated write
+from another origin · `404` unknown id · `409` conflict (refs exist; unconfirmed pin surface) ·
+`413` inference body over `max_body_mib` · `422` **key test failed** (with `step`) · `429` at cap.
+Every route except `/healthz`, the dashboard's static files and the sign-in/setup endpoints
+(`GET|POST /admin/setup`, `POST /admin/login`, `POST /admin/logout`) needs credentials: a client
+token (`Authorization: Bearer …` or `x-api-key`) on `/v1/*`; on `/admin/*` an admin token or the
+dashboard session (bearer or the `ezllm_session` cookie).
+
+**Cookie writes are same-origin only.** A `POST`/`PUT`/`PATCH`/`DELETE` authenticated by the
+`ezllm_session` cookie is refused with `403` when the browser marks it as coming from another
+origin (`Sec-Fetch-Site`, or `Origin` against `Host`) — including another port on the same
+host. Bearer-token callers and non-browser clients are unaffected.
 
 Errors are OpenAI-shaped: `{"error":{"type":"...","message":"...","code":422}}`.
 `422` key-test failures add `step`, `upstream_status`, `upstream_error`, `hint` (see below).
@@ -185,6 +196,11 @@ so it is never a sum of the group medians) — plus `applied_saved`, `context_pr
 `context_saved` summed like every other metric (`applied_saved` is the token total the
 dashboard's savings cards read; a totals row that omitted it showed 0 over non-zero groups).
 
+**Shared for 10 s.** A usage report is computed once and shared by every caller asking for the
+same grouping, zone and window for up to 10 seconds (an open-ended default window is rounded so
+simultaneous polls share it; explicit `from`/`to` keep their precision). The `Age` response
+header gives the report's age in seconds, so a dashboard number can be up to 10 s old.
+
 ### `POST /admin/accounts` → `201`
 ```jsonc
 // request
@@ -348,6 +364,10 @@ Catalog resyncs **preserve** pins (models that vanish upstream lose their pin wi
   "price_cache_read":0.04, "price_cache_write":0.25, "note":"source + date",
   "source":"litellm", "fetched_at":"2026-10-18T03:00:00Z" }
 ```
+Only USD rates are accepted (currency is normalized; an omitted currency defaults to USD).
+Existing non-USD rates are counted as unpriced in cost reports, without falling back to an
+older USD rate or converting the amount.
+
 Rates are **USD per 1M tokens**, versioned per `(account, model, effective_from)`. Same
 version re-set = overwrite; new date = new version. Cost joins each call to the newest
 rate effective **on or before the call's date**, so a reprice never rewrites history.
@@ -511,13 +531,26 @@ handler returns, so concurrent requests cannot all pass the same remaining
 budget. Reservations expire after 15 minutes if a process dies.
 
 ### `GET /admin/export` → `200`
-Full config dump: accounts (no key plaintext — hints + `key_ct` omitted), combos, tokens (hints),
-compression profiles, and per-key latest quota. `?include_ledger=true` adds the call ledger.
-This is the disaster-recovery file; it must re-seed a fresh instance minus credentials.
-The config half is written first and the ledger is **streamed** row by row, so the response is
-chunked (no `Content-Length`) and memory stays flat regardless of ledger size — the ledger is
-**complete**, with no row cap. If the ledger stream fails mid-way the document is still closed
-validly rather than truncated, and `/admin/health` carries the row counts to reconcile against.
+Versioned non-secret configuration export, with `format_version:1`,
+`kind:"configuration_export"`, and `database_backup_required:true`.
+Includes accounts (credential hints only), combos, token policies (no tokens),
+compression profiles, per-model rules, versioned prices, individual model
+capability/pin records with account IDs, service bindings, and latest quotas.
+`?include_ledger=true` adds a streamed ledger projection, without a row cap.
+
+The response ends with `completion:{complete,ledger_requested,ledger_rows}`.
+Accept an export only if HTTP succeeds, JSON parses, and `completion.complete`
+is true. Missing completion metadata means an incomplete download. Initial
+cursor/first-row failures return an error before attachment headers; later
+source failures set `completion.complete:false` and an `error` message, even
+though HTTP 200 was already committed. Client-write failures leave no success
+marker. `ledger_rows` counts only rows successfully emitted by this export.
+
+This is an inspection/manual-configuration aid, not a database restore image
+or an atomic point-in-time backup. It excludes credentials, authentication
+state, accounting/reconciliation internals, and some ledger columns. Full
+recovery uses the SQLite database plus its active master key and deployment
+configuration; see [recovery-runbook.md](recovery-runbook.md).
 
 ## M3 — quota snapshots
 
@@ -584,7 +617,8 @@ hash; the SPA shows only its set-password page until setup flips the flag.
 ### `POST /admin/logout` → `204`
 Revokes the presented dashboard session (cookie, else bearer) server-side and
 expires the `ezllm_session` cookie. No auth needed — it can only end the session
-it is handed — and signing out twice is a no-op.
+it is handed — and signing out twice is a no-op. A cookie sent from another
+origin gets `403`, so another site cannot sign the operator out.
 
 ### `POST /admin/login` → `200` + session · `POST /admin/settings/password`
 bcrypt dashboard password; the SPA renders and fetches nothing pre-auth.
@@ -696,3 +730,37 @@ shape", not output quality; `auto` may only pick tested-ok models.
 - Paging: `?limit=` (default 100, max 1000) + `?offset=` on list endpoints.
 - The frontend is same-origin-served by the Go binary from `web/dist` in production; in dev it
   proxies `/admin`, `/v1`, `/healthz` to `127.0.0.1:20129`.
+
+### Accounting source for translated traffic
+
+Ledger token buckets and `raw_usage` come from the effective upstream wire,
+using the account's usage convention before client response projection.
+Client-visible usage may expose a smaller subset. Failed client conversion
+still retains reported upstream usage. SSE accounting observes bounded source
+frames as they are consumed; native response bytes remain unchanged.
+
+### Meter recovery (schema v28)
+
+`pending_usage_meter` records the call ID and budget reservation ID for durable
+ledger rows whose counter updates failed. The normal ledger flush or the next
+budget/model-meter read replays these debits transactionally, exactly once,
+and only then releases their reservations. Recovery survives restarts.
+Admission returns `503 budget_unavailable` while client-meter recovery fails;
+model rules retain their existing refusal when their meter is unavailable.
+No HTTP response field or application release version changes with this schema.
+
+### Usage reported by retries and failed hops
+
+A delivered request retains its normal ledger row. Each earlier upstream
+attempt that reports usage also produces an accounting row under its own
+account, provider key, model, and status. These rows share the client/session
+identity, use `err: "upstream attempt discarded before delivery"`, and contain
+source `raw_usage`. They do not duplicate compression savings or the delivery
+row's budget reservation. Usage and cost totals include all observed attempts;
+call counts can exceed the number of client requests. Attempts without reported
+usage are kept in diagnostics, without estimated token charges.
+
+The discarded-body observer reads at most 32 MiB (the normal JSON response
+cap), including bounded SSE events. Usage outside an unread/oversized body or
+after transport failure is not estimated. The final fallback response is
+accounted once as the delivery row, rather than as an extra discarded attempt.

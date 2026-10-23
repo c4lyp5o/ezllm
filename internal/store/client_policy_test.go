@@ -107,3 +107,47 @@ func TestReserveClientBudget(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// The ledger row that counts a request's usage ends its reservation in the
+// same commit (audit finding 5), so a reservation never outlives its row
+// and the budget is never both unreserved and uncounted.
+func TestFlushReleasesTheRowsReservation(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "r.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	id, err := db.AddClientToken(ctx, "held-key", "tok-held", "infer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	limit := int64(100)
+	if err := db.UpdateToken(ctx, id, nil, nil, &limit, "daily", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	resID, ok, err := db.ReserveClientBudget(ctx, "held-key", 100)
+	if err != nil || !ok {
+		t.Fatalf("reserve = ok %v err %v", ok, err)
+	}
+	db.RecordCall(Call{TS: time.Now().UTC(), Client: "held-key", Model: "m", Status: 200,
+		TokensIn: 60, TokensOut: 40, ReservationID: resID})
+	if err := db.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.r.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM client_budget_reservations WHERE id = ?`, resID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatal("reservation survived the flush that counted its row")
+	}
+	st, err := db.ClientBudgetStatus(ctx, "held-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Used != 100 {
+		t.Fatalf("used = %d, want the row's 100 tokens", st.Used)
+	}
+}

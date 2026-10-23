@@ -9,7 +9,10 @@ people who don't know them yet.
 ```bash
 make check        # gofmt + go vet + full test suite + build — run before every commit
 make test-short   # functional suite only (see "Memory" below)
+make test-quiet   # test-short pinned to two cores at low priority, one package at a time
 ```
+
+On a shared or desktop machine use `make test-quiet`; CI runs the full suite.
 
 - **gofmt is a hard gate.** CI rejects the build if `gofmt -l cmd internal`
   prints anything. `make fmt` fixes it.
@@ -35,7 +38,7 @@ make test-short   # functional suite only (see "Memory" below)
 | `docs/` | Design records and runbooks — decisions, not status |
 | `EXPLORING.md` | Codebase tour: reading order, invariants, landmarks |
 | `CHANGELOG.md` | Milestone-tagged change narrative |
-| `VERSION.md` | Release history — one version per change date |
+| `VERSION.md` | Release history — semantic versioning |
 
 ### Why Go test files are not in `tests/`
 
@@ -53,8 +56,10 @@ constraint, not a preference.
   weakened to match buggy behaviour.
 - `tests/prove_*.py` are **live proofs** — they exercise a running instance
   through the real admin API (never against production; use a scratch rig).
-- `web/tests/verify-*.mjs` are **UI checks** (screenshot + assertion) against
-  a local dashboard instance; `shot-*.mjs` capture review screenshots.
+- `web/tests/verify-*.mjs` are **UI checks**. The regression drivers built on
+  `web/tests/mockdash.mjs` serve the built `web/dist` with a mocked API, so they
+  need only `npm run build` (`node tests/verify-<name>.mjs` from `web/`); each
+  exits non-zero on a failed check. `shot-*.mjs` capture review screenshots.
 - `make verify` runs `cmd/m2verify` — acceptance invariants against a live
   ledger, run after any soak.
 
@@ -93,9 +98,10 @@ post-1.0 work.
 3. **No CI latency gate.** Percentile numbers exist in `docs/perf-baseline-m1.md`
    but nothing enforces them — a stable reference environment is needed
    before a regression gate means anything.
-4. **Playwright drivers hardcode absolute paths.** `web/tests/*.mjs` read a
-   fixed secrets file, a fixed screenshot dir, and a fixed port (20199).
-   They work on one machine; parameterize via env before relying on them
+4. **Older Playwright drivers need a live instance.** The `shot-*.mjs`
+   drivers and `verify-feed*`, `verify-ranges`, `verify-stats` expect a
+   dashboard on port 20199, an `EZLLM_TOKEN_HERMES` token and fixed
+   screenshot paths. Move them onto `mockdash.mjs` before relying on them
    elsewhere.
 5. **`docs/API.md` JSON examples are hand-curated.** Refresh them from live
    responses after contract changes (curl the endpoint, reshape
@@ -105,8 +111,8 @@ post-1.0 work.
 
 Docs are claims about code — verify before writing:
 
-- Landmarks (`file.go:NN`) get checked against the actual file, not trusted
-  from the previous revision.
+- Cite code by file and symbol (`proxy.go` `Forward`), not `file.go:NN`:
+  line numbers drift with every edit. Check the symbol exists before citing it.
 - No stale markers: `⏳ TBD TODO FIXME` in `*.md` should read zero.
 - Status lines age: prefer "shipped — <what>, verified <date>" over bare
   milestone tags.

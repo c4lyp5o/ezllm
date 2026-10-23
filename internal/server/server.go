@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"log/slog"
 	"net"
@@ -106,6 +105,10 @@ type Server struct {
 	// priceRefreshOn: StartPriceRefresh ran (EZLLM_PRICE_REFRESH not off),
 	// so pricing new models is wanted. Never set in unit tests: no network.
 	priceRefreshOn atomic.Bool
+	// bg owns detached background work (background.go).
+	bg *background
+	// reports shares dashboard usage reports across callers (reportcache.go).
+	reports *reportCache
 	// cspOnce/csp cache the dashboard Content-Security-Policy (spa.go).
 	cspOnce sync.Once
 	csp     string
@@ -144,6 +147,9 @@ type sweepRun struct {
 // registry entry self-heals. Budget already covers every probe plus the
 // final batch persist; grace covers the goroutine's wind-down.
 const sweepDeadlineGrace = 5 * time.Minute
+
+// memoSweepEvery paces the session memo's idle sweep (a var for tests).
+var memoSweepEvery = time.Minute
 
 // Options configures New.
 type Options struct {
@@ -184,6 +190,9 @@ type Options struct {
 	// TrustedProxies are the reverse proxies whose X-Forwarded-For the auth
 	// rate limiter believes (clientip.go). Empty = the socket peer only.
 	TrustedProxies []netip.Prefix
+	// SessionMemo overrides the committed-prefix ledger (tests inject a clock
+	// and small limits); nil builds the default.
+	SessionMemo *compress.SessionMemo
 }
 
 // usageTZOrDefault resolves the day-bucketing zone. Empty or whitespace means
@@ -223,12 +232,14 @@ func New(opts Options) *Server {
 		comboAutoProbe: opts.ComboAutoProbe,
 		setupCode:      opts.SetupCode,
 		trustedProxies: opts.TrustedProxies,
+		sessMemo:       opts.SessionMemo,
 	}
 	// A server without a tester cannot run the key test; default one so the
 	// admin routes fail loudly at construction rather than nil-panic per request.
 	if s.tester == nil && opts.Registry != nil && opts.DB != nil {
 		s.tester = registration.NewTester(&http.Client{
-			Timeout: 30 * time.Second,
+			Timeout:       30 * time.Second,
+			CheckRedirect: provider.SameOriginRedirect, // key tests send real keys
 			Transport: &http.Transport{
 				MaxIdleConnsPerHost: 4,
 				IdleConnTimeout:     30 * time.Second,
@@ -244,6 +255,23 @@ func New(opts Options) *Server {
 	if s.sessMemo == nil {
 		s.sessMemo = compress.NewSessionMemo(nil)
 	}
+	s.bg = newBackground()
+	// Idle memo entries hold prompt-derived text; drop them on a timer rather
+	// than only when the next request happens to touch the memo.
+	every := memoSweepEvery
+	s.goBackground(func(ctx context.Context) {
+		t := time.NewTicker(every)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				s.sessMemo.Sweep()
+			}
+		}
+	})
+	s.reports = newReportCache(reportTTL, time.Now)
 	if opts.DB != nil {
 		newGeminiWebBridge(opts.DB, "").register(s.mux)
 		newClaudeWebBridge(opts.DB, nil).register(s.mux)
@@ -614,15 +642,14 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 		}
 		// The deadline is lifted only after a complete read (see limitBodyRead).
 		liftDeadline := limitBodyRead(w, inferenceBodyTimeout)
-		body, err := io.ReadAll(io.LimitReader(r.Body, s.maxBody+1))
+		body, tooLarge, err := readBody(r, s.maxBody)
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, "invalid_request_error", "could not read body: "+err.Error())
 			return
 		}
-		// The extra byte detects an oversized body: a LimitReader alone stops
-		// silently at the cap and the truncated bytes would be parsed (or, for
-		// multipart, forwarded) as if they were the whole request.
-		if int64(len(body)) > s.maxBody {
+		// An oversized body is refused, never truncated: the cut bytes would
+		// be parsed (or, for multipart, forwarded) as the whole request.
+		if tooLarge {
 			writeErr(w, http.StatusRequestEntityTooLarge, "invalid_request_error",
 				fmt.Sprintf("request body exceeds %d bytes", s.maxBody))
 			return
@@ -659,8 +686,12 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			return
 		}
 		// Reserve the request's max output tokens against the key budget
-		// before dispatch; the defer releases the reservation when the
-		// handler returns (including streams and early errors).
+		// before dispatch. Once dispatched, the request's ledger row owns the
+		// reservation and the flush ends it in the transaction that counts
+		// the usage; releasing on return instead left a window where the
+		// spent budget was neither reserved nor counted. The defer covers
+		// every exit that never reaches dispatch.
+		var reservation int64
 		if s.db != nil {
 			if n := maxOutputTokens(doc.Map()); n > 0 {
 				if id, ok, rerr := s.db.ReserveClientBudget(r.Context(), client, n); rerr != nil {
@@ -668,13 +699,20 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 					// not a failure worth a warning on every request.
 					if !errors.Is(rerr, store.ErrNotFound) {
 						slog.Warn("client budget reservation failed", "client", client, "err", rerr)
+						writeErr(w, http.StatusServiceUnavailable, "budget_unavailable", "usage meter unavailable")
+						return
 					}
 				} else if !ok {
 					writeErr(w, http.StatusTooManyRequests, "rate_limited",
 						fmt.Sprintf("token budget cannot cover max_tokens=%d for %q", n, client))
 					return
 				} else if id != 0 {
-					defer s.db.ReleaseClientBudget(context.Background(), id)
+					reservation = id
+					defer func() {
+						if reservation != 0 {
+							s.db.ReleaseClientBudget(context.Background(), reservation)
+						}
+					}()
 				}
 			}
 		}
@@ -734,7 +772,9 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			// v8 research capture: request shape + operator session key.
 			PrefixSHA: sh.PrefixSHA, MsgCount: sh.MsgCount, ToolCount: sh.ToolCount,
 			SessionID: sessionOf(r), ReqBytes: sh.ReqBytes,
+			ReservationID: reservation,
 		}
+		reservation = 0 // handed to the ledger row
 		attachCompressionMetrics(&call, compRes)
 		s.finishDispatch(w, r, call, routes, served, res, ferr)
 	}
@@ -749,15 +789,14 @@ func (s *Server) inferenceMultipart(w http.ResponseWriter, r *http.Request, surf
 	// Read the raw multipart body FIRST so it can be forwarded byte-for-byte
 	// (ParseMultipartForm would consume the stream).
 	liftDeadline := limitBodyRead(w, inferenceBodyTimeout)
-	body, err := io.ReadAll(io.LimitReader(r.Body, s.maxBody+1))
+	body, tooLarge, err := readBody(r, s.maxBody)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid_request_error", "could not read multipart body: "+err.Error())
 		return
 	}
-	// The extra byte detects an oversized body: a LimitReader alone stops
-	// silently at the cap and the truncated bytes would be parsed (or, for
-	// multipart, forwarded) as if they were the whole request.
-	if int64(len(body)) > s.maxBody {
+	// An oversized body is refused, never truncated: the cut bytes would be
+	// forwarded upstream as the whole request.
+	if tooLarge {
 		writeErr(w, http.StatusRequestEntityTooLarge, "invalid_request_error",
 			fmt.Sprintf("request body exceeds %d bytes", s.maxBody))
 		return
@@ -1022,19 +1061,56 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		loc = l
 	}
 
-	var rows []store.UsageRow
 	var usedTZ string
-	var err error
 	if groupBy == "day" {
-		rows, err = s.db.UsageDayReportTZ(r.Context(), from, to, loc)
 		usedTZ = loc.String()
-	} else {
-		rows, err = s.db.UsageReport(r.Context(), from, to, groupBy)
 	}
+	// Shared across callers for reportTTL (reportcache.go). An open-ended
+	// default window is rounded to the TTL so simultaneous polls share it.
+	// Explicit boundaries retain their precision: rounding a caller's from
+	// can include rows that a different caller deliberately excluded.
+	keyFrom := from.Truncate(reportTTL).Format(time.RFC3339Nano)
+	if r.URL.Query().Get("from") != "" {
+		keyFrom = from.Format(time.RFC3339Nano)
+	}
+	key := fmt.Sprintf("usage|%s|%s|%s|", groupBy, usedTZ, keyFrom)
+	if r.URL.Query().Get("to") != "" {
+		key = fmt.Sprintf("usage|%s|%s|%s|%s", groupBy, usedTZ, from.Format(time.RFC3339Nano), to.Format(time.RFC3339Nano))
+	}
+	v, age, err := s.reports.do(key, func() (any, error) {
+		ctx, cancel := context.WithTimeout(s.bg.ctx, reportTimeout)
+		defer cancel()
+		var res usageResult
+		var err error
+		if groupBy == "day" {
+			res.rows, err = s.db.UsageDayReportTZ(ctx, from, to, loc)
+		} else {
+			res.rows, err = s.db.UsageReport(ctx, from, to, groupBy)
+		}
+		if err != nil {
+			return nil, usageErr{http.StatusBadRequest, "invalid_request_error", err}
+		}
+		// The totals P50 cannot be a sum of group P50s — medians don't add
+		// up — so it was never set and the card read "0ms · not measured
+		// yet" forever. One separate median over the whole window, same
+		// convention as the per-group fillP50 (upper of the two middle values).
+		if res.tp50, err = s.db.TotalP50TTFTms(ctx, from, to); err != nil {
+			return nil, usageErr{http.StatusInternalServerError, "api_error", err}
+		}
+		return res, nil
+	})
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid_request_error", err.Error())
+		var ue usageErr
+		if errors.As(err, &ue) {
+			writeErr(w, ue.status, ue.typ, ue.err.Error())
+		} else {
+			writeErr(w, http.StatusInternalServerError, "api_error", err.Error())
+		}
 		return
 	}
+	res := v.(usageResult)
+	rows := res.rows // shared with other callers: read only
+	w.Header().Set("Age", strconv.Itoa(int(age.Seconds())))
 	var totals store.UsageRow
 	totals.Key = "total"
 	for _, x := range rows {
@@ -1050,16 +1126,7 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		totals.ContextSaved += x.ContextSaved
 		totals.Errors += x.Errors
 	}
-	// The totals P50 cannot be a sum of group P50s — medians don't add up —
-	// so it was never set and the card read "0ms · not measured yet" forever.
-	// One separate median over the whole window, same convention as the
-	// per-group fillP50 (upper of the two middle values).
-	tp50, err := s.db.TotalP50TTFTms(r.Context(), from, to)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "api_error", err.Error())
-		return
-	}
-	totals.P50TTFTms = tp50
+	totals.P50TTFTms = res.tp50
 	out := map[string]any{
 		"from": from.Format(time.RFC3339), "to": to.Format(time.RFC3339),
 		"group_by": orDefault(groupBy, "account"),
@@ -1074,6 +1141,31 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, out)
 }
+
+// reportTTL bounds how stale a shared dashboard report may be: under the
+// 15s overview poll, so one open tab still sees every refresh as fresh work
+// while extra tabs and simultaneous polls share it.
+const reportTTL = 10 * time.Second
+
+// reportTimeout bounds one shared report computation. It runs on the server's
+// background context, not the first caller's request, so one caller going
+// away cannot fail the others waiting on it.
+const reportTimeout = 30 * time.Second
+
+// usageResult is one /admin/usage computation, shared through reportCache.
+type usageResult struct {
+	rows []store.UsageRow
+	tp50 int64
+}
+
+// usageErr carries the status a failed usage computation answers with.
+type usageErr struct {
+	status int
+	typ    string
+	err    error
+}
+
+func (e usageErr) Error() string { return e.err.Error() }
 
 func orDefault(v, def string) string {
 	if strings.TrimSpace(v) == "" {
@@ -1162,6 +1254,8 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, token stri
 			}
 		} else if !errors.Is(berr, store.ErrNotFound) {
 			slog.Warn("client budget check failed", "client", name, "err", berr)
+			writeErr(w, http.StatusServiceUnavailable, "budget_unavailable", "usage meter unavailable")
+			return r, false
 		}
 	}
 	ctx := context.WithValue(r.Context(), rolesKey{}, roles)

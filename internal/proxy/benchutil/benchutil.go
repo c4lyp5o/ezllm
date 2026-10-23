@@ -396,6 +396,13 @@ func NewClient() *http.Client {
 
 func filler(n int) []byte { return bytes.Repeat([]byte("x"), n) }
 
+// prose is n bytes of text with the quotes, newlines and tabs real history
+// carries, so encoders pay their escaping cost (filler's x's need none).
+func prose(n int) string {
+	const line = "The tool said \"ok\" & returned <3> rows.\n\tnext: run it again\n"
+	return strings.Repeat(line, n/len(line)+1)[:n]
+}
+
 func completionBody(contentBytes int) []byte {
 	var b bytes.Buffer
 	b.WriteString(`{"id":"mock-cmpl","object":"chat.completion","created":1,"model":"mock-model","choices":[{"index":0,"message":{"role":"assistant","content":"`)
@@ -438,6 +445,28 @@ func ChatBody(model string, totalBytes int) []byte {
 	b.Write(filler(pad))
 	b.WriteString(`"}],"temperature":0.7}`)
 	return b.Bytes()
+}
+
+// HistoryChatBody is an agent-loop shaped body of about totalBytes: a system
+// prompt, `turns` alternating user/assistant messages carrying the bulk, and a
+// short newest user turn. ChatBody puts everything in the final message, which
+// shape capture excludes — this fixture exercises the history-hashing cost.
+func HistoryChatBody(model string, totalBytes, turns int) []byte {
+	if turns < 1 {
+		turns = 1
+	}
+	per := totalBytes / turns
+	msgs := []map[string]any{{"role": "system", "content": "You are a helpful assistant."}}
+	for i := 0; i < turns; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		msgs = append(msgs, map[string]any{"role": role, "content": prose(per)})
+	}
+	msgs = append(msgs, map[string]any{"role": "user", "content": "continue"})
+	b, _ := json.Marshal(map[string]any{"model": model, "messages": msgs, "temperature": 0.7})
+	return b
 }
 
 // StreamChatBody is ChatBody plus `"stream":true`.

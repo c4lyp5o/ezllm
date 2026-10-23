@@ -566,7 +566,8 @@ func (t *Tester) probeModel(
 		}
 	}
 
-	// Ledger admin probes: real token spend must never be invisible.
+	// Ledger admin probes: real token spend must never be invisible, and a
+	// failed probe must say WHY — a bare status cannot be diagnosed.
 	total := msAtLeastOne(elapsed)
 	t.ledgerCall(store.Call{
 		TS:      t.now().UTC(),
@@ -577,6 +578,7 @@ func (t *Tester) probeModel(
 		Model:   model,
 		Status:  status,
 		Totalms: &total,
+		Err:     probeErrNote(status, resp, err),
 	})
 
 	switch {
@@ -946,6 +948,7 @@ func (t *Tester) probeSurface(
 		Model:   model,
 		Status:  status,
 		Totalms: &total,
+		Err:     probeErrNote(status, resp, err),
 	})
 	if err != nil {
 		// Transport failure → unknown, never "unsupported".
@@ -1625,6 +1628,36 @@ func (t *Tester) ledgerCall(c store.Call) {
 	if t.db != nil {
 		t.db.RecordCall(c)
 	}
+}
+
+// maxProbeErrNote bounds the reason stored for a failed probe: the ledger is
+// not a request log, and the dashboard renders err inline.
+const maxProbeErrNote = 200
+
+// probeErrNote renders why a probe failed, in the same shape the proxy writes
+// into the ledger's err column — `upstream <status> [<cause>]: <words>` — so a
+// sweep failure is diagnosable from the dashboard.
+//
+// Before this, a failed probe recorded its status and nothing else: 183 of the
+// 189 error rows in the 48h window ending 2026-10-23 were probe failures with
+// an empty err, and a bare 400 cannot distinguish "the plan does not include
+// this model" from a malformed probe.
+func probeErrNote(status int, body []byte, err error) string {
+	if err != nil {
+		return "probe transport: " + err.Error()
+	}
+	if status < 400 {
+		return ""
+	}
+	cause := provider.ErrorCause(status, body)
+	words := strings.Join(strings.Fields(string(body)), " ")
+	if len(words) > maxProbeErrNote {
+		words = strings.ToValidUTF8(words[:maxProbeErrNote], "") + "…"
+	}
+	if words == "" {
+		return fmt.Sprintf("upstream %d [%s]: (empty body)", status, cause)
+	}
+	return fmt.Sprintf("upstream %d [%s]: %s", status, cause, words)
 }
 
 // setProto persists one (model, surface) verdict: true → 1, false → 0,

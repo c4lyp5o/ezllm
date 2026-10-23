@@ -386,3 +386,30 @@ func TestDedupDropIsCommittedPerOccurrence(t *testing.T) {
 		t.Error("the first system copy was dropped or the repeat came back")
 	}
 }
+
+// Eviction drops the LEAST-recently-used entry (a read refreshes recency),
+// and expired entries are swept on insert, not only when read.
+func TestMemoEvictsLeastRecentlyUsed(t *testing.T) {
+	clock := time.Unix(1700000000, 0)
+	memo := NewSessionMemo(&SessionMemoOptions{TTL: time.Minute, MaxEntries: 2, Now: func() time.Time { return clock }})
+	msg := func(s string) any { return map[string]any{"role": "user", "content": s} }
+	memo.Put("s", "p", msg("a"), msg("A"))
+	memo.Put("s", "p", msg("b"), msg("B"))
+	if _, ok := memo.Get("s", "p", msg("a")); !ok { // a is now the most recent
+		t.Fatal("a missing before eviction")
+	}
+	memo.Put("s", "p", msg("c"), msg("C"))
+	if _, ok := memo.Get("s", "p", msg("b")); ok {
+		t.Error("b (least recently used) survived eviction")
+	}
+	for _, k := range []string{"a", "c"} {
+		if _, ok := memo.Get("s", "p", msg(k)); !ok {
+			t.Errorf("%s evicted, want kept", k)
+		}
+	}
+	clock = clock.Add(2 * time.Minute) // a and c expire
+	memo.Put("s", "p", msg("d"), msg("D"))
+	if memo.Len() != 1 {
+		t.Errorf("expired entries not swept on insert: entries=%d, want 1", memo.Len())
+	}
+}

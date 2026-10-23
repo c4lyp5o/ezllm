@@ -1,6 +1,7 @@
 package compress
 
 import (
+	"container/list"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -61,14 +62,18 @@ type SessionMemo struct {
 	// immutable version binding, addendum #4). Bounded like entries; a session
 	// absent here binds on its next use.
 	binding map[string]string
-	lru     map[string]int64 // key -> logical clock of last use
-	clock   int64
-	ops     uint64
+	// lru orders entries by last use, newest at the front. Every use stamps
+	// usedAt = now, so the back is also the oldest: capacity eviction and
+	// TTL expiry both pop from the back, O(1) per entry dropped.
+	lru *list.List
+	ops uint64 // paces binding eviction (Bind)
 }
 
 type memoEntry struct {
+	key     string
 	shipped any // the exact message object that went upstream (nil = original)
 	usedAt  time.Time
+	elem    *list.Element
 }
 
 // SessionMemoOptions tunes the ledger; zero values take the defaults.
@@ -88,7 +93,7 @@ func NewSessionMemo(opts *SessionMemoOptions) *SessionMemo {
 		now:        time.Now,
 		entries:    map[string]*memoEntry{},
 		binding:    map[string]string{},
-		lru:        map[string]int64{},
+		lru:        list.New(),
 	}
 	if opts != nil {
 		if opts.TTL > 0 {
@@ -245,13 +250,11 @@ func (m *SessionMemo) GetAt(session, profile string, msg any, ord int) (shipped 
 		return nil, false
 	}
 	if m.now().Sub(e.usedAt) > m.ttl {
-		delete(m.entries, key)
-		delete(m.lru, key)
+		m.removeLocked(e)
 		return nil, false
 	}
-	m.clock++
-	m.lru[key] = m.clock
 	e.usedAt = m.now()
+	m.lru.MoveToFront(e.elem)
 	return e.shipped, true
 }
 
@@ -272,41 +275,36 @@ func (m *SessionMemo) PutAt(session, profile string, msg any, ord int, shipped a
 	key := memoKey(session, profile, h, ord)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.entries[key] = &memoEntry{shipped: shipped, usedAt: m.now()}
-	m.clock++
-	m.lru[key] = m.clock
-	m.ops++
-	if m.ops%1024 == 0 || len(m.entries) > m.maxEntries {
-		m.evictLocked()
+	now := m.now()
+	if e, ok := m.entries[key]; ok {
+		e.shipped, e.usedAt = shipped, now
+		m.lru.MoveToFront(e.elem)
+	} else {
+		e := &memoEntry{key: key, shipped: shipped, usedAt: now}
+		e.elem = m.lru.PushFront(e)
+		m.entries[key] = e
+	}
+	m.evictLocked(now)
+}
+
+// evictLocked drops expired entries, then the least-recently-used ones while
+// over the global cap — both from the back of the LRU list, so a full memo
+// pays O(1) per eviction instead of sorting every entry under the lock.
+// Caller holds the lock.
+func (m *SessionMemo) evictLocked(now time.Time) {
+	for back := m.lru.Back(); back != nil; back = m.lru.Back() {
+		e := back.Value.(*memoEntry)
+		if now.Sub(e.usedAt) <= m.ttl && len(m.entries) <= m.maxEntries {
+			return
+		}
+		m.removeLocked(e)
 	}
 }
 
-// evictLocked drops expired entries and, if still over the global cap, the
-// least-recently-used ones. Caller holds the lock.
-func (m *SessionMemo) evictLocked() {
-	now := m.now()
-	for k, e := range m.entries {
-		if now.Sub(e.usedAt) > m.ttl {
-			delete(m.entries, k)
-			delete(m.lru, k)
-		}
-	}
-	if len(m.entries) <= m.maxEntries {
-		return
-	}
-	type kv struct {
-		key string
-		clk int64
-	}
-	all := make([]kv, 0, len(m.lru))
-	for k, c := range m.lru {
-		all = append(all, kv{k, c})
-	}
-	sort.Slice(all, func(i, j int) bool { return all[i].clk < all[j].clk })
-	for i := 0; i < len(all) && len(m.entries) > m.maxEntries; i++ {
-		delete(m.entries, all[i].key)
-		delete(m.lru, all[i].key)
-	}
+// removeLocked drops one entry. Caller holds the lock.
+func (m *SessionMemo) removeLocked(e *memoEntry) {
+	m.lru.Remove(e.elem)
+	delete(m.entries, e.key)
 }
 
 // Len reports the entry count (tests/ops visibility).
@@ -328,7 +326,7 @@ func (m *SessionMemo) Clear() {
 	defer m.mu.Unlock()
 	m.entries = map[string]*memoEntry{}
 	m.binding = map[string]string{}
-	m.lru = map[string]int64{}
+	m.lru = list.New()
 }
 
 // ConversationKey derives the memo session for a request that names none, so

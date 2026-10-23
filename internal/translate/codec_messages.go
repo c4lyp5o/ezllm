@@ -100,7 +100,7 @@ func DecodeMessagesRequest(body []byte) (*RequestIR, error) {
 			return nil, unsupported("messages.tools", err.Error())
 		}
 		for _, t := range tools {
-			ir.Tools = append(ir.Tools, Tool{Name: t.Name, Description: t.Description, Schema: t.InputSchema})
+			ir.Tools = append(ir.Tools, Tool{Name: t.Name, Description: t.Description, Schema: t.InputSchema, Strict: t.Strict})
 		}
 	}
 
@@ -502,7 +502,7 @@ func EncodeMessagesRequest(ir *RequestIR, upstreamModel string) ([]byte, error) 
 			schema = emptyObjectSchema
 		}
 		out.Tools = append(out.Tools, AnthropicTool{
-			Name: t.Name, Description: t.Description, InputSchema: schema,
+			Name: t.Name, Description: t.Description, InputSchema: schema, Strict: t.Strict,
 		})
 	}
 	if ir.ToolChoice != nil {

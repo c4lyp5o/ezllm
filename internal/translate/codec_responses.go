@@ -136,7 +136,7 @@ func DecodeResponsesRequest(body []byte) (*RequestIR, error) {
 				return nil, unsupported("responses.tools.type",
 					fmt.Sprintf("tool type %q is not a function; only function tools cross wires", t.Type))
 			}
-			ir.Tools = append(ir.Tools, Tool{Name: t.Name, Description: t.Description, Schema: t.Parameters})
+			ir.Tools = append(ir.Tools, Tool{Name: t.Name, Description: t.Description, Schema: t.Parameters, Strict: t.Strict})
 		}
 	}
 
@@ -312,7 +312,7 @@ func EncodeResponsesRequest(ir *RequestIR, upstreamModel string) ([]byte, error)
 
 	for _, t := range ir.Tools {
 		out.Tools = append(out.Tools, responsesTool{
-			Type: "function", Name: t.Name, Description: t.Description, Parameters: t.Schema,
+			Type: "function", Name: t.Name, Description: t.Description, Parameters: t.Schema, Strict: t.Strict,
 		})
 	}
 	if ir.ToolChoice != nil {

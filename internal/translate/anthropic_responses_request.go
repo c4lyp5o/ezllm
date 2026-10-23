@@ -54,6 +54,7 @@ func AnthropicToResponses(body []byte, upstreamModel string) ([]byte, error) {
 			Name:        t.Name,
 			Description: t.Description,
 			Parameters:  t.InputSchema,
+			Strict:      t.Strict,
 		})
 	}
 	out.ToolChoice = translateAnthropicToolChoice(req.ToolChoice)

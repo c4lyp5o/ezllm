@@ -100,6 +100,7 @@ func DecodeChatRequest(body []byte) (*RequestIR, error) {
 				Name:        t.Function.Name,
 				Description: t.Function.Description,
 				Schema:      t.Function.Parameters,
+				Strict:      t.Function.Strict,
 			})
 		}
 	}
@@ -356,6 +357,7 @@ func EncodeChatRequest(ir *RequestIR, upstreamModel string) ([]byte, error) {
 				Name:        t.Name,
 				Description: t.Description,
 				Parameters:  t.Schema,
+				Strict:      t.Strict,
 			},
 		})
 	}

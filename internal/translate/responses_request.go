@@ -84,6 +84,7 @@ func ChatToResponses(body []byte, upstreamModel string) ([]byte, error) {
 			Name:        t.Function.Name,
 			Description: t.Function.Description,
 			Parameters:  t.Function.Parameters,
+			Strict:      t.Function.Strict,
 		})
 	}
 
@@ -182,6 +183,7 @@ type chatWireFunction struct {
 	Description string          `json:"description,omitempty"`
 	Parameters  json.RawMessage `json:"parameters,omitempty"`
 	Arguments   string          `json:"arguments,omitempty"`
+	Strict      *bool           `json:"strict,omitempty"`
 }
 
 type chatWireToolChoice struct {
@@ -223,6 +225,7 @@ type responsesTool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Parameters  json.RawMessage `json:"parameters,omitempty"`
+	Strict      *bool           `json:"strict,omitempty"`
 }
 
 // input item kinds — heterogeneous array, so each kind owns its MarshalJSON.

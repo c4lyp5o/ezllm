@@ -12,6 +12,24 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/store"
 )
 
+// A computation closes done before its failure is removed from the map.
+// Readers that arrive during that publication window must retain the error.
+func TestReportCacheCompletedFailureIsNotASuccess(t *testing.T) {
+	now := time.Now()
+	c := newReportCache(reportTTL, func() time.Time { return now })
+	boom := errors.New("database unavailable")
+	done := make(chan struct{})
+	close(done)
+	c.m["failed"] = &reportFlight{done: done, at: now, err: boom}
+	v, _, err := c.do("failed", func() (any, error) {
+		t.Fatal("a published failure should be returned to its reader")
+		return nil, nil
+	})
+	if v != nil || !errors.Is(err, boom) {
+		t.Fatalf("completed failure = (%v, %v), want (nil, %v)", v, err, boom)
+	}
+}
+
 func TestReportCacheSharesAndExpires(t *testing.T) {
 	now := time.Unix(1700000000, 0)
 	c := newReportCache(10*time.Second, func() time.Time { return now })

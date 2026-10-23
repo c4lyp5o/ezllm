@@ -41,6 +41,10 @@ func (c *reportCache) do(key string, fn func() (any, error)) (val any, age time.
 	if f, ok := c.m[key]; ok {
 		select {
 		case <-f.done:
+			if f.err != nil {
+				c.mu.Unlock()
+				return nil, 0, f.err
+			}
 			if age := c.now().Sub(f.at); age < c.ttl {
 				c.mu.Unlock()
 				return f.val, age, nil

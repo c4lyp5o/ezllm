@@ -120,9 +120,8 @@ type Call struct {
 	// Translated marks a hop whose WIRE differed from the client's surface, so
 	// the bodies were translated in one or both directions: the
 	// anthropic->openai-chat leg (Route.Translated) and a hop curated onto the
-	// Responses wire (Route.ResponsesWire). The tap reads the client-shaped
-	// body the codec synthesized, which carries the cache split in the
-	// client's own convention — see schema.sql calls.translated.
+	// Responses wire (Route.ResponsesWire). Usage is observed on the upstream
+	// wire before projection; normalized buckets do not depend on this marker.
 	Translated bool
 
 	Err string

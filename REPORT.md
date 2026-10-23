@@ -4,7 +4,7 @@ Updated: 2026-10-23
 
 Reviewed commit: `4059482` (`fix/audit-findings`, v1.1.1)
 
-Three accounting integrity findings remain open: two high and one medium.
+Two accounting integrity findings remain open: one high and one medium.
 Previously resolved findings remain removed. No production fixes or version
 changes were made during this sweep.
 
@@ -14,58 +14,6 @@ Traced upstream usage normalization, JSON/SSE translation and tapping, retry
 and failover attribution, ledger writes, client/model meters, reservations,
 and effective-dated cost reporting. Reproductions used mock upstreams and
 disposable SQLite databases, with no live provider calls or credentials.
-
-### AI1 — High: translated client envelopes are a lossy accounting source
-
-**Locations:** `internal/proxy/proxy.go:1260`,
-`internal/proxy/proxy.go:1362`, `internal/translate/response_codec.go:397`,
-`internal/translate/response_codec.go:409`, and
-`internal/translate/stream_codec.go:706`.
-
-The proxy translates the upstream response before tapping its usage. The
-ledger therefore depends on what the client codec elects to expose, rather
-than on the upstream's reported counters. The legacy Responses-to-Chat
-response drops cache-read details. Other conversions drop cache-write
-counters, and reasoning-token details are lost or synthesized as zero.
-The store then treats omitted cache portions as cold input. The `raw_usage`
-column also receives the synthesized usage instead of the original upstream
-usage, removing the evidence needed to rederive the correct split later.
-
-**Reproduction:** `TestAccountingAuditMatrix` exercises all nine wire pairs
-with JSON and SSE: 18 cases. Each upstream reports normalized cold=100,
-output=42, cache-read=900, cache-write=50, reasoning=7. The Messages fixture
-uses the account's declared inclusive convention. Native routes preserve
-all five counters. Translated routes produce the following identical results
-in JSON and SSE (Chat means OpenAI Chat Completions):
-
-| Client → upstream | Cold input | Output | Cache read | Cache write | Reasoning |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Any native pair | 100 | 42 | 900 | 50 | 7 |
-| Chat → Responses | 1050 | 42 | 0 | 0 | 0 |
-| Chat → Messages | 150 | 42 | 900 | 0 | 0 |
-| Messages → Chat | 150 | 42 | 900 | 0 | 0 |
-| Messages → Responses | 150 | 42 | 900 | 0 | 0 |
-| Responses → Chat | 150 | 42 | 900 | 0 | 0 |
-| Responses → Messages | 150 | 42 | 900 | 0 | 0 |
-
-The fixture includes gateway-supported cache-write details on the Chat and
-Responses wires and thinking-token details on Messages; these extensions are
-not claimed to be universal provider fields. Standard Messages
-`cache_creation_input_tokens` is also lost on the two strict reverse paths.
-
-**Impact:** derived cost can use the wrong rate bucket, cache metrics and
-reasoning metrics lose reported information, and caps based on cold input
-plus output can reject traffic prematurely. For example, the Chat client on
-a Responses hop counts 1092 tokens instead of the documented cap quantity of
-142. Reasoning tokens already belong to output; losing their breakdown does
-not mean they should be charged a second time.
-
-**Suggested fix:** normalize and preserve upstream usage before client
-projection, using the effective upstream wire and its account convention.
-For SSE, observe source frames without buffering the entire response. Keep
-source accounting distinct from client-facing usage, and retain original
-usage evidence. Add end-to-end matrix tests with nonzero cache buckets and
-reasoning details, including failed response conversion.
 
 ### AI2 — High: a metering failure releases budget without counting the spend
 

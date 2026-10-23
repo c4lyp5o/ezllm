@@ -189,8 +189,7 @@ type Route struct {
 	// Translated marks a hop that speaks only the OpenAI wire shape while
 	// the client speaks anthropic: the request body is translated on the
 	// way out and the response on the way back, while Surface stays the
-	// CLIENT's surface (the ledger and the usage tap must never see the
-	// translation). Set by the router from probed capability; nothing else
+	// CLIENT's surface; accounting observes the effective upstream wire. Set by the router from probed capability; nothing else
 	// about the hop's failover/park semantics changes.
 	Translated bool
 	// HoldUntilFailure (block_round_robin only) marks a hop the operator
@@ -1104,7 +1103,7 @@ func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, bod
 		return nil, Result{}, time.Time{}, err
 	}
 	// A translated hop dials the upstream on ITS wire while everything
-	// client-facing (ledger, usage tap) keeps the client surface. One
+	// client-facing keeps the client surface. Accounting reads the dial wire. One
 	// selector: the same value prepareHopBody encodes for and commit unwraps.
 	dialSurface := rt.EffectiveWire()
 	url := provider.UpstreamURL(rt.Account.BaseURL, rt.Account.Kind, provider.SurfacePath(dialSurface))
@@ -1271,13 +1270,14 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 	if res.Stream && isSSE {
 		// A translated stream wraps the body BEFORE any byte is copied: the
 		// client sees its own event shape synthesized from the upstream's, and
-		// streamCopy's usage tap then reads client-shaped events — which
-		// matches rt.Surface exactly. Close still reaches the ORIGINAL body (a
+		// the independent source tap retains the upstream accounting before any
+		// lossy client projection. Close still reaches the ORIGINAL body (a
 		// NopCloser would leak the upstream connection).
 		//
 		// translated carries the reader whose terminal state becomes the
 		// delivery outcome; nil for a native stream.
 		var translated *translate.StreamReader
+		var sourceTap *UsageTapper
 		if cross {
 			if cw.optsErr != nil {
 				// A cell that cannot be converted must not stream
@@ -1286,6 +1286,8 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 					translate.EncodeError(translate.ErrorIR{Type: "api_error", Message: cw.optsErr.Error()}, rt.Surface))
 				return res, nil
 			}
+			sourceTap = NewUsageTapperFor(cw.wire, rt.Account.UsageConvention)
+			resp.Body = &sourceUsageReader{ReadCloser: resp.Body, tap: sourceTap}
 			translated = translate.NewStreamReader(resp.Body, cw.wire, rt.Surface, rt.Alias, cw.opts)
 			resp.Body = struct {
 				io.Reader
@@ -1297,7 +1299,9 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 		res.Committed = true
 		ttft, usage, first, copyErr := d.streamCopy(ctx, w, resp, rt.Surface, tapConvention(rt, cross), start)
 		res.TTFTms = msAtLeastOne(ttft)
-		if usage != nil {
+		if sourceTap != nil {
+			res.Usage = sourceTap.Usage()
+		} else if usage != nil {
 			res.Usage = usage
 		}
 		if copyErr != nil {
@@ -1360,10 +1364,12 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 				[]byte(`{"error":{"type":"upstream_error","message":"upstream returned an empty body","code":502}}`))
 			return res, nil
 		}
+		// Accounting belongs to the source wire, even if client conversion fails.
+		res.Usage = tapJSONUsage(raw, rt.EffectiveWire(), rt.Account.UsageConvention)
 		// A translated hop re-encodes every byte the client sees into its own
 		// shape. The err-column snippet is captured from the upstream's OWN
-		// words before any re-shaping, and usage is tapped on the translated
-		// body — the tap is surface-aware and rt.Surface is the client's.
+		// words before any re-shaping. The codec produces the translated
+		// body only for delivery; usage was already captured on the source wire.
 		if cross {
 			if res.Status >= 400 {
 				if cw.reshape != nil {
@@ -1388,9 +1394,7 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 				}
 			}
 		}
-		if u := tapJSONUsage(raw, rt.Surface, tapConvention(rt, cross)); u != nil {
-			res.Usage = u
-		}
+
 		// Record WHY an error status happened. Before this, the err column was
 		// populated only for transport and stream failures, so a provider 429
 		// left a fully blank row — status 429, err "". The upstream's own

@@ -137,8 +137,8 @@ func (s *Server) finishDispatch(w http.ResponseWriter, r *http.Request, call sto
 	}
 	call.BlockPos = served.BlockPos
 	// Attribution for hops whose WIRE differs from the client's surface: the
-	// bodies were translated, so tokens_in is the vendor's INCLUSIVE total
-	// rather than our cold-token convention. That covers both the
+	// bodies were translated; usage still follows the normalized cold-token
+	// convention observed on the upstream wire. That covers both the
 	// anthropic->openai-chat leg and a hop curated onto the Responses wire.
 	call.Translated = served.Translated || served.ResponsesWire
 	s.ledger(call)

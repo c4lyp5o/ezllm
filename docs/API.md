@@ -700,3 +700,11 @@ shape", not output quality; `auto` may only pick tested-ok models.
 - Paging: `?limit=` (default 100, max 1000) + `?offset=` on list endpoints.
 - The frontend is same-origin-served by the Go binary from `web/dist` in production; in dev it
   proxies `/admin`, `/v1`, `/healthz` to `127.0.0.1:20129`.
+
+### Accounting source for translated traffic
+
+Ledger token buckets and `raw_usage` come from the effective upstream wire,
+using the account's usage convention before client response projection.
+Client-visible usage may expose a smaller subset. Failed client conversion
+still retains reported upstream usage. SSE accounting observes bounded source
+frames as they are consumed; native response bytes remain unchanged.

@@ -37,8 +37,11 @@ type copilotTransport struct {
 	// chatStatus is what /chat/completions answers. Copilot answers 400
 	// unsupported_api_for_model for every model that lives on /responses.
 	chatStatus int
-	mints      int
-	chats      int
+	// responsesStatus is what /responses answers (0 → a valid completion).
+	responsesStatus int
+	mints           int
+	chats           int
+	responses       int
 }
 
 func (c *copilotTransport) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -68,6 +71,12 @@ func (c *copilotTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 			return reply(http.StatusOK, `{"id":"c1","choices":[{"index":0,"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1}}`)
 		}
 		return reply(c.chatStatus, `{"error":{"message":"model \"gpt-6.1-sol\" is not accessible via the /chat/completions endpoint","code":"unsupported_api_for_model"}}`)
+	case strings.HasSuffix(r.URL.Path, "/responses"):
+		c.responses++
+		if c.responsesStatus != 0 {
+			return reply(c.responsesStatus, `{"error":{"message":"model \"gpt-6.1-sol\" is not accessible via the /responses endpoint"}}`)
+		}
+		return reply(http.StatusOK, `{"id":"r1","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"pong"}]}],"usage":{"input_tokens":3,"output_tokens":1,"total_tokens":4}}`)
 	}
 	return reply(http.StatusNotFound, `{}`)
 }

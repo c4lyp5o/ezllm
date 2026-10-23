@@ -529,6 +529,33 @@ func (t *Tester) authGate(
 	}
 }
 
+// isEndpointMismatch reports a refusal that NAMES the wire, i.e. the provider
+// is telling us this model lives on another endpoint rather than that the model
+// is gone. Copilot answers `/chat/completions` with `model "gpt-6.1-sol" is not
+// accessible via the /chat/completions endpoint` (code unsupported_api_for_model)
+// for every model of its that lives on /responses.
+//
+// Narrow on purpose: a retired model ("no longer available", "does not exist")
+// is NOT a wire mismatch, and retrying it on another wire would only spend a
+// call to learn the same thing.
+func isEndpointMismatch(status int, body []byte) bool {
+	if status < 400 || status >= 500 {
+		return false
+	}
+	text := strings.ToLower(string(body))
+	for _, marker := range []string{
+		"not accessible via",
+		"unsupported_api_for_model",
+		"not available on this endpoint",
+		"wrong endpoint",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // probeOutcome classifies ONE generation probe so the caller can decide
 // between failing the key test and trying the next catalog candidate.
 type probeOutcome int
@@ -603,6 +630,33 @@ func (t *Tester) probeModel(
 		Totalms: &total,
 		Err:     probeErrNote(status, resp, err),
 	})
+
+	// A wire mismatch is a signpost, not a dead end: the provider just named the
+	// wire this model lives on. Probe the SAME model once on /responses. Two
+	// things come out of it when it answers — the key test gets a real
+	// generation instead of "unverified", and the capability matrix learns the
+	// wire (openai=0, responses=1), so routing stops needing a hand-written
+	// responses_models regex for every model that lives there.
+	if err == nil && surface == provider.SurfaceOpenAI && !isAuthStatus(status) && isEndpointMismatch(status, resp) {
+		verdict, authDead, rstatus := t.probeSurface(ctx, adapter, acct, key, model, provider.SurfaceResponses, pace)
+		switch {
+		case authDead:
+			f := &Failure{
+				Step:           StepInference,
+				Message:        fmt.Sprintf("%s refused the credential on /responses (%s)", model, httpStatusWord(rstatus)),
+				UpstreamStatus: rstatus,
+			}
+			res.addStep(Step{Step: StepInference, OK: false, Detail: f.Message})
+			return probeFailed, f
+		case verdict == provider.VerdictSupported:
+			no, yes := false, true
+			t.setProto(acct.ID, model, provider.SurfaceOpenAI, &no)
+			t.setProto(acct.ID, model, provider.SurfaceResponses, &yes)
+			res.addStep(Step{Step: StepInference, OK: true,
+				Detail: fmt.Sprintf("%s answers on /responses, not the chat endpoint — wire recorded", model)})
+			return probeOK, nil
+		}
+	}
 
 	switch {
 	case err == nil && status >= 200 && status < 300 && isJSON(resp):

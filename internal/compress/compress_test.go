@@ -67,6 +67,22 @@ func TestExemptFinalMessage(t *testing.T) {
 	}
 }
 
+// Contract rule 1 holds for a one-message request too: the sole message IS
+// the final message. The old `last > 0` guard sent it through every stage,
+// and lite rewrote its whitespace.
+func TestExemptSoleMessage(t *testing.T) {
+	text := "keep   my\n\n\n\nspacing   exactly   \n\n\n" + strings.Repeat("padding line   \n\n\n", 20)
+	body := bodyOf(textMsg("user", text))
+	out, _ := Apply(body, fullProfile(Stage{Engine: "lite"}))
+	msgs := decodeMsgs(t, out)
+	if len(msgs) != 1 {
+		t.Fatalf("sole message dropped: %d msgs", len(msgs))
+	}
+	if got := msgs[0].(map[string]any)["content"]; got != text {
+		t.Fatalf("sole message changed:\n got %q\nwant %q", got, text)
+	}
+}
+
 // session_dedup core: later exact SYSTEM duplicates dropped, first stays.
 // user/assistant/tool/tool_calls carriers are never touched.
 func TestSessionDedupDropsOnlySafeDuplicates(t *testing.T) {

@@ -237,7 +237,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 	// — unless it is purely tool output and the profile compresses fresh tool
 	// output, in which case it is new work like any other message.
 	last := len(msgs) - 1
-	exemptTail := p.ExemptLastTurn && last > 0 && !(p.FreshToolOutput && pureToolOutput(msgs[last]))
+	exemptTail := p.ExemptLastTurn && !(p.FreshToolOutput && pureToolOutput(msgs[last]))
 	editable := msgs
 	if exemptTail {
 		editable = msgs[:last]

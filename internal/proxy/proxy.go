@@ -63,9 +63,11 @@ const maxScanToken = 4 << 20
 // key, and normalize once at the end. Normalizing each event alone and then
 // mixing counters could pair one event's input with another's cache split.
 type UsageTapper struct {
-	surface provider.Surface
-	conv    provider.UsageConvention
-	raw     map[string]any
+	surface   provider.Surface
+	conv      provider.UsageConvention
+	raw       map[string]any
+	event     []byte
+	skipEvent bool
 }
 
 // NewUsageTapper builds a tapper for one surface (usage_convention auto).
@@ -79,11 +81,38 @@ func NewUsageTapperFor(surface provider.Surface, conv provider.UsageConvention) 
 	return &UsageTapper{surface: surface, conv: conv}
 }
 
-// Observe inspects one SSE data line (read-only; bytes are forwarded untouched).
+// Observe inspects a physical SSE line without changing forwarded bytes.
+// Single-line JSON stays on the fast path; incomplete JSON is assembled only
+// up to maxScanToken. An oversized event is ignored until its blank separator.
 func (t *UsageTapper) Observe(line []byte) {
-	if len(line) < 6 || !bytes.HasPrefix(line, []byte("data:")) {
+	line = bytes.TrimRight(line, "\r\n")
+	if len(line) == 0 {
+		t.event = nil
+		t.skipEvent = false
 		return
 	}
+	if t.skipEvent || !bytes.HasPrefix(line, []byte("data:")) {
+		return
+	}
+	data := bytes.TrimPrefix(line, []byte("data:"))
+	if len(t.event) == 0 && len(data) <= maxScanToken && json.Valid(data) {
+		t.observePayload(line)
+		return
+	}
+	if len(t.event)+len(data)+1 > maxScanToken {
+		t.event = nil
+		t.skipEvent = true
+		return
+	}
+	t.event = append(t.event, data...)
+	t.event = append(t.event, '\n')
+	if json.Valid(t.event) {
+		t.observePayload(append([]byte("data:"), t.event...))
+		t.event = nil
+	}
+}
+
+func (t *UsageTapper) observePayload(line []byte) {
 	if u := sseUsageRaw(line, t.surface); u != nil {
 		if t.raw == nil {
 			t.raw = map[string]any{}
@@ -1926,8 +1955,12 @@ func (d *Dispatcher) streamCopy(ctx context.Context, w http.ResponseWriter, resp
 					}
 					tapper.Observe(line)
 				} else if !firstEvent {
+					tapper.event, tapper.skipEvent = nil, true
 					ttft = time.Since(start)
 					firstEvent = true
+				}
+				if overlong {
+					tapper.event, tapper.skipEvent = nil, true
 				}
 				long, overlong = nil, false
 			}

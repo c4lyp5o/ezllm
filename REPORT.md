@@ -4,7 +4,7 @@ Updated: 2026-10-23
 
 Reviewed commit: `4059482` (`fix/audit-findings`, v1.1.1)
 
-Four accounting integrity findings remain open: two high and two medium.
+Three accounting integrity findings remain open: two high and one medium.
 Previously resolved findings remain removed. No production fixes or version
 changes were made during this sweep.
 
@@ -104,37 +104,6 @@ without reconciliation is the remaining problem.
 record until the meter catches up, or rebuild dirty counters from the ledger
 before admission. Recovery must avoid charging the same row twice and must
 not discard the durable call to preserve counter consistency.
-
-### AI3 — Medium: native multiline SSE usage is forwarded but never metered
-
-**Locations:** `internal/proxy/proxy.go:83` and
-`internal/proxy/proxy.go:1927`.
-
-The native stream copier invokes `UsageTapper.Observe` once per physical line.
-The tap parses each `data:` line as a complete JSON document. SSE permits a
-single event's data to span several data lines; their payloads are joined with
-newlines. A valid usage object split across lines therefore fails every JSON
-parse, while the bytes still reach the client unchanged.
-
-**Reproduction:** `TestAccountingAuditMultilineUsage` sends this event,
-followed by `[DONE]`:
-
-```text
-data: {"choices":[],
-data: "usage":{"prompt_tokens":100,"completion_tokens":42}}
-
-```
-
-`streamCopy` forwards the source byte-for-byte and returns no error, but its
-usage result is nil. No 100/42 counters reach the ledger. The issue applies to
-the line-based native tap; translated streams have a separate frame decoder.
-
-**Impact:** valid native provider streams can record zero usage and evade
-usage-based budgets and derived cost despite reporting counters upstream.
-
-**Suggested fix:** assemble bounded SSE event data for the read-only tap while
-preserving byte-exact forwarding. Handle multi-line payloads, blank separators,
-comments, CRLF, and event-size limits. Do not reserialize native traffic.
 
 ### AI4 — Medium: failover omits usage explicitly reported by earlier hops
 

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -679,5 +680,39 @@ func TestRetestFailureKeepsTheRow(t *testing.T) {
 	}
 	if ok == nil || *ok != 0 {
 		t.Errorf("last_test_ok should be 0 after a failed retest, got %v", ok)
+	}
+}
+
+// TestDecodeBodyRejectsTrailingAndOversize pins audit finding 6: More() is
+// false before a closing delimiter, and the 1 MiB LimitReader silently
+// truncated, so "{...}]" and an object followed by padding that pushed a
+// second value past the cap were both accepted.
+func TestDecodeBodyRejectsTrailingAndOversize(t *testing.T) {
+	const limit = 1 << 20
+	pad := strings.Repeat(" ", limit)
+	for _, tc := range []struct {
+		name string
+		body string
+		ok   bool
+		code int
+	}{
+		{"single object", `{"name":"x"}`, true, 0},
+		{"trailing whitespace", "{\"name\":\"x\"}  \n", true, 0},
+		{"trailing close bracket", `{"name":"x"}]`, false, http.StatusBadRequest},
+		{"trailing second value", `{"name":"x"}{}`, false, http.StatusBadRequest},
+		{"second value past the cap", `{"name":"x"}` + pad + `{"name":"y"}`, false, http.StatusRequestEntityTooLarge},
+	} {
+		var dst struct {
+			Name string `json:"name"`
+		}
+		r := httptest.NewRequest(http.MethodPost, "/api/x", strings.NewReader(tc.body))
+		w := httptest.NewRecorder()
+		if got := decodeBody(w, r, &dst); got != tc.ok {
+			t.Errorf("%s: decodeBody = %v, want %v (body %.80s)", tc.name, got, tc.ok, w.Body.String())
+			continue
+		}
+		if !tc.ok && w.Code != tc.code {
+			t.Errorf("%s: status = %d, want %d", tc.name, w.Code, tc.code)
+		}
 	}
 }

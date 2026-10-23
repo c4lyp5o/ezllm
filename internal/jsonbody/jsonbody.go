@@ -32,6 +32,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 )
 
@@ -65,8 +66,9 @@ func Open(body []byte) *BodyDoc {
 	}
 	// A second value after the object means trailing garbage. Both legacy
 	// sites (struct Unmarshal in extractModel/IsStream, Decoder in SwapModel)
-	// rejected that, so we must too — and dec.Decode alone does NOT.
-	if dec.More() {
+	// rejected that, so we must too — and dec.Decode alone does NOT. Only
+	// EOF may follow: More() reports false before a stray closing delimiter.
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
 		d.err = errors.New("jsonbody: trailing data after JSON object")
 		return d
 	}

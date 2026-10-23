@@ -56,6 +56,9 @@ func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// adminBodyMax caps an admin JSON body.
+const adminBodyMax = 1 << 20
+
 // decodeBody reads a bounded JSON body into dst. Unknown fields are rejected:
 // a typo'd field name silently ignored is how a "saved" setting never saves.
 func decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {
@@ -63,16 +66,28 @@ func decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {
 	// net/http's post-handler drain of the unread body fails fast too
 	// (see limitBodyRead).
 	lift := limitBodyRead(w, adminBodyTimeout)
-	limited := io.LimitReader(r.Body, 1<<20)
-	dec := json.NewDecoder(limited)
+	// One byte over the cap detects an oversized body: a LimitReader alone
+	// stops silently and the truncated prefix would decode as the whole body.
+	body, err := io.ReadAll(io.LimitReader(r.Body, adminBodyMax+1))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_request_error", "could not read body: "+err.Error())
+		return false
+	}
+	if len(body) > adminBodyMax {
+		writeErr(w, http.StatusRequestEntityTooLarge, "invalid_request_error",
+			fmt.Sprintf("request body exceeds %d bytes", adminBodyMax))
+		return false
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid_request_error",
 			"invalid JSON body: "+err.Error())
 		return false
 	}
-	// Refuse trailing garbage ("{}{}").
-	if dec.More() {
+	// Refuse trailing data ("{}{}", "{}]"): only EOF may follow the value.
+	// More() is not enough — it reports false before a closing delimiter.
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
 		writeErr(w, http.StatusBadRequest, "invalid_request_error",
 			"body must contain a single JSON object")
 		return false

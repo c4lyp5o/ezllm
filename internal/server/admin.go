@@ -66,14 +66,14 @@ func decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {
 	// net/http's post-handler drain of the unread body fails fast too
 	// (see limitBodyRead).
 	lift := limitBodyRead(w, adminBodyTimeout)
-	// One byte over the cap detects an oversized body: a LimitReader alone
-	// stops silently and the truncated prefix would decode as the whole body.
-	body, err := io.ReadAll(io.LimitReader(r.Body, adminBodyMax+1))
+	// An oversized body is refused, never truncated: the cut prefix would
+	// decode as the whole body.
+	body, tooLarge, err := readBody(r, adminBodyMax)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid_request_error", "could not read body: "+err.Error())
 		return false
 	}
-	if len(body) > adminBodyMax {
+	if tooLarge {
 		writeErr(w, http.StatusBadRequest, "invalid_request_error",
 			fmt.Sprintf("request body exceeds %d bytes", adminBodyMax))
 		return false

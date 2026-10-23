@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"log/slog"
 	"net"
@@ -620,15 +619,14 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 		}
 		// The deadline is lifted only after a complete read (see limitBodyRead).
 		liftDeadline := limitBodyRead(w, inferenceBodyTimeout)
-		body, err := io.ReadAll(io.LimitReader(r.Body, s.maxBody+1))
+		body, tooLarge, err := readBody(r, s.maxBody)
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, "invalid_request_error", "could not read body: "+err.Error())
 			return
 		}
-		// The extra byte detects an oversized body: a LimitReader alone stops
-		// silently at the cap and the truncated bytes would be parsed (or, for
-		// multipart, forwarded) as if they were the whole request.
-		if int64(len(body)) > s.maxBody {
+		// An oversized body is refused, never truncated: the cut bytes would
+		// be parsed (or, for multipart, forwarded) as the whole request.
+		if tooLarge {
 			writeErr(w, http.StatusRequestEntityTooLarge, "invalid_request_error",
 				fmt.Sprintf("request body exceeds %d bytes", s.maxBody))
 			return
@@ -766,15 +764,14 @@ func (s *Server) inferenceMultipart(w http.ResponseWriter, r *http.Request, surf
 	// Read the raw multipart body FIRST so it can be forwarded byte-for-byte
 	// (ParseMultipartForm would consume the stream).
 	liftDeadline := limitBodyRead(w, inferenceBodyTimeout)
-	body, err := io.ReadAll(io.LimitReader(r.Body, s.maxBody+1))
+	body, tooLarge, err := readBody(r, s.maxBody)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid_request_error", "could not read multipart body: "+err.Error())
 		return
 	}
-	// The extra byte detects an oversized body: a LimitReader alone stops
-	// silently at the cap and the truncated bytes would be parsed (or, for
-	// multipart, forwarded) as if they were the whole request.
-	if int64(len(body)) > s.maxBody {
+	// An oversized body is refused, never truncated: the cut bytes would be
+	// forwarded upstream as the whole request.
+	if tooLarge {
 		writeErr(w, http.StatusRequestEntityTooLarge, "invalid_request_error",
 			fmt.Sprintf("request body exceeds %d bytes", s.maxBody))
 		return

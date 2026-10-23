@@ -280,12 +280,20 @@ type ledgerItem struct {
 
 // RecordCall enqueues a ledger row. It NEVER blocks the caller: if the queue is
 // full the row is dropped and counted, because a slow database must not add
-// latency to a token stream (invariant #5).
+// latency to a token stream (invariant #5). A row arriving after Close is
+// counted separately (DroppedAfterClose).
 func (d *DB) RecordCall(c Call) {
 	if c.TS.IsZero() {
 		c.TS = time.Now().UTC()
 	}
 	cp := c
+	d.recMu.RLock()
+	defer d.recMu.RUnlock()
+	if d.closed {
+		// The ledger loop has exited: queueing would lose the row silently.
+		droppedAfterClose.Add(1)
+		return
+	}
 	select {
 	case d.callCh <- ledgerItem{call: &cp}:
 	default:
@@ -298,6 +306,14 @@ var droppedCalls atomic.Int64
 
 // DroppedCalls reports how many ledger rows were shed (should stay 0).
 func DroppedCalls() int64 { return droppedCalls.Load() }
+
+// droppedAfterClose counts rows recorded after Close, when no ledger loop is
+// left to persist them. Kept apart from backpressure drops: it means a
+// producer outlived shutdown, not that the database was slow.
+var droppedAfterClose atomic.Int64
+
+// DroppedAfterClose reports how many ledger rows arrived after Close.
+func DroppedAfterClose() int64 { return droppedAfterClose.Load() }
 
 // lostRows counts rows a FAILED FLUSH discarded. It is separate from
 // droppedCalls on purpose: dropping counts the queue-full path, while a

@@ -43,7 +43,12 @@ type DB struct {
 	// ledger batching
 	callCh  chan ledgerItem
 	closeCh chan struct{}
-	wg      sync.WaitGroup
+	// recMu orders RecordCall against Close: a row enqueued under RLock is
+	// in callCh before closeCh closes (so the final drain sees it), and a row
+	// arriving after Close sees closed and is counted as dropped.
+	recMu  sync.RWMutex
+	closed bool
+	wg     sync.WaitGroup
 
 	// crypto at rest for provider keys (nil = plaintext, dev/back-compat)
 	crypto *FieldCrypto
@@ -945,11 +950,12 @@ func (d *DB) Close() error {
 	var firstErr error
 	// ask the ledger loop to flush + exit, and wait for it
 	done := make(chan struct{})
-	select {
-	case <-d.closeCh: // already closed
-	default:
+	d.recMu.Lock()
+	if !d.closed {
+		d.closed = true
 		close(d.closeCh)
 	}
+	d.recMu.Unlock()
 	go func() { d.wg.Wait(); close(done) }()
 	select {
 	case <-done:

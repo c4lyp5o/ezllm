@@ -318,9 +318,11 @@ func run() error {
 		return err
 	}
 
+	reqs := newRequestLifetime()
 	httpSrv := &http.Server{
 		Addr:              addr,
-		Handler:           srv.Handler(),
+		Handler:           reqs.track(srv.Handler()),
+		BaseContext:       reqs.baseContext,
 		ReadHeaderTimeout: 10 * time.Second,
 		// Idle keep-alive connections are closed after 2 minutes. Request
 		// bodies get their own read budget per handler (server.limitBodyRead).
@@ -349,16 +351,18 @@ func run() error {
 	}
 
 	log.Info("shutting down", "drain_max", "15s")
-	shutCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	if err := httpSrv.Shutdown(shutCtx); err != nil {
-		log.Error("http shutdown", "err", err)
-	}
+	// The store closes only after every handler has returned (or the abort
+	// wait expires), so in-flight requests still get their ledger rows.
+	reqs.drain(httpSrv, 15*time.Second, 5*time.Second, log)
 	// Stop the rules-engine ticker first so it cannot reload against a closing
 	// store, then db.Close() drains the ledger queue and flushes the pools.
 	ruleEngine.Close()
 	if err := db.Close(); err != nil {
 		return fmt.Errorf("store close: %w", err)
+	}
+	// Rows from handlers that outlived the abort wait; nonzero = lost usage.
+	if n := store.DroppedAfterClose(); n > 0 {
+		log.Error("ledger rows recorded after store close were dropped", "rows", n)
 	}
 	log.Info("stopped")
 	return nil

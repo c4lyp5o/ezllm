@@ -36,7 +36,7 @@ entitlement catalog is reachable (premium models included).
   `GITHUB_OAUTH_CLIENT_ID` for operators who prefer their own app —
   documented that custom apps hit the restricted tier).
 - **CLI version pin configurable** (`GITHUB_COPILOT_CLI_VERSION`, default
-  `1.0.81-6`): GitHub raises a minimum floor and rejects older with
+  `1.0.103`, bumped 2026-10-23): GitHub raises a minimum floor and rejects older with
   `466 This version of the Copilot CLI is no longer supported`. This is the
   one operational setting that will need periodic bumps.
 - **Endpoint routing by model** (three Copilot endpoints, ported from

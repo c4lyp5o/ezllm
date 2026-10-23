@@ -34,6 +34,9 @@ services:
       # setup code (`docker logs ezllm`) that the dashboard asks for. Used only
       # while setup is pending; it never overwrites a password already set.
       # EZLLM_DASHBOARD_PASSWORD_FILE: /data/ezllm-dashboard-password
+      # Copilot CLI version presented upstream. GitHub raises a floor and
+      # answers 466 below it; bump to `npm view @github/copilot version`.
+      GITHUB_COPILOT_CLI_VERSION: ${GITHUB_COPILOT_CLI_VERSION:-1.0.103}
 
       # Claude subscription surface (loopback-only, an ordinary
       # anthropic-compatible account dials it). Needs the two mounts below; set

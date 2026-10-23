@@ -117,6 +117,23 @@ func TestToolRefNeverShipsADanglingReference(t *testing.T) {
 	}
 }
 
+// A frozen reference is valid only while its target still holds the same
+// content. A client that rewrites history under one session (a compaction, a
+// retried tool) can keep the call id with different output; the memoized
+// reference would then claim the wrong text, so that message ships its
+// original instead.
+func TestToolRefNeverReplaysAReferenceToChangedContent(t *testing.T) {
+	file, changed := fileBody(30), fileBody(40)
+	for _, shape := range refShapes {
+		memo := NewSessionMemo(nil)
+		ApplyWithSession(refConv(shape, [][2]string{{"a", file}, {"b", file}}, false), refProfile(false, nil), nil, "auto:"+shape, memo)
+		out, _ := ApplyWithSession(refConv(shape, [][2]string{{"a", changed}, {"b", file}}, false), refProfile(false, nil), nil, "auto:"+shape, memo)
+		if got := editedTexts(t, out); got[0] != changed || got[1] != file {
+			t.Errorf("%s: call b shipped %q although call a now holds different content", shape, got[1])
+		}
+	}
+}
+
 // The final message is exempt unless fresh_tool_output: compress opens a
 // purely tool-output final message — then it is referenced at first send.
 func TestToolRefFinalMessageFollowsFreshToolOutput(t *testing.T) {

@@ -93,12 +93,16 @@ history to its original bytes and breaking the upstream prefix cache.
 - The ledger is bounded (512/session, 8192 global), memory-only, lost on
   restart (re-derivation is deterministic).
 - **Every request is covered (2026-10-19).** An explicit `X-Ezllm-Session`
-  wins; otherwise `compress.ConversationKey` derives one from what exists
+  wins, scoped to the authenticated client (`compress.ClientSession`, so two
+  clients naming the same id never share forms or a profile binding);
+  otherwise `compress.ConversationKey` derives one from what exists
   from a conversation's first request and never changes: the client, the
   leading instructions (top-level `system` / Responses `instructions` /
   leading system or developer messages) and the first message after them.
   No app has to send a header for its prefix to stay stable. Conversations
-  that open identically share a key safely — entries are keyed by content —
+  that open identically share a key safely — entries are keyed by content,
+  and a replayed `tool_ref` reference ships only while its target still holds
+  the same output —
   and a rewritten history (compaction, fork) opens a new key. The derived key
   feeds the memo only; the ledger's `session_id` stays the explicit id.
 - Entries are keyed by content **and occurrence** (the nth identical

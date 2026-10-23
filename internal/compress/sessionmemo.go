@@ -329,6 +329,20 @@ func (m *SessionMemo) Clear() {
 	m.lru = list.New()
 }
 
+// ClientSession scopes a caller-chosen X-Ezllm-Session id to the client that
+// sent it. The id is free text, so two clients can name the same session (or
+// one can name another's derived "auto:" key); unscoped, one client's
+// committed forms and profile binding would replay into the other's requests.
+// The length prefix keeps the client/id boundary unambiguous.
+func ClientSession(client, id string) string {
+	if id == "" {
+		return ""
+	}
+	h := sha256.New()
+	fmt.Fprintf(h, "%d:%s\x00%s", len(client), client, id)
+	return "explicit:" + hex.EncodeToString(h.Sum(nil))[:32]
+}
+
 // ConversationKey derives the memo session for a request that names none, so
 // committed-prefix stability holds for every client — not only those that
 // send X-Ezllm-Session. It hashes only what exists from a conversation's FIRST

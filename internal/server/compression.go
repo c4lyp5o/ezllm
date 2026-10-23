@@ -103,9 +103,10 @@ func (s *Server) applyCompression(r *http.Request, requested string, body []byte
 		rt.Shadow = s.shadowSampler()
 	}
 	// Every request gets committed-prefix stability: an explicit session id
-	// wins, otherwise the conversation's own opening derives one. Used only
-	// for the memo — the ledger's session_id column stays the explicit id.
-	session := sessionOf(r)
+	// wins, otherwise the conversation's own opening derives one. Both are
+	// scoped to the authenticated client. Used only for the memo — the
+	// ledger's session_id column stays the explicit id.
+	session := compress.ClientSession(clientName(r), sessionOf(r))
 	if session == "" && doc != nil && doc.Err() == nil && doc.Map() != nil {
 		session = compress.ConversationKey(clientName(r), doc.Map())
 	}

@@ -389,9 +389,10 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 	// where the memo hit, the new work's output everywhere else. A nil on
 	// either side is a message that ships as nothing (a dropped repeat). A
 	// tool_ref reference whose target did not ship above (the client dropped
-	// it) is never sent: that message ships its original instead.
+	// it) or now holds different content (history rewritten under the same
+	// session) is never sent: that message ships its original instead.
 	rebuilt := make([]any, 0, len(editable))
-	have := map[string]bool{}
+	have := map[string]string{}
 	ni := 0
 	for i := range editable {
 		f := forms[i]
@@ -402,10 +403,10 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 		if f == nil {
 			continue
 		}
-		if !refsResolve(f, have) {
+		if !refsResolve(f, editable[i], have) {
 			f = editable[i]
 		}
-		realToolIDs(f, have)
+		realToolIDs(f, editable[i], have)
 		rebuilt = append(rebuilt, f)
 	}
 	finalMsgs := rebuilt

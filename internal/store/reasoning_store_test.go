@@ -98,6 +98,37 @@ func TestLearnModelReasoningIgnoresAnEmptyRule(t *testing.T) {
 	}
 }
 
+// Refusals teach one fact at a time: a mandate that names no list must not
+// erase the stored list, and a later list without a mandate must not lower it.
+func TestLearnModelReasoningMergesFacts(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "r.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	aid := seedReasoningModel(t, db)
+
+	if err := db.LearnModelReasoning(ctx, aid, "m", provider.ReasoningRule{Allowed: []string{"low", "medium", "high"}, Known: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.LearnModelReasoning(ctx, aid, "m", provider.ReasoningRule{Required: true, Known: true}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := db.ModelFacts(ctx, aid, "m")
+	if len(got.Reasoning.Allowed) != 3 || !got.Reasoning.Required {
+		t.Fatalf("after mandate: %+v, want the list kept and Required", got.Reasoning)
+	}
+
+	if err := db.LearnModelReasoning(ctx, aid, "m", provider.ReasoningRule{Allowed: []string{"low", "high"}, Known: true}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = db.ModelFacts(ctx, aid, "m")
+	if len(got.Reasoning.Allowed) != 2 || !got.Reasoning.Required {
+		t.Fatalf("after new list: %+v, want the new list and Required kept", got.Reasoning)
+	}
+}
+
 // The trap the skill names: UpsertModels replaces the catalog WHOLESALE, so any
 // column it does not carry in its snapshot is wiped by the next refresh — and a
 // refresh runs at every boot.

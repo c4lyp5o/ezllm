@@ -524,6 +524,11 @@ func reasoningRuleFrom(vocab sql.NullString, required sql.NullInt64) provider.Re
 // learned from its own refusal. It only ever writes a rule that carries
 // information — an empty struct is a no-op, so a mis-parse can never erase a
 // vocabulary that is already known.
+//
+// The two columns MERGE rather than replace: refusals arrive one fact at a
+// time ("cannot be disabled" names no list; "Supported values" names no
+// mandate), so a rule that says nothing about a column keeps what is stored,
+// and a learned mandate is never lowered back to "not required".
 func (d *DB) LearnModelReasoning(ctx context.Context, accountID int64, modelID string, r provider.ReasoningRule) error {
 	if accountID == 0 || modelID == "" || !r.Known {
 		return nil
@@ -541,7 +546,10 @@ func (d *DB) LearnModelReasoning(ctx context.Context, accountID int64, modelID s
 		_, err := tx.ExecContext(ctx, `
 INSERT INTO models (account_id, model_id, reasoning_vocab, reasoning_required) VALUES (?,?,?,?)
 ON CONFLICT(account_id, model_id) DO UPDATE SET
-  reasoning_vocab=excluded.reasoning_vocab, reasoning_required=excluded.reasoning_required`,
+  reasoning_vocab=COALESCE(excluded.reasoning_vocab, reasoning_vocab),
+  reasoning_required=CASE
+    WHEN excluded.reasoning_required IS NULL OR reasoning_required = 1 THEN reasoning_required
+    ELSE excluded.reasoning_required END`,
 			accountID, modelID, nullIfEmpty(vocab), required)
 		return err
 	})

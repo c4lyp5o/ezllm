@@ -4,7 +4,7 @@ Updated: 2026-10-23
 
 Reviewed commit: `19489a2` (`fix/audit-findings`, application v1.1.1, schema v28)
 
-Three recovery and upgrade findings remain open: one high and two medium.
+Two recovery and upgrade findings remain open, both medium.
 Previously resolved findings remain removed. This sweep changed no production
 code, release version, database schema, or deployment.
 
@@ -14,30 +14,6 @@ Reviewed startup/key handling, schema migration and restart behavior, WAL
 backup instructions, export completeness and errors, shutdown ownership,
 durable meter recovery, and release/container workflows. Local probes used
 only disposable databases, dummy secrets, and local processes.
-
-### RU3 — High: documented live SQLite backup omits committed WAL data
-
-**Location:** `docs/master-key-runbook.md:18`.
-
-The backup instructions copy only `data/ezllm.sqlite` with `cp`, then copy the
-master key. They do not require stopping the service or obtaining a consistent
-SQLite snapshot. The database runs in WAL mode; committed changes can reside
-in the WAL while the main file still holds an older checkpoint.
-
-**Reproduction:** `TestRecoveryAuditLiveCopyLosesCommittedRows` checkpoints a
-disposable database, disables automatic checkpoints for a deterministic test,
-and commits a new client token. Copying just the main file as documented
-produces a readable backup containing zero copies of that token, while the
-live database contains one. No concurrent write was needed during the copy.
-
-**Impact:** the documented backup can silently lose committed credentials,
-configuration, ledger usage, or pending meter debits. Possessing the matching
-master key does not compensate for the missing database pages.
-
-**Suggested fix:** document and verify an online SQLite backup/snapshot method,
-or require a clean service stop before copying. Do not suggest separately
-copying live DB/WAL files as an atomic snapshot. Restore a produced backup to
-a separate location and verify integrity plus representative recent rows.
 
 ### RU4 — Medium: disaster-recovery export omits non-secret configuration
 

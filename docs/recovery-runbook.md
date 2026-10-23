@@ -22,3 +22,11 @@ rather than choose or delete data. Stop the service, preserve the entire
 DB/key backup, and inspect both tables on a copy before reconciling. Do not
 blindly delete the staged copy: it can contain the only surviving configuration
 from an older interrupted upgrade. Retry the upgraded instance after repair.
+
+## Verified database/key backup
+
+Use the procedure in [master-key-runbook.md](master-key-runbook.md). The online
+backup helper uses SQLite's backup API and does not copy a live main file or
+assume WAL checkpoints have already run. Accept only a successful exit plus
+`COMPLETE.json`; test restoration to a separate stopped instance before relying
+on the backup. Never let a second gateway write the same restored data files.

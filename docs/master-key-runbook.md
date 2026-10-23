@@ -17,11 +17,42 @@ key lives on the data volume and is backed up with the SQLite ledger.
 
 ## Backup (do this with every DB backup)
 
+Do not copy a running database's main file with `cp`: committed pages can
+still be in `-wal`. Do not copy live DB/WAL files separately as a snapshot.
+Use the online tool from the repository (Python 3.11+, standard library only):
+
 ```bash
-cp data/ezllm.sqlite        ~/backups/ezllm/<date>/ezllm.sqlite
-cp data/ezllm-master.key    ~/backups/ezllm/<date>/ezllm-master.key
-chmod 600 ~/backups/ezllm/<date>/*
+python3 scripts/backup_sqlite.py --db data/ezllm.sqlite \
+  --key data/ezllm-master.key --output /backups/ezllm/new-backup
 ```
+
+The output directory must not exist. The tool includes committed WAL data,
+closes and verifies the SQLite copy, copies the key without changing it, and
+writes `COMPLETE.json` last with the database checksum. Require both exit
+status zero and the completion marker; a failed/incomplete directory is not a
+backup. The directory is private and its files are mode 0600. Keep the pair
+encrypted off-host. This captures committed rows, not usage still queued in a
+running gateway; cleanly stop the service first when every accepted call must
+be included. Do not rotate/change the master key during backup.
+
+Use the **active** key, honoring the precedence above. If `EZLLM_MASTER_KEY`
+overrides the file, put that same secret in a protected file for the tool;
+backing up an ignored key file is not enough. Also preserve `config.yaml` and
+any separately mounted subscription login/CLI data needed by your deployment.
+
+For an offline copy instead, cleanly stop the service, confirm it exited and
+closed its ledger, then copy the database and active key as a pair into a new
+private directory. Restart only after the copy finishes. Never run that
+procedure against a live writer.
+
+Restore into a separate stopped instance: verify `COMPLETE.json`, recompute
+and compare `database_sha256` before opening the copy, check SQLite
+`PRAGMA integrity_check`, then copy both files to its data directory and set
+`EZLLM_MASTER_KEY_FILE` to the copied key. Start on a different local port,
+verify account access and representative recent rows, and only then switch
+traffic. Keep the original backup immutable; restore from a copy. An older
+binary may refuse a newer schema, so rollback uses a matching pre-upgrade
+backup. See [recovery-runbook.md](recovery-runbook.md).
 
 Losing the master key makes every stored provider key unrecoverable. There is no
 recovery path; the only fix is re-entering every key in the dashboard.

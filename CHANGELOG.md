@@ -23,6 +23,11 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M14); full histor
   failure.
 - **Fix: Copilot presents CLI 1.0.103.** GitHub's HTTP 466 floor rejected 1.0.81-6;
   compose passes `GITHUB_COPILOT_CLI_VERSION` through.
+- **Deploy change: one compose file, yours.** `compose.yml` is no longer shipped:
+  copy `compose.example.yml` (every variable with its default, bridges off, mounts
+  commented) to `compose.yml`, which is gitignored. `compose.traefik.yml` is gone;
+  proxy labels go in your copy. **Before pulling,** back up your `compose.yml`:
+  git deletes a formerly tracked file on pull.
 
 ## 2026-10-22 — v1.0.0: one translation switch, env reference, probe fixes, arm64 image
 

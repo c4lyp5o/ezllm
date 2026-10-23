@@ -147,13 +147,12 @@ long as it is set.
 
 ## Enable
 
-Add the `compose.codex.yml` overlay, which sets `EZLLM_CODEX_BRIDGE=on` and
-mounts the release directory at `/opt/codex` and the login at `/codex-sub`
-(`CODEX_CLI_DIR`, `CODEX_SUB_DIR` point them at your copies), and recreate the
-container:
+In your `compose.yml` (from `compose.example.yml`): uncomment the two Codex
+mounts (the release directory read-only at `/opt/codex`, the login read-write
+at `/codex-sub`), set `EZLLM_CODEX_BRIDGE: "on"`, and recreate the container:
 
 ```bash
-docker compose -f compose.yml -f compose.traefik.yml -f compose.codex.yml up -d
+docker compose up -d
 ```
 
 Boot fails loudly — the process does not start — when:

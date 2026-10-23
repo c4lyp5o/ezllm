@@ -230,8 +230,9 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
 - Post-ship fixes (2026-10-09): `Origin` added to `stripAlways` in the proxy (Anthropic 401s on
   browser origins; regression-tested — commit `8c832ef`); SPA clears session only on our
   numeric-code 401, provider 401s surface inline (commit `358cda3`).
-- Deployment: `ghcr.io/c4lyp5o/ezllm` image; compose base (port 20129) + `compose.traefik.yml`
-  overlay (`llm.calypso.dedyn.io`, `/admin` guard); served bundle verified against `web/dist`.
+- Deployment: `ghcr.io/c4lyp5o/ezllm` image; compose (port 20129) from
+  `compose.example.yml`; the host's own gitignored `compose.yml` adds the Traefik labels
+  (`llm.calypso.dedyn.io`, `/admin` guard); served bundle verified against `web/dist`.
 - `cmd/m2verify` remains the end-to-end acceptance checker against live traffic; every landmark
   in this file re-verified against code on 2026-10-10 (line numbers were stale by ~400 lines in
   places — that's why §4 says re-verify, not trust).

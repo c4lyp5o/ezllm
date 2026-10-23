@@ -23,7 +23,7 @@ nothing else ever holds the subscription credential. One container, no sidecar.
   ```sh
   mkdir -p ~/.local/share/claude-bridge
   cp ~/.local/share/claude/versions/<ver> ~/.local/share/claude-bridge/claude-<ver>
-  # then point compose.yml (or CLAUDE_CLI_BIN) at it and re-run the live proof
+  # then point the mount in your compose.yml at it and re-run the live proof
   ```
 - A subscription login in its own config dir, never the interactive one:
 
@@ -38,12 +38,13 @@ nothing else ever holds the subscription credential. One container, no sidecar.
 
 ## Enable
 
-`compose.yml` already wires it: the CLI mounts read-only at `/opt/claude/claude`,
-the login read-write at `/claude-sub`, `USER`/`LOGNAME` are set (the CLI's login
-check reads process identity), and `EZLLM_CLAUDE_BRIDGE=on` turns the surface on.
+In your `compose.yml` (from `compose.example.yml`): uncomment the two Claude
+mounts (the CLI read-only at `/opt/claude/claude`, the login read-write at
+`/claude-sub`), set `USER`/`LOGNAME` to the login's owner (the CLI's login check
+reads process identity), and set `EZLLM_CLAUDE_BRIDGE: "on"`.
 
 ```sh
-docker compose -f compose.yml -f compose.traefik.yml up -d
+docker compose up -d
 docker logs ezllm | grep -i "claude bridge"   # cli version + login + plan + flag drift
 ```
 
@@ -123,7 +124,7 @@ shape the Providers page already draws — **rolling** = the 5-hour window,
   (`web_search_*`, `code_execution_*`, …), an OpenAI-shaped tool on `/v1/messages`,
   or `parallel_tool_calls`. The message names the field; send client tools only.
 - **Boot: "does not resolve to the official Claude Code CLI"** — the
-  `CLAUDE_CLI_BIN` mount is missing or points at nothing.
+  `/opt/claude/claude` mount in your `compose.yml` is missing or points at nothing.
 
 ## Rollback
 

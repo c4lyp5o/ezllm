@@ -75,13 +75,18 @@ On first boot the dashboard asks for the setup code printed in the
 container log. To skip setup, pass the first password instead, ideally as a
 secret file: `-e EZLLM_DASHBOARD_PASSWORD_FILE=/run/secrets/ezllm-dashboard`.
 
-Or use the published image (`ghcr.io/c4lyp5o/ezllm:latest`) with
-[compose.yml](compose.yml); [compose.traefik.yml](compose.traefik.yml) adds a
-Traefik overlay. It serves `/v1`, `/healthz` and the dashboard publicly; `/admin`
-is public too but guarded by the dashboard password and a per-source rate
-limit, with a tighter one on `/admin/login` and `/admin/setup`.
-[compose.codex.yml](compose.codex.yml) turns on the ChatGPT subscription
-bridge with its mounts ([runbook](docs/codex-bridge-runbook.md)).
+Or use the published image (`ghcr.io/c4lyp5o/ezllm:latest`) with compose:
+
+```bash
+cp compose.example.yml compose.yml         # gitignored: your paths and labels
+docker compose up -d
+```
+
+[compose.example.yml](compose.example.yml) lists every environment variable
+with its default, and the bridge mounts commented out. Behind a reverse proxy,
+add its network and labels to your copy and set `EZLLM_TRUSTED_PROXIES`;
+`/admin` is public there too, so keep the dashboard password long and put a
+per-source rate limit on `/admin/login` and `/admin/setup`.
 
 ## API surface
 
@@ -188,8 +193,8 @@ Precedence: command-line flags → `EZLLM_*` environment → `config.yaml` →
 built-in defaults.
 
 New install? Set `EZLLM_USAGE_TZ` to your time zone, and
-`EZLLM_CLAUDE_BRIDGE=off` unless you run the Claude subscription bridge (the
-Codex bridge is already off by default).
+keep both subscription bridges off unless you run them (they are off in
+`compose.example.yml`).
 Every variable and its default: **[docs/environment.md](docs/environment.md)**.
 
 Provider credentials live in SQLite only, managed from the dashboard or the

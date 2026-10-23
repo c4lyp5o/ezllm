@@ -2,6 +2,8 @@
 /bin/
 # local config contains non-secret provider metadata
 /config.yaml
+# your deployment, copied from compose.example.yml (host paths, proxy labels)
+/compose.yml
 # ledger
 /data/
 *.sqlite

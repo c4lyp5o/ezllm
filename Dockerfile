@@ -70,7 +70,7 @@ ENV TZ=Asia/Kuala_Lumpur
 
 # Claude subscription surface: off unless EZLLM_CLAUDE_BRIDGE=on, and it
 # expects the official CLI at /opt/claude/claude and the subscription login at
-# /claude-sub (claudebridge.go defaults), bind-mounted by compose.yml. Never
+# /claude-sub (claudebridge.go defaults), bind-mounted by your compose.yml. Never
 # bake either into the image.
 #
 # ChatGPT subscription surface: off unless EZLLM_CODEX_BRIDGE=on; it expects the

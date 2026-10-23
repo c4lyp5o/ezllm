@@ -29,6 +29,9 @@ file in the same commit, or the test fails.
   blocks a proven key on a non-auth generation failure.
 - **GitHub Copilot** presents CLI 1.0.103 (GitHub's HTTP 466 floor rejected
   1.0.81-6); `GITHUB_COPILOT_CLI_VERSION` passes through compose.
+- **Deploy change:** `compose.yml` is no longer shipped. Copy
+  `compose.example.yml` to `compose.yml` (gitignored); `compose.traefik.yml` is
+  gone. Back up your `compose.yml` before pulling.
 
 ---
 

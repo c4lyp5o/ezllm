@@ -83,6 +83,20 @@ Setup and operation: [claude-bridge-runbook.md](claude-bridge-runbook.md).
 | `USER`, `LOGNAME` | compose: `${CLAUDE_BRIDGE_USER}` | Both must be set when the bridge is on (the CLI's login check reads process identity). |
 | `CLAUDE_CODE_*`, `DISABLE_*` | unset | Passed through to the CLI for tuning. `ANTHROPIC_*` and `CLAUDE_CONFIG_DIR` never pass. |
 
+## Codex (ChatGPT subscription) bridge
+
+Setup, platform requirements and the lockdown: [codex-bridge-runbook.md](codex-bridge-runbook.md). Linux only.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `EZLLM_CODEX_BRIDGE` | off | `on` starts the loopback surface. Enabled without a usable CLI, login or required app-server methods, the boot fails. |
+| `EZLLM_CODEX_BIN` | `/opt/codex/bin/codex` | Official Codex CLI binary inside the container (compose mounts the release directory at `/opt/codex`). |
+| `EZLLM_CODEX_HOME` | `/codex-sub` | `CODEX_HOME` holding the subscription login (compose mounts it here). |
+| `EZLLM_CODEX_BRIDGE_ADDR` | `127.0.0.1:8791` | Bridge listen address; non-loopback addresses are refused. |
+| `EZLLM_CODEX_BRIDGE_TOKEN_FILE` | `/data/codex-bridge.token` | Shared secret for the account key; generated (0600) when missing. |
+| `EZLLM_CODEX_BRIDGE_CONCURRENCY` | `2` | Concurrent Codex children; a positive integer, anything else fails the boot. |
+| `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK` | unset | `on` allows client tools on a host without Landlock. Read the runbook's platform section before setting it. |
+
 ## GitHub Copilot provider
 
 | Variable | Default | What it does |
@@ -103,9 +117,12 @@ Substituted into the compose files; the binary never reads them.
 | `CLAUDE_CLI_BIN` | `/home/calypso/.local/share/claude-bridge/claude-2.1.306` | Host CLI binary mounted at `/opt/claude/claude`. Set it to your own copy. |
 | `CLAUDE_SUB_DIR` | `/home/calypso/.claude-sub` | Host login directory mounted at `/claude-sub`. Set it to your own. |
 | `CLAUDE_BRIDGE_USER` | `calypso` | Value for `USER` / `LOGNAME`: the owner of the login directory. Set it to yours. |
+| `CODEX_CLI_DIR` | `/home/calypso/.local/share/codex-bridge/0.163.0` | Host Codex release directory (`bin/codex`, `bin/codex-code-mode-host`) mounted at `/opt/codex`. Mount commented out until the bridge is on. |
+| `CODEX_SUB_DIR` | `/home/calypso/.codex-sub` | Host `CODEX_HOME` mounted at `/codex-sub`. Mount commented out until the bridge is on. |
 
 ## Tests only
 
 | Variable | What it does |
 |---|---|
+| `EZLLM_CODEX_LIVE` | `1` runs the Codex bridge live tests against the real CLI and login (`go test ./internal/codexbridge/ -run Live -v`). |
 | `EZLLM_REHEARSE_DB` | Path to a **copy** of the production database; runs the store rehearsal test (`go test ./internal/store/ -run Rehearse -v`). |

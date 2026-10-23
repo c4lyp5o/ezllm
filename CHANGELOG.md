@@ -2,6 +2,28 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14); full history via `git log`.
 
+## 2026-10-23 — v1.1.0: ChatGPT subscription bridge, plan windows, probe and Copilot fixes
+
+- **ChatGPT subscription as an account** (`internal/codexbridge`, off by default).
+  The official `codex app-server` sits behind a loopback OpenAI-compatible surface
+  (`127.0.0.1:8791`); every child runs with Codex's own shell, patch, web and
+  update features disabled and a read-only sandbox, so it executes nothing of its
+  own. Client tools travel through code-mode and come back as `tool_calls`; the
+  child is parked until the results arrive (continuation), and every child is
+  confined by Landlock — without Landlock, tools are refused unless
+  `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK=on`. Structured output, reasoning summaries
+  as `reasoning_content`, all models including hidden ones, and a `codex exec`
+  fallback when the app-server lacks a required method
+  (`docs/codex-bridge-runbook.md`, `docs/codex-subscription-design.md`).
+- **Plan windows on the provider card.** The Claude bridge serves the CLI's 5h/7d
+  `rate_limit_event` on `/v1/usage`, the Codex bridge serves `account/rateLimits/read`
+  in the same shape; ezllm reads it for loopback accounts.
+- **Fix: key test advances past endpoint-mismatch models** ("not accessible via
+  /chat/completions") and no longer blocks a proven key on a non-auth generation
+  failure.
+- **Fix: Copilot presents CLI 1.0.103.** GitHub's HTTP 466 floor rejected 1.0.81-6;
+  compose passes `GITHUB_COPILOT_CLI_VERSION` through.
+
 ## 2026-10-22 — v1.0.0: one translation switch, env reference, probe fixes, arm64 image
 
 - **Behaviour change: `translation.enabled` is the one switch.** It now covers the

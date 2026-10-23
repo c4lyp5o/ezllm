@@ -218,6 +218,11 @@ Send ordinary OpenAI `tools`. What happens behind the bridge:
    run (a full bridge answers 504 instead of queueing forever). Cancelling a
    request ends its child even when the CLI or the client has stopped reading;
    a stream write the client leaves undrained for 60 seconds ends the request.
+   Pending output is capped at **1 MiB or 4,096 deltas**, plus the delivery batch
+   already in progress (at most the same size). If the pending backlog exceeds
+   either cap, the bridge ends the turn with `output_backpressure` and reaps its
+   child independently of the stalled write. It never silently drops deltas
+   from an otherwise successful answer.
 
 Mappings and limits:
 
@@ -278,6 +283,7 @@ python3 tests/prove_codex_bridge.py                                     # throug
 | a tool follow-up is slow and the model "forgets" what it was doing | the paused turn expired (10 min) or was dropped (8 held) and the bridge replayed | answer tool calls promptly; check `parked_tool_turns` |
 | 503 `binary_missing` | the mount is gone | re-copy the pinned binary, recreate |
 | 502 `native_closed` | the CLI died mid-answer | `docker logs ezllm`; the message carries the CLI's stderr |
+| 502 `output_backpressure` (or a terminal stream error) | pending output exceeded 1 MiB or 4,096 deltas behind a slow consumer | drain the response promptly and check downstream buffering; the turn has ended and its child was reaped |
 | answers arrive in one chunk, `/v1/models` 404 | the bridge is on the **exec fallback** (`/status` → `channel`) | the CLI release dropped an app-server method; pin the qualified release |
 
 ## Rollback

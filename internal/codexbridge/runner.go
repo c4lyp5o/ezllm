@@ -301,6 +301,15 @@ func (r *Runner) Session(ctx context.Context, fn func(ctx context.Context, c *rp
 // (Promise.all in the model's script) before returning the batch.
 const toolBatchWindow = 250 * time.Millisecond
 
+// A stalled sink can retain at most one delivery batch plus this pending
+// queue. Both bytes and event count are bounded: tiny deltas must not grow
+// the slice indefinitely either. Overflow ends the turn rather than blocking
+// the stdout reader, which must stay free for cancellation and cleanup.
+const (
+	maxQueuedOutputBytes  = 1 << 20
+	maxQueuedOutputEvents = 4096
+)
+
 // turnState collects one turn's notifications and tool calls. Its methods run
 // on the child's reader goroutine; wake tells the waiting request to look.
 // Deltas are queued, not delivered here: a sink blocked on a client that
@@ -309,6 +318,8 @@ type turnState struct {
 	mu       sync.Mutex
 	sink     func(Delta) error
 	out      []Delta // queued for the request goroutine; the reader never calls sink
+	outBytes int
+	abort    func() // asynchronously reaps the child on backlog overflow
 	text     strings.Builder
 	lastItem string
 
@@ -329,6 +340,16 @@ type turnState struct {
 
 func newTurnState(sink func(Delta) error) *turnState {
 	return &turnState{sink: sink, replyTo: map[string]json.RawMessage{}, wake: make(chan struct{}, 1)}
+}
+
+func (t *turnState) bindChild(c *child) {
+	t.mu.Lock()
+	t.abort = func() { go c.close() }
+	failed := t.finished && t.fail != nil
+	t.mu.Unlock()
+	if failed {
+		go c.close()
+	}
 }
 
 func (t *turnState) signal() {
@@ -357,9 +378,10 @@ func (t *turnState) handle(method string, params json.RawMessage) {
 		if t.lastItem != "" && p.ItemID != t.lastItem {
 			delta = "\n\n" + delta // a second agent message (commentary, then answer)
 		}
-		t.lastItem = p.ItemID
-		t.text.WriteString(delta)
-		t.queue(Delta{Content: delta})
+		if t.queue(Delta{Content: delta}) {
+			t.lastItem = p.ItemID
+			t.text.WriteString(delta)
+		}
 	case "item/reasoning/summaryPartAdded":
 		t.reasoningPart = t.reasoning.Len() > 0
 	case "item/reasoning/summaryTextDelta":
@@ -373,8 +395,9 @@ func (t *turnState) handle(method string, params json.RawMessage) {
 		if t.reasoningPart {
 			delta, t.reasoningPart = "\n\n"+delta, false
 		}
-		t.reasoning.WriteString(delta)
-		t.queue(Delta{Reasoning: delta})
+		if t.queue(Delta{Reasoning: delta}) {
+			t.reasoning.WriteString(delta)
+		}
 	case "thread/tokenUsage/updated":
 		var p struct {
 			TokenUsage struct {
@@ -411,10 +434,25 @@ func (t *turnState) handle(method string, params json.RawMessage) {
 	}
 }
 
-// queue hands one delta to the request goroutine; mu is held.
-func (t *turnState) queue(d Delta) {
+// queue hands one delta to the request goroutine; mu is held. A full queue
+// fails explicitly and kills the child independently of a blocked sink.
+func (t *turnState) queue(d Delta) bool {
+	n := len(d.Content) + len(d.Reasoning)
+	if n > maxQueuedOutputBytes-t.outBytes || len(t.out) >= maxQueuedOutputEvents {
+		t.fail = &NativeError{Status: 502, Type: "api_error", Code: "output_backpressure",
+			Message: "codex-bridge: output backlog exceeded; the client is not draining the stream fast enough"}
+		t.finished = true
+		t.out, t.outBytes = nil, 0
+		if t.abort != nil {
+			t.abort()
+		}
+		t.signal()
+		return false
+	}
 	t.out = append(t.out, d)
+	t.outBytes += n
 	t.signal()
+	return true
 }
 
 // onRequest serves server→client requests for a tool-bearing turn: a dynamic
@@ -468,7 +506,7 @@ func (r *Runner) segment(ctx context.Context, c *child, st *turnState) (res Resu
 	for {
 		st.mu.Lock()
 		out, sink := st.out, st.sink
-		st.out = nil
+		st.out, st.outBytes = nil, 0
 		finished, ready := st.finished, st.callsReady
 		st.mu.Unlock()
 		// Deliver in order, outside the lock, on this (the request's)
@@ -512,6 +550,12 @@ func (r *Runner) segment(ctx context.Context, c *child, st *turnState) (res Resu
 				return Result{}, false, r.childErr(ctx, c, "turn", errors.New("the CLI exited mid-turn"))
 			}
 		case <-ctx.Done():
+			st.mu.Lock()
+			failure := st.fail
+			st.mu.Unlock()
+			if failure != nil {
+				return Result{}, false, failure
+			}
 			return Result{}, false, r.childErr(ctx, c, "turn", ctx.Err())
 		}
 	}
@@ -575,6 +619,7 @@ func (r *Runner) runAppServer(ctx context.Context, req Request, sink func(Delta)
 	if err != nil {
 		return Result{}, err
 	}
+	st.bindChild(c)
 	parked := false
 	defer func() {
 		if !parked {

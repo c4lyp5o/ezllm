@@ -71,10 +71,12 @@ type SessionMemo struct {
 
 	// key = sha256(session | profileVersion | messageHash); ships form.
 	entries map[string]*memoEntry
-	// binding: session -> the profile fingerprint it was FIRST seen with (the
-	// immutable version binding, addendum #4). Bounded like entries; a session
-	// absent here binds on its next use.
-	binding map[string]string
+	// binding: session -> the profile it was FIRST seen with, fingerprint and
+	// snapshot (the immutable version binding, addendum #4). The snapshot is
+	// what the session keeps RUNNING, so the stamped version is the ruleset
+	// that produced its bytes. Bounded like entries; a session absent here
+	// binds on its next use.
+	binding map[string]boundProfile
 	// lru orders entries by last use, newest at the front. Every use stamps
 	// usedAt = now, so the back is also the oldest: capacity eviction and
 	// TTL expiry both pop from the back, O(1) per entry dropped.
@@ -93,6 +95,11 @@ type memoEntry struct {
 	usedAt  time.Time
 	elem    *list.Element // in SessionMemo.lru
 	gelem   *list.Element // in its group's lru
+}
+
+type boundProfile struct {
+	version string
+	prof    *Profile
 }
 
 type memoGroup struct {
@@ -122,7 +129,7 @@ func NewSessionMemo(opts *SessionMemoOptions) *SessionMemo {
 		maxEntryB:  DefaultMemoMaxEntryBytes,
 		now:        time.Now,
 		entries:    map[string]*memoEntry{},
-		binding:    map[string]string{},
+		binding:    map[string]boundProfile{},
 		lru:        list.New(),
 		groups:     map[string]*memoGroup{},
 	}
@@ -186,25 +193,65 @@ func ProfileFingerprint(p *Profile) string {
 	return "v" + hex.EncodeToString(h.Sum(nil)[:8])
 }
 
-// Bind returns the profile fingerprint a session is BOUND to. The first use
-// of a session binds the CURRENT fingerprint; later calls return the binding
-// even after the effective profile changes — an active session is never
-// silently re-versioned. An empty session binds nothing (legacy path).
-func (m *SessionMemo) Bind(session, currentFingerprint string) string {
-	if m == nil || session == "" || currentFingerprint == "" {
-		return ""
+// Bind returns the profile a session is BOUND to: its fingerprint and a
+// snapshot of the versioned settings. The first use of a session binds the
+// CURRENT profile; later calls return the binding even after the effective
+// profile changes — an active session is never silently re-versioned, and
+// it keeps running the rules it was bound to, not merely their name. An
+// empty session binds nothing (legacy path).
+// fp is ProfileFingerprint(current), which the caller already holds.
+func (m *SessionMemo) Bind(session, fp string, current *Profile) (string, *Profile) {
+	if m == nil || session == "" || fp == "" {
+		return "", nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if v, ok := m.binding[session]; ok {
-		return v
+	if b, ok := m.binding[session]; ok {
+		return b.version, b.prof
 	}
-	m.binding[session] = currentFingerprint
+	snap := snapshotProfile(current)
+	m.binding[session] = boundProfile{version: fp, prof: snap}
 	m.ops++
 	if m.ops%1024 == 0 {
 		m.evictBindingsLocked()
 	}
-	return currentFingerprint
+	return fp, snap
+}
+
+// snapshotProfile copies what ProfileFingerprint covers, so a later edit of
+// the caller's profile (or its stage options) cannot reach the binding.
+func snapshotProfile(p *Profile) *Profile {
+	q := *p
+	q.Stages = make([]Stage, len(p.Stages))
+	for i, st := range p.Stages {
+		q.Stages[i] = Stage{Engine: st.Engine, Options: cloneOptions(st.Options)}
+	}
+	return &q
+}
+
+func cloneOptions(v map[string]any) map[string]any {
+	if v == nil {
+		return nil
+	}
+	out := make(map[string]any, len(v))
+	for k, x := range v {
+		out[k] = cloneValue(x)
+	}
+	return out
+}
+
+func cloneValue(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		return cloneOptions(x)
+	case []any:
+		out := make([]any, len(x))
+		for i, e := range x {
+			out[i] = cloneValue(e)
+		}
+		return out
+	}
+	return v
 }
 
 // BoundFingerprint reports a session's binding without creating one.
@@ -214,8 +261,8 @@ func (m *SessionMemo) BoundFingerprint(session string) (string, bool) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	v, ok := m.binding[session]
-	return v, ok
+	b, ok := m.binding[session]
+	return b.version, ok
 }
 
 // evictBindingsLocked keeps the session->version map bounded: dropping a
@@ -409,7 +456,7 @@ func (m *SessionMemo) Clear() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.entries = map[string]*memoEntry{}
-	m.binding = map[string]string{}
+	m.binding = map[string]boundProfile{}
 	m.lru = list.New()
 	m.groups = map[string]*memoGroup{}
 	m.bytes = 0

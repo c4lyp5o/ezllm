@@ -472,3 +472,32 @@ func TestMemoEnforcesPerSessionAndByteBudgets(t *testing.T) {
 		t.Errorf("Sweep left %d idle entries (%d bytes)", memo.Len(), memo.Bytes())
 	}
 }
+
+// The bound version must be what RUNS, not only what is stamped: after the
+// operator edits the profile, a live session's new messages still go through
+// the stages it was bound to, so Result.ProfileVersion names the rules that
+// produced the shipped bytes. A new session runs the edited profile.
+func TestBoundSessionRunsItsBoundStages(t *testing.T) {
+	memo := NewSessionMemo(nil)
+	p := &Profile{Name: "edited", Enabled: true, ExemptLastTurn: true, Stages: []Stage{{Engine: "lite"}}}
+	_, first := ApplyWithSession([]byte(`{"messages":[{"role":"user","content":"hello"}]}`), p, nil, "s", memo)
+
+	p.Stages = []Stage{{Engine: "caveman", Options: map[string]any{"intensity": "lite"}}}
+	prose := strings.Repeat("It is important to note that a large number of files changed. ", 8)
+	body, _ := json.Marshal(map[string]any{"messages": []any{
+		map[string]any{"role": "user", "content": "hello"},
+		map[string]any{"role": "user", "content": prose},
+		map[string]any{"role": "user", "content": "continue"}}})
+	out, res := ApplyWithSession(body, p, nil, "s", memo)
+	if res.ProfileVersion != first.ProfileVersion {
+		t.Fatalf("live session re-versioned: %s -> %s", first.ProfileVersion, res.ProfileVersion)
+	}
+	if strings.Contains(string(out), "many files") {
+		t.Errorf("the edited profile's caveman ran in a session bound to %s (lite only)", res.ProfileVersion)
+	}
+
+	out, res = ApplyWithSession(body, p, nil, "fresh", memo)
+	if res.ProfileVersion != ProfileFingerprint(p) || !strings.Contains(string(out), "many files") {
+		t.Errorf("a new session should run and stamp the edited profile: version=%s applied=%v", res.ProfileVersion, res.Applied)
+	}
+}

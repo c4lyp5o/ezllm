@@ -183,6 +183,20 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 		return body, res
 	}
 
+	// A session runs the profile it was BOUND to (addendum #4): after an
+	// operator edit, a live session keeps its committed bytes AND the rules
+	// that produced them, so the stamped version is what actually ran. Only
+	// the versioned settings come from the binding; the per-request floor,
+	// CPU cap and shadow sampling stay current. Disabling the profile still
+	// takes effect at once (the check above runs first).
+	boundVersion, bound := memo.Bind(session, res.ProfileVersion, p)
+	if bound != nil {
+		q := *bound
+		q.MinAbsoluteTokens, q.MaxPipelineMS, q.Shadow = p.MinAbsoluteTokens, p.MaxPipelineMS, p.Shadow
+		p = &q
+		res.ProfileVersion = boundVersion
+	}
+
 	// The conversation list: chat and messages carry `messages`, the
 	// Responses API carries an `input` item array. Anything else (a bare
 	// string input, no list at all) passes through untouched with the profile
@@ -250,16 +264,12 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 	// conversation grows, and a message that shipped untouched stays
 	// untouched when the exempt window slides off it. Order is preserved:
 	// hit[] marks the replayed positions, cur carries the new work in order.
-	// The session binds ONCE to the effective profile's fingerprint
-	// (addendum #4): an operator editing the profile never silently
-	// re-versions a live session — its committed bytes keep replaying under
-	// the version it was first seen with, and only new sessions bind fresh.
-	profileVersion := memo.Bind(session, res.ProfileVersion)
-	if profileVersion != "" {
-		// The DECISION ran under the bound version (its committed forms are
-		// from it), so that is what the row must name.
-		res.ProfileVersion = profileVersion
-	}
+	// The session bound ONCE to the effective profile (addendum #4, see the
+	// Bind above): an operator editing the profile never silently
+	// re-versions a live session — its committed bytes keep replaying, and
+	// its new work runs, under the version it was first seen with; only new
+	// sessions bind fresh.
+	profileVersion := boundVersion // stamped on res above
 	useMemo := profileVersion != ""
 	hit := make([]bool, len(editable))
 	forms := make([]any, len(editable)) // committed forms for hit positions; nil = shipped as nothing

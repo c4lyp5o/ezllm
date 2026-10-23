@@ -659,8 +659,12 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			return
 		}
 		// Reserve the request's max output tokens against the key budget
-		// before dispatch; the defer releases the reservation when the
-		// handler returns (including streams and early errors).
+		// before dispatch. Once dispatched, the request's ledger row owns the
+		// reservation and the flush ends it in the transaction that counts
+		// the usage; releasing on return instead left a window where the
+		// spent budget was neither reserved nor counted. The defer covers
+		// every exit that never reaches dispatch.
+		var reservation int64
 		if s.db != nil {
 			if n := maxOutputTokens(doc.Map()); n > 0 {
 				if id, ok, rerr := s.db.ReserveClientBudget(r.Context(), client, n); rerr != nil {
@@ -674,7 +678,12 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 						fmt.Sprintf("token budget cannot cover max_tokens=%d for %q", n, client))
 					return
 				} else if id != 0 {
-					defer s.db.ReleaseClientBudget(context.Background(), id)
+					reservation = id
+					defer func() {
+						if reservation != 0 {
+							s.db.ReleaseClientBudget(context.Background(), reservation)
+						}
+					}()
 				}
 			}
 		}
@@ -734,7 +743,9 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			// v8 research capture: request shape + operator session key.
 			PrefixSHA: sh.PrefixSHA, MsgCount: sh.MsgCount, ToolCount: sh.ToolCount,
 			SessionID: sessionOf(r), ReqBytes: sh.ReqBytes,
+			ReservationID: reservation,
 		}
+		reservation = 0 // handed to the ledger row
 		attachCompressionMetrics(&call, compRes)
 		s.finishDispatch(w, r, call, routes, served, res, ferr)
 	}

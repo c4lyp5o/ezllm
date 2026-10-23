@@ -108,6 +108,11 @@ type Call struct {
 	SessionID string // operator grouping key from X-Ezllm-Session
 	ReqBytes  int    // exact body bytes posted upstream
 
+	// ReservationID is the client-budget reservation this row's usage
+	// replaces (not persisted). The flush deletes it in the transaction that
+	// counts the usage, so the budget is never both unreserved and uncounted.
+	ReservationID int64
+
 	// BlockPos is block_round_robin's per-dispatch tag: the 1-based position
 	// of THIS call inside its block (the "N requests finished" evidence).
 	// 0 = not counted (direct routes, non-block strategies).
@@ -291,6 +296,7 @@ func (d *DB) RecordCall(c Call) {
 	defer d.recMu.RUnlock()
 	if d.closed {
 		// The ledger loop has exited: queueing would lose the row silently.
+		// Its reservation stays to expire: the pools are closing.
 		droppedAfterClose.Add(1)
 		return
 	}
@@ -298,6 +304,11 @@ func (d *DB) RecordCall(c Call) {
 	case d.callCh <- ledgerItem{call: &cp}:
 	default:
 		droppedCalls.Add(1)
+		// No row will release it, so release here — off this goroutine,
+		// which must never wait on the database.
+		if cp.ReservationID != 0 {
+			go d.ReleaseClientBudget(context.Background(), cp.ReservationID)
+		}
 	}
 }
 
@@ -483,6 +494,17 @@ INSERT INTO calls (
 		)
 		if err != nil {
 			return fmt.Errorf("insert call: %w", err)
+		}
+	}
+
+	// Budget reservations end in the SAME transaction that counts their
+	// rows' usage. Outside the meter savepoint: a reservation must not
+	// outlive its committed row even when metering fails.
+	for _, c := range rows {
+		if c.ReservationID != 0 {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM client_budget_reservations WHERE id = ?`, c.ReservationID); err != nil {
+				return err
+			}
 		}
 	}
 

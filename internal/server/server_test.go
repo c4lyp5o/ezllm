@@ -39,11 +39,22 @@ func newHarness(t *testing.T, upstream http.HandlerFunc, opts ...func(*Options))
 // second listener; testing.TB lets the same wiring serve benchmarks.
 func newHarnessAt(tb testing.TB, up *httptest.Server, opts ...func(*Options)) *harness {
 	tb.Helper()
+	return newHarnessWithStore(tb, up, nil, opts...)
+}
+
+// newHarnessWithStore is newHarnessAt with a hook on the store options (a
+// test that must hold rows in the ledger queue stretches the batching).
+func newHarnessWithStore(tb testing.TB, up *httptest.Server, storeOpt func(*store.Options), opts ...func(*Options)) *harness {
+	tb.Helper()
 	dir := tb.TempDir()
-	db, err := store.Open(context.Background(), store.Options{
+	so := store.Options{
 		Path:      filepath.Join(dir, "t.sqlite"),
 		BatchSize: 4, BatchWait: 20 * time.Millisecond,
-	})
+	}
+	if storeOpt != nil {
+		storeOpt(&so)
+	}
+	db, err := store.Open(context.Background(), so)
 	if err != nil {
 		tb.Fatal(err)
 	}

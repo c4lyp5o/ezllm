@@ -166,7 +166,7 @@ func anthropicAssistantItems(content any) []responsesInputItem {
 	return out
 }
 
-// translateAnthropicToolChoice maps {type: auto|any|tool, name} onto the
+// translateAnthropicToolChoice maps {type: auto|none|any|tool, name} onto the
 // responses vocabulary (auto / required / named-function). Absent stays
 // absent; an unknown type falls back to "auto" rather than 400ing upstream.
 func translateAnthropicToolChoice(tc *AnthropicToolChoice) any {
@@ -174,6 +174,8 @@ func translateAnthropicToolChoice(tc *AnthropicToolChoice) any {
 		return nil
 	}
 	switch tc.Type {
+	case "none":
+		return "none"
 	case "any":
 		return "required"
 	case "tool":

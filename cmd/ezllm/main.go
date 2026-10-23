@@ -238,14 +238,10 @@ func run() error {
 	// on a load failure we log it and fall back to a permissive engine — the
 	// background ticker keeps retrying via Reload, so rules reappear once the
 	// store recovers.
-	ruleEngine, err := rules.NewEngine(
-		storeAdapter{db}, storeAdapter{db}, rules.SystemClock, 30*time.Second, true)
+	ruleEngine, err := rules.NewEngineRetrying(
+		storeAdapter{db}, storeAdapter{db}, rules.SystemClock, 30*time.Second)
 	if err != nil {
 		log.Warn("rules engine failed to load at boot; running unrestricted (ticker will retry)", "err", err)
-		ruleEngine, err = rules.NewEngine(emptyRuleSource{}, storeAdapter{db}, rules.SystemClock, 30*time.Second, true)
-		if err != nil {
-			return fmt.Errorf("rules engine: %w", err) // permissive engine failing = real bug
-		}
 	}
 	resolver = resolver.WithEligibility(ruleEngine.Eligible)
 	// Translation of anthropic requests onto openai-only hops. Opt-in at

@@ -79,6 +79,29 @@ type key struct {
 // autoRefresh is false) starts a background refresh goroutine. Production
 // passes autoRefresh=true; tests pass false and call Reload manually.
 func NewEngine(src RuleSource, usage UsageSource, now Clock, refreshEvery time.Duration, autoRefresh bool) (*Engine, error) {
+	e := newEngine(src, usage, now, refreshEvery)
+	if err := e.Reload(context.Background()); err != nil {
+		return nil, err
+	}
+	if autoRefresh {
+		e.start()
+	}
+	return e, nil
+}
+
+// NewEngineRetrying is NewEngine for boot: a failed initial load does not
+// fail construction. The engine starts with no rules (allow everything) and
+// the refresh ticker keeps retrying the SAME source, so rules come back once
+// the store recovers. The load error is returned alongside the engine for
+// logging; the engine is never nil.
+func NewEngineRetrying(src RuleSource, usage UsageSource, now Clock, refreshEvery time.Duration) (*Engine, error) {
+	e := newEngine(src, usage, now, refreshEvery)
+	err := e.Reload(context.Background())
+	e.start()
+	return e, err
+}
+
+func newEngine(src RuleSource, usage UsageSource, now Clock, refreshEvery time.Duration) *Engine {
 	if now == nil {
 		now = SystemClock
 	}
@@ -93,14 +116,12 @@ func NewEngine(src RuleSource, usage UsageSource, now Clock, refreshEvery time.D
 		stopCh:       make(chan struct{}),
 	}
 	e.rules.Store(map[key]*Rule{})
-	if err := e.Reload(context.Background()); err != nil {
-		return nil, err
-	}
-	if autoRefresh {
-		e.wg.Add(1)
-		go e.refreshLoop()
-	}
-	return e, nil
+	return e
+}
+
+func (e *Engine) start() {
+	e.wg.Add(1)
+	go e.refreshLoop()
 }
 
 // Reload republishes the rule set. Called at startup and after any admin

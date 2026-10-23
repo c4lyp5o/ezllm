@@ -18,6 +18,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"net"
@@ -52,6 +53,7 @@ type Fetcher interface {
 type TLSFetcher struct {
 	Timeout       time.Duration // total request timeout; 0 = none (ctx governs)
 	chromeHelloID utls.ClientHelloID
+	rootCAs       *x509.CertPool // nil = system roots; tests pin a local CA
 }
 
 // NewTLSFetcher builds the browser-impersonating fetcher.
@@ -89,10 +91,10 @@ func (f *TLSFetcher) Fetch(ctx context.Context, method, url string, body []byte,
 			uconn := utls.UClient(raw, &utls.Config{
 				ServerName: host,
 				MinVersion: tls.VersionTLS13,
-				// claude.ai sits behind Cloudflare; the browser does not pin
-				// the leaf either for this profile — validation is not the
-				// fingerprint's job.
-				InsecureSkipVerify: true,
+				// Chain and hostname verification stay on: the session cookie
+				// and every prompt ride this connection. The fingerprint only
+				// shapes the ClientHello; it never needs verification off.
+				RootCAs: f.rootCAs,
 			}, f.chromeHelloID)
 			if err := uconn.HandshakeContext(ctx); err != nil {
 				raw.Close()

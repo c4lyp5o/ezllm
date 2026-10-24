@@ -449,6 +449,18 @@ corrections section.
 - Lifetimes: `goBackground`/`StopBackground` (`internal/server/background.go`) own probes and
   refresh loops; shutdown drains handlers before the ledger closes.
 
+### v1.2.0 — reasoning vocabulary, model-access park, console logging ✅ (2026-10-24)
+- Reasoning effort is a per-model vocabulary: `provider.ParseReasoningRule` reads it out of the
+  refusal, `ReasoningRule.Clamp` maps a value onto it, `models.reasoning_vocab` /
+  `reasoning_required` (schema v29) keep it, and `proxy.prepareHopBody` applies it per hop
+  without re-encoding an accepted value. Design: `docs/reasoning-effort-design.md`.
+- `deniesModelAccess` (`internal/proxy/proxy.go`) parks a hop on a 401/403 whose body names model
+  access — body-matched, `hasAlternate`-gated, so a bare 403 still changes no state.
+- Console logging has a written contract: `docs/logging.md` (levels, what is never logged, the
+  measured cost of an argument built for a filtered line). `accessLog` carries `alias` and the
+  failover trail from `reqInfo`; refusals before dispatch are visible at `debug`;
+  `EZLLM_LOG_FORMAT=json` opts into one object per line.
+
 ## 5. Invariants to check while reading (review checklist)
 
 These are the "if it's broken here, the project failed" spots — each must be visibly true in code:

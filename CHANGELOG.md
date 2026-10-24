@@ -2,7 +2,7 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
 
-## Unreleased — reasoning-effort clamp, model-access park, fail-closed allowlist
+## 2026-10-24 — v1.2.0: reasoning-effort clamp, model-access park, logging
 
 - **Reasoning effort follows the model's own vocabulary** (schema v29). A 4xx
   that enumerates accepted `reasoning_effort` values, or says reasoning cannot

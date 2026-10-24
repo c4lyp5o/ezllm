@@ -45,6 +45,13 @@ Two conclusions, both measured:
 - **Scope is the top-level `reasoning_effort` string.** Anthropic's `thinking`
   block and a nested `reasoning.effort` (Responses) are different vocabularies;
   they are left untouched rather than approximated.
+- **A clamp is never silent.** It rewrites what the client asked for, so the
+  console records both values (`asked=none sent=minimal`) at Info, once per
+  changed hop, and a mandatory-reasoning drop is reported as a drop. An effort
+  the model already accepts logs nothing — the common path stays quiet. A
+  learned vocabulary is Info; a write that matched no catalog row (a combo hop,
+  a retired model) is Debug, because it is routine and otherwise unexplainable.
+  See `docs/logging.md`.
 
 ## Where it lives
 
@@ -57,7 +64,11 @@ Two conclusions, both measured:
 - `proxy.prepareHopBody` — clamps **before** the wire branches, so the native
   swap and every translation inherit it. A clamp invalidates the shared
   `jsonbody.BodyDoc` (it describes bytes no longer sent), so the native path
-  re-parses instead of splicing into the original.
+  re-parses instead of splicing into the original. It returns the
+  `*effortChange` it applied, so the dispatcher can report it without the clamp
+  helper doing I/O: the clamp stays pure and the log call sits in
+  `ForwardCandidatesDoc`, after the error branch (a hop skipped for an
+  untranslatable field never dialled, so it changed nothing on the wire).
 - `server.finishDispatch` — persists `Result.LearnedReasoning`, detached from
   the request context so a client that hung up still gets the lesson kept.
 

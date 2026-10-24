@@ -78,7 +78,9 @@ names the pre-fix call sites.)*
 
 ### M1 — skeleton + health ✅ (2026-10-05, verified)
 - `cmd/ezllm/main.go` `run` — flags (`-config`, `-addr`); console logging via
-  `internal/logx` (`EZLLM_LOG_LEVEL`, `EZLLM_LOG_COLOR`); first-boot dashboard setup
+  `internal/logx` (`EZLLM_LOG_LEVEL`, `EZLLM_LOG_COLOR`, `EZLLM_LOG_FORMAT`;
+  `announceLogging` states the effective level at boot, see `docs/logging.md`);
+  first-boot dashboard setup
   (`cmd/ezllm/setup.go`: env password or one-time setup code, env-only by design — it must
   work before config is read); addr precedence `-addr` > `EZLLM_ADDR` > config;
   `http.Server` (10s ReadHeaderTimeout, **no WriteTimeout on purpose** for SSE);

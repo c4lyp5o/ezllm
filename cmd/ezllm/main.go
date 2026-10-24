@@ -47,6 +47,21 @@ func main() {
 	}
 }
 
+// announceLogging states the level and format the process actually runs with.
+// A typo'd or ignored value is silent otherwise — the operator sees fewer lines
+// and cannot tell a quiet gateway from a switch that did not take.
+//
+// The key is log_level, not level: slog already emits "level" for the record
+// itself, and a second "level" is a duplicate JSON key whose value depends on
+// which parser reads it.
+func announceLogging(log *slog.Logger, level slog.Level, jsonFormat, color bool) {
+	format := "console"
+	if jsonFormat {
+		format = "json"
+	}
+	log.Info("console logging", "log_level", logx.LevelName(level), "format", format, "color", color)
+}
+
 func run() error {
 	// Subcommands run before flag parsing (they own the whole process).
 	if len(os.Args) > 1 {
@@ -70,11 +85,16 @@ func run() error {
 	rawLevel := os.Getenv("EZLLM_LOG_LEVEL")
 	level, levelOK := logx.ParseLevel(rawLevel)
 	color := logx.ColorEnabled(os.Getenv("EZLLM_LOG_COLOR"), os.Stdout)
-	log := slog.New(logx.NewHandler(os.Stdout, logx.Options{Level: level, Color: color}))
+	jsonFormat := logx.ParseFormat(os.Getenv("EZLLM_LOG_FORMAT"))
+	log := slog.New(logx.NewHandler(os.Stdout, logx.Options{Level: level, Color: color, JSON: jsonFormat}))
 	slog.SetDefault(log)
 	if !levelOK {
 		log.Warn("unknown EZLLM_LOG_LEVEL, using info", "value", rawLevel, "accepted", "debug|info|warn|error")
 	}
+	// Say what the console will actually do. A typo'd or ignored level is
+	// silent otherwise: the operator sees fewer lines and cannot tell whether
+	// the gateway is quiet or the switch did not take.
+	announceLogging(log, level, jsonFormat, color)
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {

@@ -179,6 +179,12 @@ func (s *Server) noteBudgetReached(client string, b store.ClientBudget) {
 	if _, seen := budgetNoted.LoadOrStore(key, true); seen {
 		return
 	}
+	// Once per client per window, on the same dedupe as the notification: a
+	// client that keeps retrying past its cap must not turn this into a log
+	// flood, but the first occurrence belongs at Info — it explains a stream of
+	// 429s that otherwise look like a gateway fault.
+	s.log.Info("client budget reached", "client", client,
+		"used", b.Used, "limit", b.Limit, "window", b.Window)
 	s.notify(store.NotificationInput{
 		Kind: store.NoteClientBudgetReached, Severity: "warn",
 		Title:    fmt.Sprintf("Token %q reached its %s budget", client, b.Window),

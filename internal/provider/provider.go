@@ -241,6 +241,19 @@ const (
 // record kind='none' rather than treating it as a failure.
 var ErrQuotaUnsupported = errors.New("provider: quota endpoint unsupported")
 
+// ErrCredentialRefused marks a credential the ADAPTER ITSELF refused before any
+// inference traffic — a session blob it cannot decode, or a token exchange the
+// provider rejected with 401/403. It is a verdict about the credential, not an
+// outage, and the key test's calibration reads it as such: an adapter that
+// must exchange the key before it can dial cannot be asked "does your endpoint
+// say no?" over the wire, because a bad key never reaches the wire. The refusal
+// IS the answer.
+//
+// Never wrap a transport error in this: a mint that never reached the provider
+// is an outage, and treating it as a refusal would turn an unreachable host
+// into a proven credential.
+var ErrCredentialRefused = errors.New("provider: credential refused")
+
 // Registry maps Kind -> Adapter.
 type Registry struct {
 	m map[Kind]Adapter

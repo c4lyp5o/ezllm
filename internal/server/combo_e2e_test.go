@@ -39,7 +39,7 @@ type twoUpstream struct {
 // newTwoUpstream builds the harness. badQuota makes the first upstream reject
 // chat completions with 429 while still serving a valid /models catalog — the
 // realistic "key works, quota spent" state that failover exists to survive.
-func newTwoUpstream(t *testing.T, badQuota bool) *twoUpstream {
+func newTwoUpstream(t *testing.T, badQuota bool, opts ...func(*Options)) *twoUpstream {
 	t.Helper()
 	tu := &twoUpstream{}
 
@@ -128,12 +128,18 @@ func newTwoUpstream(t *testing.T, badQuota bool) *twoUpstream {
 	// retry.retries cannot silently rewrite what "failover worked" means.
 	dispatcher := proxy.NewDispatcher(client, registry)
 	dispatcher.SetRetries(0)
-	s := New(Options{
+	serverOpts := Options{
 		Auth: db, Resolver: router.New(db),
 		Dispatcher: dispatcher,
 		DB:         db, MaxBodyMiB: 1,
 		Registry: registry, Tester: registration.NewTester(client, registry, db),
-	})
+	}
+	for _, o := range opts {
+		if o != nil {
+			o(&serverOpts)
+		}
+	}
+	s := New(serverOpts)
 	tu.handler = s.Handler()
 	tu.db = db
 	t.Cleanup(func() { db.Close(); tu.bad.Close(); tu.good.Close() })

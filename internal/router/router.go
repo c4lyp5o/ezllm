@@ -295,6 +295,10 @@ type wireDecision struct {
 	// refusePin carries a pin violation on the ACTUAL wire. Both paths fail
 	// hard on it — a pin is a refusal, never a skip (see checkPin).
 	refusePin error
+	// reasoning is what the model accepts for `reasoning_effort`, read from the
+	// SAME memoized row the pin and capability checks used. Zero = nothing
+	// known, and the proxy then sends the client's body untouched.
+	reasoning provider.ReasoningRule
 }
 
 // modelFactsCatalog is the optional one-row read of a model's pin and
@@ -346,6 +350,16 @@ func (f *hopFacts) loadRow() (bool, error) {
 	return true, f.rowErr
 }
 
+func (f *hopFacts) reasoning() provider.ReasoningRule {
+	ok, err := f.loadRow()
+	if !ok || err != nil {
+		// A catalog without the whole-row read, or a failed one, means "nothing
+		// known": the clamp must stay inert rather than guess.
+		return provider.ReasoningRule{}
+	}
+	return f.row.Reasoning
+}
+
 func (f *hopFacts) pin() (string, error) {
 	if ok, err := f.loadRow(); ok {
 		return f.row.Pin, err
@@ -393,6 +407,16 @@ func (f *hopFacts) supports(s provider.Surface) (*bool, error) {
 // cannot pass a pin that guards a different wire than the one it dials.
 func (r *Resolver) selectWire(ctx context.Context, acct *provider.Account, model, requested string, clientSurface provider.Surface) wireDecision {
 	f := r.factsFor(ctx, acct.ID, model)
+	dec := r.selectWireWith(ctx, acct, model, requested, clientSurface, f)
+	// The reasoning vocabulary comes from the row f already loaded: asking a
+	// second hopFacts would read the model row twice per hop for one answer.
+	dec.reasoning = f.reasoning()
+	return dec
+}
+
+// selectWireWith is the body of selectWire, given the memoized hop facts so the
+// caller can reuse the same row for its own questions.
+func (r *Resolver) selectWireWith(ctx context.Context, acct *provider.Account, model, requested string, clientSurface provider.Surface, f *hopFacts) wireDecision {
 	// 1. Curated responses-wire override.
 	if r.needsResponsesWire(clientSurface, acct.Namespace, model) {
 		rcap, rerr := f.supports(provider.SurfaceResponses)
@@ -632,6 +656,10 @@ func (r *Resolver) resolveCandidates(ctx context.Context, requested string, surf
 		// wire fix as a combo hop.
 		Translated:    dec.translated,
 		ResponsesWire: dec.responsesWire,
+		// What this model accepts for reasoning_effort, read from the same
+		// memoized row the wire decision used. Zero = nothing known, and the
+		// proxy sends the client's request untouched.
+		Reasoning: dec.reasoning,
 	}
 	if dec.wire != surface {
 		rt.WireSurface = dec.wire
@@ -790,6 +818,8 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 			ResponsesWire: dec.responsesWire,
 			// The per-hop block_round_robin hold (combo editor checkbox).
 			HoldUntilFailure: h.HoldUntilFailure != nil && *h.HoldUntilFailure,
+			// Learned from this model's own refusal; zero = untouched.
+			Reasoning: dec.reasoning,
 		}
 		if dec.wire != surface {
 			route.WireSurface = dec.wire

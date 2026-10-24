@@ -26,6 +26,14 @@ compression, a SQLite usage ledger, and an embedded operator dashboard
 
 - **Run the gate.** `make check` (or `make test-short` under a memory cap —
   see below). Never report a change as tested without it.
+- **NEVER run the test suite without `-short`.** Not `go test ./...`, not
+  `go test ./internal/server/`, not a single package, not "just to see". The
+  perf harnesses (`TestLatencyPercentiles`, `TestRetainedMemory`,
+  `TestSlowConsumer`) are not skipped by a package selector, peak ~4.21 GiB
+  RSS, and will OOM-kill or hang the shell — an agent hit this on 2026-10-23
+  and lost six minutes to a package run that `-short` finishes in 106 s.
+  Always `go test -short …` / `make test-short`. The only exception is the
+  deliberate `make perf`, which is a requested measurement, not a gate.
 - **Version discipline:** bump `internal/server/version.go` and the
   `Current:` line of `VERSION.md` in the same commit. `version_test.go`
   enforces the pairing; `GET /healthz` serves the constant.
@@ -101,3 +109,22 @@ docs/               design records + runbooks (decisions, not status)
 - JSON examples in docs/API.md come from live responses, not memory.
 - README = front door (what/how/where); CHANGELOG = milestone narrative;
   VERSION.md = dated version history; design docs = decisions.
+
+## Logging
+
+The contract, the level table and the measured cost are in
+[`docs/logging.md`](docs/logging.md). The rules that must not drift:
+
+- **stdout only.** No log file, no rotation, no third-party logger. The
+  platform captures stdout; the ledger is the durable record.
+- **`slog` evaluates arguments before it checks the level.** Any `Debug` whose
+  arguments cost more than a field read (a join, a sprintf, a slice walk) sits
+  behind `if log.Enabled(ctx, slog.LevelDebug)`. Measured: 17.7 ns filtered with
+  cheap args, 255.8 ns and 2 allocs with one computed arg.
+- **A new log line needs a test** that proves it appears at its level and is
+  filtered out at the level below. Bite it: remove the call, watch the test
+  fail.
+- **Never log a credential, body or prompt** — not even a hint. Auth refusals
+  name the path and the reason.
+- **The happy path allocates nothing for logging.** No per-request string is
+  built unless a line is actually emitted.

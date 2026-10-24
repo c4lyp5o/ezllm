@@ -1,17 +1,14 @@
 // ── ezllm admin API contract (docs/API.md, M3) — types + tiny fetch helper ──
 import { fmtMs, formatTokens } from './lib';
 
-const TOKEN_KEY = 'ezllm.admin.token';
 const UNLOCK_KEY = 'ezllm.admin.unlocked';
 
-export function getToken(): string | null {
-  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
-}
-export function setToken(t: string): void { try { localStorage.setItem(TOKEN_KEY, t); } catch { /* noop */ } }
+/** The session lives in an HttpOnly cookie that JS cannot read or clear; this
+ *  only drops the in-tab "unlocked" marker. */
 export function clearToken(): void {
-  try { localStorage.removeItem(TOKEN_KEY); } catch { /* noop */ }
   try { sessionStorage.removeItem(UNLOCK_KEY); } catch { /* noop */ }
 }
+
 /** Sign out: revoke the session server-side (the HttpOnly cookie cannot be
  *  cleared from JS), then forget the local markers. Best-effort on the
  *  network — local state is cleared either way. */
@@ -24,7 +21,6 @@ export async function logout(): Promise<void> {
 /** Cookie sessions are httpOnly, so JS cannot inspect them. This marker only
  *  says "this tab logged in"; the cookie is what actually authenticates. */
 export function isUnlocked(): boolean {
-  if (getToken()) return true;
   try { return sessionStorage.getItem(UNLOCK_KEY) === '1'; } catch { return false; }
 }
 export function markUnlocked(): void {
@@ -129,11 +125,9 @@ function parseOpenAIError(body: unknown, status: number): ApiErrorDetail {
   return { status, type: 'error', message: typeof o === 'object' && 'message' in o ? String(o.message) : `HTTP ${status}` };
 }
 
-/** Shared fetch: bearer token from localStorage, OpenAI-shaped error parsing, 401/403 → AuthError. */
+/** Shared fetch: session cookie, OpenAI-shaped error parsing, 401/403 → AuthError. */
 export async function apiFetch<T = unknown>(path: string, init: RequestInit = {}, body?: unknown): Promise<T> {
-  const token = getToken();
   const headers: Record<string, string> = {};
-  if (token) headers.Authorization = `Bearer ${token}`;
   if (body !== undefined) { headers['Content-Type'] = 'application/json'; }
   let payload: string | undefined;
   if (body !== undefined) payload = JSON.stringify(body);
@@ -180,13 +174,11 @@ export async function postKeyTestStream<T>(
   body: unknown,
   onStep: (s: TestStep) => void,
 ): Promise<T> {
-  const token = getToken();
   let res: Response;
   try {
     res = await fetch(path, {
       method: 'POST',
       headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         'Content-Type': 'application/json',
         Accept: 'application/x-ndjson',
       },
@@ -656,7 +648,6 @@ export type GenerateOutput =
 export async function generateService(
   surface: ServiceSurface, body: Record<string, unknown> | FormData, signal?: AbortSignal,
 ): Promise<GenerateOutput> {
-  const token = getToken();
   const multipart = body instanceof FormData;
   const started = performance.now();
   let res: Response;
@@ -665,7 +656,6 @@ export async function generateService(
       method: 'POST',
       headers: {
         ...(multipart ? {} : { 'Content-Type': 'application/json' }),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: multipart ? body : JSON.stringify(body),
       credentials: 'include',
@@ -834,14 +824,12 @@ export async function chatStream(
   onDelta: (text: string) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const token = getToken();
   let res: Response;
   try {
     res = await fetch('/admin/chat', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify({ model, messages, stream: true }),
       credentials: 'include',

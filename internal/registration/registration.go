@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"sort"
@@ -142,6 +143,10 @@ type Tester struct {
 	client   *http.Client
 	registry *provider.Registry
 	db       *store.DB // optional: admin probes are ledgered so spend is visible
+	// log reports the facts a probe LEARNS (a vocabulary, a wire), never every
+	// probe: a sweep over 40 models would otherwise be 40 lines of noise. Nil
+	// is safe — every use goes through logf, which falls back to slog.Default.
+	log *slog.Logger
 	// No per-test state lives here: the server shares one Tester across
 	// concurrent key tests and background sweeps, so the adapter for a test
 	// is resolved in Run/ProtocolSweep and passed explicitly into doProbe.
@@ -448,6 +453,16 @@ func (t *Tester) authGate(
 				Detail: "oracle public (200 for any key) — deferring to inference"})
 			res.authDeferred = true
 			return true // not a failure yet: inference may still gate
+		case errors.Is(calErr, provider.ErrCredentialRefused):
+			// The adapter could not turn a bogus credential into a request at
+			// all: it exchanges the key for a token before it dials, so a bad
+			// key dies while the request is being BUILT, with no status to
+			// read. That refusal is the discrimination itself — the real key
+			// just minted one and the oracle answered 200, so the endpoint is
+			// not public: it authenticates a step earlier than the wire.
+			res.addStep(Step{Step: StepAuth, OK: true,
+				Detail: "oracle 200; a bogus credential is refused before the wire"})
+			return true
 		case isAuthRejectFor(adapter, calStatus):
 			res.addStep(Step{Step: StepAuth, OK: true,
 				Detail: "oracle 200, calibration rejected the fake key"})
@@ -478,6 +493,19 @@ func (t *Tester) authGate(
 		res.authDeferred = true
 		return true
 
+	case errors.Is(authErr, provider.ErrCredentialRefused):
+		// The adapter refused the credential while PREPARING the request, so
+		// the oracle never dialled. Name the layer that said no instead of
+		// blaming reachability.
+		f := &Failure{
+			Step:    StepAuth,
+			Message: "the credential was refused before any request could be sent: " + shortErr(authErr),
+			Hint:    "This provider exchanges the key for a session token first. The stored credential is not in the shape it needs, or the exchange rejected it.",
+		}
+		res.Fail = f
+		res.addStep(Step{Step: StepAuth, OK: false, Detail: f.Message})
+		return false
+
 	case retryableStatus(status):
 		// Rate-limited or broken upstream after retries: honest failure with a
 		// retryable flag. Never claim a pass we did not prove.
@@ -504,6 +532,33 @@ func (t *Tester) authGate(
 		res.addStep(Step{Step: StepAuth, OK: false, Detail: f.Message})
 		return false
 	}
+}
+
+// isEndpointMismatch reports a refusal that NAMES the wire, i.e. the provider
+// is telling us this model lives on another endpoint rather than that the model
+// is gone. Copilot answers `/chat/completions` with `model "gpt-6.1-sol" is not
+// accessible via the /chat/completions endpoint` (code unsupported_api_for_model)
+// for every model of its that lives on /responses.
+//
+// Narrow on purpose: a retired model ("no longer available", "does not exist")
+// is NOT a wire mismatch, and retrying it on another wire would only spend a
+// call to learn the same thing.
+func isEndpointMismatch(status int, body []byte) bool {
+	if status < 400 || status >= 500 {
+		return false
+	}
+	text := strings.ToLower(string(body))
+	for _, marker := range []string{
+		"not accessible via",
+		"unsupported_api_for_model",
+		"not available on this endpoint",
+		"wrong endpoint",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // probeOutcome classifies ONE generation probe so the caller can decide
@@ -566,7 +621,8 @@ func (t *Tester) probeModel(
 		}
 	}
 
-	// Ledger admin probes: real token spend must never be invisible.
+	// Ledger admin probes: real token spend must never be invisible, and a
+	// failed probe must say WHY — a bare status cannot be diagnosed.
 	total := msAtLeastOne(elapsed)
 	t.ledgerCall(store.Call{
 		TS:      t.now().UTC(),
@@ -577,7 +633,48 @@ func (t *Tester) probeModel(
 		Model:   model,
 		Status:  status,
 		Totalms: &total,
+		Err:     probeErrNote(status, resp, err),
 	})
+
+	// A refusal that names its own reasoning vocabulary is a fact worth keeping:
+	// the very next request to this model gets clamped instead of refused. This
+	// is the same read the proxy does on live traffic, so a dashboard "test"
+	// teaches it before a single real request is spent.
+	if rule := provider.ParseReasoningRule(status, resp); rule.Known {
+		t.setReasoning(acct.ID, model, rule)
+	}
+
+	// A wire mismatch is a signpost, not a dead end: the provider just named the
+	// wire this model lives on. Probe the SAME model once on /responses. Two
+	// things come out of it when it answers — the key test gets a real
+	// generation instead of "unverified", and the capability matrix learns the
+	// wire (openai=0, responses=1), so routing stops needing a hand-written
+	// responses_models regex for every model that lives there.
+	if err == nil && surface == provider.SurfaceOpenAI && !isAuthStatus(status) && isEndpointMismatch(status, resp) {
+		verdict, authDead, rstatus := t.probeSurface(ctx, adapter, acct, key, model, provider.SurfaceResponses, pace)
+		switch {
+		case authDead:
+			f := &Failure{
+				Step:           StepInference,
+				Message:        fmt.Sprintf("%s refused the credential on /responses (%s)", model, httpStatusWord(rstatus)),
+				UpstreamStatus: rstatus,
+			}
+			res.addStep(Step{Step: StepInference, OK: false, Detail: f.Message})
+			return probeFailed, f
+		case verdict == provider.VerdictSupported:
+			no, yes := false, true
+			t.setProto(acct.ID, model, provider.SurfaceOpenAI, &no)
+			t.setProto(acct.ID, model, provider.SurfaceResponses, &yes)
+			// A wire change reroutes every future request for this model, so it
+			// is Info: the operator must be able to see that a 400 on chat did
+			// not fail the key but TAUGHT the router where the model lives.
+			t.logf().Info("model answers on /responses, not chat: wire recorded",
+				"account", acct.Namespace, "model", model)
+			res.addStep(Step{Step: StepInference, OK: true,
+				Detail: fmt.Sprintf("%s answers on /responses, not the chat endpoint — wire recorded", model)})
+			return probeOK, nil
+		}
+	}
 
 	switch {
 	case err == nil && status >= 200 && status < 300 && isJSON(resp):
@@ -735,13 +832,26 @@ func (t *Tester) calibrateCatalog(
 		func(c context.Context) ([]provider.ModelInfo, error) {
 			return adapter.ListModels(c, acct, fakeKey())
 		})
-	if cerr == nil || !isAuthRejectFor(adapter, statusOf(cerr)) {
+	if cerr == nil {
 		return false, cerr
 	}
-	res.authDeferred = false
-	res.addStep(Step{Step: StepAuth, OK: true,
-		Detail: "catalog rejected a fake key — the real key is proven"})
-	return true, cerr
+	switch {
+	case isAuthRejectFor(adapter, statusOf(cerr)):
+		res.authDeferred = false
+		res.addStep(Step{Step: StepAuth, OK: true,
+			Detail: "catalog rejected a fake key — the real key is proven"})
+		return true, cerr
+	case errors.Is(cerr, provider.ErrCredentialRefused):
+		// Same fact, one step earlier: this adapter exchanges the key for a
+		// token while building the request, so the fake key is refused before
+		// any wire traffic. The real key was just accepted by that same
+		// exchange, which is discrimination enough.
+		res.authDeferred = false
+		res.addStep(Step{Step: StepAuth, OK: true,
+			Detail: "catalog refused a fake credential before the wire — the real key is proven"})
+		return true, cerr
+	}
+	return false, cerr
 }
 
 // noteInferenceUnverified appends the OK follow-up to the failed inference
@@ -946,10 +1056,21 @@ func (t *Tester) probeSurface(
 		Model:   model,
 		Status:  status,
 		Totalms: &total,
+		Err:     probeErrNote(status, resp, err),
 	})
 	if err != nil {
 		// Transport failure → unknown, never "unsupported".
 		return provider.VerdictUnknown, false, status
+	}
+	if rule := provider.ParseReasoningRule(status, resp); rule.Known {
+		t.setReasoning(acct.ID, model, rule)
+		// An invalid effort is a request-value refusal, not evidence that
+		// the wire is unsupported. Keep prior capability evidence (including
+		// unknown) until a valid probe proves otherwise. Authentication
+		// failures still go through the normal classifier below.
+		if status == http.StatusBadRequest || status == http.StatusUnprocessableEntity {
+			return provider.VerdictUnknown, false, status
+		}
 	}
 	verdict, authDead := provider.ClassifyProbeResult(status, string(resp))
 	return verdict, authDead, status
@@ -1627,6 +1748,36 @@ func (t *Tester) ledgerCall(c store.Call) {
 	}
 }
 
+// maxProbeErrNote bounds the reason stored for a failed probe: the ledger is
+// not a request log, and the dashboard renders err inline.
+const maxProbeErrNote = 200
+
+// probeErrNote renders why a probe failed, in the same shape the proxy writes
+// into the ledger's err column — `upstream <status> [<cause>]: <words>` — so a
+// sweep failure is diagnosable from the dashboard.
+//
+// Before this, a failed probe recorded its status and nothing else: 183 of the
+// 189 error rows in the 48h window ending 2026-10-23 were probe failures with
+// an empty err, and a bare 400 cannot distinguish "the plan does not include
+// this model" from a malformed probe.
+func probeErrNote(status int, body []byte, err error) string {
+	if err != nil {
+		return "probe transport: " + err.Error()
+	}
+	if status < 400 {
+		return ""
+	}
+	cause := provider.ErrorCause(status, body)
+	words := strings.Join(strings.Fields(string(body)), " ")
+	if len(words) > maxProbeErrNote {
+		words = strings.ToValidUTF8(words[:maxProbeErrNote], "") + "…"
+	}
+	if words == "" {
+		return fmt.Sprintf("upstream %d [%s]: (empty body)", status, cause)
+	}
+	return fmt.Sprintf("upstream %d [%s]: %s", status, cause, words)
+}
+
 // setProto persists one (model, surface) verdict: true → 1, false → 0,
 // nil → NULL (untested — a first-class state the UI renders as "?").
 func (t *Tester) setProto(accountID int64, modelID string, s provider.Surface, supported *bool) {
@@ -1634,4 +1785,53 @@ func (t *Tester) setProto(accountID int64, modelID string, s provider.Surface, s
 		return
 	}
 	_ = t.db.SetModelProto(context.Background(), accountID, modelID, s, supported)
+}
+
+// setReasoning records a model's learned effort vocabulary. Best-effort like
+// setProto: a probe that taught us something must not fail on the write.
+//
+// The write reports whether it landed on a catalog row. It cannot create one
+// (see store.LearnModelReasoning), so "not kept" means the model is not in this
+// account's catalog — a combo hop, or one a refresh retired. That is a real
+// outcome an operator should be able to explain, and it is invisible to the
+// caller otherwise, so it is reported at Info as learned and at Debug as
+// dropped.
+func (t *Tester) setReasoning(accountID int64, modelID string, rule provider.ReasoningRule) {
+	if t.db == nil {
+		return
+	}
+	kept, err := t.db.LearnModelReasoning(context.Background(), accountID, modelID, rule)
+	if err != nil {
+		t.logf().Warn("could not record a model's reasoning vocabulary",
+			"account_id", accountID, "model", modelID, "err", err)
+		return
+	}
+	if kept && len(rule.Allowed) > 0 {
+		t.logf().Info("reasoning vocabulary learned", "account_id", accountID,
+			"model", modelID, "allowed", strings.Join(rule.Allowed, ","))
+	}
+	if !kept {
+		// Debug: this is normal for a combo hop whose model has no catalog row,
+		// and it would otherwise be one line per probe on a big sweep.
+		t.logf().Debug("reasoning vocabulary not kept: model is not in this account's catalog",
+			"account_id", accountID, "model", modelID)
+	}
+}
+
+// logf returns the tester's logger, defaulting like the dispatcher does so a
+// hand-built Tester (tests, dry runs) still logs rather than panics.
+func (t *Tester) logf() *slog.Logger {
+	if t.log != nil {
+		return t.log
+	}
+	return slog.Default()
+}
+
+// SetLogger installs the logger for facts a probe LEARNS (a reasoning
+// vocabulary, a wire). Nil restores the default, matching the dispatcher.
+func (t *Tester) SetLogger(l *slog.Logger) {
+	if l == nil {
+		l = slog.Default()
+	}
+	t.log = l
 }

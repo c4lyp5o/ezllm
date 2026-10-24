@@ -65,11 +65,13 @@ export const usageByClient = (days = 30) =>
     `/admin/usage?group_by=client&from=${encodeURIComponent(isoDaysAgo(days))}`,
   ).then((r) => r.groups ?? []);
 
-// Live check for the Connect page: asks the real /v1/models route with the key
-// being advertised, so "these routes work" is evidence rather than a claim.
-// Same-origin, so the admin token is a valid credential here too.
-export async function probeModels(key: string): Promise<V1Model[]> {
-  const res = await fetch('/v1/models', { headers: { Authorization: `Bearer ${key}` } });
+// Live check for the Connect page: the routable ids the gateway can serve right
+// now, read through the dashboard SESSION. /v1/models is the same list for a
+// bearer client, but the dashboard holds a cookie and never a key — this route
+// is that same handler behind the admin gate, so "these routes work" is
+// evidence again instead of a label.
+export async function routableModels(): Promise<V1Model[]> {
+  const res = await fetch('/admin/routable-models', { cache: 'no-store' });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const body = await res.json();
   return (body?.data ?? []) as V1Model[];

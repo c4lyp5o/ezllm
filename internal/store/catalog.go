@@ -326,11 +326,16 @@ func (d *DB) UpsertModels(ctx context.Context, accountID int64, models []provide
 			openai, anthropic, responses sql.NullInt64
 			testedAt                     sql.NullString
 			source, note                 sql.NullString
+			// The learned reasoning vocabulary is the same class of fact: the
+			// vendor catalog cannot supply it, so a wholesale refresh would
+			// reset the clamp to "unknown" on every boot.
+			vocab    sql.NullString
+			required sql.NullInt64
 		}
 		prior := map[string]modelState{}
 		prows, err := tx.QueryContext(ctx, `
 SELECT model_id, proto_pin, proto_openai, proto_anthropic, proto_responses, proto_tested_at,
-       proto_source, proto_note
+       proto_source, proto_note, reasoning_vocab, reasoning_required
 FROM models WHERE account_id=?`, accountID)
 		if err != nil {
 			return err
@@ -338,7 +343,7 @@ FROM models WHERE account_id=?`, accountID)
 		for prows.Next() {
 			var id string
 			var st modelState
-			if err := prows.Scan(&id, &st.pin, &st.openai, &st.anthropic, &st.responses, &st.testedAt, &st.source, &st.note); err != nil {
+			if err := prows.Scan(&id, &st.pin, &st.openai, &st.anthropic, &st.responses, &st.testedAt, &st.source, &st.note, &st.vocab, &st.required); err != nil {
 				prows.Close()
 				return err
 			}
@@ -373,9 +378,9 @@ ON CONFLICT(account_id, model_id) DO UPDATE SET
 			}
 			if _, err := tx.ExecContext(ctx, `
 UPDATE models SET proto_pin=?, proto_openai=?, proto_anthropic=?, proto_responses=?, proto_tested_at=?,
-       proto_source=?, proto_note=?
+       proto_source=?, proto_note=?, reasoning_vocab=?, reasoning_required=?
 WHERE account_id=? AND model_id=?`,
-				st.pin, st.openai, st.anthropic, st.responses, st.testedAt, st.source, st.note, accountID, m.ID); err != nil {
+				st.pin, st.openai, st.anthropic, st.responses, st.testedAt, st.source, st.note, st.vocab, st.required, accountID, m.ID); err != nil {
 				return err
 			}
 		}
@@ -429,6 +434,10 @@ type ModelFacts struct {
 	OpenAI    *bool
 	Anthropic *bool
 	Responses *bool
+	// Reasoning is what the model accepts for `reasoning_effort`, learned from
+	// its own refusal. The zero value is "nothing known", and every caller must
+	// treat that as "send the client's request untouched".
+	Reasoning provider.ReasoningRule
 }
 
 // Supports returns the probed capability for one wire (nil = untested).
@@ -470,17 +479,98 @@ func (d *DB) ModelFacts(ctx context.Context, accountID int64, modelID string) (M
 	var (
 		pin       sql.NullString
 		oa, an, r sql.NullInt64
+		vocab     sql.NullString
+		required  sql.NullInt64
 	)
 	err := d.r.QueryRowContext(ctx, `
-SELECT proto_pin, proto_openai, proto_anthropic, proto_responses
-FROM models WHERE account_id=? AND model_id=?`, accountID, modelID).Scan(&pin, &oa, &an, &r)
+SELECT proto_pin, proto_openai, proto_anthropic, proto_responses, reasoning_vocab, reasoning_required
+FROM models WHERE account_id=? AND model_id=?`, accountID, modelID).Scan(&pin, &oa, &an, &r, &vocab, &required)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ModelFacts{}, nil
 	}
 	if err != nil {
 		return ModelFacts{}, err
 	}
-	return ModelFacts{Pin: pin.String, OpenAI: nullBoolPtr(oa), Anthropic: nullBoolPtr(an), Responses: nullBoolPtr(r)}, nil
+	return ModelFacts{
+		Pin: pin.String, OpenAI: nullBoolPtr(oa), Anthropic: nullBoolPtr(an), Responses: nullBoolPtr(r),
+		Reasoning: reasoningRuleFrom(vocab, required),
+	}, nil
+}
+
+// reasoningRuleFrom rebuilds the stored rule. Keeping it here (and not at the
+// call sites) means the "unknown" representation lives in exactly one place.
+func reasoningRuleFrom(vocab sql.NullString, required sql.NullInt64) provider.ReasoningRule {
+	r := provider.ReasoningRule{}
+	if vocab.Valid && vocab.String != "" {
+		for _, p := range strings.Split(vocab.String, ",") {
+			if v := strings.TrimSpace(p); v != "" {
+				r.Allowed = append(r.Allowed, v)
+			}
+		}
+	}
+	// NULL means nobody has observed the model's behaviour; only a stored 1 or
+	// 0 is a fact.
+	if required.Valid {
+		r.Required = required.Int64 == 1
+		r.Known = true
+	}
+	if len(r.Allowed) > 0 {
+		r.Known = true
+	}
+	return r
+}
+
+// LearnModelReasoning records what a model accepts for `reasoning_effort`,
+// learned from its own refusal. It only ever writes a rule that carries
+// information — an empty struct is a no-op, so a mis-parse can never erase a
+// vocabulary that is already known.
+//
+// The two columns MERGE rather than replace: refusals arrive one fact at a
+// time ("cannot be disabled" names no list; "Supported values" names no
+// mandate), so a rule that says nothing about a column keeps what is stored,
+// and a learned mandate is never lowered back to "not required".
+func (d *DB) LearnModelReasoning(ctx context.Context, accountID int64, modelID string, r provider.ReasoningRule) (bool, error) {
+	if accountID == 0 || modelID == "" || !r.Known {
+		return false, nil
+	}
+	vocab := strings.Join(r.Allowed, ",")
+	var required any // NULL when the provider said nothing about it
+	if r.Required {
+		required = 1
+	} else if len(r.Allowed) > 0 {
+		// A named vocabulary without a mandate is a fact too: reasoning is not
+		// required, so record 0 rather than leaving the question open.
+		required = 0
+	}
+	// kept reports whether the rule landed on a catalog row. The caller needs
+	// it: a model that is not in the catalog (a combo hop, or one a refresh
+	// retired) silently absorbs the rule, and an operator wondering why a
+	// vocabulary "did not stick" has nothing else to go on.
+	var kept bool
+	err := d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		// UPDATE only, never INSERT: a row here is a catalog entry — it lists in
+		// /v1/models and passes the router's ModelExists check — so learning
+		// for a model the catalog does not hold (a combo hop, or one a refresh
+		// retired mid-request) would make it routable. Direct routes cannot
+		// reach an uncatalogued model anyway, and a refresh would drop the
+		// phantom row's vocabulary with it.
+		res, err := tx.ExecContext(ctx, `
+UPDATE models SET
+  reasoning_vocab=COALESCE(?1, reasoning_vocab),
+  reasoning_required=CASE
+    WHEN ?2 IS NULL OR reasoning_required = 1 THEN reasoning_required
+    ELSE ?2 END
+WHERE account_id=?3 AND model_id=?4`,
+			nullIfEmpty(vocab), required, accountID, modelID)
+		if err != nil {
+			return err
+		}
+		if n, aerr := res.RowsAffected(); aerr == nil {
+			kept = n > 0
+		}
+		return nil
+	})
+	return kept, err
 }
 
 // ModelSupportsSurface returns the recorded protocol capability for one

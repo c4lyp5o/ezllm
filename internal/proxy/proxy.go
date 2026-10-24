@@ -214,6 +214,10 @@ type Route struct {
 	// path, the pin target and the codec choice — Translated/ResponsesWire are
 	// the same fact in legacy form (see EffectiveWire). Empty = native.
 	WireSurface provider.Surface
+	// Reasoning is what THIS model accepts for `reasoning_effort`, learned from
+	// its own refusal. The zero value means nothing is known, and prepareHopBody
+	// then sends the client's request byte-identical.
+	Reasoning provider.ReasoningRule
 }
 
 // EffectiveWire is THE wire selector: what we speak upstream. Native routes
@@ -247,6 +251,17 @@ type Attempt struct {
 
 // Result carries what the ledger needs after a dispatch. Attempts lists every
 // candidate that did not serve, dispatch order; the serving hop is never listed.
+// LearnedReasoning is one fact a refusal taught us, tagged with the hop that
+// taught it: the vocabulary is per (account, model), never global.
+type LearnedReasoning struct {
+	AccountID int64
+	// Namespace names the account for the console line; the store keys on ID.
+	Namespace string
+	Model     string
+	Rule      provider.ReasoningRule
+}
+
+// Result reports the outcome of one request.
 type Result struct {
 	Status        int
 	Stream        bool
@@ -259,6 +274,11 @@ type Result struct {
 	Attempts      []Attempt
 	// DiscardedUsage contains source-accounted attempts that did not deliver.
 	DiscardedUsage []store.Call
+	// LearnedReasoning is what an upstream refusal taught us about a model's
+	// `reasoning_effort` vocabulary. The proxy has no store, so it reports the
+	// fact and the server persists it (store.LearnModelReasoning); nil means
+	// nothing was learned on this request.
+	LearnedReasoning *LearnedReasoning
 	// UpstreamAttempts is how many upstream calls this REQUEST actually made
 	// — same-hop retries and failover hops counted together (addendum #3).
 	// AttemptBudget is the configured request-wide budget; 0 means UNLIMITED
@@ -957,7 +977,28 @@ func isCloudflare(rt Route) bool {
 // value attempt dials and commit unwraps — so a hop can never be dialed on one
 // wire while its body is encoded for another. Translation REPLACES the swap:
 // it rewrites the whole wire shape, model included, so the paths never compose.
-func prepareHopBody(body []byte, rt Route, doc *jsonbody.BodyDoc) ([]byte, error) {
+func prepareHopBody(body []byte, rt Route, doc *jsonbody.BodyDoc) ([]byte, *effortChange, error) {
+	// What THIS model accepts for reasoning_effort, from its own refusal. It
+	// runs first so both the native swap and every translation below inherit
+	// the clamped value — the client asked for a level this model names
+	// differently, and the ledger's 400s are all this one field.
+	//
+	// A clamp invalidates the shared doc: it describes bytes we no longer send,
+	// so the native path re-parses the clamped body instead of splicing the
+	// model into the original. That costs one parse on the rare changed path,
+	// and only a byte scan on a body that does not carry the field.
+	var change *effortChange
+	if clamped, c := clampReasoning(body, rt.Reasoning); c != nil {
+		body, change, doc = clamped, c, nil
+	}
+	out, err := prepareHopBodyWire(body, rt, doc)
+	return out, change, err
+}
+
+// prepareHopBodyWire is prepareHopBody without the reasoning clamp: the model
+// swap and the wire translation. Split so the clamp can report what it changed
+// without threading a return value through every branch below.
+func prepareHopBodyWire(body []byte, rt Route, doc *jsonbody.BodyDoc) ([]byte, error) {
 	// Google AI Studio native audio (TTS/STT) needs a generateContent
 	// translation, not the OpenAI envelope. It runs before the multipart
 	// branch because the STT input IS multipart and must be unwrapped.
@@ -1169,6 +1210,12 @@ func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, bod
 	}
 	if isGeminiNativeAudio(rt, rt.Surface) {
 		if err := geminiAudioResponse(resp, dialSurface); err != nil {
+			// geminiAudioResponse closes the body itself once it has READ it;
+			// the read-failure path returns before that point, and this
+			// response is discarded (nil is returned to the caller), so the
+			// body would be abandoned unclosed. Close is idempotent on the
+			// paths that already closed it.
+			_ = resp.Body.Close()
 			return nil, Result{Stream: stream, Totalms: msPtr(time.Since(start)), Err: err.Error()}, time.Time{}, err
 		}
 	}
@@ -1555,6 +1602,39 @@ func refusesWire(resp *http.Response) bool {
 	return strings.Contains(s, "modelprotocolunsupported") || strings.Contains(s, "not supported for format")
 }
 
+// deniesModelAccess reports a 401/403 whose body says the HOP cannot reach the
+// model it was asked for ("Access to model denied", "model access denied",
+// "does not have access to"). Measured 2026-10-23: an account answered 403 for
+// one model, was re-dialled on all 12 remaining requests of its block, and
+// every one of them fell over to a hop whose prompt cache hit 27% instead of
+// 98% — the wasted dial is cheap, the cache it forces is not.
+//
+// Deliberately narrow: the words must name MODEL access. A 403 that describes
+// the request (a policy on the body, a bad tool shape) keeps its old treatment
+// — fail over, leave hop health alone — because parking a healthy hop on a
+// caller's mistake is worse than one wasted round trip. The park is keyed by
+// account+base+model (hopKey), so only that one model stops being dialled.
+func deniesModelAccess(resp *http.Response) bool {
+	if resp == nil || resp.Body == nil {
+		return false
+	}
+	if resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden {
+		return false
+	}
+	body := strings.ToLower(string(peekBody(resp, maxErrPeek)))
+	for _, phrase := range []string{
+		"access to model denied",
+		"model access denied",
+		"does not have access to",
+		"no access to model",
+	} {
+		if strings.Contains(body, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
 // peekBody reads up to n bytes of resp's body and puts them back in front of
 // the rest, so the response stays committable byte-for-byte. The restored
 // body still closes the ORIGINAL one: wrapping it in io.NopCloser (as both
@@ -1641,6 +1721,19 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 	// (never the winning attempt's stream).
 	led := &attemptLedger{limit: d.attemptBudget}
 	defer func() { result.DiscardedUsage = led.spent }()
+	// A parked fallback response is owned by this function until it is either
+	// committed or discarded. Every discard below clears the pointer, so this
+	// defer only ever fires on an EARLY return — the path where a later hop's
+	// body cannot be prepared and the loop leaves before reaching the code that
+	// would have closed it. Without it that return abandoned the parked body
+	// and its upstream connection.
+	discardFallback := func() {
+		if fallbackResp != nil {
+			discardAttempt(fallbackResp, *fallbackRoute, fallbackResult, fallbackStart, led)
+			fallbackResp = nil
+		}
+	}
+	defer discardFallback()
 	var sel time.Time
 	if d.dispatchDeadline > 0 {
 		sel = time.Now().Add(d.dispatchDeadline)
@@ -1686,7 +1779,7 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 		// is skipped like a cooling hop — no dial, no probe slot, no rate
 		// budget — and the combo moves on. The refusal is the answer only
 		// when no later hop serves.
-		swapped, err := prepareHopBody(body, rt, doc)
+		swapped, effort, err := prepareHopBody(body, rt, doc)
 		if err != nil {
 			var ufe *translate.UnsupportedFieldError
 			if !errors.As(err, &ufe) {
@@ -1702,6 +1795,22 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 				refusal = err
 			}
 			continue
+		}
+		// The clamp REWRITES what the client asked for, so it is never silent:
+		// a client that sets "none" and gets "minimal" must be able to find out
+		// why from the console. Info, because it only fires on a request that
+		// would otherwise have been refused — and the client's own level is
+		// still on the request, so this names the hop that forced the change.
+		if effort != nil {
+			if effort.Dropped {
+				d.log.Info("reasoning effort dropped for this hop",
+					"account", rt.Account.Namespace, "model", rt.Model,
+					"asked", effort.From, "why", "reasoning is mandatory for this model")
+			} else {
+				d.log.Info("reasoning effort clamped for this hop",
+					"account", rt.Account.Namespace, "model", rt.Model,
+					"asked", effort.From, "sent", effort.To)
+			}
 		}
 		allowed, probe := d.acquireHop(rt, time.Now())
 		if !allowed {
@@ -1754,6 +1863,19 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 		// A sole eligible endpoint is attempted normally below.
 		resp, res, start, err := d.retryAttempt(ctx, r, rt, swapped, doc, led, sel)
 		res.UpstreamAttempts, res.AttemptBudget = led.used, d.attemptBudget
+		// A refusal that names its own `reasoning_effort` vocabulary is worth
+		// keeping: the next request to this hop gets clamped instead of refused.
+		// Read here — before the failover/commit split — so a SOLE hop that
+		// answers 400 teaches us too, not only one that failed over. Only 4xx:
+		// a 200 body may be a stream, and peeking it would break the delivery.
+		if err == nil && resp != nil && res.Status >= 400 && res.Status < 500 && result.LearnedReasoning == nil {
+			if rule := provider.ParseReasoningRule(res.Status, peekBody(resp, maxErrPeek)); rule.Known {
+				result.LearnedReasoning = &LearnedReasoning{
+					AccountID: rt.Account.ID, Namespace: rt.Account.Namespace,
+					Model: rt.Model, Rule: rule,
+				}
+			}
+		}
 		// Park the hop only when there is somewhere else to go. len(routes) is
 		// the full candidate list the router resolved; a single entry means a
 		// cooled hop has no alternate, and classifyHop declines to park a rate
@@ -1780,6 +1902,14 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 					oc.cooldown = defaultHopCooldown
 				}
 			}
+			// A 403 that names model access is a fact about the hop, so park it
+			// exactly as a 429 would be: same model-scoped key, same TTL, same
+			// half-open probe. hasAlternate is required for the same reason as
+			// the 429 path — a sole hop is better retried than refused from the
+			// in-process park.
+			if err == nil && !oc.failed && len(routes) > 1 && deniesModelAccess(resp) {
+				oc = hopOutcome{failed: true, cooldown: defaultHopCooldown, reason: "model access denied"}
+			}
 			d.recordHop(rt, oc, time.Now())
 		}
 		if probe {
@@ -1803,10 +1933,7 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 				Namespace: rt.Account.Namespace, Model: rt.Model,
 				Note: note,
 			})
-			if fallbackResp != nil {
-				discardAttempt(fallbackResp, *fallbackRoute, fallbackResult, fallbackStart, led)
-				fallbackResp = nil
-			}
+			discardFallback()
 			fallbackTransportErr = err
 			continue
 		}
@@ -1831,22 +1958,20 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 			})
 		}
 		if failoverStatus(res.Status) || oc.failed {
-			if fallbackResp != nil {
-				discardAttempt(fallbackResp, *fallbackRoute, fallbackResult, fallbackStart, led)
-			}
+			discardFallback()
 			rtCopy, resCopy, startCopy := rt, res, start
 			fallbackRoute, fallbackResp, fallbackResult, fallbackStart = &rtCopy, resp, resCopy, startCopy
 			continue
 		}
-		if fallbackResp != nil {
-			discardAttempt(fallbackResp, *fallbackRoute, fallbackResult, fallbackStart, led)
-		}
+		discardFallback()
 		res2, err2 := d.commit(ctx, w, resp, rt, res, start)
 		// The committed route travels back with the result: the ledger must
 		// credit the hop that ACTUALLY served the call. Reporting routes[0]
 		// would attribute a failed hop's spend — and, worse, would make a
 		// per-account cap meter the wrong budget entirely.
 		res2.Attempts = attempts
+		// commit builds its own Result; the fact learned above rides with it.
+		res2.LearnedReasoning = result.LearnedReasoning
 		return rt, res2, err2
 	}
 
@@ -1858,24 +1983,31 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 			"status", fallbackResult.Status,
 			"account", fallbackRoute.Account.Namespace, "model", fallbackRoute.Model,
 			"alias", fallbackRoute.Alias)
-		result, err := d.commit(ctx, w, fallbackResp, *fallbackRoute, fallbackResult, fallbackStart)
-		result.Attempts = attempts
-		return *fallbackRoute, result, err
+		// commit owns the body from here (it closes it), so clear the parked
+		// pointer first: the deferred cleaner must not close it a second time.
+		toCommit := fallbackResp
+		fallbackResp = nil
+		res, err := d.commit(ctx, w, toCommit, *fallbackRoute, fallbackResult, fallbackStart)
+		res.Attempts = attempts
+		// commit builds its own Result, as on the in-loop path: a hop that
+		// taught us a vocabulary and then failed over must still report it.
+		res.LearnedReasoning = result.LearnedReasoning
+		return *fallbackRoute, res, err
 	}
 	if fallbackTransportErr != nil {
-		return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget}, fallbackTransportErr
+		return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget, LearnedReasoning: result.LearnedReasoning}, fallbackTransportErr
 	}
 	// Nothing was attempted at all because every hop was out of request budget.
 	// Report the refusal with the earliest release time so the client can wait
 	// instead of blind-retrying — and note that no upstream request was wasted
 	// discovering this.
 	if rateRefusal != nil {
-		return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget}, rateRefusal
+		return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget, LearnedReasoning: result.LearnedReasoning}, rateRefusal
 	}
 	if refusal != nil {
-		return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget}, refusal
+		return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget, LearnedReasoning: result.LearnedReasoning}, refusal
 	}
-	return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget}, errors.New("proxy: all combo endpoints are in five-minute cooldown")
+	return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget, LearnedReasoning: result.LearnedReasoning}, errors.New("proxy: all combo endpoints are in five-minute cooldown")
 }
 
 // streamCopy copies SSE upstream->client with a Flush per chunk, observing

@@ -11,9 +11,45 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.1.1**
+**Current: v1.2.0**
 
 ---
+
+## v1.2.0 — 2026-10-24
+
+Feature release; one additive schema step (v28 -> v29, `models.reasoning_vocab`
+and `models.reasoning_required`). The columns are additive and NULL means
+"nothing known", so an older binary reads a v29 database without harm — but a
+v29 binary refuses a v28 database, so roll back from a backup taken before the
+upgrade.
+
+- **Reasoning effort follows each model's own vocabulary.** A refusal that names
+  the accepted values (`Supported values: [minimal, low, ...]`), or says
+  reasoning cannot be disabled, is stored per account and model; later requests
+  are clamped down into it instead of being refused. A clamp never raises the
+  effort, and an effort the model already accepts goes out byte-identical. Both
+  the key test and live traffic teach it.
+- **A clamp is never silent.** The console records what the client asked for and
+  what the hop received, and a mandatory-reasoning drop is reported as a drop.
+- **A 403 that names model access parks that model on that hop** for the normal
+  cooldown when another candidate exists, so a block stops re-dialling it and
+  losing its prompt cache to a fallback.
+- **The per-key model allowlist fails closed** — a store error answers
+  `503 authorization_unavailable` rather than suspending the allowlist.
+- **Key tests:** a Copilot credential refused at token exchange counts as proven
+  discrimination; an endpoint-mismatch refusal is re-probed on `/responses` and
+  the wire recorded, so responses-only models stop failing a working key; a
+  failed probe writes its reason into the ledger `err`.
+- **Console logging:** the access line names the requested target and carries
+  the failover trail; auth refusals (missing, invalid, expired, wrong role) and
+  the client-budget refusal are visible; a learned vocabulary and a recorded
+  wire are reported; the boot states the effective level. `EZLLM_LOG_FORMAT=json`
+  for collectors. Contract and measured cost: `docs/logging.md`.
+- **Dashboard:** the Connect page reads `GET /admin/routable-models` through the
+  session, so its "supported" chips are live observations; the unused
+  localStorage bearer path is gone.
+- **Leaks:** a parked fallback response and a failed Gemini audio rewrite close
+  their upstream bodies on every exit.
 
 ## v1.1.1 — 2026-10-23
 

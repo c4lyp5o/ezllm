@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -26,7 +27,17 @@ func (s *Server) allowModel(w http.ResponseWriter, r *http.Request, client, requ
 		return false
 	}
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		slog.Warn("client allowlist check failed", "client", client, "err", err)
+		// An authorization control must not degrade silently. The budget check
+		// a few lines later in the same handler already refuses with a 503 when
+		// the store is unavailable; failing OPEN here was the inconsistent half
+		// of that pair, and it suspended the per-key allowlist for every
+		// request in the window. ErrNotFound stays an allow: no token row means
+		// the key carries no policy (the dashboard's own chat).
+		slog.Warn("client allowlist check failed; refusing the request",
+			"client", client, "err", err)
+		writeErr(w, http.StatusServiceUnavailable, "authorization_unavailable",
+			"cannot verify the model allowlist; retry shortly")
+		return false
 	}
 	return true
 }
@@ -42,6 +53,28 @@ func (s *Server) allowModel(w http.ResponseWriter, r *http.Request, client, requ
 // rate-limited combo answered 502 instead of 429, and hop health and the
 // failover trail were never recorded.
 func (s *Server) finishDispatch(w http.ResponseWriter, r *http.Request, call store.Call, routes []proxy.Route, served proxy.Route, res proxy.Result, ferr error) {
+	// What a refusal taught us about a model's reasoning vocabulary is kept for
+	// the NEXT request: the router will clamp into it before dialling, so the
+	// 400 that taught us is the last one this hop costs. Detached from the
+	// request context on purpose — the client may already be gone, and this
+	// write must still land.
+	if lr := res.LearnedReasoning; lr != nil && s.db != nil {
+		kept, err := s.db.LearnModelReasoning(context.WithoutCancel(r.Context()), lr.AccountID, lr.Model, lr.Rule)
+		switch {
+		case err != nil:
+			slog.Warn("could not record a model's reasoning vocabulary",
+				"account_id", lr.AccountID, "model", lr.Model, "err", err)
+		case kept:
+			// The next request to this hop is clamped instead of refused, so
+			// the console should show where that vocabulary came from.
+			s.log.Info("reasoning vocabulary learned from a refusal",
+				"account", lr.Namespace, "model", lr.Model,
+				"allowed", strings.Join(lr.Rule.Allowed, ","))
+		default:
+			s.log.Debug("reasoning vocabulary not kept: model is not in the catalog",
+				"account_id", lr.AccountID, "model", lr.Model)
+		}
+	}
 	if served.Alias == "" {
 		// Resolution or swap failed before any hop committed: the ledger
 		// still needs the REQUESTED target, or the row lands with no alias
@@ -76,6 +109,17 @@ func (s *Server) finishDispatch(w http.ResponseWriter, r *http.Request, call sto
 	if info := reqInfoOf(r); info != nil {
 		info.account = served.Account.Namespace
 		info.model = served.Model
+		info.surface = string(served.Surface)
+		// The requested target and the failover trail ride the SAME access
+		// line: a second "request" log would double every line on the box, and
+		// the trail is what turns "502" into "hop 1 was tried and refused".
+		// served.Alias is the resolved target (combo name, or ns/model for a
+		// direct route); call.Alias is not populated until later in this
+		// function, so read the served route here.
+		info.alias = served.Alias
+		if len(res.Attempts) > 0 {
+			info.trail = failoverTrail(res.Attempts)
+		}
 	}
 
 	status := res.Status

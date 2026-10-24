@@ -199,6 +199,8 @@ New install? Set `EZLLM_USAGE_TZ` to your time zone, and
 keep both subscription bridges off unless you run them (they are off in
 `compose.example.yml`).
 Every variable and its default: **[docs/environment.md](docs/environment.md)**.
+Logs go to stdout, one line per record — `docker logs ezllm`; what each level
+carries and why there is no log file: **[docs/logging.md](docs/logging.md)**.
 
 Provider credentials live in SQLite only, managed from the dashboard or the
 admin API — never in `config.yaml`. Upstream retry policy defaults to 3

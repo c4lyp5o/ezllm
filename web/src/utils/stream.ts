@@ -1,10 +1,10 @@
-// openCallStream reads /admin/stream (SSE) over fetch so the Authorization
-// header rides along — EventSource cannot set headers, and putting the admin
-// token in the query string would leak it into access logs.
+// openCallStream reads /admin/stream (SSE) over fetch, so the HttpOnly session
+// cookie rides along — EventSource cannot be told to authenticate, and putting
+// a credential in the query string would leak it into access logs.
 //
 // Returns a close() that stops the reader AND the reconnect loop.
 
-import { getToken, normalizeFeedRow, type FeedRow } from "./api";
+import { normalizeFeedRow, type FeedRow } from "./api";
 
 export interface CallEvent {
   ts: string;
@@ -73,7 +73,6 @@ export function openCallStream(handlers: Handlers): () => void {
       abort = new AbortController();
       try {
         const res = await fetch("/admin/stream", {
-          headers: { Authorization: `Bearer ${getToken() ?? ""}` },
           cache: "no-store",
           signal: abort.signal,
         });

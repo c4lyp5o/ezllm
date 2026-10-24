@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -91,11 +92,13 @@ func (a *gitHubCopilotAdapter) PrepareRequest(ctx context.Context, req *http.Req
 	}
 	session, err := githubcopilot.DecodeSession(key)
 	if err != nil {
-		return err
+		// Decided locally with no network involved: a blob the adapter cannot
+		// decode is a credential it cannot use.
+		return fmt.Errorf("%w: %v", ErrCredentialRefused, err)
 	}
 	ensured, err := a.ensureSession(ctx, acct.ID, session)
 	if err != nil {
-		return err
+		return credentialErr(err)
 	}
 
 	// Endpoint anchoring: Copilot's Anthropic shim lives at /v1/messages
@@ -174,6 +177,18 @@ func (a *gitHubCopilotAdapter) AuthOracle() AuthProbe {
 
 func (a *gitHubCopilotAdapter) CatalogIsPublic() bool { return false }
 
+// credentialErr marks a provider-side REFUSAL of the credential exchange.
+// Only a 401/403 from the mint becomes ErrCredentialRefused: a transport
+// failure (unreachable host, timeout) or a 5xx stays an ordinary error, so an
+// outage can never be mistaken for a proven credential by the key test.
+func credentialErr(err error) error {
+	var me *githubcopilot.MintError
+	if errors.As(err, &me) && (me.Status == http.StatusUnauthorized || me.Status == http.StatusForbidden) {
+		return fmt.Errorf("%w: %v", ErrCredentialRefused, err)
+	}
+	return err
+}
+
 // ReadQuota: Copilot exposes no quota endpoint on this surface — report
 // unsupported rather than inventing numbers.
 func (a *gitHubCopilotAdapter) ReadQuota(context.Context, Account, string) (Quota, error) {
@@ -184,11 +199,11 @@ func (a *gitHubCopilotAdapter) ReadQuota(context.Context, Account, string) (Quot
 func (a *gitHubCopilotAdapter) ListModels(ctx context.Context, acct Account, key string) ([]ModelInfo, error) {
 	session, err := githubcopilot.DecodeSession(key)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", ErrCredentialRefused, err)
 	}
 	ensured, err := a.ensureSession(ctx, acct.ID, session)
 	if err != nil {
-		return nil, err
+		return nil, credentialErr(err)
 	}
 	models, err := githubcopilot.ListModels(ctx, a.cfg, ensured.CopilotToken)
 	if err != nil {

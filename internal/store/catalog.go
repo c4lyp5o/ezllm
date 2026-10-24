@@ -529,9 +529,9 @@ func reasoningRuleFrom(vocab sql.NullString, required sql.NullInt64) provider.Re
 // time ("cannot be disabled" names no list; "Supported values" names no
 // mandate), so a rule that says nothing about a column keeps what is stored,
 // and a learned mandate is never lowered back to "not required".
-func (d *DB) LearnModelReasoning(ctx context.Context, accountID int64, modelID string, r provider.ReasoningRule) error {
+func (d *DB) LearnModelReasoning(ctx context.Context, accountID int64, modelID string, r provider.ReasoningRule) (bool, error) {
 	if accountID == 0 || modelID == "" || !r.Known {
-		return nil
+		return false, nil
 	}
 	vocab := strings.Join(r.Allowed, ",")
 	var required any // NULL when the provider said nothing about it
@@ -542,14 +542,19 @@ func (d *DB) LearnModelReasoning(ctx context.Context, accountID int64, modelID s
 		// required, so record 0 rather than leaving the question open.
 		required = 0
 	}
-	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+	// kept reports whether the rule landed on a catalog row. The caller needs
+	// it: a model that is not in the catalog (a combo hop, or one a refresh
+	// retired) silently absorbs the rule, and an operator wondering why a
+	// vocabulary "did not stick" has nothing else to go on.
+	var kept bool
+	err := d.WithWriteTx(ctx, func(tx *sql.Tx) error {
 		// UPDATE only, never INSERT: a row here is a catalog entry — it lists in
 		// /v1/models and passes the router's ModelExists check — so learning
 		// for a model the catalog does not hold (a combo hop, or one a refresh
 		// retired mid-request) would make it routable. Direct routes cannot
 		// reach an uncatalogued model anyway, and a refresh would drop the
 		// phantom row's vocabulary with it.
-		_, err := tx.ExecContext(ctx, `
+		res, err := tx.ExecContext(ctx, `
 UPDATE models SET
   reasoning_vocab=COALESCE(?1, reasoning_vocab),
   reasoning_required=CASE
@@ -557,8 +562,15 @@ UPDATE models SET
     ELSE ?2 END
 WHERE account_id=?3 AND model_id=?4`,
 			nullIfEmpty(vocab), required, accountID, modelID)
-		return err
+		if err != nil {
+			return err
+		}
+		if n, aerr := res.RowsAffected(); aerr == nil {
+			kept = n > 0
+		}
+		return nil
 	})
+	return kept, err
 }
 
 // ModelSupportsSurface returns the recorded protocol capability for one

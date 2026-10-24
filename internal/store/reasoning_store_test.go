@@ -33,7 +33,7 @@ func TestLearnModelReasoningRoundTrips(t *testing.T) {
 	aid := seedReasoningModel(t, db)
 
 	rule := provider.ReasoningRule{Allowed: []string{"off", "low", "high"}, Required: false, Known: true}
-	if err := db.LearnModelReasoning(ctx, aid, "m", rule); err != nil {
+	if _, err := db.LearnModelReasoning(ctx, aid, "m", rule); err != nil {
 		t.Fatalf("learn: %v", err)
 	}
 	got, err := db.ModelFacts(ctx, aid, "m")
@@ -62,7 +62,7 @@ func TestLearnModelReasoningRecordsAMandate(t *testing.T) {
 	defer db.Close()
 	aid := seedReasoningModel(t, db)
 
-	if err := db.LearnModelReasoning(ctx, aid, "m", provider.ReasoningRule{Required: true, Known: true}); err != nil {
+	if _, err := db.LearnModelReasoning(ctx, aid, "m", provider.ReasoningRule{Required: true, Known: true}); err != nil {
 		t.Fatalf("learn: %v", err)
 	}
 	got, _ := db.ModelFacts(ctx, aid, "m")
@@ -86,10 +86,10 @@ func TestLearnModelReasoningIgnoresAnEmptyRule(t *testing.T) {
 	defer db.Close()
 	aid := seedReasoningModel(t, db)
 
-	if err := db.LearnModelReasoning(ctx, aid, "m", provider.ReasoningRule{Allowed: []string{"low"}, Known: true}); err != nil {
+	if _, err := db.LearnModelReasoning(ctx, aid, "m", provider.ReasoningRule{Allowed: []string{"low"}, Known: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.LearnModelReasoning(ctx, aid, "m", provider.ReasoningRule{}); err != nil {
+	if _, err := db.LearnModelReasoning(ctx, aid, "m", provider.ReasoningRule{}); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := db.ModelFacts(ctx, aid, "m")
@@ -109,10 +109,10 @@ func TestLearnModelReasoningMergesFacts(t *testing.T) {
 	defer db.Close()
 	aid := seedReasoningModel(t, db)
 
-	if err := db.LearnModelReasoning(ctx, aid, "m", provider.ReasoningRule{Allowed: []string{"low", "medium", "high"}, Known: true}); err != nil {
+	if _, err := db.LearnModelReasoning(ctx, aid, "m", provider.ReasoningRule{Allowed: []string{"low", "medium", "high"}, Known: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.LearnModelReasoning(ctx, aid, "m", provider.ReasoningRule{Required: true, Known: true}); err != nil {
+	if _, err := db.LearnModelReasoning(ctx, aid, "m", provider.ReasoningRule{Required: true, Known: true}); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := db.ModelFacts(ctx, aid, "m")
@@ -120,7 +120,7 @@ func TestLearnModelReasoningMergesFacts(t *testing.T) {
 		t.Fatalf("after mandate: %+v, want the list kept and Required", got.Reasoning)
 	}
 
-	if err := db.LearnModelReasoning(ctx, aid, "m", provider.ReasoningRule{Allowed: []string{"low", "high"}, Known: true}); err != nil {
+	if _, err := db.LearnModelReasoning(ctx, aid, "m", provider.ReasoningRule{Allowed: []string{"low", "high"}, Known: true}); err != nil {
 		t.Fatal(err)
 	}
 	got, _ = db.ModelFacts(ctx, aid, "m")
@@ -140,7 +140,7 @@ func TestLearnModelReasoningNeverCreatesACatalogRow(t *testing.T) {
 	defer db.Close()
 	aid := seedReasoningModel(t, db)
 
-	if err := db.LearnModelReasoning(ctx, aid, "retired", provider.ReasoningRule{Allowed: []string{"low", "high"}, Known: true}); err != nil {
+	if _, err := db.LearnModelReasoning(ctx, aid, "retired", provider.ReasoningRule{Allowed: []string{"low", "high"}, Known: true}); err != nil {
 		t.Fatal(err)
 	}
 	exists, err := db.ModelExists(ctx, aid, "retired")
@@ -164,7 +164,7 @@ func TestCatalogRefreshPreservesTheLearnedVocabulary(t *testing.T) {
 	defer db.Close()
 	aid := seedReasoningModel(t, db)
 
-	if err := db.LearnModelReasoning(ctx, aid, "m", provider.ReasoningRule{Allowed: []string{"minimal", "low", "max"}, Known: true}); err != nil {
+	if _, err := db.LearnModelReasoning(ctx, aid, "m", provider.ReasoningRule{Allowed: []string{"minimal", "low", "max"}, Known: true}); err != nil {
 		t.Fatal(err)
 	}
 	// A refresh that lists the same model, plus a new one.
@@ -215,7 +215,7 @@ func TestReasoningColumnsMigrateFromThePreviousVersion(t *testing.T) {
 		t.Fatalf("catalog after migrate: %v (%d rows)", err, len(rows))
 	}
 	// ...and the ALTERed columns are usable.
-	if err := db.LearnModelReasoning(ctx, aid, "m", provider.ReasoningRule{Allowed: []string{"low", "high"}, Known: true}); err != nil {
+	if _, err := db.LearnModelReasoning(ctx, aid, "m", provider.ReasoningRule{Allowed: []string{"low", "high"}, Known: true}); err != nil {
 		t.Fatalf("learn after migrate: %v", err)
 	}
 	facts, _ := db.ModelFacts(ctx, aid, "m")

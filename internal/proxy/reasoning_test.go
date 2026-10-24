@@ -28,8 +28,8 @@ func sparkRule() provider.ReasoningRule {
 func TestClampReasoningRewritesOnlyTheEffort(t *testing.T) {
 	body := []byte(`{"model":"m","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"none","temperature":0.2}`)
 
-	got, changed := clampReasoning(body, sparkRule())
-	if !changed {
+	got, change := clampReasoning(body, sparkRule())
+	if change == nil {
 		t.Fatalf("'none' is not allowed, the body must be rewritten")
 	}
 	var doc map[string]any
@@ -55,8 +55,8 @@ func TestClampReasoningIsInertWithoutARule(t *testing.T) {
 		"zero":    {},
 		"no-rule": {Allowed: []string{"low", "high"}}, // not Known
 	} {
-		got, changed := clampReasoning(body, rule)
-		if changed {
+		got, change := clampReasoning(body, rule)
+		if change != nil {
 			t.Fatalf("%s: rule with no knowledge rewrote the body", name)
 		}
 		if &got[0] != &body[0] {
@@ -67,8 +67,8 @@ func TestClampReasoningIsInertWithoutARule(t *testing.T) {
 
 func TestClampReasoningDropsTheFieldWhenReasoningIsMandatory(t *testing.T) {
 	body := []byte(`{"model":"m","reasoning_effort":"none"}`)
-	got, changed := clampReasoning(body, provider.ReasoningRule{Required: true, Known: true})
-	if !changed {
+	got, change := clampReasoning(body, provider.ReasoningRule{Required: true, Known: true})
+	if change == nil {
 		t.Fatalf("a mandatory-reasoning model must not receive 'none'")
 	}
 	var doc map[string]any
@@ -82,7 +82,7 @@ func TestClampReasoningDropsTheFieldWhenReasoningIsMandatory(t *testing.T) {
 
 func TestClampReasoningLeavesAnAbsentFieldAbsent(t *testing.T) {
 	body := []byte(`{"model":"m","messages":[]}`)
-	if _, changed := clampReasoning(body, sparkRule()); changed {
+	if _, change := clampReasoning(body, sparkRule()); change != nil {
 		t.Fatalf("a body without reasoning_effort must not be rewritten")
 	}
 }
@@ -93,7 +93,7 @@ func TestClampReasoningDoesNotDecodeABodyWithoutTheField(t *testing.T) {
 	body := []byte(`{"model":"m","messages":[{"role":"user","content":"` + strings.Repeat("x", 64<<10) + `"}]}`)
 	rule := sparkRule()
 	allocs := testing.AllocsPerRun(20, func() {
-		if _, changed := clampReasoning(body, rule); changed {
+		if _, change := clampReasoning(body, rule); change != nil {
 			t.Fatal("a body without reasoning_effort must not be rewritten")
 		}
 	})
@@ -191,7 +191,7 @@ func TestClampReasoningLeadingWhitespace(t *testing.T) {
 			rt := testRoute("http://up.invalid", "real-model")
 			rt.Reasoning = sparkRule()
 			doc := jsonbody.Open(body)
-			got, err := prepareHopBody(body, rt, doc)
+			got, _, err := prepareHopBody(body, rt, doc)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -203,8 +203,8 @@ func TestClampReasoningLeadingWhitespace(t *testing.T) {
 				t.Fatalf("hop body = %s, want clamped effort and upstream model", got)
 			}
 			unchanged := []byte(prefix + `{"reasoning_effort":"low"}`)
-			out, changed := clampReasoning(unchanged, sparkRule())
-			if changed || &out[0] != &unchanged[0] {
+			out, change := clampReasoning(unchanged, sparkRule())
+			if change != nil || &out[0] != &unchanged[0] {
 				t.Fatal("allowed effort must preserve the original slice")
 			}
 		})

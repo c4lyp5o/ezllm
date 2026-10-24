@@ -59,9 +59,20 @@ func (s *Server) finishDispatch(w http.ResponseWriter, r *http.Request, call sto
 	// request context on purpose — the client may already be gone, and this
 	// write must still land.
 	if lr := res.LearnedReasoning; lr != nil && s.db != nil {
-		if err := s.db.LearnModelReasoning(context.WithoutCancel(r.Context()), lr.AccountID, lr.Model, lr.Rule); err != nil {
+		kept, err := s.db.LearnModelReasoning(context.WithoutCancel(r.Context()), lr.AccountID, lr.Model, lr.Rule)
+		switch {
+		case err != nil:
 			slog.Warn("could not record a model's reasoning vocabulary",
 				"account_id", lr.AccountID, "model", lr.Model, "err", err)
+		case kept:
+			// The next request to this hop is clamped instead of refused, so
+			// the console should show where that vocabulary came from.
+			s.log.Info("reasoning vocabulary learned from a refusal",
+				"account", lr.Namespace, "model", lr.Model,
+				"allowed", strings.Join(lr.Rule.Allowed, ","))
+		default:
+			s.log.Debug("reasoning vocabulary not kept: model is not in the catalog",
+				"account_id", lr.AccountID, "model", lr.Model)
 		}
 	}
 	if served.Alias == "" {

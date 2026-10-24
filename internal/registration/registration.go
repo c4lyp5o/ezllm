@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"sort"
@@ -142,6 +143,10 @@ type Tester struct {
 	client   *http.Client
 	registry *provider.Registry
 	db       *store.DB // optional: admin probes are ledgered so spend is visible
+	// log reports the facts a probe LEARNS (a vocabulary, a wire), never every
+	// probe: a sweep over 40 models would otherwise be 40 lines of noise. Nil
+	// is safe — every use goes through logf, which falls back to slog.Default.
+	log *slog.Logger
 	// No per-test state lives here: the server shares one Tester across
 	// concurrent key tests and background sweeps, so the adapter for a test
 	// is resolved in Run/ProtocolSweep and passed explicitly into doProbe.
@@ -660,6 +665,11 @@ func (t *Tester) probeModel(
 			no, yes := false, true
 			t.setProto(acct.ID, model, provider.SurfaceOpenAI, &no)
 			t.setProto(acct.ID, model, provider.SurfaceResponses, &yes)
+			// A wire change reroutes every future request for this model, so it
+			// is Info: the operator must be able to see that a 400 on chat did
+			// not fail the key but TAUGHT the router where the model lives.
+			t.logf().Info("model answers on /responses, not chat: wire recorded",
+				"account", acct.Namespace, "model", model)
 			res.addStep(Step{Step: StepInference, OK: true,
 				Detail: fmt.Sprintf("%s answers on /responses, not the chat endpoint — wire recorded", model)})
 			return probeOK, nil
@@ -1779,9 +1789,49 @@ func (t *Tester) setProto(accountID int64, modelID string, s provider.Surface, s
 
 // setReasoning records a model's learned effort vocabulary. Best-effort like
 // setProto: a probe that taught us something must not fail on the write.
+//
+// The write reports whether it landed on a catalog row. It cannot create one
+// (see store.LearnModelReasoning), so "not kept" means the model is not in this
+// account's catalog — a combo hop, or one a refresh retired. That is a real
+// outcome an operator should be able to explain, and it is invisible to the
+// caller otherwise, so it is reported at Info as learned and at Debug as
+// dropped.
 func (t *Tester) setReasoning(accountID int64, modelID string, rule provider.ReasoningRule) {
 	if t.db == nil {
 		return
 	}
-	_ = t.db.LearnModelReasoning(context.Background(), accountID, modelID, rule)
+	kept, err := t.db.LearnModelReasoning(context.Background(), accountID, modelID, rule)
+	if err != nil {
+		t.logf().Warn("could not record a model's reasoning vocabulary",
+			"account_id", accountID, "model", modelID, "err", err)
+		return
+	}
+	if kept && len(rule.Allowed) > 0 {
+		t.logf().Info("reasoning vocabulary learned", "account_id", accountID,
+			"model", modelID, "allowed", strings.Join(rule.Allowed, ","))
+	}
+	if !kept {
+		// Debug: this is normal for a combo hop whose model has no catalog row,
+		// and it would otherwise be one line per probe on a big sweep.
+		t.logf().Debug("reasoning vocabulary not kept: model is not in this account's catalog",
+			"account_id", accountID, "model", modelID)
+	}
+}
+
+// logf returns the tester's logger, defaulting like the dispatcher does so a
+// hand-built Tester (tests, dry runs) still logs rather than panics.
+func (t *Tester) logf() *slog.Logger {
+	if t.log != nil {
+		return t.log
+	}
+	return slog.Default()
+}
+
+// SetLogger installs the logger for facts a probe LEARNS (a reasoning
+// vocabulary, a wire). Nil restores the default, matching the dispatcher.
+func (t *Tester) SetLogger(l *slog.Logger) {
+	if l == nil {
+		l = slog.Default()
+	}
+	t.log = l
 }

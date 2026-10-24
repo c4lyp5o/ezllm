@@ -252,6 +252,7 @@ func New(opts Options) *Server {
 				IdleConnTimeout:     30 * time.Second,
 			},
 		}, opts.Registry, opts.DB)
+		s.tester.SetLogger(s.log)
 	}
 	// The gemini-web bridge: loopback-internal OpenAI-wire routes the
 	// gemini-web adapter rewrites hops to. Distinct patterns from the public

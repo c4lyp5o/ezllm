@@ -21,9 +21,9 @@ import (
 // read. A nested `reasoning.effort` (Responses) or anthropic's `thinking` block
 // is a different vocabulary and is not touched here — guessing would be worse
 // than leaving it alone.
-func clampReasoning(body []byte, rule provider.ReasoningRule) (out []byte, changed bool) {
+func clampReasoning(body []byte, rule provider.ReasoningRule) (out []byte, change *effortChange) {
 	if !rule.Known {
-		return body, false
+		return body, nil
 	}
 	// Once a model has a rule, EVERY request to it reaches this point, and most
 	// do not carry the field at all. Decoding a whole agent body to find that
@@ -32,31 +32,31 @@ func clampReasoning(body []byte, rule provider.ReasoningRule) (out []byte, chang
 	// spelled with JSON escapes is missed and goes out untouched, which is the
 	// no-rule behaviour.
 	if !bytes.Contains(body, []byte(`"reasoning_effort"`)) {
-		return body, false
+		return body, nil
 	}
 	// JSON permits whitespace before the opening object. Inspect a view while
 	// retaining the original slice for every unchanged request.
 	trimmed := bytes.TrimLeft(body, " \t\r\n")
 	if len(trimmed) == 0 || trimmed[0] != '{' {
-		return body, false
+		return body, nil
 	}
 	var doc map[string]any
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.UseNumber() // literals stay exact through the round trip
 	if err := dec.Decode(&doc); err != nil || doc == nil {
-		return body, false
+		return body, nil
 	}
 	raw, ok := doc["reasoning_effort"]
 	if !ok {
-		return body, false
+		return body, nil
 	}
 	want, ok := raw.(string)
 	if !ok {
-		return body, false // a non-string is the validator's problem, not ours
+		return body, nil // a non-string is the validator's problem, not ours
 	}
 	value, drop, changed := rule.Clamp(want)
 	if !changed {
-		return body, false
+		return body, nil
 	}
 	if drop {
 		delete(doc, "reasoning_effort")
@@ -65,7 +65,19 @@ func clampReasoning(body []byte, rule provider.ReasoningRule) (out []byte, chang
 	}
 	encoded, err := json.Marshal(doc)
 	if err != nil {
-		return body, false // never send a half-rewritten body
+		return body, nil // never send a half-rewritten body
 	}
-	return encoded, true
+	return encoded, &effortChange{From: want, To: value, Dropped: drop}
+}
+
+// effortChange is one clamp, for the operator: what the client asked for and
+// what this hop will actually receive. A clamp silently rewrites a client's
+// request, so it must never be invisible — but it is also rare (it only fires
+// when the request WOULD have been refused), so the line is Info, not Debug.
+type effortChange struct {
+	From string
+	To   string // "" when Dropped
+	// Dropped means the field was removed rather than rewritten: the provider
+	// requires reasoning and named no vocabulary, so its default applies.
+	Dropped bool
 }

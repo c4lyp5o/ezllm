@@ -255,6 +255,8 @@ type Attempt struct {
 // taught it: the vocabulary is per (account, model), never global.
 type LearnedReasoning struct {
 	AccountID int64
+	// Namespace names the account for the console line; the store keys on ID.
+	Namespace string
 	Model     string
 	Rule      provider.ReasoningRule
 }
@@ -975,7 +977,7 @@ func isCloudflare(rt Route) bool {
 // value attempt dials and commit unwraps — so a hop can never be dialed on one
 // wire while its body is encoded for another. Translation REPLACES the swap:
 // it rewrites the whole wire shape, model included, so the paths never compose.
-func prepareHopBody(body []byte, rt Route, doc *jsonbody.BodyDoc) ([]byte, error) {
+func prepareHopBody(body []byte, rt Route, doc *jsonbody.BodyDoc) ([]byte, *effortChange, error) {
 	// What THIS model accepts for reasoning_effort, from its own refusal. It
 	// runs first so both the native swap and every translation below inherit
 	// the clamped value — the client asked for a level this model names
@@ -985,10 +987,18 @@ func prepareHopBody(body []byte, rt Route, doc *jsonbody.BodyDoc) ([]byte, error
 	// so the native path re-parses the clamped body instead of splicing the
 	// model into the original. That costs one parse on the rare changed path,
 	// and only a byte scan on a body that does not carry the field.
-	if clamped, changed := clampReasoning(body, rt.Reasoning); changed {
-		body = clamped
-		doc = nil
+	var change *effortChange
+	if clamped, c := clampReasoning(body, rt.Reasoning); c != nil {
+		body, change, doc = clamped, c, nil
 	}
+	out, err := prepareHopBodyWire(body, rt, doc)
+	return out, change, err
+}
+
+// prepareHopBodyWire is prepareHopBody without the reasoning clamp: the model
+// swap and the wire translation. Split so the clamp can report what it changed
+// without threading a return value through every branch below.
+func prepareHopBodyWire(body []byte, rt Route, doc *jsonbody.BodyDoc) ([]byte, error) {
 	// Google AI Studio native audio (TTS/STT) needs a generateContent
 	// translation, not the OpenAI envelope. It runs before the multipart
 	// branch because the STT input IS multipart and must be unwrapped.
@@ -1769,7 +1779,7 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 		// is skipped like a cooling hop — no dial, no probe slot, no rate
 		// budget — and the combo moves on. The refusal is the answer only
 		// when no later hop serves.
-		swapped, err := prepareHopBody(body, rt, doc)
+		swapped, effort, err := prepareHopBody(body, rt, doc)
 		if err != nil {
 			var ufe *translate.UnsupportedFieldError
 			if !errors.As(err, &ufe) {
@@ -1785,6 +1795,22 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 				refusal = err
 			}
 			continue
+		}
+		// The clamp REWRITES what the client asked for, so it is never silent:
+		// a client that sets "none" and gets "minimal" must be able to find out
+		// why from the console. Info, because it only fires on a request that
+		// would otherwise have been refused — and the client's own level is
+		// still on the request, so this names the hop that forced the change.
+		if effort != nil {
+			if effort.Dropped {
+				d.log.Info("reasoning effort dropped for this hop",
+					"account", rt.Account.Namespace, "model", rt.Model,
+					"asked", effort.From, "why", "reasoning is mandatory for this model")
+			} else {
+				d.log.Info("reasoning effort clamped for this hop",
+					"account", rt.Account.Namespace, "model", rt.Model,
+					"asked", effort.From, "sent", effort.To)
+			}
 		}
 		allowed, probe := d.acquireHop(rt, time.Now())
 		if !allowed {
@@ -1845,7 +1871,8 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 		if err == nil && resp != nil && res.Status >= 400 && res.Status < 500 && result.LearnedReasoning == nil {
 			if rule := provider.ParseReasoningRule(res.Status, peekBody(resp, maxErrPeek)); rule.Known {
 				result.LearnedReasoning = &LearnedReasoning{
-					AccountID: rt.Account.ID, Model: rt.Model, Rule: rule,
+					AccountID: rt.Account.ID, Namespace: rt.Account.Namespace,
+					Model: rt.Model, Rule: rule,
 				}
 			}
 		}

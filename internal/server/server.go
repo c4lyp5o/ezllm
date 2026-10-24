@@ -48,6 +48,13 @@ type reqInfo struct {
 	account string
 	model   string
 	surface string
+	// alias is the REQUESTED target (a combo name, or ns/model for a direct
+	// route): the access line already names the hop that served, and the alias
+	// is what tells an operator whether a combo was involved at all.
+	alias string
+	// trail is the failover trail, filled only when some candidate did not
+	// serve. Empty on the happy path, so the common line keeps its shape.
+	trail string
 }
 
 // Auth resolves a bearer token to a client name + roles. Implemented by the store.
@@ -1221,6 +1228,13 @@ func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := bearerToken(r)
 		if token == "" {
+			// Debug, not Warn: a misconfigured client retrying in a loop must
+			// not be able to flood the console, and auth debugging is exactly
+			// when an operator turns debug on. This refusal reaches neither the
+			// ledger nor any other log today, so without this line it is
+			// invisible everywhere.
+			s.log.Debug("request refused", "why", "missing token",
+				"path", r.URL.Path, "remote", r.RemoteAddr)
 			writeErr(w, http.StatusUnauthorized, "invalid_request_error", "missing bearer token")
 			return
 		}
@@ -1238,7 +1252,14 @@ func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, token string) (*http.Request, bool) {
 	name, roles, err := s.auth.ClientByToken(r.Context(), token)
 	if err != nil || name == "" {
+		why := "invalid token"
 		if errors.Is(err, store.ErrTokenExpired) {
+			why = "expired token"
+		}
+		// The token itself is never logged — not even its hint. What an
+		// operator needs is "which path, which kind of refusal".
+		s.log.Debug("request refused", "why", why, "path", r.URL.Path)
+		if why == "expired token" {
 			writeErr(w, http.StatusUnauthorized, "invalid_request_error", "token expired")
 			return r, false
 		}
@@ -1393,12 +1414,21 @@ func (s *Server) accessLog(next http.Handler) http.Handler {
 			status = http.StatusOK
 		}
 		// Attribution only — never a token, key, or Authorization value.
-		s.log.Info("request",
+		attrs := []any{
 			"method", r.Method, "path", logPath(r.URL.Path), "status", status,
 			"ms", time.Since(start).Milliseconds(), "bytes", sw.bytes,
 			"client", info.client, "account", info.account,
 			"model", info.model, "surface", info.surface,
-		)
+		}
+		// Only when they exist: the common line keeps its exact shape, and a
+		// direct request pays nothing for a field it cannot use.
+		if info.alias != "" {
+			attrs = append(attrs, "alias", info.alias)
+		}
+		if info.trail != "" {
+			attrs = append(attrs, "trail", info.trail)
+		}
+		s.log.Info("request", attrs...)
 	})
 }
 

@@ -98,6 +98,17 @@ func (s *Server) finishDispatch(w http.ResponseWriter, r *http.Request, call sto
 	if info := reqInfoOf(r); info != nil {
 		info.account = served.Account.Namespace
 		info.model = served.Model
+		info.surface = string(served.Surface)
+		// The requested target and the failover trail ride the SAME access
+		// line: a second "request" log would double every line on the box, and
+		// the trail is what turns "502" into "hop 1 was tried and refused".
+		// served.Alias is the resolved target (combo name, or ns/model for a
+		// direct route); call.Alias is not populated until later in this
+		// function, so read the served route here.
+		info.alias = served.Alias
+		if len(res.Attempts) > 0 {
+			info.trail = failoverTrail(res.Attempts)
+		}
 	}
 
 	status := res.Status

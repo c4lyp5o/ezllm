@@ -60,6 +60,10 @@ func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 		}
 		s.authed(func(w http.ResponseWriter, r *http.Request) {
 			if !hasRole(r, "admin") {
+				// A client token without the admin role is a misconfiguration
+				// someone will hunt for; name the path, never the token.
+				s.log.Debug("admin refused", "why", "client token lacks the admin role",
+					"path", r.URL.Path)
 				writeErr(w, http.StatusForbidden, "forbidden", "admin role required")
 				return
 			}

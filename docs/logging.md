@@ -46,6 +46,23 @@ trail is the point — a hop that failed over writes no ledger row of its own, s
 collector. The console format is the default because the first tool is
 `docker logs`.
 
+### The boot line
+
+The process states what the log will do before anything else happens:
+
+```
+2026-10-24 09:07:07.823 INFO  console logging log_level=info format=console color=false
+```
+
+The key is `log_level`, not `level`: slog already emits `level` for the record
+itself, and in JSON a second `level` would be a duplicate key whose value
+depends on which parser reads it. The record's level is `INFO` while
+`log_level` is what `EZLLM_LOG_LEVEL` asked for — two different facts.
+
+The line is an `INFO` record, so at `warn`/`error` it is not shown. That is the
+levels doing their job, not a bug: at those levels the operator has already
+asked for silence about startup.
+
 ## Levels
 
 | level | what belongs there | volume |

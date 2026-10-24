@@ -70,11 +70,20 @@ func run() error {
 	rawLevel := os.Getenv("EZLLM_LOG_LEVEL")
 	level, levelOK := logx.ParseLevel(rawLevel)
 	color := logx.ColorEnabled(os.Getenv("EZLLM_LOG_COLOR"), os.Stdout)
-	log := slog.New(logx.NewHandler(os.Stdout, logx.Options{Level: level, Color: color}))
+	jsonFormat := logx.ParseFormat(os.Getenv("EZLLM_LOG_FORMAT"))
+	log := slog.New(logx.NewHandler(os.Stdout, logx.Options{Level: level, Color: color, JSON: jsonFormat}))
 	slog.SetDefault(log)
 	if !levelOK {
 		log.Warn("unknown EZLLM_LOG_LEVEL, using info", "value", rawLevel, "accepted", "debug|info|warn|error")
 	}
+	// Say what the console will actually do. A typo'd or ignored level is
+	// silent otherwise: the operator sees fewer lines and cannot tell whether
+	// the gateway is quiet or the switch did not take.
+	format := "console"
+	if jsonFormat {
+		format = "json"
+	}
+	log.Info("console logging", "level", logx.LevelName(level), "format", format, "color", color)
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {

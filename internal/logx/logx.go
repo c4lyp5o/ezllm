@@ -72,6 +72,32 @@ func ColorEnabled(mode string, f *os.File) bool {
 type Options struct {
 	Level slog.Leveler // nil = info
 	Color bool
+	// JSON emits one JSON object per line instead of the console format, for a
+	// collector that parses rather than a human that reads. The console format
+	// stays the default: the operator's first tool is `docker logs`, and a JSON
+	// line is worse there.
+	JSON bool
+}
+
+// ParseFormat reads EZLLM_LOG_FORMAT: "json", or anything else for the console
+// format (pretty is the default and the documented one).
+func ParseFormat(s string) bool {
+	return strings.EqualFold(strings.TrimSpace(s), "json")
+}
+
+// LevelName renders a level the way EZLLM_LOG_LEVEL spells it, so the boot line
+// echoes the operator's own vocabulary back at them.
+func LevelName(l slog.Level) string {
+	switch {
+	case l >= slog.LevelError:
+		return "error"
+	case l >= slog.LevelWarn:
+		return "warn"
+	case l >= slog.LevelInfo:
+		return "info"
+	default:
+		return "debug"
+	}
 }
 
 // NewHandler returns a handler writing the console format to w. Safe for
@@ -80,6 +106,9 @@ func NewHandler(w io.Writer, opts Options) slog.Handler {
 	lv := opts.Level
 	if lv == nil {
 		lv = slog.LevelInfo
+	}
+	if opts.JSON {
+		return slog.NewJSONHandler(w, &slog.HandlerOptions{Level: lv})
 	}
 	return &handler{mu: &sync.Mutex{}, w: w, level: lv, color: opts.Color}
 }

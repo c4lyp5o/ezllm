@@ -21,6 +21,16 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by rel
   their upstream bodies on every exit.
 - **Dashboard:** the Connect page reads `GET /admin/routable-models` through
   the session; the unused localStorage bearer path is gone.
+- **Console logging says what it knows.** The access line names the requested
+  target (`alias`) and carries the failover trail when a candidate did not
+  serve. Auth refusals — which reached neither the ledger nor any log — are
+  visible at `debug`, and the client-budget refusal logs once per window at
+  `info`. The reasoning clamp now reports both values (`none` → `minimal`) and a
+  mandatory-reasoning drop as a drop; a learned vocabulary and a wire recorded
+  after an endpoint-mismatch probe are reported at `info`. The boot states the
+  effective level. `EZLLM_LOG_FORMAT=json` for collectors; stdout only, no log
+  file. The contract and the measured cost are in
+  [docs/logging.md](docs/logging.md).
 
 ## 2026-10-23 — v1.1.1: audit fixes — security, compression sessions, dashboard, recovery, performance
 

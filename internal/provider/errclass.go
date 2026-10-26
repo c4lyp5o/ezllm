@@ -25,8 +25,9 @@ func ErrorCause(status int, body []byte) string {
 	case strings.Contains(s, "reasoning_effort are not supported") || strings.Contains(s, "use /v1/responses"):
 		return "chat_tools_unsupported" // tokenrouter gpt-6.1-sol class: tools+reasoning on chat
 	case strings.Contains(s, "modelprotocolunsupported") || strings.Contains(s, "not supported for format") ||
+		strings.Contains(s, "unsupported_api_for_model") ||
 		strings.Contains(s, "does not allow"):
-		return "protocol_unsupported" // surface capability gap (opencode-go, group-403s)
+		return "protocol_unsupported" // surface capability gap (opencode-go, Copilot /responses, group-403s)
 	case strings.Contains(s, "insufficient_quota") || strings.Contains(s, "credit_balance_exhausted") ||
 		strings.Contains(s, "billing") || strings.Contains(s, "quota"):
 		return "quota_exhausted"

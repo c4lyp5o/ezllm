@@ -142,14 +142,45 @@ var fallbackModelIDs = []string{
 	"grok-4.6", "grok-4.5", "oswe-vscode-prime",
 }
 
+// ResponsesUnsupported reports models Copilot does NOT serve on the
+// OpenAI-Responses wire: claude* is Anthropic-native (/v1/messages) and
+// gemini* rides /chat/completions, and both answer 400 unsupported_api_for_model
+// when dialed on /responses. This is per MODEL, not per account — Copilot's
+// endpoint support is a property of the model id, so the check is name-scoped
+// on purpose (a near-miss name simply is not guarded).
+func ResponsesUnsupported(model string) bool {
+	m := strings.ToLower(model)
+	return strings.Contains(m, "claude") || strings.Contains(m, "gemini")
+}
+
 // PrepareBody applies the per-model quirks that keep upstream from 400ing
-// (omniroute transformRequest, each ported with its reference):
+// (omniroute transformRequest, each ported with its reference), plus one rule
+// that is NOT a quirk:
+//   - system messages are DROPPED on every model. The client's persona and
+//     personal context (SOUL.md/MEMORY.md/USER.md) must never reach a web
+//     provider. This is deliberate output loss, not a workaround — a request
+//     whose only content was a system prompt leaves with an empty messages
+//     list, and the upstream's own "messages is empty" error is the honest
+//     answer for a call that carried nothing but persona.
 //   - tools capped at 128
 //   - gpt-5.4*: strip temperature ("Unsupported parameter")
 //   - assistant messages: strip reasoning_text/reasoning_content
 //   - claude models: none of the /chat/completions-only quirks apply
 func PrepareBody(model string, body map[string]any) {
 	m := strings.ToLower(model)
+	// Stealth, for every model on this provider: drop system messages so the
+	// persona and personal context never leave the box. Provider-scoped, not
+	// model-scoped — it is a privacy rule.
+	if msgs, ok := body["messages"].([]any); ok {
+		kept := make([]any, 0, len(msgs))
+		for _, mm := range msgs {
+			if msg, ok := mm.(map[string]any); ok && msg["role"] == "system" {
+				continue
+			}
+			kept = append(kept, mm)
+		}
+		body["messages"] = kept
+	}
 	if tools, ok := body["tools"].([]any); ok && len(tools) > 128 {
 		body["tools"] = tools[:128]
 	}

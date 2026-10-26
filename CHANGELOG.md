@@ -2,6 +2,49 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
 
+## 2026-10-27 — github-copilot wire guard and persona stealth (behaviour change)
+
+Resolves the three findings the previous pass deliberately left unfixed, because
+each one changes what the running gateway does. Two are behaviour changes on the
+github-copilot surface; one is a test that could never have failed.
+
+**Persona stealth now actually runs.** The "stealth" rule — drop `role:system`
+turns so the client's persona and personal context never reach a web provider —
+was documented but only reachable through `DoChat`, which was linker-dead. It
+was carried in the body-quirk pass (`PrepareBody`) the live adapter calls, so
+every github-copilot request now sheds its system turns. This is deliberate
+output loss: a request whose only content was a system prompt leaves with an
+empty `messages` list and the upstream's own "empty messages" error is the
+honest answer for a call that carried nothing but persona. If you want system
+prompts to reach Copilot, this is the change to revisit.
+
+**Gemini/Claude no longer dialled on /responses.** The old endpoint router
+carried a hard rule — claude* is Anthropic-native, gemini* rides
+/chat/completions, and neither answers on the Responses wire (400
+`unsupported_api_for_model`). That rule died with `endpointForModel`, so a
+claude/gemini request on the responses surface went out on a wire the model
+cannot speak and returned a mystery 400. The github-copilot adapter now refuses
+before dialling and types the refusal as `ErrWireUnsupported`, which the
+dispatcher treats as a hop fact: it fails over to a hop that can serve the wire
+instead of committing the refusal. Deliberately not parked — the park key is
+account+base+model and cannot tell wires apart, so parking would stop the same
+model being dialled on the wire it *does* serve.
+
+Copilot's own phrase `unsupported_api_for_model` was also added to the
+capability tables (`refusesWire`, `ErrorCause`), so an upstream answer of that
+shape is diagnosed as `protocol_unsupported` and fails over rather than being
+reported as a bad request. Defense in depth for model names the rule does not
+recognise.
+
+**A test that could not fail was replaced with one that can.**
+`TestCaptureShapeDocParityWithBytePath` compared `captureShape` against
+`captureShapeDoc(...)` — but `captureShape` *was* that delegation, so it
+compared a function with itself. It is replaced by `TestCaptureShapeDocContract`
+(assertions over the body corpus: what hashes, what does not) and
+`TestCaptureShapeDocHashScope` (the cache-reuse invariant: appending a turn must
+break the prefix hash, editing the system prompt must, swapping only the newest
+turn must not).
+
 ## 2026-10-27 — dead-code removal and comment correctness (no behaviour change)
 
 Maintenance pass with no functional change: removed 32 unreachable functions,

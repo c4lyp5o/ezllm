@@ -1606,7 +1606,9 @@ func refusesWire(resp *http.Response) bool {
 	// Only the vendor's explicit capability words count: ErrorCause also maps
 	// "does not allow" here, which on a 400 can just as well describe a body.
 	s := strings.ToLower(string(peekBody(resp, maxErrPeek)))
-	return strings.Contains(s, "modelprotocolunsupported") || strings.Contains(s, "not supported for format")
+	return strings.Contains(s, "modelprotocolunsupported") ||
+		strings.Contains(s, "not supported for format") ||
+		strings.Contains(s, "unsupported_api_for_model")
 }
 
 // deniesModelAccess reports a 401/403 whose body says the HOP cannot reach the
@@ -1934,12 +1936,21 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 			// The hop's outcome was recorded above; a second record here once
 			// cleared the park a transport error had just set.
 			note := "transport: " + err.Error()
-			if errors.Is(err, errAttemptBudgetSpent) {
+			switch {
+			case errors.Is(err, errAttemptBudgetSpent):
 				note = err.Error()
 				d.log.Info("hop not dialed", // Info, not Warn: nothing failed
 					"account", rt.Account.Namespace, "model", rt.Model,
 					"alias", rt.Alias, "why", err.Error())
-			} else {
+			case errors.Is(err, provider.ErrWireUnsupported):
+				// Not an outage and not a bad request: this hop cannot serve
+				// the wire this model needs. Say so in the trail instead of
+				// dressing it as a transport fault.
+				note = err.Error()
+				d.log.Info("hop cannot serve this wire, failing over",
+					"account", rt.Account.Namespace, "model", rt.Model,
+					"alias", rt.Alias, "why", err.Error())
+			default:
 				d.log.Warn("hop failed, failing over",
 					"account", rt.Account.Namespace, "model", rt.Model,
 					"alias", rt.Alias, "err", err.Error())

@@ -689,3 +689,32 @@ func TestProtocolUnsupportedSoleHopPassesThrough(t *testing.T) {
 		t.Errorf("client saw %d %s, want the upstream 400 verbatim", rec.Code, rec.Body.String())
 	}
 }
+
+// Copilot's own words for "this model has no such endpoint" are
+// unsupported_api_for_model — the same hop-fact class as ModelProtocolUnsupported
+// (measured: claude* and gemini* answer exactly this when dialled on
+// /responses). Without the phrase in the table this 400 read as a bad request
+// and was committed to the client instead of failing over.
+func TestUnsupportedAPIForModelFailsOver(t *testing.T) {
+	refused := upstub(t, http.StatusBadRequest,
+		`{"type":"error","error":{"type":"invalid_request_error","code":"unsupported_api_for_model","message":"unsupported_api_for_model"}}`)
+	defer refused.Close()
+	good := upstub(t, http.StatusOK, `{"ok":true,"model":"night"}`)
+	defer good.Close()
+
+	d := newDispatcher()
+	req, body := reqWithBody(`{"model":"day","messages":[]}`)
+	rec := httptest.NewRecorder()
+
+	routes := []Route{textRoute(refused.URL, "day"), textRoute(good.URL, "night")}
+	_, res, err := d.ForwardCandidates(context.Background(), rec, req, routes, body)
+	if err != nil {
+		t.Fatalf("ForwardCandidates: %v", err)
+	}
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "night") {
+		t.Fatalf("client saw %d %s, want hop 2's 200", rec.Code, rec.Body.String())
+	}
+	if len(res.Attempts) != 1 || !strings.Contains(res.Attempts[0].Note, "[protocol_unsupported]") {
+		t.Errorf("attempt trail = %+v, want the refused hop with its cause", res.Attempts)
+	}
+}

@@ -257,6 +257,18 @@ var ErrQuotaUnsupported = errors.New("provider: quota endpoint unsupported")
 // into a proven credential.
 var ErrCredentialRefused = errors.New("provider: credential refused")
 
+// ErrWireUnsupported marks a hop that cannot serve the REQUESTED WIRE for the
+// model it was asked for — the provider's own API shape, not the client's body
+// (Copilot serves claude* on /v1/messages and gemini* on /chat/completions, so
+// both 400 with unsupported_api_for_model when dialed on /responses). It is a
+// fact about the hop: an identical request on another hop can succeed, so the
+// dispatcher fails over rather than committing the refusal.
+//
+// Deliberately NOT a park on its own: the park key is account+base+model and
+// cannot tell wires apart, so parking would stop the same model being dialled
+// on the wire it DOES serve. The guard is cheap and repeats per request.
+var ErrWireUnsupported = errors.New("provider: wire unsupported for this model")
+
 // Registry maps Kind -> Adapter.
 type Registry struct {
 	m map[Kind]Adapter

@@ -50,6 +50,7 @@ function useNeighbourhood() {
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [usage, setUsage] = useState<UsageResp | null>(null);
   const [stale, setStale] = useState(false);
+  const [at, setAt] = useState<number | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -62,7 +63,7 @@ function useNeighbourhood() {
           get<UsageResp>(`/admin/usage?from=${encodeURIComponent(from)}&group_by=key`),
         ]);
         if (!alive) return;
-        setAccounts(a); setUsage(u); setStale(false);
+        setAccounts(a); setUsage(u); setStale(false); setAt(Date.now());
       } catch {
         if (alive) setStale(true); // keep the last scene; just say it is old
       }
@@ -75,7 +76,7 @@ function useNeighbourhood() {
   }, []);
 
   const houses = useMemo(() => (accounts ? buildHouses(accounts, usage) : null), [accounts, usage]);
-  return { houses, stale };
+  return { houses, stale, at };
 }
 
 // ── drawing ────────────────────────────────────────────────────────────────
@@ -101,10 +102,10 @@ function Window({ cx: x, cy: y, level, state, delay, still }: { cx: number; cy: 
     <g>
       {/* The glow is a scaled, faded disc — transform and opacity only. */}
       {(on || idle) && (
-        <motion.circle cx={x} cy={y} r={40} fill="url(#nb-glow)"
+        <motion.circle cx={x} cy={y} r={26} fill="url(#nb-glow)"
           style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
           initial={{ opacity: 0, scale: 0.3 }}
-          animate={{ opacity: on ? 0.25 + 0.75 * level : 0.12, scale: on ? 0.45 + 0.95 * level : 0.4 }}
+          animate={{ opacity: on ? 0.3 + 0.7 * level : 0.12, scale: on ? 0.55 + 0.75 * level : 0.45 }}
           transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }} />
       )}
       <rect x={x - 8} y={y - 8} width={16} height={16} rx={2} fill="var(--nb-window-off)" />
@@ -114,6 +115,11 @@ function Window({ cx: x, cy: y, level, state, delay, still }: { cx: number; cy: 
         transition={flicker
           ? { duration: 2.6 + delay, repeat: Infinity, ease: 'easeInOut', delay }
           : { duration: 0.9, ease: [0.22, 1, 0.36, 1] }} />
+      {state === 'off' && (
+        <g stroke="var(--nb-wall-line)" strokeWidth={2.2} strokeLinecap="round">
+          <line x1={x - 9} y1={y - 4} x2={x + 9} y2={y + 2} /><line x1={x - 9} y1={y + 3} x2={x + 9} y2={y - 3} />
+        </g>
+      )}
     </g>
   );
 }
@@ -149,7 +155,9 @@ function Storm({ x, y, still }: { x: number; y: number; still: boolean }) {
   );
 }
 
-function HouseSvg({ h, i, x0, still }: { h: House; i: number; x0: number; still: boolean }) {
+type Hover = { hot: string | null; setHot: (id: string | null) => void };
+
+function HouseSvg({ h, i, x0, still, hot, setHot }: { h: House; i: number; x0: number; still: boolean } & Hover) {
   const hh = hash(h.id);
   const bodyH = 46 + (hh % 3) * 8;
   const top = G - bodyH;
@@ -158,9 +166,18 @@ function HouseSvg({ h, i, x0, still }: { h: House; i: number; x0: number; still:
     + (h.state === 'off' ? ' · disabled' : '');
   return (
     <motion.g data-house={h.id} data-state={h.state} data-level={h.level.toFixed(2)} data-storm={h.storm ? '1' : '0'}
-      initial={still ? false : { opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.42, ease: [0.22, 1, 0.36, 1], delay: still ? 0 : i * 0.06 }}>
+      tabIndex={0} aria-label={title} className="cursor-default outline-none"
+      onMouseEnter={() => setHot(h.id)} onMouseLeave={() => setHot(null)}
+      onFocus={() => setHot(h.id)} onBlur={() => setHot(null)}
+      initial={still ? false : { opacity: 0, y: 10 }}
+      animate={{ opacity: h.state === 'off' ? 0.6 : 1, y: hot === h.id && !still ? -3 : 0 }}
+      transition={{ duration: 0.42, ease: [0.22, 1, 0.36, 1], delay: still || hot !== null ? 0 : i * 0.06 }}>
       <title>{title}</title>
+      {/* Light from a busy house spills onto the pavement. */}
+      {h.state === 'live' && (
+        <motion.ellipse cx={x0 + W / 2} cy={G + 2} rx={W * 0.7} ry={7} fill="url(#nb-glow)"
+          initial={{ opacity: 0 }} animate={{ opacity: 0.2 + 0.5 * h.level }} transition={{ duration: 0.9 }} />
+      )}
       <rect x={chimneyX - 5} y={top - 30} width={10} height={26} fill="var(--nb-wall)" stroke="var(--nb-wall-line)" />
       <rect x={x0} y={top} width={W} height={bodyH} fill="var(--nb-wall)" stroke="var(--nb-wall-line)" />
       <polygon points={`${x0 - 7},${top} ${x0 + W / 2},${top - 28} ${x0 + W + 7},${top}`} fill="var(--nb-roof)" />
@@ -171,12 +188,13 @@ function HouseSvg({ h, i, x0, still }: { h: House; i: number; x0: number; still:
         <Smoke x={chimneyX} y={top - 34} puffs={h.level > 0.66 ? 3 : h.level > 0.33 ? 2 : 1} still={still} />
       )}
       {h.storm && <Storm x={x0 + W / 2} y={top - 62} still={still} />}
-      <text x={x0 + W / 2} y={G + 20} textAnchor="middle" fontSize={12} fill="var(--color-dim)">{clip(h.label, 14)}</text>
+      <text x={x0 + W / 2} y={G + 22} textAnchor="middle" fontSize={12}
+        fill={hot === h.id ? 'var(--color-ink)' : 'var(--color-dim)'}>{clip(h.label, 14)}</text>
     </motion.g>
   );
 }
 
-function Street({ account, houses, still }: { account: string; houses: House[]; still: boolean }) {
+function Street({ account, houses, still, hot, setHot }: { account: string; houses: House[]; still: boolean } & Hover) {
   const width = PAD * 2 + houses.length * W + (houses.length - 1) * GAP;
   return (
     <figure className="m-0">
@@ -188,9 +206,12 @@ function Street({ account, houses, still }: { account: string; houses: House[]; 
             <stop offset="100%" stopColor="var(--nb-glow)" stopOpacity="0" />
           </radialGradient>
         </defs>
-        {houses.map((h, i) => <HouseSvg key={h.id} h={h} i={i} x0={PAD + i * (W + GAP)} still={still} />)}
+        <line x1={0} x2={width} y1={G + 0.5} y2={G + 0.5} stroke="var(--nb-wall-line)" strokeOpacity={0.6} />
+        {houses.map((h, i) => <HouseSvg key={h.id} h={h} i={i} x0={PAD + i * (W + GAP)} still={still} hot={hot} setHot={setHot} />)}
       </svg>
-      <figcaption className="relative px-1 pb-1.5 text-[12px] text-ink">{account}</figcaption>
+      <figcaption className="relative px-1 pb-2 text-[12px] text-ink">
+        {account} <span className="text-mute">· {houses.length} {houses.length === 1 ? 'house' : 'houses'}</span>
+      </figcaption>
     </figure>
   );
 }
@@ -203,6 +224,7 @@ const STARS: Array<[number, number, number]> = [
 function Sky({ still }: { still: boolean }) {
   return (
     <div className="pointer-events-none absolute inset-0" aria-hidden>
+      <span className="nbhd-moon absolute right-[7%] top-6 rounded-full" />
       {STARS.map(([x, y, d], i) => (
         <span key={i} className="nbhd-star absolute rounded-full"
           style={{ left: `${x}%`, top: `${y}%`, width: d, height: d, animationDelay: `${(i % 5) * 0.8}s`, animationPlayState: still ? 'paused' : 'running' }} />
@@ -211,10 +233,30 @@ function Sky({ still }: { still: boolean }) {
   );
 }
 
+function Glyph({ kind }: { kind: 'lit' | 'smoke' | 'storm' | 'off' }) {
+  return (
+    <svg width={18} height={18} viewBox="0 0 18 18" aria-hidden className="shrink-0">
+      {kind === 'lit' && <><circle cx={9} cy={9} r={8} fill="var(--nb-glow)" opacity={0.35} /><rect x={4} y={4} width={10} height={10} rx={1.5} fill="var(--nb-window-on)" /></>}
+      {kind === 'smoke' && <g fill="var(--nb-smoke)"><circle cx={6} cy={13} r={2.6} /><circle cx={9.5} cy={8.5} r={3.2} opacity={0.75} /><circle cx={13} cy={4} r={2.6} opacity={0.5} /></g>}
+      {kind === 'storm' && <><g fill="var(--nb-cloud)"><circle cx={6} cy={7} r={4} /><circle cx={11} cy={5.5} r={4.5} /><rect x={2} y={7} width={14} height={4} rx={2} /></g><g stroke="var(--color-bad)" strokeWidth={1.4} strokeLinecap="round"><line x1={6} y1={13} x2={5} y2={16} /><line x1={11} y1={13} x2={10} y2={16} /></g></>}
+      {kind === 'off' && <><rect x={4} y={4} width={10} height={10} rx={1.5} fill="var(--nb-window-off)" /><g stroke="var(--nb-wall-line)" strokeWidth={1.8} strokeLinecap="round"><line x1={3} y1={7} x2={15} y2={10} /><line x1={3} y1={11} x2={15} y2={8} /></g></>}
+    </svg>
+  );
+}
+
+function Ago({ at }: { at: number | null }) {
+  const [, tick] = useState(0);
+  useEffect(() => { const iv = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(iv); }, []);
+  if (at === null) return null;
+  const s = Math.max(0, Math.round((Date.now() - at) / 1000));
+  return <span className="tnum">updated {s < 2 ? 'just now' : `${s}s ago`}</span>;
+}
+
 // ── page ───────────────────────────────────────────────────────────────────
 export default function Neighbourhood() {
-  const { houses, stale } = useNeighbourhood();
+  const { houses, stale, at } = useNeighbourhood();
   const reduce = useReducedMotion() ?? false;
+  const [hot, setHot] = useState<string | null>(null);
 
   const streets = useMemo(() => {
     const m = new Map<string, House[]>();
@@ -236,18 +278,28 @@ export default function Neighbourhood() {
           <div className="absolute inset-x-0 bottom-0" style={{ height: GROUND_PX, background: 'var(--nb-ground)' }} aria-hidden />
           <div className="relative flex min-h-[300px] flex-wrap items-end gap-x-10 gap-y-2 px-4 pb-0 pt-10">
             {!houses && <p className="px-2 pb-10 text-[13px] text-dim">Lighting the lamps…</p>}
-            {streets.map(([account, hs]) => <Street key={account} account={account} houses={hs} still={reduce} />)}
+            {streets.map(([account, hs]) => <Street key={account} account={account} houses={hs} still={reduce} hot={hot} setHot={setHot} />)}
           </div>
         </div>
       </div>
-      <p className="text-[12px] text-mute">
-        Window brightness is tokens per minute over the last {WINDOW_MIN} minutes, scaled so the busiest key
-        (at least {formatTokens(MIN_REF_TPM)} a minute) is fully lit. Smoke means a key is serving traffic; a rain
-        cloud means a quarter or more of its recent calls failed; dark windows mean it is disabled.
-        {stale && <span className="ml-1 text-warn">Last update failed — showing the previous scene.</span>}
-      </p>
+      <div className="nbhd space-y-1.5">
+        <ul className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px] text-dim">
+          <li className="flex items-center gap-1.5"><Glyph kind="lit" />Brighter = more tokens per minute</li>
+          <li className="flex items-center gap-1.5"><Glyph kind="smoke" />Serving traffic</li>
+          <li className="flex items-center gap-1.5"><Glyph kind="storm" />A quarter or more of calls failed</li>
+          <li className="flex items-center gap-1.5"><Glyph kind="off" />Disabled</li>
+          <li className="ml-auto flex items-center gap-1.5 text-mute">
+            <span className={cx('size-1.5 rounded-full', stale ? 'bg-warn' : 'bg-ok')} />
+            <Ago at={at} /> · last {WINDOW_MIN} minutes
+          </li>
+        </ul>
+        <p className="text-[12px] text-mute">
+          The busiest key is fully lit, but full glow is never less than {formatTokens(MIN_REF_TPM)} tokens a minute.
+          {stale && <span className="ml-1 text-warn">Last update failed — showing the previous scene.</span>}
+        </p>
+      </div>
       {ranked.length > 0 && (
-        <div className="rounded-xl border border-line bg-surface">
+        <div className="nbhd rounded-xl border border-line bg-surface">
           <div className="px-4 pt-3"><SectionLabel>Every house, busiest first</SectionLabel></div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[640px] text-[13px]">
@@ -255,6 +307,7 @@ export default function Neighbourhood() {
                 <tr className="text-left text-[11px] text-mute">
                   <th className="px-4 py-2 font-medium">Key</th>
                   <th className="px-3 py-2 font-medium">Account</th>
+                  <th className="px-3 py-2 font-medium">Glow</th>
                   <th className="px-3 py-2 text-right font-medium">Tokens / min</th>
                   <th className="px-3 py-2 text-right font-medium">Calls</th>
                   <th className="px-3 py-2 text-right font-medium">Errors</th>
@@ -263,9 +316,15 @@ export default function Neighbourhood() {
               </thead>
               <tbody>
                 {ranked.map((h) => (
-                  <tr key={h.id} className="border-t border-line">
+                  <tr key={h.id} data-row={h.id} className={cx('border-t border-line transition-colors', hot === h.id && 'bg-hover')}
+                    onMouseEnter={() => setHot(h.id)} onMouseLeave={() => setHot(null)}>
                     <td className="px-4 py-2 font-mono">{h.label}</td>
                     <td className="px-3 py-2 text-dim">{h.account}</td>
+                    <td className="px-3 py-2">
+                      <div className="h-1.5 w-20 overflow-hidden rounded-full bg-line" title={`${Math.round(h.level * 100)}% of full glow`}>
+                        <div className="h-full rounded-full" style={{ width: `${Math.round(h.level * 100)}%`, background: 'var(--nb-window-on)' }} />
+                      </div>
+                    </td>
                     <td className="tnum px-3 py-2 text-right font-mono">{formatTokens(h.tpm)}</td>
                     <td className="tnum px-3 py-2 text-right font-mono">{formatTokens(h.calls)}</td>
                     <td className={cx('tnum px-3 py-2 text-right font-mono', h.errors > 0 && 'text-bad')}>{formatTokens(h.errors)}</td>

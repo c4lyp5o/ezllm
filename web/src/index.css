@@ -352,9 +352,13 @@ code, pre, kbd, samp, .font-code { font-family: var(--font-code); font-variant-n
   --nb-smoke: #7d8696;
   --nb-cloud: #566074;
   --nb-star: #dbe4f5;
+  --nb-moon: #f3e3b0;
 }
 .nbhd-sky {
   background: linear-gradient(to bottom, var(--nb-sky-top), var(--nb-sky-bottom));
 }
 @keyframes nbhd-twinkle { 0%, 100% { opacity: 0.25; } 50% { opacity: 0.9; } }
 .nbhd-star { background: var(--nb-star); animation: nbhd-twinkle 4s ease-in-out infinite; }
+/* Sun by day, crescent moon by night — the crescent is an inset shadow. */
+.nbhd-moon { width: 34px; height: 34px; background: var(--nb-moon); opacity: 0.85; }
+.dark .nbhd-moon { width: 30px; height: 30px; background: transparent; box-shadow: inset -9px 5px 0 0 var(--nb-moon); opacity: 1; }

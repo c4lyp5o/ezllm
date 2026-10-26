@@ -35,6 +35,10 @@ for (const reduced of [false, true]) {
   check("failing key draws a storm" + tag, by("2:4")?.storm === "1" && by("1:1")?.storm === "0", by("2:4"));
   const tableText = await page.locator("table").innerText();
   check("table prints exact figures, unabbreviated" + tag, tableText.includes("24,000") && !/\d(k|K)\b/.test(tableText), tableText.slice(0, 200));
+  await page.hover('[data-house="2:4"]');
+  check("hovering a house highlights its table row" + tag, await page.locator('tr[data-row="2:4"]').evaluate((e) => e.className.includes("bg-hover")));
+  check("disabled house has boarded windows" + tag, (await page.locator('[data-house="1:3"] line').count()) >= 4);
+  check("legend and refresh time shown" + tag, /updated/.test(await page.locator(".nbhd ul").innerText()));
   check("nav entry present" + tag, (await page.getByRole("link", { name: /Neighbourhood/ }).count()) > 0);
   if (!reduced) { await page.waitForTimeout(1800); await page.screenshot({ path: process.env.SHOT ?? "/tmp/neighbourhood.png" }); }
   await page.context().close();

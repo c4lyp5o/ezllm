@@ -8,7 +8,9 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by rel
   glow with its tokens per minute over the last five minutes; smoke means it is
   serving traffic, a rain cloud means a quarter or more of its recent calls
   failed, dark windows mean it is disabled. SVG and motion only, polled every
-  10 s, with an exact-figures table underneath. The one scene exempt from the
+  10 s, with an exact-figures table underneath (glow meter per key; hovering a
+  house highlights its row and back), a glyph legend, an "updated Ns ago"
+  indicator, boarded windows on disabled keys, and a sun/moon. The one scene exempt from the
   no-glow rule — fenced in `web/DESIGN.md`. The Playwright harness's unlock
   marker was updated to the session marker the app has used since v1.2.0.
 

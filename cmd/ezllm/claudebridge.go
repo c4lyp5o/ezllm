@@ -41,10 +41,15 @@ var claudeRequiredFlags = []string{
 	"--permission-mode", "--no-session-persistence", "--session-id", "--max-turns",
 }
 
+// bridgeReport tells the dashboard a bridge is running (server.EnableBridge):
+// its address, the secret its account key carries, and its boot status. Nil
+// in tests that only exercise the boot checks.
+type bridgeReport func(id, addr, token string, info map[string]any)
+
 // startClaudeBridge brings up the loopback surface when enabled. Enabling it
 // without a usable CLI or login is a boot failure, not a silent no-op: this
 // process would otherwise look healthy while every subscription request 503s.
-func startClaudeBridge(ctx context.Context, log *slog.Logger) (func(), error) {
+func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeReport) (func(), error) {
 	if !strings.EqualFold(strings.TrimSpace(os.Getenv(envBridge)), "on") {
 		return func() {}, nil
 	}
@@ -99,6 +104,9 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger) (func(), error) {
 		Limits: &claudebridge.Limits{},
 	}
 
+	if report != nil {
+		report("claude-sub", addr, token, srv.Info)
+	}
 	httpSrv := &http.Server{Addr: addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	go func() {
 		log.Info("claude bridge listening", "addr", addr, "cli", cliVersion, "login", login, "plan", plan, "flags_drift", drift)

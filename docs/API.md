@@ -250,7 +250,13 @@ Add `?force=true` to delete anyway (cascades: keys, models, quota rows).
 ```jsonc
 // request
 { "label":"primary", "api_key":"sk-…", "skip_inference":false }
+// or, for a running subscription bridge (see GET /admin/bridges): the server supplies the key
+{ "label":"primary", "bridge":"claude-sub" }
 ```
+`bridge` is refused with `api_key` or `device_handle` (`400`), for an unknown id (`400`), for an
+account that does not point at that bridge's kind and base URL (`400`), and while the bridge is
+not running (`409`, naming the variable that turns it on). A key test against a bridge base URL
+that is not running fails with a `hint` naming the same fix.
 Runs the **7-step test** (design: `2026-10-06_070000-ezllm-m3-keytest-design.md`).
 `201` response:
 ```jsonc
@@ -302,6 +308,25 @@ falls back to the real inference probe.
 `429`/`5xx`/timeout/transport failure → retried with exponential backoff, using the global
 `retry.retries` setting (default `3` retries after the initial attempt) per combo hop.
 Retries set to 3 after the initial call per hop. When all four total attempts fail retryably, combo failover advances and grants the next hop its own budget. For `n` hops, worst-case network attempts are `4n`; use `retry.retries: 0` to disable extra tries. **`400`/`401`/`403`/`404`/`422` → no retry.** Streaming responses are never replayed after bytes reach the client.
+
+### `GET /admin/bridges` → `200`
+The subscription bridges this build knows, whether each is running in this process, and how to
+turn one on. The dashboard's Add provider dialog reads it for the two bridge presets. `status` is
+the bridge's own boot report (its loopback `/status`), present only while it runs. The shared
+secret is never in the response — a key add names `bridge` instead.
+```jsonc
+[{"id":"claude-sub","label":"Claude subscription (bridge)","kind":"anthropic-compatible",
+  "base_url":"http://127.0.0.1:8790/v1","usage_convention":"anthropic","enabled":true,
+  "env":"EZLLM_CLAUDE_BRIDGE","runbook":"docs/claude-bridge-runbook.md",
+  "status":{"cli_version":"2.1.306 (Claude Code)","login":"logged-in","status":"ok","subscription":"Subscription: max"}},
+ {"id":"chatgpt-sub","label":"ChatGPT subscription (bridge)","kind":"openai-compatible",
+  "base_url":"http://127.0.0.1:8791/v1","usage_convention":"auto","enabled":false,
+  "env":"EZLLM_CODEX_BRIDGE","runbook":"docs/codex-bridge-runbook.md"}]
+```
+Refusal while a bridge is off (`POST …/keys` with `"bridge":"chatgpt-sub"`):
+```jsonc
+{"error":{"code":409,"message":"ChatGPT subscription (bridge) is not running: set EZLLM_CODEX_BRIDGE=on, mount the CLI and login, and restart (docs/codex-bridge-runbook.md)","type":"invalid_request_error"}}
+```
 
 ### `POST /admin/accounts/{id}/keys/{keyId}/retest` → `200` | `422`
 Same flow against an already-stored key. On failure the row is **kept** but marked

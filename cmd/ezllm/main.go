@@ -320,12 +320,12 @@ func run() error {
 
 	// Claude subscription surface: loopback-only, off unless EZLLM_CLAUDE_BRIDGE=on.
 	// Enabling it without a usable CLI or login fails the boot loudly.
-	stopClaude, err := startClaudeBridge(ctx, log)
+	stopClaude, err := startClaudeBridge(ctx, log, srv.EnableBridge)
 	if err != nil {
 		return err
 	}
 	// ChatGPT subscription surface: loopback-only, off unless EZLLM_CODEX_BRIDGE=on.
-	stopCodex, err := startCodexBridge(ctx, log)
+	stopCodex, err := startCodexBridge(ctx, log, srv.EnableBridge)
 	if err != nil {
 		stopClaude()
 		return err

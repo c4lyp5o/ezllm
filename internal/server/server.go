@@ -87,10 +87,13 @@ type Server struct {
 	shadowSampler func() bool
 	log           *slog.Logger
 	mux           *http.ServeMux
-	started       time.Time
-	maxBody       int64
-	web           fs.FS // dashboard source: embedded dist/ or EZLLM_WEB_DIR
-	corsOrigins   []string
+	// bridges lists the subscription bridges for the Add Provider dialog
+	// (bridges.go); main.go marks the running ones via EnableBridge.
+	bridges     *bridgeRegistry
+	started     time.Time
+	maxBody     int64
+	web         fs.FS // dashboard source: embedded dist/ or EZLLM_WEB_DIR
+	corsOrigins []string
 	// usageTZ is the default zone for group_by=day. Never nil: UTC unless
 	// EZLLM_USAGE_TZ says otherwise (validated at boot).
 	usageTZ *time.Location
@@ -229,7 +232,7 @@ func New(opts Options) *Server {
 		auth: opts.Auth, resolver: opts.Resolver, dispatcher: opts.Dispatcher,
 		db: opts.DB, registry: opts.Registry, tester: opts.Tester,
 		log: opts.Log, mux: http.NewServeMux(), rulesEngine: opts.Rules,
-		started: time.Now(), maxBody: maxBody,
+		started: time.Now(), maxBody: maxBody, bridges: newBridgeRegistry(),
 		web: webFS(), corsOrigins: opts.CORSOrigins,
 		usageTZ:           usageTZOrDefault(opts.UsageTZ),
 		compressionMinAbs: opts.CompressionMinAbs, compressionMaxMS: opts.CompressionMaxMS,
@@ -343,6 +346,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /admin/github/device", s.admin(s.handleGitHubDeviceStart))
 	s.mux.HandleFunc("GET /admin/github/device/{handle}", s.admin(s.handleGitHubDeviceStatus))
 	s.mux.HandleFunc("DELETE /admin/github/device/{handle}", s.admin(s.handleGitHubDeviceCancel))
+
+	// Subscription bridges: which exist, which are running, how to enable
+	// them (bridges.go). The shared secret is never in the response.
+	s.mux.HandleFunc("GET /admin/bridges", s.admin(s.handleBridges))
 
 	s.mux.HandleFunc("GET /admin/accounts", s.admin(s.handleAccounts))
 	s.mux.HandleFunc("POST /admin/accounts", s.admin(s.handleAccounts))

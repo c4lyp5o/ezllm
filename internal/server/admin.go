@@ -508,6 +508,10 @@ type keyTestRequest struct {
 	// caller names the pending flow instead of pasting its JSON. Refused
 	// together with APIKey — one credential source per add.
 	DeviceHandle string `json:"device_handle"`
+	// Bridge names a running subscription bridge (claude-sub, chatgpt-sub)
+	// whose shared secret the server fills in itself (bridges.go). Refused
+	// together with APIKey, and unless the account points at that bridge.
+	Bridge string `json:"bridge"`
 }
 
 // handleAddKey runs the key test and persists ONLY on success. A 422 stores
@@ -549,10 +553,24 @@ func (s *Server) handleAddKey(w http.ResponseWriter, r *http.Request) {
 		}
 		in.APIKey = session
 	}
+	if in.Bridge != "" {
+		if strings.TrimSpace(in.APIKey) != "" || in.DeviceHandle != "" {
+			writeErr(w, http.StatusBadRequest, "invalid_request_error",
+				"pass bridge alone — the server supplies its key")
+			return
+		}
+		token, code, msg := s.bridgeToken(in.Bridge, acc.Kind, acc.BaseURL)
+		if code != 0 {
+			writeErr(w, code, "invalid_request_error", msg)
+			return
+		}
+		in.APIKey = token
+	}
 
 	sink := s.keyTestSink(w, r)
 	test := s.runTest(r.Context(), acc, in, true, sink.step)
 	if !test.OK {
+		s.explainBridgeFailure(acc.BaseURL, test)
 		sink.fail(test)
 		return
 	}
@@ -613,6 +631,7 @@ func (s *Server) handleRetest(w http.ResponseWriter, r *http.Request) {
 	if !test.OK {
 		// Record the failure against the live row (last_test_ok=0) but keep it.
 		_ = s.db.MarkKeyTest(r.Context(), keyID, false, detail)
+		s.explainBridgeFailure(acc.BaseURL, test)
 		sink.fail(test)
 		return
 	}

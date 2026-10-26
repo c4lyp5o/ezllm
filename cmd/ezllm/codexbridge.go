@@ -77,7 +77,7 @@ func fileExists(path string) bool {
 // startCodexBridge brings up the loopback surface when enabled. A missing
 // binary or login, a lockdown flag the CLI refuses, or a protocol method it
 // dropped is a boot failure, never a silent degrade.
-func startCodexBridge(ctx context.Context, log *slog.Logger) (func(), error) {
+func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport) (func(), error) {
 	if !strings.EqualFold(strings.TrimSpace(os.Getenv(envCodexBridge)), "on") {
 		return func() {}, nil
 	}
@@ -162,6 +162,9 @@ func startCodexBridge(ctx context.Context, log *slog.Logger) (func(), error) {
 		Logf: log.Info,
 	}
 
+	if report != nil {
+		report("chatgpt-sub", addr, token, srv.Info)
+	}
 	httpSrv := &http.Server{Addr: addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	go func() {
 		if pre.Channel == codexbridge.ChannelExec {

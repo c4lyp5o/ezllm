@@ -2,11 +2,11 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { motion } from 'motion/react';
 import {
-  ApiError, AuthError, del, get, ghDeviceCancel, ghDeviceStart, ghDeviceStatus,
+  ApiError, AuthError, del, get, ghDeviceCancel, ghDeviceStart, ghDeviceStatus, listBridges,
   modelRules, patch, post, postKeyTestStream, setModelPin,
   setPrice, deletePrice, startSweep, stopSweep, sweepStatus,
   KINDS, STEPS,
-  type Account, type ApiErrorDetail, type GhDeviceStart, type GhDeviceStatus, type KeyRow, type ModelRule, type ModelRow, type Price, type SweepStatus, type TestResult, type TestStep,
+  type Account, type ApiErrorDetail, type Bridge, type GhDeviceStart, type GhDeviceStatus, type KeyRow, type ModelRule, type ModelRow, type Price, type SweepStatus, type TestResult, type TestStep,
 } from '../utils/api';
 import { Chip, ConfirmModal, Modal, SectionLabel, Skeleton, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls, relTime, Mono } from '../components/ui';
 import { Collapse, Stagger, StaggerItem } from '../components/motion';
@@ -122,7 +122,21 @@ const PROVIDER_PRESETS: Record<string, {
   // not fit one input row — the field must hold them before the backend can
   // extract what it needs.
   multilineKey?: boolean;
+  // bridge names an in-process subscription bridge (GET /admin/bridges). The
+  // server supplies its key, so the key field becomes a status panel.
+  bridge?: Bridge['id'];
+  usageConvention?: string;
 }> = {
+  // Subscription bridges: the official CLI behind a loopback surface. No key to
+  // paste — docs/claude-bridge-runbook.md, docs/codex-bridge-runbook.md.
+  'claude-sub': {
+    label: 'Claude subscription (bridge)', kind: 'anthropic-compatible', baseURL: 'http://127.0.0.1:8790/v1',
+    bridge: 'claude-sub', usageConvention: 'anthropic',
+  },
+  'chatgpt-sub': {
+    label: 'ChatGPT subscription (bridge)', kind: 'openai-compatible', baseURL: 'http://127.0.0.1:8791/v1',
+    bridge: 'chatgpt-sub',
+  },
   'claude-platform': { label: 'Claude Platform', kind: 'anthropic-compatible', baseURL: 'https://api.anthropic.com' },
   // Web-protocol providers: no API key — credentials are browser sessions.
   // The sentinel base URL is rewritten to the in-process bridge at request
@@ -350,6 +364,60 @@ function IconButton({ label, tone, busy, disabled, onClick, children }: {
   );
 }
 
+const REPO_DOCS = 'https://github.com/c4lyp5o/ezllm/blob/master/';
+const statusText = (v: unknown) => (typeof v === 'string' && v.trim() ? v : null);
+
+// BridgePanel stands in for the key field on a subscription preset: running →
+// what the bridge reported at boot and "no key needed"; off → the exact steps
+// that turn it on, with the runbook one click away.
+function BridgePanel({ bridge, loading }: { bridge: Bridge | null; loading: boolean }) {
+  if (loading) return <div className="flex items-center gap-2 text-[13px] text-mute"><Spinner /> Checking the bridge…</div>;
+  if (!bridge) return null;
+  const runbook = (
+    <a className="text-ink underline underline-offset-2" href={REPO_DOCS + bridge.runbook} target="_blank" rel="noreferrer">
+      {bridge.runbook}
+    </a>
+  );
+  if (bridge.enabled) {
+    const s = bridge.status ?? {};
+    const facts = ([
+      ['CLI', statusText(s.cli_version)],
+      ['Login', statusText(s.login)],
+      ['Plan', statusText(s.subscription)],
+      ['Client tools', statusText(s.client_tools)],
+    ] as Array<[string, string | null]>).filter((f): f is [string, string] => f[1] !== null);
+    const login = statusText(s.login);
+    const loggedOut = login !== null && !/logged.in/i.test(login);
+    return (
+      <div className="space-y-2 rounded-lg border border-ok/40 bg-ok-dim/40 px-4 py-3">
+        <p className="flex flex-wrap items-center gap-2 text-[13px] text-ok">
+          <span className="size-1.5 rounded-full bg-ok" /> Bridge running at <Mono>{bridge.base_url}</Mono> — no key needed
+        </p>
+        {facts.length > 0 && (
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 text-[12px]">
+            {facts.map(([k, v]) => (
+              <div key={k} className="contents"><dt className="text-mute">{k}</dt><dd className="font-mono text-dim">{v}</dd></div>
+            ))}
+          </dl>
+        )}
+        {loggedOut && <p className="text-[12px] text-warn">The CLI does not report a login — the key test will fail until you log in again ({runbook}).</p>}
+        <p className="text-[12px] text-mute">Save &amp; validate uses the bridge&apos;s own key. Cap the account under Rules before agents use it.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2 rounded-lg border border-warn/40 bg-warn-dim/40 px-4 py-3 text-[13px]">
+      <p className="flex items-center gap-2 text-warn"><span className="size-1.5 rounded-full bg-warn" /> This bridge is not running on this server</p>
+      <ol className="list-decimal space-y-1 pl-5 text-dim">
+        <li>On the host, install the official CLI and log in to a separate folder (the runbook has the exact commands).</li>
+        <li>In <Mono>compose.yml</Mono>, uncomment the bridge&apos;s two mounts and set <Mono>{bridge.env}: &quot;on&quot;</Mono>.</li>
+        <li>Run <Mono>docker compose up -d</Mono>, then reopen this dialog — it will say running.</li>
+      </ol>
+      <p className="text-[12px] text-mute">Step-by-step: {runbook}</p>
+    </div>
+  );
+}
+
 function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: () => void }) {
   const [d, setD] = useState<Draft>(emptyDraft);
   const [busy, setBusy] = useState(false);
@@ -371,6 +439,13 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
   // this is what stops "Waiting for authorization…" from being permanent while
   // github.com/login/device already says success.
   const [ghBackoff, setGhBackoff] = useState(0);
+  // Subscription bridges: fetched on open so the preset shows live state.
+  const [bridges, setBridges] = useState<Bridge[] | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    listBridges().then(setBridges).catch(() => setBridges([]));
+  }, [open]);
 
   useEffect(() => {
     if (open) {
@@ -417,6 +492,8 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
   }, [ghStart, ghStatus?.status, open, ghBackoff]);
 
   const isGitHub = PROVIDER_PRESETS[d.preset]?.kind === 'github-copilot';
+  const bridgeID = PROVIDER_PRESETS[d.preset]?.bridge;
+  const bridge = bridgeID ? bridges?.find((b) => b.id === bridgeID) ?? null : null;
 
   const startGitHub = async () => {
     setGhBusy(true); setGhErr(null); setGhStatus(null);
@@ -440,7 +517,8 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
         name: d.name.trim(), namespace: d.namespace.trim(), kind: preset.kind,
         // Local Ollama is the one preset whose URL field stays editable (a remote
         // box) — send what the operator typed, not the preset's localhost default.
-        base_url: d.preset === 'ollama-local' ? d.base_url.trim() : preset.baseURL ?? d.base_url.trim(), probe_delay_ms: d.probe_delay_ms,
+        base_url: d.preset === 'ollama-local' ? d.base_url.trim() : bridge?.base_url ?? preset.baseURL ?? d.base_url.trim(), probe_delay_ms: d.probe_delay_ms,
+        ...(preset.usageConvention ? { usage_convention: preset.usageConvention } : {}),
         requires_session_header: preset.sessionHeader ?? d.requiresSessionHeader,
         custom_headers: customHeaders, notes: d.notes.trim(),
         management_key: d.managementKey.trim(),
@@ -454,6 +532,7 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
       // into the session itself, so no credential rides in this body.
       const credential = d.apiKey.trim()
         ? { api_key: d.apiKey.trim() }
+        : bridgeID ? { bridge: bridgeID }
         : { device_handle: ghStart?.handle ?? '' };
       // Streamed key test: every step lands in liveSteps as the server
       // records it (NDJSON), so the chain moves. Falls back to the one-shot
@@ -484,7 +563,7 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
     && (!isCompat || /^https?:\/\//i.test(d.base_url.trim()))
     // GitHub has no pasteable key: an authorized device flow substitutes for
     // the API key. Anything else still needs its credential in hand.
-    && (d.apiKey.trim().length > 0 || (isGitHub && ghStatus?.status === 'authorized'));
+    && (d.apiKey.trim().length > 0 || (isGitHub && ghStatus?.status === 'authorized') || !!bridge?.enabled);
 
   return (
     <Modal open={open} onClose={onClose} wide title="Add provider"
@@ -520,7 +599,11 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
             <select id="ap-kind" className={inputCls} value={d.preset} onChange={(e) => {
               const presetID = e.target.value;
               const preset = PROVIDER_PRESETS[presetID];
+              // A bridge preset names itself: one per server, so the
+              // operator has nothing to invent.
+              const named = preset.bridge && !d.name.trim();
               setD((p) => ({ ...p, preset: presetID, kind: preset.kind,
+                ...(named ? { name: preset.label.replace(/ \(bridge\)$/, ''), namespace: presetID, nsTouched: false } : {}),
                 accountId: '',
                 base_url: preset.baseURL ?? (preset.accountURL ? preset.accountURL('') : ''),
                 requiresSessionHeader: preset.sessionHeader ?? false }));
@@ -640,7 +723,8 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
             <ErrBox e={ghErr} onDismiss={() => setGhErr(null)} />
           </div>
         )}
-        <div className="grid gap-4 sm:grid-cols-2">
+        {bridgeID && <BridgePanel bridge={bridge} loading={bridges === null} />}
+        <div className={cx('grid gap-4 sm:grid-cols-2', bridgeID && 'hidden')}>
           <div className="sm:col-span-1">
             <label className={labelCls} htmlFor="ap-key">API key</label>
             {PROVIDER_PRESETS[d.preset]?.multilineKey ? (

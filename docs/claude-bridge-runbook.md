@@ -3,6 +3,23 @@
 Operating the Claude subscription surface. Decisions live in
 `claude-subscription-design.md`; this is the how.
 
+## Quick setup
+
+Five steps, about ten minutes. Each links to its detail below.
+
+1. **Install the CLI on the host** and pin a copy outside the updater's folder
+   ([prerequisites](#prerequisites)):
+   `curl -fsSL https://claude.ai/install.sh | bash`, then copy the version file.
+2. **Log in to a separate folder** — never your everyday `~/.claude`:
+   `CLAUDE_CONFIG_DIR=~/.claude-sub claude auth login`.
+3. **Turn it on** in `compose.yml`: uncomment the two Claude mounts, set `USER`
+   and `LOGNAME` to the login's owner, set `EZLLM_CLAUDE_BRIDGE: "on"`, then
+   `docker compose up -d` ([enable](#enable)).
+4. **Add the account** in the dashboard: Providers → Add provider → **Claude
+   subscription (bridge)** → Save & validate. The dialog shows whether the bridge
+   is running; there is no key to paste ([wire it in](#wire-it-into-ezllm)).
+5. **Cap it** under Rules before any agent uses it ([drain cap](#wire-it-into-ezllm)).
+
 ## What it is
 
 A **loopback-only Anthropic Messages surface inside the ezllm process**
@@ -13,8 +30,9 @@ nothing else ever holds the subscription credential. One container, no sidecar.
 
 ## Prerequisites
 
-- The official CLI binary, pinned by path (qualified: **2.1.306**):
-  `/home/calypso/.local/share/claude-bridge/claude-2.1.306`. Pin a **copy**, never
+- The official CLI binary, pinned by path (qualified: **2.1.306**). Install it on
+  the host with the official installer (`curl -fsSL https://claude.ai/install.sh | bash`),
+  then pin a copy such as `~/.local/share/claude-bridge/claude-2.1.306`. Pin a **copy**, never
   a file under `~/.local/share/claude/versions/`: the CLI's auto-updater deletes old
   versions there, and a deleted file under a live bind mount keeps working only
   until the next container recreate, which then fails the boot (2.1.299 was lost
@@ -55,7 +73,11 @@ address is refused.
 
 ## Wire it into ezllm
 
-1. **Account** (dashboard → Providers → Add):
+1. **Account** (dashboard → Providers → Add provider → **Claude subscription
+   (bridge)**). The preset fills in everything below, shows the bridge's CLI
+   version, login and plan, and supplies the key itself — Save & validate is the
+   whole step. If it says the bridge is not running, go back to [Enable](#enable).
+   By hand (API or an older dashboard):
    - kind `anthropic-compatible`
    - base URL `http://127.0.0.1:8790/v1`
    - key: `cat data/claude-bridge.token` (on the host; the file is gitignored)

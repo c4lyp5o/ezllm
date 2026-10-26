@@ -8,6 +8,24 @@ effort and summaries, structured output, plan windows, client tools with
 continuation. Read the [platform requirements](#platform-requirements--read-this-first)
 before you rely on tools.
 
+## Quick setup
+
+Five steps. Each links to its detail below.
+
+1. **Check the host** supports client tools — Linux with Landlock
+   ([platform requirements](#platform-requirements--read-this-first)). Without it
+   the bridge still answers, but tool calls are refused.
+2. **Install the official Codex CLI on the host** and pin a copy of the **whole
+   release directory** ([prerequisites](#prerequisites)).
+3. **Log in to a separate folder** — never your everyday `~/.codex`:
+   `CODEX_HOME=~/.codex-sub codex login --device-auth`.
+4. **Turn it on** in `compose.yml`: uncomment the two Codex mounts, set
+   `EZLLM_CODEX_BRIDGE: "on"`, then `docker compose up -d` ([enable](#enable)).
+5. **Add the account** in the dashboard: Providers → Add provider → **ChatGPT
+   subscription (bridge)** → Save & validate. The dialog shows whether the bridge
+   is running; there is no key to paste. Cap it under Rules before agents use it
+   ([wire it in](#wire-it-into-ezllm)).
+
 ## What it is
 
 A **loopback-only OpenAI Chat Completions surface inside the ezllm process**
@@ -181,7 +199,11 @@ docker logs ezllm | grep -i "codex bridge"   # cli version, release, login, chan
 
 ## Wire it into ezllm
 
-1. **Account** (dashboard → Providers → Add):
+1. **Account** (dashboard → Providers → Add provider → **ChatGPT subscription
+   (bridge)**). The preset fills in everything below, shows the bridge's CLI
+   version, login and tool state, and supplies the key itself — Save & validate
+   is the whole step. If it says the bridge is not running, go back to
+   [Enable](#enable). By hand (API or an older dashboard):
    - kind `openai-compatible`
    - base URL `http://127.0.0.1:8791/v1`
    - key: `cat data/codex-bridge.token` (on the host; gitignored)

@@ -4,6 +4,19 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by rel
 
 ## Unreleased
 
+- **Subscription bridges in one click.** Add provider has two presets, **Claude
+  subscription (bridge)** and **ChatGPT subscription (bridge)**. Each shows
+  whether its bridge is running (CLI version, login, plan or tool state) or the
+  exact steps to turn it on, fills in name, base URL and usage convention, and
+  needs no key: the add names `bridge` and the server supplies the shared secret,
+  so nobody copies `data/*-bridge.token` off the host. New `GET /admin/bridges`
+  (the secret is never in it); a key test against a bridge that is not running
+  now names the variable that fixes it. Both runbooks open with a five-step
+  quick setup and say how to install each CLI.
+- **Lighter login backdrop.** At most 12 packets on a desktop and 5 on a phone
+  (was 24), no per-packet `shadowBlur`, and phones draw at 1.5x density and 30
+  fps, at the same on-screen speed.
+
 - **Neighbourhood page (dashboard).** Every provider key is a house whose windows
   glow with its tokens per minute over the last five minutes; smoke means it is
   serving traffic, a rain cloud means a quarter or more of its recent calls

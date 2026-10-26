@@ -264,6 +264,23 @@ export const ghDeviceStatus = (handle: string) =>
 export const ghDeviceCancel = (handle: string) =>
   del(`/admin/github/device/${encodeURIComponent(handle)}`);
 
+// ── subscription bridges ─────────────────────────────────────────────────
+// GET /admin/bridges: which loopback bridges exist, which are running, and
+// how to turn one on. A key add names `bridge` instead of api_key and the
+// server supplies the shared secret — it never reaches the browser.
+export type Bridge = {
+  id: 'claude-sub' | 'chatgpt-sub';
+  label: string;
+  kind: string;
+  base_url: string;
+  usage_convention: string;
+  enabled: boolean;
+  env: string;
+  runbook: string;
+  status?: Record<string, unknown>;
+};
+export const listBridges = () => get<Bridge[]>('/admin/bridges');
+
 // ── protocol sweep ("test all models") ───────────────────────────────────
 export type StartSweepOpts = {
   /** Probe every model, not the 6-of-N sample. */

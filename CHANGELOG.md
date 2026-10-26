@@ -2,6 +2,30 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
 
+## 2026-10-27 — a history refusal fails over instead of ending the run (fix)
+
+A thinking model that requires the reasoning of every earlier assistant turn
+cannot serve a conversation another model started. It answers a 400 — and 400 is
+not in the failover set, because a 400 normally describes the BODY we are about
+to replay byte-identically. This one describes the HISTORY, so committing it
+ended a client run that a hop of the same family could have served. Four such
+rows in the ledger (`The reasoning_content in the thinking mode must be passed
+back to the API`, and `Missing required parameter: 'messages[2].reasoning_content'
+… needs the reasoning of every earlier assistant turn`), each one killing the run.
+
+`refusesHistory` now recognises that class and the dispatcher fails over, exactly
+as it does for a hop that cannot serve a wire. Deliberately **not** parked: the
+hop is healthy for a conversation it started itself, so a cooldown would take a
+good endpoint out of rotation for an unrelated reason. The 400 still reaches the
+client when EVERY hop refuses, because the last response stays committable as the
+fallback — the change turns a hard stop into "try the next hop", it does not hide
+the refusal.
+
+The cause is now visible as `[reasoning_echo_required]` instead of `bad_request`,
+which is what lets an operator count the occurrences and fix the real problem:
+a combo whose hops span model families. Under `bad_request` it read as a
+malformed request and nothing pointed at the combo design.
+
 ## 2026-10-27 — the error table stops calling a bad body "capacity" (fix)
 
 `ErrorCause` matched opencode's `Upstream request failed:` envelope before it

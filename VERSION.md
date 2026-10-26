@@ -15,7 +15,7 @@ file in the same commit, or the test fails.
 
 ## v1.3.2 — 2026-10-27
 
-Four fixes, three of them found by reading the gateway's own ledger rather than
+Five fixes, three of them found by reading the gateway's own ledger rather than
 by review. No API, config or schema change; no migration.
 
 **The reasoning-effort clamp now actually runs.** It shipped in v1.2.0 and was
@@ -50,6 +50,14 @@ request-shape faults in an `Upstream request failed:` envelope typed
 `server_error`; the envelope won, so malformed requests were counted as provider
 weather and the dashboard told the operator to wait. The bracketed cause inside
 the envelope now wins.
+
+**A history refusal fails over instead of ending the run.** A thinking model that
+demands the reasoning of every earlier assistant turn cannot serve a conversation
+another model started; it answers a 400, and 400 is not in the failover set, so
+the run died where another hop of the same family could have served it. That
+class is now recognised (`[reasoning_echo_required]`), it fails over, and it does
+NOT park the hop — the same model is healthy for conversations it started. The
+400 still reaches the client if every hop refuses.
 
 Every fix carries a test at the seam that broke, and each was bitten against its
 own producer before commit. The clamp fix was additionally proved end-to-end on a

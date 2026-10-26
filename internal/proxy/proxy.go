@@ -1628,6 +1628,24 @@ func refusesWire(resp *http.Response) bool {
 		strings.Contains(s, "unsupported_api_for_model")
 }
 
+// refusesHistory reports a 400 whose body says the hop cannot serve this
+// CONVERSATION: a thinking model demanding the reasoning of every earlier
+// assistant turn, in a history another model produced. Like refusesWire it is a
+// fact about the hop, not our body — the identical bytes are fine for a hop of
+// the model's own family — so the dispatcher fails over instead of committing a
+// 400 that ends a client run.
+//
+// It is deliberately NOT a park: the hop is healthy for conversations it started
+// itself, and the refusal says nothing about its availability.
+func refusesHistory(resp *http.Response) bool {
+	if resp == nil || resp.Body == nil || resp.StatusCode != http.StatusBadRequest {
+		return false
+	}
+	s := strings.ToLower(string(peekBody(resp, maxErrPeek)))
+	return strings.Contains(s, "must be passed back to the api") ||
+		strings.Contains(s, "needs the reasoning of every")
+}
+
 // deniesModelAccess reports a 401/403 whose body says the HOP cannot reach the
 // model it was asked for ("Access to model denied", "model access denied",
 // "does not have access to"). Measured 2026-10-23: an account answered 403 for
@@ -1932,6 +1950,13 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 				if len(routes) > 1 {
 					oc.cooldown = defaultHopCooldown
 				}
+			}
+			// A history refusal is a hop fact too, but unlike a wire refusal it
+			// says NOTHING about the hop's health: the same model serves a
+			// conversation it started. So it fails over with no cooldown at all
+			// — the attempt trail and the cause carry the explanation.
+			if err == nil && !oc.failed && refusesHistory(resp) {
+				oc = hopOutcome{failed: true, reason: "history has no reasoning this model requires"}
 			}
 			// A 403 that names model access is a fact about the hop, so park it
 			// exactly as a 429 would be: same model-scoped key, same TTL, same

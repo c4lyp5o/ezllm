@@ -23,7 +23,7 @@ func TestBridgesListsBothOffByDefault(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("GET /admin/bridges = %d %s", code, resp)
 	}
-	for _, want := range []string{`"id":"claude-sub"`, `"id":"chatgpt-sub"`, `"EZLLM_CLAUDE_BRIDGE"`, `"EZLLM_CODEX_BRIDGE"`, `"enabled":false`} {
+	for _, want := range []string{`"id":"claude-sub"`, `"id":"chatgpt-sub"`, `"EZLLM_CLAUDE_BRIDGE"`, `"EZLLM_CODEX_BRIDGE"`, `"id":"antigravity-sub"`, `"EZLLM_AGY_BRIDGE"`, `"enabled":false`} {
 		if !strings.Contains(resp, want) {
 			t.Fatalf("bridges response lacks %s: %s", want, resp)
 		}

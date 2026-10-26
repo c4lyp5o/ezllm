@@ -4,8 +4,23 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by rel
 
 ## Unreleased
 
-- **Subscription bridges in one click.** Add provider has two presets, **Claude
-  subscription (bridge)** and **ChatGPT subscription (bridge)**. Each shows
+- **Antigravity subscription bridge.** A third loopback bridge
+  (`EZLLM_AGY_BRIDGE=on`, `127.0.0.1:8792`) puts a personal Google Antigravity
+  plan behind an `openai-compatible` account through the official `agy` CLI
+  (1.4.7, headless stream-json, one process per request): Gemini 3.8 Flash and
+  the Claude and GPT-OSS models the plan includes, served from what
+  `agy models` lists at boot. Text chat with usage (1.4.7 sends the answer as
+  one chunk at the end of the turn); client tools and images are refused, not
+  dropped. The login is made with D-Bus unset so
+  it is a token file the container can mount, not a desktop-keyring entry. The
+  agent's own tools stay soft-denied: a turn whose CLI reports a looser
+  permission mode is killed, and a login whose `settings.json` loosens the
+  policy fails the boot. Google's "account not eligible" refusal becomes 403
+  `account_ineligible` with its sign-in link withheld. Dashboard preset
+  **Antigravity subscription (bridge)** lists the plan's models. Decisions:
+  `docs/antigravity-subscription-design.md`; setup: `docs/agy-bridge-runbook.md`.
+- **Subscription bridges in one click.** Add provider has a preset per bridge (**Claude
+  subscription**, **ChatGPT subscription**, **Antigravity subscription**). Each shows
   whether its bridge is running (CLI version, login, plan or tool state) or the
   exact steps to turn it on, fills in name, base URL and usage convention, and
   needs no key: the add names `bridge` and the server supplies the shared secret,

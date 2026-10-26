@@ -128,7 +128,8 @@ const PROVIDER_PRESETS: Record<string, {
   usageConvention?: string;
 }> = {
   // Subscription bridges: the official CLI behind a loopback surface. No key to
-  // paste — docs/claude-bridge-runbook.md, docs/codex-bridge-runbook.md.
+  // paste — docs/claude-bridge-runbook.md, docs/codex-bridge-runbook.md,
+  // docs/agy-bridge-runbook.md.
   'claude-sub': {
     label: 'Claude subscription (bridge)', kind: 'anthropic-compatible', baseURL: 'http://127.0.0.1:8790/v1',
     bridge: 'claude-sub', usageConvention: 'anthropic',
@@ -136,6 +137,10 @@ const PROVIDER_PRESETS: Record<string, {
   'chatgpt-sub': {
     label: 'ChatGPT subscription (bridge)', kind: 'openai-compatible', baseURL: 'http://127.0.0.1:8791/v1',
     bridge: 'chatgpt-sub',
+  },
+  'antigravity-sub': {
+    label: 'Antigravity subscription (bridge)', kind: 'openai-compatible', baseURL: 'http://127.0.0.1:8792/v1',
+    bridge: 'antigravity-sub',
   },
   'claude-platform': { label: 'Claude Platform', kind: 'anthropic-compatible', baseURL: 'https://api.anthropic.com' },
   // Web-protocol providers: no API key — credentials are browser sessions.
@@ -384,6 +389,7 @@ function BridgePanel({ bridge, loading }: { bridge: Bridge | null; loading: bool
       ['CLI', statusText(s.cli_version)],
       ['Login', statusText(s.login)],
       ['Plan', statusText(s.subscription)],
+      ['Models', statusText(s.models)],
       ['Client tools', statusText(s.client_tools)],
     ] as Array<[string, string | null]>).filter((f): f is [string, string] => f[1] !== null);
     const login = statusText(s.login);

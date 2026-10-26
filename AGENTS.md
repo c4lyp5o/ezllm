@@ -81,6 +81,7 @@ internal/logx/      structured logging setup and the first-boot banner
 internal/{claudeweb,geminiweb,githubcopilot}/  web-protocol providers
 internal/claudebridge/  Claude subscription surface (loopback-only): CLI spawn, body injection, SSE
 internal/codexbridge/   ChatGPT subscription surface (loopback-only): Codex app-server JSON-RPC, lockdown, exec fallback
+internal/agybridge/     Antigravity subscription surface (loopback-only): headless agy spawn, preflight, lockdown
 web/                React+Vite dashboard; web/tests/ = Playwright drivers
 tests/              Python live-proof scripts (not part of go test)
 docs/               design records + runbooks (decisions, not status)

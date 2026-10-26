@@ -330,6 +330,13 @@ func run() error {
 		stopClaude()
 		return err
 	}
+	// Antigravity subscription surface: loopback-only, off unless EZLLM_AGY_BRIDGE=on.
+	stopAgy, err := startAgyBridge(ctx, log, srv.EnableBridge)
+	if err != nil {
+		stopCodex()
+		stopClaude()
+		return err
+	}
 
 	reqs := newRequestLifetime()
 	httpSrv := &http.Server{
@@ -369,6 +376,7 @@ func run() error {
 	reqs.drain(httpSrv, 15*time.Second, 5*time.Second, log)
 	// Bridges after the gateway (its handlers proxy into them), joined here
 	// so no CLI child outlives the process's own shutdown.
+	stopAgy()
 	stopCodex()
 	stopClaude()
 	// Background probes and refresh loops write to the store: cancel them

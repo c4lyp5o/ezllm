@@ -11,6 +11,11 @@ const bridges = [
     status: { cli_version: "2.1.306 (Claude Code)", login: "logged-in", subscription: "Subscription: max" } },
   { id: "chatgpt-sub", label: "ChatGPT subscription (bridge)", kind: "openai-compatible", base_url: "http://127.0.0.1:8791/v1",
     usage_convention: "auto", enabled: false, env: "EZLLM_CODEX_BRIDGE", runbook: "docs/codex-bridge-runbook.md" },
+  { id: "antigravity-sub", label: "Antigravity subscription (bridge)", kind: "openai-compatible", base_url: "http://127.0.0.1:8792/v1",
+    usage_convention: "auto", enabled: true, env: "EZLLM_AGY_BRIDGE", runbook: "docs/agy-bridge-runbook.md",
+    // the Info map cmd/ezllm/agybridge.go reports
+    status: { cli_version: "1.4.7", login: "logged in (token file; models listed at boot)",
+      models: "gemini-3.8-flash-low, claude-sonnet-4-6", client_tools: "disabled (text chat only)" } },
 ];
 const posts = [];
 const handler = async (route, url) => {
@@ -33,7 +38,14 @@ const page = await t.page(handler);
 await page.goto(`${t.base}/providers`);
 await page.getByRole("button", { name: /Add provider/ }).click();
 const options = await page.$$eval("#ap-kind option", (os) => os.map((o) => o.value));
-check("both bridge presets offered", options.includes("claude-sub") && options.includes("chatgpt-sub"), options);
+check("every bridge preset offered", ["claude-sub", "chatgpt-sub", "antigravity-sub"].every((o) => options.includes(o)), options);
+
+await page.selectOption("#ap-kind", "antigravity-sub");
+await page.getByText("Bridge running at").waitFor();
+check("antigravity bridge lists its plan's models", (await page.locator("text=gemini-3.8-flash-low, claude-sonnet-4-6").count()) === 1);
+check("antigravity login is not misread as logged out", (await page.locator("text=does not report a login").count()) === 0);
+await page.keyboard.press("Escape");
+await page.getByRole("button", { name: /Add provider/ }).click();
 
 await page.selectOption("#ap-kind", "chatgpt-sub");
 await page.getByText("This bridge is not running").waitFor();

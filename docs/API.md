@@ -311,7 +311,7 @@ Retries set to 3 after the initial call per hop. When all four total attempts fa
 
 ### `GET /admin/bridges` → `200`
 The subscription bridges this build knows, whether each is running in this process, and how to
-turn one on. The dashboard's Add provider dialog reads it for the two bridge presets. `status` is
+turn one on. The dashboard's Add provider dialog reads it for the bridge presets. `status` is
 the bridge's own boot report (its loopback `/status`), present only while it runs. The shared
 secret is never in the response — a key add names `bridge` instead.
 ```jsonc
@@ -321,7 +321,10 @@ secret is never in the response — a key add names `bridge` instead.
   "status":{"cli_version":"2.1.306 (Claude Code)","login":"logged-in","status":"ok","subscription":"Subscription: max"}},
  {"id":"chatgpt-sub","label":"ChatGPT subscription (bridge)","kind":"openai-compatible",
   "base_url":"http://127.0.0.1:8791/v1","usage_convention":"auto","enabled":false,
-  "env":"EZLLM_CODEX_BRIDGE","runbook":"docs/codex-bridge-runbook.md"}]
+  "env":"EZLLM_CODEX_BRIDGE","runbook":"docs/codex-bridge-runbook.md"},
+ {"id":"antigravity-sub","label":"Antigravity subscription (bridge)","kind":"openai-compatible",
+  "base_url":"http://127.0.0.1:8792/v1","usage_convention":"auto","enabled":false,
+  "env":"EZLLM_AGY_BRIDGE","runbook":"docs/agy-bridge-runbook.md"}]
 ```
 Refusal while a bridge is off (`POST …/keys` with `"bridge":"chatgpt-sub"`):
 ```jsonc

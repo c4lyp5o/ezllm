@@ -86,6 +86,16 @@ services:
       # Client tools without Landlock: read the runbook before setting this.
       # EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK: "on"
 
+      # ── Antigravity subscription bridge ── docs/agy-bridge-runbook.md
+      # Loopback-only; an openai-compatible account dials it. Linux only. `on`
+      # without the CLI and a login (the two mounts below) fails the boot.
+      EZLLM_AGY_BRIDGE: "off"
+      # EZLLM_AGY_BIN: /opt/agy/agy
+      # EZLLM_AGY_HOME: /agy-sub
+      # EZLLM_AGY_BRIDGE_ADDR: 127.0.0.1:8792
+      # EZLLM_AGY_BRIDGE_TOKEN_FILE: /data/agy-bridge.token
+      # EZLLM_AGY_BRIDGE_CONCURRENCY: "2"
+
     volumes:
       # Non-secret runtime defaults; credentials stay in SQLite.
       - ./config.yaml:/app/config.yaml:ro
@@ -106,3 +116,9 @@ services:
       # the isolated login (CODEX_HOME), read-write.
       # - /path/to/codex-bridge/<version>:/opt/codex:ro
       # - /path/to/.codex-sub:/codex-sub
+
+      # Antigravity bridge: a pinned copy of the agy binary (agy self-updates
+      # in place, so never mount ~/.local/bin/agy), read-only, and the login
+      # HOME made with DBUS unset, read-write (agy refreshes its token there).
+      # - /path/to/agy-bridge/<version>/agy:/opt/agy/agy:ro
+      # - /path/to/.agy-sub:/agy-sub

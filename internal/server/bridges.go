@@ -9,16 +9,17 @@ import (
 )
 
 // Subscription bridges, as the dashboard sees them. main.go starts each bridge
-// (cmd/ezllm/claudebridge.go, codexbridge.go) and reports it here; the Add
+// (cmd/ezllm/claudebridge.go, codexbridge.go, agybridge.go) and reports it here; the Add
 // Provider dialog reads GET /admin/bridges to offer a ready-made preset with a
 // live "running / off" state, and names `bridge` on the key add so the server
 // fills in the shared secret itself — nobody has to cat a token file on the
 // host. The token never leaves the process: it is not in any response.
-// Runbooks: docs/claude-bridge-runbook.md, docs/codex-bridge-runbook.md.
+// Runbooks: docs/claude-bridge-runbook.md, docs/codex-bridge-runbook.md,
+// docs/agy-bridge-runbook.md.
 
 // Bridge is one loopback subscription surface.
 type Bridge struct {
-	ID      string `json:"id"`       // claude-sub | chatgpt-sub
+	ID      string `json:"id"`       // claude-sub | chatgpt-sub | antigravity-sub
 	Label   string `json:"label"`    // dashboard preset name
 	Kind    string `json:"kind"`     // account kind that dials it
 	BaseURL string `json:"base_url"` // where that account points
@@ -34,7 +35,7 @@ type Bridge struct {
 	token  string
 }
 
-// bridgeRegistry starts with both bridges off so the endpoint can always tell
+// bridgeRegistry starts with every bridge off so the endpoint can always tell
 // a new operator what exists and how to turn it on.
 type bridgeRegistry struct {
 	mu   sync.RWMutex
@@ -52,6 +53,11 @@ func newBridgeRegistry() *bridgeRegistry {
 			ID: "chatgpt-sub", Label: "ChatGPT subscription (bridge)", Kind: "openai-compatible",
 			BaseURL: "http://127.0.0.1:8791/v1", UsageConvention: "auto",
 			Env: "EZLLM_CODEX_BRIDGE", Runbook: "docs/codex-bridge-runbook.md",
+		},
+		{
+			ID: "antigravity-sub", Label: "Antigravity subscription (bridge)", Kind: "openai-compatible",
+			BaseURL: "http://127.0.0.1:8792/v1", UsageConvention: "auto",
+			Env: "EZLLM_AGY_BRIDGE", Runbook: "docs/agy-bridge-runbook.md",
 		},
 	}}
 }

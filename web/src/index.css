@@ -316,3 +316,45 @@ code, pre, kbd, samp, .font-code { font-family: var(--font-code); font-variant-n
     scroll-behavior: auto !important;
   }
 }
+
+/* ── Neighbourhood — the one scene ────────────────────────────────────────
+   The house rules forbid gradients and glows; this page is the deliberate,
+   fenced exception (web/DESIGN.md → "The scene"). Everything below is scoped
+   to .nbhd, so nothing leaks into the data screens. Light theme is a day
+   scene, dark theme a night one; the window glow is the data. */
+.nbhd {
+  --nb-sky-top: #cfe3f3;
+  --nb-sky-bottom: #f4efe4;
+  --nb-ground: #c9c4b5;
+  --nb-wall: #fdfcf8;
+  --nb-wall-line: #b9b3a2;
+  --nb-roof: #8b5e4b;
+  --nb-door: #6f5446;
+  --nb-window-off: #9aa3ad;
+  --nb-window-on: #f5a524;
+  --nb-glow: #ffd27a;
+  --nb-smoke: #8a8e95;
+  --nb-cloud: #6f747c;
+  --nb-star: transparent;
+  --nb-moon: #f6df9a;
+}
+.dark .nbhd {
+  --nb-sky-top: #0b1020;
+  --nb-sky-bottom: #1d2a44;
+  --nb-ground: #101419;
+  --nb-wall: #2a303b;
+  --nb-wall-line: #3a4252;
+  --nb-roof: #4a3a44;
+  --nb-door: #1d222b;
+  --nb-window-off: #1a1f27;
+  --nb-window-on: #ffc857;
+  --nb-glow: #ffb347;
+  --nb-smoke: #7d8696;
+  --nb-cloud: #566074;
+  --nb-star: #dbe4f5;
+}
+.nbhd-sky {
+  background: linear-gradient(to bottom, var(--nb-sky-top), var(--nb-sky-bottom));
+}
+@keyframes nbhd-twinkle { 0%, 100% { opacity: 0.25; } 50% { opacity: 0.9; } }
+.nbhd-star { background: var(--nb-star); animation: nbhd-twinkle 4s ease-in-out infinite; }

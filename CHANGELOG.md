@@ -2,6 +2,16 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
 
+## Unreleased
+
+- **Neighbourhood page (dashboard).** Every provider key is a house whose windows
+  glow with its tokens per minute over the last five minutes; smoke means it is
+  serving traffic, a rain cloud means a quarter or more of its recent calls
+  failed, dark windows mean it is disabled. SVG and motion only, polled every
+  10 s, with an exact-figures table underneath. The one scene exempt from the
+  no-glow rule — fenced in `web/DESIGN.md`. The Playwright harness's unlock
+  marker was updated to the session marker the app has used since v1.2.0.
+
 ## 2026-10-26 — v1.3.0: chat wire rename, probes out of the ledger, live Claude quota
 
 - **The chat-completions wire is named `chat`, not `openai`** (schema v30,

@@ -123,7 +123,9 @@ func (d *DB) loadCatalogSnapshot(ctx context.Context, gen int64) (*CatalogSnapsh
 	}
 
 	mrows, err := d.r.QueryContext(ctx, `
-SELECT account_id, model_id, proto_pin, proto_chat, proto_anthropic, proto_responses FROM models`)
+SELECT account_id, model_id, proto_pin, proto_chat, proto_anthropic, proto_responses,
+       reasoning_vocab, reasoning_required
+FROM models`)
 	if err != nil {
 		return nil, err
 	}
@@ -133,8 +135,16 @@ SELECT account_id, model_id, proto_pin, proto_chat, proto_anthropic, proto_respo
 			model     string
 			pin       sql.NullString
 			oa, an, r sql.NullInt64
+			// The learned reasoning vocabulary is read here for the same
+			// reason the pin and the protocol flags are: this snapshot is
+			// what every resolution reads hop facts from. Leaving it out
+			// left the clamp inert on EVERY request — the direct ModelFacts
+			// read had it, so the store looked correct while production
+			// never saw a rule (each refusal re-taught the same list).
+			vocab    sql.NullString
+			required sql.NullInt64
 		)
-		if err := mrows.Scan(&acct, &model, &pin, &oa, &an, &r); err != nil {
+		if err := mrows.Scan(&acct, &model, &pin, &oa, &an, &r, &vocab, &required); err != nil {
 			mrows.Close()
 			return nil, err
 		}
@@ -142,7 +152,8 @@ SELECT account_id, model_id, proto_pin, proto_chat, proto_anthropic, proto_respo
 			s.models[acct] = map[string]ModelFacts{}
 		}
 		s.models[acct][model] = ModelFacts{Pin: pin.String,
-			Chat: nullBoolPtr(oa), Anthropic: nullBoolPtr(an), Responses: nullBoolPtr(r)}
+			Chat: nullBoolPtr(oa), Anthropic: nullBoolPtr(an), Responses: nullBoolPtr(r),
+			Reasoning: reasoningRuleFrom(vocab, required)}
 	}
 	mrows.Close()
 	if err := mrows.Err(); err != nil {

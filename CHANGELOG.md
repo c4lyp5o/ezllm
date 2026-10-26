@@ -2,6 +2,47 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
 
+## 2026-10-27 — the reasoning clamp actually runs (fix)
+
+The reasoning-effort clamp shipped in v1.2.0 was inert on every real request,
+and the ledger proves it: 20 of the 29 `bad_request` 400s in the previous seven
+days were `Invalid option: expected one of "off"|"low"|…`, and the log re-learned
+the SAME vocabulary for the same model four times inside 45 minutes. Two bugs,
+one behind the other.
+
+**The rule never reached the route.** `ResolveCandidates` swaps the catalog for a
+`*store.CatalogSnapshot`, and `hopFacts.reasoning()` reads the rule out of
+whatever `ModelFacts` it is handed. The snapshot's model query selected the pin
+and the three protocol flags but never `reasoning_vocab` / `reasoning_required`,
+so it built `ModelFacts` with a zero rule. The direct `*DB.ModelFacts` read had
+the vocabulary — which is why the store tests passed while production never saw
+a rule, every request went out unclamped, and each refusal re-taught the same
+list. The snapshot is a second projection of that row and now carries the same
+columns.
+
+**A required-reasoning model could still be sent a disabling effort.** Command
+Code enumerated `off|low|medium|high|xhigh|max` and then refused `off` for one
+model — "Only models that can turn thinking off accept it." The vocabulary and
+the mandate arrive as separate facts, so `Clamp` picked `off` as the cheapest
+allowed value and turned a bogus client value into a guaranteed 400 that looked
+like a correct clamp. `Required` now governs the selection: a rank-0 value is
+never sent, and when nothing at or below the ask is legal the field is DROPPED so
+the provider's own default applies — inventing a higher effort would buy
+reasoning the client did not ask for. The vendor's wording is now in the phrase
+table, so the refusal teaches `Required` instead of being discarded.
+
+Proved end-to-end on a canary rig (copied prod database, current-tree binary,
+loopback port, real provider, `max_tokens: 5`): a bogus effort returned 400 →
+`reasoning vocabulary learned … allowed=""` → the retry DROPPED the field and
+returned 200, twice. The stored row now reads `reasoning_required=1`.
+
+Coverage added at the seam that broke: `TestCatalogSnapshotCarriesReasoningRule`
+(snapshot parity), `TestResolvedRouteCarriesLearnedReasoningRule` (a resolved
+Route carries the rule — every existing clamp test built its Route by hand with
+the rule attached, which is exactly why the hole survived),
+`TestClampNeverSendsADisablingEffortWhenRequired`, and
+`TestParseReasoningRequiredFromThinkingOffRefusal`.
+
 ## 2026-10-27 — github-copilot wire guard and persona stealth (behaviour change)
 
 Resolves the three findings the previous pass deliberately left unfixed, because

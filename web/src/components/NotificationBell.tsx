@@ -18,6 +18,7 @@ const ROUTE: Record<string, string> = {
   catalog_refresh_failed: '/providers',
   client_budget_reached: '/connect',
   price_refresh_failed: '/economics',
+ backup_failed: '/settings',
 };
 
 // Status colour only where it means something (house rule): warn/error get

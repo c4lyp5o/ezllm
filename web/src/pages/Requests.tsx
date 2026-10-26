@@ -1,3 +1,4 @@
+import { readRange } from '../utils/preferences';
 // REQUESTS — the token dissection explorer.
 // min/max filters on tokens in and tokens out over a time range, with summary
 // totals over the WHOLE matching set (not just the page). Sort by either axis
@@ -66,7 +67,7 @@ const FIELDS: { key: keyof NumFields; label: string; ph: string }[] = [
 export default function Requests() {
   const [fields, setFields] = useState<NumFields>(EMPTY_FIELDS);
   const [applied, setApplied] = useState<Applied>({});
-  const [range, setRange] = useState<RangeKey>('24h');
+  const [range, setRange] = useState<RangeKey>(readRange);
   const [sort, setSort] = useState<RequestSort>('ts_desc');
   const [data, setData] = useState<RequestsResp | null>(null);
   const [rows, setRows] = useState<FeedRow[]>([]);

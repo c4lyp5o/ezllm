@@ -51,11 +51,13 @@ func (s *Server) StartModelRefresh(ctx context.Context, interval, bootDelay time
 // subset here once dropped custom headers from every refresh. A failed
 // listing keeps the last catalog: the upstream being briefly down must not
 // empty a pool.
-func (s *Server) refreshCatalogsOnce(ctx context.Context) {
+func (s *Server) refreshCatalogsOnce(ctx context.Context) bool {
+	success := true
 	accounts, err := s.db.ListAccounts(ctx)
 	if err != nil {
+		success = false
 		s.log.Warn("model refresh: list accounts failed", "err", err)
-		return
+		return false
 	}
 	for _, summary := range accounts {
 		if !summary.Enabled {
@@ -63,6 +65,7 @@ func (s *Server) refreshCatalogsOnce(ctx context.Context) {
 		}
 		keys, err := s.db.ListKeys(ctx, summary.ID)
 		if err != nil {
+			success = false
 			s.log.Warn("model refresh: list keys failed", "account", summary.Namespace, "err", err)
 			continue
 		}
@@ -80,16 +83,19 @@ func (s *Server) refreshCatalogsOnce(ctx context.Context) {
 		}
 		acct, err := s.db.AccountByID(ctx, summary.ID)
 		if err != nil {
+			success = false
 			s.log.Warn("model refresh: read account failed", "account", summary.Namespace, "err", err)
 			continue
 		}
 		adapter, err := s.registry.Get(acct.Kind)
 		if err != nil {
+			success = false
 			s.log.Warn("model refresh: adapter unavailable", "account", summary.Namespace, "err", err)
 			continue
 		}
 		models, err := adapter.ListModels(ctx, *acct, key)
 		if err != nil {
+			success = false
 			s.log.Warn("model refresh failed; keeping last catalog", "account", summary.Namespace, "err", err)
 			s.notify(store.NotificationInput{
 				Kind: store.NoteCatalogRefreshFailed, Severity: "warn",
@@ -101,6 +107,7 @@ func (s *Server) refreshCatalogsOnce(ctx context.Context) {
 			continue
 		}
 		if err := s.saveCatalog(ctx, summary.ID, summary.Namespace, models, "catalog refresh"); err != nil {
+			success = false
 			s.log.Warn("model refresh: persist failed", "account", summary.Namespace, "err", err)
 			continue
 		}
@@ -113,11 +120,13 @@ func (s *Server) refreshCatalogsOnce(ctx context.Context) {
 	if s.pricesWanted.CompareAndSwap(true, false) && s.priceRefreshOn.Load() {
 		res, err := s.refreshPrices(ctx, "litellm", "")
 		if err != nil {
+			success = false
 			s.log.Warn("price refresh for new models failed", "err", err)
 		} else {
 			s.log.Info("priced new models", "matched", res.Matched)
 		}
 	}
+	return success
 }
 
 // probeFreeModels probes an account's free models on every surface that
@@ -127,7 +136,7 @@ func (s *Server) refreshCatalogsOnce(ctx context.Context) {
 // catalog costs nothing; the probes are paced and hold the account's sweep
 // slot like any other auto-probe. Off with EZLLM_COMBO_AUTOPROBE=off.
 func (s *Server) probeFreeModels(bg context.Context, acctID int64, origin string) {
-	if !s.comboAutoProbe || s.tester == nil {
+	if !s.automaticProbing() || s.tester == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(bg, 30*time.Second)

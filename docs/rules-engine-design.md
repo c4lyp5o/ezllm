@@ -1,6 +1,8 @@
 # ezllm — Rules Engine Design (M5)
 
-Status: APPROVED by Calypso 2026-10-06. All five open questions answered (§9). Ready to implement.
+Status: approved by Calypso 2026-10-06 and shipped. Sections 1–11 preserve the
+original design decisions; the v1.4 extension in §12 supersedes the original
+timezone default and meter assumptions for inherited rules.
 Author: m3lis5a · 2026-10-06
 
 ## 1. What we're building
@@ -283,3 +285,24 @@ self-describing so the handler can put `kind`/`next_allowed` in the body.
 - No multiple rule rows per (account, model) — one row, OR'd days.
 - No silent cap semantics — the counted quantity is a documented constant.
 - No commit without your gate; patches only, as always.
+
+## 12. Instance timezone inheritance (v1.4, 2026-10-26)
+
+New rules default to `win_tz: instance`. The API still accepts explicit zones;
+these remain independent of the instance setting. Schema v31 preserves existing
+explicit zones and changes legacy empty rows to explicit UTC, matching their
+previous evaluation behavior. The earlier Asia/Kuala_Lumpur default describes
+pre-v1.4 rule creation, not the current default.
+
+`engine.go` `Evaluate` resolves an inherited timezone from the admitted request's
+settings snapshot before evaluating allowed hours or choosing a cap range.
+Explicit rules retain `usage_counters.go` `UsageFor`; inherited rules use
+`settings.go` `InheritedRuleUsage` over the indexed committed ledger calendar
+range. The latter avoids conflating identical bucket names created under different
+instance timezones. It is a deliberate exception to the original O(1)-counter
+assumption: no historical rows/counters are rewritten on a timezone change.
+
+Changing the instance timezone can immediately alter inherited remaining budget.
+Client-token reservations and their existing server-local boundaries are separate
+from this model-rule setting. Current operational behavior is documented in
+[settings-runbook.md](settings-runbook.md).

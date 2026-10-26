@@ -1,3 +1,4 @@
+import { subscribePreferences } from './utils/preferences';
 // App shell: token unlock gate → sidebar layout → routes.
 // Nothing renders or fetches before the unlock screen hands back a token.
 import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
@@ -50,7 +51,7 @@ const NAV: NavItem[] = [
   { to: '/compression', label: 'Compression', hint: 'profiles · engines' },
   { to: '/connect', label: 'Connect', hint: 'routes · API keys' },
   { to: '/neighbourhood', label: 'Neighbourhood', hint: 'your keys as a living scene' },
-  { to: '/settings', label: 'Settings', hint: 'dashboard password' },
+  { to: '/settings', label: 'Settings', hint: 'instance administration' },
 ];
 
 // One restrained 16px stroke icon per destination. Inline SVG keeps the
@@ -269,6 +270,7 @@ function SetupForm({ onDone, onAlreadySet }: { onDone: () => void; onAlreadySet:
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const location = useLocation();
   const [theme, setThemeState] = useState<Theme>(() => readTheme());
+ useEffect(() => subscribePreferences(() => setThemeState(readTheme())), []);
   const version = useServerVersion();
 
   const changeTheme = useCallback((t: Theme) => { setThemeState(t); setTheme(t); }, []);
@@ -344,7 +346,7 @@ const PAGE_HEADERS: Record<string, { title: string; sub: string }> = {
   '/compression': { title: 'Compression', sub: 'Profiles, engines and what they save.' },
   '/connect': { title: 'Connect', sub: 'Point clients at this gateway and issue API keys.' },
   '/neighbourhood': { title: 'Neighbourhood', sub: 'Every key is a house; the busier it is, the brighter it shines.' },
-  '/settings': { title: 'Settings', sub: 'The dashboard password.' },
+  '/settings': { title: 'Settings', sub: 'Preferences, security, backups and gateway policy.' },
 };
 
 export default function App() {

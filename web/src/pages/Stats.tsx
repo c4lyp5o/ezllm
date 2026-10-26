@@ -1,3 +1,4 @@
+import { readRange } from '../utils/preferences';
 // ANALYTICS EXPLORER — the /admin/usage report, exposed properly.
 //
 // The old design was ONE toggle called "granularity" that folded two
@@ -91,7 +92,7 @@ function focusColor(focus: FocusKey): string {
 export default function Stats() {
   const [split, setSplit] = useState<SplitKey>('account');
   const [focus, setFocus] = useState<FocusKey>('tokens');
-  const [range, setRange] = useState<RangeKey>('24h');
+  const [range, setRange] = useState<RangeKey>(readRange);
   const [data, setData] = useState<UsageResp | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);

@@ -9,6 +9,7 @@
 //   - the loop pauses while the tab is hidden (rAF already stops; the clock
 //     is time-based so a re-shown tab never fast-forwards)
 import { useEffect, useRef } from 'react';
+import { useReducedMotion } from '../utils/preferences';
 
 type Seg = { p0: { x: number; y: number }; p1: { x: number; y: number }; p2: { x: number; y: number }; p3: { x: number; y: number } };
 type Path = { segments: Seg[]; color: string };
@@ -21,21 +22,18 @@ const PATH_COLORS = ['#38bdf8', '#60a5fa', '#818cf8', '#22d3ee', '#7dd3fc']; // 
 // old white core was a hard spark against the dark field.
 const PACKET_COLORS = ['#38bdf8', '#60a5fa', '#818cf8', '#22d3ee', '#7dd3fc', '#a78bfa', '#c084fc'];
 
-// Calm, not busy: a dozen packets at most on a desktop, five on a phone, with
-// a few already mid-track on load so the page never opens empty. Each packet
-// is two arcs + a short trail — no shadowBlur (the costliest canvas op, and it
-// was per packet per frame), no offscreen canvas.
-// Phones (small or coarse-pointer screens) also get fewer tracks, a backing
-// store capped at 1.5x instead of the device's 3x, and 30 frames a second.
+// Restore the busier pre-1.3 desktop scene. Small screens keep a bounded
+// backing store and a 30fps budget, with traffic visible from the first paint.
 const BUDGET = {
-  desktop: { maxPackets: 12, seed: 5, paths: 12, maxDpr: 2, frameMs: 0 },
-  phone: { maxPackets: 5, seed: 3, paths: 8, maxDpr: 1.5, frameMs: 33 },
+  desktop: { maxPackets: 24, seed: 8, paths: 12, maxDpr: 2, frameMs: 0 },
+  phone: { maxPackets: 9, seed: 4, paths: 8, maxDpr: 1.5, frameMs: 33 },
 };
 const isPhone = () =>
   Math.min(window.innerWidth, window.innerHeight) < 640 || (window.matchMedia?.('(pointer: coarse)').matches ?? false);
 
 export default function RailwayBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+ const reducedMotion=useReducedMotion();
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -165,16 +163,15 @@ export default function RailwayBackground() {
     const posOnPath = (path: Path, t: number) => {
       // Map overall t (0..1) onto the three segments
       let segIdx: number, localT: number;
-      if (t < 0.4) { segIdx = 0; localT = t / 0.4; } else if (t < 0.6) { segIdx = 1; localT = (t - 0.6 + 0.4) / 0.2; } else { segIdx = 2; localT = (t - 0.6) / 0.4; }
+      if (t < 0.4) { segIdx = 0; localT = t / 0.4; } else if (t < 0.6) { segIdx = 1; localT = (t - 0.4) / 0.2; } else { segIdx = 2; localT = (t - 0.6) / 0.4; }
       const seg = path.segments[segIdx];
       return getCubicBezierXYatT(seg.p0, seg.p1, seg.p2, seg.p3, localT);
     };
 
-    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 
     // dt scales packet speed (tuned per 60 Hz frame), so a 120 Hz phone or the
     // 30 fps phone cap moves packets at the same pace on screen.
-    const drawFrame = (now: number, dt = 1) => {
+    const drawFrame = (now: number, dt = 0) => {
       // 1. Motion-blur background trail (deep dark blue fade)
       ctx.globalCompositeOperation = 'source-over';
       ctx.fillStyle = 'rgba(5, 8, 20, 0.16)';
@@ -222,7 +219,7 @@ export default function RailwayBackground() {
       // a track the previous packet did not use.
       if (now >= nextSpawnAt && packets.length < budget.maxPackets) {
         spawnPacket();
-        nextSpawnAt = now + 400 + Math.random() * 600; // 0.4–1s apart
+        nextSpawnAt = now + (budget === BUDGET.phone ? 400 : 180) + Math.random() * 420;
       }
       ctx.globalCompositeOperation = 'screen';
       for (let i = packets.length - 1; i >= 0; i--) {
@@ -247,49 +244,58 @@ export default function RailwayBackground() {
         ctx.stroke();
         ctx.globalAlpha = 1.0;
 
-        // Core + soft halo, both in the packet's own colour: no white core, no
-        // black — colour carries the whole read. The halo stands in for the
-        // shadowBlur glow at a fraction of the cost.
+        // Restore the original desktop comet glow. Phones use the painted
+        // halo so the small-screen frame budget stays predictable.
         ctx.fillStyle = packet.color;
         ctx.beginPath();
         ctx.globalAlpha = 0.18;
         ctx.arc(pos.x, pos.y, packet.size + 4, 0, Math.PI * 2);
         ctx.fill();
         ctx.globalAlpha = 1.0;
+        ctx.shadowBlur = budget === BUDGET.desktop ? 14 : 0;
+        ctx.shadowColor = packet.color;
         ctx.beginPath();
         ctx.arc(pos.x, pos.y, packet.size, 0, Math.PI * 2);
         ctx.fill();
+        ctx.shadowBlur = 0;
       }
     };
 
-    let last = 0;
+    let last: number | null = null;
     const animate = (now: number) => {
       animationFrameId = requestAnimationFrame(animate);
-      const elapsed = last ? now - last : 16.7;
+      if (last === null) { last = now; return; }
+      const elapsed = now - last;
       if (elapsed < budget.frameMs) return;
-      // Clamp so a long stall (backgrounded tab) never teleports packets.
       drawFrame(now, Math.min(elapsed, 100) / 16.7);
       last = now;
     };
 
-    init();
-    if (reducedMotion) {
-      // One static frame: same picture, no loop, no motion sickness.
-      drawFrame(0);
-    } else {
-      animationFrameId = requestAnimationFrame(animate);
-    }
-
     const handleResize = () => {
       init();
-      if (reducedMotion) drawFrame(last);
+      // Paint independently of the limiter: otherwise a 30fps first frame
+      // can repeatedly skip without ever initializing its clock.
+      drawFrame(performance.now(), 0);
+      last = null;
     };
+    const onVisibility = () => {
+      cancelAnimationFrame(animationFrameId);
+      last = null;
+      if (!document.hidden && !reducedMotion) animationFrameId = requestAnimationFrame(animate);
+    };
+    handleResize();
+    if (!reducedMotion && !document.hidden) animationFrameId = requestAnimationFrame(animate);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(handleResize);
+    observer?.observe(canvas);
     window.addEventListener('resize', handleResize);
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
+      observer?.disconnect();
       window.removeEventListener('resize', handleResize);
+      document.removeEventListener('visibilitychange', onVisibility);
       cancelAnimationFrame(animationFrameId);
     };
-  }, []);
+  }, [reducedMotion]);
 
-  return <canvas ref={canvasRef} aria-hidden className="absolute inset-0 h-full w-full" />;
+  return <canvas ref={canvasRef} aria-hidden className="pointer-events-none absolute inset-0 h-full w-full" />;
 }

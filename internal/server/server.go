@@ -25,6 +25,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/c4lyp5o/ezllm/internal/backup"
 	"github.com/c4lyp5o/ezllm/internal/compress"
 	"github.com/c4lyp5o/ezllm/internal/githubcopilot"
 	"github.com/c4lyp5o/ezllm/internal/jsonbody"
@@ -33,6 +34,7 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/registration"
 	"github.com/c4lyp5o/ezllm/internal/router"
 	"github.com/c4lyp5o/ezllm/internal/rules"
+	"github.com/c4lyp5o/ezllm/internal/settings"
 	"github.com/c4lyp5o/ezllm/internal/store"
 )
 
@@ -62,13 +64,27 @@ type Auth interface {
 	ClientByToken(ctx context.Context, token string) (name string, roles []string, err error)
 }
 
+type DeploymentInfo struct {
+	ListenAddress     string `json:"listen_address"`
+	ListenSource      string `json:"listen_source"`
+	Storage           string `json:"storage"`
+	MasterKeySource   string `json:"master_key_source"`
+	TrustedProxyCount int    `json:"trusted_proxy_count"`
+}
+
 type Server struct {
-	auth       Auth
-	resolver   *router.Resolver
-	dispatcher *proxy.Dispatcher
-	db         *store.DB
-	registry   *provider.Registry
-	tester     *registration.Tester
+	deployment   DeploymentInfo
+	settings     *settings.Manager
+	settingsWake chan struct{}
+	backups      *backup.Manager
+	jobsMu       sync.Mutex
+	jobs         map[string]jobHealth
+	auth         Auth
+	resolver     *router.Resolver
+	dispatcher   *proxy.Dispatcher
+	db           *store.DB
+	registry     *provider.Registry
+	tester       *registration.Tester
 	// rulesEngine is the eligibility engine (M5). Admin writes to model_rules
 	// reload it so a new cap/window applies on the next request instead of
 	// waiting for the background ticker. Nil in unit tests that don't care.
@@ -163,6 +179,9 @@ var memoSweepEvery = time.Minute
 
 // Options configures New.
 type Options struct {
+	Deployment  DeploymentInfo
+	Settings    *settings.Manager
+	Backups     *backup.Manager
 	Auth        Auth
 	Resolver    *router.Resolver
 	Dispatcher  *proxy.Dispatcher
@@ -229,6 +248,8 @@ func New(opts Options) *Server {
 		maxBody = 32 << 20
 	}
 	s := &Server{
+		deployment: opts.Deployment,
+		settings:   opts.Settings, backups: opts.Backups, settingsWake: make(chan struct{}, 1), jobs: map[string]jobHealth{},
 		auth: opts.Auth, resolver: opts.Resolver, dispatcher: opts.Dispatcher,
 		db: opts.DB, registry: opts.Registry, tester: opts.Tester,
 		log: opts.Log, mux: http.NewServeMux(), rulesEngine: opts.Rules,
@@ -323,6 +344,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/vscode/{token}/responses", s.vscodeAuthed(s.inference(provider.SurfaceResponses)))
 
 	// ── Dashboard account settings ──
+	s.mux.HandleFunc("GET /admin/settings", s.admin(s.handleSettings))
+	s.mux.HandleFunc("PATCH /admin/settings", s.admin(s.handleSettings))
+	s.mux.HandleFunc("GET /admin/settings/sessions", s.admin(s.handleSessions))
+	s.mux.HandleFunc("DELETE /admin/settings/sessions/{id}", s.admin(s.handleRevokeSession))
+	s.mux.HandleFunc("POST /admin/settings/sessions/revoke-all", s.admin(s.handleRevokeAllSessions))
+	s.mux.HandleFunc("GET /admin/settings/diagnostics", s.admin(s.handleDiagnostics))
+	s.mux.HandleFunc("GET /admin/backups", s.admin(s.handleBackups))
+	s.mux.HandleFunc("POST /admin/backups", s.admin(s.handleRunBackup))
 	s.mux.HandleFunc("POST /admin/settings/password", s.admin(s.handleDashboardPassword))
 
 	// ── M3 admin API (docs/API.md) ──
@@ -433,7 +462,12 @@ func (s *Server) Handler() http.Handler {
 	// "POST /v1/chat/completions" registered it answers OPTIONS with 405 before
 	// any handler — so CORS headers can never be attached there. Pre-dispatch
 	// interception is the only correct place for it.
-	return s.withCORS(inner)
+	return s.withCORS(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.settings != nil {
+			r = r.WithContext(settings.With(r.Context(), s.settings.Current()))
+		}
+		inner.ServeHTTP(w, r)
+	}))
 }
 
 // securityHeaders sets the headers every response gets: no MIME sniffing
@@ -1065,6 +1099,9 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 	// ignored parameter is how a caller believes a number means something it
 	// does not.
 	loc := s.usageTZ
+	if p, ok := settings.From(r.Context()); ok {
+		loc = p.Location()
+	}
 	if v := strings.TrimSpace(r.URL.Query().Get("tz")); v != "" {
 		if groupBy != "day" {
 			writeErr(w, http.StatusBadRequest, "invalid_request_error",

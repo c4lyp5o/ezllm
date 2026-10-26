@@ -38,7 +38,7 @@ type Draft = {
 
 const newDraft = (accountID: number): Draft => ({
   account_id: accountID, model_ids: [], cap_tokens: 0, cap_window: 'monthly',
-  win_start: '', win_end: '', win_days: '', win_tz: 'Asia/Kuala_Lumpur',
+  win_start: '', win_end: '', win_days: '', win_tz: 'instance',
   enabled: true, note: '',
 });
 
@@ -261,7 +261,8 @@ function RuleModal({ open, editing, accounts, models, draft, setDraft,
             onChange={(e) => set({ win_tz: e.target.value })}>
             {/* The browser's own IANA list, so an exotic zone can't be typed
                 into a typo the router would silently treat as UTC. */}
-            {!TZS.includes(d.win_tz) && d.win_tz && <option value={d.win_tz}>{d.win_tz}</option>}
+            {!TZS.includes(d.win_tz) && d.win_tz && d.win_tz !== 'instance' && <option value={d.win_tz}>{d.win_tz}</option>}
+            <option value="instance">Instance timezone</option>
             {TZS.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
         </div>

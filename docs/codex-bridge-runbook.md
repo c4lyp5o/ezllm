@@ -21,8 +21,8 @@ Five steps. Each links to its detail below.
    `CODEX_HOME=~/.codex-sub codex login --device-auth`.
 4. **Turn it on** in `compose.yml`: uncomment the two Codex mounts, set
    `EZLLM_CODEX_BRIDGE: "on"`, then `docker compose up -d` ([enable](#enable)).
-5. **Add the account** in the dashboard: Providers → Add provider → **ChatGPT
-   subscription (bridge)** → Save & validate. The dialog shows whether the bridge
+5. **Add the account** in the dashboard: Providers → Add provider →
+   **ChatGPT Plus/Pro** → Save & validate. The dialog shows whether the bridge
    is running; there is no key to paste. Cap it under Rules before agents use it
    ([wire it in](#wire-it-into-ezllm)).
 

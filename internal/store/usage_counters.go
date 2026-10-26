@@ -4,9 +4,9 @@ package store
 //
 // Two properties make this safe on the hot path:
 //
-//  1. Reads are a single primary-key lookup. There is no SUM() over `calls`
-//     anywhere near a request — an aggregate per inference would put SQLite
-//     work on every call and scale with the ledger's size, not its rate.
+//  1. Explicit-timezone rule reads use a single primary-key lookup. Rules
+//     inheriting a mutable instance timezone instead use InheritedRuleUsage
+//     and the indexed ledger calendar range, avoiding mixed historical buckets.
 //  2. Rotation is implicit. A window that ends simply writes a new bucket key,
 //     so there is no reset job and no "forgot to reset the counter" bug class.
 //     Old buckets age out by being ignored (and, optionally, pruned).

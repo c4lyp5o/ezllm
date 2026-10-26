@@ -190,16 +190,25 @@ Same binary, served at `/`; the UI renders and fetches nothing until
 unlocked. Everything under `/admin/*` except sign-in and first-boot setup
 requires an admin session or an admin client token. The sidebar shows the
 running **version**; the overview shows uptime and account, model and combo
-counts.
+counts. Settings covers browser preferences, sessions, backup/recovery, gateway
+policy, notification preferences and safe system diagnostics. Encrypted backup
+scheduling is disabled by default; configure a separate encryption secret and a
+mounted destination before enabling it. See the
+[recovery runbook](docs/recovery-runbook.md).
 
 ## Configuration
 
-Precedence: command-line flags → `EZLLM_*` environment → `config.yaml` →
-built-in defaults.
+Precedence for supported operator controls: command-line flags → `EZLLM_*`
+environment → saved Settings → explicit `config.yaml` → built-in defaults.
+Settings manages runtime policy, preferences, sessions and encrypted backups;
+deployment paths and bridge startup remain YAML/environment controls. See
+[Settings administration](docs/settings-runbook.md).
 
-New install? Set `EZLLM_USAGE_TZ` to your time zone, and
-keep both subscription bridges off unless you run them (they are off in
-`compose.example.yml`).
+New install? Choose your usage timezone in Settings → General, or enforce it
+with `EZLLM_USAGE_TZ` (which locks that dashboard control). Keep subscription
+bridges off unless you run them (they are off in `compose.example.yml`).
+The compose example explicitly sets `EZLLM_USAGE_TZ: UTC`; remove that entry
+to manage the timezone from Settings.
 Every variable and its default: **[docs/environment.md](docs/environment.md)**.
 Logs go to stdout, one line per record — `docker logs ezllm`; what each level
 carries and why there is no log file: **[docs/logging.md](docs/logging.md)**.
@@ -262,6 +271,8 @@ an image or a release asset.
 | Document | What it holds |
 |---|---|
 | [docs/API.md](docs/API.md) | the admin + public API contract |
+| [docs/settings-runbook.md](docs/settings-runbook.md) | settings ownership, live updates, timezones, sessions and diagnostics |
+| [docs/recovery-runbook.md](docs/recovery-runbook.md) | encrypted scheduled backups, offline verification/restore and upgrades |
 | [docs/environment.md](docs/environment.md) | every environment variable and its default; what a new install sets |
 | [docs/master-key-runbook.md](docs/master-key-runbook.md) | at-rest key encryption: paths, backup, rotation |
 | [docs/pricing-runbook.md](docs/pricing-runbook.md) | price catalog: refresh cadence, import, query |

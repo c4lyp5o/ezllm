@@ -78,11 +78,17 @@ bill when `unpriced_calls > 0`.
 
 The scheduler is **inside ezllm** — no external cron, no systemd timer:
 
-- first pass ~45 seconds after boot, so a deploy fills prices immediately;
-- then daily at **03:00** in `EZLLM_USAGE_TZ` (UTC if unset);
-- logs one line: `scheduled price refresh source=litellm effective_from=… entries=… matched=…`.
+- first pass ~45 seconds after boot when automatic refresh is enabled;
+- then daily at **03:00** in the effective instance usage timezone: environment
+  override → saved Settings value → explicit YAML → UTC;
+- scheduled job success/failure timestamps appear in System diagnostics and
+  persist across restarts.
 
-Set `EZLLM_PRICE_REFRESH=off` to disable it (for an air-gapped instance).
+Change automatic price refresh in Settings → Gateway, or enforce
+`EZLLM_PRICE_REFRESH=off` from the deployment (for an air-gapped instance).
+An explicit environment value locks the Settings control. Live changes reschedule
+future work; an already-running refresh may finish. Enabling refresh after startup
+schedules the next daily run; use the manual endpoint for an immediate pass.
 Prices stay manual/import-only unless the process can reach GitHub.
 
 The admin endpoint remains available for an immediate manual pass or a

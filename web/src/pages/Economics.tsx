@@ -1,3 +1,4 @@
+import { readRange } from '../utils/preferences';
 // TOKEN ECONOMICS — what arrived, what was cached, what was removed, what it
 // cost. Two endpoints, one range control:
 //
@@ -41,7 +42,7 @@ function Metric({ label, value, note, tone }: { label: string; value: string; no
 }
 
 export default function Economics() {
-  const [range, setRange] = useState<RangeKey>('24h');
+  const [range, setRange] = useState<RangeKey>(readRange);
   const [rows, setRows] = useState<FeedRow[]>([]);
   const [summary, setSummary] = useState<any>(null);
   const [costRows, setCostRows] = useState<CostRow[]>([]);

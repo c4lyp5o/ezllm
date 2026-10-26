@@ -1,3 +1,4 @@
+import { preferenceChanged } from './preferences';
 // Theme state. Dark is the default; light is an explicit opt-out.
 //
 // The class is applied by an inline <script> in index.html BEFORE React
@@ -13,13 +14,14 @@
 const KEY = 'ezllm.theme';
 
 export type Theme = 'dark' | 'light';
+let transientTheme: Theme = 'dark';
 
 /** Stored preference, or the default when nothing has been chosen. */
 export function readTheme(): Theme {
   try {
     return localStorage.getItem(KEY) === 'light' ? 'light' : 'dark';
   } catch {
-    return 'dark'; // private mode / storage blocked: the default still applies
+    return transientTheme; // Keep this tab usable when browser storage is blocked.
   }
 }
 
@@ -30,8 +32,10 @@ export function applyTheme(t: Theme): void {
 }
 
 export function setTheme(t: Theme): void {
+ transientTheme = t;
   applyTheme(t);
   try { localStorage.setItem(KEY, t); } catch { /* noop — the class still applies */ }
+ preferenceChanged();
 }
 
 /**

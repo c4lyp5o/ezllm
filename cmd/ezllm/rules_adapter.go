@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/c4lyp5o/ezllm/internal/rules"
+	"github.com/c4lyp5o/ezllm/internal/settings"
 	"github.com/c4lyp5o/ezllm/internal/store"
 )
 
@@ -51,6 +52,10 @@ func (a storeAdapter) AllRules(ctx context.Context) ([]rules.Rule, error) {
 // predicate needs. A bucket that has never been written is 0 usage (not an
 // error) — store.UsageFor already returns the zero-value for that case.
 func (a storeAdapter) UsageFor(ctx context.Context, accountID int64, modelID, bucket string) (int64, error) {
+	if meter, ok := settings.RuleMeter(ctx); ok {
+		p, _ := settings.From(ctx)
+		return a.db.InheritedRuleUsage(ctx, accountID, modelID, meter.Window, meter.Now, p.Location())
+	}
 	c, err := a.db.UsageFor(ctx, accountID, modelID, bucket)
 	if err != nil {
 		return 0, err

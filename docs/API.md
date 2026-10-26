@@ -170,21 +170,17 @@ set — the client never sums rows. `group_by` ∈ `account` (default) | `key` |
 to the last 24h (+1min grace, same as `/admin/requests`). Each row carries
 `p50_ttft_ms`.
 
-**`group_by=day` is UTC by default.** Rows are stamped UTC and the default bucket is
-`substr(ts,1,10)`, so the dashboard's day boundary is midnight UTC. Usage-rule CAPS, by contrast, are evaluated in the
-rule's own `*time.Location` (`rules.Window.loc` — Asia/Kuala_Lumpur unless the rule names
-another zone). The two therefore disagree about which day a call belongs to whenever a rule
-runs in a non-UTC zone, by up to the zone offset: the dashboard's "today" counts a call the
-daily cap already refuses, or vice versa. Compare `group_by=day` against a UTC-aligned rule,
-or derive the day boundary from the rule's `tz` before trusting the two together. The
-grouping is UTC-by-construction and deliberately not silently changed.
+**`group_by=day` uses the effective usage timezone.** Ledger rows are stamped
+UTC. Report precedence is `?tz=` → `EZLLM_USAGE_TZ` → saved `usage_timezone` →
+explicit YAML `usage_timezone` → UTC. Set the instance default in Settings →
+General, or enforce it through the environment. `?tz=` affects only this report;
+it does not change rule eligibility or budget accounting.
 
-**Aligning the two — `EZLLM_USAGE_TZ` / `?tz=`.** Set `EZLLM_USAGE_TZ=Asia/Kuala_Lumpur` in the
-environment and every `group_by=day` bucket is computed in that zone, using the *same*
-`CountBucket` the usage meter writes its counters with — so the dashboard's day and the rule's
-day are one implementation and cannot drift. A per-request `?tz=` overrides the env default.
-Precedence: `?tz=` > `EZLLM_USAGE_TZ` > UTC. A `tz` that does not resolve is rejected (400 on the
-request; the container fails to start naming the bad value), never silently treated as UTC.
+Model rules with `win_tz: instance` use the instance timezone captured when the
+inference request was admitted. Explicit rule timezones remain independent, so a
+report can disagree with an explicitly zoned rule unless its timezone is aligned.
+An unresolvable report zone returns 400; an invalid effective instance zone fails
+startup rather than silently falling back.
 The zone used is echoed back as `tz` in the response, because a day-grouped number is
 meaningless without it. `tz` applies only to `group_by=day` and is rejected for any other
 grouping rather than ignored. DST zones are handled per row, so a day boundary that moves
@@ -315,20 +311,20 @@ turn one on. The dashboard's Add provider dialog reads it for the bridge presets
 the bridge's own boot report (its loopback `/status`), present only while it runs. The shared
 secret is never in the response — a key add names `bridge` instead.
 ```jsonc
-[{"id":"claude-sub","label":"Claude subscription (bridge)","kind":"anthropic-compatible",
+[{"id":"claude-sub","label":"Claude Pro/Max","kind":"anthropic-compatible",
   "base_url":"http://127.0.0.1:8790/v1","usage_convention":"anthropic","enabled":true,
   "env":"EZLLM_CLAUDE_BRIDGE","runbook":"docs/claude-bridge-runbook.md",
   "status":{"cli_version":"2.1.306 (Claude Code)","login":"logged-in","status":"ok","subscription":"Subscription: max"}},
- {"id":"chatgpt-sub","label":"ChatGPT subscription (bridge)","kind":"openai-compatible",
+ {"id":"chatgpt-sub","label":"ChatGPT Plus/Pro","kind":"openai-compatible",
   "base_url":"http://127.0.0.1:8791/v1","usage_convention":"auto","enabled":false,
   "env":"EZLLM_CODEX_BRIDGE","runbook":"docs/codex-bridge-runbook.md"},
- {"id":"antigravity-sub","label":"Antigravity subscription (bridge)","kind":"openai-compatible",
+ {"id":"antigravity-sub","label":"Google Antigravity","kind":"openai-compatible",
   "base_url":"http://127.0.0.1:8792/v1","usage_convention":"auto","enabled":false,
   "env":"EZLLM_AGY_BRIDGE","runbook":"docs/agy-bridge-runbook.md"}]
 ```
 Refusal while a bridge is off (`POST …/keys` with `"bridge":"chatgpt-sub"`):
 ```jsonc
-{"error":{"code":409,"message":"ChatGPT subscription (bridge) is not running: set EZLLM_CODEX_BRIDGE=on, mount the CLI and login, and restart (docs/codex-bridge-runbook.md)","type":"invalid_request_error"}}
+{"error":{"code":409,"message":"ChatGPT Plus/Pro is not running: set EZLLM_CODEX_BRIDGE=on, mount the CLI and login, and restart (docs/codex-bridge-runbook.md)","type":"invalid_request_error"}}
 ```
 
 ### `POST /admin/accounts/{id}/keys/{keyId}/retest` → `200` | `422`
@@ -438,9 +434,10 @@ of weeks, and the endpoint is idempotent for the day. For a **historical backfil
 pass an earlier `effective_from` (for example 30 days ago) — the cost report then
 applies today's list price to those calls as an estimate, still marked `source=litellm`.
 
-ezllm also runs this refresh **in-process**: ~45s after boot, then daily at 03:00
-in `EZLLM_USAGE_TZ`. `EZLLM_PRICE_REFRESH=off` disables the scheduler; the admin
-endpoint still works for manual runs.
+ezllm also runs this refresh **in-process**: ~45s after boot when enabled, then
+daily at 03:00 in the effective instance usage timezone. Settings → Gateway
+controls scheduled refresh live; `EZLLM_PRICE_REFRESH=off` enforces a deployment
+override and locks that control. The admin endpoint still works for manual runs.
 
 ### `PUT /admin/accounts/{id}/prices` → `200` (echoes the stored row)
 Model id in the body (ids can contain `/`). **All four rates are required** — a missing
@@ -565,7 +562,8 @@ Versioned non-secret configuration export, with `format_version:1`,
 `kind:"configuration_export"`, and `database_backup_required:true`.
 Includes accounts (credential hints only), combos, token policies (no tokens),
 compression profiles, per-model rules, versioned prices, individual model
-capability/pin records with account IDs, service bindings, and latest quotas.
+capability/pin records with account IDs, service bindings, latest quotas, and
+saved non-secret instance settings.
 `?include_ledger=true` adds a streamed ledger projection, without a row cap.
 
 The response ends with `completion:{complete,ledger_requested,ledger_rows}`.
@@ -599,7 +597,9 @@ One rule per `(account_id, model_id)`: a rolling **token cap** and/or an **allow
 - `max_context_tokens` — the declared context window (default `0` = unknown/unlimited). Requests whose estimated token count exceeds it are filtered before dispatch — no wasted upstream call. The estimate is `len(body)/4`, a conservative heuristic.
 - `win_start` / `win_end` — `HH:MM` local to `win_tz`; `end < start` wraps midnight; both empty =
   always allowed; an identical pair is rejected (empty window, not all-day).
-- `win_days` — CSV of `0–6` (Sun=0), `""` = every day; `win_tz` — IANA name or fixed offset.
+- `win_days` — CSV of `0–6` (Sun=0), `""` = every day; `win_tz` — an explicit
+  host-resolvable timezone or `instance` (the default for new rules). Existing
+  explicit values are preserved; legacy empty values migrate to UTC.
 - `enabled`, `note` optional.
 
 Enforcement: inside a combo, a hop whose rule says "not now" is **skipped silently** (the next
@@ -807,3 +807,58 @@ The discarded-body observer reads at most 32 MiB (the normal JSON response
 cap), including bounded SSE events. Usage outside an unread/oversized body or
 after transport failure is not estimated. The final fallback response is
 accounted once as the delivery row, rather than as an extra discarded attempt.
+
+## Instance settings, sessions, diagnostics and backups (v1.4)
+
+All routes in this section require admin authentication. Cookie writes retain
+same-origin enforcement. Settings writes accept at most 32 KiB and exactly one
+JSON object, with unknown envelope/setting fields rejected.
+
+| Method and route | Input / result |
+|---|---|
+| `GET /admin/settings` | `revision` and `fields`; each field has `value`, `source`, `editable`, `saved`, and `apply`. Sources: `default`, `yaml`, `settings`, `environment`, `flag`. |
+| `PATCH /admin/settings` | Send `revision` and nonempty `values` object. Values are typed settings; null removes a saved override. Success returns the new full view. Invalid or deployment-locked fields reject the whole update with 400; stale revision returns 409; persistence failure returns 503 with the previous policy active. |
+| `GET /admin/settings/sessions` | Active sessions with opaque `id`, `created_at`, `expires_at`, `browser`, and `current`. IDs are independent of authentication tokens/digests. |
+| `DELETE /admin/settings/sessions/{id}` | Revoke one dashboard session; 204, including an unknown/already-revoked ID. |
+| `POST /admin/settings/sessions/revoke-all` | Revoke every dashboard session; 204. Client API tokens are unaffected. |
+| `GET /admin/settings/diagnostics` | Allowlisted `version`, `uptime_seconds`, `database_bytes`, `bridges`, `jobs`, effective `settings`, safe deployment metadata (listen address/source, storage kind, master-key source and trusted proxy count), and configured backup status. `download=true` sets an attachment filename. No filesystem paths, credentials or request content. |
+| `GET /admin/backups` | `ready`, `running`, `last_outcome`, optional `last_finished`, optional sanitized `error` for inventory failures, and `backups`. `ready` describes configuration/inventory readiness; each run separately checks writability. Completed records have `id`, `created_at`, `bytes`, and `verified`. An unconfigured instance returns an empty list and `ready=false`. |
+| `POST /admin/backups` | Start a manual job; 202 with status `running`. Returns 409 if storage is unavailable, a job is already running, or shutdown has begun. Poll the GET route for completion. |
+
+### Editable settings
+
+| Setting | Type / validation |
+|---|---|
+| `usage_timezone` | Nonempty resolvable IANA zone; default UTC. |
+| `translation_enabled`, `automatic_probing`, `price_refresh` | Boolean. Existing environment switches override saved values. |
+| `catalog_interval` | Duration, at least 1 minute. Default 12h. |
+| `retries` | Integer 0–9; 0 disables same-hop retry. Default 3. |
+| `attempt_budget` | Integer 0–64; 0 means unlimited. Default 8. |
+| `dispatch_deadline` | Duration at least 1 second, or empty for unlimited. Governs selection/retry waits, never an active stream. |
+| `cooldown_429`, `cooldown_5xx` | Positive durations; defaults 60s. Upstream Retry-After retains precedence. |
+| `cooldown_strikes` | Positive integer; default 3. Existing expiry times are preserved. |
+| `backup_enabled` | Boolean, default false. Enabling requires configured writable storage and a separate backup encryption secret. |
+| `backup_hour` | Integer 0–23, instance timezone; default 3. |
+| `backup_keep` | Integer 1–365, default 7; counts completed verified backups. |
+| `notify_free_models_added`, `notify_free_models_removed`, `notify_free_model_broken`, `notify_catalog_refresh_failed`, `notify_client_budget_reached`, `notify_price_refresh_failed`, `notify_backup_failed` | Boolean, all default true. Apply to future dashboard bell events. |
+
+Duration settings retain the limits of their existing YAML counterparts.
+`apply` is `immediate` for operator values; changing a deployment override still
+requires a process restart. `saved` can remain true while an environment override
+masks the saved value. Settings are stored in the
+`instance_settings` singleton as `revision` and `values_json`; job timestamps use
+`instance_job_health`. `dashboard_session_details` maps internal digests to opaque
+management IDs and bounded browser descriptions. These tables ship with schema
+version 31.
+
+Model-rule `win_tz` additionally accepts `instance`, now the default for new
+rules. Existing empty timezone rows migrate to UTC; explicit zones are preserved.
+Inherited rule usage reads committed ledger timestamps in the admitted timezone's
+calendar range. Existing client-token budget timezone semantics remain unchanged.
+
+Configuration exports retain format version 1 and add `settings`, containing
+saved non-secret operator overrides. Existing export fields and streamed completion
+manifests remain; exports still require a database/master-key backup for recovery.
+Browser preferences, backup encryption secrets and deployment path configuration
+are not included. See [settings-runbook.md](settings-runbook.md) and
+[recovery-runbook.md](recovery-runbook.md).

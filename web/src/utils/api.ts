@@ -958,6 +958,7 @@ export function formatDays(csv: string | undefined): string {
 export function windowState(
   r: Pick<ModelRule, 'win_start' | 'win_end' | 'win_days' | 'win_tz'>,
   now: Date = new Date(),
+  instanceTimezone = 'UTC',
 ): { open: boolean; label: string } {
   const s = r.win_start ?? '';
   const e = r.win_end ?? '';
@@ -970,7 +971,7 @@ export function windowState(
   if (!Number.isFinite(startM) || !Number.isFinite(endM)) return { open: false, label: 'invalid time' };
   if (startM === endM) return { open: false, label: 'invalid (start==end)' };
 
-  const { h, m, date } = tzParts(r.win_tz || 'UTC', now);
+  const { h, m, date } = tzParts(r.win_tz === 'instance' ? instanceTimezone : r.win_tz || 'UTC', now);
   const nowM = h * 60 + m;
   let open: boolean;
   let anchor = date;
@@ -1034,3 +1035,17 @@ export const listNotifications = (limit = 30) =>
   get<{ items: Notification[]; unread: number }>(`/admin/notifications?limit=${limit}`);
 export const markNotificationsRead = (ids: number[] | 'all') =>
   post<null>('/admin/notifications/read', ids === 'all' ? { all: true } : { ids });
+
+export type SettingField = { value: string | boolean | number; source: string; editable: boolean; saved: boolean; apply: string };
+export type SettingsView = { revision: number; fields: Record<string, SettingField> };
+export type DashboardSession = { id: string; created_at: string; expires_at: string; browser: string; current: boolean };
+export type BackupStatus = { error?: string; ready: boolean; running: boolean; last_outcome: string; last_finished?: string; backups: { id: string; created_at: string; bytes: number; verified: boolean }[] };
+export type SystemDiagnostics = { deployment?: { listen_address: string; listen_source: string; storage: string; master_key_source: string; trusted_proxy_count: number }; version: string; uptime_seconds: number; database_bytes: number; bridges: { id: string; enabled: boolean }[]; jobs: Record<string, { running: boolean; last_success?: string; last_failure?: string }> };
+export const getSettings = () => get<SettingsView>('/admin/settings');
+export const saveSettings = (revision: number, values: Record<string, unknown>) => patch<SettingsView>('/admin/settings', { revision, values });
+export const getDashboardSessions = () => get<DashboardSession[]>('/admin/settings/sessions');
+export const revokeDashboardSession = (id: string) => del(`/admin/settings/sessions/${encodeURIComponent(id)}`);
+export const revokeAllDashboardSessions = () => post('/admin/settings/sessions/revoke-all');
+export const getBackupStatus = () => get<BackupStatus>('/admin/backups');
+export const runBackup = () => post('/admin/backups');
+export const getDiagnostics = () => get<SystemDiagnostics>('/admin/settings/diagnostics');

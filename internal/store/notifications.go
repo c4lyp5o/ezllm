@@ -56,6 +56,9 @@ const (
 // DedupKey updates that row (count + 1, newest title/body/data) rather than
 // adding one, so a recurring failure is one line with a counter, not a flood.
 func (d *DB) Notify(ctx context.Context, in NotificationInput) error {
+	if m := d.operatorSettings.Load(); m != nil && !m.Current().Notify(in.Kind) {
+		return nil
+	}
 	if strings.TrimSpace(in.Kind) == "" || strings.TrimSpace(in.Title) == "" {
 		return errors.New("store: notification needs a kind and a title")
 	}

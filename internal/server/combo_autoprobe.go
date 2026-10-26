@@ -28,7 +28,7 @@ var comboProbeSurfaces = []provider.Surface{
 // lack a verdict, and curated rows are never touched. A combo write whose
 // hops are all proven costs nothing.
 func (s *Server) probeComboHops(comboID int64) {
-	if !s.comboAutoProbe || s.tester == nil {
+	if !s.automaticProbing() || s.tester == nil {
 		return
 	}
 	s.goBackground(func(ctx context.Context) { s.runComboProbe(ctx, comboID) })

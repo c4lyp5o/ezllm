@@ -6,12 +6,12 @@
 import { start, json, check, finish } from "./mockdash.mjs";
 
 const bridges = [
-  { id: "claude-sub", label: "Claude subscription (bridge)", kind: "anthropic-compatible", base_url: "http://127.0.0.1:8790/v1",
+  { id: "claude-sub", label: "Claude Pro/Max", kind: "anthropic-compatible", base_url: "http://127.0.0.1:8790/v1",
     usage_convention: "anthropic", enabled: true, env: "EZLLM_CLAUDE_BRIDGE", runbook: "docs/claude-bridge-runbook.md",
     status: { cli_version: "2.1.306 (Claude Code)", login: "logged-in", subscription: "Subscription: max" } },
-  { id: "chatgpt-sub", label: "ChatGPT subscription (bridge)", kind: "openai-compatible", base_url: "http://127.0.0.1:8791/v1",
+  { id: "chatgpt-sub", label: "ChatGPT Plus/Pro", kind: "openai-compatible", base_url: "http://127.0.0.1:8791/v1",
     usage_convention: "auto", enabled: false, env: "EZLLM_CODEX_BRIDGE", runbook: "docs/codex-bridge-runbook.md" },
-  { id: "antigravity-sub", label: "Antigravity subscription (bridge)", kind: "openai-compatible", base_url: "http://127.0.0.1:8792/v1",
+  { id: "antigravity-sub", label: "Google Antigravity", kind: "openai-compatible", base_url: "http://127.0.0.1:8792/v1",
     usage_convention: "auto", enabled: true, env: "EZLLM_AGY_BRIDGE", runbook: "docs/agy-bridge-runbook.md",
     // the Info map cmd/ezllm/agybridge.go reports
     status: { cli_version: "1.4.7", login: "logged in (token file; models listed at boot)",
@@ -40,6 +40,9 @@ await page.getByRole("button", { name: /Add provider/ }).click();
 const options = await page.$$eval("#ap-kind option", (os) => os.map((o) => o.value));
 check("every bridge preset offered", ["claude-sub", "chatgpt-sub", "antigravity-sub"].every((o) => options.includes(o)), options);
 
+const labels = await page.$$eval("#ap-kind option", (os) => Object.fromEntries(os.map((o) => [o.value, o.textContent])));
+check("provider labels use the requested names", labels["claude-sub"] === "Claude Pro/Max" && labels["chatgpt-sub"] === "ChatGPT Plus/Pro" && labels["antigravity-sub"] === "Google Antigravity" && labels.openai === "OpenAI Platform", labels);
+
 await page.selectOption("#ap-kind", "antigravity-sub");
 await page.getByText("Bridge running at").waitFor();
 check("antigravity bridge lists its plan's models", (await page.locator("text=gemini-3.8-flash-low, claude-sonnet-4-6").count()) === 1);
@@ -61,7 +64,7 @@ await page.selectOption("#ap-kind", "claude-sub");
 await page.getByText("Bridge running at").waitFor();
 check("running bridge shows its boot facts", (await page.locator("text=2.1.306 (Claude Code)").count()) === 1);
 check("key field hidden for a bridge", !(await page.locator("#ap-key").isVisible()));
-check("name and namespace prefilled", (await page.inputValue("#ap-name")) === "Claude subscription" && (await page.inputValue("#ap-ns")) === "claude-sub");
+check("name and namespace prefilled", (await page.inputValue("#ap-name")) === "Claude Pro/Max" && (await page.inputValue("#ap-ns")) === "claude-sub");
 await page.screenshot({ path: process.env.SHOT ?? "/tmp/bridges.png" });
 await page.getByRole("button", { name: /Save & validate/ }).click();
 await page.waitForTimeout(800);

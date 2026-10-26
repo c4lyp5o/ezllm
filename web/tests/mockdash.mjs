@@ -63,10 +63,10 @@ export async function start() {
   const browser = await chromium.launch();
   return {
     base,
-    async page(handler) {
-      const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+    async page(handler, { unlocked = true, ...contextOptions } = {}) {
+      const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, ...contextOptions });
       // Sessions are an httpOnly cookie; the tab only keeps this unlock marker.
-      await context.addInitScript(() => sessionStorage.setItem("ezllm.admin.unlocked", "1"));
+      if (unlocked) await context.addInitScript(() => sessionStorage.setItem("ezllm.admin.unlocked", "1"));
       const page = await context.newPage();
       page.on("pageerror", (e) => console.error("PAGEERROR", e.message));
       await page.route("**/*", async (route) => {

@@ -72,3 +72,13 @@ retry:
 # Refresh each provider's model catalog at startup and on this interval.
 model_refresh:
   interval: 12h
+
+# Optional deployment configuration for encrypted backups. The encryption
+# secret is a separate protected file, never the field-encryption master key.
+# backup:
+#   directory: /backups
+#   secret_file: /run/secrets/ezllm-backup
+# Settings may override these runtime defaults unless an environment switch wins:
+# usage_timezone: UTC
+# price_refresh: true
+# automatic_probing: true

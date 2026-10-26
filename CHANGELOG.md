@@ -2,6 +2,43 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
 
+## 2026-10-26 — v1.3.1: settings administration and encrypted recovery
+
+Expanded Settings into General, Security, Backup & Recovery, Gateway,
+Notifications and System. Operator settings persist in SQLite with revision
+checks and explicit configuration provenance; deployment overrides remain locked.
+Request policy snapshots preserve active retries/routing while new requests use
+saved controls. Browser theme, reduced motion and analytics defaults remain local.
+
+Added opaque dashboard session management, instance-wide notification preferences,
+and allowlisted diagnostics. The healthz contract is unchanged. Model rules can
+inherit the instance timezone while existing explicit boundaries are preserved.
+
+Encrypted online backups include WAL data and the active master key, verify an
+independent decrypted copy before publication, and begin retention only after
+successful publication. Optional scheduling uses a mounted destination and a
+separate backup secret. Offline verification and restore reject corrupted archives and
+existing output directories; restored dashboard sessions are revoked.
+
+Schema v31 adds settings, job-health and session-detail storage. Legacy empty
+rule timezones migrate to explicit UTC; existing explicit zones and client-token
+budget boundaries are preserved. Deployment-controlled values remain read-only
+in Settings. Changing ordinary runtime policy affects newly admitted requests;
+already-running requests retain their original snapshot. Export format version 1
+is preserved with an additive non-secret settings field.
+
+The login railway restores its busier glowing rails and fixes the small-screen
+30 fps first-frame stall that left the canvas blank in v1.3. Packet interpolation
+stays inside each segment, and OS/browser motion changes are applied live.
+Neighbourhood now uses layered facades, gardens, streetlights and traffic, with
+keyboard/touch selection and a numeric house inspector. Missing usage is shown
+as unavailable; loading/errors support recovery, and wide streets scroll locally.
+The SVG scene remains dependency-free and pauses independently of data refresh.
+
+Provider presets and the bridge API use Google Antigravity, Claude Pro/Max,
+ChatGPT Plus/Pro and OpenAI Platform. Newly added accounts use those names;
+existing account names and routing identifiers remain unchanged.
+
 ## 2026-10-26 — v1.3.0: chat wire rename, probes out of the ledger, Antigravity bridge, one-click bridges
 
 - **The chat-completions wire is named `chat`, not `openai`** (schema v30,

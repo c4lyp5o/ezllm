@@ -5,6 +5,7 @@ go 1.27
 toolchain go1.27.2
 
 require (
+	filippo.io/age v1.2.1
 	github.com/andybalholm/brotli v1.0.6
 	github.com/klauspost/compress v1.17.4
 	github.com/refraction-networking/utls v1.8.2

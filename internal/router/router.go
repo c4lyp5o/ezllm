@@ -22,6 +22,7 @@ import (
 
 	"github.com/c4lyp5o/ezllm/internal/provider"
 	"github.com/c4lyp5o/ezllm/internal/proxy"
+	"github.com/c4lyp5o/ezllm/internal/settings"
 	"github.com/c4lyp5o/ezllm/internal/store"
 	"github.com/c4lyp5o/ezllm/internal/translate"
 )
@@ -417,6 +418,11 @@ func (r *Resolver) selectWire(ctx context.Context, acct *provider.Account, model
 // selectWireWith is the body of selectWire, given the memoized hop facts so the
 // caller can reuse the same row for its own questions.
 func (r *Resolver) selectWireWith(ctx context.Context, acct *provider.Account, model, requested string, clientSurface provider.Surface, f *hopFacts) wireDecision {
+	translationEnabled, universalEnabled := r.translationEnabled, r.universalEnabled
+	if p, ok := settings.From(ctx); ok {
+		translationEnabled = p.Translation
+		universalEnabled = p.Translation
+	}
 	// 1. Curated responses-wire override.
 	if r.needsResponsesWire(clientSurface, acct.Namespace, model) {
 		rcap, rerr := f.supports(provider.SurfaceResponses)
@@ -442,7 +448,7 @@ func (r *Resolver) selectWireWith(ctx context.Context, acct *provider.Account, m
 	// universal_enabled is the SINGLE switch for the matrix: it does not
 	// require the legacy translation.enabled gate (operator decision,
 	// 2026-10-13).
-	if r.universalEnabled {
+	if universalEnabled {
 		// Only a chat client pinned to ANOTHER chat wire is translated. A
 		// service request never is (its body has no chat shape), and a pin
 		// to a service surface is not a wire to dial: both fall through to
@@ -484,7 +490,7 @@ func (r *Resolver) selectWireWith(ctx context.Context, acct *provider.Account, m
 	// except that an anthropic-compatible account's Messages wire is proven
 	// by the account kind itself. The usage convention is not a gate: auto
 	// reads Messages usage as exclusive, exactly as the ledger does.
-	if r.universalEnabled {
+	if universalEnabled {
 		for _, dest := range universalOrder(clientSurface) {
 			capability, cerr := f.supports(dest)
 			if cerr != nil {
@@ -509,7 +515,7 @@ func (r *Resolver) selectWireWith(ctx context.Context, acct *provider.Account, m
 	if oerr != nil {
 		chat = nil
 	}
-	if translate.Eligible(clientSurface, native, chat, r.translationEnabled) {
+	if translate.Eligible(clientSurface, native, chat, translationEnabled) {
 		if err := r.checkPin(f, requested, provider.SurfaceChat); err != nil {
 			return wireDecision{refusePin: err}
 		}

@@ -20,6 +20,17 @@ func ErrorCause(status int, body []byte) string {
 	switch {
 	case strings.Contains(s, "error code: 1010") || strings.Contains(s, "browser signature"):
 		return "automation_gate" // Cloudflare ban on library-style UAs (opencode)
+	// The bracketed cause opencode's edge puts INSIDE its "Upstream request
+	// failed:" envelope is more specific than the envelope, and it is about
+	// the BODY, not the backend. Ordering matters: without these the generic
+	// capacity phrase below claims every 400 the edge wraps, so a malformed
+	// request reads as "upstream was busy" and the real bug stays invisible.
+	case strings.Contains(s, "[missing_required_parameter]") ||
+		strings.Contains(s, "[bad_request_error]") ||
+		strings.Contains(s, "[invalid_params]") ||
+		strings.Contains(s, "[unsupported_value]") ||
+		strings.Contains(s, "[invalid_request_error]"):
+		return "bad_request"
 	case strings.Contains(s, "endpoint is unavailable") || strings.Contains(s, "upstream request failed"):
 		return "upstream_capacity" // opencode's edge reporting its own backend
 	case strings.Contains(s, "reasoning_effort are not supported") || strings.Contains(s, "use /v1/responses"):

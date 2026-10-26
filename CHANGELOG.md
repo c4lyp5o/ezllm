@@ -2,6 +2,27 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
 
+## 2026-10-27 — the error table stops calling a bad body "capacity" (fix)
+
+`ErrorCause` matched opencode's `Upstream request failed:` envelope before it
+looked inside it, so every 4xx the edge wrapped was classified
+`upstream_capacity` — "the backend was busy". The edge types those `server_error`
+too, which made the misclassification look deliberate. Real bodies caught in the
+ledger: `[missing_required_parameter] Missing required parameter:
+'messages[347].content'`, `[bad_request_error] invalid params … requires adapter`,
+and `[unsupported_value] Unsupported value: 'reasoning_effort'`.
+
+The bracketed cause inside the envelope now wins, because it is more specific and
+it describes the REQUEST, not the backend: `[missing_required_parameter]`,
+`[bad_request_error]`, `[invalid_params]`, `[unsupported_value]` and
+`[invalid_request_error]` all classify as `bad_request`. The genuine capacity
+refusal (`Endpoint is unavailable`) still classifies as `upstream_capacity`, and
+a test pins that case too — the point is the ordering, not a blanket rewrite.
+
+Why it matters beyond tidiness: a request-shape bug labelled "upstream was busy"
+is a bug nobody goes looking for, and the dashboard's cause chip told the
+operator to wait rather than to fix the body.
+
 ## 2026-10-27 — a client hanging up no longer parks the hop (fix)
 
 `classifyHopPolicy` classified a cancelled CALLER context as a transport error,

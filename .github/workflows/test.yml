@@ -28,6 +28,20 @@ name: Tests
 on:
   workflow_call:
   workflow_dispatch:
+  # A PR gets the same gate as a release. Without this the reusable workflow only
+  # ever ran when docker-publish.yml or release.yml called it, so a branch could
+  # open a PR, be reviewed and merged with NO test result anywhere — "no checks
+  # reported" reads like a green light to anyone skimming the PR.
+  #
+  # No duplication: this workflow has no `push` trigger, so the merge commit is
+  # still tested exactly once, by the publish/release caller or by the next PR.
+  # `edited` is deliberately absent (it fires on a title change and would re-run
+  # the whole suite for nothing); `synchronize`/`reopened` are the defaults that
+  # matter.
+  pull_request:
+    branches:
+      - development
+      - master
 
 jobs:
   test:

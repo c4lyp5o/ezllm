@@ -268,10 +268,29 @@ func (s *Server) runScheduledPriceRefresh(ctx context.Context) {
 }
 
 func nextDaily(hour int, loc *time.Location) time.Time {
-	now := time.Now().In(loc)
-	next := time.Date(now.Year(), now.Month(), now.Day(), hour, 0, 0, 0, loc)
-	if !next.After(now) {
-		next = next.AddDate(0, 0, 1)
+	return nextDailyAt(time.Now(), hour, loc)
+}
+
+// Use the first occurrence of a repeated hour, and the first valid minute
+// after a skipped hour. A calendar date has at most one scheduled run.
+func nextDailyAt(now time.Time, hour int, loc *time.Location) time.Time {
+	local := now.In(loc)
+	for day := 0; ; day++ {
+		reference := time.Date(local.Year(), local.Month(), local.Day()+day, 12, 0, 0, 0, loc)
+		next := time.Date(reference.Year(), reference.Month(), reference.Day(), hour, 0, 0, 0, loc)
+		for next.In(loc).Format("2006-01-02") < reference.Format("2006-01-02") || next.In(loc).Hour() < hour {
+			next = next.Add(time.Minute)
+		}
+		_, beforeOffset := next.Add(-6 * time.Hour).Zone()
+		_, offset := next.Zone()
+		if beforeOffset > offset {
+			earlier := next.Add(time.Duration(offset-beforeOffset) * time.Second)
+			if earlier.In(loc).Format("2006-01-02 15:04") == next.In(loc).Format("2006-01-02 15:04") {
+				next = earlier
+			}
+		}
+		if next.After(now) {
+			return next
+		}
 	}
-	return next
 }

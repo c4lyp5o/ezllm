@@ -29,6 +29,7 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/jsonbody"
 	"github.com/c4lyp5o/ezllm/internal/provider"
 	"github.com/c4lyp5o/ezllm/internal/ratelimit"
+	"github.com/c4lyp5o/ezllm/internal/settings"
 	"github.com/c4lyp5o/ezllm/internal/store"
 	"github.com/c4lyp5o/ezllm/internal/translate"
 )
@@ -391,6 +392,7 @@ type cooldownState struct {
 // would strand the request, so the hop stays available and the client gets the
 // upstream's real answer instead of a synthetic refusal.
 type hopOutcome struct {
+	strikes  int
 	failed   bool
 	cooldown time.Duration
 	// reason is the operator-facing cause, surfaced on /admin/health. A parked
@@ -557,6 +559,14 @@ func (d *Dispatcher) releaseProbe(rt Route) {
 // transport error) is still parked: those failures mean "do not send traffic
 // here", which a single hop cannot escape anyway.
 func (d *Dispatcher) classifyHop(err error, status int, hdr http.Header, hasAlternate bool) hopOutcome {
+	return d.classifyHopPolicy(context.Background(), err, status, hdr, hasAlternate)
+}
+func (d *Dispatcher) classifyHopPolicy(ctx context.Context, err error, status int, hdr http.Header, hasAlternate bool) hopOutcome {
+	on429, on5xx := d.on429, d.on5xx
+	if p, ok := settings.From(ctx); ok {
+		on429 = settings.Duration(p.Cooldown429)
+		on5xx = settings.Duration(p.Cooldown5xx)
+	}
 	if err != nil {
 		if !retryableUpstreamError(err) {
 			return hopOutcome{} // our own fault (bad kind, bad request shape): not the hop's
@@ -573,8 +583,8 @@ func (d *Dispatcher) classifyHop(err error, status int, hdr http.Header, hasAlte
 		if dur, ok := parseRetryAfter(hdr.Get("Retry-After")); ok {
 			return hopOutcome{failed: true, cooldown: dur, reason: "429 rate limited (Retry-After)"}
 		}
-		if d.on429 > 0 {
-			return hopOutcome{failed: true, cooldown: d.on429, reason: "429 rate limited"}
+		if on429 > 0 {
+			return hopOutcome{failed: true, cooldown: on429, reason: "429 rate limited"}
 		}
 		return hopOutcome{failed: true, cooldown: defaultHopCooldown, reason: "429 rate limited"}
 	case status >= 500 || status == http.StatusRequestTimeout || status == http.StatusTooEarly:
@@ -584,8 +594,8 @@ func (d *Dispatcher) classifyHop(err error, status int, hdr http.Header, hasAlte
 		}
 		// 408/425 are transient by definition and share the 5xx duration: the
 		// operator configured one "hop is unhealthy" number, not two.
-		if d.on5xx > 0 && status >= 500 {
-			return hopOutcome{failed: true, cooldown: d.on5xx, reason: reason}
+		if on5xx > 0 && status >= 500 {
+			return hopOutcome{failed: true, cooldown: on5xx, reason: reason}
 		}
 		return hopOutcome{failed: true, cooldown: defaultHopCooldown, reason: reason}
 	}
@@ -650,6 +660,9 @@ func (d *Dispatcher) recordHop(rt Route, oc hopOutcome, now time.Time) {
 	st := d.cooldowns[key]
 	st.strikes++
 	threshold := d.maxStrikes
+	if oc.strikes > 0 {
+		threshold = oc.strikes
+	}
 	if threshold < 1 {
 		threshold = 1
 	}
@@ -1468,14 +1481,16 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 // response to w. It returns the ledger Result. Single-candidate form: nothing
 // to fail over to, so attempt and commit happen back to back.
 func (d *Dispatcher) Forward(ctx context.Context, w http.ResponseWriter, r *http.Request, rt Route, body []byte) (result Result, resultErr error) {
-	led := &attemptLedger{limit: d.attemptBudget}
+	policy := d.requestPolicy(ctx)
+	deadline := settings.Duration(policy.DispatchDeadline)
+	led := &attemptLedger{limit: policy.AttemptBudget}
 	defer func() { result.DiscardedUsage = led.spent }()
 	var sel time.Time
-	if d.dispatchDeadline > 0 {
-		sel = time.Now().Add(d.dispatchDeadline)
+	if deadline > 0 {
+		sel = time.Now().Add(deadline)
 	}
 	resp, res, start, err := d.retryAttempt(ctx, r, rt, body, nil, led, sel)
-	res.UpstreamAttempts, res.AttemptBudget = led.used, d.attemptBudget
+	res.UpstreamAttempts, res.AttemptBudget = led.used, policy.AttemptBudget
 	if err != nil {
 		return res, err
 	}
@@ -1483,7 +1498,7 @@ func (d *Dispatcher) Forward(ctx context.Context, w http.ResponseWriter, r *http
 }
 
 func (d *Dispatcher) retryAttempt(ctx context.Context, r *http.Request, rt Route, body []byte, doc *jsonbody.BodyDoc, led *attemptLedger, sel time.Time) (*http.Response, Result, time.Time, error) {
-	maxAttempts := d.retryAttempts + 1
+	maxAttempts := d.requestPolicy(ctx).Retries + 1
 	if maxAttempts < 1 {
 		maxAttempts = 1
 	}
@@ -1675,6 +1690,8 @@ func (d *Dispatcher) ForwardCandidates(ctx context.Context, w http.ResponseWrite
 // ForwardCandidatesDoc is ForwardCandidates with the request body's shared
 // decode threaded through. See ForwardCandidates for the failover contract.
 func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWriter, r *http.Request, routes []Route, body []byte, doc *jsonbody.BodyDoc) (served Route, result Result, resultErr error) {
+	policy := d.requestPolicy(ctx)
+	deadline := settings.Duration(policy.DispatchDeadline)
 	if len(routes) == 0 {
 		return Route{}, Result{}, errors.New("proxy: no candidate routes")
 	}
@@ -1719,7 +1736,7 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 	// Addendum #3: ONE request-wide budget across same-hop retries AND
 	// failover hops, and a selection deadline that governs only the choosing
 	// (never the winning attempt's stream).
-	led := &attemptLedger{limit: d.attemptBudget}
+	led := &attemptLedger{limit: policy.AttemptBudget}
 	defer func() { result.DiscardedUsage = led.spent }()
 	// A parked fallback response is owned by this function until it is either
 	// committed or discarded. Every discard below clears the pointer, so this
@@ -1735,13 +1752,13 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 	}
 	defer discardFallback()
 	var sel time.Time
-	if d.dispatchDeadline > 0 {
-		sel = time.Now().Add(d.dispatchDeadline)
+	if deadline > 0 {
+		sel = time.Now().Add(deadline)
 	}
 	budgetNote := func(ns, model string) Attempt {
 		return Attempt{
 			Namespace: ns, Model: model,
-			Note: fmt.Sprintf("request attempt budget spent (%s/%d used)", budgetLabel(d.attemptBudget), led.used),
+			Note: fmt.Sprintf("request attempt budget spent (%s/%d used)", budgetLabel(policy.AttemptBudget), led.used),
 		}
 	}
 	for i := 0; i < len(routes); i++ {
@@ -1862,7 +1879,7 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 		// without making an extra request that circumvents cooldown.
 		// A sole eligible endpoint is attempted normally below.
 		resp, res, start, err := d.retryAttempt(ctx, r, rt, swapped, doc, led, sel)
-		res.UpstreamAttempts, res.AttemptBudget = led.used, d.attemptBudget
+		res.UpstreamAttempts, res.AttemptBudget = led.used, policy.AttemptBudget
 		// A refusal that names its own `reasoning_effort` vocabulary is worth
 		// keeping: the next request to this hop gets clamped instead of refused.
 		// Read here — before the failover/commit split — so a SOLE hop that
@@ -1892,10 +1909,13 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 		switch {
 		case errors.Is(err, errAttemptBudgetSpent) && res.Status == 0:
 		case errors.Is(err, errAttemptBudgetSpent):
-			oc = d.classifyHop(nil, res.Status, hdr, len(routes) > 1)
+			oc = d.classifyHopPolicy(ctx, nil, res.Status, hdr, len(routes) > 1)
+			if p, ok := settings.From(ctx); ok {
+				oc.strikes = p.CooldownStrikes
+			}
 			d.recordHop(rt, oc, time.Now())
 		default:
-			oc = d.classifyHop(err, res.Status, hdr, len(routes) > 1)
+			oc = d.classifyHopPolicy(ctx, err, res.Status, hdr, len(routes) > 1)
 			if err == nil && refusesWire(resp) {
 				oc = hopOutcome{failed: true, reason: "protocol unsupported"}
 				if len(routes) > 1 {
@@ -1909,6 +1929,9 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 			// in-process park.
 			if err == nil && !oc.failed && len(routes) > 1 && deniesModelAccess(resp) {
 				oc = hopOutcome{failed: true, cooldown: defaultHopCooldown, reason: "model access denied"}
+			}
+			if p, ok := settings.From(ctx); ok {
+				oc.strikes = p.CooldownStrikes
 			}
 			d.recordHop(rt, oc, time.Now())
 		}
@@ -1995,19 +2018,19 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 		return *fallbackRoute, res, err
 	}
 	if fallbackTransportErr != nil {
-		return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget, LearnedReasoning: result.LearnedReasoning}, fallbackTransportErr
+		return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: policy.AttemptBudget, LearnedReasoning: result.LearnedReasoning}, fallbackTransportErr
 	}
 	// Nothing was attempted at all because every hop was out of request budget.
 	// Report the refusal with the earliest release time so the client can wait
 	// instead of blind-retrying — and note that no upstream request was wasted
 	// discovering this.
 	if rateRefusal != nil {
-		return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget, LearnedReasoning: result.LearnedReasoning}, rateRefusal
+		return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: policy.AttemptBudget, LearnedReasoning: result.LearnedReasoning}, rateRefusal
 	}
 	if refusal != nil {
-		return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget, LearnedReasoning: result.LearnedReasoning}, refusal
+		return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: policy.AttemptBudget, LearnedReasoning: result.LearnedReasoning}, refusal
 	}
-	return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: d.attemptBudget, LearnedReasoning: result.LearnedReasoning}, errors.New("proxy: all combo endpoints are in five-minute cooldown")
+	return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: policy.AttemptBudget, LearnedReasoning: result.LearnedReasoning}, errors.New("proxy: all combo endpoints are in five-minute cooldown")
 }
 
 // streamCopy copies SSE upstream->client with a Flush per chunk, observing
@@ -2444,4 +2467,17 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+func (d *Dispatcher) requestPolicy(ctx context.Context) settings.Values {
+	if p, ok := settings.From(ctx); ok {
+		return p
+	}
+	p := settings.Defaults()
+	p.Retries = d.retryAttempts
+	p.AttemptBudget = d.attemptBudget
+	if d.dispatchDeadline > 0 {
+		p.DispatchDeadline = d.dispatchDeadline.String()
+	}
+	return p
 }

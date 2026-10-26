@@ -202,6 +202,11 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreErr(w, err)
 		return
 	}
+	if err := s.db.DescribeDashboardSession(r.Context(), token, r.UserAgent()); err != nil {
+		_ = s.db.EndDashboardSession(r.Context(), token)
+		s.writeStoreErr(w, err)
+		return
+	}
 	s.setSessionCookie(w, r, token)
 	writeJSON(w, http.StatusOK, map[string]any{"token": token})
 }
@@ -243,6 +248,11 @@ func (s *Server) handleDashboardLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	clearLoginAttempts(ip)
+	if err := s.db.DescribeDashboardSession(r.Context(), token, r.UserAgent()); err != nil {
+		_ = s.db.EndDashboardSession(r.Context(), token)
+		s.writeStoreErr(w, err)
+		return
+	}
 	s.setSessionCookie(w, r, token)
 	writeJSON(w, http.StatusOK, map[string]any{"token": token})
 }

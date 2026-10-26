@@ -32,6 +32,7 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/router"
 	"github.com/c4lyp5o/ezllm/internal/rules"
 	"github.com/c4lyp5o/ezllm/internal/server"
+	"github.com/c4lyp5o/ezllm/internal/settings"
 	"github.com/c4lyp5o/ezllm/internal/store"
 )
 
@@ -66,6 +67,8 @@ func run() error {
 	// Subcommands run before flag parsing (they own the whole process).
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "backup-verify", "backup-restore":
+			return runBackupCommand(os.Args[1], os.Args[2:])
 		case "github-login":
 			return runGitHubLogin()
 		case "help", "-h", "--help":
@@ -162,6 +165,26 @@ func run() error {
 		return err
 	}
 	defer db.Close()
+	operator, err := operatorSettings(ctx, db, cfg)
+	if err != nil {
+		return fmt.Errorf("operator settings: %w", err)
+	}
+	db.SetOperatorSettings(operator)
+	backups, err := configuredBackups(db, cfg, masterSecret)
+	if err != nil {
+		return err
+	}
+	operator.Check = backupSettingsCheck(operator, backups)
+	policy := operator.Current()
+	cfg.Translation.Enabled = policy.Translation
+	cfg.Translation.UniversalEnabled = policy.Translation
+	cfg.Retry.Retries = policy.Retries
+	cfg.Retry.RequestAttemptBudget = policy.AttemptBudget
+	cfg.Retry.DispatchDeadlineStr = policy.DispatchDeadline
+	cfg.CooldownOn429 = settings.Duration(policy.Cooldown429)
+	cfg.CooldownOn5xx = settings.Duration(policy.Cooldown5xx)
+	cfg.Cooldown.MaxPerKey = policy.CooldownStrikes
+
 	log.Info("store ready", "path", dbPath, "schema", db.SchemaVersion())
 
 	// First boot: no dashboard password exists. Seed it from the env, or
@@ -280,19 +303,35 @@ func run() error {
 	// it, and the operator just sees a rule that "is not working".
 	//
 	// Per-request ?tz= still overrides it; this is only the default.
-	usageTZ := strings.TrimSpace(os.Getenv("EZLLM_USAGE_TZ"))
-	usageLoc := time.UTC
+	usageTZ := policy.UsageTZ
+
 	if usageTZ != "" {
 		loc, err := time.LoadLocation(usageTZ)
 		if err != nil {
 			return fmt.Errorf("EZLLM_USAGE_TZ=%q does not resolve to a time zone on this host "+
 				"(use an IANA name like Asia/Kuala_Lumpur, or unset it for UTC): %w", usageTZ, err)
 		}
-		usageLoc = loc
+		_ = loc
 		log.Info("usage day bucketing zone", "tz", usageTZ)
 	}
 
+	listenSource := "default"
+	if cfg.Explicit["listen"] {
+		listenSource = "yaml"
+	}
+	if os.Getenv("EZLLM_ADDR") != "" {
+		listenSource = "environment"
+	}
+	if *addrOverride != "" {
+		listenSource = "flag"
+	}
+	masterSource := "file"
+	if strings.TrimSpace(os.Getenv("EZLLM_MASTER_KEY")) != "" {
+		masterSource = "environment"
+	}
 	srv := server.New(server.Options{
+		Deployment: server.DeploymentInfo{ListenAddress: addr, ListenSource: listenSource, Storage: "SQLite", MasterKeySource: masterSource, TrustedProxyCount: len(trustedProxies)},
+		Settings:   operator, Backups: backups,
 		Auth: db, Resolver: resolver, Dispatcher: dispatcher, DB: db,
 		Registry: registry, Log: log, Rules: ruleEngine,
 		MaxBodyMiB:  cfg.MaxBodyMiB,
@@ -304,19 +343,13 @@ func run() error {
 		// Sampled shadow compression (addendum #7): off unless configured.
 		ShadowSampler: shadowSamplerFor(cfg.Compression.ShadowPct),
 		// A combo write probes only its own untested hops — never a catalog.
-		ComboAutoProbe: os.Getenv("EZLLM_COMBO_AUTOPROBE") != "off",
+		ComboAutoProbe: policy.AutoProbe,
 		SetupCode:      setupCode,
 		TrustedProxies: trustedProxies,
 	})
 
-	// Catalogs at boot and every model_refresh.interval (default 12h); each
-	// saved catalog resyncs the auto-free combos and probes its free models.
-	refreshEvery, _ := time.ParseDuration(cfg.ModelRefresh.Interval) // validated by config.Load
-	srv.StartModelRefresh(ctx, refreshEvery, 30*time.Second)
-
-	if os.Getenv("EZLLM_PRICE_REFRESH") != "off" {
-		srv.StartPriceRefresh(ctx, 3, usageLoc)
-	}
+	defer srv.StopBackground(15 * time.Second)
+	srv.StartSettingsJobs(ctx)
 
 	// Claude subscription surface: loopback-only, off unless EZLLM_CLAUDE_BRIDGE=on.
 	// Enabling it without a usable CLI or login fails the boot loudly.

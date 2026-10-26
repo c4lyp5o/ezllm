@@ -25,12 +25,12 @@ func newBackground() *background {
 
 // goBackground runs fn on a tracked goroutine with the server's background
 // context. After StopBackground it runs nothing.
-func (s *Server) goBackground(fn func(ctx context.Context)) {
+func (s *Server) goBackground(fn func(ctx context.Context)) bool {
 	b := s.bg
 	b.mu.Lock()
 	if b.closed {
 		b.mu.Unlock()
-		return
+		return false
 	}
 	b.wg.Add(1)
 	b.mu.Unlock()
@@ -38,6 +38,7 @@ func (s *Server) goBackground(fn func(ctx context.Context)) {
 		defer b.wg.Done()
 		fn(b.ctx)
 	}()
+	return true
 }
 
 // StopBackground cancels every background job and waits up to d for them to

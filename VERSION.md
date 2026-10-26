@@ -11,7 +11,33 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.2.0**
+**Current: v1.3.0**
+
+---
+
+## v1.3.0 — 2026-10-26
+
+Breaking release; one non-additive schema step (v29 -> v30). The migration
+renames `models.proto_openai` to `proto_chat` and rewrites stored pins and
+ledger surfaces from `openai` to `chat` in place. A v29 binary refuses a v30
+database, so roll back from a backup taken before the upgrade.
+
+- **The chat-completions wire is named `chat`, not `openai`.** Ledger
+  `surface`, model pins, `protocol_support`, the `/admin/models` capability
+  keys and the dashboard all use `chat`; scripts reading `openai` from the API
+  or the ledger must switch. `openai` is still accepted as input for model pins
+  and the combo-test surface. Provider kinds (`openai-compatible`,
+  `gemini-openai`) are unchanged.
+- **Probes are no longer ledgered.** Key tests, protocol sweeps, combo tests and
+  service tests leave no ledger row; their verdicts are still stored. This
+  reverses the v1.2.0 rule that failed probes write their reason into the
+  ledger `err`.
+- **Claude subscription quota reads live.** With the claude.ai Cookie header in
+  the account's `management_key`, Quota reads `claude.ai/api/organizations/
+  {org}/usage` (five-hour and weekly windows); the dialog also shows the
+  Opus/Sonnet windows and the per-product split of the week, names the source,
+  and says why it fell back to the bridge's last reading when the live read
+  failed.
 
 ---
 

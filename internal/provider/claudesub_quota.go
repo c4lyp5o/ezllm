@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -56,7 +57,7 @@ func (a *anthropicCompatible) readClaudeSubUsage(ctx context.Context, cookie, or
 		return Quota{}, fmt.Errorf("claude.ai usage: status %d", resp.Status)
 	}
 	if q := parseClaudeSubUsage(string(body)); q.Kind != "" {
-		return q, nil
+		return tagQuotaRaw(q, "source", "claude.ai usage"), nil
 	}
 	return Quota{}, errors.New("claude.ai usage: unrecognised body")
 }
@@ -93,4 +94,23 @@ func claudeSubReset(m map[string]any, path string) string {
 		return t.UTC().Format(time.RFC3339)
 	}
 	return s
+}
+
+// tagQuotaRaw adds one string key to a quota's raw JSON so the Quota dialog
+// can say where the reading came from. A raw body that is not a JSON object is
+// left as it was; the error text is bounded (it never carries the cookie —
+// fetch errors name the status or the transport failure only).
+func tagQuotaRaw(q Quota, key, val string) Quota {
+	var m map[string]any
+	if err := jsonUnmarshal([]byte(q.Raw), &m); err != nil || m == nil {
+		return q
+	}
+	if len(val) > 200 {
+		val = val[:200] + "…"
+	}
+	m[key] = val
+	if b, err := json.Marshal(m); err == nil {
+		q.Raw = string(b)
+	}
+	return q
 }

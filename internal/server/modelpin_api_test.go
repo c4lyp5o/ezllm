@@ -53,7 +53,7 @@ func TestModelPinUnknownModelIs404(t *testing.T) {
 func TestModelPinRefusesUnconfirmedUnlessForced(t *testing.T) {
 	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
 	acct := seededAccountID(t, h)
-	// Probe confirmed openai only; responses is unconfirmed.
+	// Probe confirmed chat only; responses is unconfirmed.
 	if _, err := h.db.Writer().Exec(
 		`INSERT INTO models (account_id, model_id, proto_chat, proto_anthropic, proto_responses)
 		 VALUES (?, 'probed', 1, 0, 0)`, acct); err != nil {
@@ -75,5 +75,25 @@ func TestModelPinRefusesUnconfirmedUnlessForced(t *testing.T) {
 	code, _, resp = h.do("PUT", pinPath(acct), adminTok(), `{"model":"probed","pin":""}`)
 	if code != http.StatusOK {
 		t.Fatalf("clear: %d (%s), want 200", code, resp)
+	}
+}
+
+// The chat wire used to be named "openai": scripts that still send that name
+// get the same pin, stored under the new name.
+func TestModelPinAcceptsTheLegacyOpenAIName(t *testing.T) {
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
+	acct := seededAccountID(t, h)
+	if _, err := h.db.Writer().Exec(
+		`INSERT INTO models (account_id, model_id, proto_chat, proto_anthropic, proto_responses)
+		 VALUES (?, 'probed', 1, 0, 0)`, acct); err != nil {
+		t.Fatal(err)
+	}
+	code, _, resp := h.do("PUT", pinPath(acct), adminTok(), `{"model":"probed","pin":"openai"}`)
+	if code != http.StatusOK {
+		t.Fatalf("legacy pin name: %d (%s), want 200", code, resp)
+	}
+	var pin string
+	if err := h.db.Reader().QueryRow(`SELECT proto_pin FROM models WHERE account_id=? AND model_id='probed'`, acct).Scan(&pin); err != nil || pin != "chat" {
+		t.Fatalf("stored pin = %q (%v), want chat", pin, err)
 	}
 }

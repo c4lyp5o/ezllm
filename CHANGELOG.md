@@ -2,7 +2,7 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
 
-## Unreleased — development branch
+## 2026-10-26 — v1.3.0: chat wire rename, probes out of the ledger, live Claude quota
 
 - **The chat-completions wire is named `chat`, not `openai`** (schema v30,
   breaking). The ledger `surface`, model pins, `protocol_support`, the
@@ -19,7 +19,9 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by rel
 - **Claude subscription quota can be read live.** Pasting the claude.ai Cookie
   header into the claude-sub account's `management_key` makes the Quota button
   read `claude.ai/api/organizations/{org}/usage` (five-hour and weekly
-  windows) instead of the bridge's last-observed reading.
+  windows) instead of the bridge's last-observed reading. The dialog adds the
+  Opus/Sonnet windows and the per-product split of the week, names the source,
+  and states why it fell back when the live read failed.
 
 ## 2026-10-24 — v1.2.0: reasoning-effort clamp, model-access park, logging
 

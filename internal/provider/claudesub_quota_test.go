@@ -79,6 +79,9 @@ func TestReadQuotaClaudeSubPrefersTheFreshUsageRead(t *testing.T) {
 	if q.PercentWeekly == nil || *q.PercentWeekly != 93 {
 		t.Fatalf("quota = %+v, want the claude.ai weekly 93", q)
 	}
+	if !strings.Contains(q.Raw, `"source":"claude.ai usage"`) || strings.Contains(q.Raw, "live_read_error") {
+		t.Fatalf("raw = %s, want the claude.ai source tag and no error", q.Raw)
+	}
 }
 
 func TestReadQuotaClaudeSubFallsBackToTheBridgeReading(t *testing.T) {
@@ -93,6 +96,9 @@ func TestReadQuotaClaudeSubFallsBackToTheBridgeReading(t *testing.T) {
 		if err != nil || q.PercentRolling == nil || *q.PercentRolling != 50 {
 			t.Errorf("%s: quota=%+v err=%v, want the bridge's rolling 50", name, q, err)
 		}
+		if !strings.Contains(q.Raw, `"live_read_error"`) {
+			t.Errorf("%s: raw = %s, want live_read_error naming why the live read was skipped", name, q.Raw)
+		}
 	}
 }
 
@@ -105,5 +111,8 @@ func TestReadQuotaClaudeSubWithoutCookieNeverFetchesClaudeAI(t *testing.T) {
 	}
 	if f.url != "" {
 		t.Fatalf("fetched %q without a cookie", f.url)
+	}
+	if q, _ := a.ReadQuota(context.Background(), Account{Kind: KindAnthropicCompat, BaseURL: bridge.URL + "/v1"}, "k"); strings.Contains(q.Raw, "live_read_error") {
+		t.Fatalf("raw = %s: no cookie means no live read to report failing", q.Raw)
 	}
 }

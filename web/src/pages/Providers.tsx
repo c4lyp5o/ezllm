@@ -1288,6 +1288,48 @@ function PricingModal({ account, onClose }: { account: Account; onClose: () => v
   );
 }
 
+// What the claude.ai usage read carries beyond the two headline windows: the
+// Opus/Sonnet weekly windows and the per-product split of the week (Claude Code
+// vs chat), plus the provenance tags the server stamps on the raw body. Anything
+// absent or null is simply not drawn.
+function ClaudeUsageExtras({ raw }: { raw: string }) {
+  let o: Record<string, unknown> | null = null;
+  try { const v: unknown = JSON.parse(raw); o = v && typeof v === 'object' ? (v as Record<string, unknown>) : null; } catch { o = null; }
+  if (!o) return null;
+  const util = (k: string): number | null => {
+    const w = o?.[k] as { utilization?: unknown } | null | undefined;
+    return typeof w?.utilization === 'number' ? w.utilization : null;
+  };
+  const rows: Array<[string, number]> = [];
+  const opus = util('seven_day_opus');
+  const sonnet = util('seven_day_sonnet');
+  if (opus != null) rows.push(['Opus · weekly', opus]);
+  if (sonnet != null) rows.push(['Sonnet · weekly', sonnet]);
+  const split = (o.seven_day_breakdown as { rows?: Array<{ display_name?: string; percent?: number }> } | null | undefined)?.rows ?? [];
+  for (const r of split) {
+    if (typeof r?.percent === 'number' && r.display_name) rows.push([`${r.display_name} · share of week`, r.percent]);
+  }
+  const source = typeof o.source === 'string' ? o.source : '';
+  const liveErr = typeof o.live_read_error === 'string' ? o.live_read_error : '';
+  if (rows.length === 0 && !source && !liveErr) return null;
+  return (
+    <div className="space-y-1.5">
+      {liveErr && (
+        <p className="text-[12px] text-warn">
+          Live claude.ai read failed ({liveErr}) — showing the bridge&apos;s last observed reading. Paste a fresh cookie to restore it.
+        </p>
+      )}
+      {source && !liveErr && <p className="text-[12px] text-mute">source: {source}</p>}
+      {rows.map(([k, v]) => (
+        <div key={k} className="flex items-center gap-2.5">
+          <span className="w-44 flex-none truncate text-[11px] text-mute">{k}</span>
+          <span className="tnum w-10 text-right font-mono text-[12px] text-dim">{Math.round(v)}%</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function QuotaModal({ account, onClose }: { account: Account; onClose: () => void }) {
   const [live, setLive] = useState<QuotaLive | null>(null);
   const [busy, setBusy] = useState(true);
@@ -1339,6 +1381,7 @@ function QuotaModal({ account, onClose }: { account: Account; onClose: () => voi
                 <span className="rounded-full border border-line bg-bg px-2 py-0.5 font-mono text-[12px] text-accent">{live.kind}</span>
                 <span className="text-mute">read {live.read_at ? relTime(live.read_at) : '—'}</span>
               </div>
+              <ClaudeUsageExtras raw={live.raw} />
               <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-md border border-line bg-bg px-3 py-2 font-mono text-[12px] leading-relaxed text-dim">
                 {prettyBody(live.raw)}
               </pre>

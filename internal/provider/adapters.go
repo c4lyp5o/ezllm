@@ -436,10 +436,13 @@ func (a *anthropicCompatible) ReadQuota(ctx context.Context, acct Account, key s
 		// A pasted claude.ai cookie in management_key buys a fresh read of
 		// the plan windows; without it (or when it fails) the bridge's
 		// last-observed reading below stands.
+		var liveErr error
 		if cookie, org, ok := claudeSubCreds(acct.ManagementKey); ok {
-			if q, err := a.readClaudeSubUsage(ctx, cookie, org); err == nil {
+			q, err := a.readClaudeSubUsage(ctx, cookie, org)
+			if err == nil {
 				return q, nil
 			}
+			liveErr = err
 		}
 		body, err := getJSON(ctx, a.client, UpstreamURL(acct.BaseURL, acct.Kind, "/usage"),
 			withCustomHeaders(map[string]string{"x-api-key": key}, acct))
@@ -447,6 +450,11 @@ func (a *anthropicCompatible) ReadQuota(ctx context.Context, acct Account, key s
 			return Quota{}, mapUsageErr(err)
 		}
 		if q := ClassifyQuota(string(body)); q.Kind == QuotaPercent {
+			if liveErr != nil {
+				// The operator pasted a cookie and expects a live read: say
+				// why this one is the bridge's older reading instead.
+				q = tagQuotaRaw(q, "live_read_error", liveErr.Error())
+			}
 			return q, nil
 		}
 		return Quota{}, ErrQuotaUnsupported

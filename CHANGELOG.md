@@ -27,6 +27,14 @@ in Settings. Changing ordinary runtime policy affects newly admitted requests;
 already-running requests retain their original snapshot. Export format version 1
 is preserved with an additive non-secret settings field.
 
+The login railway restores its busier glowing rails and fixes the small-screen
+30 fps first-frame stall that left the canvas blank in v1.3. Packet interpolation
+stays inside each segment, and OS/browser motion changes are applied live.
+Neighbourhood now uses layered facades, gardens, streetlights and traffic, with
+keyboard/touch selection and a numeric house inspector. Missing usage is shown
+as unavailable; loading/errors support recovery, and wide streets scroll locally.
+The SVG scene remains dependency-free and pauses independently of data refresh.
+
 ## 2026-10-26 — v1.3.0: chat wire rename, probes out of the ledger, Antigravity bridge, one-click bridges
 
 - **The chat-completions wire is named `chat`, not `openai`** (schema v30,

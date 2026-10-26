@@ -113,16 +113,40 @@ suspended: it is a toy, and a glow is the whole point. The exception is fenced
 and carries rules of its own:
 
 - **Scoped.** Every scene colour is a `--nb-*` token under `.nbhd` in
-  `src/index.css` (light = a day scene, dark = a night one). Nothing outside
-  that wrapper may use a gradient or glow, and no data screen embeds the scene.
-- **Every element is data.** Window brightness is tokens per minute over the
-  last five minutes (log scale, full glow = the busiest key, never less than
-  2,000 a minute); smoke = serving traffic; rain cloud = a quarter or more of
-  recent calls failed; dark windows = key or account disabled. Nothing is
-  decorative-only except the stars.
+  `src/index.css` (light = a day scene, dark = a night one). No other data-page component may use a gradient or glow, and no data screen
+  embeds the scene. The pre-auth login backdrop is described separately below.
+- **Activity indicators are data.** Window brightness is tokens per minute over
+  the last five minutes (log scale, full glow = the busiest key, never less than
+  2,000 a minute); smoke and street traffic indicate recent usage; rain cloud =
+  a quarter or more of recent calls failed; boarded windows = disabled. Facades,
+  roofs, gardens, trees and streetlights are scenery, not additional metrics.
+  Vehicle motion is not a per-request replay. Missing usage is unavailable,
+  never invented zero activity.
 - **Never colour alone.** The table under the scene lists every house with
-  exact, unabbreviated figures, and each house has a `<title>`.
-- **Cheap.** SVG, transform and opacity only, polled every 10 s and skipped
-  while the tab is hidden; reduced-motion renders the settled scene with no
-  loops. No WebGL: a canvas that redraws every frame is a poor trade on a
-  machine that is also the load balancer.
+  exact, unabbreviated figures, and each house has a `<title>`. Houses and table
+  key buttons support focus, Enter/Space and touch selection; the inspector
+  exposes the selected key's exact values and state outside the illustration.
+- **Cheap.** SVG architecture and CSS transform/opacity animation, polled every
+  10 s and skipped while hidden. Pause scene stops decoration without stopping
+  usage refresh. Reduced motion follows both the OS and browser Settings,
+  including changes while the page is open. Hidden tabs pause scene animation.
+  Keep WebGL out of this page: side walls and layered roofs provide depth without
+  a renderer loop on the gateway's machine.
+- **Contained.** Provider streets scroll locally when there are too many houses
+  to fit. The page itself never scrolls sideways. Loading, empty, failed and
+  partial reads stay actionable; previously available data is retained on a
+  refresh failure. Landscape and portrait layouts use the same real key IDs.
+
+## Login railway
+
+The sign-in/setup backdrop is a separate canvas exception to the flat dashboard.
+It restores the pre-1.3 glowing sky/violet rails and busier desktop traffic, while
+retaining bounded phone resolution and a 30 fps phone budget. Paint the initial
+scene before frame limiting, initialize the elapsed-time clock independently of
+whether a frame is drawn, and clamp resume deltas. Packets interpolate each rail
+segment within its own 0–1 interval. Pause the loop while hidden and render a
+still picture for OS/browser reduced motion. It requests no private dashboard
+API data before authentication.
+
+Browser regressions exercise the built assets in `tests/verify-railway.mjs`,
+`tests/verify-neighbourhood.mjs`, and `tests/verify-neighbourhood-polish.mjs`.

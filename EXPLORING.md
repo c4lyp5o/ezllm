@@ -495,6 +495,12 @@ corrections section.
   `web/src/utils/preferences.tsx` `PreferencesMotion` / `readRange` preserve local
   browser preferences. Browser regressions: `web/tests/verify-settings.mjs`.
   Operational guidance: `docs/settings-runbook.md` and `docs/recovery-runbook.md`.
+- `web/src/components/RailwayBackground.tsx` `RailwayBackground` restores the
+  login rails with first-paint drawing independent of the small-screen limiter.
+  `web/src/components/NeighbourhoodScene.tsx` `NeighbourhoodScene` draws the
+  layered streets; `Neighbourhood.tsx` `buildHouses` preserves the real usage
+  mapping and represents missing activity as unknown. Visual/interaction coverage
+  is in `web/tests/verify-railway.mjs` and `verify-neighbourhood-polish.mjs`.
 
 ## 5. Invariants to check while reading (review checklist)
 

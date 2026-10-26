@@ -11,7 +11,49 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.3.1**
+**Current: v1.3.2**
+
+## v1.3.2 — 2026-10-27
+
+Four fixes, three of them found by reading the gateway's own ledger rather than
+by review. No API, config or schema change; no migration.
+
+**The reasoning-effort clamp now actually runs.** It shipped in v1.2.0 and was
+inert on every request: the resolver reads hop facts from a catalog SNAPSHOT, and
+the snapshot's model query never selected `reasoning_vocab` / `reasoning_required`,
+so the rule was always empty while the direct row read had it — which is why the
+tests were green and production kept refusing the same values. It also could not
+serve a model that requires reasoning: the vocabulary and the mandate arrive as
+separate facts, so the clamp offered `off` to a model that refuses it. `Required`
+now governs the selection and the field is dropped when nothing at or below the
+ask is legal. 20 of the 29 `bad_request` 400s in the week before this release were
+this one bug.
+
+**A client hanging up no longer parks the hop.** A cancelled caller context was
+classified as a transport error, so the hop banked a strike and the default
+threshold parked it for five minutes — closing a tab took a healthy endpoint out
+of rotation. All 80 of the 502s in the week before this release were
+`context canceled`. A cancellation is now a third outcome: no strike, no park, no
+cleared park, a `client cancelled` trail note at Info, and the ledger row records
+`499` instead of `502 upstream_error`.
+
+**github-copilot: the persona stealth rule runs, and claude/gemini are no longer
+dialled on the responses wire.** Both rules existed only in functions the linker
+had already pruned, so SOUL/MEMORY/USER have been reaching a web provider. The
+stealth rule is a deliberate privacy behaviour with real output loss: a request
+whose only content was a system prompt now leaves with an empty `messages` list.
+claude*/gemini* are refused before the dial with a typed hop fact and the
+dispatcher fails over instead of committing a mystery 400.
+
+**The error table stops calling a bad body "capacity".** opencode's edge wraps
+request-shape faults in an `Upstream request failed:` envelope typed
+`server_error`; the envelope won, so malformed requests were counted as provider
+weather and the dashboard told the operator to wait. The bracketed cause inside
+the envelope now wins.
+
+Every fix carries a test at the seam that broke, and each was bitten against its
+own producer before commit. The clamp fix was additionally proved end-to-end on a
+canary rig against the real provider.
 
 ## v1.3.1 — 2026-10-26
 

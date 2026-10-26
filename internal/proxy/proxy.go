@@ -390,6 +390,11 @@ type hopOutcome struct {
 	strikes  int
 	failed   bool
 	cooldown time.Duration
+	// clientCancelled marks an attempt that failed because the CALLER hung up.
+	// It is neither a success nor a hop failure: recording it as either one is
+	// wrong (clearing a legitimate park, or parking a healthy hop for a closed
+	// browser tab), so recordHop leaves the hop's state untouched.
+	clientCancelled bool
 	// reason is the operator-facing cause, surfaced on /admin/health. A parked
 	// hop produces no ledger row, so without this a hop could disappear from
 	// routing with no recorded explanation anywhere.
@@ -560,6 +565,15 @@ func (d *Dispatcher) classifyHopPolicy(ctx context.Context, err error, status in
 		on5xx = settings.Duration(p.Cooldown5xx)
 	}
 	if err != nil {
+		// The CALLER hung up (closed tab, cancelled agent run, shutdown). The
+		// dial fails with context.Canceled, which is a net.Error, so without
+		// this check it reads as a transport fault on the hop: one strike, and
+		// at the default threshold a five-minute park. Measured live: 80 such
+		// rows in seven days, and eight later requests answered "all combo
+		// endpoints are in five-minute cooldown".
+		if ctx.Err() != nil {
+			return hopOutcome{clientCancelled: true, reason: "client cancelled"}
+		}
 		if !retryableUpstreamError(err) {
 			return hopOutcome{} // our own fault (bad kind, bad request shape): not the hop's
 		}
@@ -638,6 +652,9 @@ func (d *Dispatcher) recordHop(rt Route, oc hopOutcome, now time.Time) {
 	defer d.cooldownMu.Unlock()
 
 	if !oc.failed {
+		if oc.clientCancelled {
+			return // the caller's cancel says nothing about this hop
+		}
 		if d.cooldowns != nil {
 			delete(d.cooldowns, key)
 		}
@@ -1948,6 +1965,14 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 				// dressing it as a transport fault.
 				note = err.Error()
 				d.log.Info("hop cannot serve this wire, failing over",
+					"account", rt.Account.Namespace, "model", rt.Model,
+					"alias", rt.Alias, "why", err.Error())
+			case oc.clientCancelled:
+				// The caller left. Nothing was learnt about this hop, so the
+				// trail must not read as a hop fault — and the log is Info,
+				// because a client hanging up is routine, not an incident.
+				note = "client cancelled: " + err.Error()
+				d.log.Info("client cancelled, no hop charged",
 					"account", rt.Account.Namespace, "model", rt.Model,
 					"alias", rt.Alias, "why", err.Error())
 			default:

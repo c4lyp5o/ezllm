@@ -2,6 +2,35 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
 
+## 2026-10-27 — a client hanging up no longer parks the hop (fix)
+
+`classifyHopPolicy` classified a cancelled CALLER context as a transport error,
+because a cancelled dial returns `context.Canceled`, which is a NetError. One
+line, and the consequence is disproportionate: the hop banks a strike, the
+default threshold parks it for the full five-minute cooldown, and the next real
+request is refused from a local counter. The ledger says exactly that happened —
+all 80 of the 502s in the previous seven days were `context canceled` (38 on
+`daily`/anthropic), and eight later requests were answered "all combo endpoints
+are in five-minute cooldown".
+
+A cancellation is now a third outcome, neither success nor hop failure: it banks
+no strike, parks nothing, and — importantly — does not CLEAR an existing park
+either, since the abandoned request learnt nothing about the hop. The attempt
+trail says `client cancelled: …` and logs at Info (a closed tab is routine, not
+an incident), instead of a Warn "hop failed, failing over" that pointed the
+operator at a healthy endpoint.
+
+The ledger row is recorded as `499` with `client cancelled` in the error column
+rather than `502 upstream_error`: the caller is gone, so nothing useful is
+written to it, but the gateway must not report a fault it did not have.
+
+Proved black-box, not just by unit: `TestClientCancelIsRecordedAs499AndDoesNotParkTheHop`
+hangs the upstream, times the caller out mid-flight, asserts the 499 row, then
+sends a REAL follow-up request that must be served — which is the only assertion
+that proves the park is gone. `TestClientCancelDoesNotParkTheHop` pins the
+dispatcher state directly. Both were bitten against their own producer and both
+go red without the fix.
+
 ## 2026-10-27 — the reasoning clamp actually runs (fix)
 
 The reasoning-effort clamp shipped in v1.2.0 was inert on every real request,

@@ -1,8 +1,9 @@
 # Environment variables
 
-Every environment variable ezllm reads, with its default. Settings that also
-exist in `config.yaml` follow: command-line flags → `EZLLM_*` environment →
-`config.yaml` → built-in defaults.
+Every environment variable ezllm reads, with its default. Supported operator
+controls follow: command-line flags → `EZLLM_*` environment → saved SQLite
+settings → explicit `config.yaml` → built-in defaults. Deployment-only options
+continue to use flags/environment/YAML/defaults without a database override.
 
 "Image" below means the published Docker image (`Dockerfile`); "compose" means
 the shipped `compose.example.yml`, which lists every variable below. Copy it to
@@ -13,11 +14,14 @@ the shipped `compose.example.yml`, which lists every variable below. Copy it to
 Most installs need three settings, and the image already handles listen address
 and data location.
 
-1. **`EZLLM_USAGE_TZ`** — your time zone, as an IANA name
-   (`Europe/Berlin`, `America/New_York`, `Asia/Kuala_Lumpur`). It decides where
-   a "day" starts on the dashboard's day view and in daily usage rules. Unset
-   means UTC; a name that does not resolve stops the boot rather than silently
-   shifting every day.
+1. **Usage timezone** — choose it in Settings → General, or set
+   **`EZLLM_USAGE_TZ`** to enforce it from the deployment. Use an IANA name
+   (`Europe/Berlin`, `America/New_York`, `Asia/Kuala_Lumpur`). It controls
+   report days, model rules set to `instance`, and daily price/backup schedules.
+   An explicit rule timezone remains independent; client-token budgets retain
+   their server-local boundaries. An environment override locks the dashboard
+   control. Without an override, saved settings and YAML are considered before
+   UTC; an unresolvable effective name stops boot.
 2. **`EZLLM_DASHBOARD_PASSWORD_FILE`** (or `EZLLM_DASHBOARD_PASSWORD`) — the
    first dashboard password, at least 12 characters. Skip it and the first boot
    prints a one-time setup code to `docker logs ezllm` instead.
@@ -45,14 +49,14 @@ provider key unreadable. See [master-key-runbook.md](master-key-runbook.md).
 |---|---|---|
 | `EZLLM_ADDR` | config `listen` (loopback); image: `0.0.0.0:20129` | Listen address. `-addr` overrides it. |
 | `EZLLM_DATA_DIR` | config `data_dir` (`data`); image: `/data` | Ledger and data location. |
-| `EZLLM_USAGE_TZ` | UTC | IANA zone for day bucketing (dashboard day view, `group_by=day`, daily usage rules). An unresolvable name fails the boot. A request's `?tz=` overrides it. |
+| `EZLLM_USAGE_TZ` | saved setting → YAML `usage_timezone` → UTC | Deployment override for report days, inherited model-rule windows/caps and daily schedules; locks the dashboard control. An unresolvable name fails boot. Report `?tz=` overrides the default grouping timezone. |
 | `EZLLM_LOG_LEVEL` | `info` | `debug` \| `info` \| `warn` \| `error`. Env-only (needed before the config is read); an unknown value logs a warning and uses `info`. The effective value is stated at boot. |
 | `EZLLM_LOG_COLOR` | `auto` | `auto` (color only on a terminal) \| `always` \| `never`. |
 | `EZLLM_LOG_FORMAT` | `console` | `console` \| `json`. JSON emits one object per line for a collector; the console format is for `docker logs`. See [logging.md](logging.md). |
 | `NO_COLOR` | unset | Any value disables color under `auto`. |
 | `EZLLM_TRUSTED_PROXIES` | unset | Comma-separated IPs/CIDRs of reverse proxies in front of ezllm. The sign-in/setup rate limiter reads `X-Forwarded-For` only from these; unset, it keys on the socket peer. Set it behind any proxy, or every client shares the proxy's limit. |
 | `EZLLM_WEB_DIR` | unset (embedded `web/dist`) | Serve the dashboard from a directory of built assets instead, to iterate on the UI without a Go rebuild. |
-| `TZ` | image: `Asia/Kuala_Lumpur` | The container clock: log timestamps only. Usage days follow `EZLLM_USAGE_TZ`, not this. |
+| `TZ` | image: `Asia/Kuala_Lumpur` | Server-local clock used by log timestamps and existing client-token budget boundaries. Report defaults, inherited model rules and schedules use the effective usage timezone. |
 
 ## Secrets
 
@@ -67,10 +71,10 @@ provider key unreadable. See [master-key-runbook.md](master-key-runbook.md).
 
 | Variable | Default | What it does |
 |---|---|---|
-| `EZLLM_TRANSLATION_ENABLED` | on | The one switch for wire-protocol translation (pairwise translators and the universal matrix). `false` turns it off without a rebuild. Non-boolean values fail the boot. See [translation-runbook.md](translation-runbook.md). |
+| `EZLLM_TRANSLATION_ENABLED` | saved setting → YAML → on | The one switch for wire-protocol translation (pairwise translators and the universal matrix). `false` turns it off without a rebuild. Non-boolean values fail the boot. See [translation-runbook.md](translation-runbook.md). |
 | `EZLLM_TRANSLATION_UNIVERSAL_ENABLED` | unset | **Deprecated** (merged into `EZLLM_TRANSLATION_ENABLED`). Still honored when the new variable is unset, with a warning at boot. |
-| `EZLLM_COMBO_AUTOPROBE` | on | `off` stops automatic probing of free models after a catalog refresh. |
-| `EZLLM_PRICE_REFRESH` | on | `off` stops the price catalog refresh (boot + daily). See [pricing-runbook.md](pricing-runbook.md). |
+| `EZLLM_COMBO_AUTOPROBE` | saved setting → YAML `automatic_probing` → on | An explicit value locks the dashboard control. `off` disables automatic combo-hop and free-model probes; manual probes remain available. |
+| `EZLLM_PRICE_REFRESH` | saved setting → YAML `price_refresh` → on | An explicit value locks the dashboard control. `off` stops scheduled price refresh (boot + daily); manual refresh remains available. See [pricing-runbook.md](pricing-runbook.md). |
 
 ## Claude subscription bridge
 
@@ -135,8 +139,39 @@ mount paths are written into your `compose.yml` directly.
 
 | Variable | What it does |
 |---|---|
-| `EZLLM_CODEX_LIVE` | `1` runs the Codex bridge live tests against the real CLI and login (`go test ./internal/codexbridge/ -run Live -v`). |
+| `EZLLM_CODEX_LIVE` | `1` runs the Codex bridge live tests against the real CLI and login (`go test -short ./internal/codexbridge/ -run Live -v`). |
 | `EZLLM_CODEX_LIVE_BIN`, `EZLLM_CODEX_LIVE_HOME` | The CLI and `CODEX_HOME` those live tests use; default `codex` on `PATH` and `~/.codex-sub`. |
 | `EZLLM_AGY_LIVE` | `1` runs the Antigravity bridge live tests against the real CLI and login (`go test -short ./internal/agybridge/ -run Live -v`); a turn spends plan quota. |
 | `EZLLM_AGY_BIN`, `EZLLM_AGY_HOME`, `EZLLM_AGY_MODEL` | The CLI, login directory and model those live tests use. On the host, unlike the container defaults above, they default to `~/.local/share/agy-bridge/1.4.7/agy`, `~/.agy-sub` and `gemini-3.8-flash-low`. |
-| `EZLLM_REHEARSE_DB` | Path to a **copy** of the production database; runs the store rehearsal test (`go test ./internal/store/ -run Rehearse -v`). |
+| `EZLLM_REHEARSE_DB` | Path to a **copy** of the production database; runs the store rehearsal test (`go test -short ./internal/store/ -run Rehearse -v`). |
+
+## Operator settings and encrypted backups
+
+The Settings page manages ordinary runtime policy. For supported fields the
+precedence is flags → environment → saved SQLite settings → explicit YAML →
+built-in defaults. Environment-controlled fields are read-only in the dashboard.
+Reset removes the saved override; it does not rewrite YAML. Existing settings
+are not imported into SQLite automatically.
+
+The supported YAML additions are `usage_timezone`, `price_refresh`,
+`automatic_probing`, and `backup.directory` / `backup.secret_file`. Existing
+retry, cooldown, translation, and model-refresh YAML fields remain supported.
+Network binding, data/key locations, trusted proxies and bridge startup remain
+deployment configuration. Browser theme, motion and analytics range are local
+preferences.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `EZLLM_BACKUP_DIR` | unset | Absolute destination directory for encrypted backups; overrides `backup.directory`. Mount separate storage here for protection from loss of the data disk. |
+| `EZLLM_BACKUP_SECRET_FILE` | unset | File containing a separate backup encryption secret of at least 24 bytes after trimming whitespace; overrides `backup.secret_file`. Must differ from the active master key. Read at startup; retain it separately for recovery. |
+
+Automation is disabled until enabled in Settings. With storage configured,
+manual backups are available independently of the schedule. Defaults on enabling:
+daily at 03:00 in the instance timezone, retain seven verified successful backups.
+The schedule hour and retention (1–365) are editable. Each job has a five-minute
+budget. Pruning starts only after a new archive verifies and is published;
+snapshot/verification failures preserve earlier backups. The destination and encryption
+secret require a restart to change.
+
+See [settings-runbook.md](settings-runbook.md) for live-update behavior and
+[recovery-runbook.md](recovery-runbook.md) for encrypted offline recovery.

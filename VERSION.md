@@ -11,7 +11,19 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.3.0**
+**Current: v1.4.0**
+
+## v1.4.0 — 2026-10-26
+
+Settings administration: persisted runtime policy with source/override visibility,
+local display preferences, live gateway controls, session management, notification
+preferences, sanitized diagnostics, and verified encrypted scheduled backups with
+offline recovery. YAML/environment deployment configuration remains supported.
+Schema v31 adds operator settings, job-health and session metadata. Existing empty
+model-rule timezones migrate to UTC; new rules can inherit the instance timezone.
+Export format version 1 remains compatible with an additive settings field.
+Back up the database and active key before upgrading; use the pre-upgrade pair
+with the previous binary for rollback.
 
 ---
 

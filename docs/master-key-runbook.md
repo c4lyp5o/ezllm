@@ -17,6 +17,14 @@ key lives on the data volume and is backed up with the SQLite ledger.
 
 ## Backup (do this with every DB backup)
 
+Settings → Backup & Recovery can create encrypted verified backups containing
+both the database and its active master secret, including environment overrides.
+It requires a separate backup encryption secret and an absolute mounted
+destination directory. Configure the workflow and use its offline verification /
+restore commands as described in [recovery-runbook.md](recovery-runbook.md).
+The Python procedure below remains available and produces a different,
+unwrapped database/key directory with a `COMPLETE.json` marker.
+
 Do not copy a running database's main file with `cp`: committed pages can
 still be in `-wal`. Do not copy live DB/WAL files separately as a snapshot.
 Use the online tool from the repository (Python 3.11+, standard library only):
@@ -48,7 +56,8 @@ procedure against a live writer.
 Restore into a separate stopped instance: verify `COMPLETE.json`, recompute
 and compare `database_sha256` before opening the copy, check SQLite
 `PRAGMA integrity_check`, then copy both files to its data directory and set
-`EZLLM_MASTER_KEY_FILE` to the copied key. Start on a different local port,
+`EZLLM_MASTER_KEY_FILE` to the copied key. Remove a conflicting
+`EZLLM_MASTER_KEY` override before starting. Start on a different local port,
 verify account access and representative recent rows, and only then switch
 traffic. Keep the original backup immutable; restore from a copy. An older
 binary may refuse a newer schema, so rollback uses a matching pre-upgrade

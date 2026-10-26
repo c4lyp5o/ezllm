@@ -469,6 +469,33 @@ corrections section.
   `mapError` turns the CLI's prose errors into statuses and withholds Google's sign-in links;
   `env.go` `childEnv` is the allowlisted child environment. Wired in `cmd/ezllm/agybridge.go`.
 
+
+### v1.4.0 — Settings administration (2026-10-26)
+
+- `internal/settings/settings.go` `Manager.Patch` validates and saves a revision
+  before publishing an immutable policy. `cmd/ezllm/settings.go` `operatorSettings`
+  resolves environment → saved settings → explicit YAML → defaults; deployment
+  flags remain higher-priority controls for their supported options.
+- `internal/store/settings.go` `SaveSettings` owns revision-checked persistence;
+  `InheritedRuleUsage` reads an indexed ledger range for mutable instance timezones.
+  `internal/rules/engine.go` `Evaluate` binds inherited windows to the admitted
+  request. Schema v31 preserves legacy empty zones as UTC and explicit zones intact.
+- `internal/server/settings.go` `handleSettings` / `handleDiagnostics` expose the
+  authenticated control and allowlisted diagnostic views. `server.go` `Handler`
+  attaches the admission snapshot used by routing, proxy retries and report defaults.
+- `internal/server/settings_jobs.go` `StartSettingsJobs` owns runtime scheduling;
+  `prices_refresh.go` `nextDailyAt` handles skipped and repeated local hours.
+  `settings_sessions.go` `handleSessions` / `handleRevokeSession` manage opaque
+  session IDs; password changes still revoke every dashboard session.
+- `internal/store/backup.go` `BackupTo` snapshots through SQLite's online API;
+  `internal/backup/manager.go` `RunReserved` verifies and encrypts archives before
+  publication and retention. `archive.go` `Verify` / `Restore` implement offline
+  checks and recovery. `cmd/ezllm/backup.go` `runBackupCommand` wires CLI commands.
+- `web/src/pages/Settings.tsx` `Settings` renders the six administration sections;
+  `web/src/utils/preferences.tsx` `PreferencesMotion` / `readRange` preserve local
+  browser preferences. Browser regressions: `web/tests/verify-settings.mjs`.
+  Operational guidance: `docs/settings-runbook.md` and `docs/recovery-runbook.md`.
+
 ## 5. Invariants to check while reading (review checklist)
 
 These are the "if it's broken here, the project failed" spots — each must be visibly true in code:
@@ -528,8 +555,10 @@ These are the "if it's broken here, the project failed" spots — each must be v
   OpenCode") from a plain POST — don't add it as a provider. GitHub Models retired 2026-07-30.
 - Groq free (Developer) limits are third-party approximations (~30 RPM / 14.4k RPD / 6k TPM) —
   official docs confirm "no card, no per-token charge" but not the numbers.
-- SQLite backups: **no `sqlite3` CLI on this box** — use python3 `sqlite3.Connection.backup()`
-  against a `mode=ro` URI (safe on the live WAL db); a raw file copy can catch mid-write state.
+- SQLite backups: **no `sqlite3` CLI required** — Settings can create encrypted
+  verified online backups through the Go driver. `scripts/backup_sqlite.py` remains
+  available for the separate unwrapped database/key format. A raw live file copy
+  can miss committed WAL data; use the matching verification/restore procedure.
 
 ## 7. Deliberate non-goals (don't go looking for them in the code)
 

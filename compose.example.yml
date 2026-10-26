@@ -28,10 +28,12 @@ services:
 
     environment:
       # ── server ──
-      # Where a "day" starts on the dashboard and in daily usage rules. An IANA
-      # name that does not resolve fails the boot. Unset = UTC.
+      # Deployment override for report days, inherited model rules and daily
+      # schedules. Remove this entry to manage the timezone in Settings;
+      # otherwise the dashboard control is locked. No configured value = UTC.
       EZLLM_USAGE_TZ: UTC
-      # Container clock, log timestamps only (the image sets Asia/Kuala_Lumpur).
+      # Server-local clock: logs and existing client-token budget boundaries.
+      # Instance report/rule/schedule defaults use the usage timezone above.
       # TZ: UTC
       # Reverse proxies whose X-Forwarded-For the sign-in limiter trusts. Set it
       # behind any proxy, or every client shares the proxy's limit.
@@ -54,6 +56,13 @@ services:
       # EZLLM_TRANSLATION_ENABLED: "true"
       # EZLLM_COMBO_AUTOPROBE: "on"
       # EZLLM_PRICE_REFRESH: "on"
+
+      # ── optional encrypted backups ── docs/recovery-runbook.md
+      # These require the two optional mounts below. Scheduling stays off
+      # until enabled in Settings. Keep the backup secret separate from the
+      # master key and retain a recovery copy outside the archive directory.
+      # EZLLM_BACKUP_DIR: /backups
+      # EZLLM_BACKUP_SECRET_FILE: /run/secrets/ezllm-backup
 
       # ── GitHub Copilot provider ──
       # Copilot CLI version presented upstream. GitHub raises a floor and
@@ -102,6 +111,11 @@ services:
       # The ledger, master key and bridge tokens. Without it, a restart loses
       # everything.
       - "${EZLLM_DATA:-./data}:/data"
+
+      # Optional backup storage (writable by the container user) and a
+      # separately protected encryption-secret file; create both first.
+      # - /path/to/backup-storage:/backups
+      # - /path/to/backup-secret:/run/secrets/ezllm-backup:ro
 
       # Claude bridge: a pinned copy of the CLI binary (outside the CLI's own
       # versions directory, so its auto-updater cannot delete it under a running

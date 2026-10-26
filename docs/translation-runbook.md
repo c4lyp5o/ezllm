@@ -4,13 +4,14 @@ ezllm's native contract is passthrough: bodies leave the box byte-identical to
 what the client sent (model swap aside). Translation is the **one deliberate
 exception**, and it is double-gated so it can never happen by accident:
 
-1. **Operator knob** — `translation.enabled` in `config.yaml`, **default `true`**
-   (global enable, 2026-10-12). The default is seeded before the YAML decode, so
-   an absent key keeps it and an explicit `enabled: false` still wins;
-   `EZLLM_TRANSLATION_ENABLED=false` is the no-rebuild rollback lever (flag >
-   env > config > default). The effective state is logged at boot:
-   `translation enabled=true|false`. Since 2026-10-22 this is the **one switch**
-   for every translated wire, the universal matrix included.
+1. **Operator knob** — Settings → Gateway → Protocol translation, default on.
+   Precedence is environment override → saved `translation_enabled` → explicit
+   YAML `translation.enabled` → default. An explicit environment value locks the
+   dashboard control; changing it requires restarting the process. Settings
+   changes apply to newly admitted requests without restarting. The effective
+   startup state is logged as `translation enabled=true|false`; the Settings API
+   reports the current value and source. Since 2026-10-22 this is the one switch
+   for automatic pairwise and universal-matrix wire selection.
 2. **Proven capability** — the hop's probed/curated `proto_*` facts must say
    `proto_chat = true` AND `proto_anthropic` false-or-NULL. Both flags are
    **NULL until a probe sweep marks them or an operator curates them**, so a
@@ -128,6 +129,10 @@ Caveats, learned live (see the ezllm skill):
 
 ## Enabling (after the sweep passes)
 
+Enable Protocol translation in Settings → Gateway for an immediate update to
+new requests. To manage its deployment fallback instead, remove any saved override
+and use YAML:
+
 ```yaml
 # config.yaml
 translation:
@@ -139,7 +144,8 @@ or for the container / a canary: `EZLLM_TRANSLATION_ENABLED=true`
 
 ## Verifying it works
 
-- Boot log shows `translation enabled=true`.
+- Settings or `GET /admin/settings` shows `translation_enabled` true. The boot
+  log records the startup value; it does not replace the live effective view.
 - Send one request through a combo whose translated-eligible hop is the
   chat-only model (e.g. hop 0 `opencode-go/step-5-preview-free` with no
   healthy native hop ahead of it) from an anthropic client.
@@ -149,9 +155,12 @@ or for the container / a canary: `EZLLM_TRANSLATION_ENABLED=true`
 
 ## Rolling back
 
-Flip the knob off and restart. Nothing else persists: the `proto_*` facts stay
-(true facts about the upstream), and routing reverts to dropping
-probed-incompatible hops.
+Disable Protocol translation in Settings for new requests, or set
+`EZLLM_TRANSLATION_ENABLED=false` and restart to enforce the deployment override.
+For a YAML-only rollback, remove the saved override before changing
+`translation.enabled` to false and restarting. Existing requests retain their
+admitted policy. Capability facts stay recorded; automatic translated alternatives
+are no longer selected. Curated `responses_models` overrides remain independent.
 
 ## Known non-goals (locked 2026-10-12)
 
@@ -170,14 +179,16 @@ Design: `docs/universal-wire-design.md`. Adds **chat→messages**, **responses�
 **responses→messages** through the strict codecs, plus the fixed fallback ordering for any
 client whose native wire a hop provably cannot serve.
 
-**Enabling:** on by default, under the same `translation.enabled` /
-`EZLLM_TRANSLATION_ENABLED` switch as every other translated wire (merged 2026-10-22).
+**Enabling:** on by default, under the same effective `translation_enabled`
+setting as automatic pairwise translation (merged 2026-10-22). Manage it live in
+Settings or through the deployment fallbacks described above.
 
 The former matrix switch, `translation.universal_enabled` /
 `EZLLM_TRANSLATION_UNIVERSAL_ENABLED`, is **deprecated** and logs a warning at boot. It still
-works as a rollback: an explicit `false` in config turns translation off, and the env var
-applies when `EZLLM_TRANSLATION_ENABLED` is unset. A wrong-typed value still fails boot naming
-the field.
+participates in deployment fallback resolution: explicit false in config disables
+translation when no saved/environment value overrides it. The deprecated env var
+applies when `EZLLM_TRANSLATION_ENABLED` is unset and locks the Settings control.
+A wrong-typed value still fails boot naming the field.
 
 **Usage convention on a Messages destination:** `auto` (the default) reads the upstream's
 `input_tokens` as exclusive of cache, as the ledger does, so an unconfigured Anthropic account
@@ -198,9 +209,11 @@ terminal event is recorded in the ledger error column (`translated stream failed
 saw), and the hop is not marked good. A translated hop is an ordinary member of the combo
 strategy: it is ordered, rotated and marked good on exactly the same terms as a native one.
 
-**Rollback:** `EZLLM_TRANSLATION_ENABLED=false`, or `translation.enabled: false` + restart.
-This turns off every translated wire; there is no matrix-only switch any more. No data migration is involved; the curated `responses_models` list keeps working
-independently.
+**Rollback:** disable Protocol translation in Settings, or enforce
+`EZLLM_TRANSLATION_ENABLED=false` and restart. A YAML-only fallback change also
+requires removing any saved override. This disables automatic translated wire
+selection; there is no matrix-only switch. No data migration is involved, and
+the curated `responses_models` list keeps working independently.
 
 ## Responses-wire hops (chat client → /v1/responses hop)
 

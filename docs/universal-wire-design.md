@@ -39,12 +39,18 @@ consistently between a direct route and the same hop inside a combo.
 
 ## Selection (router)
 
-Boot flags: `translation.universal_enabled` (default **false**;
-`EZLLM_TRANSLATION_UNIVERSAL_ENABLED` is the no-rebuild rollback) — the **single switch for the
-matrix**. It does not require `translation.enabled` (operator decision 2026-10-13): with the
-flag on, the whole matrix is available through one knob. With it off, nothing changes
-byte-for-byte. `translation.enabled` remains the legacy gate for the single anthropic→chat
-alternative when universal is off. A wrong-typed config value fails boot naming the field.
+The original separate matrix switch was merged into `translation.enabled` on
+2026-10-22. The effective switch defaults on and gates automatic pairwise and
+universal selection together. Since v1.4 it resolves environment override → saved
+`translation_enabled` → explicit YAML → default, and each admitted request keeps
+its own snapshot. Settings can change it live; deployment overrides require a
+restart and lock the dashboard control.
+
+`translation.universal_enabled` / `EZLLM_TRANSLATION_UNIVERSAL_ENABLED` remain
+deprecated deployment aliases, not a matrix-only control. See the
+[translation runbook](translation-runbook.md) for precedence and rollback; curated
+Responses-wire overrides remain a separate deployment choice. Wrong-typed YAML
+still fails startup naming the field.
 
 Per candidate, wire-first:
 

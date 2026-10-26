@@ -246,7 +246,7 @@ func TestApplyHeadroomAndLite(t *testing.T) {
 	p := &Profile{Name: "p2", Enabled: true, Stages: []Stage{
 		{Engine: "headroom"}, {Engine: "lite"},
 	}}
-	out, res := Apply(body, p)
+	out, res := ApplyWithSession(body, p, nil, "", nil)
 	if !res.Applied {
 		t.Fatalf("not applied: %s", res.Err)
 	}

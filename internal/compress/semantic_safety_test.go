@@ -13,7 +13,7 @@ import (
 
 func TestNilProfileSafelyReturnsUnchanged(t *testing.T) {
 	body := []byte(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`)
-	out, res := ApplyWithDoc(body, nil, nil)
+	out, res := ApplyWithSession(body, nil, nil, "", nil)
 	if !bytes.Equal(out, body) {
 		t.Error("nil profile must return the body byte-identical")
 	}
@@ -28,7 +28,7 @@ func TestNilProfileSafelyReturnsUnchanged(t *testing.T) {
 func TestDisabledProfileRecordsNameAndNoRewrite(t *testing.T) {
 	body := []byte(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`)
 	p := &Profile{Name: "off-profile", Enabled: false, Stages: []Stage{{Engine: "lite"}}}
-	out, res := ApplyWithDoc(body, p, nil)
+	out, res := ApplyWithSession(body, p, nil, "", nil)
 	if !bytes.Equal(out, body) {
 		t.Error("disabled profile must return the body byte-identical")
 	}
@@ -50,7 +50,7 @@ func TestMSReachesCaller(t *testing.T) {
 	}
 	body := []byte(`{"model":"m","messages":[` + strings.TrimSuffix(sb.String(), ",") + `]}`)
 	p := &Profile{Name: "slow", Enabled: true, Stages: []Stage{{Engine: "lite"}}}
-	_, res := ApplyWithDoc(body, p, nil)
+	_, res := ApplyWithSession(body, p, nil, "", nil)
 	if res.MS <= 0 {
 		t.Fatalf("compression_ms = %d on a multi-millisecond workload; the deferred stamp is not reaching the caller (unnamed-return regression)", res.MS)
 	}

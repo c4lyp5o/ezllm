@@ -17,6 +17,25 @@ func TestErrorCause(t *testing.T) {
 			"upstream_capacity",
 		},
 		{
+			// opencode's edge wraps a REQUEST-shape fault in its own
+			// "Upstream request failed:" envelope and types it server_error.
+			// The envelope must not win: this is our body being wrong, and
+			// calling it capacity hides the bug behind "upstream was busy".
+			"opencode-edge missing required parameter",
+			400, `{"error":{"param":"messages[347].content","type":"invalid_request_error","message":"Upstream request failed: [missing_required_parameter] Missing required parameter: 'messages[347].content'."}}`,
+			"bad_request",
+		},
+		{
+			"opencode-edge invalid params (model adapter)",
+			400, `{"error":{"type":"server_error","message":"Upstream request failed: [bad_request_error] invalid params, model \"MiniMax-M3.1-Flash\" requires adapter …"}}`,
+			"bad_request",
+		},
+		{
+			"opencode-edge unsupported reasoning value",
+			400, `{"error":{"param":"reasoning_effort","type":"invalid_request_error","message":"Upstream request failed: [unsupported_value] Unsupported value: 'reasoning_effort'."}}`,
+			"bad_request",
+		},
+		{
 			"opencode cloudflare browser ban",
 			403, `<html><body>error code: 1010</body></html>`,
 			"automation_gate",

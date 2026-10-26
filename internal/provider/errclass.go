@@ -20,13 +20,32 @@ func ErrorCause(status int, body []byte) string {
 	switch {
 	case strings.Contains(s, "error code: 1010") || strings.Contains(s, "browser signature"):
 		return "automation_gate" // Cloudflare ban on library-style UAs (opencode)
+	case strings.Contains(s, "must be passed back to the api") ||
+		strings.Contains(s, "needs the reasoning of every"):
+		// A thinking model that demands the reasoning of earlier assistant
+		// turns cannot serve a conversation another model started. The
+		// refusal describes the HISTORY, not the body we sent, so another hop
+		// of the same family may still serve it — see refusesHistory.
+		return "reasoning_echo_required"
+	// The bracketed cause opencode's edge puts INSIDE its "Upstream request
+	// failed:" envelope is more specific than the envelope, and it is about
+	// the BODY, not the backend. Ordering matters: without these the generic
+	// capacity phrase below claims every 400 the edge wraps, so a malformed
+	// request reads as "upstream was busy" and the real bug stays invisible.
+	case strings.Contains(s, "[missing_required_parameter]") ||
+		strings.Contains(s, "[bad_request_error]") ||
+		strings.Contains(s, "[invalid_params]") ||
+		strings.Contains(s, "[unsupported_value]") ||
+		strings.Contains(s, "[invalid_request_error]"):
+		return "bad_request"
 	case strings.Contains(s, "endpoint is unavailable") || strings.Contains(s, "upstream request failed"):
 		return "upstream_capacity" // opencode's edge reporting its own backend
 	case strings.Contains(s, "reasoning_effort are not supported") || strings.Contains(s, "use /v1/responses"):
 		return "chat_tools_unsupported" // tokenrouter gpt-6.1-sol class: tools+reasoning on chat
 	case strings.Contains(s, "modelprotocolunsupported") || strings.Contains(s, "not supported for format") ||
+		strings.Contains(s, "unsupported_api_for_model") ||
 		strings.Contains(s, "does not allow"):
-		return "protocol_unsupported" // surface capability gap (opencode-go, group-403s)
+		return "protocol_unsupported" // surface capability gap (opencode-go, Copilot /responses, group-403s)
 	case strings.Contains(s, "insufficient_quota") || strings.Contains(s, "credit_balance_exhausted") ||
 		strings.Contains(s, "billing") || strings.Contains(s, "quota"):
 		return "quota_exhausted"

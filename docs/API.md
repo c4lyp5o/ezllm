@@ -57,6 +57,14 @@ larger than `max_body_mib` (default 32) is refused **before any upstream dial** 
 (captured with `max_body_mib: 1`). The body is never truncated to the cap: earlier builds parsed
 the cut-off JSON (a misleading `400`) or forwarded a cut-off multipart upload upstream.
 
+**Client cancellation (`499`).** If the CALLER's context ends before the upstream answers — a closed
+tab, a cancelled agent run, a shutdown — the hop is not charged. Cancellation is neither a success
+nor a transport failure: it banks no strike and parks nothing (and clears no existing park either,
+because an abandoned request learnt nothing about the hop). The request is recorded as `499` with
+`client cancelled` in the ledger's error column instead of `502 upstream_error`, because the gateway
+did not have a fault. A caller still reading receives
+`499 {"error":{"code":499,"message":"client cancelled the request: …","type":"client_cancelled"}}`.
+
 `/v1/models` rows: namespaced ids carry the upstream's `owned_by` and, once probed, a `protocol`
 map. A combo row is bare (`owned_by: "ezllm"`) and adds a non-standard `combo` key —
 `{"strategy":"failover","hops":[{"account_id":1,"model":"mimo-v2.6-flash","enabled":true}],"context_size":200000}` — so a
@@ -787,10 +795,12 @@ No HTTP response field or application release version changes with this schema.
 `models.reasoning_vocab` (CSV, in the provider's order) and `models.reasoning_required` record
 what a model accepts for `reasoning_effort`, read from its own 4xx refusal during live traffic or a
 key-test probe. The next request to that model has a top-level `reasoning_effort` clamped down to
-an accepted value (or dropped when reasoning is mandatory and the client sent `none`/`off`); a
-model with nothing learned receives the body untouched. Facts merge: a refusal that names only a
-mandate keeps the stored list, and a mandate is never lowered. Only catalogued models are
-learned. No HTTP response field changes; design: docs/reasoning-effort-design.md.
+an accepted value, and DROPPED when reasoning is mandatory and nothing at or below the ask is legal:
+a stored list can name a disabling value (`off`/`none`) the model nevertheless refuses, so a
+mandatory model never receives one. A model with nothing learned receives the body untouched. Facts
+merge: a refusal that names only a mandate keeps the stored list, and a mandate is never lowered.
+Only catalogued models are learned. No HTTP response field changes; design:
+docs/reasoning-effort-design.md.
 
 ### Usage reported by retries and failed hops
 

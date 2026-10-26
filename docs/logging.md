@@ -122,6 +122,7 @@ Add one when **an operator could not otherwise explain** what the gateway did:
 | event | level | why it is not in the ledger |
 |---|---|---|
 | hop skipped (parked, budget, context too small) | info | the request never left the box; there is no row for it |
+| client cancelled (no hop charged) | info | the row records `499`, but not that the hop was left untouched |
 | reasoning clamp applied / field dropped | info | the ledger has the status, not the rewrite |
 | reasoning vocabulary learned / not kept | info / debug | a per-model fact about the future |
 | wire recorded after a mismatch probe | info | it reroutes every later request |

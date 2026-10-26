@@ -2,6 +2,207 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
 
+## 2026-10-27 — a history refusal fails over instead of ending the run (fix)
+
+A thinking model that requires the reasoning of every earlier assistant turn
+cannot serve a conversation another model started. It answers a 400 — and 400 is
+not in the failover set, because a 400 normally describes the BODY we are about
+to replay byte-identically. This one describes the HISTORY, so committing it
+ended a client run that a hop of the same family could have served. Four such
+rows in the ledger (`The reasoning_content in the thinking mode must be passed
+back to the API`, and `Missing required parameter: 'messages[2].reasoning_content'
+… needs the reasoning of every earlier assistant turn`), each one killing the run.
+
+`refusesHistory` now recognises that class and the dispatcher fails over, exactly
+as it does for a hop that cannot serve a wire. Deliberately **not** parked: the
+hop is healthy for a conversation it started itself, so a cooldown would take a
+good endpoint out of rotation for an unrelated reason. The 400 still reaches the
+client when EVERY hop refuses, because the last response stays committable as the
+fallback — the change turns a hard stop into "try the next hop", it does not hide
+the refusal.
+
+The cause is now visible as `[reasoning_echo_required]` instead of `bad_request`,
+which is what lets an operator count the occurrences and fix the real problem:
+a combo whose hops span model families. Under `bad_request` it read as a
+malformed request and nothing pointed at the combo design.
+
+## 2026-10-27 — the error table stops calling a bad body "capacity" (fix)
+
+`ErrorCause` matched opencode's `Upstream request failed:` envelope before it
+looked inside it, so every 4xx the edge wrapped was classified
+`upstream_capacity` — "the backend was busy". The edge types those `server_error`
+too, which made the misclassification look deliberate. Real bodies caught in the
+ledger: `[missing_required_parameter] Missing required parameter:
+'messages[347].content'`, `[bad_request_error] invalid params … requires adapter`,
+and `[unsupported_value] Unsupported value: 'reasoning_effort'`.
+
+The bracketed cause inside the envelope now wins, because it is more specific and
+it describes the REQUEST, not the backend: `[missing_required_parameter]`,
+`[bad_request_error]`, `[invalid_params]`, `[unsupported_value]` and
+`[invalid_request_error]` all classify as `bad_request`. The genuine capacity
+refusal (`Endpoint is unavailable`) still classifies as `upstream_capacity`, and
+a test pins that case too — the point is the ordering, not a blanket rewrite.
+
+Why it matters beyond tidiness: a request-shape bug labelled "upstream was busy"
+is a bug nobody goes looking for, and the dashboard's cause chip told the
+operator to wait rather than to fix the body.
+
+## 2026-10-27 — a client hanging up no longer parks the hop (fix)
+
+`classifyHopPolicy` classified a cancelled CALLER context as a transport error,
+because a cancelled dial returns `context.Canceled`, which is a NetError. One
+line, and the consequence is disproportionate: the hop banks a strike, the
+default threshold parks it for the full five-minute cooldown, and the next real
+request is refused from a local counter. The ledger says exactly that happened —
+all 80 of the 502s in the previous seven days were `context canceled` (38 on
+`daily`/anthropic), and eight later requests were answered "all combo endpoints
+are in five-minute cooldown".
+
+A cancellation is now a third outcome, neither success nor hop failure: it banks
+no strike, parks nothing, and — importantly — does not CLEAR an existing park
+either, since the abandoned request learnt nothing about the hop. The attempt
+trail says `client cancelled: …` and logs at Info (a closed tab is routine, not
+an incident), instead of a Warn "hop failed, failing over" that pointed the
+operator at a healthy endpoint.
+
+The ledger row is recorded as `499` with `client cancelled` in the error column
+rather than `502 upstream_error`: the caller is gone, so nothing useful is
+written to it, but the gateway must not report a fault it did not have.
+
+Proved black-box, not just by unit: `TestClientCancelIsRecordedAs499AndDoesNotParkTheHop`
+hangs the upstream, times the caller out mid-flight, asserts the 499 row, then
+sends a REAL follow-up request that must be served — which is the only assertion
+that proves the park is gone. `TestClientCancelDoesNotParkTheHop` pins the
+dispatcher state directly. Both were bitten against their own producer and both
+go red without the fix.
+
+## 2026-10-27 — the reasoning clamp actually runs (fix)
+
+The reasoning-effort clamp shipped in v1.2.0 was inert on every real request,
+and the ledger proves it: 20 of the 29 `bad_request` 400s in the previous seven
+days were `Invalid option: expected one of "off"|"low"|…`, and the log re-learned
+the SAME vocabulary for the same model four times inside 45 minutes. Two bugs,
+one behind the other.
+
+**The rule never reached the route.** `ResolveCandidates` swaps the catalog for a
+`*store.CatalogSnapshot`, and `hopFacts.reasoning()` reads the rule out of
+whatever `ModelFacts` it is handed. The snapshot's model query selected the pin
+and the three protocol flags but never `reasoning_vocab` / `reasoning_required`,
+so it built `ModelFacts` with a zero rule. The direct `*DB.ModelFacts` read had
+the vocabulary — which is why the store tests passed while production never saw
+a rule, every request went out unclamped, and each refusal re-taught the same
+list. The snapshot is a second projection of that row and now carries the same
+columns.
+
+**A required-reasoning model could still be sent a disabling effort.** Command
+Code enumerated `off|low|medium|high|xhigh|max` and then refused `off` for one
+model — "Only models that can turn thinking off accept it." The vocabulary and
+the mandate arrive as separate facts, so `Clamp` picked `off` as the cheapest
+allowed value and turned a bogus client value into a guaranteed 400 that looked
+like a correct clamp. `Required` now governs the selection: a rank-0 value is
+never sent, and when nothing at or below the ask is legal the field is DROPPED so
+the provider's own default applies — inventing a higher effort would buy
+reasoning the client did not ask for. The vendor's wording is now in the phrase
+table, so the refusal teaches `Required` instead of being discarded.
+
+Proved end-to-end on a canary rig (copied prod database, current-tree binary,
+loopback port, real provider, `max_tokens: 5`): a bogus effort returned 400 →
+`reasoning vocabulary learned … allowed=""` → the retry DROPPED the field and
+returned 200, twice. The stored row now reads `reasoning_required=1`.
+
+Coverage added at the seam that broke: `TestCatalogSnapshotCarriesReasoningRule`
+(snapshot parity), `TestResolvedRouteCarriesLearnedReasoningRule` (a resolved
+Route carries the rule — every existing clamp test built its Route by hand with
+the rule attached, which is exactly why the hole survived),
+`TestClampNeverSendsADisablingEffortWhenRequired`, and
+`TestParseReasoningRequiredFromThinkingOffRefusal`.
+
+## 2026-10-27 — github-copilot wire guard and persona stealth (behaviour change)
+
+Resolves the three findings the previous pass deliberately left unfixed, because
+each one changes what the running gateway does. Two are behaviour changes on the
+github-copilot surface; one is a test that could never have failed.
+
+**Persona stealth now actually runs.** The "stealth" rule — drop `role:system`
+turns so the client's persona and personal context never reach a web provider —
+was documented but only reachable through `DoChat`, which was linker-dead. It
+was carried in the body-quirk pass (`PrepareBody`) the live adapter calls, so
+every github-copilot request now sheds its system turns. This is deliberate
+output loss: a request whose only content was a system prompt leaves with an
+empty `messages` list and the upstream's own "empty messages" error is the
+honest answer for a call that carried nothing but persona. If you want system
+prompts to reach Copilot, this is the change to revisit.
+
+**Gemini/Claude no longer dialled on /responses.** The old endpoint router
+carried a hard rule — claude* is Anthropic-native, gemini* rides
+/chat/completions, and neither answers on the Responses wire (400
+`unsupported_api_for_model`). That rule died with `endpointForModel`, so a
+claude/gemini request on the responses surface went out on a wire the model
+cannot speak and returned a mystery 400. The github-copilot adapter now refuses
+before dialling and types the refusal as `ErrWireUnsupported`, which the
+dispatcher treats as a hop fact: it fails over to a hop that can serve the wire
+instead of committing the refusal. Deliberately not parked — the park key is
+account+base+model and cannot tell wires apart, so parking would stop the same
+model being dialled on the wire it *does* serve.
+
+Copilot's own phrase `unsupported_api_for_model` was also added to the
+capability tables (`refusesWire`, `ErrorCause`), so an upstream answer of that
+shape is diagnosed as `protocol_unsupported` and fails over rather than being
+reported as a bad request. Defense in depth for model names the rule does not
+recognise.
+
+**A test that could not fail was replaced with one that can.**
+`TestCaptureShapeDocParityWithBytePath` compared `captureShape` against
+`captureShapeDoc(...)` — but `captureShape` *was* that delegation, so it
+compared a function with itself. It is replaced by `TestCaptureShapeDocContract`
+(assertions over the body corpus: what hashes, what does not) and
+`TestCaptureShapeDocHashScope` (the cache-reuse invariant: appending a turn must
+break the prefix hash, editing the system prompt must, swapping only the newest
+turn must not).
+
+## 2026-10-27 — dead-code removal and comment correctness (no behaviour change)
+
+Maintenance pass with no functional change: removed 32 unreachable functions,
+moved test-only constructors out of production files, and corrected comments
+that described code which no longer exists. The shipped binary is byte-for-byte
+the same size (18,481,312) and its symbol set is unchanged (20,811 symbols,
+none added, none removed) — the deleted code was already pruned by the linker,
+so routing, translation, compression and accounting behave exactly as before.
+
+Every removed function was classified first. Pure orphans went with their
+tests (`storeSurface`, `CavemanDiags`, `proxy.StatusText`/`truncate`, and the
+`pickProbeModel` assertion that only restated `pickProbeModels()[0]`). One-line
+wrappers over a live core went with the wrapper, and any test that asserted
+LIVE behaviour was repointed at the entry production actually calls rather
+than dropped: the legacy `CodecOptions{Legacy:true}` translation cells now
+exercise `ResponseUniversal`/`NewStreamReader` directly (23 call sites), the
+usage normaliser calls `NormalizeUsageWith` (7), the compression engines call
+`ApplyWithSession` (42), and the park policy calls `classifyHopPolicy` (24).
+`TestPollDeviceState` was upgraded in passing: it now asserts `slow_down` as a
+DISTINCT state, the contract the dashboard device flow backs off on, instead of
+the folded boolean the removed wrapper returned.
+
+Comments were corrected where they were wrong, not merely trimmed: the claim
+that `EncodeRequest` was "the one entry point the dispatcher uses", that
+`NormalizeUsage` was the normaliser, and that `CavemanDiags` was read by "the
+admin surface" were all false. Durable contract text was moved onto the
+function that now owns it (the named-return/MS-stamp trap to `applyPipeline`,
+the per-surface usage map to `sseUsageRaw`, the park-duration precedence to
+`classifyHopPolicy`), and two stale line-number references were replaced with
+symbol references.
+
+`make build` now produces what ships: `CGO_ENABLED=0 -trimpath
+-ldflags="-s -w"` (26.6 MB → 18.5 MB), with a `build-debug` target retaining
+the symbol table.
+
+Two findings came out of the pass and are NOT fixed here, because fixing either
+would change behaviour: the github-copilot "stealth" filter (drop `role:system`
+so persona/context never reach a web provider) existed only in the dead
+`DoChat`, so it does not run today; and the "Gemini/Claude must never go to
+`/responses`" routing guard existed only in the dead `endpointForModel`, the
+live adapter routing by surface instead. A third, `TestCaptureShapeDocParityWithBytePath`, was deleted as unfalsifiable — it compared `captureShape` with
+the `captureShapeDoc` call that `captureShape` delegated to.
+
 ## 2026-10-26 — v1.3.1: settings administration and encrypted recovery
 
 Expanded Settings into General, Security, Backup & Recovery, Gateway,

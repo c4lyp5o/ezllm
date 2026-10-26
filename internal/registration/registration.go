@@ -1464,15 +1464,6 @@ func pickProbeModels(models []provider.ModelInfo, acct provider.Account) []strin
 	return out
 }
 
-// pickProbeModel is the single-candidate view of pickProbeModels — the best
-// guess alone, for callers that do not run the fallback loop.
-func pickProbeModel(models []provider.ModelInfo, acct provider.Account) string {
-	if candidates := pickProbeModels(models, acct); len(candidates) > 0 {
-		return candidates[0]
-	}
-	return ""
-}
-
 // isModelUnavailable reports a refusal about THIS MODEL rather than about the
 // credential or the provider: Gemini's retired-model 404 ("This model
 // models/gemini-2.5-flash is no longer available to new users"), a
@@ -1700,17 +1691,6 @@ func msAtLeastOne(d time.Duration) int64 {
 		return 1 // sub-ms first bytes must not read as "unmeasured"
 	}
 	return ms
-}
-
-func storeSurface(s provider.Surface) store.Surface {
-	switch s {
-	case provider.SurfaceAnthropic:
-		return store.SurfaceAnthropic
-	case provider.SurfaceResponses:
-		return store.SurfaceResponses
-	default:
-		return store.SurfaceChat
-	}
 }
 
 // setProto persists one (model, surface) verdict: true → 1, false → 0,

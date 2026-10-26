@@ -49,7 +49,7 @@ func TestExemptFinalMessage(t *testing.T) {
 		textMsg("assistant", "ok"),
 		textMsg("user", "same words"), // final: would dedup, must NOT
 	)
-	out, res := Apply(body, fullProfile(Stage{Engine: "session_dedup"}))
+	out, res := ApplyWithSession(body, fullProfile(Stage{Engine: "session_dedup"}), nil, "", nil)
 	if res.Err != "" && res.Saved == 0 {
 		// floor may reject the 0-saving rewrite; that is also compliant
 		if string(out) != string(body) {
@@ -73,7 +73,7 @@ func TestExemptFinalMessage(t *testing.T) {
 func TestExemptSoleMessage(t *testing.T) {
 	text := "keep   my\n\n\n\nspacing   exactly   \n\n\n" + strings.Repeat("padding line   \n\n\n", 20)
 	body := bodyOf(textMsg("user", text))
-	out, _ := Apply(body, fullProfile(Stage{Engine: "lite"}))
+	out, _ := ApplyWithSession(body, fullProfile(Stage{Engine: "lite"}), nil, "", nil)
 	msgs := decodeMsgs(t, out)
 	if len(msgs) != 1 {
 		t.Fatalf("sole message dropped: %d msgs", len(msgs))
@@ -106,7 +106,7 @@ func TestSessionDedupDropsOnlySafeDuplicates(t *testing.T) {
 		map[string]any{"role": "tool", "tool_call_id": "c1", "content": "file1 file2"},
 		map[string]any{"role": "tool", "tool_call_id": "c1", "content": "file1 file2"}, // dup tool: KEEP (pairing)
 	)
-	out, res := Apply(body, fullProfile(Stage{Engine: "session_dedup"}))
+	out, res := ApplyWithSession(body, fullProfile(Stage{Engine: "session_dedup"}), nil, "", nil)
 	if !res.Applied {
 		t.Fatalf("expected applied, got skip: %s (saved=%d)", res.Err, res.Saved)
 	}
@@ -175,7 +175,7 @@ func TestRTKFiltersToolOutput(t *testing.T) {
 		map[string]any{"role": "tool", "content": `{"ok":false,"n":1}`},                  // JSON + unresolved id: untouched
 		textMsg("user", "final"),
 	)
-	out, res := Apply(body, fullProfile(Stage{Engine: "rtk", Options: map[string]any{"keep_lines": 6}}))
+	out, res := ApplyWithSession(body, fullProfile(Stage{Engine: "rtk", Options: map[string]any{"keep_lines": 6}}), nil, "", nil)
 	if !res.Applied {
 		t.Fatalf("expected applied, got: %s", res.Err)
 	}
@@ -212,7 +212,7 @@ func TestRTKFencesAtomic(t *testing.T) {
 		map[string]any{"role": "tool", "tool_call_id": "call_1", "content": content},
 		textMsg("user", "final"),
 	)
-	out, res := Apply(body, fullProfile(Stage{Engine: "rtk"}))
+	out, res := ApplyWithSession(body, fullProfile(Stage{Engine: "rtk"}), nil, "", nil)
 	if !res.Applied {
 		t.Fatalf("expected applied: %s", res.Err)
 	}
@@ -227,7 +227,7 @@ func TestRTKFencesAtomic(t *testing.T) {
 	// unclosed fence => skip content entirely (integrity rule 3)
 	unclosed := "start\n```js\nnever closed"
 	body2 := bodyOf(map[string]any{"role": "tool", "content": unclosed}, textMsg("user", "final"))
-	out2, res2 := Apply(body2, fullProfile(Stage{Engine: "rtk"}))
+	out2, res2 := ApplyWithSession(body2, fullProfile(Stage{Engine: "rtk"}), nil, "", nil)
 	if res2.Applied {
 		t.Error("unclosed fence must fail open")
 	}
@@ -245,7 +245,7 @@ func TestRatioFloorSendsOriginal(t *testing.T) {
 		textMsg("assistant", "ok"),
 		textMsg("user", "hi"), // duplicate: saves ~5 chars of ~2800
 	)
-	out, res := Apply(body, fullProfile(Stage{Engine: "session_dedup"}))
+	out, res := ApplyWithSession(body, fullProfile(Stage{Engine: "session_dedup"}), nil, "", nil)
 	if res.Applied {
 		t.Fatalf("floor should reject a ~0.2%% saving, got applied (saved=%d pre=%d)", res.Saved, res.Pre)
 	}
@@ -263,14 +263,14 @@ func TestRatioFloorSendsOriginal(t *testing.T) {
 // Contract rule 5: unknown engine / bad input fails open with the original.
 func TestFailOpen(t *testing.T) {
 	body := bodyOf(textMsg("user", "hello world"))
-	out, res := Apply(body, fullProfile(Stage{Engine: "caveman"})) // not in M5 registry
+	out, res := ApplyWithSession(body, fullProfile(Stage{Engine: "caveman"}), nil, "", nil) // not in M5 registry
 	if res.Applied || string(out) != string(body) {
 		t.Fatalf("unknown engine must fail open (applied=%v err=%s)", res.Applied, res.Err)
 	}
 
 	// no messages array (e.g. /v1/responses shape) -> passthrough
 	other, _ := json.Marshal(map[string]any{"model": "m", "input": "hi"})
-	out2, res2 := Apply(other, fullProfile(Stage{Engine: "session_dedup"}))
+	out2, res2 := ApplyWithSession(other, fullProfile(Stage{Engine: "session_dedup"}), nil, "", nil)
 	if res2.Applied || string(out2) != string(other) {
 		t.Fatal("non-chat shape must pass through")
 	}
@@ -288,7 +288,7 @@ func TestAutoTriggerTokens(t *testing.T) {
 		textMsg("assistant", "ok"),
 		textMsg("user", "dup"),
 	)
-	out, res := Apply(body, p)
+	out, res := ApplyWithSession(body, p, nil, "", nil)
 	if res.Applied {
 		t.Fatal("must skip below auto_trigger_tokens")
 	}
@@ -302,7 +302,7 @@ func TestDisabledProfileNoop(t *testing.T) {
 	body := bodyOf(textMsg("user", "x"))
 	p := fullProfile(Stage{Engine: "session_dedup"})
 	p.Enabled = false
-	out, res := Apply(body, p)
+	out, res := ApplyWithSession(body, p, nil, "", nil)
 	if res.Applied || string(out) != string(body) {
 		t.Fatal("disabled profile must be a no-op")
 	}

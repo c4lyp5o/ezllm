@@ -2,10 +2,10 @@
 // compression, shape capture, and the per-hop model swap all share one decode.
 //
 // Why: M1 measured that the hot path JSON-decoded the same body up to five
-// times (extractModel, IsStream, SwapModel per hop, compress.Apply, and
-// captureShape), and the parse cost is what makes inspection+routing scale
-// with payload (~1.5 ms/MiB against ~1 MB dominant traffic). BodyDoc is that
-// one decode.
+// times (the old extractModel, IsStream, SwapModel-per-hop, compress.Apply and
+// captureShape call sites), and the parse cost is what makes
+// inspection+routing scale with payload (~1.5 ms/MiB against ~1 MB dominant
+// traffic). BodyDoc is that one decode.
 //
 // Parity with the code it replaces is the contract, documented field by field
 // in docs/single-parse-dispatch-design.md:
@@ -65,9 +65,10 @@ func Open(body []byte) *BodyDoc {
 		return d
 	}
 	// A second value after the object means trailing garbage. Both legacy
-	// sites (struct Unmarshal in extractModel/IsStream, Decoder in SwapModel)
-	// rejected that, so we must too — and dec.Decode alone does NOT. Only
-	// EOF may follow: More() reports false before a stray closing delimiter.
+	// sites (struct Unmarshal in the old extractModel/IsStream, Decoder in
+	// SwapModel) rejected that, so we must too — and dec.Decode alone does
+	// NOT. Only EOF may follow: More() reports false before a stray closing
+	// delimiter.
 	if err := dec.Decode(&struct{}{}); err != io.EOF {
 		d.err = errors.New("jsonbody: trailing data after JSON object")
 		return d
@@ -86,7 +87,8 @@ func (d *BodyDoc) Bytes() []byte { return d.raw }
 // zero). Callers MUST NOT mutate it; WithModel is the only writer.
 func (d *BodyDoc) Map() map[string]any { return d.m }
 
-// Model is extractModel's exact decision tree over the decoded body:
+// Model is the old byte-entry extractModel decision tree over the decoded
+// body (server.go reaches it through extractModelDoc):
 // absent or null → ("", false, nil); a real string → (trimmed, true, nil);
 // a non-string value (number, bool, object, array) or a decode failure →
 // error "body is not a JSON object", matching the old wrapped error string.

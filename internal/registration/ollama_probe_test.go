@@ -23,21 +23,30 @@ func TestOllamaCloudProbePrefersDocumentedFreeModels(t *testing.T) {
 		{ID: "gpt-oss:20b"},
 		{ID: "nemotron-3-nano:30b"},
 	}
-	if got := pickProbeModel(models, acct); got != "gemma4:31b" {
-		t.Fatalf("pickProbeModel() = %q, want first documented free model gemma4:31b", got)
+	if got := firstOf(pickProbeModels(models, acct)); got != "gemma4:31b" {
+		t.Fatalf("pickProbeModels()[0] = %q, want first documented free model gemma4:31b", got)
 	}
 }
 
 func TestOllamaCloudProbeUsesNextFreeModelWhenFirstAbsent(t *testing.T) {
 	acct := provider.Account{Kind: provider.KindOpenAICompatible, BaseURL: "https://ollama.com/v1"}
 	models := []provider.ModelInfo{{ID: "deepseek-v4.1-flash"}, {ID: "gpt-oss:20b"}, {ID: "gemma4:31b"}}
-	if got := pickProbeModel(models, acct); got != "gemma4:31b" {
-		t.Fatalf("pickProbeModel() = %q, want gemma4:31b", got)
+	if got := firstOf(pickProbeModels(models, acct)); got != "gemma4:31b" {
+		t.Fatalf("pickProbeModels()[0] = %q, want gemma4:31b", got)
 	}
 	models = []provider.ModelInfo{{ID: "deepseek-v4.1-flash"}, {ID: "gpt-oss:20b"}}
-	if got := pickProbeModel(models, acct); got != "gpt-oss:20b" {
-		t.Fatalf("fallback pickProbeModel() = %q, want gpt-oss:20b", got)
+	if got := firstOf(pickProbeModels(models, acct)); got != "gpt-oss:20b" {
+		t.Fatalf("fallback pickProbeModels()[0] = %q, want gpt-oss:20b", got)
 	}
+}
+
+// firstOf is the single-candidate view of pickProbeModels, for tests that
+// assert which model the probe tries first.
+func firstOf(candidates []string) string {
+	if len(candidates) > 0 {
+		return candidates[0]
+	}
+	return ""
 }
 
 func TestOllamaCloudDetectionIsHostAndKindScoped(t *testing.T) {
@@ -127,7 +136,7 @@ func TestOllamaProbeModelDoesNotSelectPaidModelWhenNoFreeModelListed(t *testing.
 	// to select one and reject the valid free-plan key. Returning no model makes
 	// the existing public-catalog auth calibration fail closed rather than store
 	// an unproven credential.
-	if got := pickProbeModel(models, acct); got != "" {
+	if got := firstOf(pickProbeModels(models, acct)); got != "" {
 		t.Fatalf("no free candidate should return empty, got paid model %q", got)
 	}
 	if !isOllamaCloud(acct) {

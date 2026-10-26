@@ -121,7 +121,7 @@ func TestFrameParserPartialFrameHangsNothing(t *testing.T) {
 	if err != nil || len(got) != 0 {
 		t.Fatalf("partial: got=%q err=%v, want nothing", got, err)
 	}
-	if p.Buffered() == 0 {
+	if len(p.buf) == 0 {
 		t.Fatal("partial frame not buffered")
 	}
 	// …and it completes later.

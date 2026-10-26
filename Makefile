@@ -11,13 +11,19 @@ BIN := bin/ezllm
 test test-race bench perf: export GOMEMLIMIT := 3GiB
 test test-race bench perf: export GOGC := 50
 
-.PHONY: build static run test test-short test-quiet test-race vet fmt check verify bench perf clean
+.PHONY: build build-debug static run test test-short test-quiet test-race vet fmt check verify bench perf clean
 
+# Default build is what ships: static, no symbol/DWARF tables, no local paths.
+# Measured 2026-10-26: 26.6 MB plain vs 18.5 MB with these flags. CGO_ENABLED=0
+# works because modernc.org/sqlite is pure Go; mattn/go-sqlite3 would break it.
 build:
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="-s -w" -o $(BIN) ./cmd/ezllm
+
+# Symbols kept (`go tool nm`, debuggers). Nothing ships from this target.
+build-debug:
 	$(GO) build -o $(BIN) ./cmd/ezllm
 
-# Static, no-CGO build — this is what the Docker image ships. modernc.org/sqlite
-# (pure Go) is what makes it possible; mattn/go-sqlite3 would break it.
+# Same flags as `build`, plus the static-link check the Docker image relies on.
 static:
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="-s -w" -o $(BIN) ./cmd/ezllm
 	@file $(BIN) | grep -q "statically linked" && echo "✓ statically linked" || echo "✗ NOT static"

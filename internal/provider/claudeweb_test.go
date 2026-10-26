@@ -6,7 +6,14 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
+
+// newClaudeWebAdapterForTest is the test constructor: bridgeBase points the
+// rewrite at a mock.
+func newClaudeWebAdapterForTest(bridgeBase string) Adapter {
+	return &claudeWebAdapter{client: &http.Client{Timeout: 5 * time.Second}, bridgeBase: strings.TrimSuffix(bridgeBase, "/")}
+}
 
 func TestClaudeWebAdapterShape(t *testing.T) {
 	bridge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))

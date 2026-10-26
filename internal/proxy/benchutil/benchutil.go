@@ -423,7 +423,7 @@ func chunkFrame(i, contentBytes int) []byte {
 }
 
 // terminalFrame carries the usage the ledger taps. It is byte-for-byte the
-// shape internal/proxy.tapSSELine expects on the OpenAI surface.
+// shape internal/proxy.sseUsageRaw expects on the OpenAI surface.
 func terminalFrame() []byte {
 	return []byte(`data: {"id":"mock-cmpl","object":"chat.completion.chunk","created":1,"model":"mock-model","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}` + "\n\n")
 }

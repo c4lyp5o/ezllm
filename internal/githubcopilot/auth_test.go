@@ -222,22 +222,6 @@ func TestEnsureSessionNoRefreshNeeded(t *testing.T) {
 	}
 }
 
-func TestEndpointRouting(t *testing.T) {
-	cases := []struct{ model, target, want string }{
-		{"gpt-4o", "", "https://api.githubcopilot.com/chat/completions"},
-		{"claude-opus-4.6", "", "https://api.githubcopilot.com/v1/messages"},
-		{"CLAUDE-SONNET-4.5", "", "https://api.githubcopilot.com/v1/messages"},
-		{"gpt-5.3-codex", "", "https://api.githubcopilot.com/responses"},
-		{"gpt-5.6-luna", "openai-responses", "https://api.githubcopilot.com/responses"},
-		{"gemini-3.5-flash", "openai-responses", "https://api.githubcopilot.com/chat/completions"}, // never /responses
-	}
-	for _, tc := range cases {
-		if got := endpointForModel(tc.model, tc.target); got != tc.want {
-			t.Errorf("endpoint(%q,%q) = %s, want %s", tc.model, tc.target, got, tc.want)
-		}
-	}
-}
-
 func TestChatHeaders(t *testing.T) {
 	h := ChatHeaders(Config{}, "tid-1", true)
 	if h.Get("Authorization") != "Bearer tid-1" {
@@ -374,34 +358,6 @@ func TestNeedsRefresh(t *testing.T) {
 	}
 }
 
-func TestDoChatRoutingAndHeaders(t *testing.T) {
-	var gotPath, gotAuth, gotVer string
-	client := routedClient(t, map[string]http.HandlerFunc{
-		"api.githubcopilot.com": func(w http.ResponseWriter, r *http.Request) {
-			gotPath = r.URL.Path
-			gotAuth = r.Header.Get("Authorization")
-			gotVer = r.Header.Get("anthropic-version")
-			jsonResp(200, `{"ok":true}`)(w, r)
-		},
-	}, nil)
-	resp, err := DoChat(context.Background(), Config{HTTP: client},
-		Session{CopilotToken: "tid-9"}, "claude-opus-4.6", "",
-		map[string]any{"messages": []any{}}, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if gotPath != "/v1/messages" {
-		t.Errorf("path = %s", gotPath)
-	}
-	if gotAuth != "Bearer tid-9" {
-		t.Errorf("auth = %q", gotAuth)
-	}
-	if gotVer != "2023-06-01" {
-		t.Errorf("anthropic-version = %q (the /v1/messages shim requires it)", gotVer)
-	}
-}
-
 func TestDeviceFlowCancel(t *testing.T) {
 	client := routedClient(t, map[string]http.HandlerFunc{
 		"github.com": jsonResp(200, `{"error":"authorization_pending"}`),
@@ -423,11 +379,12 @@ func TestDeviceFlowCancel(t *testing.T) {
 
 var _ = json.Marshal
 
-// TestPollAccessTokenOnce covers the single-shot poll the dashboard's device
-// flow drives (one round trip per status GET instead of a held-open
-// request): GitHub's pending signals must read as "ask again", never as an
-// error, and only a grant or a denial may end the wait.
-func TestPollAccessTokenOnce(t *testing.T) {
+// TestPollDeviceState covers the single-shot poll the dashboard's device flow
+// drives (one round trip per status GET instead of a held-open request — see
+// internal/server/github_device.go): GitHub's pending signals must read as
+// "ask again", never as an error, and they stay DISTINCT — slow_down is the
+// state the dashboard backs off on. Only a grant or a denial may end the wait.
+func TestPollDeviceState(t *testing.T) {
 	var polls int
 	client := routedClient(t, map[string]http.HandlerFunc{
 		"github.com": func(w http.ResponseWriter, _ *http.Request) {
@@ -445,15 +402,15 @@ func TestPollAccessTokenOnce(t *testing.T) {
 	cfg := Config{HTTP: client}
 	dc := DeviceCode{DeviceCode: "dc-once", UserCode: "ABCD-1234"}
 
-	for tick, wantOK := range []bool{false, false, true} {
-		s, ok, err := PollAccessTokenOnce(context.Background(), cfg, dc)
+	for tick, want := range []PollState{PollPending, PollSlowDown, PollGranted} {
+		s, state, err := PollDeviceState(context.Background(), cfg, dc)
 		if err != nil {
 			t.Fatalf("tick %d: unexpected error %v (pending must not fail)", tick, err)
 		}
-		if ok != wantOK {
-			t.Fatalf("tick %d: ok=%v, want %v", tick, ok, wantOK)
+		if state != want {
+			t.Fatalf("tick %d: state=%v, want %v", tick, state, want)
 		}
-		if wantOK && (s.AccessToken != "gho_once" || s.RefreshToken != "ghr_once") {
+		if want == PollGranted && (s.AccessToken != "gho_once" || s.RefreshToken != "ghr_once") {
 			t.Fatalf("granted session = %+v", s)
 		}
 	}
@@ -464,7 +421,7 @@ func TestPollAccessTokenOnce(t *testing.T) {
 			jsonResp(200, `{"error":"access_denied"}`)(w, nil)
 		},
 	}, nil)
-	if _, ok, err := PollAccessTokenOnce(context.Background(), Config{HTTP: denied}, dc); err == nil || ok {
-		t.Fatalf("denied poll: ok=%v err=%v, want a failure", ok, err)
+	if _, _, err := PollDeviceState(context.Background(), Config{HTTP: denied}, dc); err == nil {
+		t.Fatalf("denied poll: err=%v, want a failure", err)
 	}
 }

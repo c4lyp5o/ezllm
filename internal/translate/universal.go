@@ -8,8 +8,10 @@ import (
 
 // Universal-cell conversions. The three NEW cross-wire pairs
 // (chat→Messages, Responses→chat, Responses→Messages) ride the strict
-// surface-neutral codecs; the legacy pairs keep their characterized wrappers
-// (IsUniversalCell decides, so selection and codec choice cannot disagree).
+// surface-neutral codecs; a legacy response pair is the same call with
+// CodecOptions{Legacy:true} (IsUniversalCell decides, so selection and codec
+// choice cannot disagree). Legacy REQUEST cells keep their own hand-written
+// encoders (Request / AnthropicToResponses / ChatToResponses).
 // Everything here is strict: an unsupported request feature is a typed
 // refusal, never a silent loss.
 

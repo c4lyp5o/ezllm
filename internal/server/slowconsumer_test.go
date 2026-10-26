@@ -110,9 +110,9 @@ func TestSlowConsumerBackpressure(t *testing.T) {
 	}
 
 	// 3: no write timeout cut the stream. The production server sets none
-	// (cmd/ezllm/main.go:226 — "No WriteTimeout: SSE streams are unbounded by
-	// design"), and this asserts the observable consequence: the stalled
-	// connection is still alive and delivers every byte.
+	// (cmd/ezllm/main.go, http.Server: "No WriteTimeout: SSE streams are
+	// unbounded by design"), and this asserts the observable consequence: the
+	// stalled connection is still alive and delivers every byte.
 	if delivered != payload {
 		t.Errorf("after the stall the client received %d B of %d — the stream was truncated by a "+
 			"write timeout or a broken connection", delivered, payload)

@@ -219,7 +219,7 @@ func TestTranslatedHopFailureStillFailsOver(t *testing.T) {
 	}
 
 	// The failed translated hop is parked with the upstream's own words —
-	// existing classifyHop/recordHop machinery, unchanged.
+	// existing classifyHopPolicy/recordHop machinery, unchanged.
 	parks := d.Cooldowns()
 	if len(parks) != 1 {
 		t.Fatalf("parks = %+v, want exactly the translated hop parked", parks)

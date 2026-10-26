@@ -40,8 +40,8 @@ const (
 //
 // This matters because the three surfaces disagree: OpenAI includes cached
 // tokens inside prompt_tokens, Anthropic EXCLUDES cache_read from input_tokens,
-// and Responses reports its own details object. Use NormalizeUsage rather than
-// copying fields by hand.
+// and Responses reports its own details object. Use NormalizeUsageWith rather
+// than copying fields by hand.
 type Call struct {
 	TS time.Time
 	// IP is the caller address (X-Forwarded-For / X-Real-IP / remote) captured
@@ -131,13 +131,6 @@ type Call struct {
 type Usage struct {
 	In, Out, CachedRead, CachedWrite, Reasoning int64
 	Raw                                         map[string]any
-}
-
-// NormalizeUsage maps a provider's raw usage object onto our surface-independent
-// counters, reading an anthropic-shape input_tokens as exclusive of cache (the
-// meaning of usage_convention=auto). See NormalizeUsageWith.
-func NormalizeUsage(surface Surface, raw map[string]any) Usage {
-	return NormalizeUsageWith(surface, raw, provider.UsageConventionAuto)
 }
 
 // NormalizeUsageWith maps a raw usage object onto the four billed buckets —

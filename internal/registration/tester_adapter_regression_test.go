@@ -132,8 +132,9 @@ func TestProbesArePreparedByTheirOwnAdapter(t *testing.T) {
 	reg.Register(adapterA)
 	reg.Register(adapterB)
 
-	// ONE shared Tester, exactly as server.go:100 builds it for the whole
-	// server. This is the condition that made the old global dangerous.
+	// ONE shared Tester, exactly as server.go builds it (registration.NewTester)
+	// for the whole server. This is the condition that made the old global
+	// dangerous.
 	tester := NewTester(srv.Client(), reg, nil)
 
 	acctA := provider.Account{ID: 1, Namespace: "acct-a", Kind: kindA, BaseURL: srv.URL + "/v1", Enabled: true}

@@ -17,7 +17,7 @@ func TestRatioFloorSplitsNotionalFromSaved(t *testing.T) {
 		textMsg("assistant", "ok"),
 		textMsg("user", "hi"), // duplicate: measurable but far below the 5% floor
 	)
-	_, res := Apply(body, fullProfile(Stage{Engine: "session_dedup"}))
+	_, res := ApplyWithSession(body, fullProfile(Stage{Engine: "session_dedup"}), nil, "", nil)
 	if res.Applied {
 		t.Fatal("expected the floor to reject this rewrite")
 	}
@@ -50,7 +50,7 @@ func TestAppliedSavesAreRealAndNotionalZero(t *testing.T) {
 		{"role":"tool","content":` + mustJSONString(payload) + `}
 	]}`)
 	p := &Profile{Name: "p2", Enabled: true, Stages: []Stage{{Engine: "headroom"}, {Engine: "lite"}}}
-	out, res := Apply(body, p)
+	out, res := ApplyWithSession(body, p, nil, "", nil)
 	if !res.Applied {
 		t.Fatalf("expected applied: %s", res.Err)
 	}

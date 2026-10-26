@@ -187,13 +187,16 @@ type Adapter interface {
 	// ListModels fetches the upstream catalog.
 	ListModels(ctx context.Context, acct Account, key string) ([]ModelInfo, error)
 
-	// AuthOracle returns the cheapest call that fails on a bad credential
+	// AuthOracle returns the cheapest call that proves the credential is valid
 	// (see probe.go). Registration gates the key test on this — never on
-	// ListModels, which is public on some providers.
+	// ListModels, which is public on some providers. The registration flow
+	// treats a 401/403 here as an invalid key (fail fast — no retry; on these
+	// providers 403 means bad credentials, not "slow down").
 	AuthOracle() AuthProbe
 
 	// CatalogIsPublic reports whether ListModels answers 200 for an invalid
-	// key (true for opencode-go). A public catalog is recorded as info only.
+	// key (true for opencode-go). A public catalog is recorded as info only:
+	// the catalog step is informational and CANNOT pass a key test.
 	CatalogIsPublic() bool
 }
 
@@ -253,6 +256,18 @@ var ErrQuotaUnsupported = errors.New("provider: quota endpoint unsupported")
 // is an outage, and treating it as a refusal would turn an unreachable host
 // into a proven credential.
 var ErrCredentialRefused = errors.New("provider: credential refused")
+
+// ErrWireUnsupported marks a hop that cannot serve the REQUESTED WIRE for the
+// model it was asked for — the provider's own API shape, not the client's body
+// (Copilot serves claude* on /v1/messages and gemini* on /chat/completions, so
+// both 400 with unsupported_api_for_model when dialed on /responses). It is a
+// fact about the hop: an identical request on another hop can succeed, so the
+// dispatcher fails over rather than committing the refusal.
+//
+// Deliberately NOT a park on its own: the park key is account+base+model and
+// cannot tell wires apart, so parking would stop the same model being dialled
+// on the wire it DOES serve. The guard is cheap and repeats per request.
+var ErrWireUnsupported = errors.New("provider: wire unsupported for this model")
 
 // Registry maps Kind -> Adapter.
 type Registry struct {

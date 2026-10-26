@@ -65,9 +65,6 @@ func (p *FrameParser) Feed(chunk []byte) ([]string, error) {
 	}
 }
 
-// Buffered reports bytes currently held for an incomplete frame.
-func (p *FrameParser) Buffered() int { return len(p.buf) }
-
 // tryFrame consumes one complete frame from the head of the buffer.
 // ok=false means "need more bytes" (neither error nor frame).
 func (p *FrameParser) tryFrame() (string, bool, error) {

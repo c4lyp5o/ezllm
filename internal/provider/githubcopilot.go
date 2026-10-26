@@ -54,16 +54,6 @@ func NewGitHubCopilot(c *http.Client) Adapter {
 	}
 }
 
-// newGitHubCopilotWithClient is the test constructor: the routed HTTP client
-// stands in for GitHub's endpoints.
-func newGitHubCopilotWithClient(c *http.Client) Adapter {
-	return &gitHubCopilotAdapter{
-		client:   c,
-		sessions: map[int64]githubcopilot.Session{},
-		cfg:      githubcopilot.Config{HTTP: c},
-	}
-}
-
 func envOr(key, def string) string {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		return v
@@ -110,13 +100,15 @@ func (a *gitHubCopilotAdapter) PrepareRequest(ctx context.Context, req *http.Req
 	req.URL.RawQuery = ""
 
 	// Read the body ONCE: the model id selects the quirks and the patched
-	// body goes back on the request.
+	// body goes back on the request. The responses wire needs no quirk pass,
+	// but it does need the model — Copilot serves claude*/gemini* on other
+	// endpoints only, and a bare /responses dial 400s upstream.
 	var (
 		raw     []byte
 		bodyObj map[string]any
 		model   string
 	)
-	if req.Body != nil && (surface == SurfaceChat || surface == SurfaceAnthropic) {
+	if req.Body != nil {
 		raw, err = io.ReadAll(io.LimitReader(req.Body, 32<<20))
 		if err != nil {
 			return fmt.Errorf("github-copilot: read body: %w", err)
@@ -124,9 +116,17 @@ func (a *gitHubCopilotAdapter) PrepareRequest(ctx context.Context, req *http.Req
 		_ = req.Body.Close()
 		if err := json.Unmarshal(raw, &bodyObj); err == nil {
 			model, _ = bodyObj["model"].(string)
-			githubcopilot.PrepareBody(model, bodyObj)
-			if patched, err := json.Marshal(bodyObj); err == nil {
-				raw = patched
+			if surface == SurfaceResponses && githubcopilot.ResponsesUnsupported(model) {
+				// Refuse BEFORE dialling: this hop cannot serve the wire, and
+				// another hop may have the same model on its native endpoint.
+				return fmt.Errorf("%w: github-copilot %s has no /responses endpoint (upstream answers 400 unsupported_api_for_model)",
+					ErrWireUnsupported, model)
+			}
+			if surface == SurfaceChat || surface == SurfaceAnthropic {
+				githubcopilot.PrepareBody(model, bodyObj)
+				if patched, err := json.Marshal(bodyObj); err == nil {
+					raw = patched
+				}
 			}
 		}
 		req.Body = io.NopCloser(strings.NewReader(string(raw)))

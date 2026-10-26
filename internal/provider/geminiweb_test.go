@@ -8,7 +8,17 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
+
+// newGeminiWebWithBase is the test constructor: geminiBase points the direct
+// status/catalog calls at a mock upstream.
+func newGeminiWebWithBase(bridgeBase, geminiBase string, c *http.Client) Adapter {
+	if c == nil {
+		c = &http.Client{Timeout: 30 * time.Second}
+	}
+	return &geminiWebAdapter{client: c, bridgeBase: strings.TrimSuffix(bridgeBase, "/"), geminiBase: strings.TrimSuffix(geminiBase, "/")}
+}
 
 // The gemini-web adapter test mocks the upstream the way the geminiweb
 // package's own tests do (init page + batchexecute status frames), plus a

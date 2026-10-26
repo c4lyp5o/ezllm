@@ -104,6 +104,13 @@ last reading and serves it on `GET /v1/usage` (same `x-api-key`) in the percent
 shape the Providers page already draws — **rolling** = the 5-hour window,
 **weekly** = the 7-day window. Press **Quota** on the claude-sub account to read it.
 
+- **Fresh read (optional):** paste your claude.ai Cookie header into the account's
+  `management_key` (it must contain `sessionKey` and `lastActiveOrg`; keep the
+  `cf_clearance`/`__cf_bm` cookies — Cloudflare challenges a bare session). **Quota**
+  then reads `GET claude.ai/api/organizations/{org}/usage` (`five_hour` → rolling,
+  `seven_day` → weekly, `utilization` already a percent) without spending a request,
+  and falls back to the bridge reading below if that read fails (expired cookie,
+  challenge). `cf_clearance` expires; re-paste when the card goes back to `observed_at`.
 - The reading is only as fresh as the **last call** (`observed_at` in the raw
   body); the CLI has no way to read it without making one.
 - Before the first call after a restart the bridge answers 404 and the card shows

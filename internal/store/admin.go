@@ -1644,22 +1644,23 @@ type ExportCompletion struct {
 }
 
 type Export struct {
-	Completion             ExportCompletion     `json:"completion"`
-	FormatVersion          int                  `json:"format_version"`
-	Kind                   string               `json:"kind"`
-	DatabaseBackupRequired bool                 `json:"database_backup_required"`
-	Models                 []ExportModel        `json:"models"`
-	Rules                  []ModelRule          `json:"model_rules"`
-	Prices                 []Price              `json:"model_prices"`
-	Bindings               []ServiceBinding     `json:"service_bindings"`
-	ExportedAt             string               `json:"exported_at"`
-	SchemaVersion          int                  `json:"schema_version"`
-	Accounts               []AccountSummary     `json:"accounts"`
-	Combos                 []Combo              `json:"combos"`
-	Tokens                 []TokenSummary       `json:"tokens"`
-	Compression            []CompressionProfile `json:"compression_profiles"`
-	Quotas                 []map[string]any     `json:"latest_quotas"`
-	Ledger                 []map[string]any     `json:"ledger,omitempty"`
+	Completion             ExportCompletion           `json:"completion"`
+	FormatVersion          int                        `json:"format_version"`
+	Kind                   string                     `json:"kind"`
+	Settings               map[string]json.RawMessage `json:"settings"`
+	DatabaseBackupRequired bool                       `json:"database_backup_required"`
+	Models                 []ExportModel              `json:"models"`
+	Rules                  []ModelRule                `json:"model_rules"`
+	Prices                 []Price                    `json:"model_prices"`
+	Bindings               []ServiceBinding           `json:"service_bindings"`
+	ExportedAt             string                     `json:"exported_at"`
+	SchemaVersion          int                        `json:"schema_version"`
+	Accounts               []AccountSummary           `json:"accounts"`
+	Combos                 []Combo                    `json:"combos"`
+	Tokens                 []TokenSummary             `json:"tokens"`
+	Compression            []CompressionProfile       `json:"compression_profiles"`
+	Quotas                 []map[string]any           `json:"latest_quotas"`
+	Ledger                 []map[string]any           `json:"ledger,omitempty"`
 }
 
 // ExportLedgerRows returns a LIVE row cursor over the whole call ledger,
@@ -1708,6 +1709,10 @@ func ScanExportRow(rows *sql.Rows) (map[string]any, error) {
 // Kept separate from the ledger so a caller can validate (and a handler can
 // answer) before committing to a long stream.
 func (d *DB) ExportConfig(ctx context.Context) (*Export, error) {
+	savedSettings, err := d.LoadSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
 	accounts, err := d.ListAccounts(ctx)
 	if err != nil {
 		return nil, err
@@ -1751,7 +1756,7 @@ func (d *DB) ExportConfig(ctx context.Context) (*Export, error) {
 		}
 	}
 	return &Export{
-		FormatVersion: 1, Kind: "configuration_export", DatabaseBackupRequired: true,
+		Settings: savedSettings.Values, FormatVersion: 1, Kind: "configuration_export", DatabaseBackupRequired: true,
 		Completion: ExportCompletion{Complete: true},
 		Models:     models, Rules: rules, Prices: prices, Bindings: bindings,
 		ExportedAt:    time.Now().UTC().Format(time.RFC3339),

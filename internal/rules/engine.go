@@ -7,6 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/settings"
 )
 
 // RuleSource loads all rules — satisfied by *store.DB (via a thin adapter in
@@ -209,6 +211,16 @@ func (e *Engine) Evaluate(ctx context.Context, accountID int64, modelID, request
 	}
 
 	now := e.now()
+	if r.Window.TZ == "instance" {
+		copy := *r
+		r = &copy
+		p, ok := settings.From(ctx)
+		if !ok {
+			p = settings.Defaults()
+		}
+		r.Window.TZ = p.UsageTZ
+		ctx = settings.WithMeter(settings.With(ctx, p), r.CapWindow, now)
+	}
 
 	// 1. Window — pure arithmetic, no I/O.
 	if r.Window.Start != "" || r.Window.End != "" {

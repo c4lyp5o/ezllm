@@ -321,7 +321,7 @@ CREATE TABLE IF NOT EXISTS model_rules (
   win_start   TEXT,                                     -- 'HH:MM' local to win_tz
   win_end     TEXT,                                     -- end<start wraps midnight
   win_days    TEXT,                                     -- csv 0-6 (Sun=0); NULL/e'' = every day
-  win_tz      TEXT    NOT NULL DEFAULT 'Asia/Kuala_Lumpur',
+  win_tz      TEXT    NOT NULL DEFAULT 'instance',
   enabled     INTEGER NOT NULL DEFAULT 1,
   note        TEXT    NOT NULL DEFAULT '',
   updated_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
@@ -463,4 +463,21 @@ CREATE TRIGGER IF NOT EXISTS catalog_gen_combo_hops_del AFTER DELETE ON combo_ho
 CREATE TABLE IF NOT EXISTS pending_usage_meter (
   call_id INTEGER PRIMARY KEY REFERENCES calls(id) ON DELETE CASCADE,
   reservation_id INTEGER NOT NULL DEFAULT 0
+);
+
+-- Operator settings; deployment overrides are resolved at runtime.
+CREATE TABLE IF NOT EXISTS instance_settings (
+ id INTEGER PRIMARY KEY CHECK(id=1),
+ revision INTEGER NOT NULL DEFAULT 0,
+ values_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE TABLE IF NOT EXISTS dashboard_session_details (
+ token_hash TEXT PRIMARY KEY REFERENCES dashboard_sessions(token_hash) ON DELETE CASCADE,
+ id TEXT NOT NULL UNIQUE,
+ browser TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS instance_job_health (
+ kind TEXT PRIMARY KEY,
+ last_success TEXT NOT NULL DEFAULT '',
+ last_failure TEXT NOT NULL DEFAULT ''
 );

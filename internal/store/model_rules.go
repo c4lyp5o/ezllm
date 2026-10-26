@@ -108,12 +108,12 @@ func ValidateModelRule(r *ModelRule) error {
 	r.WinDays = days
 
 	if tz := strings.TrimSpace(r.WinTZ); tz != "" {
-		if !tzRE.MatchString(tz) {
+		if tz != "instance" && !tzRE.MatchString(tz) {
 			return fmt.Errorf("win_tz %q must be an IANA zone (Asia/Kuala_Lumpur) or offset (+08:00)", tz)
 		}
 		r.WinTZ = tz
 	} else {
-		r.WinTZ = "Asia/Kuala_Lumpur"
+		r.WinTZ = "instance"
 	}
 	return nil
 }

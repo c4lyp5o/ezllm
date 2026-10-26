@@ -123,8 +123,12 @@ func (d *DB) DashboardLogin(ctx context.Context, password string) (string, error
 		return "", err
 	}
 	token := hex.EncodeToString(raw)
+	id, err := sessionID()
+	if err != nil {
+		return "", err
+	}
 	expires := time.Now().UTC().Add(12 * time.Hour)
-	err := d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+	err = d.WithWriteTx(ctx, func(tx *sql.Tx) error {
 		// Expired sessions were only deleted when someone presented that
 		// exact token, so the table grew by one row per login. Prune here.
 		if _, err := tx.ExecContext(ctx, `DELETE FROM dashboard_sessions WHERE expires_at < ?`,
@@ -133,6 +137,10 @@ func (d *DB) DashboardLogin(ctx context.Context, password string) (string, error
 		}
 		_, err := tx.ExecContext(ctx, `
 INSERT INTO dashboard_sessions (token_hash, expires_at) VALUES (?, ?)`, HashToken(token), expires.Format(time.RFC3339Nano))
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO dashboard_session_details(token_hash,id) VALUES(?,?)`, HashToken(token), id)
 		return err
 	})
 	if err != nil {

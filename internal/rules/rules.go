@@ -107,7 +107,7 @@ func (w Window) loc() *time.Location {
 // rule rather than silent.
 func (w Window) ValidateTZ() error {
 	tz := strings.TrimSpace(w.TZ)
-	if tz == "" {
+	if tz == "" || tz == "instance" {
 		return nil // empty = UTC, by design
 	}
 	if _, err := time.LoadLocation(tz); err != nil {

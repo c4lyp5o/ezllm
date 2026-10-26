@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c4lyp5o/ezllm/internal/settings"
 	_ "modernc.org/sqlite" // pure Go, no CGO — required for the static Docker image
 )
 
@@ -26,13 +27,14 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 30
+const schemaVersion = 31
 
 // DB wraps the writer/reader split.
 type DB struct {
-	w    *sql.DB // single writer connection (MaxOpenConns=1)
-	r    *sql.DB // read pool
-	path string
+	operatorSettings atomic.Pointer[settings.Manager]
+	w                *sql.DB // single writer connection (MaxOpenConns=1)
+	r                *sql.DB // read pool
+	path             string
 
 	writeMu sync.Mutex // serializes writers explicitly (belt and braces over the pool)
 
@@ -130,6 +132,11 @@ func Open(ctx context.Context, opts Options) (*DB, error) {
 		db.closeConns()
 		return nil, err
 	}
+	if _, err := db.w.Exec(`INSERT OR IGNORE INTO dashboard_session_details(token_hash,id) SELECT token_hash,lower(hex(randomblob(16))) FROM dashboard_sessions`); err != nil {
+		db.closeConns()
+		return nil, err
+	}
+
 	if db.crypto != nil {
 		if err := db.migrateEncryptProviderKeys(ctx); err != nil {
 			db.closeConns()
@@ -359,6 +366,12 @@ func (d *DB) migrate() error {
 		if _, err := d.w.Exec(schemaSQL); err != nil {
 			return fmt.Errorf("store: migrate %d->%d: %w", cur, schemaVersion, err)
 		}
+		if cur < 31 {
+			if _, err := d.w.Exec(`UPDATE model_rules SET win_tz='UTC' WHERE trim(win_tz)=''`); err != nil {
+				return err
+			}
+		}
+
 		if _, err := d.w.Exec(`INSERT INTO schema_version(version) VALUES(?)`, schemaVersion); err != nil {
 			return fmt.Errorf("store: stamp version: %w", err)
 		}

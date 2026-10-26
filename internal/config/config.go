@@ -142,7 +142,17 @@ type Compression struct {
 	ShadowPct int `yaml:"shadow_pct"`
 }
 
+type Backup struct {
+	Directory  string `yaml:"directory"`
+	SecretFile string `yaml:"secret_file"`
+}
+
 type Config struct {
+	Backup             Backup              `yaml:"backup"`
+	Explicit           map[string]bool     `yaml:"-"`
+	UsageTZ            string              `yaml:"usage_timezone"`
+	PriceRefresh       *bool               `yaml:"price_refresh"`
+	AutoProbe          *bool               `yaml:"automatic_probing"`
 	Listen             string              `yaml:"listen"`
 	DataDir            string              `yaml:"data_dir"`
 	MaxBodyMiB         int                 `yaml:"max_body_mib"`
@@ -189,6 +199,21 @@ func Load(path string) (*Config, error) {
 		}
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
+	var tree map[string]any
+	_ = yaml.Unmarshal(raw, &tree)
+	cfg.Explicit = map[string]bool{}
+	var walk func(string, map[string]any)
+	walk = func(prefix string, m map[string]any) {
+		for k, v := range m {
+			name := prefix + k
+			if child, ok := v.(map[string]any); ok {
+				walk(name+".", child)
+			} else {
+				cfg.Explicit[name] = true
+			}
+		}
+	}
+	walk("", tree)
 	if universalKeySet(raw) {
 		cfg.Warnings = append(cfg.Warnings,
 			"translation.universal_enabled is deprecated: translation.enabled is the one switch now")

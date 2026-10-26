@@ -76,7 +76,7 @@ func TestMidStreamDropWritesTerminalErrorFrame(t *testing.T) {
 	base := dropMidStreamUpstream(t)
 	client := &http.Client{Timeout: 5 * time.Second}
 	d := NewDispatcher(client, provider.NewRegistry(client))
-	rt := testRoute(base, provider.SurfaceOpenAI)
+	rt := testRoute(base, provider.SurfaceChat)
 
 	body := []byte(`{"model":"m","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
 	req, _ := reqWithBody(string(body))

@@ -293,7 +293,7 @@ func TestInspectRoutePercentiles1MiB(t *testing.T) {
 			if _, err := extractModel(body); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := resolver.ResolveCandidates(ctx, target, provider.SurfaceOpenAI, "bench"); err != nil {
+			if _, err := resolver.ResolveCandidates(ctx, target, provider.SurfaceChat, "bench"); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -303,7 +303,7 @@ func TestInspectRoutePercentiles1MiB(t *testing.T) {
 			if _, err := extractModel(body); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := resolver.ResolveCandidates(ctx, target, provider.SurfaceOpenAI, "bench"); err != nil {
+			if _, err := resolver.ResolveCandidates(ctx, target, provider.SurfaceChat, "bench"); err != nil {
 				t.Fatal(err)
 			}
 			samples[i] = time.Since(t0)

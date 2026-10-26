@@ -79,7 +79,7 @@ func TestServiceEndpointsForwardEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	no := false
-	if err := db.SetModelProto(ctx, id, "svc-model", provider.SurfaceOpenAI, &no); err != nil {
+	if err := db.SetModelProto(ctx, id, "svc-model", provider.SurfaceChat, &no); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.UpsertClientToken(ctx, "hermes", "tok-infer", "infer"); err != nil {

@@ -55,7 +55,7 @@ func TestLedgerErrCarriesCause(t *testing.T) {
 				strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"hi"}],"max_tokens":8}`))
 			rec := httptest.NewRecorder()
 			_, res, err := d.ForwardCandidates(context.Background(), rec, req,
-				[]Route{testRoute(upstream.URL, provider.SurfaceOpenAI)},
+				[]Route{testRoute(upstream.URL, provider.SurfaceChat)},
 				[]byte(`{"model":"m","messages":[{"role":"user","content":"hi"}],"max_tokens":8}`))
 			if err != nil {
 				t.Fatal(err)

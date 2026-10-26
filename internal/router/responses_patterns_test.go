@@ -32,7 +32,7 @@ func TestResponsesPatternsMatchFully(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			r := New(nil).WithResponsesModels(c.patterns)
-			if got := r.needsResponsesWire(provider.SurfaceOpenAI, c.ns, c.model); got != c.want {
+			if got := r.needsResponsesWire(provider.SurfaceChat, c.ns, c.model); got != c.want {
 				t.Errorf("needsResponsesWire(%q/%q) = %v, want %v", c.ns, c.model, got, c.want)
 			}
 		})

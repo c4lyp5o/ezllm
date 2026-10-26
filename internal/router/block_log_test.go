@@ -51,13 +51,13 @@ func TestBlockAdvanceLoggedOncePerBlock(t *testing.T) {
 
 	// Cold start + first block of 3: one line (cold start).
 	for i := 0; i < 3; i++ {
-		if _, err := r.ResolveCandidates(ctx, "daily", provider.SurfaceOpenAI, "test"); err != nil {
+		if _, err := r.ResolveCandidates(ctx, "daily", provider.SurfaceChat, "test"); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// Second block of 3: one more line (block complete).
 	for i := 0; i < 3; i++ {
-		if _, err := r.ResolveCandidates(ctx, "daily", provider.SurfaceOpenAI, "test"); err != nil {
+		if _, err := r.ResolveCandidates(ctx, "daily", provider.SurfaceChat, "test"); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -15,7 +15,7 @@ func ResponsesToChat(body []byte, clientModel string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return EncodeResponse(ir, provider.SurfaceOpenAI, clientModel, opts)
+	return EncodeResponse(ir, provider.SurfaceChat, clientModel, opts)
 }
 
 // ── responses wire decode types ───────────────────────────────────────────

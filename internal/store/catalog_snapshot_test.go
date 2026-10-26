@@ -67,10 +67,10 @@ func TestCatalogSnapshotSeesEveryWrite(t *testing.T) {
 	if v, _ := snap(t, db).ModelSupportsSurface(ctx, id, "m1", provider.SurfaceAnthropic); v == nil || *v {
 		t.Fatalf("probe verdict not visible: %v", v)
 	}
-	if err := db.SetModelPin(ctx, id, "m1", "openai"); err != nil {
+	if err := db.SetModelPin(ctx, id, "m1", "chat"); err != nil {
 		t.Fatal(err)
 	}
-	if p, _ := snap(t, db).ModelPin(ctx, id, "m1"); p != "openai" {
+	if p, _ := snap(t, db).ModelPin(ctx, id, "m1"); p != "chat" {
 		t.Fatalf("pin not visible: %q", p)
 	}
 
@@ -128,7 +128,7 @@ func TestCatalogSnapshotMatchesLiveReads(t *testing.T) {
 		t.Fatal(err)
 	}
 	yes := true
-	if err := db.SetModelProto(ctx, synced, "m1", provider.SurfaceOpenAI, &yes); err != nil {
+	if err := db.SetModelProto(ctx, synced, "m1", provider.SurfaceChat, &yes); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.UpsertCombo(ctx, Combo{Name: "off", Strategy: "failover", Enabled: false,
@@ -159,7 +159,7 @@ func TestCatalogSnapshotMatchesLiveReads(t *testing.T) {
 			sp, _ := s.ModelPin(ctx, id, m)
 			lp, _ := db.ModelPin(ctx, id, m)
 			same("ModelPin "+m, sp, lp)
-			for _, sf := range []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses} {
+			for _, sf := range []provider.Surface{provider.SurfaceChat, provider.SurfaceAnthropic, provider.SurfaceResponses} {
 				sv, _ := s.ModelSupportsSurface(ctx, id, m, sf)
 				lv, _ := db.ModelSupportsSurface(ctx, id, m, sf)
 				same("ModelSupportsSurface "+m, sv, lv)

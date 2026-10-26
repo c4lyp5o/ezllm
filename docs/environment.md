@@ -22,10 +22,11 @@ and data location.
    first dashboard password, at least 12 characters. Skip it and the first boot
    prints a one-time setup code to `docker logs ezllm` instead.
 3. **The subscription bridges stay off** (`EZLLM_CLAUDE_BRIDGE`,
-   `EZLLM_CODEX_BRIDGE`) unless you have the vendor CLI and a subscription
-   login on the host; turned on without them, the boot fails. To use one,
-   follow [claude-bridge-runbook.md](claude-bridge-runbook.md) or
-   [codex-bridge-runbook.md](codex-bridge-runbook.md).
+   `EZLLM_CODEX_BRIDGE`, `EZLLM_AGY_BRIDGE`) unless you have the vendor CLI
+   and a subscription login on the host; turned on without them, the boot
+   fails. To use one, follow [claude-bridge-runbook.md](claude-bridge-runbook.md),
+   [codex-bridge-runbook.md](codex-bridge-runbook.md) or
+   [agy-bridge-runbook.md](agy-bridge-runbook.md).
 
 Behind a reverse proxy, also set `EZLLM_TRUSTED_PROXIES`. Set these in your
 `compose.yml`:
@@ -99,6 +100,19 @@ Setup, platform requirements and the lockdown: [codex-bridge-runbook.md](codex-b
 | `EZLLM_CODEX_BRIDGE_CONCURRENCY` | `2` | Concurrent Codex children; a positive integer, anything else fails the boot. |
 | `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK` | unset | `on` allows client tools on a host without Landlock. Read the runbook's platform section before setting it. |
 
+## Antigravity (Google subscription) bridge
+
+Setup and the login that must avoid the desktop keyring: [agy-bridge-runbook.md](agy-bridge-runbook.md). Linux only.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `EZLLM_AGY_BRIDGE` | off | `on` starts the loopback surface. Enabled without a usable CLI, a token file or a working `agy models`, the boot fails. |
+| `EZLLM_AGY_BIN` | `/opt/agy/agy` | Official Antigravity CLI binary inside the container (compose mounts a pinned copy here). |
+| `EZLLM_AGY_HOME` | `/agy-sub` | `HOME` for the CLI: holds `.gemini/antigravity-cli/antigravity-oauth-token` (compose mounts the login here, read-write). |
+| `EZLLM_AGY_BRIDGE_ADDR` | `127.0.0.1:8792` | Bridge listen address; non-loopback addresses are refused. |
+| `EZLLM_AGY_BRIDGE_TOKEN_FILE` | `/data/agy-bridge.token` | Shared secret for the account key; generated (0600) when missing. |
+| `EZLLM_AGY_BRIDGE_CONCURRENCY` | `2` | Concurrent `agy` children (~207 MB each); a positive integer, anything else fails the boot. |
+
 ## GitHub Copilot provider
 
 | Variable | Default | What it does |
@@ -123,4 +137,6 @@ mount paths are written into your `compose.yml` directly.
 |---|---|
 | `EZLLM_CODEX_LIVE` | `1` runs the Codex bridge live tests against the real CLI and login (`go test ./internal/codexbridge/ -run Live -v`). |
 | `EZLLM_CODEX_LIVE_BIN`, `EZLLM_CODEX_LIVE_HOME` | The CLI and `CODEX_HOME` those live tests use; default `codex` on `PATH` and `~/.codex-sub`. |
+| `EZLLM_AGY_LIVE` | `1` runs the Antigravity bridge live tests against the real CLI and login (`go test -short ./internal/agybridge/ -run Live -v`); a turn spends plan quota. |
+| `EZLLM_AGY_BIN`, `EZLLM_AGY_HOME`, `EZLLM_AGY_MODEL` | The CLI, login directory and model those live tests use. On the host, unlike the container defaults above, they default to `~/.local/share/agy-bridge/1.4.7/agy`, `~/.agy-sub` and `gemini-3.8-flash-low`. |
 | `EZLLM_REHEARSE_DB` | Path to a **copy** of the production database; runs the store rehearsal test (`go test ./internal/store/ -run Rehearse -v`). |

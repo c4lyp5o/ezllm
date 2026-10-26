@@ -74,8 +74,8 @@ func TestEndpointMismatchProbesTheResponsesWire(t *testing.T) {
 		t.Fatalf("expected exactly one probed model, got %d (%d rows)", len(probed), len(rows))
 	}
 	m := probed[0]
-	if m.OpenAI == nil || *m.OpenAI {
-		t.Fatalf("%s: proto_openai must be recorded FALSE (the chat wire refused), got %v", m.ID, m.OpenAI)
+	if m.Chat == nil || *m.Chat {
+		t.Fatalf("%s: proto_chat must be recorded FALSE (the chat wire refused), got %v", m.ID, m.Chat)
 	}
 	if m.Responses == nil || !*m.Responses {
 		t.Fatalf("%s: proto_responses must be recorded TRUE, got %v", m.ID, m.Responses)

@@ -46,7 +46,7 @@ event: response.completed
 data: {"type":"response.completed","response":{"id":"resp_i","status":"completed","output":[{"id":"fc_x","type":"function_call","call_id":"call_A","name":"ls","arguments":"{\"path\":\"src\"}"}],"usage":{"input_tokens":3,"output_tokens":4}}}
 
 `
-	for _, to := range []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses} {
+	for _, to := range []provider.Surface{provider.SurfaceChat, provider.SurfaceAnthropic, provider.SurfaceResponses} {
 		r, b := codecStream(t, in, provider.SurfaceResponses, to, CodecOptions{})
 		if r.Outcome() != FinishTools {
 			t.Fatalf("%s outcome %s: %s", to, r.Outcome(), b)
@@ -64,7 +64,7 @@ data: {"type":"response.completed","response":{"id":"resp_i","status":"completed
 }
 
 func TestStreamPortableResponsesLifecycle(t *testing.T) {
-	r, b := codecStream(t, portableChatStream, provider.SurfaceOpenAI, provider.SurfaceResponses, CodecOptions{})
+	r, b := codecStream(t, portableChatStream, provider.SurfaceChat, provider.SurfaceResponses, CodecOptions{})
 	if r.Outcome() != FinishTools {
 		t.Fatalf("outcome %s: %s", r.Outcome(), b)
 	}
@@ -123,18 +123,18 @@ func TestStreamPortableResponsesLifecycle(t *testing.T) {
 		t.Fatalf("usage %v", u)
 	}
 	// Decode the emitted wire back into event IR: no fixture echo can pass this.
-	round, chat := codecStream(t, string(b), provider.SurfaceResponses, provider.SurfaceOpenAI, CodecOptions{})
+	round, chat := codecStream(t, string(b), provider.SurfaceResponses, provider.SurfaceChat, CodecOptions{})
 	if round.Outcome() != FinishTools || !bytes.Contains(chat, []byte("hello 😊")) || !bytes.Contains(chat, []byte(`"id":"call_A"`)) {
 		t.Fatalf("roundtrip %s", chat)
 	}
 }
 
 func TestStreamPortableTerminalAndAbsentUsage(t *testing.T) {
-	for _, to := range []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceResponses, provider.SurfaceAnthropic} {
+	for _, to := range []provider.Surface{provider.SurfaceChat, provider.SurfaceResponses, provider.SurfaceAnthropic} {
 		t.Run(string(to), func(t *testing.T) {
 			// A finish chunk is a terminal classification, usage may arrive later.
 			input := `data: {"id":"c","choices":[{"index":0,"delta":{"content":"x"},"finish_reason":"length"}]}` + "\n\ndata: [DONE]\n\n"
-			r, b := codecStream(t, input, provider.SurfaceOpenAI, to, CodecOptions{})
+			r, b := codecStream(t, input, provider.SurfaceChat, to, CodecOptions{})
 			if r.Outcome() != FinishLength {
 				t.Fatalf("outcome %s: %s", r.Outcome(), b)
 			}
@@ -146,10 +146,10 @@ func TestStreamPortableTerminalAndAbsentUsage(t *testing.T) {
 }
 
 func TestStreamPortableTruncationAndLateError(t *testing.T) {
-	for _, to := range []provider.Surface{provider.SurfaceAnthropic, provider.SurfaceOpenAI, provider.SurfaceResponses} {
+	for _, to := range []provider.Surface{provider.SurfaceAnthropic, provider.SurfaceChat, provider.SurfaceResponses} {
 		for _, tail := range []string{"", "data: {\"error\":{\"type\":\"server_error\",\"message\":\"late boom\"}}\n\n", "data: not-json\n\n"} {
 			input := "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\n" + tail
-			r, b := codecStream(t, input, provider.SurfaceOpenAI, to, CodecOptions{})
+			r, b := codecStream(t, input, provider.SurfaceChat, to, CodecOptions{})
 			if r.Outcome() != FinishFailed || !bytes.Contains(b, []byte("partial")) || !bytes.Contains(b, []byte(`"error"`)) {
 				t.Fatalf("failed stream became success %s %s", to, b)
 			}
@@ -167,7 +167,7 @@ func TestStreamPortableMessagesUsageMerge(t *testing.T) {
 		"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n" +
 		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":8}}\n\n" +
 		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
-	for _, to := range []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceResponses} {
+	for _, to := range []provider.Surface{provider.SurfaceChat, provider.SurfaceResponses} {
 		r, b := codecStream(t, in, provider.SurfaceAnthropic, to, CodecOptions{MessagesUsage: UsageExclusive})
 		if r.Outcome() != FinishCompleted {
 			t.Fatal(string(b))
@@ -180,7 +180,7 @@ func TestStreamPortableMessagesUsageMerge(t *testing.T) {
 			t.Fatalf("merge %s", b)
 		}
 	}
-	r, b := codecStream(t, in, provider.SurfaceAnthropic, provider.SurfaceOpenAI, CodecOptions{})
+	r, b := codecStream(t, in, provider.SurfaceAnthropic, provider.SurfaceChat, CodecOptions{})
 	if r.Outcome() != FinishFailed {
 		t.Fatalf("unknown convention guessed: %s", b)
 	}
@@ -188,13 +188,13 @@ func TestStreamPortableMessagesUsageMerge(t *testing.T) {
 
 func TestStreamPortableSSEFraming(t *testing.T) {
 	input := ": comment\r\nevent: ignored\r\ndata:{\"id\":\"c\",\r\ndata: \"choices\":[{\"index\":0,\"delta\":{\"content\":\"é😊\"},\"finish_reason\":\"stop\"}]}\r\n\r\ndata:[DONE]\r\n\r\n"
-	_, out := codecStream(t, input, provider.SurfaceOpenAI, provider.SurfaceResponses, CodecOptions{})
+	_, out := codecStream(t, input, provider.SurfaceChat, provider.SurfaceResponses, CodecOptions{})
 	if !bytes.Contains(out, []byte("é😊")) || !bytes.Contains(out, []byte("response.completed")) {
 		t.Fatalf("framing %s", out)
 	}
 	// Transport reads can split inside any UTF-8 sequence, but JSON is decoded
 	// only after a complete frame, never per network fragment.
-	r := NewStreamReader(&oneByteReader{data: []byte(input)}, provider.SurfaceOpenAI, provider.SurfaceResponses, "client", CodecOptions{})
+	r := NewStreamReader(&oneByteReader{data: []byte(input)}, provider.SurfaceChat, provider.SurfaceResponses, "client", CodecOptions{})
 	b, err := io.ReadAll(r)
 	if err != nil || !bytes.Contains(b, []byte("é😊")) {
 		t.Fatalf("fragmented stream %v %s", err, b)
@@ -214,7 +214,7 @@ func (r *oneByteReader) Read(p []byte) (int, error) {
 
 func TestStreamPortableCloseAndFlowControl(t *testing.T) {
 	pr, pw := io.Pipe()
-	r := NewStreamReader(pr, provider.SurfaceOpenAI, provider.SurfaceResponses, "client", CodecOptions{})
+	r := NewStreamReader(pr, provider.SurfaceChat, provider.SurfaceResponses, "client", CodecOptions{})
 	defer r.Close()
 	defer pw.Close()
 	// Source remains parked WITHOUT sending finish. The client must get delta.
@@ -260,11 +260,11 @@ func TestStreamPortableCloseAndFlowControl(t *testing.T) {
 
 func TestStreamPortableInvalidArgumentsAndCap(t *testing.T) {
 	bad := strings.ReplaceAll(portableChatStream, `{\"path\":`, `[`)
-	r, b := codecStream(t, bad, provider.SurfaceOpenAI, provider.SurfaceAnthropic, CodecOptions{})
+	r, b := codecStream(t, bad, provider.SurfaceChat, provider.SurfaceAnthropic, CodecOptions{})
 	if r.Outcome() != FinishFailed || !bytes.Contains(b, []byte(`"error"`)) {
 		t.Fatalf("invalid object succeeded: %s", b)
 	}
-	r = NewStreamReader(strings.NewReader(portableChatStream), provider.SurfaceOpenAI, provider.SurfaceResponses, "client", CodecOptions{})
+	r = NewStreamReader(strings.NewReader(portableChatStream), provider.SurfaceChat, provider.SurfaceResponses, "client", CodecOptions{})
 	r.maxOutput = 4 // exercise the same 32MiB limit without wasting memory in test
 	b, e := io.ReadAll(r)
 	if e != nil {
@@ -279,7 +279,7 @@ func TestStreamPortableSourceFinishFailureUsage(t *testing.T) {
 	for _, kind := range []string{"incomplete", "failed"} {
 		in := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_c\"}}\n\n" +
 			"event: response." + kind + "\ndata: {\"type\":\"response." + kind + "\",\"response\":{\"id\":\"resp_c\",\"output\":[],\"status\":\"" + kind + "\",\"error\":{\"message\":\"boom\",\"type\":\"api_error\"},\"usage\":{\"input_tokens\":4,\"output_tokens\":6}}}\n\n"
-		r, b := codecStream(t, in, provider.SurfaceResponses, provider.SurfaceOpenAI, CodecOptions{})
+		r, b := codecStream(t, in, provider.SurfaceResponses, provider.SurfaceChat, CodecOptions{})
 		want := FinishLength
 		if kind == "failed" {
 			want = FinishFailed

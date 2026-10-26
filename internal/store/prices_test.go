@@ -41,7 +41,7 @@ func seedPriceAccount(t *testing.T, db *DB, name, ns string) int64 {
 
 func seedCall(t *testing.T, db *DB, ts time.Time, acctID int64, model string, in, out, cr, cw int64) {
 	t.Helper()
-	db.RecordCall(Call{TS: ts, Surface: SurfaceOpenAI, AccountID: acctID, Account: "acct", Model: model,
+	db.RecordCall(Call{TS: ts, Surface: SurfaceChat, AccountID: acctID, Account: "acct", Model: model,
 		Status: 200, TokensIn: in, TokensOut: out, TokensCachedRead: cr, TokensCachedWrite: cw})
 }
 

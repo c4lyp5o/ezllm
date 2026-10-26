@@ -82,7 +82,7 @@ func TestCompressionVersionNullIsUnknown(t *testing.T) {
 	defer db.Close()
 	if _, err := db.w.ExecContext(ctx,
 		`INSERT INTO calls (ts, client, surface, account, model, status, tokens_in) VALUES (?,?,?,?,?,?,?)`,
-		time.Now().UTC().Format("2006-01-02T15:04:05.000Z"), "c", "openai", "a", "m", 200, 10); err != nil {
+		time.Now().UTC().Format("2006-01-02T15:04:05.000Z"), "c", "chat", "a", "m", 200, 10); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := db.RecentCalls(ctx, 1)

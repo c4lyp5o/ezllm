@@ -49,7 +49,7 @@ func overCapResponse() *http.Response {
 func TestOverCapNonStreamBodyYields502NotPartialJSON(t *testing.T) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	d := NewDispatcher(client, provider.NewRegistry(client))
-	rt := testRoute("http://upstream.invalid", provider.SurfaceOpenAI)
+	rt := testRoute("http://upstream.invalid", provider.SurfaceChat)
 
 	res := Result{Status: http.StatusOK, Stream: false}
 	rec := httptest.NewRecorder()
@@ -83,7 +83,7 @@ func TestOverCapNonStreamBodyYields502NotPartialJSON(t *testing.T) {
 func TestBodyExactlyAtCapStillServed(t *testing.T) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	d := NewDispatcher(client, provider.NewRegistry(client))
-	rt := testRoute("http://upstream.invalid", provider.SurfaceOpenAI)
+	rt := testRoute("http://upstream.invalid", provider.SurfaceChat)
 
 	// A loud, parseable JSON payload of exactly maxBodyBytes bytes.
 	pad := strings.Repeat("A", maxBodyBytes-len(`{"id":"x","pad":""}`))

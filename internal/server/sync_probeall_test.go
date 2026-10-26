@@ -53,7 +53,7 @@ func waitSweepDone(t *testing.T, h *harness, acct int64, limit time.Duration) {
 func verdictsFor(t *testing.T, h *harness, acct int64) (tested, untested int) {
 	t.Helper()
 	for _, m := range listModels(t, h, acct) {
-		if m.OpenAI == nil && m.Anthropic == nil && m.Responses == nil {
+		if m.Chat == nil && m.Anthropic == nil && m.Responses == nil {
 			untested++
 		} else {
 			tested++

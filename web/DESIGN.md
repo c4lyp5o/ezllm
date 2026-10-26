@@ -105,3 +105,24 @@ Two animations are deliberately NOT transform-and-opacity, and both earn it:
 - Cards that share a row end level; an empty block keeps its frame and says so
   in one sentence (dashed box). Loading shows the final layout with flat grey
   blocks at the values' sizes.
+
+## The scene (Neighbourhood)
+
+The Neighbourhood page is the one place the no-gradients, no-glows rule is
+suspended: it is a toy, and a glow is the whole point. The exception is fenced
+and carries rules of its own:
+
+- **Scoped.** Every scene colour is a `--nb-*` token under `.nbhd` in
+  `src/index.css` (light = a day scene, dark = a night one). Nothing outside
+  that wrapper may use a gradient or glow, and no data screen embeds the scene.
+- **Every element is data.** Window brightness is tokens per minute over the
+  last five minutes (log scale, full glow = the busiest key, never less than
+  2,000 a minute); smoke = serving traffic; rain cloud = a quarter or more of
+  recent calls failed; dark windows = key or account disabled. Nothing is
+  decorative-only except the stars.
+- **Never colour alone.** The table under the scene lists every house with
+  exact, unabbreviated figures, and each house has a `<title>`.
+- **Cheap.** SVG, transform and opacity only, polled every 10 s and skipped
+  while the tab is hidden; reduced-motion renders the settled scene with no
+  loops. No WebGL: a canvas that redraws every frame is a poor trade on a
+  machine that is also the load balancer.

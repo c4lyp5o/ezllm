@@ -74,7 +74,7 @@ func TestProbeAllSweepsEveryModelInCatalogOrder(t *testing.T) {
 
 	// Default behaviour: the sample stays capped at DefaultProbeMaxModels.
 	res := tester.ProtocolSweep(context.Background(), acct, "k", models,
-		Options{Surfaces: []provider.Surface{provider.SurfaceOpenAI}})
+		Options{Surfaces: []provider.Surface{provider.SurfaceChat}})
 	if res == nil {
 		t.Fatal("no result from the sampled sweep")
 	}
@@ -85,7 +85,7 @@ func TestProbeAllSweepsEveryModelInCatalogOrder(t *testing.T) {
 	// ProbeAll: every model, in the order the caller handed them over.
 	log.reset()
 	res = tester.ProtocolSweep(context.Background(), acct, "k", models, Options{
-		Surfaces: []provider.Surface{provider.SurfaceOpenAI}, ProbeAll: true,
+		Surfaces: []provider.Surface{provider.SurfaceChat}, ProbeAll: true,
 	})
 	if res == nil || res.Tested != len(models) {
 		t.Fatalf("Tested = %+v, want %d", res, len(models))

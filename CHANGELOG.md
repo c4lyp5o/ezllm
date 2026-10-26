@@ -2,6 +2,62 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
 
+## 2026-10-26 — v1.3.0: chat wire rename, probes out of the ledger, Antigravity bridge, one-click bridges
+
+- **The chat-completions wire is named `chat`, not `openai`** (schema v30,
+  breaking). The ledger `surface`, model pins, `protocol_support`, the
+  `/admin/models` capability keys and the `proto_openai` column all become
+  `chat` / `proto_chat`. The migration renames the column and rewrites stored
+  pins and existing ledger rows in place; it is idempotent. `PUT .../pin` and
+  the combo-test `surface` still accept `openai` as a legacy alias on input.
+  Provider kind names (`openai-compatible`, `gemini-openai`) are unchanged.
+- **Probes are no longer written to the ledger.** Key tests (`admin:test`),
+  protocol sweeps, combo tests (`combo-test`) and service tests
+  (`service-test`) leave no row; the verdicts they produce are still stored.
+  Rows already in the ledger are untouched. This reverses the earlier rule
+  that probe spend must be visible in the ledger.
+- **Claude subscription quota can be read live.** Pasting the claude.ai Cookie
+  header into the claude-sub account's `management_key` makes the Quota button
+  read `claude.ai/api/organizations/{org}/usage` (five-hour and weekly
+  windows) instead of the bridge's last-observed reading. The dialog adds the
+  Opus/Sonnet windows and the per-product split of the week, names the source,
+  and states why it fell back when the live read failed.
+- **Antigravity subscription bridge.** A third loopback bridge
+  (`EZLLM_AGY_BRIDGE=on`, `127.0.0.1:8792`) puts a personal Google Antigravity
+  plan behind an `openai-compatible` account through the official `agy` CLI
+  (1.4.7, headless stream-json, one process per request): Gemini 3.8 Flash and
+  the Claude and GPT-OSS models the plan includes, served from what
+  `agy models` lists at boot. Text chat with usage (1.4.7 sends the answer as
+  one chunk at the end of the turn); client tools and images are refused, not
+  dropped. The login is made with D-Bus unset so it is a token file the
+  container can mount, not a desktop-keyring entry. The agent's own tools stay soft-denied: a turn whose CLI reports a looser
+  permission mode is killed, and a login whose `settings.json` loosens the
+  policy fails the boot. Google's "account not eligible" refusal becomes 403
+  `account_ineligible` with its sign-in link withheld. Dashboard preset
+  **Antigravity subscription (bridge)** lists the plan's models. Decisions:
+  `docs/antigravity-subscription-design.md`; setup: `docs/agy-bridge-runbook.md`.
+- **Subscription bridges in one click.** Add provider has a preset per bridge (**Claude
+  subscription**, **ChatGPT subscription**, **Antigravity subscription**). Each shows
+  whether its bridge is running (CLI version, login, plan or tool state) or the
+  exact steps to turn it on, fills in name, base URL and usage convention, and
+  needs no key: the add names `bridge` and the server supplies the shared secret,
+  so nobody copies `data/*-bridge.token` off the host. New `GET /admin/bridges`
+  (the secret is never in it); a key test against a bridge that is not running
+  now names the variable that fixes it. Both runbooks open with a five-step
+  quick setup and say how to install each CLI.
+- **Lighter login backdrop.** At most 12 packets on a desktop and 5 on a phone
+  (was 24), no per-packet `shadowBlur`, and phones draw at 1.5x density and 30
+  fps, at the same on-screen speed.
+- **Neighbourhood page (dashboard).** Every provider key is a house whose windows
+  glow with its tokens per minute over the last five minutes; smoke means it is
+  serving traffic, a rain cloud means a quarter or more of its recent calls
+  failed, dark windows mean it is disabled. SVG and motion only, polled every
+  10 s, with an exact-figures table underneath (glow meter per key; hovering a
+  house highlights its row and back), a glyph legend, an "updated Ns ago"
+  indicator, boarded windows on disabled keys, and a sun/moon. The one scene exempt from the
+  no-glow rule — fenced in `web/DESIGN.md`. The Playwright harness's unlock
+  marker was updated to the session marker the app has used since v1.2.0.
+
 ## 2026-10-24 — v1.2.0: reasoning-effort clamp, model-access park, logging
 
 - **Reasoning effort follows the model's own vocabulary** (schema v29). A 4xx

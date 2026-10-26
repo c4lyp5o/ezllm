@@ -461,6 +461,14 @@ corrections section.
   failover trail from `reqInfo`; refusals before dispatch are visible at `debug`;
   `EZLLM_LOG_FORMAT=json` opts into one object per line.
 
+### v1.3.0 — Antigravity subscription bridge ✅ (2026-10-26; design `docs/antigravity-subscription-design.md`, runbook `docs/agy-bridge-runbook.md`)
+- `internal/agybridge/` — Google Antigravity plan behind a loopback OpenAI surface:
+  `runner.go` `Run` spawns `agy --print=` headless per request in a fresh empty workspace,
+  kills a turn whose `init` reports a loose permission mode; `preflight.go` `RunPreflight`
+  (version, flags, token file, `CheckSettings`, `agy models`) gates the boot; `errors.go`
+  `mapError` turns the CLI's prose errors into statuses and withholds Google's sign-in links;
+  `env.go` `childEnv` is the allowlisted child environment. Wired in `cmd/ezllm/agybridge.go`.
+
 ## 5. Invariants to check while reading (review checklist)
 
 These are the "if it's broken here, the project failed" spots — each must be visibly true in code:

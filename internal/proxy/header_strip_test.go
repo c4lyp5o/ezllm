@@ -36,7 +36,7 @@ func TestEzllmHeadersAreStrippedBeforeUpstream(t *testing.T) {
 			defer up.Close()
 
 			d := NewDispatcher(up.Client(), provider.NewRegistry(up.Client()))
-			rt := testRoute(up.URL, provider.SurfaceOpenAI)
+			rt := testRoute(up.URL, provider.SurfaceChat)
 			req, _ := reqWithBody(`{"model":"m","messages":[]}`)
 			req.Header.Set(hdr, "operator-value")
 
@@ -66,7 +66,7 @@ func TestClientAndCustomHeadersStillForward(t *testing.T) {
 	defer up.Close()
 
 	d := NewDispatcher(up.Client(), provider.NewRegistry(up.Client()))
-	rt := testRoute(up.URL, provider.SurfaceOpenAI)
+	rt := testRoute(up.URL, provider.SurfaceChat)
 	req, _ := reqWithBody(`{"model":"m","messages":[]}`)
 	req.Header.Set("User-Agent", "ezllm-test/1.0")
 	req.Header.Set("Content-Type", "application/json")

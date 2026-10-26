@@ -161,7 +161,7 @@ func TestDocPathStreamFlag(t *testing.T) {
 	if res2.Stream {
 		t.Error("doc path invented a streaming flag")
 	}
-	_ = provider.SurfaceOpenAI // keep the import for the Route construction helpers
+	_ = provider.SurfaceChat // keep the import for the Route construction helpers
 }
 
 // The upstream receives the client's own bytes with only the model value

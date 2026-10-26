@@ -14,7 +14,7 @@ import (
 // responsesWireRoute is a hop curated onto the Responses wire for a CHAT
 // client: Surface stays the client's surface, ResponsesWire flips the dial.
 func responsesWireRoute(url, model string) Route {
-	rt := testRoute(url, provider.SurfaceOpenAI)
+	rt := testRoute(url, provider.SurfaceChat)
 	rt.Model = model
 	rt.Alias = "daily"
 	rt.ResponsesWire = true
@@ -47,7 +47,7 @@ func TestResponsesWireHopServesChatClient(t *testing.T) {
 	if res.Status != 200 {
 		t.Fatalf("status = %d", res.Status)
 	}
-	if served.ResponsesWire != true || served.Surface != provider.SurfaceOpenAI {
+	if served.ResponsesWire != true || served.Surface != provider.SurfaceChat {
 		t.Errorf("served route = %+v", served)
 	}
 
@@ -176,7 +176,7 @@ func TestResponsesWireHopFailureStillFailsOver(t *testing.T) {
 	rec := httptest.NewRecorder()
 	served, res, err := d.ForwardCandidates(context.Background(), rec, req, []Route{
 		responsesWireRoute(failing.URL, "openai/gpt-6.1-sol"),
-		testRoute(healthy.URL, provider.SurfaceOpenAI),
+		testRoute(healthy.URL, provider.SurfaceChat),
 	}, []byte(clientBody))
 	if err != nil {
 		t.Fatal(err)

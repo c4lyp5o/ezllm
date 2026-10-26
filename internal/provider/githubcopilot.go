@@ -116,7 +116,7 @@ func (a *gitHubCopilotAdapter) PrepareRequest(ctx context.Context, req *http.Req
 		bodyObj map[string]any
 		model   string
 	)
-	if req.Body != nil && (surface == SurfaceOpenAI || surface == SurfaceAnthropic) {
+	if req.Body != nil && (surface == SurfaceChat || surface == SurfaceAnthropic) {
 		raw, err = io.ReadAll(io.LimitReader(req.Body, 32<<20))
 		if err != nil {
 			return fmt.Errorf("github-copilot: read body: %w", err)

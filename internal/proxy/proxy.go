@@ -230,7 +230,7 @@ func (rt Route) EffectiveWire() provider.Surface {
 	}
 	switch {
 	case rt.Translated:
-		return provider.SurfaceOpenAI
+		return provider.SurfaceChat
 	case rt.ResponsesWire:
 		return provider.SurfaceResponses
 	}
@@ -1074,11 +1074,11 @@ func prepareHopBodyWire(body []byte, rt Route, doc *jsonbody.BodyDoc) ([]byte, e
 		}
 		// Legacy cells keep their characterized converters.
 		switch {
-		case wire == provider.SurfaceOpenAI:
+		case wire == provider.SurfaceChat:
 			return translate.Request(body, rt.Model)
 		case wire == provider.SurfaceResponses && rt.Surface == provider.SurfaceAnthropic:
 			return translate.AnthropicToResponses(body, rt.Model)
-		case wire == provider.SurfaceResponses && rt.Surface == provider.SurfaceOpenAI:
+		case wire == provider.SurfaceResponses && rt.Surface == provider.SurfaceChat:
 			return translate.ChatToResponses(body, rt.Model)
 		}
 		// A cross-wire pair with no converter must never fall through to the
@@ -1276,7 +1276,7 @@ func crossWireFor(rt Route) (crossWire, bool) {
 		}, true
 	}
 	legacy := translate.CodecOptions{Legacy: true}
-	if wire == provider.SurfaceOpenAI {
+	if wire == provider.SurfaceChat {
 		// Legacy anthropic client on the chat wire: errors and failures are
 		// both rendered as an anthropic error envelope.
 		return crossWire{
@@ -2430,7 +2430,7 @@ func usageSurface(s provider.Surface) store.Surface {
 	case provider.SurfaceResponses:
 		return store.SurfaceResponses
 	default:
-		return store.SurfaceOpenAI
+		return store.SurfaceChat
 	}
 }
 

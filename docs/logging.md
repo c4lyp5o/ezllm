@@ -33,7 +33,7 @@ redirect stdout at deploy time and let `logrotate` handle it — not the gateway
 ## The shape of a line
 
 ```
-2026-10-24 08:01:15.254 INFO  request method=POST path=/v1/chat/completions status=200 ms=25709 bytes=31568 client=melissa account=command-code model=meta/muse-spark-1.3-contributor surface=openai alias=daily trail="opencode-go/muse-spark — 429 rate_limited"
+2026-10-24 08:01:15.254 INFO  request method=POST path=/v1/chat/completions status=200 ms=25709 bytes=31568 client=melissa account=command-code model=meta/muse-spark-1.3-contributor surface=chat alias=daily trail="opencode-go/muse-spark — 429 rate_limited"
 ```
 
 The access line is written by the `accessLog` middleware for **every** request,

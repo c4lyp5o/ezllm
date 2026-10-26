@@ -15,7 +15,7 @@ import (
 // comboProbeSurfaces are the wires a hop can be dialed on; a verdict on each
 // is what lets the router translate instead of sending a body the hop refuses.
 var comboProbeSurfaces = []provider.Surface{
-	provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses,
+	provider.SurfaceChat, provider.SurfaceAnthropic, provider.SurfaceResponses,
 }
 
 // probeComboHops starts a background protocol probe of one combo's hops.

@@ -36,7 +36,7 @@ func TestResolveComboBareName(t *testing.T) {
 	cat := withCombo(newFake(), dayNightCombo())
 	r := New(cat)
 
-	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceOpenAI, "test")
+	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceChat, "test")
 	if err != nil {
 		t.Fatalf("combo resolution: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestResolveReturnsFirstCandidate(t *testing.T) {
 	cat := withCombo(newFake(), dayNightCombo())
 	r := New(cat)
 
-	rt, err := r.Resolve(context.Background(), "daily", provider.SurfaceOpenAI, "test")
+	rt, err := r.Resolve(context.Background(), "daily", provider.SurfaceChat, "test")
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestIneligibleHopIsSkippedNotFatal(t *testing.T) {
 		return nil
 	})
 
-	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceOpenAI, "test")
+	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceChat, "test")
 	if err != nil {
 		t.Fatalf("combo must still resolve when one hop is out of window: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestAllHopsIneligibleExplainsWhy(t *testing.T) {
 		return errors.New("daily cap of 500k tokens spent")
 	})
 
-	_, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceOpenAI, "test")
+	_, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceChat, "test")
 	if err == nil {
 		t.Fatal("expected an error when no hop is eligible")
 	}
@@ -119,7 +119,7 @@ func TestComboSkipsDisabledHops(t *testing.T) {
 	cat := withCombo(newFake(), c)
 	r := New(cat)
 
-	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceOpenAI, "test")
+	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceChat, "test")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestUnknownComboHintsIncludeCombos(t *testing.T) {
 	cat := withCombo(newFake(), dayNightCombo())
 	r := New(cat)
 
-	_, err := r.ResolveCandidates(context.Background(), "dialy", provider.SurfaceOpenAI, "test")
+	_, err := r.ResolveCandidates(context.Background(), "dialy", provider.SurfaceChat, "test")
 	var nf *ErrNotFound
 	if !errors.As(err, &nf) {
 		t.Fatalf("want ErrNotFound, got %v", err)
@@ -156,7 +156,7 @@ func TestUnknownComboHintsIncludeCombos(t *testing.T) {
 func TestDirectRouteSingleCandidate(t *testing.T) {
 	r := New(newFake())
 
-	routes, err := r.ResolveCandidates(context.Background(), "opengo/qwen3.8-flash", provider.SurfaceOpenAI, "test")
+	routes, err := r.ResolveCandidates(context.Background(), "opengo/qwen3.8-flash", provider.SurfaceChat, "test")
 	if err != nil {
 		t.Fatalf("direct resolve: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestDirectRouteIneligibleIsUnavailable(t *testing.T) {
 		return errors.New("daily cap spent")
 	})
 
-	_, err := r.ResolveCandidates(context.Background(), "opengo/qwen3.8-flash", provider.SurfaceOpenAI, "test")
+	_, err := r.ResolveCandidates(context.Background(), "opengo/qwen3.8-flash", provider.SurfaceChat, "test")
 	var nu *ErrUnavailable
 	if !errors.As(err, &nu) {
 		t.Fatalf("want ErrUnavailable (maps to 429), got %v", err)
@@ -195,7 +195,7 @@ func TestBlockRoundRobinIsWiredAtTheResolver(t *testing.T) {
 
 	first := map[int64]bool{}
 	for i := 0; i < 4; i++ {
-		routes, err := r.ResolveCandidates(ctx, "block-wired", provider.SurfaceOpenAI, "test")
+		routes, err := r.ResolveCandidates(ctx, "block-wired", provider.SurfaceChat, "test")
 		if err != nil {
 			t.Fatalf("resolve %d: %v", i, err)
 		}
@@ -214,7 +214,7 @@ func TestUnknownStrategyFallsBackToPositionOrder(t *testing.T) {
 	cat := withCombo(newFake(), c)
 	r := New(cat)
 
-	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceOpenAI, "test")
+	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceChat, "test")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestHopWithUnknownModelIsDropped(t *testing.T) {
 	cat := withCombo(newFake(), c)
 	r := New(cat)
 
-	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceOpenAI, "test")
+	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceChat, "test")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestComboAllHopsDisabledAccountNamesCause(t *testing.T) {
 	cat := withCombo(newFake(), c)
 	r := New(cat)
 
-	_, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceOpenAI, "test")
+	_, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceChat, "test")
 	if err == nil {
 		t.Fatal("expected error: every hop points at a disabled account")
 	}
@@ -281,7 +281,7 @@ func TestComboSkipsProbedIncompatibleHop(t *testing.T) {
 
 	// The SAME hop stays eligible on a surface it was never probed against:
 	// untested is not incompatible, and a drop here would strand a good hop.
-	routes, err = r.ResolveCandidates(context.Background(), "daily", provider.SurfaceOpenAI, "test")
+	routes, err = r.ResolveCandidates(context.Background(), "daily", provider.SurfaceChat, "test")
 	if err != nil || len(routes) != 2 {
 		t.Fatalf("openai surface: candidates=%d err=%v, want both hops", len(routes), err)
 	}

@@ -9,7 +9,7 @@ import (
 
 // A service pin (embeddings, rerank, ...) names the endpoint the model serves.
 // It must ADMIT that endpoint (it used to be refused there: every service
-// surface was named "openai") and refuse the others with ErrPinned — never
+// surface was named "chat") and refuse the others with ErrPinned — never
 // "pinned to an unknown wire", never a translation.
 func TestServicePinAdmitsItsOwnEndpoint(t *testing.T) {
 	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
@@ -28,9 +28,9 @@ func TestServicePinRefusesChatWithPinnedError(t *testing.T) {
 	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
 	cat.pins = map[string]string{"2/gpt-6.1-sol": "embeddings"}
 	for _, res := range []*Resolver{New(cat), universalResolver(cat)} {
-		_, _, err := resolveWire(t, res, "super-ssn/gpt-6.1-sol", provider.SurfaceOpenAI)
+		_, _, err := resolveWire(t, res, "super-ssn/gpt-6.1-sol", provider.SurfaceChat)
 		var p *ErrPinned
-		if !errors.As(err, &p) || p.Pinned != "embeddings" || p.Got != "openai" {
+		if !errors.As(err, &p) || p.Pinned != "embeddings" || p.Got != "chat" {
 			t.Fatalf("err = %v, want ErrPinned{pinned embeddings, got openai}", err)
 		}
 	}
@@ -40,11 +40,11 @@ func TestServicePinRefusesChatWithPinnedError(t *testing.T) {
 // into a translated chat call (a rerank body POSTed to /chat/completions).
 func TestChatPinRefusesServiceRequest(t *testing.T) {
 	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
-	cat.pins = map[string]string{"2/gpt-6.1-sol": "openai"}
+	cat.pins = map[string]string{"2/gpt-6.1-sol": "chat"}
 	for _, res := range []*Resolver{New(cat), universalResolver(cat)} {
 		wire, translated, err := resolveWire(t, res, "super-ssn/gpt-6.1-sol", provider.SurfaceRerank)
 		var p *ErrPinned
-		if !errors.As(err, &p) || p.Pinned != "openai" || p.Got != "rerank" {
+		if !errors.As(err, &p) || p.Pinned != "chat" || p.Got != "rerank" {
 			t.Fatalf("wire=%q translated=%v err=%v; want ErrPinned{pinned openai, got rerank}", wire, translated, err)
 		}
 	}

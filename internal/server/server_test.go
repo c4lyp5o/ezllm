@@ -226,7 +226,7 @@ func TestChatCompletionsRoutesAndLedgers(t *testing.T) {
 	if c.Account != "up" || c.Model != "gpt-6-luna" || c.Alias != "up/gpt-6-luna" {
 		t.Errorf("attribution wrong: acct=%q model=%q alias=%q", c.Account, c.Model, c.Alias)
 	}
-	if c.Surface != store.SurfaceOpenAI {
+	if c.Surface != store.SurfaceChat {
 		t.Errorf("surface = %q", c.Surface)
 	}
 	if c.TokensIn != 252 || c.TokensOut != 72 || c.TokensCachedRead != 1792 || c.ReasoningTokens != 28 {

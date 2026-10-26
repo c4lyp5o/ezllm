@@ -85,13 +85,13 @@ func TestNormalizeUsageSurfaceSemantics(t *testing.T) {
 		{
 			// Live probe P4: repeat of an 11.8 KB prefix on opencode-go OpenAI surface.
 			name:    "openai cached-repeat (P4)",
-			surface: SurfaceOpenAI,
+			surface: SurfaceChat,
 			raw:     `{"prompt_tokens":2044,"completion_tokens":72,"total_tokens":2116,"prompt_tokens_details":{"cached_tokens":1792},"completion_tokens_details":{"reasoning_tokens":28}}`,
 			want:    Usage{In: 252, Out: 72, CachedRead: 1792, CachedWrite: 0, Reasoning: 28},
 		},
 		{
 			name:    "openai cold (P4 first call)",
-			surface: SurfaceOpenAI,
+			surface: SurfaceChat,
 			raw:     `{"prompt_tokens":2371,"completion_tokens":43,"total_tokens":2414,"prompt_tokens_details":{"cached_tokens":0},"completion_tokens_details":{"reasoning_tokens":39}}`,
 			want:    Usage{In: 2371, Out: 43, CachedRead: 0, Reasoning: 39},
 		},
@@ -135,14 +135,14 @@ func TestNormalizeUsageSurfaceSemantics(t *testing.T) {
 		},
 		{
 			name:    "empty usage",
-			surface: SurfaceOpenAI,
+			surface: SurfaceChat,
 			raw:     `{}`,
 			want:    Usage{},
 		},
 		{
 			// Some gateways use input_tokens/output_tokens on the OpenAI surface.
 			name:    "openai alternate field names",
-			surface: SurfaceOpenAI,
+			surface: SurfaceChat,
 			raw:     `{"input_tokens":500,"output_tokens":20,"prompt_tokens_details":{"cached_tokens":100}}`,
 			want:    Usage{In: 400, Out: 20, CachedRead: 100},
 		},
@@ -178,7 +178,7 @@ func TestCrossSurfaceTotalsAgree(t *testing.T) {
 	json.Unmarshal([]byte(`{"prompt_tokens":2044,"completion_tokens":72,"prompt_tokens_details":{"cached_tokens":1792}}`), &openaiRaw)
 	json.Unmarshal([]byte(`{"input_tokens":252,"output_tokens":72,"cache_read_input_tokens":1792}`), &anthropicRaw)
 
-	o := NormalizeUsage(SurfaceOpenAI, openaiRaw)
+	o := NormalizeUsage(SurfaceChat, openaiRaw)
 	a := NormalizeUsage(SurfaceAnthropic, anthropicRaw)
 
 	if o.In != a.In {
@@ -197,7 +197,7 @@ func TestCrossSurfaceTotalsAgree(t *testing.T) {
 }
 
 func TestNormalizeUsageNilAndUnknown(t *testing.T) {
-	if u := NormalizeUsage(SurfaceOpenAI, nil); u.In != 0 || u.Out != 0 {
+	if u := NormalizeUsage(SurfaceChat, nil); u.In != 0 || u.Out != 0 {
 		t.Errorf("nil usage must zero out, got %+v", u)
 	}
 	// unknown surface falls back to OpenAI-ish rather than panicking
@@ -212,7 +212,7 @@ func TestNormalizeUsageNilAndUnknown(t *testing.T) {
 func TestNormalizeUsageClampsNegative(t *testing.T) {
 	var raw map[string]any
 	json.Unmarshal([]byte(`{"prompt_tokens":100,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":500}}`), &raw)
-	if u := NormalizeUsage(SurfaceOpenAI, raw); u.In != 0 {
+	if u := NormalizeUsage(SurfaceChat, raw); u.In != 0 {
 		t.Errorf("tokens_in = %d, want clamped 0", u.In)
 	}
 }
@@ -228,7 +228,7 @@ func TestRecordCallIsNonBlocking(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		for i := 0; i < 5000; i++ {
-			db.RecordCall(Call{Client: "flood", Surface: SurfaceOpenAI, Model: "m", Status: 200})
+			db.RecordCall(Call{Client: "flood", Surface: SurfaceChat, Model: "m", Status: 200})
 		}
 		close(done)
 	}()
@@ -252,7 +252,7 @@ func TestLedgerRoundTripAndAggregation(t *testing.T) {
 		{TS: now, Client: "claude-code", Surface: SurfaceAnthropic, Alias: "my-stack",
 			Account: "super-ssn", KeyID: 1, KeyHint: "sk…def0", Model: "gpt-6.1-sol",
 			Status: 200, Stream: true, TokensIn: 200, TokensOut: 60, TokensCachedRead: 40},
-		{TS: now, Client: "hermes", Surface: SurfaceOpenAI, Alias: "opengo/qwen3.8-flash",
+		{TS: now, Client: "hermes", Surface: SurfaceChat, Alias: "opengo/qwen3.8-flash",
 			Account: "opengo", KeyID: 2, KeyHint: "sk…abcd", Model: "qwen3.8-flash",
 			Status: 429, Stream: false, Err: "rate limited"},
 	}
@@ -328,7 +328,7 @@ func TestLedgerRowsAreImmutableHistory(t *testing.T) {
 	if _, err := db.Writer().Exec(`INSERT INTO provider_keys(id,account_id,label,key_hint,key_plain) VALUES(1,1,'primary','sk…def0','sk-test-plain')`); err != nil {
 		t.Fatal(err)
 	}
-	db.RecordCall(Call{TS: now, Client: "hermes", Surface: SurfaceOpenAI, Alias: "super-ssn/gpt-6-luna",
+	db.RecordCall(Call{TS: now, Client: "hermes", Surface: SurfaceChat, Alias: "super-ssn/gpt-6-luna",
 		Account: "super-ssn", KeyID: 1, KeyHint: "sk…def0", Model: "gpt-6-luna", Status: 200, TokensIn: 10, TokensOut: 2})
 	if err := db.Flush(); err != nil {
 		t.Fatal(err)
@@ -353,7 +353,7 @@ func TestTTFTAndDurationsPersist(t *testing.T) {
 	db := openTest(t)
 	ttft, total, cms := int64(410), int64(18800), int64(3)
 	db.RecordCall(Call{
-		Surface: SurfaceOpenAI, Account: "a", Model: "m", Status: 200, Stream: true,
+		Surface: SurfaceChat, Account: "a", Model: "m", Status: 200, Stream: true,
 		TTFTms: &ttft, Totalms: &total, CompressionMs: &cms,
 		PromptTokensPre: 1000, TokensSaved: 400, CompressionApplied: true, CompressionProfile: "agentic-safe",
 	})

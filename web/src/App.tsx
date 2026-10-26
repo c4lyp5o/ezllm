@@ -29,6 +29,7 @@ const Economics = lazy(() => import('./pages/Economics'));
 const Requests = lazy(() => import('./pages/Requests'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Chat = lazy(() => import('./pages/Chat'));
+const Neighbourhood = lazy(() => import('./pages/Neighbourhood'));
 
 // One sidebar entry per destination — Stats / Token Economics / Requests live
 // together under Analytics (same data family, tabbed).
@@ -48,6 +49,7 @@ const NAV: NavItem[] = [
   { to: '/rules', label: 'Rules', hint: 'quotas · windows' },
   { to: '/compression', label: 'Compression', hint: 'profiles · engines' },
   { to: '/connect', label: 'Connect', hint: 'routes · API keys' },
+  { to: '/neighbourhood', label: 'Neighbourhood', hint: 'your keys as a living scene' },
   { to: '/settings', label: 'Settings', hint: 'dashboard password' },
 ];
 
@@ -77,6 +79,8 @@ function NavIcon({ label }: { label: string }) {
       return <svg {...common}><path d="M12 3 4 6v5c0 5 3.5 8 8 10 4.5-2 8-5 8-10V6l-8-3Z" /><path d="m9 12 2 2 4-4" /></svg>;
     case 'Compression':
       return <svg {...common}><path d="M4 7h16M4 12h10M4 17h7" /><path d="m16 15 3 3 3-3M19 12v6" /></svg>;
+    case 'Neighbourhood':
+      return <svg {...common}><path d="M3 21V11l5-4 5 4v10M13 21v-7l4-3 4 3v7M2 21h20" /><path d="M7 15h2M17 17h2" /></svg>;
     case 'Connect':
       return <svg {...common}><path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0V7ZM12 16v5" /></svg>;
     default:
@@ -339,6 +343,7 @@ const PAGE_HEADERS: Record<string, { title: string; sub: string }> = {
   '/rules': { title: 'Rules', sub: 'Token caps and allowed-use windows per model.' },
   '/compression': { title: 'Compression', sub: 'Profiles, engines and what they save.' },
   '/connect': { title: 'Connect', sub: 'Point clients at this gateway and issue API keys.' },
+  '/neighbourhood': { title: 'Neighbourhood', sub: 'Every key is a house; the busier it is, the brighter it shines.' },
   '/settings': { title: 'Settings', sub: 'The dashboard password.' },
 };
 
@@ -491,6 +496,7 @@ export default function App() {
               <Route path="/rules" element={<Rules />} />
               <Route path="/compression" element={<Compression />} />
               <Route path="/connect" element={<Connect />} />
+              <Route path="/neighbourhood" element={<Neighbourhood />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="*" element={<Dashboard />} />
             </Routes>

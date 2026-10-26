@@ -322,10 +322,10 @@ func (d *DB) UpsertModels(ctx context.Context, accountID int64, models []provide
 		// and the router goes back to dialling hops it has already proved
 		// incompatible with that surface.
 		type modelState struct {
-			pin                          sql.NullString
-			openai, anthropic, responses sql.NullInt64
-			testedAt                     sql.NullString
-			source, note                 sql.NullString
+			pin                        sql.NullString
+			chat, anthropic, responses sql.NullInt64
+			testedAt                   sql.NullString
+			source, note               sql.NullString
 			// The learned reasoning vocabulary is the same class of fact: the
 			// vendor catalog cannot supply it, so a wholesale refresh would
 			// reset the clamp to "unknown" on every boot.
@@ -334,7 +334,7 @@ func (d *DB) UpsertModels(ctx context.Context, accountID int64, models []provide
 		}
 		prior := map[string]modelState{}
 		prows, err := tx.QueryContext(ctx, `
-SELECT model_id, proto_pin, proto_openai, proto_anthropic, proto_responses, proto_tested_at,
+SELECT model_id, proto_pin, proto_chat, proto_anthropic, proto_responses, proto_tested_at,
        proto_source, proto_note, reasoning_vocab, reasoning_required
 FROM models WHERE account_id=?`, accountID)
 		if err != nil {
@@ -343,7 +343,7 @@ FROM models WHERE account_id=?`, accountID)
 		for prows.Next() {
 			var id string
 			var st modelState
-			if err := prows.Scan(&id, &st.pin, &st.openai, &st.anthropic, &st.responses, &st.testedAt, &st.source, &st.note, &st.vocab, &st.required); err != nil {
+			if err := prows.Scan(&id, &st.pin, &st.chat, &st.anthropic, &st.responses, &st.testedAt, &st.source, &st.note, &st.vocab, &st.required); err != nil {
 				prows.Close()
 				return err
 			}
@@ -377,10 +377,10 @@ ON CONFLICT(account_id, model_id) DO UPDATE SET
 				continue // a brand-new model: nothing to carry over
 			}
 			if _, err := tx.ExecContext(ctx, `
-UPDATE models SET proto_pin=?, proto_openai=?, proto_anthropic=?, proto_responses=?, proto_tested_at=?,
+UPDATE models SET proto_pin=?, proto_chat=?, proto_anthropic=?, proto_responses=?, proto_tested_at=?,
        proto_source=?, proto_note=?, reasoning_vocab=?, reasoning_required=?
 WHERE account_id=? AND model_id=?`,
-				st.pin, st.openai, st.anthropic, st.responses, st.testedAt, st.source, st.note, st.vocab, st.required, accountID, m.ID); err != nil {
+				st.pin, st.chat, st.anthropic, st.responses, st.testedAt, st.source, st.note, st.vocab, st.required, accountID, m.ID); err != nil {
 				return err
 			}
 		}
@@ -431,7 +431,7 @@ func (d *DB) SetModelPin(ctx context.Context, accountID int64, modelID, pin stri
 // ModelSupportsSurface give them (a nil capability is UNTESTED).
 type ModelFacts struct {
 	Pin       string
-	OpenAI    *bool
+	Chat      *bool
 	Anthropic *bool
 	Responses *bool
 	// Reasoning is what the model accepts for `reasoning_effort`, learned from
@@ -443,8 +443,8 @@ type ModelFacts struct {
 // Supports returns the probed capability for one wire (nil = untested).
 func (f ModelFacts) Supports(s provider.Surface) *bool {
 	switch s {
-	case provider.SurfaceOpenAI:
-		return f.OpenAI
+	case provider.SurfaceChat:
+		return f.Chat
 	case provider.SurfaceAnthropic:
 		return f.Anthropic
 	case provider.SurfaceResponses:
@@ -461,8 +461,8 @@ func (f ModelFacts) Supports(s provider.Surface) *bool {
 // endpoint it actually serves.
 func protoColumn(s provider.Surface) (string, bool) {
 	switch s {
-	case provider.SurfaceOpenAI:
-		return "proto_openai", true
+	case provider.SurfaceChat:
+		return "proto_chat", true
 	case provider.SurfaceAnthropic:
 		return "proto_anthropic", true
 	case provider.SurfaceResponses:
@@ -483,7 +483,7 @@ func (d *DB) ModelFacts(ctx context.Context, accountID int64, modelID string) (M
 		required  sql.NullInt64
 	)
 	err := d.r.QueryRowContext(ctx, `
-SELECT proto_pin, proto_openai, proto_anthropic, proto_responses, reasoning_vocab, reasoning_required
+SELECT proto_pin, proto_chat, proto_anthropic, proto_responses, reasoning_vocab, reasoning_required
 FROM models WHERE account_id=? AND model_id=?`, accountID, modelID).Scan(&pin, &oa, &an, &r, &vocab, &required)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ModelFacts{}, nil
@@ -492,7 +492,7 @@ FROM models WHERE account_id=? AND model_id=?`, accountID, modelID).Scan(&pin, &
 		return ModelFacts{}, err
 	}
 	return ModelFacts{
-		Pin: pin.String, OpenAI: nullBoolPtr(oa), Anthropic: nullBoolPtr(an), Responses: nullBoolPtr(r),
+		Pin: pin.String, Chat: nullBoolPtr(oa), Anthropic: nullBoolPtr(an), Responses: nullBoolPtr(r),
 		Reasoning: reasoningRuleFrom(vocab, required),
 	}, nil
 }
@@ -654,7 +654,7 @@ type ModelEntry struct {
 	Created  int64  `json:"created"`
 	Object   string `json:"object"`
 	Protocol struct {
-		OpenAI    *bool `json:"openai,omitempty"`
+		Chat      *bool `json:"chat,omitempty"`
 		Anthropic *bool `json:"anthropic,omitempty"`
 		Responses *bool `json:"responses,omitempty"`
 	} `json:"protocol,omitempty"`
@@ -664,7 +664,7 @@ type ModelEntry struct {
 func (d *DB) ListModelEntries(ctx context.Context) ([]ModelEntry, error) {
 	rows, err := d.r.QueryContext(ctx, `
 SELECT a.namespace, m.model_id, COALESCE(m.owned_by,''), COALESCE(m.display_name,''),
-       m.proto_openai, m.proto_anthropic, m.proto_responses
+       m.proto_chat, m.proto_anthropic, m.proto_responses
 FROM accounts a
 JOIN models m ON m.account_id = a.id
 WHERE a.enabled = 1
@@ -684,7 +684,7 @@ ORDER BY a.namespace, m.model_id`)
 		if owned != "" {
 			e.OwnedBy = owned
 		}
-		e.Protocol.OpenAI = nullBoolPtr(po)
+		e.Protocol.Chat = nullBoolPtr(po)
 		e.Protocol.Anthropic = nullBoolPtr(pa)
 		e.Protocol.Responses = nullBoolPtr(pr)
 		out = append(out, e)

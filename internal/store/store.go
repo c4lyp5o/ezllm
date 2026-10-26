@@ -26,7 +26,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 29
+const schemaVersion = 30
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -353,11 +353,48 @@ func (d *DB) migrate() error {
 		if err := d.alterAccountCatalogSynced(context.Background()); err != nil {
 			return fmt.Errorf("store: alter accounts catalog_synced_at: %w", err)
 		}
+		if err := d.renameWireOpenAIToChat(context.Background()); err != nil {
+			return fmt.Errorf("store: rename wire openai to chat: %w", err)
+		}
 		if _, err := d.w.Exec(schemaSQL); err != nil {
 			return fmt.Errorf("store: migrate %d->%d: %w", cur, schemaVersion, err)
 		}
 		if _, err := d.w.Exec(`INSERT INTO schema_version(version) VALUES(?)`, schemaVersion); err != nil {
 			return fmt.Errorf("store: stamp version: %w", err)
+		}
+	}
+	return nil
+}
+
+// renameWireOpenAIToChat (v30) renames the chat-completions wire from "openai"
+// to "chat": the models.proto_openai column, the pins stored in
+// models.proto_pin, and the surface recorded on every ledger row. Idempotent —
+// each step is a no-op once applied, and a database that never had the old
+// names is untouched.
+func (d *DB) renameWireOpenAIToChat(ctx context.Context) error {
+	if exists, err := hasTable(ctx, d.w, "models"); err != nil {
+		return err
+	} else if exists {
+		old, err := hasColumn(ctx, d.w, "models", "proto_openai")
+		if err != nil {
+			return err
+		}
+		if has, err := hasColumn(ctx, d.w, "models", "proto_chat"); err != nil {
+			return err
+		} else if old && !has {
+			if _, err := d.w.ExecContext(ctx, `ALTER TABLE models RENAME COLUMN proto_openai TO proto_chat`); err != nil {
+				return err
+			}
+		}
+		if _, err := d.w.ExecContext(ctx, `UPDATE models SET proto_pin='chat' WHERE proto_pin='openai'`); err != nil {
+			return err
+		}
+	}
+	if exists, err := hasTable(ctx, d.w, "calls"); err != nil {
+		return err
+	} else if exists {
+		if _, err := d.w.ExecContext(ctx, `UPDATE calls SET surface='chat' WHERE surface='openai'`); err != nil {
+			return err
 		}
 	}
 	return nil

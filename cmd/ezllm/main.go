@@ -320,13 +320,20 @@ func run() error {
 
 	// Claude subscription surface: loopback-only, off unless EZLLM_CLAUDE_BRIDGE=on.
 	// Enabling it without a usable CLI or login fails the boot loudly.
-	stopClaude, err := startClaudeBridge(ctx, log)
+	stopClaude, err := startClaudeBridge(ctx, log, srv.EnableBridge)
 	if err != nil {
 		return err
 	}
 	// ChatGPT subscription surface: loopback-only, off unless EZLLM_CODEX_BRIDGE=on.
-	stopCodex, err := startCodexBridge(ctx, log)
+	stopCodex, err := startCodexBridge(ctx, log, srv.EnableBridge)
 	if err != nil {
+		stopClaude()
+		return err
+	}
+	// Antigravity subscription surface: loopback-only, off unless EZLLM_AGY_BRIDGE=on.
+	stopAgy, err := startAgyBridge(ctx, log, srv.EnableBridge)
+	if err != nil {
+		stopCodex()
 		stopClaude()
 		return err
 	}
@@ -351,7 +358,7 @@ func run() error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info("listening", "addr", addr, "surfaces", "openai,anthropic,responses")
+		log.Info("listening", "addr", addr, "surfaces", "chat,anthropic,responses")
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
@@ -369,6 +376,7 @@ func run() error {
 	reqs.drain(httpSrv, 15*time.Second, 5*time.Second, log)
 	// Bridges after the gateway (its handlers proxy into them), joined here
 	// so no CLI child outlives the process's own shutdown.
+	stopAgy()
 	stopCodex()
 	stopClaude()
 	// Background probes and refresh loops write to the store: cancel them

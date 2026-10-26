@@ -279,7 +279,7 @@ func TestPrepareRequestUAFillsOnlyWhenAbsent(t *testing.T) {
 		name string
 		run  func(*http.Request) error
 	}{
-		{"openai", func(r *http.Request) error { return oa.PrepareRequest(t.Context(), r, acct, "k", SurfaceOpenAI) }},
+		{"openai", func(r *http.Request) error { return oa.PrepareRequest(t.Context(), r, acct, "k", SurfaceChat) }},
 		{"anthropic", func(r *http.Request) error { return an.PrepareRequest(t.Context(), r, acct, "k", SurfaceAnthropic) }},
 	} {
 		req, _ := http.NewRequest(http.MethodPost, "https://x.example", nil)
@@ -294,7 +294,7 @@ func TestPrepareRequestUAFillsOnlyWhenAbsent(t *testing.T) {
 	// Client UA present → preserved (inference passthrough contract).
 	req, _ := http.NewRequest(http.MethodPost, "https://x.example", nil)
 	req.Header.Set("User-Agent", "client-app/9.9")
-	if err := oa.PrepareRequest(t.Context(), req, acct, "k", SurfaceOpenAI); err != nil {
+	if err := oa.PrepareRequest(t.Context(), req, acct, "k", SurfaceChat); err != nil {
 		t.Fatal(err)
 	}
 	if got := req.Header.Get("User-Agent"); got != "client-app/9.9" {
@@ -304,7 +304,7 @@ func TestPrepareRequestUAFillsOnlyWhenAbsent(t *testing.T) {
 	// Operator custom_headers UA wins over ours (applied after).
 	acct.CustomHeaders = map[string]string{"User-Agent": "operator/2"}
 	req, _ = http.NewRequest(http.MethodPost, "https://x.example", nil)
-	if err := oa.PrepareRequest(t.Context(), req, acct, "k", SurfaceOpenAI); err != nil {
+	if err := oa.PrepareRequest(t.Context(), req, acct, "k", SurfaceChat); err != nil {
 		t.Fatal(err)
 	}
 	if got := req.Header.Get("User-Agent"); got != "operator/2" {

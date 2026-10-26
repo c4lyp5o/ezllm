@@ -182,7 +182,7 @@ func (s *Server) brokenModels(bg context.Context, acctID int64) map[string]bool 
 	}
 	no := func(b *bool) bool { return b != nil && !*b }
 	for _, m := range rows {
-		if no(m.OpenAI) && no(m.Anthropic) && no(m.Responses) {
+		if no(m.Chat) && no(m.Anthropic) && no(m.Responses) {
 			out[m.ID] = true
 		}
 	}

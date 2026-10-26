@@ -43,7 +43,7 @@ func TestClampIsLoggedWithBothValues(t *testing.T) {
 	d.SetLogger(slog.New(logx.NewHandler(sink, logx.Options{Level: slog.LevelInfo})))
 
 	req, body := reqWithBody(`{"model":"alias","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"none"}`)
-	rt := testRoute("http://up.invalid", provider.SurfaceOpenAI)
+	rt := testRoute("http://up.invalid", provider.SurfaceChat)
 	rt.Reasoning = sparkRule()
 	if _, _, err := d.ForwardCandidatesDoc(context.Background(), httptest.NewRecorder(), req, []Route{rt}, body, jsonbody.Open(body)); err != nil {
 		t.Fatalf("dispatch: %v", err)
@@ -68,7 +68,7 @@ func TestAllowedEffortLogsNothing(t *testing.T) {
 	d.SetLogger(slog.New(logx.NewHandler(sink, logx.Options{Level: slog.LevelDebug})))
 
 	req, body := reqWithBody(`{"model":"alias","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"low"}`)
-	rt := testRoute("http://up.invalid", provider.SurfaceOpenAI)
+	rt := testRoute("http://up.invalid", provider.SurfaceChat)
 	rt.Reasoning = sparkRule()
 	if _, _, err := d.ForwardCandidatesDoc(context.Background(), httptest.NewRecorder(), req, []Route{rt}, body, jsonbody.Open(body)); err != nil {
 		t.Fatalf("dispatch: %v", err)
@@ -87,7 +87,7 @@ func TestDroppedEffortIsLoggedAsDropped(t *testing.T) {
 	d.SetLogger(slog.New(logx.NewHandler(sink, logx.Options{Level: slog.LevelInfo})))
 
 	req, body := reqWithBody(`{"model":"alias","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"none"}`)
-	rt := testRoute("http://up.invalid", provider.SurfaceOpenAI)
+	rt := testRoute("http://up.invalid", provider.SurfaceChat)
 	rt.Reasoning = provider.ReasoningRule{Required: true, Known: true}
 	if _, _, err := d.ForwardCandidatesDoc(context.Background(), httptest.NewRecorder(), req, []Route{rt}, body, jsonbody.Open(body)); err != nil {
 		t.Fatalf("dispatch: %v", err)
@@ -109,7 +109,7 @@ func TestClampedBodyStillReachesTheWire(t *testing.T) {
 	d.SetLogger(slog.New(logx.NewHandler(&syncBuf{}, logx.Options{Level: slog.LevelError})))
 
 	req, body := reqWithBody(`{"model":"alias","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"none"}`)
-	rt := testRoute("http://up.invalid", provider.SurfaceOpenAI)
+	rt := testRoute("http://up.invalid", provider.SurfaceChat)
 	rt.Reasoning = sparkRule()
 	if _, _, err := d.ForwardCandidatesDoc(context.Background(), httptest.NewRecorder(), req, []Route{rt}, body, jsonbody.Open(body)); err != nil {
 		t.Fatalf("dispatch: %v", err)

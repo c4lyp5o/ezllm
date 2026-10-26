@@ -36,14 +36,14 @@ func TestPinnedTranslatedComboHTTP(t *testing.T) {
 			}, func(o *Options) { o.Resolver = router.New(o.DB).WithTranslation(enabled) })
 			ctx := context.Background()
 			acct := seededAccountID(t, h)
-			if err := h.db.SetModelPin(ctx, acct, "gpt-6-luna", "openai"); err != nil {
+			if err := h.db.SetModelPin(ctx, acct, "gpt-6-luna", "chat"); err != nil {
 				t.Fatal(err)
 			}
 			// Leave capability unknown when OFF to pin the existing pre-dial
 			// refusal; ON needs proof of the OpenAI-only path.
 			if enabled {
 				yes, no := true, false
-				for surface, verdict := range map[provider.Surface]*bool{provider.SurfaceOpenAI: &yes, provider.SurfaceAnthropic: &no} {
+				for surface, verdict := range map[provider.Surface]*bool{provider.SurfaceChat: &yes, provider.SurfaceAnthropic: &no} {
 					if err := h.db.SetModelProto(ctx, acct, "gpt-6-luna", surface, verdict); err != nil {
 						t.Fatal(err)
 					}
@@ -54,7 +54,7 @@ func TestPinnedTranslatedComboHTTP(t *testing.T) {
 			}
 			code, _, body := h.do("POST", "/v1/messages", "tok-infer", `{"model":"pin-proof","max_tokens":8,"messages":[{"role":"user","content":[{"type":"text","text":"ping"}]}]}`)
 			if !enabled {
-				const want = "{\"error\":{\"code\":400,\"message\":\"model \\\"pin-proof\\\" is pinned to the openai surface; this request used anthropic — call it on the openai endpoint instead\",\"pinned\":\"openai\",\"requested_surface\":\"anthropic\",\"type\":\"pinned_surface\"}}\n"
+				const want = "{\"error\":{\"code\":400,\"message\":\"model \\\"pin-proof\\\" is pinned to the chat surface; this request used anthropic — call it on the chat endpoint instead\",\"pinned\":\"chat\",\"requested_surface\":\"anthropic\",\"type\":\"pinned_surface\"}}\n"
 				if code != 400 || hits != 0 || body != want {
 					t.Fatalf("OFF refusal changed: code=%d hits=%d body=%s", code, hits, body)
 				}

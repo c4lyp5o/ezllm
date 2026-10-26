@@ -22,14 +22,14 @@ func TestServiceSurfaceCapabilityIsNeverTheChatProbe(t *testing.T) {
 		t.Fatal(err)
 	}
 	no := false
-	if err := db.SetModelProto(ctx, id, "embed-1", provider.SurfaceOpenAI, &no); err != nil {
+	if err := db.SetModelProto(ctx, id, "embed-1", provider.SurfaceChat, &no); err != nil {
 		t.Fatal(err)
 	}
 	facts, err := db.ModelFacts(ctx, id, "embed-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v := facts.Supports(provider.SurfaceOpenAI); v == nil || *v {
+	if v := facts.Supports(provider.SurfaceChat); v == nil || *v {
 		t.Fatalf("chat verdict = %v, want recorded false", v)
 	}
 	for _, s := range []provider.Surface{provider.SurfaceEmbeddings, provider.SurfaceImagesGen, provider.SurfaceAudioTTS, provider.SurfaceAudioSTT} {

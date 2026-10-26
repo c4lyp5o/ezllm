@@ -34,9 +34,11 @@ suite · web build). `GET /healthz` reports the running release version — see
   `jsonmin`, `tool_ref`, `blobs` — with per-profile configuration and
   fail-open semantics.
 - **Subscriptions as accounts.** Optional loopback bridges put a Claude
-  ([runbook](docs/claude-bridge-runbook.md)) or ChatGPT
-  ([runbook](docs/codex-bridge-runbook.md)) subscription behind the router
-  through each vendor's official CLI, with plan windows on the provider card.
+  ([runbook](docs/claude-bridge-runbook.md)), ChatGPT
+  ([runbook](docs/codex-bridge-runbook.md)) or Google Antigravity
+  ([runbook](docs/agy-bridge-runbook.md)) subscription behind the router
+  through each vendor's official CLI, with plan windows on the provider card
+  where the vendor reports them.
 - **Ops surface included.** Dashboard, live request feed, analytics, key-test
   pipeline with protocol sweeps, and configuration exports — all served from
   the same binary. Full recovery uses the [database/key backup procedure](docs/master-key-runbook.md).
@@ -265,6 +267,7 @@ an image or a release asset.
 | [docs/pricing-runbook.md](docs/pricing-runbook.md) | price catalog: refresh cadence, import, query |
 | [docs/claude-bridge-runbook.md](docs/claude-bridge-runbook.md) | Claude subscription bridge: setup, account, plan windows |
 | [docs/codex-bridge-runbook.md](docs/codex-bridge-runbook.md) | ChatGPT subscription bridge: platform requirements, lockdown, tools, setup |
+| [docs/agy-bridge-runbook.md](docs/agy-bridge-runbook.md) | Antigravity (Google) subscription bridge: keyring-free login, setup, limits |
 | [VERSION.md](VERSION.md) | release history; what changed on each date |
 | [CHANGELOG.md](CHANGELOG.md) | milestone-tagged change narrative |
 | [EXPLORING.md](EXPLORING.md) | codebase tour: reading order, invariants, landmarks |

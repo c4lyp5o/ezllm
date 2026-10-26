@@ -40,7 +40,7 @@ accepts whatever the resolver accepts.
 A model's fit for a service is only ever **proven by a real request**. A per-card
 `Test` action runs one tiny, endpoint-appropriate real request through the real
 dispatcher (same path as `POST /admin/combos/{id}/test`: `ResolveCandidates` →
-`ForwardCandidates`, ledger client `service-test`) and records a verdict per
+`ForwardCandidates`; not ledgered) and records a verdict per
 `(surface, account, model)`. Tests are strictly opt-in — the operator clicks,
 nothing sweeps.
 
@@ -68,7 +68,7 @@ quality. The UI says so.
 ## Locked DECISIONS
 
 1. **Binding = default for requests that OMIT `model`.** Explicit `model` in the
-   request always wins; chat surfaces (`openai`/`anthropic`/`responses`) are
+   request always wins; chat surfaces (`chat`/`anthropic`/`responses`) are
    unaffected and keep requiring `model`. Applies to the four service surfaces
    only (`embeddings`, `images_gen`, `audio_tts`, `audio_stt`).
 2. **Schema v15, two tables.** `service_bindings(surface PRIMARY KEY, mode,
@@ -90,7 +90,7 @@ quality. The UI says so.
 5. **Tests run through the REAL path** — `ResolveCandidates` (so pins and
    capability gates refuse the test exactly as they would refuse traffic) then
    `ForwardCandidates`; verdict stored per `(surface, account_id, model_id)` of
-   the SERVED route; ledger client `service-test`. Test bodies as listed above;
+   the SERVED route; not ledgered. Test bodies as listed above;
    `images_gen` is the only card that confirms before sending (real cost).
 6. **Target validity is visible.** The binding's target is validated on write
    (namespace must resolve, model must be in that account's catalog) and
@@ -145,7 +145,7 @@ Video and music have no common upstream wire: ezllm passes the body through, so 
 means whatever the bound provider accepts.
 
 Fix shipped alongside: `ModelFacts.Supports` / `ModelSupportsSurface` mapped every service
-surface to the CHAT probe column (`proto_openai`), so a model whose chat probe failed — every
+surface to the CHAT probe column (`proto_chat`), so a model whose chat probe failed — every
 embedding/image/rerank model — was refused on its own endpoint. Service surfaces now read as
 unknown (NULL) there, and `SetModelProto` ignores them.
 

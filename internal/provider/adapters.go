@@ -12,8 +12,11 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/c4lyp5o/ezllm/internal/claudeweb"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -351,7 +354,14 @@ func (a *openAICompatible) ReadQuota(ctx context.Context, acct Account, key stri
 // (its own kind because the AUTH HEADER SHAPE differs, not just the path)
 // ─────────────────────────────────────────────────────────────────────────────
 
-type anthropicCompatible struct{ client *http.Client }
+type anthropicCompatible struct {
+	client *http.Client
+
+	// fetcher reads claude.ai, which sits behind a Cloudflare TLS-fingerprint
+	// check plain net/http fails; built on first use, tests inject one.
+	fetchOnce sync.Once
+	fetcher   claudeweb.Fetcher
+}
 
 func NewAnthropicCompatible(c *http.Client) Adapter { return &anthropicCompatible{client: c} }
 
@@ -423,12 +433,28 @@ func (a *anthropicCompatible) ReadQuota(ctx context.Context, acct Account, key s
 	// A loopback base is ezllm's own claude-bridge, which serves the plan's
 	// 5h/weekly windows on {base}/usage in the percent shape.
 	if isLoopbackBase(acct.BaseURL) {
+		// A pasted claude.ai cookie in management_key buys a fresh read of
+		// the plan windows; without it (or when it fails) the bridge's
+		// last-observed reading below stands.
+		var liveErr error
+		if cookie, org, ok := claudeSubCreds(acct.ManagementKey); ok {
+			q, err := a.readClaudeSubUsage(ctx, cookie, org)
+			if err == nil {
+				return q, nil
+			}
+			liveErr = err
+		}
 		body, err := getJSON(ctx, a.client, UpstreamURL(acct.BaseURL, acct.Kind, "/usage"),
 			withCustomHeaders(map[string]string{"x-api-key": key}, acct))
 		if err != nil {
 			return Quota{}, mapUsageErr(err)
 		}
 		if q := ClassifyQuota(string(body)); q.Kind == QuotaPercent {
+			if liveErr != nil {
+				// The operator pasted a cookie and expects a live read: say
+				// why this one is the bridge's older reading instead.
+				q = tagQuotaRaw(q, "live_read_error", liveErr.Error())
+			}
 			return q, nil
 		}
 		return Quota{}, ErrQuotaUnsupported

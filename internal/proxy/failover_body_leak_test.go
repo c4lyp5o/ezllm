@@ -63,10 +63,10 @@ func leakDispatcher(statuses []int, bodies []string, calls, closes *atomic.Int32
 func comboRoutes() []Route {
 	// Distinct models so the cooldown key (account|base|model) can never make
 	// the second hop read as "the same parked hop".
-	rt1 := testRoute("http://hop1.invalid", provider.SurfaceOpenAI)
+	rt1 := testRoute("http://hop1.invalid", provider.SurfaceChat)
 	rt1.Model = "model-one"
 	rt1.Alias = "combo"
-	rt2 := testRoute("http://hop2.invalid", provider.SurfaceOpenAI)
+	rt2 := testRoute("http://hop2.invalid", provider.SurfaceChat)
 	rt2.Model = "model-two"
 	rt2.Alias = "combo"
 	return []Route{rt1, rt2}

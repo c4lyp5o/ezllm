@@ -16,9 +16,9 @@ func TestResponseCodecStrictEnvelope(t *testing.T) {
 		surface provider.Surface
 		body    string
 	}{
-		{provider.SurfaceOpenAI, `{}`}, {provider.SurfaceAnthropic, `{}`}, {provider.SurfaceResponses, `{}`},
-		{provider.SurfaceOpenAI, `{"id":"c","choices":[]}`},
-		{provider.SurfaceOpenAI, `{"id":"c","choices":[{"message":{"role":"user","content":"x"},"finish_reason":"stop"}]}`},
+		{provider.SurfaceChat, `{}`}, {provider.SurfaceAnthropic, `{}`}, {provider.SurfaceResponses, `{}`},
+		{provider.SurfaceChat, `{"id":"c","choices":[]}`},
+		{provider.SurfaceChat, `{"id":"c","choices":[{"message":{"role":"user","content":"x"},"finish_reason":"stop"}]}`},
 		{provider.SurfaceResponses, `{"id":"r","status":"in_progress","output":[]}`},
 		{provider.SurfaceResponses, `{"id":"r","status":"completed","output":null}`},
 		{provider.SurfaceAnthropic, `{"id":"m","type":"message","role":"user","content":[],"stop_reason":"end_turn"}`},
@@ -31,10 +31,10 @@ func TestResponseCodecStrictEnvelope(t *testing.T) {
 	}
 }
 func TestResponseCodecMatrixAndIdentity(t *testing.T) {
-	for _, source := range []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses} {
+	for _, source := range []provider.Surface{provider.SurfaceChat, provider.SurfaceAnthropic, provider.SurfaceResponses} {
 		var body string
 		switch source {
-		case provider.SurfaceOpenAI:
+		case provider.SurfaceChat:
 			body = `{"id":"c","created":123,"choices":[{"index":0,"message":{"role":"assistant","content":"hello","tool_calls":[{"id":"call_B","type":"function","function":{"name":"ls","arguments":"{\"path\":\"src\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":12,"completion_tokens":7}}`
 		case provider.SurfaceAnthropic:
 			body = `{"id":"msg_c","type":"message","role":"assistant","content":[{"type":"text","text":"hello"},{"type":"tool_use","id":"call_B","name":"ls","input":{"path":"src"}}],"stop_reason":"tool_use","usage":{"input_tokens":12,"output_tokens":7}}`
@@ -49,7 +49,7 @@ func TestResponseCodecMatrixAndIdentity(t *testing.T) {
 		if ir.Finish != FinishTools || len(ir.Blocks) != 2 || ir.Blocks[1].CallID != "call_B" {
 			t.Fatalf("identity %s %+v", source, ir)
 		}
-		for _, target := range []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses} {
+		for _, target := range []provider.Surface{provider.SurfaceChat, provider.SurfaceAnthropic, provider.SurfaceResponses} {
 			out, err := EncodeResponse(ir, target, "client-alias", opts)
 			if err != nil {
 				t.Fatal(err)
@@ -72,7 +72,7 @@ func TestResponseCodecFailedIsNotSuccess(t *testing.T) {
 	if err != nil || ir.Finish != FinishFailed || ir.Error == nil {
 		t.Fatalf("failed %+v %v", ir, err)
 	}
-	for _, target := range []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses} {
+	for _, target := range []provider.Surface{provider.SurfaceChat, provider.SurfaceAnthropic, provider.SurfaceResponses} {
 		b, err := EncodeResponse(ir, target, "client", CodecOptions{})
 		if err != nil {
 			t.Fatal(err)
@@ -97,11 +97,11 @@ func TestResponseCodecStrictObjectArguments(t *testing.T) {
 	}
 }
 func TestResponseCodecUsagePresenceAndConvention(t *testing.T) {
-	ir, err := DecodeResponse([]byte(`{"id":"c","choices":[{"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`), provider.SurfaceOpenAI, CodecOptions{})
+	ir, err := DecodeResponse([]byte(`{"id":"c","choices":[{"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`), provider.SurfaceChat, CodecOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, s := range []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceAnthropic} {
+	for _, s := range []provider.Surface{provider.SurfaceChat, provider.SurfaceAnthropic} {
 		b, e := EncodeResponse(ir, s, "client", CodecOptions{})
 		if e != nil || bytes.Contains(b, []byte(`"usage"`)) {
 			t.Fatalf("fabricated usage %s %v", b, e)
@@ -132,8 +132,8 @@ func TestResponseCodecLegacyGoldensAndCausality(t *testing.T) {
 		source, target       provider.Surface
 		input, golden, model string
 	}{
-		{provider.SurfaceOpenAI, provider.SurfaceAnthropic, "openai_response.json", "anthropic_response_golden.json", "claude-3-5-sonnet-20240620"},
-		{provider.SurfaceResponses, provider.SurfaceOpenAI, "responses_response.json", "chat_response_golden.json", "daily"},
+		{provider.SurfaceChat, provider.SurfaceAnthropic, "openai_response.json", "anthropic_response_golden.json", "claude-3-5-sonnet-20240620"},
+		{provider.SurfaceResponses, provider.SurfaceChat, "responses_response.json", "chat_response_golden.json", "daily"},
 	} {
 		b := fixture(t, tc.input)
 		ir, err := DecodeResponse(b, tc.source, CodecOptions{Legacy: true})
@@ -167,7 +167,7 @@ func TestResponseCodecLegacyGoldensAndCausality(t *testing.T) {
 	}
 }
 func TestResponseCodecErrorEnvelopes(t *testing.T) {
-	for _, s := range []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceResponses, provider.SurfaceAnthropic} {
+	for _, s := range []provider.Surface{provider.SurfaceChat, provider.SurfaceResponses, provider.SurfaceAnthropic} {
 		b := EncodeError(ErrorIR{Type: "rate_limit_error", Message: "upstream's own words", Code: "x"}, s)
 		var top map[string]any
 		if err := json.Unmarshal(b, &top); err != nil {

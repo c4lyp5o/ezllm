@@ -85,11 +85,11 @@ func (e *ErrPinned) Error() string {
 // surfaceName maps a wire surface to its pin name.
 func surfaceName(s provider.Surface) string {
 	// The pin vocabulary IS the surface vocabulary (chat wires and service
-	// surfaces alike). Collapsing service surfaces to "openai" made a model
+	// surfaces alike). Collapsing service surfaces to "chat" made a model
 	// pinned to embeddings unreachable on /v1/embeddings, and let a chat pin
 	// admit rerank/moderation requests.
 	if s == "" {
-		return string(provider.SurfaceOpenAI)
+		return string(provider.SurfaceChat)
 	}
 	return string(s)
 }
@@ -223,11 +223,11 @@ func (r *Resolver) WithUniversal(enabled bool) *Resolver {
 func universalOrder(client provider.Surface) []provider.Surface {
 	switch client {
 	case provider.SurfaceAnthropic:
-		return []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceResponses}
-	case provider.SurfaceOpenAI:
+		return []provider.Surface{provider.SurfaceChat, provider.SurfaceResponses}
+	case provider.SurfaceChat:
 		return []provider.Surface{provider.SurfaceResponses, provider.SurfaceAnthropic}
 	case provider.SurfaceResponses:
-		return []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceAnthropic}
+		return []provider.Surface{provider.SurfaceChat, provider.SurfaceAnthropic}
 	}
 	return nil
 }
@@ -236,7 +236,7 @@ func universalOrder(client provider.Surface) []provider.Surface {
 // provider.Surface values, so the pin vocabulary cannot drift from the wires.
 func pinSurface(pin string) (provider.Surface, bool) {
 	switch provider.Surface(pin) {
-	case provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses:
+	case provider.SurfaceChat, provider.SurfaceAnthropic, provider.SurfaceResponses:
 		return provider.Surface(pin), true
 	}
 	return "", false
@@ -505,15 +505,15 @@ func (r *Resolver) selectWireWith(ctx context.Context, acct *provider.Account, m
 	}
 
 	// Legacy (universal off): the single anthropic→openai alternative.
-	openai, oerr := f.supports(provider.SurfaceOpenAI)
+	chat, oerr := f.supports(provider.SurfaceChat)
 	if oerr != nil {
-		openai = nil
+		chat = nil
 	}
-	if translate.Eligible(clientSurface, native, openai, r.translationEnabled) {
-		if err := r.checkPin(f, requested, provider.SurfaceOpenAI); err != nil {
+	if translate.Eligible(clientSurface, native, chat, r.translationEnabled) {
+		if err := r.checkPin(f, requested, provider.SurfaceChat); err != nil {
 			return wireDecision{refusePin: err}
 		}
-		return wireDecision{wire: provider.SurfaceOpenAI, translated: true}
+		return wireDecision{wire: provider.SurfaceChat, translated: true}
 	}
 
 	// 4. No wire left.

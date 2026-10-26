@@ -10,7 +10,7 @@ import "github.com/c4lyp5o/ezllm/internal/provider"
 //
 // NULL capability flags mean UNTESTED, and an untested hop is never
 // translation-eligible: translation only rides on proven facts
-// (proto_openai=true), which is what keeps the feature inert until a
+// (proto_chat=true), which is what keeps the feature inert until a
 // probe sweep marks models. protoAnthropic may be NULL — the native path
 // being merely untested does not disqualify a hop we KNOW serves the
 // OpenAI shape.
@@ -25,10 +25,10 @@ func IsUniversalCell(client, upstream provider.Surface) bool {
 		return false
 	}
 	switch client {
-	case provider.SurfaceOpenAI:
+	case provider.SurfaceChat:
 		return upstream == provider.SurfaceAnthropic
 	case provider.SurfaceResponses:
-		return upstream == provider.SurfaceOpenAI || upstream == provider.SurfaceAnthropic
+		return upstream == provider.SurfaceChat || upstream == provider.SurfaceAnthropic
 	}
 	return false
 }

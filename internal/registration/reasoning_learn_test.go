@@ -120,7 +120,7 @@ func (s *reasoningStub) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 func TestProtocolSweepLearnsReasoningWithoutDisablingWire(t *testing.T) {
-	for _, surface := range []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses} {
+	for _, surface := range []provider.Surface{provider.SurfaceChat, provider.SurfaceAnthropic, provider.SurfaceResponses} {
 		for _, proven := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/proven=%t", surface, proven), func(t *testing.T) {
 				ctx := context.Background()

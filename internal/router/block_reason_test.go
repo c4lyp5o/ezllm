@@ -17,7 +17,7 @@ func TestBlockCursorCarriesAdvanceReason(t *testing.T) {
 	r := New(cat)
 	ctx := context.Background()
 
-	if _, err := r.ResolveCandidates(ctx, "daily", provider.SurfaceOpenAI, "test"); err != nil {
+	if _, err := r.ResolveCandidates(ctx, "daily", provider.SurfaceChat, "test"); err != nil {
 		t.Fatal(err)
 	}
 

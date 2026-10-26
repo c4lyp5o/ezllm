@@ -25,7 +25,7 @@ func TestEligible(t *testing.T) {
 			provider.SurfaceAnthropic, nil, boolPtr(true), true, true},
 
 		{"disabled knob", provider.SurfaceAnthropic, boolPtr(false), boolPtr(true), false, false},
-		{"openai client never translated", provider.SurfaceOpenAI, boolPtr(false), boolPtr(true), true, false},
+		{"openai client never translated", provider.SurfaceChat, boolPtr(false), boolPtr(true), true, false},
 		{"responses client never translated", provider.SurfaceResponses, boolPtr(false), boolPtr(true), true, false},
 		{"openai capability untested", provider.SurfaceAnthropic, boolPtr(false), nil, true, false},
 		{"openai capability proven false", provider.SurfaceAnthropic, boolPtr(false), boolPtr(false), true, false},

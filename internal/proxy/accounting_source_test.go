@@ -16,9 +16,9 @@ import (
 )
 
 func TestAccountingSourceUsageMatrix(t *testing.T) {
-	surfaces := []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses}
+	surfaces := []provider.Surface{provider.SurfaceChat, provider.SurfaceAnthropic, provider.SurfaceResponses}
 	usage := map[provider.Surface]string{
-		provider.SurfaceOpenAI:    `{"prompt_tokens":1050,"completion_tokens":42,"prompt_tokens_details":{"cached_tokens":900,"cache_write_tokens":50},"completion_tokens_details":{"reasoning_tokens":7}}`,
+		provider.SurfaceChat:      `{"prompt_tokens":1050,"completion_tokens":42,"prompt_tokens_details":{"cached_tokens":900,"cache_write_tokens":50},"completion_tokens_details":{"reasoning_tokens":7}}`,
 		provider.SurfaceAnthropic: `{"input_tokens":1050,"output_tokens":42,"cache_read_input_tokens":900,"cache_creation_input_tokens":50,"output_tokens_details":{"thinking_tokens":7}}`,
 		provider.SurfaceResponses: `{"input_tokens":1050,"output_tokens":42,"input_tokens_details":{"cached_tokens":900,"cache_write_tokens":50},"output_tokens_details":{"reasoning_tokens":7}}`,
 	}
@@ -89,7 +89,7 @@ func TestAccountingUsageSurvivesConversionFailure(t *testing.T) {
 	defer up.Close()
 	body := chatBody(false)
 	rec := httptest.NewRecorder()
-	_, res, err := newDispatcher().ForwardCandidates(context.Background(), rec, httptest.NewRequest("POST", "/", strings.NewReader(body)), []Route{wireRoute(up.URL, provider.SurfaceOpenAI, provider.SurfaceAnthropic)}, []byte(body))
+	_, res, err := newDispatcher().ForwardCandidates(context.Background(), rec, httptest.NewRequest("POST", "/", strings.NewReader(body)), []Route{wireRoute(up.URL, provider.SurfaceChat, provider.SurfaceAnthropic)}, []byte(body))
 	if err != nil || rec.Code != 502 || res.Usage == nil || res.Usage.In != 100 || res.Usage.Out != 42 {
 		t.Fatalf("conversion fault lost spend: status=%d usage=%+v err=%v", rec.Code, res.Usage, err)
 	}

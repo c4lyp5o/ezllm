@@ -21,7 +21,7 @@ func TestPinnedSurfaceIs400Not502(t *testing.T) {
 		w.Write([]byte(`{"id":"x","choices":[{"message":{"content":"OK"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
 	})
 	acct := seededAccountID(t, h)
-	if err := h.db.SetModelPin(context.Background(), acct, "gpt-6-luna", "openai"); err != nil {
+	if err := h.db.SetModelPin(context.Background(), acct, "gpt-6-luna", "chat"); err != nil {
 		t.Fatalf("set pin: %v", err)
 	}
 
@@ -48,11 +48,11 @@ func TestPinnedSurfaceIs400Not502(t *testing.T) {
 	if e.Error.Type != "pinned_surface" {
 		t.Errorf("type = %q, want pinned_surface", e.Error.Type)
 	}
-	if e.Error.Pinned != "openai" || e.Error.Asked != "anthropic" {
-		t.Errorf("fields = pinned %q / requested %q, want openai / anthropic",
+	if e.Error.Pinned != "chat" || e.Error.Asked != "anthropic" {
+		t.Errorf("fields = pinned %q / requested %q, want chat / anthropic",
 			e.Error.Pinned, e.Error.Asked)
 	}
-	if !strings.Contains(e.Error.Message, "pinned to the openai surface") {
+	if !strings.Contains(e.Error.Message, "pinned to the chat surface") {
 		t.Errorf("message lost its guidance: %q", e.Error.Message)
 	}
 

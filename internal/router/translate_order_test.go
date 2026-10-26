@@ -21,7 +21,7 @@ func translatedFixture() (*fakeCatalog, *Resolver) {
 	})
 	// gpt-6.1-sol: cannot speak anthropic, PROVEN; can speak openai, PROVEN.
 	cat.noProto = map[string]bool{"2/gpt-6.1-sol/anthropic": true}
-	cat.yesProto = map[string]bool{"2/gpt-6.1-sol/openai": true}
+	cat.yesProto = map[string]bool{"2/gpt-6.1-sol/chat": true}
 	return cat, New(cat).WithTranslation(true)
 }
 
@@ -69,7 +69,7 @@ func TestTranslatedHopParticipatesInStrategyOrdering(t *testing.T) {
 		},
 	})
 	cat.noProto = map[string]bool{"2/gpt-6.1-sol/anthropic": true}
-	cat.yesProto = map[string]bool{"2/gpt-6.1-sol/openai": true}
+	cat.yesProto = map[string]bool{"2/gpt-6.1-sol/chat": true}
 	r := New(cat).WithTranslation(true)
 
 	// true_round_robin is a real dice roll; if the translated hop were still
@@ -177,7 +177,7 @@ func TestNativeCapableHopNeverTranslated(t *testing.T) {
 func TestOpenAIClientSurfaceNeverTranslates(t *testing.T) {
 	_, r := translatedFixture()
 
-	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceOpenAI, "test")
+	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceChat, "test")
 	if err != nil {
 		t.Fatalf("resolution: %v", err)
 	}

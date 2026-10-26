@@ -52,15 +52,15 @@ func seedCalls(t *testing.T, h *harness) {
 	t.Helper()
 	now := time.Now()
 	seeds := []store.Call{
-		{TS: now, Client: "hermes", Surface: store.SurfaceOpenAI, Model: "m", Status: 200,
+		{TS: now, Client: "hermes", Surface: store.SurfaceChat, Model: "m", Status: 200,
 			TokensIn: 10, TokensOut: 5},
-		{TS: now, Client: "hermes", Surface: store.SurfaceOpenAI, Model: "m", Status: 200,
+		{TS: now, Client: "hermes", Surface: store.SurfaceChat, Model: "m", Status: 200,
 			TokensIn: 200, TokensOut: 40},
 		{TS: now, Client: "claude-code", Surface: store.SurfaceAnthropic, Model: "m", Status: 200,
 			TokensIn: 5000, TokensOut: 300},
 		{TS: now, Client: "claude-code", Surface: store.SurfaceAnthropic, Model: "m", Status: 200,
 			TokensIn: 90000, TokensOut: 9000, ReasoningTokens: 700},
-		{TS: now.Add(-48 * time.Hour), Client: "hermes", Surface: store.SurfaceOpenAI,
+		{TS: now.Add(-48 * time.Hour), Client: "hermes", Surface: store.SurfaceChat,
 			Model: "m", Status: 429, TokensIn: 70000, TokensOut: 1},
 	}
 	for _, c := range seeds {

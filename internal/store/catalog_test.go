@@ -265,13 +265,13 @@ func TestModelFactsMatchesPerQuestionReads(t *testing.T) {
 		t.Fatal(err)
 	}
 	yes, no := true, false
-	if err := db.SetModelProto(ctx, id, "probed", provider.SurfaceOpenAI, &yes); err != nil {
+	if err := db.SetModelProto(ctx, id, "probed", provider.SurfaceChat, &yes); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.SetModelProto(ctx, id, "probed", provider.SurfaceAnthropic, &no); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.SetModelPin(ctx, id, "probed", "openai"); err != nil {
+	if err := db.SetModelPin(ctx, id, "probed", "chat"); err != nil {
 		t.Fatal(err)
 	}
 	show := func(b *bool) string {
@@ -292,14 +292,14 @@ func TestModelFactsMatchesPerQuestionReads(t *testing.T) {
 		if f.Pin != pin {
 			t.Errorf("%s: facts pin %q, ModelPin %q", m, f.Pin, pin)
 		}
-		for _, s := range []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses} {
+		for _, s := range []provider.Surface{provider.SurfaceChat, provider.SurfaceAnthropic, provider.SurfaceResponses} {
 			want, _ := db.ModelSupportsSurface(ctx, id, m, s)
 			if got := f.Supports(s); show(got) != show(want) {
 				t.Errorf("%s/%s: facts %s, ModelSupportsSurface %s", m, s, show(got), show(want))
 			}
 		}
 	}
-	if f, _ := db.ModelFacts(ctx, id, "probed"); f.Pin != "openai" || show(f.OpenAI) != "true" || show(f.Anthropic) != "false" || f.Responses != nil {
+	if f, _ := db.ModelFacts(ctx, id, "probed"); f.Pin != "chat" || show(f.Chat) != "true" || show(f.Anthropic) != "false" || f.Responses != nil {
 		t.Errorf("probed facts = %+v, want pin openai, openai true, anthropic false, responses nil", f)
 	}
 }

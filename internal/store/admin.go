@@ -157,7 +157,7 @@ func (d *DB) GetAccount(ctx context.Context, id int64) (*AccountSummary, error) 
 // hydrateAccount fills keys / quota / protocol counts for one account.
 func (d *DB) hydrateAccount(ctx context.Context, a *AccountSummary) error {
 	a.Keys = []KeySummary{} // API contract: collections are arrays, including when empty.
-	a.ProtocolSupport = map[string]int{"openai": 0, "anthropic": 0, "responses": 0, "untested": 0}
+	a.ProtocolSupport = map[string]int{"chat": 0, "anthropic": 0, "responses": 0, "untested": 0}
 
 	// keys
 	krows, err := d.r.QueryContext(ctx, `
@@ -221,20 +221,20 @@ ORDER BY q.read_at DESC, q.id DESC LIMIT 1`, a.ID).
 
 	// model counts + protocol support (map values can't be addressed, so scan
 	// into locals and place them)
-	var openai, anthropic, responses, untested int
+	var chat, anthropic, responses, untested int
 	err = d.r.QueryRowContext(ctx, `
 SELECT COUNT(*),
-       COALESCE(SUM(CASE WHEN proto_openai=1 THEN 1 ELSE 0 END),0),
+       COALESCE(SUM(CASE WHEN proto_chat=1 THEN 1 ELSE 0 END),0),
        COALESCE(SUM(CASE WHEN proto_anthropic=1 THEN 1 ELSE 0 END),0),
        COALESCE(SUM(CASE WHEN proto_responses=1 THEN 1 ELSE 0 END),0),
-       COALESCE(SUM(CASE WHEN proto_openai IS NULL AND proto_anthropic IS NULL
+       COALESCE(SUM(CASE WHEN proto_chat IS NULL AND proto_anthropic IS NULL
                           AND proto_responses IS NULL THEN 1 ELSE 0 END),0)
 FROM models WHERE account_id=?`, a.ID).
-		Scan(&a.ModelsCount, &openai, &anthropic, &responses, &untested)
+		Scan(&a.ModelsCount, &chat, &anthropic, &responses, &untested)
 	if err != nil {
 		return err
 	}
-	a.ProtocolSupport["openai"] = openai
+	a.ProtocolSupport["chat"] = chat
 	a.ProtocolSupport["anthropic"] = anthropic
 	a.ProtocolSupport["responses"] = responses
 	a.ProtocolSupport["untested"] = untested
@@ -765,7 +765,7 @@ type ModelEntryRow struct {
 	ID        string  `json:"id"`
 	Display   string  `json:"display,omitempty"`
 	OwnedBy   string  `json:"owned_by,omitempty"`
-	OpenAI    *bool   `json:"openai"`
+	Chat      *bool   `json:"chat"`
 	Anthropic *bool   `json:"anthropic"`
 	Responses *bool   `json:"responses"`
 	TestedAt  *string `json:"tested_at,omitempty"`
@@ -782,7 +782,7 @@ type ModelEntryRow struct {
 func (d *DB) ListModels(ctx context.Context, accountID int64) ([]ModelEntryRow, error) {
 	rows, err := d.r.QueryContext(ctx, `
 SELECT model_id, COALESCE(display_name,''), COALESCE(owned_by,''),
-       proto_openai, proto_anthropic, proto_responses, proto_tested_at, COALESCE(proto_pin,''),
+       proto_chat, proto_anthropic, proto_responses, proto_tested_at, COALESCE(proto_pin,''),
        COALESCE(proto_source,''), COALESCE(proto_note,'')
 FROM models WHERE account_id=? ORDER BY model_id`, accountID)
 	if err != nil {
@@ -799,7 +799,7 @@ FROM models WHERE account_id=? ORDER BY model_id`, accountID)
 		}
 		if o.Valid {
 			v := o.Bool
-			m.OpenAI = &v
+			m.Chat = &v
 		}
 		if a.Valid {
 			v := a.Bool
@@ -842,7 +842,7 @@ WHERE COALESCE(proto_source,'') <> 'curated'`, col, col, col)
 // after a background protocol probe, and the reason the sweep does not take
 // the write lock 108 times. Service surfaces keep their verdicts in
 // service_probes and are skipped here (they used to fall through to the chat
-// proto_openai column).
+// proto_chat column).
 func (d *DB) SetModelProtos(ctx context.Context, accountID int64, rows map[string]map[string]*bool) error {
 	if len(rows) == 0 {
 		return nil
@@ -895,7 +895,7 @@ type ProtoEdit struct {
 //
 // ErrNotFound when the model row does not exist: curation never creates rows.
 func (d *DB) SetModelCurated(ctx context.Context, accountID int64, modelID, note string, edits map[string]ProtoEdit, release bool) error {
-	cols := map[string]string{"openai": "proto_openai", "anthropic": "proto_anthropic", "responses": "proto_responses"}
+	cols := map[string]string{"chat": "proto_chat", "anthropic": "proto_anthropic", "responses": "proto_responses"}
 	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
 		var res sql.Result
 		var err error

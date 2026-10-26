@@ -15,7 +15,7 @@ import (
 
 func decodeRequestFor(body []byte, client provider.Surface) (*RequestIR, error) {
 	switch client {
-	case provider.SurfaceOpenAI:
+	case provider.SurfaceChat:
 		return DecodeChatRequest(body)
 	case provider.SurfaceAnthropic:
 		return DecodeMessagesRequest(body)
@@ -27,7 +27,7 @@ func decodeRequestFor(body []byte, client provider.Surface) (*RequestIR, error) 
 
 func encodeRequestFor(ir *RequestIR, upstream provider.Surface, model string) ([]byte, error) {
 	switch upstream {
-	case provider.SurfaceOpenAI:
+	case provider.SurfaceChat:
 		return EncodeChatRequest(ir, model)
 	case provider.SurfaceAnthropic:
 		return EncodeMessagesRequest(ir, model)

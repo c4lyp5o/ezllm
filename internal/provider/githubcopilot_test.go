@@ -89,7 +89,7 @@ func TestCopilotPrepareRequestMintsAndHeaders(t *testing.T) {
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("X-Initiator", "agent") // client-supplied: must be replaced
 	acct := Account{ID: 7, Kind: KindGitHubCopilot}
-	if err := a.PrepareRequest(context.Background(), req, acct, copilotSessionKey(t), SurfaceOpenAI); err != nil {
+	if err := a.PrepareRequest(context.Background(), req, acct, copilotSessionKey(t), SurfaceChat); err != nil {
 		t.Fatal(err)
 	}
 	if mints != 1 {
@@ -113,7 +113,7 @@ func TestCopilotPrepareRequestMintsAndHeaders(t *testing.T) {
 	// Second call: the cached session means no second mint.
 	req2, _ := http.NewRequest(http.MethodPost, copilotAPIBase+"/chat/completions",
 		strings.NewReader(`{"model":"gpt-4o","messages":[]}`))
-	if err := a.PrepareRequest(context.Background(), req2, acct, copilotSessionKey(t), SurfaceOpenAI); err != nil {
+	if err := a.PrepareRequest(context.Background(), req2, acct, copilotSessionKey(t), SurfaceChat); err != nil {
 		t.Fatal(err)
 	}
 	if mints != 1 {
@@ -142,7 +142,7 @@ func TestCopilotPrepareRequestDeadCredential(t *testing.T) {
 	a := newGitHubCopilotWithClient(client)
 	req, _ := http.NewRequest(http.MethodPost, copilotAPIBase+"/chat/completions",
 		strings.NewReader(`{"model":"gpt-4o","messages":[]}`))
-	err := a.PrepareRequest(context.Background(), req, Account{ID: 1}, copilotSessionKey(t), SurfaceOpenAI)
+	err := a.PrepareRequest(context.Background(), req, Account{ID: 1}, copilotSessionKey(t), SurfaceChat)
 	if err == nil {
 		t.Fatal("403 on mint must fail PrepareRequest (this is the calibration path)")
 	}
@@ -180,7 +180,7 @@ func TestCopilotSessionCacheIsolatesAccounts(t *testing.T) {
 	for _, id := range []int64{1, 2} {
 		req, _ := http.NewRequest(http.MethodPost, copilotAPIBase+"/chat/completions",
 			strings.NewReader(`{"model":"gpt-4o","messages":[]}`))
-		if err := a.PrepareRequest(context.Background(), req, Account{ID: id}, key, SurfaceOpenAI); err != nil {
+		if err := a.PrepareRequest(context.Background(), req, Account{ID: id}, key, SurfaceChat); err != nil {
 			t.Fatal(err)
 		}
 	}

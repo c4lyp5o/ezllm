@@ -40,7 +40,7 @@ func TestModelCuratedRoundTrip(t *testing.T) {
 
 	// Probe first so the row carries a real probe timestamp the curation must
 	// clear: a curated row never claims "last probed at".
-	if err := db.SetModelProto(ctx, acct, "m1", provider.SurfaceOpenAI, ptrTrue()); err != nil {
+	if err := db.SetModelProto(ctx, acct, "m1", provider.SurfaceChat, ptrTrue()); err != nil {
 		t.Fatal(err)
 	}
 	if m := entryByID(t, db, acct, "m1"); m.TestedAt == nil || m.Source != "probe" {
@@ -48,7 +48,7 @@ func TestModelCuratedRoundTrip(t *testing.T) {
 	}
 
 	if err := db.SetModelCurated(ctx, acct, "m1", "edge stonewalls anthropic probes", map[string]ProtoEdit{
-		"openai": present(true), "anthropic": present(false),
+		"chat": present(true), "anthropic": present(false),
 	}, false); err != nil {
 		t.Fatal(err)
 	}
@@ -56,8 +56,8 @@ func TestModelCuratedRoundTrip(t *testing.T) {
 	if m.Source != "curated" || m.Note != "edge stonewalls anthropic probes" {
 		t.Fatalf("provenance = %q/%q, want curated + note", m.Source, m.Note)
 	}
-	if m.OpenAI == nil || !*m.OpenAI || m.Anthropic == nil || *m.Anthropic {
-		t.Fatalf("verdicts = %v/%v, want true/false", m.OpenAI, m.Anthropic)
+	if m.Chat == nil || !*m.Chat || m.Anthropic == nil || *m.Anthropic {
+		t.Fatalf("verdicts = %v/%v, want true/false", m.Chat, m.Anthropic)
 	}
 	if m.TestedAt != nil {
 		t.Fatalf("curated row carries tested_at %q, want nil", *m.TestedAt)
@@ -69,8 +69,8 @@ func TestModelCuratedRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	m = entryByID(t, db, acct, "m1")
-	if m.OpenAI == nil || !*m.OpenAI || m.Anthropic == nil || *m.Anthropic {
-		t.Fatalf("absent verdicts changed: %v/%v", m.OpenAI, m.Anthropic)
+	if m.Chat == nil || !*m.Chat || m.Anthropic == nil || *m.Anthropic {
+		t.Fatalf("absent verdicts changed: %v/%v", m.Chat, m.Anthropic)
 	}
 	if m.Responses == nil || !*m.Responses {
 		t.Fatalf("responses = %v, want true", m.Responses)
@@ -78,7 +78,7 @@ func TestModelCuratedRoundTrip(t *testing.T) {
 
 	// Curation never creates rows — an unknown model is a not-found, matching
 	// the pin route's typo protection.
-	if err := db.SetModelCurated(ctx, acct, "nope", "x", map[string]ProtoEdit{"openai": present(true)}, false); err != ErrNotFound {
+	if err := db.SetModelCurated(ctx, acct, "nope", "x", map[string]ProtoEdit{"chat": present(true)}, false); err != ErrNotFound {
 		t.Fatalf("unknown model err = %v, want ErrNotFound", err)
 	}
 }
@@ -93,7 +93,7 @@ func TestModelCuratedProbeProtectionAndRelease(t *testing.T) {
 	acct := seedPinAccount(t, db)
 	yes := true
 	if err := db.SetModelCurated(ctx, acct, "m1", "curated openai-only", map[string]ProtoEdit{
-		"openai": present(true), "anthropic": present(false),
+		"chat": present(true), "anthropic": present(false),
 	}, false); err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestModelCuratedProbeProtectionAndRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := db.SetModelProtos(ctx, acct, map[string]map[string]*bool{
-		"m1": {"openai": ptrTrue(), "anthropic": &yes},
+		"m1": {"chat": ptrTrue(), "anthropic": &yes},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -118,8 +118,8 @@ func TestModelCuratedProbeProtectionAndRelease(t *testing.T) {
 	if m.Source != "" || m.Note != "" {
 		t.Fatalf("after release provenance = %q/%q, want empty", m.Source, m.Note)
 	}
-	if m.OpenAI == nil || !*m.OpenAI {
-		t.Fatalf("openai after release = %v, want the recorded true", m.OpenAI)
+	if m.Chat == nil || !*m.Chat {
+		t.Fatalf("openai after release = %v, want the recorded true", m.Chat)
 	}
 	if err := db.SetModelProto(ctx, acct, "m1", provider.SurfaceAnthropic, &yes); err != nil {
 		t.Fatal(err)
@@ -136,14 +136,14 @@ func TestModelCuratedSurvivesResync(t *testing.T) {
 	db := openAt(t, filepath.Join(t.TempDir(), "proto-resync.sqlite"))
 	defer db.Close()
 	acct := seedPinAccount(t, db)
-	if err := db.SetModelCurated(ctx, acct, "m1", "curated", map[string]ProtoEdit{"openai": present(true)}, false); err != nil {
+	if err := db.SetModelCurated(ctx, acct, "m1", "curated", map[string]ProtoEdit{"chat": present(true)}, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.UpsertModels(ctx, acct, []provider.ModelInfo{{ID: "m1", Display: "M One"}}); err != nil {
 		t.Fatal(err)
 	}
 	m := entryByID(t, db, acct, "m1")
-	if m.Source != "curated" || m.Note != "curated" || m.OpenAI == nil || !*m.OpenAI {
+	if m.Source != "curated" || m.Note != "curated" || m.Chat == nil || !*m.Chat {
 		t.Fatalf("curation lost on resync: %+v", m)
 	}
 }

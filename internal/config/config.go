@@ -93,7 +93,7 @@ type ModelRefresh struct {
 //
 // Default ON (global enable, 2026-10-12): the layer is inert on its own —
 // eligibility additionally requires a hop whose probed capability says
-// proto_openai=true and proto_anthropic is false/null, and those flags are NULL
+// proto_chat=true and proto_anthropic is false/null, and those flags are NULL
 // until a probe sweep or an operator curation sets them. Set `enabled: false`
 // in config.yaml, or EZLLM_TRANSLATION_ENABLED=false (the env wins, kept as the
 // rollback lever with no rebuild), to turn it back off.

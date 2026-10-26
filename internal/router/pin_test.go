@@ -15,13 +15,13 @@ func TestPinnedDirectRouteRefusesWrongSurface(t *testing.T) {
 	cat.pins = map[string]string{"2/gpt-6-luna": "responses"}
 	r := New(cat)
 
-	_, err := r.Resolve(context.Background(), "super-ssn/gpt-6-luna", provider.SurfaceOpenAI, "c")
+	_, err := r.Resolve(context.Background(), "super-ssn/gpt-6-luna", provider.SurfaceChat, "c")
 	var np *ErrPinned
 	if !errors.As(err, &np) {
 		t.Fatalf("want *ErrPinned for openai call on responses-pinned model, got %v", err)
 	}
-	if np.Pinned != "responses" || np.Got != "openai" {
-		t.Errorf("pin refusal = pinned %q got %q, want responses/openai", np.Pinned, np.Got)
+	if np.Pinned != "responses" || np.Got != "chat" {
+		t.Errorf("pin refusal = pinned %q got %q, want responses/chat", np.Pinned, np.Got)
 	}
 }
 
@@ -43,7 +43,7 @@ func TestPinnedDirectRouteAcceptsPinnedSurface(t *testing.T) {
 // An unpinned model keeps today's behaviour on every surface.
 func TestUnpinnedModelUnaffected(t *testing.T) {
 	r := New(newFake())
-	for _, s := range []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses} {
+	for _, s := range []provider.Surface{provider.SurfaceChat, provider.SurfaceAnthropic, provider.SurfaceResponses} {
 		if _, err := r.Resolve(context.Background(), "super-ssn/gpt-6-luna", s, "c"); err != nil {
 			t.Errorf("unpinned model on %v: %v", s, err)
 		}
@@ -57,7 +57,7 @@ func TestPinnedComboHopRefusesInsteadOfSkipping(t *testing.T) {
 	cat.pins = map[string]string{"1/gpt-6-luna": "responses"}
 	r := New(cat)
 
-	_, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceOpenAI, "c")
+	_, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceChat, "c")
 	var np *ErrPinned
 	if !errors.As(err, &np) {
 		t.Fatalf("combo with pinned hop on wrong surface: want *ErrPinned, got %v", err)
@@ -74,7 +74,7 @@ func (f failingPinCatalog) ModelPin(_ context.Context, _ int64, _ string) (strin
 
 func TestPinLookupFailureFailsClosed(t *testing.T) {
 	r := New(failingPinCatalog{newFake()})
-	if _, err := r.Resolve(context.Background(), "super-ssn/gpt-6-luna", provider.SurfaceOpenAI, "c"); err == nil {
+	if _, err := r.Resolve(context.Background(), "super-ssn/gpt-6-luna", provider.SurfaceChat, "c"); err == nil {
 		t.Fatal("pin lookup error must refuse the request, got nil")
 	}
 }

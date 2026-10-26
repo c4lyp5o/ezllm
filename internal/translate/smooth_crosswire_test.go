@@ -50,7 +50,7 @@ const hermesChatBody = `{
 // schema, parallel_tool_calls=false is honored, an empty assistant turn is
 // dropped, and the client's own cache markers are carried.
 func TestChatToMessagesHermesBody(t *testing.T) {
-	m := universal(t, hermesChatBody, provider.SurfaceOpenAI, provider.SurfaceAnthropic)
+	m := universal(t, hermesChatBody, provider.SurfaceChat, provider.SurfaceAnthropic)
 
 	if m["max_tokens"] != float64(defaultMessagesMaxTokens) {
 		t.Errorf("max_tokens = %v, want the default %d", m["max_tokens"], defaultMessagesMaxTokens)
@@ -119,7 +119,7 @@ func TestChatToMessagesHermesBody(t *testing.T) {
 func TestChatToMessagesAddsCacheBreakpoints(t *testing.T) {
 	turn1 := `{"model":"m","messages":[{"role":"system","content":"sys"},{"role":"user","content":"q1"}]}`
 	turn2 := `{"model":"m","messages":[{"role":"system","content":"sys"},{"role":"user","content":"q1"},{"role":"assistant","content":"a1"},{"role":"user","content":"q2"}]}`
-	m := universal(t, turn1, provider.SurfaceOpenAI, provider.SurfaceAnthropic)
+	m := universal(t, turn1, provider.SurfaceChat, provider.SurfaceAnthropic)
 	if sys := m["system"].([]any); sys[len(sys)-1].(map[string]any)["cache_control"] == nil {
 		t.Errorf("no breakpoint on the system prompt: %v", m["system"])
 	}
@@ -128,12 +128,12 @@ func TestChatToMessagesAddsCacheBreakpoints(t *testing.T) {
 	if last[len(last)-1].(map[string]any)["cache_control"] == nil {
 		t.Errorf("no breakpoint on the newest message: %v", msgs)
 	}
-	a, _ := RequestUniversal([]byte(turn2), provider.SurfaceOpenAI, provider.SurfaceAnthropic, "up/model")
-	b, _ := RequestUniversal([]byte(turn2), provider.SurfaceOpenAI, provider.SurfaceAnthropic, "up/model")
+	a, _ := RequestUniversal([]byte(turn2), provider.SurfaceChat, provider.SurfaceAnthropic, "up/model")
+	b, _ := RequestUniversal([]byte(turn2), provider.SurfaceChat, provider.SurfaceAnthropic, "up/model")
 	if !bytes.Equal(a, b) {
 		t.Fatal("breakpoint placement is not deterministic")
 	}
-	m2 := universal(t, turn2, provider.SurfaceOpenAI, provider.SurfaceAnthropic)
+	m2 := universal(t, turn2, provider.SurfaceChat, provider.SurfaceAnthropic)
 	marks := 0
 	for _, x := range m2["messages"].([]any) {
 		for _, bl := range x.(map[string]any)["content"].([]any) {
@@ -158,7 +158,7 @@ func TestChatToMessagesCapsBreakpointsAtFour(t *testing.T) {
 		}
 		msgs = append(msgs, `{"role":"`+role+`","content":[{"type":"text","text":"t`+string(rune('0'+i))+`","cache_control":{"type":"ephemeral"}}]}`)
 	}
-	m := universal(t, `{"model":"m","messages":[`+strings.Join(msgs, ",")+`]}`, provider.SurfaceOpenAI, provider.SurfaceAnthropic)
+	m := universal(t, `{"model":"m","messages":[`+strings.Join(msgs, ",")+`]}`, provider.SurfaceChat, provider.SurfaceAnthropic)
 	var kept []string
 	for _, x := range m["messages"].([]any) {
 		for _, bl := range x.(map[string]any)["content"].([]any) {
@@ -186,7 +186,7 @@ func TestResponsesClientBodyCrossesWires(t *testing.T) {
 	  {"type":"function_call","call_id":"call_1","name":"ls","arguments":"{}"},
 	  {"type":"function_call_output","call_id":"call_1","output":"a.txt"}
 	 ]}`
-	for _, up := range []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceAnthropic} {
+	for _, up := range []provider.Surface{provider.SurfaceChat, provider.SurfaceAnthropic} {
 		m := universal(t, body, provider.SurfaceResponses, up)
 		raw, _ := json.Marshal(m)
 		if bytes.Contains(raw, []byte("gAAA")) || bytes.Contains(raw, []byte("rs_1")) {
@@ -200,7 +200,7 @@ func TestResponsesClientBodyCrossesWires(t *testing.T) {
 		"previous_response_id": `{"model":"m","previous_response_id":"resp_1","input":"hi"}`,
 		"json text format":     `{"model":"m","text":{"format":{"type":"json_schema","name":"x","schema":{}}},"input":"hi"}`,
 	} {
-		if _, err := RequestUniversal([]byte(b), provider.SurfaceResponses, provider.SurfaceOpenAI, "m"); err == nil {
+		if _, err := RequestUniversal([]byte(b), provider.SurfaceResponses, provider.SurfaceChat, "m"); err == nil {
 			t.Errorf("%s must still be refused", name)
 		}
 	}
@@ -210,7 +210,7 @@ func TestResponsesClientBodyCrossesWires(t *testing.T) {
 // JSON still refuses a wire that cannot promise it.
 func TestChatResponseFormatJSONStillRefused(t *testing.T) {
 	_, err := RequestUniversal([]byte(`{"model":"m","messages":[{"role":"user","content":"x"}],"response_format":{"type":"json_object"}}`),
-		provider.SurfaceOpenAI, provider.SurfaceAnthropic, "m")
+		provider.SurfaceChat, provider.SurfaceAnthropic, "m")
 	if err == nil {
 		t.Fatal("response_format json_object reached the messages wire")
 	}
@@ -236,7 +236,7 @@ func TestMessagesStreamWithThinkingReachesChat(t *testing.T) {
 		ev("content_block_stop", `{"type":"content_block_stop","index":2}`) +
 		ev("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":9}}`) +
 		ev("message_stop", `{"type":"message_stop"}`)
-	for _, to := range []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceResponses} {
+	for _, to := range []provider.Surface{provider.SurfaceChat, provider.SurfaceResponses} {
 		r, out := codecStream(t, in, provider.SurfaceAnthropic, to, CodecOptions{MessagesUsage: UsageExclusive})
 		if r.Outcome() != FinishCompleted || !bytes.Contains(out, []byte("answer")) {
 			t.Fatalf("%s: outcome %q\n%s", to, r.Outcome(), out)
@@ -246,11 +246,11 @@ func TestMessagesStreamWithThinkingReachesChat(t *testing.T) {
 		}
 		// Chat clients (Hermes) show reasoning from reasoning_content; it
 		// never mixes into the answer's content. Responses gets none.
-		wantReasoning := to == provider.SurfaceOpenAI
+		wantReasoning := to == provider.SurfaceChat
 		if got := bytes.Contains(out, []byte(`"reasoning_content":"let me see"`)); got != wantReasoning {
 			t.Errorf("%s: reasoning_content present=%v, want %v:\n%s", to, got, wantReasoning, out)
 		}
-		if bytes.Contains(out, []byte(`"content":"let me see"`)) || to != provider.SurfaceOpenAI && bytes.Contains(out, []byte("let me see")) {
+		if bytes.Contains(out, []byte(`"content":"let me see"`)) || to != provider.SurfaceChat && bytes.Contains(out, []byte("let me see")) {
 			t.Errorf("%s: thinking leaked into the answer: %s", to, out)
 		}
 	}
@@ -279,7 +279,7 @@ func TestMessagesNewStopReasons(t *testing.T) {
 		ev("content_block_stop", `{"type":"content_block_stop","index":0}`) +
 		ev("message_delta", `{"type":"message_delta","delta":{"stop_reason":"model_context_window_exceeded"},"usage":{"output_tokens":9}}`) +
 		ev("message_stop", `{"type":"message_stop"}`)
-	r, out := codecStream(t, in, provider.SurfaceAnthropic, provider.SurfaceOpenAI, CodecOptions{MessagesUsage: UsageExclusive})
+	r, out := codecStream(t, in, provider.SurfaceAnthropic, provider.SurfaceChat, CodecOptions{MessagesUsage: UsageExclusive})
 	if r.Outcome() != FinishLength || !bytes.Contains(out, []byte(`"finish_reason":"length"`)) {
 		t.Fatalf("outcome %q\n%s", r.Outcome(), out)
 	}
@@ -287,7 +287,7 @@ func TestMessagesNewStopReasons(t *testing.T) {
 
 func messagesFor(t *testing.T, body, model string) map[string]any {
 	t.Helper()
-	out, err := RequestUniversal([]byte(body), provider.SurfaceOpenAI, provider.SurfaceAnthropic, model)
+	out, err := RequestUniversal([]byte(body), provider.SurfaceChat, provider.SurfaceAnthropic, model)
 	if err != nil {
 		t.Fatalf("%s: %v", model, err)
 	}
@@ -393,7 +393,7 @@ func TestMessagesThinkingReachesChatResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, _ := EncodeResponse(ir, provider.SurfaceOpenAI, "m", CodecOptions{})
+	chat, _ := EncodeResponse(ir, provider.SurfaceChat, "m", CodecOptions{})
 	if !bytes.Contains(chat, []byte(`"reasoning_content":"weighing it"`)) || !bytes.Contains(chat, []byte(`"content":"done"`)) {
 		t.Errorf("chat = %s", chat)
 	}

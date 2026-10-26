@@ -103,7 +103,7 @@ type Options struct {
 type ProtocolResult struct {
 	Deferred bool                        `json:"deferred"`
 	Tested   int                         `json:"tested"`
-	Support  map[string]int              `json:"support"` // openai/anthropic/responses counts
+	Support  map[string]int              `json:"support"` // chat/anthropic/responses counts
 	Rows     map[string]map[string]*bool `json:"-"`       // model → surface → verdict
 }
 
@@ -142,7 +142,7 @@ func (r *TestResult) addStep(s Step) {
 type Tester struct {
 	client   *http.Client
 	registry *provider.Registry
-	db       *store.DB // optional: admin probes are ledgered so spend is visible
+	db       *store.DB // optional: verdicts and learned vocabularies persist here; probes are NOT ledgered
 	// log reports the facts a probe LEARNS (a vocabulary, a wire), never every
 	// probe: a sweep over 40 models would otherwise be 40 lines of noise. Nil
 	// is safe — every use goes through logf, which falls back to slog.Default.
@@ -584,7 +584,7 @@ func (t *Tester) probeModel(
 	pace *pacer,
 	res *TestResult,
 ) (probeOutcome, *Failure) {
-	surface := provider.SurfaceOpenAI
+	surface := provider.SurfaceChat
 	if acct.Kind == provider.KindAnthropicCompat {
 		surface = provider.SurfaceAnthropic
 	}
@@ -621,21 +621,6 @@ func (t *Tester) probeModel(
 		}
 	}
 
-	// Ledger admin probes: real token spend must never be invisible, and a
-	// failed probe must say WHY — a bare status cannot be diagnosed.
-	total := msAtLeastOne(elapsed)
-	t.ledgerCall(store.Call{
-		TS:      t.now().UTC(),
-		Client:  "admin:test",
-		Surface: storeSurface(surface),
-		Alias:   acct.Namespace + "/" + model,
-		Account: acct.Namespace,
-		Model:   model,
-		Status:  status,
-		Totalms: &total,
-		Err:     probeErrNote(status, resp, err),
-	})
-
 	// A refusal that names its own reasoning vocabulary is a fact worth keeping:
 	// the very next request to this model gets clamped instead of refused. This
 	// is the same read the proxy does on live traffic, so a dashboard "test"
@@ -650,7 +635,7 @@ func (t *Tester) probeModel(
 	// generation instead of "unverified", and the capability matrix learns the
 	// wire (openai=0, responses=1), so routing stops needing a hand-written
 	// responses_models regex for every model that lives there.
-	if err == nil && surface == provider.SurfaceOpenAI && !isAuthStatus(status) && isEndpointMismatch(status, resp) {
+	if err == nil && surface == provider.SurfaceChat && !isAuthStatus(status) && isEndpointMismatch(status, resp) {
 		verdict, authDead, rstatus := t.probeSurface(ctx, adapter, acct, key, model, provider.SurfaceResponses, pace)
 		switch {
 		case authDead:
@@ -663,7 +648,7 @@ func (t *Tester) probeModel(
 			return probeFailed, f
 		case verdict == provider.VerdictSupported:
 			no, yes := false, true
-			t.setProto(acct.ID, model, provider.SurfaceOpenAI, &no)
+			t.setProto(acct.ID, model, provider.SurfaceChat, &no)
 			t.setProto(acct.ID, model, provider.SurfaceResponses, &yes)
 			// A wire change reroutes every future request for this model, so it
 			// is Info: the operator must be able to see that a 400 on chat did
@@ -919,7 +904,7 @@ func (t *Tester) inferenceStep(
 // 429/5xx/timeout → unknown: NOTHING is recorded, so a verdict proven by an
 // earlier sweep survives the weather. A 429 also stops the sweep rather than
 // spending the rest of the catalog against a rate limit; a 5xx is one
-// model's trouble and the sweep moves on. Every probe is ledgered.
+// model's trouble and the sweep moves on. Probes are not ledgered.
 func (t *Tester) ProtocolSweep(
 	ctx context.Context,
 	acct provider.Account,
@@ -950,25 +935,25 @@ func (t *Tester) ProtocolSweep(
 	surfaces := append([]provider.Surface(nil), opts.Surfaces...)
 	if len(surfaces) == 0 {
 		surfaces = []provider.Surface{
-			provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses,
+			provider.SurfaceChat, provider.SurfaceAnthropic, provider.SurfaceResponses,
 		}
 	}
 	// Anthropic-only providers never speak the OpenAI wire; probing them
-	// wastes time and leaves proto_openai NULL (which the router reads as
+	// wastes time and leaves proto_chat NULL (which the router reads as
 	// "unproven" instead of "impossible"). Mark openai as proven-false up
 	// front so translated routing treats them correctly, and skip the
 	// openai surface in the sweep.
 	if isAnthropicOnlyKind(acct.Kind) {
 		filtered := surfaces[:0]
 		for _, s := range surfaces {
-			if s != provider.SurfaceOpenAI {
+			if s != provider.SurfaceChat {
 				filtered = append(filtered, s)
 			}
 		}
 		surfaces = filtered
 		no := false
 		for _, m := range models {
-			t.setProto(acct.ID, m.ID, provider.SurfaceOpenAI, &no)
+			t.setProto(acct.ID, m.ID, provider.SurfaceChat, &no)
 		}
 	}
 	pace := &pacer{delay: acct.ProbeDelay}
@@ -1020,7 +1005,7 @@ func (t *Tester) ProtocolSweep(
 	return out
 }
 
-// probeSurface classifies one (model, surface) pair and ledgers the probe.
+// probeSurface classifies one (model, surface) pair.
 // authDead reports a credential failure so the caller can abort the whole
 // sweep; status is the HTTP answer (0 = none).
 func (t *Tester) probeSurface(
@@ -1039,25 +1024,12 @@ func (t *Tester) probeSurface(
 	}
 	spec := provider.AuthProbe{Method: http.MethodPost, Path: provider.SurfacePath(surface)}
 
-	start := t.now()
 	pres, err := probe(ctx, t, pace, defaultStepTimeout,
 		func(c context.Context) (httpResult, error) {
 			s, b, e := doProbe(c, t.client, adapter, spec, acct, key, withBody(body))
 			return httpResult{status: s, body: b}, e
 		})
 	status, resp := pres.status, pres.body
-	total := msAtLeastOne(t.now().Sub(start))
-	t.ledgerCall(store.Call{
-		TS:      t.now().UTC(),
-		Client:  "admin:test",
-		Surface: storeSurface(surface),
-		Alias:   acct.Namespace + "/" + model,
-		Account: acct.Namespace,
-		Model:   model,
-		Status:  status,
-		Totalms: &total,
-		Err:     probeErrNote(status, resp, err),
-	})
 	if err != nil {
 		// Transport failure → unknown, never "unsupported".
 		return provider.VerdictUnknown, false, status
@@ -1153,7 +1125,7 @@ func surfaceFor(path string) provider.Surface {
 	case strings.HasSuffix(path, "/responses"):
 		return provider.SurfaceResponses
 	default:
-		return provider.SurfaceOpenAI
+		return provider.SurfaceChat
 	}
 }
 
@@ -1573,7 +1545,7 @@ func isPlanGatedError(status int, body []byte) bool {
 }
 
 // isAnthropicOnlyKind reports whether a provider kind is served on the
-// Anthropic wire (POST /v1/messages). Marking proto_openai=false up front
+// Anthropic wire (POST /v1/messages). Marking proto_chat=false up front
 // saves a probe per model and sends chat clients through the Messages
 // translation (native caching and thinking) instead of a compat endpoint.
 // claude-web is NOT one: ezllm's own bridge serves it on /chat/completions
@@ -1675,7 +1647,7 @@ func summarize(res *TestResult) string {
 	}
 	if res.Proto != nil && !res.Proto.Deferred && res.Proto.Tested > 0 {
 		var counts []string
-		for _, k := range []string{"openai", "anthropic", "responses"} {
+		for _, k := range []string{"chat", "anthropic", "responses"} {
 			if n, ok := res.Proto.Support[k]; ok {
 				counts = append(counts, fmt.Sprintf("%s %d", k, n))
 			}
@@ -1737,45 +1709,8 @@ func storeSurface(s provider.Surface) store.Surface {
 	case provider.SurfaceResponses:
 		return store.SurfaceResponses
 	default:
-		return store.SurfaceOpenAI
+		return store.SurfaceChat
 	}
-}
-
-// ledgerCall records an admin probe so its token spend appears in dashboards.
-func (t *Tester) ledgerCall(c store.Call) {
-	if t.db != nil {
-		t.db.RecordCall(c)
-	}
-}
-
-// maxProbeErrNote bounds the reason stored for a failed probe: the ledger is
-// not a request log, and the dashboard renders err inline.
-const maxProbeErrNote = 200
-
-// probeErrNote renders why a probe failed, in the same shape the proxy writes
-// into the ledger's err column — `upstream <status> [<cause>]: <words>` — so a
-// sweep failure is diagnosable from the dashboard.
-//
-// Before this, a failed probe recorded its status and nothing else: 183 of the
-// 189 error rows in the 48h window ending 2026-10-23 were probe failures with
-// an empty err, and a bare 400 cannot distinguish "the plan does not include
-// this model" from a malformed probe.
-func probeErrNote(status int, body []byte, err error) string {
-	if err != nil {
-		return "probe transport: " + err.Error()
-	}
-	if status < 400 {
-		return ""
-	}
-	cause := provider.ErrorCause(status, body)
-	words := strings.Join(strings.Fields(string(body)), " ")
-	if len(words) > maxProbeErrNote {
-		words = strings.ToValidUTF8(words[:maxProbeErrNote], "") + "…"
-	}
-	if words == "" {
-		return fmt.Sprintf("upstream %d [%s]: (empty body)", status, cause)
-	}
-	return fmt.Sprintf("upstream %d [%s]: %s", status, cause, words)
 }
 
 // setProto persists one (model, surface) verdict: true → 1, false → 0,

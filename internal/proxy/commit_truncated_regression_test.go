@@ -67,7 +67,7 @@ func TestNonStreamBodyReadFailureLeavesCommittedFalse(t *testing.T) {
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	d := NewDispatcher(client, provider.NewRegistry(client))
-	rt := testRoute(base, provider.SurfaceOpenAI)
+	rt := testRoute(base, provider.SurfaceChat)
 
 	body := []byte(`{"model":"m","stream":false,"messages":[{"role":"user","content":"hi"}]}`)
 	req, _ := reqWithBody(string(body))
@@ -124,7 +124,7 @@ func TestCommitSetsCommittedOnSuccess(t *testing.T) {
 
 	client := up.Client()
 	d := NewDispatcher(client, provider.NewRegistry(client))
-	rt := testRoute(up.URL, provider.SurfaceOpenAI)
+	rt := testRoute(up.URL, provider.SurfaceChat)
 
 	body := []byte(`{"model":"m","stream":false,"messages":[{"role":"user","content":"hi"}]}`)
 	req, _ := reqWithBody(string(body))
@@ -159,7 +159,7 @@ func TestCommitSetsCommittedOnEmptyBody(t *testing.T) {
 
 	client := up.Client()
 	d := NewDispatcher(client, provider.NewRegistry(client))
-	rt := testRoute(up.URL, provider.SurfaceOpenAI)
+	rt := testRoute(up.URL, provider.SurfaceChat)
 
 	body := []byte(`{"model":"m","stream":false,"messages":[{"role":"user","content":"hi"}]}`)
 	req, _ := reqWithBody(string(body))

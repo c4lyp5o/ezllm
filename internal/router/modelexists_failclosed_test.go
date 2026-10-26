@@ -27,7 +27,7 @@ func (d deadCatalog) ModelExists(_ context.Context, _ int64, _ string) (bool, er
 
 func TestModelLookupFailureFailsClosed(t *testing.T) {
 	r := New(deadCatalog{newFake()})
-	rt, err := r.Resolve(context.Background(), "super-ssn/gpt-6-luna", provider.SurfaceOpenAI, "c")
+	rt, err := r.Resolve(context.Background(), "super-ssn/gpt-6-luna", provider.SurfaceChat, "c")
 	if err == nil {
 		t.Fatal("model lookup error must refuse the request, got nil — a store error would skip the existence check and burn an upstream call")
 	}
@@ -43,7 +43,7 @@ func TestModelLookupFailureFailsClosed(t *testing.T) {
 // dead store cannot turn into an upstream call there either.
 func TestModelLookupFailureFailsClosedOnCandidates(t *testing.T) {
 	r := New(deadCatalog{newFake()})
-	routes, err := r.ResolveCandidates(context.Background(), "super-ssn/gpt-6-luna", provider.SurfaceOpenAI, "c")
+	routes, err := r.ResolveCandidates(context.Background(), "super-ssn/gpt-6-luna", provider.SurfaceChat, "c")
 	if err == nil {
 		t.Fatalf("candidates path must refuse on a lookup error, got %d routes", len(routes))
 	}

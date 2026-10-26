@@ -40,10 +40,10 @@ func resolveWire(t *testing.T, r *Resolver, target string, client provider.Surfa
 func TestUniversalOffKeepsTheSingleAlternative(t *testing.T) {
 	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceAnthropic)] = true
-	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceOpenAI)] = true
+	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceChat)] = true
 
 	wire, translated, err := resolveWire(t, New(cat).WithTranslation(true), wireCombo, provider.SurfaceAnthropic)
-	if err != nil || wire != provider.SurfaceOpenAI || !translated {
+	if err != nil || wire != provider.SurfaceChat || !translated {
 		t.Fatalf("wire=%q translated=%v err=%v; want openai/true", wire, translated, err)
 	}
 }
@@ -53,7 +53,7 @@ func TestUniversalOffKeepsTheSingleAlternative(t *testing.T) {
 func TestUniversalOffDoesNotAutoSelectResponses(t *testing.T) {
 	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceAnthropic)] = true
-	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceOpenAI)] = true
+	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceChat)] = true
 	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceResponses)] = true
 
 	_, _, err := resolveWire(t, New(cat).WithTranslation(true), wireCombo, provider.SurfaceAnthropic)
@@ -67,15 +67,15 @@ func TestUniversalOffDoesNotAutoSelectResponses(t *testing.T) {
 func TestUniversalMessagesClientPrefersChatThenResponses(t *testing.T) {
 	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceAnthropic)] = true
-	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceOpenAI)] = true
+	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceChat)] = true
 	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceResponses)] = true
 
-	if wire, translated, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceAnthropic); err != nil || wire != provider.SurfaceOpenAI || !translated {
+	if wire, translated, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceAnthropic); err != nil || wire != provider.SurfaceChat || !translated {
 		t.Fatalf("wire=%q translated=%v err=%v; want chat first", wire, translated, err)
 	}
 
-	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceOpenAI)] = true
-	delete(cat.yesProto, probeKey(2, "gpt-6.1-sol", provider.SurfaceOpenAI))
+	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceChat)] = true
+	delete(cat.yesProto, probeKey(2, "gpt-6.1-sol", provider.SurfaceChat))
 	if wire, translated, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceAnthropic); err != nil || wire != provider.SurfaceResponses || !translated {
 		t.Fatalf("wire=%q translated=%v err=%v; want responses fallback", wire, translated, err)
 	}
@@ -85,11 +85,11 @@ func TestUniversalMessagesClientPrefersChatThenResponses(t *testing.T) {
 // and the messages fallback is open whatever the account's convention.
 func TestUniversalChatClientPrefersResponsesThenMessages(t *testing.T) {
 	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
-	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceOpenAI)] = true
+	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceChat)] = true
 	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceResponses)] = true
 	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceAnthropic)] = true
 
-	if wire, _, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceOpenAI); err != nil || wire != provider.SurfaceResponses {
+	if wire, _, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceChat); err != nil || wire != provider.SurfaceResponses {
 		t.Fatalf("wire=%q err=%v; want responses first", wire, err)
 	}
 
@@ -101,7 +101,7 @@ func TestUniversalChatClientPrefersResponsesThenMessages(t *testing.T) {
 
 	for _, conv := range []provider.UsageConvention{provider.UsageConventionAuto, provider.UsageConventionTotal} {
 		cat.accounts["super-ssn"].UsageConvention = conv
-		if wire, translated, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceOpenAI); err != nil || wire != provider.SurfaceAnthropic || !translated {
+		if wire, translated, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceChat); err != nil || wire != provider.SurfaceAnthropic || !translated {
 			t.Fatalf("convention %q: wire=%q translated=%v err=%v; want messages", conv, wire, translated, err)
 		}
 	}
@@ -113,15 +113,15 @@ func TestUniversalChatClientPrefersResponsesThenMessages(t *testing.T) {
 func TestUniversalAnthropicKindIsMessagesEvidence(t *testing.T) {
 	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
 	cat.accounts["super-ssn"].Kind = provider.KindAnthropicCompat
-	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceOpenAI)] = true
+	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceChat)] = true
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceResponses)] = true
 
-	if wire, translated, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceOpenAI); err != nil || wire != provider.SurfaceAnthropic || !translated {
+	if wire, translated, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceChat); err != nil || wire != provider.SurfaceAnthropic || !translated {
 		t.Fatalf("wire=%q translated=%v err=%v; want messages on an anthropic-compatible account", wire, translated, err)
 	}
 	// A disproved Messages capability still wins over the kind.
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceAnthropic)] = true
-	if _, _, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceOpenAI); err == nil {
+	if _, _, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceChat); err == nil {
 		t.Fatal("a probe that disproved messages must not be overridden by the account kind")
 	}
 }
@@ -130,15 +130,15 @@ func TestUniversalAnthropicKindIsMessagesEvidence(t *testing.T) {
 func TestUniversalResponsesClientPrefersChatThenMessages(t *testing.T) {
 	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceResponses)] = true
-	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceOpenAI)] = true
+	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceChat)] = true
 	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceAnthropic)] = true
 
-	if wire, translated, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceResponses); err != nil || wire != provider.SurfaceOpenAI || !translated {
+	if wire, translated, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceResponses); err != nil || wire != provider.SurfaceChat || !translated {
 		t.Fatalf("wire=%q translated=%v err=%v; want chat first", wire, translated, err)
 	}
 
-	delete(cat.yesProto, probeKey(2, "gpt-6.1-sol", provider.SurfaceOpenAI))
-	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceOpenAI)] = true
+	delete(cat.yesProto, probeKey(2, "gpt-6.1-sol", provider.SurfaceChat))
+	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceChat)] = true
 	cat.accounts["super-ssn"].UsageConvention = provider.UsageConventionAnthropic
 	if wire, translated, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceResponses); err != nil || wire != provider.SurfaceAnthropic || !translated {
 		t.Fatalf("wire=%q translated=%v err=%v; want messages fallback", wire, translated, err)
@@ -149,10 +149,10 @@ func TestUniversalResponsesClientPrefersChatThenMessages(t *testing.T) {
 // the universal matrix refuses instead of dialing an untested wire.
 func TestUniversalAlternativeRequiresProvenCapability(t *testing.T) {
 	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
-	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceOpenAI)] = true
+	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceChat)] = true
 	cat.accounts["super-ssn"].UsageConvention = provider.UsageConventionTotal
 
-	_, _, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceOpenAI)
+	_, _, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceChat)
 	var wu *ErrWireUnsupported
 	if !errors.As(err, &wu) {
 		t.Fatalf("error = %v, want ErrWireUnsupported (untested destinations are not evidence)", err)
@@ -166,7 +166,7 @@ func TestUniversalPinNamesTheWire(t *testing.T) {
 	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceResponses)] = true
 	cat.pins = map[string]string{"2/gpt-6.1-sol": "responses"}
 
-	if wire, translated, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceOpenAI); err != nil || wire != provider.SurfaceResponses || !translated {
+	if wire, translated, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceChat); err != nil || wire != provider.SurfaceResponses || !translated {
 		t.Fatalf("wire=%q translated=%v err=%v; want the pinned responses wire", wire, translated, err)
 	}
 }
@@ -176,12 +176,12 @@ func TestUniversalPinNamesTheWire(t *testing.T) {
 // whole reason Hermes-style clients were turned away before.
 func TestUniversalMessagesPinServesChatClients(t *testing.T) {
 	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
-	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceOpenAI)] = true
+	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceChat)] = true
 	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceAnthropic)] = true
 	cat.pins = map[string]string{"2/gpt-6.1-sol": "anthropic"}
 
 	for _, target := range []string{wireCombo, "super-ssn/gpt-6.1-sol"} {
-		if wire, translated, err := resolveWire(t, universalResolver(cat), target, provider.SurfaceOpenAI); err != nil || wire != provider.SurfaceAnthropic || !translated {
+		if wire, translated, err := resolveWire(t, universalResolver(cat), target, provider.SurfaceChat); err != nil || wire != provider.SurfaceAnthropic || !translated {
 			t.Fatalf("%s: wire=%q translated=%v err=%v; want the pinned messages wire", target, wire, translated, err)
 		}
 	}
@@ -193,7 +193,7 @@ func TestUniversalPinToDisprovedWireRefused(t *testing.T) {
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceAnthropic)] = true
 	cat.pins = map[string]string{"2/gpt-6.1-sol": "anthropic"}
 
-	_, _, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceOpenAI)
+	_, _, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceChat)
 	var wu *ErrWireUnsupported
 	if !errors.As(err, &wu) || !strings.Contains(wu.Reason, "pinned") {
 		t.Fatalf("error = %v, want a refusal naming the pin", err)
@@ -207,7 +207,7 @@ func TestUniversalOffKeepsPinRefusal(t *testing.T) {
 	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceResponses)] = true
 	cat.pins = map[string]string{"2/gpt-6.1-sol": "responses"}
 
-	_, _, err := resolveWire(t, New(cat).WithTranslation(true), wireCombo, provider.SurfaceOpenAI)
+	_, _, err := resolveWire(t, New(cat).WithTranslation(true), wireCombo, provider.SurfaceChat)
 	var np *ErrPinned
 	if !errors.As(err, &np) {
 		t.Fatalf("error = %v, want *ErrPinned with universal off", err)
@@ -220,11 +220,11 @@ func TestUniversalOffKeepsPinRefusal(t *testing.T) {
 func TestUniversalNeedsNoOtherFlag(t *testing.T) {
 	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceAnthropic)] = true
-	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceOpenAI)] = true
+	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceChat)] = true
 
 	// No WithTranslation: universal alone must serve the cell.
 	wire, translated, err := resolveWire(t, New(cat).WithUniversal(true), wireCombo, provider.SurfaceAnthropic)
-	if err != nil || wire != provider.SurfaceOpenAI || !translated {
+	if err != nil || wire != provider.SurfaceChat || !translated {
 		t.Fatalf("wire=%q translated=%v err=%v; want the matrix to work on universal_enabled alone", wire, translated, err)
 	}
 	// And with neither flag, nothing translates (the legacy default).
@@ -239,14 +239,14 @@ func TestUniversalNeedsNoOtherFlag(t *testing.T) {
 // new cells included.
 func TestUniversalDirectMatchesCombo(t *testing.T) {
 	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
-	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceOpenAI)] = true
+	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceChat)] = true
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceResponses)] = true
 	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceAnthropic)] = true
 	cat.accounts["super-ssn"].UsageConvention = provider.UsageConventionTotal
 	r := universalResolver(cat)
 
-	combo, _, cerr := resolveWire(t, r, wireCombo, provider.SurfaceOpenAI)
-	direct, _, derr := resolveWire(t, r, "super-ssn/gpt-6.1-sol", provider.SurfaceOpenAI)
+	combo, _, cerr := resolveWire(t, r, wireCombo, provider.SurfaceChat)
+	direct, _, derr := resolveWire(t, r, "super-ssn/gpt-6.1-sol", provider.SurfaceChat)
 	if cerr != nil || derr != nil {
 		t.Fatalf("combo err=%v direct err=%v", cerr, derr)
 	}

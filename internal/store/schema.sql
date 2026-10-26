@@ -123,11 +123,11 @@ CREATE TABLE IF NOT EXISTS models (
   model_id        TEXT NOT NULL,
   display_name    TEXT,
   owned_by        TEXT,
-  proto_openai    INTEGER,                      -- 1 ok / 0 unsupported / NULL untested
+  proto_chat      INTEGER,                      -- 1 ok / 0 unsupported / NULL untested
   proto_anthropic INTEGER,
   proto_responses INTEGER,
   proto_tested_at TEXT,
-  proto_pin       TEXT,                         -- NULL auto / 'openai' | 'anthropic' | 'responses' (enforced, never rerouted)
+  proto_pin       TEXT,                         -- NULL auto / 'chat' | 'anthropic' | 'responses' (enforced, never rerouted)
   proto_source    TEXT,                         -- 'probe' | 'curated' | NULL legacy: who wrote the verdicts; curated sticks until released
   proto_note      TEXT,                         -- operator's reason, curated rows only
   reasoning_vocab TEXT,                         -- CSV of accepted reasoning_effort values, from the provider's own refusal
@@ -224,7 +224,7 @@ CREATE TABLE IF NOT EXISTS calls (
   account_id     INTEGER,                       -- M5: denormalized NAME survives key deletion, this is the id for metering
   client         TEXT NOT NULL DEFAULT '',
   ip             TEXT NOT NULL DEFAULT '',       -- v14: caller IP (X-Forwarded-For/X-Real-IP/remote)
-  surface        TEXT NOT NULL,                  -- openai|anthropic|responses
+  surface        TEXT NOT NULL,                  -- chat|anthropic|responses
   alias          TEXT NOT NULL DEFAULT '',       -- combo name or namespace/model requested
   account        TEXT NOT NULL,                  -- denormalized
   provider_key_id INTEGER,
@@ -276,7 +276,7 @@ CREATE TABLE IF NOT EXISTS calls (
   -- The "N requests finished" tag the dashboard renders as ▮ pos/size.
   block_pos      INTEGER NOT NULL DEFAULT 0,
   -- v12: the served hop's WIRE differed from the client's, so the bodies were
-  -- TRANSLATED — the anthropic->openai-chat leg (Claude Code onto an
+  -- TRANSLATED — the anthropic->chat leg (Claude Code onto an
   -- openai-only hop) or a hop curated onto the Responses wire. Attribution,
   -- so translated traffic is a row you can count instead of infer from
   -- surface+model. 0 = the client surface and the hop wire matched.

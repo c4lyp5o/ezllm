@@ -16,11 +16,11 @@ export const account = {
   enabled: true, requires_session_header: false, quota_mode: "none", cap_window: "monthly", cap_tokens: 0,
   usage_convention: "auto", probe_delay_ms: 400, rate_limit: 0, rate_window: "",
   keys: [{ id: 1, label: "mock", hint: "dummy", enabled: true, last_test_ok: true }], quota: null, models_count: 2,
-  protocol_support: { openai: 2, anthropic: 0, responses: 0, untested: 0 },
+  protocol_support: { chat: 2, anthropic: 0, responses: 0, untested: 0 },
 };
 export const models = [
-  { id: "model-a", display: "Model A", openai: true, anthropic: false, responses: false, pin: "" },
-  { id: "model-b", display: "Model B", openai: true, anthropic: false, responses: false, pin: "" },
+  { id: "model-a", display: "Model A", chat: true, anthropic: false, responses: false, pin: "" },
+  { id: "model-b", display: "Model B", chat: true, anthropic: false, responses: false, pin: "" },
 ];
 export const summary = { count: 1, tin: 10, tout: 5, cread: 0, cwrite: 0, reasoning: 0, max_tin: 10, max_tout: 5, context_pre: 0, context_saved: 0, compression_saved: 0, applied_calls: 0, applied_saved: 0, declined_calls: 0, held_notional: 0 };
 export const requestsBody = (marker) => ({
@@ -65,7 +65,8 @@ export async function start() {
     base,
     async page(handler) {
       const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-      await context.addInitScript(() => localStorage.setItem("ezllm.admin.token", "dummy-admin-token"));
+      // Sessions are an httpOnly cookie; the tab only keeps this unlock marker.
+      await context.addInitScript(() => sessionStorage.setItem("ezllm.admin.unlocked", "1"));
       const page = await context.newPage();
       page.on("pageerror", (e) => console.error("PAGEERROR", e.message));
       await page.route("**/*", async (route) => {

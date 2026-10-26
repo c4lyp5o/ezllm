@@ -107,7 +107,7 @@ func TestOpenAIProjectionCarriesCacheSplit(t *testing.T) {
 	ir := &ResponseIR{ID: "c", Finish: FinishCompleted,
 		Usage: UsageIR{Input: intPtr(1000), Output: intPtr(42), CacheRead: intPtr(900)}}
 
-	body, err := EncodeResponse(ir, provider.SurfaceOpenAI, "m", CodecOptions{})
+	body, err := EncodeResponse(ir, provider.SurfaceChat, "m", CodecOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

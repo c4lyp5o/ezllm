@@ -274,17 +274,14 @@ func TestServiceTestRecordsFailureVerdict(t *testing.T) {
 	if code, _, body := h.do("POST", "/v1/embeddings", "tok-infer", `{"input":"x"}`); code != 400 {
 		t.Fatalf("auto with only failed probes must refuse, got %d %s", code, body)
 	}
-	// The probe itself is ledgered as real spend with its own client tag.
+	// The probe is admin traffic: it leaves no ledger row (the refused client
+	// request above is real traffic and stays).
 	h.db.Flush()
 	rows, _ := h.db.RecentCalls(context.Background(), 5)
-	found := false
 	for _, row := range rows {
 		if row.Client == "service-test" {
-			found = true
+			t.Errorf("service probe reached the ledger: %+v", row)
 		}
-	}
-	if !found {
-		t.Errorf("probe call not ledgered as client=service-test: %+v", rows)
 	}
 }
 
@@ -430,9 +427,8 @@ func TestServiceTestCustomPromptReachesUpstream(t *testing.T) {
 	}
 }
 
-// A service probe is real spend: the tokens the upstream reported land on its
-// ledger row, like any other call — not just a status.
-func TestServiceTestLedgersUsage(t *testing.T) {
+// A service probe is real spend, but admin traffic: it is not ledgered.
+func TestServiceTestIsNotLedgered(t *testing.T) {
 	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"object":"list","data":[{"embedding":[0.1]}],"usage":{"prompt_tokens":7,"total_tokens":7}}`))
@@ -441,14 +437,7 @@ func TestServiceTestLedgersUsage(t *testing.T) {
 		t.Fatalf("probe: %d %s", code, body)
 	}
 	h.db.Flush()
-	rows, _ := h.db.RecentCalls(context.Background(), 5)
-	for _, row := range rows {
-		if row.Client == "service-test" {
-			if row.TokensIn != 7 || row.RawUsage == "" {
-				t.Fatalf("service-test row tokens_in=%d raw=%q, want 7 and the raw usage", row.TokensIn, row.RawUsage)
-			}
-			return
-		}
+	if rows, _ := h.db.RecentCalls(context.Background(), 5); len(rows) != 0 {
+		t.Fatalf("service probe reached the ledger: %+v", rows)
 	}
-	t.Fatalf("no service-test row: %+v", rows)
 }

@@ -18,7 +18,7 @@ func seedLedger(tb testing.TB, d *DB, n int, start time.Time) {
 INSERT INTO calls(ts, client, surface, account, model, status, tokens_in, tokens_out, ttft_ms,
                   tokens_saved, compression_applied)
 SELECT strftime('%Y-%m-%dT%H:%M:%fZ', ?, '+' || ((n * 7919) % 604800) || ' seconds'),
-       'client', 'openai', 'account-' || (n % 5), 'model-' || (n % 10),
+       'client', 'chat', 'account-' || (n % 5), 'model-' || (n % 10),
        CASE WHEN n % 17 = 0 THEN 500 ELSE 200 END, 100, 20,
        CASE WHEN n % 13 = 0 THEN NULL ELSE n % 1000 END,
        n % 7, n % 2

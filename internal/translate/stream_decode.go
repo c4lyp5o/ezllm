@@ -93,7 +93,7 @@ func (e *streamTruncation) Error() string { return "translate: " + e.Reason }
 
 // sourceEnd applies the historic per-reader end-of-stream policy.
 func (d *eventDecoder) sourceEnd(transport bool, cause error) ([]Event, error) {
-	if d.opts.Legacy && d.surface == provider.SurfaceOpenAI && d.started {
+	if d.opts.Legacy && d.surface == provider.SurfaceChat && d.started {
 		// Historic Chat reader closed the message as a completed answer on
 		// ANY source end (transport cuts included). Preserve exactly — and
 		// mark the synthesis so the outcome plumbing knows the source died.
@@ -103,7 +103,7 @@ func (d *eventDecoder) sourceEnd(transport bool, cause error) ([]Event, error) {
 		}
 		return d.finishEvents(FinishCompleted), nil
 	}
-	if d.opts.Legacy && d.surface == provider.SurfaceOpenAI {
+	if d.opts.Legacy && d.surface == provider.SurfaceChat {
 		return nil, &streamTruncation{Reason: "upstream stream ended before any event"}
 	}
 	if transport {
@@ -170,7 +170,7 @@ func (d *eventDecoder) Next() ([]Event, error) {
 		d.terminal = true
 		return []Event{{Kind: EventError, Error: &e, Usage: d.usage}}, nil
 	}
-	if !d.opts.Legacy && d.surface != provider.SurfaceOpenAI && name != "" {
+	if !d.opts.Legacy && d.surface != provider.SurfaceChat && name != "" {
 		var typ string
 		if raw := top["type"]; len(raw) > 0 {
 			if err := json.Unmarshal(raw, &typ); err != nil || typ != name {
@@ -179,7 +179,7 @@ func (d *eventDecoder) Next() ([]Event, error) {
 		}
 	}
 	switch d.surface {
-	case provider.SurfaceOpenAI:
+	case provider.SurfaceChat:
 		return d.chat(b)
 	case provider.SurfaceAnthropic:
 		return d.messages(name, b, top)
@@ -327,7 +327,7 @@ func (d *eventDecoder) chat(b []byte) ([]Event, error) {
 	out = append(out, u...)
 	// Legacy messages synthesis closes at finish+usage rather than waiting for
 	// [DONE]. Preserve this policy; strict mode waits so late errors remain visible.
-	if d.opts.Legacy && d.surface == provider.SurfaceOpenAI && d.finish != "" && (d.usage.Input != nil || d.usage.Output != nil) {
+	if d.opts.Legacy && d.surface == provider.SurfaceChat && d.finish != "" && (d.usage.Input != nil || d.usage.Output != nil) {
 		out = append(out, d.finishEvents(d.finish)...)
 	}
 	return out, nil

@@ -47,7 +47,7 @@ func TestClaudeWebPrepareRequestRewrite(t *testing.T) {
 	a := newClaudeWebAdapterForTest(bridge.URL + "/internal/claudeweb/v1")
 	req, _ := http.NewRequest(http.MethodPost, "internal://claudeweb/chat/completions", nil)
 	req.Header.Set("Authorization", "Bearer client-supplied")
-	if err := a.PrepareRequest(context.Background(), req, Account{ID: 9}, "sessionKey=sk-ant-1", SurfaceOpenAI); err != nil {
+	if err := a.PrepareRequest(context.Background(), req, Account{ID: 9}, "sessionKey=sk-ant-1", SurfaceChat); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(req.URL.String(), bridge.URL+"/internal/claudeweb/v1/chat/completions") {
@@ -72,7 +72,7 @@ func TestWebAdaptersStampTheBridgeSecret(t *testing.T) {
 		"gemini-web": NewGeminiWeb("http://127.0.0.1:1/internal/geminiweb/v1", nil),
 	} {
 		req, _ := http.NewRequest("POST", "http://sentinel/chat/completions", nil)
-		if err := ad.PrepareRequest(context.Background(), req, Account{ID: 3}, "k", SurfaceOpenAI); err != nil {
+		if err := ad.PrepareRequest(context.Background(), req, Account{ID: 3}, "k", SurfaceChat); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
 		if !ValidBridgeSecret(req.Header.Get(BridgeSecretHeader)) {

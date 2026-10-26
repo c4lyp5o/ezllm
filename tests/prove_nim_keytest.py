@@ -14,13 +14,11 @@ Run against a SCRATCH instance (verify-instance / canary rig), never prod:
     EZLLM_DATA_DIR=<rig>/data \
     python3 tests/prove_nim_keytest.py
 
-Env-overridable: EZLLM_BASE, EZLLM_ADMIN_TOKEN_FILE, NVIDIA_NIM_KEY_FILE,
-EZLLM_DB (the rig's sqlite, for the ledger read). Secrets are read at runtime
-and never printed.
+Env-overridable: EZLLM_BASE, EZLLM_ADMIN_TOKEN_FILE, NVIDIA_NIM_KEY_FILE.
+Secrets are read at runtime and never printed.
 """
 import json
 import os
-import sqlite3
 import sys
 import time
 import urllib.error
@@ -37,7 +35,6 @@ def env_path(name: str, default: str) -> str:
 
 ADMIN_TOKEN_FILE = env_path("EZLLM_ADMIN_TOKEN_FILE", ADMIN_TOKEN_FILE)
 NIM_KEY_FILE = env_path("NVIDIA_NIM_KEY_FILE", NIM_KEY_FILE)
-DB = env_path("EZLLM_DB", "~/.hermes/cache/scratch/nim-canary/data/ezllm.sqlite")
 
 NIM_BASE = "https://integrate.api.nvidia.com/v1"
 ACCOUNT_NAME = "NVIDIA NIM (probe proof)"
@@ -114,20 +111,7 @@ def main() -> int:
         mark = "ok " if step.get("ok") else "FAIL"
         print(f"  [{mark}] {step.get('step')}: {step.get('detail', '')}")
 
-    # Ledger evidence: the admin:test row the probe itself wrote.
-    time.sleep(1.0)
-    try:
-        con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
-        rows = con.execute(
-            "SELECT client, account, model, status, total_ms FROM calls "
-            "WHERE client='admin:test' ORDER BY ts DESC LIMIT 5").fetchall()
-        con.close()
-        print("ledger (latest admin:test rows):")
-        for r in rows:
-            print(f"  client={r[0]} account={r[1]} model={r[2]} status={r[3]} {r[4]}ms")
-    except sqlite3.Error as e:
-        print(f"(ledger read skipped: {e})")
-
+    # Key tests are not ledgered; the steps above are the evidence.
     print("PROOF OK — the NIM key test passed through the real handler")
     return 0
 

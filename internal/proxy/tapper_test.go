@@ -125,7 +125,7 @@ func TestTapperHandlesResponsesCompleted(t *testing.T) {
 // OpenAI streams put usage only in the final chunk; earlier chunks and [DONE]
 // must not clear or corrupt it.
 func TestTapperOpenAIFinalChunkWins(t *testing.T) {
-	tp := NewUsageTapper(provider.SurfaceOpenAI)
+	tp := NewUsageTapper(provider.SurfaceChat)
 	tp.Observe([]byte(`data: {"choices":[{"delta":{"role":"assistant"}}]}`))
 	tp.Observe([]byte(`data: {"choices":[{"delta":{"content":"1"}}]}`))
 	if tp.Usage() != nil {

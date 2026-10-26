@@ -415,7 +415,7 @@ func TestSuccessfulComboRequestRecordsTheServedHop(t *testing.T) {
 
 	// A fresh resolver reads the same process-wide record, so this observes what
 	// the handler wrote rather than any state the test set up itself.
-	routes, err := router.New(tu.db).ResolveCandidates(ctx, "daily", provider.SurfaceOpenAI, "test")
+	routes, err := router.New(tu.db).ResolveCandidates(ctx, "daily", provider.SurfaceChat, "test")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}

@@ -379,29 +379,7 @@ func TestEncodeMessagesRefusesNonObjectArguments(t *testing.T) {
 	}
 }
 
-// ── cross-surface dispatcher + determinism ──────────────────────────────────
-
-func TestEncodeRequestDispatchesByDestination(t *testing.T) {
-	ir := dec(t, DecodeChatRequest, goldenChatBody)
-	for _, s := range []struct {
-		surface destSurface
-		encode  func(*RequestIR, string) ([]byte, error)
-	}{
-		{destChat, EncodeChatRequest}, {destMessages, EncodeMessagesRequest}, {destResponses, EncodeResponsesRequest},
-	} {
-		via, err := EncodeRequest(ir, s.surface, "up/model")
-		if err != nil {
-			t.Fatalf("%s: %v", s.surface, err)
-		}
-		direct, err := s.encode(ir, "up/model")
-		if err != nil {
-			t.Fatalf("%s: %v", s.surface, err)
-		}
-		if !bytes.Equal(via, direct) {
-			t.Errorf("%s: dispatcher output differs from the direct encoder", s.surface)
-		}
-	}
-}
+// ── determinism ────────────────────────────────────────────────────────────
 
 func TestEncodersAreDeterministic(t *testing.T) {
 	for _, tc := range []struct {

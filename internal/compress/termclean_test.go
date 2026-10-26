@@ -39,7 +39,7 @@ func toolOutputAfter(t *testing.T, st Stage, name, output string) map[string]str
 	p := &Profile{Name: "p", Enabled: true, ExemptLastTurn: true, MinCompressRatio: 0, Stages: []Stage{st}}
 	got := map[string]string{}
 	for shape, body := range toolBodies(name, output) {
-		out, _ := Apply(body, p)
+		out, _ := ApplyWithSession(body, p, nil, "", nil)
 		texts := editedTexts(t, out)
 		got[shape] = texts[0]
 	}

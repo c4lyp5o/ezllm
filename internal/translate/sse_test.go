@@ -6,6 +6,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/c4lyp5o/ezllm/internal/provider"
 )
 
 // sseFrame is one parsed `event:`/`data:` pair from an SSE stream.
@@ -16,7 +18,7 @@ type sseFrame struct {
 
 func runSSE(t *testing.T, stream, clientModel string) ([]byte, []sseFrame) {
 	t.Helper()
-	r := NewSSEReader(strings.NewReader(stream), clientModel)
+	r := NewStreamReader(strings.NewReader(stream), provider.SurfaceChat, provider.SurfaceAnthropic, clientModel, CodecOptions{Legacy: true})
 	var buf bytes.Buffer
 	if _, err := io.Copy(&buf, r); err != nil {
 		t.Fatalf("reading translated stream: %v", err)

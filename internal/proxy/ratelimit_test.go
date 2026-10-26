@@ -131,26 +131,26 @@ func TestHopCooldownHonoursRetryAfter(t *testing.T) {
 	hdr := http.Header{}
 
 	hdr.Set("Retry-After", "7")
-	if got := d.classifyHop(nil, http.StatusTooManyRequests, hdr, true).cooldown; got != 7*time.Second {
+	if got := d.classifyHopPolicy(context.Background(), nil, http.StatusTooManyRequests, hdr, true).cooldown; got != 7*time.Second {
 		t.Errorf("Retry-After: 7 → %v, want 7s", got)
 	}
 
 	// A value the upstream cannot seriously mean is rejected rather than
 	// clamped, so the operator's configured duration applies instead.
 	hdr.Set("Retry-After", "86400")
-	if got := d.classifyHop(nil, http.StatusTooManyRequests, hdr, true).cooldown; got != d.on429 {
+	if got := d.classifyHopPolicy(context.Background(), nil, http.StatusTooManyRequests, hdr, true).cooldown; got != d.on429 {
 		t.Errorf("absurd Retry-After → %v, want the configured on_429 (%v)", got, d.on429)
 	}
 
 	// Garbage must not pin a hop.
 	hdr.Set("Retry-After", "soon")
-	if got := d.classifyHop(nil, http.StatusTooManyRequests, hdr, true).cooldown; got != d.on429 {
+	if got := d.classifyHopPolicy(context.Background(), nil, http.StatusTooManyRequests, hdr, true).cooldown; got != d.on429 {
 		t.Errorf("garbage Retry-After → %v, want the configured on_429 (%v)", got, d.on429)
 	}
 
 	// Zero is not a valid delay: "come back now" is what we are already doing.
 	hdr.Set("Retry-After", "0")
-	if got := d.classifyHop(nil, http.StatusTooManyRequests, hdr, true).cooldown; got != d.on429 {
+	if got := d.classifyHopPolicy(context.Background(), nil, http.StatusTooManyRequests, hdr, true).cooldown; got != d.on429 {
 		t.Errorf("Retry-After: 0 → %v, want the configured on_429 (%v)", got, d.on429)
 	}
 }

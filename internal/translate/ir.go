@@ -156,29 +156,3 @@ func (e *UnsupportedFieldError) Error() string {
 func unsupported(field, reason string) error {
 	return &UnsupportedFieldError{Field: field, Reason: reason}
 }
-
-// destSurface names an ENCODER destination (the wire we will dial).
-type destSurface string
-
-const (
-	destChat      destSurface = "chat"
-	destMessages  destSurface = "messages"
-	destResponses destSurface = "responses"
-)
-
-// EncodeRequest is the one entry point the dispatcher uses: encode the IR for
-// the destination wire. Nil IR is a programming error, not a client error.
-func EncodeRequest(ir *RequestIR, dest destSurface, upstreamModel string) ([]byte, error) {
-	if ir == nil {
-		return nil, fmt.Errorf("translate: nil request IR for %s", dest)
-	}
-	switch dest {
-	case destChat:
-		return EncodeChatRequest(ir, upstreamModel)
-	case destMessages:
-		return EncodeMessagesRequest(ir, upstreamModel)
-	case destResponses:
-		return EncodeResponsesRequest(ir, upstreamModel)
-	}
-	return nil, fmt.Errorf("translate: unknown destination wire %q", dest)
-}

@@ -43,10 +43,6 @@ func TestPickProbeModelsSkipsNonChatOrdersAndCaps(t *testing.T) {
 	if got[0] != "models/gemini-2.5-flash" {
 		t.Fatalf("first candidate = %q (catalog order decides among 'flash' matches)", got[0])
 	}
-	// The single-candidate view stays the first candidate.
-	if pickProbeModel(models, acct) != got[0] {
-		t.Fatalf("pickProbeModel = %q, want %q", pickProbeModel(models, acct), got[0])
-	}
 }
 
 func TestProbeAdvancesWhenTheFirstModelIsRetired(t *testing.T) {
@@ -251,9 +247,6 @@ func TestNIMCatalogPicksMeasuredFastCandidates(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("candidate[%d] = %q, want %q (full list %v)", i, got[i], want[i], got)
 		}
-	}
-	if pickProbeModel(models, acct) != want[0] {
-		t.Fatalf("single-candidate view = %q, want %q", pickProbeModel(models, acct), want[0])
 	}
 }
 

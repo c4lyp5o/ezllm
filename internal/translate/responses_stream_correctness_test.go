@@ -13,6 +13,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/c4lyp5o/ezllm/internal/provider"
 )
 
 // One source stream with DISTINCT item ids and call ids, plus a text preamble.
@@ -138,7 +140,7 @@ func anthropicArgs(t *testing.T, out string) (map[int]string, map[int]string) {
 }
 
 func TestChatStreamCarriesArgsWhenItemIDDiffersFromCallID(t *testing.T) {
-	out := readAll(t, NewResponsesSSEReader(strings.NewReader(toolStream(false)), "proof"))
+	out := readAll(t, NewStreamReader(strings.NewReader(toolStream(false)), provider.SurfaceResponses, provider.SurfaceChat, "proof", CodecOptions{Legacy: true}))
 	args, ids := chatArgs(t, out)
 
 	if got := args[0]; got != `{"path":"/a"}` {
@@ -150,7 +152,7 @@ func TestChatStreamCarriesArgsWhenItemIDDiffersFromCallID(t *testing.T) {
 }
 
 func TestAnthropicStreamCarriesArgsWhenItemIDDiffersFromCallID(t *testing.T) {
-	out := readAll(t, NewResponsesAnthropicSSEReader(strings.NewReader(toolStream(false)), "proof"))
+	out := readAll(t, NewStreamReader(strings.NewReader(toolStream(false)), provider.SurfaceResponses, provider.SurfaceAnthropic, "proof", CodecOptions{Legacy: true}))
 	args, ids := anthropicArgs(t, out)
 
 	if got := args[0]; got != `{"path":"/a"}` {
@@ -162,7 +164,7 @@ func TestAnthropicStreamCarriesArgsWhenItemIDDiffersFromCallID(t *testing.T) {
 }
 
 func TestChatStreamKeepsInterleavedToolsSeparate(t *testing.T) {
-	out := readAll(t, NewResponsesSSEReader(strings.NewReader(toolStream(true)), "proof"))
+	out := readAll(t, NewStreamReader(strings.NewReader(toolStream(true)), provider.SurfaceResponses, provider.SurfaceChat, "proof", CodecOptions{Legacy: true}))
 	args, ids := chatArgs(t, out)
 
 	if got := args[0]; got != `{"path":"/a"}_more` {
@@ -212,7 +214,7 @@ func toolStreamInterleaved() string {
 }
 
 func TestAnthropicStreamKeepsSequentialToolsSeparate(t *testing.T) {
-	out := readAll(t, NewResponsesAnthropicSSEReader(strings.NewReader(toolStreamSequential()), "proof"))
+	out := readAll(t, NewStreamReader(strings.NewReader(toolStreamSequential()), provider.SurfaceResponses, provider.SurfaceAnthropic, "proof", CodecOptions{Legacy: true}))
 	args, ids := anthropicArgs(t, out)
 
 	if got := args[0]; got != `{"path":"/a"}` {
@@ -230,7 +232,7 @@ func TestAnthropicStreamKeepsSequentialToolsSeparate(t *testing.T) {
 }
 
 func TestAnthropicStreamRefusesUnrepresentableInterleave(t *testing.T) {
-	out := readAll(t, NewResponsesAnthropicSSEReader(strings.NewReader(toolStreamInterleaved()), "proof"))
+	out := readAll(t, NewStreamReader(strings.NewReader(toolStreamInterleaved()), provider.SurfaceResponses, provider.SurfaceAnthropic, "proof", CodecOptions{Legacy: true}))
 
 	if !strings.Contains(out, `"type":"error"`) {
 		t.Errorf("a fragment for an already-stopped block must fail visibly, not reopen it:\n%s", out)
@@ -245,7 +247,7 @@ func TestChatStreamIncompleteKeepsUsage(t *testing.T) {
 		`data: {"type":"response.created","response":{"id":"resp_1"}}` + "\n\n" +
 		"event: response.incomplete\n" +
 		`data: {"type":"response.incomplete","response":{"id":"resp_1","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":12345,"output_tokens":6789}}}` + "\n\n"
-	out := readAll(t, NewResponsesSSEReader(strings.NewReader(in), "proof"))
+	out := readAll(t, NewStreamReader(strings.NewReader(in), provider.SurfaceResponses, provider.SurfaceChat, "proof", CodecOptions{Legacy: true}))
 
 	if !strings.Contains(out, `"finish_reason":"length"`) {
 		t.Error("incomplete terminal must map to finish_reason length")
@@ -260,7 +262,7 @@ func TestAnthropicStreamIncompleteKeepsUsage(t *testing.T) {
 		`data: {"type":"response.created","response":{"id":"resp_1"}}` + "\n\n" +
 		"event: response.incomplete\n" +
 		`data: {"type":"response.incomplete","response":{"id":"resp_1","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":12345,"output_tokens":6789}}}` + "\n\n"
-	out := readAll(t, NewResponsesAnthropicSSEReader(strings.NewReader(in), "proof"))
+	out := readAll(t, NewStreamReader(strings.NewReader(in), provider.SurfaceResponses, provider.SurfaceAnthropic, "proof", CodecOptions{Legacy: true}))
 
 	if !strings.Contains(out, `"stop_reason":"max_tokens"`) {
 		t.Error("incomplete terminal must map to stop_reason max_tokens")
@@ -275,7 +277,7 @@ func TestChatStreamFailedKeepsUsage(t *testing.T) {
 		`data: {"type":"response.created","response":{"id":"resp_1"}}` + "\n\n" +
 		"event: response.failed\n" +
 		`data: {"type":"response.failed","response":{"id":"resp_1","status":"failed","error":{"code":"server_error","message":"boom"},"usage":{"input_tokens":11,"output_tokens":22}}}` + "\n\n"
-	out := readAll(t, NewResponsesSSEReader(strings.NewReader(in), "proof"))
+	out := readAll(t, NewStreamReader(strings.NewReader(in), provider.SurfaceResponses, provider.SurfaceChat, "proof", CodecOptions{Legacy: true}))
 
 	if !strings.Contains(out, "boom") {
 		t.Error("failed terminal must surface the upstream error words")
@@ -292,7 +294,7 @@ func TestChatStreamEOFWithoutTerminalIsNotSuccess(t *testing.T) {
 		`data: {"type":"response.created","response":{"id":"resp_1"}}` + "\n\n" +
 		"event: response.output_text.delta\n" +
 		`data: {"type":"response.output_text.delta","delta":"partial"}` + "\n\n"
-	out := readAll(t, NewResponsesSSEReader(strings.NewReader(in), "proof"))
+	out := readAll(t, NewStreamReader(strings.NewReader(in), provider.SurfaceResponses, provider.SurfaceChat, "proof", CodecOptions{Legacy: true}))
 
 	if strings.Contains(out, `"finish_reason":"stop"`) || strings.Contains(out, `"finish_reason":"tool_calls"`) {
 		t.Errorf("clean EOF without a terminal event synthesized success:\n%s", out)
@@ -307,7 +309,7 @@ func TestAnthropicStreamEOFWithoutTerminalIsNotSuccess(t *testing.T) {
 		`data: {"type":"response.created","response":{"id":"resp_1"}}` + "\n\n" +
 		"event: response.output_text.delta\n" +
 		`data: {"type":"response.output_text.delta","delta":"partial"}` + "\n\n"
-	out := readAll(t, NewResponsesAnthropicSSEReader(strings.NewReader(in), "proof"))
+	out := readAll(t, NewStreamReader(strings.NewReader(in), provider.SurfaceResponses, provider.SurfaceAnthropic, "proof", CodecOptions{Legacy: true}))
 
 	if strings.Contains(out, `"stop_reason":"end_turn"`) || strings.Contains(out, `"stop_reason":"tool_use"`) {
 		t.Errorf("clean EOF without a terminal event synthesized success:\n%s", out)

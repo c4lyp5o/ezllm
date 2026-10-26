@@ -71,7 +71,7 @@ func TestToolRefReplacesIdenticalLaterResults(t *testing.T) {
 	file, other := fileBody(30), fileBody(31)
 	for _, shape := range refShapes {
 		body := refConv(shape, [][2]string{{"a", file}, {"b", other}, {"c", file}, {"d", file}, {"e", "tiny"}, {"f", "tiny"}}, false)
-		out, res := Apply(body, refProfile(false, nil))
+		out, res := ApplyWithSession(body, refProfile(false, nil), nil, "", nil)
 		got := editedTexts(t, out)
 		want := []string{file, other, refMarker("a"), refMarker("a"), "tiny", "tiny", "go"}
 		if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
@@ -81,7 +81,7 @@ func TestToolRefReplacesIdenticalLaterResults(t *testing.T) {
 	// min_bytes is the size floor (default 200).
 	for _, shape := range refShapes {
 		body := refConv(shape, [][2]string{{"a", file}, {"b", file}}, false)
-		out, _ := Apply(body, refProfile(false, map[string]any{"min_bytes": len(file) + 1}))
+		out, _ := ApplyWithSession(body, refProfile(false, map[string]any{"min_bytes": len(file) + 1}), nil, "", nil)
 		if strings.Contains(string(out), "ezllm/ref") {
 			t.Errorf("%s: referenced an output below min_bytes", shape)
 		}
@@ -140,11 +140,11 @@ func TestToolRefFinalMessageFollowsFreshToolOutput(t *testing.T) {
 	file := fileBody(30)
 	for _, shape := range refShapes {
 		body := refConv(shape, [][2]string{{"a", file}, {"b", file}}, true)
-		keep, _ := Apply(body, refProfile(false, nil))
+		keep, _ := ApplyWithSession(body, refProfile(false, nil), nil, "", nil)
 		if strings.Contains(string(keep), "ezllm/ref") {
 			t.Errorf("%s: keep referenced the exempt final message", shape)
 		}
-		comp, _ := Apply(body, refProfile(true, nil))
+		comp, _ := ApplyWithSession(body, refProfile(true, nil), nil, "", nil)
 		if got := editedTexts(t, comp); got[len(got)-1] != refMarker("a") {
 			t.Errorf("%s: compress did not reference the fresh final result: %q", shape, got[len(got)-1])
 		}

@@ -44,15 +44,6 @@ func NewGeminiWeb(bridgeBase string, c *http.Client) Adapter {
 	return &geminiWebAdapter{client: c, bridgeBase: strings.TrimSuffix(bridgeBase, "/"), geminiBase: "https://gemini.google.com"}
 }
 
-// newGeminiWebWithBase is the test constructor: geminiBase points the direct
-// status/catalog calls at a mock upstream.
-func newGeminiWebWithBase(bridgeBase, geminiBase string, c *http.Client) Adapter {
-	if c == nil {
-		c = &http.Client{Timeout: 30 * time.Second}
-	}
-	return &geminiWebAdapter{client: c, bridgeBase: strings.TrimSuffix(bridgeBase, "/"), geminiBase: strings.TrimSuffix(geminiBase, "/")}
-}
-
 // statusClient builds a geminiweb client for direct status/catalog calls.
 func (a *geminiWebAdapter) statusClient(key string) (*geminiweb.Client, error) {
 	c, err := geminiweb.NewFromKey(key)

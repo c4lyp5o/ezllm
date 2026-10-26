@@ -191,7 +191,7 @@ type CostRow struct {
 	Model         string  `json:"model"`
 	Calls         int64   `json:"calls"`
 	UnpricedCalls int64   `json:"unpriced_calls"` // NO price row at that date — see header note
-	TokensIn      int64   `json:"tokens_in"`      // full-price input (excludes cached, per NormalizeUsage)
+	TokensIn      int64   `json:"tokens_in"`      // full-price input (excludes cached, per NormalizeUsageWith)
 	TokensOut     int64   `json:"tokens_out"`
 	CachedRead    int64   `json:"tokens_cached_read"`
 	CachedWrite   int64   `json:"tokens_cached_write"`

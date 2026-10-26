@@ -10,6 +10,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/c4lyp5o/ezllm/internal/provider"
 )
 
 func TestAnthropicToResponsesRequest(t *testing.T) {
@@ -115,7 +117,7 @@ func TestResponsesToAnthropicResponse(t *testing.T) {
 	  ],
 	  "usage":{"input_tokens":1234,"output_tokens":56}
 	}`
-	out, err := ResponsesToAnthropic([]byte(in), "daily")
+	out, err := ResponseUniversal([]byte(in), provider.SurfaceResponses, provider.SurfaceAnthropic, "daily", CodecOptions{Legacy: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +176,7 @@ event: response.completed
 data: {"type":"response.completed","response":{"usage":{"input_tokens":42,"output_tokens":7}}}
 
 `
-	out, _ := io.ReadAll(NewResponsesAnthropicSSEReader(strings.NewReader(in), "daily"))
+	out, _ := io.ReadAll(NewStreamReader(strings.NewReader(in), provider.SurfaceResponses, provider.SurfaceAnthropic, "daily", CodecOptions{Legacy: true}))
 	events := parseAnthropicFrames(t, string(out))
 	want := []string{
 		"ping", "message_start",
@@ -222,7 +224,7 @@ event: response.output_text.delta
 data: {"type":"response.output_text.delta","delta":"partial"}
 
 `
-	out, _ := io.ReadAll(NewResponsesAnthropicSSEReader(strings.NewReader(in), "daily"))
+	out, _ := io.ReadAll(NewStreamReader(strings.NewReader(in), provider.SurfaceResponses, provider.SurfaceAnthropic, "daily", CodecOptions{Legacy: true}))
 	events := parseAnthropicFrames(t, string(out))
 	if len(events) == 0 || events[len(events)-1].event != "error" {
 		t.Fatalf("cut stream must end with an error event: %v", events)

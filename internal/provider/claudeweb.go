@@ -53,12 +53,6 @@ func NewClaudeWeb(bridgeBase string, c *http.Client) Adapter {
 	return &claudeWebAdapter{client: c, bridgeBase: strings.TrimSuffix(bridgeBase, "/")}
 }
 
-// newClaudeWebAdapterForTest is the test constructor: bridgeBase points the
-// rewrite at a mock.
-func newClaudeWebAdapterForTest(bridgeBase string) Adapter {
-	return &claudeWebAdapter{client: &http.Client{Timeout: 5 * time.Second}, bridgeBase: strings.TrimSuffix(bridgeBase, "/")}
-}
-
 func (a *claudeWebAdapter) Kind() Kind { return KindClaudeWeb }
 
 func (a *claudeWebAdapter) StripHeaders() []string {

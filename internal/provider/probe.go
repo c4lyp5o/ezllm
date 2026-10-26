@@ -41,11 +41,6 @@ type AuthProbe struct {
 	CalibrationKey string
 }
 
-// AuthOracle returns the cheapest call that proves the credential is valid.
-// The registration flow treats a 401/403 here as an invalid key (fail fast — no
-// retry; on these providers 403 means bad credentials, not "slow down").
-func AuthOracle(a Adapter) AuthProbe { return a.AuthOracle() }
-
 // AuthRejectStatuser is an optional adapter interface. Adapters whose upstream
 // signals a bad credential with a non-401/403 status (Gemini: 400
 // INVALID_ARGUMENT) list those statuses here. Adapters that do not implement it
@@ -61,10 +56,6 @@ type AuthRejectStatuser interface {
 type HostedAuthOracle interface {
 	AuthOracleFor(acct Account) AuthProbe
 }
-
-// CatalogIsPublic reports whether ListModels succeeds without a valid key.
-// true → the catalog step is informational only and CANNOT pass a key test.
-func CatalogIsPublic(a Adapter) bool { return a.CatalogIsPublic() }
 
 // ProbeVerdict classifies one protocol-probe response. NULL (unknown) is a
 // first-class result: "we could not ask" must never be recorded as

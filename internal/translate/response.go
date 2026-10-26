@@ -3,24 +3,7 @@ package translate
 import (
 	"encoding/json"
 	"strings"
-
-	"github.com/c4lyp5o/ezllm/internal/provider"
 )
-
-// Response translates an OpenAI chat-completions response body into an
-// Anthropic messages response body.
-//
-// The Anthropic envelope always carries a valid stop_reason and a
-// content array (possibly empty); a client that renders nothing is
-// better than one that chokes on a missing field.
-func Response(body []byte, clientModel string) ([]byte, error) {
-	opts := CodecOptions{Legacy: true}
-	ir, err := DecodeResponse(body, provider.SurfaceChat, opts)
-	if err != nil {
-		return nil, err
-	}
-	return EncodeResponse(ir, provider.SurfaceAnthropic, clientModel, opts)
-}
 
 // parseToolArguments turns the OpenAI `arguments` JSON string into the
 // object Anthropic's tool_use.input expects. Empty or malformed

@@ -63,8 +63,8 @@ type Engine struct {
 
 	rules atomic.Value // map[key]*Rule, immutable once published
 
-	// refresh interval for the background ticker. Exported-ish via field so
-	// tests can shrink it; production sets it via NewEngine.
+	// refresh interval for the background ticker. Named here so tests can
+	// shrink it; production sets it via newEngine.
 	refreshEvery time.Duration
 
 	stopOnce sync.Once
@@ -77,9 +77,10 @@ type key struct {
 	modelID   string
 }
 
-// NewEngine builds an Engine, loads the initial rule set, and (unless
-// autoRefresh is false) starts a background refresh goroutine. Production
-// passes autoRefresh=true; tests pass false and call Reload manually.
+// NewEngine is the constructor tests use: it builds an Engine and loads the
+// initial rule set, starting the background refresh goroutine only when
+// autoRefresh is true. Tests pass false and call Reload manually so no ticker
+// runs during a test. Production boots with NewEngineRetrying below.
 func NewEngine(src RuleSource, usage UsageSource, now Clock, refreshEvery time.Duration, autoRefresh bool) (*Engine, error) {
 	e := newEngine(src, usage, now, refreshEvery)
 	if err := e.Reload(context.Background()); err != nil {

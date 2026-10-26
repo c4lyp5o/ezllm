@@ -227,21 +227,6 @@ func PollDeviceState(ctx context.Context, cfg Config, dc DeviceCode) (Session, P
 	}
 }
 
-// PollAccessTokenOnce is one poll for callers that own their own schedule —
-// the dashboard device flow asks once per status GET rather than blocking.
-// ok=false means the operator has not authorized yet; ask again.
-// (slow_down is folded into ok=false here — use PollDeviceState to honour it.)
-func PollAccessTokenOnce(ctx context.Context, cfg Config, dc DeviceCode) (Session, bool, error) {
-	s, state, err := PollDeviceState(ctx, cfg, dc)
-	if err != nil {
-		return Session{}, false, err
-	}
-	if state != PollGranted {
-		return Session{}, false, nil
-	}
-	return s, true, nil
-}
-
 // PollAccessToken polls until the operator authorizes (or the code
 // expires / is denied). ctx cancellation aborts the wait.
 func PollAccessToken(ctx context.Context, cfg Config, dc DeviceCode) (Session, error) {

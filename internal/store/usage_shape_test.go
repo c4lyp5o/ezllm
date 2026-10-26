@@ -67,7 +67,7 @@ func TestNormalizeUsageEveryTokenInOneBucket(t *testing.T) {
 // reasoning count. They are already inside output_tokens; cost never adds
 // them again.
 func TestNormalizeUsageAnthropicThinking(t *testing.T) {
-	got := NormalizeUsage(SurfaceAnthropic, rawUsage(t, `{"input_tokens":191,"output_tokens":590,"output_tokens_details":{"thinking_tokens":246}}`))
+	got := NormalizeUsageWith(SurfaceAnthropic, rawUsage(t, `{"input_tokens":191,"output_tokens":590,"output_tokens_details":{"thinking_tokens":246}}`), provider.UsageConventionAuto)
 	if got.Reasoning != 246 || got.Out != 590 {
 		t.Errorf("reasoning=%d out=%d, want 246 / 590", got.Reasoning, got.Out)
 	}

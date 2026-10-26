@@ -1,7 +1,6 @@
 package githubcopilot
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,22 +9,6 @@ import (
 	"strings"
 	"time"
 )
-
-// Endpoint routing (omniroute buildUrl): claude* → the Anthropic-native
-// /v1/messages shim; openai-responses target or *codex* → /responses;
-// everything else → /chat/completions. Gemini/Claude models must NEVER go
-// to /responses (they 400 with unsupported_api_for_model).
-func endpointForModel(model, targetFormat string) string {
-	m := strings.ToLower(model)
-	isClaude := strings.Contains(m, "claude")
-	if isClaude {
-		return copilotAPIBase + "/v1/messages"
-	}
-	if (targetFormat == "openai-responses" || strings.Contains(m, "codex")) && !strings.Contains(m, "gemini") && !isClaude {
-		return copilotAPIBase + "/responses"
-	}
-	return copilotAPIBase + "/chat/completions"
-}
 
 // ChatHeaders builds the request header set (omniroute
 // getGitHubCopilotChatHeaders + buildHeaders).
@@ -307,42 +290,4 @@ func EnsureSession(ctx context.Context, cfg Config, s Session, now time.Time) (S
 	}
 	refreshed.CopilotToken, refreshed.CopilotExpiresAt = token, exp
 	return refreshed, nil
-}
-
-// DoChat performs one POST against the routed endpoint with the CLI header
-// set. The caller owns the body; quirks are applied here.
-func DoChat(ctx context.Context, cfg Config, s Session, model, targetFormat string, body map[string]any, stream bool) (*http.Response, error) {
-	cfg = cfg.withDefaults()
-	// Stealth: drop system messages (SOUL.md/MEMORY.md/USER.md) so the
-	// client's persona and personal context never reach a web provider.
-	if msgs, ok := body["messages"].([]any); ok {
-		filtered := make([]any, 0, len(msgs))
-		for _, m := range msgs {
-			msg, ok := m.(map[string]any)
-			if ok && msg["role"] == "system" {
-				continue
-			}
-			filtered = append(filtered, m)
-		}
-		body["messages"] = filtered
-	}
-	PrepareBody(model, body)
-	endpoint := endpointForModel(model, targetFormat)
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
-	if err != nil {
-		return nil, err
-	}
-	for k, vs := range ChatHeaders(cfg, s.CopilotToken, stream) {
-		for _, v := range vs {
-			req.Header.Add(k, v)
-		}
-	}
-	if strings.Contains(strings.ToLower(model), "claude") {
-		req.Header.Set("anthropic-version", "2023-06-01")
-	}
-	return cfg.HTTP.Do(req)
 }

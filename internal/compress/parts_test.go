@@ -102,7 +102,7 @@ func TestEveryEngineSavesTheSameInEveryShape(t *testing.T) {
 		var refTexts []string
 		var refSaved int64 = -1
 		for _, shape := range []string{"chat", "messages", "responses"} {
-			out, res := Apply(bodies[shape], p)
+			out, res := ApplyWithSession(bodies[shape], p, nil, "", nil)
 			if !res.Applied {
 				t.Errorf("%s/%s: not applied (%s)", st.Engine, shape, res.Err)
 				continue
@@ -129,7 +129,7 @@ func TestEveryEngineSavesTheSameInEveryShape(t *testing.T) {
 func TestPartsLeaveNonTextUntouched(t *testing.T) {
 	p := &Profile{Name: "p", Enabled: true, ExemptLastTurn: true, Stages: []Stage{{Engine: "rtk"}, {Engine: "headroom"}, {Engine: "lite"}}}
 	for shape, body := range shapeBodies() {
-		out, res := Apply(body, p)
+		out, res := ApplyWithSession(body, p, nil, "", nil)
 		if !res.Applied {
 			t.Fatalf("%s: not applied (%s)", shape, res.Err)
 		}
@@ -178,7 +178,7 @@ func TestFileReadsStayVerbatimThroughEveryEngine(t *testing.T) {
 		return map[string][]byte{"chat": b("messages", chat), "messages": b("messages", msgs), "responses": b("input", resp)}
 	}
 	for shape, body := range mk(map[string]string{"f": fileText, "j": jsonFile, "u": unknown}) {
-		out, _ := Apply(body, p)
+		out, _ := ApplyWithSession(body, p, nil, "", nil)
 		texts := strings.Join(editedTexts(t, out), "\x00")
 		if !strings.Contains(texts, fileText) {
 			t.Errorf("%s: a file read was rewritten", shape)
@@ -193,7 +193,7 @@ func TestFileReadsStayVerbatimThroughEveryEngine(t *testing.T) {
 	// The profile says deploy_status is verbatim: no engine touches it.
 	p.Stages[0].Options = map[string]any{"tool_classes": map[string]any{"deploy_status": "preserve"}}
 	for shape, body := range mk(map[string]string{"u": unknown}) {
-		out, _ := Apply(body, p)
+		out, _ := ApplyWithSession(body, p, nil, "", nil)
 		if !strings.Contains(strings.Join(editedTexts(t, out), "\x00"), unknown) {
 			t.Errorf("%s: a preserve override did not reach lite", shape)
 		}

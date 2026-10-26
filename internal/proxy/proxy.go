@@ -71,11 +71,6 @@ type UsageTapper struct {
 	skipEvent bool
 }
 
-// NewUsageTapper builds a tapper for one surface (usage_convention auto).
-func NewUsageTapper(surface provider.Surface) *UsageTapper {
-	return NewUsageTapperFor(surface, provider.UsageConventionAuto)
-}
-
 // NewUsageTapperFor builds a tapper that normalizes with the account's
 // declared usage convention (it changes only the Messages wire's reading).
 func NewUsageTapperFor(surface provider.Surface, conv provider.UsageConvention) *UsageTapper {
@@ -542,8 +537,8 @@ func (d *Dispatcher) releaseProbe(rt Route) {
 	}
 }
 
-// classifyHop decides what one hop attempt means: whether it failed, and how
-// long the hop should be parked for.
+// classifyHopPolicy decides what one hop attempt means: whether it failed,
+// and how long the hop should be parked for.
 //
 // Precedence for the park duration: an explicit upstream Retry-After wins (the
 // provider alone knows when its own window resets), then the operator's
@@ -558,9 +553,6 @@ func (d *Dispatcher) releaseProbe(rt Route) {
 // never parked for a rate limit. A hop that is genuinely broken (5xx,
 // transport error) is still parked: those failures mean "do not send traffic
 // here", which a single hop cannot escape anyway.
-func (d *Dispatcher) classifyHop(err error, status int, hdr http.Header, hasAlternate bool) hopOutcome {
-	return d.classifyHopPolicy(context.Background(), err, status, hdr, hasAlternate)
-}
 func (d *Dispatcher) classifyHopPolicy(ctx context.Context, err error, status int, hdr http.Header, hasAlternate bool) hopOutcome {
 	on429, on5xx := d.on429, d.on5xx
 	if p, ok := settings.From(ctx); ok {
@@ -1895,8 +1887,8 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 		}
 		// Park the hop only when there is somewhere else to go. len(routes) is
 		// the full candidate list the router resolved; a single entry means a
-		// cooled hop has no alternate, and classifyHop declines to park a rate
-		// limit in that case.
+		// cooled hop has no alternate, and classifyHopPolicy declines to park a
+		// rate limit in that case.
 		var hdr http.Header
 		if resp != nil {
 			hdr = resp.Header
@@ -2162,22 +2154,11 @@ func writeStreamErrorFrame(w io.Writer, surface provider.Surface, msg string) {
 	}
 }
 
-// tapSSELine extracts usage from one SSE data line for the given surface.
-//
-//	openai     : final chunk carries "usage"
-//	anthropic  : message_start + message_delta both carry usage (delta has the
-//	             authoritative output_tokens), so we merge
-//	responses  : response.completed carries the full response incl. usage
-func tapSSELine(line []byte, surface provider.Surface) *store.Usage {
-	u := sseUsageRaw(line, surface)
-	if u == nil {
-		return nil
-	}
-	n := store.NormalizeUsage(usageSurface(surface), u)
-	return &n
-}
-
 // sseUsageRaw returns the raw usage object one SSE data line carries, or nil.
+// Where usage rides is per surface: openai puts it on the final chunk;
+// anthropic sends it on message_start AND message_delta (the delta carries the
+// authoritative output_tokens, the start the input/cache breakdown, so the tap
+// merges across events); responses puts the full usage on response.completed.
 // Every usage-bearing event names "usage", so a line without the word is
 // skipped before any JSON decoding — content deltas are most of a stream.
 func sseUsageRaw(line []byte, surface provider.Surface) map[string]any {
@@ -2250,36 +2231,6 @@ func tapConvention(rt Route, cross bool) provider.UsageConvention {
 		return provider.UsageConventionAuto
 	}
 	return rt.Account.UsageConvention
-}
-
-// MergeUsage combines an earlier (message_start) and later (message_delta)
-// Anthropic usage object: the delta carries authoritative output totals, the
-// start carries the input/cache breakdown.
-func MergeUsage(base, delta *store.Usage) *store.Usage {
-	if base == nil {
-		return delta
-	}
-	if delta == nil {
-		return base
-	}
-	out := *base
-	if delta.Out > 0 {
-		out.Out = delta.Out
-	}
-	if delta.CachedRead > 0 {
-		out.CachedRead = delta.CachedRead
-	}
-	if delta.CachedWrite > 0 {
-		out.CachedWrite = delta.CachedWrite
-	}
-	if delta.Reasoning > 0 {
-		out.Reasoning = delta.Reasoning
-	}
-	if delta.In > 0 {
-		out.In = delta.In
-	}
-	out.Raw = delta.Raw
-	return &out
 }
 
 // --- header plumbing ---
@@ -2455,18 +2406,6 @@ func usageSurface(s provider.Surface) store.Surface {
 	default:
 		return store.SurfaceChat
 	}
-}
-
-// StatusText renders an upstream error body for logging without leaking keys.
-func StatusText(status int, body []byte) string {
-	return "HTTP " + strconv.Itoa(status) + ": " + truncate(string(body), 200)
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
 }
 
 func (d *Dispatcher) requestPolicy(ctx context.Context) settings.Values {

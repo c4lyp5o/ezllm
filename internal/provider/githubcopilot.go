@@ -54,16 +54,6 @@ func NewGitHubCopilot(c *http.Client) Adapter {
 	}
 }
 
-// newGitHubCopilotWithClient is the test constructor: the routed HTTP client
-// stands in for GitHub's endpoints.
-func newGitHubCopilotWithClient(c *http.Client) Adapter {
-	return &gitHubCopilotAdapter{
-		client:   c,
-		sessions: map[int64]githubcopilot.Session{},
-		cfg:      githubcopilot.Config{HTTP: c},
-	}
-}
-
 func envOr(key, def string) string {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		return v

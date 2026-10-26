@@ -24,7 +24,7 @@ func TestRepeatedUserTurnSurvivesSessionDedup(t *testing.T) {
 		textMsg("user", u2),
 		textMsg("assistant", "Fixed them."),
 	)
-	out, res := Apply(body, fullProfile(Stage{Engine: "session_dedup"}))
+	out, res := ApplyWithSession(body, fullProfile(Stage{Engine: "session_dedup"}), nil, "", nil)
 
 	msgs := decodeMsgs(t, out)
 	if len(msgs) != 4 {
@@ -54,7 +54,7 @@ func TestSystemDedupStillFiresAndUserTurnsSurvive(t *testing.T) {
 		textMsg("user", task),  // repeated user turn: KEEP (C1)
 		textMsg("assistant", "3 packages failed"),
 	)
-	out, res := Apply(body, fullProfile(Stage{Engine: "session_dedup"}))
+	out, res := ApplyWithSession(body, fullProfile(Stage{Engine: "session_dedup"}), nil, "", nil)
 	if !res.Applied {
 		t.Fatalf("expected applied, got skip: %s (saved=%d)", res.Err, res.Saved)
 	}

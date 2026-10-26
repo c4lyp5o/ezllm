@@ -2,6 +2,49 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
 
+## 2026-10-27 — dead-code removal and comment correctness (no behaviour change)
+
+Maintenance pass with no functional change: removed 32 unreachable functions,
+moved test-only constructors out of production files, and corrected comments
+that described code which no longer exists. The shipped binary is byte-for-byte
+the same size (18,481,312) and its symbol set is unchanged (20,811 symbols,
+none added, none removed) — the deleted code was already pruned by the linker,
+so routing, translation, compression and accounting behave exactly as before.
+
+Every removed function was classified first. Pure orphans went with their
+tests (`storeSurface`, `CavemanDiags`, `proxy.StatusText`/`truncate`, and the
+`pickProbeModel` assertion that only restated `pickProbeModels()[0]`). One-line
+wrappers over a live core went with the wrapper, and any test that asserted
+LIVE behaviour was repointed at the entry production actually calls rather
+than dropped: the legacy `CodecOptions{Legacy:true}` translation cells now
+exercise `ResponseUniversal`/`NewStreamReader` directly (23 call sites), the
+usage normaliser calls `NormalizeUsageWith` (7), the compression engines call
+`ApplyWithSession` (42), and the park policy calls `classifyHopPolicy` (24).
+`TestPollDeviceState` was upgraded in passing: it now asserts `slow_down` as a
+DISTINCT state, the contract the dashboard device flow backs off on, instead of
+the folded boolean the removed wrapper returned.
+
+Comments were corrected where they were wrong, not merely trimmed: the claim
+that `EncodeRequest` was "the one entry point the dispatcher uses", that
+`NormalizeUsage` was the normaliser, and that `CavemanDiags` was read by "the
+admin surface" were all false. Durable contract text was moved onto the
+function that now owns it (the named-return/MS-stamp trap to `applyPipeline`,
+the per-surface usage map to `sseUsageRaw`, the park-duration precedence to
+`classifyHopPolicy`), and two stale line-number references were replaced with
+symbol references.
+
+`make build` now produces what ships: `CGO_ENABLED=0 -trimpath
+-ldflags="-s -w"` (26.6 MB → 18.5 MB), with a `build-debug` target retaining
+the symbol table.
+
+Two findings came out of the pass and are NOT fixed here, because fixing either
+would change behaviour: the github-copilot "stealth" filter (drop `role:system`
+so persona/context never reach a web provider) existed only in the dead
+`DoChat`, so it does not run today; and the "Gemini/Claude must never go to
+`/responses`" routing guard existed only in the dead `endpointForModel`, the
+live adapter routing by surface instead. A third, `TestCaptureShapeDocParityWithBytePath`, was deleted as unfalsifiable — it compared `captureShape` with
+the `captureShapeDoc` call that `captureShape` delegated to.
+
 ## 2026-10-26 — v1.3.1: settings administration and encrypted recovery
 
 Expanded Settings into General, Security, Backup & Recovery, Gateway,

@@ -54,13 +54,6 @@ func loadCavemanPacks() ([]cavemanPack, []string) {
 	return cavemanPacks, cavemanDiags
 }
 
-// CavemanDiags exposes pack-load diagnostics (rejected packs and why). Tests and
-// the admin surface read it; a rejected pack must never be silent.
-func CavemanDiags() []string {
-	_, diags := loadCavemanPacks()
-	return diags
-}
-
 // caveman condenses prose in text messages. Returns the rewritten messages and
 // the number of rules that fired (for the ledger's attribution column).
 func caveman(msgs []any, opts map[string]any) ([]any, int) {

@@ -474,19 +474,19 @@ func TestCooldownsReportsCause(t *testing.T) {
 	}
 }
 
-// classifyHop must name the cause it parks for, or the health payload has a
-// reason field that is always empty.
+// classifyHopPolicy must name the cause it parks for, or the health payload has
+// a reason field that is always empty.
 func TestClassifyHopRecordsReason(t *testing.T) {
 	d := newDispatcher()
 	hdr := http.Header{}
-	if got := d.classifyHop(nil, http.StatusTooManyRequests, hdr, true); got.reason == "" {
+	if got := d.classifyHopPolicy(context.Background(), nil, http.StatusTooManyRequests, hdr, true); got.reason == "" {
 		t.Error("429 park must carry a reason")
 	}
-	if got := d.classifyHop(nil, http.StatusBadGateway, hdr, true); !strings.Contains(got.reason, "502") {
+	if got := d.classifyHopPolicy(context.Background(), nil, http.StatusBadGateway, hdr, true); !strings.Contains(got.reason, "502") {
 		t.Errorf("5xx reason = %q, want the status named", got.reason)
 	}
 	// A 4xx that describes the REQUEST must not park, and so has no reason.
-	if got := d.classifyHop(nil, http.StatusBadRequest, hdr, true); got.failed || got.reason != "" {
+	if got := d.classifyHopPolicy(context.Background(), nil, http.StatusBadRequest, hdr, true); got.failed || got.reason != "" {
 		t.Errorf("400 = %+v, want no park and no reason", got)
 	}
 }

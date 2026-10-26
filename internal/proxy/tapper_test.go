@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/c4lyp5o/ezllm/internal/provider"
-	"github.com/c4lyp5o/ezllm/internal/store"
 )
 
 // Both regressions below were found by LIVE probing, not by reasoning: the unit
@@ -22,7 +21,7 @@ func TestTapperMergesAnthropicMessageStartAndDelta(t *testing.T) {
 		stop  = `data: {"type":"message_stop"}`
 	)
 
-	tp := NewUsageTapper(provider.SurfaceAnthropic)
+	tp := NewUsageTapperFor(provider.SurfaceAnthropic, provider.UsageConventionAuto)
 	tp.Observe([]byte(start))
 
 	// After only message_start the tap must NOT look complete: out=0 is a trap.
@@ -52,7 +51,7 @@ func TestTapperKeepsCacheFromStartAndTotalsFromDelta(t *testing.T) {
 		start = `data: {"type":"message_start","message":{"usage":{"input_tokens":252,"output_tokens":1,"cache_read_input_tokens":1792,"cache_creation_input_tokens":0}}}`
 		delta = `data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":252,"output_tokens":41,"cache_creation_input_tokens":0,"cache_read_input_tokens":1792}}`
 	)
-	tp := NewUsageTapper(provider.SurfaceAnthropic)
+	tp := NewUsageTapperFor(provider.SurfaceAnthropic, provider.UsageConventionAuto)
 	tp.Observe([]byte(start))
 	tp.Observe([]byte(delta))
 	u := tp.Usage()
@@ -78,7 +77,7 @@ func TestTapperHandlesResponsesIncomplete(t *testing.T) {
 	// with max_output_tokens=32 (status "incomplete", reason "max_output_tokens").
 	const incomplete = `data: {"type":"response.incomplete","response":{"id":"resp_x","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"model":"gpt-6-luna","usage":{"input_tokens":12,"output_tokens":32,"total_tokens":44,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0},"output_tokens_details":{"reasoning_tokens":9}}}}`
 
-	tp := NewUsageTapper(provider.SurfaceResponses)
+	tp := NewUsageTapperFor(provider.SurfaceResponses, provider.UsageConventionAuto)
 	tp.Observe([]byte(`data: {"type":"response.created","response":{"usage":null}}`))
 	tp.Observe([]byte(`data: {"type":"response.in_progress","response":{"usage":null}}`))
 	tp.Observe([]byte(`data: {"type":"response.output_text.delta","delta":"1"}`))
@@ -100,7 +99,7 @@ func TestTapperHandlesResponsesIncomplete(t *testing.T) {
 // and recording zero would under-report spend.
 func TestTapperHandlesResponsesFailed(t *testing.T) {
 	const failed = `data: {"type":"response.failed","response":{"status":"failed","usage":{"input_tokens":50,"output_tokens":3,"input_tokens_details":{"cached_tokens":10,"cache_write_tokens":0}}}}`
-	tp := NewUsageTapper(provider.SurfaceResponses)
+	tp := NewUsageTapperFor(provider.SurfaceResponses, provider.UsageConventionAuto)
 	tp.Observe([]byte(failed))
 	u := tp.Usage()
 	if u == nil {
@@ -114,7 +113,7 @@ func TestTapperHandlesResponsesFailed(t *testing.T) {
 // The completed path must keep working (the normal case).
 func TestTapperHandlesResponsesCompleted(t *testing.T) {
 	const done = `data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":12,"output_tokens":27,"total_tokens":39,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0},"output_tokens_details":{"reasoning_tokens":13}}}}`
-	tp := NewUsageTapper(provider.SurfaceResponses)
+	tp := NewUsageTapperFor(provider.SurfaceResponses, provider.UsageConventionAuto)
 	tp.Observe([]byte(done))
 	u := tp.Usage()
 	if u == nil || u.Out != 27 || u.Reasoning != 13 {
@@ -125,7 +124,7 @@ func TestTapperHandlesResponsesCompleted(t *testing.T) {
 // OpenAI streams put usage only in the final chunk; earlier chunks and [DONE]
 // must not clear or corrupt it.
 func TestTapperOpenAIFinalChunkWins(t *testing.T) {
-	tp := NewUsageTapper(provider.SurfaceChat)
+	tp := NewUsageTapperFor(provider.SurfaceChat, provider.UsageConventionAuto)
 	tp.Observe([]byte(`data: {"choices":[{"delta":{"role":"assistant"}}]}`))
 	tp.Observe([]byte(`data: {"choices":[{"delta":{"content":"1"}}]}`))
 	if tp.Usage() != nil {
@@ -145,7 +144,7 @@ func TestTapperOpenAIFinalChunkWins(t *testing.T) {
 
 // Non-data lines (event:, comments, blanks) must be ignored, never parsed.
 func TestTapperIgnoresNonDataLines(t *testing.T) {
-	tp := NewUsageTapper(provider.SurfaceAnthropic)
+	tp := NewUsageTapperFor(provider.SurfaceAnthropic, provider.UsageConventionAuto)
 	for _, l := range []string{
 		`event: message_delta`, `: comment`, ``, ` `, `data:`, `data: [DONE]`,
 		`data: {"type":"ping"}`, `data: {malformed`,
@@ -154,20 +153,5 @@ func TestTapperIgnoresNonDataLines(t *testing.T) {
 	}
 	if tp.Usage() != nil {
 		t.Error("non-usage lines produced usage")
-	}
-}
-
-// MergeUsage must prefer non-zero later values without discarding earlier
-// non-zero fields the later event omits.
-func TestMergeUsagePreservesEarlierFields(t *testing.T) {
-	base := &store.Usage{In: 252, Out: 1, CachedRead: 1792, CachedWrite: 64, Reasoning: 5}
-	// delta omits cache fields entirely (common: providers only send deltas)
-	delta := &store.Usage{In: 252, Out: 41}
-	got := MergeUsage(base, delta)
-	if got.Out != 41 {
-		t.Errorf("out = %d, want 41 (later wins)", got.Out)
-	}
-	if got.CachedRead != 1792 || got.CachedWrite != 64 || got.Reasoning != 5 {
-		t.Errorf("earlier non-zero fields lost: %+v", got)
 	}
 }

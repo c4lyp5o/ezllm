@@ -7,30 +7,8 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/provider"
 )
 
-// captureShape now reads the request's single-parse decode
-// (docs/single-parse-dispatch-design.md). Two contracts live here:
-
-// TestCaptureShapeDocParityWithBytePath: for bodies WITHOUT number-literal
-// edge cases, the doc path and the byte path must hash identically. The
-// request path switched to captureShapeDoc on the shared decode; this guards
-// the switch against silent drift in the hashing itself.
-func TestCaptureShapeDocParityWithBytePath(t *testing.T) {
-	bodies := []string{
-		`{"model":"m","system":"s","tools":[{"type":"function","function":{"name":"f"}}],"messages":[{"role":"user","content":"one"},{"role":"assistant","content":"two"},{"role":"user","content":"three"}]}`,
-		`{"model":"m","instructions":"be kind","input":[{"role":"user","content":"a"},{"role":"assistant","content":"b"}]}`,
-		`{"model":"m","messages":[{"role":"user","content":"only one"}]}`,
-		`{"model":"m"}`,
-		`not json`,
-		`{"model":"m","messages":[]}`,
-	}
-	for _, b := range bodies {
-		legacy := captureShape([]byte(b), provider.SurfaceChat)
-		doc := captureShapeDoc(jsonbody.Open([]byte(b)), provider.SurfaceChat)
-		if legacy != doc {
-			t.Errorf("shape drift for %s\nlegacy: %+v\ndoc:    %+v", b, legacy, doc)
-		}
-	}
-}
+// captureShapeDoc reads the request's single-parse decode
+// (docs/single-parse-dispatch-design.md).
 
 // TestCaptureShapeDocNumberLiteralSensitivity is the INTENDED divergence from
 // the old float64 decode: the hash now sees JSON number literals verbatim.

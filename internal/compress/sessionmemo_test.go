@@ -294,7 +294,7 @@ func TestLegacyPathUnchanged(t *testing.T) {
 		t.Error("legacy path did not compress")
 	}
 	// and the plain entry still works
-	out2, res2 := Apply(body, p)
+	out2, res2 := ApplyWithSession(body, p, nil, "", nil)
 	if !res2.Applied || msgContent(t, out2, 0) == "" {
 		t.Error("Apply must keep working unchanged")
 	}

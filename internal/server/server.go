@@ -717,7 +717,7 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 		// decode of the client body serves model extraction, compression,
 		// shape capture and every hop's model swap. Decode problems are not
 		// checked here — each consumer keeps its own documented decision
-		// (extractModel answers 400 for them, exactly as before).
+		// (extractModelDoc answers 400 for them, exactly as before).
 		doc := jsonbody.Open(body)
 
 		requested, err := extractModelDoc(doc)
@@ -1557,19 +1557,13 @@ func (s *Server) resolveServiceRequestModel(w http.ResponseWriter, r *http.Reque
 	return target, true
 }
 
-// extractModel reads the requested model without disturbing any other field.
-// An absent/empty model returns ("", nil): the handler decides per surface
-// whether that is a required-model refusal or a service-default lookup.
-// Byte form: decodes then delegates; the request path uses extractModelDoc on
-// the shared single-parse decode (docs/single-parse-dispatch-design.md).
-func extractModel(body []byte) (string, error) {
-	return extractModelDoc(jsonbody.Open(body))
-}
-
-// extractModelDoc is extractModel over the request's shared decode. Parity
-// with the old struct decode is exact: absent or null -> ("", nil); a string
-// -> trimmed; a non-string value or any decode problem -> "body is not a JSON
-// object" (the old Unmarshal wrapped every failure into that one string).
+// extractModelDoc reads the requested model from the request's shared decode
+// without disturbing any other field. An absent/empty model returns ("", nil):
+// the handler decides per surface whether that is a required-model refusal or
+// a service-default lookup. Parity with the old struct decode is exact:
+// absent or null -> ("", nil); a string -> trimmed; a non-string value or any
+// decode problem -> "body is not a JSON object" (the old Unmarshal wrapped
+// every failure into that one string).
 func extractModelDoc(doc *jsonbody.BodyDoc) (string, error) {
 	model, _, err := doc.Model()
 	return model, err

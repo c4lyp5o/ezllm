@@ -50,12 +50,6 @@ type shape struct {
 // record byte size but leave the prefix empty (unknown), never fail the request.
 const maxShapeBody = 8 << 20 // 8 MiB
 
-// captureShape is the byte-entry form: it decodes the body and delegates.
-// captureShapeDoc is the single-parse form the request path uses.
-func captureShape(body []byte, surface provider.Surface) shape {
-	return captureShapeDoc(jsonbody.Open(body), surface)
-}
-
 // captureShapeDoc parses the body we are about to send upstream and derives
 // the stable-prefix hash plus counters. It is best-effort by contract: any
 // parse problem yields the zero shape (prefix ""), because a failed

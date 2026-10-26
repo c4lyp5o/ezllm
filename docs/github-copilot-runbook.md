@@ -94,7 +94,25 @@ Anthropic surface for `claude-opus-4.6`).
 | 400 `Unsupported parameter: 'temperature'` | gpt-5.4 quirk (auto-stripped) | Fixed in the adapter; file a bug if it leaks through |
 | 400 "conversation must end with a user message" | assistant prefill (auto-dropped) | Fixed in the adapter |
 | 400 `does not support Responses API` | a Claude/Gemini model routed to /responses | Routing bug; claude* always goes to /v1/messages |
+| 400 `unsupported_api_for_model` | the same gap, answered by the upstream instead of refused locally | Fails over to a hop that can serve the wire; the trail names the refused hop. Only reaches the client when every hop refuses |
 | 466 (CLI version) | Version floor raised | Set GITHUB_COPILOT_CLI_VERSION, restart |
+
+## Persona stealth (behaviour change, v1.3.2)
+
+Every github-copilot request drops its `role: system` turns before it leaves the
+box, on every model. The provider is a web surface, so the client's persona and
+personal context (SOUL/MEMORY/USER-style system prompts) must never reach it.
+
+This is deliberate output loss, not a workaround: a request whose ONLY content was
+a system prompt now leaves with an empty `messages` list, and the upstream's own
+"messages is empty" error is the honest answer for a call that carried nothing
+else. If a future task genuinely needs a system prompt to reach Copilot, that is
+the rule to revisit — it does not exist behind a flag because a flag would make
+the privacy guarantee optional.
+
+The guard was previously documented but lived only in a linker-dead function, so
+it never ran. A run whose answers suddenly look "different" on this provider
+should be checked against this rule first.
 
 ## Scope
 

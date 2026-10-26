@@ -1,3 +1,4 @@
+import { useReducedMotion } from '../utils/preferences';
 // Shared data-viz primitives for every analytics surface.
 //
 // Two rules this module exists to enforce:
@@ -7,7 +8,7 @@
 //      series rendered as two different colours on two screens).
 //   2. Aggregates arrive pre-aggregated from SQL. Nothing here re-sums raw
 //      rows — these are presentation layers over /admin/usage groups.
-import { motion, useReducedMotion } from 'motion/react';
+import { motion,} from 'motion/react';
 import type { CSSProperties, ReactNode } from 'react';
 import { cx, formatTokens, pct } from './ui';
 

@@ -1,3 +1,4 @@
+import { useReducedMotion } from '../utils/preferences';
 // NEIGHBOURHOOD — a living view of the keys. Each provider key is a house; the
 // more tokens it moves, the brighter its windows burn. It is for fun, but every
 // element is real data (see web/DESIGN.md → "The scene"):
@@ -8,7 +9,7 @@
 // The numbers behind the scene are always in the table underneath — nothing is
 // readable only as a colour.
 import { useEffect, useMemo, useState } from 'react';
-import { motion, useReducedMotion } from 'motion/react';
+import { motion,} from 'motion/react';
 import { get, type Account, type UsageResp } from '../utils/api';
 import { Chip, EmptyState, SectionLabel, cx, formatTokens } from '../components/ui';
 

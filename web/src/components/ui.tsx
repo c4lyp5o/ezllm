@@ -1,5 +1,6 @@
+import { useReducedMotion } from '../utils/preferences';
 // Tiny shared UI primitives — hand-built with Tailwind, no component library.
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import { AnimatePresence, motion,} from 'motion/react';
 import { createPortal } from 'react-dom';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { DUR, SelectionLine, spring } from './motion';

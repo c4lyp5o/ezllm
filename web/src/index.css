@@ -362,3 +362,9 @@ code, pre, kbd, samp, .font-code { font-family: var(--font-code); font-variant-n
 /* Sun by day, crescent moon by night — the crescent is an inset shadow. */
 .nbhd-moon { width: 34px; height: 34px; background: var(--nb-moon); opacity: 0.85; }
 .dark .nbhd-moon { width: 30px; height: 30px; background: transparent; box-shadow: inset -9px 5px 0 0 var(--nb-moon); opacity: 1; }
+
+/* The browser preference can reduce motion even when the OS does not. */
+:root[data-reduce-motion="true"] *, :root[data-reduce-motion="true"] *::before, :root[data-reduce-motion="true"] *::after {
+ animation-duration: 0.01ms !important; animation-iteration-count: 1 !important;
+ transition-duration: 0.01ms !important; scroll-behavior: auto !important;
+}

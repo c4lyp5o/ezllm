@@ -1,7 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
-import { MotionConfig } from 'motion/react';
+import { PreferencesMotion } from './utils/preferences';
 import './index.css';
 import App from './App';
 
@@ -12,10 +12,10 @@ import App from './App';
 // who set the OS preference must never have to hunt for an in-app toggle.
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <MotionConfig reducedMotion="user">
+    <PreferencesMotion>
       <BrowserRouter>
         <App />
       </BrowserRouter>
-    </MotionConfig>
+    </PreferencesMotion>
   </StrictMode>,
 );

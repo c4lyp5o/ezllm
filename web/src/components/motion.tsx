@@ -1,3 +1,4 @@
+import { useReducedMotion } from '../utils/preferences';
 // Central motion layer.
 //
 // Every animation in the dashboard goes through here so three things stay
@@ -11,7 +12,7 @@
 //   2. Durations come from the CSS tokens, so one edit retimes the app.
 //   3. Nothing animates on a timer-driven repaint for longer than --dur-base:
 //      the overview polls every 15s and a long ease reads as lag.
-import { AnimatePresence, motion, useMotionValue, useMotionValueEvent, useReducedMotion, useSpring, type Transition } from 'motion/react';
+import { AnimatePresence, motion, useMotionValue, useMotionValueEvent, useSpring, type Transition } from 'motion/react';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { cx } from '../utils/lib';
 

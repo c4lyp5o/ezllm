@@ -17,7 +17,7 @@ func TestAccountingMultilineSSE(t *testing.T) {
 		source := strings.Join([]string{": keepalive", "data: {\"choices\":[],", "data: \"usage\":{\"prompt_tokens\":100,\"completion_tokens\":42}}", "", "data: [DONE]", "", ""}, newline)
 		rec := httptest.NewRecorder()
 		resp := &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(source)), Header: make(http.Header)}
-		_, u, _, err := newDispatcher().streamCopy(context.Background(), rec, resp, provider.SurfaceOpenAI, provider.UsageConventionAuto, time.Now())
+		_, u, _, err := newDispatcher().streamCopy(context.Background(), rec, resp, provider.SurfaceChat, provider.UsageConventionAuto, time.Now())
 		if err != nil || rec.Body.String() != source {
 			t.Fatalf("copy changed: %v", err)
 		}
@@ -28,7 +28,7 @@ func TestAccountingMultilineSSE(t *testing.T) {
 }
 
 func TestAccountingSSEBoundAndRecovery(t *testing.T) {
-	tp := NewUsageTapper(provider.SurfaceOpenAI)
+	tp := NewUsageTapper(provider.SurfaceChat)
 	tp.Observe([]byte("data: {"))
 	tp.Observe([]byte("data: " + strings.Repeat(" ", maxScanToken)))
 	tp.Observe([]byte(`data: "usage":{"prompt_tokens":999}}`))

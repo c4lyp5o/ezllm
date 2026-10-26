@@ -51,7 +51,7 @@ func responsesBody(opaque bool) string {
 
 func clientBody(surface provider.Surface, opaque bool) string {
 	switch surface {
-	case provider.SurfaceOpenAI:
+	case provider.SurfaceChat:
 		return chatBody(opaque)
 	case provider.SurfaceAnthropic:
 		return messagesBody(opaque)
@@ -69,7 +69,7 @@ const (
 
 func upstreamResponse(surface provider.Surface) string {
 	switch surface {
-	case provider.SurfaceOpenAI:
+	case provider.SurfaceChat:
 		return chatUpstreamResp
 	case provider.SurfaceAnthropic:
 		return msgUpstreamResp
@@ -97,7 +97,7 @@ const respUpstreamStream = `event: response.output_text.delta` + "\n" + `data: {
 
 func upstreamStream(surface provider.Surface) string {
 	switch surface {
-	case provider.SurfaceOpenAI:
+	case provider.SurfaceChat:
 		return chatUpstreamStream
 	case provider.SurfaceAnthropic:
 		return msgUpstreamStream
@@ -203,7 +203,7 @@ func responseTextOf(t *testing.T, surface provider.Surface, body []byte) string 
 	t.Helper()
 	m := jsonMap(t, body)
 	switch surface {
-	case provider.SurfaceOpenAI:
+	case provider.SurfaceChat:
 		choices, _ := m["choices"].([]any)
 		c0, _ := choices[0].(map[string]any)
 		msg, _ := c0["message"].(map[string]any)
@@ -224,7 +224,7 @@ func responseTextOf(t *testing.T, surface provider.Surface, body []byte) string 
 // ── the nine cells, non-stream ───────────────────────────────────────────────
 
 func TestWireMatrixNineCellsNonStream(t *testing.T) {
-	surfaces := []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses}
+	surfaces := []provider.Surface{provider.SurfaceChat, provider.SurfaceAnthropic, provider.SurfaceResponses}
 	for _, client := range surfaces {
 		for _, up := range surfaces {
 			name := string(client) + "-" + string(up)
@@ -306,7 +306,7 @@ func TestWireMatrixNineCellsNonStream(t *testing.T) {
 // ── the nine cells, streaming ────────────────────────────────────────────────
 
 func TestWireMatrixNineCellsStream(t *testing.T) {
-	surfaces := []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses}
+	surfaces := []provider.Surface{provider.SurfaceChat, provider.SurfaceAnthropic, provider.SurfaceResponses}
 	for _, client := range surfaces {
 		for _, up := range surfaces {
 			t.Run(string(client)+"-"+string(up), func(t *testing.T) {
@@ -371,7 +371,7 @@ func streamTextOf(t *testing.T, client provider.Surface, raw []byte) string {
 			continue
 		}
 		switch client {
-		case provider.SurfaceOpenAI:
+		case provider.SurfaceChat:
 			if choices, _ := m["choices"].([]any); len(choices) > 0 {
 				c0, _ := choices[0].(map[string]any)
 				delta, _ := c0["delta"].(map[string]any)

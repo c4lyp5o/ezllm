@@ -103,7 +103,7 @@ type Options struct {
 type ProtocolResult struct {
 	Deferred bool                        `json:"deferred"`
 	Tested   int                         `json:"tested"`
-	Support  map[string]int              `json:"support"` // openai/anthropic/responses counts
+	Support  map[string]int              `json:"support"` // chat/anthropic/responses counts
 	Rows     map[string]map[string]*bool `json:"-"`       // model → surface → verdict
 }
 
@@ -584,7 +584,7 @@ func (t *Tester) probeModel(
 	pace *pacer,
 	res *TestResult,
 ) (probeOutcome, *Failure) {
-	surface := provider.SurfaceOpenAI
+	surface := provider.SurfaceChat
 	if acct.Kind == provider.KindAnthropicCompat {
 		surface = provider.SurfaceAnthropic
 	}
@@ -635,7 +635,7 @@ func (t *Tester) probeModel(
 	// generation instead of "unverified", and the capability matrix learns the
 	// wire (openai=0, responses=1), so routing stops needing a hand-written
 	// responses_models regex for every model that lives there.
-	if err == nil && surface == provider.SurfaceOpenAI && !isAuthStatus(status) && isEndpointMismatch(status, resp) {
+	if err == nil && surface == provider.SurfaceChat && !isAuthStatus(status) && isEndpointMismatch(status, resp) {
 		verdict, authDead, rstatus := t.probeSurface(ctx, adapter, acct, key, model, provider.SurfaceResponses, pace)
 		switch {
 		case authDead:
@@ -648,7 +648,7 @@ func (t *Tester) probeModel(
 			return probeFailed, f
 		case verdict == provider.VerdictSupported:
 			no, yes := false, true
-			t.setProto(acct.ID, model, provider.SurfaceOpenAI, &no)
+			t.setProto(acct.ID, model, provider.SurfaceChat, &no)
 			t.setProto(acct.ID, model, provider.SurfaceResponses, &yes)
 			// A wire change reroutes every future request for this model, so it
 			// is Info: the operator must be able to see that a 400 on chat did
@@ -935,25 +935,25 @@ func (t *Tester) ProtocolSweep(
 	surfaces := append([]provider.Surface(nil), opts.Surfaces...)
 	if len(surfaces) == 0 {
 		surfaces = []provider.Surface{
-			provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses,
+			provider.SurfaceChat, provider.SurfaceAnthropic, provider.SurfaceResponses,
 		}
 	}
 	// Anthropic-only providers never speak the OpenAI wire; probing them
-	// wastes time and leaves proto_openai NULL (which the router reads as
+	// wastes time and leaves proto_chat NULL (which the router reads as
 	// "unproven" instead of "impossible"). Mark openai as proven-false up
 	// front so translated routing treats them correctly, and skip the
 	// openai surface in the sweep.
 	if isAnthropicOnlyKind(acct.Kind) {
 		filtered := surfaces[:0]
 		for _, s := range surfaces {
-			if s != provider.SurfaceOpenAI {
+			if s != provider.SurfaceChat {
 				filtered = append(filtered, s)
 			}
 		}
 		surfaces = filtered
 		no := false
 		for _, m := range models {
-			t.setProto(acct.ID, m.ID, provider.SurfaceOpenAI, &no)
+			t.setProto(acct.ID, m.ID, provider.SurfaceChat, &no)
 		}
 	}
 	pace := &pacer{delay: acct.ProbeDelay}
@@ -1125,7 +1125,7 @@ func surfaceFor(path string) provider.Surface {
 	case strings.HasSuffix(path, "/responses"):
 		return provider.SurfaceResponses
 	default:
-		return provider.SurfaceOpenAI
+		return provider.SurfaceChat
 	}
 }
 
@@ -1545,7 +1545,7 @@ func isPlanGatedError(status int, body []byte) bool {
 }
 
 // isAnthropicOnlyKind reports whether a provider kind is served on the
-// Anthropic wire (POST /v1/messages). Marking proto_openai=false up front
+// Anthropic wire (POST /v1/messages). Marking proto_chat=false up front
 // saves a probe per model and sends chat clients through the Messages
 // translation (native caching and thinking) instead of a compat endpoint.
 // claude-web is NOT one: ezllm's own bridge serves it on /chat/completions
@@ -1647,7 +1647,7 @@ func summarize(res *TestResult) string {
 	}
 	if res.Proto != nil && !res.Proto.Deferred && res.Proto.Tested > 0 {
 		var counts []string
-		for _, k := range []string{"openai", "anthropic", "responses"} {
+		for _, k := range []string{"chat", "anthropic", "responses"} {
 			if n, ok := res.Proto.Support[k]; ok {
 				counts = append(counts, fmt.Sprintf("%s %d", k, n))
 			}
@@ -1709,7 +1709,7 @@ func storeSurface(s provider.Surface) store.Surface {
 	case provider.SurfaceResponses:
 		return store.SurfaceResponses
 	default:
-		return store.SurfaceOpenAI
+		return store.SurfaceChat
 	}
 }
 

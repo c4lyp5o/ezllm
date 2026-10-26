@@ -33,7 +33,7 @@ func decodeUsage(raw json.RawMessage, surface provider.Surface, opts CodecOption
 	u := UsageIR{}
 	var err error
 	switch surface {
-	case provider.SurfaceOpenAI:
+	case provider.SurfaceChat:
 		u.Input, err = read("prompt_tokens")
 		if err != nil {
 			return u, err
@@ -175,7 +175,7 @@ func DecodeResponse(body []byte, surface provider.Surface, opts CodecOptions) (*
 	}
 	var err error
 	switch surface {
-	case provider.SurfaceOpenAI:
+	case provider.SurfaceChat:
 		var up struct {
 			ID      string `json:"id"`
 			Created int64  `json:"created"`
@@ -371,7 +371,7 @@ func EncodeResponse(ir *ResponseIR, surface provider.Surface, model string, opts
 			Sequence *string          `json:"stop_sequence"`
 			Usage    json.RawMessage  `json:"usage,omitempty"`
 		}{res.ID, res.Type, res.Role, res.Content, res.Model, res.StopReason, res.StopSequence, optionalMessagesUsage(ir.Usage)})
-	case provider.SurfaceOpenAI:
+	case provider.SurfaceChat:
 		msg := chatWireOutMessage{Role: "assistant"}
 		for _, b := range ir.Blocks {
 			if b.Kind == BlockText {

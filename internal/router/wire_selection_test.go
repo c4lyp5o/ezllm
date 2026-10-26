@@ -57,7 +57,7 @@ func TestCuratedResponsesHopBeatsTheCapabilityGate(t *testing.T) {
 	// openai-capable — so today the translation gate claims it and dials the
 	// chat wire, discarding the operator's responses override.
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceAnthropic)] = true
-	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceOpenAI)] = true
+	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceChat)] = true
 
 	r := New(cat).WithTranslation(true).WithResponsesModels([]string{`super-ssn/gpt-6\.1-sol`})
 	routes, err := r.ResolveCandidates(context.Background(), wireCombo, provider.SurfaceAnthropic, "test")
@@ -85,7 +85,7 @@ func TestCuratedResponsesHopRefusedWhenResponsesProbedFalse(t *testing.T) {
 	// impossible for this hop: dialing it anyway wastes a request on a wire we
 	// already know cannot answer.
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceResponses)] = true
-	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceOpenAI)] = true
+	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceChat)] = true
 
 	r := New(cat).WithTranslation(true).WithResponsesModels([]string{`super-ssn/gpt-6\.1-sol`})
 	_, err := r.ResolveCandidates(context.Background(), wireCombo, provider.SurfaceAnthropic, "test")
@@ -136,7 +136,7 @@ func TestResponsesWireHopRefusesConflictingPin(t *testing.T) {
 func TestDirectRouteTranslatesLikeTheSameComboHop(t *testing.T) {
 	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceAnthropic)] = true
-	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceOpenAI)] = true
+	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceChat)] = true
 
 	r := New(cat).WithTranslation(true)
 	combo, cerr := r.ResolveCandidates(context.Background(), wireCombo, provider.SurfaceAnthropic, "test")
@@ -150,7 +150,7 @@ func TestDirectRouteTranslatesLikeTheSameComboHop(t *testing.T) {
 	if len(combo) != 1 || len(direct) != 1 {
 		t.Fatalf("candidates: combo=%d direct=%d, want 1 each", len(combo), len(direct))
 	}
-	if combo[0].EffectiveWire() != provider.SurfaceOpenAI || direct[0].EffectiveWire() != provider.SurfaceOpenAI {
+	if combo[0].EffectiveWire() != provider.SurfaceChat || direct[0].EffectiveWire() != provider.SurfaceChat {
 		t.Fatalf("wires: combo=%q direct=%q, want openai for both (same inputs, same wire)",
 			combo[0].EffectiveWire(), direct[0].EffectiveWire())
 	}
@@ -186,7 +186,7 @@ func TestUntestedCapabilityStaysNative(t *testing.T) {
 	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
 	r := New(cat).WithTranslation(true)
 
-	for _, surface := range []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses} {
+	for _, surface := range []provider.Surface{provider.SurfaceChat, provider.SurfaceAnthropic, provider.SurfaceResponses} {
 		routes, err := r.ResolveCandidates(context.Background(), wireCombo, surface, "test")
 		if err != nil {
 			t.Fatalf("%s: %v", surface, err)
@@ -203,7 +203,7 @@ func TestUntestedCapabilityStaysNative(t *testing.T) {
 func TestProvenNativeHopKeepsItsWireAndFlagsClear(t *testing.T) {
 	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
 	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceAnthropic)] = true
-	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceOpenAI)] = true
+	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceChat)] = true
 
 	r := New(cat).WithTranslation(true)
 	routes, err := r.ResolveCandidates(context.Background(), wireCombo, provider.SurfaceAnthropic, "test")

@@ -135,7 +135,7 @@ func (f *fakeCatalog) AllNamespaces(_ context.Context) ([]string, error) {
 
 func TestResolveNamespaceModel(t *testing.T) {
 	r := New(newFake())
-	rt, err := r.Resolve(context.Background(), "super-ssn/gpt-6.1-sol", provider.SurfaceOpenAI, "hermes")
+	rt, err := r.Resolve(context.Background(), "super-ssn/gpt-6.1-sol", provider.SurfaceChat, "hermes")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestResolveNamespaceModel(t *testing.T) {
 	if rt.Alias != "super-ssn/gpt-6.1-sol" {
 		t.Errorf("alias = %q, want the requested string", rt.Alias)
 	}
-	if rt.Surface != provider.SurfaceOpenAI {
+	if rt.Surface != provider.SurfaceChat {
 		t.Errorf("surface = %q", rt.Surface)
 	}
 }
@@ -160,11 +160,11 @@ func TestResolveNamespaceModel(t *testing.T) {
 // request — never guessed. This is the attribution guarantee.
 func TestResolveSameModelDifferentAccounts(t *testing.T) {
 	r := New(newFake())
-	a, err := r.Resolve(context.Background(), "opengo/gpt-6-luna", provider.SurfaceOpenAI, "c")
+	a, err := r.Resolve(context.Background(), "opengo/gpt-6-luna", provider.SurfaceChat, "c")
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := r.Resolve(context.Background(), "super-ssn/gpt-6-luna", provider.SurfaceOpenAI, "c")
+	b, err := r.Resolve(context.Background(), "super-ssn/gpt-6-luna", provider.SurfaceChat, "c")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestResolveSameModelDifferentAccounts(t *testing.T) {
 // namespaces that actually serve it.
 func TestResolveBareModelIs404WithHints(t *testing.T) {
 	r := New(newFake())
-	_, err := r.Resolve(context.Background(), "gpt-6-luna", provider.SurfaceOpenAI, "c")
+	_, err := r.Resolve(context.Background(), "gpt-6-luna", provider.SurfaceChat, "c")
 	if err == nil {
 		t.Fatal("bare model id must not resolve (no default account)")
 	}
@@ -203,7 +203,7 @@ func TestResolveBareModelIs404WithHints(t *testing.T) {
 // Hints must be filtered to the requested model, not a catalog dump.
 func TestResolveHintsAreFiltered(t *testing.T) {
 	r := New(newFake())
-	_, err := r.Resolve(context.Background(), "gpt-6.1-sol", provider.SurfaceOpenAI, "c")
+	_, err := r.Resolve(context.Background(), "gpt-6.1-sol", provider.SurfaceChat, "c")
 	var nf *ErrNotFound
 	if !errors.As(err, &nf) {
 		t.Fatal(err)
@@ -220,7 +220,7 @@ func TestResolveHintsAreFiltered(t *testing.T) {
 
 func TestResolveUnknownNamespace(t *testing.T) {
 	r := New(newFake())
-	_, err := r.Resolve(context.Background(), "nope/gpt-6-luna", provider.SurfaceOpenAI, "c")
+	_, err := r.Resolve(context.Background(), "nope/gpt-6-luna", provider.SurfaceChat, "c")
 	var nf *ErrNotFound
 	if !errors.As(err, &nf) {
 		t.Fatalf("want ErrNotFound, got %v", err)
@@ -232,7 +232,7 @@ func TestResolveUnknownNamespace(t *testing.T) {
 
 func TestResolveUnknownModelInKnownNamespace(t *testing.T) {
 	r := New(newFake())
-	_, err := r.Resolve(context.Background(), "opengo/does-not-exist", provider.SurfaceOpenAI, "c")
+	_, err := r.Resolve(context.Background(), "opengo/does-not-exist", provider.SurfaceChat, "c")
 	if err == nil {
 		t.Fatal("unknown model must not resolve")
 	}
@@ -246,7 +246,7 @@ func TestResolveDisabledAccount(t *testing.T) {
 	f := newFake()
 	f.models[3] = map[string]bool{"m": true}
 	r := New(f)
-	_, err := r.Resolve(context.Background(), "off/m", provider.SurfaceOpenAI, "c")
+	_, err := r.Resolve(context.Background(), "off/m", provider.SurfaceChat, "c")
 	if err == nil || !strings.Contains(err.Error(), "disabled") {
 		t.Fatalf("disabled account must not route, got %v", err)
 	}
@@ -256,7 +256,7 @@ func TestResolveNoUsableKey(t *testing.T) {
 	f := newFake()
 	f.pickKeyErr = store.ErrNotFound
 	r := New(f)
-	_, err := r.Resolve(context.Background(), "opengo/qwen3.8-flash", provider.SurfaceOpenAI, "c")
+	_, err := r.Resolve(context.Background(), "opengo/qwen3.8-flash", provider.SurfaceChat, "c")
 	if err == nil || !strings.Contains(err.Error(), "no usable key") {
 		t.Fatalf("want 'no usable key', got %v", err)
 	}
@@ -265,12 +265,12 @@ func TestResolveNoUsableKey(t *testing.T) {
 func TestResolveEmptyAndWhitespace(t *testing.T) {
 	r := New(newFake())
 	for _, m := range []string{"", "   ", "\t"} {
-		if _, err := r.Resolve(context.Background(), m, provider.SurfaceOpenAI, "c"); err == nil {
+		if _, err := r.Resolve(context.Background(), m, provider.SurfaceChat, "c"); err == nil {
 			t.Errorf("model %q must be rejected", m)
 		}
 	}
 	// surrounding whitespace is trimmed, not rejected
-	rt, err := r.Resolve(context.Background(), "  opengo/qwen3.8-flash  ", provider.SurfaceOpenAI, "c")
+	rt, err := r.Resolve(context.Background(), "  opengo/qwen3.8-flash  ", provider.SurfaceChat, "c")
 	if err != nil {
 		t.Fatalf("trimmed model should resolve: %v", err)
 	}
@@ -284,7 +284,7 @@ func TestResolveEmptyAndWhitespace(t *testing.T) {
 func TestResolveModelIDsWithDots(t *testing.T) {
 	r := New(newFake())
 	for _, req := range []string{"opengo/qwen3.8-flash", "super-ssn/gpt-6.1-sol"} {
-		rt, err := r.Resolve(context.Background(), req, provider.SurfaceOpenAI, "c")
+		rt, err := r.Resolve(context.Background(), req, provider.SurfaceChat, "c")
 		if err != nil {
 			t.Fatalf("%s: %v", req, err)
 		}
@@ -296,7 +296,7 @@ func TestResolveModelIDsWithDots(t *testing.T) {
 
 func TestResolvePreservesSurface(t *testing.T) {
 	r := New(newFake())
-	for _, s := range []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses} {
+	for _, s := range []provider.Surface{provider.SurfaceChat, provider.SurfaceAnthropic, provider.SurfaceResponses} {
 		rt, err := r.Resolve(context.Background(), "opengo/qwen3.8-flash", s, "c")
 		if err != nil {
 			t.Fatal(err)

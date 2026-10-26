@@ -2,6 +2,25 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
 
+## Unreleased — development branch
+
+- **The chat-completions wire is named `chat`, not `openai`** (schema v30,
+  breaking). The ledger `surface`, model pins, `protocol_support`, the
+  `/admin/models` capability keys and the `proto_openai` column all become
+  `chat` / `proto_chat`. The migration renames the column and rewrites stored
+  pins and existing ledger rows in place; it is idempotent. `PUT .../pin` and
+  the combo-test `surface` still accept `openai` as a legacy alias on input.
+  Provider kind names (`openai-compatible`, `gemini-openai`) are unchanged.
+- **Probes are no longer written to the ledger.** Key tests (`admin:test`),
+  protocol sweeps, combo tests (`combo-test`) and service tests
+  (`service-test`) leave no row; the verdicts they produce are still stored.
+  Rows already in the ledger are untouched. This reverses the earlier rule
+  that probe spend must be visible in the ledger.
+- **Claude subscription quota can be read live.** Pasting the claude.ai Cookie
+  header into the claude-sub account's `management_key` makes the Quota button
+  read `claude.ai/api/organizations/{org}/usage` (five-hour and weekly
+  windows) instead of the bridge's last-observed reading.
+
 ## 2026-10-24 — v1.2.0: reasoning-effort clamp, model-access park, logging
 
 - **Reasoning effort follows the model's own vocabulary** (schema v29). A 4xx

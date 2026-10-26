@@ -32,7 +32,7 @@ const (
 type Surface string
 
 const (
-	SurfaceOpenAI     Surface = "openai"      // POST /chat/completions
+	SurfaceChat       Surface = "chat"        // POST /chat/completions
 	SurfaceAnthropic  Surface = "anthropic"   // POST /messages
 	SurfaceResponses  Surface = "responses"   // POST /responses
 	SurfaceEmbeddings Surface = "embeddings"  // POST /embeddings

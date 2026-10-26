@@ -179,7 +179,7 @@ func (d *DB) syncAutoFree(ctx context.Context, tx *sql.Tx, comboID int64) error 
 SELECT m.account_id, m.model_id, a.kind, a.base_url
 FROM models m JOIN accounts a ON a.id = m.account_id
 WHERE a.enabled = 1
-  AND NOT (m.proto_tested_at IS NOT NULL AND COALESCE(m.proto_openai,0) = 0
+  AND NOT (m.proto_tested_at IS NOT NULL AND COALESCE(m.proto_chat,0) = 0
            AND COALESCE(m.proto_anthropic,0) = 0 AND COALESCE(m.proto_responses,0) = 0)
 ORDER BY m.account_id, m.model_id`)
 	if err != nil {

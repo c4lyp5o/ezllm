@@ -49,13 +49,13 @@ func TestModelProtocolAPIValidation(t *testing.T) {
 	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
 	acct := seededAccountID(t, h)
 	cases := []struct{ name, body string }{
-		{"missing model", `{"proto_openai":true,"note":"x"}`},
+		{"missing model", `{"proto_chat":true,"note":"x"}`},
 		{"nothing to write", `{"model":"m","note":"x"}`},
-		{"release mixed with verdicts", `{"model":"m","proto_openai":true,"note":"x","release":true}`},
-		{"missing note", `{"model":"m","proto_openai":true}`},
-		{"blank note", `{"model":"m","proto_openai":true,"note":"   "}`},
-		{"bad verdict type", `{"model":"m","proto_openai":"yes","note":"x"}`},
-		{"unknown field rejected", `{"model":"m","proto_openai":true,"note":"x","prto":"x"}`},
+		{"release mixed with verdicts", `{"model":"m","proto_chat":true,"note":"x","release":true}`},
+		{"missing note", `{"model":"m","proto_chat":true}`},
+		{"blank note", `{"model":"m","proto_chat":true,"note":"   "}`},
+		{"bad verdict type", `{"model":"m","proto_chat":"yes","note":"x"}`},
+		{"unknown field rejected", `{"model":"m","proto_chat":true,"note":"x","prto":"x"}`},
 		{"malformed json", `{"model":`},
 	}
 	for _, c := range cases {
@@ -69,7 +69,7 @@ func TestModelProtocolAPIValidation(t *testing.T) {
 func TestModelProtocolUnknownModelIs404(t *testing.T) {
 	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
 	acct := seededAccountID(t, h)
-	code, _, resp := h.do("PUT", protocolPath(acct), adminTok(), `{"model":"ghost","proto_openai":true,"note":"x"}`)
+	code, _, resp := h.do("PUT", protocolPath(acct), adminTok(), `{"model":"ghost","proto_chat":true,"note":"x"}`)
 	if code != http.StatusNotFound {
 		t.Fatalf("unknown model: %d (%s), want 404", code, resp)
 	}
@@ -87,7 +87,7 @@ func TestModelProtocolRoundTripAndProbeProtection(t *testing.T) {
 	}
 
 	code, _, body := h.do("PUT", protocolPath(acct), adminTok(),
-		`{"model":"m1","proto_openai":true,"proto_anthropic":false,"note":"edge stonewalls anthropic"}`)
+		`{"model":"m1","proto_chat":true,"proto_anthropic":false,"note":"edge stonewalls anthropic"}`)
 	if code != 200 {
 		t.Fatalf("curate: %d (%s), want 200", code, body)
 	}
@@ -96,7 +96,7 @@ func TestModelProtocolRoundTripAndProbeProtection(t *testing.T) {
 		t.Fatal(err)
 	}
 	if echo.Source != "curated" || echo.Note != "edge stonewalls anthropic" || echo.TestedAt != nil ||
-		echo.OpenAI == nil || !*echo.OpenAI || echo.Anthropic == nil || *echo.Anthropic {
+		echo.Chat == nil || !*echo.Chat || echo.Anthropic == nil || *echo.Anthropic {
 		t.Fatalf("echo = %+v", echo)
 	}
 
@@ -106,7 +106,7 @@ func TestModelProtocolRoundTripAndProbeProtection(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := h.db.SetModelProtos(context.Background(), acct, map[string]map[string]*bool{
-		"m1": {"openai": &yes, "anthropic": &yes},
+		"m1": {"chat": &yes, "anthropic": &yes},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestModelProtocolRoundTripAndProbeProtection(t *testing.T) {
 		t.Fatalf("release: %d (%s), want 200", code, body)
 	}
 	m = entry(t, h, acct, "m1")
-	if m.Source != "" || m.Note != "" || m.OpenAI == nil || !*m.OpenAI || m.Anthropic == nil || *m.Anthropic {
+	if m.Source != "" || m.Note != "" || m.Chat == nil || !*m.Chat || m.Anthropic == nil || *m.Anthropic {
 		t.Fatalf("after release = %+v", m)
 	}
 	if err := h.db.SetModelProto(context.Background(), acct, "m1", provider.SurfaceAnthropic, &yes); err != nil {
@@ -149,7 +149,7 @@ func TestModelProtocolCuratedFeedsTranslationEligibility(t *testing.T) {
 
 	// Curated through the ADMIN ROUTE — the API is the gate, not a direct store call.
 	code, _, body := h.do("PUT", protocolPath(acct), adminTok(),
-		`{"model":"gpt-6-luna","proto_openai":true,"proto_anthropic":false,"note":"curated openai-only"}`)
+		`{"model":"gpt-6-luna","proto_chat":true,"proto_anthropic":false,"note":"curated openai-only"}`)
 	if code != 200 {
 		t.Fatalf("curate: %d (%s)", code, body)
 	}

@@ -25,7 +25,7 @@ const hermesChat = `{
  "tools":[{"type":"function","function":{"name":"terminal","description":"run","parameters":{"type":"object","properties":{"command":{"type":"string"}}}}}]}`
 
 func TestHermesChatBodyCrossesIntoTheBridge(t *testing.T) {
-	messages, err := translate.RequestUniversal([]byte(hermesChat), provider.SurfaceOpenAI, provider.SurfaceAnthropic, "claude-sonnet-5-5")
+	messages, err := translate.RequestUniversal([]byte(hermesChat), provider.SurfaceChat, provider.SurfaceAnthropic, "claude-sonnet-5-5")
 	if err != nil {
 		t.Fatalf("translate: %v", err)
 	}

@@ -46,7 +46,7 @@ func (c *factsCatalog) ModelFacts(ctx context.Context, id int64, m string) (stor
 	c.facts++
 	pin, _ := c.fakeCatalog.ModelPin(ctx, id, m)
 	f := store.ModelFacts{Pin: pin}
-	f.OpenAI, _ = c.fakeCatalog.ModelSupportsSurface(ctx, id, m, provider.SurfaceOpenAI)
+	f.Chat, _ = c.fakeCatalog.ModelSupportsSurface(ctx, id, m, provider.SurfaceChat)
 	f.Anthropic, _ = c.fakeCatalog.ModelSupportsSurface(ctx, id, m, provider.SurfaceAnthropic)
 	f.Responses, _ = c.fakeCatalog.ModelSupportsSurface(ctx, id, m, provider.SurfaceResponses)
 	return f, nil
@@ -69,7 +69,7 @@ func TestComboResolutionReadsEachAccountOnce(t *testing.T) {
 	f := newFake()
 	sharedAccountCombo(f)
 	c := &factsCatalog{countingCatalog: &countingCatalog{fakeCatalog: f}}
-	routes, err := New(c).ResolveCandidates(context.Background(), "mix", provider.SurfaceOpenAI, "t")
+	routes, err := New(c).ResolveCandidates(context.Background(), "mix", provider.SurfaceChat, "t")
 	if err != nil || len(routes) != 3 {
 		t.Fatalf("routes = %d, err = %v; want 3", len(routes), err)
 	}
@@ -115,7 +115,7 @@ func (brokenSnapshotCatalog) CatalogSnapshot(context.Context) (*store.CatalogSna
 // the live catalog, whose own errors keep their fail-closed meaning.
 func TestUnreadableSnapshotFallsBackToLiveCatalog(t *testing.T) {
 	c := brokenSnapshotCatalog{&countingCatalog{fakeCatalog: newFake()}}
-	routes, err := New(c).ResolveCandidates(context.Background(), "opengo/gpt-6-luna", provider.SurfaceOpenAI, "t")
+	routes, err := New(c).ResolveCandidates(context.Background(), "opengo/gpt-6-luna", provider.SurfaceChat, "t")
 	if err != nil || len(routes) != 1 {
 		t.Fatalf("routes = %d, err = %v; want 1 via the live catalog", len(routes), err)
 	}

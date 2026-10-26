@@ -24,8 +24,8 @@ func TestCaptureShapeDocParityWithBytePath(t *testing.T) {
 		`{"model":"m","messages":[]}`,
 	}
 	for _, b := range bodies {
-		legacy := captureShape([]byte(b), provider.SurfaceOpenAI)
-		doc := captureShapeDoc(jsonbody.Open([]byte(b)), provider.SurfaceOpenAI)
+		legacy := captureShape([]byte(b), provider.SurfaceChat)
+		doc := captureShapeDoc(jsonbody.Open([]byte(b)), provider.SurfaceChat)
 		if legacy != doc {
 			t.Errorf("shape drift for %s\nlegacy: %+v\ndoc:    %+v", b, legacy, doc)
 		}
@@ -45,8 +45,8 @@ func TestCaptureShapeDocNumberLiteralSensitivity(t *testing.T) {
 	mk := func(num string) string {
 		return `{"model":"m","messages":[{"role":"user","content":"` + num + `"},{"role":"assistant","content":"tail"}]}`
 	}
-	a := captureShapeDoc(jsonbody.Open([]byte(mk(`1e10`))), provider.SurfaceOpenAI)
-	b := captureShapeDoc(jsonbody.Open([]byte(mk(`10000000000`))), provider.SurfaceOpenAI)
+	a := captureShapeDoc(jsonbody.Open([]byte(mk(`1e10`))), provider.SurfaceChat)
+	b := captureShapeDoc(jsonbody.Open([]byte(mk(`10000000000`))), provider.SurfaceChat)
 	if a.PrefixSHA == "" || a.PrefixSHA == b.PrefixSHA {
 		t.Errorf("number-literal sensitivity lost: %q vs %q", a.PrefixSHA, b.PrefixSHA)
 	}

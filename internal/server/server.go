@@ -298,7 +298,7 @@ func (s *Server) routes() {
 	// Public price catalog (infer token): current/historical rates per
 	// account+model, versioned by effective_from.
 	s.mux.HandleFunc("GET /v1/prices", s.authed(s.handleCurrentPrices))
-	s.mux.HandleFunc("POST /v1/chat/completions", s.authed(s.inference(provider.SurfaceOpenAI)))
+	s.mux.HandleFunc("POST /v1/chat/completions", s.authed(s.inference(provider.SurfaceChat)))
 	s.mux.HandleFunc("POST /v1/messages", s.authed(s.inference(provider.SurfaceAnthropic)))
 	s.mux.HandleFunc("POST /v1/responses", s.authed(s.inference(provider.SurfaceResponses)))
 
@@ -316,7 +316,7 @@ func (s *Server) routes() {
 	// VS Code / Headerless tokenized aliases (OmniRoute compatibility)
 	s.mux.HandleFunc("GET /api/v1/vscode/{token}/", s.vscodeAuthed(s.handleModels))
 	s.mux.HandleFunc("GET /api/v1/vscode/{token}/models", s.vscodeAuthed(s.handleModels))
-	s.mux.HandleFunc("POST /api/v1/vscode/{token}/chat/completions", s.vscodeAuthed(s.inference(provider.SurfaceOpenAI)))
+	s.mux.HandleFunc("POST /api/v1/vscode/{token}/chat/completions", s.vscodeAuthed(s.inference(provider.SurfaceChat)))
 	s.mux.HandleFunc("POST /api/v1/vscode/{token}/responses", s.vscodeAuthed(s.inference(provider.SurfaceResponses)))
 
 	// ── Dashboard account settings ──
@@ -379,7 +379,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PUT /admin/accounts/{id}/prices", s.admin(s.handleSetPrice))
 	s.mux.HandleFunc("DELETE /admin/accounts/{id}/prices", s.admin(s.handleDeletePrice))
 	s.mux.HandleFunc("GET /admin/cost", s.admin(s.handleCost))
-	s.mux.HandleFunc("POST /admin/chat", s.admin(s.inference(provider.SurfaceOpenAI)))
+	s.mux.HandleFunc("POST /admin/chat", s.admin(s.inference(provider.SurfaceChat)))
 	s.mux.HandleFunc("GET /admin/accounts/{id}/quota", s.admin(s.handleAccountQuota))
 
 	s.mux.HandleFunc("GET /admin/combos", s.admin(s.handleCombos))
@@ -577,11 +577,11 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 // protocolMap exposes probed per-surface support so a client can tell whether a
 // model can serve /v1/messages or /v1/responses (upstream catalogs omit this).
 func protocolMap(e store.ModelEntry) map[string]any {
-	if e.Protocol.OpenAI == nil && e.Protocol.Anthropic == nil && e.Protocol.Responses == nil {
+	if e.Protocol.Chat == nil && e.Protocol.Anthropic == nil && e.Protocol.Responses == nil {
 		return nil
 	}
 	return map[string]any{
-		"openai": e.Protocol.OpenAI, "anthropic": e.Protocol.Anthropic, "responses": e.Protocol.Responses,
+		"chat": e.Protocol.Chat, "anthropic": e.Protocol.Anthropic, "responses": e.Protocol.Responses,
 	}
 }
 
@@ -595,7 +595,7 @@ func supportsProtocol(e store.ModelEntry, p string) bool {
 	case "responses":
 		return e.Protocol.Responses == nil || *e.Protocol.Responses
 	default:
-		return e.Protocol.OpenAI == nil || *e.Protocol.OpenAI
+		return e.Protocol.Chat == nil || *e.Protocol.Chat
 	}
 }
 
@@ -1578,6 +1578,6 @@ func store2surface(s provider.Surface) store.Surface {
 	case provider.SurfaceMusicGen:
 		return store.SurfaceMusicGen
 	default:
-		return store.SurfaceOpenAI
+		return store.SurfaceChat
 	}
 }

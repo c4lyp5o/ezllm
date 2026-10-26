@@ -28,7 +28,7 @@ func TestModelPinAPIValidation(t *testing.T) {
 		name, body string
 		want       int
 	}{
-		{"missing model", `{"pin":"openai"}`, http.StatusBadRequest},
+		{"missing model", `{"pin":"chat"}`, http.StatusBadRequest},
 		{"absent pin is not a write", `{"model":"m"}`, http.StatusBadRequest},
 		{"unknown surface", `{"model":"m","pin":"gemini"}`, http.StatusBadRequest},
 		{"malformed json", `{"model":`, http.StatusBadRequest},
@@ -44,7 +44,7 @@ func TestModelPinAPIValidation(t *testing.T) {
 func TestModelPinUnknownModelIs404(t *testing.T) {
 	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
 	acct := seededAccountID(t, h)
-	code, _, resp := h.do("PUT", pinPath(acct), adminTok(), `{"model":"ghost","pin":"openai"}`)
+	code, _, resp := h.do("PUT", pinPath(acct), adminTok(), `{"model":"ghost","pin":"chat"}`)
 	if code != http.StatusNotFound {
 		t.Fatalf("unknown model: %d (%s), want 404", code, resp)
 	}
@@ -55,7 +55,7 @@ func TestModelPinRefusesUnconfirmedUnlessForced(t *testing.T) {
 	acct := seededAccountID(t, h)
 	// Probe confirmed openai only; responses is unconfirmed.
 	if _, err := h.db.Writer().Exec(
-		`INSERT INTO models (account_id, model_id, proto_openai, proto_anthropic, proto_responses)
+		`INSERT INTO models (account_id, model_id, proto_chat, proto_anthropic, proto_responses)
 		 VALUES (?, 'probed', 1, 0, 0)`, acct); err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestModelPinRefusesUnconfirmedUnlessForced(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("forced pin: %d (%s), want 200", code, resp)
 	}
-	code, _, resp = h.do("PUT", pinPath(acct), adminTok(), `{"model":"probed","pin":"openai"}`)
+	code, _, resp = h.do("PUT", pinPath(acct), adminTok(), `{"model":"probed","pin":"chat"}`)
 	if code != http.StatusOK {
 		t.Fatalf("confirmed pin: %d (%s), want 200", code, resp)
 	}

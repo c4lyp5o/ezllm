@@ -22,7 +22,7 @@ import (
 func TestModelPinRejectsUnknownField(t *testing.T) {
 	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
 	code, _, body := h.do("PUT", "/admin/accounts/1/model-pin", "tok-admin",
-		`{"model":"gpt-6-luna","pinn":"openai"}`) // typo: pinn
+		`{"model":"gpt-6-luna","pinn":"chat"}`) // typo: pinn
 	if code != 400 {
 		t.Fatalf("unknown field answered %d, want 400: %s", code, body)
 	}
@@ -82,7 +82,7 @@ func TestModelPinRejectsOverCapBody(t *testing.T) {
 	// the 1 MiB cap before EOF and reports "unexpected EOF".
 	pad := strings.Repeat("A", 2<<20)
 	code, _, body := h.do("PUT", "/admin/accounts/1/model-pin", "tok-admin",
-		`{"model":"`+pad+`","pin":"openai"}`)
+		`{"model":"`+pad+`","pin":"chat"}`)
 	if code != 400 {
 		t.Fatalf("over-cap body answered %d, want 400: %s", code, body)
 	}

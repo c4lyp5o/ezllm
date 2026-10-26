@@ -54,7 +54,7 @@ func BenchmarkUpstreamRoundTrip(b *testing.B) {
 
 	client := benchutil.NewClient()
 	d := NewDispatcher(client, provider.NewRegistry(client))
-	rt := testRoute(mock.URL(), provider.SurfaceOpenAI)
+	rt := testRoute(mock.URL(), provider.SurfaceChat)
 
 	for _, p := range proxyPayloadSizes {
 		plain := benchutil.ChatBody(benchModel, p.bytes)
@@ -128,7 +128,7 @@ func BenchmarkStreamCopy(b *testing.B) {
 					b.ResetTimer()
 					c.run(b, newDiscardWriter, func(w *discardWriter) {
 						resp := streamResponse(payload, frag.read)
-						_, _, _, err := d.streamCopy(context.Background(), w, resp, provider.SurfaceOpenAI, provider.UsageConventionAuto, time.Now())
+						_, _, _, err := d.streamCopy(context.Background(), w, resp, provider.SurfaceChat, provider.UsageConventionAuto, time.Now())
 						if err != nil {
 							b.Error(err)
 						}

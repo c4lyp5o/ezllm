@@ -21,13 +21,13 @@ func TestUsageReportAppliedSavedGatesLegacyRows(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	rows := []Call{
-		{TS: now, Client: "c", Surface: "openai", Account: "a", Model: "m",
+		{TS: now, Client: "c", Surface: "chat", Account: "a", Model: "m",
 			Status: 200, TokensIn: 100, TokensSaved: 40, CompressionApplied: true, CompressionProfile: "p"},
 		// legacy declined row: saved recorded but nothing shipped
-		{TS: now, Client: "c", Surface: "openai", Account: "a", Model: "m",
+		{TS: now, Client: "c", Surface: "chat", Account: "a", Model: "m",
 			Status: 200, TokensIn: 100, TokensSaved: 21, TokensSavedNotional: 21, CompressionApplied: false, CompressionProfile: "p"},
 		// clean declined row: only the notional travels
-		{TS: now, Client: "c", Surface: "openai", Account: "a", Model: "m",
+		{TS: now, Client: "c", Surface: "chat", Account: "a", Model: "m",
 			Status: 200, TokensIn: 100, TokensSaved: 0, TokensSavedNotional: 9, CompressionApplied: false, CompressionProfile: "p"},
 	}
 	for _, c := range rows {

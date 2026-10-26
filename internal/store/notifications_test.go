@@ -103,7 +103,7 @@ func TestUpsertModelsStampsCatalogSyncedAt(t *testing.T) {
 }
 
 // A service-surface verdict in a sweep batch must not land in the chat
-// proto_openai column (it used to fall through to it).
+// proto_chat column (it used to fall through to it).
 func TestSetModelProtosSkipsServiceSurfaces(t *testing.T) {
 	db := openEventsDB(t, 4)
 	defer db.Close()
@@ -116,14 +116,14 @@ func TestSetModelProtosSkipsServiceSurfaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	yes, no := true, false
-	if err := db.SetModelProtos(ctx, id, map[string]map[string]*bool{"m": {"openai": &yes, "embeddings": &no}}); err != nil {
+	if err := db.SetModelProtos(ctx, id, map[string]map[string]*bool{"m": {"chat": &yes, "embeddings": &no}}); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := db.ListModels(ctx, id)
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("rows %v err %v", rows, err)
 	}
-	if rows[0].OpenAI == nil || !*rows[0].OpenAI {
-		t.Fatalf("openai verdict = %v, want true (the embeddings 'false' must not overwrite it)", rows[0].OpenAI)
+	if rows[0].Chat == nil || !*rows[0].Chat {
+		t.Fatalf("openai verdict = %v, want true (the embeddings 'false' must not overwrite it)", rows[0].Chat)
 	}
 }

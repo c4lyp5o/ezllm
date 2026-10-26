@@ -12,7 +12,7 @@ import (
 func TestProtocolToolIdentities(t *testing.T) {
 	sum := sha256.Sum256([]byte("call.a"))
 	ids := []string{"call.a", "call_a", "call/a", "functions.read:0", "functions_read_0", fmt.Sprintf("call_a_%x", sum[:8])}
-	for _, source := range []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceResponses} {
+	for _, source := range []provider.Surface{provider.SurfaceChat, provider.SurfaceResponses} {
 		ir := &RequestIR{}
 		calls := Turn{Role: RoleAssistant}
 		for i, id := range ids {

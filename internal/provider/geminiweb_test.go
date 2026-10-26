@@ -102,7 +102,7 @@ func TestGeminiWebPrepareRequestRewrite(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodPost, "internal://geminiweb/chat/completions", nil)
 	req.Header.Set("Authorization", "Bearer client-supplied")
 	acct := Account{ID: 42, Kind: KindGeminiWeb}
-	if err := a.PrepareRequest(context.Background(), req, acct, "__Secure-1PSID=x\n__Secure-1PSIDTS=y", SurfaceOpenAI); err != nil {
+	if err := a.PrepareRequest(context.Background(), req, acct, "__Secure-1PSID=x\n__Secure-1PSIDTS=y", SurfaceChat); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(req.URL.String(), bridge.URL+"/internal/geminiweb/v1/chat/completions") {

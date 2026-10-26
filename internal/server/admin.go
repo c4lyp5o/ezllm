@@ -906,8 +906,8 @@ func needsProbe(e store.ModelEntryRow, surfaces []provider.Surface) bool {
 	for _, s := range surfaces {
 		var v *bool
 		switch s {
-		case provider.SurfaceOpenAI:
-			v = e.OpenAI
+		case provider.SurfaceChat:
+			v = e.Chat
 		case provider.SurfaceAnthropic:
 			v = e.Anthropic
 		case provider.SurfaceResponses:
@@ -1126,7 +1126,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	surfaces := parseSurfaces(body.Surfaces)
 	if len(surfaces) == 0 {
 		surfaces = []provider.Surface{
-			provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses,
+			provider.SurfaceChat, provider.SurfaceAnthropic, provider.SurfaceResponses,
 		}
 	}
 	surfaceNames := make([]string, 0, len(surfaces))
@@ -1270,7 +1270,7 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 
 // handleSetModelPin sets or clears a model's surface pin.
 //
-// Body: {"model": "<id>", "pin": "openai"|"anthropic"|"responses"|"", "force": bool}
+// Body: {"model": "<id>", "pin": "chat"|"anthropic"|"responses"|"", "force": bool}
 // The model id travels in the body, not the path: ids can contain "/".
 // pin is a RawMessage so "absent" (keep), "" (clear), and a value (set) are
 // distinct. A pin on a surface the probe never confirmed is refused unless
@@ -1302,11 +1302,14 @@ func (s *Server) handleSetModelPin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad_request", "pin must be a string")
 		return
 	}
+	if pin == "openai" {
+		pin = "chat" // legacy name of the chat wire
+	}
 	switch {
-	case pin == "", pin == "openai", pin == "anthropic", pin == "responses", store.IsServiceSurface(pin):
+	case pin == "", pin == "chat", pin == "anthropic", pin == "responses", store.IsServiceSurface(pin):
 	default:
 		writeErr(w, http.StatusBadRequest, "bad_request",
-			"pin must be openai, anthropic, responses, "+strings.Join(store.ServiceSurfaceNames, ", ")+", or empty")
+			"pin must be chat, anthropic, responses, "+strings.Join(store.ServiceSurfaceNames, ", ")+", or empty")
 		return
 	}
 
@@ -1327,7 +1330,7 @@ func (s *Server) handleSetModelPin(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusNotFound, "not_found", "model not in this account's catalog")
 			return
 		}
-		confirmed := map[string]*bool{"openai": found.OpenAI, "anthropic": found.Anthropic, "responses": found.Responses}[pin]
+		confirmed := map[string]*bool{"chat": found.Chat, "anthropic": found.Anthropic, "responses": found.Responses}[pin]
 		if confirmed == nil || !*confirmed {
 			writeErr(w, http.StatusConflict, "unconfirmed_surface",
 				"the probe has not confirmed this model on "+pin+"; pass force=true to pin anyway")
@@ -1344,7 +1347,7 @@ func (s *Server) handleSetModelPin(w http.ResponseWriter, r *http.Request) {
 
 // handleSetModelProtocol records operator-curated protocol verdicts.
 //
-// Body: {"model": "<id>", "proto_openai": true|false|null, "proto_anthropic":
+// Body: {"model": "<id>", "proto_chat": true|false|null, "proto_anthropic":
 // ..., "proto_responses": ..., "note": "<why>", "release": bool}
 // The model id travels in the body, not the path: ids can contain "/".
 // Each proto_* verdict is three-state: absent keeps the recorded value, null
@@ -1359,7 +1362,7 @@ func (s *Server) handleSetModelProtocol(w http.ResponseWriter, r *http.Request) 
 	}
 	var body struct {
 		Model     string          `json:"model"`
-		OpenAI    json.RawMessage `json:"proto_openai"`
+		Chat      json.RawMessage `json:"proto_chat"`
 		Anthropic json.RawMessage `json:"proto_anthropic"`
 		Responses json.RawMessage `json:"proto_responses"`
 		Note      string          `json:"note"`
@@ -1373,7 +1376,7 @@ func (s *Server) handleSetModelProtocol(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	present := 0
-	for _, raw := range []json.RawMessage{body.OpenAI, body.Anthropic, body.Responses} {
+	for _, raw := range []json.RawMessage{body.Chat, body.Anthropic, body.Responses} {
 		if len(raw) != 0 {
 			present++
 		}
@@ -1392,7 +1395,7 @@ func (s *Server) handleSetModelProtocol(w http.ResponseWriter, r *http.Request) 
 	}
 	edits := map[string]store.ProtoEdit{}
 	for name, raw := range map[string]json.RawMessage{
-		"openai": body.OpenAI, "anthropic": body.Anthropic, "responses": body.Responses,
+		"chat": body.Chat, "anthropic": body.Anthropic, "responses": body.Responses,
 	} {
 		if len(raw) == 0 {
 			continue
@@ -1663,7 +1666,7 @@ func (s *Server) handleComboTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	surface := provider.SurfaceOpenAI
+	surface := provider.SurfaceChat
 	if r.ContentLength > 0 {
 		var in struct {
 			Surface string `json:"surface"`
@@ -1673,12 +1676,12 @@ func (s *Server) handleComboTest(w http.ResponseWriter, r *http.Request) {
 		// sends anyway.
 		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<12)).Decode(&in)
 		switch in.Surface {
-		case "", "openai":
-			surface = provider.SurfaceOpenAI
+		case "", "chat", "openai":
+			surface = provider.SurfaceChat
 		case "anthropic":
 			surface = provider.SurfaceAnthropic
 		default:
-			writeErr(w, http.StatusBadRequest, "invalid_request_error", "surface must be openai or anthropic")
+			writeErr(w, http.StatusBadRequest, "invalid_request_error", "surface must be chat or anthropic")
 			return
 		}
 	}
@@ -2244,10 +2247,10 @@ func accountFromSummary(a *store.AccountSummary) provider.Account {
 }
 
 func protocolCounts(entries []store.ModelEntryRow) map[string]int {
-	out := map[string]int{"openai": 0, "anthropic": 0, "responses": 0, "untested": 0}
+	out := map[string]int{"chat": 0, "anthropic": 0, "responses": 0, "untested": 0}
 	for _, e := range entries {
-		if e.OpenAI != nil && *e.OpenAI {
-			out["openai"]++
+		if e.Chat != nil && *e.Chat {
+			out["chat"]++
 		}
 		if e.Anthropic != nil && *e.Anthropic {
 			out["anthropic"]++
@@ -2255,7 +2258,7 @@ func protocolCounts(entries []store.ModelEntryRow) map[string]int {
 		if e.Responses != nil && *e.Responses {
 			out["responses"]++
 		}
-		if e.OpenAI == nil && e.Anthropic == nil && e.Responses == nil {
+		if e.Chat == nil && e.Anthropic == nil && e.Responses == nil {
 			out["untested"]++
 		}
 	}
@@ -2269,8 +2272,8 @@ func parseSurfaces(names []string) []provider.Surface {
 	var out []provider.Surface
 	for _, n := range names {
 		switch strings.ToLower(strings.TrimSpace(n)) {
-		case "openai", "chat":
-			out = append(out, provider.SurfaceOpenAI)
+		case "chat", "openai":
+			out = append(out, provider.SurfaceChat)
 		case "anthropic", "messages":
 			out = append(out, provider.SurfaceAnthropic)
 		case "responses":

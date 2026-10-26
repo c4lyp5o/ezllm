@@ -90,7 +90,7 @@ func markMessagesOnly(t *testing.T, db *store.DB, acctID int64) {
 	t.Helper()
 	no := false
 	yes := true
-	for _, s := range []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceResponses} {
+	for _, s := range []provider.Surface{provider.SurfaceChat, provider.SurfaceResponses} {
 		if err := db.SetModelProto(context.Background(), acctID, "gpt-6-luna", s, &no); err != nil {
 			t.Fatal(err)
 		}

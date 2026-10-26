@@ -27,7 +27,7 @@ func TestOpenCodeGoInjectsSessionHeaders(t *testing.T) {
 	acct := testAccount(KindOpenCodeGo, "https://opencode.ai/zen/go/v1")
 	acct.RequiresSessionHeader = true
 
-	for _, surface := range []Surface{SurfaceOpenAI, SurfaceAnthropic, SurfaceResponses} {
+	for _, surface := range []Surface{SurfaceChat, SurfaceAnthropic, SurfaceResponses} {
 		req, _ := http.NewRequest(http.MethodPost, acct.BaseURL+SurfacePath(surface), nil)
 		// a client with its own conversation session must keep it
 		req.Header.Set("x-opencode-session", "ses-hermes-conv-42")
@@ -51,7 +51,7 @@ func TestOpenCodeGoSynthesizesSessionWhenAbsent(t *testing.T) {
 	a := NewOpenCodeGo(http.DefaultClient)
 	acct := testAccount(KindOpenCodeGo, "https://opencode.ai/zen/go/v1")
 	req, _ := http.NewRequest(http.MethodPost, acct.BaseURL+"/chat/completions", nil)
-	if err := a.PrepareRequest(t.Context(), req, acct, "sk-k", SurfaceOpenAI); err != nil {
+	if err := a.PrepareRequest(t.Context(), req, acct, "sk-k", SurfaceChat); err != nil {
 		t.Fatal(err)
 	}
 	sess := req.Header.Get("x-opencode-session")
@@ -75,7 +75,7 @@ func TestOpenCodeGoSessionIdentitySemantics(t *testing.T) {
 	seen := map[string]bool{}
 	for i := 0; i < 200; i++ {
 		req, _ := http.NewRequest(http.MethodPost, acct.BaseURL+"/chat/completions", nil)
-		if err := a.PrepareRequest(t.Context(), req, acct, "sk-k", SurfaceOpenAI); err != nil {
+		if err := a.PrepareRequest(t.Context(), req, acct, "sk-k", SurfaceChat); err != nil {
 			t.Fatal(err)
 		}
 		s := req.Header.Get("x-opencode-session")
@@ -90,7 +90,7 @@ func TestOpenCodeGoSessionIdentitySemantics(t *testing.T) {
 	for _, dst := range []*string{&first, &second} {
 		req, _ := http.NewRequest(http.MethodPost, acct.BaseURL+"/chat/completions", nil)
 		req.Header.Set("x-opencode-session", "ses-hermes-conv-42")
-		if err := a.PrepareRequest(t.Context(), req, acct, "sk-k", SurfaceOpenAI); err != nil {
+		if err := a.PrepareRequest(t.Context(), req, acct, "sk-k", SurfaceChat); err != nil {
 			t.Fatal(err)
 		}
 		*dst = req.Header.Get("x-opencode-session")
@@ -109,7 +109,7 @@ func TestOpenCodeGoOverridesClientUserAgent(t *testing.T) {
 	acct := testAccount(KindOpenCodeGo, "https://opencode.ai/zen/go/v1")
 	req, _ := http.NewRequest(http.MethodPost, acct.BaseURL+"/chat/completions", nil)
 	req.Header.Set("User-Agent", "Python-urllib/3.11")
-	if err := a.PrepareRequest(t.Context(), req, acct, "sk-k", SurfaceOpenAI); err != nil {
+	if err := a.PrepareRequest(t.Context(), req, acct, "sk-k", SurfaceChat); err != nil {
 		t.Fatal(err)
 	}
 	if got := req.Header.Get("User-Agent"); got != agentUserAgent {
@@ -164,7 +164,7 @@ func TestPrepareRequestRejectsEmptyKey(t *testing.T) {
 		NewAnthropicCompatible(http.DefaultClient),
 	} {
 		req, _ := http.NewRequest(http.MethodPost, "https://x/v1/chat/completions", nil)
-		if err := a.PrepareRequest(t.Context(), req, acct, "", SurfaceOpenAI); err == nil {
+		if err := a.PrepareRequest(t.Context(), req, acct, "", SurfaceChat); err == nil {
 			t.Errorf("%s: empty key must be rejected", a.Kind())
 		}
 	}
@@ -230,7 +230,7 @@ func TestParseKindAndValidKinds(t *testing.T) {
 
 func TestSurfacePath(t *testing.T) {
 	cases := map[Surface]string{
-		SurfaceOpenAI:    "/chat/completions",
+		SurfaceChat:      "/chat/completions",
 		SurfaceAnthropic: "/messages",
 		SurfaceResponses: "/responses",
 		Surface("weird"): "/chat/completions", // default

@@ -80,7 +80,7 @@ func TestProtocolProbeIsNotLedgered(t *testing.T) {
 
 	tester.ProtocolSweep(context.Background(), acct, "k",
 		[]provider.ModelInfo{{ID: "m1"}},
-		Options{Surfaces: []provider.Surface{provider.SurfaceOpenAI}, ProbeAll: true})
+		Options{Surfaces: []provider.Surface{provider.SurfaceChat}, ProbeAll: true})
 
 	assertLedgerEmpty(t, db)
 }

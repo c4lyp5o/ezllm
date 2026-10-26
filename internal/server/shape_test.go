@@ -19,8 +19,8 @@ func TestCaptureShapeSiblingReuseSharesPrefix(t *testing.T) {
 	// A re-send of the SAME conversation (retry after a dropped connection, or
 	// the same context re-posted) — identical stable core, so identical hash.
 	resend := base
-	a := captureShape([]byte(base), provider.SurfaceOpenAI)
-	b := captureShape([]byte(resend), provider.SurfaceOpenAI)
+	a := captureShape([]byte(base), provider.SurfaceChat)
+	b := captureShape([]byte(resend), provider.SurfaceChat)
 	if a.PrefixSHA == "" {
 		t.Fatal("prefix hash empty for a valid chat body")
 	}
@@ -32,7 +32,7 @@ func TestCaptureShapeSiblingReuseSharesPrefix(t *testing.T) {
 	// newest is exempt, so the core is one message longer — a DIFFERENT hash.
 	// This is correct: consecutive agent turns are not byte-identical prompts.
 	next := `{"model":"m","messages":[` + sys + `,{"role":"user","content":"one"},{"role":"assistant","content":"ok"}]}`
-	c := captureShape([]byte(next), provider.SurfaceOpenAI)
+	c := captureShape([]byte(next), provider.SurfaceChat)
 	if c.PrefixSHA == a.PrefixSHA {
 		t.Error("an appended turn should change the hash (history grew) — otherwise growth is invisible")
 	}
@@ -61,11 +61,11 @@ func TestCaptureShapeChangeBreaksPrefix(t *testing.T) {
 	// Tool definitions count, and the tool counter must reflect them.
 	withTools := []byte(`{"model":"m","messages":[{"role":"user","content":"x"}],"tools":[{"name":"a"},{"name":"b"}]}`)
 	noTools := []byte(`{"model":"m","messages":[{"role":"user","content":"x"}]}`)
-	s := captureShape(withTools, provider.SurfaceOpenAI)
+	s := captureShape(withTools, provider.SurfaceChat)
 	if s.ToolCount != 2 {
 		t.Errorf("tool_count = %d, want 2", s.ToolCount)
 	}
-	if s.PrefixSHA == captureShape(noTools, provider.SurfaceOpenAI).PrefixSHA {
+	if s.PrefixSHA == captureShape(noTools, provider.SurfaceChat).PrefixSHA {
 		t.Error("adding tool definitions must change the prefix hash")
 	}
 }
@@ -89,7 +89,7 @@ func TestCaptureShapeResponsesInput(t *testing.T) {
 func TestCaptureShapeNeverFailsOnGarbage(t *testing.T) {
 	// Capture is best-effort: nonsense must not panic and must not fake a hash.
 	for _, body := range []string{"", "not json", `{`, `{"model":"m","messages":"wrong-type"}`, `[]`} {
-		s := captureShape([]byte(body), provider.SurfaceOpenAI)
+		s := captureShape([]byte(body), provider.SurfaceChat)
 		if body == "" {
 			if s.ReqBytes != 0 {
 				t.Error("empty body should record 0 bytes")
@@ -105,7 +105,7 @@ func TestCaptureShapeNeverFailsOnGarbage(t *testing.T) {
 	}
 	// Huge body: byte size only, no hash, no panic.
 	huge := `{"model":"m","messages":[{"role":"user","content":"` + strings.Repeat("x", maxShapeBody+1) + `"}]}`
-	if s := captureShape([]byte(huge), provider.SurfaceOpenAI); s.PrefixSHA != "" || s.ReqBytes != len(huge) {
+	if s := captureShape([]byte(huge), provider.SurfaceChat); s.PrefixSHA != "" || s.ReqBytes != len(huge) {
 		t.Errorf("oversized body should record bytes without hashing: %+v", s)
 	}
 }
@@ -114,8 +114,8 @@ func TestCaptureShapeSingleTurnSharesEmptyHistory(t *testing.T) {
 	// One message = no prior turn to reuse. With the same system, both calls'
 	// stable core is identical (system + empty history), so they DO share a
 	// hash — the correct reading of "nothing here was ever cached before".
-	a := captureShape([]byte(`{"model":"m","system":"s","messages":[{"role":"user","content":"one"}]}`), provider.SurfaceOpenAI)
-	b := captureShape([]byte(`{"model":"m","system":"s","messages":[{"role":"user","content":"two"}]}`), provider.SurfaceOpenAI)
+	a := captureShape([]byte(`{"model":"m","system":"s","messages":[{"role":"user","content":"one"}]}`), provider.SurfaceChat)
+	b := captureShape([]byte(`{"model":"m","system":"s","messages":[{"role":"user","content":"two"}]}`), provider.SurfaceChat)
 	if a.MsgCount != 1 || b.MsgCount != 1 {
 		t.Fatalf("msg counts = %d/%d, want 1/1", a.MsgCount, b.MsgCount)
 	}
@@ -123,7 +123,7 @@ func TestCaptureShapeSingleTurnSharesEmptyHistory(t *testing.T) {
 		t.Errorf("same-system single turns should share an (empty-history) prefix: %s vs %s", a.PrefixSHA, b.PrefixSHA)
 	}
 	// But a different system still separates them.
-	c := captureShape([]byte(`{"model":"m","system":"OTHER","messages":[{"role":"user","content":"one"}]}`), provider.SurfaceOpenAI)
+	c := captureShape([]byte(`{"model":"m","system":"OTHER","messages":[{"role":"user","content":"one"}]}`), provider.SurfaceChat)
 	if c.PrefixSHA == a.PrefixSHA {
 		t.Error("different system must not share the prefix hash")
 	}

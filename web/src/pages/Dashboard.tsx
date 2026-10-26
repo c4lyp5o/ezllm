@@ -328,7 +328,7 @@ function RecentCalls({ o }: { o: Overview }) {
                           in-tokens are the vendor's INCLUSIVE total. */}
                       {r.translated && (
                         <div className="mt-0.5 text-[11px] text-accent"
-                          title="translated hop: this hop's wire differs from the client's surface (anthropic client -> openai-only hop, or a hop curated for /v1/responses) — and the answer was converted back. Tokens are recorded in ezllm's own convention like any other row.">
+                          title="translated hop: this hop's wire differs from the client's surface (anthropic client -> chat-only hop, or a hop curated for /v1/responses) — and the answer was converted back. Tokens are recorded in ezllm's own convention like any other row.">
                           ⇄ translated
                         </div>
                       )}

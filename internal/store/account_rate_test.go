@@ -239,7 +239,7 @@ func TestAccountsWithRateLimitAndCallTimesSeed(t *testing.T) {
 	} {
 		if _, err := db.w.ExecContext(ctx,
 			`INSERT INTO calls (ts, client, surface, account_id, account, model, status) VALUES (?,?,?,?,?,?,?)`,
-			now.Add(-c.ago).Format(ledgerTSLayout), "t", "openai", c.acct, "ns", "m", 200); err != nil {
+			now.Add(-c.ago).Format(ledgerTSLayout), "t", "chat", c.acct, "ns", "m", 200); err != nil {
 			t.Fatalf("insert call: %v", err)
 		}
 	}

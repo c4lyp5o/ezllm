@@ -50,13 +50,13 @@ func TestNormalizeUsageEveryTokenInOneBucket(t *testing.T) {
 		// Chat gateways fronting cached models put the write in the details
 		// (opencode/openrouter) or at the top level (command-code), inside
 		// prompt_tokens like the read.
-		{"chat write in details", "openai", `{"prompt_tokens":1000,"prompt_tokens_details":{"cached_tokens":600,"cache_write_tokens":300},"completion_tokens":5}`, auto, 100, 5, 600, 300},
-		{"chat write top level", "openai", `{"prompt_tokens":1000,"cache_creation_input_tokens":300,"prompt_tokens_details":{"cached_tokens":600},"completion_tokens":5}`, auto, 100, 5, 600, 300},
+		{"chat write in details", "chat", `{"prompt_tokens":1000,"prompt_tokens_details":{"cached_tokens":600,"cache_write_tokens":300},"completion_tokens":5}`, auto, 100, 5, 600, 300},
+		{"chat write top level", "chat", `{"prompt_tokens":1000,"cache_creation_input_tokens":300,"prompt_tokens_details":{"cached_tokens":600},"completion_tokens":5}`, auto, 100, 5, 600, 300},
 		// DeepSeek's own counters, when no details object is sent.
-		{"chat deepseek hit tokens", "openai", `{"prompt_tokens":1000,"prompt_cache_hit_tokens":800,"prompt_cache_miss_tokens":200,"completion_tokens":5}`, auto, 200, 5, 800, 0},
-		{"chat top-level cached_tokens", "openai", `{"prompt_tokens":1000,"cached_tokens":700,"completion_tokens":5}`, auto, 300, 5, 700, 0},
+		{"chat deepseek hit tokens", "chat", `{"prompt_tokens":1000,"prompt_cache_hit_tokens":800,"prompt_cache_miss_tokens":200,"completion_tokens":5}`, auto, 200, 5, 800, 0},
+		{"chat top-level cached_tokens", "chat", `{"prompt_tokens":1000,"cached_tokens":700,"completion_tokens":5}`, auto, 300, 5, 700, 0},
 		// The details object wins when both are present (live opencode row).
-		{"chat details win", "openai", `{"cached_tokens":99456,"prompt_tokens":99704,"prompt_tokens_details":{"cached_tokens":99456},"completion_tokens":174}`, auto, 248, 174, 99456, 0},
+		{"chat details win", "chat", `{"cached_tokens":99456,"prompt_tokens":99704,"prompt_tokens_details":{"cached_tokens":99456},"completion_tokens":174}`, auto, 248, 174, 99456, 0},
 	} {
 		got := NormalizeUsageWith(Surface(tc.surface), rawUsage(t, tc.body), tc.conv)
 		wantUsage(t, tc.label, got, tc.in, tc.out, tc.read, tc.write)

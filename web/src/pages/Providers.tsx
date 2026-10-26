@@ -905,7 +905,7 @@ function EditAccountModal({ account, onClose, onSaved }: { account: Account | nu
 
 // ── models drawer ───────────────────────────────────────────────────────
 
-const PIN_SURFACES = ['openai', 'anthropic', 'responses', 'embeddings', 'images_gen', 'audio_tts', 'audio_stt',
+const PIN_SURFACES = ['chat', 'anthropic', 'responses', 'embeddings', 'images_gen', 'audio_tts', 'audio_stt',
   'images_edit', 'moderations', 'rerank', 'videos_gen', 'music_gen'] as const;
 
 // syncedAt is the account's catalog_synced_at: a manual sync bumps it, so the
@@ -1042,7 +1042,7 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
     // Chat-family surfaces have probe verdicts; a pin to an unconfirmed one
     // needs an explicit force. The new surfaces (embeddings/images/audio)
     // have no probe column yet, so ANY pin to them needs the confirm step.
-    const confirmed = pin === 'openai' ? m.openai
+    const confirmed = pin === 'chat' ? m.chat
       : pin === 'anthropic' ? m.anthropic
       : pin === 'responses' ? m.responses
       : undefined;
@@ -1050,7 +1050,7 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
     applyPin(m.id, pin, false);
   };
 
-  const untested = models.filter((m) => m.openai == null && m.anthropic == null && m.responses == null).length;
+  const untested = models.filter((m) => m.chat == null && m.anthropic == null && m.responses == null).length;
 
   return (
     // No CSS fade here: the drawer is rendered inside a <Collapse>, which
@@ -1102,13 +1102,13 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
           <tbody>
             {models.map((m) => {
               const testing = testingId === m.id;
-              const unprobed = m.openai == null && m.anthropic == null && m.responses == null;
+              const unprobed = m.chat == null && m.anthropic == null && m.responses == null;
               const queued = running && !testing && unprobed;
               const verdicts = (
                 <>
                   <div className={cx('flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[12px] transition-opacity', (testing || queued) && 'opacity-40')}>
                       {([
-                        ['Chat', m.openai],
+                        ['Chat', m.chat],
                         ['Messages', m.anthropic],
                         ['Responses', m.responses],
                       ] as const).map(([label, v]) => (

@@ -69,7 +69,7 @@ func TestComboTestProbesEveryHopAndFillsErr(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
-	if out.Combo != "daily" || out.Surface != "openai" {
+	if out.Combo != "daily" || out.Surface != "chat" {
 		t.Fatalf("combo/surface = %q/%q", out.Combo, out.Surface)
 	}
 	if len(out.Hops) != 2 {

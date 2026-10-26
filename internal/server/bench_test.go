@@ -139,7 +139,7 @@ func BenchmarkInspectAndRoute(b *testing.B) {
 					if err != nil {
 						b.Fatal(err)
 					}
-					routes, err := resolver.ResolveCandidates(ctx, model, provider.SurfaceOpenAI, "bench")
+					routes, err := resolver.ResolveCandidates(ctx, model, provider.SurfaceChat, "bench")
 					if err != nil {
 						b.Fatal(err)
 					}
@@ -166,7 +166,7 @@ func BenchmarkShapeCapture(b *testing.B) {
 			b.SetBytes(int64(len(body)))
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				if sh := captureShapeDoc(doc, provider.SurfaceOpenAI); sh.PrefixSHA == "" {
+				if sh := captureShapeDoc(doc, provider.SurfaceChat); sh.PrefixSHA == "" {
 					b.Fatal("no prefix hash")
 				}
 			}

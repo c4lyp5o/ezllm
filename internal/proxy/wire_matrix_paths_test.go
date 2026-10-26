@@ -25,11 +25,11 @@ import (
 // crossCells are the six translated cells, in their (client, upstream) pair.
 func crossCells() [][2]provider.Surface {
 	return [][2]provider.Surface{
-		{provider.SurfaceAnthropic, provider.SurfaceOpenAI},
+		{provider.SurfaceAnthropic, provider.SurfaceChat},
 		{provider.SurfaceAnthropic, provider.SurfaceResponses},
-		{provider.SurfaceOpenAI, provider.SurfaceAnthropic},
-		{provider.SurfaceOpenAI, provider.SurfaceResponses},
-		{provider.SurfaceResponses, provider.SurfaceOpenAI},
+		{provider.SurfaceChat, provider.SurfaceAnthropic},
+		{provider.SurfaceChat, provider.SurfaceResponses},
+		{provider.SurfaceResponses, provider.SurfaceChat},
 		{provider.SurfaceResponses, provider.SurfaceAnthropic},
 	}
 }
@@ -38,7 +38,7 @@ func crossCells() [][2]provider.Surface {
 // and its result, in the CLIENT's shape.
 func toolHistory(client provider.Surface) string {
 	switch client {
-	case provider.SurfaceOpenAI:
+	case provider.SurfaceChat:
 		return `{"model":"daily","max_tokens":64,"messages":[` +
 			`{"role":"user","content":"list files"},` +
 			`{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"ls","arguments":"{}"}}]},` +
@@ -60,7 +60,7 @@ func toolHistory(client provider.Surface) string {
 // UPSTREAM's shape.
 func toolCallResponse(upstream provider.Surface) string {
 	switch upstream {
-	case provider.SurfaceOpenAI:
+	case provider.SurfaceChat:
 		return `{"id":"c2","object":"chat.completion","created":1,"model":"upstream-model","choices":[{"index":0,"message":{"role":"assistant","tool_calls":[{"id":"call_2","type":"function","function":{"name":"ls","arguments":"{\"path\":\".\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`
 	case provider.SurfaceAnthropic:
 		return `{"id":"msg_2","type":"message","role":"assistant","model":"upstream-model","content":[{"type":"tool_use","id":"call_2","name":"ls","input":{"path":"."}}],"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}`
@@ -75,7 +75,7 @@ func clientToolCallOf(t *testing.T, client provider.Surface, body []byte) (strin
 	t.Helper()
 	m := jsonMap(t, body)
 	switch client {
-	case provider.SurfaceOpenAI:
+	case provider.SurfaceChat:
 		choices, _ := m["choices"].([]any)
 		c0, _ := choices[0].(map[string]any)
 		msg, _ := c0["message"].(map[string]any)
@@ -110,7 +110,7 @@ func upstreamToolCallOf(t *testing.T, upstream provider.Surface, body []byte) (c
 		return v
 	}
 	switch upstream {
-	case provider.SurfaceOpenAI:
+	case provider.SurfaceChat:
 		msgs := items("messages")
 		for _, it := range msgs {
 			c0, _ := it.(map[string]any)
@@ -224,8 +224,8 @@ func TestWireMatrix429MixedWireFallback(t *testing.T) {
 	d.SetRetries(0)
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(clientBody))
 	recout := httptest.NewRecorder()
-	hop1 := wireRoute(srv.URL, provider.SurfaceOpenAI, provider.SurfaceOpenAI)
-	hop2 := wireRoute(srv.URL, provider.SurfaceOpenAI, provider.SurfaceAnthropic)
+	hop1 := wireRoute(srv.URL, provider.SurfaceChat, provider.SurfaceChat)
+	hop2 := wireRoute(srv.URL, provider.SurfaceChat, provider.SurfaceAnthropic)
 	// A combo's second candidate is a DIFFERENT hop: same account+model would
 	// be parked by the 429 cooldown instead of being tried on the other wire.
 	hop2.Account.ID, hop2.Account.Name, hop2.Account.Namespace = 2, "second", "second"
@@ -243,7 +243,7 @@ func TestWireMatrix429MixedWireFallback(t *testing.T) {
 	if served.EffectiveWire() != provider.SurfaceAnthropic {
 		t.Errorf("served wire = %s, want messages", served.EffectiveWire())
 	}
-	if got := responseTextOf(t, provider.SurfaceOpenAI, recout.Body.Bytes()); got != "hello" {
+	if got := responseTextOf(t, provider.SurfaceChat, recout.Body.Bytes()); got != "hello" {
 		t.Errorf("client text = %q, want hello", got)
 	}
 	if len(res.Attempts) != 1 || !strings.Contains(res.Attempts[0].Note, "429") {
@@ -269,8 +269,8 @@ func TestWireMatrix400NoBlindFailover(t *testing.T) {
 	d.SetRetries(0)
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(clientBody))
 	recout := httptest.NewRecorder()
-	hop1 := wireRoute(srv.URL, provider.SurfaceOpenAI, provider.SurfaceAnthropic)
-	hop2 := wireRoute(srv.URL, provider.SurfaceOpenAI, provider.SurfaceAnthropic)
+	hop1 := wireRoute(srv.URL, provider.SurfaceChat, provider.SurfaceAnthropic)
+	hop2 := wireRoute(srv.URL, provider.SurfaceChat, provider.SurfaceAnthropic)
 	if _, res, err := d.ForwardCandidates(context.Background(), recout, req,
 		[]Route{hop1, hop2}, []byte(clientBody)); err != nil || res.Status != 400 {
 		t.Fatalf("err=%v status=%d body=%s", err, res.Status, recout.Body.String())
@@ -295,8 +295,8 @@ func TestWireMatrixLateStreamError(t *testing.T) {
 		wantClientText   string // a fragment the client must have received
 		wantOutcome      string
 	}{
-		{provider.SurfaceOpenAI, provider.SurfaceAnthropic, "partial", StreamOutcomeFailed},
-		{provider.SurfaceAnthropic, provider.SurfaceOpenAI, "partial", StreamOutcomeTruncated},
+		{provider.SurfaceChat, provider.SurfaceAnthropic, "partial", StreamOutcomeFailed},
+		{provider.SurfaceAnthropic, provider.SurfaceChat, "partial", StreamOutcomeTruncated},
 	} {
 		t.Run(string(tc.client)+"-"+string(tc.upstream), func(t *testing.T) {
 			var mu sync.Mutex
@@ -306,7 +306,7 @@ func TestWireMatrixLateStreamError(t *testing.T) {
 				calls++
 				mu.Unlock()
 				w.Header().Set("Content-Type", "text/event-stream")
-				if tc.upstream == provider.SurfaceOpenAI {
+				if tc.upstream == provider.SurfaceChat {
 					// Legacy chat cut: bytes, then EOF without a terminal.
 					_, _ = w.Write([]byte(`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":null}]}` + "\n\n"))
 					return
@@ -380,7 +380,7 @@ func TestWireMatrixPreparationRefusalZeroSpend(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(clientBody))
 	recout := httptest.NewRecorder()
 	_, _, err := d.ForwardCandidates(context.Background(), recout, req,
-		[]Route{wireRoute(srv.URL, provider.SurfaceOpenAI, provider.SurfaceAnthropic)}, []byte(clientBody))
+		[]Route{wireRoute(srv.URL, provider.SurfaceChat, provider.SurfaceAnthropic)}, []byte(clientBody))
 	var ufe *translate.UnsupportedFieldError
 	if err == nil {
 		t.Fatal("a messages-bound request with a non-function tool must be refused")
@@ -422,8 +422,8 @@ func TestWireMatrixPreparationRefusalFailsOver(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(clientBody))
 	recout := httptest.NewRecorder()
 	_, res, err := d.ForwardCandidates(context.Background(), recout, req, []Route{
-		wireRoute(refused.URL, provider.SurfaceOpenAI, provider.SurfaceAnthropic),
-		wireRoute(native.URL, provider.SurfaceOpenAI, provider.SurfaceOpenAI),
+		wireRoute(refused.URL, provider.SurfaceChat, provider.SurfaceAnthropic),
+		wireRoute(native.URL, provider.SurfaceChat, provider.SurfaceChat),
 	}, []byte(clientBody))
 	if err != nil {
 		t.Fatalf("the native hop must serve after the refused one: %v", err)
@@ -444,7 +444,7 @@ func TestWireMatrixPreparationRefusalFailsOver(t *testing.T) {
 // The codec path reads an unstated convention the way the ledger does
 // (exclusive) instead of refusing the hop; an explicit one is used as stated.
 func TestUniversalCodecOptionsConvention(t *testing.T) {
-	rt := testRoute("http://unused.invalid", provider.SurfaceOpenAI)
+	rt := testRoute("http://unused.invalid", provider.SurfaceChat)
 	rt.WireSurface = provider.SurfaceAnthropic
 	for stored, want := range map[provider.UsageConvention]translate.UsageConvention{
 		provider.UsageConventionAuto:      translate.UsageExclusive,
@@ -484,7 +484,7 @@ func TestChatClientReachesThinkingMessagesUpstream(t *testing.T) {
 	defer srv.Close()
 
 	clientBody := `{"model":"daily","stream":true,"reasoning_effort":"medium","prompt_cache_key":"k","messages":[{"role":"system","content":"sys"},{"role":"user","content":"hi"}]}`
-	rt := wireRoute(srv.URL, provider.SurfaceOpenAI, provider.SurfaceAnthropic)
+	rt := wireRoute(srv.URL, provider.SurfaceChat, provider.SurfaceAnthropic)
 	rt.Account.UsageConvention = provider.UsageConventionAuto
 	d := newDispatcher()
 	d.SetRetries(0)

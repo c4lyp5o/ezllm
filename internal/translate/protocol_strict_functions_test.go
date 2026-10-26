@@ -11,7 +11,7 @@ import (
 
 func TestProtocolStrictFunctions(t *testing.T) {
 	for _, value := range []string{"", `,"strict":true`, `,"strict":false`} {
-		for _, source := range []provider.Surface{provider.SurfaceResponses, provider.SurfaceOpenAI, provider.SurfaceAnthropic} {
+		for _, source := range []provider.Surface{provider.SurfaceResponses, provider.SurfaceChat, provider.SurfaceAnthropic} {
 			var body string
 			if source == provider.SurfaceResponses {
 				body = fmt.Sprintf(`{"input":"hello","tools":[{"type":"function","name":"lookup","parameters":{"type":"object","properties":{},"additionalProperties":false}%s}]}`, value)
@@ -20,15 +20,15 @@ func TestProtocolStrictFunctions(t *testing.T) {
 			} else {
 				body = fmt.Sprintf(`{"messages":[{"role":"user","content":"hello"}],"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object","properties":{},"additionalProperties":false}%s}}]}`, value)
 			}
-			for _, target := range []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses} {
+			for _, target := range []provider.Surface{provider.SurfaceChat, provider.SurfaceAnthropic, provider.SurfaceResponses} {
 				var b []byte
 				var err error
 				switch {
-				case source == provider.SurfaceOpenAI && target == provider.SurfaceResponses:
+				case source == provider.SurfaceChat && target == provider.SurfaceResponses:
 					b, err = ChatToResponses([]byte(body), "model")
 				case source == provider.SurfaceAnthropic && target == provider.SurfaceResponses:
 					b, err = AnthropicToResponses([]byte(body), "model")
-				case source == provider.SurfaceAnthropic && target == provider.SurfaceOpenAI:
+				case source == provider.SurfaceAnthropic && target == provider.SurfaceChat:
 					b, err = Request([]byte(body), "model")
 				default:
 					b, err = RequestUniversal([]byte(body), source, target, "model")
@@ -43,7 +43,7 @@ func TestProtocolStrictFunctions(t *testing.T) {
 					t.Fatal(err)
 				}
 				tool := out.Tools[0]
-				if target == provider.SurfaceOpenAI {
+				if target == provider.SurfaceChat {
 					raw := tool["function"]
 					tool = nil
 					if err = json.Unmarshal(raw, &tool); err != nil {

@@ -530,12 +530,12 @@ type TestHop = {
 type TestResult = { combo: string; surface: string; hops: TestHop[] };
 
 function TestComboModal({ combo, onClose }: { combo: Combo | null; onClose: () => void }) {
-  const [surface, setSurface] = useState<'openai' | 'anthropic'>('openai');
+  const [surface, setSurface] = useState<'chat' | 'anthropic'>('chat');
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<TestResult | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  const run = useCallback(async (c: Combo, s: 'openai' | 'anthropic') => {
+  const run = useCallback(async (c: Combo, s: 'chat' | 'anthropic') => {
     setRunning(true); setErr(null);
     try { setResult(await post<TestResult>(`/admin/combos/${c.id}/test`, { surface: s })); }
     catch (e) { setErr(e instanceof ApiError ? e.detail.message : e instanceof Error ? e.message : String(e)); }
@@ -558,8 +558,8 @@ function TestComboModal({ combo, onClose }: { combo: Combo | null; onClose: () =
         <span className="mr-auto flex items-center gap-2 text-[13px] text-mute">
           surface
           <select className={cx(inputCls, 'w-auto py-1 text-[13px]')} value={surface}
-            onChange={(e) => setSurface(e.target.value as 'openai' | 'anthropic')}>
-            <option value="openai">openai</option>
+            onChange={(e) => setSurface(e.target.value as 'chat' | 'anthropic')}>
+            <option value="chat">chat</option>
             <option value="anthropic">anthropic</option>
           </select>
         </span>

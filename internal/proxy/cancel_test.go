@@ -34,7 +34,7 @@ func TestForwardCandidatesCancelsUpstreamWhenContextIsCanceled(t *testing.T) {
 
 	client := benchutil.NewClient()
 	d := NewDispatcher(client, provider.NewRegistry(client))
-	rt := testRoute(mock.URL(), provider.SurfaceOpenAI)
+	rt := testRoute(mock.URL(), provider.SurfaceChat)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -82,7 +82,7 @@ func TestForwardCandidatesDoesNotReportCancelOnSuccess(t *testing.T) {
 
 	client := benchutil.NewClient()
 	d := NewDispatcher(client, provider.NewRegistry(client))
-	rt := testRoute(mock.URL(), provider.SurfaceOpenAI)
+	rt := testRoute(mock.URL(), provider.SurfaceChat)
 
 	for _, body := range [][]byte{
 		benchutil.StreamChatBody(benchModel, 1<<10),

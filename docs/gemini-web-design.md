@@ -63,14 +63,14 @@ enterprise-account cookie.
   capacity, tier flags). Upserted like every other `ListModels`.
 - Model ids are exposed to clients as `gemini-web/<display>` (namespace
   chosen at account creation, like every kind).
-- `proto_openai=1` / `proto_anthropic` capability flags are POSTURE, not
-  facts: this hop is reachable from openai/anthropic clients through the
+- `proto_chat=1` / `proto_anthropic` capability flags are POSTURE, not
+  facts: this hop is reachable from chat/anthropic clients through the
   normal translation legs, so we mark the flags per probe (a tiny real
   generate) and let the usual gates decide.
 
 ## Request path
 
-- openai/anthropic/responses client → hop dial wires `gemini-web`:
+- chat/anthropic/responses client → hop dial wires `gemini-web`:
   protocol request = form-encoded `at` + `f.req` (double-encoded inner
   list, streaming flag at index 7, model header
   `x-goog-ext-525001261-jspb` built from the model's registry entry —

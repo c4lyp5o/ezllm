@@ -61,7 +61,7 @@ func TestSetModelPinUnknownModelIsNotFound(t *testing.T) {
 	db := openAt(t, filepath.Join(t.TempDir(), "pin2.sqlite"))
 	defer db.Close()
 	acct := seedPinAccount(t, db)
-	if err := db.SetModelPin(context.Background(), acct, "nope", "openai"); err != ErrNotFound {
+	if err := db.SetModelPin(context.Background(), acct, "nope", "chat"); err != ErrNotFound {
 		t.Fatalf("unknown model: err = %v, want ErrNotFound", err)
 	}
 }
@@ -110,7 +110,7 @@ func TestProbedProtocolSurvivesResync(t *testing.T) {
 	}
 	// The sync still owns the vendor-supplied fields, and a surface that was
 	// never probed stays UNTESTED rather than inheriting a neighbour's verdict.
-	if got, _ := db.ModelSupportsSurface(ctx, acct, "m1", provider.SurfaceOpenAI); got != nil {
+	if got, _ := db.ModelSupportsSurface(ctx, acct, "m1", provider.SurfaceChat); got != nil {
 		t.Errorf("openai capability = %v, want untested (nil)", got)
 	}
 

@@ -85,7 +85,7 @@ func TestCatalogRefreshProbesFreeModelsAndPrunesBroken(t *testing.T) {
 	for {
 		tested := 0
 		for _, m := range listModels(t, h, acct) {
-			if (m.ID == "tiny:free" || m.ID == "broken-free") && m.OpenAI != nil && m.Anthropic != nil && m.Responses != nil {
+			if (m.ID == "tiny:free" || m.ID == "broken-free") && m.Chat != nil && m.Anthropic != nil && m.Responses != nil {
 				tested++
 			}
 		}

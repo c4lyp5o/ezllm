@@ -351,7 +351,7 @@ func run() error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info("listening", "addr", addr, "surfaces", "openai,anthropic,responses")
+		log.Info("listening", "addr", addr, "surfaces", "chat,anthropic,responses")
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}

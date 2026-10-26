@@ -22,7 +22,7 @@ func TestRecoveryExportIncludesOperatorConfiguration(t *testing.T) {
 	if err := h.db.SetServiceBinding(ctx, "embeddings", "manual", "up/gpt-6-luna"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.db.Writer().Exec(`UPDATE models SET proto_pin='openai',proto_openai=1 WHERE account_id=?`, id); err != nil {
+	if _, err := h.db.Writer().Exec(`UPDATE models SET proto_pin='chat',proto_chat=1 WHERE account_id=?`, id); err != nil {
 		t.Fatal(err)
 	}
 	code, _, body := h.do("GET", "/admin/export", adminTok(), "")
@@ -47,7 +47,7 @@ func TestRecoveryExportIncludesOperatorConfiguration(t *testing.T) {
 	if len(out.Rules) != 1 || out.Rules[0].CapTokens != 123 || len(out.Prices) != 1 || out.Prices[0].PriceIn != 2 {
 		t.Fatalf("rules/prices lost: %s", body)
 	}
-	if len(out.Models) != 1 || out.Models[0].AccountID != id || out.Models[0].Pin != "openai" {
+	if len(out.Models) != 1 || out.Models[0].AccountID != id || out.Models[0].Pin != "chat" {
 		t.Fatalf("model pin lost: %s", body)
 	}
 	if len(out.Bindings) != 1 || out.Bindings[0].ModelTarget != "up/gpt-6-luna" {

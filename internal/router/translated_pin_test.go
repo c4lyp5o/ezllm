@@ -10,7 +10,7 @@ import (
 
 // A translated hop must satisfy the actual OpenAI wire, not bypass pins.
 func TestTranslatedHopChecksActualWirePin(t *testing.T) {
-	for _, pin := range []string{"", "openai", "anthropic", "responses"} {
+	for _, pin := range []string{"", "chat", "anthropic", "responses"} {
 		t.Run(pin, func(t *testing.T) {
 			cat, r := translatedFixture()
 			cat.pins = map[string]string{"2/gpt-6.1-sol": pin}
@@ -20,7 +20,7 @@ func TestTranslatedHopChecksActualWirePin(t *testing.T) {
 				if !errors.As(err, &refusal) {
 					t.Fatalf("want pin refusal, got %v", err)
 				}
-				if refusal.Requested != "daily" || refusal.Pinned != pin || refusal.Got != "openai" || len(routes) != 0 {
+				if refusal.Requested != "daily" || refusal.Pinned != pin || refusal.Got != "chat" || len(routes) != 0 {
 					t.Fatalf("wrong refusal: %+v; candidate count = %d", refusal, len(routes))
 				}
 				return
@@ -44,7 +44,7 @@ func TestTranslatedPinDisabledPreservesNativeGate(t *testing.T) {
 	for _, provenUnsupported := range []bool{true, false} {
 		t.Run(map[bool]string{true: "proven-unsupported", false: "untested"}[provenUnsupported], func(t *testing.T) {
 			cat, _ := translatedFixture()
-			cat.pins = map[string]string{"2/gpt-6.1-sol": "openai"}
+			cat.pins = map[string]string{"2/gpt-6.1-sol": "chat"}
 			if !provenUnsupported {
 				cat.noProto = nil
 			}
@@ -59,8 +59,8 @@ func TestTranslatedPinDisabledPreservesNativeGate(t *testing.T) {
 			if !errors.As(err, &refusal) {
 				t.Fatalf("want native pin refusal, got %v", err)
 			}
-			const want = "model \"daily\" is pinned to the openai surface; this request used anthropic — call it on the openai endpoint instead"
-			if refusal.Error() != want || refusal.Requested != "daily" || refusal.Pinned != "openai" || refusal.Got != "anthropic" || len(routes) != 0 {
+			const want = "model \"daily\" is pinned to the chat surface; this request used anthropic — call it on the chat endpoint instead"
+			if refusal.Error() != want || refusal.Requested != "daily" || refusal.Pinned != "chat" || refusal.Got != "anthropic" || len(routes) != 0 {
 				t.Fatalf("native refusal changed: %+v", refusal)
 			}
 		})
@@ -69,13 +69,13 @@ func TestTranslatedPinDisabledPreservesNativeGate(t *testing.T) {
 
 func TestTranslatedPinMatchingNativeSurfaceUnchanged(t *testing.T) {
 	cat, r := translatedFixture()
-	cat.pins = map[string]string{"2/gpt-6.1-sol": "openai"}
-	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceOpenAI, "test")
+	cat.pins = map[string]string{"2/gpt-6.1-sol": "chat"}
+	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceChat, "test")
 	if err != nil || len(routes) != 2 {
 		t.Fatalf("matching native surface must route: %v", err)
 	}
 	for _, rt := range routes {
-		if rt.Translated || rt.Surface != provider.SurfaceOpenAI {
+		if rt.Translated || rt.Surface != provider.SurfaceChat {
 			t.Fatal("matching native route changed")
 		}
 	}

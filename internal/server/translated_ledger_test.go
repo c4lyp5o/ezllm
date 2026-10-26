@@ -32,7 +32,7 @@ func TestTranslatedCallIsAttributedInTheLedger(t *testing.T) {
 
 	// Curate through the ADMIN ROUTE — the API is the gate.
 	if code, _, body := h.do("PUT", protocolPath(acct), adminTok(),
-		`{"model":"gpt-6-luna","proto_openai":true,"proto_anthropic":false,"note":"curated openai-only for ledger attribution"}`); code != 200 {
+		`{"model":"gpt-6-luna","proto_chat":true,"proto_anthropic":false,"note":"curated openai-only for ledger attribution"}`); code != 200 {
 		t.Fatalf("curate: %d (%s)", code, body)
 	}
 	if _, err := h.db.UpsertCombo(context.Background(), store.Combo{
@@ -198,7 +198,7 @@ func TestResponsesWireHopIsMarkedTranslated(t *testing.T) {
 	if !row.Translated {
 		t.Error("a responses-wire hop must carry the translated marker (one marker, one meaning)")
 	}
-	if row.Surface != "openai" {
+	if row.Surface != "chat" {
 		t.Errorf("surface = %q, want the CLIENT surface (openai)", row.Surface)
 	}
 	if row.TokensIn != 500 {

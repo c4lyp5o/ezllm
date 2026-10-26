@@ -128,7 +128,7 @@ prod redeploy to take effect. Items 2–3 are process-local and need neither.
 ## Appendix — translated rows are the documented inclusive exception (schema v12)
 
 The cold-vs-inclusive rule above is about the WIRE the usage came from. A
-wire-translated hop (anthropic client -> openai-only hop) breaks it on purpose:
+wire-translated hop (anthropic client -> chat-only hop) breaks it on purpose:
 `translate.Response` / the SSE synthesizer build an anthropic usage envelope out
 of OpenAI's `prompt_tokens`, which counts the cached prefix, so the tap reads an
 INCLUSIVE number on a row whose ledger surface is `anthropic`. `calls.translated`

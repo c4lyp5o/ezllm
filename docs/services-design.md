@@ -68,7 +68,7 @@ quality. The UI says so.
 ## Locked DECISIONS
 
 1. **Binding = default for requests that OMIT `model`.** Explicit `model` in the
-   request always wins; chat surfaces (`openai`/`anthropic`/`responses`) are
+   request always wins; chat surfaces (`chat`/`anthropic`/`responses`) are
    unaffected and keep requiring `model`. Applies to the four service surfaces
    only (`embeddings`, `images_gen`, `audio_tts`, `audio_stt`).
 2. **Schema v15, two tables.** `service_bindings(surface PRIMARY KEY, mode,
@@ -145,7 +145,7 @@ Video and music have no common upstream wire: ezllm passes the body through, so 
 means whatever the bound provider accepts.
 
 Fix shipped alongside: `ModelFacts.Supports` / `ModelSupportsSurface` mapped every service
-surface to the CHAT probe column (`proto_openai`), so a model whose chat probe failed — every
+surface to the CHAT probe column (`proto_chat`), so a model whose chat probe failed — every
 embedding/image/rerank model — was refused on its own endpoint. Service surfaces now read as
 unknown (NULL) there, and `SetModelProto` ignores them.
 

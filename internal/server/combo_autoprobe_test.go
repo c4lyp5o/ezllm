@@ -45,7 +45,7 @@ func TestComboWriteProbesOnlyUntestedHops(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := h.db.SetModelProto(ctx, acct, "half", provider.SurfaceOpenAI, &yes); err != nil {
+	if err := h.db.SetModelProto(ctx, acct, "half", provider.SurfaceChat, &yes); err != nil {
 		t.Fatal(err)
 	}
 

@@ -40,7 +40,7 @@ func TestSSEErrorStreamRecordsLedgerErr(t *testing.T) {
 
 	client := up.Client()
 	d := NewDispatcher(client, provider.NewRegistry(client))
-	rt := testRoute(up.URL, provider.SurfaceOpenAI)
+	rt := testRoute(up.URL, provider.SurfaceChat)
 
 	// A stream request: this selects commit's SSE branch.
 	res := Result{Status: http.StatusTooManyRequests, Stream: true}
@@ -91,7 +91,7 @@ func TestSSE200WithErrorEnvelopeRecordsLedgerErr(t *testing.T) {
 
 	client := up.Client()
 	d := NewDispatcher(client, provider.NewRegistry(client))
-	rt := testRoute(up.URL, provider.SurfaceOpenAI)
+	rt := testRoute(up.URL, provider.SurfaceChat)
 
 	res := Result{Status: http.StatusOK, Stream: true}
 	req, _ := reqWithBody(`{"model":"m","stream":true,"messages":[]}`)
@@ -125,7 +125,7 @@ func TestSSECleanStreamKeepsBlankErr(t *testing.T) {
 
 	client := up.Client()
 	d := NewDispatcher(client, provider.NewRegistry(client))
-	rt := testRoute(up.URL, provider.SurfaceOpenAI)
+	rt := testRoute(up.URL, provider.SurfaceChat)
 
 	res := Result{Status: http.StatusOK, Stream: true}
 	req, _ := reqWithBody(`{"model":"m","stream":true,"messages":[]}`)

@@ -16,7 +16,7 @@ import (
 func TestResearchColumnsRoundTrip(t *testing.T) {
 	db := openTest(t)
 	db.RecordCall(Call{
-		Surface: SurfaceOpenAI, Account: "a", AccountID: 0, Model: "m", Status: 200,
+		Surface: SurfaceChat, Account: "a", AccountID: 0, Model: "m", Status: 200,
 		TokensIn: 5000, TokensCachedRead: 4000,
 		PrefixSHA: "deadbeefdeadbeef",
 		MsgCount:  7,
@@ -49,11 +49,11 @@ func TestResearchColumnsRoundTrip(t *testing.T) {
 func TestSavedRealVsNotionalRoundTrip(t *testing.T) {
 	db := openTest(t)
 	// A real saving: applied, tokens actually shipped shorter.
-	db.RecordCall(Call{Surface: SurfaceOpenAI, Account: "a", Model: "m", Status: 200,
+	db.RecordCall(Call{Surface: SurfaceChat, Account: "a", Model: "m", Status: 200,
 		CompressionProfile: "p", CompressionApplied: true, PromptTokensPre: 1000,
 		TokensSaved: 400, TokensSavedNotional: 0})
 	// A floor reject: nothing shipped, but the potential is recorded separately.
-	db.RecordCall(Call{Surface: SurfaceOpenAI, Account: "a", Model: "m", Status: 200,
+	db.RecordCall(Call{Surface: SurfaceChat, Account: "a", Model: "m", Status: 200,
 		CompressionProfile: "p", CompressionApplied: false, PromptTokensPre: 2000,
 		TokensSaved: 0, TokensSavedNotional: 60})
 	if err := db.Flush(); err != nil {
@@ -92,7 +92,7 @@ func TestMigrateV7AddsResearchColumnsKeepsRows(t *testing.T) {
 	// calls.account_id has no FK (it is the denormalized metering key), so a
 	// row records fine without a seeded account — this test is about the calls
 	// table surviving the upgrade.
-	db.RecordCall(Call{Surface: SurfaceOpenAI, Account: "a", Model: "m", Status: 200, TokensIn: 42, PrefixSHA: "abc"})
+	db.RecordCall(Call{Surface: SurfaceChat, Account: "a", Model: "m", Status: 200, TokensIn: 42, PrefixSHA: "abc"})
 	if err := db.Flush(); err != nil {
 		t.Fatal(err)
 	}

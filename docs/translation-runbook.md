@@ -1,4 +1,4 @@
-# Translation runbook — anthropic clients on openai-only hops
+# Translation runbook — anthropic clients on chat-only hops
 
 ezllm's native contract is passthrough: bodies leave the box byte-identical to
 what the client sent (model swap aside). Translation is the **one deliberate
@@ -12,7 +12,7 @@ exception**, and it is double-gated so it can never happen by accident:
    `translation enabled=true|false`. Since 2026-10-22 this is the **one switch**
    for every translated wire, the universal matrix included.
 2. **Proven capability** — the hop's probed/curated `proto_*` facts must say
-   `proto_openai = true` AND `proto_anthropic` false-or-NULL. Both flags are
+   `proto_chat = true` AND `proto_anthropic` false-or-NULL. Both flags are
    **NULL until a probe sweep marks them or an operator curates them**, so a
    fresh deploy (or a database where the sweep never ran) makes the feature
    inert even with the knob on.
@@ -63,8 +63,8 @@ The probe sweep cannot mark every hop — an edge that stonewalls probe traffic
 always records UNKNOWN — so an operator can record a capability fact by hand:
 
     PUT /admin/accounts/{id}/model-protocol
-    {"model": "step-5-preview-free", "proto_openai": true, "proto_anthropic": false,
-     "note": "edge refuses /v1/messages; the openai wire works"}
+    {"model": "step-5-preview-free", "proto_chat": true, "proto_anthropic": false,
+     "note": "edge refuses /v1/messages; the chat wire works"}
 
 - The model id travels in the **body**, not the path: 493 of 622 catalog ids
   contain `/` (the same rule as model-pin).
@@ -90,12 +90,12 @@ always records UNKNOWN — so an operator can record a capability fact by hand:
 
 Capability flags come from the dashboard-triggered **ProtocolSweep**
 (Models page → protocol sweep), which samples `ProbeMaxModels` (default 6)
-models per account × 3 surfaces and writes `proto_openai` / `proto_anthropic` /
+models per account × 3 surfaces and writes `proto_chat` / `proto_anthropic` /
 `proto_responses` / `proto_tested_at`. Only a verdict is written: a 429, 5xx or
 timeout leaves the stored value as it was (a re-sweep in bad weather never wipes
 a proven capability back to `NULL`), and a 429 ends the sweep. Probes are not
 ledgered. `anthropic-compatible` accounts skip the
-openai probe and are marked `proto_openai=false` (chat clients reach them through
+openai probe and are marked `proto_chat=false` (chat clients reach them through
 the Messages translation); `claude-web` is probed normally — its bridge serves
 `/chat/completions` only.
 
@@ -103,7 +103,7 @@ What flips when the sweep runs, in order:
 
 1. Nothing, while `translation.enabled=false` — probed-incompatible hops are
    dropped from combos exactly as before.
-2. With the knob ON, a hop marked `proto_anthropic=false, proto_openai=true`
+2. With the knob ON, a hop marked `proto_anthropic=false, proto_chat=true`
    stops being dropped for anthropic traffic and instead becomes a
    **translated tail candidate**: it is tried only after every native-compatible
    hop has failed or was skipped. A healthy native hop always wins.
@@ -141,7 +141,7 @@ or for the container / a canary: `EZLLM_TRANSLATION_ENABLED=true`
 
 - Boot log shows `translation enabled=true`.
 - Send one request through a combo whose translated-eligible hop is the
-  openai-only model (e.g. hop 0 `opencode-go/step-5-preview-free` with no
+  chat-only model (e.g. hop 0 `opencode-go/step-5-preview-free` with no
   healthy native hop ahead of it) from an anthropic client.
 - The ledger row must read `surface=anthropic`, `model=step-5-preview-free`
   (the upstream's model), `status=200` — the first anthropic-surface 200 for

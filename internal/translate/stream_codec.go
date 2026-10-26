@@ -39,7 +39,7 @@ func NewStreamReader(r io.Reader, source, target provider.Surface, clientModel s
 	if c, ok := r.(io.Closer); ok {
 		s.closer = c
 	}
-	if opts.Legacy && source == provider.SurfaceOpenAI && target == provider.SurfaceAnthropic {
+	if opts.Legacy && source == provider.SurfaceChat && target == provider.SurfaceAnthropic {
 		s.out.WriteString("event: ping\ndata: {\"type\":\"ping\"}\n\n")
 		e.ping = true
 	}
@@ -148,7 +148,7 @@ func (s *StreamReader) end(err error) {
 	case provider.SurfaceAnthropic:
 		// Historic cut frames never started a message first.
 		s.encoder.frame(&s.out, "error", string(EncodeError(ErrorIR{Type: "api_error", Message: tr.Reason}, provider.SurfaceAnthropic)))
-	case provider.SurfaceOpenAI:
+	case provider.SurfaceChat:
 		if !tr.Transport {
 			s.encoder.start(&s.out, s.decoder.id, s.decoder.created) // historic ensureStarted
 		}
@@ -232,7 +232,7 @@ func (e *eventEncoder) start(out *bytes.Buffer, id string, created int64) {
 		}
 	}
 	switch e.surface {
-	case provider.SurfaceOpenAI:
+	case provider.SurfaceChat:
 		e.chatChunk(out, `{"role":"assistant"}`, "null")
 	case provider.SurfaceAnthropic:
 		if !e.ping {
@@ -288,7 +288,7 @@ func (e *eventEncoder) Emit(out *bytes.Buffer, v Event) error {
 				e.terminal = true
 			}
 			e.jsonFrame(out, "response.failed", map[string]any{"response": e.responseObject("failed", er)})
-		case provider.SurfaceOpenAI:
+		case provider.SurfaceChat:
 			if e.opts.Legacy {
 				// Historic shape: the upstream error object verbatim
 				// (message-first), a usage chunk only for real spend, [DONE],
@@ -330,7 +330,7 @@ func (e *eventEncoder) Emit(out *bytes.Buffer, v Event) error {
 				// Historic emitError frames carried type+message only, always
 				// named api_error, with the message verbatim (even empty).
 				er = &ErrorIR{Type: "api_error", Message: er.Message}
-				if e.source == provider.SurfaceOpenAI {
+				if e.source == provider.SurfaceChat {
 					// Historic chat reader: message passes through unchanged
 					// and no message_start was synthesized first.
 				} else {
@@ -368,7 +368,7 @@ func (e *eventEncoder) Emit(out *bytes.Buffer, v Event) error {
 		}
 		e.terminal = true
 		switch e.surface {
-		case provider.SurfaceOpenAI:
+		case provider.SurfaceChat:
 			e.chatChunk(out, `{}`, mustMarshalString(streamChatFinish(v.Finish)))
 			if e.opts.Legacy || e.usage.Input != nil || e.usage.Output != nil {
 				e.chatUsage(out)
@@ -413,7 +413,7 @@ func (e *eventEncoder) Emit(out *bytes.Buffer, v Event) error {
 	}
 	// Reasoning reaches chat clients only (as reasoning_content): on the
 	// Messages and Responses encoders the whole block is dropped.
-	if e.surface != provider.SurfaceOpenAI {
+	if e.surface != provider.SurfaceChat {
 		if v.Kind == EventBlockStart && v.Block.Kind == BlockReasoning {
 			if e.dropped == nil {
 				e.dropped = map[string]bool{}
@@ -444,14 +444,14 @@ func (e *eventEncoder) Emit(out *bytes.Buffer, v Event) error {
 		e.blocks[v.Key] = b
 		e.order = append(e.order, v.Key)
 		switch e.surface {
-		case provider.SurfaceOpenAI:
+		case provider.SurfaceChat:
 			if v.Block.Kind == BlockCall {
 				e.chatChunk(out, fmt.Sprintf(`{"tool_calls":[{"index":%d,"id":%s,"type":"function","function":{"name":%s,"arguments":""}}]}`, b.callIndex, mustMarshalString(v.Block.CallID), mustMarshalString(v.Block.Name)), "null")
 			}
 		case provider.SurfaceAnthropic:
 			// Strict and Responses legacy targets are single-open-block. Chat
 			// legacy keeps its exact characterized multi-open event ordering.
-			if !(e.opts.Legacy && e.source == provider.SurfaceOpenAI) && e.current != "" {
+			if !(e.opts.Legacy && e.source == provider.SurfaceChat) && e.current != "" {
 				if err := e.closeBlock(out, e.current); err != nil {
 					return err
 				}
@@ -498,7 +498,7 @@ func (e *eventEncoder) Emit(out *bytes.Buffer, v Event) error {
 			b.arguments.WriteString(v.Delta)
 		}
 		switch e.surface {
-		case provider.SurfaceOpenAI:
+		case provider.SurfaceChat:
 			if b.event.Block.Kind == BlockReasoning {
 				e.chatChunk(out, `{"reasoning_content":`+mustMarshalString(v.Delta)+`}`, "null")
 			} else if v.Kind == EventTextDelta {
@@ -525,7 +525,7 @@ func (e *eventEncoder) Emit(out *bytes.Buffer, v Event) error {
 		}
 	case EventBlockEnd:
 		// Chat legacy closes all blocks together, not as soon as they end.
-		if e.opts.Legacy && e.source == provider.SurfaceOpenAI && e.surface == provider.SurfaceAnthropic {
+		if e.opts.Legacy && e.source == provider.SurfaceChat && e.surface == provider.SurfaceAnthropic {
 			return nil
 		}
 		return e.closeBlock(out, v.Key)

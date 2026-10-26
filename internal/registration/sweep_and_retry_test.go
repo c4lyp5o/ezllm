@@ -157,7 +157,7 @@ func TestSweepNeverOverwritesAVerdictWithWeather(t *testing.T) {
 		t.Fatal(err)
 	}
 	yes := true
-	if err := db.SetModelProto(ctx, acctID, "m1", provider.SurfaceOpenAI, &yes); err != nil {
+	if err := db.SetModelProto(ctx, acctID, "m1", provider.SurfaceChat, &yes); err != nil {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -167,11 +167,11 @@ func TestSweepNeverOverwritesAVerdictWithWeather(t *testing.T) {
 	acct := compatAccount(srv.URL)
 	acct.ID = acctID
 	res := noSleepTester(srv.Client(), db).ProtocolSweep(ctx, acct, "k", []provider.ModelInfo{{ID: "m1"}},
-		Options{Surfaces: []provider.Surface{provider.SurfaceOpenAI}})
-	if _, has := res.Rows["m1"][string(provider.SurfaceOpenAI)]; has {
+		Options{Surfaces: []provider.Surface{provider.SurfaceChat}})
+	if _, has := res.Rows["m1"][string(provider.SurfaceChat)]; has {
 		t.Errorf("an unknown verdict entered the persisted rows: %+v", res.Rows)
 	}
-	got, err := db.ModelSupportsSurface(ctx, acctID, "m1", provider.SurfaceOpenAI)
+	got, err := db.ModelSupportsSurface(ctx, acctID, "m1", provider.SurfaceChat)
 	if err != nil || got == nil || !*got {
 		t.Fatalf("proven openai support became %v (err %v) after a 503", got, err)
 	}
@@ -195,7 +195,7 @@ func TestSweepStopsOnRateLimitButNotOnServerError(t *testing.T) {
 		}))
 		models := []provider.ModelInfo{{ID: "m1"}, {ID: "m2"}, {ID: "m3"}}
 		noSleepTester(srv.Client(), nil).ProtocolSweep(context.Background(), compatAccount(srv.URL), "k", models,
-			Options{Surfaces: []provider.Surface{provider.SurfaceOpenAI}, ProbeAll: true})
+			Options{Surfaces: []provider.Surface{provider.SurfaceChat}, ProbeAll: true})
 		srv.Close()
 		if got := h.get("post"); got != tc.wantCalls {
 			t.Errorf("HTTP %d: %d probes, want %d", tc.status, got, tc.wantCalls)
@@ -214,7 +214,7 @@ func TestSweepProbesAreNotLedgered(t *testing.T) {
 	defer srv.Close()
 	noSleepTester(srv.Client(), db).ProtocolSweep(context.Background(), compatAccount(srv.URL), "k",
 		[]provider.ModelInfo{{ID: "m1"}, {ID: "m2"}},
-		Options{Surfaces: []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceResponses}})
+		Options{Surfaces: []provider.Surface{provider.SurfaceChat, provider.SurfaceResponses}})
 	if err := db.Flush(); err != nil {
 		t.Fatal(err)
 	}
@@ -245,12 +245,12 @@ func TestSweepLeavesCallerSurfacesIntact(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
-	surfaces := []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses}
+	surfaces := []provider.Surface{provider.SurfaceChat, provider.SurfaceAnthropic, provider.SurfaceResponses}
 	acct := compatAccount(srv.URL)
 	acct.Kind = provider.KindAnthropicCompat
 	noSleepTester(srv.Client(), nil).ProtocolSweep(context.Background(), acct, "k", []provider.ModelInfo{{ID: "m1"}},
 		Options{Surfaces: surfaces})
-	want := []provider.Surface{provider.SurfaceOpenAI, provider.SurfaceAnthropic, provider.SurfaceResponses}
+	want := []provider.Surface{provider.SurfaceChat, provider.SurfaceAnthropic, provider.SurfaceResponses}
 	for i := range want {
 		if surfaces[i] != want[i] {
 			t.Fatalf("caller's surfaces changed to %v", surfaces)

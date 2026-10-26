@@ -123,7 +123,7 @@ func (d *DB) loadCatalogSnapshot(ctx context.Context, gen int64) (*CatalogSnapsh
 	}
 
 	mrows, err := d.r.QueryContext(ctx, `
-SELECT account_id, model_id, proto_pin, proto_openai, proto_anthropic, proto_responses FROM models`)
+SELECT account_id, model_id, proto_pin, proto_chat, proto_anthropic, proto_responses FROM models`)
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +142,7 @@ SELECT account_id, model_id, proto_pin, proto_openai, proto_anthropic, proto_res
 			s.models[acct] = map[string]ModelFacts{}
 		}
 		s.models[acct][model] = ModelFacts{Pin: pin.String,
-			OpenAI: nullBoolPtr(oa), Anthropic: nullBoolPtr(an), Responses: nullBoolPtr(r)}
+			Chat: nullBoolPtr(oa), Anthropic: nullBoolPtr(an), Responses: nullBoolPtr(r)}
 	}
 	mrows.Close()
 	if err := mrows.Err(); err != nil {

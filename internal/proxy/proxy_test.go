@@ -128,7 +128,7 @@ func TestIsStream(t *testing.T) {
 func TestTapSSELineOpenAIFinalChunk(t *testing.T) {
 	// Verbatim shape captured live 2026-10-05 (P4, cached repeat).
 	line := `data: {"id":"chatcmpl-x","object":"chat.completion.chunk","choices":[{"delta":{"content":"5"},"index":0}],"usage":{"prompt_tokens":2044,"completion_tokens":72,"total_tokens":2116,"prompt_tokens_details":{"cached_tokens":1792},"completion_tokens_details":{"reasoning_tokens":28}}}`
-	u := tapSSELine([]byte(line), provider.SurfaceOpenAI)
+	u := tapSSELine([]byte(line), provider.SurfaceChat)
 	if u == nil {
 		t.Fatal("usage not tapped")
 	}
@@ -148,7 +148,7 @@ func TestTapSSELineOpenAIIntermediateChunksHaveNoUsage(t *testing.T) {
 		`: comment line`,
 		``,
 	} {
-		if u := tapSSELine([]byte(line), provider.SurfaceOpenAI); u != nil {
+		if u := tapSSELine([]byte(line), provider.SurfaceChat); u != nil {
 			t.Errorf("line %q should not yield usage, got %+v", line, u)
 		}
 	}
@@ -236,7 +236,7 @@ func TestTapJSONUsageNonStreamed(t *testing.T) {
 	if ua == nil || ua.In != 315 || ua.Out != 73 {
 		t.Fatalf("anthropic non-stream tap wrong: %+v", ua)
 	}
-	if tapJSONUsage([]byte(`{"error":"x"}`), provider.SurfaceOpenAI, provider.UsageConventionAuto) != nil {
+	if tapJSONUsage([]byte(`{"error":"x"}`), provider.SurfaceChat, provider.UsageConventionAuto) != nil {
 		t.Error("error body must not yield usage")
 	}
 }
@@ -268,7 +268,7 @@ func TestForwardNonStreamedWritesBodyAndTapsUsage(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(string(reqBody)))
-	res, err := d.Forward(context.Background(), rec, req, testRoute(upstream.URL, provider.SurfaceOpenAI), reqBody)
+	res, err := d.Forward(context.Background(), rec, req, testRoute(upstream.URL, provider.SurfaceChat), reqBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +316,7 @@ func TestForwardStripsClientOrigin(t *testing.T) {
 	req.Header.Set("Referer", "https://llm.calypso.dedyn.io/chat")
 	req.Header.Set("X-Keep", "1")
 
-	res, err := d.Forward(context.Background(), rec, req, testRoute(upstream.URL, provider.SurfaceOpenAI), reqBody)
+	res, err := d.Forward(context.Background(), rec, req, testRoute(upstream.URL, provider.SurfaceChat), reqBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +343,7 @@ func TestForwardStripsEzllmSession(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(string(body)))
 	req.Header.Set("X-Ezllm-Session", "sess-internal-42")
 
-	if _, err := d.Forward(context.Background(), rec, req, testRoute(upstream.URL, provider.SurfaceOpenAI), body); err != nil {
+	if _, err := d.Forward(context.Background(), rec, req, testRoute(upstream.URL, provider.SurfaceChat), body); err != nil {
 		t.Fatal(err)
 	}
 	if saw != "" {
@@ -403,7 +403,7 @@ func TestForwardStreamedIsIncrementalAndLossless(t *testing.T) {
 		close(arrivals)
 	}()
 
-	res, err := d.Forward(context.Background(), w, req, testRoute(upstream.URL, provider.SurfaceOpenAI), reqBody)
+	res, err := d.Forward(context.Background(), w, req, testRoute(upstream.URL, provider.SurfaceChat), reqBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,7 +481,7 @@ func TestForwardRelaysUpstreamError(t *testing.T) {
 	reqBody := []byte(`{"model":"resolved-model","messages":[]}`)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(string(reqBody)))
-	res, _ := d.Forward(context.Background(), rec, req, testRoute(upstream.URL, provider.SurfaceOpenAI), reqBody)
+	res, _ := d.Forward(context.Background(), rec, req, testRoute(upstream.URL, provider.SurfaceChat), reqBody)
 	if res.Status != 429 {
 		t.Errorf("status = %d, want 429", res.Status)
 	}
@@ -544,7 +544,7 @@ func TestForwardPreservesClientSessionHeader(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	rt := testRoute(upstream.URL, provider.SurfaceOpenAI)
+	rt := testRoute(upstream.URL, provider.SurfaceChat)
 	rt.Account.Kind = provider.KindOpenCodeGo
 	rt.Account.RequiresSessionHeader = true
 
@@ -582,7 +582,7 @@ func TestForwardSynthesizesSessionWhenClientSendsNone(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	rt := testRoute(upstream.URL, provider.SurfaceOpenAI)
+	rt := testRoute(upstream.URL, provider.SurfaceChat)
 	rt.Account.Kind = provider.KindOpenCodeGo
 
 	d := newDispatcher()
@@ -628,7 +628,7 @@ func TestForwardStripsClientCredentials(t *testing.T) {
 	})
 
 	rec := httptest.NewRecorder()
-	if _, err := d.Forward(context.Background(), rec, req, testRoute(upstream.URL, provider.SurfaceOpenAI), reqBody); err != nil {
+	if _, err := d.Forward(context.Background(), rec, req, testRoute(upstream.URL, provider.SurfaceChat), reqBody); err != nil {
 		t.Fatal(err)
 	}
 	if gotAuth != "Bearer sk-test-key" {
@@ -657,7 +657,7 @@ func TestForwardCapturesProvenanceHeaders(t *testing.T) {
 	reqBody := []byte(`{"model":"resolved-model","messages":[]}`)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(string(reqBody)))
-	res, err := d.Forward(context.Background(), rec, req, testRoute(upstream.URL, provider.SurfaceOpenAI), reqBody)
+	res, err := d.Forward(context.Background(), rec, req, testRoute(upstream.URL, provider.SurfaceChat), reqBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -691,7 +691,7 @@ func TestStreamCopySurvivesGarbageLines(t *testing.T) {
 	reqBody := []byte(`{"model":"m","stream":true,"messages":[]}`)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(string(reqBody)))
-	res, err := d.Forward(context.Background(), rec, req, testRoute(upstream.URL, provider.SurfaceOpenAI), reqBody)
+	res, err := d.Forward(context.Background(), rec, req, testRoute(upstream.URL, provider.SurfaceChat), reqBody)
 	if err != nil {
 		t.Fatalf("garbage SSE must not error the request: %v", err)
 	}

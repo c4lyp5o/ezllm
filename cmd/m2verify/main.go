@@ -80,7 +80,7 @@ func usageAgreesWithRaw(db *sql.DB, limit int) result {
 		COALESCE(a.usage_convention, 'auto')
 		FROM calls c LEFT JOIN accounts a ON a.id = c.account_id
 		WHERE c.raw_usage IS NOT NULL AND c.raw_usage <> ''
-		  AND c.surface IN ('openai','anthropic','responses')
+		  AND c.surface IN ('chat','anthropic','responses')
 		ORDER BY c.id DESC LIMIT ?`, limit)
 	if err != nil {
 		return result{err: err}
@@ -126,7 +126,7 @@ func hasTotal(surface string, m map[string]any) bool {
 		return false
 	}
 	switch surface {
-	case "openai":
+	case "chat":
 		_, a := m["prompt_tokens"]
 		_, b := m["input_tokens"]
 		return a || b

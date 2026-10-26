@@ -15,7 +15,7 @@ import (
 // better than one that chokes on a missing field.
 func Response(body []byte, clientModel string) ([]byte, error) {
 	opts := CodecOptions{Legacy: true}
-	ir, err := DecodeResponse(body, provider.SurfaceOpenAI, opts)
+	ir, err := DecodeResponse(body, provider.SurfaceChat, opts)
 	if err != nil {
 		return nil, err
 	}

@@ -44,10 +44,10 @@ one).
 **Surface-pin refusal (every inference POST, JSON and multipart).** A pin names one surface —
 a chat wire or a service surface (`embeddings`, `rerank`, …) — and admits only that endpoint. If
 the resolved model carries a `proto_pin` and the client called a different surface, the request is refused **before any upstream dial** with
-`400 {"error":{"type":"pinned_surface","message":"...","pinned":"openai","requested_surface":"anthropic","code":400}}`.
+`400 {"error":{"type":"pinned_surface","message":"...","pinned":"chat","requested_surface":"anthropic","code":400}}`.
 The pin never reroutes the request — native paths pass bodies through untranslated, so the
 honest answer is a refusal that names the endpoint to use instead. (Translated hops — the
-probe-gated anthropic→openai exception, `docs/translation-runbook.md` — do not bypass pins
+probe-gated anthropic→chat exception, `docs/translation-runbook.md` — do not bypass pins
 either.) Lookup errors fail closed (refuse), and combo
 hops pinned to another surface refuse the whole request rather than silently skipping.
 
@@ -101,9 +101,9 @@ token budgets under-count by them. The live feed's `snapshot` event carries the 
                "db_path":"/data/ezllm.sqlite" },
   "usage":  [ {"k":"opengo","calls":64,"tin":1200000,"tout":84000,"cread":300000,"cwrite":21000,
                 "reasoning":4000,"saved":0,"errors":1} ],          // group_by=account, last 24h
-  "usage_by_surface": [ {"k":"openai","calls":50,"tin":…,"tout":…,"cread":…,"cwrite":…,"reasoning":…,"saved":…,"errors":0} ],
+  "usage_by_surface": [ {"k":"chat","calls":50,"tin":…,"tout":…,"cread":…,"cwrite":…,"reasoning":…,"saved":…,"errors":0} ],
   "accounts": [ AccountSummary … ],
-  "recent_calls": [ {"ts":"…","client":"hermes","surface":"openai","account":"opengo",
+  "recent_calls": [ {"ts":"…","client":"hermes","surface":"chat","account":"opengo",
                       "model":"qwen3.8-flash","status":200,"ttft_ms":180,"total_ms":940,
                       "tin":120,"tout":40,"cread":0} ]            // last 20, newest first
 }
@@ -121,7 +121,7 @@ token budgets under-count by them. The live feed's `snapshot` event carries the 
   "quota": { "kind":"percent", "percent_rolling":0, "percent_weekly":7, "percent_monthly":12,
               "balance":null, "unit":null, "resets_at":"…", "read_at":"…" },   // latest snapshot, null if none
   "models_count":36,
-  "protocol_support": {"openai":36,"anthropic":12,"responses":5,"untested":0}
+  "protocol_support": {"chat":36,"anthropic":12,"responses":5,"untested":0}
 }
 ```
 
@@ -136,7 +136,7 @@ returned page — so the totals answer "how much lives behind this filter".
                               // (rules_fired = caveman prose rules that fired; 0 otherwise),
                               // plus `translated` (schema v12): true when the served hop's
                               // WIRE differed from the client's surface, so the bodies were
-                              // translated (anthropic client -> openai-only hop, or any client
+                              // translated (anthropic client -> chat-only hop, or any client
                               // onto a hop curated for /v1/responses). On such a row `tin` is
                               // the vendor's INCLUSIVE total — the upstream's own total is
                               // passed through, cache counted inside — and `cread` is 0. Read
@@ -261,7 +261,7 @@ Runs the **7-step test** (design: `2026-10-06_070000-ezllm-m3-keytest-design.md`
                                   {"step":"auth","ok":true,"ms":760,"detail":"usage oracle 200"},
                                   {"step":"quota","ok":true,"ms":780,"detail":"percent weekly=7"},
                                   {"step":"inference","ok":true,"ms":1690,"detail":"deepseek-v4.1-flash"},
-                                  {"step":"protocol","ok":true,"ms":4200,"detail":"openai 6/6 anthropic 4/6 responses 2/6"} ],
+                                  {"step":"protocol","ok":true,"ms":4200,"detail":"chat 6/6 anthropic 4/6 responses 2/6"} ],
              "catalog":[ {"id":"qwen3.8-flash","owned_by":"opencode"} , … ],
              "quota": { "kind":"percent", … } } }
 ```
@@ -312,10 +312,10 @@ Same flow against an already-stored key. On failure the row is **kept** but mark
 ### `DELETE /admin/accounts/{id}/keys/{keyId}` → `204`
 
 ### `POST /admin/accounts/{id}/sync` → `200`
-Full catalog + protocol probe (all models, or `{"models":[…],"surfaces":["openai"]}` to scope).
+Full catalog + protocol probe (all models, or `{"models":[…],"surfaces":["chat"]}` to scope).
 ```jsonc
 { "synced":36, "protocol_tested":36,
-  "protocol_support":{"openai":36,"anthropic":12,"responses":5,"untested":0},
+  "protocol_support":{"chat":36,"anthropic":12,"responses":5,"untested":0},
   "ms":12400 }
 ```
 **Test-all fields** (2026-10-12): `{"probe_all":true}` sweeps the WHOLE catalog on the
@@ -334,7 +334,7 @@ per account: a second `POST` while one runs → `409` with the stop instruction.
 ### `GET /admin/accounts/{id}/models` → `200`
 ```jsonc
 [ {"id":"qwen3.8-flash","display":"…","owned_by":"opencode",
-   "openai":1,"anthropic":1,"responses":0,"tested_at":"…","pin":"",
+   "chat":1,"anthropic":1,"responses":0,"tested_at":"…","pin":"",
    "source":"probe","note":""} ]
 ```
 `null` = untested (the UI must render three states: ✓ / ✗ / ?). `pin` is `""` (auto) or the
@@ -345,11 +345,11 @@ operator's reason for a curation.
 ### `PUT /admin/accounts/{id}/model-pin` → `200`
 Set or clear a model's surface pin. The model id travels **in the body** (ids can contain `/`,
 so it can never be a path segment). `pin` distinguishes three states — **absent** field → `400`
-(this endpoint always states intent), `""` → clear (back to auto), or one of `openai|anthropic|responses`.
+(this endpoint always states intent), `""` → clear (back to auto), or one of `chat|anthropic|responses` (`openai` is accepted as a legacy alias).
 ```jsonc
 // request                                   // 200 response
 { "model":"qwen3.8-flash",                   { "model":"qwen3.8-flash",
-  "pin":"openai",                              "pin":"openai",
+  "pin":"chat",                              "pin":"chat",
   "force":false }                              "force":false }
 ```
 Unknown model → `404`. Pinning a surface the probe never confirmed (`null`/`0`) → `409

@@ -24,7 +24,7 @@ func TestResponsesWireHopMarkedInPlace(t *testing.T) {
 	cat := withCombo(newFake(), solCombo())
 	r := New(cat).WithResponsesModels([]string{"super-ssn/gpt-6.1-sol"})
 
-	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceOpenAI, "test")
+	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceChat, "test")
 	if err != nil {
 		t.Fatalf("resolution: %v", err)
 	}
@@ -37,7 +37,7 @@ func TestResponsesWireHopMarkedInPlace(t *testing.T) {
 	if routes[1].ResponsesWire {
 		t.Errorf("unmarked hop carried the wire flag: %+v", routes[1])
 	}
-	if routes[0].Surface != provider.SurfaceOpenAI {
+	if routes[0].Surface != provider.SurfaceChat {
 		t.Errorf("surface = %v, want the client's openai surface", routes[0].Surface)
 	}
 	if routes[0].Translated {
@@ -50,7 +50,7 @@ func TestResponsesWireEmptyListInert(t *testing.T) {
 	cat := withCombo(newFake(), solCombo())
 	r := New(cat) // no WithResponsesModels
 
-	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceOpenAI, "test")
+	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceChat, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestResponsesWireMatchesNamespaceAndModel(t *testing.T) {
 	cat := withCombo(newFake(), solCombo())
 	r := New(cat).WithResponsesModels([]string{"opengo/gpt-6.1-sol"})
 
-	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceOpenAI, "test")
+	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceChat, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestResponsesWireMatchesNamespaceAndModel(t *testing.T) {
 func TestResponsesWireDirectRouteMarked(t *testing.T) {
 	r := New(newFake()).WithResponsesModels([]string{"super-ssn/gpt-6.1-sol"})
 
-	routes, err := r.ResolveCandidates(context.Background(), "super-ssn/gpt-6.1-sol", provider.SurfaceOpenAI, "test")
+	routes, err := r.ResolveCandidates(context.Background(), "super-ssn/gpt-6.1-sol", provider.SurfaceChat, "test")
 	if err != nil {
 		t.Fatalf("direct resolution: %v", err)
 	}

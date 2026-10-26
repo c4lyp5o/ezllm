@@ -29,7 +29,7 @@ func upstub(t *testing.T, status int, body string) *httptest.Server {
 // failover tests need several routes with DIFFERENT models, which the shared
 // helper cannot express.
 func textRoute(url, model string) Route {
-	rt := testRoute(url, provider.SurfaceOpenAI)
+	rt := testRoute(url, provider.SurfaceChat)
 	rt.Model = model
 	rt.Alias = "combo"
 	return rt

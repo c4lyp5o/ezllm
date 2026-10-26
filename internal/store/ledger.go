@@ -17,7 +17,7 @@ import (
 type Surface string
 
 const (
-	SurfaceOpenAI     Surface = "openai"      // /v1/chat/completions
+	SurfaceChat       Surface = "chat"        // /v1/chat/completions
 	SurfaceAnthropic  Surface = "anthropic"   // /v1/messages
 	SurfaceResponses  Surface = "responses"   // /v1/responses
 	SurfaceEmbeddings Surface = "embeddings"  // /v1/embeddings
@@ -216,7 +216,7 @@ func NormalizeUsageWith(surface Surface, raw map[string]any, conv provider.Usage
 		u.Out = num(raw, "output_tokens")
 		u.Reasoning = num(sub(raw, "output_tokens_details"), "reasoning_tokens")
 
-	case SurfaceOpenAI:
+	case SurfaceChat:
 		fallthrough
 	default:
 		prompt := num(raw, "prompt_tokens")

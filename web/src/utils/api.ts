@@ -333,7 +333,7 @@ export type KeyRow = {
   last_test_at?: string | null; last_test_ok?: boolean | null; last_test_detail?: string | null;
 };
 
-export type ProtocolSupport = { openai?: number | null; anthropic?: number | null; responses?: number | null; untested?: number | null };
+export type ProtocolSupport = { chat?: number | null; anthropic?: number | null; responses?: number | null; untested?: number | null };
 
 export type Account = {
   id: number; name: string; namespace: string;
@@ -372,7 +372,7 @@ export type RecentCall = {
   // counted): the "N requests finished" tag.
   block_pos?: number;
   // translated = the served hop's WIRE differed from the client's surface, so
-  // the bodies were translated (anthropic client -> openai-only hop, or any
+  // the bodies were translated (anthropic client -> chat-only hop, or any
   // client onto a hop curated for /v1/responses). On such a row `tin` is the
   // vendor's INCLUSIVE total (cache counted inside) and `cread` is 0. Read the
   // marker before comparing `tin` across rows.
@@ -465,7 +465,7 @@ export const RANGE_LABEL: Record<RangeKey, string> = { '24h': '24h', '7d': '7d',
 //   client  → which application is burning the tokens
 //   alias   → which combo is really getting the traffic
 //   key     → which API key, per client
-//   surface → openai vs anthropic vs responses uptake
+//   surface → chat vs anthropic vs responses uptake
 // `global` sends no group_by and reads `totals` only.
 export type SplitKey = 'global' | 'day' | 'account' | 'model' | 'client' | 'alias' | 'key' | 'surface';
 
@@ -489,7 +489,7 @@ export const SPLIT_HINT: Record<SplitKey, string> = {
   client: 'which application sent it (the x-ezllm-client header)',
   alias: 'which combo a request named, vs a direct model call',
   key: 'which API key was used',
-  surface: 'openai vs anthropic vs responses endpoint',
+  surface: 'chat vs anthropic vs responses endpoint',
 };
 
 // group_by the endpoint needs for a given split (null = totals only).
@@ -684,7 +684,7 @@ export async function generateService(
 
 export type ModelRow = {
   id: string; display?: string | null; owned_by?: string | null;
-  openai?: boolean | number | null; anthropic?: boolean | number | null; responses?: boolean | number | null;
+  chat?: boolean | number | null; anthropic?: boolean | number | null; responses?: boolean | number | null;
   tested_at?: string | null;
   /** Operator-pinned surface; empty string = auto (probed). Enforced by the router. */
   pin?: string | null;

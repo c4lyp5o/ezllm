@@ -9,5 +9,5 @@ import (
 // encoder in legacy compatibility mode. New portable conversions use the same
 // modules through NewStreamReader without the legacy policy.
 func NewResponsesSSEReader(r io.Reader, clientModel string) *StreamReader {
-	return NewStreamReader(r, provider.SurfaceResponses, provider.SurfaceOpenAI, clientModel, CodecOptions{Legacy: true})
+	return NewStreamReader(r, provider.SurfaceResponses, provider.SurfaceChat, clientModel, CodecOptions{Legacy: true})
 }

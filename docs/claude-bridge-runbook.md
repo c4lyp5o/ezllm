@@ -15,8 +15,8 @@ Five steps, about ten minutes. Each links to its detail below.
 3. **Turn it on** in `compose.yml`: uncomment the two Claude mounts, set `USER`
    and `LOGNAME` to the login's owner, set `EZLLM_CLAUDE_BRIDGE: "on"`, then
    `docker compose up -d` ([enable](#enable)).
-4. **Add the account** in the dashboard: Providers → Add provider → **Claude
-   subscription (bridge)** → Save & validate. The dialog shows whether the bridge
+4. **Add the account** in the dashboard: Providers → Add provider →
+   **Claude Pro/Max** → Save & validate. The dialog shows whether the bridge
    is running; there is no key to paste ([wire it in](#wire-it-into-ezllm)).
 5. **Cap it** under Rules before any agent uses it ([drain cap](#wire-it-into-ezllm)).
 

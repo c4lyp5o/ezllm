@@ -11,9 +11,9 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.4.0**
+**Current: v1.3.1**
 
-## v1.4.0 — 2026-10-26
+## v1.3.1 — 2026-10-26
 
 Settings administration: persisted runtime policy with source/override visibility,
 local display preferences, live gateway controls, session management, notification
@@ -24,6 +24,10 @@ model-rule timezones migrate to UTC; new rules can inherit the instance timezone
 Export format version 1 remains compatible with an additive settings field.
 Back up the database and active key before upgrading; use the pre-upgrade pair
 with the previous binary for rollback.
+
+Provider presets now read Google Antigravity, Claude Pro/Max, ChatGPT Plus/Pro,
+and OpenAI Platform. Provider IDs, namespaces and existing account names are
+unchanged. The dashboard includes the rebuilt assets for these labels.
 
 ---
 

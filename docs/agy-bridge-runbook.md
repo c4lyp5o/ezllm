@@ -21,7 +21,7 @@ Five steps. Each links to its detail below.
 4. **Turn it on** in `compose.yml`: uncomment the two Antigravity mounts, set
    `EZLLM_AGY_BRIDGE: "on"`, then `docker compose up -d` ([enable](#enable)).
 5. **Add the account** in the dashboard: Providers → Add provider →
-   **Antigravity subscription (bridge)** → Save & validate. The dialog shows
+   **Google Antigravity** → Save & validate. The dialog shows
    whether the bridge is running and which models the plan has; there is no key
    to paste. Cap it under Rules before agents use it.
 

@@ -311,20 +311,20 @@ turn one on. The dashboard's Add provider dialog reads it for the bridge presets
 the bridge's own boot report (its loopback `/status`), present only while it runs. The shared
 secret is never in the response — a key add names `bridge` instead.
 ```jsonc
-[{"id":"claude-sub","label":"Claude subscription (bridge)","kind":"anthropic-compatible",
+[{"id":"claude-sub","label":"Claude Pro/Max","kind":"anthropic-compatible",
   "base_url":"http://127.0.0.1:8790/v1","usage_convention":"anthropic","enabled":true,
   "env":"EZLLM_CLAUDE_BRIDGE","runbook":"docs/claude-bridge-runbook.md",
   "status":{"cli_version":"2.1.306 (Claude Code)","login":"logged-in","status":"ok","subscription":"Subscription: max"}},
- {"id":"chatgpt-sub","label":"ChatGPT subscription (bridge)","kind":"openai-compatible",
+ {"id":"chatgpt-sub","label":"ChatGPT Plus/Pro","kind":"openai-compatible",
   "base_url":"http://127.0.0.1:8791/v1","usage_convention":"auto","enabled":false,
   "env":"EZLLM_CODEX_BRIDGE","runbook":"docs/codex-bridge-runbook.md"},
- {"id":"antigravity-sub","label":"Antigravity subscription (bridge)","kind":"openai-compatible",
+ {"id":"antigravity-sub","label":"Google Antigravity","kind":"openai-compatible",
   "base_url":"http://127.0.0.1:8792/v1","usage_convention":"auto","enabled":false,
   "env":"EZLLM_AGY_BRIDGE","runbook":"docs/agy-bridge-runbook.md"}]
 ```
 Refusal while a bridge is off (`POST …/keys` with `"bridge":"chatgpt-sub"`):
 ```jsonc
-{"error":{"code":409,"message":"ChatGPT subscription (bridge) is not running: set EZLLM_CODEX_BRIDGE=on, mount the CLI and login, and restart (docs/codex-bridge-runbook.md)","type":"invalid_request_error"}}
+{"error":{"code":409,"message":"ChatGPT Plus/Pro is not running: set EZLLM_CODEX_BRIDGE=on, mount the CLI and login, and restart (docs/codex-bridge-runbook.md)","type":"invalid_request_error"}}
 ```
 
 ### `POST /admin/accounts/{id}/keys/{keyId}/retest` → `200` | `422`

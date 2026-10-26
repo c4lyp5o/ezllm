@@ -470,7 +470,7 @@ corrections section.
   `env.go` `childEnv` is the allowlisted child environment. Wired in `cmd/ezllm/agybridge.go`.
 
 
-### v1.4.0 — Settings administration (2026-10-26)
+### v1.3.1 — Settings administration (2026-10-26)
 
 - `internal/settings/settings.go` `Manager.Patch` validates and saves a revision
   before publishing an immutable policy. `cmd/ezllm/settings.go` `operatorSettings`

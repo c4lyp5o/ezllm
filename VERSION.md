@@ -38,6 +38,13 @@ database, so roll back from a backup taken before the upgrade.
   Opus/Sonnet windows and the per-product split of the week, names the source,
   and says why it fell back to the bridge's last reading when the live read
   failed.
+- **Antigravity subscription bridge** (`EZLLM_AGY_BRIDGE=on`, off by default).
+  A personal Google Antigravity plan as an `openai-compatible` account through
+  the official `agy` CLI 1.4.7: text chat with usage, no client tools, the
+  answer in one chunk. Setup: `docs/agy-bridge-runbook.md`.
+- **One-click bridge accounts.** Add provider offers a preset per bridge that
+  shows whether it is running and needs no key; new `GET /admin/bridges`.
+- **Dashboard:** Neighbourhood page; lighter login backdrop.
 
 ---
 

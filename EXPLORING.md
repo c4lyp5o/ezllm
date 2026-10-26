@@ -461,7 +461,7 @@ corrections section.
   failover trail from `reqInfo`; refusals before dispatch are visible at `debug`;
   `EZLLM_LOG_FORMAT=json` opts into one object per line.
 
-### Unreleased — Antigravity subscription bridge ✅ (2026-10-26; design `docs/antigravity-subscription-design.md`, runbook `docs/agy-bridge-runbook.md`)
+### v1.3.0 — Antigravity subscription bridge ✅ (2026-10-26; design `docs/antigravity-subscription-design.md`, runbook `docs/agy-bridge-runbook.md`)
 - `internal/agybridge/` — Google Antigravity plan behind a loopback OpenAI surface:
   `runner.go` `Run` spawns `agy --print=` headless per request in a fresh empty workspace,
   kills a turn whose `init` reports a loose permission mode; `preflight.go` `RunPreflight`

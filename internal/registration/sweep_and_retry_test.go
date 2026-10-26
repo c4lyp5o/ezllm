@@ -203,9 +203,9 @@ func TestSweepStopsOnRateLimitButNotOnServerError(t *testing.T) {
 	}
 }
 
-// Every sweep probe is a real generation call: each one is ledgered, like
-// the inference probe, so the spend is never invisible.
-func TestSweepProbesAreLedgered(t *testing.T) {
+// A sweep probe is a real generation call, but admin traffic: none of them is
+// ledgered, while the verdicts they produce are still persisted.
+func TestSweepProbesAreNotLedgered(t *testing.T) {
 	db := sweepDB(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -222,14 +222,8 @@ func TestSweepProbesAreLedgered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	n := 0
-	for _, c := range calls {
-		if c.Client == "admin:test" && c.Status == http.StatusOK {
-			n++
-		}
-	}
-	if n != 4 {
-		t.Errorf("ledgered %d sweep probes, want 4 (2 models x 2 surfaces): %+v", n, calls)
+	if len(calls) != 0 {
+		t.Errorf("sweep probes reached the ledger: %+v", calls)
 	}
 }
 

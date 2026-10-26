@@ -520,8 +520,7 @@ function FreeSummary({ combo, accounts }: { combo: Combo; accounts: AccountLite[
 }
 
 // Hop test results — POST /admin/combos/{id}/test. Each probe is one REAL
-// upstream call (tiny: max_tokens 16) and lands in the ledger as client
-// "combo-test", so what the modal shows is the dispatcher's genuine verdict,
+// upstream call (tiny: max_tokens 16) and is NOT ledgered, so what the modal shows is the dispatcher's genuine verdict,
 // parks included.
 type TestHop = {
   account_id: number; namespace?: string; model: string; enabled: boolean;
@@ -554,7 +553,7 @@ function TestComboModal({ combo, onClose }: { combo: Combo | null; onClose: () =
   return (
     <Modal open={combo != null} onClose={onClose} wide
       title={combo ? `Test combo ${combo.name}` : 'Test combo'}
-      subtitle="one real request per hop — tiny (16 tokens out), recorded in the ledger as combo-test"
+      subtitle="one real request per hop — tiny (16 tokens out), not recorded in the ledger"
       footer={<>
         <span className="mr-auto flex items-center gap-2 text-[13px] text-mute">
           surface

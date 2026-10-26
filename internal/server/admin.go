@@ -1626,9 +1626,9 @@ func causeFromSnippet(s string) string {
 //     <surface> request, so a protocol refusal here is genuine signal about
 //     the hop's native support (the markings are applied by the router).
 //   - It SPENDS: one request per hop, max_tokens 16, non-streaming.
-//   - It uses the real dispatcher, so parks, cooldowns and the ledger behave
-//     exactly as in production — each probe is recorded as a normal call, and
-//     a probe that parks a hop LEAVES it parked, because it failed for real.
+//   - It uses the real dispatcher, so parks and cooldowns behave exactly as in
+//     production — a probe that parks a hop LEAVES it parked, because it failed
+//     for real. The probe itself is NOT written to the ledger.
 func (s *Server) handleComboTest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeErr(w, http.StatusMethodNotAllowed, "invalid_request_error", "method not allowed")
@@ -1712,17 +1712,6 @@ func (s *Server) handleComboTest(w http.ResponseWriter, r *http.Request) {
 		cancel()
 		hr.Ms = time.Since(start).Milliseconds()
 
-		// The probe is a real call and must be recorded like one: the ledger
-		// is the audit trail, and an unrecorded probe would be invisible
-		// spend. Client "combo-test" tells probe traffic from client traffic
-		// in every dashboard.
-		call := store.Call{
-			TS: start, Client: "combo-test", Surface: store2surface(surface), Alias: rt.Alias,
-			AccountID: rt.Account.ID, Account: rt.Account.Namespace,
-			KeyID: rt.KeyID, KeyHint: rt.KeyHint, Model: rt.Model,
-			Status: res.Status, Stream: res.Stream, Totalms: res.Totalms,
-			EndpointID: res.EndpointID, UpstreamModel: res.UpstreamModel,
-		}
 		switch {
 		case ferr != nil:
 			hr.Err = ferr.Error()
@@ -1734,15 +1723,6 @@ func (s *Server) handleComboTest(w http.ResponseWriter, r *http.Request) {
 			hr.Err = res.Err
 			hr.Cause = causeFromSnippet(res.Err)
 		}
-		call.Status = hr.Status
-		if ferr != nil {
-			call.Err = ferr.Error()
-		} else if res.Err != "" {
-			call.Err = res.Err
-		}
-		applyUsage(&call, res.Usage)
-		s.ledgerAttempts(call, res)
-		s.ledger(call)
 		for _, c := range s.dispatcher.Cooldowns() {
 			if c.Namespace == rt.Account.Namespace && c.Model == rt.Model && c.Until.After(time.Now()) {
 				hr.Parked = true

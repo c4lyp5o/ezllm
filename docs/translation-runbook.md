@@ -93,8 +93,8 @@ Capability flags come from the dashboard-triggered **ProtocolSweep**
 models per account × 3 surfaces and writes `proto_openai` / `proto_anthropic` /
 `proto_responses` / `proto_tested_at`. Only a verdict is written: a 429, 5xx or
 timeout leaves the stored value as it was (a re-sweep in bad weather never wipes
-a proven capability back to `NULL`), and a 429 ends the sweep. Every probe is a
-ledger row under client `admin:test`. `anthropic-compatible` accounts skip the
+a proven capability back to `NULL`), and a 429 ends the sweep. Probes are not
+ledgered. `anthropic-compatible` accounts skip the
 openai probe and are marked `proto_openai=false` (chat clients reach them through
 the Messages translation); `claude-web` is probed normally — its bridge serves
 `/chat/completions` only.

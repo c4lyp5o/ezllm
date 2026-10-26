@@ -340,7 +340,6 @@ func (s *Server) handleServiceTest(w http.ResponseWriter, r *http.Request) {
 	servedRoute, res, ferr := s.dispatcher.ForwardCandidates(ctx, &captureWriter{}, reqUp, routes, body)
 	ms := time.Since(start).Milliseconds()
 	if servedRoute.Account.ID == 0 {
-		s.ledgerAttempts(store.Call{Client: "service-test"}, res)
 		// Nothing left the box (every candidate was skipped or refused before
 		// dispatch). This is NOT evidence about the wire: no verdict row, no
 		// ledger row — exactly the dispatcher's "a skipped hop writes no
@@ -372,19 +371,8 @@ func (s *Server) handleServiceTest(w http.ResponseWriter, r *http.Request) {
 	} else {
 		detail = truncate(detail, 500)
 	}
-	// The probe is a real call and must be recorded like one: invisible spend
-	// is unauditable spend. Client "service-test" separates probe rows from
-	// client traffic in every dashboard, exactly like "combo-test".
-	call := store.Call{
-		TS: start, Client: "service-test", Surface: store2surface(provider.Surface(surface)), Alias: servedRoute.Alias,
-		AccountID: servedRoute.Account.ID, Account: servedRoute.Account.Namespace,
-		KeyID: servedRoute.KeyID, KeyHint: servedRoute.KeyHint, Model: servedRoute.Model,
-		Status: status, Stream: res.Stream, Totalms: res.Totalms,
-		EndpointID: res.EndpointID, UpstreamModel: res.UpstreamModel, Err: detail,
-	}
-	applyUsage(&call, res.Usage)
-	s.ledgerAttempts(call, res)
-	s.ledger(call)
+	// Probes are not ledgered: the verdict row below is their record, and a
+	// test must not read as client traffic in the usage dashboards.
 	if err := s.db.UpsertServiceProbe(ctx, surface, servedRoute.Account.ID, servedRoute.Model, ok, detail); err != nil {
 		s.writeStoreErr(w, err)
 		return

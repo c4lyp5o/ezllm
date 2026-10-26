@@ -506,7 +506,7 @@ Replaces the hop list atomically (same body shape, `hops` only).
 models only** — never the account catalog — on just the surfaces still `NULL`.
 Curated rows, proven surfaces, disabled hops and disabled combos/accounts cost nothing.
 It holds the account's sweep slot (visible on `GET /admin/accounts/{id}/sync`) and is
-skipped if a sweep is already running. Probes are ledgered as `admin:test`. The
+skipped if a sweep is already running. Probes are not ledgered. The
 response shape is unchanged. `EZLLM_COMBO_AUTOPROBE=off` disables it.
 
 ### `GET|POST /admin/tokens` · `PATCH|DELETE /admin/tokens/{id}`
@@ -715,8 +715,7 @@ normal dispatch path (ResolveCandidates → ForwardCandidates) with an endpoint-
 shape — embeddings `{"input":…}` · images `{"prompt":…,"n":1}` ·
 tts `{"input":…,"voice":"alloy"}` · stt multipart with a 0.2 s silent WAV — and
 stores the verdict in `service_probes` per `(surface, account, model)`. The call is
-ledgered like any other (client `service-test`): invisible spend is unauditable
-spend. **Image probes can cost provider quota — the UI confirms before each one and
+not ledgered (it is admin traffic; the verdict row is its record). **Image probes can cost provider quota — the UI confirms before each one and
 no sweep ever runs one unattended.** `ok` means "the wire answered this service
 shape", not output quality; `auto` may only pick tested-ok models.
 

@@ -40,7 +40,7 @@ accepts whatever the resolver accepts.
 A model's fit for a service is only ever **proven by a real request**. A per-card
 `Test` action runs one tiny, endpoint-appropriate real request through the real
 dispatcher (same path as `POST /admin/combos/{id}/test`: `ResolveCandidates` →
-`ForwardCandidates`, ledger client `service-test`) and records a verdict per
+`ForwardCandidates`; not ledgered) and records a verdict per
 `(surface, account, model)`. Tests are strictly opt-in — the operator clicks,
 nothing sweeps.
 
@@ -90,7 +90,7 @@ quality. The UI says so.
 5. **Tests run through the REAL path** — `ResolveCandidates` (so pins and
    capability gates refuse the test exactly as they would refuse traffic) then
    `ForwardCandidates`; verdict stored per `(surface, account_id, model_id)` of
-   the SERVED route; ledger client `service-test`. Test bodies as listed above;
+   the SERVED route; not ledgered. Test bodies as listed above;
    `images_gen` is the only card that confirms before sending (real cost).
 6. **Target validity is visible.** The binding's target is validated on write
    (namespace must resolve, model must be in that account's catalog) and

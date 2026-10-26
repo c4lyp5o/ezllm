@@ -3,8 +3,7 @@ package server
 // The combo-test endpoint must probe EVERY hop with the REAL dispatcher and
 // the results must be truthful enough to trust: the failing hop earns a real
 // status with a classified cause, the healthy hop earns 200, and the probes
-// themselves land in the ledger with the err marker — which also proves the
-// err projection the recent-calls table reads.
+// themselves stay out of the ledger.
 
 import (
 	"encoding/json"
@@ -100,44 +99,24 @@ func TestComboTestProbesEveryHopAndFillsErr(t *testing.T) {
 		t.Fatalf("upstream hits = bad %d / good %d, want exactly one probe each (zero retries)", len(tu.badHits), len(tu.goodHits))
 	}
 
-	// The probes go through the real dispatcher, so they are real ledger
-	// rows — and the err projection the recent-calls table reads must carry
-	// the classified marker. The ledger batches asynchronously (20ms batch in
-	// this harness), so poll briefly rather than race the flush.
-	deadline := time.Now().Add(3 * time.Second)
-	sawErr := false
-	for {
-		calls := httptest.NewRecorder()
-		req = httptest.NewRequest("GET", "/admin/requests?limit=10", nil)
-		req.Header.Set("Authorization", "Bearer tok-admin")
-		tu.handler.ServeHTTP(calls, req)
-		if calls.Code != http.StatusOK {
-			t.Fatalf("requests: %d %s", calls.Code, calls.Body.String())
-		}
-		var payload struct {
-			Rows []map[string]any `json:"rows"`
-		}
-		if err := json.Unmarshal(calls.Body.Bytes(), &payload); err != nil {
-			t.Fatal(err)
-		}
-		sawErr = false
-		for _, r := range payload.Rows {
-			if s, _ := r["status"].(float64); s == 429 {
-				e, _ := r["err"].(string)
-				if !strings.Contains(e, "[quota_exhausted]") {
-					t.Errorf("ledger err row = %q, want the [quota_exhausted] marker", e)
-				} else {
-					sawErr = true
-				}
-			}
-		}
-		if sawErr || time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
+	// The probes go through the real dispatcher but are admin traffic: none of
+	// them may reach the ledger the recent-calls table reads.
+	time.Sleep(100 * time.Millisecond) // the ledger batches asynchronously (20ms here)
+	calls := httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/admin/requests?limit=10", nil)
+	req.Header.Set("Authorization", "Bearer tok-admin")
+	tu.handler.ServeHTTP(calls, req)
+	if calls.Code != http.StatusOK {
+		t.Fatalf("requests: %d %s", calls.Code, calls.Body.String())
 	}
-	if !sawErr {
-		t.Fatal("no 429 row with the [quota_exhausted] marker landed in the ledger after the probes")
+	var payload struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	if err := json.Unmarshal(calls.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Rows) != 0 {
+		t.Fatalf("combo-test probes reached the ledger: %v", payload.Rows)
 	}
 
 	// Overview carries the cursor list (empty here: no block combo ran) so

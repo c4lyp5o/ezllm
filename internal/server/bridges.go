@@ -45,17 +45,17 @@ type bridgeRegistry struct {
 func newBridgeRegistry() *bridgeRegistry {
 	return &bridgeRegistry{list: []Bridge{
 		{
-			ID: "claude-sub", Label: "Claude subscription (bridge)", Kind: "anthropic-compatible",
+			ID: "claude-sub", Label: "Claude Pro/Max", Kind: "anthropic-compatible",
 			BaseURL: "http://127.0.0.1:8790/v1", UsageConvention: "anthropic",
 			Env: "EZLLM_CLAUDE_BRIDGE", Runbook: "docs/claude-bridge-runbook.md",
 		},
 		{
-			ID: "chatgpt-sub", Label: "ChatGPT subscription (bridge)", Kind: "openai-compatible",
+			ID: "chatgpt-sub", Label: "ChatGPT Plus/Pro", Kind: "openai-compatible",
 			BaseURL: "http://127.0.0.1:8791/v1", UsageConvention: "auto",
 			Env: "EZLLM_CODEX_BRIDGE", Runbook: "docs/codex-bridge-runbook.md",
 		},
 		{
-			ID: "antigravity-sub", Label: "Antigravity subscription (bridge)", Kind: "openai-compatible",
+			ID: "antigravity-sub", Label: "Google Antigravity", Kind: "openai-compatible",
 			BaseURL: "http://127.0.0.1:8792/v1", UsageConvention: "auto",
 			Env: "EZLLM_AGY_BRIDGE", Runbook: "docs/agy-bridge-runbook.md",
 		},

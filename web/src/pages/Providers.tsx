@@ -131,15 +131,15 @@ const PROVIDER_PRESETS: Record<string, {
   // paste — docs/claude-bridge-runbook.md, docs/codex-bridge-runbook.md,
   // docs/agy-bridge-runbook.md.
   'claude-sub': {
-    label: 'Claude subscription (bridge)', kind: 'anthropic-compatible', baseURL: 'http://127.0.0.1:8790/v1',
+    label: 'Claude Pro/Max', kind: 'anthropic-compatible', baseURL: 'http://127.0.0.1:8790/v1',
     bridge: 'claude-sub', usageConvention: 'anthropic',
   },
   'chatgpt-sub': {
-    label: 'ChatGPT subscription (bridge)', kind: 'openai-compatible', baseURL: 'http://127.0.0.1:8791/v1',
+    label: 'ChatGPT Plus/Pro', kind: 'openai-compatible', baseURL: 'http://127.0.0.1:8791/v1',
     bridge: 'chatgpt-sub',
   },
   'antigravity-sub': {
-    label: 'Antigravity subscription (bridge)', kind: 'openai-compatible', baseURL: 'http://127.0.0.1:8792/v1',
+    label: 'Google Antigravity', kind: 'openai-compatible', baseURL: 'http://127.0.0.1:8792/v1',
     bridge: 'antigravity-sub',
   },
   'claude-platform': { label: 'Claude Platform', kind: 'anthropic-compatible', baseURL: 'https://api.anthropic.com' },
@@ -179,7 +179,7 @@ const PROVIDER_PRESETS: Record<string, {
     multilineKey: true,
     keyHint: 'Paste the WHOLE cookie header (all cookies, semicolon-separated) — we keep __Secure-1PSID and __Secure-1PSIDTS. Two lines work too. Use a TEST Google account only.',
   },
-  'openai': { label: 'OpenAI', kind: 'openai-compatible', baseURL: 'https://api.openai.com/v1' },
+  'openai': { label: 'OpenAI Platform', kind: 'openai-compatible', baseURL: 'https://api.openai.com/v1' },
   // NVIDIA NIM — standard OpenAI-compatible chat, model ids are bare
   // (e.g. meta/llama-3.3-70b-instruct), so splitNamespace routes them like
   // tokenrouter's slash-ids already do.

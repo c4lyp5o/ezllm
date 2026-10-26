@@ -50,6 +50,17 @@ func TestClientCancelIsRecordedAs499AndDoesNotParkTheHop(t *testing.T) {
 	rec := httptest.NewRecorder()
 	tu.handler.ServeHTTP(rec, req)
 
+	// The response the caller (if it is still reading) receives, and the exact
+	// envelope docs/API.md quotes.
+	if rec.Code != statusClientClosedRequest {
+		t.Fatalf("response status = %d, want %d", rec.Code, statusClientClosedRequest)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, `"client_cancelled"`) {
+		t.Errorf("response body = %q, want the client_cancelled envelope", body)
+	} else {
+		t.Logf("cancellation envelope: %s", body)
+	}
+
 	// The ledger row: 499, named as a cancellation, not a gateway fault.
 	deadline := time.Now().Add(2 * time.Second)
 	for {

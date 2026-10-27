@@ -135,25 +135,25 @@ which resolves against the working directory the launcher sets.
 The shipped `config.example.yaml` is bootstrap metadata only — provider
 credentials live in SQLite and are added from the dashboard.
 
-**It also seeds provider accounts.** Every entry under `providers:` is upserted
-into SQLite at boot, *enabled and with no key*. So a fresh instance already lists
-the two examples the file ships:
+**It seeds whatever `providers:` contains.** Every entry is upserted into SQLite
+at boot, *enabled and with no key*, so an uncommented example appears in a fresh
+instance's provider list and no model is exposed until a key is added — the
+account is cosmetic until then, not a cost or security problem. That is also why
+the boot log warns `model sync failed at boot … err="store: not found"` once per
+entry: the account exists, no credential does, so there is no catalog to sync.
+
+The example that ships with **v1.3.2 and earlier** has two entries uncommented,
+so those installs start with two keyless accounts:
 
 | name | namespace | kind |
 |---|---|---|
 | `opencode-main` | `opengo` | `opencode-go` |
 | `ssn-gpt` | `super-ssn` | `openai-compatible` |
 
-That is exactly why the boot log warns `model sync failed at boot … err="store:
-not found"` once per provider: the account exists, no credential does, so there
-is no catalog to sync. Neither account is usable and no model is exposed until a
-key is added — the provider list is cosmetic until then, not a security or cost
-issue, but it is surprising on a "fresh" install.
-
-For a genuinely empty instance, delete the `providers:` block — an empty map is
-valid, the schema explicitly allows it — or keep only the entries you intend to
-use. Accounts are not removed by deleting a config entry later; delete those in
-the dashboard.
+Newer versions ship both commented out: nothing is seeded and a fresh instance
+starts empty (verified — healthy, zero accounts). Either way, an empty map is
+valid, and a config entry you delete later does **not** delete the account —
+remove those in the dashboard.
 
 The two settings a new install usually changes:
 

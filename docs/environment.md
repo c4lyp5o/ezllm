@@ -36,6 +36,12 @@ and data location.
    [codex-bridge-runbook.md](codex-bridge-runbook.md) or
    [agy-bridge-runbook.md](agy-bridge-runbook.md).
 
+A **binary install** (no container) has one more: pin
+**`EZLLM_MASTER_KEY_FILE`** beside the data directory. The default is
+home-global, so a second instance silently shares the first one's key and a
+backup of `data/` alone leaves the provider keys unreadable. See
+[install-binary.md](install-binary.md).
+
 Behind a reverse proxy, also set `EZLLM_TRUSTED_PROXIES`. Set these in your
 `compose.yml`:
 

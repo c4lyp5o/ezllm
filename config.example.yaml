@@ -6,6 +6,11 @@ data_dir: ./data               # repo-relative so Docker can bind-mount ./data
 max_body_mib: 32
 # upstream_timeout: 0 = unbounded (streaming responses have no natural deadline)
 
+# NOTHING BELOW IS SEEDED BY DEFAULT — every uncommented entry is upserted into
+# SQLite at boot, ENABLED and with no key, so it appears in a fresh instance's
+# provider list and logs "model sync failed at boot" until a key is added.
+# Add accounts through Providers → Add provider in the dashboard, or uncomment
+# an example here to bootstrap one. An empty map is valid.
 providers:
   # ── OpenCode Go ────────────────────────────────────────────────────────────
   # Clients address it as "<namespace>/<model>", e.g. opengo/qwen3.8-flash.
@@ -13,25 +18,23 @@ providers:
   # header yields 400 MissingSessionID upstream. Serves all three surfaces, but
   # per-model: /v1/messages 400s ModelProtocolUnsupported on some models
   # (glm-5.2, omen-alpha, kimi-k2.6) while qwen/deepseek/minimax work.
-  opencode-main:
-    namespace: opengo
-    kind: opencode-go
-    base_url: https://opencode.ai/zen/go/v1
-    # Add keys through Providers → Add provider in the dashboard.
+  # opencode-main:
+  #   namespace: opengo
+  #   kind: opencode-go
+  #   base_url: https://opencode.ai/zen/go/v1
 
   # ── Generic OpenAI-compatible (ssn-gpt = space.stationine.com) ─────────────
   # Its GET /v1/usage reports a MONEY shape (balance/remaining in USD plus
   # usage.today / usage.total cost), which the dashboard renders as a balance
   # card rather than percentage bars.
-  ssn-gpt:
-    namespace: super-ssn
-    kind: openai-compatible
-    base_url: https://space.stationine.com/v1
-    # Add keys through Providers → Add provider in the dashboard.
-    # This host sits behind Cloudflare: probing too fast returns 403 "error
-    # code: 1010", which would make the key test FAIL ON A PERFECTLY GOOD KEY.
-    # Keep probe_delay_ms >= 400.
-    probe_delay_ms: 500
+  # ssn-gpt:
+  #   namespace: super-ssn
+  #   kind: openai-compatible
+  #   base_url: https://space.stationine.com/v1
+  #   # This host sits behind Cloudflare: probing too fast returns 403 "error
+  #   # code: 1010", which would make the key test FAIL ON A PERFECTLY GOOD KEY.
+  #   # Keep probe_delay_ms >= 400.
+  #   probe_delay_ms: 500
 
   # ── Anthropic-compatible (x-api-key + anthropic-version, not Bearer) ───────
   # anthropic-main:

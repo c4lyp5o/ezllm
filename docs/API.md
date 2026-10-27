@@ -489,7 +489,8 @@ claim any value, so it must never gate anything. The dashboard shows it under
 the request's timestamp.
 
 ### `GET /admin/accounts/{id}/quota` → `200`
-Live `ReadQuota` → classified shape + `raw`. `{"kind":"none"}` when the provider has no endpoint
+Live `ReadQuota` → classified shape + `raw`. Provider-by-provider oracles and
+the classification rules: [quota-oracles-design.md](quota-oracles-design.md). `{"kind":"none"}` when the provider has no endpoint
 (`400`/`404`/`405` on the generic `{base}/usage` → NOT an error; OpenAI answers `400` there even
 for a valid key). A TokenRouter, OpenAI, Anthropic (`api.anthropic.com`) or Command Code account without a `management_key` is `none` without a call.
 OpenAI reads `GET api.openai.com/v1/dashboard/billing/credit_grants` with the session token (the

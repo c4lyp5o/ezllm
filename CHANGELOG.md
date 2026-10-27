@@ -23,10 +23,11 @@ key pinned beside the data directory.
 
 A third trap the doc now states: the provider accounts a "fresh" install already
 shows are not auto-created by code — `seed()` upserts every entry under
-`providers:` in the bootstrap config, so copying `config.example.yaml` seeds
+`providers:` in the bootstrap config. Copying the v1.3.2 example therefore seeded
 `opencode-main` and `ssn-gpt` as *enabled accounts with no key*, which is also
-why the boot log warns twice about a failed model sync. Deleting the block gives
-a genuinely empty instance (verified: 0 accounts, healthy).
+why the boot log warned twice about a failed model sync. `config.example.yaml`
+now ships both commented out, so a fresh instance starts with zero accounts —
+verified by booting it (healthy, 0 accounts).
 
 Two more facts the doc states because they are traps rather than preferences: the
 darwin/arm64 binary carries the Go linker's ad-hoc code signature (Apple

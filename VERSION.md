@@ -11,7 +11,32 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.3.2**
+**Current: v1.3.3**
+
+## v1.3.3 — 2026-10-27
+
+One fix, found by a test that had been failing about one run in five without
+anyone noticing. No API, config or schema change; no migration.
+
+**A cancelled caller now gets the cancellation, not a parked hop error.** v1.3.2
+stopped a client hang-up from charging a strike against the hop, but the request
+could still end as a *success* carrying a hop's 503. When the last hop answers a
+failover status its response is parked, to be committed if nothing else serves.
+The loop's context check then broke out without clearing that parked response,
+so `commit` wrote the 503 and returned a nil error: the cancellation reached
+neither the server nor the ledger, and the hop's error was reported as the reason
+the call ended. Which branch you got depended on the race — a hop whose transport
+noticed the cancel surfaced `context.Canceled` (~82% of runs), a hop that had
+already written its 503 was committed as a success (~18%).
+
+`TestClientCancelStopsTheFailoverLoop` measured 9 failures in 50 local runs
+before the change and 0 in 200 after. The fix is one branch at the loop head: a
+cancellation outranks a parked fallback, so the body is discarded and the error
+path answers, preserving any earlier transport error as the first cause.
+
+Two things also landed that are not runtime changes: `docs/install-binary.md`,
+the manual for the released Linux/macOS/Windows binaries, and the CI rule that
+`:latest` is master-only so a tag build can never roll it backwards.
 
 ## v1.3.2 — 2026-10-27
 

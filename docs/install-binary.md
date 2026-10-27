@@ -35,11 +35,10 @@ musl distributions alike, and on Windows with no redistributable installed.
 | Subscription bridges | supported | Codex/Antigravity refused | Codex/Antigravity refused |
 | Code signing | not required | arm64 needs ≥ ad-hoc | not required |
 
-The Claude, Codex and Antigravity bridges are **Linux-only** features: the
-Codex and Antigravity bridges refuse to start off Linux with a boot error, and
-the Claude bridge needs the vendor CLI plus a subscription login. Leave
-`EZLLM_CLAUDE_BRIDGE`, `EZLLM_CODEX_BRIDGE` and `EZLLM_AGY_BRIDGE` at their
-default `off` on macOS and Windows — otherwise the boot fails.
+Codex and Antigravity bridges require Linux and refuse to start on native macOS
+or Windows. The Claude bridge requires the vendor CLI and a subscription login;
+its documented container setup uses Linux. Leave bridges off unless their
+prerequisites are configured. See the individual bridge runbooks in the README.
 
 ## 1. Install
 

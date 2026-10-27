@@ -41,7 +41,10 @@ client ──HTTP──▶ internal/server/server.go
 - Phase 4 streamCopy alone (32 events): **104–125 µs** parallel
 - Whole handler (e2e, real socket): **578 µs** non-stream par4 / **866 µs** stream par4
 
-## 2. Reproduction commands
+## 2. Historical reproduction commands
+
+These commands document the original measurements; do not run the full suite or
+performance harnesses on this machine. Use `make test-short` for local tests.
 
 ```bash
 # toolchain: Go 1.27.1 (PATH="$HOME/.local/go/bin:$PATH")

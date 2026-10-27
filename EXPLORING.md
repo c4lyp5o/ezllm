@@ -32,9 +32,9 @@ account row carries the base URL + key pool. The Claude and ChatGPT
 subscription bridges are loopback accounts of the compatible kinds.
 ```
 
-Several real upstreams, not 359. The whole point: **SSE bytes flow back untouched** — ezllm swaps
-`model` upstream and copies the response stream while tapping the `usage` frames for the ledger.
-Compression is the only thing that ever rewrites the request body (when a profile is active).
+On native passthrough paths, SSE bytes flow back as they arrive while usage is
+observed for the ledger. Translation converts requests and responses across wire
+protocols; compression and per-hop reasoning rules can also change requests.
 
 ## 2. Quick start (run these before reading code — read after seeing it live)
 
@@ -42,7 +42,7 @@ Compression is the only thing that ever rewrites the request body (when a profil
 cd ~/workspace/ezllm
 make build && make run          # or: go run ./cmd/ezllm -config config.yaml
 curl -s localhost:20129/healthz
-curl -s localhost:20129/v1/models | python3 -m json.tool
+curl -s localhost:20129/v1/models -H "Authorization: Bearer $EZLLM_TOKEN_HERMES" | python3 -m json.tool
 # real call (streaming, watch it print incrementally):
 curl -N localhost:20129/v1/chat/completions \
   -H "Authorization: Bearer $EZLLM_TOKEN_HERMES" -H "Content-Type: application/json" \
@@ -62,9 +62,9 @@ equal, something is buffering — go read `streamCopy` in `internal/proxy/proxy.
 | # | Read first | Then | Ask yourself |
 |---|-----------|------|--------------|
 | M1 | `cmd/ezllm/main.go` → `internal/config` → `internal/server` | `config.example.yaml` | Where would I add a fourth account? (config seeds; the DB is runtime truth) |
-| M2 | `internal/proxy/proxy.go` (`Forward` → `streamCopy` → `tapSSELine`) → `internal/store/ledger.go` (`NormalizeUsage`) | `git show` of M2 | Does ANY code path touch response bytes besides the scanner+Write+Flush loop? |
+| M2 | `internal/proxy/proxy.go` (`Forward` → `streamCopy` → `tapSSELine`) → `internal/store/ledger.go` (`NormalizeUsage`) | `git show` of M2 | How do native streaming and translated streaming differ? |
 | M3 | `internal/registration` + `internal/provider/adapters.go` + admin handlers in `internal/server` | `docs/API.md` | Can I trace an account from DB row → adapter → first upstream byte? |
-| M4 | `internal/router` (hops → strategies → key pick/cooldown) + `internal/rules` | `go test ./internal/router ./internal/rules` | What happens on 429 with 1 key left? (answer must be in a test) |
+| M4 | `internal/router` (hops → strategies → key pick/cooldown) + `internal/rules` | `go test -short ./internal/router ./internal/rules` | What happens on 429 with 1 key left? (answer must be in a test) |
 | M5 | `internal/compress` (engines + stage pipeline) + `internal/server/compression.go` | `docs/compression-design.md` | Where is "never touch final turn / tool results" enforced, and where does fail-open live? |
 | M6 | `internal/store/ledger.go` (`UsageReport`) → `/admin/usage` · `/admin/requests` · `/admin/stream` + `web/src` | `docs/API.md` + a dashboard login | Can I kill -9 it and restart without corrupting the ledger? Does the dashboard render anything pre-auth? (it must not) |
 | M7 | `internal/compress/rtk.go`, `caveman.go` + `internal/rules` windows/caps | `tests/prove_*.py` (live proofs) | After compression, do ledger rows still carry faithful pre/saved token counts? |
@@ -562,10 +562,11 @@ These are the "if it's broken here, the project failed" spots — each must be v
 
 1. **No secret ever reaches a log line** — grep the logging calls for `Authorization`, key env
    names, `Bearer`. Config has `env:` indirection only.
-2. **SSE is never buffered** — no `bufio.Scanner` over the response, no full-body `ReadAll` on the
-   stream path; `Flush()` called after each chunk to the client.
-3. **Unknown request fields survive** — `extra_body`, `enable_thinking`, `thinking` pass through;
-   the only mutation is `model` — plus the ONE documented exception,
+2. **Streaming stays incremental** — do not read an entire streaming response before
+   forwarding it; native and translated paths must flush output as it becomes available.
+3. **Unknown request fields survive native passthrough** — `extra_body`, `enable_thinking`,
+   `thinking` pass through when not affected by configured compression. The model is swapped;
+   another documented per-hop mutation is
    `reasoning_effort`, which `proxy.prepareHopBody` clamps or drops against the
    model's own learned vocabulary when the client asked for a value that model
    refuses. An accepted value is never re-encoded.

@@ -273,7 +273,7 @@ content, one upstream request per call) are documented in the Hermes plugin, MIT
 credited.
 
 Each milestone: focused in-package tests, a live proof through the router, and the repository gate
-(`make test-short` under the memory cap, `make check` on the uncapped shell or CI).
+(`make test-short` locally; the full gate runs in CI).
 
 ## 7. Version pinning and boot checks
 

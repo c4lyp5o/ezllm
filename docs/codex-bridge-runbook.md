@@ -3,14 +3,16 @@
 Operating the ChatGPT subscription surface (codex-bridge). Decisions live in
 `codex-subscription-design.md`; this is the how.
 
-**Status:** shipped in v1.1.0 and deployed: text, streaming, images, reasoning
-effort and summaries, structured output, plan windows, client tools with
-continuation. Read the [platform requirements](#platform-requirements--read-this-first)
+The bridge supports text, streaming, images, reasoning effort and summaries,
+structured output, plan windows, and client tools with continuation. Read the [platform requirements](#platform-requirements--read-this-first)
 before you rely on tools.
 
 ## Quick setup
 
-Five steps. Each links to its detail below.
+Start with a working ezllm installation and dashboard ([quick start](../README.md#quick-start)).
+This guide uses Docker Compose with a Linux environment, a ChatGPT subscription,
+and an isolated Codex login. Validation and test requests use subscription quota.
+Each step links to more detail below.
 
 1. **Check the host** supports client tools — Linux with Landlock
    ([platform requirements](#platform-requirements--read-this-first)). Without it
@@ -22,7 +24,7 @@ Five steps. Each links to its detail below.
 4. **Turn it on** in `compose.yml`: uncomment the two Codex mounts, set
    `EZLLM_CODEX_BRIDGE: "on"`, then `docker compose up -d` ([enable](#enable)).
 5. **Add the account** in the dashboard: Providers → Add provider →
-   **ChatGPT Plus/Pro** → Save & validate. The dialog shows whether the bridge
+   **ChatGPT Plus/Pro** → Save & validate key. The dialog shows whether the bridge
    is running; there is no key to paste. Cap it under Rules before agents use it
    ([wire it in](#wire-it-into-ezllm)).
 
@@ -89,7 +91,9 @@ answer is authoritative: it tries Landlock at boot and reports the result.
 docker logs ezllm | grep -i "codex bridge"    # boot line: landlock=… client_tools=…
 ```
 
-`GET /status` on the bridge carries the same two fields:
+The dashboard preset shows bridge status. The loopback bridge `GET /status`
+also carries the same two fields; it is reachable only from the ezllm network
+namespace, and the distroless container has no shell or curl:
 
 | field | values |
 | --- | --- |
@@ -136,18 +140,25 @@ long as it is set.
 ## Prerequisites
 
 - **The official CLI release, pinned by path** (qualified: **0.163.0**, the
-  standalone musl build). Pin a **copy of the whole release directory** outside
+  standalone musl build). Obtain the official release from the
+  [Codex releases page](https://github.com/openai/codex/releases) and inspect
+  the extracted files before copying. Pin a **copy of the whole release directory** outside
   `~/.codex/packages/`, which the CLI's updater manages. The directory matters:
   `bin/` holds the CLI **and** `codex-code-mode-host`, the runtime client tools
   need — copy only the CLI and tools stay off (`/status` → `client_tools:
   disabled (code-mode host missing)`).
 
   ```sh
+  # Find the standalone release directory installed on your host. It must
+  # contain bin/codex and bin/codex-code-mode-host; an npm wrapper is not it.
+  # Replace /path/to/release with that directory before running these commands.
   mkdir -p ~/.local/share/codex-bridge
-  cp -a "$(dirname "$(dirname "$(readlink -f "$(command -v codex)")")")" ~/.local/share/codex-bridge/0.163.0
-  ls ~/.local/share/codex-bridge/0.163.0/bin    # codex  codex-code-mode-host
+  cp -a /path/to/release ~/.local/share/codex-bridge/0.163.0
+  ls ~/.local/share/codex-bridge/0.163.0/bin    # codex and codex-code-mode-host
   ```
 
+  The `0.163.0` directory name above is an example for the qualified release;
+  check the copied binary version and use a matching path for other releases.
   The bridge also starts the CLI with `--disable in_app_updates`, so a running
   bridge never updates itself. A different version still boots — the lockdown and
   protocol checks below guard it — but `/status` reports it `unqualified` until the
@@ -167,7 +178,19 @@ long as it is set.
 
 In your `compose.yml` (from `compose.example.yml`): uncomment the two Codex
 mounts (the release directory read-only at `/opt/codex`, the login read-write
-at `/codex-sub`), set `EZLLM_CODEX_BRIDGE: "on"`, and recreate the container:
+at `/codex-sub`), set `EZLLM_CODEX_BRIDGE: "on"`, and recreate the container.
+Replace `/home/you` and the release path below with your actual host paths; keep
+the existing `environment` and `volumes` entries for ezllm's data and config.
+The Compose service user must be able to execute the CLI and read and write the
+login directory.
+
+```yaml
+    environment:
+      EZLLM_CODEX_BRIDGE: "on"
+    volumes:
+      - /home/you/.local/share/codex-bridge/0.163.0:/opt/codex:ro
+      - /home/you/.codex-sub:/codex-sub
+```
 
 ```bash
 docker compose up -d
@@ -199,9 +222,8 @@ docker logs ezllm | grep -i "codex bridge"   # cli version, release, login, chan
 
 ## Wire it into ezllm
 
-1. **Account** (dashboard → Providers → Add provider → **ChatGPT subscription
-   (bridge)**). The preset fills in everything below, shows the bridge's CLI
-   version, login and tool state, and supplies the key itself — Save & validate
+1. **Account** (dashboard → Providers → Add provider → **ChatGPT Plus/Pro**). The preset fills in everything below, shows the bridge's CLI
+   version, login and tool state, and supplies the key itself — Save & validate key
    is the whole step. If it says the bridge is not running, go back to
    [Enable](#enable). By hand (API or an older dashboard):
    - kind `openai-compatible`
@@ -289,10 +311,22 @@ the Rules caps.
 
 ## Verify
 
+For a first check, use the gateway's [model-list command](../README.md#set-up-the-dashboard),
+then send a short prompt to an available model through the dashboard or your client.
+Requests consume subscription quota.
+
+The optional repository proof makes several calls and requires an inference key.
+Set the URL explicitly: the script otherwise defaults to a specific remote server.
+Replace the model ID with one from your account, and run only against a test
+instance you control:
+
 ```sh
-EZLLM_CODEX_LIVE=1 go test -count=1 -run Live ./internal/codexbridge/   # real plan draw, ~5 calls
-python3 tests/prove_codex_bridge.py                                     # through ezllm's front door
+EZLLM_URL=http://127.0.0.1:20129 EZLLM_TOKEN=YOUR_EZLLM_KEY \
+  python3 tests/prove_codex_bridge.py YOUR_NAMESPACE/YOUR_MODEL
 ```
+
+`EZLLM_ADMIN_TOKEN` enables the optional ledger check. The separate CLI live tests
+are for maintainers; see `internal/codexbridge/live_test.go` for their setup.
 
 ## Failure modes
 

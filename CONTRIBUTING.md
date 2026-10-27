@@ -25,8 +25,8 @@ appropriate for code changes.
 - **Web changes:** run `npm run build` inside `web/`. The `web/dist/` output
   is committed on purpose — `cmd/ezllm` embeds it via `go:embed`, so a UI
   change that doesn't rebuild `dist` simply never ships. CI type-checks and
-  builds, but cannot verify the committed dist matches the sources byte-for-byte
-  (Vite hashes depend on the checkout path) — rebuild locally before committing.
+  builds and compares the committed bundle with fresh output, normalizing Vite
+  hash suffixes — rebuild locally before committing.
 - **Version bumps:** `internal/server/version.go` and the `Current:` line in
   `VERSION.md` move **together** in one commit. `version_test.go` fails
   otherwise, and `GET /healthz` serves whatever the constant says.

@@ -130,6 +130,8 @@ Add one when **an operator could not otherwise explain** what the gateway did:
 | reasoning vocabulary learned / not kept | info / debug | a per-model fact about the future |
 | wire recorded after a mismatch probe | info | it reroutes every later request |
 | client budget reached | info, once per window | the 429s are rows; the cause is not |
+| rules refresh fails | warn | the last successfully loaded rules remain active |
+| Gemini Web rotated cookie cannot be saved | warn | the next request retries persistence; credentials are never logged |
 | auth refused (missing/invalid/expired/role) | debug | refused before dispatch: no row, and a retry loop must not flood the console |
 
 Each of these has a test asserting the line appears at the right level and that

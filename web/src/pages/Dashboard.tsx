@@ -442,6 +442,7 @@ export default function Dashboard() {
   const [byKey, setByKey] = useState<UsageRow[]>([]);
   const [trend, setTrend] = useState<UsageRow[]>([]);
   const [err, setErr] = useState<string | null>(null);
+  const [reportsStale, setReportsStale] = useState(false);
 
   // Overview is the fast pulse; the breakdowns refresh on their own cadence
   // (see SLOW_MS). Splitting the timers means a token total does not twiddle
@@ -477,6 +478,7 @@ export default function Dashboard() {
         usage('key', TOTAL_RANGE).catch(() => null),
         usage('day', TREND_RANGE).catch(() => null),
       ]);
+      setReportsStale(!m || !k || !d);
       if (m) setByModel(m.groups);
       if (k) setByKey(k.groups);
       if (d) setTrend(d.groups);
@@ -569,6 +571,7 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       <HealthPills o={o} />
+      {reportsStale && <p role="alert" className="rounded-lg border border-warn/30 bg-warn-dim p-3 text-sm text-ink">Some usage reports could not refresh. Their figures may be unavailable or out of date; check the connection. <button type="button" className="underline" onClick={() => void loadSlow()}>Retry</button></p>}
 
       {/* One statement of the window for the whole screen, instead of a
           suffix on the first tile only: the totals and every breakdown below

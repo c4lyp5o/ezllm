@@ -43,8 +43,9 @@ type DB struct {
 	subs   []chan []Call
 
 	// ledger batching
-	callCh  chan ledgerItem
-	closeCh chan struct{}
+	callCh             chan ledgerItem
+	reservationCleanup chan int64
+	closeCh            chan struct{}
 	// recMu orders RecordCall against Close: a row enqueued under RLock is
 	// in callCh before closeCh closes (so the final drain sees it), and a row
 	// arriving after Close sees closed and is counted as dropped.
@@ -112,7 +113,8 @@ func Open(ctx context.Context, opts Options) (*DB, error) {
 
 	db := &DB{
 		w: w, r: r, path: opts.Path,
-		callCh: make(chan ledgerItem, 512),
+		callCh:             make(chan ledgerItem, 512),
+		reservationCleanup: make(chan int64, 512),
 
 		closeCh: make(chan struct{}),
 	}
@@ -147,7 +149,8 @@ func Open(ctx context.Context, opts Options) (*DB, error) {
 		db.closeConns()
 		return nil, fmt.Errorf("store: initialize dashboard password: %w", err)
 	}
-	db.wg.Add(1)
+	db.wg.Add(2)
+	go db.reservationCleanupLoop()
 	go db.ledgerLoop(opts.BatchSize, opts.BatchWait)
 	return db, nil
 }

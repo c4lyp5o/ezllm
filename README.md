@@ -327,9 +327,8 @@ harnesses can choke this machine. CI runs the full suite.
 CI: [test.yml](.github/workflows/test.yml) gates
 [docker-publish.yml](.github/workflows/docker-publish.yml) and
 [release.yml](.github/workflows/release.yml) — a red suite never produces
-an image or a release asset. CI builds the web sources but does not verify that
-the committed `web/dist/` matches them; publishers embed the committed bundle.
-Rebuild and commit it for every web change. Browser verification scripts are
+an image or a release asset. CI checks that the committed `web/dist/` matches a fresh build; publishers
+embed that bundle. Rebuild and commit it for every web change. Browser verification scripts are
 run separately; they are not part of this CI gate.
 
 ## Documentation

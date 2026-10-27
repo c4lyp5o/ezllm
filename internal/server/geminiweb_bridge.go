@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -30,7 +31,8 @@ import (
 const geminiWebBridgePrefix = "/internal/geminiweb/v1"
 
 type geminiWebBridge struct {
-	db *store.DB
+	db  *store.DB
+	log *slog.Logger
 	// geminiBase is the upstream origin; empty = production
 	// (gemini.google.com). Tests inject a mock.
 	geminiBase string
@@ -64,7 +66,7 @@ const (
 // newGeminiWebBridge builds the bridge. geminiBase empty = production
 // upstream; tests pass a mock origin.
 func newGeminiWebBridge(db *store.DB, geminiBase string) *geminiWebBridge {
-	return &geminiWebBridge{db: db, geminiBase: geminiBase, clients: map[int64]*geminiwebClientEntry{}, genLocks: map[int64]*sync.Mutex{}, now: time.Now, rotate: func(ctx context.Context, c *geminiweb.Client) (string, error) { return c.Rotate(ctx) }}
+	return &geminiWebBridge{db: db, log: slog.Default(), geminiBase: geminiBase, clients: map[int64]*geminiwebClientEntry{}, genLocks: map[int64]*sync.Mutex{}, now: time.Now, rotate: func(ctx context.Context, c *geminiweb.Client) (string, error) { return c.Rotate(ctx) }}
 }
 
 // lockFor returns the per-account generation mutex, creating it on first use.
@@ -196,6 +198,7 @@ func (b *geminiWebBridge) maybeRotate(ctx context.Context, entry *geminiwebClien
 	}
 	if keyID != 0 {
 		if err := b.db.UpdateKeyPlain(ctx, keyID, newKey); err != nil {
+			b.log.Warn("gemini-web cookie rotation could not be saved; retrying", "account_id", entry.accountID)
 			// Keep the old cache key and retry on the next request. The client
 			// still has its rotated cookie for this request.
 			b.mu.Lock()

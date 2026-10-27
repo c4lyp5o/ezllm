@@ -1,9 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -464,5 +466,39 @@ func TestBridgeStampedStoredKeyPersistsRotation(t *testing.T) {
 	_, got, err = b.db.KeyForTest(ctx, pick.ID)
 	if err != nil || got != rotated {
 		t.Fatalf("probe changed stored credential: %q, %v", got, err)
+	}
+}
+
+func TestBridgeRotationPersistenceFailureIsLogged(t *testing.T) {
+	for _, tc := range []struct {
+		level slog.Level
+		want  bool
+	}{{slog.LevelWarn, true}, {slog.LevelError, false}} {
+		t.Run(tc.level.String(), func(t *testing.T) {
+			b, id, _ := newBridgeFixture(t, genFrame("x", true, "c"))
+			pick, err := b.db.PickKey(context.Background(), id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry, err := b.clientFor(context.Background(), id, pick.Plaintext)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var output bytes.Buffer
+			b.log = slog.New(slog.NewTextHandler(&output, &slog.HandlerOptions{Level: tc.level}))
+			b.rotate = func(context.Context, *geminiweb.Client) (string, error) {
+				return "__Secure-1PSID=abc\n__Secure-1PSIDTS=fresh", nil
+			}
+			if err := b.db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			b.maybeRotate(context.Background(), entry)
+			if got := strings.Contains(output.String(), "cookie rotation could not be saved"); got != tc.want {
+				t.Fatalf("log = %q", output.String())
+			}
+			if strings.Contains(output.String(), pick.Plaintext) {
+				t.Fatal("credential appeared in log")
+			}
+		})
 	}
 }

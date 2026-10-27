@@ -571,7 +571,10 @@ expanded, and a disallowed model answers `403 model_not_allowed`.
 A request that declares `max_tokens`/`max_completion_tokens`/`max_output_tokens`
 reserves that many tokens before dispatch; the reservation is released when the
 handler returns, so concurrent requests cannot all pass the same remaining
-budget. Reservations expire after 15 minutes if a process dies.
+budget. Reservations expire after 15 minutes if a process dies. If the ledger
+queue is full, cleanup of a dropped call’s reservation is best-effort and
+bounded; when its cleanup queue is also full, the reservation remains counted
+until its normal expiry.
 
 ### `GET /admin/export` → `200`
 Versioned non-secret configuration export, with `format_version:1`,

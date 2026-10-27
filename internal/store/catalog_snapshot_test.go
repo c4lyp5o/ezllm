@@ -47,7 +47,7 @@ func TestCatalogSnapshotSeesEveryWrite(t *testing.T) {
 	if k, err := snap(t, db).PickKey(ctx, id); err != nil || k.Plaintext != "sk-one" {
 		t.Fatalf("new key not visible: %+v %v", k, err)
 	}
-	if err := db.EnableKey(ctx, keyID, false); err != nil {
+	if err := db.EnableKey(ctx, id, keyID, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := snap(t, db).PickKey(ctx, id); err != ErrNotFound {

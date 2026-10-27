@@ -744,10 +744,10 @@ func (d *DB) DeleteKey(ctx context.Context, accountID, keyID int64) error {
 }
 
 // EnableKey toggles a credential without deleting it.
-func (d *DB) EnableKey(ctx context.Context, keyID int64, enabled bool) error {
+func (d *DB) EnableKey(ctx context.Context, accountID, keyID int64, enabled bool) error {
 	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx,
-			`UPDATE provider_keys SET enabled=? WHERE id=?`, boolToInt(enabled), keyID)
+			`UPDATE provider_keys SET enabled=? WHERE id=? AND account_id=?`, boolToInt(enabled), keyID, accountID)
 		if err != nil {
 			return err
 		}

@@ -609,9 +609,13 @@ func (s *Server) handleRetest(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	_, pt, err := s.db.KeyForTest(r.Context(), keyID)
+	keyAccountID, pt, err := s.db.KeyForTest(r.Context(), keyID)
 	if err != nil {
 		s.writeStoreErr(w, err)
+		return
+	}
+	if keyAccountID != accountID {
+		s.writeStoreErr(w, store.ErrNotFound)
 		return
 	}
 	acc, err := s.db.GetAccount(r.Context(), accountID)
@@ -905,7 +909,7 @@ func (s *Server) handleToggleKey(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid_request_error", "enabled is required")
 		return
 	}
-	if err := s.db.EnableKey(r.Context(), keyID, *body.Enabled); err != nil {
+	if err := s.db.EnableKey(r.Context(), accountID, keyID, *body.Enabled); err != nil {
 		s.writeStoreErr(w, err)
 		return
 	}

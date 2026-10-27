@@ -266,7 +266,9 @@ var ErrCredentialRefused = errors.New("provider: credential refused")
 //
 // Deliberately NOT a park on its own: the park key is account+base+model and
 // cannot tell wires apart, so parking would stop the same model being dialled
-// on the wire it DOES serve. The guard is cheap and repeats per request.
+// on the wire it DOES serve. The router normally keeps such a hop off the wire
+// at resolution (KnownWireSupport); this error is the backstop, and the
+// dispatcher records it as no health verdict either way.
 var ErrWireUnsupported = errors.New("provider: wire unsupported for this model")
 
 // Registry maps Kind -> Adapter.

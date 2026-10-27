@@ -219,3 +219,28 @@ func (a *gitHubCopilotAdapter) ListModels(ctx context.Context, acct Account, key
 	}
 	return out, nil
 }
+
+// KnownWireSupport reports what an account kind's own API shape already says
+// about a model on a wire, with no probe needed: nil when the kind says
+// nothing. The router reads it BEFORE the probe facts, so a wire the provider
+// cannot serve is never chosen — no rate slot, attempt or token refresh is
+// spent on a dial that would be refused.
+//
+// Today only Copilot: claude* is served on /v1/messages and gemini* on
+// /chat/completions, and neither has a /responses endpoint.
+func KnownWireSupport(kind Kind, model string, s Surface) *bool {
+	if kind != KindGitHubCopilot || !githubcopilot.ResponsesUnsupported(model) {
+		return nil
+	}
+	m := strings.ToLower(model)
+	switch {
+	case s == SurfaceResponses:
+		v := false
+		return &v
+	case s == SurfaceAnthropic && strings.Contains(m, "claude"),
+		s == SurfaceChat && strings.Contains(m, "gemini"):
+		v := true
+		return &v
+	}
+	return nil
+}

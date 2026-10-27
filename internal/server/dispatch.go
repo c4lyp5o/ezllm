@@ -95,7 +95,8 @@ func (s *Server) finishDispatch(w http.ResponseWriter, r *http.Request, call sto
 	// inform. A hop-attributable failure releases a hold_until_failure block
 	// so the next dispatch rotates; a 4xx is the REQUEST's fault and keeps
 	// the hold (operator decision 2026-10-13).
-	if hopAttributableFailure(res, ferr) && !strings.Contains(served.Alias, "/") {
+	clientGone := r.Context().Err() != nil || errors.Is(ferr, context.Canceled)
+	if hopAttributableFailure(res, ferr, clientGone) && !strings.Contains(served.Alias, "/") {
 		s.resolver.MarkHopBad(served.Alias, served)
 	}
 	// Only a delivered, completed 2xx moves sticky_last_good: a translated
@@ -145,7 +146,7 @@ func (s *Server) finishDispatch(w http.ResponseWriter, r *http.Request, call sto
 			}
 			writeErrExtra(w, status, "model_unavailable", ferr.Error(),
 				map[string]any{"reason": ferr.Error(), "rule": rule})
-		} else if r.Context().Err() != nil || errors.Is(ferr, context.Canceled) {
+		} else if clientGone {
 			// The CALLER hung up — closed tab, cancelled agent run, shutdown.
 			// 499 is the recording convention for "client closed request": the
 			// caller is gone, so nothing useful can be written to it, but the

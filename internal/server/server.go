@@ -1359,7 +1359,14 @@ func hasRole(r *http.Request, want string) bool {
 // 2xx/3xx that delivered, and every 4xx — a 400/404/422 is the caller's
 // payload or model id, and rotating away from a healthy hop on it would be
 // fabricating a health signal.
-func hopAttributableFailure(res proxy.Result, ferr error) bool {
+//
+// A caller that hung up (clientGone) is never the hop's fault, whatever the
+// error or stream outcome it left behind: the same rule classifyHopPolicy
+// applies to strikes and parks, applied here to the hold.
+func hopAttributableFailure(res proxy.Result, ferr error, clientGone bool) bool {
+	if clientGone {
+		return false
+	}
 	if ferr != nil {
 		return true
 	}

@@ -1793,6 +1793,14 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 		}
 	}
 	for i := 0; i < len(routes); i++ {
+		// The caller has left: no later hop is dialed, probed or charged
+		// against its account's request budget for a response nobody reads.
+		if ctx.Err() != nil {
+			if fallbackResp == nil && fallbackTransportErr == nil {
+				fallbackTransportErr = ctx.Err()
+			}
+			break
+		}
 		// The budget is checked BEFORE any eligibility work: an unaffordable
 		// hop is never dialed, never probed, never cooled.
 		if led.exhausted() || pastDeadline(sel) {

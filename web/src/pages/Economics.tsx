@@ -48,8 +48,10 @@ export default function Economics() {
   const [costRows, setCostRows] = useState<CostRow[]>([]);
   const [costTotals, setCostTotals] = useState<CostTotals | null>(null);
   const [minInput, setMinInput] = useState('');
+  const [appliedMin, setAppliedMin] = useState<number | undefined>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [costError, setCostError] = useState(false);
 
   // Only the newest load may write state: an older selection's response that
   // lands late is dropped instead of overwriting the current one.
@@ -65,7 +67,7 @@ export default function Economics() {
         requests({
           range,
           sort: 'tin_desc',
-          minTin: minInput ? Number(minInput) : undefined,
+          minTin: appliedMin,
           limit: 100,
         }),
         cost(range).catch(() => null),
@@ -73,6 +75,7 @@ export default function Economics() {
       if (gen !== loadGen.current) return;
       setRows(r.rows.map(normalizeFeedRow));
       setSummary(r.summary);
+      setCostError(c === null);
       setCostRows(c?.rows ?? []);
       setCostTotals(c?.totals ?? null);
     } catch (e) {
@@ -80,7 +83,7 @@ export default function Economics() {
     } finally {
       if (gen === loadGen.current) setLoading(false);
     }
-  }, [range, minInput]);
+  }, [range, appliedMin]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -161,7 +164,15 @@ export default function Economics() {
             <input value={minInput} onChange={(e) => setMinInput(e.target.value)} inputMode="numeric"
               placeholder="all" className={cx(inputCls, 'mt-1.5 w-44 font-mono tnum')} />
           </label>
-          <button onClick={() => void load()} className={cx(btn.base, btn.primary)}>Analyze</button>
+          <button onClick={() => {
+            const raw = minInput.trim();
+            const parsed = raw === '' ? undefined : Number(raw);
+            if (parsed !== undefined && (!Number.isSafeInteger(parsed) || parsed < 0)) {
+              setError('Minimum input tokens must be a non-negative whole number.'); return;
+            }
+            setError('');
+            if (parsed === appliedMin) void load(); else setAppliedMin(parsed);
+          }} className={cx(btn.base, btn.primary)}>Analyze</button>
           <span className="text-[12px] text-mute">
             Sorted largest first. Use Requests for full bounds and per-row inspection.
           </span>
@@ -285,7 +296,7 @@ export default function Economics() {
             label={<SectionLabel>Spend (derived from model_prices)</SectionLabel>}
             aside={
               <>
-                {minInput && (
+                {appliedMin !== undefined && (
                   <span className="text-[12px] text-warn" title="The min-input filter scopes the token view above; the spend rows are the whole range.">
                     min-input filter: tokens only — spend is the whole range
                   </span>
@@ -299,7 +310,9 @@ export default function Economics() {
                 ) : null}
               </>
             }>
-            {costRows.length === 0 ? (
+            {costError ? (
+              <p role="alert" className="text-sm text-warn">Could not load the cost report. <button type="button" className="underline" onClick={() => void load()}>Retry cost report</button></p>
+            ) : costRows.length === 0 ? (
               <EmptyState title="No priced traffic yet"
                 hint="Cost is computed from the rates entered under Providers → account → Pricing. Until a rate exists for an account+model, those calls cost 0." />
             ) : (

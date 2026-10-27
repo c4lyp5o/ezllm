@@ -150,6 +150,9 @@ export function SkeletonCards({ n = 3 }: { n?: number }) {
 
 // ── modal ───────────────────────────────────────────────────────────────
 
+// Only the topmost dialog handles focus and Escape when dialogs are nested.
+const modalStack: HTMLElement[] = [];
+
 export function Modal({ open, onClose, title, subtitle, children, footer, wide }: {
   open: boolean; onClose: () => void; title: string; subtitle?: string;
   children: ReactNode; footer?: ReactNode; wide?: boolean;
@@ -168,11 +171,40 @@ export function Modal({ open, onClose, title, subtitle, children, footer, wide }
   // re-rendered and dropped the caret back onto the account select. Focus
   // belongs to the closed -> open transition; after that the operator owns it.
   useEffect(() => {
-    if (!open) return;
-    ref.current?.querySelector<HTMLElement>('input,select,textarea,button')?.focus();
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCloseRef.current(); };
+    if (!open || !ref.current) return;
+    const dialog = ref.current;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    modalStack.push(dialog);
+    const top = () => modalStack[modalStack.length - 1] === dialog;
+    const focusable = () => Array.from(dialog.querySelectorAll<HTMLElement>(
+      'a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"])',
+    )).filter(el => !el.matches(':disabled,[hidden],[aria-hidden="true"]') && el.tabIndex >= 0 && el.getClientRects().length > 0);
+    const focusFirst = () => (focusable()[0] ?? dialog).focus();
+    focusFirst();
+    const onKey = (e: KeyboardEvent) => {
+      if (!top()) return;
+      if (e.key === 'Escape') { e.preventDefault(); onCloseRef.current(); return; }
+      if (e.key !== 'Tab') return;
+      const items = focusable();
+      if (!items.length) { e.preventDefault(); dialog.focus(); return; }
+      const index = items.indexOf(document.activeElement as HTMLElement);
+      if (e.shiftKey && index <= 0) { e.preventDefault(); items[items.length - 1].focus(); }
+      else if (!e.shiftKey && (index < 0 || index === items.length - 1)) { e.preventDefault(); items[0].focus(); }
+    };
+    const onFocus = (e: FocusEvent) => {
+      if (top() && !dialog.contains(e.target as Node)) focusFirst();
+    };
     document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    document.addEventListener('focusin', onFocus);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('focusin', onFocus);
+      const index = modalStack.lastIndexOf(dialog);
+      if (index >= 0) modalStack.splice(index, 1);
+      const activeDialog = modalStack[modalStack.length - 1];
+      if (opener?.isConnected && (!activeDialog || activeDialog.contains(opener))) opener.focus();
+      else if (activeDialog) activeDialog.focus();
+    };
   }, [open]);
 
   const overlay = (e: React.MouseEvent) => { if (e.target === e.currentTarget) onClose(); };
@@ -199,7 +231,7 @@ export function Modal({ open, onClose, title, subtitle, children, footer, wide }
         >
           <div className="absolute inset-0 bg-overlay" />
           <motion.div
-            ref={ref} role="dialog" aria-modal="true" aria-label={title}
+            ref={ref} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1}
             className="relative z-10 flex max-h-[90dvh] w-full flex-col overflow-hidden rounded-xl border border-line-strong bg-surface shadow-2xl shadow-black/60"
             style={{ maxWidth: wide ? '56rem' : '44rem' }}
             initial={{ opacity: 0, y: 8, scale: 0.985 }}
@@ -259,13 +291,15 @@ export const labelCls = 'mb-1.5 block text-[12px] font-medium text-mute';
 // the selection. Keyboard: ↑/↓ highlight, Enter confirm.
 export type ComboOption = { value: string; label: string };
 
-export function Combobox({ options, value, onChange, disabled, loadingText, placeholder, idPrefix }: {
+export function Combobox({ options, value, onChange, disabled, loadingText, placeholder, idPrefix, label, id }: {
   options: ComboOption[];
   value: string;
   onChange: (v: string) => void;
   disabled?: boolean;
   loadingText: string;
   placeholder?: string;
+  label: string;
+  id?: string;
   /** Unique DOM id prefix so aria-controls never collides across cards. */
   idPrefix?: string;
 }) {
@@ -317,9 +351,12 @@ export function Combobox({ options, value, onChange, disabled, loadingText, plac
     <div ref={wrapRef} className="relative w-full">
       <input
         type="text"
+        id={id}
         role="combobox"
+        aria-label={label}
         aria-expanded={open}
         aria-controls={listId}
+        aria-activedescendant={open && filtered.length > 0 ? `${listId}-option-${Math.min(active, filtered.length - 1)}` : undefined}
         aria-autocomplete="list"
         autoComplete="off"
         spellCheck={false}
@@ -341,6 +378,7 @@ export function Combobox({ options, value, onChange, disabled, loadingText, plac
             e.preventDefault();
             if (filtered.length > 0) pick(filtered[Math.min(active, filtered.length - 1)].value);
           } else if (e.key === 'Escape' && open) {
+            e.preventDefault(); e.stopPropagation();
             close();
           }
         }}
@@ -365,6 +403,7 @@ export function Combobox({ options, value, onChange, disabled, loadingText, plac
               <li
                 key={o.value}
                 role="option"
+                id={`${listId}-option-${i}`}
                 aria-selected={isSel}
                 data-active={isActive || undefined}
                 onClick={() => pick(o.value)}

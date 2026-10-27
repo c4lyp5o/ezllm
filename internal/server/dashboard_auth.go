@@ -12,38 +12,71 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/store"
 )
 
-var loginRateLimiter = struct {
-	mu       sync.Mutex
-	attempts map[string][]time.Time
-}{
-	attempts: map[string][]time.Time{},
+const maxLoginSources = 4096
+const loginWindow = 15 * time.Minute
+const maxLoginAttempts = 5
+
+type loginBucket struct {
+	failures []time.Time
+	inFlight int
 }
 
-func loginAllowed(ip string) bool {
+var loginRateLimiter = struct {
+	mu       sync.Mutex
+	attempts map[string]*loginBucket
+}{attempts: map[string]*loginBucket{}}
+
+// reserveLogin atomically accounts for attempts in progress as well as failures.
+// Expired, idle sources are swept before the bounded source table fills.
+func reserveLogin(ip string) (func(failed, succeeded bool), bool) {
 	loginRateLimiter.mu.Lock()
 	defer loginRateLimiter.mu.Unlock()
 	now := time.Now()
-	cutoff := now.Add(-15 * time.Minute)
-	var recent []time.Time
-	for _, t := range loginRateLimiter.attempts[ip] {
-		if t.After(cutoff) {
-			recent = append(recent, t)
+	cutoff := now.Add(-loginWindow)
+	prune := func(b *loginBucket) {
+		recent := b.failures[:0]
+		for _, t := range b.failures {
+			if t.After(cutoff) {
+				recent = append(recent, t)
+			}
 		}
+		b.failures = recent
 	}
-	loginRateLimiter.attempts[ip] = recent
-	return len(recent) < 5
-}
-
-func recordLoginFailure(ip string) {
-	loginRateLimiter.mu.Lock()
-	defer loginRateLimiter.mu.Unlock()
-	loginRateLimiter.attempts[ip] = append(loginRateLimiter.attempts[ip], time.Now())
-}
-
-func clearLoginAttempts(ip string) {
-	loginRateLimiter.mu.Lock()
-	defer loginRateLimiter.mu.Unlock()
-	delete(loginRateLimiter.attempts, ip)
+	bucket := loginRateLimiter.attempts[ip]
+	if bucket == nil {
+		if len(loginRateLimiter.attempts) >= maxLoginSources {
+			for key, b := range loginRateLimiter.attempts {
+				prune(b)
+				if len(b.failures) == 0 && b.inFlight == 0 {
+					delete(loginRateLimiter.attempts, key)
+				}
+			}
+			if len(loginRateLimiter.attempts) >= maxLoginSources {
+				return nil, false
+			}
+		}
+		bucket = &loginBucket{}
+		loginRateLimiter.attempts[ip] = bucket
+	}
+	prune(bucket)
+	if len(bucket.failures)+bucket.inFlight >= maxLoginAttempts {
+		return nil, false
+	}
+	bucket.inFlight++
+	return func(failed, succeeded bool) {
+		loginRateLimiter.mu.Lock()
+		defer loginRateLimiter.mu.Unlock()
+		bucket.inFlight--
+		if succeeded {
+			bucket.failures = nil
+		}
+		if failed {
+			bucket.failures = append(bucket.failures, time.Now())
+		}
+		if bucket.inFlight == 0 && len(bucket.failures) == 0 && loginRateLimiter.attempts[ip] == bucket {
+			delete(loginRateLimiter.attempts, ip)
+		}
+	}, true
 }
 
 // bcryptSlots bounds concurrent password hashing across login, setup and
@@ -148,10 +181,13 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ip := s.sourceIP(r)
-	if !loginAllowed(ip) {
+	finishLogin, allowed := reserveLogin(ip)
+	if !allowed {
 		writeErr(w, http.StatusTooManyRequests, "rate_limited", "too many attempts; try again later")
 		return
 	}
+	failed, succeeded := false, false
+	defer func() { finishLogin(failed, succeeded) }()
 	var in struct {
 		SetupCode string `json:"setup_code"`
 		Password  string `json:"password"`
@@ -175,7 +211,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	got, want := normalizeSetupCode(in.SetupCode), normalizeSetupCode(s.setupCode)
 	if subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
-		recordLoginFailure(ip)
+		failed = true
 		writeErr(w, http.StatusUnauthorized, "invalid_request_error", "invalid setup code")
 		return
 	}
@@ -195,7 +231,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	clearLoginAttempts(ip)
+	succeeded = true
 	s.log.Info("dashboard password set via first-boot setup", "ip", ip)
 	token, err := s.db.DashboardLogin(r.Context(), in.Password)
 	if err != nil {
@@ -217,10 +253,13 @@ func (s *Server) handleDashboardLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ip := s.sourceIP(r)
-	if !loginAllowed(ip) {
+	finishLogin, allowed := reserveLogin(ip)
+	if !allowed {
 		writeErr(w, http.StatusTooManyRequests, "rate_limited", "too many login attempts; try again later")
 		return
 	}
+	failed, succeeded := false, false
+	defer func() { finishLogin(failed, succeeded) }()
 	var in struct {
 		Password string `json:"password"`
 	}
@@ -240,14 +279,14 @@ func (s *Server) handleDashboardLogin(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, store.ErrInvalidDashboardPassword):
 			// Every failure counts, empty ones included: each costs a
 			// bcrypt compare.
-			recordLoginFailure(ip)
+			failed = true
 			writeErr(w, http.StatusUnauthorized, "invalid_request_error", "invalid dashboard password")
 		default:
 			s.writeStoreErr(w, err)
 		}
 		return
 	}
-	clearLoginAttempts(ip)
+	succeeded = true
 	if err := s.db.DescribeDashboardSession(r.Context(), token, r.UserAgent()); err != nil {
 		_ = s.db.EndDashboardSession(r.Context(), token)
 		s.writeStoreErr(w, err)

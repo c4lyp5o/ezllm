@@ -2,6 +2,50 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
 
+## Unreleased — account safety, operational visibility and dashboard fixes
+
+- Provider-key retests and enable/disable operations now require the key to
+  belong to the account in the URL. A mismatch returns 404 before a provider
+  probe or key update.
+- Gemini Web persists rotated cookies for matching stored keys, including normal
+  routed requests; temporary probe credentials do not overwrite stored keys.
+  A failed persistence attempt is warned and retried.
+- Dashboard login and first-boot setup count in-flight attempts in the per-source
+  limit and bound the source table. Ledger overload uses a bounded reservation
+  cleanup queue; reservations that cannot be queued expire normally.
+- The overview exposes failed ledger flushes alongside dropped and unmetered
+  rows. Report and quota load failures now show an unavailable state and retry
+  instead of suggesting that usage, cost or caps are zero. Failed background
+  rules refreshes are logged while the last successfully loaded rules remain active.
+- Chat cancels requests when their column is removed or the page is left, parses
+  CRLF stream boundaries across chunks, and loads provider catalogs with bounded
+  concurrency and partial-failure recovery. The mobile comparison view stacks
+  columns; model pickers expose their name and highlighted option to assistive
+  technology. Dialogs contain keyboard focus and restore it on close.
+- Connect offers a copyable first request; bridge presets show tool availability
+  and link to troubleshooting. Hidden dashboard tabs skip notification and
+  backup polling. Economics applies its minimum-input filter on Analyze.
+- CI compares the committed dashboard bundle with a fresh build, normalizing
+  Vite's checkout-dependent asset hash suffixes. Browser regressions cover the
+  dashboard changes; the short Go suite is the local functional gate.
+- Neighbourhood is now a generated isometric city instead of a row of houses:
+  one building per provider account on a seeded street grid, height and window
+  light from tokens per minute, rain for failing providers, boarded windows for
+  disabled ones, traffic density from the live request rate, and a flare plus a
+  car at a provider's door for every committed call on `/admin/stream`. Canvas
+  2D only, 60 fps on desktop, a still frame for reduced motion. `web/tests/`
+  gains `shot-city.mjs`; `verify-neighbourhood*.mjs` now assert the city's
+  contract (including that each tower paints where the plan says).
+- The city breathes on its own: people walking the pavements (umbrellas up in
+  the rain), cars drawn with cabin, glass, wheels and lights, a plane crossing
+  the sky every minute or two behind the towers, and occasional rain showers
+  that can also be commanded from a new Auto sky / Rain / Clear control. At
+  night, lit buildings throw their windows down the street in front of them.
+  The provider table gained a trend arrow for what moved since the last update.
+  Two scene bugs found and fixed along the way: the animation clock never
+  advanced (traffic lights, rain streaks and walk cycles were frozen), and a
+  single early dispatched taxi stopped the scene from ever seeding its people.
+
 ## 2026-10-27 — a cancelled caller gets the cancellation, not a parked hop error (fix)
 
 v1.3.2 taught the dispatcher that a client hanging up must not charge a strike

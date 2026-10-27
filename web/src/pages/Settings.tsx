@@ -1,7 +1,7 @@
 import { getSettings, saveSettings, getDashboardSessions, revokeDashboardSession, revokeAllDashboardSessions, getBackupStatus, runBackup, getDiagnostics, type SettingsView, type DashboardSession, type BackupStatus, type SystemDiagnostics } from '../utils/api';
 import { readTheme, setTheme } from '../utils/theme';
 import { readMotion, readRange, savePreference, subscribePreferences } from '../utils/preferences';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ApiError, changeDashboardPassword, clearToken } from '../utils/api';
 import { Chip, SectionLabel, btn, cx, inputCls } from '../components/ui';
 import PasswordStrength from '../components/PasswordStrength';
@@ -181,8 +181,21 @@ function Backups() {
   const [status, setStatus] = useState<BackupStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const load = () => getBackupStatus().then(setStatus).catch(e => setError(errorMessage(e)));
-  useEffect(() => { void load(); const timer = window.setInterval(() => void load(), 5000); return () => window.clearInterval(timer); }, []);
+  const loading = useRef(false);
+  const load = async () => {
+    if (loading.current) return;
+    loading.current = true;
+    try { setStatus(await getBackupStatus()); setError(''); }
+    catch (e) { setError(errorMessage(e)); }
+    finally { loading.current = false; }
+  };
+  useEffect(() => {
+    const refresh = () => { if (!document.hidden) void load(); };
+    refresh();
+    const timer = window.setInterval(refresh, 5000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', refresh); };
+  }, []);
   const run = async () => { setBusy(true); setError(''); try { await runBackup(); await load(); } catch (e) { setError(errorMessage(e)); } finally { setBusy(false); } };
   return <><section className={panel}><SectionLabel>Exports</SectionLabel><p className="mt-2 text-sm text-mute">Exports contain configuration and optional usage history, with no provider credentials. They require a separate database and master-key backup for full recovery. A completed export ends with a successful completion manifest.</p><div className="mt-4 flex flex-wrap gap-3"><a className={cx(btn.base, btn.ghost)} href="/admin/export" download>Export configuration</a><a className={cx(btn.base, btn.ghost)} href="/admin/export?include_ledger=true" download>Export with ledger</a></div></section>
     <section className={panel}><SectionLabel>Encrypted backups</SectionLabel><p className="mt-2 text-sm text-mute">Each backup contains a verified database snapshot and its active master key, encrypted with a separate backup secret. Keep that secret separately. Configure EZLLM_BACKUP_DIR and EZLLM_BACKUP_SECRET_FILE on the host; vendor CLI logins and deployment configuration need separate backups.</p>

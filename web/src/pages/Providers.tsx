@@ -391,9 +391,13 @@ function BridgePanel({ bridge, loading }: { bridge: Bridge | null; loading: bool
       ['Plan', statusText(s.subscription)],
       ['Models', statusText(s.models)],
       ['Client tools', statusText(s.client_tools)],
+      ['Channel', statusText(s.channel)],
+      ['Landlock', statusText(s.landlock)],
     ] as Array<[string, string | null]>).filter((f): f is [string, string] => f[1] !== null);
     const login = statusText(s.login);
-    const loggedOut = login !== null && !/logged.in/i.test(login);
+    const loggedOut = login !== null && !/^logged[ -]in\b/i.test(login);
+    const tools = statusText(s.client_tools);
+    const toolsDisabled = tools !== null && /^disabled/i.test(tools);
     return (
       <div className="space-y-2 rounded-lg border border-ok/40 bg-ok-dim/40 px-4 py-3">
         <p className="flex flex-wrap items-center gap-2 text-[13px] text-ok">
@@ -406,7 +410,9 @@ function BridgePanel({ bridge, loading }: { bridge: Bridge | null; loading: bool
             ))}
           </dl>
         )}
+        {toolsDisabled && <p className="text-[12px] text-warn">Client tool calls are unavailable on this bridge. See {runbook} for the reason and options.</p>}
         {loggedOut && <p className="text-[12px] text-warn">The CLI does not report a login — the key test will fail until you log in again ({runbook}).</p>}
+        <p className="text-[12px] text-mute">Status was recorded at startup. Setup and troubleshooting: {runbook}</p>
         <p className="text-[12px] text-mute">Save &amp; validate uses the bridge&apos;s own key. Cap the account under Rules before agents use it.</p>
       </div>
     );
@@ -417,7 +423,7 @@ function BridgePanel({ bridge, loading }: { bridge: Bridge | null; loading: bool
       <ol className="list-decimal space-y-1 pl-5 text-dim">
         <li>On the host, install the official CLI and log in to a separate folder (the runbook has the exact commands).</li>
         <li>In <Mono>compose.yml</Mono>, uncomment the bridge&apos;s two mounts and set <Mono>{bridge.env}: &quot;on&quot;</Mono>.</li>
-        <li>Run <Mono>docker compose up -d</Mono>, then reopen this dialog — it will say running.</li>
+        <li>Run <Mono>docker compose up -d</Mono>, then reopen this dialog. If ezllm does not start, check <Mono>docker compose logs ezllm</Mono>.</li>
       </ol>
       <p className="text-[12px] text-mute">Step-by-step: {runbook}</p>
     </div>
@@ -1425,6 +1431,8 @@ function QuotaModal({ account, onClose }: { account: Account; onClose: () => voi
   const [busy, setBusy] = useState(true);
   const [err, setErr] = useState<ApiErrorDetail | null>(null);
   const [rules, setRules] = useState<ModelRule[] | null>(null);
+  const [rulesError, setRulesError] = useState(false);
+  const [rulesAttempt, setRulesAttempt] = useState(0);
 
   const load = useCallback(() => {
     setBusy(true);
@@ -1438,11 +1446,12 @@ function QuotaModal({ account, onClose }: { account: Account; onClose: () => voi
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     let alive = true;
+    setRules(null); setRulesError(false);
     modelRules()
       .then((rs) => { if (alive) setRules(rs.filter((r) => r.account_id === account.id)); })
-      .catch(() => { if (alive) setRules([]); });
+      .catch(() => { if (alive) setRulesError(true); });
     return () => { alive = false; };
-  }, [account.id]);
+  }, [account.id, rulesAttempt]);
 
   const caps = (rules ?? []).filter((r) => r.cap_tokens > 0);
 
@@ -1495,7 +1504,8 @@ function QuotaModal({ account, onClose }: { account: Account; onClose: () => voi
         </div>
         <div className="rounded-lg border border-line bg-raised/60 p-4">
           <SectionLabel>Cap window · cap tokens</SectionLabel>
-          {rules === null && <Skeleton className="mt-2 h-3.5 w-48" />}
+          {rulesError && <p role="alert" className="mt-2 text-[13px] text-warn">Could not load account caps. <button type="button" className="underline" onClick={() => setRulesAttempt(n => n + 1)}>Retry caps</button></p>}
+          {rules === null && !rulesError && <Skeleton className="mt-2 h-3.5 w-48" />}
           {rules !== null && caps.length === 0 && (
             <p className="mt-2 text-[13px] text-mute">No caps set for this account — add one under <span className="text-ink">Rules</span>.</p>
           )}

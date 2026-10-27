@@ -25,8 +25,8 @@ appropriate for code changes.
 - **Web changes:** run `npm run build` inside `web/`. The `web/dist/` output
   is committed on purpose — `cmd/ezllm` embeds it via `go:embed`, so a UI
   change that doesn't rebuild `dist` simply never ships. CI type-checks and
-  builds, but cannot verify the committed dist matches the sources byte-for-byte
-  (Vite hashes depend on the checkout path) — rebuild locally before committing.
+  builds and compares the committed bundle with fresh output, normalizing Vite
+  hash suffixes — rebuild locally before committing.
 - **Version bumps:** `internal/server/version.go` and the `Current:` line in
   `VERSION.md` move **together** in one commit. `version_test.go` fails
   otherwise, and `GET /healthz` serves whatever the constant says.
@@ -63,7 +63,12 @@ constraint, not a preference.
 - `web/tests/verify-*.mjs` are **UI checks**. The regression drivers built on
   `web/tests/mockdash.mjs` serve the built `web/dist` with a mocked API, so they
   need only `npm run build` (`node tests/verify-<name>.mjs` from `web/`); each
-  exits non-zero on a failed check. `shot-*.mjs` capture review screenshots.
+  exits non-zero on a failed check. `verify-frontend-p1.mjs`,
+  `verify-frontend-p2.mjs`, and `verify-frontend-p3.mjs` cover report failures,
+  focus and cancellation, streaming, model selection, and request handling.
+  `shot-*.mjs` capture review screenshots. CI also runs
+  `node tests/check-dist.test.mjs` and compares the committed bundle against a
+  fresh build with `scripts/check-dist.mjs`.
 - `make verify` runs `cmd/m2verify` — acceptance invariants against a live
   ledger, run after any soak.
 

@@ -44,7 +44,10 @@ honest posture: what breaks, how it breaks, and what the operator does.
 - **Rotation is automatic.** `__Secure-1PSIDTS` rotates roughly every 10
   minutes upstream; the bridge rotates every 8 and persists the new cookie
   in place (same key row, refreshed hint). No operator action. If rotation
-  fails, the previous cookie keeps working for a while; the next tick retries.
+  fails, the previous cookie keeps working for a while; the next request retries.
+  If saving a rotated cookie fails, a warning appears in the server log. Check
+  database availability and storage; the bridge retries persistence on a later
+  request. Temporary validation credentials do not overwrite a stored key.
 - **Catalogs re-sync** from the same zero-quota call; the bridge caches for
   30 minutes.
 - **Usage limit (1037)** surfaces as 429 with the upstream code preserved in

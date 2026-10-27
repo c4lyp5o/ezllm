@@ -87,37 +87,56 @@ export default function Chat() {
   const [columns, setColumns] = useState<Column[]>(() => [newColumn()]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState('');
+  const [catalogAttempt, setCatalogAttempt] = useState(0);
   const [error, setError] = useState('');
   const [pending, setPending] = useState<Attachment[]>([]);
   const [system, setSystem] = useState(() => readStored(KEY_SYSTEM, DEFAULT_SYSTEM_PROMPT));
   const [systemOpen, setSystemOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const requests = useRef(new Map<string, AbortController>());
+  useEffect(() => () => {
+    for (const controller of requests.current.values()) controller.abort();
+    requests.current.clear();
+  }, []);
 
   useEffect(() => {
     let live = true;
+    setLoading(true); setCatalogError('');
     (async () => {
       try {
-        const rows = await get<Account[]>('/admin/accounts');
-        const flat: ModelRow[] = [];
-        for (const a of rows.filter((x) => x.enabled)) {
-          const ms = await accountModels(a.id);
-          for (const m of ms) {
-            flat.push({ ...m, id: `${a.namespace}/${m.id}`, display: `${a.namespace} / ${m.display ?? m.id}` });
+        const accounts = (await get<Account[]>('/admin/accounts')).filter(a => a.enabled);
+        const results: Array<ModelRow[] | null> = new Array(accounts.length).fill(null);
+        let next = 0;
+        // Bound concurrent catalog reads, retain account order, and keep the
+        // models from healthy accounts when another account fails.
+        const worker = async () => {
+          while (live && next < accounts.length) {
+            const index = next++;
+            try { results[index] = await accountModels(accounts[index].id); }
+            catch { results[index] = null; }
           }
-        }
+        };
+        await Promise.all(Array.from({ length: Math.min(4, accounts.length) }, worker));
         if (!live) return;
+        const flat = results.flatMap((models, index) => (models ?? []).map(m => ({
+          ...m, id: `${accounts[index].namespace}/${m.id}`,
+          display: `${accounts[index].namespace} / ${m.display ?? m.id}`,
+        })));
+        const failed = accounts.filter((_, index) => results[index] === null);
+        if (failed.length) setCatalogError(`Could not load models for ${failed.map(a => a.name).join(', ')}.${failed.length < accounts.length ? ' Other providers remain available.' : ''}`);
         setCatalog(flat);
         const stored = readStored(KEY_MODEL, '');
-        const preferred = stored && flat.some((m) => m.id === stored) ? stored : flat[0]?.id ?? '';
-        setColumns((prev) => prev.map((c) => (!c.model ? { ...c, model: preferred } : c)));
+        const preferred = stored && flat.some(m => m.id === stored) ? stored : flat[0]?.id ?? '';
+        setColumns(prev => prev.map(c => (!c.model ? { ...c, model: preferred } : c)));
       } catch (e) {
-        if (live) setError(e instanceof Error ? e.message : 'could not load provider models');
+        if (live) setCatalogError(e instanceof Error ? e.message : 'could not load provider models');
       } finally {
         if (live) setLoading(false);
       }
     })();
     return () => { live = false; };
-  }, []);
+  }, [catalogAttempt]);
 
   const modelOptions = useMemo(
     () => catalog.map((m) => ({ value: m.id, label: m.display ?? m.id })),
@@ -129,6 +148,8 @@ export default function Chat() {
   }, [defaultModel]);
 
   const removeColumn = useCallback((id: string) => {
+    requests.current.get(id)?.abort();
+    requests.current.delete(id);
     setColumns((prev) => (prev.length <= 1 ? prev : prev.filter((c) => c.id !== id)));
   }, []);
 
@@ -197,11 +218,14 @@ export default function Chat() {
       : c)));
 
     await Promise.all(targets.map(async (target) => {
+      const controller = new AbortController();
+      requests.current.set(target.id, controller);
       const turns: ChatMessage[] = [];
       if (system.trim()) turns.push({ role: 'system', content: system.trim() });
       turns.push(...(history.get(target.id) ?? []), { role: 'user', content });
       try {
         await chatStream(target.model, turns, (delta) => {
+          if (controller.signal.aborted) return;
           setColumns((prev) => prev.map((c) => {
             if (c.id !== target.id) return c;
             const msgs = [...c.messages];
@@ -211,8 +235,9 @@ export default function Chat() {
             }
             return { ...c, messages: msgs };
           }));
-        });
+        }, controller.signal);
       } catch (e) {
+        if (controller.signal.aborted) return;
         const msg = e instanceof Error ? e.message : 'chat request failed';
         setColumns((prev) => prev.map((c) => {
           if (c.id !== target.id) return c;
@@ -221,6 +246,8 @@ export default function Chat() {
           return { ...c, error: msg };
         }));
       } finally {
+        if (requests.current.get(target.id) === controller) requests.current.delete(target.id);
+        if (controller.signal.aborted) return;
         setColumns((prev) => prev.map((c) => {
           if (c.id !== target.id) return c;
           const msgs = c.messages.filter((m, i) => !(i === c.messages.length - 1 && m.role === 'assistant' && m.content === ''));
@@ -275,9 +302,10 @@ export default function Chat() {
         )}
       </AnimatePresence>
 
+      {catalogError && <div role="alert" className="rounded-xl border border-warn/30 bg-warn-dim px-4 py-3 text-[13px] text-ink">{catalogError} <button type="button" className="underline" onClick={() => setCatalogAttempt(n => n + 1)}>Retry models</button></div>}
       {error && <div role="alert" className="rounded-xl border border-bad/30 bg-bad-dim px-4 py-3 text-[13px] text-bad">{error}</div>}
 
-      <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}>
+      <div className={cx('grid grid-cols-1 gap-4', columns.length > 1 && 'lg:grid-cols-2', columns.length > 2 && 'xl:grid-cols-3')}>
         {columns.map((c, idx) => {
           const selected = catalog.find((m) => m.id === c.model);
           return (
@@ -287,7 +315,7 @@ export default function Chat() {
                   {idx + 1}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <Combobox idPrefix={`col-${c.id}`} options={modelOptions} value={c.model} onChange={(v) => setColumnModel(c.id, v)}
+                  <Combobox label={`Model for column ${idx + 1}`} idPrefix={`col-${c.id}`} options={modelOptions} value={c.model} onChange={(v) => setColumnModel(c.id, v)}
                     disabled={loading || c.busy} loadingText={loading ? 'Loading models…' : 'No synced models'} />
                 </div>
                 {idx > 0 && (

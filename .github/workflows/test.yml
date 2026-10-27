@@ -11,18 +11,8 @@
 #     unbounded locally and got OOM-killed (dmesg: server.test anon-rss
 #     4.17GB). Its live set is small — it passes at a 1GiB limit — so a soft
 #     GC ceiling keeps the runner inside budget without altering behaviour.
-#   * The web step proves the sources type-check and build; it does NOT
-#     assert the committed dist reproduces byte-for-byte, because Vite's
-#     output hash depends on the absolute checkout path and would differ on
-#     every machine. Freshness of the committed bundle stays a local
-#     repo-path rebuild before commit.
-#
-#     NOTE (2026-10-20): the checkout-path caveat above is now only true of
-#     the JS bundle name. The CSS no longer depends on the previous build:
-#     web/src/index.css carries `@source not "../dist"`, because Tailwind
-#     otherwise scans the tracked web/dist/ output and feeds the previous
-#     build's class names into the next one. With that exclusion the CSS
-#     hash is a function of the sources alone and reproduces across paths.
+#   * The web step compares committed assets with a fresh build, normalizing
+#     only Vite's checkout-dependent asset hash suffixes and references.
 name: Tests
 
 on:
@@ -97,4 +87,6 @@ jobs:
         working-directory: web
         run: |
           npm ci
-          npm run build   # tsc --noEmit && vite build
+          npm run build -- --emptyOutDir --outDir "$RUNNER_TEMP/ezllm-web-dist"  # tsc + Vite
+          node tests/check-dist.test.mjs
+          node scripts/check-dist.mjs dist "$RUNNER_TEMP/ezllm-web-dist"

@@ -251,8 +251,12 @@ Same binary, served at `/`; the UI renders and fetches nothing until
 unlocked. Everything under `/admin/*` except sign-in and first-boot setup
 requires an admin session or an admin client token. The sidebar shows the
 running **version**; the overview shows uptime and account, model and combo
-counts. Settings covers browser preferences, sessions, backup/recovery, gateway
-policy, notification preferences and safe system diagnostics. Encrypted backup
+counts and warnings for dropped, lost, or unmetered ledger rows. Overview and
+Connect warn when usage reports cannot refresh; Economics and Compression show
+errors when cost or savings data is unavailable. Connect provides a copyable
+example request, and Chat cancels active requests when their column is removed
+or you leave the page. Settings covers browser preferences, sessions,
+backup/recovery, gateway policy, notification preferences and safe system diagnostics. Encrypted backup
 scheduling is disabled by default; configure a separate encryption secret and a
 mounted destination before enabling it. See the
 [recovery runbook](docs/recovery-runbook.md).
@@ -327,9 +331,8 @@ harnesses can choke this machine. CI runs the full suite.
 CI: [test.yml](.github/workflows/test.yml) gates
 [docker-publish.yml](.github/workflows/docker-publish.yml) and
 [release.yml](.github/workflows/release.yml) — a red suite never produces
-an image or a release asset. CI builds the web sources but does not verify that
-the committed `web/dist/` matches them; publishers embed the committed bundle.
-Rebuild and commit it for every web change. Browser verification scripts are
+an image or a release asset. CI checks that the committed `web/dist/` matches a fresh build; publishers
+embed that bundle. Rebuild and commit it for every web change. Browser verification scripts are
 run separately; they are not part of this CI gate.
 
 ## Documentation

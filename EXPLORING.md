@@ -497,10 +497,13 @@ corrections section.
   Operational guidance: `docs/settings-runbook.md` and `docs/recovery-runbook.md`.
 - `web/src/components/RailwayBackground.tsx` `RailwayBackground` restores the
   login rails with first-paint drawing independent of the small-screen limiter.
-  `web/src/components/NeighbourhoodScene.tsx` `NeighbourhoodScene` draws the
-  layered streets; `Neighbourhood.tsx` `buildHouses` preserves the real usage
-  mapping and represents missing activity as unknown. Visual/interaction coverage
-  is in `web/tests/verify-railway.mjs` and `verify-neighbourhood-polish.mjs`.
+- `web/src/components/CityScene.tsx` `CityScene` draws the city on a canvas (one
+  building per provider account, depth-sorted traffic, request flares);
+  `web/src/utils/city.ts` `buildBuildings` keeps the real usage mapping and
+  `planCity` generates the seeded street grid, while `web/src/utils/live.ts`
+  `useLiveCalls` turns committed ledger rows into flares. Visual/interaction
+  coverage is in `web/tests/verify-railway.mjs`, `verify-neighbourhood.mjs`,
+  `verify-neighbourhood-polish.mjs` and `shot-city.mjs`.
 
 ### v1.3.3 — cancellation outranks a parked fallback ✅ (2026-10-27)
 

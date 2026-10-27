@@ -92,6 +92,11 @@ export default function Chat() {
   const [system, setSystem] = useState(() => readStored(KEY_SYSTEM, DEFAULT_SYSTEM_PROMPT));
   const [systemOpen, setSystemOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const requests = useRef(new Map<string, AbortController>());
+  useEffect(() => () => {
+    for (const controller of requests.current.values()) controller.abort();
+    requests.current.clear();
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -129,6 +134,8 @@ export default function Chat() {
   }, [defaultModel]);
 
   const removeColumn = useCallback((id: string) => {
+    requests.current.get(id)?.abort();
+    requests.current.delete(id);
     setColumns((prev) => (prev.length <= 1 ? prev : prev.filter((c) => c.id !== id)));
   }, []);
 
@@ -197,11 +204,14 @@ export default function Chat() {
       : c)));
 
     await Promise.all(targets.map(async (target) => {
+      const controller = new AbortController();
+      requests.current.set(target.id, controller);
       const turns: ChatMessage[] = [];
       if (system.trim()) turns.push({ role: 'system', content: system.trim() });
       turns.push(...(history.get(target.id) ?? []), { role: 'user', content });
       try {
         await chatStream(target.model, turns, (delta) => {
+          if (controller.signal.aborted) return;
           setColumns((prev) => prev.map((c) => {
             if (c.id !== target.id) return c;
             const msgs = [...c.messages];
@@ -211,8 +221,9 @@ export default function Chat() {
             }
             return { ...c, messages: msgs };
           }));
-        });
+        }, controller.signal);
       } catch (e) {
+        if (controller.signal.aborted) return;
         const msg = e instanceof Error ? e.message : 'chat request failed';
         setColumns((prev) => prev.map((c) => {
           if (c.id !== target.id) return c;
@@ -221,6 +232,8 @@ export default function Chat() {
           return { ...c, error: msg };
         }));
       } finally {
+        if (requests.current.get(target.id) === controller) requests.current.delete(target.id);
+        if (controller.signal.aborted) return;
         setColumns((prev) => prev.map((c) => {
           if (c.id !== target.id) return c;
           const msgs = c.messages.filter((m, i) => !(i === c.messages.length - 1 && m.role === 'assistant' && m.content === ''));

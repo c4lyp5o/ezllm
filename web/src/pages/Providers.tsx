@@ -1431,6 +1431,8 @@ function QuotaModal({ account, onClose }: { account: Account; onClose: () => voi
   const [busy, setBusy] = useState(true);
   const [err, setErr] = useState<ApiErrorDetail | null>(null);
   const [rules, setRules] = useState<ModelRule[] | null>(null);
+  const [rulesError, setRulesError] = useState(false);
+  const [rulesAttempt, setRulesAttempt] = useState(0);
 
   const load = useCallback(() => {
     setBusy(true);
@@ -1444,11 +1446,12 @@ function QuotaModal({ account, onClose }: { account: Account; onClose: () => voi
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     let alive = true;
+    setRules(null); setRulesError(false);
     modelRules()
       .then((rs) => { if (alive) setRules(rs.filter((r) => r.account_id === account.id)); })
-      .catch(() => { if (alive) setRules([]); });
+      .catch(() => { if (alive) setRulesError(true); });
     return () => { alive = false; };
-  }, [account.id]);
+  }, [account.id, rulesAttempt]);
 
   const caps = (rules ?? []).filter((r) => r.cap_tokens > 0);
 
@@ -1501,7 +1504,8 @@ function QuotaModal({ account, onClose }: { account: Account; onClose: () => voi
         </div>
         <div className="rounded-lg border border-line bg-raised/60 p-4">
           <SectionLabel>Cap window · cap tokens</SectionLabel>
-          {rules === null && <Skeleton className="mt-2 h-3.5 w-48" />}
+          {rulesError && <p role="alert" className="mt-2 text-[13px] text-warn">Could not load account caps. <button type="button" className="underline" onClick={() => setRulesAttempt(n => n + 1)}>Retry caps</button></p>}
+          {rules === null && !rulesError && <Skeleton className="mt-2 h-3.5 w-48" />}
           {rules !== null && caps.length === 0 && (
             <p className="mt-2 text-[13px] text-mute">No caps set for this account — add one under <span className="text-ink">Rules</span>.</p>
           )}

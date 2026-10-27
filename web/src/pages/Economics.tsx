@@ -50,6 +50,7 @@ export default function Economics() {
   const [minInput, setMinInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [costError, setCostError] = useState(false);
 
   // Only the newest load may write state: an older selection's response that
   // lands late is dropped instead of overwriting the current one.
@@ -73,6 +74,7 @@ export default function Economics() {
       if (gen !== loadGen.current) return;
       setRows(r.rows.map(normalizeFeedRow));
       setSummary(r.summary);
+      setCostError(c === null);
       setCostRows(c?.rows ?? []);
       setCostTotals(c?.totals ?? null);
     } catch (e) {
@@ -299,7 +301,9 @@ export default function Economics() {
                 ) : null}
               </>
             }>
-            {costRows.length === 0 ? (
+            {costError ? (
+              <p role="alert" className="text-sm text-warn">Could not load the cost report. <button type="button" className="underline" onClick={() => void load()}>Retry cost report</button></p>
+            ) : costRows.length === 0 ? (
               <EmptyState title="No priced traffic yet"
                 hint="Cost is computed from the rates entered under Providers → account → Pricing. Until a rate exists for an account+model, those calls cost 0." />
             ) : (

@@ -48,6 +48,7 @@ export default function Economics() {
   const [costRows, setCostRows] = useState<CostRow[]>([]);
   const [costTotals, setCostTotals] = useState<CostTotals | null>(null);
   const [minInput, setMinInput] = useState('');
+  const [appliedMin, setAppliedMin] = useState<number | undefined>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [costError, setCostError] = useState(false);
@@ -66,7 +67,7 @@ export default function Economics() {
         requests({
           range,
           sort: 'tin_desc',
-          minTin: minInput ? Number(minInput) : undefined,
+          minTin: appliedMin,
           limit: 100,
         }),
         cost(range).catch(() => null),
@@ -82,7 +83,7 @@ export default function Economics() {
     } finally {
       if (gen === loadGen.current) setLoading(false);
     }
-  }, [range, minInput]);
+  }, [range, appliedMin]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -163,7 +164,15 @@ export default function Economics() {
             <input value={minInput} onChange={(e) => setMinInput(e.target.value)} inputMode="numeric"
               placeholder="all" className={cx(inputCls, 'mt-1.5 w-44 font-mono tnum')} />
           </label>
-          <button onClick={() => void load()} className={cx(btn.base, btn.primary)}>Analyze</button>
+          <button onClick={() => {
+            const raw = minInput.trim();
+            const parsed = raw === '' ? undefined : Number(raw);
+            if (parsed !== undefined && (!Number.isSafeInteger(parsed) || parsed < 0)) {
+              setError('Minimum input tokens must be a non-negative whole number.'); return;
+            }
+            setError('');
+            if (parsed === appliedMin) void load(); else setAppliedMin(parsed);
+          }} className={cx(btn.base, btn.primary)}>Analyze</button>
           <span className="text-[12px] text-mute">
             Sorted largest first. Use Requests for full bounds and per-row inspection.
           </span>
@@ -287,7 +296,7 @@ export default function Economics() {
             label={<SectionLabel>Spend (derived from model_prices)</SectionLabel>}
             aside={
               <>
-                {minInput && (
+                {appliedMin !== undefined && (
                   <span className="text-[12px] text-warn" title="The min-input filter scopes the token view above; the spend rows are the whole range.">
                     min-input filter: tokens only — spend is the whole range
                   </span>

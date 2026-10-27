@@ -127,13 +127,13 @@ function parseOpenAIError(body: unknown, status: number): ApiErrorDetail {
 
 /** Shared fetch: session cookie, OpenAI-shaped error parsing, 401/403 → AuthError. */
 export async function apiFetch<T = unknown>(path: string, init: RequestInit = {}, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = {};
-  if (body !== undefined) { headers['Content-Type'] = 'application/json'; }
+  const headers = new Headers(init.headers);
+  if (body !== undefined && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   let payload: string | undefined;
   if (body !== undefined) payload = JSON.stringify(body);
   let res: Response;
   try {
-    res = await fetch(path, { ...init, headers, body: payload, credentials: 'include' });
+    res = await fetch(path, { ...init, headers, body: body === undefined ? init.body : payload, credentials: 'include' });
   } catch {
     throw new ApiError({ status: 0, type: 'network', message: 'upstream unreachable — is ezllm running?' });
   }
@@ -802,8 +802,6 @@ export const cost = (range: RangeKey = '7d') => {
   const params = new URLSearchParams({ from: new Date(Date.now() - hours * 3600_000).toISOString() });
   return get<{ from: string; to: string; currency: string; rows: CostRow[]; totals: CostTotals }>(`/admin/cost?${params.toString()}`);
 };
-export const chat = (model: string, messages: ChatMessage[]) =>
-  post<any>('/admin/chat', { model, messages });
 
 /**
  * A chat turn's content. Plain string for text; an array of parts when a file

@@ -99,16 +99,25 @@ Anthropic surface for `claude-opus-4.6`).
 
 ## Persona stealth (behaviour change, v1.3.2)
 
-Every github-copilot request drops its `role: system` turns before it leaves the
-box, on every model. The provider is a web surface, so the client's persona and
-personal context (SOUL/MEMORY/USER-style system prompts) must never reach it.
+Every github-copilot request has its system content replaced before it leaves
+the box, on every model and every wire. The provider is a web surface, so the
+client's persona and personal context (SOUL/MEMORY/USER-style system prompts)
+must never reach it. The rule drops the personal CONTENT, not the role: a short
+neutral system prompt (a generic coding-assistant line, plus a tool-use line when
+the request carries tools) takes its place, so the model keeps operating
+instructions and the request keeps the shape a real client sends.
 
-This is deliberate output loss, not a workaround: a request whose ONLY content was
-a system prompt now leaves with an empty `messages` list, and the upstream's own
-"messages is empty" error is the honest answer for a call that carried nothing
-else. If a future task genuinely needs a system prompt to reach Copilot, that is
-the rule to revisit — it does not exist behind a flag because a flag would make
-the privacy guarantee optional.
+| Wire | Replaced |
+|---|---|
+| chat (`/chat/completions`) | `system` and `developer` turns → one neutral `system` turn in the first one's place |
+| messages (`/v1/messages`, claude*) | the top-level `system` field |
+| responses (`/responses`) | `instructions`, and `system`/`developer` items in `input` |
+
+A request that sent no system content gets none added. The neutral prompt is
+constant, so it stays prompt-cache friendly. The client's own instructions (tool
+conventions, output format, environment) are lost with the persona — that is the
+price of the guarantee, and it does not exist behind a flag because a flag would
+make the privacy guarantee optional.
 
 The guard was previously documented but lived only in a linker-dead function, so
 it never ran. A run whose answers suddenly look "different" on this provider

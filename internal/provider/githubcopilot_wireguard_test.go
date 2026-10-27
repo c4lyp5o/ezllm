@@ -68,8 +68,8 @@ func TestCopilotAllowsResponsesWireForCodex(t *testing.T) {
 	}
 }
 
-// The stealth rule reaches the wire on the chat surface: a system turn is gone
-// before the request leaves the adapter.
+// The stealth rule reaches the wire on the chat surface: the persona is gone
+// before the request leaves the adapter (a neutral system turn replaces it).
 func TestCopilotPrepareRequestDropsSystemMessages(t *testing.T) {
 	client := copilotRoutedClient(t, 200, `{"token":"tid-live","expires_at":1893456000}`,
 		func(w http.ResponseWriter, r *http.Request) { t.Fatalf("no upstream call expected") }, nil)
@@ -84,10 +84,34 @@ func TestCopilotPrepareRequestDropsSystemMessages(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := io.ReadAll(req.Body)
-	if strings.Contains(string(got), "SOUL.md") || strings.Contains(string(got), `"system"`) {
+	if strings.Contains(string(got), "SOUL.md") {
 		t.Errorf("persona reached the outbound body: %s", got)
 	}
 	if !strings.Contains(string(got), `"hi"`) {
 		t.Errorf("user turn lost: %s", got)
+	}
+}
+
+// The responses wire runs no quirk pass, but the privacy rule still reaches it:
+// instructions carry the client's persona on this wire.
+func TestCopilotPrepareRequestStripsPersonaOnResponses(t *testing.T) {
+	client := copilotRoutedClient(t, 200, `{"token":"tid-live","expires_at":1893456000}`,
+		func(w http.ResponseWriter, r *http.Request) { t.Fatalf("no upstream call expected") }, nil)
+	a := newGitHubCopilotWithClient(client)
+
+	req, _ := http.NewRequest(http.MethodPost, copilotAPIBase+"/responses",
+		strings.NewReader(`{"model":"gpt-5.3-codex","instructions":"SOUL.md","input":"hi"}`))
+	req.Header.Set("Accept", "application/json")
+	acct := Account{ID: 7, Kind: KindGitHubCopilot}
+
+	if err := a.PrepareRequest(context.Background(), req, acct, copilotSessionKey(t), SurfaceResponses); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(req.Body)
+	if strings.Contains(string(got), "SOUL.md") {
+		t.Errorf("persona reached the outbound body: %s", got)
+	}
+	if req.ContentLength != int64(len(got)) {
+		t.Errorf("ContentLength = %d, body is %d bytes", req.ContentLength, len(got))
 	}
 }

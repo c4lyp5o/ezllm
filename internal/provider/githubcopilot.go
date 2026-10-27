@@ -122,10 +122,19 @@ func (a *gitHubCopilotAdapter) PrepareRequest(ctx context.Context, req *http.Req
 				return fmt.Errorf("%w: github-copilot %s has no /responses endpoint (upstream answers 400 unsupported_api_for_model)",
 					ErrWireUnsupported, model)
 			}
-			if surface == SurfaceChat || surface == SurfaceAnthropic {
+			switch surface {
+			case SurfaceChat, SurfaceAnthropic:
 				githubcopilot.PrepareBody(model, bodyObj)
 				if patched, err := json.Marshal(bodyObj); err == nil {
 					raw = patched
+				}
+			case SurfaceResponses:
+				// No quirk pass on this wire, but the privacy rule is not a
+				// quirk. An untouched body stays byte-identical.
+				if githubcopilot.StripPersona(bodyObj) {
+					if patched, err := json.Marshal(bodyObj); err == nil {
+						raw = patched
+					}
 				}
 			}
 		}

@@ -156,31 +156,19 @@ func ResponsesUnsupported(model string) bool {
 // PrepareBody applies the per-model quirks that keep upstream from 400ing
 // (omniroute transformRequest, each ported with its reference), plus one rule
 // that is NOT a quirk:
-//   - system messages are DROPPED on every model. The client's persona and
-//     personal context (SOUL.md/MEMORY.md/USER.md) must never reach a web
-//     provider. This is deliberate output loss, not a workaround — a request
-//     whose only content was a system prompt leaves with an empty messages
-//     list, and the upstream's own "messages is empty" error is the honest
-//     answer for a call that carried nothing but persona.
+//   - the client's system content is REPLACED on every model (StripPersona):
+//     its persona and personal context (SOUL.md/MEMORY.md/USER.md) must never
+//     reach a web provider, but the system role itself stays, carrying a
+//     neutral prompt, so the model still gets operating instructions.
 //   - tools capped at 128
 //   - gpt-5.4*: strip temperature ("Unsupported parameter")
 //   - assistant messages: strip reasoning_text/reasoning_content
 //   - claude models: none of the /chat/completions-only quirks apply
 func PrepareBody(model string, body map[string]any) {
 	m := strings.ToLower(model)
-	// Stealth, for every model on this provider: drop system messages so the
-	// persona and personal context never leave the box. Provider-scoped, not
+	// Stealth, for every model on this provider. Provider-scoped, not
 	// model-scoped — it is a privacy rule.
-	if msgs, ok := body["messages"].([]any); ok {
-		kept := make([]any, 0, len(msgs))
-		for _, mm := range msgs {
-			if msg, ok := mm.(map[string]any); ok && msg["role"] == "system" {
-				continue
-			}
-			kept = append(kept, mm)
-		}
-		body["messages"] = kept
-	}
+	StripPersona(body)
 	if tools, ok := body["tools"].([]any); ok && len(tools) > 128 {
 		body["tools"] = tools[:128]
 	}
@@ -218,6 +206,80 @@ func PrepareBody(model string, body map[string]any) {
 			}
 		}
 	}
+}
+
+// neutralSystemPrompt replaces whatever system content the client sent. It
+// names a role and nothing about the user: no persona, no memory, no paths.
+const neutralSystemPrompt = "You are a helpful coding assistant. Follow the user's instructions and answer accurately and concisely."
+
+// neutralToolsLine is appended when the request carries tools, so a model that
+// lost the client's tool-use instructions still knows how to use them.
+const neutralToolsLine = " Use the provided tools when they help, and call them with arguments that match their schemas."
+
+func neutralPrompt(body map[string]any) string {
+	if tools, ok := body["tools"].([]any); ok && len(tools) > 0 {
+		return neutralSystemPrompt + neutralToolsLine
+	}
+	return neutralSystemPrompt
+}
+
+func isPersonaRole(v any) bool { return v == "system" || v == "developer" }
+
+// StripPersona replaces the client's system content with a neutral prompt on
+// every wire shape Copilot is dialed with — drop the personal content, not the
+// role:
+//   - chat: system/developer turns leave messages; one neutral system turn
+//     takes the first one's place
+//   - messages (Anthropic): the top-level system field
+//   - responses: instructions, and system/developer items in input (their
+//     place goes to a neutral instructions field)
+//
+// A request that sent no system content gets none added. It reports whether
+// the body changed, so a caller can keep an untouched body byte-identical.
+func StripPersona(body map[string]any) bool {
+	changed := false
+	prompt := neutralPrompt(body)
+	if msgs, ok := body["messages"].([]any); ok {
+		kept := make([]any, 0, len(msgs))
+		for _, mm := range msgs {
+			if msg, ok := mm.(map[string]any); ok && isPersonaRole(msg["role"]) {
+				if !changed {
+					kept = append(kept, map[string]any{"role": "system", "content": prompt})
+				}
+				changed = true
+				continue
+			}
+			kept = append(kept, mm)
+		}
+		if changed {
+			body["messages"] = kept
+		}
+	}
+	if sys, ok := body["system"]; ok && sys != nil && sys != "" {
+		body["system"] = prompt
+		changed = true
+	}
+	if ins, ok := body["instructions"]; ok && ins != nil && ins != "" {
+		body["instructions"] = prompt
+		changed = true
+	}
+	if items, ok := body["input"].([]any); ok {
+		kept := make([]any, 0, len(items))
+		dropped := false
+		for _, it := range items {
+			if item, ok := it.(map[string]any); ok && isPersonaRole(item["role"]) {
+				dropped = true
+				continue
+			}
+			kept = append(kept, it)
+		}
+		if dropped {
+			body["input"] = kept
+			body["instructions"] = prompt
+			changed = true
+		}
+	}
+	return changed
 }
 
 // sanitizeChatMessages: /chat/completions accepts only text/image_url parts;

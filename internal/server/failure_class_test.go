@@ -18,25 +18,30 @@ import (
 
 func TestHopAttributableFailure(t *testing.T) {
 	cases := []struct {
-		name string
-		res  proxy.Result
-		ferr error
-		want bool
+		name       string
+		res        proxy.Result
+		ferr       error
+		clientGone bool
+		want       bool
 	}{
-		{"delivered 200", proxy.Result{Status: 200}, nil, false},
-		{"redirect", proxy.Result{Status: 302}, nil, false},
-		{"bad request is the caller's fault", proxy.Result{Status: 400}, nil, false},
-		{"not found is the caller's model id", proxy.Result{Status: 404}, nil, false},
-		{"rate limited is the hop's budget", proxy.Result{Status: 429}, nil, true},
-		{"server error is the hop", proxy.Result{Status: 500}, nil, true},
-		{"bad gateway is the hop", proxy.Result{Status: 502}, nil, true},
-		{"transport error never reached a body", proxy.Result{Status: 0}, errors.New("dial: refused"), true},
-		{"stream completed", proxy.Result{Status: 200, StreamOutcome: proxy.StreamOutcomeCompleted}, nil, false},
-		{"stream failed late", proxy.Result{Status: 200, StreamOutcome: proxy.StreamOutcomeFailed}, nil, true},
-		{"stream truncated", proxy.Result{Status: 200, StreamOutcome: proxy.StreamOutcomeTruncated}, nil, true},
+		{"delivered 200", proxy.Result{Status: 200}, nil, false, false},
+		{"redirect", proxy.Result{Status: 302}, nil, false, false},
+		{"bad request is the caller's fault", proxy.Result{Status: 400}, nil, false, false},
+		{"not found is the caller's model id", proxy.Result{Status: 404}, nil, false, false},
+		{"rate limited is the hop's budget", proxy.Result{Status: 429}, nil, false, true},
+		{"server error is the hop", proxy.Result{Status: 500}, nil, false, true},
+		{"bad gateway is the hop", proxy.Result{Status: 502}, nil, false, true},
+		{"transport error never reached a body", proxy.Result{Status: 0}, errors.New("dial: refused"), false, true},
+		{"stream completed", proxy.Result{Status: 200, StreamOutcome: proxy.StreamOutcomeCompleted}, nil, false, false},
+		{"stream failed late", proxy.Result{Status: 200, StreamOutcome: proxy.StreamOutcomeFailed}, nil, false, true},
+		{"stream truncated", proxy.Result{Status: 200, StreamOutcome: proxy.StreamOutcomeTruncated}, nil, false, true},
+		// The caller hanging up is never the hop's fault: no release.
+		{"client cancelled before commit", proxy.Result{Status: 0}, context.Canceled, true, false},
+		{"client hung up mid-stream", proxy.Result{Status: 200, Committed: true}, errors.New("client write: broken pipe"), true, false},
+		{"client hung up, stream cut short", proxy.Result{Status: 200, StreamOutcome: proxy.StreamOutcomeTruncated}, nil, true, false},
 	}
 	for _, c := range cases {
-		if got := hopAttributableFailure(c.res, c.ferr); got != c.want {
+		if got := hopAttributableFailure(c.res, c.ferr, c.clientGone); got != c.want {
 			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
 		}
 	}

@@ -395,6 +395,10 @@ type hopOutcome struct {
 	// wrong (clearing a legitimate park, or parking a healthy hop for a closed
 	// browser tab), so recordHop leaves the hop's state untouched.
 	clientCancelled bool
+	// noVerdict marks an attempt refused before any dial (the adapter knows
+	// the hop cannot serve this wire). Like a cancel it says nothing about the
+	// hop's health, so recordHop must neither park it nor clear its park.
+	noVerdict bool
 	// reason is the operator-facing cause, surfaced on /admin/health. A parked
 	// hop produces no ledger row, so without this a hop could disappear from
 	// routing with no recorded explanation anywhere.
@@ -574,6 +578,9 @@ func (d *Dispatcher) classifyHopPolicy(ctx context.Context, err error, status in
 		if ctx.Err() != nil {
 			return hopOutcome{clientCancelled: true, reason: "client cancelled"}
 		}
+		if errors.Is(err, provider.ErrWireUnsupported) {
+			return hopOutcome{noVerdict: true, reason: "wire unsupported"}
+		}
 		if !retryableUpstreamError(err) {
 			return hopOutcome{} // our own fault (bad kind, bad request shape): not the hop's
 		}
@@ -652,8 +659,8 @@ func (d *Dispatcher) recordHop(rt Route, oc hopOutcome, now time.Time) {
 	defer d.cooldownMu.Unlock()
 
 	if !oc.failed {
-		if oc.clientCancelled {
-			return // the caller's cancel says nothing about this hop
+		if oc.clientCancelled || oc.noVerdict {
+			return // neither a cancel nor a pre-dial refusal says anything about this hop
 		}
 		if d.cooldowns != nil {
 			delete(d.cooldowns, key)
@@ -1202,8 +1209,10 @@ func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, bod
 		upReq.Header.Set("x-goog-api-key", rt.KeyPlain)
 		upReq.Header.Del("Authorization")
 	}
-	// Content-Length must match the rewritten body.
-	upReq.ContentLength = int64(len(body))
+	// Content-Length: NewRequestWithContext set it from body; an adapter that
+	// rewrites the body (Copilot drops system messages) sets its own. Never
+	// re-stamp len(body) here — a shorter rewritten body would then fail the
+	// client's length check.
 	// Preserve multipart Content-Type with boundary; default to JSON.
 	contentType := "application/json"
 	if isMultipartBody(body) {
@@ -1791,6 +1800,14 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 		}
 	}
 	for i := 0; i < len(routes); i++ {
+		// The caller has left: no later hop is dialed, probed or charged
+		// against its account's request budget for a response nobody reads.
+		if ctx.Err() != nil {
+			if fallbackResp == nil && fallbackTransportErr == nil {
+				fallbackTransportErr = ctx.Err()
+			}
+			break
+		}
 		// The budget is checked BEFORE any eligibility work: an unaffordable
 		// hop is never dialed, never probed, never cooled.
 		if led.exhausted() || pastDeadline(sel) {

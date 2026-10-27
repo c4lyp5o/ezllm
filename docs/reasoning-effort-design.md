@@ -33,12 +33,15 @@ Two conclusions, both measured:
 - **A clamp never raises effort.** The value chosen is the highest allowed at or
   below what was asked; if nothing is that low, the cheapest allowed. Buying
   more reasoning than the client asked for is a cost regression, not a fix.
-- **`required` + a disabled effort = drop the field**, letting the provider's own
-  default apply. Inventing a value the provider did not name is the one thing
-  worse than the 400. This holds whether or not a vocabulary is stored: a
-  provider can enumerate `off|low|…|max` and still refuse `off` for a model that
-  cannot turn thinking off, so `Required` governs the selection and a rank-0
-  candidate is never chosen.
+- **`required` never sends a disabling effort.** A provider can enumerate
+  `off|low|…|max` and still refuse `off` for a model that cannot turn thinking
+  off, so `Required` governs the selection and a rank-0 candidate is never
+  chosen: a disabled or too-low ask gets the cheapest NON-disabling value. The
+  field is dropped (provider default) only when there is no such value to name —
+  no vocabulary stored, or one holding nothing but disabling words. Dropping
+  where a cheapest value exists was tried in v1.3.2 development and reverted:
+  the provider default is never cheaper than its cheapest value and usually
+  dearer.
 - **An allowed value is left alone.** No rewrite, no re-encode: the common path
   sends exactly the bytes the client sent.
 - **Learning is two-sided, writing only facts that carry information.** The key

@@ -12,22 +12,32 @@ import "testing"
 // accept it." The clamp picked off as the cheapest allowed value, turned a
 // bogus client value into a guaranteed 400, and the operator read it as the
 // clamp being broken.
+//
+// The clamp sends the cheapest NON-disabling value ("low"), not a dropped
+// field: dropping hands the choice to the provider's default, which is never
+// cheaper and usually medium or high.
 func TestClampNeverSendsADisablingEffortWhenRequired(t *testing.T) {
 	r := ReasoningRule{Allowed: []string{"off", "low", "medium", "high"}, Required: true, Known: true}
 
 	for _, want := range []string{"off", "none", "disabled", "bogus-tier"} {
 		value, drop, changed := r.Clamp(want)
-		if !changed {
-			t.Errorf("Clamp(%q) changed=false: a required-reasoning model must not receive %q", want, want)
-			continue
+		if !changed || drop || value != "low" {
+			t.Errorf("Clamp(%q) = (%q, drop=%v, changed=%v), want (\"low\", false, true): the cheapest value this model accepts",
+				want, value, drop, changed)
 		}
-		if !drop {
-			t.Errorf("Clamp(%q) = %q, want the field DROPPED — nothing at or below the ask is legal here", want, value)
-			continue
-		}
-		if value != "" {
-			t.Errorf("Clamp(%q) dropped but returned value %q", want, value)
-		}
+	}
+
+	// An ask below every legal value on a list with no disabling member
+	// moves UP to the cheapest one rather than dropping the field.
+	r2 := ReasoningRule{Allowed: []string{"low", "medium", "high"}, Required: true, Known: true}
+	if value, drop, changed := r2.Clamp("minimal"); !changed || drop || value != "low" {
+		t.Errorf("Clamp(minimal) = (%q, drop=%v, changed=%v), want (\"low\", false, true)", value, drop, changed)
+	}
+
+	// With no vocabulary at all there is nothing to name: drop.
+	r3 := ReasoningRule{Required: true, Known: true}
+	if value, drop, _ := r3.Clamp("off"); !drop || value != "" {
+		t.Errorf("Clamp(off) with no vocabulary = (%q, drop=%v), want the field dropped", value, drop)
 	}
 
 	// A legal, non-disabling ask still passes through untouched.

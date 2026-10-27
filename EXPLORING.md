@@ -529,9 +529,12 @@ examples of a class of bug rather than as history.
   strikes nor clears, `recordHop` returns early for it, and
   `server.statusClientClosedRequest` records `499` instead of a 502.
 - **Two copilot safety rules were dead (`d6c2f24`)**: `githubcopilot.PrepareBody`
-  now drops `role:system` (persona never reaches a web provider), and
-  `githubcopilot.ResponsesUnsupported` + `provider.ErrWireUnsupported` refuse
-  claude\*/gemini\* on `/responses` before the dial so the dispatcher fails over.
+  replaces the client's system content with a neutral prompt on every wire
+  (`githubcopilot.StripPersona`: persona never reaches a web provider, the role
+  stays), and `githubcopilot.ResponsesUnsupported` keeps claude\*/gemini\* off
+  `/responses` at resolution (`provider.KnownWireSupport`, read by the router's
+  `hopFacts.supports`); `provider.ErrWireUnsupported` is the adapter backstop and
+  records no health verdict (`hopOutcome.noVerdict`).
 - **Cause table (`eaf44cb`, `e16ad49`)**: the bracketed cause inside opencode's
   `Upstream request failed:` envelope now beats the envelope, and
   `proxy.refusesHistory` treats "this model needs the reasoning of every earlier

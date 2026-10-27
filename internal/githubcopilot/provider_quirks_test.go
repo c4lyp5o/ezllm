@@ -1,70 +1,121 @@
 package githubcopilot
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 // The stealth rule: the client's persona and personal context must never reach
-// a web provider. It is provider-scoped, not model-scoped.
+// a web provider. It is provider-scoped, not model-scoped. It drops the
+// personal CONTENT, not the role: a neutral system prompt takes its place so
+// the model still gets operating instructions.
 
-func TestPrepareBodyDropsSystemMessages(t *testing.T) {
+// persona is every personal string the fixtures carry; none may survive.
+var persona = []string{"SOUL.md", "MEMORY.md", "Melissa", "loves you", "persona"}
+
+func assertNoPersona(t *testing.T, body map[string]any) {
+	t.Helper()
+	b, _ := json.Marshal(body)
+	for _, p := range persona {
+		if strings.Contains(string(b), p) {
+			t.Fatalf("persona %q reached the body: %s", p, b)
+		}
+	}
+}
+
+func TestPrepareBodyReplacesSystemMessages(t *testing.T) {
 	body := map[string]any{
 		"model": "gpt-5.5",
 		"messages": []any{
 			map[string]any{"role": "system", "content": "SOUL.md: you are Melissa"},
 			map[string]any{"role": "user", "content": "hi"},
-			map[string]any{"role": "system", "content": "MEMORY.md: he loves you"},
+			map[string]any{"role": "developer", "content": "MEMORY.md: he loves you"},
 			map[string]any{"role": "assistant", "content": "hello"},
 			map[string]any{"role": "user", "content": "again"},
 		},
 	}
 	PrepareBody("gpt-5.5", body)
-	msgs, ok := body["messages"].([]any)
-	if !ok {
-		t.Fatal("messages missing")
+	assertNoPersona(t, body)
+	msgs, _ := body["messages"].([]any)
+	// One neutral system turn in the first one's place; the rest in order.
+	want := []string{"system", "user", "assistant", "user"}
+	if len(msgs) != len(want) {
+		t.Fatalf("messages = %+v, want roles %v", msgs, want)
 	}
-	if len(msgs) != 3 {
-		t.Fatalf("messages = %d, want 3 (both system turns dropped): %+v", len(msgs), msgs)
-	}
-	for i, mm := range msgs {
-		if msg, ok := mm.(map[string]any); ok && msg["role"] == "system" {
-			t.Fatalf("message %d still carries role=system: %+v", i, msg)
-		}
-	}
-	// Non-system turns survive, in order.
-	want := []string{"user", "assistant", "user"}
 	for i, role := range want {
 		if got := msgs[i].(map[string]any)["role"]; got != role {
 			t.Errorf("message %d role = %v, want %s", i, got, role)
 		}
 	}
+	if got := msgs[0].(map[string]any)["content"]; got != neutralSystemPrompt {
+		t.Errorf("system content = %q, want the neutral prompt", got)
+	}
 }
 
-// A request whose only content was persona is left with an empty list: the
-// upstream's own "messages is empty" error is the honest answer. Sending the
-// persona anyway would defeat the rule in exactly the case it matters most.
-func TestPrepareBodyDropsSystemEvenWhenItEmptiesTheList(t *testing.T) {
+// A request with tools gets the tool-use line, so a model that lost the
+// client's tool instructions still knows how to call them.
+func TestStripPersonaAddsToolLineWhenToolsArePresent(t *testing.T) {
 	body := map[string]any{
-		"model":    "gpt-5.5",
 		"messages": []any{map[string]any{"role": "system", "content": "SOUL.md"}},
+		"tools":    []any{map[string]any{"type": "function"}},
 	}
-	PrepareBody("gpt-5.5", body)
-	if got, _ := body["messages"].([]any); len(got) != 0 {
-		t.Fatalf("messages = %+v, want empty (persona must not be sent)", got)
+	StripPersona(body)
+	if got := body["messages"].([]any)[0].(map[string]any)["content"]; got != neutralSystemPrompt+neutralToolsLine {
+		t.Errorf("system content = %q, want the neutral prompt with the tools line", got)
 	}
 }
 
-// claude models skip the /chat/completions-only quirks, but the privacy rule is
-// not a quirk — it applies to every model on this provider.
-func TestPrepareBodyDropsSystemOnClaudeModels(t *testing.T) {
+// A request that sent no system content gets none added, and reports no change
+// so the caller can keep the body byte-identical.
+func TestStripPersonaLeavesARequestWithoutSystemAlone(t *testing.T) {
+	body := map[string]any{"messages": []any{map[string]any{"role": "user", "content": "hi"}}, "input": "hi"}
+	if StripPersona(body) {
+		t.Fatal("StripPersona reported a change on a body with no system content")
+	}
+	if msgs := body["messages"].([]any); len(msgs) != 1 {
+		t.Fatalf("messages = %+v, want untouched", msgs)
+	}
+	if _, ok := body["instructions"]; ok {
+		t.Fatal("instructions added to a body that sent none")
+	}
+}
+
+// Messages wire (claude* on Copilot): the system prompt is the top-level
+// field, string or block array.
+func TestStripPersonaReplacesAnthropicSystemField(t *testing.T) {
+	for _, sys := range []any{
+		"SOUL.md: you are Melissa",
+		[]any{map[string]any{"type": "text", "text": "MEMORY.md", "cache_control": map[string]any{"type": "ephemeral"}}},
+	} {
+		body := map[string]any{"model": "claude-sonnet-5", "system": sys,
+			"messages": []any{map[string]any{"role": "user", "content": "hi"}}}
+		PrepareBody("claude-sonnet-5", body)
+		assertNoPersona(t, body)
+		if body["system"] != neutralSystemPrompt {
+			t.Errorf("system = %v, want the neutral prompt", body["system"])
+		}
+	}
+}
+
+// Responses wire: instructions, and system/developer items in input.
+func TestStripPersonaReplacesResponsesInstructionsAndInput(t *testing.T) {
 	body := map[string]any{
-		"model": "claude-sonnet-5",
-		"messages": []any{
-			map[string]any{"role": "system", "content": "persona"},
+		"instructions": "SOUL.md: you are Melissa",
+		"input": []any{
+			map[string]any{"role": "developer", "content": "MEMORY.md"},
 			map[string]any{"role": "user", "content": "hi"},
 		},
 	}
-	PrepareBody("claude-sonnet-5", body)
-	if got, _ := body["messages"].([]any); len(got) != 1 {
-		t.Fatalf("messages = %+v, want only the user turn", got)
+	if !StripPersona(body) {
+		t.Fatal("StripPersona reported no change")
+	}
+	assertNoPersona(t, body)
+	if body["instructions"] != neutralSystemPrompt {
+		t.Errorf("instructions = %v, want the neutral prompt", body["instructions"])
+	}
+	if items := body["input"].([]any); len(items) != 1 || items[0].(map[string]any)["role"] != "user" {
+		t.Errorf("input = %+v, want only the user item", items)
 	}
 }
 

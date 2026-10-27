@@ -505,6 +505,26 @@ corrections section.
   coverage is in `web/tests/verify-railway.mjs`, `verify-neighbourhood.mjs`,
   `verify-neighbourhood-polish.mjs` and `shot-city.mjs`.
 
+### v1.4.0 — the Neighbourhood is a living city ✅ (2026-10-28)
+
+The page is a canvas city: one building per provider account on a seeded street
+grid (`web/src/utils/city.ts` `planCity` / `buildBuildings`), height and window
+light from tokens per minute over five minutes, rain where ≥25% of recent calls
+failed, boarded where the account or its keys are disabled, street density from
+the live request rate, and one flare + one taxi per committed ledger row on
+`/admin/stream` (`web/src/utils/live.ts` `useLiveCalls` — one SSE connection per
+page, 4s replay buffer). Scenery carries no numbers: people, umbrellas, cars
+with cabins and lamps, a plane behind the towers, seeded showers with an
+Auto sky / Rain / Clear control, night window reflections on the street.
+Canvas 2D only — 60 fps at 1150x598 clear, 56 fps rain, 60 fps at 390x844;
+one still frame for reduced motion. Two scene bugs fixed in here: the animation
+clock never advanced (traffic lights, rain and walk cycles were frozen), and
+one early dispatched taxi stopped the scene from seeding its people. Provider
+keys now enforce account ownership (404 before any probe). Contract:
+`web/tests/verify-neighbourhood.mjs` (55 assertions),
+`verify-neighbourhood-polish.mjs` (38), `shot-city.mjs` (frame budgets).
+Scene rules live in `web/DESIGN.md` "The scene (Neighbourhood)".
+
 ### v1.3.3 — cancellation outranks a parked fallback ✅ (2026-10-27)
 
 `ForwardCandidates`' loop head now discards a parked fallback response when the

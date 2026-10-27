@@ -2,7 +2,7 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
 
-## Unreleased — account safety, operational visibility and dashboard fixes
+## 2026-10-28 — account safety, operational visibility and a living Neighbourhood city (v1.4.0)
 
 - Provider-key retests and enable/disable operations now require the key to
   belong to the account in the URL. A mismatch returns 404 before a provider

@@ -322,39 +322,39 @@ code, pre, kbd, samp, .font-code { font-family: var(--font-code); font-variant-n
    colour it needs lives here as a --nb-* token: light = day, dark = night. */
 .nbhd {
   --nb-night: 0;
-  --nb-sky-top: #cfe4f2; --nb-sky-bottom: #f6ead9;
-  --nb-land: #a9bb9d; --nb-hill-far: #a3b6ac; --nb-hill-near: #8fa78f;
-  --nb-ground: #b9c8ac; --nb-road: #9aa19f; --nb-road-line: #f4ecd4;
-  --nb-pavement: #d6d3c3; --nb-shadow: #52625a;
-  --nb-sage: #e6e2d2; --nb-sage-side: #bcbfa9;
-  --nb-clay: #eed5c5; --nb-clay-side: #c4a494;
-  --nb-blue: #c8d9e7; --nb-blue-side: #9fb4ca;
-  --nb-steel: #d8dee3; --nb-steel-side: #aab4bd;
-  --nb-roof: #8d8f95; --nb-roof-top: #b9bcc1; --nb-roof-edge: #6f7278;
-  --nb-door: #7c7f83;
-  --nb-window-off: #93a9b7; --nb-window-on: #f0a63f; --nb-glow: #ffcf72; --nb-tail: #cf5c50;
-  --nb-smoke: #9b9c9e; --nb-label: #3c4b52; --nb-cloud: #ffffff;
-  --nb-tree: #6d956f; --nb-tree-dark: #52755e; --nb-trunk: #7b6b58;
-  --nb-car: #c99072; --nb-car-1: #9db6c6; --nb-car-2: #d9d2b6; --nb-car-3: #a9b8a2;
+  --nb-sky-top: #aecfe6; --nb-sky-bottom: #f8e2bf;
+  --nb-land: #86a98a; --nb-hill-far: #b3cbc4; --nb-hill-near: #98b894;
+  --nb-ground: #a6c697; --nb-road: #6c777e; --nb-road-line: #f3e9c9;
+  --nb-pavement: #ddd7c3; --nb-shadow: #36444d;
+  --nb-sage: #ebe5ce; --nb-sage-side: #b0b79d;
+  --nb-clay: #e6bba2; --nb-clay-side: #b6866f;
+  --nb-blue: #bdd5e8; --nb-blue-side: #86a3c3;
+  --nb-steel: #d9dfe3; --nb-steel-side: #a0abb6;
+  --nb-roof: #7b7f88; --nb-roof-top: #aeb4bc; --nb-roof-edge: #5d616b;
+  --nb-door: #5f6872;
+  --nb-window-off: #7a9db6; --nb-window-on: #f6b24a; --nb-glow: #ffd27a; --nb-tail: #cf5c50;
+  --nb-smoke: #9b9c9e; --nb-label: #1f2d34; --nb-cloud: #ffffff;
+  --nb-tree: #5c9a60; --nb-tree-dark: #3f7550; --nb-trunk: #7b6b58;
+  --nb-car: #d6735f; --nb-car-1: #5f93bd; --nb-car-2: #f1c84b; --nb-car-3: #6fa585;
   --nb-car-window: #e4f0ef;
-  --nb-star: transparent; --nb-moon: #f2c14e;
+  --nb-star: transparent; --nb-moon: #f6c85a;
 }
 .dark .nbhd {
   --nb-night: 1;
-  --nb-sky-top: #0c1424; --nb-sky-bottom: #24384c;
-  --nb-land: #1b2a26; --nb-hill-far: #1b2a34; --nb-hill-near: #17251f;
-  --nb-ground: #263b35; --nb-road: #171f2c; --nb-road-line: #7e8d9a;
-  --nb-pavement: #4b5d6e; --nb-shadow: #050a14;
-  --nb-sage: #43555f; --nb-sage-side: #2b3b46;
-  --nb-clay: #6b5457; --nb-clay-side: #4a3c44;
-  --nb-blue: #43597a; --nb-blue-side: #2e4059;
-  --nb-steel: #55606c; --nb-steel-side: #39434f;
-  --nb-roof: #333a48; --nb-roof-top: #59616f; --nb-roof-edge: #6d7889;
-  --nb-door: #232c3b;
-  --nb-window-off: #1d2a3d; --nb-window-on: #ffcd7c; --nb-glow: #ffb95e; --nb-tail: #e2564f;
+  --nb-sky-top: #090f24; --nb-sky-bottom: #33456a;
+  --nb-land: #1a2b2b; --nb-hill-far: #1d3042; --nb-hill-near: #162a28;
+  --nb-ground: #223b32; --nb-road: #151c28; --nb-road-line: #7e8d9a;
+  --nb-pavement: #44566a; --nb-shadow: #03070f;
+  --nb-sage: #4f6c69; --nb-sage-side: #2d4443;
+  --nb-clay: #7c6062; --nb-clay-side: #4c3b45;
+  --nb-blue: #4a6591; --nb-blue-side: #2e4366;
+  --nb-steel: #5e6c7e; --nb-steel-side: #3a4657;
+  --nb-roof: #323a49; --nb-roof-top: #5b6475; --nb-roof-edge: #7a879b;
+  --nb-door: #1f2736;
+  --nb-window-off: #1c2a40; --nb-window-on: #ffd083; --nb-glow: #ffb95e; --nb-tail: #e2564f;
   --nb-smoke: #94a6bb; --nb-label: #c0cfdb; --nb-cloud: #7f93a8;
-  --nb-tree: #37614f; --nb-tree-dark: #26463c; --nb-trunk: #5b514d;
-  --nb-car: #d8987b; --nb-car-1: #7ea3bd; --nb-car-2: #c9c3a8; --nb-car-3: #9bb08f;
+  --nb-tree: #3a6b57; --nb-tree-dark: #274b40; --nb-trunk: #5b514d;
+  --nb-car: #d8765f; --nb-car-1: #6f9fc7; --nb-car-2: #e8c35a; --nb-car-3: #7fb596;
   --nb-car-window: #a4c7d8;
   --nb-star: #d0e0ed; --nb-moon: #f3dfb2;
 }
@@ -367,7 +367,9 @@ code, pre, kbd, samp, .font-code { font-family: var(--font-code); font-variant-n
   border-radius: 12px;
   border: 1px solid var(--color-line);
   overflow: hidden;
-  background: linear-gradient(168deg, var(--nb-sky-top), var(--nb-sky-bottom));
+  background:
+    radial-gradient(ellipse 70% 40% at 50% 64%, color-mix(in srgb, var(--nb-sky-bottom) 80%, transparent), transparent 70%),
+    linear-gradient(180deg, var(--nb-sky-top), var(--nb-sky-bottom) 70%);
 }
 .nbhd-city::before {
   content: "";
@@ -377,7 +379,7 @@ code, pre, kbd, samp, .font-code { font-family: var(--font-code); font-variant-n
   border-radius: 50%;
   background: var(--nb-moon);
   opacity: 0.75;
-  box-shadow: 0 0 34px 10px color-mix(in srgb, var(--nb-moon) 22%, transparent);
+  box-shadow: 0 0 40px 14px color-mix(in srgb, var(--nb-moon) 30%, transparent);
   pointer-events: none;
 }
 .nbhd-city::after {

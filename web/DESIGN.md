@@ -111,7 +111,8 @@ Two animations are deliberately NOT transform-and-opacity, and both earn it:
 The Neighbourhood page is the one place the no-gradients, no-glows rule is
 suspended: it is a toy, and a glow is the whole point. The toy is an isometric
 city: one building per provider account, streets between them, and traffic that
-runs whether or not anyone is watching. The exception is fenced and carries
+runs whether or not anyone is watching. Four facade materials (sage, terracotta, glass-blue, concrete) sit on
+grass and tarmac that are painted once into a cached layer; warm windows make activity easy to find. The exception is fenced and carries
 rules of its own:
 
 - **Scoped.** Every scene colour is a `--nb-*` token under `.nbhd` in

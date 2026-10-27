@@ -105,6 +105,28 @@ function glowAt(ctx: CanvasRenderingContext2D, color: string, x: number, y: numb
   ctx.globalAlpha = prev;
 }
 
+/** Seeded speckle tile, cached per palette: grass and asphalt grain. */
+const patternCache = new Map<string, CanvasPattern | null>();
+function grain(ctx: CanvasRenderingContext2D, dark: string, light: string, seed: number, count: number): CanvasPattern | null {
+  const key = `${dark}|${light}|${seed}`;
+  if (patternCache.has(key)) return patternCache.get(key) ?? null;
+  const tile = document.createElement('canvas');
+  tile.width = 96; tile.height = 96;
+  const c = tile.getContext('2d');
+  let pattern: CanvasPattern | null = null;
+  if (c) {
+    const r = rng(seed);
+    for (let i = 0; i < count; i++) {
+      c.globalAlpha = 0.1 + r() * 0.16;
+      c.fillStyle = r() > 0.45 ? dark : light;
+      c.fillRect(Math.floor(r() * 96), Math.floor(r() * 96), 1 + Math.floor(r() * 2), 1 + Math.floor(r() * 2));
+    }
+    pattern = ctx.createPattern(tile, 'repeat');
+  }
+  patternCache.set(key, pattern);
+  return pattern;
+}
+
 const quadPath = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, d: number) => {
   ctx.beginPath();
   ctx.moveTo(isoX(x, y), isoY(x, y));
@@ -138,6 +160,7 @@ export default function CityScene({
   const peds = useRef<Ped[]>([]);
   const clock = useRef(0);
   const style = useRef<Style | null>(null);
+  const groundLayer = useRef<{ key: string; style: Style; canvas: HTMLCanvasElement } | null>(null);
   const pulsesSeen = useRef(0);
   // Requests per minute, mirrored into a ref: the street density follows the
   // real request rate, so a busy gateway visibly has a busy city.
@@ -328,6 +351,76 @@ export default function CityScene({
     if (slot) dispatch(slot, call.status >= 400);
   }), [byName, plan]);
 
+  // ── ground layer ─────────────────────────────────────────────────────────
+  const paintGround = (g: CanvasRenderingContext2D) => {
+    const s = style.current ?? readStyle(host.current ?? document.body);
+    const px = 1 / fit.scale;
+    // Land: the city sits on a plateau, so the diamond is a place, not a chart.
+    const pad = 3.2;
+    g.beginPath();
+    ([[-pad, -pad], [plan.w + pad, -pad], [plan.w + pad, plan.d + pad], [-pad, plan.d + pad]] as const)
+      .forEach(([x, y], i) => (i ? g.lineTo(isoX(x, y), isoY(x, y)) : g.moveTo(isoX(x, y), isoY(x, y))));
+    g.closePath();
+    g.fillStyle = s.land;
+    g.fill();
+
+    const turf = grain(g, s.treeDark, s.windowOn, 11, 150);
+    const tarmac = grain(g, s.shadow, s.line, 23, 90);
+    for (const b of plan.blocks) {
+      quadPath(g, b.x, b.y, b.w, b.d);
+      g.fillStyle = s.ground;
+      g.fill();
+      if (turf) { g.fillStyle = turf; g.fill(); }
+      quadPath(g, b.x + 0.16, b.y + 0.16, b.w - 0.32, b.d - 0.32);
+      g.strokeStyle = s.kerb;
+      g.globalAlpha = 0.32;
+      g.lineWidth = Math.max(0.5, px * 0.7);
+      g.stroke();
+      g.globalAlpha = 1;
+    }
+
+    // Streets: one quad per road, full length, plus lane dashes.
+    g.fillStyle = s.road;
+    for (const rx of plan.roadX) { quadPath(g, rx - 1.4, 0, 2.8, plan.d); g.fill(); }
+    for (const ry of plan.roadY) { quadPath(g, 0, ry - 1.4, plan.w, 2.8); g.fill(); }
+    if (tarmac) {
+      g.fillStyle = tarmac;
+      for (const rx of plan.roadX) { quadPath(g, rx - 1.4, 0, 2.8, plan.d); g.fill(); }
+      for (const ry of plan.roadY) { quadPath(g, 0, ry - 1.4, plan.w, 2.8); g.fill(); }
+    }
+    // Zebra crossings on every arm of every junction, one path, one fill.
+    g.fillStyle = s.line;
+    g.globalAlpha = 0.5;
+    g.beginPath();
+    const bar = (x: number, y: number, w: number, d: number) => {
+      g.moveTo(isoX(x, y), isoY(x, y)); g.lineTo(isoX(x + w, y), isoY(x + w, y));
+      g.lineTo(isoX(x + w, y + d), isoY(x + w, y + d)); g.lineTo(isoX(x, y + d), isoY(x, y + d)); g.closePath();
+    };
+    for (const rx of plan.roadX) {
+      for (const ry of plan.roadY) {
+        for (let k = -2; k <= 2; k++) {
+          const o = k * 0.52;
+          for (const e of [-1, 1]) {
+            bar(rx + o - 0.14, ry + e * 1.95 - 0.28, 0.28, 0.56);
+            bar(rx + e * 1.95 - 0.28, ry + o - 0.14, 0.56, 0.28);
+          }
+        }
+      }
+    }
+    g.fill();
+    g.globalAlpha = 1;
+    g.strokeStyle = s.line;
+    g.globalAlpha = 0.45;
+    g.lineWidth = Math.max(0.4, px * 0.8);
+    g.setLineDash([1.1, 1.9]);
+    g.beginPath();
+    for (const rx of plan.roadX) { g.moveTo(isoX(rx, 0), isoY(rx, 0)); g.lineTo(isoX(rx, plan.d), isoY(rx, plan.d)); }
+    for (const ry of plan.roadY) { g.moveTo(isoX(0, ry), isoY(0, ry)); g.lineTo(isoX(plan.w, ry), isoY(plan.w, ry)); }
+    g.stroke();
+    g.setLineDash([]);
+    g.globalAlpha = 1;
+  };
+
   // ── the frame ────────────────────────────────────────────────────────────
   const draw = (ctx: CanvasRenderingContext2D, now: number) => {
     const s = style.current ?? readStyle(host.current ?? document.body);
@@ -349,7 +442,10 @@ export default function CityScene({
       }
       ctx.lineTo(view.w, view.h);
       ctx.closePath();
-      ctx.fillStyle = color;
+      const haze = ctx.createLinearGradient(0, hz - amp, 0, view.h);
+      haze.addColorStop(0, `${color}`);
+      haze.addColorStop(1, `${s.land}`);
+      ctx.fillStyle = haze;
       ctx.fill();
     };
     band(s.hillFar, 26, 0.7);
@@ -362,41 +458,25 @@ export default function CityScene({
     const px = 1 / scale; // one CSS pixel in world units
     const heights = geometry.heights;
 
-    // Land: the city sits on a plateau, so the diamond is a place, not a chart.
-    const pad = 3.2;
-    ctx.beginPath();
-    ([[-pad, -pad], [plan.w + pad, -pad], [plan.w + pad, plan.d + pad], [-pad, plan.d + pad]] as const)
-      .forEach(([x, y], i) => (i ? ctx.lineTo(isoX(x, y), isoY(x, y)) : ctx.moveTo(isoX(x, y), isoY(x, y))));
-    ctx.closePath();
-    ctx.fillStyle = s.land;
-    ctx.fill();
-
-    for (const b of plan.blocks) {
-      quadPath(ctx, b.x, b.y, b.w, b.d);
-      ctx.fillStyle = s.ground;
-      ctx.fill();
-      quadPath(ctx, b.x + 0.16, b.y + 0.16, b.w - 0.32, b.d - 0.32);
-      ctx.strokeStyle = s.kerb;
-      ctx.globalAlpha = 0.32;
-      ctx.lineWidth = Math.max(0.5, px * 0.7);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
+    // The ground never moves, so it is painted once into an offscreen layer
+    // and blitted: textures and crossings cost nothing per frame. The key is
+    // everything that changes it: size, fit, palette and city.
+    const groundKey = `${view.w}x${view.h}@${dpr}|${scale}|${ox}|${oy}|${plan.seed}|${plan.blocks.length}`;
+    let layer = groundLayer.current;
+    if (!layer || layer.key !== groundKey || layer.style !== s) {
+      const off = layer?.canvas ?? document.createElement('canvas');
+      off.width = Math.round(view.w * dpr); off.height = Math.round(view.h * dpr);
+      const g = off.getContext('2d');
+      if (g) {
+        g.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * ox, dpr * oy);
+        paintGround(g);
+      }
+      layer = { key: groundKey, style: s, canvas: off };
+      groundLayer.current = layer;
     }
-
-    // Streets: one quad per road, full length, plus lane dashes.
-    ctx.fillStyle = s.road;
-    for (const rx of plan.roadX) { quadPath(ctx, rx - 1.4, 0, 2.8, plan.d); ctx.fill(); }
-    for (const ry of plan.roadY) { quadPath(ctx, 0, ry - 1.4, plan.w, 2.8); ctx.fill(); }
-    ctx.strokeStyle = s.line;
-    ctx.globalAlpha = 0.45;
-    ctx.lineWidth = Math.max(0.4, px * 0.8);
-    ctx.setLineDash([1.1, 1.9]);
-    ctx.beginPath();
-    for (const rx of plan.roadX) { ctx.moveTo(isoX(rx, 0), isoY(rx, 0)); ctx.lineTo(isoX(rx, plan.d), isoY(rx, plan.d)); }
-    for (const ry of plan.roadY) { ctx.moveTo(isoX(0, ry), isoY(0, ry)); ctx.lineTo(isoX(plan.w, ry), isoY(plan.w, ry)); }
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.globalAlpha = 1;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (layer.canvas.width && layer.canvas.height) ctx.drawImage(layer.canvas, 0, 0);
+    ctx.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * ox, dpr * oy);
 
     // Weather on the ground. Rain lays a sheen over the streets, and a lit
     // building throws its windows down the road in front of it at night — the
@@ -428,6 +508,15 @@ export default function CityScene({
         ctx.fillRect(fx - w2 / 2, fy, w2, tall);
         ctx.globalAlpha = 1;
       }
+    }
+    // Street lamps at every block's front corner: a post and a head.
+    ctx.lineWidth = Math.max(0.5, px * 0.9);
+    for (const b of plan.blocks) {
+      const lx = isoX(b.x + b.w + 0.35, b.y + b.d + 0.35), ly = isoY(b.x + b.w + 0.35, b.y + b.d + 0.35);
+      ctx.strokeStyle = s.roofEdge;
+      ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx, ly - 0.95 * Z); ctx.stroke();
+      ctx.fillStyle = s.night ? s.windowOn : s.roofTop;
+      ctx.beginPath(); ctx.arc(lx, ly - 0.98 * Z, Math.max(0.9, px * 1.3), 0, Math.PI * 2); ctx.fill();
     }
     if (s.night) {
       for (const slot of plan.slots) {
@@ -557,6 +646,21 @@ export default function CityScene({
       ctx.transform(bx / width, by / width, 0, 1, ox2, oy2);
       ctx.fillStyle = fill;
       ctx.fillRect(0, 0, width, zTop);
+      // Light falls from the sky: a pale top, a dark base where the street
+      // shades the wall, a cornice course under the roof and a plinth at grade.
+      const g = ctx.createLinearGradient(0, 0, 0, zTop);
+      g.addColorStop(0, 'rgba(255,255,255,0.2)');
+      g.addColorStop(0.35, 'rgba(255,255,255,0)');
+      g.addColorStop(1, `${s.shadow}66`);
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, width, zTop);
+      ctx.fillStyle = s.roofTop;
+      ctx.globalAlpha = 0.5;
+      ctx.fillRect(0, 0, width, Math.max(1.2, zTop * 0.035));
+      ctx.fillStyle = s.shadow;
+      ctx.globalAlpha = 0.3;
+      ctx.fillRect(0, zTop - Math.max(1.2, zTop * 0.04), width, Math.max(1.2, zTop * 0.04));
+      ctx.globalAlpha = 1;
     };
 
     face(pC[0], pC[1] - zTop, pB[0] - pC[0], pB[1] - pC[1], (slot.d * TU) / 2, side);
@@ -566,6 +670,13 @@ export default function CityScene({
     face(pD[0], pD[1] - zTop, pC[0] - pD[0], pC[1] - pD[1], (slot.w * TU) / 2, wall);
     windowsIn(ctx, s, slot, b, (slot.w * TU) / 2, zTop, height, now, 2, px);
     ctx.restore();
+
+    // The vertical corner catches the light.
+    ctx.strokeStyle = '#ffffff';
+    ctx.globalAlpha = s.night ? 0.14 : 0.45;
+    ctx.lineWidth = Math.max(0.5, px);
+    ctx.beginPath(); ctx.moveTo(pC[0], pC[1]); ctx.lineTo(pC[0], pC[1] - zTop); ctx.stroke();
+    ctx.globalAlpha = 1;
 
     // Roof slab.
     const roof: [number, number][] = [
@@ -582,6 +693,18 @@ export default function CityScene({
     ctx.strokeStyle = s.roofEdge;
     ctx.lineWidth = Math.max(0.4, px * 0.8);
     ctx.stroke();
+    // Parapet: an inset deck a shade lighter than the rim.
+    const rcx = (roof[0][0] + roof[2][0]) / 2, rcy = (roof[0][1] + roof[2][1]) / 2;
+    ctx.beginPath();
+    roof.forEach(([x, y], i) => {
+      const ix = rcx + (x - rcx) * 0.82, iy = rcy + (y - rcy) * 0.82;
+      if (i) ctx.lineTo(ix, iy); else ctx.moveTo(ix, iy);
+    });
+    ctx.closePath();
+    ctx.fillStyle = s.roofTop;
+    ctx.globalAlpha = 0.42;
+    ctx.fill();
+    ctx.globalAlpha = 1;
 
     // Roof plant: air-handling boxes and, on a tall building, an antenna with
     // a beacon that blinks at night.
@@ -713,6 +836,12 @@ export default function CityScene({
           ctx.globalAlpha = dark ? 0.45 : 0.78;
         }
         ctx.fillRect(x, y, winW, winH);
+        if (!lit && !dark) {
+          // Sky reflected in the glass, upper half only.
+          ctx.fillStyle = '#ffffff';
+          ctx.globalAlpha = s.night ? 0.05 : 0.22;
+          ctx.fillRect(x, y, winW, winH * 0.45);
+        }
       }
     }
     ctx.globalAlpha = 1;
@@ -732,90 +861,81 @@ export default function CityScene({
     }
   }
 
+  // Street furniture shares one scale with the buildings: a height unit is one
+  // storey (~3 m, Z px), so a car is ~1.5 units long and 0.5 high, a person
+  // ~0.55 high and a street tree ~2.2.
+  const pt = (x: number, y: number, z = 0): [number, number] => [isoX(x, y), isoY(x, y, z)];
+  const poly = (ctx: CanvasRenderingContext2D, pts: [number, number][], fill: string, shadeA = 0, shadeC = '') => {
+    ctx.beginPath();
+    pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
+    if (shadeA) { ctx.globalAlpha = shadeA; ctx.fillStyle = shadeC; ctx.fill(); ctx.globalAlpha = 1; }
+  };
+  /** An axis-aligned box in world space: top, the y=y1 wall and the x=x1 wall. */
+  const box = (
+    ctx: CanvasRenderingContext2D, s: Style, x0: number, y0: number, x1: number, y1: number,
+    z0: number, z1: number, color: string, glass = false,
+  ) => {
+    const wall = glass ? s.carWindow : color;
+    poly(ctx, [pt(x0, y1, z0), pt(x1, y1, z0), pt(x1, y1, z1), pt(x0, y1, z1)], wall, glass ? 0.25 : 0.08, s.shadow);
+    poly(ctx, [pt(x1, y0, z0), pt(x1, y1, z0), pt(x1, y1, z1), pt(x1, y0, z1)], wall, glass ? 0.5 : 0.32, s.shadow);
+    poly(ctx, [pt(x0, y0, z1), pt(x1, y0, z1), pt(x1, y1, z1), pt(x0, y1, z1)], color, 0.16, '#ffffff');
+  };
+
   function drawCar(ctx: CanvasRenderingContext2D, s: Style, car: Car, px: number) {
     const [x, y] = carPoint(car);
-    const sx = isoX(x, y), sy = isoY(x, y);
-    const dirX = car.axis === 0 ? car.dir : 0;
-    const dirY = car.axis === 1 ? car.dir : 0;
-    const bx = dirX * (TU / 2) - dirY * (TU / 2);
-    const by = dirX * (TU / 4) + dirY * (TU / 4);
-    const len = Math.hypot(bx, by) || 1;
-    const ux = bx / len, uy = by / len;
-    const long = 0.92 * TU, wide = 0.44 * TU;
     const body = car.taxi ? s.car[2] : s.car[car.tint];
-    const taxi = car.taxi;
+    const along = car.axis === 0;
+    const L = 0.95, W = 0.4; // half length / half width, world units
+    const hx = along ? L : W, hy = along ? W : L;
+    const x0 = x - hx, x1 = x + hx, y0 = y - hy, y1 = y + hy;
 
-    // Drawing the car in its own rotated frame keeps every part axis-aligned:
-    // silhouette, cabin, wheels and lights are plain rects and arcs.
-    ctx.save();
-    ctx.translate(sx, sy);
-    ctx.rotate(Math.atan2(uy, ux));
-
-    ctx.globalAlpha = 0.26;
-    ctx.beginPath();
-    ctx.ellipse(0, 2 * px, long * 1.06, wide * 1.16, 0, 0, Math.PI * 2);
-    ctx.fillStyle = s.shadow;
-    ctx.fill();
+    ctx.globalAlpha = 0.3;
+    poly(ctx, [pt(x0 + 0.1, y0 + 0.1), pt(x1 + 0.1, y0 + 0.1), pt(x1 + 0.1, y1 + 0.1), pt(x0 + 0.1, y1 + 0.1)], s.shadow);
     ctx.globalAlpha = 1;
 
-    // Wheels first, so the body sits over them: dark, and just proud of the
-    // silhouette, so they read even at city scale.
+    box(ctx, s, x0, y0, x1, y1, 0.07, 0.3, body);
+    // Cabin: shorter than the body and set back from the nose.
+    const sh = L * 0.34, back = L * 0.1, c = car.dir;
+    const cx0 = along ? x - sh + (c > 0 ? -back : back) : x0 + 0.06;
+    const cx1 = along ? x + sh + (c > 0 ? -back : back) : x1 - 0.06;
+    const cy0 = along ? y0 + 0.06 : y - sh + (c > 0 ? -back : back);
+    const cy1 = along ? y1 - 0.06 : y + sh + (c > 0 ? -back : back);
+    box(ctx, s, cx0, cy0, cx1, cy1, 0.3, 0.5, body, true);
+    poly(ctx, [pt(cx0, cy0, 0.5), pt(cx1, cy0, 0.5), pt(cx1, cy1, 0.5), pt(cx0, cy1, 0.5)], body, 0.16, '#ffffff');
+
+    // Wheels: dark pads under the body on the two visible sides.
     ctx.fillStyle = s.ink;
-    ctx.globalAlpha = 0.82;
-    for (const wx of [-long * 0.52, long * 0.52]) {
-      for (const wy of [-wide * 1.04, wide * 1.04]) {
-        ctx.fillRect(wx - long * 0.12, wy - wide * 0.3, long * 0.24, wide * 0.6);
-      }
+    ctx.globalAlpha = 0.7;
+    for (const t of [-0.5, 0.5]) {
+      const wx = along ? x + t * L * 1.2 : x1, wy = along ? y1 : y + t * L * 1.2;
+      const [qx, qy] = pt(wx, wy, 0.1);
+      ctx.beginPath(); ctx.ellipse(qx, qy, 2.3, 2.3, 0, 0, Math.PI * 2); ctx.fill();
     }
     ctx.globalAlpha = 1;
 
-    // Silhouette: a nose that tapers, a tail that does not.
-    ctx.beginPath();
-    ctx.moveTo(-long * 0.94, -wide * 0.82);
-    ctx.lineTo(long * 0.66, -wide);
-    ctx.quadraticCurveTo(long * 1.04, -wide * 0.86, long * 1.04, 0);
-    ctx.quadraticCurveTo(long * 1.04, wide * 0.86, long * 0.66, wide);
-    ctx.lineTo(-long * 0.94, wide * 0.82);
-    ctx.quadraticCurveTo(-long * 1.06, 0, -long * 0.94, -wide * 0.82);
-    ctx.closePath();
-    ctx.fillStyle = body;
-    ctx.fill();
-
-    // Cabin: a solid light roof with dark glass in front of it and behind it,
-    // so the car reads as a car at city scale and not as a coloured bar.
-    ctx.fillStyle = s.carWindow;
-    ctx.globalAlpha = 0.92;
-    ctx.fillRect(-long * 0.3, -wide * 0.62, long * 0.56, wide * 1.24);
-    ctx.globalAlpha = 0.78;
-    ctx.fillStyle = s.ink;
-    ctx.fillRect(long * 0.26, -wide * 0.56, long * 0.14, wide * 1.12);
-    ctx.fillRect(-long * 0.43, -wide * 0.52, long * 0.11, wide * 1.04);
-    ctx.globalAlpha = 1;
-
-    // Lights: headlamps at the nose, tail lamps at the back. Night adds the
-    // glow they throw on the road.
-    if (s.night) {
-      glowAt(ctx, s.glow, long * 1.15, 0, (taxi ? 15 : 11) * px, 0.5);
-      ctx.fillStyle = s.windowOn;
-      for (const wy of [-wide * 0.55, wide * 0.55]) ctx.fillRect(long * 0.86, wy - wide * 0.16, long * 0.16, wide * 0.32);
-    }
+    // Lamps at both ends, on the nose and tail faces' corners.
+    const nose = along ? [x + c * hx, y + hy] : [x + hx, y + c * hy];
+    const tail = along ? [x - c * hx, y + hy] : [x + hx, y - c * hy];
+    const [nx, ny] = pt(nose[0], nose[1], 0.2);
+    const [tx, ty] = pt(tail[0], tail[1], 0.2);
+    if (s.night) glowAt(ctx, s.glow, nx, ny, 9 * px, 0.35);
+    ctx.fillStyle = s.night ? s.windowOn : s.carWindow;
+    ctx.fillRect(nx - 1, ny - 1, 2, 2);
     ctx.fillStyle = s.tail;
-    ctx.globalAlpha = s.night ? 0.92 : 0.55;
-    for (const wy of [-wide * 0.58, wide * 0.58]) ctx.fillRect(-long * 1.02, wy - wide * 0.15, long * 0.13, wide * 0.3);
-    ctx.globalAlpha = 1;
+    ctx.fillRect(tx - 1, ty - 1, 2, 2);
 
-    ctx.restore();
-
-    if (taxi) {
-      // The dispatched car wears its roof sign, drawn in screen space above the
-      // car: the ground frame cannot express "up". A request is recognisable
-      // even in daylight.
+    if (car.taxi) {
+      // The dispatched car wears a lit roof sign: a request is recognisable by day.
+      const [rx, ry] = pt(x, y, 0.62);
       ctx.fillStyle = s.windowOn;
-      ctx.fillRect(sx - long * 0.24, sy - wide * 2.05, long * 0.48, Math.max(1, px * 1.5));
+      ctx.fillRect(rx - 3, ry - 1.5, 6, 3);
     }
   }
 
-  /** A person on the pavement: legs that swing, and an umbrella in the rain. */
+  /** A person on the pavement: ~0.55 of a storey, legs that swing, umbrella in rain. */
   function drawPed(
     ctx: CanvasRenderingContext2D, s: Style, p: Ped, at: [number, number], px: number,
   ) {
@@ -823,81 +943,68 @@ export default function CityScene({
     const sx = isoX(x, y), sy = isoY(x, y);
     const step = Math.sin(clock.current * 7 + p.phase);
     const skin = s.car[p.tint];
-    const h = 0.92 * TU; // head height in screen pixels: small beside the cars
+    const h = 0.66 * Z; // 1.7 m on a 3 m storey, nudged up to stay legible
 
-    ctx.globalAlpha = 0.22;
+    ctx.globalAlpha = 0.25;
     ctx.beginPath();
-    ctx.ellipse(sx + px, sy + px * 0.4, h * 0.34, h * 0.13, 0, 0, Math.PI * 2);
+    ctx.ellipse(sx + 1, sy + 0.5, h * 0.3, h * 0.1, 0, 0, Math.PI * 2);
     ctx.fillStyle = s.shadow;
     ctx.fill();
     ctx.globalAlpha = 1;
 
-    // Legs: two strokes swinging against each other, hips at 45% of the height.
-    const hipY = sy - h * 0.45;
+    const hip = sy - h * 0.45;
     ctx.strokeStyle = s.ink;
-    ctx.globalAlpha = 0.72;
-    ctx.lineWidth = Math.max(0.7, px * 1.1);
+    ctx.globalAlpha = 0.75;
+    ctx.lineWidth = Math.max(0.6, px * 0.9);
     ctx.beginPath();
-    ctx.moveTo(sx, hipY);
-    ctx.lineTo(sx + step * h * 0.16, sy);
-    ctx.moveTo(sx, hipY);
-    ctx.lineTo(sx - step * h * 0.16, sy);
+    ctx.moveTo(sx, hip); ctx.lineTo(sx + step * h * 0.14, sy);
+    ctx.moveTo(sx, hip); ctx.lineTo(sx - step * h * 0.14, sy);
     ctx.stroke();
-
-    // Body and head.
     ctx.globalAlpha = 1;
     ctx.fillStyle = skin;
-    ctx.fillRect(sx - h * 0.17, sy - h * 0.92, h * 0.34, h * 0.5);
+    ctx.fillRect(sx - h * 0.15, sy - h * 0.86, h * 0.3, h * 0.44);
     ctx.beginPath();
-    ctx.arc(sx, sy - h * 1.02, h * 0.17, 0, Math.PI * 2);
+    ctx.arc(sx, sy - h * 0.94, h * 0.12, 0, Math.PI * 2);
     ctx.fill();
 
-    // One arm, swinging the other way to the legs.
-    ctx.strokeStyle = skin;
-    ctx.lineWidth = Math.max(0.7, px * 1.2);
-    ctx.beginPath();
-    ctx.moveTo(sx + h * 0.16, sy - h * 0.82);
-    ctx.lineTo(sx + h * 0.16 - step * h * 0.14, sy - h * 0.45);
-    ctx.stroke();
-
-    // Rain comes down on everyone: an umbrella, opened over the head.
     if (weather.current.rain) {
       ctx.fillStyle = s.bad;
-      ctx.globalAlpha = 0.55;
+      ctx.globalAlpha = 0.7;
       ctx.beginPath();
-      ctx.arc(sx, sy - h * 1.2, h * 0.3, Math.PI, 0);
+      ctx.arc(sx, sy - h * 1.02, h * 0.34, Math.PI, 0);
       ctx.closePath();
       ctx.fill();
       ctx.globalAlpha = 1;
-      ctx.strokeStyle = s.ink;
-      ctx.lineWidth = Math.max(0.4, px * 0.7);
-      ctx.beginPath();
-      ctx.moveTo(sx, sy - h * 1.2);
-      ctx.lineTo(sx, sy - h * 1.02);
-      ctx.stroke();
     }
-    ctx.globalAlpha = 1;
   }
 
-  function drawTree(ctx: CanvasRenderingContext2D, s: Style, t: { x: number; y: number; seed: number }, px: number) {
+  /** A street tree: ~2.2 storeys tall with a layered canopy. */
+  function drawTree(ctx: CanvasRenderingContext2D, s: Style, t: { x: number; y: number; seed: number }, _px: number) {
     const sx = isoX(t.x, t.y), sy = isoY(t.x, t.y);
-    const r = 2.2 + (t.seed % 3) * 0.5;
-    ctx.globalAlpha = 0.24;
+    const size = 0.85 + (t.seed % 4) * 0.12;
+    const r = 0.42 * Z * size;
+    const trunkH = 0.85 * Z * size;
+    ctx.globalAlpha = 0.25;
     ctx.beginPath();
-    ctx.ellipse(sx + r * 0.4, sy + r * 0.25, r * 1.5, r * 0.55, 0, 0, Math.PI * 2);
+    ctx.ellipse(sx + r * 0.35, sy + r * 0.2, r * 1.2, r * 0.45, 0, 0, Math.PI * 2);
     ctx.fillStyle = s.shadow;
     ctx.fill();
     ctx.globalAlpha = 1;
     ctx.fillStyle = s.trunk;
-    ctx.fillRect(sx - Math.max(0.4, px * 0.6), sy - r * 1.9, Math.max(0.9, px * 1.2), r * 1.9);
-    ctx.beginPath();
-    ctx.arc(sx, sy - r * 2.3, r, 0, Math.PI * 2);
-    ctx.fillStyle = s.treeDark;
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(sx - r * 0.35, sy - r * 2.7, r * 0.68, 0, Math.PI * 2);
-    ctx.fillStyle = s.tree;
-    ctx.fill();
+    ctx.fillRect(sx - Math.max(0.8, r * 0.1), sy - trunkH, Math.max(1.6, r * 0.2), trunkH);
+    const blob = (dx: number, dy: number, rr: number, color: string, a = 1) => {
+      ctx.beginPath();
+      ctx.arc(sx + dx * r, sy - trunkH - dy * r, rr * r, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.globalAlpha = a;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    };
+    blob(0, 0.2, 1, s.treeDark);
+    blob(0.6, 0.0, 0.7, s.treeDark);
+    blob(-0.55, 0.7, 0.8, s.tree);
+    blob(0.25, 1.0, 0.7, s.tree);
+    blob(-0.45, 1.25, 0.28, '#ffffff', s.night ? 0.05 : 0.2);
   }
 
   /** The plane in the sky: screen-space scenery with a fading contrail. */

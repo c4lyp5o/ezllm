@@ -102,6 +102,11 @@ function HealthPills({ o }: { o: Overview }) {
           {nfmt(h.dropped_rows)} ledger rows dropped
         </Chip>
       )}
+      {(h.lost_rows ?? 0) > 0 && (
+        <Chip tone="warn" title="Ledger writes failed after retry; usage and budgets omit these calls. Check server logs and storage.">
+          {nfmt(h.lost_rows ?? 0)} ledger rows lost
+        </Chip>
+      )}
       {/* Recorded but not metered: the call is in the ledger, but model caps
           and token budgets did not count it, so they read low by this much. */}
       {(h.unmetered_rows ?? 0) > 0 && (

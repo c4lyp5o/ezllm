@@ -38,6 +38,7 @@ type geminiWebBridge struct {
 	mu      sync.Mutex
 	clients map[int64]*geminiwebClientEntry
 	now     func() time.Time // tests
+	rotate  func(context.Context, *geminiweb.Client) (string, error)
 	// genLocks serializes per-account use of a cached client. The client
 	// carries mutable session/cookie state (and rotates them) and is not
 	// safe for concurrent use, so two chats on one web account must not
@@ -63,7 +64,7 @@ const (
 // newGeminiWebBridge builds the bridge. geminiBase empty = production
 // upstream; tests pass a mock origin.
 func newGeminiWebBridge(db *store.DB, geminiBase string) *geminiWebBridge {
-	return &geminiWebBridge{db: db, geminiBase: geminiBase, clients: map[int64]*geminiwebClientEntry{}, genLocks: map[int64]*sync.Mutex{}, now: time.Now}
+	return &geminiWebBridge{db: db, geminiBase: geminiBase, clients: map[int64]*geminiwebClientEntry{}, genLocks: map[int64]*sync.Mutex{}, now: time.Now, rotate: func(ctx context.Context, c *geminiweb.Client) (string, error) { return c.Rotate(ctx) }}
 }
 
 // lockFor returns the per-account generation mutex, creating it on first use.
@@ -106,6 +107,24 @@ func (b *geminiWebBridge) clientFor(ctx context.Context, acctID int64, stampedKe
 		}
 		key, keyID = pick.Plaintext, pick.ID
 	}
+	if stampedKey != "" {
+		// A calibration key need not be stored. Only associate a row when its
+		// actual credential matches, so probing cannot overwrite another key.
+		keys, err := b.db.ListKeys(ctx, acctID)
+		if err != nil {
+			return nil, err
+		}
+		for _, k := range keys {
+			_, plaintext, err := b.db.KeyForTest(ctx, k.ID)
+			if err != nil {
+				return nil, err
+			}
+			if plaintext == stampedKey {
+				keyID = k.ID
+				break
+			}
+		}
+	}
 	if strings.TrimSpace(key) == "" {
 		return nil, errors.New("gemini-web bridge: empty credential")
 	}
@@ -141,7 +160,7 @@ func (b *geminiWebBridge) maybeRotate(ctx context.Context, entry *geminiwebClien
 	oldKey := entry.key
 	b.mu.Unlock()
 
-	newKey, err := entry.client.Rotate(ctx)
+	newKey, err := b.rotate(ctx, entry.client)
 	if err != nil {
 		// Best-effort: leave the client usable with its previous cookie.
 		b.mu.Lock()
@@ -175,12 +194,19 @@ func (b *geminiWebBridge) maybeRotate(ctx context.Context, entry *geminiwebClien
 		b.mu.Unlock()
 		return
 	}
+	if keyID != 0 {
+		if err := b.db.UpdateKeyPlain(ctx, keyID, newKey); err != nil {
+			// Keep the old cache key and retry on the next request. The client
+			// still has its rotated cookie for this request.
+			b.mu.Lock()
+			entry.rotatedAt = time.Time{}
+			b.mu.Unlock()
+			return
+		}
+	}
 	b.mu.Lock()
 	entry.key = newKey
 	b.mu.Unlock()
-	if keyID != 0 {
-		_ = b.db.UpdateKeyPlain(ctx, keyID, newKey)
-	}
 }
 
 // models returns the account's catalog, cached for the TTL.

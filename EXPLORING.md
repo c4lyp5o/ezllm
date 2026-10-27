@@ -537,6 +537,18 @@ won the race (9 failures in 50 runs of `TestClientCancelStopsTheFailoverLoop`;
 0 in 200 after). The v1.3.2 landmark below stopped a cancellation from *parking*
 the hop; this closes the other half. Seam: `internal/proxy/client_cancel_test.go`.
 
+### v1.3.3 — cancellation outranks a parked fallback ✅ (2026-10-27)
+
+`ForwardCandidates`' loop head now discards a parked fallback response when the
+context is already cancelled and answers from the error path. Before, the context
+check only recorded the error when NO response was parked, so a hop that had
+answered a failover status was committed after the caller left — `commit` wrote
+that 503 and returned nil, so the cancellation reached neither the server nor the
+ledger. Whether it happened depended on whether the hop's transport or its 503
+won the race (9 failures in 50 runs of `TestClientCancelStopsTheFailoverLoop`;
+0 in 200 after). The v1.3.2 landmark below stopped a cancellation from *parking*
+the hop; this closes the other half. Seam: `internal/proxy/client_cancel_test.go`.
+
 ### v1.3.2 — five fixes the ledger found, and a dead-code pass ✅ (2026-10-27)
 
 None of these came from review; each came from a query over `calls`. Read them as

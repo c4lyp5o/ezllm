@@ -59,6 +59,18 @@ Choose one way to start ezllm, then follow **Set up the dashboard** below:
   can run `make test-short` to check the functional suite; a test run is not
   required to start the server.
 
+No Go toolchain? [docs/install-binary.md](docs/install-binary.md) covers the
+released binaries (Linux, macOS, Windows): download, checksum, `config.yaml`,
+and running one as a systemd unit or a launchd agent.
+
+There is no default dashboard password. On first boot the server prints an
+ezllm banner with a one-time **setup code**, and the dashboard at `/` shows
+only a set-password page that asks for it. The code changes on every restart
+until setup is done. To skip the page, set `EZLLM_DASHBOARD_PASSWORD` (or
+`EZLLM_DASHBOARD_PASSWORD_FILE`) before the first boot. Add provider accounts and
+keys from the Providers page — keys are validated by a live probe chain
+(catalog → auth → quota → inference → protocol), never by format checks.
+
 ### Docker
 
 With Docker installed, clone this repository and run the published image:

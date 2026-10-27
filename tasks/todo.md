@@ -1,5 +1,9 @@
 # Todo: claude-bridge M2 — tool calls on claude-sub
 
+**Historical checklist:** The implementation shipped. Unchecked operator items below
+are not evidence of current deployment or configuration; verify them on the live
+instance before acting.
+
 Plan: [plan.md](plan.md) · Spec: [SPEC.md](../SPEC.md)
 
 Focused test command used below: `go test -short -count=1 ./internal/claudebridge/ ./cmd/ezllm/`
@@ -166,7 +170,7 @@ and cap notes). Add the CHANGELOG milestone. Bump `VERSION.md` `Current:` and
 **Acceptance criteria:**
 - [x] `version_test.go` passes; M2 lands under v0.0.21 per VERSION.md's one-version-per-date rule
 - [x] No stale markers in the touched `*.md` files; `file.go:NN` landmarks re-verified
-- [x] SPEC.md marked implemented, awaiting deploy
+- [x] SPEC.md marked implemented at the time; deployment was then pending
 
 **Verification:**
 - [x] Tests pass: `go test -short -count=1 ./internal/server/`

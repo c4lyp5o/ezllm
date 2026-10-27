@@ -7,16 +7,19 @@ people who don't know them yet.
 ## Workflow
 
 ```bash
-make check        # gofmt + go vet + full test suite + build — run before every commit
-make test-short   # functional suite only (see "Memory" below)
+make test-short   # local functional gate, before every commit
 make test-quiet   # test-short pinned to two cores at low priority, one package at a time
 ```
 
-On a shared or desktop machine use `make test-quiet`; CI runs the full suite.
+Run Go tests with `-short` on this machine, including focused package tests.
+Do not run `make check`, `make test`, `make test-race`, or `make perf` locally.
+CI separately runs the full suite. Run `go vet ./...` and `make build` as
+appropriate for code changes.
 
 - **gofmt is a hard gate.** CI rejects the build if `gofmt -l cmd internal`
   prints anything. `make fmt` fixes it.
-- **`go test` runs with `-count=1 -timeout 15m`** (mirrors CI). Do not
+- **Avoid cached test results.** `make test-short` uses `-count=1`; CI also
+  sets `-timeout 15m`. Do not
   "verify" from cached results — cached passes have masked real changes here
   before.
 - **Web changes:** run `npm run build` inside `web/`. The `web/dist/` output
@@ -46,7 +49,7 @@ On a shared or desktop machine use `make test-quiet`; CI runs the full suite.
 Go requires `_test.go` files to live in the **same package directory** as the
 code they test (in-package tests reach unexported identifiers; the toolchain
 will not pick up test files from a separate tree). Moving them would break
-`go test ./...`. The `tests/` folder therefore holds only the *external*
+`go test -short ./...`. The `tests/` folder therefore holds only the *external*
 proof scripts, which are not part of the Go build. This is a toolchain
 constraint, not a preference.
 
@@ -77,9 +80,9 @@ Known, measured (2026-10-17):
 - In a **4 GiB memory cgroup** (e.g. a Hermes worker scope), that peak is an
   OOM kill: `server.test` dies at ~3.98 GiB anon-rss. The machine's free RAM
   is irrelevant — the cgroup ceiling is what kills it.
-- **Use `make test-short` there.** It skips the percentile/retained-memory
-  harnesses (`testing.Short()`), runs every functional test, and peaks at
-  ~0.18 GiB. Full-suite runs belong on uncapped shells or in CI.
+- **Use `make test-short` locally.** It skips the percentile/retained-memory
+  harnesses (`testing.Short()`), runs the functional suite, and peaks at
+  ~0.18 GiB. CI runs the full suite separately.
 
 ## Known issues / open threads
 

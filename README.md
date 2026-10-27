@@ -10,10 +10,6 @@ in the same binary.
 [![Tests](https://github.com/c4lyp5o/ezllm/actions/workflows/test.yml/badge.svg)](https://github.com/c4lyp5o/ezllm/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**Status: shipped.** Every image publish is CI-gated (gofmt · vet · full test
-suite · web build). `GET /healthz` reports the running release version — see
-[VERSION.md](VERSION.md) for the release history.
-
 ---
 
 ## Why ezllm
@@ -45,54 +41,115 @@ suite · web build). `GET /healthz` reports the running release version — see
 
 ## Quick start
 
-Requires **Go 1.27+**. SQLite is pure Go (`modernc.org/sqlite`), so
-`CGO_ENABLED=0` static builds work out of the box.
+Choose one way to start ezllm, then follow **Set up the dashboard** below:
 
-```bash
-git clone https://github.com/c4lyp5o/ezllm.git && cd ezllm
-make check                                 # fmt + vet + tests + build
-cp config.example.yaml config.yaml         # provider metadata only —
-                                           # credentials are added in the dashboard
-make run                                   # http://127.0.0.1:20129
-```
+- **Released binary:** follow the [installation guide](docs/install-binary.md)
+  for Linux, macOS, or Windows. No Go installation is needed.
+- **Docker:** use the commands below from a checkout of this repository.
+- **From source:** install Go 1.27+, then run:
 
-No Go toolchain? [docs/install-binary.md](docs/install-binary.md) covers the
-released binaries (Linux, macOS, Windows): download, checksum, `config.yaml`,
-and running one as a systemd unit or a launchd agent.
+  ```bash
+  git clone https://github.com/c4lyp5o/ezllm.git
+  cd ezllm
+  cp config.example.yaml config.yaml
+  make run
+  ```
 
-There is no default dashboard password. On first boot the server prints an
-ezllm banner with a one-time **setup code**, and the dashboard at `/` shows
-only a set-password page that asks for it. The code changes on every restart
-until setup is done. To skip the page, set `EZLLM_DASHBOARD_PASSWORD` (or
-`EZLLM_DASHBOARD_PASSWORD_FILE`) before the first boot. Add provider accounts and
-keys from the Providers page — keys are validated by a live probe chain
-(catalog → auth → quota → inference → protocol), never by format checks.
+  Keep the terminal open while ezllm runs. Press Ctrl+C to stop it. Developers
+  can run `make test-short` to check the functional suite; a test run is not
+  required to start the server.
 
 ### Docker
 
-```bash
-docker build -t ezllm .                    # distroless, static, non-root
-docker run -p 20129:20129 -v ./data:/data \
-  -e EZLLM_ADDR=0.0.0.0:20129 ezllm
-docker logs ezllm                          # first boot: the setup code
-```
-
-On first boot the dashboard asks for the setup code printed in the
-container log. To skip setup, pass the first password instead, ideally as a
-secret file: `-e EZLLM_DASHBOARD_PASSWORD_FILE=/run/secrets/ezllm-dashboard`.
-
-Or use the published image (`ghcr.io/c4lyp5o/ezllm:latest`) with compose:
+With Docker installed, clone this repository and run the published image:
 
 ```bash
-cp compose.example.yml compose.yml         # gitignored: your paths and labels
-docker compose up -d
+git clone https://github.com/c4lyp5o/ezllm.git
+cd ezllm
+cp config.example.yaml config.yaml
+mkdir -p data
+docker run -d --name ezllm --user "$(id -u):$(id -g)" \
+  -p 127.0.0.1:20129:20129 -v "$(pwd)/data:/data" \
+  -v "$(pwd)/config.yaml:/app/config.yaml:ro" \
+  -e EZLLM_MASTER_KEY_FILE=/data/ezllm-master.key \
+  ghcr.io/c4lyp5o/ezllm:latest
+docker logs ezllm
 ```
 
-[compose.example.yml](compose.example.yml) lists every environment variable
-with its default, and the bridge mounts commented out. Behind a reverse proxy,
-add its network and labels to your copy and set `EZLLM_TRUSTED_PROXIES`;
-`/admin` is public there too, so keep the dashboard password long and put a
-per-source rate limit on `/admin/login` and `/admin/setup`.
+These commands use a shell on Linux or macOS. The data directory stores the
+SQLite database and master key across container restarts. Keep it private and
+back up both together; see the [master key runbook](docs/master-key-runbook.md).
+To stop the container, run `docker stop ezllm`; to start it again, run
+`docker start ezllm`.
+
+Alternatively, use Docker Compose from the repository directory:
+
+```bash
+cp config.example.yaml config.yaml
+cp compose.example.yml compose.yml
+mkdir -p data
+docker compose up -d --no-build
+docker compose logs ezllm
+```
+
+The example runs as UID and GID 1000 by default. If those do not match the
+owner of `data`, set `UID` and `GID` in your Compose environment so the
+container can write to that directory. See [compose.example.yml](compose.example.yml)
+for deployment options. The Compose example publishes the port on all host
+interfaces; restrict it or configure a reverse proxy as appropriate for your host.
+
+### Set up the dashboard
+
+1. Open [http://127.0.0.1:20129](http://127.0.0.1:20129) on the machine
+   running ezllm. Find the one-time setup code in the server output, or in
+   `docker logs ezllm` for Docker. Enter it and choose a dashboard password.
+   The code changes on restart until setup is complete.
+2. In **Providers**, choose **Add provider** and enter your provider account
+   and API key. The dashboard tests the key and discovers available models.
+   These probes can make inference requests and may incur provider charges.
+3. In **Connect**, under **Create an API key**, enter a name and choose **Inference only**, then select **Create key**. Copy it immediately: ezllm shows the full key only once.
+   This is the key your applications use to call ezllm; it is separate from
+   your provider's key.
+4. Choose an available model from Connect and copy its full ID, including the
+   account namespace, such as `myprovider/model-name`. Connect also shows the
+   base URL and environment variables for your client.
+
+To check the gateway from another terminal, substitute your new ezllm key:
+
+```bash
+curl http://127.0.0.1:20129/v1/models \
+  -H "Authorization: Bearer YOUR_EZLLM_KEY"
+```
+
+A successful response contains a `data` list of model IDs. Use one of those IDs
+in a chat request; see the [API reference](docs/API.md). If the list is empty,
+check the provider key and model discovery in Providers. A `401` means the
+client key is missing, invalid, or disabled. `GET /healthz` is available
+without a key for a basic liveness check.
+
+There is no default dashboard password. To set one before first boot instead of
+using the setup code, configure `EZLLM_DASHBOARD_PASSWORD` or
+`EZLLM_DASHBOARD_PASSWORD_FILE`. Behind a reverse proxy, set
+`EZLLM_TRUSTED_PROXIES` and apply a per-source rate limit to `/admin/login`
+and `/admin/setup`; see [environment variables](docs/environment.md).
+
+## Use a subscription bridge
+
+A bridge lets ezllm route requests through an official CLI signed in to a
+subscription. Choose the guide for your account:
+
+| Account | Guide | Before you start |
+|---|---|---|
+| Claude Pro/Max | [Claude bridge](docs/claude-bridge-runbook.md) | Install Claude Code and sign in with a separate CLI profile. |
+| ChatGPT Plus/Pro | [Codex bridge](docs/codex-bridge-runbook.md) | Linux; client tools require Landlock for the default protection. |
+| Google Antigravity | [Antigravity bridge](docs/agy-bridge-runbook.md) | Linux; text only, with no client tools or image input. |
+
+The guides use Docker Compose and explain CLI installation, separate sign-in,
+mounts, and the dashboard preset. Start ezllm and finish dashboard setup first.
+Each bridge is optional and disabled by default. Enabling one with missing
+prerequisites prevents ezllm from starting; check `docker compose logs ezllm`
+if startup fails. Subscription requests and validation probes consume plan
+quota. See the guides for model and tool limitations and how to set Rules.
 
 ## API surface
 
@@ -249,10 +306,7 @@ and backed up.
 ## Development
 
 ```bash
-make check       # gofmt + go vet + full test suite + build
-make test-short  # functional suite only — for memory-constrained machines
-make bench       # phase benchmarks with -benchmem
-make perf        # latency percentile harness + retained-memory measurements
+make test-short  # local functional suite; always use -short for Go tests
 make verify      # acceptance check against a live ledger
 ```
 
@@ -267,10 +321,16 @@ Repository layout:
 - `docs/` — design records and runbooks; `EXPLORING.md` is the codebase tour
 - `VERSION.md` — release history (semantic versioning)
 
+The local test suite must always use `-short`; the full suite and performance
+harnesses can choke this machine. CI runs the full suite.
+
 CI: [test.yml](.github/workflows/test.yml) gates
 [docker-publish.yml](.github/workflows/docker-publish.yml) and
 [release.yml](.github/workflows/release.yml) — a red suite never produces
-an image or a release asset.
+an image or a release asset. CI builds the web sources but does not verify that
+the committed `web/dist/` matches them; publishers embed the committed bundle.
+Rebuild and commit it for every web change. Browser verification scripts are
+run separately; they are not part of this CI gate.
 
 ## Documentation
 

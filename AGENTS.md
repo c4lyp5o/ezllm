@@ -16,24 +16,24 @@ compression, a SQLite usage ledger, and an embedded operator dashboard
 1. Read [README.md](README.md) for the product shape, then
    [EXPLORING.md](EXPLORING.md) for the code tour (reading order, invariants,
    per-milestone landmarks).
-2. `make check` must be green before anything else — it is the exact CI gate
-   (gofmt → vet → `go test -count=1 -timeout 15m ./...` → build).
+2. Run `make test-short` before work. This is the local functional gate; CI
+   separately runs formatting, vet, the full suite, cross-builds and web build.
 3. Design decisions live in `docs/*-design.md` and `docs/*-runbook.md`;
    milestone narrative in `CHANGELOG.md`; dated version bumps in
    `VERSION.md`. Don't restate them from memory — open the doc.
 
 ## Hard rules
 
-- **Run the gate.** `make check` (or `make test-short` under a memory cap —
-  see below). Never report a change as tested without it.
+- **Run the gate.** Run `make test-short` locally. Never report a change as
+  tested without it.
 - **NEVER run the test suite without `-short`.** Not `go test ./...`, not
   `go test ./internal/server/`, not a single package, not "just to see". The
   perf harnesses (`TestLatencyPercentiles`, `TestRetainedMemory`,
   `TestSlowConsumer`) are not skipped by a package selector, peak ~4.21 GiB
   RSS, and will OOM-kill or hang the shell — an agent hit this on 2026-10-23
   and lost six minutes to a package run that `-short` finishes in 106 s.
-  Always `go test -short …` / `make test-short`. The only exception is the
-  deliberate `make perf`, which is a requested measurement, not a gate.
+  Always use `go test -short …` or `make test-short` locally; do not run
+  `make check`, `make test`, `make test-race`, or `make perf` on this machine.
 - **Version discipline:** bump `internal/server/version.go` and the
   `Current:` line of `VERSION.md` in the same commit. `version_test.go`
   enforces the pairing; `GET /healthz` serves the constant.
@@ -57,8 +57,8 @@ free machine RAM or `GOMEMLIMIT` (soft limit, doesn't cap RSS). Use:
 make test-short    # functional suite, ~0.18 GiB peak, skips perf harnesses
 ```
 
-Full `make check` belongs on the uncapped shell or in CI. Details and
-measured numbers: CONTRIBUTING.md § Memory.
+CI runs the full suite separately. Details and measured numbers:
+CONTRIBUTING.md § Memory.
 
 ## Layout map
 

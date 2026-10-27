@@ -46,7 +46,7 @@ default `off` on macOS and Windows — otherwise the boot fails.
 ### Linux and macOS
 
 ```bash
-VER=1.3.2                    # or any tag from the releases page
+VER=1.3.3                    # or any tag from the releases page
 OS=$(uname -s | tr 'A-Z' 'a-z')
 case "$(uname -m)" in
   x86_64) ARCH=amd64 ;;
@@ -78,7 +78,7 @@ capability is needed.
 ### Windows (PowerShell)
 
 ```powershell
-$Ver  = "1.3.2"
+$Ver  = "1.3.3"
 $Name = "ezllm_v${Ver}_windows_amd64"
 $Base = "https://github.com/c4lyp5o/ezllm/releases/download/v$Ver"
 
@@ -220,7 +220,7 @@ the dashboard.
 Verify (any OS; `curl.exe` on Windows):
 
 ```bash
-curl -s localhost:20129/healthz                      # {"status":"ok","version":"1.3.2"}
+curl -s localhost:20129/healthz                      # {"status":"ok","version":"1.3.3"}
 curl -s -o /dev/null -w '%{http_code}\n' localhost:20129/v1/models   # 401 without a token
 ```
 

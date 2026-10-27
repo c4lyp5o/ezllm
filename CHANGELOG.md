@@ -2,6 +2,28 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
 
+## 2026-10-27 — a cancelled caller gets the cancellation, not a parked hop error (fix)
+
+v1.3.2 taught the dispatcher that a client hanging up must not charge a strike
+against the hop. It did not make the request END as a cancellation. When the last
+hop answers a failover status, that response is parked so it can be committed if
+nothing else serves; if the caller had already left, the loop's context check
+broke out without clearing the parked response, `commit` wrote the 503 and
+returned a **nil error**. The cancellation reached neither the server nor the
+ledger, and a hop error was recorded as the reason the call ended.
+
+Whether it happened at all depended on which side won the race: a hop whose
+transport noticed the cancel surfaced `context.Canceled`, while a hop that had
+already written its 503 was committed as a success. It surfaced as a test
+failing roughly one run in five — 9 failures in 50 local runs of
+`TestClientCancelStopsTheFailoverLoop` — which is exactly the shape of a bug that
+ships: too rare to block a green suite, frequent enough to corrupt the ledger's
+account of why a request ended.
+
+One branch at the loop head: a cancellation outranks a parked fallback. The body
+is discarded, the error path answers, and an earlier transport error stays the
+first cause. 200/200 after.
+
 ## 2026-10-27 — the released binaries finally have a manual (docs)
 
 `release.yml` has shipped five platform binaries since v1.0.0 and nothing

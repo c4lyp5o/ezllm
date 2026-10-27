@@ -148,14 +148,6 @@ func New(fetcher Fetcher, cookieHeader, deviceID string) *Client {
 	}
 }
 
-// WithTimezone overrides the IANA timezone the wire sends.
-func (c *Client) WithTimezone(tz string) *Client {
-	if tz != "" {
-		c.timezone = tz
-	}
-	return c
-}
-
 // NewConversation drops the conversation state so the next Generate opens a
 // fresh upstream conversation. The org id stays cached.
 func (c *Client) NewConversation() {

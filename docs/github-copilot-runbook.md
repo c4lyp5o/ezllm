@@ -94,7 +94,34 @@ Anthropic surface for `claude-opus-4.6`).
 | 400 `Unsupported parameter: 'temperature'` | gpt-5.4 quirk (auto-stripped) | Fixed in the adapter; file a bug if it leaks through |
 | 400 "conversation must end with a user message" | assistant prefill (auto-dropped) | Fixed in the adapter |
 | 400 `does not support Responses API` | a Claude/Gemini model routed to /responses | Routing bug; claude* always goes to /v1/messages |
+| 400 `unsupported_api_for_model` | the same gap, answered by the upstream instead of refused locally | Fails over to a hop that can serve the wire; the trail names the refused hop. Only reaches the client when every hop refuses |
 | 466 (CLI version) | Version floor raised | Set GITHUB_COPILOT_CLI_VERSION, restart |
+
+## Persona stealth (behaviour change, v1.3.2)
+
+Every github-copilot request has its system content replaced before it leaves
+the box, on every model and every wire. The provider is a web surface, so the
+client's persona and personal context (SOUL/MEMORY/USER-style system prompts)
+must never reach it. The rule drops the personal CONTENT, not the role: a short
+neutral system prompt (a generic coding-assistant line, plus a tool-use line when
+the request carries tools) takes its place, so the model keeps operating
+instructions and the request keeps the shape a real client sends.
+
+| Wire | Replaced |
+|---|---|
+| chat (`/chat/completions`) | `system` and `developer` turns → one neutral `system` turn in the first one's place |
+| messages (`/v1/messages`, claude*) | the top-level `system` field |
+| responses (`/responses`) | `instructions`, and `system`/`developer` items in `input` |
+
+A request that sent no system content gets none added. The neutral prompt is
+constant, so it stays prompt-cache friendly. The client's own instructions (tool
+conventions, output format, environment) are lost with the persona — that is the
+price of the guarantee, and it does not exist behind a flag because a flag would
+make the privacy guarantee optional.
+
+The guard was previously documented but lived only in a linker-dead function, so
+it never ran. A run whose answers suddenly look "different" on this provider
+should be checked against this rule first.
 
 ## Scope
 

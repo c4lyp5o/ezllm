@@ -606,7 +606,7 @@ func streamMessagesFinish(f FinishKind) string {
 // are inclusive by contract. An anthropic source is normalized to inclusive
 // before it reaches a chat/responses encode, so subtracting is safe on all of
 // them — gating on Legacy here would have skipped the Claude Code leg, which
-// is precisely the legacy path (translate.Response / NewSSEReader).
+// is precisely the legacy path (the CodecOptions{Legacy:true} cells).
 func streamMessagesUsage(u UsageIR) []byte {
 	m := map[string]int{}
 	if u.Input != nil {

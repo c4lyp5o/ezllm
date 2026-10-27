@@ -28,7 +28,7 @@ func TestAccountingMultilineSSE(t *testing.T) {
 }
 
 func TestAccountingSSEBoundAndRecovery(t *testing.T) {
-	tp := NewUsageTapper(provider.SurfaceChat)
+	tp := NewUsageTapperFor(provider.SurfaceChat, provider.UsageConventionAuto)
 	tp.Observe([]byte("data: {"))
 	tp.Observe([]byte("data: " + strings.Repeat(" ", maxScanToken)))
 	tp.Observe([]byte(`data: "usage":{"prompt_tokens":999}}`))

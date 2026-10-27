@@ -13,6 +13,16 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/githubcopilot"
 )
 
+// newGitHubCopilotWithClient is the test constructor: the routed HTTP client
+// stands in for GitHub's endpoints.
+func newGitHubCopilotWithClient(c *http.Client) Adapter {
+	return &gitHubCopilotAdapter{
+		client:   c,
+		sessions: map[int64]githubcopilot.Session{},
+		cfg:      githubcopilot.Config{HTTP: c},
+	}
+}
+
 // The adapter's tests route GitHub's + Copilot's endpoints through an
 // injected client, same technique as internal/githubcopilot's own tests.
 

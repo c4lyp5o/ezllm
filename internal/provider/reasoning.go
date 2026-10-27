@@ -69,12 +69,23 @@ func (r ReasoningRule) Clamp(want string) (value string, drop bool, changed bool
 	}
 	for _, a := range r.Allowed {
 		if strings.EqualFold(a, want) {
+			// A stored list can name a disabling value the model still
+			// refuses ("cannot turn thinking off" arrives as a separate
+			// fact from the enumeration), so Required governs: a rank-0
+			// ask is clamped below like any value outside the list.
+			if r.Required {
+				if rank, ok := rankOf(want); ok && rank == 0 {
+					break
+				}
+			}
 			return want, false, false // already acceptable: byte-identical request
 		}
 	}
+
 	if len(r.Allowed) == 0 {
 		// Required with no enumeration: never send a "disabled" effort, and do
-		// not invent a value the provider did not name.
+		// not invent a value the provider did not name — anything else the
+		// client asked for passes through untouched.
 		if r.Required {
 			if rank, ok := rankOf(want); ok && rank == 0 {
 				return "", true, true
@@ -96,6 +107,12 @@ func (r ReasoningRule) Clamp(want string) (value string, drop bool, changed bool
 		if !ok {
 			continue
 		}
+		// When reasoning is mandatory, every disabling member is a value
+		// this model will refuse — picking it turns a clamp into a
+		// guaranteed 400 with a plausible-looking body.
+		if r.Required && ar == 0 {
+			continue
+		}
 		if ar < lowestRank {
 			lowest, lowestRank = a, ar
 		}
@@ -106,8 +123,19 @@ func (r ReasoningRule) Clamp(want string) (value string, drop bool, changed bool
 	if best != "" {
 		return best, false, true
 	}
+	// Nothing at or below the ask is legal: send the cheapest allowed value.
+	// Dropping the field instead would hand the choice to the provider's
+	// default, which is never cheaper than its own cheapest value and usually
+	// dearer (medium or high).
 	if lowest != "" {
 		return lowest, false, true
+	}
+	if r.Required {
+		// The enumeration held only disabling or unranked words, so there is
+		// no legal value to name: the provider's default is the only answer.
+		if rank, ok := rankOf(want); ok && rank == 0 {
+			return "", true, true
+		}
 	}
 	return want, false, false // the enumeration held only words we do not rank
 }
@@ -165,6 +193,10 @@ func ParseReasoningRule(status int, body []byte) ReasoningRule {
 		strings.Contains(lower, "is mandatory"),
 		strings.Contains(lower, "requires adaptive thinking"),
 		strings.Contains(lower, "requires reasoning"),
+		// Command Code's wording when a value turns thinking OFF on a model
+		// that cannot: 'Only models that can turn thinking off accept it.'
+		// Its presence in a REFUSAL is the statement that this model cannot.
+		strings.Contains(lower, "can turn thinking off"),
 		strings.Contains(lower, "reasoning is required"):
 		r.Required = true
 	case strings.Contains(lower, "is not allowed") && containsEffortWord(lower):

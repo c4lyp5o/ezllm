@@ -31,6 +31,15 @@ func newDispatcher() *Dispatcher {
 	return NewDispatcher(&http.Client{Timeout: 30 * time.Second}, provider.NewRegistry(&http.Client{Timeout: 30 * time.Second}))
 }
 
+// tapOne runs one SSE line through the production tap and returns the
+// normalized usage, or nil when the line carries none. Per-line unit view of
+// UsageTapper (whose multi-line assembly path lives in tapper_test.go).
+func tapOne(line string, surface provider.Surface) *store.Usage {
+	tp := NewUsageTapperFor(surface, provider.UsageConventionAuto)
+	tp.Observe([]byte(line))
+	return tp.Usage()
+}
+
 // ── SwapModel: the "preserve unknown fields" invariant ───────────────────────
 
 func TestSwapModelPreservesUnknownFields(t *testing.T) {
@@ -128,7 +137,7 @@ func TestIsStream(t *testing.T) {
 func TestTapSSELineOpenAIFinalChunk(t *testing.T) {
 	// Verbatim shape captured live 2026-10-05 (P4, cached repeat).
 	line := `data: {"id":"chatcmpl-x","object":"chat.completion.chunk","choices":[{"delta":{"content":"5"},"index":0}],"usage":{"prompt_tokens":2044,"completion_tokens":72,"total_tokens":2116,"prompt_tokens_details":{"cached_tokens":1792},"completion_tokens_details":{"reasoning_tokens":28}}}`
-	u := tapSSELine([]byte(line), provider.SurfaceChat)
+	u := tapOne(line, provider.SurfaceChat)
 	if u == nil {
 		t.Fatal("usage not tapped")
 	}
@@ -148,26 +157,28 @@ func TestTapSSELineOpenAIIntermediateChunksHaveNoUsage(t *testing.T) {
 		`: comment line`,
 		``,
 	} {
-		if u := tapSSELine([]byte(line), provider.SurfaceChat); u != nil {
+		if u := tapOne(line, provider.SurfaceChat); u != nil {
 			t.Errorf("line %q should not yield usage, got %+v", line, u)
 		}
 	}
 }
 
 func TestTapSSELineAnthropicMessageDelta(t *testing.T) {
-	// Verbatim from live probe P2/P5.
+	// Verbatim from live probe P2/P5. One tapper sees both events: the merge
+	// is the production mergeUsageRaw path, not a per-line normalisation.
 	start := `data: {"type":"message_start","message":{"id":"msg_x","role":"assistant","model":"qwen3.8-flash","usage":{"input_tokens":252,"output_tokens":1,"cache_read_input_tokens":1792,"cache_creation_input_tokens":0}}}`
 	delta := `data: {"type":"message_delta","delta":{"stop_reason":"max_tokens"},"usage":{"input_tokens":67,"output_tokens":32,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}`
 
-	us := tapSSELine([]byte(start), provider.SurfaceAnthropic)
-	ud := tapSSELine([]byte(delta), provider.SurfaceAnthropic)
-	if us == nil || ud == nil {
+	tp := NewUsageTapperFor(provider.SurfaceAnthropic, provider.UsageConventionAuto)
+	tp.Observe([]byte(start))
+	if us := tp.Usage(); us == nil || us.CachedRead != 1792 || us.In != 252 {
+		t.Fatalf("message_start wrong: %+v (want in=252 cr=1792)", us)
+	}
+	tp.Observe([]byte(delta))
+	merged := tp.Usage()
+	if merged == nil {
 		t.Fatal("anthropic usage not tapped")
 	}
-	if us.CachedRead != 1792 || us.In != 252 {
-		t.Errorf("message_start wrong: in=%d cr=%d", us.In, us.CachedRead)
-	}
-	merged := MergeUsage(us, ud)
 	if merged.Out != 32 {
 		t.Errorf("merged output = %d, want 32 (delta is authoritative)", merged.Out)
 	}
@@ -187,7 +198,7 @@ func TestTapSSELineAnthropicIgnoresOtherEvents(t *testing.T) {
 		`data: {"type":"content_block_stop"}`,
 		`data: {"type":"message_stop"}`,
 	} {
-		if u := tapSSELine([]byte(line), provider.SurfaceAnthropic); u != nil {
+		if u := tapOne(line, provider.SurfaceAnthropic); u != nil {
 			t.Errorf("line %q should not yield usage: %+v", line, u)
 		}
 	}
@@ -196,7 +207,7 @@ func TestTapSSELineAnthropicIgnoresOtherEvents(t *testing.T) {
 func TestTapSSELineResponsesCompleted(t *testing.T) {
 	// Verbatim from live probe P8 (streaming gpt-6-luna).
 	line := `data: {"type":"response.completed","response":{"id":"resp_x","status":"completed","model":"gpt-6-luna","usage":{"input_tokens":12,"output_tokens":27,"total_tokens":39,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0},"output_tokens_details":{"reasoning_tokens":13}}}}`
-	u := tapSSELine([]byte(line), provider.SurfaceResponses)
+	u := tapOne(line, provider.SurfaceResponses)
 	if u == nil {
 		t.Fatal("responses usage not tapped")
 	}
@@ -209,7 +220,7 @@ func TestTapSSELineResponsesCacheWrite(t *testing.T) {
 	// The Responses surface is the ONLY one reporting cache_write (P6) — the
 	// dashboard's "cached write" column depends on this tap.
 	line := `data: {"type":"response.completed","response":{"usage":{"input_tokens":3000,"output_tokens":40,"input_tokens_details":{"cached_tokens":2048,"cache_write_tokens":512}}}}`
-	u := tapSSELine([]byte(line), provider.SurfaceResponses)
+	u := tapOne(line, provider.SurfaceResponses)
 	if u == nil {
 		t.Fatal("no usage")
 	}
@@ -700,18 +711,5 @@ func TestStreamCopySurvivesGarbageLines(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "not json at all") {
 		t.Error("garbage line was not forwarded byte-for-byte")
-	}
-}
-
-func TestMergeUsageNilHandling(t *testing.T) {
-	u := &store.Usage{In: 1, Out: 2}
-	if MergeUsage(nil, nil) != nil {
-		t.Error("nil+nil should be nil")
-	}
-	if got := MergeUsage(nil, u); got != u {
-		t.Error("nil+u should be u")
-	}
-	if got := MergeUsage(u, nil); got != u {
-		t.Error("u+nil should be u")
 	}
 }

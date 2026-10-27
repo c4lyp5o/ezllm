@@ -54,16 +54,6 @@ func NewGitHubCopilot(c *http.Client) Adapter {
 	}
 }
 
-// newGitHubCopilotWithClient is the test constructor: the routed HTTP client
-// stands in for GitHub's endpoints.
-func newGitHubCopilotWithClient(c *http.Client) Adapter {
-	return &gitHubCopilotAdapter{
-		client:   c,
-		sessions: map[int64]githubcopilot.Session{},
-		cfg:      githubcopilot.Config{HTTP: c},
-	}
-}
-
 func envOr(key, def string) string {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		return v
@@ -110,13 +100,15 @@ func (a *gitHubCopilotAdapter) PrepareRequest(ctx context.Context, req *http.Req
 	req.URL.RawQuery = ""
 
 	// Read the body ONCE: the model id selects the quirks and the patched
-	// body goes back on the request.
+	// body goes back on the request. The responses wire needs no quirk pass,
+	// but it does need the model — Copilot serves claude*/gemini* on other
+	// endpoints only, and a bare /responses dial 400s upstream.
 	var (
 		raw     []byte
 		bodyObj map[string]any
 		model   string
 	)
-	if req.Body != nil && (surface == SurfaceChat || surface == SurfaceAnthropic) {
+	if req.Body != nil {
 		raw, err = io.ReadAll(io.LimitReader(req.Body, 32<<20))
 		if err != nil {
 			return fmt.Errorf("github-copilot: read body: %w", err)
@@ -124,9 +116,26 @@ func (a *gitHubCopilotAdapter) PrepareRequest(ctx context.Context, req *http.Req
 		_ = req.Body.Close()
 		if err := json.Unmarshal(raw, &bodyObj); err == nil {
 			model, _ = bodyObj["model"].(string)
-			githubcopilot.PrepareBody(model, bodyObj)
-			if patched, err := json.Marshal(bodyObj); err == nil {
-				raw = patched
+			if surface == SurfaceResponses && githubcopilot.ResponsesUnsupported(model) {
+				// Refuse BEFORE dialling: this hop cannot serve the wire, and
+				// another hop may have the same model on its native endpoint.
+				return fmt.Errorf("%w: github-copilot %s has no /responses endpoint (upstream answers 400 unsupported_api_for_model)",
+					ErrWireUnsupported, model)
+			}
+			switch surface {
+			case SurfaceChat, SurfaceAnthropic:
+				githubcopilot.PrepareBody(model, bodyObj)
+				if patched, err := json.Marshal(bodyObj); err == nil {
+					raw = patched
+				}
+			case SurfaceResponses:
+				// No quirk pass on this wire, but the privacy rule is not a
+				// quirk. An untouched body stays byte-identical.
+				if githubcopilot.StripPersona(bodyObj) {
+					if patched, err := json.Marshal(bodyObj); err == nil {
+						raw = patched
+					}
+				}
 			}
 		}
 		req.Body = io.NopCloser(strings.NewReader(string(raw)))
@@ -218,4 +227,29 @@ func (a *gitHubCopilotAdapter) ListModels(ctx context.Context, acct Account, key
 		out = append(out, ModelInfo{ID: m.ID, OwnedBy: "github", Display: display})
 	}
 	return out, nil
+}
+
+// KnownWireSupport reports what an account kind's own API shape already says
+// about a model on a wire, with no probe needed: nil when the kind says
+// nothing. The router reads it BEFORE the probe facts, so a wire the provider
+// cannot serve is never chosen — no rate slot, attempt or token refresh is
+// spent on a dial that would be refused.
+//
+// Today only Copilot: claude* is served on /v1/messages and gemini* on
+// /chat/completions, and neither has a /responses endpoint.
+func KnownWireSupport(kind Kind, model string, s Surface) *bool {
+	if kind != KindGitHubCopilot || !githubcopilot.ResponsesUnsupported(model) {
+		return nil
+	}
+	m := strings.ToLower(model)
+	switch {
+	case s == SurfaceResponses:
+		v := false
+		return &v
+	case s == SurfaceAnthropic && strings.Contains(m, "claude"),
+		s == SurfaceChat && strings.Contains(m, "gemini"):
+		v := true
+		return &v
+	}
+	return nil
 }

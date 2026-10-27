@@ -71,11 +71,6 @@ type UsageTapper struct {
 	skipEvent bool
 }
 
-// NewUsageTapper builds a tapper for one surface (usage_convention auto).
-func NewUsageTapper(surface provider.Surface) *UsageTapper {
-	return NewUsageTapperFor(surface, provider.UsageConventionAuto)
-}
-
 // NewUsageTapperFor builds a tapper that normalizes with the account's
 // declared usage convention (it changes only the Messages wire's reading).
 func NewUsageTapperFor(surface provider.Surface, conv provider.UsageConvention) *UsageTapper {
@@ -395,6 +390,15 @@ type hopOutcome struct {
 	strikes  int
 	failed   bool
 	cooldown time.Duration
+	// clientCancelled marks an attempt that failed because the CALLER hung up.
+	// It is neither a success nor a hop failure: recording it as either one is
+	// wrong (clearing a legitimate park, or parking a healthy hop for a closed
+	// browser tab), so recordHop leaves the hop's state untouched.
+	clientCancelled bool
+	// noVerdict marks an attempt refused before any dial (the adapter knows
+	// the hop cannot serve this wire). Like a cancel it says nothing about the
+	// hop's health, so recordHop must neither park it nor clear its park.
+	noVerdict bool
 	// reason is the operator-facing cause, surfaced on /admin/health. A parked
 	// hop produces no ledger row, so without this a hop could disappear from
 	// routing with no recorded explanation anywhere.
@@ -542,8 +546,8 @@ func (d *Dispatcher) releaseProbe(rt Route) {
 	}
 }
 
-// classifyHop decides what one hop attempt means: whether it failed, and how
-// long the hop should be parked for.
+// classifyHopPolicy decides what one hop attempt means: whether it failed,
+// and how long the hop should be parked for.
 //
 // Precedence for the park duration: an explicit upstream Retry-After wins (the
 // provider alone knows when its own window resets), then the operator's
@@ -558,9 +562,6 @@ func (d *Dispatcher) releaseProbe(rt Route) {
 // never parked for a rate limit. A hop that is genuinely broken (5xx,
 // transport error) is still parked: those failures mean "do not send traffic
 // here", which a single hop cannot escape anyway.
-func (d *Dispatcher) classifyHop(err error, status int, hdr http.Header, hasAlternate bool) hopOutcome {
-	return d.classifyHopPolicy(context.Background(), err, status, hdr, hasAlternate)
-}
 func (d *Dispatcher) classifyHopPolicy(ctx context.Context, err error, status int, hdr http.Header, hasAlternate bool) hopOutcome {
 	on429, on5xx := d.on429, d.on5xx
 	if p, ok := settings.From(ctx); ok {
@@ -568,6 +569,18 @@ func (d *Dispatcher) classifyHopPolicy(ctx context.Context, err error, status in
 		on5xx = settings.Duration(p.Cooldown5xx)
 	}
 	if err != nil {
+		// The CALLER hung up (closed tab, cancelled agent run, shutdown). The
+		// dial fails with context.Canceled, which is a net.Error, so without
+		// this check it reads as a transport fault on the hop: one strike, and
+		// at the default threshold a five-minute park. Measured live: 80 such
+		// rows in seven days, and eight later requests answered "all combo
+		// endpoints are in five-minute cooldown".
+		if ctx.Err() != nil {
+			return hopOutcome{clientCancelled: true, reason: "client cancelled"}
+		}
+		if errors.Is(err, provider.ErrWireUnsupported) {
+			return hopOutcome{noVerdict: true, reason: "wire unsupported"}
+		}
 		if !retryableUpstreamError(err) {
 			return hopOutcome{} // our own fault (bad kind, bad request shape): not the hop's
 		}
@@ -646,6 +659,9 @@ func (d *Dispatcher) recordHop(rt Route, oc hopOutcome, now time.Time) {
 	defer d.cooldownMu.Unlock()
 
 	if !oc.failed {
+		if oc.clientCancelled || oc.noVerdict {
+			return // neither a cancel nor a pre-dial refusal says anything about this hop
+		}
 		if d.cooldowns != nil {
 			delete(d.cooldowns, key)
 		}
@@ -1193,8 +1209,10 @@ func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, bod
 		upReq.Header.Set("x-goog-api-key", rt.KeyPlain)
 		upReq.Header.Del("Authorization")
 	}
-	// Content-Length must match the rewritten body.
-	upReq.ContentLength = int64(len(body))
+	// Content-Length: NewRequestWithContext set it from body; an adapter that
+	// rewrites the body (Copilot drops system messages) sets its own. Never
+	// re-stamp len(body) here — a shorter rewritten body would then fail the
+	// client's length check.
 	// Preserve multipart Content-Type with boundary; default to JSON.
 	contentType := "application/json"
 	if isMultipartBody(body) {
@@ -1614,7 +1632,27 @@ func refusesWire(resp *http.Response) bool {
 	// Only the vendor's explicit capability words count: ErrorCause also maps
 	// "does not allow" here, which on a 400 can just as well describe a body.
 	s := strings.ToLower(string(peekBody(resp, maxErrPeek)))
-	return strings.Contains(s, "modelprotocolunsupported") || strings.Contains(s, "not supported for format")
+	return strings.Contains(s, "modelprotocolunsupported") ||
+		strings.Contains(s, "not supported for format") ||
+		strings.Contains(s, "unsupported_api_for_model")
+}
+
+// refusesHistory reports a 400 whose body says the hop cannot serve this
+// CONVERSATION: a thinking model demanding the reasoning of every earlier
+// assistant turn, in a history another model produced. Like refusesWire it is a
+// fact about the hop, not our body — the identical bytes are fine for a hop of
+// the model's own family — so the dispatcher fails over instead of committing a
+// 400 that ends a client run.
+//
+// It is deliberately NOT a park: the hop is healthy for conversations it started
+// itself, and the refusal says nothing about its availability.
+func refusesHistory(resp *http.Response) bool {
+	if resp == nil || resp.Body == nil || resp.StatusCode != http.StatusBadRequest {
+		return false
+	}
+	s := strings.ToLower(string(peekBody(resp, maxErrPeek)))
+	return strings.Contains(s, "must be passed back to the api") ||
+		strings.Contains(s, "needs the reasoning of every")
 }
 
 // deniesModelAccess reports a 401/403 whose body says the HOP cannot reach the
@@ -1762,6 +1800,14 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 		}
 	}
 	for i := 0; i < len(routes); i++ {
+		// The caller has left: no later hop is dialed, probed or charged
+		// against its account's request budget for a response nobody reads.
+		if ctx.Err() != nil {
+			if fallbackResp == nil && fallbackTransportErr == nil {
+				fallbackTransportErr = ctx.Err()
+			}
+			break
+		}
 		// The budget is checked BEFORE any eligibility work: an unaffordable
 		// hop is never dialed, never probed, never cooled.
 		if led.exhausted() || pastDeadline(sel) {
@@ -1895,8 +1941,8 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 		}
 		// Park the hop only when there is somewhere else to go. len(routes) is
 		// the full candidate list the router resolved; a single entry means a
-		// cooled hop has no alternate, and classifyHop declines to park a rate
-		// limit in that case.
+		// cooled hop has no alternate, and classifyHopPolicy declines to park a
+		// rate limit in that case.
 		var hdr http.Header
 		if resp != nil {
 			hdr = resp.Header
@@ -1922,6 +1968,13 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 					oc.cooldown = defaultHopCooldown
 				}
 			}
+			// A history refusal is a hop fact too, but unlike a wire refusal it
+			// says NOTHING about the hop's health: the same model serves a
+			// conversation it started. So it fails over with no cooldown at all
+			// — the attempt trail and the cause carry the explanation.
+			if err == nil && !oc.failed && refusesHistory(resp) {
+				oc = hopOutcome{failed: true, reason: "history has no reasoning this model requires"}
+			}
 			// A 403 that names model access is a fact about the hop, so park it
 			// exactly as a 429 would be: same model-scoped key, same TTL, same
 			// half-open probe. hasAlternate is required for the same reason as
@@ -1942,12 +1995,29 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 			// The hop's outcome was recorded above; a second record here once
 			// cleared the park a transport error had just set.
 			note := "transport: " + err.Error()
-			if errors.Is(err, errAttemptBudgetSpent) {
+			switch {
+			case errors.Is(err, errAttemptBudgetSpent):
 				note = err.Error()
 				d.log.Info("hop not dialed", // Info, not Warn: nothing failed
 					"account", rt.Account.Namespace, "model", rt.Model,
 					"alias", rt.Alias, "why", err.Error())
-			} else {
+			case errors.Is(err, provider.ErrWireUnsupported):
+				// Not an outage and not a bad request: this hop cannot serve
+				// the wire this model needs. Say so in the trail instead of
+				// dressing it as a transport fault.
+				note = err.Error()
+				d.log.Info("hop cannot serve this wire, failing over",
+					"account", rt.Account.Namespace, "model", rt.Model,
+					"alias", rt.Alias, "why", err.Error())
+			case oc.clientCancelled:
+				// The caller left. Nothing was learnt about this hop, so the
+				// trail must not read as a hop fault — and the log is Info,
+				// because a client hanging up is routine, not an incident.
+				note = "client cancelled: " + err.Error()
+				d.log.Info("client cancelled, no hop charged",
+					"account", rt.Account.Namespace, "model", rt.Model,
+					"alias", rt.Alias, "why", err.Error())
+			default:
 				d.log.Warn("hop failed, failing over",
 					"account", rt.Account.Namespace, "model", rt.Model,
 					"alias", rt.Alias, "err", err.Error())
@@ -2162,22 +2232,11 @@ func writeStreamErrorFrame(w io.Writer, surface provider.Surface, msg string) {
 	}
 }
 
-// tapSSELine extracts usage from one SSE data line for the given surface.
-//
-//	openai     : final chunk carries "usage"
-//	anthropic  : message_start + message_delta both carry usage (delta has the
-//	             authoritative output_tokens), so we merge
-//	responses  : response.completed carries the full response incl. usage
-func tapSSELine(line []byte, surface provider.Surface) *store.Usage {
-	u := sseUsageRaw(line, surface)
-	if u == nil {
-		return nil
-	}
-	n := store.NormalizeUsage(usageSurface(surface), u)
-	return &n
-}
-
 // sseUsageRaw returns the raw usage object one SSE data line carries, or nil.
+// Where usage rides is per surface: openai puts it on the final chunk;
+// anthropic sends it on message_start AND message_delta (the delta carries the
+// authoritative output_tokens, the start the input/cache breakdown, so the tap
+// merges across events); responses puts the full usage on response.completed.
 // Every usage-bearing event names "usage", so a line without the word is
 // skipped before any JSON decoding — content deltas are most of a stream.
 func sseUsageRaw(line []byte, surface provider.Surface) map[string]any {
@@ -2250,36 +2309,6 @@ func tapConvention(rt Route, cross bool) provider.UsageConvention {
 		return provider.UsageConventionAuto
 	}
 	return rt.Account.UsageConvention
-}
-
-// MergeUsage combines an earlier (message_start) and later (message_delta)
-// Anthropic usage object: the delta carries authoritative output totals, the
-// start carries the input/cache breakdown.
-func MergeUsage(base, delta *store.Usage) *store.Usage {
-	if base == nil {
-		return delta
-	}
-	if delta == nil {
-		return base
-	}
-	out := *base
-	if delta.Out > 0 {
-		out.Out = delta.Out
-	}
-	if delta.CachedRead > 0 {
-		out.CachedRead = delta.CachedRead
-	}
-	if delta.CachedWrite > 0 {
-		out.CachedWrite = delta.CachedWrite
-	}
-	if delta.Reasoning > 0 {
-		out.Reasoning = delta.Reasoning
-	}
-	if delta.In > 0 {
-		out.In = delta.In
-	}
-	out.Raw = delta.Raw
-	return &out
 }
 
 // --- header plumbing ---
@@ -2455,18 +2484,6 @@ func usageSurface(s provider.Surface) store.Surface {
 	default:
 		return store.SurfaceChat
 	}
-}
-
-// StatusText renders an upstream error body for logging without leaking keys.
-func StatusText(status int, body []byte) string {
-	return "HTTP " + strconv.Itoa(status) + ": " + truncate(string(body), 200)
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
 }
 
 func (d *Dispatcher) requestPolicy(ctx context.Context) settings.Values {

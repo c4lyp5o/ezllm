@@ -1,7 +1,6 @@
 package githubcopilot
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,22 +9,6 @@ import (
 	"strings"
 	"time"
 )
-
-// Endpoint routing (omniroute buildUrl): claude* → the Anthropic-native
-// /v1/messages shim; openai-responses target or *codex* → /responses;
-// everything else → /chat/completions. Gemini/Claude models must NEVER go
-// to /responses (they 400 with unsupported_api_for_model).
-func endpointForModel(model, targetFormat string) string {
-	m := strings.ToLower(model)
-	isClaude := strings.Contains(m, "claude")
-	if isClaude {
-		return copilotAPIBase + "/v1/messages"
-	}
-	if (targetFormat == "openai-responses" || strings.Contains(m, "codex")) && !strings.Contains(m, "gemini") && !isClaude {
-		return copilotAPIBase + "/responses"
-	}
-	return copilotAPIBase + "/chat/completions"
-}
 
 // ChatHeaders builds the request header set (omniroute
 // getGitHubCopilotChatHeaders + buildHeaders).
@@ -159,14 +142,33 @@ var fallbackModelIDs = []string{
 	"grok-4.6", "grok-4.5", "oswe-vscode-prime",
 }
 
+// ResponsesUnsupported reports models Copilot does NOT serve on the
+// OpenAI-Responses wire: claude* is Anthropic-native (/v1/messages) and
+// gemini* rides /chat/completions, and both answer 400 unsupported_api_for_model
+// when dialed on /responses. This is per MODEL, not per account — Copilot's
+// endpoint support is a property of the model id, so the check is name-scoped
+// on purpose (a near-miss name simply is not guarded).
+func ResponsesUnsupported(model string) bool {
+	m := strings.ToLower(model)
+	return strings.Contains(m, "claude") || strings.Contains(m, "gemini")
+}
+
 // PrepareBody applies the per-model quirks that keep upstream from 400ing
-// (omniroute transformRequest, each ported with its reference):
+// (omniroute transformRequest, each ported with its reference), plus one rule
+// that is NOT a quirk:
+//   - the client's system content is REPLACED on every model (StripPersona):
+//     its persona and personal context (SOUL.md/MEMORY.md/USER.md) must never
+//     reach a web provider, but the system role itself stays, carrying a
+//     neutral prompt, so the model still gets operating instructions.
 //   - tools capped at 128
 //   - gpt-5.4*: strip temperature ("Unsupported parameter")
 //   - assistant messages: strip reasoning_text/reasoning_content
 //   - claude models: none of the /chat/completions-only quirks apply
 func PrepareBody(model string, body map[string]any) {
 	m := strings.ToLower(model)
+	// Stealth, for every model on this provider. Provider-scoped, not
+	// model-scoped — it is a privacy rule.
+	StripPersona(body)
 	if tools, ok := body["tools"].([]any); ok && len(tools) > 128 {
 		body["tools"] = tools[:128]
 	}
@@ -204,6 +206,80 @@ func PrepareBody(model string, body map[string]any) {
 			}
 		}
 	}
+}
+
+// neutralSystemPrompt replaces whatever system content the client sent. It
+// names a role and nothing about the user: no persona, no memory, no paths.
+const neutralSystemPrompt = "You are a helpful coding assistant. Follow the user's instructions and answer accurately and concisely."
+
+// neutralToolsLine is appended when the request carries tools, so a model that
+// lost the client's tool-use instructions still knows how to use them.
+const neutralToolsLine = " Use the provided tools when they help, and call them with arguments that match their schemas."
+
+func neutralPrompt(body map[string]any) string {
+	if tools, ok := body["tools"].([]any); ok && len(tools) > 0 {
+		return neutralSystemPrompt + neutralToolsLine
+	}
+	return neutralSystemPrompt
+}
+
+func isPersonaRole(v any) bool { return v == "system" || v == "developer" }
+
+// StripPersona replaces the client's system content with a neutral prompt on
+// every wire shape Copilot is dialed with — drop the personal content, not the
+// role:
+//   - chat: system/developer turns leave messages; one neutral system turn
+//     takes the first one's place
+//   - messages (Anthropic): the top-level system field
+//   - responses: instructions, and system/developer items in input (their
+//     place goes to a neutral instructions field)
+//
+// A request that sent no system content gets none added. It reports whether
+// the body changed, so a caller can keep an untouched body byte-identical.
+func StripPersona(body map[string]any) bool {
+	changed := false
+	prompt := neutralPrompt(body)
+	if msgs, ok := body["messages"].([]any); ok {
+		kept := make([]any, 0, len(msgs))
+		for _, mm := range msgs {
+			if msg, ok := mm.(map[string]any); ok && isPersonaRole(msg["role"]) {
+				if !changed {
+					kept = append(kept, map[string]any{"role": "system", "content": prompt})
+				}
+				changed = true
+				continue
+			}
+			kept = append(kept, mm)
+		}
+		if changed {
+			body["messages"] = kept
+		}
+	}
+	if sys, ok := body["system"]; ok && sys != nil && sys != "" {
+		body["system"] = prompt
+		changed = true
+	}
+	if ins, ok := body["instructions"]; ok && ins != nil && ins != "" {
+		body["instructions"] = prompt
+		changed = true
+	}
+	if items, ok := body["input"].([]any); ok {
+		kept := make([]any, 0, len(items))
+		dropped := false
+		for _, it := range items {
+			if item, ok := it.(map[string]any); ok && isPersonaRole(item["role"]) {
+				dropped = true
+				continue
+			}
+			kept = append(kept, it)
+		}
+		if dropped {
+			body["input"] = kept
+			body["instructions"] = prompt
+			changed = true
+		}
+	}
+	return changed
 }
 
 // sanitizeChatMessages: /chat/completions accepts only text/image_url parts;
@@ -307,42 +383,4 @@ func EnsureSession(ctx context.Context, cfg Config, s Session, now time.Time) (S
 	}
 	refreshed.CopilotToken, refreshed.CopilotExpiresAt = token, exp
 	return refreshed, nil
-}
-
-// DoChat performs one POST against the routed endpoint with the CLI header
-// set. The caller owns the body; quirks are applied here.
-func DoChat(ctx context.Context, cfg Config, s Session, model, targetFormat string, body map[string]any, stream bool) (*http.Response, error) {
-	cfg = cfg.withDefaults()
-	// Stealth: drop system messages (SOUL.md/MEMORY.md/USER.md) so the
-	// client's persona and personal context never reach a web provider.
-	if msgs, ok := body["messages"].([]any); ok {
-		filtered := make([]any, 0, len(msgs))
-		for _, m := range msgs {
-			msg, ok := m.(map[string]any)
-			if ok && msg["role"] == "system" {
-				continue
-			}
-			filtered = append(filtered, m)
-		}
-		body["messages"] = filtered
-	}
-	PrepareBody(model, body)
-	endpoint := endpointForModel(model, targetFormat)
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
-	if err != nil {
-		return nil, err
-	}
-	for k, vs := range ChatHeaders(cfg, s.CopilotToken, stream) {
-		for _, v := range vs {
-			req.Header.Add(k, v)
-		}
-	}
-	if strings.Contains(strings.ToLower(model), "claude") {
-		req.Header.Set("anthropic-version", "2023-06-01")
-	}
-	return cfg.HTTP.Do(req)
 }

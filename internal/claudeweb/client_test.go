@@ -307,7 +307,7 @@ func TestPayloadParity(t *testing.T) {
 		},
 	}
 	c := newMock(t, mf)
-	c.WithTimezone("Asia/Kuala_Lumpur")
+	c.timezone = "Asia/Kuala_Lumpur" // pin the wire value so the payload asserts exactly
 	_, err := c.Generate(context.Background(), GenerateOptions{
 		Model:  "claude-opus-5",
 		Prompt: "hello",

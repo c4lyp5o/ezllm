@@ -474,19 +474,19 @@ func TestCooldownsReportsCause(t *testing.T) {
 	}
 }
 
-// classifyHop must name the cause it parks for, or the health payload has a
-// reason field that is always empty.
+// classifyHopPolicy must name the cause it parks for, or the health payload has
+// a reason field that is always empty.
 func TestClassifyHopRecordsReason(t *testing.T) {
 	d := newDispatcher()
 	hdr := http.Header{}
-	if got := d.classifyHop(nil, http.StatusTooManyRequests, hdr, true); got.reason == "" {
+	if got := d.classifyHopPolicy(context.Background(), nil, http.StatusTooManyRequests, hdr, true); got.reason == "" {
 		t.Error("429 park must carry a reason")
 	}
-	if got := d.classifyHop(nil, http.StatusBadGateway, hdr, true); !strings.Contains(got.reason, "502") {
+	if got := d.classifyHopPolicy(context.Background(), nil, http.StatusBadGateway, hdr, true); !strings.Contains(got.reason, "502") {
 		t.Errorf("5xx reason = %q, want the status named", got.reason)
 	}
 	// A 4xx that describes the REQUEST must not park, and so has no reason.
-	if got := d.classifyHop(nil, http.StatusBadRequest, hdr, true); got.failed || got.reason != "" {
+	if got := d.classifyHopPolicy(context.Background(), nil, http.StatusBadRequest, hdr, true); got.failed || got.reason != "" {
 		t.Errorf("400 = %+v, want no park and no reason", got)
 	}
 }
@@ -687,5 +687,34 @@ func TestProtocolUnsupportedSoleHopPassesThrough(t *testing.T) {
 	}
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "ModelProtocolUnsupported") {
 		t.Errorf("client saw %d %s, want the upstream 400 verbatim", rec.Code, rec.Body.String())
+	}
+}
+
+// Copilot's own words for "this model has no such endpoint" are
+// unsupported_api_for_model — the same hop-fact class as ModelProtocolUnsupported
+// (measured: claude* and gemini* answer exactly this when dialled on
+// /responses). Without the phrase in the table this 400 read as a bad request
+// and was committed to the client instead of failing over.
+func TestUnsupportedAPIForModelFailsOver(t *testing.T) {
+	refused := upstub(t, http.StatusBadRequest,
+		`{"type":"error","error":{"type":"invalid_request_error","code":"unsupported_api_for_model","message":"unsupported_api_for_model"}}`)
+	defer refused.Close()
+	good := upstub(t, http.StatusOK, `{"ok":true,"model":"night"}`)
+	defer good.Close()
+
+	d := newDispatcher()
+	req, body := reqWithBody(`{"model":"day","messages":[]}`)
+	rec := httptest.NewRecorder()
+
+	routes := []Route{textRoute(refused.URL, "day"), textRoute(good.URL, "night")}
+	_, res, err := d.ForwardCandidates(context.Background(), rec, req, routes, body)
+	if err != nil {
+		t.Fatalf("ForwardCandidates: %v", err)
+	}
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "night") {
+		t.Fatalf("client saw %d %s, want hop 2's 200", rec.Code, rec.Body.String())
+	}
+	if len(res.Attempts) != 1 || !strings.Contains(res.Attempts[0].Note, "[protocol_unsupported]") {
+		t.Errorf("attempt trail = %+v, want the refused hop with its cause", res.Attempts)
 	}
 }

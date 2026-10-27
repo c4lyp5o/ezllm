@@ -33,9 +33,15 @@ Two conclusions, both measured:
 - **A clamp never raises effort.** The value chosen is the highest allowed at or
   below what was asked; if nothing is that low, the cheapest allowed. Buying
   more reasoning than the client asked for is a cost regression, not a fix.
-- **`required` + a disabled effort (`none`/`off`) with no vocabulary = drop the
-  field**, letting the provider's own default apply. Inventing a value the
-  provider did not name is the one thing worse than the 400.
+- **`required` never sends a disabling effort.** A provider can enumerate
+  `off|low|…|max` and still refuse `off` for a model that cannot turn thinking
+  off, so `Required` governs the selection and a rank-0 candidate is never
+  chosen: a disabled or too-low ask gets the cheapest NON-disabling value. The
+  field is dropped (provider default) only when there is no such value to name —
+  no vocabulary stored, or one holding nothing but disabling words. Dropping
+  where a cheapest value exists was tried in v1.3.2 development and reverted:
+  the provider default is never cheaper than its cheapest value and usually
+  dearer.
 - **An allowed value is left alone.** No rewrite, no re-encode: the common path
   sends exactly the bytes the client sent.
 - **Learning is two-sided, writing only facts that carry information.** The key
@@ -58,7 +64,11 @@ Two conclusions, both measured:
 - `internal/provider/reasoning.go` — `ParseReasoningRule` (reads the refusal)
   and `ReasoningRule.Clamp` (maps a value onto it). Pure, no I/O.
 - `store.ModelFacts.Reasoning` — travels with the pin and capability reads, so
-  the router needs no extra query.
+  the router needs no extra query. **Both** projections of that row must carry
+  it: `*DB.ModelFacts` and `*store.CatalogSnapshot.ModelFacts`. The resolver reads
+  facts from the snapshot, so a snapshot that omits `reasoning_vocab` /
+  `reasoning_required` leaves the rule empty on every request while the direct
+  read — and every store test — still shows it (see the amendment below).
 - `router` — `selectWire` attaches the rule to `proxy.Route` from the same
   memoized facts row; a second `factsFor` per hop doubled the row reads.
 - `proxy.prepareHopBody` — clamps **before** the wire branches, so the native
@@ -92,3 +102,32 @@ The teaching request itself still fails. The rule is learned and the next
 request is clamped, but there is no in-request retry with the clamped body. That
 is one extra upstream call on a path that just failed; it can be added later
 without changing the data model.
+
+## Amendment 2026-10-27 (v1.3.2) — the feature was inert in production
+
+The shipped feature never clamped anything, and the tests could not see it. The
+locked decisions above stand; two implementation facts were wrong.
+
+- **The rule never reached the route.** `ResolveCandidates` replaces the catalog
+  with a `*store.CatalogSnapshot` for one consistent resolution, and the
+  resolver's `hopFacts.reasoning()` reads the rule out of whatever `ModelFacts`
+  it is handed. The snapshot's model query selected the pin and the three
+  protocol flags and not `reasoning_vocab` / `reasoning_required`, so every real
+  request carried a zero rule: the clamp was a no-op, each refusal re-taught the
+  same vocabulary, and the ledger collected 20 of 29 `bad_request` 400s from this
+  one bug while the log re-learned one model's list four times in 45 minutes. The
+  direct `*DB.ModelFacts` read had the vocabulary, which is why the store tests
+  passed. Any new fact on that row must be added to BOTH projections.
+- **`Required` did not govern the selection.** With a stored vocabulary, `Clamp`
+  picked the cheapest allowed value, so a model that enumerates `off|low|…|max`
+  and then refuses `off` ("Only models that can turn thinking off accept it")
+  received `off`: a bogus client value became a guaranteed 400 that looked like a
+  correct, conservative clamp. A rank-0 value is now never sent when `Required`
+  holds, and when nothing at or below the ask is legal the field is dropped. The
+  vendor's wording is in the phrase table, so that refusal teaches `Required`.
+
+Both are covered by tests at the seam that broke — the snapshot read, and a Route
+returned by the REAL resolver — because every pre-existing clamp test built its
+`Route` by hand with the rule already attached, which is exactly why the hole
+survived review. Proved end-to-end on a canary rig against the real provider:
+400 → `learned … allowed=""` → retry dropped the field → 200.

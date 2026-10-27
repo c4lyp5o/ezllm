@@ -6,11 +6,13 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/c4lyp5o/ezllm/internal/provider"
 )
 
 func runResponsesSSE(t *testing.T, stream, clientModel string) []byte {
 	t.Helper()
-	r := NewResponsesSSEReader(strings.NewReader(stream), clientModel)
+	r := NewStreamReader(strings.NewReader(stream), provider.SurfaceResponses, provider.SurfaceChat, clientModel, CodecOptions{Legacy: true})
 	var buf bytes.Buffer
 	if _, err := io.Copy(&buf, r); err != nil {
 		t.Fatalf("reading translated stream: %v", err)
@@ -173,9 +175,9 @@ func mustJSON(t *testing.T, v any) []byte {
 // ── response: responses → chat ─────────────────────────────────────────────
 
 func TestResponsesToChatGolden(t *testing.T) {
-	got, err := ResponsesToChat(fixture(t, "responses_response.json"), "daily")
+	got, err := ResponseUniversal(fixture(t, "responses_response.json"), provider.SurfaceResponses, provider.SurfaceChat, "daily", CodecOptions{Legacy: true})
 	if err != nil {
-		t.Fatalf("ResponsesToChat: %v", err)
+		t.Fatalf("ResponseUniversal: %v", err)
 	}
 	want := fixture(t, "chat_response_golden.json")
 	if !bytes.Equal(got, want) {
@@ -258,9 +260,9 @@ func TestResponsesToChatTable(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			raw, err := ResponsesToChat([]byte(tc.in), "client")
+			raw, err := ResponseUniversal([]byte(tc.in), provider.SurfaceResponses, provider.SurfaceChat, "client", CodecOptions{Legacy: true})
 			if err != nil {
-				t.Fatalf("ResponsesToChat: %v", err)
+				t.Fatalf("ResponseUniversal: %v", err)
 			}
 			var out map[string]any
 			if err := json.Unmarshal(raw, &out); err != nil {
@@ -273,11 +275,11 @@ func TestResponsesToChatTable(t *testing.T) {
 
 func TestResponsesToChatDeterminism(t *testing.T) {
 	in := fixture(t, "responses_response.json")
-	first, err := ResponsesToChat(in, "daily")
+	first, err := ResponseUniversal(in, provider.SurfaceResponses, provider.SurfaceChat, "daily", CodecOptions{Legacy: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := ResponsesToChat(in, "daily")
+	second, err := ResponseUniversal(in, provider.SurfaceResponses, provider.SurfaceChat, "daily", CodecOptions{Legacy: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +287,7 @@ func TestResponsesToChatDeterminism(t *testing.T) {
 		t.Errorf("non-deterministic\nfirst:  %s\nsecond: %s", first, second)
 	}
 	if orig := fixture(t, "responses_response.json"); !bytes.Equal(in, orig) {
-		t.Error("ResponsesToChat mutated its input slice")
+		t.Error("ResponseUniversal mutated its input slice")
 	}
 }
 

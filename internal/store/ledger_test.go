@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/provider"
 )
 
 func openTest(t *testing.T) *DB {
@@ -154,7 +156,7 @@ func TestNormalizeUsageSurfaceSemantics(t *testing.T) {
 			if err := json.Unmarshal([]byte(tc.raw), &raw); err != nil {
 				t.Fatal(err)
 			}
-			got := NormalizeUsage(tc.surface, raw)
+			got := NormalizeUsageWith(tc.surface, raw, provider.UsageConventionAuto)
 			if got.In != tc.want.In || got.Out != tc.want.Out ||
 				got.CachedRead != tc.want.CachedRead || got.CachedWrite != tc.want.CachedWrite ||
 				got.Reasoning != tc.want.Reasoning {
@@ -178,8 +180,8 @@ func TestCrossSurfaceTotalsAgree(t *testing.T) {
 	json.Unmarshal([]byte(`{"prompt_tokens":2044,"completion_tokens":72,"prompt_tokens_details":{"cached_tokens":1792}}`), &openaiRaw)
 	json.Unmarshal([]byte(`{"input_tokens":252,"output_tokens":72,"cache_read_input_tokens":1792}`), &anthropicRaw)
 
-	o := NormalizeUsage(SurfaceChat, openaiRaw)
-	a := NormalizeUsage(SurfaceAnthropic, anthropicRaw)
+	o := NormalizeUsageWith(SurfaceChat, openaiRaw, provider.UsageConventionAuto)
+	a := NormalizeUsageWith(SurfaceAnthropic, anthropicRaw, provider.UsageConventionAuto)
 
 	if o.In != a.In {
 		t.Errorf("cold input disagrees across surfaces: openai=%d anthropic=%d (must match)", o.In, a.In)
@@ -197,13 +199,13 @@ func TestCrossSurfaceTotalsAgree(t *testing.T) {
 }
 
 func TestNormalizeUsageNilAndUnknown(t *testing.T) {
-	if u := NormalizeUsage(SurfaceChat, nil); u.In != 0 || u.Out != 0 {
+	if u := NormalizeUsageWith(SurfaceChat, nil, provider.UsageConventionAuto); u.In != 0 || u.Out != 0 {
 		t.Errorf("nil usage must zero out, got %+v", u)
 	}
 	// unknown surface falls back to OpenAI-ish rather than panicking
 	var raw map[string]any
 	json.Unmarshal([]byte(`{"prompt_tokens":10,"completion_tokens":3}`), &raw)
-	if u := NormalizeUsage(Surface("mystery"), raw); u.In != 10 || u.Out != 3 {
+	if u := NormalizeUsageWith(Surface("mystery"), raw, provider.UsageConventionAuto); u.In != 10 || u.Out != 3 {
 		t.Errorf("unknown surface fallback wrong: %+v", u)
 	}
 }
@@ -212,7 +214,7 @@ func TestNormalizeUsageNilAndUnknown(t *testing.T) {
 func TestNormalizeUsageClampsNegative(t *testing.T) {
 	var raw map[string]any
 	json.Unmarshal([]byte(`{"prompt_tokens":100,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":500}}`), &raw)
-	if u := NormalizeUsage(SurfaceChat, raw); u.In != 0 {
+	if u := NormalizeUsageWith(SurfaceChat, raw, provider.UsageConventionAuto); u.In != 0 {
 		t.Errorf("tokens_in = %d, want clamped 0", u.In)
 	}
 }

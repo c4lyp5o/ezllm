@@ -69,7 +69,7 @@ func TestFreshToolOutputCompressedOnFirstSendAndFrozen(t *testing.T) {
 // keep (the default): the trailing tool result is exempt like any last turn.
 func TestFreshToolOutputKeepLeavesTheLastTurnAlone(t *testing.T) {
 	for shape, body := range trailingToolBodies(false) {
-		out, _ := Apply(body, freshProfile(false))
+		out, _ := ApplyWithSession(body, freshProfile(false), nil, "", nil)
 		if strings.Contains(string(out), "lines elided") {
 			t.Errorf("%s: keep trimmed the exempt last turn", shape)
 		}
@@ -91,7 +91,7 @@ func TestFreshToolOutputNeverOpensProse(t *testing.T) {
 			map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "tool_use", "id": "c1", "name": "Bash", "input": map[string]any{}}}},
 			last,
 		)
-		out, _ := Apply(body, freshProfile(true))
+		out, _ := ApplyWithSession(body, freshProfile(true), nil, "", nil)
 		if !strings.Contains(string(out), verbose) || strings.Contains(string(out), "lines elided") {
 			t.Errorf("%s: the final message was edited", name)
 		}

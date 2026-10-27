@@ -502,6 +502,48 @@ corrections section.
   mapping and represents missing activity as unknown. Visual/interaction coverage
   is in `web/tests/verify-railway.mjs` and `verify-neighbourhood-polish.mjs`.
 
+### v1.3.2 — five fixes the ledger found, and a dead-code pass ✅ (2026-10-27)
+
+None of these came from review; each came from a query over `calls`. Read them as
+examples of a class of bug rather than as history.
+
+- **Dead code (`2dc157d`)**: every function `deadcode` reports from `main` is gone,
+  classified first — orphans with their tests, one-line wrappers with the wrapper,
+  and tests asserting LIVE behaviour repointed at the entry production calls
+  (`ResponseUniversal`, `NormalizeUsageWith`, `ApplyWithSession`,
+  `classifyHopPolicy`). `make build` now ships stripped (`-s -w -trimpath`); the
+  proof is the shipped binary's symbol set, identical before and after.
+- **The reasoning clamp had never run (`20cec42`)**: `store.CatalogSnapshot`'s model
+  query did not select `reasoning_vocab` / `reasoning_required`, and
+  `ResolveCandidates` resolves against that snapshot, so `hopFacts.reasoning()`
+  returned a zero rule on every request while `*DB.ModelFacts` had it. Two
+  projections of one row, and only one carried the fact. `ReasoningRule.Clamp` also
+  could hand `off` to a model that requires reasoning; `Required` now governs the
+  selection and drops the field when nothing at or below the ask is legal.
+  Seams pinned by `internal/store/catalog_snapshot_reasoning_test.go`,
+  `internal/router/reasoning_resolution_test.go`,
+  `internal/provider/reasoning_required_clamp_test.go`.
+- **A client hanging up charged the hop (`4e9b20c`)**: `context.Canceled` is a
+  `net.Error`, so `classifyHopPolicy` read it as a transport fault and parked a
+  healthy hop. `hopOutcome.clientCancelled` is a third outcome that neither
+  strikes nor clears, `recordHop` returns early for it, and
+  `server.statusClientClosedRequest` records `499` instead of a 502.
+- **Two copilot safety rules were dead (`d6c2f24`)**: `githubcopilot.PrepareBody`
+  replaces the client's system content with a neutral prompt on every wire
+  (`githubcopilot.StripPersona`: persona never reaches a web provider, the role
+  stays), and `githubcopilot.ResponsesUnsupported` keeps claude\*/gemini\* off
+  `/responses` at resolution (`provider.KnownWireSupport`, read by the router's
+  `hopFacts.supports`); `provider.ErrWireUnsupported` is the adapter backstop and
+  records no health verdict (`hopOutcome.noVerdict`).
+- **Cause table (`eaf44cb`, `e16ad49`)**: the bracketed cause inside opencode's
+  `Upstream request failed:` envelope now beats the envelope, and
+  `proxy.refusesHistory` treats "this model needs the reasoning of every earlier
+  turn" as a hop fact (fail over, no park, cause `reasoning_echo_required`).
+
+`docs/reasoning-effort-design.md` carries the amendment that explains how the first
+one shipped, because "documented but in a function the linker removed" is a failure
+mode this codebase has now hit twice.
+
 ## 5. Invariants to check while reading (review checklist)
 
 These are the "if it's broken here, the project failed" spots — each must be visibly true in code:
@@ -511,9 +553,17 @@ These are the "if it's broken here, the project failed" spots — each must be v
 2. **SSE is never buffered** — no `bufio.Scanner` over the response, no full-body `ReadAll` on the
    stream path; `Flush()` called after each chunk to the client.
 3. **Unknown request fields survive** — `extra_body`, `enable_thinking`, `thinking` pass through;
-   the only mutation is `model`.
+   the only mutation is `model` — plus the ONE documented exception,
+   `reasoning_effort`, which `proxy.prepareHopBody` clamps or drops against the
+   model's own learned vocabulary when the client asked for a value that model
+   refuses. An accepted value is never re-encoded.
 4. **4xx ≠ retry** — only 429/5xx/timeouts trigger cooldown + next hop; a 400 (bad request) goes
-   straight back to the client. Retrying a 400 burns quota for nothing.
+   straight back to the client. Retrying a 400 burns quota for nothing. Three 400
+   classes are exceptions because they describe the HOP rather than our body, and
+   each is body-matched: `refusesWire` (the model cannot speak this wire),
+   `refusesHistory` (this model needs its own reasoning in the history — fail over,
+   no cooldown, because it serves conversations it started), and a 403 that names
+   model access (parks the hop). Everything else in the 4xx range is the client's.
 5. **Ledger writes can't block the response path** — async/batched; a slow SQLite must never add
    latency to a token stream.
 6. **Graceful shutdown** — SIGTERM finishes in-flight streams (bounded), then closes the DB.

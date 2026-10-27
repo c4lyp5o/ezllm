@@ -13,6 +13,11 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/store"
 )
 
+// statusClientClosedRequest is the recording convention for "the caller hung
+// up" (nginx's 499). It is never a gateway fault and never a hop's fault, so it
+// must be distinguishable from the 502 this gateway emits for its own failures.
+const statusClientClosedRequest = 499
+
 // allowModel enforces the per-key model allowlist (empty = every model). It
 // checks the REQUESTED id before a combo is expanded, so a key cannot reach a
 // disallowed hop through an alias. On refusal it has written the 403.
@@ -90,7 +95,8 @@ func (s *Server) finishDispatch(w http.ResponseWriter, r *http.Request, call sto
 	// inform. A hop-attributable failure releases a hold_until_failure block
 	// so the next dispatch rotates; a 4xx is the REQUEST's fault and keeps
 	// the hold (operator decision 2026-10-13).
-	if hopAttributableFailure(res, ferr) && !strings.Contains(served.Alias, "/") {
+	clientGone := r.Context().Err() != nil || errors.Is(ferr, context.Canceled)
+	if hopAttributableFailure(res, ferr, clientGone) && !strings.Contains(served.Alias, "/") {
 		s.resolver.MarkHopBad(served.Alias, served)
 	}
 	// Only a delivered, completed 2xx moves sticky_last_good: a translated
@@ -140,6 +146,17 @@ func (s *Server) finishDispatch(w http.ResponseWriter, r *http.Request, call sto
 			}
 			writeErrExtra(w, status, "model_unavailable", ferr.Error(),
 				map[string]any{"reason": ferr.Error(), "rule": rule})
+		} else if clientGone {
+			// The CALLER hung up — closed tab, cancelled agent run, shutdown.
+			// 499 is the recording convention for "client closed request": the
+			// caller is gone, so nothing useful can be written to it, but the
+			// ledger row and the access log must not report a gateway fault
+			// that never happened. The hop was not charged either (see
+			// classifyHopPolicy), so this row is the whole record of it.
+			status = statusClientClosedRequest
+			if !res.Committed {
+				writeErr(w, status, "client_cancelled", "client cancelled the request: "+ferr.Error())
+			}
 		} else {
 			// Nothing (or only headers) reached the client. Emit an explicit
 			// 502 so a transport failure never looks like an empty 200. The

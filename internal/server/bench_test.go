@@ -5,8 +5,8 @@ package server
 // whether a regression lives in body ingestion, in routing, or in the upstream
 // round trip, and those three have completely different owners.
 //
-//	phase 1  BenchmarkIngestBody        server.go:464 — read + size-limit the body
-//	phase 2  BenchmarkInspectAndRoute   server.go:474 extractModel + router.ResolveCandidates
+//	phase 1  BenchmarkIngestBody        — read + size-limit the body
+//	phase 2  BenchmarkInspectAndRoute   decode + model extraction, then router.ResolveCandidates
 //	e2e      BenchmarkEndToEnd          the whole handler over a real loopback socket
 //
 // The network half (ForwardCandidates, streamCopy) lives in
@@ -97,8 +97,8 @@ func BenchmarkIngestBody(b *testing.B) {
 // ── phase 2: inspection and routing ─────────────────────────────────────────
 
 // BenchmarkInspectAndRoute measures the two inspection steps against the real
-// store and the real router, with no upstream involved: extractModel over the
-// parsed body, then ResolveCandidates (namespace → account → model existence →
+// store and the real router, with no upstream involved: model extraction from
+// the body, then ResolveCandidates (namespace → account → model existence →
 // wire/pin selection → key pick → rules eligibility, or combo → per-hop gates).
 //
 // `direct` is the ns/model path; `combo` is a bare combo name, which pays the

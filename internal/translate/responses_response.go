@@ -1,23 +1,5 @@
 package translate
 
-import "github.com/c4lyp5o/ezllm/internal/provider"
-
-// ResponsesToChat translates a non-streaming OpenAI Responses API response
-// body into an OpenAI chat-completions response body, for a chat client whose
-// hop was dialed on the responses wire.
-//
-// Reasoning items are dropped silently (a chat body has no field for them);
-// the envelope always carries a valid finish_reason; usage is remapped 1:1.
-// Contract tables: docs/responses-wire-design.md.
-func ResponsesToChat(body []byte, clientModel string) ([]byte, error) {
-	opts := CodecOptions{Legacy: true}
-	ir, err := DecodeResponse(body, provider.SurfaceResponses, opts)
-	if err != nil {
-		return nil, err
-	}
-	return EncodeResponse(ir, provider.SurfaceChat, clientModel, opts)
-}
-
 // ── responses wire decode types ───────────────────────────────────────────
 
 type responsesWireResponse struct {

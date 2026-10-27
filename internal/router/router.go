@@ -317,6 +317,7 @@ type hopFacts struct {
 	ctx       context.Context
 	cat       Catalog
 	accountID int64
+	kind      provider.Kind
 	model     string
 
 	rowDone bool
@@ -334,8 +335,8 @@ type capAnswer struct {
 	err error
 }
 
-func (r *Resolver) factsFor(ctx context.Context, accountID int64, model string) *hopFacts {
-	return &hopFacts{ctx: ctx, cat: r.catalog, accountID: accountID, model: model}
+func (r *Resolver) factsFor(ctx context.Context, acct *provider.Account, model string) *hopFacts {
+	return &hopFacts{ctx: ctx, cat: r.catalog, accountID: acct.ID, kind: acct.Kind, model: model}
 }
 
 // loadRow reads the whole row once when the catalog supports it.
@@ -373,6 +374,11 @@ func (f *hopFacts) pin() (string, error) {
 }
 
 func (f *hopFacts) supports(s provider.Surface) (*bool, error) {
+	// The provider's own API shape outranks a probe: it is a fact about the
+	// model id, not an observation that may be stale.
+	if v := provider.KnownWireSupport(f.kind, f.model, s); v != nil {
+		return v, nil
+	}
 	if ok, err := f.loadRow(); ok {
 		if err != nil {
 			return nil, err
@@ -407,7 +413,7 @@ func (f *hopFacts) supports(s provider.Surface) (*bool, error) {
 // The pin is checked against the DECIDED wire inside this function, so a hop
 // cannot pass a pin that guards a different wire than the one it dials.
 func (r *Resolver) selectWire(ctx context.Context, acct *provider.Account, model, requested string, clientSurface provider.Surface) wireDecision {
-	f := r.factsFor(ctx, acct.ID, model)
+	f := r.factsFor(ctx, acct, model)
 	dec := r.selectWireWith(ctx, acct, model, requested, clientSurface, f)
 	// The reasoning vocabulary comes from the row f already loaded: asking a
 	// second hopFacts would read the model row twice per hop for one answer.

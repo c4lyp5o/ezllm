@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/c4lyp5o/ezllm/internal/provider"
 )
 
 type respOut struct {
@@ -29,7 +31,7 @@ type respOut struct {
 
 func translateResp(t *testing.T, in, model string) (respOut, []byte) {
 	t.Helper()
-	out, err := Response([]byte(in), model)
+	out, err := ResponseUniversal([]byte(in), provider.SurfaceChat, provider.SurfaceAnthropic, model, CodecOptions{Legacy: true})
 	if err != nil {
 		t.Fatalf("Response(%s) failed: %v", in, err)
 	}
@@ -41,7 +43,7 @@ func translateResp(t *testing.T, in, model string) (respOut, []byte) {
 }
 
 func TestResponseTranslationGolden(t *testing.T) {
-	got, err := Response(fixture(t, "openai_response.json"), "claude-3-5-sonnet-20240620")
+	got, err := ResponseUniversal(fixture(t, "openai_response.json"), provider.SurfaceChat, provider.SurfaceAnthropic, "claude-3-5-sonnet-20240620", CodecOptions{Legacy: true})
 	if err != nil {
 		t.Fatalf("Response failed: %v", err)
 	}
@@ -53,11 +55,11 @@ func TestResponseTranslationGolden(t *testing.T) {
 
 func TestResponseDeterminism(t *testing.T) {
 	in := fixture(t, "openai_response.json")
-	first, err := Response(in, "claude-3-5-sonnet-20240620")
+	first, err := ResponseUniversal(in, provider.SurfaceChat, provider.SurfaceAnthropic, "claude-3-5-sonnet-20240620", CodecOptions{Legacy: true})
 	if err != nil {
 		t.Fatalf("first Response: %v", err)
 	}
-	second, err := Response(in, "claude-3-5-sonnet-20240620")
+	second, err := ResponseUniversal(in, provider.SurfaceChat, provider.SurfaceAnthropic, "claude-3-5-sonnet-20240620", CodecOptions{Legacy: true})
 	if err != nil {
 		t.Fatalf("second Response: %v", err)
 	}

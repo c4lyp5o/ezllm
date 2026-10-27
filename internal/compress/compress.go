@@ -130,41 +130,27 @@ func EstimateTokens(s string) int64 {
 	return int64(utf8.RuneCountInString(s)/4) + 1
 }
 
-// Apply runs the profile's pipeline over a chat-completions body.
-// body is returned unchanged on every skip/fail path.
-func Apply(body []byte, p *Profile) ([]byte, Result) {
-	return ApplyWithDoc(body, p, nil)
-}
-
-// ApplyWithDoc is Apply with the request's single-parse decode threaded
-// through (docs/single-parse-dispatch-design.md): when doc is non-nil its
-// map(root) replaces the internal decode — same UseNumber settings, same
-// fail-open decisions — so the body is not parsed a second time. doc must be
-// the decode of `body`; a nil doc decodes internally as before.
+// ApplyWithSession runs the profile's pipeline over a request body. body is
+// returned unchanged on every skip/fail path. doc is the request's single-parse
+// decode (docs/single-parse-dispatch-design.md): when non-nil its map(root)
+// replaces the internal decode — same UseNumber settings, same fail-open
+// decisions — so the body is not parsed a second time. doc must be the decode
+// of `body`; a nil doc decodes internally as before.
 //
-// Results are NAMED (out, res): the deferred MS stamp below only reaches
-// the caller on named returns — with unnamed returns the deferred write
-// lands on a local copy and compression_ms silently reads 0 everywhere.
-//
-// This is the LEGACY stateless entry: no session, no memo. Request-path
-// callers should use ApplyWithSession, which adds committed-prefix
-// stability on top of exactly this pipeline.
-func ApplyWithDoc(body []byte, p *Profile, doc *jsonbody.BodyDoc) ([]byte, Result) {
-	return applyPipeline(body, p, doc, "", nil)
-}
-
-// ApplyWithSession is ApplyWithDoc with committed-prefix stability (WS-C,
-// scoped): when session and memo are both non-empty, messages already
-// SHIPPED in a transformed form (this session, this profile) ship that
-// exact form again — never re-judged by the ratio floor — and the floor
-// applies to the new work only. With an empty session or nil memo the
-// behaviour is exactly ApplyWithDoc's (legacy stateless mode). See
-// sessionmemo.go for the ledger's bounds, TTL, and privacy properties.
+// Committed-prefix stability (WS-C, scoped): when session and memo are both
+// non-empty, messages already SHIPPED in a transformed form (this session,
+// this profile) ship that exact form again — never re-judged by the ratio
+// floor — and the floor applies to the new work only. With an empty session or
+// nil memo the behaviour is the legacy stateless pipeline. See sessionmemo.go
+// for the ledger's bounds, TTL, and privacy properties.
 func ApplyWithSession(body []byte, p *Profile, doc *jsonbody.BodyDoc, session string, memo *SessionMemo) ([]byte, Result) {
 	return applyPipeline(body, p, doc, session, memo)
 }
 
-// applyPipeline is the shared pipeline; session/memo empty = legacy mode.
+// applyPipeline is the shared pipeline; session/memo empty = legacy stateless
+// mode. Results are NAMED (out, res): the deferred MS stamp below only reaches
+// the caller on named returns — with unnamed returns the deferred write lands
+// on a local copy and compression_ms silently reads 0 everywhere.
 func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session string, memo *SessionMemo) (out []byte, res Result) {
 	start := time.Now()
 	// A disabled/stageless profile still RESOLVED, so its name belongs on

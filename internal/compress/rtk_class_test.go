@@ -28,7 +28,7 @@ func TestRTKLogClassStillFilters(t *testing.T) {
 		map[string]any{"role": "tool", "tool_call_id": "call_b", "content": content},
 		textMsg("user", "and now?"), // the tool result must not be the exempt last turn
 	)
-	out, res := Apply(body, fullProfile(Stage{Engine: "rtk", Options: map[string]any{"keep_lines": 3}}))
+	out, res := ApplyWithSession(body, fullProfile(Stage{Engine: "rtk", Options: map[string]any{"keep_lines": 3}}), nil, "", nil)
 	if !res.Applied {
 		t.Fatalf("log class must filter: %s", res.Err)
 	}
@@ -49,7 +49,7 @@ func TestRTKPreservesFileReads(t *testing.T) {
 			toolCallMsg("call_r", name),
 			map[string]any{"role": "tool", "tool_call_id": "call_r", "content": content},
 		)
-		out, res := Apply(body, fullProfile(Stage{Engine: "rtk"}))
+		out, res := ApplyWithSession(body, fullProfile(Stage{Engine: "rtk"}), nil, "", nil)
 		if res.Applied {
 			t.Errorf("%s: a file read must never be head/tail-truncated", name)
 		}
@@ -67,7 +67,7 @@ func TestRTKPreservesDiffsAndPatches(t *testing.T) {
 			toolCallMsg("call_d", name),
 			map[string]any{"role": "tool", "tool_call_id": "call_d", "content": content},
 		)
-		out, res := Apply(body, fullProfile(Stage{Engine: "rtk"}))
+		out, res := ApplyWithSession(body, fullProfile(Stage{Engine: "rtk"}), nil, "", nil)
 		if res.Applied {
 			t.Errorf("%s: a patch must never be truncated", name)
 		}
@@ -84,7 +84,7 @@ func TestRTKPreservesUnknownTools(t *testing.T) {
 		toolCallMsg("call_u", "mcp__acme__fetch_everything"),
 		map[string]any{"role": "tool", "tool_call_id": "call_u", "content": content},
 	)
-	out, res := Apply(body, fullProfile(Stage{Engine: "rtk"}))
+	out, res := ApplyWithSession(body, fullProfile(Stage{Engine: "rtk"}), nil, "", nil)
 	if res.Applied {
 		t.Error("an unknown tool must pass through untouched")
 	}
@@ -93,7 +93,7 @@ func TestRTKPreservesUnknownTools(t *testing.T) {
 	}
 	// A tool result with no resolvable call at all is also unknown.
 	body2 := bodyOf(map[string]any{"role": "tool", "tool_call_id": "ghost", "content": content})
-	out2, res2 := Apply(body2, fullProfile(Stage{Engine: "rtk"}))
+	out2, res2 := ApplyWithSession(body2, fullProfile(Stage{Engine: "rtk"}), nil, "", nil)
 	if res2.Applied || msgContent(t, out2, 0) != content {
 		t.Error("a tool result with no originating call must pass through")
 	}
@@ -107,7 +107,7 @@ func TestRTKSearchesFilter(t *testing.T) {
 		map[string]any{"role": "tool", "tool_call_id": "call_g", "content": content},
 		textMsg("user", "and now?"),
 	)
-	out, res := Apply(body, fullProfile(Stage{Engine: "rtk", Options: map[string]any{"keep_lines": 3}}))
+	out, res := ApplyWithSession(body, fullProfile(Stage{Engine: "rtk", Options: map[string]any{"keep_lines": 3}}), nil, "", nil)
 	if !res.Applied {
 		t.Fatalf("search results should filter: %s", res.Err)
 	}
@@ -128,7 +128,7 @@ func TestRTKParallelCallsKeepPairing(t *testing.T) {
 		map[string]any{"role": "tool", "tool_call_id": "p1", "content": log},
 		map[string]any{"role": "tool", "tool_call_id": "p2", "content": log},
 	)
-	out, res := Apply(body, fullProfile(Stage{Engine: "rtk", Options: map[string]any{"keep_lines": 3}}))
+	out, res := ApplyWithSession(body, fullProfile(Stage{Engine: "rtk", Options: map[string]any{"keep_lines": 3}}), nil, "", nil)
 	if !res.Applied {
 		t.Fatalf("expected the bash half filtered: %s", res.Err)
 	}
@@ -158,7 +158,7 @@ func TestRTKAnthropicShapeResolves(t *testing.T) {
 		}},
 		textMsg("user", "final"),
 	)
-	out, res := Apply(body, fullProfile(Stage{Engine: "rtk", Options: map[string]any{"keep_lines": 3}}))
+	out, res := ApplyWithSession(body, fullProfile(Stage{Engine: "rtk", Options: map[string]any{"keep_lines": 3}}), nil, "", nil)
 	if !res.Applied {
 		t.Fatalf("anthropic tool_use id must resolve (got %s)", res.Err)
 	}
@@ -241,7 +241,7 @@ func TestToolClassOverridesApplyThroughThePipeline(t *testing.T) {
 		textMsg("user", "and now?"),
 	)
 	opts := map[string]any{"keep_lines": 3, "tool_classes": map[string]any{"terminal_run": "preserve", "DEPLOY_STATUS": "log"}}
-	out, _ := Apply(body, fullProfile(Stage{Engine: "rtk", Options: opts}))
+	out, _ := ApplyWithSession(body, fullProfile(Stage{Engine: "rtk", Options: opts}), nil, "", nil)
 	if msgContent(t, out, 1) != content {
 		t.Error("override preserve was ignored: Terminal_Run was filtered")
 	}

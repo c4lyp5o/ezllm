@@ -148,13 +148,13 @@ func TestResultNamesDecisionVersion(t *testing.T) {
 	// A legacy (no session) decision names the CURRENT fingerprint — the
 	// ruleset that actually ran — with no binding involved.
 	p2 := memoProfile(Stage{Engine: "lite"})
-	_, res3 := Apply(body, p2)
+	_, res3 := ApplyWithSession(body, p2, nil, "", nil)
 	if res3.ProfileVersion != ProfileFingerprint(p2) {
 		t.Errorf("legacy decisions must name the ruleset that ran: %q != %q",
 			res3.ProfileVersion, ProfileFingerprint(p2))
 	}
 	// A nil profile invents nothing.
-	_, res4 := Apply(body, nil)
+	_, res4 := ApplyWithSession(body, nil, nil, "", nil)
 	if res4.ProfileVersion != "" {
 		t.Errorf("a nil profile has no version, got %q", res4.ProfileVersion)
 	}

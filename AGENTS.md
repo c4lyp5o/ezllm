@@ -84,6 +84,7 @@ internal/codexbridge/   ChatGPT subscription surface (loopback-only): Codex app-
 internal/agybridge/     Antigravity subscription surface (loopback-only): headless agy spawn, preflight, lockdown
 web/                React+Vite dashboard; web/tests/ = Playwright drivers
 tests/              Python live-proof scripts (not part of go test)
+scripts/            operator utilities: backup_sqlite.py (online backup), ezllm-mac.sh (macOS installer + launchd agent)
 docs/               design records + runbooks (decisions, not status)
 ```
 

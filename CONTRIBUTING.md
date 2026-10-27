@@ -35,6 +35,7 @@ On a shared or desktop machine use `make test-quiet`; CI runs the full suite.
 | `cmd/`, `internal/` | Go source, with `_test.go` **in-package** (see below) |
 | `tests/` | Live proof scripts (Python) — run against a real instance, not part of `go test` |
 | `web/tests/` | Playwright screenshot (`shot-*.mjs`) and check (`verify-*.mjs`) drivers |
+| `scripts/` | Operator utilities: `backup_sqlite.py` (online SQLite backup), `ezllm-mac.sh` (macOS binary installer + launchd agent) |
 | `docs/` | Design records and runbooks — decisions, not status |
 | `EXPLORING.md` | Codebase tour: reading order, invariants, landmarks |
 | `CHANGELOG.md` | Milestone-tagged change narrative |
@@ -120,10 +121,39 @@ Docs are claims about code — verify before writing:
   dated version bumps go in `VERSION.md`; design decisions go in `docs/`.
   README stays the front door: what it is, how to run it, where things live.
 
+## Releasing
+
+Both publishers are gated by `test.yml`: a red suite never produces an image or
+an asset.
+
+1. **Bump the version in one commit.** `internal/server/version.go` and the
+   `Current:` line of `VERSION.md` move together; `version_test.go` enforces the
+   pairing and `/healthz` serves the constant.
+2. **Tag, then push the tag** — `git tag vX.Y.Z && git push --tags`. Each
+   publisher runs a `version` job first and **fails** if the tag does not equal
+   the constant in `version.go` (a prerelease suffix such as `-rc1` is allowed).
+3. **`release.yml`** builds the five standalone binaries — linux amd64/arm64,
+   darwin amd64/arm64, windows amd64 — packs each with `config.example.yaml` and
+   `README.md`, writes `SHA256SUMS`, and attaches them to the GitHub release
+   with generated notes. Everything is `CGO_ENABLED=0`, so the cross-compile
+   needs no toolchain; nothing is signed (no Authenticode, no notarization).
+4. **`docker-publish.yml`** builds the multi-arch image (amd64 + arm64,
+   cross-compiled in the builder stage — never emulated) and pushes it to GHCR.
+   **`:latest` is master-only:** a tag build publishes just its version tag, so
+   tagging an old commit cannot roll `latest` backwards.
+5. **Verify what shipped, from outside.** The release lists five assets plus
+   `SHA256SUMS`, and the running deployment reports the new version at
+   `/healthz`. A schema bump additionally needs the rehearsal in
+   `docs/install-binary.md` §7 (boot the new binary against a COPY of the data
+   directory, compare counts and `schema_version`).
+
 ## Commit conventions
 
 - Conventional-commit style, lowercase: `fix:` (default), `feat:`, `docs:`,
   `chore:`, `refactor:`, `test:`, `perf:`, `style:`, `build:`.
-- Small, focused commits; single-line subjects, no bodies.
+- Small, focused commits. Subject on one line; the body carries the *why* — a
+  measured number, a trap the diff cannot show, what was deliberately not done.
+  (Recent history is the reference: most commits have bodies.) Narration of the
+  diff does not earn one.
 - Never commit secrets: `config.yaml`, `data/`, and token files are
   gitignored for a reason.

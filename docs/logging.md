@@ -22,8 +22,11 @@ docker logs ezllm 2>&1 | grep 'ERROR'
 ```
 
 `docker logs` without `-t` is not a terminal, so the default `auto` colour
-stays off and the lines stay greppable. Under systemd, `journalctl -u ezllm`
-reads the same records. Neither needs anything from ezllm itself.
+stays off and the lines stay greppable. The binary behaves the same way: under
+systemd it is `journalctl --user -u ezllm -f` (or `-u ezllm` for a system unit),
+and launchd/Task Scheduler redirect stdout to a file — see
+[install-binary.md](install-binary.md) §6. None of it needs anything from ezllm
+itself.
 
 **No log file, deliberately.** An in-process file writer would buy rotation,
 locking, permissions and a disk-full failure mode in exchange for duplicating

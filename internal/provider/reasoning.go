@@ -72,10 +72,10 @@ func (r ReasoningRule) Clamp(want string) (value string, drop bool, changed bool
 			// A stored list can name a disabling value the model still
 			// refuses ("cannot turn thinking off" arrives as a separate
 			// fact from the enumeration), so Required governs: a rank-0
-			// ask is dropped rather than passed through.
+			// ask is clamped below like any value outside the list.
 			if r.Required {
 				if rank, ok := rankOf(want); ok && rank == 0 {
-					return "", true, true
+					break
 				}
 			}
 			return want, false, false // already acceptable: byte-identical request
@@ -123,16 +123,19 @@ func (r ReasoningRule) Clamp(want string) (value string, drop bool, changed bool
 	if best != "" {
 		return best, false, true
 	}
-	if r.Required {
-		// Nothing at or below the ask is legal, and the vocabulary is a real
-		// one (so the empty-list passthrough above never applied). Dropping
-		// the field lets the provider's own default apply, which is the only
-		// safe answer: inventing a higher effort would buy reasoning the
-		// client did not ask for.
-		return "", true, true
-	}
+	// Nothing at or below the ask is legal: send the cheapest allowed value.
+	// Dropping the field instead would hand the choice to the provider's
+	// default, which is never cheaper than its own cheapest value and usually
+	// dearer (medium or high).
 	if lowest != "" {
 		return lowest, false, true
+	}
+	if r.Required {
+		// The enumeration held only disabling or unranked words, so there is
+		// no legal value to name: the provider's default is the only answer.
+		if rank, ok := rankOf(want); ok && rank == 0 {
+			return "", true, true
+		}
 	}
 	return want, false, false // the enumeration held only words we do not rank
 }

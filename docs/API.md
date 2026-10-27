@@ -795,9 +795,10 @@ No HTTP response field or application release version changes with this schema.
 `models.reasoning_vocab` (CSV, in the provider's order) and `models.reasoning_required` record
 what a model accepts for `reasoning_effort`, read from its own 4xx refusal during live traffic or a
 key-test probe. The next request to that model has a top-level `reasoning_effort` clamped down to
-an accepted value, and DROPPED when reasoning is mandatory and nothing at or below the ask is legal:
-a stored list can name a disabling value (`off`/`none`) the model nevertheless refuses, so a
-mandatory model never receives one. A model with nothing learned receives the body untouched. Facts
+an accepted value, or up to the cheapest accepted value when nothing at or below the ask is legal.
+A stored list can name a disabling value (`off`/`none`) the model nevertheless refuses, so a
+mandatory model never receives one; the field is DROPPED only when a mandatory model's stored list
+names no non-disabling value at all. A model with nothing learned receives the body untouched. Facts
 merge: a refusal that names only a mandate keeps the stored list, and a mandate is never lowered.
 Only catalogued models are learned. No HTTP response field changes; design:
 docs/reasoning-effort-design.md.

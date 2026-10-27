@@ -79,34 +79,6 @@ func reserveLogin(ip string) (func(failed, succeeded bool), bool) {
 	}, true
 }
 
-func loginAllowed(ip string) bool {
-	loginRateLimiter.mu.Lock()
-	defer loginRateLimiter.mu.Unlock()
-	b := loginRateLimiter.attempts[ip]
-	if b == nil {
-		return true
-	}
-	cutoff := time.Now().Add(-loginWindow)
-	n := b.inFlight
-	for _, t := range b.failures {
-		if t.After(cutoff) {
-			n++
-		}
-	}
-	return n < maxLoginAttempts
-}
-
-func clearLoginAttempts(ip string) {
-	loginRateLimiter.mu.Lock()
-	defer loginRateLimiter.mu.Unlock()
-	if b := loginRateLimiter.attempts[ip]; b != nil {
-		b.failures = nil
-		if b.inFlight == 0 {
-			delete(loginRateLimiter.attempts, ip)
-		}
-	}
-}
-
 // bcryptSlots bounds concurrent password hashing across login, setup and
 // password change. The per-IP limiter cannot stop many source addresses
 // (or every client behind one proxy address sharing a bucket) from running

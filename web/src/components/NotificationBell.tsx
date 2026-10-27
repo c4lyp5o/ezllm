@@ -48,17 +48,24 @@ export default function NotificationBell() {
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
+  const loading = useRef(false);
   const navigate = useNavigate();
 
-  const load = useCallback(() => {
-    listNotifications().then((r) => { setItems(r.items); setUnread(r.unread); }).catch(() => undefined);
+  const load = useCallback(async () => {
+    if (loading.current) return;
+    loading.current = true;
+    try { const r = await listNotifications(); setItems(r.items); setUnread(r.unread); }
+    catch { /* Keep the last successful reading. */ }
+    finally { loading.current = false; }
   }, []);
 
   useEffect(() => {
-    load();
-    const t = window.setInterval(load, POLL_MS);
-    window.addEventListener('focus', load);
-    return () => { window.clearInterval(t); window.removeEventListener('focus', load); };
+    const refresh = () => { if (!document.hidden) void load(); };
+    refresh();
+    const t = window.setInterval(refresh, POLL_MS);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => { window.clearInterval(t); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh); };
   }, [load]);
 
   useEffect(() => {

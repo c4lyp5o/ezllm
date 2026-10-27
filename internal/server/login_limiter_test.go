@@ -8,6 +8,34 @@ import (
 	"time"
 )
 
+func loginAllowed(ip string) bool {
+	loginRateLimiter.mu.Lock()
+	defer loginRateLimiter.mu.Unlock()
+	b := loginRateLimiter.attempts[ip]
+	if b == nil {
+		return true
+	}
+	cutoff := time.Now().Add(-loginWindow)
+	n := b.inFlight
+	for _, t := range b.failures {
+		if t.After(cutoff) {
+			n++
+		}
+	}
+	return n < maxLoginAttempts
+}
+
+func clearLoginAttempts(ip string) {
+	loginRateLimiter.mu.Lock()
+	defer loginRateLimiter.mu.Unlock()
+	if b := loginRateLimiter.attempts[ip]; b != nil {
+		b.failures = nil
+		if b.inFlight == 0 {
+			delete(loginRateLimiter.attempts, ip)
+		}
+	}
+}
+
 func TestLoginLimiterBoundsConcurrentAndExpiredSources(t *testing.T) {
 	const ip = "limiter-concurrent-test"
 	clearLoginAttempts(ip)

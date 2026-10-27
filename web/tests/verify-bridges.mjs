@@ -46,6 +46,8 @@ check("provider labels use the requested names", labels["claude-sub"] === "Claud
 await page.selectOption("#ap-kind", "antigravity-sub");
 await page.getByText("Bridge running at").waitFor();
 check("antigravity bridge lists its plan's models", (await page.locator("text=gemini-3.8-flash-low, claude-sonnet-4-6").count()) === 1);
+check("disabled client tools have actionable guidance", (await page.getByText(/Client tool calls are unavailable/).count()) === 1);
+check("running bridge links its runbook", (await page.locator('a[href$="docs/agy-bridge-runbook.md"]').count()) >= 1);
 check("antigravity login is not misread as logged out", (await page.locator("text=does not report a login").count()) === 0);
 await page.keyboard.press("Escape");
 await page.getByRole("button", { name: /Add provider/ }).click();
@@ -54,6 +56,7 @@ await page.selectOption("#ap-kind", "chatgpt-sub");
 await page.getByText("This bridge is not running").waitFor();
 const off = await page.locator("text=EZLLM_CODEX_BRIDGE").count();
 check("off bridge names the variable that turns it on", off > 0);
+check("off bridge explains where to find startup errors", (await page.getByText(/docker compose logs ezllm/).count()) === 1);
 check("off bridge links its runbook", (await page.locator('a[href$="docs/codex-bridge-runbook.md"]').count()) === 1);
 check("save disabled while the bridge is off", await page.getByRole("button", { name: /Save & validate/ }).isDisabled());
 

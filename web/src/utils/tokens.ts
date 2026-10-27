@@ -35,6 +35,7 @@ export interface V1Model {
   id: string;
   object?: string;
   owned_by?: string;
+  protocol?: { chat?: boolean | null };
 }
 
 // GET /admin/tokens writes the ARRAY directly (not {tokens:[...]}), and POST

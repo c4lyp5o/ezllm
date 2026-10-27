@@ -133,8 +133,29 @@ On Windows a YAML value with backslashes needs quoting or forward slashes
 which resolves against the working directory the launcher sets.
 
 The shipped `config.example.yaml` is bootstrap metadata only — provider
-credentials live in SQLite and are added from the dashboard. The two settings a
-new install usually changes:
+credentials live in SQLite and are added from the dashboard.
+
+**It also seeds provider accounts.** Every entry under `providers:` is upserted
+into SQLite at boot, *enabled and with no key*. So a fresh instance already lists
+the two examples the file ships:
+
+| name | namespace | kind |
+|---|---|---|
+| `opencode-main` | `opengo` | `opencode-go` |
+| `ssn-gpt` | `super-ssn` | `openai-compatible` |
+
+That is exactly why the boot log warns `model sync failed at boot … err="store:
+not found"` once per provider: the account exists, no credential does, so there
+is no catalog to sync. Neither account is usable and no model is exposed until a
+key is added — the provider list is cosmetic until then, not a security or cost
+issue, but it is surprising on a "fresh" install.
+
+For a genuinely empty instance, delete the `providers:` block — an empty map is
+valid, the schema explicitly allows it — or keep only the entries you intend to
+use. Accounts are not removed by deleting a config entry later; delete those in
+the dashboard.
+
+The two settings a new install usually changes:
 
 ```yaml
 listen: "127.0.0.1:20129"     # loopback; 0.0.0.0:20129 to reach it from the LAN

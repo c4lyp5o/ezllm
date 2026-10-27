@@ -21,7 +21,14 @@ a `.cmd` wrapper since Task Scheduler has no environment block.
 autodetect (Rosetta included), checksum, layout, and an agent with the master
 key pinned beside the data directory.
 
-Two facts the doc states because they are traps rather than preferences: the
+A third trap the doc now states: the provider accounts a "fresh" install already
+shows are not auto-created by code — `seed()` upserts every entry under
+`providers:` in the bootstrap config, so copying `config.example.yaml` seeds
+`opencode-main` and `ssn-gpt` as *enabled accounts with no key*, which is also
+why the boot log warns twice about a failed model sync. Deleting the block gives
+a genuinely empty instance (verified: 0 accounts, healthy).
+
+Two more facts the doc states because they are traps rather than preferences: the
 darwin/arm64 binary carries the Go linker's ad-hoc code signature (Apple
 Silicon kills an unsigned one with `Killed: 9`), and `EZLLM_MASTER_KEY_FILE`
 must be set explicitly — the default is home-global, so a second instance

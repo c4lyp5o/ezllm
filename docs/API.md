@@ -65,6 +65,13 @@ because an abandoned request learnt nothing about the hop). The request is recor
 did not have a fault. A caller still reading receives
 `499 {"error":{"code":499,"message":"client cancelled the request: …","type":"client_cancelled"}}`.
 
+**Precedence over a parked fallback.** When the last hop answers a failover status, that response is
+held so it can be committed if nothing else serves. A cancellation that arrives afterwards **discards
+it** and returns `499`. A hop's error must never be reported as the reason a cancelled call ended —
+before v1.3.3 that path committed the parked response and returned a nil error, so the ledger recorded
+a `503` against the hop instead of the caller leaving, and whether it happened depended on whether the
+hop's transport or its already-written response won the race.
+
 `/v1/models` rows: namespaced ids carry the upstream's `owned_by` and, once probed, a `protocol`
 map. A combo row is bare (`owned_by: "ezllm"`) and adds a non-standard `combo` key —
 `{"strategy":"failover","hops":[{"account_id":1,"model":"mimo-v2.6-flash","enabled":true}],"context_size":200000}` — so a
@@ -489,7 +496,8 @@ claim any value, so it must never gate anything. The dashboard shows it under
 the request's timestamp.
 
 ### `GET /admin/accounts/{id}/quota` → `200`
-Live `ReadQuota` → classified shape + `raw`. `{"kind":"none"}` when the provider has no endpoint
+Live `ReadQuota` → classified shape + `raw`. Provider-by-provider oracles and
+the classification rules: [quota-oracles-design.md](quota-oracles-design.md). `{"kind":"none"}` when the provider has no endpoint
 (`400`/`404`/`405` on the generic `{base}/usage` → NOT an error; OpenAI answers `400` there even
 for a valid key). A TokenRouter, OpenAI, Anthropic (`api.anthropic.com`) or Command Code account without a `management_key` is `none` without a call.
 OpenAI reads `GET api.openai.com/v1/dashboard/billing/credit_grants` with the session token (the

@@ -56,6 +56,10 @@ cp config.example.yaml config.yaml         # provider metadata only —
 make run                                   # http://127.0.0.1:20129
 ```
 
+No Go toolchain? [docs/install-binary.md](docs/install-binary.md) covers the
+released binaries (Linux, macOS, Windows): download, checksum, `config.yaml`,
+and running one as a systemd unit or a launchd agent.
+
 There is no default dashboard password. On first boot the server prints an
 ezllm banner with a one-time **setup code**, and the dashboard at `/` shows
 only a set-password page that asks for it. The code changes on every restart
@@ -258,6 +262,8 @@ Repository layout:
   (Go toolchain requirement — see [CONTRIBUTING.md](CONTRIBUTING.md))
 - `tests/` — live proof scripts (Python) run against a real instance
 - `web/tests/` — Playwright screenshot/verification drivers for the dashboard
+- `scripts/` — operator utilities: `backup_sqlite.py` (online SQLite backup),
+  `ezllm-mac.sh` (macOS binary installer + launchd agent)
 - `docs/` — design records and runbooks; `EXPLORING.md` is the codebase tour
 - `VERSION.md` — release history (semantic versioning)
 
@@ -270,6 +276,7 @@ an image or a release asset.
 
 | Document | What it holds |
 |---|---|
+| [docs/install-binary.md](docs/install-binary.md) | running a released binary: platforms, checksum, `config.yaml`, service units, upgrades |
 | [docs/API.md](docs/API.md) | the admin + public API contract |
 | [docs/settings-runbook.md](docs/settings-runbook.md) | settings ownership, live updates, timezones, sessions and diagnostics |
 | [docs/recovery-runbook.md](docs/recovery-runbook.md) | encrypted scheduled backups, offline verification/restore and upgrades |

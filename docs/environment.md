@@ -9,6 +9,10 @@ continue to use flags/environment/YAML/defaults without a database override.
 the shipped `compose.example.yml`, which lists every variable below. Copy it to
 `compose.yml` (gitignored) and edit the copy.
 
+Running a released binary instead of the container? Start at
+[install-binary.md](install-binary.md) — the layout, the master-key path and the
+service unit differ from the image, the variables do not.
+
 ## New install: what to set
 
 Most installs need three settings, and the image already handles listen address
@@ -31,6 +35,12 @@ and data location.
    fails. To use one, follow [claude-bridge-runbook.md](claude-bridge-runbook.md),
    [codex-bridge-runbook.md](codex-bridge-runbook.md) or
    [agy-bridge-runbook.md](agy-bridge-runbook.md).
+
+A **binary install** (no container) has one more: pin
+**`EZLLM_MASTER_KEY_FILE`** beside the data directory. The default is
+home-global, so a second instance silently shares the first one's key and a
+backup of `data/` alone leaves the provider keys unreadable. See
+[install-binary.md](install-binary.md).
 
 Behind a reverse proxy, also set `EZLLM_TRUSTED_PROXIES`. Set these in your
 `compose.yml`:

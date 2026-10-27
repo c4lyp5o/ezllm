@@ -1803,7 +1803,19 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 		// The caller has left: no later hop is dialed, probed or charged
 		// against its account's request budget for a response nobody reads.
 		if ctx.Err() != nil {
-			if fallbackResp == nil && fallbackTransportErr == nil {
+			// A cancellation outranks a PARKED fallback response. When the last
+			// hop answered a failover status, its response is held here to be
+			// committed if nothing else serves; committing it after the caller
+			// left presents a hop error as the reason the call ended and returns
+			// a nil error to the server, so the cancellation never reaches the
+			// ledger. Whether that happened used to depend on which side won the
+			// race: a hop whose TRANSPORT noticed the cancel set
+			// fallbackTransportErr and surfaced it, while one that had already
+			// written a 503 parked it and was committed as a success. Discard
+			// the parked body and let the error path answer — the defer would
+			// close it, but the pointer is cleared here so the defer is a no-op.
+			discardFallback()
+			if fallbackTransportErr == nil {
 				fallbackTransportErr = ctx.Err()
 			}
 			break

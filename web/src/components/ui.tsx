@@ -291,13 +291,15 @@ export const labelCls = 'mb-1.5 block text-[12px] font-medium text-mute';
 // the selection. Keyboard: ↑/↓ highlight, Enter confirm.
 export type ComboOption = { value: string; label: string };
 
-export function Combobox({ options, value, onChange, disabled, loadingText, placeholder, idPrefix }: {
+export function Combobox({ options, value, onChange, disabled, loadingText, placeholder, idPrefix, label, id }: {
   options: ComboOption[];
   value: string;
   onChange: (v: string) => void;
   disabled?: boolean;
   loadingText: string;
   placeholder?: string;
+  label: string;
+  id?: string;
   /** Unique DOM id prefix so aria-controls never collides across cards. */
   idPrefix?: string;
 }) {
@@ -349,9 +351,12 @@ export function Combobox({ options, value, onChange, disabled, loadingText, plac
     <div ref={wrapRef} className="relative w-full">
       <input
         type="text"
+        id={id}
         role="combobox"
+        aria-label={label}
         aria-expanded={open}
         aria-controls={listId}
+        aria-activedescendant={open && filtered.length > 0 ? `${listId}-option-${Math.min(active, filtered.length - 1)}` : undefined}
         aria-autocomplete="list"
         autoComplete="off"
         spellCheck={false}
@@ -373,6 +378,7 @@ export function Combobox({ options, value, onChange, disabled, loadingText, plac
             e.preventDefault();
             if (filtered.length > 0) pick(filtered[Math.min(active, filtered.length - 1)].value);
           } else if (e.key === 'Escape' && open) {
+            e.preventDefault(); e.stopPropagation();
             close();
           }
         }}
@@ -397,6 +403,7 @@ export function Combobox({ options, value, onChange, disabled, loadingText, plac
               <li
                 key={o.value}
                 role="option"
+                id={`${listId}-option-${i}`}
                 aria-selected={isSel}
                 data-active={isActive || undefined}
                 onClick={() => pick(o.value)}

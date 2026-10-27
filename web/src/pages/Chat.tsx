@@ -290,7 +290,7 @@ export default function Chat() {
 
       {error && <div role="alert" className="rounded-xl border border-bad/30 bg-bad-dim px-4 py-3 text-[13px] text-bad">{error}</div>}
 
-      <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}>
+      <div className={cx('grid grid-cols-1 gap-4', columns.length > 1 && 'lg:grid-cols-2', columns.length > 2 && 'xl:grid-cols-3')}>
         {columns.map((c, idx) => {
           const selected = catalog.find((m) => m.id === c.model);
           return (
@@ -300,7 +300,7 @@ export default function Chat() {
                   {idx + 1}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <Combobox idPrefix={`col-${c.id}`} options={modelOptions} value={c.model} onChange={(v) => setColumnModel(c.id, v)}
+                  <Combobox label={`Model for column ${idx + 1}`} idPrefix={`col-${c.id}`} options={modelOptions} value={c.model} onChange={(v) => setColumnModel(c.id, v)}
                     disabled={loading || c.busy} loadingText={loading ? 'Loading models…' : 'No synced models'} />
                 </div>
                 {idx > 0 && (

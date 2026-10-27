@@ -95,6 +95,8 @@ export default function Compression() {
   // held_notional count and measure the rewrites a stage correctly refused.
   const [savings, setSavings] = useState<UsageRow[] | null>(null);
   const [sum, setSum] = useState<RequestsSummary | null>(null);
+  const [savingsError, setSavingsError] = useState(false);
+  const [savingsAttempt, setSavingsAttempt] = useState(0);
   const [draft, setDraft] = useState<ProfileDraft | null>(null);
   const [pendingDelete, setPendingDelete] = useState<CompressionProfile | null>(null);
   const [editingID, setEditingID] = useState<number | null>(null);
@@ -108,18 +110,15 @@ export default function Compression() {
   }, []);
   useEffect(() => { reload(); }, [reload]);
 
-  // Savings over the last 24h: per-account groups for the bar list, and the
-  // requests summary (limit:1 — only its `summary` block is read) for the
-  // applied/declined cards. A failure here must not take the editor down, so
-  // each leaves its own panel piece empty.
+  // Both reports are needed for the authoritative totals and breakdown.
   useEffect(() => {
-    usage('account', '24h')
-      .then((r) => setSavings(r.groups))
-      .catch(() => setSavings([]));
-    requests({ range: '24h', limit: 1 })
-      .then((r) => setSum(r.summary))
-      .catch(() => setSum(null));
-  }, []);
+    let live = true;
+    setSavings(null); setSum(null); setSavingsError(false);
+    Promise.all([usage('account', '24h'), requests({ range: '24h', limit: 1 })])
+      .then(([byAccount, report]) => { if (live) { setSavings(byAccount.groups); setSum(report.summary); } })
+      .catch(() => { if (live) setSavingsError(true); });
+    return () => { live = false; };
+  }, [savingsAttempt]);
 
   const startNew = () => { setEditingID(null); setDraft(freshDraft()); setErr(''); setNotice(''); };
   const startEdit = (p: CompressionProfile) => { setEditingID(p.id); setDraft(fromProfile(p)); setErr(''); setNotice(''); };
@@ -170,13 +169,8 @@ export default function Compression() {
     finally { setBusy(false); }
   };
 
-  const savedTotal = savings?.reduce((a, r) => a + r.saved, 0) ?? 0;
-  // The REAL rewritten total: applied_saved only counts rows where a rewrite
-  // actually shipped. `savedTotal` (the raw per-account column) additionally
-  // sweeps in ~21k legacy tokens_saved sitting on declined rows — direction
-  // is right, magnitude is not, so the card reads applied_saved when the
-  // summary answered and falls back to the raw column while it loads.
-  const rewritten = sum ? sum.applied_saved : savedTotal;
+  // Only the summary's applied total describes rewrites that shipped.
+  const rewritten = sum?.applied_saved ?? 0;
   const declinedCalls = sum?.declined_calls ?? 0;
   const heldNotional = sum?.held_notional ?? 0;
   const appliedCalls = sum?.applied_calls ?? 0;
@@ -223,11 +217,13 @@ export default function Compression() {
       <Panel
         label={<SectionLabel>Actual savings · last 24h</SectionLabel>}
         aside={<span className="text-[12px] text-mute">
-          {hasSavings
+          {savingsError ? 'report unavailable' : !sum || savings === null ? 'loading…' : hasSavings
             ? `${formatTokens(rewritten)} rewritten${showHeld ? ` · ${formatTokens(heldNotional)} held` : ''}`
             : 'nothing recorded yet'}
         </span>}>
-        {savings === null ? (
+        {savingsError ? (
+          <p role="alert" className="text-[13px] text-warn">Could not load compression savings. <button type="button" className="underline" onClick={() => setSavingsAttempt(n => n + 1)}>Retry savings</button></p>
+        ) : savings === null || sum === null ? (
           <p className="text-[13px] text-mute">Loading savings…</p>
         ) : !hasSavings ? (
           <EmptyState

@@ -9,6 +9,10 @@ continue to use flags/environment/YAML/defaults without a database override.
 the shipped `compose.example.yml`, which lists every variable below. Copy it to
 `compose.yml` (gitignored) and edit the copy.
 
+Running a released binary instead of the container? Start at
+[install-binary.md](install-binary.md) — the layout, the master-key path and the
+service unit differ from the image, the variables do not.
+
 ## New install: what to set
 
 Most installs need three settings, and the image already handles listen address

@@ -2,6 +2,48 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
 
+## 2026-10-27 — the released binaries finally have a manual (docs)
+
+`release.yml` has shipped five platform binaries since v1.0.0 and nothing
+explained how to run one — the README covered `make check` and Docker, and the
+only macOS mentions under `docs/` were the Codex bridge refusing to start there.
+[docs/install-binary.md](docs/install-binary.md) now covers download and
+checksum (SHA256SUMS lists every platform, so a bare `sha256sum -c` fails on the
+four archives you did not fetch), the mandatory `config.yaml` and the two flags
+that override it, what the process writes, the first-boot setup code, a
+throwaway-instance recipe for borrowed machines, and one service shape per OS:
+a systemd user unit (with the lingering it needs to survive logout), a hardened
+system unit, a launchd agent, and Windows Task Scheduler — because `ezllm.exe`
+is a console application, `New-Service` fails on it, and the launcher has to be
+a `.cmd` wrapper since Task Scheduler has no environment block.
+
+`scripts/ezllm-mac.sh` is the macOS half, runnable end to end: architecture
+autodetect (Rosetta included), checksum, layout, and an agent with the master
+key pinned beside the data directory.
+
+Two facts the doc states because they are traps rather than preferences: the
+darwin/arm64 binary carries the Go linker's ad-hoc code signature (Apple
+Silicon kills an unsigned one with `Killed: 9`), and `EZLLM_MASTER_KEY_FILE`
+must be set explicitly — the default is home-global, so a second instance
+silently shares the first one's key.
+
+Verified: the install path executed against the real v1.3.2 assets on all three
+platforms. **macOS:** the release binary was installed and ran on a Mac — the
+ad-hoc-signed arm64 build executes without a `codesign` step, which is the one
+thing the artifact alone could not prove. **Windows** 11 / Server 2025, build
+26300: PowerShell download and `Get-FileHash` matched `SHA256SUMS`,
+`Expand-Archive` + layout, a mandatory `config.yaml` failure with exit code 1, a
+throwaway instance serving `{"status":"ok","version":"1.3.2"}` with the
+dashboard at 200 and `/v1/models` returning 401 anonymous, the `.cmd` launcher
+doing the same on a second port, and a clean stop leaving no process or listener
+behind. One documented claim came back **wrong and is now corrected**:
+`New-Service` does not fail — the SCM registers the console app happily and then
+refuses to start it with `StartService FAILED 1053`, which is the real reason to
+use Task Scheduler. Unexercised: the launchd agent registration
+(`scripts/ezllm-mac.sh start`) and the Windows Task Scheduler registration — the
+plist parses and the `.cmd` that Task Scheduler would launch is proven, and that
+is the extent of the claim.
+
 ## 2026-10-27 — a history refusal fails over instead of ending the run (fix)
 
 A thinking model that requires the reasoning of every earlier assistant turn

@@ -556,6 +556,27 @@ examples of a class of bug rather than as history.
 one shipped, because "documented but in a function the linker removed" is a failure
 mode this codebase has now hit twice.
 
+### Unreleased — account safety and dashboard reliability
+
+- `internal/server/admin.go` `handleRetest` checks the key's owning account;
+  `internal/store/admin.go` `EnableKey` scopes the update to the account.
+  `internal/server/key_ownership_test.go` covers cross-account refusals.
+- `internal/server/dashboard_auth.go` `reserveLogin` bounds tracked sources
+  and counts in-flight attempts. `internal/server/geminiweb_bridge.go`
+  `clientFor` associates stamped stored credentials with their key row, and
+  `maybeRotate` persists the rotated cookie or warns and retries.
+- `internal/store/ledger.go` `reservationCleanupLoop` bounds cleanup work for
+  dropped rows; overflow reservations expire normally. `internal/rules/engine.go`
+  `refreshLoop` warns while retaining the last good rule snapshot.
+- `web/src/components/ui.tsx` `Modal` contains and restores focus; `Combobox`
+  exposes its highlighted option. `web/src/pages/Chat.tsx` `Chat` owns request
+  cancellation and bounded catalog loading. The frontend regression drivers in
+  `web/tests/verify-frontend-p1.mjs`, `verify-frontend-p2.mjs` and
+  `verify-frontend-p3.mjs` cover these paths and report failure states.
+- `.github/workflows/test.yml` builds the web sources and uses
+  `web/scripts/check-dist.mjs` to compare the committed embedded bundle after
+  normalizing checkout-dependent Vite hashes.
+
 ## 5. Invariants to check while reading (review checklist)
 
 These are the "if it's broken here, the project failed" spots — each must be visibly true in code:

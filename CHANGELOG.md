@@ -2,6 +2,33 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
 
+## Unreleased — account safety, operational visibility and dashboard fixes
+
+- Provider-key retests and enable/disable operations now require the key to
+  belong to the account in the URL. A mismatch returns 404 before a provider
+  probe or key update.
+- Gemini Web persists rotated cookies for matching stored keys, including normal
+  routed requests; temporary probe credentials do not overwrite stored keys.
+  A failed persistence attempt is warned and retried.
+- Dashboard login and first-boot setup count in-flight attempts in the per-source
+  limit and bound the source table. Ledger overload uses a bounded reservation
+  cleanup queue; reservations that cannot be queued expire normally.
+- The overview exposes failed ledger flushes alongside dropped and unmetered
+  rows. Report and quota load failures now show an unavailable state and retry
+  instead of suggesting that usage, cost or caps are zero. Failed background
+  rules refreshes are logged while the last successfully loaded rules remain active.
+- Chat cancels requests when their column is removed or the page is left, parses
+  CRLF stream boundaries across chunks, and loads provider catalogs with bounded
+  concurrency and partial-failure recovery. The mobile comparison view stacks
+  columns; model pickers expose their name and highlighted option to assistive
+  technology. Dialogs contain keyboard focus and restore it on close.
+- Connect offers a copyable first request; bridge presets show tool availability
+  and link to troubleshooting. Hidden dashboard tabs skip notification and
+  backup polling. Economics applies its minimum-input filter on Analyze.
+- CI compares the committed dashboard bundle with a fresh build, normalizing
+  Vite's checkout-dependent asset hash suffixes. Browser regressions cover the
+  dashboard changes; the short Go suite is the local functional gate.
+
 ## 2026-10-27 — a cancelled caller gets the cancellation, not a parked hop error (fix)
 
 v1.3.2 taught the dispatcher that a client hanging up must not charge a strike

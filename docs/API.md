@@ -12,6 +12,15 @@ Every route except `/healthz`, the dashboard's static files and the sign-in/setu
 token (`Authorization: Bearer …` or `x-api-key`) on `/v1/*`; on `/admin/*` an admin token or the
 dashboard session (bearer or the `ezllm_session` cookie).
 
+**Sign-in and setup limits.** Failed guesses and in-flight attempts share a
+per-source limit of five: failures count for 15 minutes and in-flight attempts
+count until they finish. A successful sign-in clears
+that source's recorded failures. The in-memory source table holds at most 4,096
+entries; when it is full, expired idle entries are removed, and a new source
+receives 429 if no space is available. Entries reset on restart. Configure
+`EZLLM_TRUSTED_PROXIES` behind a reverse proxy and retain an external
+per-source rate limit for publicly reachable deployments.
+
 **Cookie writes are same-origin only.** A `POST`/`PUT`/`PATCH`/`DELETE` authenticated by the
 `ezllm_session` cookie is refused with `403` when the browser marks it as coming from another
 origin (`Sec-Fetch-Site`, or `Origin` against `Host`) — including another port on the same
@@ -342,11 +351,16 @@ Refusal while a bridge is off (`POST …/keys` with `"bridge":"chatgpt-sub"`):
 {"error":{"code":409,"message":"ChatGPT Plus/Pro is not running: set EZLLM_CODEX_BRIDGE=on, mount the CLI and login, and restart (docs/codex-bridge-runbook.md)","type":"invalid_request_error"}}
 ```
 
-### `POST /admin/accounts/{id}/keys/{keyId}/retest` → `200` | `422`
+### `POST /admin/accounts/{id}/keys/{keyId}/retest` → `200` | `404` | `422`
 Same flow against an already-stored key. On failure the row is **kept** but marked
 `last_test_ok=0` (it was valid before; the world may have changed) — unlike first-add.
+A key belonging to another account returns `404` before any upstream probe.
 
 ### `GET /admin/accounts/{id}/keys` → `200` → keys array (hints only, never plaintext)
+
+### `PATCH /admin/accounts/{id}/keys/{keyId}` → `200` | `404`
+Set `enabled` to enable or disable a key. A key belonging to another account
+returns `404` without changing it.
 
 ### `DELETE /admin/accounts/{id}/keys/{keyId}` → `204`
 

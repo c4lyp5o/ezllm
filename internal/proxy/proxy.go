@@ -1202,8 +1202,10 @@ func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, bod
 		upReq.Header.Set("x-goog-api-key", rt.KeyPlain)
 		upReq.Header.Del("Authorization")
 	}
-	// Content-Length must match the rewritten body.
-	upReq.ContentLength = int64(len(body))
+	// Content-Length: NewRequestWithContext set it from body; an adapter that
+	// rewrites the body (Copilot drops system messages) sets its own. Never
+	// re-stamp len(body) here — a shorter rewritten body would then fail the
+	// client's length check.
 	// Preserve multipart Content-Type with boundary; default to JSON.
 	contentType := "application/json"
 	if isMultipartBody(body) {

@@ -812,6 +812,20 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
             </p>
           </div>
         )}
+        {d.preset === 'claude-sub' && (
+          <div>
+            <label className={labelCls} htmlFor="ap-cs">Claude.ai session cookie <span className="text-mute">(optional)</span></label>
+            <input id="ap-cs" type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
+              placeholder="Paste the Cookie header from a claude.ai request"
+              value={d.managementKey} onChange={(e) => set('managementKey', e.target.value)} />
+            <p className="mt-1 text-[12px] text-mute">
+              Used only to read your plan's 5-hour and weekly windows live — stored encrypted, sent only to
+              claude.ai. Paste the whole Cookie header (DevTools → Network → request headers): we need its
+              sessionKey and lastActiveOrg, and the cf_clearance/__cf_bm cookies get past Cloudflare. Without
+              it the quota panel shows the bridge's last-observed reading instead of a live one.
+            </p>
+          </div>
+        )}
         <div>
           <label className={labelCls} htmlFor="ap-notes">Notes</label>
           <input id="ap-notes" className={inputCls} value={d.notes} onChange={(e) => set('notes', e.target.value)} placeholder="optional" />
@@ -945,6 +959,14 @@ function EditAccountModal({ account, onClose, onSaved }: { account: Account | nu
             <label className={labelCls}>Console session cookie (optional, rotates the stored value)</label>
             <input type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
               placeholder={account?.management_key_set ? '•••• (set — paste to replace)' : 'Paste the Cookie header from a platform.claude.com request'}
+              value={managementKey} onChange={(e) => setManagementKey(e.target.value)} />
+          </div>
+        )}
+        {account?.namespace === 'claude-sub' && (
+          <div>
+            <label className={labelCls}>Claude.ai session cookie (optional, rotates the stored value)</label>
+            <input type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
+              placeholder={account?.management_key_set ? '•••• (set — paste to replace)' : 'Paste the Cookie header from a claude.ai request'}
               value={managementKey} onChange={(e) => setManagementKey(e.target.value)} />
           </div>
         )}

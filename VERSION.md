@@ -52,6 +52,13 @@ building is a real `<button>` clipped to its own silhouette, stacked in depth
 order like the city, so keyboard and screen readers reach each provider and the
 table and inspector carry the exact unabbreviated numbers.
 
+**The Claude Pro/Max account can now carry a session cookie.** Paste one and
+the quota panel reads the plan's 5-hour and weekly windows live from claude.ai
+(stored encrypted, sent only to claude.ai); without it the bridge's
+last-observed reading stands. The read has existed since the subscription
+bridges — it takes the cookie from the account's management key — but the
+Providers form had no field to paste one into.
+
 **Provider keys belong to their account.** A retest or an enable/disable now
 checks the key against the account in the URL and answers 404 before any
 provider probe or key update. The dashboard batch alongside it is mostly

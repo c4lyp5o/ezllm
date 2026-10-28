@@ -45,6 +45,12 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by rel
   Two scene bugs found and fixed along the way: the animation clock never
   advanced (traffic lights, rain streaks and walk cycles were frozen), and a
   single early dispatched taxi stopped the scene from ever seeding its people.
+- Providers: the Claude Pro/Max (claude-sub) account form now takes the
+  claude.ai session cookie, so the quota panel reads the plan's 5-hour and
+  weekly windows live instead of the bridge's last-observed reading. The read
+  itself existed — it takes the cookie from the account's management key — but
+  the form never offered a field to paste one. The edit drawer rotates the
+  stored value the same way.
 
 ## 2026-10-27 — a cancelled caller gets the cancellation, not a parked hop error (fix)
 

@@ -68,6 +68,12 @@ await page.getByText("Bridge running at").waitFor();
 check("running bridge shows its boot facts", (await page.locator("text=2.1.306 (Claude Code)").count()) === 1);
 check("key field hidden for a bridge", !(await page.locator("#ap-key").isVisible()));
 check("name and namespace prefilled", (await page.inputValue("#ap-name")) === "Claude Pro/Max" && (await page.inputValue("#ap-ns")) === "claude-sub");
+// The bridge supplies the key, but a live balance read needs the operator's
+// claude.ai cookie — the field has to exist and reach management_key, which is
+// what internal/provider/claudesub_quota.go reads.
+check("claude.ai session cookie field is offered", await page.locator("#ap-cs").isVisible());
+check("cookie field explains what to paste", (await page.getByText(/5-hour and weekly windows/).count()) === 1);
+await page.fill("#ap-cs", "sessionKey=sk-ant-test; lastActiveOrg=org-1");
 await page.screenshot({ path: process.env.SHOT ?? "/tmp/bridges.png" });
 await page.getByRole("button", { name: /Save & validate/ }).click();
 await page.waitForTimeout(800);
@@ -76,5 +82,7 @@ const key = posts.find((p) => p.path.endsWith("/keys"))?.body;
 check("account points at the bridge with the anthropic convention",
   acct?.base_url === "http://127.0.0.1:8790/v1" && acct?.kind === "anthropic-compatible" && acct?.usage_convention === "anthropic", acct);
 check("key add names the bridge, sends no api_key", key?.bridge === "claude-sub" && !("api_key" in (key ?? {})), key);
+check("cookie reaches the account as its management key",
+  acct?.management_key === "sessionKey=sk-ant-test; lastActiveOrg=org-1", acct?.management_key);
 await t.close();
 finish();

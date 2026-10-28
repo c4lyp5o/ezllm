@@ -198,12 +198,10 @@ func (b *geminiWebBridge) maybeRotate(ctx context.Context, entry *geminiwebClien
 	}
 	if keyID != 0 {
 		if err := b.db.UpdateKeyPlain(ctx, keyID, newKey); err != nil {
-			b.log.Warn("gemini-web cookie rotation could not be saved; retrying", "account_id", entry.accountID)
-			// Keep the old cache key and retry on the next request. The client
-			// still has its rotated cookie for this request.
-			b.mu.Lock()
-			entry.rotatedAt = time.Time{}
-			b.mu.Unlock()
+			b.log.Warn("gemini-web cookie rotation could not be saved; retrying next interval", "account_id", entry.accountID)
+			// Keep the old cache key and leave rotatedAt as set above, so the
+			// retry waits a full interval instead of hitting the upstream
+			// rotate endpoint on every request while the DB write fails.
 			return
 		}
 	}

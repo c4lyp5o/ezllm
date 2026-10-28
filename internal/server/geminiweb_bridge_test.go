@@ -502,3 +502,28 @@ func TestBridgeRotationPersistenceFailureIsLogged(t *testing.T) {
 		})
 	}
 }
+
+func TestBridgeRotationPersistenceFailureBacksOff(t *testing.T) {
+	b, id, _ := newBridgeFixture(t, genFrame("x", true, "c"))
+	pick, err := b.db.PickKey(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := b.clientFor(context.Background(), id, pick.Plaintext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	b.rotate = func(context.Context, *geminiweb.Client) (string, error) {
+		calls++
+		return "__Secure-1PSID=abc\n__Secure-1PSIDTS=fresh", nil
+	}
+	if err := b.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	b.maybeRotate(context.Background(), entry)
+	b.maybeRotate(context.Background(), entry)
+	if calls != 1 {
+		t.Fatalf("rotate called %d times after a failed save, want 1", calls)
+	}
+}

@@ -1,5 +1,10 @@
 # Implementation Plan: claude-bridge M2 — tool calls on claude-sub
 
+**Historical plan:** This checklist records the original plan and is not current
+status. Implementation shipped; [todo.md](todo.md) records the historical task
+evidence and unchecked operator follow-ups, whose live status needs verification.
+Use `make test-short` for local testing.
+
 Spec: [SPEC.md](../SPEC.md) (approved 2026-10-21). Task checklist: [todo.md](todo.md).
 
 ## Overview

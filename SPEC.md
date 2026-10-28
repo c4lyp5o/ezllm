@@ -1,6 +1,9 @@
 # Spec: claude-bridge M2 — tool calls on the claude-sub hop
 
-**Status:** implemented 2026-10-21 on `feat/claude-bridge-m2-tools` (approach A); awaiting deploy · **Gate:** Calypso
+**Historical specification:** implemented 2026-10-21 (approach A) and included in
+subsequent releases. Deployment and operator-specific completion are not established
+by this document; see [tasks/todo.md](tasks/todo.md) and verify the live instance.
+The requirements and commands below record the original plan, not current status.
 **Parent design:** [docs/claude-subscription-design.md](docs/claude-subscription-design.md) §6 (M2)
 
 ## Objective

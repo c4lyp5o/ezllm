@@ -5,7 +5,10 @@ Operating the Claude subscription surface. Decisions live in
 
 ## Quick setup
 
-Five steps, about ten minutes. Each links to its detail below.
+Start with a working ezllm installation and dashboard ([quick start](../README.md#quick-start)).
+This guide uses Docker Compose on a Linux host. You need a Claude subscription,
+the official CLI, and a separate login for the bridge. Validation and test
+requests use subscription quota. Each step links to more detail below.
 
 1. **Install the CLI on the host** and pin a copy outside the updater's folder
    ([prerequisites](#prerequisites)):
@@ -16,7 +19,7 @@ Five steps, about ten minutes. Each links to its detail below.
    and `LOGNAME` to the login's owner, set `EZLLM_CLAUDE_BRIDGE: "on"`, then
    `docker compose up -d` ([enable](#enable)).
 4. **Add the account** in the dashboard: Providers → Add provider →
-   **Claude Pro/Max** → Save & validate. The dialog shows whether the bridge
+   **Claude Pro/Max** → Save & validate key. The dialog shows whether the bridge
    is running; there is no key to paste ([wire it in](#wire-it-into-ezllm)).
 5. **Cap it** under Rules before any agent uses it ([drain cap](#wire-it-into-ezllm)).
 
@@ -40,8 +43,10 @@ nothing else ever holds the subscription credential. One container, no sidecar.
 
   ```sh
   mkdir -p ~/.local/share/claude-bridge
-  cp ~/.local/share/claude/versions/<ver> ~/.local/share/claude-bridge/claude-<ver>
-  # then point the mount in your compose.yml at it and re-run the live proof
+  # Replace VERSION with the installed version shown by claude --version.
+  VERSION=2.1.306
+  cp "$HOME/.local/share/claude/versions/$VERSION" "$HOME/.local/share/claude-bridge/claude-$VERSION"
+  # Point the compose mount at the copied file.
   ```
 - A subscription login in its own config dir, never the interactive one:
 
@@ -59,7 +64,22 @@ nothing else ever holds the subscription credential. One container, no sidecar.
 In your `compose.yml` (from `compose.example.yml`): uncomment the two Claude
 mounts (the CLI read-only at `/opt/claude/claude`, the login read-write at
 `/claude-sub`), set `USER`/`LOGNAME` to the login's owner (the CLI's login check
-reads process identity), and set `EZLLM_CLAUDE_BRIDGE: "on"`.
+reads process identity), and set `EZLLM_CLAUDE_BRIDGE: "on"`. Replace `/home/you`, the version,
+and the login name below with your actual host values; keep the existing
+`environment` and `volumes` entries for ezllm's data and config.
+
+```yaml
+    environment:
+      EZLLM_CLAUDE_BRIDGE: "on"
+      USER: your-login
+      LOGNAME: your-login
+    volumes:
+      - /home/you/.local/share/claude-bridge/claude-2.1.306:/opt/claude/claude:ro
+      - /home/you/.claude-sub:/claude-sub
+```
+
+The Compose service user must be able to execute the copied CLI and read and
+write the login directory.
 
 ```sh
 docker compose up -d
@@ -73,10 +93,9 @@ address is refused.
 
 ## Wire it into ezllm
 
-1. **Account** (dashboard → Providers → Add provider → **Claude subscription
-   (bridge)**). The preset fills in everything below, shows the bridge's CLI
-   version, login and plan, and supplies the key itself — Save & validate is the
-   whole step. If it says the bridge is not running, go back to [Enable](#enable).
+1. **Account** (dashboard → Providers → Add provider → **Claude Pro/Max**).
+   The preset fills in everything below, shows the bridge's CLI version, login
+   and plan, and supplies the key itself — Save & validate key is the whole step. If it says the bridge is not running, go back to [Enable](#enable).
    By hand (API or an older dashboard):
    - kind `anthropic-compatible`
    - base URL `http://127.0.0.1:8790/v1`
@@ -114,9 +133,21 @@ two `cache_control` markers survive (native spends two of upstream's four).
 
 ## Verify
 
+For a simple first check, use the gateway's [model-list command](../README.md#set-up-the-dashboard)
+and select a model from this account. Send a short prompt through the dashboard
+or your client. Requests consume subscription quota.
+
+The repository's optional live proof makes several calls and requires an inference
+key. Set the URL explicitly: the script otherwise defaults to a specific remote
+server. Replace the model ID with one from your account:
+
 ```sh
-python3 tests/prove_claude_bridge.py     # through ezllm's front door; real plan draw
+EZLLM_URL=http://127.0.0.1:20129 EZLLM_TOKEN=YOUR_EZLLM_KEY \
+  python3 tests/prove_claude_bridge.py YOUR_NAMESPACE/YOUR_MODEL
 ```
+
+Run this only against a test instance you control; the optional ledger check uses
+`EZLLM_ADMIN_TOKEN`.
 
 ## Plan windows on the provider card
 

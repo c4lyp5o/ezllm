@@ -3,6 +3,7 @@ package rules
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -178,7 +179,7 @@ func (e *Engine) refreshLoop() {
 			if err := e.Reload(ctx); err != nil {
 				// Keep serving the last-good set; a failed reload must not
 				// blank the rules (that would silently un-cap everything).
-				_ = err
+				slog.Warn("rules refresh failed; retaining previous rules", "err", err)
 			}
 			cancel()
 		}

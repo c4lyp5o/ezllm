@@ -109,33 +109,61 @@ Two animations are deliberately NOT transform-and-opacity, and both earn it:
 ## The scene (Neighbourhood)
 
 The Neighbourhood page is the one place the no-gradients, no-glows rule is
-suspended: it is a toy, and a glow is the whole point. The exception is fenced
-and carries rules of its own:
+suspended: it is a toy, and a glow is the whole point. The toy is an isometric
+city: one building per provider account, streets between them, and traffic that
+runs whether or not anyone is watching. Four facade materials (sage, terracotta, glass-blue, concrete) sit on
+grass and tarmac that are painted once into a cached layer; warm windows make activity easy to find. The exception is fenced and carries
+rules of its own:
 
 - **Scoped.** Every scene colour is a `--nb-*` token under `.nbhd` in
-  `src/index.css` (light = a day scene, dark = a night one). No other data-page component may use a gradient or glow, and no data screen
-  embeds the scene. The pre-auth login backdrop is described separately below.
-- **Activity indicators are data.** Window brightness is tokens per minute over
-  the last five minutes (log scale, full glow = the busiest key, never less than
-  2,000 a minute); smoke and street traffic indicate recent usage; rain cloud =
-  a quarter or more of recent calls failed; boarded windows = disabled. Facades,
-  roofs, gardens, trees and streetlights are scenery, not additional metrics.
-  Vehicle motion is not a per-request replay. Missing usage is unavailable,
-  never invented zero activity.
-- **Never colour alone.** The table under the scene lists every house with
-  exact, unabbreviated figures, and each house has a `<title>`. Houses and table
-  key buttons support focus, Enter/Space and touch selection; the inspector
-  exposes the selected key's exact values and state outside the illustration.
-- **Cheap.** SVG architecture and CSS transform/opacity animation, polled every
-  10 s and skipped while hidden. Pause scene stops decoration without stopping
-  usage refresh. Reduced motion follows both the OS and browser Settings,
-  including changes while the page is open. Hidden tabs pause scene animation.
-  Keep WebGL out of this page: side walls and layered roofs provide depth without
-  a renderer loop on the gateway's machine.
-- **Contained.** Provider streets scroll locally when there are too many houses
-  to fit. The page itself never scrolls sideways. Loading, empty, failed and
-  partial reads stay actionable; previously available data is retained on a
-  refresh failure. Landscape and portrait layouts use the same real key IDs.
+  `src/index.css` (light = a day scene, dark = a night one). No other data-page
+  component may use a gradient or glow, and no data screen embeds the scene. The
+  pre-auth login backdrop is described separately below.
+- **Generated, but stable.** The street grid comes from `planCity` in
+  `src/utils/city.ts`: blocks, setbacks, footprints, roof plant, trees and parks
+  are derived from a seed plus a hash of the provider id. A building therefore
+  never moves when traffic changes — only its height, light and weather do.
+  "New city" re-rolls the seed and regrows the same providers in a new
+  arrangement; nothing else about the data changes.
+- **Activity indicators are data.** Height and window light are tokens per
+  minute over the last five minutes (log scale, full glow = the busiest
+  provider, never less than 2,000 a minute). Rain = a quarter or more of recent
+  calls failed. Boarded windows = the account or all of its keys are disabled.
+  Street traffic thins and thickens with the live request rate of the last
+  minute. Roof plant, antennas, trees, parks, lamps, people, umbrellas, the
+  plane overhead and the weather itself are scenery, not additional metrics.
+  Missing usage is unavailable, never invented zero activity.
+- **Weather is occasional and controllable.** A shower drifts in on the city's
+  seeded schedule every minute or two and clears again — it is scenery, so it
+  may be commanded with the Auto sky / Rain / Clear control and never encodes a
+  figure. What it changes is atmosphere only: streaks over the whole scene, a
+  sheen on the streets, thicker clouds, umbrellas on the pavements.
+- **A request is an event.** A committed ledger row on `/admin/stream` flares
+  that provider's building — the light climbs the facade from the pavement — and
+  sends a car to its door. This is the one deliberate reversal of the old rule
+  that motion must never replay a request: the feed is a real per-request
+  source, so every flare is a call that actually happened, never a scheduled
+  imitation timed to look alive. Quiet gateways still breathe on the ambient
+  traffic; a call is an exception you can see.
+- **Never colour alone.** The table under the scene lists every provider with
+  exact, unabbreviated figures and a trend arrow for what moved since the last
+  update (also named in words in the inspector), and each building is a real
+  `<button>` with an `aria-label` and a `<title>`. Buildings and table buttons
+  support focus, Enter/Space and touch selection; the inspector exposes the
+  selected provider's exact values, its key count and its per-key split outside
+  the illustration.
+- **Cheap, and bounded.** Canvas 2D — never WebGL. One affine matrix per
+  building face draws the window grid as `fillRect`, and one depth-sorted pass
+  gives correct occlusion for traffic. Device pixel ratio is capped at 2, small
+  screens budget 30 fps, the loop stops when the tab is hidden, pause stops the
+  loop without stopping usage refresh (a paused scene still repaints on a data
+  change), and reduced motion renders one still frame with the same figures on
+  it. Usage is polled every 10 s; the SSE feed costs nothing.
+- **Contained.** The stage sizes itself to its container (`clamp`), fits the
+  whole city by construction (bounds include roof antennas), and never widens
+  the page. Loading, empty, failed and partial reads stay actionable;
+  previously available data is retained on a refresh failure. Landscape and
+  portrait layouts show the same real provider IDs.
 
 ## Login railway
 
@@ -149,4 +177,6 @@ still picture for OS/browser reduced motion. It requests no private dashboard
 API data before authentication.
 
 Browser regressions exercise the built assets in `tests/verify-railway.mjs`,
-`tests/verify-neighbourhood.mjs`, and `tests/verify-neighbourhood-polish.mjs`.
+`tests/verify-neighbourhood.mjs`, and `tests/verify-neighbourhood-polish.mjs`;
+`tests/shot-city.mjs` screenshots the city and measures its frame rate on a
+21-provider fixture.

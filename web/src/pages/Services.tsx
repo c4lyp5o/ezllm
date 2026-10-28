@@ -182,7 +182,7 @@ function ServiceCardView({
                     No synced models yet. Open Providers, sync a provider’s catalog, then come back here.
                   </div>
                 ) : (
-                  <Combobox idPrefix={`service-${card.surface}`} options={options} value={target}
+                  <Combobox id={`model-${card.surface}`} label={`Default model for ${card.endpoint}`} idPrefix={`service-${card.surface}`} options={options} value={target}
                     onChange={setTarget} loadingText={loadingModels ? 'Loading provider models…' : 'No synced models'}
                     disabled={loadingModels || options.length === 0} placeholder="Search provider models…" />
                 )}

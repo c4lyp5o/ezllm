@@ -1,39 +1,31 @@
-// Provider keys form a miniature town. Only activity indicators encode usage;
-// architecture is scenery. The exact ledger figures remain in the table.
-import { useEffect, useMemo, useState } from 'react';
+// NEIGHBOURHOOD — every provider is a building in a small city.
+//
+// The scene is the mood, the table is the record. What the city encodes:
+//   height, window light   tokens per minute over the last five minutes
+//   rain                   a quarter or more of recent calls failed
+//   boarded / dark         the account or all of its keys are disabled
+//   a flare + a car        one live request, replayed from the SSE ledger feed
+//   traffic density        how busy the last minute was
+// Roof plant, antennas, trees, parks, lamps and people are scenery, not
+// metrics. Missing usage is `unknown` — never a quiet zero.
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useReducedMotion } from '../utils/preferences';
 import { apiFetch, type Account, type UsageResp } from '../utils/api';
+import { POLL_MS, WINDOW_MIN, MIN_REF_TPM, buildBuildings, planCity } from '../utils/city';
+import { useLiveCalls } from '../utils/live';
 import { Chip, EmptyState, SectionLabel, btn, cx, formatTokens } from '../components/ui';
-import NeighbourhoodScene from '../components/NeighbourhoodScene';
+import CityScene from '../components/CityScene';
 
-const WINDOW_MIN = 5;
-const POLL_MS = 10_000;
-const MIN_REF_TPM = 2_000;
-type State = 'live' | 'idle' | 'off' | 'unknown';
-export type House = {
-  id: string; hint: string; label: string; account: string;
-  state: State; tpm: number; calls: number; errors: number; level: number; storm: boolean;
+const SEED_KEY = 'ezllm.city.seed';
+const readSeed = (): number => {
+  try {
+    const raw = Number(localStorage.getItem(SEED_KEY));
+    if (Number.isFinite(raw) && raw > 0) return raw;
+  } catch { /* storage blocked: fall through to a fresh city */ }
+  return 1 + Math.floor(Math.random() * 100_000);
 };
-export function glowLevel(tpm: number, ref: number): number {
-  if (tpm <= 0) return 0;
-  return Math.min(1, Math.log10(1 + tpm) / Math.log10(1 + Math.max(ref, MIN_REF_TPM)));
-}
-export function buildHouses(accounts: Account[], usage: UsageResp | null): House[] {
-  const byHint = new Map((usage?.groups ?? []).map(g => [g.k, g]));
-  const raw = accounts.flatMap(a => a.keys.map(k => {
-    const g = byHint.get(k.hint);
-    const enabled = a.enabled && k.enabled;
-    return { a, k, enabled, tpm: enabled && g ? (g.tin + g.tout) / WINDOW_MIN : 0,
-      calls: enabled ? g?.calls ?? 0 : 0, errors: enabled ? g?.errors ?? 0 : 0 };
-  }));
-  const ref = Math.max(MIN_REF_TPM, ...raw.map(r => r.tpm));
-  return raw.map(({ a, k, enabled, tpm, calls, errors }) => ({
-    id: `${a.id}:${k.id}`, hint: k.hint, label: k.label || k.hint, account: a.name,
-    state: !enabled ? 'off' : usage === null ? 'unknown' : tpm > 0 ? 'live' : 'idle',
-    tpm, calls, errors, level: glowLevel(tpm, ref), storm: calls >= 3 && errors / calls >= 0.25,
-  }));
-}
+
 function useNeighbourhood() {
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [usage, setUsage] = useState<UsageResp | null>(null);
@@ -67,19 +59,8 @@ function useNeighbourhood() {
     document.addEventListener('visibilitychange', onVisible);
     return () => { alive = false; controller.abort(); clearInterval(iv); document.removeEventListener('visibilitychange', onVisible); };
   }, [attempt]);
-  const houses = useMemo(() => accounts ? buildHouses(accounts, usage) : null, [accounts, usage]);
-  return { houses, stale, loading, at, retry: () => setAttempt(n => n + 1) };
-}
-
-function Glyph({ kind }: { kind: 'lit' | 'smoke' | 'storm' | 'off' }) {
-  return (
-    <svg width={18} height={18} viewBox="0 0 18 18" aria-hidden className="shrink-0">
-      {kind === 'lit' && <><circle cx={9} cy={9} r={8} fill="var(--nb-glow)" opacity={0.35} /><rect x={4} y={4} width={10} height={10} rx={1.5} fill="var(--nb-window-on)" /></>}
-      {kind === 'smoke' && <g fill="var(--nb-smoke)"><circle cx={6} cy={13} r={2.6} /><circle cx={9.5} cy={8.5} r={3.2} opacity={0.75} /><circle cx={13} cy={4} r={2.6} opacity={0.5} /></g>}
-      {kind === 'storm' && <><g fill="var(--nb-cloud)"><circle cx={6} cy={7} r={4} /><circle cx={11} cy={5.5} r={4.5} /><rect x={2} y={7} width={14} height={4} rx={2} /></g><g stroke="var(--color-bad)" strokeWidth={1.4} strokeLinecap="round"><line x1={6} y1={13} x2={5} y2={16} /><line x1={11} y1={13} x2={10} y2={16} /></g></>}
-      {kind === 'off' && <><rect x={4} y={4} width={10} height={10} rx={1.5} fill="var(--nb-window-off)" /><g stroke="var(--nb-wall-line)" strokeWidth={1.8} strokeLinecap="round"><line x1={3} y1={7} x2={15} y2={10} /><line x1={3} y1={11} x2={15} y2={8} /></g></>}
-    </svg>
-  );
+  const buildings = useMemo(() => (accounts ? buildBuildings(accounts, usage) : null), [accounts, usage]);
+  return { buildings, stale, loading, at, retry: () => setAttempt((n) => n + 1) };
 }
 
 function Ago({ at }: { at: number | null }) {
@@ -91,83 +72,161 @@ function Ago({ at }: { at: number | null }) {
 }
 
 export default function Neighbourhood() {
-  const { houses, stale, loading, at, retry } = useNeighbourhood();
+  const { buildings, stale, loading, at, retry } = useNeighbourhood();
+  const { perMinute, connected } = useLiveCalls();
   const reduce = useReducedMotion();
   const [paused, setPaused] = useState(false);
+  const [sky, setSky] = useState<'auto' | 'rain' | 'clear'>('auto');
   const [hidden, setHidden] = useState(document.hidden);
   const [hot, setHot] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  useEffect(() => { const update = () => setHidden(document.hidden); document.addEventListener('visibilitychange', update); return () => document.removeEventListener('visibilitychange', update); }, []);
-  useEffect(() => { if (selected && houses && !houses.some(h => h.id === selected)) setSelected(null); }, [houses, selected]);
-  const ranked = useMemo(() => [...(houses ?? [])].sort((a, b) => b.tpm - a.tpm || a.label.localeCompare(b.label)), [houses]);
-  const detail = houses?.find(h => h.id === (hot ?? selected));
-  const live = houses?.filter(h => h.state === 'live').length ?? 0;
-  const idle = houses?.filter(h => h.state === 'idle').length ?? 0;
-  const disabled = houses?.filter(h => h.state === 'off').length ?? 0;
-  const total = houses?.reduce((n, h) => n + h.tpm, 0) ?? 0;
-  const unknown = houses?.some(h => h.state === 'unknown');
-  const still = reduce || paused || hidden;
-  const select = (id: string) => setSelected(previous => previous === id ? null : id);
-  const ref = Math.max(MIN_REF_TPM, ...(houses ?? []).map(h => h.tpm));
+  const [seed, setSeed] = useState(readSeed);
 
-  if (houses === null) return <div className="nbhd nbhd-loading flex min-h-[360px] flex-col items-center justify-center gap-4 rounded-2xl border border-line bg-surface px-6 text-center">
+  useEffect(() => {
+    const update = () => setHidden(document.hidden);
+    document.addEventListener('visibilitychange', update);
+    return () => document.removeEventListener('visibilitychange', update);
+  }, []);
+  useEffect(() => { if (selected && buildings && !buildings.some((b) => b.id === selected)) setSelected(null); }, [buildings, selected]);
+
+  const ids = useMemo(() => (buildings ?? []).map((b) => b.id), [buildings]);
+  const plan = useMemo(() => planCity(ids, seed), [ids.join('|'), seed]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const ranked = useMemo(() => [...(buildings ?? [])].sort((a, b) => b.tpm - a.tpm || a.name.localeCompare(b.name)), [buildings]);
+  const detail = buildings?.find((b) => b.id === (hot ?? selected));
+  const live = buildings?.filter((b) => b.state === 'live').length ?? 0;
+  const quiet = buildings?.filter((b) => b.state === 'idle').length ?? 0;
+  const disabled = buildings?.filter((b) => b.state === 'off').length ?? 0;
+  const total = buildings?.reduce((n, b) => n + b.tpm, 0) ?? 0;
+  const unknown = buildings?.some((b) => b.state === 'unknown') ?? false;
+  const still = reduce || paused || hidden;
+  const select = (id: string) => setSelected((previous) => (previous === id ? null : id));
+  const ref = Math.max(MIN_REF_TPM, ...(buildings ?? []).map((b) => b.tpm));
+
+  // What moved since the previous update: the table shows the direction, the
+  // inspector names it. A provider seen for the first time has no trend.
+  const before = useRef<Map<string, number>>(new Map());
+  const trend = (id: string, tpm: number) => {
+    const was = before.current.get(id);
+    return was === undefined ? 0 : tpm - was;
+  };
+  useEffect(() => {
+    if (!buildings) return;
+    const next = new Map<string, number>();
+    for (const b of buildings) next.set(b.id, b.tpm);
+    before.current = next;
+  }, [buildings]);
+  const trends = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const b of buildings ?? []) map.set(b.id, trend(b.id, b.tpm));
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buildings]);
+
+  const reroll = () => {
+    const next = 1 + Math.floor(Math.random() * 100_000);
+    setSeed(next);
+    try { localStorage.setItem(SEED_KEY, String(next)); } catch { /* storage blocked: the seed still applies for this visit */ }
+  };
+
+  if (buildings === null) return <div className="nbhd nbhd-loading flex min-h-[360px] flex-col items-center justify-center gap-4 rounded-2xl border border-line bg-surface px-6 text-center">
     <span className="text-3xl text-accent" aria-hidden>⌂</span>
-    {loading ? <p role="status" className="text-sm text-dim">Lighting the lamps…</p> : <><p role="alert" className="text-sm text-dim">Could not load the neighbourhood.</p><button className={cx(btn.base, btn.ghost, 'min-h-10')} onClick={retry}>Try again</button></>}
+    {loading ? <p role="status" className="text-sm text-dim">Laying out the streets…</p> : <><p role="alert" className="text-sm text-dim">Could not load the neighbourhood.</p><button className={cx(btn.base, btn.ghost, 'min-h-10')} onClick={retry}>Try again</button></>}
   </div>;
-  if (!houses.length) return <div className="space-y-4"><EmptyState title="No keys yet." hint="Add a provider key under Providers and its house appears here." /><Link className={cx(btn.base, btn.primary, 'min-h-10')} to="/providers">Add a provider</Link></div>;
+  if (!buildings.length) return <div className="space-y-4"><EmptyState title="No providers yet." hint="Add a provider under Providers and its building appears here." /><Link className={cx(btn.base, btn.primary, 'min-h-10')} to="/providers">Add a provider</Link></div>;
 
   return <div className="nbhd space-y-4">
     <div className="nbhd-toolbar flex flex-wrap items-center justify-between gap-4">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-dim" aria-label="Neighbourhood summary">
-        <span><strong className="tnum font-medium text-ink">{houses.length}</strong> houses</span>
+        <span><strong className="tnum font-medium text-ink">{buildings.length}</strong> buildings</span>
         <span className="flex items-center gap-1.5"><span className="nbhd-status-light" /><strong className="tnum font-medium text-ink">{unknown ? '—' : live}</strong> serving</span>
-        <span><strong className="tnum font-medium text-ink">{unknown ? '—' : idle}</strong> quiet</span>
+        <span><strong className="tnum font-medium text-ink">{unknown ? '—' : quiet}</strong> quiet</span>
         <span><strong className="tnum font-medium text-ink">{disabled}</strong> disabled</span>
         <span className="font-mono text-ink">{unknown ? 'Usage unavailable' : `${formatTokens(total)} tokens / min`}</span>
+        <span className="flex items-center gap-1.5" title={connected ? 'Reading the live ledger feed' : 'Live feed not connected — figures still update every 10 s'}>
+          <span className="nbhd-live-dot" data-live={connected ? 'true' : 'false'} aria-hidden />
+          <span className="tnum font-mono text-ink">{formatTokens(perMinute)}</span><span>requests / min (live)</span>
+        </span>
       </div>
-      <button type="button" className={cx(btn.base, btn.ghost, 'min-h-10')} disabled={reduce} aria-pressed={paused || reduce}
-        onClick={() => setPaused(p => !p)} title={reduce ? 'Reduced motion is enabled in your browser or Settings.' : 'Pause the scenery; usage updates continue.'}>
-        <span aria-hidden>{still ? '▷' : 'Ⅱ'}</span>{reduce ? 'Reduced motion' : paused ? 'Resume scene' : 'Pause scene'}
-      </button>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center rounded-lg border border-line" role="group" aria-label="Weather over the city">
+          {(['auto', 'rain', 'clear'] as const).map((mode) => (
+            <button key={mode} type="button" data-wx={mode} aria-pressed={sky === mode}
+              className="min-h-10 px-2.5 text-xs capitalize text-dim aria-pressed:bg-hover aria-pressed:text-ink"
+              onClick={() => setSky(mode)}
+              title={mode === 'auto' ? 'Rain drifts in on its own' : mode === 'rain' ? 'Rain over the whole city' : 'Hold the sky clear'}>
+              {mode === 'auto' ? 'Auto sky' : mode}
+            </button>
+          ))}
+        </div>
+        <button type="button" className={cx(btn.base, btn.ghost, 'min-h-10')} disabled={reduce} aria-pressed={paused || reduce}
+          onClick={() => setPaused((p) => !p)} title={reduce ? 'Reduced motion is enabled in your browser or Settings.' : 'Pause the traffic; usage updates continue.'}>
+          <span aria-hidden>{still ? '▷' : 'Ⅱ'}</span>{reduce ? 'Reduced motion' : paused ? 'Resume traffic' : 'Pause traffic'}
+        </button>
+      </div>
     </div>
     {stale && <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warn/30 bg-warn-dim px-4 py-3 text-xs text-warn">
-      <span>{unknown ? 'Usage could not be loaded. Houses are shown without activity figures.' : 'Last update failed — showing the latest available scene.'}</span>
+      <span>{unknown ? 'Usage could not be loaded. Buildings are shown without activity figures.' : 'Last update failed — showing the latest available city.'}</span>
       <button className="min-h-10 px-2 font-medium underline underline-offset-4" onClick={retry}>Try again</button>
     </div>}
-    <NeighbourhoodScene houses={houses} hot={hot} selected={selected} still={still} onHover={setHot} onSelect={select} />
-    <div className="nbhd-inspector flex min-h-[76px] flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-surface px-4 py-3" aria-label="Selected house" aria-live="polite">
+    <CityScene plan={plan} buildings={buildings} hot={hot} selected={selected} still={still} rate={perMinute} sky={sky}
+      onHover={setHot} onSelect={select} onReroll={reroll} />
+    <div className="nbhd-inspector flex min-h-[76px] flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-surface px-4 py-3" aria-label="Selected building" aria-live="polite">
       {detail ? <>
-        <div className="min-w-0"><p className="break-words text-sm font-medium text-ink">{detail.label}</p><p className="mt-0.5 text-xs text-mute">{detail.account} · {detail.state === 'off' ? 'disabled' : detail.state === 'unknown' ? 'usage unavailable' : detail.storm ? 'stormy' : detail.state === 'live' ? 'serving traffic' : 'quiet'}</p></div>
-        <div className="flex flex-wrap gap-x-5 gap-y-1 font-mono text-xs text-dim"><span>{detail.state === 'unknown' ? '—' : formatTokens(detail.tpm)} tokens / min</span><span>{detail.state === 'unknown' ? '—' : formatTokens(detail.calls)} calls</span><span>{detail.state === 'unknown' ? '—' : formatTokens(detail.errors)} errors</span></div>
-      </> : <><p className="text-sm text-dim">Every key has a place here.</p><p className="text-xs text-mute">Hover, focus or select a house to look inside.</p></>}
+        <div className="min-w-0">
+          <p className="break-words text-sm font-medium text-ink">{detail.name}</p>
+          <p className="mt-0.5 text-xs text-mute">{detail.namespace} · {detail.keys.length} {detail.keys.length === 1 ? 'key' : 'keys'} · {detail.state === 'off' ? 'disabled' : detail.state === 'unknown' ? 'usage unavailable' : detail.storm ? 'stormy' : detail.state === 'live' ? 'serving traffic' : 'quiet'}</p>
+          {detail.keys.length > 1 && <p className="mt-1 break-words text-xs text-mute">{detail.keys.map((k) => `${k.label}${k.enabled ? '' : ' (disabled)'} ${formatTokens(k.tpm)}/min`).join(' · ')}</p>}
+        </div>
+        <div className="flex flex-wrap gap-x-5 gap-y-1 font-mono text-xs text-dim">
+          <span>{detail.state === 'unknown' ? '—' : `${formatTokens(detail.tpm)} tokens / min`}</span>
+          <span>{detail.state === 'unknown' ? '—' : `${formatTokens(detail.calls)} calls`}</span>
+          <span className={cx(detail.errors > 0 && 'text-bad')}>{detail.state === 'unknown' ? '—' : `${formatTokens(detail.errors)} errors`}</span>
+          {detail.state !== 'unknown' && (() => {
+            const d = trends.get(detail.id) ?? 0;
+            return Math.abs(d) < 0.5
+              ? <span className="text-mute">steady since the last update</span>
+              : <span className={d > 0 ? 'text-ok' : 'text-warn'}><span aria-hidden>{d > 0 ? '▲' : '▼'}</span> {formatTokens(Math.abs(Math.round(d)))} {d > 0 ? 'up' : 'down'} since the last update</span>;
+          })()}
+        </div>
+      </> : <><p className="text-sm text-dim">Every provider has a building here.</p><p className="text-xs text-mute">Hover, focus or select a building to look inside.</p></>}
     </div>
     <div className="space-y-2">
       <ul className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-dim">
-        <li className="flex items-center gap-1.5"><Glyph kind="lit" />Brighter = more tokens per minute</li>
-        <li className="flex items-center gap-1.5"><Glyph kind="smoke" />Recent traffic</li>
-        <li className="flex items-center gap-1.5"><Glyph kind="storm" />A quarter or more of calls failed</li>
-        <li className="flex items-center gap-1.5"><Glyph kind="off" />Disabled</li>
+        <li className="flex items-center gap-1.5"><span className="nbhd-key nbhd-key-lit" aria-hidden />Brighter = more tokens per minute</li>
+        <li className="flex items-center gap-1.5"><span className="nbhd-key nbhd-key-flare" aria-hidden />A flare is one live request</li>
+        <li className="flex items-center gap-1.5"><span className="nbhd-key nbhd-key-rain" aria-hidden />Rain = a quarter or more of calls failed</li>
+        <li className="flex items-center gap-1.5"><span className="nbhd-key nbhd-key-off" aria-hidden />Boarded up = disabled</li>
         <li className="ml-auto text-mute"><Ago at={at} /> · last {WINDOW_MIN} minutes</li>
       </ul>
-      <p className="text-xs text-mute">Window glow follows the last five minutes of usage. Full glow is never less than {formatTokens(MIN_REF_TPM)} tokens a minute.</p>
+      <p className="text-xs text-mute">Window light follows the last five minutes of usage. Full glow is never less than {formatTokens(MIN_REF_TPM)} tokens a minute.</p>
     </div>
     <div className="rounded-xl border border-line bg-surface">
-      <div className="px-4 pt-3"><SectionLabel>Every house, busiest first</SectionLabel></div>
+      <div className="px-4 pt-3"><SectionLabel>Every building, busiest first</SectionLabel></div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[640px] text-[13px]">
           <thead><tr className="text-left text-[11px] text-mute">
-            <th className="px-4 py-2 font-medium">Key</th><th className="px-3 py-2 font-medium">Account</th><th className="px-3 py-2 font-medium">Glow</th>
+            <th className="px-4 py-2 font-medium">Provider</th><th className="px-3 py-2 font-medium">Keys</th><th className="px-3 py-2 font-medium">Glow</th>
             <th className="px-3 py-2 text-right font-medium">Tokens / min</th><th className="px-3 py-2 text-right font-medium">Calls</th><th className="px-3 py-2 text-right font-medium">Errors</th><th className="px-4 py-2 font-medium">State</th>
           </tr></thead>
-          <tbody>{ranked.map(h => <tr key={h.id} data-row={h.id} className={cx('border-t border-line transition-colors', (hot === h.id || selected === h.id) && 'bg-hover')}
-            onMouseEnter={() => setHot(h.id)} onMouseLeave={() => setHot(null)}>
-            <td className="px-4 py-2"><button className="min-h-10 text-left font-mono underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent" onClick={() => select(h.id)} aria-pressed={selected === h.id} onFocus={() => setHot(h.id)} onBlur={() => setHot(null)}>{h.label}</button></td>
-            <td className="px-3 py-2 text-dim">{h.account}</td>
-            <td className="px-3 py-2"><div className="h-1.5 w-20 overflow-hidden rounded-full bg-line" title={h.state === 'unknown' ? 'Usage unavailable' : `${Math.round(h.level * 100)}% of full glow`}><div className="h-full rounded-full" style={{ width: `${Math.round(h.level * 100)}%`, background: 'var(--nb-window-on)' }} /></div></td>
-            <td className="tnum px-3 py-2 text-right font-mono">{h.state === 'unknown' ? '—' : formatTokens(h.tpm)}</td>
-            <td className="tnum px-3 py-2 text-right font-mono">{h.state === 'unknown' ? '—' : formatTokens(h.calls)}</td>
-            <td className={cx('tnum px-3 py-2 text-right font-mono', h.errors > 0 && 'text-bad')}>{h.state === 'unknown' ? '—' : formatTokens(h.errors)}</td>
-            <td className="px-4 py-2"><Chip tone={h.state === 'unknown' ? 'warn' : h.state === 'off' ? 'neutral' : h.storm ? 'bad' : h.state === 'live' ? 'ok' : 'neutral'}>{h.state === 'unknown' ? 'unavailable' : h.state === 'off' ? 'disabled' : h.storm ? 'stormy' : h.state === 'live' ? 'lit' : 'quiet'}</Chip></td>
+          <tbody>{ranked.map((b) => <tr key={b.id} data-row={b.id} className={cx('border-t border-line transition-colors', (hot === b.id || selected === b.id) && 'bg-hover')}
+            onMouseEnter={() => setHot(b.id)} onMouseLeave={() => setHot(null)}>
+            <td className="px-4 py-2"><button className="min-h-10 text-left underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent" onClick={() => select(b.id)} aria-pressed={selected === b.id} onFocus={() => setHot(b.id)} onBlur={() => setHot(null)}>{b.name}</button></td>
+            <td className="tnum px-3 py-2 text-dim">{b.keys.length}</td>
+            <td className="px-3 py-2"><div className="h-1.5 w-20 overflow-hidden rounded-full bg-line" title={b.state === 'unknown' ? 'Usage unavailable' : `${Math.round(b.level * 100)}% of full glow`}><div className="h-full rounded-full" style={{ width: `${Math.round(b.level * 100)}%`, background: 'var(--nb-window-on)' }} /></div></td>
+            <td className="tnum px-3 py-2 text-right font-mono">{b.state === 'unknown' ? '—' : <>
+              {(() => {
+                const d = trends.get(b.id) ?? 0;
+                return Math.abs(d) < 0.5
+                  ? <span className="text-mute" aria-hidden>·</span>
+                  : <span className={d > 0 ? 'text-ok' : 'text-warn'} title={`${d > 0 ? '+' : '−'}${formatTokens(Math.abs(Math.round(d)))} tokens/min since the last update`}>
+                    <span aria-hidden>{d > 0 ? '▲' : '▼'}</span>
+                    <span className="sr-only">{d > 0 ? 'up' : 'down'} since the last update</span>
+                  </span>;
+              })()}{' '}{formatTokens(b.tpm)}</>}</td>
+            <td className="tnum px-3 py-2 text-right font-mono">{b.state === 'unknown' ? '—' : formatTokens(b.calls)}</td>
+            <td className={cx('tnum px-3 py-2 text-right font-mono', b.errors > 0 && 'text-bad')}>{b.state === 'unknown' ? '—' : formatTokens(b.errors)}</td>
+            <td className="px-4 py-2"><Chip tone={b.state === 'unknown' ? 'warn' : b.state === 'off' ? 'neutral' : b.storm ? 'bad' : b.state === 'live' ? 'ok' : 'neutral'}>{b.state === 'unknown' ? 'unavailable' : b.state === 'off' ? 'disabled' : b.storm ? 'stormy' : b.state === 'live' ? 'lit' : 'quiet'}</Chip></td>
           </tr>)}</tbody>
         </table>
       </div>

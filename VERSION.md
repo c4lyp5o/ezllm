@@ -11,7 +11,64 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.3.3**
+**Current: v1.4.0**
+
+## v1.4.0 — 2026-10-28
+
+One feature and a batch of fixes. No API, config or schema change; no
+migration. MINOR because a feature shipped, not because anything broke.
+
+**The Neighbourhood is a city.** The page that used to draw a row of houses now
+draws a generated isometric city on one canvas: one building per provider
+account on a seeded street grid, so the same providers always grow the same
+town and a building never moves when traffic does. Height and window light are
+tokens per minute over the last five minutes (log scale, full glow = the
+busiest provider, never under 2,000 a minute); rain falls where a quarter or
+more of recent calls failed; boarded windows mean the account or all of its
+keys are disabled; the number of cars on the street follows the live request
+rate of the last minute. Missing usage is drawn as `unknown` and never as a
+quiet zero. A committed row on `/admin/stream` flares that provider — the light
+climbs the facade from the pavement — and sends a taxi to its door: the feed is
+a real per-request source, so every flare is a call that actually happened.
+Everything else on screen is scenery and carries no number: people on the
+pavements (with umbrellas in the rain), cars with cabins, glass, wheels and
+lamps, a plane crossing behind the towers every minute or two, occasional
+showers that can also be commanded from a new Auto sky / Rain / Clear control,
+and at night the windows of a lit building smeared down the street in front of
+it. The provider table gained a trend arrow for what moved since the last
+update.
+
+Two scene bugs were found while building it and are fixed here: the animation
+clock never advanced, so traffic lights never changed, rain streaks hung frozen
+mid-air and nobody walked; and a single request arriving before the first frame
+stopped the city from ever seeding its people. Neither showed in a screenshot.
+
+The city is cheap by construction — Canvas 2D, never WebGL, one affine matrix
+per building face and one depth-sorted pass for occlusion. Measured 60 fps at
+1150x598 in clear sky, 56 fps in rain, 60 fps at 390x844; device pixel ratio
+capped at 2, the loop stops when the tab is hidden or the scene is paused, and
+reduced motion renders one still frame carrying the same figures. Every
+building is a real `<button>` clipped to its own silhouette, stacked in depth
+order like the city, so keyboard and screen readers reach each provider and the
+table and inspector carry the exact unabbreviated numbers.
+
+**The Claude Pro/Max account can now carry a session cookie.** Paste one and
+the quota panel reads the plan's 5-hour and weekly windows live from claude.ai
+(stored encrypted, sent only to claude.ai); without it the bridge's
+last-observed reading stands. The read has existed since the subscription
+bridges — it takes the cookie from the account's management key — but the
+Providers form had no field to paste one into.
+
+**Provider keys belong to their account.** A retest or an enable/disable now
+checks the key against the account in the URL and answers 404 before any
+provider probe or key update. The dashboard batch alongside it is mostly
+honesty work: report and quota load failures show an unavailable state and
+retry instead of implying zero usage, cost or caps; the overview exposes failed
+ledger flushes; login and first-boot setup count in-flight attempts; chat
+cancels in-flight requests when you leave the page; and model pickers, dialogs
+and the mobile comparison view were made usable with a keyboard and a screen
+reader. The last two releases' cancellation work is not repeated here — see
+v1.3.2 and v1.3.3 below.
 
 ## v1.3.3 — 2026-10-27
 

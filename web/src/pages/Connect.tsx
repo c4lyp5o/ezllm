@@ -134,6 +134,18 @@ function snippet(surface: SurfaceKey, base: string, key: string, model: string):
   ].join('\n');
 }
 
+// Single-quote shell arguments safely, including provider-supplied model IDs.
+const shellQuote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+function firstRequest(base: string, model: string): string {
+  const body = JSON.stringify({ model, messages: [{ role: 'user', content: 'Hello!' }] });
+  return [
+    `curl ${shellQuote(base + '/v1/chat/completions')} \\`,
+    `  -H 'Authorization: Bearer YOUR_EZLLM_KEY' \\`,
+    `  -H 'Content-Type: application/json' \\`,
+    `  -d ${shellQuote(body)}`,
+  ].join('\n');
+}
+
 // The Policy modal's date-picker value for a key's stored RFC3339 expiry.
 const expiryDate = (t: TokenInfo) => (t.expires_at ? t.expires_at.slice(0, 10) : '');
 
@@ -141,6 +153,7 @@ export default function Connect() {
   const [tokens, setTokens] = useState<TokenInfo[] | null>(null);
   const [usage, setUsage] = useState<UsageRow[] | null>(null);
   const [usageWindows, setUsageWindows] = useState<Record<string, UsageRow[]>>({});
+  const [usageStale, setUsageStale] = useState(false);
   const [models, setModels] = useState<V1Model[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -165,14 +178,21 @@ export default function Connect() {
     try {
       const [tk, us, us5h, usDaily, usWeekly] = await Promise.all([
         listTokens(),
-        usageByClient(30).catch(() => [] as UsageRow[]),
-        usageByClient(5 / 24).catch(() => [] as UsageRow[]),
-        usageByClient(1).catch(() => [] as UsageRow[]),
-        usageByClient(7).catch(() => [] as UsageRow[]),
+        usageByClient(30).catch(() => null),
+        usageByClient(5 / 24).catch(() => null),
+        usageByClient(1).catch(() => null),
+        usageByClient(7).catch(() => null),
       ]);
       setTokens(tk);
-      setUsage(us);
-      setUsageWindows({ '5h': us5h, daily: usDaily, weekly: usWeekly, monthly: us });
+      setUsageStale(!us || !us5h || !usDaily || !usWeekly);
+      if (us) setUsage(us);
+      setUsageWindows(previous => ({
+        ...previous,
+        ...(us5h ? { '5h': us5h } : {}),
+        ...(usDaily ? { daily: usDaily } : {}),
+        ...(usWeekly ? { weekly: usWeekly } : {}),
+        ...(us ? { monthly: us } : {}),
+      }));
       // Live check through the dashboard session: the ids below are what the
       // gateway can route RIGHT NOW, so the "supported" chips are observations,
       // not labels.
@@ -238,7 +258,7 @@ export default function Connect() {
   const usageFor = (name: string) => (usage ?? []).find((u) => u.k === name);
   const budgetUsageFor = (name: string, window: string) =>
     (usageWindows[window] ?? []).find((u) => u.k === name);
-  const sampleModel = models[0]?.id;
+  const sampleModel = models.find(model => model.protocol?.chat !== false)?.id;
 
   return (
     <div className="space-y-8">
@@ -246,6 +266,7 @@ export default function Connect() {
         Point Hermes, Claude Code or any OpenAI/Anthropic-style client at this gateway. One port, two protocols.
       </p>
 
+      {usageStale && <p role="alert" className="rounded-lg border border-warn/30 bg-warn-dim p-3 text-sm text-ink">Some key usage could not be loaded. Figures may be unavailable or out of date. <button type="button" className="underline" onClick={() => void reload()}>Retry</button></p>}
       {err && (
         <div className="rounded-lg border border-[rgba(248,113,113,0.3)] bg-bad-dim px-4 py-3 text-[13px] text-bad">
           {err}
@@ -282,6 +303,15 @@ export default function Connect() {
           {CORS_NOTE}
           {sampleModel && <> · {models.length} routable now, first is <code className="font-mono text-dim">{sampleModel}</code></>}
         </p>
+      </section>
+
+      <section>
+        <SectionLabel>Try a first request</SectionLabel>
+        {sampleModel ? <div className="mt-3 rounded-xl border border-line bg-surface p-4">
+          <p className="text-sm text-dim">Create an inference-only key below, then replace YOUR_EZLLM_KEY in this command. It sends a short request to {sampleModel} and may use provider quota. Availability and surface pins can still affect the result.</p>
+          <pre className="mt-3 overflow-x-auto rounded-lg border border-line bg-bg p-3 text-xs">{firstRequest(base, sampleModel)}</pre>
+          <div className="mt-2 flex justify-end"><CopyButton text={firstRequest(base, sampleModel)} label="Copy request" /></div>
+        </div> : <p className="mt-3 text-sm text-dim">Add and validate a provider first; a request example appears when a model is available.</p>}
       </section>
 
       {/* ── Create a key ───────────────────────────────────────────── */}

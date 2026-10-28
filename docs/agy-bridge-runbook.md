@@ -9,7 +9,10 @@ live in `antigravity-subscription-design.md`; this is the how.
 
 ## Quick setup
 
-Five steps. Each links to its detail below.
+Start with a working ezllm installation and dashboard ([quick start](../README.md#quick-start)).
+This guide uses Docker Compose in a Linux environment and a separate Google login.
+This bridge is text-only and cannot serve client tool calls or image input.
+Validation and test requests use subscription quota. Each step links to details below.
 
 1. **Install the official CLI on the host** and pin a copy of the binary
    ([prerequisites](#prerequisites)).
@@ -21,7 +24,7 @@ Five steps. Each links to its detail below.
 4. **Turn it on** in `compose.yml`: uncomment the two Antigravity mounts, set
    `EZLLM_AGY_BRIDGE: "on"`, then `docker compose up -d` ([enable](#enable)).
 5. **Add the account** in the dashboard: Providers → Add provider →
-   **Google Antigravity** → Save & validate. The dialog shows
+   **Google Antigravity** → Save & validate key. The dialog shows
    whether the bridge is running and which models the plan has; there is no key
    to paste. Cap it under Rules before agents use it.
 
@@ -45,11 +48,13 @@ reads it at boot and serves it at `/v1/models`. Measured on a personal plan
 ```bash
 # official installer: SHA-512-verified download to ~/.local/bin/agy
 curl -fsSL https://antigravity.google/cli/install.sh | bash
-agy --version                                   # 1.4.7 is the qualified release
+agy --version                                   # check this before choosing a path
 
 # pin a copy outside the self-updating path; compose mounts THIS file
-mkdir -p ~/.local/share/agy-bridge/1.4.7
-cp ~/.local/bin/agy ~/.local/share/agy-bridge/1.4.7/agy
+# Replace VERSION with the actual installed version; 1.4.7 is qualified.
+VERSION=1.4.7
+mkdir -p "$HOME/.local/share/agy-bridge/$VERSION"
+cp ~/.local/bin/agy "$HOME/.local/share/agy-bridge/$VERSION/agy"
 ```
 
 `agy` updates itself in place in the background. Mounting `~/.local/bin/agy`
@@ -69,7 +74,8 @@ mkdir -p ~/.agy-sub && chmod 700 ~/.agy-sub
 env -u DBUS_SESSION_BUS_ADDRESS HOME=$HOME/.agy-sub ~/.local/share/agy-bridge/1.4.7/agy
 ```
 
-Run it in a real terminal (SSH is fine; it prints a URL and asks for the code).
+If you used a version other than 1.4.7 above, replace `1.4.7` in the command
+with that version. Run it in a real terminal (SSH is fine; it prints a URL and asks for the code).
 Pick a theme, trust the folder, sign in with the Google account that has the
 plan, send one prompt, then `/exit`.
 
@@ -96,7 +102,10 @@ personal account.
 
 ## Enable
 
-In `compose.yml`, under the ezllm service:
+In `compose.yml`, under the ezllm service, add these entries to the existing
+`environment` and `volumes` sections. Replace `/home/you` and the version with
+your actual host paths. The Compose service user must be able to execute the
+CLI and read and write the login directory:
 
 ```yaml
     environment:
@@ -173,4 +182,7 @@ one small turn (default model `gemini-3.8-flash-low`, override with
 cleared [eligibility](#eligibility) it skips, after checking the 403 and the
 withheld link.
 
-From inside the container: `curl -s 127.0.0.1:8792/status`.
+For an end-to-end check, use the gateway's [model-list command](../README.md#set-up-the-dashboard),
+then send a short text prompt to a model from this account. The dashboard preset
+shows bridge status; `docker compose logs ezllm` shows startup failures. The
+internal listener is loopback-only, and the distroless image has no shell or curl.

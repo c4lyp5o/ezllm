@@ -1,9 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -11,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c4lyp5o/ezllm/internal/geminiweb"
 	"github.com/c4lyp5o/ezllm/internal/provider"
 	"github.com/c4lyp5o/ezllm/internal/store"
 )
@@ -424,4 +427,103 @@ func TestBridgeResolveVersusReinitRace(t *testing.T) {
 		}
 	}
 	<-done
+}
+
+func TestBridgeStampedStoredKeyPersistsRotation(t *testing.T) {
+	b, id, _ := newBridgeFixture(t, genFrame("x", true, "c"))
+	defer b.db.Close()
+	ctx := context.Background()
+	pick, err := b.db.PickKey(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := b.clientFor(ctx, id, pick.Plaintext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.keyID != pick.ID {
+		t.Fatalf("stored stamped key ID = %d, want %d", entry.keyID, pick.ID)
+	}
+	rotated := "__Secure-1PSID=abc\n__Secure-1PSIDTS=fresh"
+	b.rotate = func(context.Context, *geminiweb.Client) (string, error) { return rotated, nil }
+	b.maybeRotate(ctx, entry)
+	_, got, err := b.db.KeyForTest(ctx, pick.ID)
+	if err != nil || got != rotated {
+		t.Fatalf("stored rotated key = %q, err %v", got, err)
+	}
+	next, err := b.clientFor(ctx, id, got)
+	if err != nil || next != entry {
+		t.Fatalf("rotated key did not retain cached client: %v", err)
+	}
+	probe, err := b.clientFor(ctx, id, "__Secure-1PSID=probe\n__Secure-1PSIDTS=probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if probe.keyID != 0 {
+		t.Fatalf("unstored probe matched key %d", probe.keyID)
+	}
+	b.maybeRotate(ctx, probe)
+	_, got, err = b.db.KeyForTest(ctx, pick.ID)
+	if err != nil || got != rotated {
+		t.Fatalf("probe changed stored credential: %q, %v", got, err)
+	}
+}
+
+func TestBridgeRotationPersistenceFailureIsLogged(t *testing.T) {
+	for _, tc := range []struct {
+		level slog.Level
+		want  bool
+	}{{slog.LevelWarn, true}, {slog.LevelError, false}} {
+		t.Run(tc.level.String(), func(t *testing.T) {
+			b, id, _ := newBridgeFixture(t, genFrame("x", true, "c"))
+			pick, err := b.db.PickKey(context.Background(), id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry, err := b.clientFor(context.Background(), id, pick.Plaintext)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var output bytes.Buffer
+			b.log = slog.New(slog.NewTextHandler(&output, &slog.HandlerOptions{Level: tc.level}))
+			b.rotate = func(context.Context, *geminiweb.Client) (string, error) {
+				return "__Secure-1PSID=abc\n__Secure-1PSIDTS=fresh", nil
+			}
+			if err := b.db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			b.maybeRotate(context.Background(), entry)
+			if got := strings.Contains(output.String(), "cookie rotation could not be saved"); got != tc.want {
+				t.Fatalf("log = %q", output.String())
+			}
+			if strings.Contains(output.String(), pick.Plaintext) {
+				t.Fatal("credential appeared in log")
+			}
+		})
+	}
+}
+
+func TestBridgeRotationPersistenceFailureBacksOff(t *testing.T) {
+	b, id, _ := newBridgeFixture(t, genFrame("x", true, "c"))
+	pick, err := b.db.PickKey(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := b.clientFor(context.Background(), id, pick.Plaintext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	b.rotate = func(context.Context, *geminiweb.Client) (string, error) {
+		calls++
+		return "__Secure-1PSID=abc\n__Secure-1PSIDTS=fresh", nil
+	}
+	if err := b.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	b.maybeRotate(context.Background(), entry)
+	b.maybeRotate(context.Background(), entry)
+	if calls != 1 {
+		t.Fatalf("rotate called %d times after a failed save, want 1", calls)
+	}
 }

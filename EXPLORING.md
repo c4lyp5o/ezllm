@@ -32,9 +32,9 @@ account row carries the base URL + key pool. The Claude and ChatGPT
 subscription bridges are loopback accounts of the compatible kinds.
 ```
 
-Several real upstreams, not 359. The whole point: **SSE bytes flow back untouched** — ezllm swaps
-`model` upstream and copies the response stream while tapping the `usage` frames for the ledger.
-Compression is the only thing that ever rewrites the request body (when a profile is active).
+On native passthrough paths, SSE bytes flow back as they arrive while usage is
+observed for the ledger. Translation converts requests and responses across wire
+protocols; compression and per-hop reasoning rules can also change requests.
 
 ## 2. Quick start (run these before reading code — read after seeing it live)
 
@@ -42,7 +42,7 @@ Compression is the only thing that ever rewrites the request body (when a profil
 cd ~/workspace/ezllm
 make build && make run          # or: go run ./cmd/ezllm -config config.yaml
 curl -s localhost:20129/healthz
-curl -s localhost:20129/v1/models | python3 -m json.tool
+curl -s localhost:20129/v1/models -H "Authorization: Bearer $EZLLM_TOKEN_HERMES" | python3 -m json.tool
 # real call (streaming, watch it print incrementally):
 curl -N localhost:20129/v1/chat/completions \
   -H "Authorization: Bearer $EZLLM_TOKEN_HERMES" -H "Content-Type: application/json" \
@@ -62,9 +62,9 @@ equal, something is buffering — go read `streamCopy` in `internal/proxy/proxy.
 | # | Read first | Then | Ask yourself |
 |---|-----------|------|--------------|
 | M1 | `cmd/ezllm/main.go` → `internal/config` → `internal/server` | `config.example.yaml` | Where would I add a fourth account? (config seeds; the DB is runtime truth) |
-| M2 | `internal/proxy/proxy.go` (`Forward` → `streamCopy` → `tapSSELine`) → `internal/store/ledger.go` (`NormalizeUsage`) | `git show` of M2 | Does ANY code path touch response bytes besides the scanner+Write+Flush loop? |
+| M2 | `internal/proxy/proxy.go` (`Forward` → `streamCopy` → `tapSSELine`) → `internal/store/ledger.go` (`NormalizeUsage`) | `git show` of M2 | How do native streaming and translated streaming differ? |
 | M3 | `internal/registration` + `internal/provider/adapters.go` + admin handlers in `internal/server` | `docs/API.md` | Can I trace an account from DB row → adapter → first upstream byte? |
-| M4 | `internal/router` (hops → strategies → key pick/cooldown) + `internal/rules` | `go test ./internal/router ./internal/rules` | What happens on 429 with 1 key left? (answer must be in a test) |
+| M4 | `internal/router` (hops → strategies → key pick/cooldown) + `internal/rules` | `go test -short ./internal/router ./internal/rules` | What happens on 429 with 1 key left? (answer must be in a test) |
 | M5 | `internal/compress` (engines + stage pipeline) + `internal/server/compression.go` | `docs/compression-design.md` | Where is "never touch final turn / tool results" enforced, and where does fail-open live? |
 | M6 | `internal/store/ledger.go` (`UsageReport`) → `/admin/usage` · `/admin/requests` · `/admin/stream` + `web/src` | `docs/API.md` + a dashboard login | Can I kill -9 it and restart without corrupting the ledger? Does the dashboard render anything pre-auth? (it must not) |
 | M7 | `internal/compress/rtk.go`, `caveman.go` + `internal/rules` windows/caps | `tests/prove_*.py` (live proofs) | After compression, do ledger rows still carry faithful pre/saved token counts? |
@@ -497,10 +497,45 @@ corrections section.
   Operational guidance: `docs/settings-runbook.md` and `docs/recovery-runbook.md`.
 - `web/src/components/RailwayBackground.tsx` `RailwayBackground` restores the
   login rails with first-paint drawing independent of the small-screen limiter.
-  `web/src/components/NeighbourhoodScene.tsx` `NeighbourhoodScene` draws the
-  layered streets; `Neighbourhood.tsx` `buildHouses` preserves the real usage
-  mapping and represents missing activity as unknown. Visual/interaction coverage
-  is in `web/tests/verify-railway.mjs` and `verify-neighbourhood-polish.mjs`.
+- `web/src/components/CityScene.tsx` `CityScene` draws the city on a canvas (one
+  building per provider account, depth-sorted traffic, request flares);
+  `web/src/utils/city.ts` `buildBuildings` keeps the real usage mapping and
+  `planCity` generates the seeded street grid, while `web/src/utils/live.ts`
+  `useLiveCalls` turns committed ledger rows into flares. Visual/interaction
+  coverage is in `web/tests/verify-railway.mjs`, `verify-neighbourhood.mjs`,
+  `verify-neighbourhood-polish.mjs` and `shot-city.mjs`.
+
+### v1.4.0 — the Neighbourhood is a living city ✅ (2026-10-28)
+
+The page is a canvas city: one building per provider account on a seeded street
+grid (`web/src/utils/city.ts` `planCity` / `buildBuildings`), height and window
+light from tokens per minute over five minutes, rain where ≥25% of recent calls
+failed, boarded where the account or its keys are disabled, street density from
+the live request rate, and one flare + one taxi per committed ledger row on
+`/admin/stream` (`web/src/utils/live.ts` `useLiveCalls` — one SSE connection per
+page, 4s replay buffer). Scenery carries no numbers: people, umbrellas, cars
+with cabins and lamps, a plane behind the towers, seeded showers with an
+Auto sky / Rain / Clear control, night window reflections on the street.
+Canvas 2D only — 60 fps at 1150x598 clear, 56 fps rain, 60 fps at 390x844;
+one still frame for reduced motion. Two scene bugs fixed in here: the animation
+clock never advanced (traffic lights, rain and walk cycles were frozen), and
+one early dispatched taxi stopped the scene from seeding its people. Provider
+keys now enforce account ownership (404 before any probe). Contract:
+`web/tests/verify-neighbourhood.mjs` (55 assertions),
+`verify-neighbourhood-polish.mjs` (38), `shot-city.mjs` (frame budgets).
+Scene rules live in `web/DESIGN.md` "The scene (Neighbourhood)".
+
+### v1.3.3 — cancellation outranks a parked fallback ✅ (2026-10-27)
+
+`ForwardCandidates`' loop head now discards a parked fallback response when the
+context is already cancelled and answers from the error path. Before, the context
+check only recorded the error when NO response was parked, so a hop that had
+answered a failover status was committed after the caller left — `commit` wrote
+that 503 and returned nil, so the cancellation reached neither the server nor the
+ledger. Whether it happened depended on whether the hop's transport or its 503
+won the race (9 failures in 50 runs of `TestClientCancelStopsTheFailoverLoop`;
+0 in 200 after). The v1.3.2 landmark below stopped a cancellation from *parking*
+the hop; this closes the other half. Seam: `internal/proxy/client_cancel_test.go`.
 
 ### v1.3.3 — cancellation outranks a parked fallback ✅ (2026-10-27)
 
@@ -556,16 +591,38 @@ examples of a class of bug rather than as history.
 one shipped, because "documented but in a function the linker removed" is a failure
 mode this codebase has now hit twice.
 
+### Unreleased — account safety and dashboard reliability
+
+- `internal/server/admin.go` `handleRetest` checks the key's owning account;
+  `internal/store/admin.go` `EnableKey` scopes the update to the account.
+  `internal/server/key_ownership_test.go` covers cross-account refusals.
+- `internal/server/dashboard_auth.go` `reserveLogin` bounds tracked sources
+  and counts in-flight attempts. `internal/server/geminiweb_bridge.go`
+  `clientFor` associates stamped stored credentials with their key row, and
+  `maybeRotate` persists the rotated cookie or warns and retries.
+- `internal/store/ledger.go` `reservationCleanupLoop` bounds cleanup work for
+  dropped rows; overflow reservations expire normally. `internal/rules/engine.go`
+  `refreshLoop` warns while retaining the last good rule snapshot.
+- `web/src/components/ui.tsx` `Modal` contains and restores focus; `Combobox`
+  exposes its highlighted option. `web/src/pages/Chat.tsx` `Chat` owns request
+  cancellation and bounded catalog loading. The frontend regression drivers in
+  `web/tests/verify-frontend-p1.mjs`, `verify-frontend-p2.mjs` and
+  `verify-frontend-p3.mjs` cover these paths and report failure states.
+- `.github/workflows/test.yml` builds the web sources and uses
+  `web/scripts/check-dist.mjs` to compare the committed embedded bundle after
+  normalizing checkout-dependent Vite hashes.
+
 ## 5. Invariants to check while reading (review checklist)
 
 These are the "if it's broken here, the project failed" spots — each must be visibly true in code:
 
 1. **No secret ever reaches a log line** — grep the logging calls for `Authorization`, key env
    names, `Bearer`. Config has `env:` indirection only.
-2. **SSE is never buffered** — no `bufio.Scanner` over the response, no full-body `ReadAll` on the
-   stream path; `Flush()` called after each chunk to the client.
-3. **Unknown request fields survive** — `extra_body`, `enable_thinking`, `thinking` pass through;
-   the only mutation is `model` — plus the ONE documented exception,
+2. **Streaming stays incremental** — do not read an entire streaming response before
+   forwarding it; native and translated paths must flush output as it becomes available.
+3. **Unknown request fields survive native passthrough** — `extra_body`, `enable_thinking`,
+   `thinking` pass through when not affected by configured compression. The model is swapped;
+   another documented per-hop mutation is
    `reasoning_effort`, which `proxy.prepareHopBody` clamps or drops against the
    model's own learned vocabulary when the client asked for a value that model
    refuses. An accepted value is never re-encoded.

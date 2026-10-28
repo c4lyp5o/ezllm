@@ -305,7 +305,9 @@ func New(opts Options) *Server {
 	})
 	s.reports = newReportCache(reportTTL, time.Now)
 	if opts.DB != nil {
-		newGeminiWebBridge(opts.DB, "").register(s.mux)
+		geminiBridge := newGeminiWebBridge(opts.DB, "")
+		geminiBridge.log = s.log
+		geminiBridge.register(s.mux)
 		newClaudeWebBridge(opts.DB, nil).register(s.mux)
 	}
 	return s

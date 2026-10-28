@@ -295,15 +295,29 @@ func (d *DB) RecordCall(c Call) {
 	case d.callCh <- ledgerItem{call: &cp}:
 	default:
 		droppedCalls.Add(1)
-		// No row will release it, so release here — off this goroutine,
-		// which must never wait on the database. Counted in wg (added under
-		// recMu, before Close can start waiting) so Close outlasts it.
+		// Release off the response path, with bounded work. If the cleanup
+		// queue is full, the reservation's existing expiry remains the fallback.
 		if cp.ReservationID != 0 {
-			d.wg.Add(1)
-			go func() {
-				defer d.wg.Done()
-				d.ReleaseClientBudget(context.Background(), cp.ReservationID)
-			}()
+			select {
+			case d.reservationCleanup <- cp.ReservationID:
+			default:
+			}
+		}
+	}
+}
+
+// reservationCleanupLoop serializes best-effort releases for dropped rows.
+// Shutdown may leave queued reservations to their normal expiry.
+func (d *DB) reservationCleanupLoop() {
+	defer d.wg.Done()
+	for {
+		select {
+		case <-d.closeCh:
+			return
+		case id := <-d.reservationCleanup:
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			d.ReleaseClientBudget(ctx, id)
+			cancel()
 		}
 	}
 }

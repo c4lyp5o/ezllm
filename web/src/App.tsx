@@ -50,7 +50,7 @@ const NAV: NavItem[] = [
   { to: '/rules', label: 'Rules', hint: 'quotas · windows' },
   { to: '/compression', label: 'Compression', hint: 'profiles · engines' },
   { to: '/connect', label: 'Connect', hint: 'routes · API keys' },
-  { to: '/neighbourhood', label: 'Neighbourhood', hint: 'your keys as a living scene' },
+  { to: '/neighbourhood', label: 'Neighbourhood', hint: 'your providers as a living city' },
   { to: '/settings', label: 'Settings', hint: 'instance administration' },
 ];
 
@@ -345,7 +345,7 @@ const PAGE_HEADERS: Record<string, { title: string; sub: string }> = {
   '/rules': { title: 'Rules', sub: 'Token caps and allowed-use windows per model.' },
   '/compression': { title: 'Compression', sub: 'Profiles, engines and what they save.' },
   '/connect': { title: 'Connect', sub: 'Point clients at this gateway and issue API keys.' },
-  '/neighbourhood': { title: 'Neighbourhood', sub: 'Every key is a house; the busier it is, the brighter it shines.' },
+  '/neighbourhood': { title: 'Neighbourhood', sub: 'Every provider is a building; the busier it is, the brighter it burns.' },
   '/settings': { title: 'Settings', sub: 'Preferences, security, backups and gateway policy.' },
 };
 

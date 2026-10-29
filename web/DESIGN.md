@@ -106,6 +106,42 @@ Two animations are deliberately NOT transform-and-opacity, and both earn it:
   in one sentence (dashed box). Loading shows the final layout with flat grey
   blocks at the values' sizes.
 
+## Editors and dialogs
+
+The contract every editor follows, so a page the operator has not seen before
+behaves like the ones they have:
+
+- **A dialog, not an inline form**, built on `Modal` with `onSubmit` (Enter
+  submits; the footer's primary button is `type="submit"`), `busy` (Escape, the
+  backdrop and the close button refuse while a save is in flight) and `dirty`
+  (closing with unsaved edits asks "Discard unsaved changes?"). The footer is a
+  function of `requestClose` so Cancel honours both guards. The discard bar and
+  the footer keep distinct React keys: a shared node would turn "Keep editing"
+  into the form's submit button.
+- **Refuse bad input with a reason, at the field**, in the page's own words,
+  mirroring the server's bounds (the server stays the authority). Errors for an
+  untouched field wait until the first submit attempt; a taken name, a range, a
+  malformed value show at once. Enter on an invalid form saves nothing and says
+  what to fix.
+- **Say what a setting means as it is typed**: a live readout (what an
+  allowlist matches, what a cap is per period, what a rule reads as in a
+  sentence, what a strategy will do next). A preset is a starting point and is
+  labelled as one.
+- **State goes where it belongs.** A deep link per page names the thing, not
+  the view (`/providers?keys=ID`, `/combos?edit=ID`, `/rules?edit=ID`,
+  `/compression?edit=ID`, `/connect?policy=ID`, `/neighbourhood?select=ID`,
+  `/settings?tab=backup`); filters on a list that can be shared live in the URL
+  (`/requests?account=&model=&alias=&client=`). A selection that must answer a
+  click at once is local state that the URL follows.
+- **A hover must not move the page.** Anything a hover changes sits where it
+  cannot shift the element under the pointer (the Neighbourhood's inspector sits
+  above its table, so only the scene's hover drives it).
+- **Say what happened**: a dismissable notice after a save, toggle or delete; a
+  failed action keeps the dialog open with the reason.
+- **One status per row**, worst first (a key is Disabled, Expired, Budget spent,
+  Expiring or Active), counted in a one-line summary above the list, with a
+  search and a "needs attention" filter once a list can be long.
+
 ## The scene (Neighbourhood)
 
 The Neighbourhood page is the one place the no-gradients, no-glows rule is

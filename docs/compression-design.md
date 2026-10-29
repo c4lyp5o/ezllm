@@ -21,7 +21,8 @@ latitude; it is the reference now.
 | `tool_ref` engine | ✅ 2026-10-20 | a repeated tool result becomes a reference to the first |
 | `blobs` engine | ✅ 2026-10-20 | base64 runs and data URIs become markers |
 | `budget` engine | deleted 2026-10-19 | Dropping whole messages to fit a token budget changed the prompt prefix every time it activated (an upstream cache miss) and could split a tool call from its result. No profile used it. |
-| Profile editor page (drag-order stages) | | M6.5 (Compression page stays a read-only preview) |
+| Profile editor page (ordered stages) | ✅ 2026-10-29 | a dialog editor with inline validation, presets and pipeline-order advice; the page shows each profile's stages and settings in words and the combos that use it |
+| Preview on a pasted sample | ✅ 2026-10-29 | `POST /admin/compression-preview` runs the real engines over a sample (a saved profile or an unsaved draft), stateless, nothing stored or sent; see docs/API.md |
 | Every engine on every wire shape (chat, messages, responses) | ✅ 2026-10-19 | see "Wire shapes" below |
 
 ---

@@ -457,6 +457,24 @@ export const btn = {
   danger: 'border border-bad/50 bg-transparent text-bad hover:bg-bad-dim',
 };
 
+/** Copies `text` to the clipboard; the label flips to "Copied" for a moment.
+ *  A blocked clipboard (insecure origin, denied) simply does nothing. */
+export function CopyButton({ text, label }: { text: string; label: string }) {
+  const [done, setDone] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setDone(true);
+      setTimeout(() => setDone(false), 1500);
+    } catch { /* clipboard unavailable */ }
+  };
+  return (
+    <button type="button" onClick={() => void copy()} className={cx(btn.base, btn.ghost, '!h-7 !px-3 !text-[12px]')}>
+      {done ? 'Copied' : label}
+    </button>
+  );
+}
+
 export function Spinner({ className }: { className?: string }) {
   return (
     <svg className={cx('animate-spin', className ?? 'h-3.5 w-3.5')} viewBox="0 0 24 24" fill="none">

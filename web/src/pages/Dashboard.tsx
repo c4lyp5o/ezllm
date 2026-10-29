@@ -28,7 +28,8 @@ import {
   type Overview, type RangeKey, type RecentCall, type UsageRow,
 } from '../utils/api';
 import { useLiveCalls } from '../utils/live';
-import { readRange } from '../utils/preferences';
+import { useRange } from '../utils/preferences';
+import { deltaNote, MAX_SPAN_H, priorFrom, type Prior } from '../utils/lib';
 import {
   BarList, ChartTooltip, CompositionBar, Panel, VIZ,
   axisProps, chartGrid, cursorFill,
@@ -36,7 +37,7 @@ import {
 import { CountUp, Stagger, StaggerItem } from '../components/motion';
 import {
   Chip, CauseChip, EmptyState, HeaderAside, SectionLabel, Segmented, Skeleton, SkeletonRows, Spinner,
-  btn, clockTime, cx, inputCls, relTime, fmtDuration, fmtMs, fmtUptime, formatTokens, nfmt, pct,
+  CopyButton, btn, clockTime, cx, inputCls, relTime, fmtDuration, fmtMs, fmtUptime, formatTokens, nfmt, pct,
 } from '../components/ui';
 
 // The trend keeps its own 7-day window whatever range the totals show. The
@@ -44,9 +45,6 @@ import {
 const TREND_RANGE: RangeKey = '7d';
 const RANGES: RangeKey[] = ['24h', '7d', '30d', '365d'];
 const RANGE_WORDS: Record<RangeKey, string> = { '24h': '24 hours', '7d': '7 days', '30d': '30 days', '365d': '365 days' };
-// /admin/usage refuses a window past maxWindowSpan (400 days), so the
-// prior-period comparison (a 2x window) is not available for the 1y view.
-const MAX_SPAN_H = 400 * 24;
 
 const HEARTBEAT_MS = 15_000; // overview
 const SLOW_MS = 60_000;      // breakdowns
@@ -238,19 +236,6 @@ function Freshness({ at, failed, busy, onRefresh }: { at: number | null; failed:
   );
 }
 
-// ── prior-period delta ────────────────────────────────────────────────────
-// `badWhenUp` colours only the figures where a rise is a problem (failures);
-// traffic going up or down is not good or bad by itself.
-type Prior = { calls: number; errors: number; tin: number; tout: number; cread: number };
-function delta(cur: number, prev: number | undefined, label: string, badWhenUp = false): HeadCell['delta'] {
-  if (prev == null) return undefined;
-  if (prev === 0) return cur > 0 ? { text: `new, none in the previous ${label}` } : undefined;
-  const p = Math.round(((cur - prev) / prev) * 100);
-  if (p === 0) return { text: `same as the previous ${label}` };
-  const tone = !badWhenUp ? undefined : p > 0 ? 'text-bad' : 'text-ok';
-  return { text: `${p > 0 ? '▲' : '▼'} ${Math.abs(p)}% vs previous ${label}`, tone };
-}
-
 // ── needs attention ───────────────────────────────────────────────────────
 // Appears only when something is off, and every line links to the screen
 // that fixes it. Built from the overview alone (accounts, keys, quota and the
@@ -342,22 +327,6 @@ function inFilter(r: RecentCall, f: CallFilter): boolean {
   if (f === 'failover') return failoverNote(r.err) !== '';
   if (f === 'translated') return !!r.translated;
   return true;
-}
-
-function CopyButton({ text, label }: { text: string; label: string }) {
-  const [done, setDone] = useState(false);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setDone(true);
-      setTimeout(() => setDone(false), 1500);
-    } catch { /* clipboard blocked (insecure origin or denied): the button simply does nothing */ }
-  };
-  return (
-    <button type="button" onClick={() => void copy()} className={cx(btn.base, btn.ghost, '!h-7 !px-3 !text-[12px]')}>
-      {done ? 'Copied' : label}
-    </button>
-  );
 }
 
 function CallDetail({ r }: { r: RecentCall }) {
@@ -719,7 +688,7 @@ export default function Dashboard() {
   const [prior, setPrior] = useState<Prior | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [reportsStale, setReportsStale] = useState(false);
-  const [range, setRange] = useState<RangeKey>(readRange);
+  const [range, setRange] = useRange();
   // Which range the slow reports on screen were fetched for: after a range
   // switch they are dimmed until the new ones land, never passed off as current.
   const [reportsFor, setReportsFor] = useState<RangeKey | null>(null);
@@ -778,13 +747,7 @@ export default function Dashboard() {
       if (ac) setByAccount(ac.groups);
       if (d) setTrend(d.groups);
       setWhole(w ? w.totals : null);
-      setPrior(w && w2 ? {
-        calls: Math.max(0, w2.totals.calls - w.totals.calls),
-        errors: Math.max(0, w2.totals.errors - w.totals.errors),
-        tin: Math.max(0, w2.totals.tin - w.totals.tin),
-        tout: Math.max(0, w2.totals.tout - w.totals.tout),
-        cread: Math.max(0, w2.totals.cread - w.totals.cread),
-      } : null);
+      setPrior(w && w2 ? priorFrom(w.totals, w2.totals) : null);
       setReportsFor(range);
     } finally {
       if (slowBusy.current === range) slowBusy.current = null;
@@ -895,7 +858,7 @@ export default function Dashboard() {
   const dash = (v: string) => (known ? v : '–');
   // The comparison needs this window's numbers from the same (slow) report as
   // the prior window's, so it only shows once both have landed.
-  const cmp = (cur: number, prev: number | undefined, bad = false) => (known && fresh && prior ? delta(cur, prev, win, bad) : undefined);
+  const cmp = (cur: number, prev: number | undefined, bad = false) => (known && fresh && prior ? deltaNote(cur, prev, win, bad) : undefined);
 
   return (
     <div className="space-y-6">

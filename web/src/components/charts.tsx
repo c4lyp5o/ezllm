@@ -274,12 +274,14 @@ export function Panel({
 // makes it worth unifying: a trend costs no recharts container, so a card can
 // show direction at the same weight as the number.
 export function StatCard({
-  label, value, sub, tone, footer,
+  label, value, sub, tone, footer, delta,
 }: {
   label: string;
   value: string;
   sub?: string;
   tone?: string;
+  /** Change against the previous equal window (see deltaNote). */
+  delta?: { text: string; tone?: string };
   /** Accepted for old call sites and ignored: a KPI carries no sparkline. */
   spark?: number[];
   sparkColor?: string;
@@ -292,6 +294,7 @@ export function StatCard({
         {value}
       </div>
       {sub && <div className="mt-1 text-[12px] text-mute">{sub}</div>}
+      {delta && <div className={cx('mt-0.5 text-[12px] tnum', delta.tone ?? 'text-mute')}>{delta.text}</div>}
       {footer && <div className="mt-2 border-t border-line pt-2.5">{footer}</div>}
     </div>
   );

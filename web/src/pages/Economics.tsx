@@ -1,4 +1,4 @@
-import { readRange } from '../utils/preferences';
+import { useRange } from '../utils/preferences';
 // TOKEN ECONOMICS — what arrived, what was cached, what was removed, what it
 // cost. Two endpoints, one range control:
 //
@@ -12,11 +12,12 @@ import { readRange } from '../utils/preferences';
 // that looks complete. Rates are versioned by effective_from, so a price change
 // does not retroactively rewrite history, which is also why "unpriced" is a
 // per-row fact and not a global one.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { fmtMoney, pctWhole } from '../utils/lib';
 import {
-  cost, normalizeFeedRow, requests, RANGE_LABEL,
+  cost, normalizeFeedRow, requests, RANGE_HOURS, RANGE_LABEL,
   type CostRow, type CostTotals, type FeedRow, type RangeKey,
 } from '../utils/api';
 import {
@@ -42,7 +43,7 @@ function Metric({ label, value, note, tone }: { label: string; value: string; no
 }
 
 export default function Economics() {
-  const [range, setRange] = useState<RangeKey>(readRange);
+  const [range, setRange] = useRange();
   const [rows, setRows] = useState<FeedRow[]>([]);
   const [summary, setSummary] = useState<any>(null);
   const [costRows, setCostRows] = useState<CostRow[]>([]);
@@ -133,6 +134,38 @@ export default function Economics() {
     return [...m.values()].sort((a, b) => a.day.localeCompare(b.day));
   }, [costRows]);
 
+  // Models whose calls had no rate on their date: named, so the operator can
+  // go and price them instead of reading a bare count. Whole cost set, same
+  // reasoning as above.
+  const unpricedModels = useMemo(() => {
+    const m = new Map<string, { key: string; calls: number }>();
+    for (const r of costRows) {
+      if (r.unpriced_calls <= 0) continue;
+      const key = `${r.account} · ${r.model}`;
+      const cur = m.get(key) ?? { key, calls: 0 };
+      cur.calls += r.unpriced_calls;
+      m.set(key, cur);
+    }
+    return [...m.values()].sort((a, b) => b.calls - a.calls);
+  }, [costRows]);
+
+  // Run-rate: the window's priced spend spread over its days. The window is a
+  // rolling look-back of exactly RANGE_HOURS, so the divisor is exact. Unpriced
+  // calls contribute $0, which makes this (like the total) a floor.
+  const windowDays = RANGE_HOURS[range] / 24;
+  const perDay = costTotals ? costTotals.usd / windowDays : 0;
+
+  const submitMin = (e: FormEvent) => {
+    e.preventDefault();
+    const raw = minInput.trim();
+    const parsed = raw === '' ? undefined : Number(raw);
+    if (parsed !== undefined && (!Number.isSafeInteger(parsed) || parsed < 0)) {
+      setError('Minimum input tokens must be a non-negative whole number.'); return;
+    }
+    setError('');
+    if (parsed === appliedMin) void load(); else setAppliedMin(parsed);
+  };
+
   const byModelCost = useMemo(() => {
     const m = new Map<string, { key: string; usd: number; calls: number; unpriced: number }>();
     for (const r of costRows) {
@@ -156,7 +189,7 @@ export default function Economics() {
 
       {/* Large-request filter. It commits on Analyze rather than on change: a
           six-digit number fires six requests as it is typed. */}
-      <section className="rounded-xl border border-line bg-surface px-5 py-4">
+      <form onSubmit={submitMin} className="rounded-xl border border-line bg-surface px-5 py-4">
         <SectionLabel>Large-request filter</SectionLabel>
         <div className="mt-3 flex flex-wrap items-end gap-3">
           <label className="text-[12px] text-mute">
@@ -164,20 +197,12 @@ export default function Economics() {
             <input value={minInput} onChange={(e) => setMinInput(e.target.value)} inputMode="numeric"
               placeholder="all" className={cx(inputCls, 'mt-1.5 w-44 font-mono tnum')} />
           </label>
-          <button onClick={() => {
-            const raw = minInput.trim();
-            const parsed = raw === '' ? undefined : Number(raw);
-            if (parsed !== undefined && (!Number.isSafeInteger(parsed) || parsed < 0)) {
-              setError('Minimum input tokens must be a non-negative whole number.'); return;
-            }
-            setError('');
-            if (parsed === appliedMin) void load(); else setAppliedMin(parsed);
-          }} className={cx(btn.base, btn.primary)}>Analyze</button>
+          <button type="submit" className={cx(btn.base, btn.primary)}>Analyze</button>
           <span className="text-[12px] text-mute">
             Sorted largest first. Use Requests for full bounds and per-row inspection.
           </span>
         </div>
-      </section>
+      </form>
 
       {error && (
         <div role="alert" className="rounded-xl border border-bad/30 bg-bad-dim px-5 py-4 text-[13px] text-bad">{error}</div>
@@ -317,14 +342,35 @@ export default function Economics() {
                 hint="Cost is computed from the rates entered under Providers → account → Pricing. Until a rate exists for an account+model, those calls cost 0." />
             ) : (
               <div className="space-y-5">
-                <div className="grid gap-3 sm:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <Metric label="Spend" value={usd(costTotals?.usd ?? 0)} note={`${nfmt(costTotals?.calls ?? 0)} calls`} />
+                  <Metric label="Per day" value={usd(perDay)}
+                    note={`${usd(perDay * 30)} over 30 days at this rate${costTotals && costTotals.unpriced_calls > 0 ? ' (a floor: unpriced calls count $0)' : ''}`} />
                   <Metric label="Priced" value={nfmt((costTotals?.calls ?? 0) - (costTotals?.unpriced_calls ?? 0))}
                     note="calls with a rate effective on their date" />
                   <Metric label="Unpriced" value={nfmt(costTotals?.unpriced_calls ?? 0)}
                     tone={costTotals && costTotals.unpriced_calls > 0 ? 'text-warn' : undefined}
                     note="contributing $0" />
                 </div>
+
+                {unpricedModels.length > 0 && (
+                  <div className="rounded-lg border border-warn/30 bg-warn-dim px-4 py-3">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <span className="text-[13px] text-ink">Counted as $0 until priced</span>
+                      <Link to="/providers" className="text-[13px] text-dim underline underline-offset-2 hover:text-ink"
+                        title="Open the provider, then Pricing, and enter a rate for the model">Add a price in Providers</Link>
+                    </div>
+                    <ul className="mt-2 grid gap-x-6 gap-y-1 text-[13px] sm:grid-cols-2">
+                      {unpricedModels.slice(0, 8).map((u) => (
+                        <li key={u.key} className="flex items-baseline gap-2">
+                          <span className="min-w-0 flex-1 truncate text-dim" title={u.key}>{u.key}</span>
+                          <span className="tnum text-warn">{nfmt(u.calls)} calls</span>
+                        </li>
+                      ))}
+                    </ul>
+                    {unpricedModels.length > 8 && <p className="mt-1.5 text-[12px] text-mute">+{unpricedModels.length - 8} more</p>}
+                  </div>
+                )}
 
                 {byDay.length > 1 && (
                   <div>
@@ -411,35 +457,49 @@ export default function Economics() {
           </Panel>
 
           <Panel label={<SectionLabel>Largest requests · {RANGE_LABEL[range]}</SectionLabel>}
-            aside={<span className="text-[12px] text-mute">sorted by actual input, largest first</span>}
+            aside={<span className="text-[12px] text-mute">top {nfmt(rows.length)} of {nfmt(matching)} by actual input, largest first</span>}
             bodyClass="p-0">
             {rows.length === 0 ? (
               <EmptyState title="No matching calls in this range"
                 hint="Raise the minimum input or widen the range. This is where the outliers answer whether the client is sending too much history, or the model is burning it on output." />
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[820px] text-[13px]">
+                <table className="w-full min-w-[1000px] text-[13px]">
                   <thead>
                     <tr className="border-b border-line text-left text-[11px] text-mute">
-                      <th className="px-5 py-2.5 font-medium">Model</th>
+                      <th className="px-5 py-2.5 font-medium">When</th>
+                      <th className="px-3 py-2.5 font-medium">Model</th>
+                      <th className="px-3 py-2.5 font-medium">Client</th>
                       <th className="px-3 py-2.5 text-right font-medium">Actual in</th>
                       <th className="px-3 py-2.5 text-right font-medium">Compression</th>
                       <th className="px-3 py-2.5 text-right font-medium">Out</th>
                       <th className="px-3 py-2.5 text-right font-medium" title="tokens the model spent thinking — billed as output, never shown">Reasoning</th>
-                      <th className="px-5 py-2.5 text-right font-medium">Status</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Status</th>
+                      <th className="px-5 py-2.5 text-right font-medium"><span className="sr-only">Open</span></th>
                     </tr>
                   </thead>
                   <tbody className="font-mono tnum">
                     {rows.map((r, i) => (
                       <tr key={`${r.ts}-${i}`} className="border-b border-line/50 transition-colors last:border-0 hover:bg-wash">
-                        <td className="max-w-[300px] truncate px-5 py-2 font-sans text-ink" title={r.model}>{r.model}</td>
+                        <td className="whitespace-nowrap px-5 py-2 text-mute" title={r.ts}>
+                          {new Date(r.ts).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })}
+                        </td>
+                        <td className="max-w-[300px] px-3 py-2 font-sans">
+                          <div className="truncate text-ink" title={r.model}>{r.model}</div>
+                          {r.account && <div className="truncate text-[11px] text-mute" title={[r.account, r.alias].filter(Boolean).join(' · ')}>{r.account}{r.alias ? ` · ${r.alias}` : ''}</div>}
+                        </td>
+                        <td className="px-3 py-2 font-sans text-dim">{r.client || '–'}</td>
                         <td className="px-3 py-2 text-right text-ink">{nfmt(r.tin)}</td>
                         <td className="px-3 py-2 text-right text-ok">{formatTokens(r.saved)}</td>
                         <td className="px-3 py-2 text-right text-dim">{nfmt(r.tout)}</td>
                         <td className={cx('px-3 py-2 text-right', (r.reasoning ?? 0) > 0 ? 'text-warn' : 'text-mute')}>
                           {nfmt(r.reasoning ?? 0)}
                         </td>
-                        <td className="px-5 py-2 text-right text-dim">{r.status}</td>
+                        <td className={cx('px-3 py-2 text-right', r.status >= 400 ? 'text-warn' : 'text-dim')}>{r.status}</td>
+                        <td className="px-5 py-2 text-right font-sans">
+                          <Link to={`/requests?${new URLSearchParams({ account: r.account, model: r.model, range })}`}
+                            className="text-dim underline underline-offset-2 hover:text-ink" title="open this provider and model in Requests">Requests</Link>
+                        </td>
                       </tr>
                     ))}
                   </tbody>

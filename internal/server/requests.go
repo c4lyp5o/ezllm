@@ -11,7 +11,8 @@ package server
 // Params: min_tin / max_tin / min_tout / max_tout (non-negative ints),
 // from / to (RFC3339, same [from,to) semantics as /admin/usage; default
 // last 24h with the same +1min grace), limit (default 50, max 500),
-// sort (ts_desc default | tin_desc | tout_desc).
+// sort (ts_desc default | tin_desc | tout_desc), account / model (exact match
+// on the ledger's denormalized names — the dashboard's click-through).
 
 import (
 	"fmt"
@@ -96,6 +97,13 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 	add(" AND tokens_in <= ?", "max_tin", bounds["max_tin"])
 	add(" AND tokens_out >= ?", "min_tout", bounds["min_tout"])
 	add(" AND tokens_out <= ?", "max_tout", bounds["max_tout"])
+	// Exact-match name filters, bound as parameters like everything else.
+	for _, col := range []string{"account", "model"} {
+		if v := q.Get(col); v != "" {
+			where += " AND " + col + " = ?"
+			args = append(args, v)
+		}
+	}
 
 	// Summary first: over the WHOLE matching set, so the numbers answer
 	// "how much lives behind this filter" regardless of the page size.
@@ -150,6 +158,7 @@ FROM calls`+where, sargs...)
 			"min_tin": bounds["min_tin"], "max_tin": bounds["max_tin"],
 			"min_tout": bounds["min_tout"], "max_tout": bounds["max_tout"],
 			"limit": limit, "sort": sortKey,
+			"account": q.Get("account"), "model": q.Get("model"),
 		},
 	})
 }

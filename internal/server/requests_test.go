@@ -146,6 +146,39 @@ func TestRequestsFiltersAndSummary(t *testing.T) {
 // rejected, notional holds what it WOULD have saved), and held_notional (the
 // sum of those rejected notional values). Before this existed the cards were
 // derived from a 409-row hardcoded claim — numbers that cannot go stale.
+func TestRequestsFiltersByAccountAndModel(t *testing.T) {
+	h := newHarness(t, func(http.ResponseWriter, *http.Request) {})
+	now := time.Now()
+	for _, c := range []store.Call{
+		{TS: now, Client: "c", Surface: store.SurfaceChat, Account: "alpha", Model: "m1", Status: 200, TokensIn: 10},
+		{TS: now, Client: "c", Surface: store.SurfaceChat, Account: "alpha", Model: "m2", Status: 200, TokensIn: 20},
+		{TS: now, Client: "c", Surface: store.SurfaceChat, Account: "beta", Model: "m1", Status: 200, TokensIn: 30},
+	} {
+		h.db.RecordCall(c)
+	}
+	if err := h.db.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		query string
+		count int64
+		tin   int64
+	}{
+		{"", 3, 60},
+		{"?account=alpha", 2, 30},
+		{"?model=m1", 2, 40},
+		{"?account=alpha&model=m1", 1, 10},
+		{"?account=alph", 0, 0}, // exact match, not a prefix or LIKE
+		{"?account=%25", 0, 0},  // a wildcard is a literal name
+	} {
+		code, got := doRequests(t, h, tc.query)
+		if code != http.StatusOK || got.Summary.Count != tc.count || got.Summary.Tin != tc.tin {
+			t.Errorf("%q: code %d count %d tin %d, want count %d tin %d",
+				tc.query, code, got.Summary.Count, got.Summary.Tin, tc.count, tc.tin)
+		}
+	}
+}
+
 func TestRequestsSummaryCompressionCounts(t *testing.T) {
 	h := newHarness(t, func(http.ResponseWriter, *http.Request) {})
 	now := time.Now()

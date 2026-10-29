@@ -3,7 +3,7 @@
 // deps): React nodes only, never dangerouslySetInnerHTML, so provider output
 // can't inject markup. Single newlines render as line breaks (chat habit),
 // blank lines separate paragraphs.
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, useState, type ReactNode } from 'react';
 
 // One alternation, scanned left to right: code wins over emphasis so `**x**`
 // inside backticks stays literal. Kept as a SOURCE string, not a /g RegExp:
@@ -114,6 +114,25 @@ const HEADCLS: Record<number, string> = {
   4: 'text-[13px]',
 };
 
+// A fenced block's copy button: shown on hover or keyboard focus, always
+// available on touch screens (no hover there).
+function CodeCopy({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setDone(true);
+      setTimeout(() => setDone(false), 1500);
+    } catch { /* clipboard unavailable: nothing to do */ }
+  };
+  return (
+    <button type="button" onClick={() => void copy()} aria-label="Copy code"
+      className="absolute right-2 top-2 rounded border border-line bg-surface px-2 py-0.5 text-[11px] text-mute opacity-0 transition-opacity hover:text-ink focus:opacity-100 group-hover/code:opacity-100 [@media(hover:none)]:opacity-100">
+      {done ? 'Copied' : 'Copy'}
+    </button>
+  );
+}
+
 export function Markdown({ text, className }: { text: string; className?: string }) {
   const blocks = parse(text);
   return (
@@ -123,9 +142,12 @@ export function Markdown({ text, className }: { text: string; className?: string
         switch (b.kind) {
           case 'code':
             return (
-              <pre key={k} className="overflow-x-auto rounded-lg border border-line bg-raised px-3 py-2.5 text-[13px]">
-                <code className="font-mono text-dim">{b.body}</code>
-              </pre>
+              <div key={k} className="group/code relative">
+                <pre className="overflow-x-auto rounded-lg border border-line bg-raised px-3 py-2.5 text-[13px]">
+                  <code className="font-mono text-dim">{b.body}</code>
+                </pre>
+                <CodeCopy text={b.body} />
+              </div>
             );
           case 'heading':
             return <div key={k} className={`font-semibold text-ink ${HEADCLS[b.level] ?? 'text-[13px]'}`}>{inline(b.text, k)}</div>;

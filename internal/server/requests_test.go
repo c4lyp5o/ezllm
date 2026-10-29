@@ -179,6 +179,38 @@ func TestRequestsFiltersByAccountAndModel(t *testing.T) {
 	}
 }
 
+func TestRequestsFiltersBySession(t *testing.T) {
+	h := newHarness(t, func(http.ResponseWriter, *http.Request) {})
+	now := time.Now()
+	for _, c := range []store.Call{
+		{TS: now, Client: "c", Surface: store.SurfaceChat, Model: "m", Status: 200, TokensIn: 10, SessionID: "chat-aaa"},
+		{TS: now, Client: "c", Surface: store.SurfaceChat, Model: "m", Status: 200, TokensIn: 20, SessionID: "chat-bbb"},
+		{TS: now, Client: "c", Surface: store.SurfaceChat, Model: "m", Status: 200, TokensIn: 30},
+	} {
+		h.db.RecordCall(c)
+	}
+	if err := h.db.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		query string
+		count int64
+		tin   int64
+	}{
+		{"", 3, 60},
+		{"?session=chat-aaa", 1, 10},
+		{"?session=chat-bbb", 1, 20},
+		{"?session=chat-", 0, 0},    // exact match, not a prefix
+		{"?session=chat-%25", 0, 0}, // a wildcard is a literal id
+	} {
+		code, got := doRequests(t, h, tc.query)
+		if code != http.StatusOK || got.Summary.Count != tc.count || got.Summary.Tin != tc.tin {
+			t.Errorf("%q: code %d count %d tin %d, want count %d tin %d",
+				tc.query, code, got.Summary.Count, got.Summary.Tin, tc.count, tc.tin)
+		}
+	}
+}
+
 func TestRequestsSummaryCompressionCounts(t *testing.T) {
 	h := newHarness(t, func(http.ResponseWriter, *http.Request) {})
 	now := time.Now()

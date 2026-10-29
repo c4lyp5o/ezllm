@@ -631,7 +631,7 @@ export type RequestFilter = {
   minTin?: number; maxTin?: number; minTout?: number; maxTout?: number;
   range?: RangeKey; sort?: RequestSort; limit?: number;
   /** Exact ledger names (the dashboard's click-through). */
-  account?: string; model?: string;
+  account?: string; model?: string; session?: string;
 };
 export function requests(f: RequestFilter = {}): Promise<RequestsResp> {
   const hours = RANGE_HOURS[f.range ?? '24h'];
@@ -644,6 +644,7 @@ export function requests(f: RequestFilter = {}): Promise<RequestsResp> {
   if (f.limit) params.set('limit', String(f.limit));
   if (f.account) params.set('account', f.account);
   if (f.model) params.set('model', f.model);
+  if (f.session) params.set('session', f.session);
   return get<RequestsResp>(`/admin/requests?${params.toString()}`);
 }
 
@@ -848,11 +849,20 @@ export function messageText(m: ChatMessage): string {
  * content delta to onDelta as the upstream emits it. Resolves on [DONE] or
  * stream end; rejects with the usual ApiError/AuthError shape.
  */
+/** Optional extras for one chat request. `params` ride in the body only when
+ *  set; `session` is sent as X-Ezllm-Session (the ledger's grouping key, never
+ *  forwarded upstream), which is how the page finds this request's ledger row. */
+export type ChatOptions = {
+  params?: { temperature?: number; max_tokens?: number; top_p?: number };
+  session?: string;
+};
+
 export async function chatStream(
   model: string,
   messages: ChatMessage[],
   onDelta: (text: string) => void,
   signal?: AbortSignal,
+  opts: ChatOptions = {},
 ): Promise<void> {
   let res: Response;
   try {
@@ -860,8 +870,9 @@ export async function chatStream(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(opts.session ? { 'X-Ezllm-Session': opts.session } : {}),
       },
-      body: JSON.stringify({ model, messages, stream: true }),
+      body: JSON.stringify({ model, messages, stream: true, ...opts.params }),
       credentials: 'include',
       signal,
     });

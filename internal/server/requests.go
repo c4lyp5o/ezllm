@@ -12,7 +12,9 @@ package server
 // from / to (RFC3339, same [from,to) semantics as /admin/usage; default
 // last 24h with the same +1min grace), limit (default 50, max 500),
 // sort (ts_desc default | tin_desc | tout_desc), account / model (exact match
-// on the ledger's denormalized names — the dashboard's click-through).
+// on the ledger's denormalized names — the dashboard's click-through),
+// session (exact match on the X-Ezllm-Session grouping key — how the Chat
+// page finds the ledger row of the request it just sent).
 
 import (
 	"fmt"
@@ -98,8 +100,8 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 	add(" AND tokens_out >= ?", "min_tout", bounds["min_tout"])
 	add(" AND tokens_out <= ?", "max_tout", bounds["max_tout"])
 	// Exact-match name filters, bound as parameters like everything else.
-	for _, col := range []string{"account", "model"} {
-		if v := q.Get(col); v != "" {
+	for param, col := range map[string]string{"account": "account", "model": "model", "session": "session_id"} {
+		if v := q.Get(param); v != "" {
 			where += " AND " + col + " = ?"
 			args = append(args, v)
 		}
@@ -158,7 +160,7 @@ FROM calls`+where, sargs...)
 			"min_tin": bounds["min_tin"], "max_tin": bounds["max_tin"],
 			"min_tout": bounds["min_tout"], "max_tout": bounds["max_tout"],
 			"limit": limit, "sort": sortKey,
-			"account": q.Get("account"), "model": q.Get("model"),
+			"account": q.Get("account"), "model": q.Get("model"), "session": q.Get("session"),
 		},
 	})
 }

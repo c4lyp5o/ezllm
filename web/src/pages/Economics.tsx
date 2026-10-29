@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { Link } from 'react-router-dom';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { fmtMoney, pctWhole } from '../utils/lib';
+import { providerLink } from '../utils/health';
 import {
   cost, normalizeFeedRow, requests, RANGE_HOURS, RANGE_LABEL,
   type CostRow, type CostTotals, type FeedRow, type RangeKey,
@@ -138,11 +139,11 @@ export default function Economics() {
   // go and price them instead of reading a bare count. Whole cost set, same
   // reasoning as above.
   const unpricedModels = useMemo(() => {
-    const m = new Map<string, { key: string; calls: number }>();
+    const m = new Map<string, { key: string; calls: number; accountId: number }>();
     for (const r of costRows) {
       if (r.unpriced_calls <= 0) continue;
       const key = `${r.account} · ${r.model}`;
-      const cur = m.get(key) ?? { key, calls: 0 };
+      const cur = m.get(key) ?? { key, calls: 0, accountId: r.account_id };
       cur.calls += r.unpriced_calls;
       m.set(key, cur);
     }
@@ -357,14 +358,16 @@ export default function Economics() {
                   <div className="rounded-lg border border-warn/30 bg-warn-dim px-4 py-3">
                     <div className="flex flex-wrap items-baseline justify-between gap-2">
                       <span className="text-[13px] text-ink">Counted as $0 until priced</span>
-                      <Link to="/providers" className="text-[13px] text-dim underline underline-offset-2 hover:text-ink"
-                        title="Open the provider, then Pricing, and enter a rate for the model">Add a price in Providers</Link>
+                      <Link to={providerLink(unpricedModels[0].accountId, 'pricing')} className="text-[13px] text-dim underline underline-offset-2 hover:text-ink"
+                        title="Opens the Pricing dialog for the first provider listed">Add a price</Link>
                     </div>
                     <ul className="mt-2 grid gap-x-6 gap-y-1 text-[13px] sm:grid-cols-2">
                       {unpricedModels.slice(0, 8).map((u) => (
                         <li key={u.key} className="flex items-baseline gap-2">
                           <span className="min-w-0 flex-1 truncate text-dim" title={u.key}>{u.key}</span>
                           <span className="tnum text-warn">{nfmt(u.calls)} calls</span>
+                          <Link to={providerLink(u.accountId, 'pricing')} className="text-dim underline underline-offset-2 hover:text-ink"
+                            aria-label={`Price ${u.key}`}>Price</Link>
                         </li>
                       ))}
                     </ul>

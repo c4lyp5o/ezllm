@@ -54,7 +54,7 @@ try {
   check('attention: all-keys-disabled account is flagged', /Dead end: every key is disabled/.test(text), text);
   check('attention: error rate over the last 15 minutes', /2 of 7 calls in the last 15 minutes failed \(29%\)/.test(text), text);
   check('attention: repeated failover is flagged', /main failed over 3 times/.test(text), text);
-  check('attention links to the fixing screen', (await strip.getByRole('link', { name: 'Open providers' }).getAttribute('href')) === '/providers');
+  check('attention deep-links to the provider', (await strip.getByRole('link', { name: 'Open provider' }).getAttribute('href')) === '/providers?open=2');
 
   await page.getByText('calls/min').or(page.getByText('live feed reconnecting')).first().waitFor();
   check('header shows the live pulse chip', true);

@@ -153,17 +153,41 @@ export function SkeletonCards({ n = 3 }: { n?: number }) {
 // Only the topmost dialog handles focus and Escape when dialogs are nested.
 const modalStack: HTMLElement[] = [];
 
-export function Modal({ open, onClose, title, subtitle, children, footer, wide }: {
+// Opt-in behaviours (a modal that passes none of them behaves as it always has):
+//   busy     - a save or validation is in flight: Escape, the backdrop, the ✕
+//              and the form all refuse, so a half-finished request cannot be
+//              abandoned by a stray click.
+//   dirty    - there are unsaved edits: closing asks "Discard unsaved changes?"
+//              first instead of throwing them away.
+//   onSubmit - the body and footer become one <form>, so Enter submits; the
+//              footer's primary button must be type="submit".
+// The page behind never scrolls while any modal is open.
+let savedBodyOverflow = '';
+export function Modal({ open, onClose, title, subtitle, children, footer, wide, busy, dirty, onSubmit }: {
   open: boolean; onClose: () => void; title: string; subtitle?: string;
-  children: ReactNode; footer?: ReactNode; wide?: boolean;
+  /** A function receives requestClose, so a Cancel button honours the busy and unsaved-changes guards. */
+  children: ReactNode; footer?: ReactNode | ((requestClose: () => void) => ReactNode); wide?: boolean;
+  busy?: boolean; dirty?: boolean; onSubmit?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const onCloseRef = useRef(onClose);
+  const body = useRef<HTMLDivElement>(null);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  // Latest props for the document-level key handler, without re-subscribing
+  // per render: callers pass an inline `() => setOpen(false)`, a new identity
+  // every time their state changes.
+  const live = useRef({ busy, dirty, onClose, confirmDiscard });
+  // Assigned during render, not in an effect: a keystroke landing between the
+  // commit and the effect must already see that a save is in flight.
+  live.current = { busy, dirty, onClose, confirmDiscard };
 
-  // Keep Escape working with the LATEST onClose without re-subscribing per
-  // render: callers pass an inline `() => setOpen(false)`, a new identity every
-  // time their state changes.
-  useEffect(() => { onCloseRef.current = onClose; });
+  const requestClose = useCallback(() => {
+    const g = live.current;
+    if (g.busy) return;
+    if (g.dirty) { setConfirmDiscard(true); return; }
+    g.onClose();
+  }, []);
+
+  useEffect(() => { if (!open) setConfirmDiscard(false); }, [open]);
 
   // deps are [open] ONLY. It used to be [open, onClose], so every parent
   // re-render re-ran the autofocus and yanked focus to the FIRST field in the
@@ -174,16 +198,29 @@ export function Modal({ open, onClose, title, subtitle, children, footer, wide }
     if (!open || !ref.current) return;
     const dialog = ref.current;
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (modalStack.length === 0) {
+      savedBodyOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+    }
     modalStack.push(dialog);
     const top = () => modalStack[modalStack.length - 1] === dialog;
     const focusable = () => Array.from(dialog.querySelectorAll<HTMLElement>(
       'a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"])',
     )).filter(el => !el.matches(':disabled,[hidden],[aria-hidden="true"]') && el.tabIndex >= 0 && el.getClientRects().length > 0);
-    const focusFirst = () => (focusable()[0] ?? dialog).focus();
+    // Land on the first FIELD in the body, not on the close button that
+    // happens to come first in tab order; fall back to the first control.
+    const focusFirst = () => {
+      const field = body.current?.querySelector<HTMLElement>('input:not([type=hidden]):not(:disabled),select:not(:disabled),textarea:not(:disabled)');
+      (field && field.getClientRects().length > 0 ? field : focusable()[0] ?? dialog).focus();
+    };
     focusFirst();
     const onKey = (e: KeyboardEvent) => {
       if (!top()) return;
-      if (e.key === 'Escape') { e.preventDefault(); onCloseRef.current(); return; }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (live.current.confirmDiscard) setConfirmDiscard(false); else requestClose();
+        return;
+      }
       if (e.key !== 'Tab') return;
       const items = focusable();
       if (!items.length) { e.preventDefault(); dialog.focus(); return; }
@@ -201,13 +238,33 @@ export function Modal({ open, onClose, title, subtitle, children, footer, wide }
       document.removeEventListener('focusin', onFocus);
       const index = modalStack.lastIndexOf(dialog);
       if (index >= 0) modalStack.splice(index, 1);
+      if (modalStack.length === 0) document.body.style.overflow = savedBodyOverflow;
       const activeDialog = modalStack[modalStack.length - 1];
       if (opener?.isConnected && (!activeDialog || activeDialog.contains(opener))) opener.focus();
       else if (activeDialog) activeDialog.focus();
     };
-  }, [open]);
+  }, [open, requestClose]);
 
-  const overlay = (e: React.MouseEvent) => { if (e.target === e.currentTarget) onClose(); };
+  const overlay = (e: React.MouseEvent) => { if (e.target === e.currentTarget) requestClose(); };
+
+  const footerNode = confirmDiscard ? (
+    <div className="flex items-center justify-end gap-3 border-t border-line bg-surface px-6 py-4" role="alertdialog" aria-label="Discard unsaved changes?">
+      <span className="mr-auto text-[13px] text-dim">Discard unsaved changes?</span>
+      <button type="button" autoFocus className={cx(btn.base, btn.ghost)} onClick={() => setConfirmDiscard(false)}>Keep editing</button>
+      <button type="button" className={cx(btn.base, btn.danger)} onClick={() => { setConfirmDiscard(false); onClose(); }}>Discard</button>
+    </div>
+  ) : footer ? (
+    <div className="sticky bottom-0 flex items-center justify-end gap-3 border-t border-line bg-surface px-6 py-4">
+      {typeof footer === 'function' ? footer(requestClose) : footer}
+    </div>
+  ) : null;
+
+  const inner = (
+    <>
+      <div ref={body} className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</div>
+      {footerNode}
+    </>
+  );
 
   // No early return on !open: AnimatePresence needs the subtree mounted to
   // PLAY the exit. Returning null instead would snap the dialog away and the
@@ -231,7 +288,7 @@ export function Modal({ open, onClose, title, subtitle, children, footer, wide }
         >
           <div className="absolute inset-0 bg-overlay" />
           <motion.div
-            ref={ref} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1}
+            ref={ref} role="dialog" aria-modal="true" aria-label={title} aria-busy={busy || undefined} tabIndex={-1}
             className="relative z-10 flex max-h-[90dvh] w-full flex-col overflow-hidden rounded-xl border border-line-strong bg-surface shadow-2xl shadow-black/60"
             style={{ maxWidth: wide ? '56rem' : '44rem' }}
             initial={{ opacity: 0, y: 8, scale: 0.985 }}
@@ -243,15 +300,15 @@ export function Modal({ open, onClose, title, subtitle, children, footer, wide }
                 <h2 className="text-[15px] font-semibold">{title}</h2>
                 {subtitle && <p className="mt-0.5 text-xs text-mute">{subtitle}</p>}
               </div>
-              <button type="button" onClick={onClose} aria-label="Close"
-                className="-mr-1 rounded-md p-1 text-mute transition-colors hover:bg-hover hover:text-ink">✕</button>
+              <button type="button" onClick={requestClose} aria-label="Close" disabled={busy}
+                className="-mr-1 rounded-md p-1 text-mute transition-colors hover:bg-hover hover:text-ink disabled:opacity-40">✕</button>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</div>
-            {footer && (
-              <div className="sticky bottom-0 flex items-center justify-end gap-3 border-t border-line bg-surface px-6 py-4">
-                {footer}
-              </div>
-            )}
+            {onSubmit ? (
+              <form noValidate className="flex min-h-0 flex-1 flex-col"
+                onSubmit={(e) => { e.preventDefault(); if (!live.current.busy) onSubmit(); }}>
+                {inner}
+              </form>
+            ) : inner}
           </motion.div>
         </motion.div>
       )}
@@ -280,7 +337,7 @@ export function ConfirmModal({ open, title, body, confirmLabel = 'Delete', busy,
 
 // ── form controls ───────────────────────────────────────────────────────
 
-export const inputCls = 'w-full rounded-lg border border-line bg-raised px-3 py-2 text-[13px] transition-colors placeholder:text-mute hover:border-line-strong focus:border-accent focus:outline-none focus:ring-0';
+export const inputCls = 'w-full rounded-lg border border-line bg-raised px-3 py-2 text-[13px] transition-colors placeholder:text-mute hover:border-line-strong focus:border-accent focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-60';
 export const labelCls = 'mb-1.5 block text-[12px] font-medium text-mute';
 
 // ── searchable combobox ──────────────────────────────────────────────────
@@ -456,6 +513,57 @@ export const btn = {
   ghost: 'border border-line-strong bg-transparent text-ink hover:bg-hover',
   danger: 'border border-bad/50 bg-transparent text-bad hover:bg-bad-dim',
 };
+
+/**
+ * A credential field: masked by default with a Show/Hide switch, whitespace
+ * trimmed off the ends of anything pasted (a trailing newline is the classic
+ * reason a copied key "doesn't work"), and a character count so the operator
+ * can see that the paste landed without revealing it. `multiline` is for
+ * cookie jars and session JSON, which cannot be masked in a textarea.
+ */
+export function SecretInput({ id, value, onChange, placeholder, multiline, rows = 4, onEnter, disabled }: {
+  id?: string; value: string; onChange: (v: string) => void; placeholder?: string;
+  multiline?: boolean; rows?: number; disabled?: boolean;
+  /** Enter inside the field (single-line only): for fields that sit outside the modal's own form. */
+  onEnter?: () => void;
+}) {
+  const [shown, setShown] = useState(false);
+  const paste = (e: React.ClipboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const text = e.clipboardData.getData('text');
+    if (text === text.trim()) return; // nothing to trim: let the browser paste natively
+    e.preventDefault();
+    const el = e.currentTarget;
+    const start = el.selectionStart ?? value.length;
+    const end = el.selectionEnd ?? value.length;
+    onChange(value.slice(0, start) + text.trim() + value.slice(end));
+  };
+  return (
+    <div>
+      <div className="relative">
+        {multiline ? (
+          <textarea id={id} rows={rows} autoComplete="off" spellCheck={false} disabled={disabled}
+            className={cx(inputCls, 'resize-y font-code leading-5')}
+            placeholder={placeholder} value={value} onPaste={paste}
+            onChange={(e) => onChange(e.target.value)} />
+        ) : (
+          <>
+            <input id={id} type={shown ? 'text' : 'password'} autoComplete="off" spellCheck={false} disabled={disabled}
+              className={cx(inputCls, 'font-code pr-16')}
+              placeholder={placeholder} value={value} onPaste={paste}
+              onChange={(e) => onChange(e.target.value)}
+              onKeyDown={onEnter ? (e) => { if (e.key === 'Enter') { e.preventDefault(); onEnter(); } } : undefined} />
+            <button type="button" aria-pressed={shown} aria-label={shown ? 'Hide value' : 'Show value'} tabIndex={-1}
+              onClick={() => setShown((v) => !v)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-1.5 py-0.5 text-[12px] text-mute transition-colors hover:bg-hover hover:text-ink">
+              {shown ? 'Hide' : 'Show'}
+            </button>
+          </>
+        )}
+      </div>
+      {value.length > 0 && <p className="tnum mt-1 text-[12px] text-mute">{value.length.toLocaleString('en-US')} characters</p>}
+    </div>
+  );
+}
 
 /** Copies `text` to the clipboard; the label flips to "Copied" for a moment.
  *  A blocked clipboard (insecure origin, denied) simply does nothing. */

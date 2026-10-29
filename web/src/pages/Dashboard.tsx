@@ -28,6 +28,7 @@ import {
   type Overview, type RangeKey, type RecentCall, type UsageRow,
 } from '../utils/api';
 import { useLiveCalls } from '../utils/live';
+import { accountIssues, providerLink } from '../utils/health';
 import { useRange } from '../utils/preferences';
 import { deltaNote, MAX_SPAN_H, priorFrom, type Prior } from '../utils/lib';
 import {
@@ -248,30 +249,11 @@ const MIN_CALLS_FOR_RATE = 5;
 function attentionItems(o: Overview): Attn[] {
   const out: Attn[] = [];
   for (const a of o.accounts ?? []) {
-    if (!a.enabled) continue; // disabled on purpose is not a fault
-    const keys = a.keys ?? [];
-    if (keys.length > 0 && keys.every((k) => !k.enabled)) {
-      out.push({ id: `keys-${a.id}`, tone: 'bad', text: `${a.name}: every key is disabled, so it cannot serve`, to: '/providers', action: 'Open providers' });
-    } else {
-      const failing = keys.filter((k) => k.enabled && k.last_test_ok === false).length;
-      if (failing > 0) {
-        out.push({ id: `test-${a.id}`, tone: 'warn', text: `${a.name}: ${failing} ${failing === 1 ? 'key' : 'keys'} failed the last test`, to: '/providers', action: 'Open providers' });
-      }
-    }
-    const q = a.quota;
-    const pcts: [string, number][] = [];
-    if (q?.percent_rolling != null) pcts.push(['rolling', q.percent_rolling]);
-    if (q?.percent_weekly != null) pcts.push(['weekly', q.percent_weekly]);
-    if (q?.percent_monthly != null) pcts.push(['monthly', q.percent_monthly]);
-    const worst = pcts.sort((x, y) => y[1] - x[1])[0];
-    if (worst && worst[1] >= 90) {
-      out.push({ id: `quota-${a.id}`, tone: worst[1] >= 100 ? 'bad' : 'warn', text: `${a.name}: ${worst[0]} quota at ${Math.round(worst[1])}%`, to: '/providers', action: 'Open providers' });
-    }
-    if (a.management_key_expires_at) {
-      const days = Math.ceil((Date.parse(a.management_key_expires_at) - Date.now()) / 86_400_000);
-      if (!Number.isNaN(days) && days <= 3) {
-        out.push({ id: `cookie-${a.id}`, tone: days < 0 ? 'bad' : 'warn', text: days < 0 ? `${a.name}: session cookie expired` : `${a.name}: session cookie expires in ${days} ${days === 1 ? 'day' : 'days'}`, to: '/providers', action: 'Open providers' });
-      }
+    for (const i of accountIssues(a)) {
+      out.push({
+        id: i.id, tone: i.tone, text: i.text, to: providerLink(a.id, i.fix),
+        action: i.fix === 'keys' ? 'Fix key' : i.fix === 'edit' ? 'Fix in Providers' : 'Open provider',
+      });
     }
   }
   const cut = Date.now() - RECENT_MS;

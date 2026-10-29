@@ -100,7 +100,7 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 	add(" AND tokens_out >= ?", "min_tout", bounds["min_tout"])
 	add(" AND tokens_out <= ?", "max_tout", bounds["max_tout"])
 	// Exact-match name filters, bound as parameters like everything else.
-	for param, col := range map[string]string{"account": "account", "model": "model", "session": "session_id"} {
+	for param, col := range map[string]string{"account": "account", "model": "model", "alias": "alias", "session": "session_id"} {
 		if v := q.Get(param); v != "" {
 			where += " AND " + col + " = ?"
 			args = append(args, v)
@@ -160,7 +160,7 @@ FROM calls`+where, sargs...)
 			"min_tin": bounds["min_tin"], "max_tin": bounds["max_tin"],
 			"min_tout": bounds["min_tout"], "max_tout": bounds["max_tout"],
 			"limit": limit, "sort": sortKey,
-			"account": q.Get("account"), "model": q.Get("model"), "session": q.Get("session"),
+			"account": q.Get("account"), "model": q.Get("model"), "alias": q.Get("alias"), "session": q.Get("session"),
 		},
 	})
 }

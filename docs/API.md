@@ -185,8 +185,8 @@ returned page — so the totals answer "how much lives behind this filter".
 Params: `min_tin` `max_tin` `min_tout` `max_tout` (non-negative integers);
 `from`/`to` (RFC3339, `[from,to)` like `/admin/usage`, default last 24h with the same
 +1min grace); `limit` (1-500, default 50); `sort` = `ts_desc` (default) | `tin_desc` |
-`tout_desc`; `account`, `model`, `session` (exact match on the ledger's account name,
-model, and `X-Ezllm-Session` grouping key — never a prefix or pattern). Anything invalid → `400`.
+`tout_desc`; `account`, `model`, `alias`, `session` (exact match on the ledger's account name,
+model, combo name, and `X-Ezllm-Session` grouping key — never a prefix or pattern). Anything invalid → `400`.
 
 ### `GET /admin/usage?group_by=&from=&to=`
 Dashboard aggregates (`store.UsageReport`), computed server-side over the FULL filtered
@@ -553,6 +553,9 @@ success-driven advance is now expressed as `block_round_robin` with a held hop.)
 toggle is `PATCH /admin/combos/{id}` `{"enabled":false}` (the `?enabled=true|false` query form is
 still honored). A disabled combo refuses inference with `combo "x" is disabled` and drops out of
 `/v1/models`.
+
+`POST /admin/combos/{id}/test` probes every hop with one tiny real request. A body `{"surface":"chat|anthropic","hop":N}`
+narrows it to the hop at position `N` (0-based; out of range → `400`). Each result carries its `index`.
 
 ### `POST /admin/combos/{id}/hops` → `200`
 Replaces the hop list atomically (same body shape, `hops` only).

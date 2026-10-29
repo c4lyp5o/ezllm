@@ -631,7 +631,7 @@ export type RequestFilter = {
   minTin?: number; maxTin?: number; minTout?: number; maxTout?: number;
   range?: RangeKey; sort?: RequestSort; limit?: number;
   /** Exact ledger names (the dashboard's click-through). */
-  account?: string; model?: string; session?: string;
+  account?: string; model?: string; alias?: string; session?: string;
 };
 export function requests(f: RequestFilter = {}): Promise<RequestsResp> {
   const hours = RANGE_HOURS[f.range ?? '24h'];
@@ -644,6 +644,7 @@ export function requests(f: RequestFilter = {}): Promise<RequestsResp> {
   if (f.limit) params.set('limit', String(f.limit));
   if (f.account) params.set('account', f.account);
   if (f.model) params.set('model', f.model);
+  if (f.alias) params.set('alias', f.alias);
   if (f.session) params.set('session', f.session);
   return get<RequestsResp>(`/admin/requests?${params.toString()}`);
 }

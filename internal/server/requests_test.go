@@ -211,6 +211,34 @@ func TestRequestsFiltersBySession(t *testing.T) {
 	}
 }
 
+func TestRequestsFiltersByAlias(t *testing.T) {
+	h := newHarness(t, func(http.ResponseWriter, *http.Request) {})
+	now := time.Now()
+	for _, c := range []store.Call{
+		{TS: now, Client: "c", Surface: store.SurfaceChat, Alias: "daily", Model: "m", Status: 200, TokensIn: 10},
+		{TS: now, Client: "c", Surface: store.SurfaceChat, Alias: "daily", Model: "m", Status: 200, TokensIn: 20},
+		{TS: now, Client: "c", Surface: store.SurfaceChat, Alias: "daily-2", Model: "m", Status: 200, TokensIn: 30},
+	} {
+		h.db.RecordCall(c)
+	}
+	if err := h.db.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		query string
+		count int64
+	}{
+		{"?alias=daily", 2},
+		{"?alias=daily-2", 1},
+		{"?alias=dai", 0}, // exact match, not a prefix
+	} {
+		code, got := doRequests(t, h, tc.query)
+		if code != http.StatusOK || got.Summary.Count != tc.count {
+			t.Errorf("%q: code %d count %d, want %d", tc.query, code, got.Summary.Count, tc.count)
+		}
+	}
+}
+
 func TestRequestsSummaryCompressionCounts(t *testing.T) {
 	h := newHarness(t, func(http.ResponseWriter, *http.Request) {})
 	now := time.Now()

@@ -105,7 +105,7 @@ function RowDetail({ r }: { r: FeedRow }) {
 
 export default function Requests() {
   // Every filter lives in the URL, so a view survives a refresh and can be
-  // shared: ?account= / ?model= are exact ledger names (server-side, so the
+  // shared: ?account= / ?model= / ?alias= (a combo) are exact ledger names (server-side, so the
   // summary strip covers the filtered set), plus range, sort, limit and the
   // four token bounds. The Dashboard and Analytics click-throughs use the
   // same parameters.
@@ -113,6 +113,7 @@ export default function Requests() {
   const [prefRange, setPrefRange] = useRange();
   const account = params.get('account') ?? '';
   const model = params.get('model') ?? '';
+  const alias = params.get('alias') ?? '';
   const urlRange = params.get('range');
   const range: RangeKey = (RANGES as string[]).includes(urlRange ?? '') ? urlRange as RangeKey : prefRange;
   const urlSort = params.get('sort');
@@ -148,11 +149,14 @@ export default function Requests() {
   const [open, setOpen] = useState<string | null>(null);
   // Options for the quick-filter dropdowns: the names that actually carry
   // traffic in the window (one aggregate each, not a scan of rows).
-  const [names, setNames] = useState<{ accounts: string[]; models: string[] }>({ accounts: [], models: [] });
+  const [names, setNames] = useState<{ accounts: string[]; models: string[]; combos: string[] }>({ accounts: [], models: [], combos: [] });
   useEffect(() => {
     let live = true;
-    void Promise.all([usage('account', range).catch(() => null), usage('model', range).catch(() => null)]).then(([a, m]) => {
-      if (live) setNames({ accounts: (a?.groups ?? []).map((g) => g.k).sort(), models: (m?.groups ?? []).map((g) => g.k).sort() });
+    void Promise.all([usage('account', range).catch(() => null), usage('model', range).catch(() => null), usage('alias', range).catch(() => null)]).then(([a, m, c]) => {
+      if (live) setNames({
+        accounts: (a?.groups ?? []).map((g) => g.k).sort(), models: (m?.groups ?? []).map((g) => g.k).sort(),
+        combos: (c?.groups ?? []).map((g) => g.k).filter((k) => k !== '(direct)').sort(),
+      });
     });
     return () => { live = false; };
   }, [range]);
@@ -165,7 +169,7 @@ export default function Requests() {
     setLoading(true);
     setErr(null);
     try {
-      const r = await requests({ ...JSON.parse(appliedKey) as Applied, range, sort, account, model, limit });
+      const r = await requests({ ...JSON.parse(appliedKey) as Applied, range, sort, account, model, alias, limit });
       if (gen !== loadGen.current) return;
       setData(r);
       setRows(r.rows.map(normalizeFeedRow));
@@ -175,7 +179,7 @@ export default function Requests() {
     } finally {
       if (gen === loadGen.current) setLoading(false);
     }
-  }, [appliedKey, range, sort, account, model, limit]);
+  }, [appliedKey, range, sort, account, model, alias, limit]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -230,6 +234,13 @@ export default function Requests() {
             <select className={cx(inputCls, 'w-56')} value={account} onChange={(e) => patch({ account: e.target.value })}>
               <option value="">All providers</option>
               {withCurrent(names.accounts, account).map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className={labelCls}>combo</span>
+            <select className={cx(inputCls, 'w-48')} value={alias} onChange={(e) => patch({ alias: e.target.value })}>
+              <option value="">All combos</option>
+              {withCurrent(names.combos, alias).map((n) => <option key={n} value={n}>{n}</option>)}
             </select>
           </label>
           <label className="block">

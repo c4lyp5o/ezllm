@@ -631,7 +631,7 @@ export type RequestFilter = {
   minTin?: number; maxTin?: number; minTout?: number; maxTout?: number;
   range?: RangeKey; /** An exact look-back in hours; wins over range (a 2x window for a prior-period comparison). */ hours?: number; sort?: RequestSort; limit?: number;
   /** Exact ledger names (the dashboard's click-through). */
-  account?: string; model?: string; alias?: string; session?: string;
+  account?: string; model?: string; alias?: string; client?: string; session?: string;
 };
 export function requests(f: RequestFilter = {}): Promise<RequestsResp> {
   const hours = f.hours ?? RANGE_HOURS[f.range ?? '24h'];
@@ -645,6 +645,7 @@ export function requests(f: RequestFilter = {}): Promise<RequestsResp> {
   if (f.account) params.set('account', f.account);
   if (f.model) params.set('model', f.model);
   if (f.alias) params.set('alias', f.alias);
+  if (f.client) params.set('client', f.client);
   if (f.session) params.set('session', f.session);
   return get<RequestsResp>(`/admin/requests?${params.toString()}`);
 }

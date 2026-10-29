@@ -239,6 +239,34 @@ func TestRequestsFiltersByAlias(t *testing.T) {
 	}
 }
 
+func TestRequestsFiltersByClient(t *testing.T) {
+	h := newHarness(t, func(http.ResponseWriter, *http.Request) {})
+	now := time.Now()
+	for _, c := range []store.Call{
+		{TS: now, Client: "hermes", Surface: store.SurfaceChat, Model: "m", Status: 200, TokensIn: 10},
+		{TS: now, Client: "hermes", Surface: store.SurfaceChat, Model: "m", Status: 200, TokensIn: 20},
+		{TS: now, Client: "hermes-2", Surface: store.SurfaceChat, Model: "m", Status: 200, TokensIn: 30},
+	} {
+		h.db.RecordCall(c)
+	}
+	if err := h.db.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		query string
+		count int64
+	}{
+		{"?client=hermes", 2},
+		{"?client=hermes-2", 1},
+		{"?client=herm", 0}, // exact match, not a prefix
+	} {
+		code, got := doRequests(t, h, tc.query)
+		if code != http.StatusOK || got.Summary.Count != tc.count {
+			t.Errorf("%q: code %d count %d, want %d", tc.query, code, got.Summary.Count, tc.count)
+		}
+	}
+}
+
 func TestRequestsSummaryCompressionCounts(t *testing.T) {
 	h := newHarness(t, func(http.ResponseWriter, *http.Request) {})
 	now := time.Now()

@@ -247,14 +247,18 @@ export function Modal({ open, onClose, title, subtitle, children, footer, wide, 
 
   const overlay = (e: React.MouseEvent) => { if (e.target === e.currentTarget) requestClose(); };
 
+  // The two bars carry distinct keys on purpose. Without them React reuses the
+  // button the operator just clicked ("Keep editing") as the form's submit
+  // button once the bar swaps back, and the browser then runs the click's
+  // submit behaviour on it: "Keep editing" would save the form.
   const footerNode = confirmDiscard ? (
-    <div className="flex items-center justify-end gap-3 border-t border-line bg-surface px-6 py-4" role="alertdialog" aria-label="Discard unsaved changes?">
+    <div key="discard" className="flex items-center justify-end gap-3 border-t border-line bg-surface px-6 py-4" role="alertdialog" aria-label="Discard unsaved changes?">
       <span className="mr-auto text-[13px] text-dim">Discard unsaved changes?</span>
       <button type="button" autoFocus className={cx(btn.base, btn.ghost)} onClick={() => setConfirmDiscard(false)}>Keep editing</button>
       <button type="button" className={cx(btn.base, btn.danger)} onClick={() => { setConfirmDiscard(false); onClose(); }}>Discard</button>
     </div>
   ) : footer ? (
-    <div className="sticky bottom-0 flex items-center justify-end gap-3 border-t border-line bg-surface px-6 py-4">
+    <div key="footer" className="sticky bottom-0 flex items-center justify-end gap-3 border-t border-line bg-surface px-6 py-4">
       {typeof footer === 'function' ? footer(requestClose) : footer}
     </div>
   ) : null;
@@ -567,16 +571,41 @@ export function SecretInput({ id, value, onChange, placeholder, multiline, rows 
   );
 }
 
+/** Copy to the clipboard with a fallback: a non-secure context (the dashboard
+ *  opened over plain HTTP on a LAN) has no navigator.clipboard, and failing
+ *  silently there would make every copy button useless on exactly the
+ *  phone-on-Wi-Fi setup the Connect page exists for. */
+export async function copyText(s: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(s);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = s;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
+
 /** Copies `text` to the clipboard; the label flips to "Copied" for a moment.
- *  A blocked clipboard (insecure origin, denied) simply does nothing. */
+ *  If every route to the clipboard is blocked it does nothing. */
 export function CopyButton({ text, label }: { text: string; label: string }) {
   const [done, setDone] = useState(false);
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
+    if (await copyText(text)) {
       setDone(true);
       setTimeout(() => setDone(false), 1500);
-    } catch { /* clipboard unavailable */ }
+    }
   };
   return (
     <button type="button" onClick={() => void copy()} className={cx(btn.base, btn.ghost, '!h-7 !px-3 !text-[12px]')}>

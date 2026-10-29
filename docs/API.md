@@ -185,8 +185,8 @@ returned page — so the totals answer "how much lives behind this filter".
 Params: `min_tin` `max_tin` `min_tout` `max_tout` (non-negative integers);
 `from`/`to` (RFC3339, `[from,to)` like `/admin/usage`, default last 24h with the same
 +1min grace); `limit` (1-500, default 50); `sort` = `ts_desc` (default) | `tin_desc` |
-`tout_desc`; `account`, `model`, `alias`, `session` (exact match on the ledger's account name,
-model, combo name, and `X-Ezllm-Session` grouping key — never a prefix or pattern). Anything invalid → `400`.
+`tout_desc`; `account`, `model`, `alias`, `client`, `session` (exact match on the ledger's account name,
+model, combo name, client (API key) name, and `X-Ezllm-Session` grouping key — never a prefix or pattern). Anything invalid → `400`.
 
 ### `GET /admin/usage?group_by=&from=&to=`
 Dashboard aggregates (`store.UsageReport`), computed server-side over the FULL filtered

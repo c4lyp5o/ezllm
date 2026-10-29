@@ -1,5 +1,5 @@
 // PROVIDERS — account cards, add-provider wizard modal, per-key actions, model drawer.
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { motion } from 'motion/react';
 import {
   ApiError, AuthError, del, get, ghDeviceCancel, ghDeviceStart, ghDeviceStatus, listBridges,
@@ -8,9 +8,11 @@ import {
   KINDS, STEPS,
   type Account, type ApiErrorDetail, type Bridge, type GhDeviceStart, type GhDeviceStatus, type KeyRow, type ModelRule, type ModelRow, type Price, type SweepStatus, type TestResult, type TestStep,
 } from '../utils/api';
-import { Chip, ConfirmModal, Modal, SectionLabel, Skeleton, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls, relTime, Mono } from '../components/ui';
+import { useSearchParams } from 'react-router-dom';
+import { Chip, ConfirmModal, Modal, SecretInput, SectionLabel, Segmented, Skeleton, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls, relTime, Mono } from '../components/ui';
 import { Collapse, Stagger, StaggerItem } from '../components/motion';
 import { fmtMoney, nfmt } from '../utils/lib';
+import { accountIssues, type Issue } from '../utils/health';
 
 // ── helpers ─────────────────────────────────────────────────────────────
 
@@ -23,7 +25,7 @@ function ErrBox({ e, onDismiss }: { e: ApiErrorDetail | null; onDismiss: () => v
     <div className="rounded-lg border border-bad/30 bg-bad-dim px-4 py-3 animate-fade-in">
       <div className="flex items-start justify-between gap-3">
         <p className="text-[13px] text-bad">{e.message}</p>
-        <button onClick={onDismiss} className="shrink-0 text-mute hover:text-ink" aria-label="dismiss">✕</button>
+        <button type="button" onClick={onDismiss} className="shrink-0 text-mute hover:text-ink" aria-label="dismiss">✕</button>
       </div>
       {e.upstream_error?.message && (
         <Mono className="mt-1 block text-[12px] text-dim">{e.upstream_error.type ? `${e.upstream_error.type}: ` : ''}{e.upstream_error.message}</Mono>
@@ -211,6 +213,225 @@ const KNOWN_ENDPOINTS = new Set<string>([
   'https://api.anthropic.com',
 ]);
 const isKnownEndpoint = (url: string) => KNOWN_ENDPOINTS.has(url.replace(/\/+$/, ''));
+
+// The preset an EXISTING account was created from: the one with the same
+// endpoint, else the generic preset of its kind. Edit uses it to know whether
+// the key is a one-line secret, a multi-line cookie jar, or a bridge link.
+function presetForAccount(a: { kind: string; base_url: string }): (typeof PROVIDER_PRESETS)[string] | null {
+  const url = a.base_url.replace(/\/+$/, '');
+  const byUrl = url ? PRESET_IDS.find((id) => (PROVIDER_PRESETS[id].baseURL ?? '').replace(/\/+$/, '') === url) : undefined;
+  if (byUrl) return PROVIDER_PRESETS[byUrl];
+  const byKind = PRESET_IDS.find((id) => PROVIDER_PRESETS[id].kind === a.kind && !PROVIDER_PRESETS[id].baseURL && !PROVIDER_PRESETS[id].accountURL);
+  return byKind ? PROVIDER_PRESETS[byKind] : null;
+}
+
+// ── optional session credentials ────────────────────────────────────────
+// Some providers can also read a balance or usage page with a browser session.
+// It is one optional secret, stored encrypted, that rides alongside the API
+// key. The Add wizard and the Edit modal used to carry five hand-copied blocks
+// each (with the help text only on Add); this is the single definition both
+// read, so the guidance cannot drift between them.
+type Extra = { label: string; placeholder: string; help: string; expiry?: boolean };
+const EXTRAS = {
+  tokenrouter: {
+    label: 'Management key', placeholder: 'Paste the TokenRouter management key',
+    help: 'Used only to read the wallet balance — stored encrypted, never sent upstream.',
+  },
+  console: {
+    label: 'Console session cookie', placeholder: 'Paste the Cookie header from a platform.claude.com request',
+    help: 'Used only to read your prepaid credit balance — stored encrypted, sent only to platform.claude.com. Paste the whole Cookie header (DevTools → Network → request headers): we need its sessionKey and lastActiveOrg. It expires with your web session; paste a fresh one when the quota shows an error.',
+  },
+  openai: {
+    label: 'Platform session token', placeholder: 'Paste the sess-… bearer token from platform.openai.com',
+    help: 'Used only to read your credit balance — stored encrypted, sent only to api.openai.com. Copy it from the Authorization header of a platform.openai.com request (DevTools → Network). It expires with your web session; paste a fresh one when the quota shows an error.',
+  },
+  commandcode: {
+    label: 'Session cookie', placeholder: 'Paste the __Secure-commandcode_prod_.session_token value',
+    help: 'Used only to read your usage page’s limits — stored encrypted, sent only to api.commandcode.ai. It expires with your web session; paste a fresh one when the quota shows an error. Paste the whole Cookie header (DevTools → Network → request headers) to also see how many days are left.',
+    expiry: true,
+  },
+  claudeSub: {
+    label: 'Claude.ai session cookie', placeholder: 'Paste the Cookie header from a claude.ai request',
+    help: 'Used only to read your plan’s 5-hour and weekly windows live — stored encrypted, sent only to claude.ai. Paste the whole Cookie header (DevTools → Network → request headers): we need its sessionKey and lastActiveOrg, and the cf_clearance/__cf_bm cookies get past Cloudflare. Without it the quota panel shows the bridge’s last-observed reading instead of a live one.',
+  },
+} satisfies Record<string, Extra>;
+
+function extraForPreset(presetID: string, baseURL: string): Extra | null {
+  if (presetID === 'tokenrouter') return EXTRAS.tokenrouter;
+  if (presetID === 'anthropic-compatible' && baseURL.includes('api.anthropic.com')) return EXTRAS.console;
+  if (presetID === 'openai') return EXTRAS.openai;
+  if (presetID === 'commandcode') return EXTRAS.commandcode;
+  if (presetID === 'claude-sub') return EXTRAS.claudeSub;
+  return null;
+}
+
+function extraForAccount(a: Account): Extra | null {
+  const url = a.base_url ?? '';
+  if (a.kind === 'openai-compatible' && a.namespace === 'tokenrouter') return EXTRAS.tokenrouter;
+  if (a.kind === 'anthropic-compatible' && url.includes('api.anthropic.com')) return EXTRAS.console;
+  if (a.namespace === 'claude-sub') return EXTRAS.claudeSub;
+  if (a.kind === 'openai-compatible' && a.namespace === 'openai') return EXTRAS.openai;
+  if (a.kind === 'openai-compatible' && url.includes('api.commandcode.ai')) return EXTRAS.commandcode;
+  return null;
+}
+
+function ExtraCredentialField({ extra, id, value, onChange, edit, isSet, expiresAt }: {
+  extra: Extra; id: string; value: string; onChange: (v: string) => void;
+  /** Edit mode: the field rotates a stored value rather than setting a first one. */
+  edit?: boolean; isSet?: boolean; expiresAt?: string;
+}) {
+  return (
+    <div>
+      <label className={labelCls} htmlFor={id}>
+        {extra.label} <span className="text-mute">{edit ? '(optional, rotates the stored value)' : '(optional)'}</span>
+      </label>
+      <SecretInput id={id} value={value} onChange={onChange}
+        placeholder={edit && isSet ? '•••• (set — paste to replace)' : extra.placeholder} />
+      <p className="mt-1 text-[12px] text-mute">{extra.help}</p>
+      {edit && extra.expiry && <CookieExpiry at={expiresAt} />}
+    </div>
+  );
+}
+
+// ── key manager (Edit modal) ────────────────────────────────────────────
+// Keys used to be enterable exactly once, in the Add wizard. This is the way
+// back in: add another key, or replace one. Both go through the same
+// validate-then-store endpoint as the wizard (POST /admin/accounts/{id}/keys),
+// which only persists a key whose live test PASSED — so a bad paste changes
+// nothing. Replace is add-then-remove: the new key is proven first, and only
+// then is the old one deleted, so a typo can never leave the provider with no
+// working key.
+type KeyForm = { replace: KeyRow | null };
+
+function KeyManager({ account, onChanged, onBusy, onDirty }: {
+  account: Account; onChanged: () => void; onBusy: (b: boolean) => void; onDirty: (d: boolean) => void;
+}) {
+  const preset = presetForAccount(account);
+  const bridgeID = preset?.bridge;
+  const multiline = !!preset?.multilineKey;
+  const [form, setForm] = useState<KeyForm | null>(null);
+  const [label, setLabel] = useState('');
+  const [secret, setSecret] = useState('');
+  const [skip, setSkip] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [steps, setSteps] = useState<TestStep[] | null>(null);
+  const [err, setErr] = useState<ApiErrorDetail | null>(null);
+  const [note, setNote] = useState<{ tone: 'ok' | 'warn'; text: string } | null>(null);
+  const formRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (form) formRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, [form]);
+
+  useEffect(() => { onDirty(form != null && secret.trim() !== ''); }, [form, secret, onDirty]);
+
+  const begin = (replace: KeyRow | null) => {
+    setForm({ replace }); setLabel(replace?.label ?? ''); setSecret(''); setSkip(false);
+    setSteps(null); setErr(null); setNote(null);
+  };
+  const cancel = () => { setForm(null); setSecret(''); setSteps(null); setErr(null); };
+
+  const submit = async () => {
+    if (!form || busy || (!bridgeID && !secret.trim())) return;
+    // Reported to the modal in the same batch as our own state, so its guard
+    // is up before the next keystroke can arrive.
+    setBusy(true); onBusy(true); setErr(null); setNote(null); setSteps([]);
+    try {
+      await postKeyTestStream<{ key: KeyRow; test: TestResult }>(
+        `/admin/accounts/${account.id}/keys`,
+        { label: label.trim() || form.replace?.label || 'primary', ...(bridgeID ? { bridge: bridgeID } : { api_key: secret.trim() }), skip_inference: skip },
+        (step) => setSteps((prev) => [...(prev ?? []), step]),
+      );
+      if (form.replace) {
+        try {
+          await del(`/admin/accounts/${account.id}/keys/${form.replace.id}`);
+          setNote({ tone: 'ok', text: `Key replaced — the new key passed its test and “${form.replace.label}” was removed.` });
+        } catch (e) {
+          setNote({ tone: 'warn', text: `The new key passed its test and is saved, but removing the old key “${form.replace.label}” failed (${e instanceof Error ? e.message : String(e)}). Delete it from the provider card.` });
+        }
+      } else {
+        setNote({ tone: 'ok', text: 'Key added — it passed its test.' });
+      }
+      setForm(null); setSecret(''); setSteps(null);
+      onChanged();
+    } catch (e) {
+      if (e instanceof ApiError) setErr(e.detail);
+      else setErr({ status: 0, type: 'error', message: e instanceof Error ? e.message : String(e) });
+    } finally { setBusy(false); onBusy(false); }
+  };
+
+  const verb = form?.replace ? 'Replace' : 'Add';
+  return (
+    <div className="rounded-lg border border-line bg-raised/60 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <SectionLabel>API keys</SectionLabel>
+        {!form && <button type="button" className={cx(btn.base, btn.ghost, '!h-7 !px-3 !text-[12px]')} onClick={() => begin(null)}>Add key</button>}
+      </div>
+      {account.keys.length === 0 ? (
+        <p className="mt-2 text-[13px] text-mute">This provider has no key, so it cannot serve. Add one below.</p>
+      ) : (
+        <ul className="mt-2 divide-y divide-line/60">
+          {account.keys.map((k) => (
+            <li key={k.id} className="flex items-center gap-3 py-2 text-[13px]">
+              <span className={cx('h-1.5 w-1.5 flex-none rounded-full', !k.enabled ? 'bg-line-strong' : k.last_test_ok === true ? 'bg-ok' : k.last_test_ok === false ? 'bg-bad' : 'bg-line-strong')} />
+              <span className="min-w-0 flex-1 truncate">
+                <span className="text-ink">{k.label}</span>
+                <span className="font-code ml-2 text-[12px] text-mute">{k.hint}</span>
+                {!k.enabled && <span className="ml-2 text-[12px] text-warn">disabled</span>}
+                {k.enabled && k.last_test_ok === false && <span className="ml-2 text-[12px] text-bad">last test failed</span>}
+              </span>
+              <button type="button" disabled={busy || form != null} className={cx(btn.base, btn.ghost, '!h-7 !px-3 !text-[12px]')}
+                onClick={() => begin(k)} aria-label={`Replace key ${k.label}`}>Replace</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div aria-live="polite">
+        {note && <p className={cx('mt-2 text-[12px]', note.tone === 'ok' ? 'text-ok' : 'text-warn')}>{note.text}</p>}
+      </div>
+      {form && (
+        <div ref={formRef} className="mt-3 space-y-3 border-t border-line pt-3">
+          <p className="text-[13px] font-medium text-ink">
+            {form.replace ? `Replace “${form.replace.label}”` : 'Add a key'}
+          </p>
+          <div>
+            <label className={labelCls} htmlFor="km-label">Label</label>
+            <input id="km-label" className={inputCls} value={label} placeholder={form.replace?.label ?? 'primary'}
+              onChange={(e) => setLabel(e.target.value)} disabled={busy}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void submit(); } }} />
+          </div>
+          {bridgeID ? (
+            <p className="text-[13px] text-dim">
+              This provider rides a subscription bridge, which supplies its own key. {verb === 'Replace' ? 'Replacing' : 'Adding'} re-links the bridge&rsquo;s current key — there is nothing to paste.
+            </p>
+          ) : (
+            <div>
+              <label className={labelCls} htmlFor="km-secret">{multiline ? 'Session cookies' : 'API key'}</label>
+              <SecretInput id="km-secret" value={secret} onChange={setSecret} multiline={multiline} disabled={busy}
+                placeholder={preset?.keyHint ?? 'Paste the new provider API key'}
+                onEnter={() => void submit()} />
+              {preset?.keyHint && <p className="mt-1 text-[12px] text-mute">{preset.keyHint}</p>}
+            </div>
+          )}
+          <div className="flex items-center gap-3">
+            <Toggle checked={skip} onChange={setSkip} label="skip inference probe" disabled={busy} />
+            <span className="text-[13px] text-dim">Skip inference probe <span className="text-mute">(saves a token spend)</span></span>
+          </div>
+          {(steps != null) && (
+            <div className="rounded-lg border border-line bg-surface px-4 py-3">
+              <SectionLabel className="mb-2">Validation</SectionLabel>
+              <StepList steps={steps} running={busy} />
+            </div>
+          )}
+          <ErrBox e={err} onDismiss={() => setErr(null)} />
+          <div className="flex items-center justify-end gap-2">
+            <button type="button" className={cx(btn.base, btn.ghost)} onClick={cancel} disabled={busy}>Cancel</button>
+            <button type="button" className={cx(btn.base, btn.primary)} disabled={busy || (!bridgeID && !secret.trim())} onClick={() => void submit()}>
+              {busy ? <Spinner /> : null} {busy ? 'Validating key…' : form.replace ? 'Validate, save & remove old key' : 'Validate & save key'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── quota presentation (moved from the dashboard's per-account quota panel:
 //    quota data belongs under the provider it describes) ──────────────────────
@@ -567,6 +788,15 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
     } finally { setBusy(false); }
   };
 
+  // Anything typed makes closing ask first; a half-finished GitHub login counts too.
+  const dirty = !!(d.name.trim() || d.apiKey || d.managementKey || d.notes.trim() || d.customHeaders.trim() || ghStart);
+  // The validation steps and any failure sit together; scroll them into view
+  // when a save starts or fails, so a red step is never off-screen below the fold.
+  const validationRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (busy || err) validationRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [busy, err]);
+  const extra = extraForPreset(d.preset, d.base_url);
   const isCompat = ['openai-compatible', 'anthropic-compatible', 'gemini-openai'].includes(PROVIDER_PRESETS[d.preset]?.kind ?? '');
   const isAnthropicKind = PROVIDER_PRESETS[d.preset]?.kind === 'anthropic-compatible';
   const presetAccountID = PROVIDER_PRESETS[d.preset]?.accountURL;
@@ -580,10 +810,11 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
   return (
     <Modal open={open} onClose={onClose} wide title="Add provider"
       subtitle="Add the provider and validate its API key before the key is saved."
-      footer={(
+      busy={busy} dirty={dirty} onSubmit={() => { if (valid) void saveAndValidate(); }}
+      footer={(close) => (
         <>
-          <button type="button" className={cx(btn.base, btn.ghost)} onClick={onClose} disabled={busy}>Cancel</button>
-          <button type="button" disabled={busy || !valid} className={cx(btn.base, btn.primary)} onClick={() => void saveAndValidate()}>
+          <button type="button" className={cx(btn.base, btn.ghost)} onClick={close} disabled={busy}>Cancel</button>
+          <button type="submit" disabled={busy || !valid} className={cx(btn.base, btn.primary)}>
             {busy ? <Spinner /> : null} {busy ? 'Validating key…' : 'Save & validate key'}
           </button>
         </>
@@ -739,22 +970,9 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
         <div className={cx('grid gap-4 sm:grid-cols-2', bridgeID && 'hidden')}>
           <div className="sm:col-span-1">
             <label className={labelCls} htmlFor="ap-key">API key</label>
-            {PROVIDER_PRESETS[d.preset]?.multilineKey ? (
-              <textarea
-                id="ap-key"
-                rows={4}
-                autoComplete="off"
-                spellCheck={false}
-                className={cx(inputCls, 'font-mono resize-y leading-5')}
-                placeholder={PROVIDER_PRESETS[d.preset]?.keyHint ?? 'Paste the cookie header'}
-                value={d.apiKey}
-                onChange={(e) => set('apiKey', e.target.value)}
-              />
-            ) : (
-              <input id="ap-key" type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
-                placeholder={PROVIDER_PRESETS[d.preset]?.keyHint ?? 'Paste provider API key'}
-                value={d.apiKey} onChange={(e) => set('apiKey', e.target.value)} />
-            )}
+            <SecretInput id="ap-key" value={d.apiKey} onChange={(v) => set('apiKey', v)}
+              multiline={!!PROVIDER_PRESETS[d.preset]?.multilineKey}
+              placeholder={PROVIDER_PRESETS[d.preset]?.keyHint ?? 'Paste provider API key'} />
             {PROVIDER_PRESETS[d.preset]?.keyHint && (
               <p className="mt-1 text-[12px] text-mute">{PROVIDER_PRESETS[d.preset].keyHint}</p>
             )}
@@ -764,68 +982,7 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
             <input id="ap-kl" className={inputCls} value={d.keyLabel} onChange={(e) => set('keyLabel', e.target.value)} placeholder="primary" />
           </div>
         </div>
-        {d.preset === 'tokenrouter' && (
-          <div>
-            <label className={labelCls} htmlFor="ap-mgmt">Management key <span className="text-mute">(optional)</span></label>
-            <input id="ap-mgmt" type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
-              placeholder="Paste the TokenRouter management key"
-              value={d.managementKey} onChange={(e) => set('managementKey', e.target.value)} />
-            <p className="mt-1 text-[12px] text-mute">Used only to read the wallet balance — stored encrypted, never sent upstream.</p>
-          </div>
-        )}
-        {d.preset === 'anthropic-compatible' && d.base_url.includes('api.anthropic.com') && (
-          <div>
-            <label className={labelCls} htmlFor="ap-an">Console session cookie <span className="text-mute">(optional)</span></label>
-            <input id="ap-an" type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
-              placeholder="Paste the Cookie header from a platform.claude.com request"
-              value={d.managementKey} onChange={(e) => set('managementKey', e.target.value)} />
-            <p className="mt-1 text-[12px] text-mute">
-              Used only to read your prepaid credit balance — stored encrypted, sent only to platform.claude.com.
-              Paste the whole Cookie header (DevTools → Network → request headers): we need its sessionKey and
-              lastActiveOrg. It expires with your web session; paste a fresh one when the quota shows an error.
-            </p>
-          </div>
-        )}
-        {d.preset === 'openai' && (
-          <div>
-            <label className={labelCls} htmlFor="ap-oa">Platform session token <span className="text-mute">(optional)</span></label>
-            <input id="ap-oa" type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
-              placeholder="Paste the sess-… bearer token from platform.openai.com"
-              value={d.managementKey} onChange={(e) => set('managementKey', e.target.value)} />
-            <p className="mt-1 text-[12px] text-mute">
-              Used only to read your credit balance — stored encrypted, sent only to api.openai.com. Copy it
-              from the Authorization header of a platform.openai.com request (DevTools → Network). It expires
-              with your web session; paste a fresh one when the quota shows an error.
-            </p>
-          </div>
-        )}
-        {d.preset === 'commandcode' && (
-          <div>
-            <label className={labelCls} htmlFor="ap-cc">Session cookie <span className="text-mute">(optional)</span></label>
-            <input id="ap-cc" type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
-              placeholder="Paste the __Secure-commandcode_prod_.session_token value"
-              value={d.managementKey} onChange={(e) => set('managementKey', e.target.value)} />
-            <p className="mt-1 text-[12px] text-mute">
-              Used only to read your usage page's limits — stored encrypted, sent only to api.commandcode.ai.
-              It expires with your web session; paste a fresh one when the quota shows an error. Paste the whole
-              Cookie header (DevTools → Network → request headers) to also see how many days are left.
-            </p>
-          </div>
-        )}
-        {d.preset === 'claude-sub' && (
-          <div>
-            <label className={labelCls} htmlFor="ap-cs">Claude.ai session cookie <span className="text-mute">(optional)</span></label>
-            <input id="ap-cs" type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
-              placeholder="Paste the Cookie header from a claude.ai request"
-              value={d.managementKey} onChange={(e) => set('managementKey', e.target.value)} />
-            <p className="mt-1 text-[12px] text-mute">
-              Used only to read your plan's 5-hour and weekly windows live — stored encrypted, sent only to
-              claude.ai. Paste the whole Cookie header (DevTools → Network → request headers): we need its
-              sessionKey and lastActiveOrg, and the cf_clearance/__cf_bm cookies get past Cloudflare. Without
-              it the quota panel shows the bridge's last-observed reading instead of a live one.
-            </p>
-          </div>
-        )}
+        {extra && <ExtraCredentialField extra={extra} id="ap-extra" value={d.managementKey} onChange={(v) => set('managementKey', v)} />}
         <div>
           <label className={labelCls} htmlFor="ap-notes">Notes</label>
           <input id="ap-notes" className={inputCls} value={d.notes} onChange={(e) => set('notes', e.target.value)} placeholder="optional" />
@@ -834,10 +991,13 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
           <Toggle checked={d.skipInference} onChange={(v) => set('skipInference', v)} label="skip inference probe" />
           <span className="text-[13px] text-dim">Skip inference probe <span className="text-mute">(saves a token spend)</span></span>
         </div>
-        <div className="rounded-lg border border-line bg-raised/60 px-4 py-3">
-          <SectionLabel className="mb-2">Validation</SectionLabel>
-          <StepList steps={result?.steps ?? liveSteps} running={busy} />
-          {result?.ok && <p className="mt-2 font-mono text-[12px] text-ok">✓ Key validated and stored.</p>}
+        <div ref={validationRef} className="space-y-3">
+          <div className="rounded-lg border border-line bg-raised/60 px-4 py-3">
+            <SectionLabel className="mb-2">Validation</SectionLabel>
+            <StepList steps={result?.steps ?? liveSteps} running={busy} />
+            {result?.ok && <p className="mt-2 font-mono text-[12px] text-ok">✓ Key validated and stored.</p>}
+          </div>
+          <ErrBox e={err} onDismiss={() => setErr(null)} />
         </div>
         <details className="rounded-lg border border-line bg-raised/40 px-4 py-3">
           <summary className="cursor-pointer text-[13px] font-medium text-dim">Advanced settings</summary>
@@ -853,7 +1013,6 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
             </div>
           </div>
         </details>
-        <ErrBox e={err} onDismiss={() => setErr(null)} />
       </div>
     </Modal>
   );
@@ -861,40 +1020,57 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
 
 // ── edit modal ──────────────────────────────────────────────────────────
 
-function EditAccountModal({ account, onClose, onSaved }: { account: Account | null; onClose: () => void; onSaved: () => void }) {
-  const [name, setName] = useState('');
-  const [kind, setKind] = useState('openai-compatible');
-  const [baseUrl, setBaseUrl] = useState('');
-  const [probeDelay, setProbeDelay] = useState(400);
-  const [notes, setNotes] = useState('');
+function EditAccountModal({ account, initialTab = 'settings', onClose, onSaved }: {
+  account: Account; initialTab?: 'settings' | 'keys'; onClose: () => void; onSaved: () => void;
+}) {
+  const [tab, setTab] = useState<'settings' | 'keys'>(initialTab);
+  // Mounted fresh per edit (the card renders it only while editing), so the
+  // fields start from the account once. A key change reloads the account
+  // underneath this modal and must NOT reset what the operator has typed.
+  const [name, setName] = useState(account.name);
+  const [kind, setKind] = useState(account.kind);
+  const [baseUrl, setBaseUrl] = useState(account.base_url);
+  // Numbers are held as text so the field can be cleared while typing; they
+  // are parsed (and validated) only when they matter.
+  const [probeDelay, setProbeDelay] = useState(String(account.probe_delay_ms ?? 400));
+  const [notes, setNotes] = useState(account.notes ?? '');
   const [managementKey, setManagementKey] = useState('');
-  const [rateLimit, setRateLimit] = useState(0);
-  const [rateWindow, setRateWindow] = useState('60s');
-  const [busy, setBusy] = useState(false);
+  const [rateLimit, setRateLimit] = useState(String(account.rate_limit ?? 0));
+  const [rateWindow, setRateWindow] = useState(account.rate_window || '60s');
+  const [saving, setSaving] = useState(false);
+  const [keyBusy, setKeyBusy] = useState(false);
+  const [keyDirty, setKeyDirty] = useState(false);
   const [err, setErr] = useState<ApiErrorDetail | null>(null);
 
-  useEffect(() => {
-    if (account) {
-      setName(account.name); setKind(account.kind); setBaseUrl(account.base_url);
-      setProbeDelay(account.probe_delay_ms ?? 400); setNotes(account.notes ?? ''); setErr(null);
-      setManagementKey('');
-      setRateLimit(account.rate_limit ?? 0);
-      setRateWindow(account.rate_window || '60s');
-    }
-  }, [account]);
+  const extra = extraForAccount(account);
+  // Changing the kind of a provider that already has keys or models re-points
+  // every request it serves at a different adapter. Fixed once it has either.
+  const kindLocked = account.keys.length > 0 || (account.models_count ?? 0) > 0;
 
-  if (!account) return null;
+  const delayN = probeDelay.trim() === '' ? 0 : Number(probeDelay);
+  const rateN = rateLimit.trim() === '' ? 0 : Number(rateLimit);
+  const delayOk = Number.isInteger(delayN) && delayN >= 0;
+  const rateOk = Number.isInteger(rateN) && rateN >= 0;
+
+  const fieldsDirty = name.trim() !== account.name || kind !== account.kind || baseUrl.trim() !== account.base_url
+    || (delayOk && delayN !== (account.probe_delay_ms ?? 400)) || notes.trim() !== (account.notes ?? '')
+    || (rateOk && rateN !== (account.rate_limit ?? 0))
+    || (rateN > 0 && rateWindow !== (account.rate_window || '60s'))
+    || managementKey.trim() !== '';
+  const busy = saving || keyBusy;
+  const valid = name.trim() !== '' && baseUrl.trim() !== '' && delayOk && rateOk;
 
   const save = async () => {
-    setBusy(true); setErr(null);
+    if (!fieldsDirty || !valid) return;
+    setSaving(true); setErr(null);
     try {
       await patch<Account>(`/admin/accounts/${account.id}`, {
-        name: name.trim(), kind, base_url: baseUrl.trim(), probe_delay_ms: probeDelay, notes: notes.trim(),
+        name: name.trim(), kind, base_url: baseUrl.trim(), probe_delay_ms: delayN, notes: notes.trim(),
         // Sent unconditionally: 0 is a meaningful value (unlimited) and the
         // server clears the window alongside it, so "unlimited" is expressible
         // as a real state rather than an omission.
-        rate_limit: rateLimit,
-        rate_window: rateLimit > 0 ? rateWindow : '',
+        rate_limit: rateN,
+        rate_window: rateN > 0 ? rateWindow : '',
         ...(managementKey.trim() ? { management_key: managementKey.trim() } : {}),
       });
       onSaved();
@@ -902,90 +1078,82 @@ function EditAccountModal({ account, onClose, onSaved }: { account: Account | nu
     } catch (e) {
       if (e instanceof ApiError) setErr(e.detail);
       else setErr({ status: 0, type: 'error', message: e instanceof Error ? e.message : String(e) });
-    } finally { setBusy(false); }
+    } finally { setSaving(false); }
   };
 
   return (
-    <Modal open={account != null} onClose={onClose} title={`Edit ${account.name}`}
-      footer={<>
-        <button type="button" className={cx(btn.base, btn.ghost)} onClick={onClose}>Cancel</button>
-        <button type="button" disabled={busy || !name.trim() || !baseUrl.trim()} className={cx(btn.base, btn.primary)} onClick={() => void save()}>
-          {busy ? <Spinner /> : null} Save
+    <Modal open onClose={onClose} title={`Edit ${account.name}`}
+      subtitle="Settings save with Save. Keys are validated and saved on their own, from the Keys tab."
+      busy={busy} dirty={fieldsDirty || keyDirty} onSubmit={() => void save()}
+      footer={(close) => <>
+        <button type="button" className={cx(btn.base, btn.ghost)} onClick={close} disabled={busy}>
+          {fieldsDirty ? 'Cancel' : 'Close'}
         </button>
+        {/* Keys save on their own, inside their tab, so Save is for settings only. */}
+        {tab === 'settings' && (
+          <button type="submit" disabled={busy || !fieldsDirty || !valid} className={cx(btn.base, btn.primary)}>
+            {saving ? <Spinner /> : null} Save
+          </button>
+        )}
       </>}>
-      <div className="space-y-4">
+      <div className="mb-5 border-b border-line pb-2">
+        <Segmented<'settings' | 'keys'> label="Edit section"
+          options={[
+            { key: 'settings', label: 'Settings' },
+            { key: 'keys', label: `Keys · ${account.keys.length}`, title: 'Add, replace or review API keys' },
+          ]}
+          value={tab} onChange={setTab} />
+      </div>
+      <div className={cx(tab !== 'keys' && 'hidden')}>
+        <KeyManager account={account} onChanged={onSaved} onBusy={setKeyBusy} onDirty={setKeyDirty} />
+      </div>
+      <div className={cx('space-y-4', tab !== 'settings' && 'hidden')}>
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <label className={labelCls}>Name</label>
-            <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
+            <label className={labelCls} htmlFor="ea-name">Name</label>
+            <input id="ea-name" className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div>
-            <label className={labelCls}>Kind</label>
-            <select className={inputCls} value={kind} onChange={(e) => setKind(e.target.value)}>
-              {KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
+            <label className={labelCls} htmlFor="ea-ns">Namespace</label>
+            <input id="ea-ns" className={cx(inputCls, 'font-mono')} value={account.namespace} readOnly disabled />
+            <p className="mt-1 text-[12px] text-mute">the prefix in model ids; fixed once created</p>
+          </div>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className={labelCls} htmlFor="ea-kind">Kind</label>
+            <select id="ea-kind" className={inputCls} value={kind} disabled={kindLocked} onChange={(e) => setKind(e.target.value)}>
+              {/* A kind outside the list (gemini-web, github-copilot, …) must still
+                  show as itself, not as whichever option sorts first. */}
+              {((KINDS as readonly string[]).includes(kind) ? [...KINDS] : [kind, ...KINDS]).map((k) => <option key={k} value={k}>{k}</option>)}
             </select>
+            {kindLocked && <p className="mt-1 text-[12px] text-mute">fixed while the provider has keys or models</p>}
+          </div>
+          <div>
+            <label className={labelCls} htmlFor="ea-delay">Probe delay (ms)</label>
+            <input id="ea-delay" inputMode="numeric" className={cx(inputCls, 'font-mono tabular-nums', !delayOk && 'border-bad')}
+              value={probeDelay} onChange={(e) => setProbeDelay(e.target.value)} />
+            {!delayOk && <p className="mt-1 text-[12px] text-bad">a whole number, 0 or more</p>}
           </div>
         </div>
         <div>
-          <label className={labelCls}>Base URL</label>
+          <label className={labelCls} htmlFor="ea-url">Base URL</label>
           {isKnownEndpoint(account.base_url) ? (
-            <div className="rounded-lg border border-line bg-raised/60 px-3.5 py-2.5 font-mono text-[13px] text-dim">
+            <div id="ea-url" className="rounded-lg border border-line bg-raised/60 px-3.5 py-2.5 font-mono text-[13px] text-dim">
               {baseUrl} <span className="font-sans text-mute">— known endpoint, fixed</span>
             </div>
           ) : (
-            <input className={cx(inputCls, 'font-mono')} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value.trim())} />
+            <input id="ea-url" className={cx(inputCls, 'font-mono')} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value.trim())} />
           )}
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <label className={labelCls}>Probe delay (ms)</label>
-            <input type="number" min={0} className={cx(inputCls, 'font-mono tabular-nums')} value={probeDelay} onChange={(e) => setProbeDelay(Number(e.target.value) || 0)} />
-          </div>
-          <div>
-            <label className={labelCls}>Notes</label>
-            <input className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} />
-          </div>
+        <div>
+          <label className={labelCls} htmlFor="ea-notes">Notes</label>
+          <input id="ea-notes" className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </div>
-        {kind === 'openai-compatible' && account?.namespace === 'tokenrouter' && (
-          <div>
-            <label className={labelCls}>Management key (optional, rotates the stored value)</label>
-            <input type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
-              placeholder={account?.management_key_set ? '•••• (set — paste to replace)' : 'Paste the TokenRouter management key'}
-              value={managementKey} onChange={(e) => setManagementKey(e.target.value)} />
-          </div>
-        )}
-        {kind === 'anthropic-compatible' && account?.base_url?.includes('api.anthropic.com') && (
-          <div>
-            <label className={labelCls}>Console session cookie (optional, rotates the stored value)</label>
-            <input type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
-              placeholder={account?.management_key_set ? '•••• (set — paste to replace)' : 'Paste the Cookie header from a platform.claude.com request'}
-              value={managementKey} onChange={(e) => setManagementKey(e.target.value)} />
-          </div>
-        )}
-        {account?.namespace === 'claude-sub' && (
-          <div>
-            <label className={labelCls}>Claude.ai session cookie (optional, rotates the stored value)</label>
-            <input type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
-              placeholder={account?.management_key_set ? '•••• (set — paste to replace)' : 'Paste the Cookie header from a claude.ai request'}
-              value={managementKey} onChange={(e) => setManagementKey(e.target.value)} />
-          </div>
-        )}
-        {kind === 'openai-compatible' && account?.namespace === 'openai' && (
-          <div>
-            <label className={labelCls}>Platform session token (optional, rotates the stored value)</label>
-            <input type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
-              placeholder={account?.management_key_set ? '•••• (set — paste to replace)' : 'Paste the sess-… bearer token from platform.openai.com'}
-              value={managementKey} onChange={(e) => setManagementKey(e.target.value)} />
-          </div>
-        )}
-        {kind === 'openai-compatible' && account?.base_url?.includes('api.commandcode.ai') && (
-          <div>
-            <label className={labelCls}>Session cookie (optional, rotates the stored value)</label>
-            <input type="password" autoComplete="off" spellCheck={false} className={cx(inputCls, 'font-mono')}
-              placeholder={account?.management_key_set ? '•••• (set — paste to replace)' : 'Paste the __Secure-commandcode_prod_.session_token value'}
-              value={managementKey} onChange={(e) => setManagementKey(e.target.value)} />
-            <CookieExpiry at={account?.management_key_expires_at} />
-          </div>
+
+        {extra && (
+          <ExtraCredentialField edit extra={extra} id="ea-extra" value={managementKey} onChange={setManagementKey}
+            isSet={account.management_key_set} expiresAt={account.management_key_expires_at} />
         )}
         <div className="rounded-lg border border-line bg-raised/60 p-4">
           <SectionLabel>Request budget (provider-wide)</SectionLabel>
@@ -996,21 +1164,22 @@ function EditAccountModal({ account, onClose, onSaved }: { account: Account | nu
           </p>
           <div className="mt-3 grid gap-4 sm:grid-cols-2">
             <div>
-              <label className={labelCls}>Requests</label>
-              <input type="number" min={0} className={cx(inputCls, 'font-mono tabular-nums')}
-                value={rateLimit} onChange={(e) => setRateLimit(Number(e.target.value) || 0)} />
+              <label className={labelCls} htmlFor="ea-rate">Requests</label>
+              <input id="ea-rate" inputMode="numeric" className={cx(inputCls, 'font-mono tabular-nums', !rateOk && 'border-bad')}
+                value={rateLimit} onChange={(e) => setRateLimit(e.target.value)} />
+              {!rateOk && <p className="mt-1 text-[12px] text-bad">a whole number, 0 or more</p>}
             </div>
             <div>
-              <label className={labelCls}>Per window</label>
-              <select className={inputCls} value={rateWindow} disabled={rateLimit <= 0}
+              <label className={labelCls} htmlFor="ea-window">Per window</label>
+              <select id="ea-window" className={inputCls} value={rateWindow} disabled={!(rateN > 0)}
                 onChange={(e) => setRateWindow(e.target.value)}>
                 {RATE_WINDOWS.map((w) => <option key={w} value={w}>{w}</option>)}
               </select>
             </div>
           </div>
-          {rateLimit > 0 ? (
+          {rateN > 0 ? (
             <p className="mt-2 text-[12px] text-accent">
-              {rateLimit} request{rateLimit === 1 ? '' : 's'} per {rateWindow} — a combo with another hop
+              {rateN} request{rateN === 1 ? '' : 's'} per {rateWindow} — a combo with another hop
               will fail over instead of failing.
             </p>
           ) : null}
@@ -1316,12 +1485,29 @@ const prettyBody = (raw: string) => {
 
 // Rates live per (account, model, date). The newest row on or before a call's
 // date prices it; re-setting the same version overwrites, a new date versions.
+// Rates are versioned: the same model can carry several rows, each effective
+// from its own date, and a call is priced by the newest row on or before its
+// day. So "update a rate" means adding a row with a new date; re-saving the
+// SAME date overwrites that row. Clicking a row loads it into the form to make
+// either of those one edit away.
+const EMPTY_RATE = { price_in: '', price_out: '', price_cache_read: '', price_cache_write: '', note: '' };
+// Rates keep their precision (0.075 must not read 0.08) but line up: two
+// decimals minimum, four at most.
+const fmtRate = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+const RATE_FIELDS = [
+  { key: 'price_in', label: 'Input' },
+  { key: 'price_out', label: 'Output' },
+  { key: 'price_cache_read', label: 'Cache read' },
+  { key: 'price_cache_write', label: 'Cache write' },
+] as const;
+
 function PricingModal({ account, onClose }: { account: Account; onClose: () => void }) {
   const [rows, setRows] = useState<Price[] | null>(null);
   const [models, setModels] = useState<ModelRow[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [form, setForm] = useState({ model: '', effective_from: new Date().toISOString().slice(0, 10), price_in: '', price_out: '', price_cache_read: '', price_cache_write: '', note: '' });
+  const [form, setForm] = useState({ model: '', effective_from: new Date().toISOString().slice(0, 10), ...EMPTY_RATE });
+  const [removing, setRemoving] = useState<Price | null>(null);
 
   const load = useCallback(() => {
     get<Price[]>('/admin/prices')
@@ -1333,12 +1519,18 @@ function PricingModal({ account, onClose }: { account: Account; onClose: () => v
   }, [account.id]);
   useEffect(() => { load(); }, [load]);
 
+  const sorted = useMemo(() => [...(rows ?? [])].sort((a, b) =>
+    a.model_id.localeCompare(b.model_id) || b.effective_from.localeCompare(a.effective_from)), [rows]);
+  const dirty = Object.entries(EMPTY_RATE).some(([k]) => (form as Record<string, string>)[k].trim() !== '');
+  const existing = sorted.find((p) => p.model_id === form.model && p.effective_from === form.effective_from);
+
   const setRate = async () => {
     // All four required: the API refuses partial rows so a missing rate can
     // never silently mean "free".
-    const nums = [form.price_in, form.price_out, form.price_cache_read, form.price_cache_write];
-    if (!form.model || !form.effective_from || nums.some((v) => v.trim() === '' || Number.isNaN(Number(v)))) {
-      setErr('model, date and all four rates are required (USD per 1M tokens)');
+    const nums = RATE_FIELDS.map((f) => form[f.key]);
+    if (!form.model || !form.effective_from) { setErr('Pick a model and an effective date.'); return; }
+    if (nums.some((v) => v.trim() === '' || Number.isNaN(Number(v)) || Number(v) < 0)) {
+      setErr('All four rates are required, as non-negative numbers in USD per 1M tokens. Use 0 for a rate that is genuinely free.');
       return;
     }
     setBusy(true); setErr(null);
@@ -1349,7 +1541,7 @@ function PricingModal({ account, onClose }: { account: Account; onClose: () => v
         price_cache_read: Number(form.price_cache_read), price_cache_write: Number(form.price_cache_write),
         note: form.note,
       });
-      setForm({ ...form, price_in: '', price_out: '', price_cache_read: '', price_cache_write: '', note: '' });
+      setForm({ ...form, ...EMPTY_RATE });
       load();
     } catch (e) { setErr(e instanceof Error ? e.message : 'save failed'); }
     finally { setBusy(false); }
@@ -1359,50 +1551,120 @@ function PricingModal({ account, onClose }: { account: Account; onClose: () => v
     setBusy(true); setErr(null);
     try { await deletePrice(account.id, p.model_id, p.effective_from); load(); }
     catch (e) { setErr(e instanceof Error ? e.message : 'delete failed'); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setRemoving(null); }
   };
 
-  const cell = 'rounded border border-line bg-transparent px-2 py-1 text-[13px] text-ink';
+  const edit = (p: Price) => {
+    setErr(null);
+    setForm({
+      model: p.model_id, effective_from: p.effective_from,
+      price_in: String(p.price_in), price_out: String(p.price_out),
+      price_cache_read: String(p.price_cache_read), price_cache_write: String(p.price_cache_write), note: p.note ?? '',
+    });
+  };
+
   return (
-    <Modal open onClose={onClose} title={`Pricing — ${account.name}`}
-      subtitle="USD per 1M tokens, versioned by date · cost derives from the rate effective on each call's day"
-      footer={<button type="button" className={cx(btn.base, btn.ghost)} onClick={onClose}>Close</button>}>
-      <div className="space-y-4">
-        {err && <div className="rounded-lg border border-bad/30 bg-bad/5 px-3 py-2 text-[13px] text-bad">{err}</div>}
-        {rows === null ? <div className="space-y-2"><Skeleton className="h-3.5 w-40" /><Skeleton className="h-3.5 w-56" /></div>
-          : rows.length === 0 ? <p className="text-[13px] text-mute">No rates yet — every call from this provider is UNPRICED until you add one.</p>
-          : <div className="overflow-x-auto"><table className="w-full text-[13px]"><thead><tr className="text-left text-[11px] text-mute"><th className="pb-1 font-medium">model</th><th className="pb-1 font-medium">from</th><th className="pb-1 text-right">in</th><th className="pb-1 text-right">out</th><th className="pb-1 text-right">cache r</th><th className="pb-1 text-right">cache w</th><th className="pb-1"></th></tr></thead>
-            <tbody className="font-mono">{rows.map((p) => (
-              <tr key={`${p.model_id}-${p.effective_from}`} className="border-t border-line/50">
-                <td className="max-w-[180px] truncate py-1.5 text-dim" title={p.model_id}>{p.model_id}</td>
-                <td className="py-1.5 text-dim">{p.effective_from}</td>
-                <td className="py-1.5 text-right text-ink">{p.price_in}</td>
-                <td className="py-1.5 text-right text-ink">{p.price_out}</td>
-                <td className="py-1.5 text-right text-ink">{p.price_cache_read}</td>
-                <td className="py-1.5 text-right text-ink">{p.price_cache_write}</td>
-                <td className="py-1.5 text-right"><button type="button" disabled={busy} className="text-mute hover:text-bad disabled:opacity-40" onClick={() => void remove(p)} title="delete this version">✕</button></td>
-              </tr>))}</tbody></table></div>}
-        <div className="rounded-lg border border-line bg-raised/60 p-3">
-          <SectionLabel>set / update a rate</SectionLabel>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <select aria-label="model" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} className={cell}>
-              <option value="">model…</option>
-              {models.map((m) => <option key={m.id} value={m.id}>{m.id}</option>)}
-            </select>
-            <input aria-label="effective from" type="date" value={form.effective_from} onChange={(e) => setForm({ ...form, effective_from: e.target.value })} className={cell} />
-            {(['price_in', 'price_out', 'price_cache_read', 'price_cache_write'] as const).map((k) => (
-              <input key={k} aria-label={k} inputMode="decimal" placeholder={k.replace('price_', '')} value={form[k]}
-                onChange={(e) => setForm({ ...form, [k]: e.target.value })} className={cx(cell, 'w-20')} />
+    <>
+    <Modal open onClose={onClose} wide title={`Pricing — ${account.name}`}
+      subtitle="USD per 1M tokens, versioned by date · a call is priced by the rate effective on its day"
+      busy={busy} dirty={dirty} onSubmit={() => void setRate()}
+      footer={(close) => (
+        <>
+          <button type="button" className={cx(btn.base, btn.ghost)} onClick={close} disabled={busy}>Close</button>
+          <button type="submit" className={cx(btn.base, btn.primary)} disabled={busy || !models.length}>
+            {busy ? <Spinner /> : null} {existing ? 'Overwrite this rate' : 'Save rate'}
+          </button>
+        </>
+      )}>
+      <div className="space-y-5">
+        {err && <div role="alert" className="rounded-lg border border-bad/30 bg-bad-dim px-3 py-2 text-[13px] text-bad">{err}</div>}
+        <div>
+          <SectionLabel>Current rates</SectionLabel>
+          {rows === null ? (
+            <div className="mt-2 space-y-2"><Skeleton className="h-3.5 w-40" /><Skeleton className="h-3.5 w-56" /></div>
+          ) : sorted.length === 0 ? (
+            <p className="mt-2 text-[13px] text-mute">No rates yet — every call from this provider is UNPRICED, and counts as $0, until you add one.</p>
+          ) : (
+            <div className="mt-2 max-h-64 overflow-auto rounded-lg border border-line">
+              <table className="w-full min-w-[640px] text-[13px]">
+                <thead className="sticky top-0 bg-surface">
+                  <tr className="border-b border-line text-left text-[11px] text-mute">
+                    <th className="px-3 py-2 font-medium">model</th>
+                    <th className="px-3 py-2 font-medium">effective from</th>
+                    <th className="px-3 py-2 text-right font-medium">input</th>
+                    <th className="px-3 py-2 text-right font-medium">output</th>
+                    <th className="px-3 py-2 text-right font-medium">cache read</th>
+                    <th className="px-3 py-2 text-right font-medium">cache write</th>
+                    <th className="px-3 py-2 text-right font-medium"><span className="sr-only">actions</span></th>
+                  </tr>
+                </thead>
+                <tbody className="font-mono tnum">
+                  {sorted.map((p) => (
+                    <tr key={`${p.model_id}-${p.effective_from}`} className="border-b border-line/50 last:border-0 hover:bg-wash">
+                      <td className="max-w-[220px] truncate px-3 py-1.5 font-sans text-ink" title={p.model_id}>{p.model_id}</td>
+                      <td className="px-3 py-1.5 text-dim">{p.effective_from}</td>
+                      <td className="px-3 py-1.5 text-right text-ink">{fmtRate(p.price_in)}</td>
+                      <td className="px-3 py-1.5 text-right text-ink">{fmtRate(p.price_out)}</td>
+                      <td className="px-3 py-1.5 text-right text-ink">{fmtRate(p.price_cache_read)}</td>
+                      <td className="px-3 py-1.5 text-right text-ink">{fmtRate(p.price_cache_write)}</td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-right font-sans">
+                        <button type="button" disabled={busy} className="text-dim underline underline-offset-2 hover:text-ink disabled:opacity-40"
+                          onClick={() => edit(p)} aria-label={`Edit rate for ${p.model_id} from ${p.effective_from}`}>Edit</button>
+                        <button type="button" disabled={busy} className="ml-3 text-mute hover:text-bad disabled:opacity-40"
+                          onClick={() => setRemoving(p)} aria-label={`Delete rate for ${p.model_id} from ${p.effective_from}`}>Delete</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-lg border border-line bg-raised/60 p-4">
+          <SectionLabel>Set a rate</SectionLabel>
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className={labelCls} htmlFor="pr-model">Model</label>
+              <select id="pr-model" className={inputCls} value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })}>
+                <option value="">Choose a model…</option>
+                {models.map((m) => <option key={m.id} value={m.id}>{m.id}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="pr-date">Effective from</label>
+              <input id="pr-date" type="date" className={inputCls} value={form.effective_from}
+                onChange={(e) => setForm({ ...form, effective_from: e.target.value })} />
+            </div>
+          </div>
+          <div className="mt-4 grid gap-4 sm:grid-cols-4">
+            {RATE_FIELDS.map((f) => (
+              <div key={f.key}>
+                <label className={labelCls} htmlFor={`pr-${f.key}`}>{f.label} <span className="text-mute">$/1M</span></label>
+                <input id={`pr-${f.key}`} inputMode="decimal" className={cx(inputCls, 'font-mono tnum')} placeholder="0.00"
+                  value={form[f.key]} onChange={(e) => setForm({ ...form, [f.key]: e.target.value })} />
+              </div>
             ))}
-            <input aria-label="note" placeholder="note" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} className={cx(cell, 'w-28')} />
-            <button type="button" className={cx(btn.base, btn.primary, 'px-3 py-1')} disabled={busy || !models.length} onClick={() => void setRate()}>
-              {busy ? <Spinner /> : null} Save
+          </div>
+          <div className="mt-2">
+            <button type="button" className="text-[12px] text-dim underline underline-offset-2 hover:text-ink"
+              onClick={() => setForm({ ...form, price_cache_read: form.price_in, price_cache_write: form.price_in })}>
+              Cache rates = input rate
             </button>
           </div>
-          {!models.length && <p className="mt-2 text-[12px] text-mute">Sync this account's models first — rates can only name a model the catalog knows.</p>}
+          <div className="mt-4">
+            <label className={labelCls} htmlFor="pr-note">Note <span className="text-mute">(optional)</span></label>
+            <input id="pr-note" className={inputCls} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
+          </div>
+          {existing && <p className="mt-3 text-[12px] text-warn">A rate for this model on {form.effective_from} exists and will be overwritten. Pick a later date to keep the old one for earlier calls.</p>}
+          {!models.length && <p className="mt-3 text-[12px] text-mute">Sync this provider&rsquo;s models first — a rate can only name a model the catalog knows.</p>}
         </div>
       </div>
     </Modal>
+    <ConfirmModal open={removing != null} title="Delete this rate?" confirmLabel="Delete" busy={busy}
+      body={removing ? `${removing.model_id}, effective from ${removing.effective_from}. Calls from that date on fall back to the previous rate, or to unpriced ($0) if there is none.` : ''}
+      onClose={() => setRemoving(null)} onConfirm={() => { if (removing) void remove(removing); }} />
+    </>
   );
 }
 
@@ -1448,7 +1710,7 @@ function ClaudeUsageExtras({ raw }: { raw: string }) {
   );
 }
 
-function QuotaModal({ account, onClose }: { account: Account; onClose: () => void }) {
+function QuotaModal({ account, onClose, onRead }: { account: Account; onClose: () => void; onRead?: () => void }) {
   const [live, setLive] = useState<QuotaLive | null>(null);
   const [busy, setBusy] = useState(true);
   const [err, setErr] = useState<ApiErrorDetail | null>(null);
@@ -1460,7 +1722,7 @@ function QuotaModal({ account, onClose }: { account: Account; onClose: () => voi
     setBusy(true);
     setErr(null);
     get<QuotaLive>(`/admin/accounts/${account.id}/quota`)
-      .then((q) => setLive(q))
+      .then((q) => { setLive(q); onRead?.(); })
       .catch((e: unknown) => setErr({ status: 0, type: 'error', message: e instanceof Error ? e.message : 'quota read failed' }))
       .finally(() => setBusy(false));
   }, [account.id]);
@@ -1492,20 +1754,30 @@ function QuotaModal({ account, onClose }: { account: Account; onClose: () => voi
         <ErrBox e={err} onDismiss={() => setErr(null)} />
         <div className="rounded-lg border border-line bg-raised/60 p-4">
           <SectionLabel>Usage</SectionLabel>
-          {busy && !live && <Skeleton className="h-3.5 w-56" />}
+          {busy && !live && <Skeleton className="mt-2 h-3.5 w-56" />}
           {!busy && live?.kind === 'none' && (
-            <p className="text-[13px] text-mute">This provider exposes no quota endpoint its key can read.</p>
+            <p className="mt-2 text-[13px] text-mute">This provider exposes no quota endpoint its key can read.</p>
           )}
           {live && live.kind !== 'none' && (
-            <div className="mt-2 space-y-2">
+            <div className="mt-2 space-y-3">
               <div className="flex flex-wrap items-center gap-2 text-[13px]">
                 <span className="rounded-full border border-line bg-bg px-2 py-0.5 font-mono text-[12px] text-accent">{live.kind}</span>
                 <span className="text-mute">read {live.read_at ? relTime(live.read_at) : '—'}</span>
+                {account.quota?.plan && <span className="text-dim">· {account.quota.plan}</span>}
+                {account.quota?.resets_at && <span className="text-mute">· resets {relTime(account.quota.resets_at)}</span>}
               </div>
+              {/* The reading first, as the card shows it; the provider's own
+                  response is evidence, one click away, not the headline. */}
+              {account.quota && account.quota.kind !== 'none' && account.quota.kind !== 'unknown' ? (
+                <div className="max-w-md"><QuotaBars quota={account.quota} /></div>
+              ) : null}
               <ClaudeUsageExtras raw={live.raw} />
-              <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-md border border-line bg-bg px-3 py-2 font-mono text-[12px] leading-relaxed text-dim">
-                {prettyBody(live.raw)}
-              </pre>
+              <details className="group">
+                <summary className="cursor-pointer text-[13px] text-dim hover:text-ink">Show raw provider response</summary>
+                <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-md border border-line bg-bg px-3 py-2 font-mono text-[12px] leading-relaxed text-dim">
+                  {prettyBody(live.raw)}
+                </pre>
+              </details>
             </div>
           )}
         </div>
@@ -1519,7 +1791,7 @@ function QuotaModal({ account, onClose }: { account: Account; onClose: () => voi
             </p>
           ) : (
             <p className="mt-2 text-[13px] text-mute">
-              Unlimited — no request ceiling is set for this account. Set one under Edit provider if the
+              Unlimited — no request ceiling is set for this account. Set one under Edit &amp; keys if the
               provider enforces its own rate limit.
             </p>
           )}
@@ -1559,15 +1831,19 @@ function QuotaModal({ account, onClose }: { account: Account; onClose: () => voi
 
 // ── account card ────────────────────────────────────────────────────────
 
-function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
-  a: Account; onChanged: () => void;
+function AccountCard({ a, open, onToggle, intent, onIntentDone, issues, onChanged, onReloadQuota, quotaBusy }: {
+  a: Account; open: boolean; onToggle: () => void;
+  /** A deep link asked for this card's Edit or Pricing modal. */
+  intent: 'edit' | 'keys' | 'pricing' | null; onIntentDone: () => void;
+  issues: Issue[];
+  onChanged: () => void;
   onReloadQuota: () => void; quotaBusy: boolean;
 }) {
-  const [open, setOpen] = useState(false);
   const [menuBusy, setMenuBusy] = useState<string | null>(null);
   const [err, setErr] = useState<ApiErrorDetail | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [editTab, setEditTab] = useState<'settings' | 'keys'>('settings');
   const [quotaOpen, setQuotaOpen] = useState(false);
   const [pricingOpen, setPricingOpen] = useState(false);
   const [confirm, setConfirm] = useState<null | { kind: 'account' } | { kind: 'key'; keyID: number; label: string }>(null);
@@ -1580,6 +1856,13 @@ function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
     ? 'quota not available — run Test key to check'
     : a.quota.kind === 'none' ? 'quota not available — this provider exposes no usage endpoint' : 'live provider quota read';
 
+  useEffect(() => {
+    if (!intent) return;
+    if (intent === 'pricing') { setPricingOpen(true); }
+    else { setEditTab(intent === 'keys' ? 'keys' : 'settings'); setEditing(true); }
+    onIntentDone();
+  }, [intent, onIntentDone]);
+
   const act = async (label: string, fn: () => Promise<unknown>) => {
     setMenuBusy(label); setErr(null); setFlash(null);
     try {
@@ -1589,7 +1872,20 @@ function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
     } catch (e) {
       if (e instanceof ApiError) setErr(e.detail);
       else setErr({ status: 0, type: 'error', message: e instanceof Error ? e.message : String(e) });
+      // A failed action can still have changed what the card shows (a key
+      // test that failed has recorded its verdict), so refresh either way.
+      onChanged();
     } finally { setMenuBusy(null); setTimeout(() => setFlash(null), 2500); }
+  };
+
+  // Every key, one after the other: a provider with two keys needs both
+  // proven, and one bad key must not stop the others being tested.
+  const testAll = async () => {
+    let failed = 0;
+    for (const k of a.keys) {
+      try { await post(`/admin/accounts/${a.id}/keys/${k.id}/retest`, {}); } catch { failed++; }
+    }
+    if (failed > 0) throw new Error(`${failed} of ${a.keys.length} ${a.keys.length === 1 ? 'key' : 'keys'} failed the test — the reason is under each key.`);
   };
 
   const removeAccount = async () => {
@@ -1614,13 +1910,18 @@ function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
       {/* The row: identity left, then three fixed columns (models, quota,
           chevron) so every figure in the roster sits on one right edge. */}
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 px-5 py-3.5 md:grid-cols-[minmax(0,1fr)_88px_216px_20px]">
-        <button type="button" className="col-span-1 flex min-w-0 items-center gap-3 text-left" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        <button type="button" className="col-span-1 flex min-w-0 items-center gap-3 text-left" onClick={onToggle} aria-expanded={open}>
           <span title={keyStateText} className={cx('h-2 w-2 flex-none rounded-full',
             keyState === 'ok' ? 'bg-ok' : keyState === 'bad' ? 'bg-bad' : 'bg-shade ring-1 ring-line-strong')} />
           <span className="min-w-0">
             <span className="flex items-center gap-2">
               <span className="truncate text-[14px] font-semibold text-ink">{a.name}</span>
               {!a.enabled && <Chip tone="warn">disabled</Chip>}
+              {issues.length > 0 && (
+                <Chip tone={issues.some((i) => i.tone === 'bad') ? 'bad' : 'warn'} title={issues.map((i) => i.text).join('\n')}>
+                  {issues.length === 1 ? '1 issue' : `${issues.length} issues`}
+                </Chip>
+              )}
             </span>
             <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12px] text-mute">
               <span className="font-code flex-none text-dim">{a.namespace}</span>
@@ -1631,7 +1932,7 @@ function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
             </span>
           </span>
         </button>
-        <button type="button" tabIndex={-1} aria-hidden="true" onClick={() => setOpen((o) => !o)}
+        <button type="button" tabIndex={-1} aria-hidden="true" onClick={onToggle}
           title={a.catalog_synced_at ? `catalog synced ${relTime(a.catalog_synced_at)}` : 'catalog not synced yet'}
           className="hidden text-right text-[13px] md:block">
           <span className="tnum text-ink">{a.models_count != null ? nfmt(a.models_count) : '–'}</span>
@@ -1653,7 +1954,7 @@ function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
             {quotaBusy ? <Spinner className="h-3 w-3" /> : '↻'}
           </button>
         </div>
-        <button type="button" tabIndex={-1} aria-hidden="true" onClick={() => setOpen((o) => !o)}
+        <button type="button" tabIndex={-1} aria-hidden="true" onClick={onToggle}
           className="row-start-1 col-start-2 justify-self-end text-mute md:col-start-4">
           <motion.span className="inline-block" animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.22 }}>⌄</motion.span>
         </button>
@@ -1667,15 +1968,22 @@ function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
           <div className="flex flex-wrap items-center gap-2">
             <BusyButton busy={menuBusy === 'sync'} disabled={menuBusy != null}
               onClick={() => void act('sync', () => post(`/admin/accounts/${a.id}/sync`, {}))}>Sync models</BusyButton>
-            <BusyButton busy={menuBusy === 'retest'} disabled={menuBusy != null || a.keys.length === 0}
-              onClick={() => void act('retest', () => post(`/admin/accounts/${a.id}/keys/${a.keys[0].id}/retest`, {}))}>Test key</BusyButton>
+            <BusyButton busy={menuBusy === 'test keys'} disabled={menuBusy != null || a.keys.length === 0}
+              onClick={() => void act('test keys', testAll)}>{a.keys.length > 1 ? 'Test all keys' : 'Test key'}</BusyButton>
             <span title={quotaHint}>
               <BusyButton disabled={!quotaExposed} onClick={() => setQuotaOpen(true)}>Quota</BusyButton>
             </span>
             <span title="Set per-model USD rates for cost analysis">
               <BusyButton onClick={() => setPricingOpen(true)}>Pricing</BusyButton>
             </span>
-            <BusyButton onClick={() => setEditing(true)}>Edit</BusyButton>
+            <span title="Provider settings, and add or replace its API keys">
+              <BusyButton onClick={() => { setEditTab('settings'); setEditing(true); }}>Edit &amp; keys</BusyButton>
+            </span>
+            <label className="flex items-center gap-2 text-[13px] text-dim" title={a.enabled ? 'Routing may use this provider' : 'Disabled: routing skips this provider'}>
+              <Toggle checked={a.enabled} disabled={menuBusy != null} label={`${a.name} enabled`}
+                onChange={(v) => void act(v ? 'enable' : 'disable', () => patch(`/admin/accounts/${a.id}`, { enabled: v }))} />
+              Enabled
+            </label>
             {/* The result slot has a fixed place at the row's end, so a flash
                 or a busy word never pushes the buttons around. */}
             <span className="min-w-24 text-[12px]" aria-live="polite">
@@ -1691,12 +1999,17 @@ function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
           <div className="mt-4">
             <div className="mb-1.5 text-[12px] text-mute">Keys</div>
             {a.keys.length === 0
-              ? <p className="text-[13px] text-mute">No keys — add one when the upstream is confirmed.</p>
+              ? (
+                <p className="text-[13px] text-mute">
+                  No keys, so this provider cannot serve.{' '}
+                  <button type="button" className="text-ink underline underline-offset-2" onClick={() => { setEditTab('keys'); setEditing(true); }}>Add a key</button>
+                </p>
+              )
               : (
                 <ul className="divide-y divide-line/60 rounded-lg border border-line bg-surface">
                   {a.keys.map((k) => (
                     <li key={k.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 px-3.5 py-2 sm:grid-cols-[minmax(0,1fr)_180px_auto]">
-                      <span className="min-w-0 truncate text-[13px]">
+                      <span className={cx('min-w-0 truncate text-[13px]', !k.enabled && 'opacity-60')}>
                         <span className="text-ink">{k.label}</span>
                         <span className="font-code ml-2 text-[12px] text-mute">{k.hint}</span>
                       </span>
@@ -1708,11 +2021,17 @@ function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
                         {k.last_test_at && <span className="text-mute">· {relTime(k.last_test_at)}</span>}
                       </span>
                       <span className="flex items-center gap-1">
+                        <Toggle checked={k.enabled} disabled={menuBusy != null} label={`Key ${k.label} enabled`}
+                          onChange={(v) => void act(`key ${k.id}`, () => patch(`/admin/accounts/${a.id}/keys/${k.id}`, { enabled: v }))} />
                         <IconButton label="Test this key" disabled={menuBusy != null} busy={menuBusy === `retest ${k.id}`}
                           onClick={() => void act(`retest ${k.id}`, () => post(`/admin/accounts/${a.id}/keys/${k.id}/retest`, {}))}>↻</IconButton>
                         <IconButton label="Delete key" tone="bad" disabled={menuBusy != null}
                           onClick={() => setConfirm({ kind: 'key', keyID: k.id, label: `${k.label} · ${k.hint}` })}>✕</IconButton>
                       </span>
+                      {/* Why it failed, in words: it used to live only in a hover tooltip. */}
+                      {k.enabled && k.last_test_ok === false && k.last_test_detail && (
+                        <p className="col-span-full mt-1 break-words text-[12px] text-bad">{k.last_test_detail}</p>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -1726,7 +2045,7 @@ function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
               <QuotaBars quota={a.quota} />
             </div>
           )}
-          {editing && <EditAccountModal account={a} onClose={() => setEditing(false)} onSaved={onChanged} />}
+          {editing && <EditAccountModal account={a} initialTab={editTab} onClose={() => setEditing(false)} onSaved={onChanged} />}
           <ConfirmModal
             open={confirm != null}
             title={confirm?.kind === 'key' ? `Delete key ${confirm.label}?` : `Delete provider ${a.name}?`}
@@ -1741,7 +2060,7 @@ function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
               if (c.kind === 'key') void act('del key', () => del(`/admin/accounts/${a.id}/keys/${c.keyID}`));
               else void removeAccount();
             }} />
-          {quotaOpen && <QuotaModal account={a} onClose={() => setQuotaOpen(false)} />}
+          {quotaOpen && <QuotaModal account={a} onClose={() => setQuotaOpen(false)} onRead={onChanged} />}
           {pricingOpen && <PricingModal account={a} onClose={() => setPricingOpen(false)} />}
           <ErrBox e={err} onDismiss={() => setErr(null)} />
         </div>
@@ -1759,11 +2078,18 @@ function AccountCard({ a, onChanged, onReloadQuota, quotaBusy }: {
 
 // ── page ────────────────────────────────────────────────────────────────
 
+type Intent = { id: number; kind: 'edit' | 'keys' | 'pricing' };
+
 export default function Providers() {
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [quotaBusy, setQuotaBusy] = useState<number | null>(null);
+  const [query, setQuery] = useState('');
+  const [onlyIssues, setOnlyIssues] = useState(false);
+  const [openIds, setOpenIds] = useState<Set<number>>(new Set());
+  const [intent, setIntent] = useState<Intent | null>(null);
+  const [params, setParams] = useSearchParams();
 
   const load = useCallback((silent = true) => {
     get<Account[]>('/admin/accounts')
@@ -1783,19 +2109,74 @@ export default function Providers() {
 
   useEffect(() => { load(false); }, [load]);
 
+  // Deep links: ?open=<id> expands that provider, ?edit=<id> and ?pricing=<id>
+  // also open the matching modal. The Dashboard's Needs-attention strip and the
+  // Economics page link here. Consumed once the providers have loaded, then
+  // removed from the URL so a refresh does not re-open it.
+  useEffect(() => {
+    if (!accounts) return;
+    for (const kind of ['open', 'edit', 'keys', 'pricing'] as const) {
+      const raw = params.get(kind);
+      if (raw == null) continue;
+      const id = Number(raw);
+      if (accounts.some((x) => x.id === id)) {
+        setOpenIds((cur) => new Set(cur).add(id));
+        if (kind !== 'open') setIntent({ id, kind });
+      }
+      setParams((p) => { const n = new URLSearchParams(p); n.delete(kind); return n; }, { replace: true });
+    }
+  }, [accounts, params, setParams]);
+  const clearIntent = useCallback(() => setIntent(null), []);
+
+  const sorted = useMemo(() => [...(accounts ?? [])].sort((a, b) => a.namespace.localeCompare(b.namespace)), [accounts]);
+  const issuesOf = useMemo(() => new Map(sorted.map((a) => [a.id, accountIssues(a)])), [sorted]);
+  const attention = sorted.filter((a) => (issuesOf.get(a.id) ?? []).length > 0).length;
+  const needle = query.trim().toLowerCase();
+  const shown = sorted.filter((a) =>
+    (!onlyIssues || (issuesOf.get(a.id) ?? []).length > 0)
+    && (needle === '' || [a.name, a.namespace, a.kind, hostOf(a.base_url)].some((v) => (v ?? '').toLowerCase().includes(needle))));
+  const allOpen = shown.length > 0 && shown.every((a) => openIds.has(a.id));
+  const toggleOne = (id: number) => setOpenIds((cur) => { const n = new Set(cur); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const toggleAll = () => setOpenIds((cur) => {
+    const n = new Set(cur);
+    if (allOpen) shown.forEach((a) => n.delete(a.id)); else shown.forEach((a) => n.add(a.id));
+    return n;
+  });
+
   return (
     // No page-root fade here: the route transition in App.tsx already fades
     // the page in. Two entrances stacked on the same surface reads as a
     // stutter, not as polish.
     <div>
-      <div className="mb-4 flex items-center justify-between">
-        <span className="text-[13px] text-mute">
-          {accounts ? <><span className="tnum text-ink">{nfmt(accounts.length)}</span> provider{accounts.length === 1 ? '' : 's'}</> : '\u00a0'}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <span className="text-[13px] text-mute" aria-live="polite">
+          {accounts ? (
+            <>
+              <span className="tnum text-ink">{nfmt(accounts.length)}</span> provider{accounts.length === 1 ? '' : 's'}
+              {attention > 0 && <> · <span className="tnum text-warn">{nfmt(attention)}</span> need{attention === 1 ? 's' : ''} attention</>}
+            </>
+          ) : '\u00a0'}
         </span>
         <button type="button" className={cx(btn.base, btn.primary)} onClick={() => setAddOpen(true)}>
           <span className="text-[15px] leading-none">＋</span> Add provider
         </button>
       </div>
+
+      {accounts && accounts.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search providers"
+            placeholder="Search name, namespace, kind or host" className={cx(inputCls, '!w-72 max-w-full !py-1.5')} />
+          <button type="button" aria-pressed={onlyIssues} onClick={() => setOnlyIssues((v) => !v)}
+            className={cx('rounded-full border px-3 py-1 text-[13px] transition-colors',
+              onlyIssues ? 'border-warn/50 bg-warn-dim text-ink' : 'border-line text-dim hover:text-ink')}>
+            Needs attention{attention > 0 ? ` ${attention}` : ''}
+          </button>
+          <button type="button" onClick={toggleAll} disabled={shown.length === 0}
+            className="ml-auto text-[13px] text-dim underline underline-offset-2 hover:text-ink disabled:opacity-40">
+            {allOpen ? 'Collapse all' : 'Expand all'}
+          </button>
+        </div>
+      )}
 
       {err && <div className="mb-4 rounded-lg border border-bad/30 bg-bad-dim px-4 py-3 text-[13px] text-bad">{err}</div>}
 
@@ -1807,6 +2188,14 @@ export default function Providers() {
           <p className="mt-1 text-[13px] text-mute">Add your first one — name it, drop in an API key, and the 7-step test runs automatically.</p>
           <button type="button" className={cx(btn.base, btn.primary, 'mt-5')} onClick={() => setAddOpen(true)}>＋ Add your first provider</button>
         </div>
+      ) : shown.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-line px-6 py-12 text-center">
+          <p className="text-[14px] font-medium">No provider matches.</p>
+          <p className="mt-1 text-[13px] text-mute">
+            {onlyIssues && needle === '' ? 'Nothing needs attention right now.' : 'Try a different search.'}
+          </p>
+          <button type="button" className={cx(btn.base, btn.ghost, 'mt-4')} onClick={() => { setQuery(''); setOnlyIssues(false); }}>Clear filters</button>
+        </div>
       ) : (
         <div className="overflow-hidden rounded-xl border border-line bg-surface">
           {/* Alphabetical by namespace — the add-provider preset list sorts the
@@ -1815,9 +2204,12 @@ export default function Providers() {
               at once; it is a one-shot entrance, so the 60s quota refresh
               (which re-renders this list) never replays it. */}
           <Stagger className="divide-y divide-line">
-            {[...accounts].sort((a, b) => a.namespace.localeCompare(b.namespace)).map((a) => (
+            {shown.map((a) => (
               <StaggerItem key={a.id}>
-                <AccountCard a={a} onChanged={() => load(true)}
+                <AccountCard a={a} open={openIds.has(a.id)} onToggle={() => toggleOne(a.id)}
+                  intent={intent?.id === a.id ? intent.kind : null} onIntentDone={clearIntent}
+                  issues={issuesOf.get(a.id) ?? []}
+                  onChanged={() => load(true)}
                   quotaBusy={quotaBusy === a.id}
                   onReloadQuota={() => void reloadQuota(a.id)} />
               </StaggerItem>

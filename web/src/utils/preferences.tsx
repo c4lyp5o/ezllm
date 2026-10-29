@@ -9,6 +9,12 @@ function subscribe(fn: () => void) { window.addEventListener(EVENT, fn); window.
 export function preferenceChanged() { window.dispatchEvent(new Event(EVENT)); }
 export function savePreference(key: string, value: string) { memory.set(key, value); try { localStorage.setItem(key, value); } catch { /* The in-memory preference remains available. */ } preferenceChanged(); applyMotion(); }
 export function readRange(): RangeKey { const range = read('ezllm.range', '24h'); return ['24h', '7d', '30d', '365d'].includes(range) ? range as RangeKey : '24h'; }
+/** The time range every data screen opens on, shared and persisted: picking
+ *  30d on one Analytics tab keeps it when you move to the next. */
+export function useRange(): [RangeKey, (r: RangeKey) => void] {
+  const range = useSyncExternalStore(subscribe, readRange);
+  return [range, (r) => savePreference('ezllm.range', r)];
+}
 export function readMotion(): 'system' | 'reduce' { return read('ezllm.motion', 'system') === 'reduce' ? 'reduce' : 'system'; }
 function applyMotion() { document.documentElement.dataset.reduceMotion = String(readMotion() === 'reduce'); }
 function subscribeSystemMotion(fn: () => void) {

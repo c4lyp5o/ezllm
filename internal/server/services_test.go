@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/c4lyp5o/ezllm/internal/provider"
 )
@@ -282,6 +283,38 @@ func TestServiceTestRecordsFailureVerdict(t *testing.T) {
 		if row.Client == "service-test" {
 			t.Errorf("service probe reached the ledger: %+v", row)
 		}
+	}
+}
+
+func TestServiceCardListsProbesNewestFirst(t *testing.T) {
+	// Every recorded probe rides on its card with a namespaced model id, so the
+	// Services page can mark verified models and show what Auto chooses from.
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[{"embedding":[0.1]}]}`))
+	})
+	if err := h.db.UpsertModels(context.Background(), seededAccountID(t, h), []provider.ModelInfo{{ID: "gpt-6-luna"}, {ID: "gpt-6-sol"}}); err != nil {
+		t.Fatal(err)
+	}
+	cards := servicesGET(t, h)
+	if p, ok := cards["embeddings"].(map[string]any)["probes"].([]any); !ok || len(p) != 0 {
+		t.Fatalf("a card with no probes must carry an empty list, got %v", cards["embeddings"])
+	}
+	for _, model := range []string{"up/gpt-6-luna", "up/gpt-6-sol"} {
+		time.Sleep(5 * time.Millisecond) // distinct timestamps, so the order is decided by time
+		if code, _, body := h.do("POST", "/admin/services/embeddings/test", "tok-admin", `{"model":"`+model+`"}`); code != 200 {
+			t.Fatalf("probe %s: %d %s", model, code, body)
+		}
+	}
+	probes := servicesGET(t, h)["embeddings"].(map[string]any)["probes"].([]any)
+	if len(probes) != 2 {
+		t.Fatalf("want 2 probes, got %v", probes)
+	}
+	if got := probes[0].(map[string]any)["model"]; got != "up/gpt-6-sol" {
+		t.Errorf("newest probe first: want up/gpt-6-sol (namespaced), got %v", got)
+	}
+	if got := probes[1].(map[string]any)["model"]; got != "up/gpt-6-luna" {
+		t.Errorf("older probe second: want up/gpt-6-luna, got %v", got)
 	}
 }
 

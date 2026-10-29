@@ -22,6 +22,15 @@ export const WINDOW_MIN = 5;
 export const MIN_REF_TPM = 2_000;
 export const POLL_MS = 10_000;
 
+/** The look-back the page can show. Usage is averaged over it into tokens per
+ *  minute, so a longer window smooths a provider that was busy a while ago
+ *  instead of reading it as quiet. */
+export const WINDOWS = [
+  { min: WINDOW_MIN, label: '5 min', words: 'five minutes' },
+  { min: 60, label: '1 hour', words: 'hour' },
+  { min: 1440, label: '24 hours', words: '24 hours' },
+] as const;
+
 export type State = 'live' | 'idle' | 'off' | 'unknown';
 
 export type CityKey = {
@@ -52,7 +61,8 @@ export function signName(name: string): string {
   return words[0].length <= 16 ? words[0] : `${words[0].slice(0, 15)}…`;
 }
 
-export function buildBuildings(accounts: Account[], usage: UsageResp | null): Building[] {
+/** `windowMin` is the look-back `usage` was fetched for: tokens are averaged over it. */
+export function buildBuildings(accounts: Account[], usage: UsageResp | null, windowMin: number = WINDOW_MIN): Building[] {
   const byHint = new Map((usage?.groups ?? []).map((g) => [g.k, g]));
   const raw = accounts.map((a) => {
     const keys: CityKey[] = a.keys.map((k) => {
@@ -60,7 +70,7 @@ export function buildBuildings(accounts: Account[], usage: UsageResp | null): Bu
       const enabled = a.enabled && k.enabled;
       return {
         id: String(k.id), label: k.label || k.hint, hint: k.hint, enabled,
-        tpm: enabled && g ? (g.tin + g.tout) / WINDOW_MIN : 0,
+        tpm: enabled && g ? (g.tin + g.tout) / windowMin : 0,
         calls: enabled ? g?.calls ?? 0 : 0,
         errors: enabled ? g?.errors ?? 0 : 0,
       };

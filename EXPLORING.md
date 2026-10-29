@@ -505,6 +505,27 @@ corrections section.
   coverage is in `web/tests/verify-railway.mjs`, `verify-neighbourhood.mjs`,
   `verify-neighbourhood-polish.mjs` and `shot-city.mjs`.
 
+### v1.5.0 — a dashboard polish pass ✅ (2026-10-29)
+
+Every operator page was reworked in place (Dashboard, Analytics, Providers,
+Services, Chat, Combos, Rules, Compression, Connect, Neighbourhood, Settings).
+The shared pieces to read first: `web/src/components/ui.tsx` `Modal` (opt-in
+`busy` / `dirty` / `onSubmit` and a footer render-prop; the unsaved-changes bar
+and the footer carry distinct keys on purpose — without them React reuses the
+clicked "Keep editing" button as the form's submit button), `web/src/utils/`
+`health.ts` (what is wrong with a provider, shared by Dashboard, Providers and
+Neighbourhood), `combos.ts` (hop health, draft validation, the strategy
+preview), `rules.ts`, `compression.ts`, `connect.ts` (key state, allowlist
+matching that mirrors Go's `path.Match`, client recipes) and `settings.ts`
+(bounds that mirror the server's). API additions, all backward compatible:
+`GET /admin/requests` exact `account`/`model`/`alias`/`client`/`session`
+filters (`internal/server/requests.go`), `POST /admin/combos/{id}/test` `hop`,
+service-card `probes` (`internal/server/services.go`), and
+`POST /admin/compression-preview` (`internal/server/compression_preview.go`).
+Contract: one `web/tests/verify-*-qol.mjs` driver per page, plus the Go tests
+named for each addition. Page conventions live in `web/DESIGN.md` "Editors and
+dialogs".
+
 ### v1.4.0 — the Neighbourhood is a living city ✅ (2026-10-28)
 
 The page is a canvas city: one building per provider account on a seeded street

@@ -2,6 +2,23 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
 
+## 2026-10-29 — a dashboard polish pass and the API it needed (v1.5.0)
+
+- Every operator page was reworked in place: health and status where the
+  operator looks first, deep links to the fix, dialogs that submit on Enter,
+  lock while saving, explain bad input at the field and guard unsaved edits.
+  Providers can add or replace a key from the Edit dialog; Chat gained Stop,
+  answer actions, parameters, export and a ledger-backed "served by" line;
+  Combos shows hop health, live block cursors and per-combo traffic; Rules and
+  Connect gained validation with live readouts (what an allowlist matches, what
+  a rule means); the Neighbourhood gained a usage window and full screen.
+- `GET /admin/requests` filters by exact `account`, `model`, `alias`, `client`
+  and `session`. `POST /admin/combos/{id}/test` accepts `hop`. Service cards
+  list their `probes`. New `POST /admin/compression-preview` runs the engines
+  over a pasted sample without storing or sending anything.
+- Fixed: the dialog's "Keep editing" button submitted the form.
+- Browser regressions: one new driver per page (`verify-*-qol.mjs`).
+
 ## 2026-10-28 — account safety, operational visibility and a living Neighbourhood city (v1.4.0)
 
 - Provider-key retests and enable/disable operations now require the key to

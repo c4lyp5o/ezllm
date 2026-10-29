@@ -82,3 +82,18 @@ function isoDaysAgo(days: number): string {
   const d = new Date(Date.now() - days * 86_400_000);
   return d.toISOString();
 }
+
+/** Proves a freshly minted key works: asks /v1/models with ONLY that key (the
+ *  dashboard cookie is not sent) and reports what it can see. */
+export type KeyTest = { ok: boolean; status: number; models: number; message: string };
+export async function testKey(plaintext: string): Promise<KeyTest> {
+  try {
+    const res = await fetch('/v1/models', { headers: { Authorization: `Bearer ${plaintext}` }, credentials: 'omit', cache: 'no-store' });
+    if (!res.ok) return { ok: false, status: res.status, models: 0, message: res.status === 401 || res.status === 403 ? 'The gateway rejected this key.' : `The gateway answered ${res.status}.` };
+    const body = await res.json().catch(() => ({}));
+    const n = Array.isArray(body?.data) ? body.data.length : 0;
+    return { ok: true, status: res.status, models: n, message: `The key works and can see ${n.toLocaleString('en-US')} model${n === 1 ? '' : 's'}.` };
+  } catch {
+    return { ok: false, status: 0, models: 0, message: 'Could not reach the gateway.' };
+  }
+}

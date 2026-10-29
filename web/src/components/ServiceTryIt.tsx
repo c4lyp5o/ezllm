@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ApiError, generateService, type ServiceSurface } from '../utils/api';
 import { extractMedia, rawPreview, type Media } from '../utils/media';
-import { Spinner, btn, cx, inputCls, labelCls } from './ui';
+import { ConfirmModal, CopyButton, Spinner, btn, cx, inputCls, labelCls } from './ui';
 import { Collapse } from './motion';
 
 export const GENERATABLE: ReadonlySet<ServiceSurface> = new Set<ServiceSurface>([
@@ -46,8 +46,15 @@ function MediaView({ m, index }: { m: Media; index: number }) {
   );
 }
 
+// The last prompt per service survives navigation within the session, so
+// coming back to try a variation does not start from a blank box.
+const promptKey = (surface: string) => `ezllm.tryit.${surface}`;
+const recallPrompt = (surface: string) => { try { return sessionStorage.getItem(promptKey(surface)) ?? ''; } catch { return ''; } };
+const rememberPrompt = (surface: string, v: string) => { try { sessionStorage.setItem(promptKey(surface), v); } catch { /* private mode: nothing to remember */ } };
+
 export function ServiceTryIt({ surface, model }: { surface: ServiceSurface; model: string }) {
-  const [prompt, setPrompt] = useState('');
+  const [prompt, setPrompt] = useState(() => recallPrompt(surface));
+  const [confirming, setConfirming] = useState(false);
   const [size, setSize] = useState(IMAGE_SIZES[0]);
   const [voice, setVoice] = useState('alloy');
   const [file, setFile] = useState<File | null>(null);
@@ -92,10 +99,18 @@ export function ServiceTryIt({ surface, model }: { surface: ServiceSurface; mode
     }
   };
 
-  const run = async (e: FormEvent) => {
+  // Submitting asks first (a styled dialog, like every other confirmation);
+  // the request itself runs once it is accepted.
+  const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!ready || running) return;
-    if (!window.confirm(`This sends a real request to ${model} and may spend provider quota. Continue?`)) return;
+    setConfirming(true);
+  };
+
+  const run = async () => {
+    setConfirming(false);
+    if (!ready || running) return;
+    rememberPrompt(surface, prompt);
     abort.current = new AbortController();
     setRunning(true); setError('');
     try {
@@ -125,7 +140,8 @@ export function ServiceTryIt({ surface, model }: { surface: ServiceSurface; mode
 
   const fieldCls = cx(inputCls, 'bg-surface');
   return (
-    <form onSubmit={run} className="space-y-3">
+    <>
+    <form onSubmit={submit} className="space-y-3">
       <p className="text-[12px] text-mute">
         Uses the saved default <code className="font-mono text-dim">{model}</code>. Results are not stored.
       </p>
@@ -197,7 +213,12 @@ export function ServiceTryIt({ surface, model }: { surface: ServiceSurface; mode
           <div className="space-y-3 rounded-lg border border-line bg-raised p-3.5" aria-live="polite">
             <p className="text-[11px] text-mute">Answered in <span className="font-mono">{result.ms.toLocaleString()}</span> ms</p>
             {result.media.map((m, i) => <MediaView key={m.src} m={m} index={i} />)}
-            {result.text && <p className="whitespace-pre-wrap text-[13px] text-ink">{result.text}</p>}
+            {result.text && (
+              <div className="space-y-2">
+                <p className="whitespace-pre-wrap text-[13px] text-ink">{result.text}</p>
+                <CopyButton text={result.text} label="Copy text" />
+              </div>
+            )}
             {result.links.map((l) => (
               <a key={l} href={l} target="_blank" rel="noreferrer" className="block break-all text-[12px] text-accent underline-offset-2 hover:underline">{l}</a>
             ))}
@@ -208,11 +229,16 @@ export function ServiceTryIt({ surface, model }: { surface: ServiceSurface; mode
               <details>
                 <summary className="cursor-pointer text-[12px] text-mute">Raw response</summary>
                 <pre className="mt-2 max-h-64 overflow-auto rounded border border-line bg-surface p-2 font-mono text-[11px] text-dim">{result.raw}</pre>
+                <div className="mt-2"><CopyButton text={result.raw} label="Copy raw response" /></div>
               </details>
             )}
           </div>
         )}
       </Collapse>
     </form>
+    <ConfirmModal open={confirming} title={`Send a real request to ${model}?`} confirmLabel="Send request" tone="primary"
+      body="This goes through the real pipeline and may spend provider quota. The result is shown here and not stored."
+      onClose={() => setConfirming(false)} onConfirm={() => void run()} />
+    </>
   );
 }

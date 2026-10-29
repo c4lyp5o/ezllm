@@ -629,12 +629,12 @@ export type RequestsResp = {
 export type RequestSort = 'ts_desc' | 'tin_desc' | 'tout_desc';
 export type RequestFilter = {
   minTin?: number; maxTin?: number; minTout?: number; maxTout?: number;
-  range?: RangeKey; sort?: RequestSort; limit?: number;
+  range?: RangeKey; /** An exact look-back in hours; wins over range (a 2x window for a prior-period comparison). */ hours?: number; sort?: RequestSort; limit?: number;
   /** Exact ledger names (the dashboard's click-through). */
   account?: string; model?: string; alias?: string; session?: string;
 };
 export function requests(f: RequestFilter = {}): Promise<RequestsResp> {
-  const hours = RANGE_HOURS[f.range ?? '24h'];
+  const hours = f.hours ?? RANGE_HOURS[f.range ?? '24h'];
   const params = new URLSearchParams({ from: new Date(Date.now() - hours * 3600_000).toISOString() });
   if (f.minTin != null) params.set('min_tin', String(f.minTin));
   if (f.maxTin != null) params.set('max_tin', String(f.maxTin));
@@ -1028,6 +1028,20 @@ export type CompressionProfile = {
   notes?: string | null;
   created_at?: string | null;
 } & Record<string, unknown>;
+
+/** POST /admin/compression-preview: the real engines over a pasted sample. */
+export type CompressionPreview = {
+  kind: string; tool: string; applied: boolean;
+  tokens_before: number; tokens_after: number; saved_notional: number;
+  stages: { engine: string; pre: number; post: number; saved: number; fired: number; cpu_ms: number }[];
+  note: string; after: string;
+};
+export type PreviewRequest = {
+  text: string; kind: 'tool_output' | 'prompt'; tool?: string; ignore_floors?: boolean;
+  profile_id?: number;
+  profile?: { stages: CompressionStage[]; exempt_last_turn: boolean; min_compress_ratio: number; auto_trigger_tokens: number; fresh_tool_output: string };
+};
+export const previewCompression = (b: PreviewRequest) => post<CompressionPreview>('/admin/compression-preview', b);
 
 export function compressionProfiles(): Promise<CompressionProfile[]> {
   return get<CompressionProfile[]>('/admin/compression-profiles');

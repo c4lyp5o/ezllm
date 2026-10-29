@@ -768,9 +768,9 @@ function ComboCard({ c, accounts, health, stat, statsReady, range, cursor, test,
         <Chip title={STRATEGY_HINTS[c.strategy]}><span className="font-mono">{c.strategy}</span></Chip>
         {c.auto_free && <Chip tone="accent" title="hops are derived from your providers' free models and kept in sync">Auto</Chip>}
         {!!c.compression_profile_id && (
-          <Chip tone="accent" title="compression profile applied to requests routed through this combo">
-            <span className="font-mono">{profileName ?? `profile #${c.compression_profile_id}`}</span>
-          </Chip>
+          <Link to={`/compression?edit=${c.compression_profile_id}`} title="compression profile applied to requests routed through this combo. Click to edit it">
+            <Chip tone="accent"><span className="font-mono">{profileName ?? `profile #${c.compression_profile_id}`}</span></Chip>
+          </Link>
         )}
         <span className="text-[12px] text-mute" title="the context size advertised to clients">{nfmt(c.context_size ?? 0)} context</span>
         <span className="ml-auto flex flex-wrap items-center gap-3">

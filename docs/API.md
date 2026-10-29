@@ -664,6 +664,19 @@ table; any other value is a 400). Every engine applies to all three request shap
 - Selection: per-request `x-ezllm-compression` header → the combo's `compression_profile_id` →
   off. Fail-open: an engine error passes the original request through untouched.
 
+### `POST /admin/compression-preview` → `200`
+Runs the real engines over a pasted sample; nothing is stored, sent upstream or ledgered. Body:
+`text` (required, ≤ 256 KiB), `profile_id` (a saved profile — a paused one still previews) **or** an inline
+`profile` (`stages` plus optional `exempt_last_turn`, `min_compress_ratio`, `auto_trigger_tokens`,
+`fresh_tool_output`; lets an editor preview an unsaved draft; wins over `profile_id`), `kind`
+(`tool_output` default | `prompt`), `tool` (the tool's name for `tool_output`, default `terminal` — it
+decides whether rtk filters or preserves the text), `ignore_floors` (skip the ratio and absolute floors to see
+what the engines alone can do). The sample is wrapped in a minimal conversation so it is never the exempt
+final message. Stateless: no session memo. Answers `applied`, `tokens_before`/`tokens_after` (of the sample,
+by the shared estimator), `saved_notional` (what a declined rewrite would have saved), `stages` (per-engine
+`pre`/`post`/`saved`/`fired`/`cpu_ms`), `note` (why nothing shipped: a floor, `below auto_trigger_tokens`, …)
+and `after` (the sample as it would ship; the original when not applied). Validation errors are `400`.
+
 ## M6 — dashboard session & live feed
 
 ### First-boot setup (schema v26): `GET /admin/setup` · `POST /admin/setup`

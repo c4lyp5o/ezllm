@@ -10,6 +10,7 @@ import { useReducedMotion } from '../utils/preferences';
 //      rows — these are presentation layers over /admin/usage groups.
 import { motion,} from 'motion/react';
 import type { CSSProperties, ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { cx, formatTokens, pct } from './ui';
 
 // ── palette ───────────────────────────────────────────────────────────────
@@ -135,7 +136,7 @@ export function Sparkline({
 export function BarList({
   rows, total, format = formatTokens, maxRows, emptyLabel = 'nothing in this range', order = 'desc',
 }: {
-  rows: { key: string; value: number; color?: string; hint?: string }[];
+  rows: { key: string; value: number; color?: string; hint?: string; /** Makes the label a link. */ to?: string }[];
   total?: number;
   format?: (n: number) => string;
   maxRows?: number;
@@ -163,7 +164,11 @@ export function BarList({
         return (
           <li key={`${r.key}-${i}`} className="group">
             <div className="flex items-baseline gap-3">
-              <span className="min-w-0 flex-1 truncate text-[13px] text-dim" title={r.hint ?? r.key}>{r.key}</span>
+              {r.to ? (
+                <Link to={r.to} className="min-w-0 flex-1 truncate text-[13px] text-dim underline-offset-2 hover:text-ink hover:underline" title={`${r.hint ?? r.key} — open in Requests`}>{r.key}</Link>
+              ) : (
+                <span className="min-w-0 flex-1 truncate text-[13px] text-dim" title={r.hint ?? r.key}>{r.key}</span>
+              )}
               <span className="tnum shrink-0 font-mono text-[13px] text-ink">{format(r.value)}</span>
               {/* Share of the total, not of the bar: the bar is scaled to the
                   largest row, so a bar's length and its share only agree when
@@ -269,12 +274,14 @@ export function Panel({
 // makes it worth unifying: a trend costs no recharts container, so a card can
 // show direction at the same weight as the number.
 export function StatCard({
-  label, value, sub, tone, footer,
+  label, value, sub, tone, footer, delta,
 }: {
   label: string;
   value: string;
   sub?: string;
   tone?: string;
+  /** Change against the previous equal window (see deltaNote). */
+  delta?: { text: string; tone?: string };
   /** Accepted for old call sites and ignored: a KPI carries no sparkline. */
   spark?: number[];
   sparkColor?: string;
@@ -287,6 +294,7 @@ export function StatCard({
         {value}
       </div>
       {sub && <div className="mt-1 text-[12px] text-mute">{sub}</div>}
+      {delta && <div className={cx('mt-0.5 text-[12px] tnum', delta.tone ?? 'text-mute')}>{delta.text}</div>}
       {footer && <div className="mt-2 border-t border-line pt-2.5">{footer}</div>}
     </div>
   );

@@ -1,16 +1,17 @@
-import { readRange } from '../utils/preferences';
+import { useRange } from '../utils/preferences';
 // REQUESTS — the token dissection explorer.
 // min/max filters on tokens in and tokens out over a time range, with summary
 // totals over the WHOLE matching set (not just the page). Sort by either axis
 // to surface the fattest calls. The question this page exists to answer: is
 // the client sending too much history, or is the model burning it on output
 // and reasoning? (row shape = the dashboard's recentCalls projection.)
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
-  normalizeFeedRow, requests, RANGE_LABEL,
+  normalizeFeedRow, requests, usage, RANGE_LABEL,
   type FeedRow, type RangeKey, type RequestSort, type RequestsResp,
 } from '../utils/api';
-import { CauseChip, SectionLabel, Segmented, btn, cx, inputCls, labelCls } from '../components/ui';
+import { CauseChip, CopyButton, SectionLabel, Segmented, btn, cx, inputCls, labelCls } from '../components/ui';
 import { Stagger, StaggerItem } from '../components/motion';
 
 const RANGES: RangeKey[] = ['24h', '7d', '30d', '365d'];
@@ -19,6 +20,11 @@ const SORTS: { key: RequestSort; label: string }[] = [
   { key: 'tin_desc', label: 'tokens in' },
   { key: 'tout_desc', label: 'tokens out' },
 ];
+
+// The server allows up to 500 rows a view; these are the steps offered.
+const PAGE_SIZES = [50, 100, 250, 500] as const;
+const BOUND_PARAM = { minTin: 'min_tin', maxTin: 'max_tin', minTout: 'min_tout', maxTout: 'max_tout' } as const;
+const rowId = (r: FeedRow) => `${r.ts}|${r.account}|${r.model}|${r.status}|${r.total_ms}`;
 
 type NumFields = { minTin: string; maxTin: string; minTout: string; maxTout: string };
 const EMPTY_FIELDS: NumFields = { minTin: '', maxTin: '', minTout: '', maxTout: '' };
@@ -64,15 +70,98 @@ const FIELDS: { key: keyof NumFields; label: string; ph: string }[] = [
   { key: 'maxTout', label: 'tokens out ≤', ph: 'e.g. 8000' },
 ];
 
+function RowDetail({ r }: { r: FeedRow }) {
+  const meta: [string, string][] = [
+    ['time', r.ts], ['client', r.client || '–'], ['surface', r.surface || '–'],
+    ['provider · combo', [r.account, r.alias].filter(Boolean).join(' · ') || '–'],
+    ['caller address', r.ip || '–'],
+    ['stream', r.stream ? `yes · first token ${r.ttft_ms ?? '–'} ms` : 'no'],
+    ['compression', r.compression ? `${r.compression}${r.applied ? ' (applied)' : ' (no change)'}` : '–'],
+  ];
+  return (
+    <div>
+      <dl className="grid gap-x-8 gap-y-1.5 text-[12px] sm:grid-cols-2 lg:grid-cols-3">
+        {meta.map(([k, v]) => (
+          <div key={k} className="flex gap-2"><dt className="w-28 shrink-0 text-mute">{k}</dt><dd className="min-w-0 break-all text-dim">{v}</dd></div>
+        ))}
+      </dl>
+      {r.error && (
+        <div className="mt-3">
+          <div className="text-[12px] text-mute">error</div>
+          <pre className="font-code mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-shade px-3 py-2 text-[12px] text-dim">{r.error}</pre>
+        </div>
+      )}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {r.error && <CopyButton text={r.error} label="Copy error" />}
+        <CopyButton text={JSON.stringify(r, null, 2)} label="Copy row as JSON" />
+        {(r.account || r.model) && (
+          <Link to={`/requests?${new URLSearchParams({ account: r.account, model: r.model })}`}
+            className={cx(btn.base, btn.ghost, '!h-7 !px-3 !text-[12px]')}>Only this provider and model</Link>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Requests() {
+  // Every filter lives in the URL, so a view survives a refresh and can be
+  // shared: ?account= / ?model= / ?alias= (a combo) / ?client= (an API key) are exact ledger names (server-side, so the
+  // summary strip covers the filtered set), plus range, sort, limit and the
+  // four token bounds. The Dashboard and Analytics click-throughs use the
+  // same parameters.
+  const [params, setParams] = useSearchParams();
+  const [prefRange, setPrefRange] = useRange();
+  const account = params.get('account') ?? '';
+  const model = params.get('model') ?? '';
+  const alias = params.get('alias') ?? '';
+  const client = params.get('client') ?? '';
+  const urlRange = params.get('range');
+  const range: RangeKey = (RANGES as string[]).includes(urlRange ?? '') ? urlRange as RangeKey : prefRange;
+  const urlSort = params.get('sort');
+  const sort: RequestSort = SORTS.some((x) => x.key === urlSort) ? urlSort as RequestSort : 'ts_desc';
+  const urlLimit = Number(params.get('limit'));
+  const limit = (PAGE_SIZES as readonly number[]).includes(urlLimit) ? urlLimit : PAGE_SIZES[0];
+  const applied: Applied = {};
+  for (const key of Object.keys(BOUND_PARAM) as (keyof NumFields)[]) {
+    const v = params.get(BOUND_PARAM[key]);
+    if (v != null && v !== '' && Number.isInteger(Number(v)) && Number(v) >= 0) applied[key] = Number(v);
+  }
+  const appliedKey = JSON.stringify(applied);
+
+  const patch = (changes: Record<string, string | undefined>) => setParams((p) => {
+    const n = new URLSearchParams(p);
+    for (const [k, v] of Object.entries(changes)) { if (v == null || v === '') n.delete(k); else n.set(k, v); }
+    return n;
+  }, { replace: true });
+  const setRange = (r: RangeKey) => { patch({ range: r }); setPrefRange(r); };
+
   const [fields, setFields] = useState<NumFields>(EMPTY_FIELDS);
-  const [applied, setApplied] = useState<Applied>({});
-  const [range, setRange] = useState<RangeKey>(readRange);
-  const [sort, setSort] = useState<RequestSort>('ts_desc');
+  useEffect(() => {
+    const a2 = JSON.parse(appliedKey) as Applied;
+    setFields({
+      minTin: String(a2.minTin ?? ''), maxTin: String(a2.maxTin ?? ''),
+      minTout: String(a2.minTout ?? ''), maxTout: String(a2.maxTout ?? ''),
+    });
+  }, [appliedKey]);
   const [data, setData] = useState<RequestsResp | null>(null);
   const [rows, setRows] = useState<FeedRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  // Options for the quick-filter dropdowns: the names that actually carry
+  // traffic in the window (one aggregate each, not a scan of rows).
+  const [names, setNames] = useState<{ accounts: string[]; models: string[]; combos: string[]; clients: string[] }>({ accounts: [], models: [], combos: [], clients: [] });
+  useEffect(() => {
+    let live = true;
+    void Promise.all([usage('account', range).catch(() => null), usage('model', range).catch(() => null), usage('alias', range).catch(() => null), usage('client', range).catch(() => null)]).then(([a, m, c, k]) => {
+      if (live) setNames({
+        accounts: (a?.groups ?? []).map((g) => g.k).sort(), models: (m?.groups ?? []).map((g) => g.k).sort(),
+        combos: (c?.groups ?? []).map((g) => g.k).filter((k) => k !== '(direct)').sort(),
+        clients: (k?.groups ?? []).map((g) => g.k).sort(),
+      });
+    });
+    return () => { live = false; };
+  }, [range]);
 
   // Only the newest load may write state: an older selection's response that
   // lands late is dropped instead of overwriting the current one.
@@ -82,34 +171,39 @@ export default function Requests() {
     setLoading(true);
     setErr(null);
     try {
-      const r = await requests({ ...applied, range, sort });
+      const r = await requests({ ...JSON.parse(appliedKey) as Applied, range, sort, account, model, alias, client, limit });
       if (gen !== loadGen.current) return;
       setData(r);
       setRows(r.rows.map(normalizeFeedRow));
+      setOpen(null);
     } catch (e) {
       if (gen === loadGen.current) setErr(e instanceof Error ? e.message : String(e));
     } finally {
       if (gen === loadGen.current) setLoading(false);
     }
-  }, [applied, range, sort]);
+  }, [appliedKey, range, sort, account, model, alias, client, limit]);
 
   useEffect(() => { load(); }, [load]);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    const parsed: Applied = {};
+    const next: Record<string, string | undefined> = {};
     for (const key of Object.keys(fields) as (keyof NumFields)[]) {
       const v = parseField(fields[key]);
       if (v === 'bad') {
         setErr(`${key} must be a non-negative whole number`);
         return;
       }
-      if (v !== undefined) parsed[key] = v;
+      next[BOUND_PARAM[key]] = v === undefined ? undefined : String(v);
     }
-    setApplied(parsed);
+    setErr(null);
+    patch(next);
   };
 
-  const clear = () => { setFields(EMPTY_FIELDS); setApplied({}); };
+  const clear = () => { setFields(EMPTY_FIELDS); setParams({}, { replace: true }); };
+  const matchCount = data?.summary.count ?? 0;
+  const canMore = rows.length < matchCount && limit < PAGE_SIZES[PAGE_SIZES.length - 1];
+  const withCurrent = (list: string[], cur: string) => (cur && !list.includes(cur) ? [cur, ...list] : list);
   const s = data?.summary;
 
   return (
@@ -135,6 +229,37 @@ export default function Requests() {
             <button type="button" onClick={clear} className={cx(btn.base, btn.ghost)}>Clear</button>
           </div>
         </div>
+        {/* Quick filters: names that carried traffic in this window. */}
+        <div className="mt-4 flex flex-wrap items-end gap-3">
+          <label className="block">
+            <span className={labelCls}>provider</span>
+            <select className={cx(inputCls, 'w-56')} value={account} onChange={(e) => patch({ account: e.target.value })}>
+              <option value="">All providers</option>
+              {withCurrent(names.accounts, account).map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className={labelCls}>combo</span>
+            <select className={cx(inputCls, 'w-48')} value={alias} onChange={(e) => patch({ alias: e.target.value })}>
+              <option value="">All combos</option>
+              {withCurrent(names.combos, alias).map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className={labelCls}>API key</span>
+            <select className={cx(inputCls, 'w-48')} value={client} onChange={(e) => patch({ client: e.target.value })}>
+              <option value="">All keys</option>
+              {withCurrent(names.clients, client).map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className={labelCls}>model</span>
+            <select className={cx(inputCls, 'w-72 max-w-full')} value={model} onChange={(e) => patch({ model: e.target.value })}>
+              <option value="">All models</option>
+              {withCurrent(names.models, model).map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </label>
+        </div>
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <SectionLabel>range</SectionLabel>
           <Seg
@@ -142,7 +267,10 @@ export default function Requests() {
             value={range} onChange={setRange}
           />
           <SectionLabel>order</SectionLabel>
-          <Seg options={SORTS} value={sort} onChange={setSort} />
+          <Seg options={SORTS} value={sort} onChange={(v) => patch({ sort: v === 'ts_desc' ? undefined : v })} />
+          <SectionLabel>rows</SectionLabel>
+          <Seg options={PAGE_SIZES.map((n) => ({ key: String(n), label: String(n) }))} value={String(limit)}
+            onChange={(v) => patch({ limit: v === String(PAGE_SIZES[0]) ? undefined : v })} />
         </div>
       </form>
 
@@ -194,8 +322,14 @@ export default function Requests() {
                   </td>
                 </tr>
               )}
-              {rows.map((r, i) => (
-                <tr key={`${r.ts}-${i}`} className="border-t border-line">
+              {rows.map((r, i) => {
+                const id = rowId(r);
+                const isOpen = open === id;
+                return (
+                <Fragment key={`${id}#${i}`}>
+                <tr tabIndex={0} aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : id)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(isOpen ? null : id); } }}
+                  className={cx('cursor-pointer border-t border-line transition-colors hover:bg-wash focus-visible:bg-wash focus-visible:outline-none', isOpen && 'bg-wash')}>
                   <td className="whitespace-nowrap px-4 py-2 font-mono text-mute">
                     {fmtTs(r.ts)}
                     {r.ip && <div className="text-[11px] text-mute/70" title="caller address">{r.ip}</div>}
@@ -249,10 +383,30 @@ export default function Requests() {
                     {r.total_ms == null ? '—' : nfmt(r.total_ms)}
                   </td>
                 </tr>
-              ))}
+                {isOpen && (
+                  <tr className="border-t border-line bg-wash">
+                    <td colSpan={10} className="px-4 py-3"><RowDetail r={r} /></td>
+                  </tr>
+                )}
+                </Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
+        {rows.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3 text-[12px] text-mute">
+            <span className="tnum">showing {nfmt(rows.length)} of {nfmt(matchCount)} matching</span>
+            {canMore ? (
+              <button type="button" onClick={() => patch({ limit: String(PAGE_SIZES.find((n) => n > limit) ?? limit) })}
+                className={cx(btn.base, btn.ghost, '!h-7 !px-3 !text-[12px]')}>
+                Show {nfmt(Math.min(matchCount, PAGE_SIZES.find((n) => n > limit) ?? limit))}
+              </button>
+            ) : rows.length < matchCount ? (
+              <span>capped at {nfmt(PAGE_SIZES[PAGE_SIZES.length - 1])} rows a view; narrow the range or filters to see the rest</span>
+            ) : null}
+          </div>
+        )}
       </div>
     </div>
   );

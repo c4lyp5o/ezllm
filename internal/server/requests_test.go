@@ -146,6 +146,127 @@ func TestRequestsFiltersAndSummary(t *testing.T) {
 // rejected, notional holds what it WOULD have saved), and held_notional (the
 // sum of those rejected notional values). Before this existed the cards were
 // derived from a 409-row hardcoded claim — numbers that cannot go stale.
+func TestRequestsFiltersByAccountAndModel(t *testing.T) {
+	h := newHarness(t, func(http.ResponseWriter, *http.Request) {})
+	now := time.Now()
+	for _, c := range []store.Call{
+		{TS: now, Client: "c", Surface: store.SurfaceChat, Account: "alpha", Model: "m1", Status: 200, TokensIn: 10},
+		{TS: now, Client: "c", Surface: store.SurfaceChat, Account: "alpha", Model: "m2", Status: 200, TokensIn: 20},
+		{TS: now, Client: "c", Surface: store.SurfaceChat, Account: "beta", Model: "m1", Status: 200, TokensIn: 30},
+	} {
+		h.db.RecordCall(c)
+	}
+	if err := h.db.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		query string
+		count int64
+		tin   int64
+	}{
+		{"", 3, 60},
+		{"?account=alpha", 2, 30},
+		{"?model=m1", 2, 40},
+		{"?account=alpha&model=m1", 1, 10},
+		{"?account=alph", 0, 0}, // exact match, not a prefix or LIKE
+		{"?account=%25", 0, 0},  // a wildcard is a literal name
+	} {
+		code, got := doRequests(t, h, tc.query)
+		if code != http.StatusOK || got.Summary.Count != tc.count || got.Summary.Tin != tc.tin {
+			t.Errorf("%q: code %d count %d tin %d, want count %d tin %d",
+				tc.query, code, got.Summary.Count, got.Summary.Tin, tc.count, tc.tin)
+		}
+	}
+}
+
+func TestRequestsFiltersBySession(t *testing.T) {
+	h := newHarness(t, func(http.ResponseWriter, *http.Request) {})
+	now := time.Now()
+	for _, c := range []store.Call{
+		{TS: now, Client: "c", Surface: store.SurfaceChat, Model: "m", Status: 200, TokensIn: 10, SessionID: "chat-aaa"},
+		{TS: now, Client: "c", Surface: store.SurfaceChat, Model: "m", Status: 200, TokensIn: 20, SessionID: "chat-bbb"},
+		{TS: now, Client: "c", Surface: store.SurfaceChat, Model: "m", Status: 200, TokensIn: 30},
+	} {
+		h.db.RecordCall(c)
+	}
+	if err := h.db.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		query string
+		count int64
+		tin   int64
+	}{
+		{"", 3, 60},
+		{"?session=chat-aaa", 1, 10},
+		{"?session=chat-bbb", 1, 20},
+		{"?session=chat-", 0, 0},    // exact match, not a prefix
+		{"?session=chat-%25", 0, 0}, // a wildcard is a literal id
+	} {
+		code, got := doRequests(t, h, tc.query)
+		if code != http.StatusOK || got.Summary.Count != tc.count || got.Summary.Tin != tc.tin {
+			t.Errorf("%q: code %d count %d tin %d, want count %d tin %d",
+				tc.query, code, got.Summary.Count, got.Summary.Tin, tc.count, tc.tin)
+		}
+	}
+}
+
+func TestRequestsFiltersByAlias(t *testing.T) {
+	h := newHarness(t, func(http.ResponseWriter, *http.Request) {})
+	now := time.Now()
+	for _, c := range []store.Call{
+		{TS: now, Client: "c", Surface: store.SurfaceChat, Alias: "daily", Model: "m", Status: 200, TokensIn: 10},
+		{TS: now, Client: "c", Surface: store.SurfaceChat, Alias: "daily", Model: "m", Status: 200, TokensIn: 20},
+		{TS: now, Client: "c", Surface: store.SurfaceChat, Alias: "daily-2", Model: "m", Status: 200, TokensIn: 30},
+	} {
+		h.db.RecordCall(c)
+	}
+	if err := h.db.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		query string
+		count int64
+	}{
+		{"?alias=daily", 2},
+		{"?alias=daily-2", 1},
+		{"?alias=dai", 0}, // exact match, not a prefix
+	} {
+		code, got := doRequests(t, h, tc.query)
+		if code != http.StatusOK || got.Summary.Count != tc.count {
+			t.Errorf("%q: code %d count %d, want %d", tc.query, code, got.Summary.Count, tc.count)
+		}
+	}
+}
+
+func TestRequestsFiltersByClient(t *testing.T) {
+	h := newHarness(t, func(http.ResponseWriter, *http.Request) {})
+	now := time.Now()
+	for _, c := range []store.Call{
+		{TS: now, Client: "hermes", Surface: store.SurfaceChat, Model: "m", Status: 200, TokensIn: 10},
+		{TS: now, Client: "hermes", Surface: store.SurfaceChat, Model: "m", Status: 200, TokensIn: 20},
+		{TS: now, Client: "hermes-2", Surface: store.SurfaceChat, Model: "m", Status: 200, TokensIn: 30},
+	} {
+		h.db.RecordCall(c)
+	}
+	if err := h.db.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		query string
+		count int64
+	}{
+		{"?client=hermes", 2},
+		{"?client=hermes-2", 1},
+		{"?client=herm", 0}, // exact match, not a prefix
+	} {
+		code, got := doRequests(t, h, tc.query)
+		if code != http.StatusOK || got.Summary.Count != tc.count {
+			t.Errorf("%q: code %d count %d, want %d", tc.query, code, got.Summary.Count, tc.count)
+		}
+	}
+}
+
 func TestRequestsSummaryCompressionCounts(t *testing.T) {
 	h := newHarness(t, func(http.ResponseWriter, *http.Request) {})
 	now := time.Now()

@@ -442,6 +442,7 @@ func (s *Server) routes() {
 
 	s.mux.HandleFunc("GET /admin/compression-profiles", s.admin(s.handleProfiles))
 	s.mux.HandleFunc("POST /admin/compression-profiles", s.admin(s.handleProfiles))
+	s.mux.HandleFunc("POST /admin/compression-preview", s.admin(s.handleCompressionPreview))
 	s.mux.HandleFunc("GET /admin/compression-profiles/{id}", s.admin(s.handleProfile))
 	s.mux.HandleFunc("PATCH /admin/compression-profiles/{id}", s.admin(s.handleProfile))
 	s.mux.HandleFunc("DELETE /admin/compression-profiles/{id}", s.admin(s.handleProfile))

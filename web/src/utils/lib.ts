@@ -67,3 +67,36 @@ export function pct(part: number, total: number): string {
   const p = (part / total) * 100;
   return p >= 9.95 ? `${p.toFixed(0)}%` : `${p.toFixed(1)}%`;
 }
+
+/**
+ * Change against the previous equal window, as a short line. `badWhenUp`
+ * colours only the figures where a rise is a problem (failures); traffic going
+ * up or down is not good or bad by itself. `label` names the window
+ * ("24 hours"). Undefined when there is nothing to compare.
+ */
+export function deltaNote(cur: number, prev: number | undefined, label: string, badWhenUp = false): { text: string; tone?: string } | undefined {
+  if (prev == null) return undefined;
+  if (prev === 0) return cur > 0 ? { text: `new, none in the previous ${label}` } : undefined;
+  const p = Math.round(((cur - prev) / prev) * 100);
+  if (p === 0) return { text: `same as the previous ${label}` };
+  const tone = !badWhenUp ? undefined : p > 0 ? 'text-bad' : 'text-ok';
+  return { text: `${p > 0 ? '▲' : '▼'} ${Math.abs(p)}% vs previous ${label}`, tone };
+}
+
+/** Previous-window totals from a 2x report minus the 1x one (the ledger API
+ *  takes a look-back, not a from/to pair). Clamped at zero. */
+export type Prior = { calls: number; errors: number; tin: number; tout: number; cread: number };
+export function priorFrom(
+  whole: { calls: number; errors: number; tin: number; tout: number; cread: number },
+  double: { calls: number; errors: number; tin: number; tout: number; cread: number },
+): Prior {
+  const d = (a: number, b: number) => Math.max(0, a - b);
+  return {
+    calls: d(double.calls, whole.calls), errors: d(double.errors, whole.errors),
+    tin: d(double.tin, whole.tin), tout: d(double.tout, whole.tout), cread: d(double.cread, whole.cread),
+  };
+}
+
+/** /admin/usage refuses a window past 400 days, so a 2x comparison window is
+ *  only available while it fits. */
+export const MAX_SPAN_H = 400 * 24;

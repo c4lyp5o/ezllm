@@ -1,4 +1,4 @@
-import { readRange } from '../utils/preferences';
+import { useRange } from '../utils/preferences';
 // ANALYTICS EXPLORER — the /admin/usage report, exposed properly.
 //
 // The old design was ONE toggle called "granularity" that folded two
@@ -17,11 +17,12 @@ import { readRange } from '../utils/preferences';
 // Every combination is still ONE /admin/usage query. Nothing here aggregates
 // raw ledger rows in the browser; the SQL does it and this renders it.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area,
 } from 'recharts';
 import {
-  usage, FOCUS_HINT, FOCUS_LABEL, SPLIT_HINT, SPLIT_LABEL,
+  usage, usageHours, RANGE_HOURS, FOCUS_HINT, FOCUS_LABEL, SPLIT_HINT, SPLIT_LABEL,
   focusFormat, focusValue, RANGE_LABEL,
   type FocusKey, type RangeKey, type SplitKey, type UsageResp, type UsageRow,
 } from '../utils/api';
@@ -33,6 +34,7 @@ import { Reveal, Stagger, StaggerItem } from '../components/motion';
 import {
   Chip, EmptyState, Mono, SectionLabel, Segmented, cx, fmtMs, formatTokens, nfmt, pct,
 } from '../components/ui';
+import { deltaNote, MAX_SPAN_H, priorFrom } from '../utils/lib';
 import RecentFeed from './RecentFeed';
 
 const SPLITS: SplitKey[] = ['global', 'day', 'account', 'model', 'client', 'alias', 'key', 'surface'];
@@ -89,11 +91,37 @@ function focusColor(focus: FocusKey): string {
   }
 }
 
+// Table columns the operator can sort by (click the header again to flip).
+type SortCol = 'k' | 'calls' | 'tin' | 'tout' | 'cached' | 'reasoning' | 'saved' | 'p50' | 'errors' | 'errRate' | 'cacheHit' | 'avg';
+const sortValue = (r: UsageRow, c: SortCol): number | string => {
+  switch (c) {
+    case 'k': return r.k;
+    case 'calls': return r.calls;
+    case 'tin': return r.tin;
+    case 'tout': return r.tout;
+    case 'cached': return r.cread + r.cwrite;
+    case 'reasoning': return r.reasoning;
+    case 'saved': return r.applied_saved;
+    case 'p50': return r.p50_ttft_ms;
+    case 'errors': return r.errors;
+    case 'errRate': return r.calls > 0 ? r.errors / r.calls : 0;
+    case 'cacheHit': { const d = r.tin + r.cread + r.cwrite; return d > 0 ? r.cread / d : 0; }
+    case 'avg': return r.calls > 0 ? (r.tin + r.tout) / r.calls : 0;
+  }
+};
+
+// Only these splits have a server-side Requests filter (the ledger columns
+// account and model), so only their names are links.
+const REQUEST_FILTER: Partial<Record<SplitKey, 'account' | 'model'>> = { account: 'account', model: 'model' };
+
 export default function Stats() {
   const [split, setSplit] = useState<SplitKey>('account');
   const [focus, setFocus] = useState<FocusKey>('tokens');
-  const [range, setRange] = useState<RangeKey>(readRange);
+  const [range, setRange] = useRange();
   const [data, setData] = useState<UsageResp | null>(null);
+  const [dayRows, setDayRows] = useState<UsageRow[]>([]);
+  const [double, setDouble] = useState<UsageResp['totals'] | null>(null);
+  const [sort, setSort] = useState<{ col: SortCol; dir: 'asc' | 'desc' } | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
@@ -105,8 +133,19 @@ export default function Stats() {
     setLoading(true);
     setErr(null);
     try {
-      const r = await usage(split, range);
-      if (gen === loadGen.current) setData(r);
+      const hours = RANGE_HOURS[range];
+      // The two extras are decoration on top of the report: a failure leaves
+      // the trend / the comparison out rather than failing the page.
+      const [r, days, dbl] = await Promise.all([
+        usage(split, range),
+        split === 'global' ? usage('day', range).catch(() => null) : Promise.resolve(null),
+        hours * 2 <= MAX_SPAN_H ? usageHours('global', hours * 2).catch(() => null) : Promise.resolve(null),
+      ]);
+      if (gen === loadGen.current) {
+        setData(r);
+        setDayRows(days?.groups ?? []);
+        setDouble(dbl ? dbl.totals : null);
+      }
     } catch (e) {
       if (gen === loadGen.current) setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -167,8 +206,26 @@ export default function Stats() {
   // which is the number that actually moves when a filter applies.
   const rankedFocusSum = ranked.reduce((a, r) => a + focusValue(focus, r), 0);
   const totalFocus = totals ? focusValue(focus, totals) : 0;
-  const focusSeries = ranked.map((r) => focusValue(focus, r));
   const isExpanded = data?.group_by != null && data.group_by !== '';
+  const windowWord = { '24h': '24 hours', '7d': '7 days', '30d': '30 days', '365d': '365 days' }[range];
+  const prior = totals && double ? priorFrom(totals, double) : null;
+  const cmp = (cur: number, prev: number | undefined, bad = false) => (prior ? deltaNote(cur, prev, windowWord, bad) : undefined);
+
+  // Real time series for the Everything view: one point per calendar day.
+  const dayTrend = useMemo(() => [...dayRows].sort((a, b) => a.k.localeCompare(b.k)), [dayRows]);
+
+  // The Every-column table: focus order by default, any column on request.
+  const tableRows = useMemo(() => {
+    if (!sort) return ranked;
+    const sgn = sort.dir === 'asc' ? 1 : -1;
+    return [...ranked].sort((a, b) => {
+      const x = sortValue(a, sort.col); const y = sortValue(b, sort.col);
+      return (typeof x === 'string' ? x.localeCompare(y as string) : x - (y as number)) * sgn;
+    });
+  }, [ranked, sort]);
+  const sortBy = (col: SortCol) => setSort((cur) => (cur?.col === col ? { col, dir: cur.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: col === 'k' ? 'asc' : 'desc' }));
+  const linkField = REQUEST_FILTER[split];
+  const reqLink = (k: string) => (linkField ? `/requests?${new URLSearchParams({ [linkField]: k, range })}` : undefined);
 
   return (
     <div className="space-y-5">
@@ -216,19 +273,19 @@ export default function Stats() {
       {totals && (
         <Stagger className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
           <StaggerItem>
-            <StatCard label="Calls" value={nfmt(totals.calls)} sub={`${RANGE_LABEL[range]} window`} />
+            <StatCard label="Calls" value={nfmt(totals.calls)} sub={`${RANGE_LABEL[range]} window`} delta={cmp(totals.calls, prior?.calls)} />
           </StaggerItem>
           <StaggerItem>
-            <StatCard label="Tokens in" value={formatTokens(totals.tin)} sub="not served from cache" />
+            <StatCard label="Tokens in" value={formatTokens(totals.tin)} sub="not served from cache" delta={cmp(totals.tin, prior?.tin)} />
           </StaggerItem>
           <StaggerItem>
-            <StatCard label="Tokens out" value={formatTokens(totals.tout)} sub={`${pct(totals.tout, totals.tin + totals.tout)} of volume`} />
+            <StatCard label="Tokens out" value={formatTokens(totals.tout)} sub={`${pct(totals.tout, totals.tin + totals.tout)} of volume`} delta={cmp(totals.tout, prior?.tout)} />
           </StaggerItem>
           {/* Share of ALL prompt tokens (in + cache reads + cache writes); the
               old sub divided by tokens in alone and printed "3033%". */}
           <StaggerItem>
             <StatCard label="Cache reads" value={formatTokens(totals.cread)}
-              sub={`${pct(totals.cread, totals.tin + totals.cread + totals.cwrite)} of prompt tokens`} />
+              sub={`${pct(totals.cread, totals.tin + totals.cread + totals.cwrite)} of prompt tokens`} delta={cmp(totals.cread, prior?.cread)} />
           </StaggerItem>
           <StaggerItem>
             <StatCard label="Reasoning" value={formatTokens(totals.reasoning)}
@@ -296,13 +353,20 @@ export default function Stats() {
               </div>
             </div>
             <div>
-              <SectionLabel>Trend · {FOCUS_LABEL[focus]}</SectionLabel>
-              <div className="mt-2.5"><Sparkline data={focusSeries} color={focusColor(focus)} height={64} /></div>
-              <p className="mt-2 text-[12px] leading-relaxed text-mute">
-                Ranked order over {nfmt(rows.length)} group{rows.length === 1 ? '' : 's'}, not a time
-                series — the ledger's only time bucketing is the calendar day,
-                so switch <span className="text-dim">Split by</span> to Day for the trend.
-              </p>
+              <SectionLabel>Trend · {FOCUS_LABEL[focus]} per day</SectionLabel>
+              {dayTrend.length >= 2 ? (
+                <>
+                  <div className="mt-2.5"><Sparkline data={dayTrend.map((r) => focusValue(focus, r))} color={focusColor(focus)} height={64} /></div>
+                  <div className="mt-1 flex justify-between text-[12px] text-mute">
+                    <span>{dayTrend[0].k}</span><span>{dayTrend[dayTrend.length - 1].k}</span>
+                  </div>
+                </>
+              ) : (
+                <p className="mt-2.5 text-[13px] leading-relaxed text-mute">
+                  Fewer than two calendar days of traffic in this window, so there is no trend to draw.
+                  The ledger's finest time bucket is the day.
+                </p>
+              )}
             </div>
           </div>
         </Panel>
@@ -394,6 +458,7 @@ export default function Stats() {
               <BarList
                 rows={barRows.map((r, i) => ({
                   key: r.k,
+                  to: reqLink(r.k),
                   value: focusValue(focus, r),
                   // A categorical ramp per position is stable within a render
                   // but NOT across splits — the legend below the chart is the
@@ -408,24 +473,42 @@ export default function Stats() {
 
             <Panel label={<SectionLabel>Every column · {RANGE_LABEL[range]}</SectionLabel>} bodyClass="p-0">
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[720px] text-[13px]">
+                <table className="w-full min-w-[980px] text-[13px]">
                   <thead>
                     <tr className="border-b border-line text-left text-[11px] text-mute">
-                      <th className="px-5 py-2.5 font-medium">{SPLIT_LABEL[split]}</th>
-                      <th className="px-3 py-2.5 text-right font-medium">calls</th>
-                      <th className="px-3 py-2.5 text-right font-medium">in</th>
-                      <th className="px-3 py-2.5 text-right font-medium">out</th>
-                      <th className="px-3 py-2.5 text-right font-medium">cached</th>
-                      <th className="px-3 py-2.5 text-right font-medium">reason</th>
-                      <th className="px-3 py-2.5 text-right font-medium">saved</th>
-                      <th className="px-3 py-2.5 text-right font-medium" title="median time to first token">p50</th>
-                      <th className="px-5 py-2.5 text-right font-medium">err</th>
+                      {([
+                        ['k', SPLIT_LABEL[split], 'px-5', 'left', undefined],
+                        ['calls', 'calls', 'px-3', 'right', undefined],
+                        ['tin', 'in', 'px-3', 'right', undefined],
+                        ['tout', 'out', 'px-3', 'right', undefined],
+                        ['cached', 'cached', 'px-3', 'right', undefined],
+                        ['reasoning', 'reason', 'px-3', 'right', undefined],
+                        ['saved', 'saved', 'px-3', 'right', undefined],
+                        ['p50', 'p50', 'px-3', 'right', 'median time to first token'],
+                        ['errors', 'err', 'px-3', 'right', undefined],
+                        ['errRate', 'err %', 'px-3', 'right', 'errors as a share of calls'],
+                        ['cacheHit', 'cache hit', 'px-3', 'right', 'cache reads as a share of all prompt tokens (in + cache reads + cache writes)'],
+                        ['avg', 'avg tokens', 'px-5', 'right', 'tokens in + out, per call'],
+                      ] as [SortCol, string, string, 'left' | 'right', string | undefined][]).map(([col, label, pad, align, title]) => (
+                        <th key={col} className={cx(pad, 'py-2.5 font-medium', align === 'right' && 'text-right')}
+                          aria-sort={sort?.col === col ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                          <button type="button" onClick={() => sortBy(col)} title={title ? `${title} — click to sort` : 'click to sort'}
+                            className={cx('hover:text-ink', sort?.col === col && 'text-ink')}>
+                            {label}{sort?.col === col ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
+                          </button>
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody className="font-mono tnum">
-                    {ranked.map((r) => (
+                    {tableRows.map((r) => {
+                      const to = reqLink(r.k);
+                      const cacheDen = r.tin + r.cread + r.cwrite;
+                      return (
                       <tr key={r.k} className="border-b border-line/50 transition-colors last:border-0 hover:bg-wash">
-                        <td className="max-w-[240px] truncate px-5 py-2 font-sans text-ink" title={r.k}>{r.k}</td>
+                        <td className="max-w-[240px] truncate px-5 py-2 font-sans text-ink" title={r.k}>
+                          {to ? <Link to={to} className="underline-offset-2 hover:underline" title={`${r.k} — open in Requests`}>{r.k}</Link> : r.k}
+                        </td>
                         <td className="px-3 py-2 text-right text-ink">{nfmt(r.calls)}</td>
                         <td className="px-3 py-2 text-right text-dim">{formatTokens(r.tin)}</td>
                         <td className="px-3 py-2 text-right text-dim">{formatTokens(r.tout)}</td>
@@ -439,11 +522,17 @@ export default function Stats() {
                         <td className={cx('px-3 py-2 text-right', r.p50_ttft_ms > 0 ? 'text-[color:var(--color-viz-latency)]' : 'text-mute')}>
                           {fmtMs(r.p50_ttft_ms)}
                         </td>
-                        <td className={cx('px-5 py-2 text-right', r.errors > 0 ? 'text-warn' : 'text-mute')}>
+                        <td className={cx('px-3 py-2 text-right', r.errors > 0 ? 'text-warn' : 'text-mute')}>
                           {r.errors > 0 ? nfmt(r.errors) : '–'}
                         </td>
+                        <td className={cx('px-3 py-2 text-right', r.errors > 0 ? 'text-warn' : 'text-mute')}>
+                          {r.calls > 0 && r.errors > 0 ? pct(r.errors, r.calls) : '–'}
+                        </td>
+                        <td className="px-3 py-2 text-right text-dim">{cacheDen > 0 && r.cread > 0 ? pct(r.cread, cacheDen) : '–'}</td>
+                        <td className="px-5 py-2 text-right text-dim">{r.calls > 0 ? formatTokens((r.tin + r.tout) / r.calls) : '–'}</td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

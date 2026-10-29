@@ -185,7 +185,8 @@ returned page — so the totals answer "how much lives behind this filter".
 Params: `min_tin` `max_tin` `min_tout` `max_tout` (non-negative integers);
 `from`/`to` (RFC3339, `[from,to)` like `/admin/usage`, default last 24h with the same
 +1min grace); `limit` (1-500, default 50); `sort` = `ts_desc` (default) | `tin_desc` |
-`tout_desc`. Anything invalid → `400`.
+`tout_desc`; `account`, `model`, `alias`, `client`, `session` (exact match on the ledger's account name,
+model, combo name, client (API key) name, and `X-Ezllm-Session` grouping key — never a prefix or pattern). Anything invalid → `400`.
 
 ### `GET /admin/usage?group_by=&from=&to=`
 Dashboard aggregates (`store.UsageReport`), computed server-side over the FULL filtered
@@ -553,6 +554,9 @@ toggle is `PATCH /admin/combos/{id}` `{"enabled":false}` (the `?enabled=true|fal
 still honored). A disabled combo refuses inference with `combo "x" is disabled` and drops out of
 `/v1/models`.
 
+`POST /admin/combos/{id}/test` probes every hop with one tiny real request. A body `{"surface":"chat|anthropic","hop":N}`
+narrows it to the hop at position `N` (0-based; out of range → `400`). Each result carries its `index`.
+
 ### `POST /admin/combos/{id}/hops` → `200`
 Replaces the hop list atomically (same body shape, `hops` only).
 
@@ -660,6 +664,19 @@ table; any other value is a 400). Every engine applies to all three request shap
 - Selection: per-request `x-ezllm-compression` header → the combo's `compression_profile_id` →
   off. Fail-open: an engine error passes the original request through untouched.
 
+### `POST /admin/compression-preview` → `200`
+Runs the real engines over a pasted sample; nothing is stored, sent upstream or ledgered. Body:
+`text` (required, ≤ 256 KiB), `profile_id` (a saved profile — a paused one still previews) **or** an inline
+`profile` (`stages` plus optional `exempt_last_turn`, `min_compress_ratio`, `auto_trigger_tokens`,
+`fresh_tool_output`; lets an editor preview an unsaved draft; wins over `profile_id`), `kind`
+(`tool_output` default | `prompt`), `tool` (the tool's name for `tool_output`, default `terminal` — it
+decides whether rtk filters or preserves the text), `ignore_floors` (skip the ratio and absolute floors to see
+what the engines alone can do). The sample is wrapped in a minimal conversation so it is never the exempt
+final message. Stateless: no session memo. Answers `applied`, `tokens_before`/`tokens_after` (of the sample,
+by the shared estimator), `saved_notional` (what a declined rewrite would have saved), `stages` (per-engine
+`pre`/`post`/`saved`/`fired`/`cpu_ms`), `note` (why nothing shipped: a floor, `below auto_trigger_tokens`, …)
+and `after` (the sample as it would ship; the original when not applied). Validation errors are `400`.
+
 ## M6 — dashboard session & live feed
 
 ### First-boot setup (schema v26): `GET /admin/setup` · `POST /admin/setup`
@@ -746,7 +763,10 @@ Always every card in fixed order, including a first run with no providers:
 right now; `""` = it will refuse), `target_exists`, `verified_models` (green probes
 for THIS surface), `accounts` (enabled providers; `0` drives the "connect a
 provider" state), `verdict` (`{model, ok, detail, tested_at}` for the resolved
-target, or `null`).
+target, or `null`), `probes` (every recorded test for THIS surface as
+`{model, ok, detail, tested_at}` with a namespaced `ns/model` id, newest first,
+at most 100; `[]` when none — the Services page marks verified models in its
+picker and lists what `auto` may choose from).
 
 ### `POST /admin/services/{surface}/generate` → upstream answer, as-is
 Admin-only "Try it" for the media services (`images_gen`, `images_edit`, `audio_tts`,

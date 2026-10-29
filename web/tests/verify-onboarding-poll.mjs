@@ -21,7 +21,7 @@ await page.addInitScript(() => {
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async text => { window.__copied = text; } } });
 });
 await page.goto(`${t.base}/connect`);
-await page.getByText(/Create an inference-only key below/).waitFor();
+await page.getByText(/Create an inference-only key above/).waitFor();
 await page.getByRole('button', { name: 'Copy request' }).click();
 const copied = await page.evaluate(() => window.__copied);
 check('example uses discovered model and a key placeholder', copied.includes('demo/model') && copied.includes('YOUR_EZLLM_KEY') && copied.includes('/v1/chat/completions'), copied);

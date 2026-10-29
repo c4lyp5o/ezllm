@@ -1595,6 +1595,9 @@ func (s *Server) handleCombos(w http.ResponseWriter, r *http.Request) {
 // could not be DIALED at all (account missing, no usable key) — distinct from
 // an upstream status the request actually earned.
 type comboTestHop struct {
+	// Index is the hop's position in the combo (0-based), so a single-hop
+	// probe can be told apart from the rest of the chain.
+	Index     int    `json:"index"`
 	AccountID int64  `json:"account_id"`
 	Namespace string `json:"namespace"`
 	Model     string `json:"model"`
@@ -1690,9 +1693,11 @@ func (s *Server) handleComboTest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	surface := provider.SurfaceChat
+	only := -1 // >= 0: probe just that hop
 	if r.ContentLength > 0 {
 		var in struct {
 			Surface string `json:"surface"`
+			Hop     *int   `json:"hop"`
 		}
 		// A malformed body is ignored on purpose: the surface is a UI hint,
 		// not a security-relevant field, and defaulting is what the button
@@ -1707,11 +1712,22 @@ func (s *Server) handleComboTest(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "invalid_request_error", "surface must be chat or anthropic")
 			return
 		}
+		if in.Hop != nil {
+			if *in.Hop < 0 || *in.Hop >= len(combo.Hops) {
+				writeErr(w, http.StatusBadRequest, "invalid_request_error", fmt.Sprintf("hop must be 0..%d", len(combo.Hops)-1))
+				return
+			}
+			only = *in.Hop
+		}
 	}
 
 	hops := make([]comboTestHop, 0, len(combo.Hops))
-	for _, h := range combo.Hops {
+	for i, h := range combo.Hops {
+		if only >= 0 && i != only {
+			continue
+		}
 		hr := comboTestHop{
+			Index:     i,
 			AccountID: h.AccountID,
 			Model:     h.ModelID,
 			Enabled:   h.Enabled == nil || *h.Enabled,

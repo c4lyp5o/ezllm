@@ -133,3 +133,57 @@ func TestComboTestProbesEveryHopAndFillsErr(t *testing.T) {
 		t.Error("overview is missing block_cursors")
 	}
 }
+
+// A body naming one hop probes just that hop (and says which position it was),
+// and a position outside the chain is a 400, not a silent empty answer.
+func TestComboTestCanProbeOneHop(t *testing.T) {
+	tu := newTwoUpstream(t, true)
+	tu.badHits, tu.goodHits = nil, nil
+
+	post := func(path, body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer tok-admin")
+		req.Header.Set("Content-Type", "application/json")
+		tu.handler.ServeHTTP(rec, req)
+		return rec
+	}
+	list := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/admin/combos", nil)
+	req.Header.Set("Authorization", "Bearer tok-admin")
+	tu.handler.ServeHTTP(list, req)
+	var combos []struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &combos); err != nil || len(combos) == 0 {
+		t.Fatalf("list combos: %v %s", err, list.Body.String())
+	}
+	path := "/admin/combos/" + itoa(combos[0].ID) + "/test"
+
+	rec := post(path, `{"hop":1}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("one-hop test: %d %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Hops []struct {
+			Index     int    `json:"index"`
+			Namespace string `json:"namespace"`
+			Status    int    `json:"status"`
+		} `json:"hops"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Hops) != 1 || out.Hops[0].Index != 1 || out.Hops[0].Namespace != "good" || out.Hops[0].Status != http.StatusOK {
+		t.Fatalf("hops = %+v, want only hop 1 (good, 200)", out.Hops)
+	}
+	if len(tu.badHits) != 0 || len(tu.goodHits) != 1 {
+		t.Fatalf("upstream hits = bad %d / good %d, want only the named hop dialed", len(tu.badHits), len(tu.goodHits))
+	}
+	for _, body := range []string{`{"hop":2}`, `{"hop":-1}`} {
+		if rec := post(path, body); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: code %d, want 400", body, rec.Code)
+		}
+	}
+}

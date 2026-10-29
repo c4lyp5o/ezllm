@@ -587,6 +587,15 @@ export function usage(split: SplitKey, range: RangeKey): Promise<UsageResp> {
   return get<UsageResp>(`/admin/usage?${params.toString()}`);
 }
 
+/** Like usage(), over an arbitrary look-back in hours (prior-period maths:
+ *  the previous window is the 2x window minus the 1x one). */
+export function usageHours(split: SplitKey, hours: number): Promise<UsageResp> {
+  const params = new URLSearchParams({ from: new Date(Date.now() - hours * 3600_000).toISOString() });
+  const g = SPLIT_GROUP[split];
+  if (g) params.set('group_by', g);
+  return get<UsageResp>(`/admin/usage?${params.toString()}`);
+}
+
 /** Escape hatch for a group_by the SplitKey map does not name. */
 export function usageGroup(groupBy: string, range: RangeKey): Promise<UsageResp> {
   const params = new URLSearchParams({ from: rangeFrom(range), group_by: groupBy });
@@ -620,10 +629,12 @@ export type RequestsResp = {
 export type RequestSort = 'ts_desc' | 'tin_desc' | 'tout_desc';
 export type RequestFilter = {
   minTin?: number; maxTin?: number; minTout?: number; maxTout?: number;
-  range?: RangeKey; sort?: RequestSort; limit?: number;
+  range?: RangeKey; /** An exact look-back in hours; wins over range (a 2x window for a prior-period comparison). */ hours?: number; sort?: RequestSort; limit?: number;
+  /** Exact ledger names (the dashboard's click-through). */
+  account?: string; model?: string; alias?: string; client?: string; session?: string;
 };
 export function requests(f: RequestFilter = {}): Promise<RequestsResp> {
-  const hours = RANGE_HOURS[f.range ?? '24h'];
+  const hours = f.hours ?? RANGE_HOURS[f.range ?? '24h'];
   const params = new URLSearchParams({ from: new Date(Date.now() - hours * 3600_000).toISOString() });
   if (f.minTin != null) params.set('min_tin', String(f.minTin));
   if (f.maxTin != null) params.set('max_tin', String(f.maxTin));
@@ -631,6 +642,11 @@ export function requests(f: RequestFilter = {}): Promise<RequestsResp> {
   if (f.maxTout != null) params.set('max_tout', String(f.maxTout));
   if (f.sort) params.set('sort', f.sort);
   if (f.limit) params.set('limit', String(f.limit));
+  if (f.account) params.set('account', f.account);
+  if (f.model) params.set('model', f.model);
+  if (f.alias) params.set('alias', f.alias);
+  if (f.client) params.set('client', f.client);
+  if (f.session) params.set('session', f.session);
   return get<RequestsResp>(`/admin/requests?${params.toString()}`);
 }
 
@@ -646,6 +662,8 @@ export type ServiceCard = {
   surface: ServiceSurface; endpoint: string; label: string; description: string;
   mode: ServiceMode; model_target: string; resolved_target: string; target_exists: boolean;
   verified_models: number; accounts: number; verdict: ServiceVerdict | null;
+  /** Every recorded test for this surface (namespaced ids), newest first. */
+  probes: ServiceVerdict[];
 };
 export type ServiceTestResult = { surface: ServiceSurface; model: string; ok: boolean; dispatched: boolean; status: number; ms: number; detail: string };
 export const serviceCards = () => get<{ services: ServiceCard[] }>('/admin/services');
@@ -833,11 +851,20 @@ export function messageText(m: ChatMessage): string {
  * content delta to onDelta as the upstream emits it. Resolves on [DONE] or
  * stream end; rejects with the usual ApiError/AuthError shape.
  */
+/** Optional extras for one chat request. `params` ride in the body only when
+ *  set; `session` is sent as X-Ezllm-Session (the ledger's grouping key, never
+ *  forwarded upstream), which is how the page finds this request's ledger row. */
+export type ChatOptions = {
+  params?: { temperature?: number; max_tokens?: number; top_p?: number };
+  session?: string;
+};
+
 export async function chatStream(
   model: string,
   messages: ChatMessage[],
   onDelta: (text: string) => void,
   signal?: AbortSignal,
+  opts: ChatOptions = {},
 ): Promise<void> {
   let res: Response;
   try {
@@ -845,8 +872,9 @@ export async function chatStream(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(opts.session ? { 'X-Ezllm-Session': opts.session } : {}),
       },
-      body: JSON.stringify({ model, messages, stream: true }),
+      body: JSON.stringify({ model, messages, stream: true, ...opts.params }),
       credentials: 'include',
       signal,
     });
@@ -1001,6 +1029,20 @@ export type CompressionProfile = {
   notes?: string | null;
   created_at?: string | null;
 } & Record<string, unknown>;
+
+/** POST /admin/compression-preview: the real engines over a pasted sample. */
+export type CompressionPreview = {
+  kind: string; tool: string; applied: boolean;
+  tokens_before: number; tokens_after: number; saved_notional: number;
+  stages: { engine: string; pre: number; post: number; saved: number; fired: number; cpu_ms: number }[];
+  note: string; after: string;
+};
+export type PreviewRequest = {
+  text: string; kind: 'tool_output' | 'prompt'; tool?: string; ignore_floors?: boolean;
+  profile_id?: number;
+  profile?: { stages: CompressionStage[]; exempt_last_turn: boolean; min_compress_ratio: number; auto_trigger_tokens: number; fresh_tool_output: string };
+};
+export const previewCompression = (b: PreviewRequest) => post<CompressionPreview>('/admin/compression-preview', b);
 
 export function compressionProfiles(): Promise<CompressionProfile[]> {
   return get<CompressionProfile[]>('/admin/compression-profiles');

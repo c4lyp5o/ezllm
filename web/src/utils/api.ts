@@ -659,6 +659,8 @@ export type ServiceCard = {
   surface: ServiceSurface; endpoint: string; label: string; description: string;
   mode: ServiceMode; model_target: string; resolved_target: string; target_exists: boolean;
   verified_models: number; accounts: number; verdict: ServiceVerdict | null;
+  /** Every recorded test for this surface (namespaced ids), newest first. */
+  probes: ServiceVerdict[];
 };
 export type ServiceTestResult = { surface: ServiceSurface; model: string; ok: boolean; dispatched: boolean; status: number; ms: number; detail: string };
 export const serviceCards = () => get<{ services: ServiceCard[] }>('/admin/services');

@@ -746,7 +746,10 @@ Always every card in fixed order, including a first run with no providers:
 right now; `""` = it will refuse), `target_exists`, `verified_models` (green probes
 for THIS surface), `accounts` (enabled providers; `0` drives the "connect a
 provider" state), `verdict` (`{model, ok, detail, tested_at}` for the resolved
-target, or `null`).
+target, or `null`), `probes` (every recorded test for THIS surface as
+`{model, ok, detail, tested_at}` with a namespaced `ns/model` id, newest first,
+at most 100; `[]` when none — the Services page marks verified models in its
+picker and lists what `auto` may choose from).
 
 ### `POST /admin/services/{surface}/generate` → upstream answer, as-is
 Admin-only "Try it" for the media services (`images_gen`, `images_edit`, `audio_tts`,

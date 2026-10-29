@@ -11,6 +11,7 @@ import (
 	"image/png"
 	"mime/multipart"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -35,7 +36,14 @@ type serviceCard struct {
 	Verified     int             `json:"verified_models"`
 	Accounts     int             `json:"accounts"`
 	Verdict      *serviceVerdict `json:"verdict"`
+	// Probes is every model's recorded test for this surface, newest first
+	// (capped at maxServiceProbes), with namespaced ids: the Services page marks
+	// verified models in its picker and lists what Auto may choose from.
+	Probes []serviceVerdict `json:"probes"`
 }
+
+// maxServiceProbes bounds the probe list a card carries.
+const maxServiceProbes = 100
 
 type serviceVerdict struct {
 	Model    string `json:"model"`
@@ -147,6 +155,26 @@ func (s *Server) buildServiceCard(ctx context.Context, surface string, binding *
 	for _, p := range probes {
 		if p.OK {
 			card.Verified++
+		}
+	}
+	card.Probes = []serviceVerdict{}
+	if len(probes) > 0 {
+		accounts, err := s.db.ListAccounts(ctx)
+		if err != nil {
+			return card, err
+		}
+		ns := map[int64]string{}
+		for _, a := range accounts {
+			ns[a.ID] = a.Namespace
+		}
+		for _, p := range probes {
+			if n, ok := ns[p.AccountID]; ok {
+				card.Probes = append(card.Probes, serviceVerdict{Model: n + "/" + p.ModelID, OK: p.OK, Detail: p.Detail, TestedAt: p.TestedAt})
+			}
+		}
+		sort.SliceStable(card.Probes, func(i, j int) bool { return card.Probes[i].TestedAt > card.Probes[j].TestedAt })
+		if len(card.Probes) > maxServiceProbes {
+			card.Probes = card.Probes[:maxServiceProbes]
 		}
 	}
 	if card.Resolved != "" {

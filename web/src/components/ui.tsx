@@ -318,15 +318,17 @@ export function Modal({ open, onClose, title, subtitle, children, footer, wide, 
 
 // Destructive-action gate. Replaces window.confirm so every delete looks and
 // behaves the same. Escape / backdrop / Cancel all dismiss without acting.
-export function ConfirmModal({ open, title, body, confirmLabel = 'Delete', busy, onConfirm, onClose }: {
+export function ConfirmModal({ open, title, body, confirmLabel = 'Delete', tone = 'danger', busy, onConfirm, onClose }: {
   open: boolean; title: string; body: ReactNode; confirmLabel?: string; busy?: boolean;
+  /** 'primary' for a confirmation that is not destructive (spending quota, sending). */
+  tone?: 'danger' | 'primary';
   onConfirm: () => void; onClose: () => void;
 }) {
   return (
     <Modal open={open} onClose={onClose} title={title}
       footer={<>
         <button type="button" className={cx(btn.base, btn.ghost)} onClick={onClose} disabled={busy}>Cancel</button>
-        <button type="button" className={cx(btn.base, btn.danger)} onClick={onConfirm} disabled={busy}>
+        <button type="button" className={cx(btn.base, tone === 'primary' ? btn.primary : btn.danger)} onClick={onConfirm} disabled={busy}>
           {busy ? 'Working…' : confirmLabel}
         </button>
       </>}>

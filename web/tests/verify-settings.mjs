@@ -55,9 +55,12 @@ try {
   await page.getByRole('alert').filter({ hasText: 'settings changed' }).waitFor();
   check('conflict keeps draft', await page.getByLabel('Retries per hop', { exact: true }).inputValue() === '2');
   await page.getByRole('button', { name: 'Security', exact: true }).click();
+  await page.getByRole('dialog').getByText('Discard unsaved changes?').waitFor();
+  check('leaving a tab with unsaved edits asks first', true);
+  await page.getByRole('dialog').getByRole('button', { name: 'Discard changes', exact: true }).click();
   await page.getByText('Other browser', { exact: true }).waitFor();
-  page.once('dialog', d => d.accept());
   await page.getByRole('button', { name: 'Sign out', exact: true }).last().click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Sign out', exact: true }).click();
   await page.waitForFunction(() => !document.body.textContent.includes('Other browser'));
   check('individual session revoked', sessions.length === 0);
   await page.getByRole('button', { name: 'Backup & Recovery', exact: true }).click();

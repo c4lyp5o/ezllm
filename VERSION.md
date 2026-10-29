@@ -11,7 +11,45 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.4.0**
+**Current: v1.5.0**
+
+## v1.5.0 — 2026-10-29
+
+A dashboard pass, page by page, and the small API additions it needed. MINOR:
+features, no breaking change. No config or schema change; no migration.
+
+**Every operator page got a polish pass** — Dashboard, Analytics (Stats,
+Economics, Requests), Providers, Services, Chat, Combos, Rules, Compression,
+Connect, Neighbourhood and Settings. The common thread: a page says what is
+wrong before you open anything (health on combo hops, stale rules, key status,
+providers that need attention), links to the thing that fixes it (deep links
+such as `/providers?keys=ID`, `/combos?edit=ID`, `/rules?edit=ID`,
+`/compression?edit=ID`, `/connect?policy=ID`, `/neighbourhood?select=ID`), and
+every editor is a dialog that submits on Enter, locks while saving, refuses bad
+input with a reason at the field and asks before throwing away unsaved edits.
+Selection state is one mark everywhere (a 1px accent line), numbers are never
+abbreviated, and the shared copy button works over plain HTTP.
+
+Notable features: add or replace a provider key from the Edit dialog (the old
+key is removed only after the new one validates); Chat is a fixed-height
+workspace with Stop, per-answer actions, parameters, saved system prompts,
+export and a "served by" line read from the ledger; Services tests every
+configured model with a paid-model confirm; Combos shows live block cursors and
+per-combo traffic and can test a single hop; Compression can run a pipeline on
+a pasted sample before it is attached; Connect shows the real key inside
+paste-ready snippets and can test a new key; the Neighbourhood averages usage
+over 5 minutes, 1 hour or 24 hours and can go full screen.
+
+**API additions (all backward compatible).** `GET /admin/requests` takes exact
+`account`, `model`, `alias` (combo), `client` (API key) and `session` filters.
+`POST /admin/combos/{id}/test` takes an optional `hop` and numbers each result
+with an `index`. `GET /admin/services` cards carry `probes`, the newest
+verdicts first. `POST /admin/compression-preview` runs the real engines over a
+pasted sample, for a saved profile or an unsaved draft, and writes nothing.
+
+**Fixed.** The shared dialog's "Keep editing" button submitted the form: React
+reused the clicked button as the form's submit button once the discard bar
+closed. Every dialog with the unsaved-changes guard was affected.
 
 ## v1.4.0 — 2026-10-28
 

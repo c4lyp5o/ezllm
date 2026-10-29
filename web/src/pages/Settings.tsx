@@ -2,8 +2,11 @@ import { getSettings, saveSettings, getDashboardSessions, revokeDashboardSession
 import { readTheme, setTheme } from '../utils/theme';
 import { readMotion, readRange, savePreference, subscribePreferences } from '../utils/preferences';
 import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { ApiError, changeDashboardPassword, clearToken } from '../utils/api';
-import { Chip, SectionLabel, btn, cx, inputCls } from '../components/ui';
+import { Chip, ConfirmModal, CopyButton, SectionLabel, btn, cx, inputCls, relTime } from '../components/ui';
+import { fmtUptime } from '../utils/lib';
+import { settingError } from '../utils/settings';
 import PasswordStrength from '../components/PasswordStrength';
 import { MIN_PASSWORD } from '../utils/passwordStrength';
 
@@ -66,6 +69,9 @@ function PasswordSettings() {
 
 type Tab = 'General' | 'Security' | 'Backup & Recovery' | 'Gateway' | 'Notifications' | 'System';
 const TABS: Tab[] = ['General', 'Security', 'Backup & Recovery', 'Gateway', 'Notifications', 'System'];
+// The tab lives in the URL (?tab=backup), so a section can be linked to.
+const TAB_SLUG: Record<Tab, string> = { General: 'general', Security: 'security', 'Backup & Recovery': 'backup', Gateway: 'gateway', Notifications: 'notifications', System: 'system' };
+const tabFromSlug = (slug: string | null): Tab => TABS.find((t) => TAB_SLUG[t] === slug) ?? 'General';
 const DETAILS: Record<string, [string, string]> = {
   usage_timezone: ['Usage timezone', 'IANA name, for example Asia/Kuala_Lumpur. Reports and rules set to “Instance timezone” follow this value. Explicit rule timezones and existing client-token budgets retain their own boundaries.'],
   translation_enabled: ['Protocol translation', 'Allow proven cross-protocol routes. Surface pins still apply.'],
@@ -114,7 +120,7 @@ function BrowserPreferences() {
   </section>;
 }
 
-function SettingsGroup({ tab, view, updated }: { tab: Tab; view: SettingsView; updated: (v: SettingsView) => void }) {
+function SettingsGroup({ tab, view, updated, onDirty }: { tab: Tab; view: SettingsView; updated: (v: SettingsView) => void; onDirty: (dirty: boolean) => void }) {
   const keys = GROUPS[tab] ?? [];
   const [draft, setDraft] = useState<Record<string, unknown>>({});
   const [busy, setBusy] = useState(false);
@@ -122,8 +128,13 @@ function SettingsGroup({ tab, view, updated }: { tab: Tab; view: SettingsView; u
   const [saved, setSaved] = useState(false);
   const [acknowledged, acknowledge] = useState(false);
   useEffect(() => { setDraft({}); acknowledge(false); }, [view.revision, tab]);
+  const dirty = Object.keys(draft).length > 0;
+  useEffect(() => { onDirty(dirty); return () => onDirty(false); }, [dirty]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!keys.length) return null;
   const timezoneChanged = 'usage_timezone' in draft;
+  // A value reset to the deployment default (null) is always acceptable.
+  const problems: Record<string, string> = {};
+  for (const [k, v] of Object.entries(draft)) { if (v !== null) { const msg = settingError(k, v); if (msg) problems[k] = msg; } }
   const submit = async (event: React.FormEvent) => {
     event.preventDefault(); setBusy(true); setError(''); setSaved(false);
     try { updated(await saveSettings(view.revision, draft)); setDraft({}); setSaved(true); }
@@ -146,7 +157,8 @@ function SettingsGroup({ tab, view, updated }: { tab: Tab; view: SettingsView; u
           <p id={`hint-${key}`} className="mt-1 text-xs leading-relaxed text-mute">{hint}</p>
           {typeof field.value === 'boolean'
             ? <input id={`setting-${key}`} aria-describedby={`hint-${key}`} className="mt-3 h-4 w-4" type="checkbox" disabled={!field.editable} checked={!!value} onChange={e => { setDraft(d => ({ ...d, [key]: e.target.checked })); setSaved(false); }} />
-            : <input id={`setting-${key}`} aria-describedby={`hint-${key}`} className={cx(inputCls, 'mt-2 max-w-sm')} type={typeof field.value === 'number' ? 'number' : 'text'} disabled={!field.editable} value={String(value)} onChange={e => { setDraft(d => ({ ...d, [key]: typeof field.value === 'number' ? Number(e.target.value) : e.target.value })); setSaved(false); }} />}
+            : <input id={`setting-${key}`} aria-describedby={`hint-${key}`} className={cx(inputCls, 'mt-2 max-w-sm', problems[key] && 'border-bad/60')} aria-invalid={!!problems[key]} type={typeof field.value === 'number' ? 'number' : 'text'} disabled={!field.editable} value={String(value)} onChange={e => { setDraft(d => ({ ...d, [key]: typeof field.value === 'number' ? Number(e.target.value) : e.target.value })); setSaved(false); }} />}
+          {problems[key] && <p className="mt-1 text-xs text-bad" role="alert">{problems[key]}</p>}
           {draft[key] === null && <p className="mt-1 text-xs text-warn">Deployment/default value will be restored when saved.</p>}
           {!field.editable && <p className="mt-1 text-xs text-mute">Managed by {field.source}; change the deployment override to unlock this control.</p>}
         </div>;
@@ -154,7 +166,11 @@ function SettingsGroup({ tab, view, updated }: { tab: Tab; view: SettingsView; u
       {timezoneChanged && <label className="flex items-start gap-2 text-sm text-warn"><input type="checkbox" checked={acknowledged} onChange={e => acknowledge(e.target.checked)} />I understand this changes report days and inherited rule boundaries, and may change available daily budget immediately.</label>}
       {error && <p role="alert" className="text-sm text-bad">{error} Reload Settings if another operator changed it.</p>}
       {saved && <p role="status" className="text-sm text-good">Settings saved.</p>}
-      <button className={cx(btn.base, btn.primary)} disabled={busy || !Object.keys(draft).length || (timezoneChanged && !acknowledged)}>{busy ? 'Saving…' : 'Save changes'}</button>
+      <div className="flex flex-wrap items-center gap-3">
+        <button className={cx(btn.base, btn.primary)} disabled={busy || !dirty || (timezoneChanged && !acknowledged) || Object.keys(problems).length > 0}>{busy ? 'Saving…' : 'Save changes'}</button>
+        {dirty && <button type="button" className={cx(btn.base, btn.ghost)} onClick={() => { setDraft({}); acknowledge(false); setError(''); }}>Discard changes</button>}
+        {dirty && <span className="text-xs text-warn">Unsaved changes</span>}
+      </div>
     </fieldset>
   </form>;
 }
@@ -163,18 +179,23 @@ function Sessions() {
   const [rows, setRows] = useState<DashboardSession[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  // null = nothing pending; {} = sign out everything; {session} = that one.
+  const [pending, setPending] = useState<{ session?: DashboardSession } | null>(null);
   const load = () => getDashboardSessions().then(setRows).catch(e => setError(errorMessage(e)));
   useEffect(() => { void load(); }, []);
   const revoke = async (session?: DashboardSession) => {
-    if (!window.confirm(session ? `Sign out ${session.current ? 'this browser' : 'this session'}?` : 'Sign out all dashboard sessions, including this browser?')) return;
     setBusy(true); setError('');
     try { if (session) await revokeDashboardSession(session.id); else await revokeAllDashboardSessions();
       if (!session || session.current) { clearToken(); window.location.reload(); return; } await load();
-    } catch (e) { setError(errorMessage(e)); } finally { setBusy(false); }
+    } catch (e) { setError(errorMessage(e)); } finally { setBusy(false); setPending(null); }
   };
+  const what = pending?.session ? (pending.session.current ? 'this browser' : 'this session') : 'every dashboard session, including this browser';
   return <section className={panel}><SectionLabel>Active sessions</SectionLabel><p className="mt-2 text-sm text-mute">Browser descriptions are supplied by the browser. Older sessions may have no description.</p>
-    <ul className="mt-4 space-y-3">{rows.map(s => <li key={s.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-3"><div className="min-w-0"><p className="break-words text-sm">{s.current ? 'This browser · ' : ''}{s.browser || 'Browser description unavailable'}</p><p className="mt-1 text-xs text-mute">Created {new Date(s.created_at).toLocaleString()} · expires {new Date(s.expires_at).toLocaleString()}</p></div><button className={cx(btn.base, btn.ghost)} disabled={busy} onClick={() => void revoke(s)}>Sign out</button></li>)}</ul>
-    {error && <p role="alert" className="mt-3 text-sm text-bad">{error}</p>}<button className={cx(btn.base, btn.ghost, 'mt-4')} disabled={busy || !rows.length} onClick={() => void revoke()}>Sign out all devices</button>
+    <ul className="mt-4 space-y-3">{rows.map(s => <li key={s.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-3"><div className="min-w-0"><p className="break-words text-sm">{s.current && <Chip tone="accent" className="mr-2">This browser</Chip>}{s.browser || 'Browser description unavailable'}</p><p className="mt-1 text-xs text-mute" title={`Created ${new Date(s.created_at).toLocaleString()}`}>Created {relTime(s.created_at)} · expires {new Date(s.expires_at).toLocaleString()}</p></div><button className={cx(btn.base, btn.ghost)} disabled={busy} onClick={() => setPending({ session: s })}>Sign out</button></li>)}</ul>
+    {error && <p role="alert" className="mt-3 text-sm text-bad">{error}</p>}<button className={cx(btn.base, btn.ghost, 'mt-4')} disabled={busy || !rows.length} onClick={() => setPending({})}>Sign out all devices</button>
+    <ConfirmModal open={pending != null} title={`Sign out ${what}?`} confirmLabel="Sign out" busy={busy}
+      body={pending?.session && !pending.session.current ? 'That session is signed out at once. This browser stays signed in.' : 'You will be sent to the sign-in page and will need your password to come back.'}
+      onClose={() => setPending(null)} onConfirm={() => void revoke(pending?.session)} />
   </section>;
 }
 function Backups() {
@@ -213,7 +234,7 @@ function System() {
   const [error, setError] = useState('');
   useEffect(() => { getDiagnostics().then(setInfo).catch(e => setError(errorMessage(e))); }, []);
   return <section className={panel}><SectionLabel>System</SectionLabel>{error && <p role="alert" className="mt-3 text-bad">{error}</p>}{info && <>
-    <dl className="mt-4 grid grid-cols-2 gap-3 text-sm"><dt>Version</dt><dd>{info.version}</dd><dt>Uptime</dt><dd>{Math.floor(info.uptime_seconds / 60)} minutes</dd><dt>Database</dt><dd>{(info.database_bytes / 1048576).toFixed(2)} MiB</dd></dl>
+    <dl className="mt-4 grid grid-cols-2 gap-3 text-sm"><dt>Version</dt><dd className="flex min-w-0 flex-wrap items-center gap-2 break-all">{info.version}<CopyButton text={info.version} label="Copy" /></dd><dt>Uptime</dt><dd title={`${Math.floor(info.uptime_seconds / 60)} minutes`}>{fmtUptime(info.uptime_seconds)}</dd><dt>Database</dt><dd>{(info.database_bytes / 1048576).toFixed(2)} MiB</dd></dl>
     {info.deployment && <dl className="mt-5 grid grid-cols-2 gap-3 text-sm"><dt>Listen address</dt><dd className="break-words">{info.deployment.listen_address} · {info.deployment.listen_source}</dd><dt>Storage</dt><dd>{info.deployment.storage}</dd><dt>Master-key source</dt><dd>{info.deployment.master_key_source}</dd><dt>Trusted proxy entries</dt><dd>{info.deployment.trusted_proxy_count}</dd></dl>}
     <div className="mt-5 space-y-2">{info.bridges.map(b => <p key={b.id} className="flex justify-between text-sm"><span>{b.id}</span><span>{b.enabled ? 'Ready' : 'Off'}</span></p>)}</div>
     <div className="mt-5 space-y-2">{Object.entries(info.jobs).map(([name, j]) => <div key={name} className="text-sm"><p>{name}: {j.running ? 'Running' : 'Idle'}</p><p className="text-xs text-mute">Last success: {j.last_success ? new Date(j.last_success).toLocaleString() : 'No recorded success'} · last failure: {j.last_failure ? new Date(j.last_failure).toLocaleString() : 'None recorded'}</p></div>)}</div>
@@ -222,19 +243,37 @@ function System() {
   </>}</section>;
 }
 export default function Settings() {
-  const [tab, setTab] = useState<Tab>('General');
+  const [params, setParams] = useSearchParams();
+  const [tab, setTabState] = useState<Tab>(() => tabFromSlug(params.get('tab')));
   const [view, setView] = useState<SettingsView | null>(null);
   const [error, setError] = useState('');
+  const [dirty, setDirty] = useState(false);
+  const [pendingTab, setPendingTab] = useState<Tab | null>(null);
   const load = () => { setError(''); getSettings().then(setView).catch(e => setError(errorMessage(e))); };
   useEffect(load, []);
+  const goTab = (t: Tab) => {
+    setTabState(t); setDirty(false); setPendingTab(null);
+    setParams((p) => { const n = new URLSearchParams(p); if (t === 'General') n.delete('tab'); else n.set('tab', TAB_SLUG[t]); return n; }, { replace: true });
+  };
+  // Leaving a tab throws its unsaved edits away, so ask first.
+  const requestTab = (t: Tab) => { if (t === tab) return; if (dirty) setPendingTab(t); else goTab(t); };
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
   return <div className="max-w-4xl space-y-5">
-    <nav aria-label="Settings sections" className="flex flex-wrap gap-2">{TABS.map(t => <button key={t} aria-current={tab === t ? 'page' : undefined} className={cx(btn.base, tab === t ? btn.primary : btn.ghost)} onClick={() => setTab(t)}>{t}</button>)}</nav>
+    <nav aria-label="Settings sections" className="flex flex-wrap gap-2">{TABS.map(t => <button key={t} aria-current={tab === t ? 'page' : undefined} className={cx(btn.base, tab === t ? btn.primary : btn.ghost)} onClick={() => requestTab(t)}>{t}</button>)}</nav>
     {error && <div role="alert" className="text-sm text-bad">{error} <button className="underline" onClick={load}>Reload Settings</button></div>}
     {tab === 'General' && <BrowserPreferences />}
-    {view && <SettingsGroup key={tab} tab={tab} view={view} updated={setView} />}
+    {view && <SettingsGroup key={tab} tab={tab} view={view} updated={setView} onDirty={setDirty} />}
     {tab === 'Security' && <><PasswordSettings /><Sessions /></>}
     {tab === 'Backup & Recovery' && <Backups />}
     {tab === 'Notifications' && <p className="text-xs text-mute">Preferences affect future notifications in this instance’s dashboard bell. Existing history is retained.</p>}
     {tab === 'System' && <><System />{view && <section className={panel}><SectionLabel>Effective configuration</SectionLabel><div className="mt-4 overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr><th className="py-2">Setting</th><th>Effective value</th><th>Source</th></tr></thead><tbody>{Object.entries(view.fields).map(([k, f]) => <tr key={k} className="border-t border-line"><td className="py-2 pr-3">{DETAILS[k]?.[0] ?? k}</td><td className="pr-3">{String(f.value) || 'Unlimited'}</td><td>{f.source}</td></tr>)}</tbody></table></div></section>}</>}
+    <ConfirmModal open={pendingTab != null} tone="primary" confirmLabel="Discard changes" title="Discard unsaved changes?"
+      body="You have changes on this tab that are not saved. Leaving it throws them away."
+      onClose={() => setPendingTab(null)} onConfirm={() => { if (pendingTab) goTab(pendingTab); }} />
   </div>;
 }

@@ -6,6 +6,7 @@ import { readRange } from '../utils/preferences';
 // the client sending too much history, or is the model burning it on output
 // and reasoning? (row shape = the dashboard's recentCalls projection.)
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   normalizeFeedRow, requests, RANGE_LABEL,
   type FeedRow, type RangeKey, type RequestSort, type RequestsResp,
@@ -65,9 +66,16 @@ const FIELDS: { key: keyof NumFields; label: string; ph: string }[] = [
 ];
 
 export default function Requests() {
+  // Dashboard click-through: ?account= / ?model= are exact ledger names
+  // (server-side filters, so the summary strip covers the filtered set), and
+  // ?range= seeds the window.
+  const [params, setParams] = useSearchParams();
+  const account = params.get('account') ?? '';
+  const model = params.get('model') ?? '';
+  const urlRange = params.get('range');
   const [fields, setFields] = useState<NumFields>(EMPTY_FIELDS);
   const [applied, setApplied] = useState<Applied>({});
-  const [range, setRange] = useState<RangeKey>(readRange);
+  const [range, setRange] = useState<RangeKey>(() => (RANGES as string[]).includes(urlRange ?? '') ? urlRange as RangeKey : readRange());
   const [sort, setSort] = useState<RequestSort>('ts_desc');
   const [data, setData] = useState<RequestsResp | null>(null);
   const [rows, setRows] = useState<FeedRow[]>([]);
@@ -82,7 +90,7 @@ export default function Requests() {
     setLoading(true);
     setErr(null);
     try {
-      const r = await requests({ ...applied, range, sort });
+      const r = await requests({ ...applied, range, sort, account, model });
       if (gen !== loadGen.current) return;
       setData(r);
       setRows(r.rows.map(normalizeFeedRow));
@@ -91,7 +99,7 @@ export default function Requests() {
     } finally {
       if (gen === loadGen.current) setLoading(false);
     }
-  }, [applied, range, sort]);
+  }, [applied, range, sort, account, model]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -109,7 +117,8 @@ export default function Requests() {
     setApplied(parsed);
   };
 
-  const clear = () => { setFields(EMPTY_FIELDS); setApplied({}); };
+  const clear = () => { setFields(EMPTY_FIELDS); setApplied({}); setParams({}); };
+  const dropParam = (name: string) => setParams((p) => { const n = new URLSearchParams(p); n.delete(name); return n; });
   const s = data?.summary;
 
   return (
@@ -135,6 +144,15 @@ export default function Requests() {
             <button type="button" onClick={clear} className={cx(btn.base, btn.ghost)}>Clear</button>
           </div>
         </div>
+        {(account || model) && (
+          <div className="mt-4 flex flex-wrap items-center gap-2 text-[13px]">
+            <SectionLabel>filtered to</SectionLabel>
+            {account && <button type="button" onClick={() => dropParam('account')} title="remove this filter"
+              className="rounded bg-shade px-2 py-0.5 text-dim hover:text-ink">provider {account} ×</button>}
+            {model && <button type="button" onClick={() => dropParam('model')} title="remove this filter"
+              className="rounded bg-shade px-2 py-0.5 text-dim hover:text-ink">model {model} ×</button>}
+          </div>
+        )}
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <SectionLabel>range</SectionLabel>
           <Seg

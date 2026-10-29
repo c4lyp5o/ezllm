@@ -587,6 +587,15 @@ export function usage(split: SplitKey, range: RangeKey): Promise<UsageResp> {
   return get<UsageResp>(`/admin/usage?${params.toString()}`);
 }
 
+/** Like usage(), over an arbitrary look-back in hours (prior-period maths:
+ *  the previous window is the 2x window minus the 1x one). */
+export function usageHours(split: SplitKey, hours: number): Promise<UsageResp> {
+  const params = new URLSearchParams({ from: new Date(Date.now() - hours * 3600_000).toISOString() });
+  const g = SPLIT_GROUP[split];
+  if (g) params.set('group_by', g);
+  return get<UsageResp>(`/admin/usage?${params.toString()}`);
+}
+
 /** Escape hatch for a group_by the SplitKey map does not name. */
 export function usageGroup(groupBy: string, range: RangeKey): Promise<UsageResp> {
   const params = new URLSearchParams({ from: rangeFrom(range), group_by: groupBy });
@@ -621,6 +630,8 @@ export type RequestSort = 'ts_desc' | 'tin_desc' | 'tout_desc';
 export type RequestFilter = {
   minTin?: number; maxTin?: number; minTout?: number; maxTout?: number;
   range?: RangeKey; sort?: RequestSort; limit?: number;
+  /** Exact ledger names (the dashboard's click-through). */
+  account?: string; model?: string;
 };
 export function requests(f: RequestFilter = {}): Promise<RequestsResp> {
   const hours = RANGE_HOURS[f.range ?? '24h'];
@@ -631,6 +642,8 @@ export function requests(f: RequestFilter = {}): Promise<RequestsResp> {
   if (f.maxTout != null) params.set('max_tout', String(f.maxTout));
   if (f.sort) params.set('sort', f.sort);
   if (f.limit) params.set('limit', String(f.limit));
+  if (f.account) params.set('account', f.account);
+  if (f.model) params.set('model', f.model);
   return get<RequestsResp>(`/admin/requests?${params.toString()}`);
 }
 

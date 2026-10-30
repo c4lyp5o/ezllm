@@ -71,9 +71,12 @@ func run() error {
 			return runBackupCommand(os.Args[1], os.Args[2:])
 		case "github-login":
 			return runGitHubLogin()
+		case "bridge-check":
+			return runBridgeCheck(os.Args[2:], os.Stdout)
 		case "help", "-h", "--help":
 			fmt.Println("usage: ezllm [flags]            start the router")
 			fmt.Println("       ezllm github-login       authorize a GitHub Copilot account (device flow)")
+			fmt.Println("       ezllm bridge-check NAME  gate a bridge CLI (claude|codex|agy) before promoting it")
 			return nil
 		}
 	}

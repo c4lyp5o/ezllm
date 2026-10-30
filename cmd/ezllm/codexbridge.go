@@ -84,18 +84,12 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 	if runtime.GOOS != "linux" {
 		return nil, fmt.Errorf("codex bridge: %s=on is a Linux feature (this build is %s); run ezllm in a Linux container — docs/codex-bridge-runbook.md", envCodexBridge, runtime.GOOS)
 	}
-	bin := strings.TrimSpace(os.Getenv(envCodexBin))
-	if bin == "" {
-		bin = "/opt/codex/bin/codex"
-	}
+	bin := envOrDefault(envCodexBin, "/opt/codex/bin/codex")
 	resolved, err := exec.LookPath(bin)
 	if err != nil {
 		return nil, fmt.Errorf("codex bridge: %s=%q does not resolve to the official Codex CLI: %w", envCodexBin, bin, err)
 	}
-	home := strings.TrimSpace(os.Getenv(envCodexHome))
-	if home == "" {
-		home = "/codex-sub"
-	}
+	home := envOrDefault(envCodexHome, "/codex-sub")
 	addr := strings.TrimSpace(os.Getenv(envCodexAddr))
 	if addr == "" {
 		addr = "127.0.0.1:8791"
@@ -125,10 +119,7 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 		return nil, fmt.Errorf("codex bridge: cannot locate this binary for the Landlock helper: %w", err)
 	}
 	tools := decideCodexTools(helper, resolved, strings.EqualFold(strings.TrimSpace(os.Getenv(envCodexToolsNoLL)), "on"))
-	qualified := "qualified"
-	if !pre.Qualified {
-		qualified = "unqualified (measured on " + codexbridge.QualifiedVersion + "; re-run the live proof)"
-	}
+	qualified := releaseState(bin, pre.Version, codexbridge.QualifiedVersion)
 
 	runner := &codexbridge.Runner{
 		Bin:           resolved,

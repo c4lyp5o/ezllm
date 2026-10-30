@@ -91,6 +91,17 @@ either **fails the boot loudly** — this process would otherwise look healthy w
 every subscription request fails. The bind is loopback-enforced: a non-loopback
 address is refused.
 
+A CLI other than 2.1.306 boots and serves; `cli_release` reports it
+`unqualified` until the live proof has been re-run and recorded in `qualified.json`.
+
+**Gate a release before promoting it.** `ezllm bridge-check claude` runs the boot
+checks against a staged CLI and exits non-zero on any problem — stricter than
+boot, which reports flag drift and keeps serving. `--json` prints the verdict
+(`ok`, `version`, `release`, `problems`) for the bridge updater
+(`SPEC-bridge-update.md`). A version the updater proved is listed in
+`qualified.json` in the bridge directory (next to the version folders, up to two
+levels above the binary); boot then reports it qualified.
+
 ## Wire it into ezllm
 
 1. **Account** (dashboard → Providers → Add provider → **Claude Pro/Max**).

@@ -43,18 +43,12 @@ func startAgyBridge(ctx context.Context, log *slog.Logger, report bridgeReport) 
 	if runtime.GOOS != "linux" {
 		return nil, fmt.Errorf("agy bridge: %s=on is a Linux feature (this build is %s); run ezllm in a Linux container — docs/agy-bridge-runbook.md", envAgyBridge, runtime.GOOS)
 	}
-	bin := strings.TrimSpace(os.Getenv(envAgyBin))
-	if bin == "" {
-		bin = "/opt/agy/agy"
-	}
+	bin := envOrDefault(envAgyBin, "/opt/agy/agy")
 	resolved, err := exec.LookPath(bin)
 	if err != nil {
 		return nil, fmt.Errorf("agy bridge: %s=%q does not resolve to the official Antigravity CLI: %w", envAgyBin, bin, err)
 	}
-	home := strings.TrimSpace(os.Getenv(envAgyHome))
-	if home == "" {
-		home = "/agy-sub"
-	}
+	home := envOrDefault(envAgyHome, "/agy-sub")
 	addr := strings.TrimSpace(os.Getenv(envAgyAddr))
 	if addr == "" {
 		addr = "127.0.0.1:8792"
@@ -80,10 +74,7 @@ func startAgyBridge(ctx context.Context, log *slog.Logger, report bridgeReport) 
 	if err != nil {
 		return nil, err
 	}
-	qualified := "qualified"
-	if !pre.Qualified {
-		qualified = "unqualified (measured on " + agybridge.QualifiedVersion + "; re-run the live proof)"
-	}
+	qualified := releaseState(bin, pre.Version, agybridge.QualifiedVersion)
 	ids := make([]string, 0, len(pre.Models))
 	for _, m := range pre.Models {
 		ids = append(ids, m.ID)

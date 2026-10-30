@@ -2,6 +2,16 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
 
+## 2026-10-30 — the bridge CLI gate (v1.6.0)
+
+- `ezllm bridge-check {claude|codex|agy} [--bin] [--home] [--json]` runs a
+  bridge's boot checks against a staged CLI and refuses on any problem, the
+  first milestone of unattended CLI updates (`SPEC-bridge-update.md`).
+- Bridges read `qualified.json` from the bridge directory: a version the
+  updater proved reports qualified. Claude's bridge status gains `cli_release`.
+- Test: a Codex release that accepts but ignores `--disable shell_tool` fails
+  preflight end to end.
+
 ## 2026-10-29 — a dashboard polish pass and the API it needed (v1.5.0)
 
 - Every operator page was reworked in place: health and status where the

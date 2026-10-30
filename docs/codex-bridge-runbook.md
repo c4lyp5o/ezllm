@@ -162,7 +162,7 @@ long as it is set.
   The bridge also starts the CLI with `--disable in_app_updates`, so a running
   bridge never updates itself. A different version still boots — the lockdown and
   protocol checks below guard it — but `/status` reports it `unqualified` until the
-  live proof has been re-run against it.
+  live proof has been re-run against it and recorded in `qualified.json`.
 - **An isolated ChatGPT login**, never the interactive `~/.codex`:
 
   ```sh
@@ -173,6 +173,14 @@ long as it is set.
 
   Do not copy `~/.codex/auth.json` across: two copies of one refresh token log
   each other out when either refreshes.
+
+**Gate a release before promoting it.** `ezllm bridge-check codex` runs the boot
+checks against a staged CLI and exits non-zero on any problem — stricter than
+boot, which reports the exec fallback or a missing code-mode host and keeps serving. `--json` prints the verdict
+(`ok`, `version`, `release`, `problems`) for the bridge updater
+(`SPEC-bridge-update.md`). A version the updater proved is listed in
+`qualified.json` in the bridge directory (next to the version folders, up to two
+levels above the binary); boot then reports it qualified.
 
 ## Enable
 

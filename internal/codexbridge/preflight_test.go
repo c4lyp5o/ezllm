@@ -2,6 +2,9 @@ package codexbridge
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -53,5 +56,35 @@ func TestPreflightAgainstTheInstalledCLI(t *testing.T) {
 	}
 	if !p.LockdownOK || !p.SchemaOK || p.Version == "" {
 		t.Fatalf("preflight = %+v", p)
+	}
+}
+
+// A release that accepts `--disable shell_tool` but stops honouring it must
+// fail preflight end to end, not just in the parser: the bridge updater
+// promotes on this verdict (SPEC-bridge-update.md §5).
+func TestPreflightRefusesAReleaseThatIgnoresTheLockdown(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fake")
+	}
+	var list strings.Builder
+	for _, f := range LockdownFeatures {
+		state := "false"
+		if f == "shell_tool" {
+			state = "true"
+		}
+		list.WriteString(f + "  stable  " + state + "\n")
+	}
+	bin := filepath.Join(t.TempDir(), "codex")
+	script := "#!/bin/sh\ncase \"$*\" in\n--version) echo codex-cli 9.9.9;;\n*'features list'*) cat <<'EOF'\n" +
+		list.String() + "EOF\n;;\nesac\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p, err := RunPreflight(context.Background(), bin, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "shell_tool=true") {
+		t.Fatalf("err = %v, want the re-enabled shell_tool named", err)
+	}
+	if p.LockdownOK || p.Version != "9.9.9" {
+		t.Fatalf("preflight = %+v, want lockdown not ok on 9.9.9", p)
 	}
 }

@@ -11,7 +11,24 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.5.0**
+**Current: v1.6.0**
+
+## v1.6.0 — 2026-10-30
+
+The first step toward unattended bridge CLI updates (`SPEC-bridge-update.md`
+M1). MINOR: a new subcommand and a new status field; no config or schema
+change; no migration.
+
+**`ezllm bridge-check {claude|codex|agy}`** gates a staged CLI before it is
+promoted: it runs the bridge's boot checks and exits non-zero on any problem,
+including the ones boot only reports (Claude flag drift, the Codex exec
+fallback or a missing code-mode host, an empty agy model list). `--json`
+prints the verdict for the host updater.
+
+**Qualification is recorded at runtime.** A bridge reports its CLI qualified
+when it is the version the build was measured on or when `qualified.json` in
+the bridge directory lists it. The Claude bridge gains the `cli_release` field
+the Codex and agy bridges already carried (qualified: 2.1.306).
 
 ## v1.5.0 — 2026-10-29
 

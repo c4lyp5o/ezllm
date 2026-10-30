@@ -32,6 +32,20 @@ const (
 	envBridgeToken = "EZLLM_CLAUDE_BRIDGE_TOKEN_FILE" // shared secret for the account key
 )
 
+// claudeQualifiedVersion is the CLI release the bridge's measurements and live
+// proof were taken on. Any other version boots and serves, reported unqualified
+// until the updater's live proof records it (bridgecheck.go releaseState).
+const claudeQualifiedVersion = "2.1.306"
+
+// claudeVersion is the release number from `claude --version`
+// ("2.1.306 (Claude Code)").
+func claudeVersion(raw string) string {
+	if f := strings.Fields(raw); len(f) > 0 {
+		return f[0]
+	}
+	return raw
+}
+
 // flags this bridge depends on. Asserted at boot: a CLI release may drop one
 // while it still "works" (measured on 2.1.299: --max-turns and --system-prompt-file
 // are accepted but absent from --help), and silent drift here breaks every request.
@@ -53,18 +67,12 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 	if !strings.EqualFold(strings.TrimSpace(os.Getenv(envBridge)), "on") {
 		return func() {}, nil
 	}
-	bin := strings.TrimSpace(os.Getenv(envBridgeBin))
-	if bin == "" {
-		bin = "/opt/claude/claude"
-	}
+	bin := envOrDefault(envBridgeBin, "/opt/claude/claude")
 	resolved, err := exec.LookPath(bin)
 	if err != nil {
 		return nil, fmt.Errorf("claude bridge: %s=%q does not resolve to the official Claude Code CLI: %w", envBridgeBin, bin, err)
 	}
-	dir := strings.TrimSpace(os.Getenv(envBridgeDir))
-	if dir == "" {
-		dir = "/claude-sub"
-	}
+	dir := envOrDefault(envBridgeDir, "/claude-sub")
 	addr := strings.TrimSpace(os.Getenv(envBridgeAddr))
 	if addr == "" {
 		addr = "127.0.0.1:8790"
@@ -74,6 +82,7 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 	}
 
 	cliVersion, drift := claudeCLICheck(resolved)
+	release := releaseState(bin, claudeVersion(cliVersion), claudeQualifiedVersion)
 	login, plan := claudeLoginCheck(resolved, dir)
 	token, err := claudeBridgeToken(strings.TrimSpace(os.Getenv(envBridgeToken)))
 	if err != nil {
@@ -95,6 +104,7 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 			"version":           server.Version,
 			"cli_bin":           resolved,
 			"cli_version":       cliVersion,
+			"cli_release":       release,
 			"claude_config_dir": dir,
 			"login":             login,
 			"subscription":      plan,
@@ -109,7 +119,7 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 	}
 	httpSrv := &http.Server{Addr: addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	go func() {
-		log.Info("claude bridge listening", "addr", addr, "cli", cliVersion, "login", login, "plan", plan, "flags_drift", drift)
+		log.Info("claude bridge listening", "addr", addr, "cli", cliVersion, "release", release, "login", login, "plan", plan, "flags_drift", drift)
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Error("claude bridge serve", "err", err)
 		}

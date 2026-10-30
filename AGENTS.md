@@ -76,6 +76,7 @@ internal/provider/  provider kinds, presets, catalog probes, quota oracles
 internal/registration/ key testing: paced probe chain, protocol sweep
 internal/rules/     token caps + allowed-hours windows
 internal/ratelimit/ per-account request limiter
+internal/notify/    push channels for bell events (ntfy, Discord, Telegram, webhook): validate, build, send, redact
 internal/jsonbody/  single-parse request document
 internal/logx/      structured logging setup and the first-boot banner
 internal/{claudeweb,geminiweb,githubcopilot}/  web-protocol providers

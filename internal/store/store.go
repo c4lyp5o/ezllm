@@ -27,7 +27,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 31
+const schemaVersion = 32
 
 // DB wraps the writer/reader split.
 type DB struct {

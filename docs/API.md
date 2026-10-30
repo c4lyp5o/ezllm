@@ -748,6 +748,39 @@ newest update first. `POST …/read` takes `{"ids":[…]}` or `{"all":true}` →
 The three bridge events are raised once per updater report, and only for reports written while
 this process runs: the updater writes its outcome after the restart it causes.
 
+### Push channels: `/admin/notification-channels` (schema v32)
+Bell events also go to external channels. A new event is pushed to every enabled channel whose
+`min_severity` it meets (`info` < `warn` < `error`); a repeat that folds into an unread row is
+pushed again at most once a day. Delivery runs in the background: 10 s per attempt, three
+attempts for a network failure, `429` or `5xx`, redirects never followed. Its outcome is the
+channel's status — a failing channel never raises a bell event. Admin only.
+
+| Request | Effect |
+|---|---|
+| `GET /admin/notification-channels` | `{"channels":[…],"kinds":{…},"max":10}`: the channels, each kind's fields (`name`, `secret`, `required`), the cap |
+| `POST /admin/notification-channels` | add one → `201` with the channel |
+| `PATCH /admin/notification-channels/{id}` | edit → `200`; an absent field is kept, `kind` cannot change |
+| `DELETE /admin/notification-channels/{id}` | `204` |
+| `POST /admin/notification-channels/test` | send one test message, one attempt → `{"ok":true}` or `{"ok":false,"error":"…"}`; takes a draft (no `id`) or a saved `id` with optional edits; only a saved channel tested as stored records the outcome |
+
+Body fields: `kind`, `name` (1–60 characters), `enabled` (default true), `min_severity` (default
+`warn`), `config` (non-secret fields) and `secrets`. In `secrets` on an edit, an absent name keeps
+the stored value and `""` clears it. Validation errors are `400` and name the field, never a value.
+
+| `kind` | `config` | `secrets` |
+|---|---|---|
+| `ntfy` | `server` (default `https://ntfy.sh`), `topic` (required) | `token` |
+| `discord` | — | `webhook_url` (required, a `discord.com` webhook) |
+| `telegram` | `chat_id` (required) | `bot_token` (required) |
+| `webhook` | — | `url` (required), `bearer` |
+
+A channel in a response carries `id`, `kind`, `name`, `enabled`, `min_severity`, `config`,
+`secrets_set` (the names of the stored secrets — never a value), `target` (where it delivers, in
+words: the ntfy topic URL, `Telegram chat …`, a webhook's scheme and host), `last_status`
+(`""`, `ok`, `failed`), `last_error`, `last_sent_at`, `created_at`, `updated_at`. Secrets are stored
+encrypted with the master key and checked by backup verification. A webhook receives
+`{"kind","severity","title","body","created_at"}` with `Authorization: Bearer …` when set.
+
 A repeat of an unread event with the same dedup key updates that row (`count`
 + 1) instead of adding one. Read rows older than 30 days are pruned; the table
 keeps at most 500. Every catalog save also logs exactly which models were added
@@ -919,7 +952,7 @@ JSON object, with unknown envelope/setting fields rejected.
 | `backup_enabled` | Boolean, default false. Enabling requires configured writable storage and a separate backup encryption secret. |
 | `backup_hour` | Integer 0–23, instance timezone; default 3. |
 | `backup_keep` | Integer 1–365, default 7; counts completed verified backups. |
-| `notify_free_models_added`, `notify_free_models_removed`, `notify_free_model_broken`, `notify_catalog_refresh_failed`, `notify_client_budget_reached`, `notify_price_refresh_failed`, `notify_backup_failed`, `notify_bridge_updated`, `notify_bridge_update_blocked`, `notify_bridge_rolled_back` | Boolean, all default true. Apply to future dashboard bell events. |
+| `notify_free_models_added`, `notify_free_models_removed`, `notify_free_model_broken`, `notify_catalog_refresh_failed`, `notify_client_budget_reached`, `notify_price_refresh_failed`, `notify_backup_failed`, `notify_bridge_updated`, `notify_bridge_update_blocked`, `notify_bridge_rolled_back` | Boolean, all default true. Apply to future dashboard bell events and so to push channels. |
 
 Duration settings retain the limits of their existing YAML counterparts.
 `apply` is `immediate` for operator values; changing a deployment override still

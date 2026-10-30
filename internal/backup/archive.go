@@ -231,7 +231,17 @@ func verifyDatabase(ctx context.Context, dir string, m Manifest) error {
 	if err != nil {
 		return err
 	}
-	rows, err := db.QueryContext(ctx, `SELECT key_plain FROM provider_keys UNION ALL SELECT management_key_plain FROM accounts WHERE management_key_plain IS NOT NULL AND management_key_plain<>''`)
+	q := `SELECT key_plain FROM provider_keys UNION ALL SELECT management_key_plain FROM accounts WHERE management_key_plain IS NOT NULL AND management_key_plain<>''`
+	// Notification channel secrets (schema 32+) are credentials too; an older
+	// backup has no such table.
+	var channels int
+	if err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='notification_channels'`).Scan(&channels); err != nil {
+		return err
+	}
+	if channels > 0 {
+		q += ` UNION ALL SELECT secrets FROM notification_channels WHERE secrets<>''`
+	}
+	rows, err := db.QueryContext(ctx, q)
 	if err != nil {
 		return err
 	}

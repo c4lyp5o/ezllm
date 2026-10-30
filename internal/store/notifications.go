@@ -59,28 +59,46 @@ const (
 // DedupKey updates that row (count + 1, newest title/body/data) rather than
 // adding one, so a recurring failure is one line with a counter, not a flood.
 func (d *DB) Notify(ctx context.Context, in NotificationInput) error {
+	_, err := d.NotifyOutcome(ctx, in)
+	return err
+}
+
+// NotifyResult is what Notify did with an event.
+type NotifyResult int
+
+const (
+	NotifyMuted   NotifyResult = iota // its kind is switched off in Settings
+	NotifyCreated                     // a new row
+	NotifyFolded                      // counted into an unread row with its DedupKey
+)
+
+// NotifyOutcome is Notify that reports what it did, so the push worker can
+// send a new event and treat a folded repeat differently.
+func (d *DB) NotifyOutcome(ctx context.Context, in NotificationInput) (NotifyResult, error) {
 	if m := d.operatorSettings.Load(); m != nil && !m.Current().Notify(in.Kind) {
-		return nil
+		return NotifyMuted, nil
 	}
 	if strings.TrimSpace(in.Kind) == "" || strings.TrimSpace(in.Title) == "" {
-		return errors.New("store: notification needs a kind and a title")
+		return NotifyMuted, errors.New("store: notification needs a kind and a title")
 	}
 	switch in.Severity {
 	case "":
 		in.Severity = "info"
 	case "info", "warn", "error":
 	default:
-		return fmt.Errorf("store: notification severity %q", in.Severity)
+		return NotifyMuted, fmt.Errorf("store: notification severity %q", in.Severity)
 	}
 	data := ""
 	if in.Data != nil {
 		b, err := json.Marshal(in.Data)
 		if err != nil {
-			return fmt.Errorf("store: notification data: %w", err)
+			return NotifyMuted, fmt.Errorf("store: notification data: %w", err)
 		}
 		data = string(b)
 	}
-	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+	result := NotifyCreated
+	err := d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		result = NotifyCreated
 		if in.DedupKey != "" {
 			res, err := tx.ExecContext(ctx, `
 UPDATE notifications SET title=?, body=?, data=?, severity=?, count=count+1,
@@ -90,6 +108,7 @@ WHERE dedup_key=? AND read_at IS NULL`, in.Title, in.Body, data, in.Severity, in
 				return err
 			}
 			if n, _ := res.RowsAffected(); n > 0 {
+				result = NotifyFolded
 				return nil
 			}
 		}
@@ -108,6 +127,7 @@ DELETE FROM notifications WHERE id NOT IN (SELECT id FROM notifications ORDER BY
 			notificationCap)
 		return err
 	})
+	return result, err
 }
 
 // ListNotifications returns the newest notifications first (by last update)

@@ -353,6 +353,8 @@ func run() error {
 
 	defer srv.StopBackground(15 * time.Second)
 	srv.StartSettingsJobs(ctx)
+	// Bell events to the push channels in Settings → Notifications.
+	srv.StartPush(ctx)
 
 	// Claude subscription surface: loopback-only, off unless EZLLM_CLAUDE_BRIDGE=on.
 	// Enabling it without a usable CLI or login fails the boot loudly.

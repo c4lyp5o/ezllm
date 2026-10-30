@@ -6,6 +6,7 @@ import { useSearchParams } from 'react-router-dom';
 import { ApiError, changeDashboardPassword, clearToken } from '../utils/api';
 import { Chip, ConfirmModal, CopyButton, SectionLabel, btn, cx, inputCls, relTime } from '../components/ui';
 import { bridgeUpdateText, fmtUptime, UPDATE_TONE } from '../utils/lib';
+import PushChannels from '../components/PushChannels';
 import { settingError } from '../utils/settings';
 import PasswordStrength from '../components/PasswordStrength';
 import { MIN_PASSWORD } from '../utils/passwordStrength';
@@ -273,7 +274,7 @@ export default function Settings() {
     {view && <SettingsGroup key={tab} tab={tab} view={view} updated={setView} onDirty={setDirty} />}
     {tab === 'Security' && <><PasswordSettings /><Sessions /></>}
     {tab === 'Backup & Recovery' && <Backups />}
-    {tab === 'Notifications' && <p className="text-xs text-mute">Preferences affect future notifications in this instance’s dashboard bell. Existing history is retained.</p>}
+    {tab === 'Notifications' && <><p className="text-xs text-mute">Preferences affect future notifications in this instance’s dashboard bell and its push channels. Existing history is retained.</p><PushChannels /></>}
     {tab === 'System' && <><System />{view && <section className={panel}><SectionLabel>Effective configuration</SectionLabel><div className="mt-4 overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr><th className="py-2">Setting</th><th>Effective value</th><th>Source</th></tr></thead><tbody>{Object.entries(view.fields).map(([k, f]) => <tr key={k} className="border-t border-line"><td className="py-2 pr-3">{DETAILS[k]?.[0] ?? k}</td><td className="pr-3">{String(f.value) || 'Unlimited'}</td><td>{f.source}</td></tr>)}</tbody></table></div></section>}</>}
     <ConfirmModal open={pendingTab != null} tone="primary" confirmLabel="Discard changes" title="Discard unsaved changes?"
       body="You have changes on this tab that are not saved. Leaving it throws them away."

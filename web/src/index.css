@@ -399,6 +399,26 @@ code, pre, kbd, samp, .font-code { font-family: var(--font-code); font-variant-n
     radial-gradient(1px 1px at 93% 8%, var(--nb-star), transparent);
 }
 .nbhd-city-canvas { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; display: block; }
+/* Loading: an indeterminate bar over the stage until the first frame is
+   painted, then a short fade. It never takes a click. */
+.nbhd-city-loading {
+  position: absolute; inset: 0; z-index: 3; display: grid; place-items: center;
+  background: var(--color-surface); pointer-events: none; transition: opacity 280ms ease;
+}
+.nbhd-city-loading[data-fading="true"] { opacity: 0; }
+.nbhd-loader { display: flex; width: min(260px, 70%); flex-direction: column; align-items: center; gap: 10px; }
+.nbhd-loader-track { position: relative; width: 100%; height: 3px; overflow: hidden; border-radius: 999px; background: var(--color-line); }
+.nbhd-loader-fill {
+  position: absolute; inset: 0 auto 0 0; width: 38%; border-radius: inherit; background: var(--color-accent);
+  animation: nbhd-loader-slide 1.15s ease-in-out infinite;
+}
+.nbhd-loader-label { font-size: 13px; color: var(--color-dim); }
+@keyframes nbhd-loader-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(265%); } }
+/* Paused traffic pauses the city's animations; the loader is not traffic. */
+.nbhd-city[data-still="true"] .nbhd-loader-fill { animation-play-state: running !important; }
+/* Reduced motion: a still, full bar — loading is said by the words. */
+@media (prefers-reduced-motion: reduce) { .nbhd-loader-fill { animation: none; width: 100%; opacity: 0.5; } }
+:root[data-reduce-motion="true"] .nbhd-loader-fill { animation: none; width: 100%; opacity: 0.5; }
 .nbhd-city-hits { position: absolute; inset: 0; z-index: 2; }
 .nbhd-clouds { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
 .nbhd-clouds span {

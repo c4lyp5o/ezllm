@@ -278,8 +278,53 @@ export type Bridge = {
   env: string;
   runbook: string;
   status?: Record<string, unknown>;
+  update?: BridgeUpdate;
+};
+// The host updater's latest report on a bridge's CLI (update-status.json,
+// read once a minute; docs/bridge-update-runbook.md).
+export type BridgeUpdate = {
+  checked_at: string;
+  result: 'updated' | 'blocked' | 'rolled_back' | 'up_to_date' | 'waiting' | 'error';
+  current?: string;
+  previous?: string;
+  candidate?: string;
+  detail?: string;
 };
 export const listBridges = () => get<Bridge[]>('/admin/bridges');
+
+// ── push channels ────────────────────────────────────────────────────────────
+// /admin/notification-channels: bell events to ntfy, Discord, Telegram or a
+// webhook. Secret fields are write-only: a response names the stored ones in
+// secrets_set and never carries a value.
+export type ChannelKind = 'ntfy' | 'discord' | 'telegram' | 'webhook';
+export type ChannelField = { name: string; secret: boolean; required: boolean };
+export type Severity = 'info' | 'warn' | 'error';
+export type NotificationChannel = {
+  id: number;
+  kind: ChannelKind;
+  name: string;
+  enabled: boolean;
+  min_severity: Severity;
+  config: Record<string, string>;
+  secrets_set: string[];
+  target: string;
+  last_status: '' | 'ok' | 'failed';
+  last_error?: string;
+  last_sent_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+export type ChannelsView = { channels: NotificationChannel[]; kinds: Record<ChannelKind, ChannelField[]>; max: number };
+/** On an edit an absent field is kept; in secrets an absent name keeps the stored value and "" clears it. */
+export type ChannelBody = {
+  id?: number; kind?: ChannelKind; name?: string; enabled?: boolean; min_severity?: Severity;
+  config?: Record<string, string>; secrets?: Record<string, string>;
+};
+export const listChannels = () => get<ChannelsView>('/admin/notification-channels');
+export const createChannel = (b: ChannelBody) => post<NotificationChannel>('/admin/notification-channels', b);
+export const updateChannel = (id: number, b: ChannelBody) => patch<NotificationChannel>(`/admin/notification-channels/${id}`, b);
+export const deleteChannel = (id: number) => del(`/admin/notification-channels/${id}`);
+export const testChannel = (b: ChannelBody) => post<{ ok: boolean; error?: string }>('/admin/notification-channels/test', b);
 
 // ── protocol sweep ("test all models") ───────────────────────────────────
 export type StartSweepOpts = {
@@ -1082,7 +1127,7 @@ export type SettingField = { value: string | boolean | number; source: string; e
 export type SettingsView = { revision: number; fields: Record<string, SettingField> };
 export type DashboardSession = { id: string; created_at: string; expires_at: string; browser: string; current: boolean };
 export type BackupStatus = { error?: string; ready: boolean; running: boolean; last_outcome: string; last_finished?: string; backups: { id: string; created_at: string; bytes: number; verified: boolean }[] };
-export type SystemDiagnostics = { deployment?: { listen_address: string; listen_source: string; storage: string; master_key_source: string; trusted_proxy_count: number }; version: string; uptime_seconds: number; database_bytes: number; bridges: { id: string; enabled: boolean }[]; jobs: Record<string, { running: boolean; last_success?: string; last_failure?: string }> };
+export type SystemDiagnostics = { deployment?: { listen_address: string; listen_source: string; storage: string; master_key_source: string; trusted_proxy_count: number }; version: string; uptime_seconds: number; database_bytes: number; bridges: { id: string; enabled: boolean; update?: Pick<BridgeUpdate, 'result' | 'checked_at' | 'current' | 'candidate'> }[]; jobs: Record<string, { running: boolean; last_success?: string; last_failure?: string }> };
 export const getSettings = () => get<SettingsView>('/admin/settings');
 export const saveSettings = (revision: number, values: Record<string, unknown>) => patch<SettingsView>('/admin/settings', { revision, values });
 export const getDashboardSessions = () => get<DashboardSession[]>('/admin/settings/sessions');

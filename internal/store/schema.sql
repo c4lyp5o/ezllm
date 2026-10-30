@@ -41,6 +41,24 @@ CREATE INDEX IF NOT EXISTS idx_notifications_updated ON notifications(updated_at
 CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_open_dedup
     ON notifications(dedup_key) WHERE read_at IS NULL AND dedup_key <> '';
 
+-- v32: external push channels for bell events (internal/notify). config is
+-- the kind's non-secret fields as JSON; secrets is its secret fields as JSON,
+-- encrypted with the master key (enc:v1:…), never returned by the API.
+CREATE TABLE IF NOT EXISTS notification_channels (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind         TEXT NOT NULL,                 -- ntfy|discord|telegram|webhook
+    name         TEXT NOT NULL,
+    enabled      INTEGER NOT NULL DEFAULT 1,
+    min_severity TEXT NOT NULL DEFAULT 'warn',  -- info|warn|error
+    config       TEXT NOT NULL DEFAULT '{}',
+    secrets      TEXT NOT NULL DEFAULT '',
+    last_status  TEXT NOT NULL DEFAULT '',      -- ''|ok|failed
+    last_error   TEXT NOT NULL DEFAULT '',
+    last_sent_at TEXT,
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
 CREATE TABLE IF NOT EXISTS schema_version (
   version    INTEGER PRIMARY KEY,
   applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))

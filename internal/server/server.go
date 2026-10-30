@@ -106,6 +106,7 @@ type Server struct {
 	// bridges lists the subscription bridges for the Add Provider dialog
 	// (bridges.go); main.go marks the running ones via EnableBridge.
 	bridges     *bridgeRegistry
+	push        *pusher // external push channels for bell events (push.go)
 	started     time.Time
 	maxBody     int64
 	web         fs.FS // dashboard source: embedded dist/ or EZLLM_WEB_DIR
@@ -253,7 +254,7 @@ func New(opts Options) *Server {
 		auth: opts.Auth, resolver: opts.Resolver, dispatcher: opts.Dispatcher,
 		db: opts.DB, registry: opts.Registry, tester: opts.Tester,
 		log: opts.Log, mux: http.NewServeMux(), rulesEngine: opts.Rules,
-		started: time.Now(), maxBody: maxBody, bridges: newBridgeRegistry(),
+		started: time.Now(), maxBody: maxBody, bridges: newBridgeRegistry(), push: newPusher(),
 		web: webFS(), corsOrigins: opts.CORSOrigins,
 		usageTZ:           usageTZOrDefault(opts.UsageTZ),
 		compressionMinAbs: opts.CompressionMinAbs, compressionMaxMS: opts.CompressionMaxMS,
@@ -368,6 +369,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /admin/stream", s.admin(s.handleStream))
 	s.mux.HandleFunc("GET /admin/notifications", s.admin(s.handleNotifications))
 	s.mux.HandleFunc("POST /admin/notifications/read", s.admin(s.handleNotificationsRead))
+	s.mux.HandleFunc("GET /admin/notification-channels", s.admin(s.handleNotificationChannels))
+	s.mux.HandleFunc("POST /admin/notification-channels", s.admin(s.handleNotificationChannels))
+	s.mux.HandleFunc("PATCH /admin/notification-channels/{id}", s.admin(s.handleNotificationChannel))
+	s.mux.HandleFunc("DELETE /admin/notification-channels/{id}", s.admin(s.handleNotificationChannel))
+	s.mux.HandleFunc("POST /admin/notification-channels/test", s.admin(s.handleNotificationChannelTest))
 
 	// Dashboard GitHub device flow: the browser taps Authorize, the server
 	// does every other step (code request, poll, mint, session storage) so

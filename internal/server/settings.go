@@ -65,7 +65,13 @@ func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 	bridges := []map[string]any{}
 	s.bridges.mu.RLock()
 	for _, b := range s.bridges.list {
-		bridges = append(bridges, map[string]any{"id": b.ID, "enabled": b.Enabled})
+		row := map[string]any{"id": b.ID, "enabled": b.Enabled}
+		if u := b.Update; u != nil {
+			// The updater's verdict and versions only: its detail can carry
+			// upstream error text, which stays on the admin bridge card.
+			row["update"] = map[string]any{"result": u.Result, "checked_at": u.CheckedAt, "current": u.Current, "candidate": u.Candidate}
+		}
+		bridges = append(bridges, row)
 	}
 	s.bridges.mu.RUnlock()
 	var size int64

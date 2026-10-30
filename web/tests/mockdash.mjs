@@ -38,6 +38,7 @@ function defaults(path) {
     case "/admin/accounts": return [account];
     case "/admin/accounts/1/models": return models;
     case "/admin/notifications": return { items: [], unread: 0 };
+    case "/admin/notification-channels": return { channels: [], kinds: {}, max: 10 };
     case "/admin/tokens": return [];
     case "/admin/usage": return { groups: [], totals: {} };
     case "/admin/requests": return requestsBody("BASELINE");

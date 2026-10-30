@@ -34,7 +34,9 @@ in the same binary.
   ([runbook](docs/codex-bridge-runbook.md)) or Google Antigravity
   ([runbook](docs/agy-bridge-runbook.md)) subscription behind the router
   through each vendor's official CLI, with plan windows on the provider card
-  where the vendor reports them.
+  where the vendor reports them. An optional host updater keeps each CLI
+  current: soaked, gated, promoted in a late-night window, proved and rolled
+  back on failure ([runbook](docs/bridge-update-runbook.md)).
 - **Ops surface included.** Dashboard, live request feed, analytics, key-test
   pipeline with protocol sweeps, and configuration exports — all served from
   the same binary. Full recovery uses the [database/key backup procedure](docs/master-key-runbook.md).
@@ -268,7 +270,8 @@ Connect warn when usage reports cannot refresh; Economics and Compression show
 errors when cost or savings data is unavailable. Connect provides a copyable
 example request, and Chat cancels active requests when their column is removed
 or you leave the page. Settings covers browser preferences, sessions,
-backup/recovery, gateway policy, notification preferences and safe system diagnostics. Encrypted backup
+backup/recovery, gateway policy, notification preferences, push channels (ntfy, Discord, Telegram or a
+webhook) and safe system diagnostics. Encrypted backup
 scheduling is disabled by default; configure a separate encryption secret and a
 mounted destination before enabling it. See the
 [recovery runbook](docs/recovery-runbook.md).
@@ -361,6 +364,7 @@ run separately; they are not part of this CI gate.
 | [docs/claude-bridge-runbook.md](docs/claude-bridge-runbook.md) | Claude subscription bridge: setup, account, plan windows |
 | [docs/codex-bridge-runbook.md](docs/codex-bridge-runbook.md) | ChatGPT subscription bridge: platform requirements, lockdown, tools, setup |
 | [docs/agy-bridge-runbook.md](docs/agy-bridge-runbook.md) | Antigravity (Google) subscription bridge: keyring-free login, setup, limits |
+| [docs/bridge-update-runbook.md](docs/bridge-update-runbook.md) | bridge CLI auto-update: layout, install, supervised runs, holds and rollback |
 | [VERSION.md](VERSION.md) | release history; what changed on each date |
 | [CHANGELOG.md](CHANGELOG.md) | milestone-tagged change narrative |
 | [EXPLORING.md](EXPLORING.md) | codebase tour: reading order, invariants, landmarks |

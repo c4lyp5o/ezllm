@@ -263,6 +263,20 @@ Bridge argv, real login, every child inside Landlock (ABI 4, kernel 6.8):
 - `/v1/responses` was not built: no client needs it, and the router's translation
   already serves Responses clients from a Chat Completions account.
 
+### 2.15 Lockdown flags retired in 0.166.0 (traced 2026-10-30)
+
+0.166.0 reports `worktrees` and `realtime_conversation` at stage `removed` and
+`true` under `--disable`: Codex retired both flags. Retired is not harmless —
+`Worktrees`' own doc says worktrees are now *always available* — so each was
+traced in the rust-v0.163.0 and rust-v0.166.0 sources. `worktrees` gated only
+TUI views and the operator option `codex exec --worktree`, which 0.166.0
+refuses alongside `--ephemeral` / `--ignore-user-config` (the exec channel
+always passes both); no model tool creates a worktree. `realtime_conversation`
+gated only TUI voice; the app-server's `thread/realtime/*` were already
+ungated and are client requests the bridge never sends. Decision: accept each
+by name and only at stage `removed` (`preflight.go` `retiredDisables`); at any
+other stage it must be `false` again, and the flags stay in the argv.
+
 ## 3. Proposed surface — full function, built in stages
 
 The target is full function (operator, 2026-10-23); the stages are build order,

@@ -132,6 +132,7 @@ Add one when **an operator could not otherwise explain** what the gateway did:
 | client budget reached | info, once per window | the 429s are rows; the cause is not |
 | rules refresh fails | warn | the last successfully loaded rules remain active |
 | Gemini Web rotated cookie cannot be saved | warn | the next request retries persistence; credentials are never logged |
+| notification push failed (channel, kind, reason) | warn | the bell row exists; the push outcome is the channel's status in Settings, and the reason never carries the channel's secrets |
 | auth refused (missing/invalid/expired/role) | debug | refused before dispatch: no row, and a retry loop must not flood the console |
 
 Each of these has a test asserting the line appears at the right level and that

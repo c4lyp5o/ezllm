@@ -96,3 +96,17 @@ func TestSettingsSnapshotAndConcurrentUpdates(t *testing.T) {
 		t.Fatal("policy changed mid request")
 	}
 }
+
+// The bridge updater's bell events default on, each behind its own toggle.
+func TestBridgeUpdateNotificationsDefaultOn(t *testing.T) {
+	v := Defaults()
+	for _, kind := range []string{"bridge_updated", "bridge_update_blocked", "bridge_rolled_back"} {
+		if !v.Notify(kind) {
+			t.Errorf("Notify(%q) = false by default", kind)
+		}
+	}
+	v.NotifyBridgeHeld = false
+	if v.Notify("bridge_update_blocked") || !v.Notify("bridge_updated") || !v.Notify("bridge_rolled_back") {
+		t.Fatal("notify_bridge_update_blocked=false must mute that kind alone")
+	}
+}

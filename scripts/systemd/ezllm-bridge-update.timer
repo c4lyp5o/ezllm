@@ -1,0 +1,12 @@
+# Hourly: every run records first sightings; only runs inside the configured
+# window (default 02:00-05:00, host local time) stage, gate and promote.
+[Unit]
+Description=ezllm bridge CLI update, hourly
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=5min
+Persistent=false
+
+[Install]
+WantedBy=timers.target

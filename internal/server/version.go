@@ -9,4 +9,4 @@ package server
 //
 // Versioning scheme (see VERSION.md): semantic versioning from 1.0.0; a
 // release tag vX.Y.Z must match this constant (the release workflows check).
-const Version = "1.5.0"
+const Version = "1.6.0"

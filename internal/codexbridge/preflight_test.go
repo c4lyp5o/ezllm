@@ -2,6 +2,9 @@ package codexbridge
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -53,5 +56,87 @@ func TestPreflightAgainstTheInstalledCLI(t *testing.T) {
 	}
 	if !p.LockdownOK || !p.SchemaOK || p.Version == "" {
 		t.Fatalf("preflight = %+v", p)
+	}
+}
+
+// A release that accepts `--disable shell_tool` but stops honouring it must
+// fail preflight end to end, not just in the parser: the bridge updater
+// promotes on this verdict (SPEC-bridge-update.md §5).
+func TestPreflightRefusesAReleaseThatIgnoresTheLockdown(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fake")
+	}
+	var list strings.Builder
+	for _, f := range LockdownFeatures {
+		state := "false"
+		if f == "shell_tool" {
+			state = "true"
+		}
+		list.WriteString(f + "  stable  " + state + "\n")
+	}
+	bin := filepath.Join(t.TempDir(), "codex")
+	script := "#!/bin/sh\ncase \"$*\" in\n--version) echo codex-cli 9.9.9;;\n*'features list'*) cat <<'EOF'\n" +
+		list.String() + "EOF\n;;\nesac\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p, err := RunPreflight(context.Background(), bin, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "shell_tool=true") {
+		t.Fatalf("err = %v, want the re-enabled shell_tool named", err)
+	}
+	if p.LockdownOK || p.Version != "9.9.9" {
+		t.Fatalf("preflight = %+v, want lockdown not ok on 9.9.9", p)
+	}
+}
+
+// A retired lockdown feature passes only by name and only at stage "removed";
+// anywhere else — or for any other feature — reported true is a violation.
+func TestLockdownRetiredFeatures(t *testing.T) {
+	var b strings.Builder
+	for _, f := range LockdownFeatures {
+		b.WriteString(f + "   stable   false\n")
+	}
+	base := b.String()
+	with := func(name, line string) string {
+		return strings.Replace(base, name+"   stable   false\n", line+"\n", 1)
+	}
+	for _, c := range []struct {
+		name, list, want string
+	}{
+		{"worktrees retired", with("worktrees", "worktrees   removed   true"), ""},
+		{"realtime retired", with("realtime_conversation", "realtime_conversation   removed   true"), ""},
+		{"worktrees back at stable", with("worktrees", "worktrees   stable   true"), "worktrees=true"},
+		{"worktrees back under development", with("worktrees", "worktrees   under development   true"), "worktrees=true"},
+		{"worktrees dropped", with("worktrees", ""), "worktrees=missing"},
+		{"shell_tool is never retired", with("shell_tool", "shell_tool   removed   true"), "shell_tool=true"},
+		{"a two-word stage still reads its value", with("goals", "goals   under development   false"), ""},
+	} {
+		if got := strings.Join(lockdownViolations(c.list), ","); got != c.want {
+			t.Errorf("%s: violations %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// The real `features list` output under the bridge's lockdown argv, captured
+// from the qualified release and from 0.166.0, which retired worktrees and
+// realtime_conversation (both reported "removed  true").
+func TestLockdownAgainstMeasuredReleases(t *testing.T) {
+	for _, v := range []string{"0.163.0", "0.166.0"} {
+		raw, err := os.ReadFile(filepath.Join("testdata", "features-lockdown-"+v+".txt"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		list := string(raw)
+		if bad := lockdownViolations(list); len(bad) != 0 {
+			t.Errorf("%s: violations %v, want none", v, bad)
+		}
+		flipped := strings.Replace(list, "\nshell_tool                               stable             false\n",
+			"\nshell_tool                               stable             true\n", 1)
+		if flipped == list {
+			t.Fatalf("%s: fixture has no shell_tool line to flip", v)
+		}
+		if bad := strings.Join(lockdownViolations(flipped), ","); bad != "shell_tool=true" {
+			t.Errorf("%s with shell_tool on: violations %q, want shell_tool=true", v, bad)
+		}
 	}
 }

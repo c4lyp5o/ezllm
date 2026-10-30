@@ -11,7 +11,69 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.5.0**
+**Current: v1.6.0**
+
+## v1.6.0 — 2026-10-31
+
+The first step toward unattended bridge CLI updates (`SPEC-bridge-update.md`
+M1). MINOR: a new subcommand and a new status field; no config or schema
+change; no migration.
+
+**`ezllm bridge-check {claude|codex|agy}`** gates a staged CLI before it is
+promoted: it runs the bridge's boot checks and exits non-zero on any problem,
+including the ones boot only reports (Claude flag drift, the Codex exec
+fallback or a missing code-mode host, an empty agy model list). `--json`
+prints the verdict for the host updater. `--live` then drives the bridge's own
+runner in-process through a plain turn and, for Claude and Codex, a client-tool
+turn; it runs only on a CLI that passed every static check, and judges the
+answer without printing it.
+
+**`scripts/bridge_update.py`** is the host updater that uses the gate: hourly
+from a systemd user timer, it discovers releases on each CLI's official channel,
+soaks them three days, stages and gates them inside a late-night window,
+promotes by swapping a `current` link and restarting ezllm once, proves the
+promotion in the running container and rolls back on failure. Install and
+operation: `docs/bridge-update-runbook.md`.
+
+**Codex lockdown: retired flags.** Codex 0.166.0 retired `worktrees` and
+`realtime_conversation` (stage `removed`, reported `true`: the flags no longer
+control anything), which failed the lockdown check. Both were traced in the
+0.163.0 and 0.166.0 sources to nothing a bridge child can reach, and are now
+accepted by name and only at stage `removed`; at any other stage they must be
+off again. A blanket "removed passes" rule was rejected: Codex also retires a
+flag when it makes a feature unconditional.
+
+**The updater on the dashboard.** ezllm reads each bridge's
+`update-status.json` once a minute: `GET /admin/bridges` carries it as
+`update`, the bridge preset and Settings → System show it in words, and three
+new bell events — `bridge_updated`, `bridge_update_blocked`,
+`bridge_rolled_back` — each with a Settings → Notifications toggle (default
+on), ring once per report. Diagnostics carry the verdict and versions only.
+
+**Push channels (schema 32).** Settings → Notifications sends bell events to
+ntfy, Discord, Telegram or a JSON webhook, each with a minimum severity, a
+*Send test* (also for an unsaved draft) and a delivery status. Secrets are
+encrypted with the master key, write-only in the API and checked by backup
+verification. Delivery is one background worker off the request path: 10 s per
+attempt, three attempts, no redirects, a folded repeat pushed at most daily,
+and a failure is the channel's status and one `warn` line — never a bell event.
+New package `internal/notify`; API in docs/API.md § Push channels.
+
+**The Neighbourhood never shows a blank stage.** A loading bar says what is
+happening while the providers load and again while the city is drawn (the
+first frame takes about half a second on a large city); it fades out once a
+frame is on screen and never takes a click.
+
+**Fixed: Claude flag drift was always reported.** The check read `--help`,
+which omits `--max-turns` and `--system-prompt-file` although the CLI accepts
+them, so every boot logged them as drift. Each flag now goes to the CLI's
+parser (`-p FLAG` with no prompt fails before any network call, naming the flag
+only when it is gone).
+
+**Qualification is recorded at runtime.** A bridge reports its CLI qualified
+when it is the version the build was measured on or when `qualified.json` in
+the bridge directory lists it. The Claude bridge gains the `cli_release` field
+the Codex and agy bridges already carried (qualified: 2.1.306).
 
 ## v1.5.0 — 2026-10-29
 

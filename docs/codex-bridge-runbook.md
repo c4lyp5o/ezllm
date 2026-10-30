@@ -177,8 +177,9 @@ long as it is set.
 **Gate a release before promoting it.** `ezllm bridge-check codex` runs the boot
 checks against a staged CLI and exits non-zero on any problem — stricter than
 boot, which reports the exec fallback or a missing code-mode host and keeps serving. `--json` prints the verdict
-(`ok`, `version`, `release`, `problems`) for the bridge updater
-(`SPEC-bridge-update.md`). A version the updater proved is listed in
+(`ok`, `version`, `release`, `live`, `problems`) for the bridge updater
+(`SPEC-bridge-update.md`). `--live` then drives real turns through the bridge
+(plan quota, the shared login) — only when every static check passed. A version the updater proved is listed in
 `qualified.json` in the bridge directory (next to the version folders, up to two
 levels above the binary); boot then reports it qualified.
 

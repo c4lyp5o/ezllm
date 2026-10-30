@@ -46,9 +46,8 @@ func claudeVersion(raw string) string {
 	return raw
 }
 
-// flags this bridge depends on. Asserted at boot: a CLI release may drop one
-// while it still "works" (measured on 2.1.299: --max-turns and --system-prompt-file
-// are accepted but absent from --help), and silent drift here breaks every request.
+// flags this bridge depends on. Asserted at boot (claudeCLICheck): a CLI release
+// may drop one, and silent drift here breaks every request.
 var claudeRequiredFlags = []string{
 	"--input-format", "--output-format", "--include-partial-messages",
 	"--setting-sources", "--system-prompt-file", "--strict-mcp-config",
@@ -142,21 +141,25 @@ func assertLoopback(addr string) error {
 }
 
 // claudeCLICheck proves the binary runs and still accepts every flag the design
-// depends on. Flag drift is reported, not fatal: the surface can still serve, and
-// the per-request behaviour is exercised by the live proof.
+// depends on. `--help` cannot answer that — it omits --max-turns and
+// --system-prompt-file while the parser accepts them (measured on 2.1.299 and
+// 2.1.306) — so each flag goes to the parser itself: `-p FLAG` with no prompt
+// and stdin at EOF fails before any network call, with "unknown option" only
+// when the flag is gone. Flag drift is reported, not fatal, at boot: the surface
+// can still serve, and the per-request behaviour is exercised by the live proof.
 func claudeCLICheck(bin string) (version, drift string) {
 	out, err := exec.Command(bin, "--version").CombinedOutput()
 	if err != nil {
 		return "unavailable", "cannot run --version"
 	}
 	version = strings.TrimSpace(string(out))
-	help, err := exec.Command(bin, "--help").CombinedOutput()
-	if err != nil {
-		return version, "cannot run --help"
-	}
 	var missing []string
 	for _, f := range claudeRequiredFlags {
-		if !strings.Contains(string(help), f) {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		out, err := exec.CommandContext(ctx, bin, "-p", f).CombinedOutput()
+		timedOut := ctx.Err() != nil
+		cancel()
+		if err == nil || timedOut || strings.Contains(string(out), "unknown option '"+f+"'") {
 			missing = append(missing, f)
 		}
 	}

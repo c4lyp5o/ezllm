@@ -83,7 +83,7 @@ write the login directory.
 
 ```sh
 docker compose up -d
-docker logs ezllm | grep -i "claude bridge"   # cli version + login + plan + flag drift
+docker logs ezllm | grep -i "claude bridge"   # cli version + release + login + plan + flag drift
 ```
 
 On a host without a CLI + login, set `EZLLM_CLAUDE_BRIDGE=off`. Enabling it without
@@ -97,8 +97,9 @@ A CLI other than 2.1.306 boots and serves; `cli_release` reports it
 **Gate a release before promoting it.** `ezllm bridge-check claude` runs the boot
 checks against a staged CLI and exits non-zero on any problem — stricter than
 boot, which reports flag drift and keeps serving. `--json` prints the verdict
-(`ok`, `version`, `release`, `problems`) for the bridge updater
-(`SPEC-bridge-update.md`). A version the updater proved is listed in
+(`ok`, `version`, `release`, `live`, `problems`) for the bridge updater
+(`SPEC-bridge-update.md`). `--live` then drives real turns through the bridge
+(plan quota, the shared login) — only when every static check passed. A version the updater proved is listed in
 `qualified.json` in the bridge directory (next to the version folders, up to two
 levels above the binary); boot then reports it qualified.
 

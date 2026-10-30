@@ -23,7 +23,16 @@ change; no migration.
 promoted: it runs the bridge's boot checks and exits non-zero on any problem,
 including the ones boot only reports (Claude flag drift, the Codex exec
 fallback or a missing code-mode host, an empty agy model list). `--json`
-prints the verdict for the host updater.
+prints the verdict for the host updater. `--live` then drives the bridge's own
+runner in-process through a plain turn and, for Claude and Codex, a client-tool
+turn; it runs only on a CLI that passed every static check, and judges the
+answer without printing it.
+
+**Fixed: Claude flag drift was always reported.** The check read `--help`,
+which omits `--max-turns` and `--system-prompt-file` although the CLI accepts
+them, so every boot logged them as drift. Each flag now goes to the CLI's
+parser (`-p FLAG` with no prompt fails before any network call, naming the flag
+only when it is gone).
 
 **Qualification is recorded at runtime.** A bridge reports its CLI qualified
 when it is the version the build was measured on or when `qualified.json` in

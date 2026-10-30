@@ -127,7 +127,11 @@ One run, per enabled bridge, at most one promotion per bridge per night:
    SHA-512-verified installer run into a scratch `HOME`. The CLIs' own updaters
    never touch the bridge directories.
 2. **Stage** into `<bridge-dir>/<ver>/` (the whole release dir for Codex);
-   verify the checksum or signature the channel publishes; refuse on mismatch.
+   verify the checksum or signature the channel publishes; refuse on mismatch;
+   then `chmod a-w` the version folder before anything runs it. agy rewrites its
+   own binary in place when run from a writable folder (measured 2026-10-30:
+   one host `--version` turned the pinned 1.4.7 into 1.4.11, the original
+   renamed `agy.<n>.old`), and the updater never runs a CLI from a writable path.
 3. **Gate:** `docker run --rm` of the **running** ezllm image with the staged
    version and the shared login mounted, executing
    `ezllm bridge-check <bridge> --live --json`. Failure → `blocked`, staged copy

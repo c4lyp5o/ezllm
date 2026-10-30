@@ -67,20 +67,13 @@ func TestRecordQualifiesIsBounded(t *testing.T) {
 	}
 }
 
-// fakeClaude answers --version, --help (all required flags unless one is
-// dropped) and auth status, like the real CLI's text output.
+// fakeClaude answers --version and auth status like the real CLI, and parses
+// `-p FLAG` like it: an unknown option names itself, a known one stops at the
+// missing prompt. drop is a flag this release no longer accepts.
 func fakeClaude(t *testing.T, bin, version, drop string) {
-	var help strings.Builder
-	for _, f := range claudeRequiredFlags {
-		if f != drop {
-			help.WriteString("  " + f + " <value>\n")
-		}
-	}
 	writeExec(t, bin, `case "$1" in
 --version) echo "`+version+` (Claude Code)";;
---help) cat <<'EOF'
-`+help.String()+`EOF
-;;
+-p) if [ "$2" = "`+drop+`" ]; then echo "error: unknown option '$2'"; else echo "Error: Input must be provided"; fi; exit 1;;
 auth) echo "Logged in: true"; echo "Subscription: max";;
 esac
 `)
@@ -153,5 +146,57 @@ func TestClaudeVersion(t *testing.T) {
 		if got := claudeVersion(raw); got != want {
 			t.Errorf("claudeVersion(%q) = %q, want %q", raw, got, want)
 		}
+	}
+}
+
+func TestJudgeTurn(t *testing.T) {
+	for _, c := range []struct {
+		name, text, want, got string
+		err                   error
+		out                   int64
+		pass                  bool
+		says                  string
+	}{
+		{name: "plain ok", text: "Pong.", out: 3, pass: true},
+		{name: "plain off-prompt", text: "hello", out: 3, says: "did not follow"},
+		{name: "no usage", text: "pong", out: 0, says: "no output tokens"},
+		{name: "native error", err: errors.New("rate limited"), says: "rate limited"},
+		{name: "tool ok", want: "get_weather", got: "get_weather", out: 9, pass: true},
+		{name: "tool stop reports no usage", want: "get_weather", got: "get_weather", out: 0, pass: true},
+		{name: "tool missing", want: "get_weather", out: 9, says: "got none"},
+		{name: "wrong tool", want: "get_weather", got: "Bash", out: 9, says: "got Bash"},
+	} {
+		p := judgeTurn("turn", c.err, c.text, c.out, c.want, c.got)
+		if (p == "") != c.pass || !strings.Contains(p, c.says) {
+			t.Errorf("%s: verdict %q, want pass=%v containing %q", c.name, p, c.pass, c.says)
+		}
+		if c.text != "" && c.text != "pong" && strings.Contains(p, c.text) {
+			t.Errorf("%s: the model's text leaked into the verdict: %q", c.name, p)
+		}
+	}
+}
+
+// --live spends quota, so it runs only on a CLI that passed every static check;
+// on one that did, a CLI that cannot answer a turn is refused.
+func TestBridgeCheckLiveRunsOnlyAfterStaticPasses(t *testing.T) {
+	t.Setenv("USER", "calypso")
+	t.Setenv("LOGNAME", "calypso")
+	bin := filepath.Join(t.TempDir(), "claude")
+	login := t.TempDir()
+	if err := os.WriteFile(filepath.Join(login, ".credentials.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	fakeClaude(t, bin, "2.1.306", "--max-turns")
+	v, err := checkJSON(t, "claude", "--bin", bin, "--home", login, "--live")
+	if !errors.Is(err, errBridgeCheckFailed) || v.Live || len(v.Problems) != 1 {
+		t.Fatalf("static failure: live=%v problems=%v, want the static refusal only", v.Live, v.Problems)
+	}
+
+	fakeClaude(t, bin, "2.1.306", "") // answers no turn: -p stops at the missing prompt
+	v, err = checkJSON(t, "claude", "--bin", bin, "--home", login, "--live")
+	if !errors.Is(err, errBridgeCheckFailed) || !v.Live || len(v.Problems) != 2 ||
+		!strings.HasPrefix(v.Problems[0], "live plain turn") || !strings.HasPrefix(v.Problems[1], "live tool turn") {
+		t.Fatalf("mute CLI: live=%v problems=%v, want both live turns refused", v.Live, v.Problems)
 	}
 }

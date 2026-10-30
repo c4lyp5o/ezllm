@@ -9,6 +9,11 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by rel
   first milestone of unattended CLI updates (`SPEC-bridge-update.md`).
 - Bridges read `qualified.json` from the bridge directory: a version the
   updater proved reports qualified. Claude's bridge status gains `cli_release`.
+- `--live` adds real turns through the bridge's runner (plain, plus a client
+  tool for Claude and Codex), only after every static check passed.
+- Fixed: Claude boot logged `--max-turns` and `--system-prompt-file` as flag
+  drift on every boot; the flags are now checked by the CLI's parser, not
+  `--help`.
 - Test: a Codex release that accepts but ignores `--disable shell_tool` fails
   preflight end to end.
 

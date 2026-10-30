@@ -93,6 +93,19 @@ Production must run ezllm 1.6.0 or later: the updater asks `ezllm help` for
 `bridge-check` and refuses to promote without it. An ezllm that predates the
 subcommand would take it as a stray argument and start a second router.
 
+## On the dashboard
+
+ezllm reads each bridge's `update-status.json` once a minute (from the mounted
+bridge root, so only on the migrated layout):
+
+- **Providers → Add provider → a bridge preset** shows *CLI updates*: what the
+  updater last did, its reason and when it checked.
+- **Settings → System** shows the same verdict per bridge.
+- **The bell** rings once per report for a promotion (`bridge_updated`, info),
+  a held-back release (`bridge_update_blocked`, warn) and a rollback
+  (`bridge_rolled_back`, error). Each has its toggle under Settings →
+  Notifications. Reports written before ezllm started are shown, not rung.
+
 ## Supervised runs
 
 ```sh

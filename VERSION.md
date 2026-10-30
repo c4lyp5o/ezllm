@@ -43,6 +43,13 @@ accepted by name and only at stage `removed`; at any other stage they must be
 off again. A blanket "removed passes" rule was rejected: Codex also retires a
 flag when it makes a feature unconditional.
 
+**The updater on the dashboard.** ezllm reads each bridge's
+`update-status.json` once a minute: `GET /admin/bridges` carries it as
+`update`, the bridge preset and Settings → System show it in words, and three
+new bell events — `bridge_updated`, `bridge_update_blocked`,
+`bridge_rolled_back` — each with a Settings → Notifications toggle (default
+on), ring once per report. Diagnostics carry the verdict and versions only.
+
 **Fixed: Claude flag drift was always reported.** The check read `--help`,
 which omits `--max-turns` and `--system-prompt-file` although the CLI accepts
 them, so every boot logged them as drift. Each flag now goes to the CLI's

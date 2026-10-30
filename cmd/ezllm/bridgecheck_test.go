@@ -200,3 +200,20 @@ func TestBridgeCheckLiveRunsOnlyAfterStaticPasses(t *testing.T) {
 		t.Fatalf("mute CLI: live=%v problems=%v, want both live turns refused", v.Live, v.Problems)
 	}
 }
+
+// The bridge root is the folder holding `current`; a legacy, version-pinned
+// mount has none, so nothing is watched there.
+func TestBridgeUpdateFile(t *testing.T) {
+	for bin, want := range map[string]string{
+		"/opt/claude-bridge/current/claude":   "/opt/claude-bridge/update-status.json",
+		"/opt/codex-bridge/current/bin/codex": "/opt/codex-bridge/update-status.json",
+		"/opt/agy-bridge/current/agy":         "/opt/agy-bridge/update-status.json",
+		"/opt/claude/claude":                  "",
+		"/opt/codex/bin/codex":                "",
+		"claude":                              "",
+	} {
+		if got := bridgeUpdateFile(bin); got != want {
+			t.Errorf("bridgeUpdateFile(%q) = %q, want %q", bin, got, want)
+		}
+	}
+}

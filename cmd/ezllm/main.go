@@ -373,6 +373,9 @@ func run() error {
 		stopClaude()
 		return err
 	}
+	// The host updater's reports (docs/bridge-update-runbook.md): bridge cards
+	// and bell events for promotions, held releases and rollbacks.
+	srv.WatchBridgeUpdates(ctx, time.Minute)
 
 	reqs := newRequestLifetime()
 	httpSrv := &http.Server{

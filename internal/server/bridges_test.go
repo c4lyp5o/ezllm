@@ -72,7 +72,7 @@ func TestBridgeKeyAddUsesTheServerSecret(t *testing.T) {
 	var authed atomic.Int64
 	h := newHarness(t, bridgeUpstream(&authed))
 	addr := strings.TrimPrefix(h.upstream.URL, "http://")
-	h.server.EnableBridge("chatgpt-sub", addr, bridgeSecret, map[string]any{"login": "logged-in"})
+	h.server.EnableBridge("chatgpt-sub", addr, bridgeSecret, "", map[string]any{"login": "logged-in"})
 
 	_, list := jsonDo(t, h, "GET", "/admin/bridges", "tok-admin", nil)
 	if !strings.Contains(list, `"enabled":true`) || !strings.Contains(list, `"login":"logged-in"`) {
@@ -108,7 +108,7 @@ func TestBridgeKeyAddRefusals(t *testing.T) {
 		t.Fatalf("bridge off = %d %s, want 409 naming EZLLM_CODEX_BRIDGE=on", code, resp)
 	}
 
-	h.server.EnableBridge("chatgpt-sub", strings.TrimPrefix(h.upstream.URL, "http://"), bridgeSecret, nil)
+	h.server.EnableBridge("chatgpt-sub", strings.TrimPrefix(h.upstream.URL, "http://"), bridgeSecret, "", nil)
 
 	// The secret only goes to the bridge that minted it.
 	other := createBridgeAccount2(t, h, "https://api.example.com/v1")

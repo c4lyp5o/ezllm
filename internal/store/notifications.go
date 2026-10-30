@@ -18,6 +18,9 @@ const (
 	NoteCatalogRefreshFailed = "catalog_refresh_failed"
 	NoteClientBudgetReached  = "client_budget_reached"
 	NotePriceRefreshFailed   = "price_refresh_failed"
+	NoteBridgeUpdated        = "bridge_updated"
+	NoteBridgeUpdateBlocked  = "bridge_update_blocked"
+	NoteBridgeRolledBack     = "bridge_rolled_back"
 )
 
 // Notification is one bell entry.

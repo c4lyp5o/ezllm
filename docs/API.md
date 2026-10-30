@@ -335,6 +335,23 @@ The subscription bridges this build knows, whether each is running in this proce
 turn one on. The dashboard's Add provider dialog reads it for the bridge presets. `status` is
 the bridge's own boot report (its loopback `/status`), present only while it runs. The shared
 secret is never in the response — a key add names `bridge` instead.
+
+`update` (v1.6.0) is the host bridge updater's latest report on the bridge's CLI, re-read once a
+minute from `update-status.json` in the bridge root ([bridge update runbook](bridge-update-runbook.md)).
+It is present only for a running bridge on the updater layout (its binary under `<root>/current/`)
+once the updater has run:
+
+| Field | Meaning |
+|---|---|
+| `checked_at` | RFC 3339 time of the updater run |
+| `result` | `updated`, `blocked` (a release failed the gate), `rolled_back` (failed after promotion), `up_to_date`, `waiting` (soaking, held, or outside the window), `error` |
+| `current` | the release the bridge runs now |
+| `previous` | the release it ran before an `updated` or `rolled_back` |
+| `candidate` | the release the report is about |
+| `detail` | the updater's reason (gate problems, proof summary, what it waits for) |
+
+`cli_release` in `status` (all three bridges as of v1.6.0) is `qualified` for the version the
+build was measured on or one the updater recorded in `qualified.json`, else `unqualified (…)`.
 ```jsonc
 [{"id":"claude-sub","label":"Claude Pro/Max","kind":"anthropic-compatible",
   "base_url":"http://127.0.0.1:8790/v1","usage_convention":"anthropic","enabled":true,
@@ -724,6 +741,12 @@ newest update first. `POST …/read` takes `{"ids":[…]}` or `{"all":true}` →
 | `catalog_refresh_failed` | warn | the periodic refresh cannot list an account (repeats fold) |
 | `client_budget_reached` | warn | a client token hits its cap (once per window) |
 | `price_refresh_failed` | warn | the daily price refresh fails (repeats fold) |
+| `bridge_updated` | info | the bridge updater promoted a CLI release and proved it (v1.6.0) |
+| `bridge_update_blocked` | warn | a CLI release failed the update gate; the bridge keeps its release (v1.6.0) |
+| `bridge_rolled_back` | error | a promoted CLI release failed its proof and was reverted (v1.6.0) |
+
+The three bridge events are raised once per updater report, and only for reports written while
+this process runs: the updater writes its outcome after the restart it causes.
 
 A repeat of an unread event with the same dedup key updates that row (`count`
 + 1) instead of adding one. Read rows older than 30 days are pruned; the table
@@ -877,7 +900,7 @@ JSON object, with unknown envelope/setting fields rejected.
 | `GET /admin/settings/sessions` | Active sessions with opaque `id`, `created_at`, `expires_at`, `browser`, and `current`. IDs are independent of authentication tokens/digests. |
 | `DELETE /admin/settings/sessions/{id}` | Revoke one dashboard session; 204, including an unknown/already-revoked ID. |
 | `POST /admin/settings/sessions/revoke-all` | Revoke every dashboard session; 204. Client API tokens are unaffected. |
-| `GET /admin/settings/diagnostics` | Allowlisted `version`, `uptime_seconds`, `database_bytes`, `bridges`, `jobs`, effective `settings`, safe deployment metadata (listen address/source, storage kind, master-key source and trusted proxy count), and configured backup status. `download=true` sets an attachment filename. No filesystem paths, credentials or request content. |
+| `GET /admin/settings/diagnostics` | Allowlisted `version`, `uptime_seconds`, `database_bytes`, `bridges` (each `id`, `enabled` and, from v1.6.0, the updater's `update` verdict: `result`, `checked_at`, `current`, `candidate` — never its free-text `detail`), `jobs`, effective `settings`, safe deployment metadata (listen address/source, storage kind, master-key source and trusted proxy count), and configured backup status. `download=true` sets an attachment filename. No filesystem paths, credentials or request content. |
 | `GET /admin/backups` | `ready`, `running`, `last_outcome`, optional `last_finished`, optional sanitized `error` for inventory failures, and `backups`. `ready` describes configuration/inventory readiness; each run separately checks writability. Completed records have `id`, `created_at`, `bytes`, and `verified`. An unconfigured instance returns an empty list and `ready=false`. |
 | `POST /admin/backups` | Start a manual job; 202 with status `running`. Returns 409 if storage is unavailable, a job is already running, or shutdown has begun. Poll the GET route for completion. |
 
@@ -896,7 +919,7 @@ JSON object, with unknown envelope/setting fields rejected.
 | `backup_enabled` | Boolean, default false. Enabling requires configured writable storage and a separate backup encryption secret. |
 | `backup_hour` | Integer 0–23, instance timezone; default 3. |
 | `backup_keep` | Integer 1–365, default 7; counts completed verified backups. |
-| `notify_free_models_added`, `notify_free_models_removed`, `notify_free_model_broken`, `notify_catalog_refresh_failed`, `notify_client_budget_reached`, `notify_price_refresh_failed`, `notify_backup_failed` | Boolean, all default true. Apply to future dashboard bell events. |
+| `notify_free_models_added`, `notify_free_models_removed`, `notify_free_model_broken`, `notify_catalog_refresh_failed`, `notify_client_budget_reached`, `notify_price_refresh_failed`, `notify_backup_failed`, `notify_bridge_updated`, `notify_bridge_update_blocked`, `notify_bridge_rolled_back` | Boolean, all default true. Apply to future dashboard bell events. |
 
 Duration settings retain the limits of their existing YAML counterparts.
 `apply` is `immediate` for operator values; changing a deployment override still

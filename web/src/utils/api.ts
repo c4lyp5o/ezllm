@@ -278,6 +278,17 @@ export type Bridge = {
   env: string;
   runbook: string;
   status?: Record<string, unknown>;
+  update?: BridgeUpdate;
+};
+// The host updater's latest report on a bridge's CLI (update-status.json,
+// read once a minute; docs/bridge-update-runbook.md).
+export type BridgeUpdate = {
+  checked_at: string;
+  result: 'updated' | 'blocked' | 'rolled_back' | 'up_to_date' | 'waiting' | 'error';
+  current?: string;
+  previous?: string;
+  candidate?: string;
+  detail?: string;
 };
 export const listBridges = () => get<Bridge[]>('/admin/bridges');
 
@@ -1082,7 +1093,7 @@ export type SettingField = { value: string | boolean | number; source: string; e
 export type SettingsView = { revision: number; fields: Record<string, SettingField> };
 export type DashboardSession = { id: string; created_at: string; expires_at: string; browser: string; current: boolean };
 export type BackupStatus = { error?: string; ready: boolean; running: boolean; last_outcome: string; last_finished?: string; backups: { id: string; created_at: string; bytes: number; verified: boolean }[] };
-export type SystemDiagnostics = { deployment?: { listen_address: string; listen_source: string; storage: string; master_key_source: string; trusted_proxy_count: number }; version: string; uptime_seconds: number; database_bytes: number; bridges: { id: string; enabled: boolean }[]; jobs: Record<string, { running: boolean; last_success?: string; last_failure?: string }> };
+export type SystemDiagnostics = { deployment?: { listen_address: string; listen_source: string; storage: string; master_key_source: string; trusted_proxy_count: number }; version: string; uptime_seconds: number; database_bytes: number; bridges: { id: string; enabled: boolean; update?: Pick<BridgeUpdate, 'result' | 'checked_at' | 'current' | 'candidate'> }[]; jobs: Record<string, { running: boolean; last_success?: string; last_failure?: string }> };
 export const getSettings = () => get<SettingsView>('/admin/settings');
 export const saveSettings = (revision: number, values: Record<string, unknown>) => patch<SettingsView>('/admin/settings', { revision, values });
 export const getDashboardSessions = () => get<DashboardSession[]>('/admin/settings/sessions');

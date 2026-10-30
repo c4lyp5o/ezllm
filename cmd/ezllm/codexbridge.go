@@ -154,7 +154,7 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 	}
 
 	if report != nil {
-		report("chatgpt-sub", addr, token, srv.Info)
+		report("chatgpt-sub", addr, token, bridgeUpdateFile(bin), srv.Info)
 	}
 	httpSrv := &http.Server{Addr: addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	go func() {

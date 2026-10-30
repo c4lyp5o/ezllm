@@ -81,6 +81,18 @@ func releaseState(bin, version, measured string) string {
 	return "unqualified (measured on " + measured + "; re-run the live proof)"
 }
 
+// bridgeUpdateFile is the updater's status file for a bridge binary on the
+// updater layout (<root>/current/…): <root>/update-status.json. A legacy,
+// version-pinned mount has no bridge root and nothing to watch: "".
+func bridgeUpdateFile(bin string) string {
+	for dir := filepath.Dir(bin); dir != filepath.Dir(dir); dir = filepath.Dir(dir) {
+		if filepath.Base(dir) == "current" {
+			return filepath.Join(filepath.Dir(dir), "update-status.json")
+		}
+	}
+	return ""
+}
+
 func envOrDefault(key, def string) string {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		return v

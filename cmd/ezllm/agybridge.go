@@ -107,7 +107,7 @@ func startAgyBridge(ctx context.Context, log *slog.Logger, report bridgeReport) 
 	}
 
 	if report != nil {
-		report("antigravity-sub", addr, token, srv.Info)
+		report("antigravity-sub", addr, token, bridgeUpdateFile(bin), srv.Info)
 	}
 	httpSrv := &http.Server{Addr: addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	go func() {

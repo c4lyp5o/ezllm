@@ -11,7 +11,7 @@ import {
 import { useSearchParams } from 'react-router-dom';
 import { Chip, ConfirmModal, Modal, SecretInput, SectionLabel, Segmented, Skeleton, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls, relTime, Mono } from '../components/ui';
 import { Collapse, Stagger, StaggerItem } from '../components/motion';
-import { fmtMoney, nfmt } from '../utils/lib';
+import { bridgeUpdateText, fmtMoney, nfmt, UPDATE_TONE } from '../utils/lib';
 import { accountIssues, type Issue } from '../utils/health';
 
 // ── helpers ─────────────────────────────────────────────────────────────
@@ -593,6 +593,20 @@ function IconButton({ label, tone, busy, disabled, onClick, children }: {
 const REPO_DOCS = 'https://github.com/c4lyp5o/ezllm/blob/master/';
 const statusText = (v: unknown) => (typeof v === 'string' && v.trim() ? v : null);
 
+// BridgeUpdateNote is the host updater's latest report on this bridge's CLI:
+// what it did, its reason when it held a release back, and when it checked.
+function BridgeUpdateNote({ update }: { update: NonNullable<Bridge['update']> }) {
+  const { text, tone } = bridgeUpdateText(update);
+  return (
+    <div className="text-[12px]">
+      <p className={UPDATE_TONE[tone]}>CLI updates: {text}</p>
+      <p className="text-mute" title={update.checked_at}>
+        {update.detail ? <>{update.detail} · </> : null}checked {relTime(update.checked_at)}
+      </p>
+    </div>
+  );
+}
+
 // BridgePanel stands in for the key field on a subscription preset: running →
 // what the bridge reported at boot and "no key needed"; off → the exact steps
 // that turn it on, with the runbook one click away.
@@ -631,6 +645,7 @@ function BridgePanel({ bridge, loading }: { bridge: Bridge | null; loading: bool
             ))}
           </dl>
         )}
+        {bridge.update && <BridgeUpdateNote update={bridge.update} />}
         {toolsDisabled && <p className="text-[12px] text-warn">Client tool calls are unavailable on this bridge. See {runbook} for the reason and options.</p>}
         {loggedOut && <p className="text-[12px] text-warn">The CLI does not report a login — the key test will fail until you log in again ({runbook}).</p>}
         <p className="text-[12px] text-mute">Status was recorded at startup. Setup and troubleshooting: {runbook}</p>

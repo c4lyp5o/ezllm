@@ -77,6 +77,26 @@ timestamps, and backup status. They contain no credentials, prompts, request bod
 filesystem paths. Readiness records bridge startup status, not an active vendor
 inference probe. `/healthz` remains exactly `status` and `version`.
 
+## Push channels
+
+Notifications → Push channels sends bell events to ntfy, Discord, Telegram or
+any JSON webhook as they happen. The per-event toggles still decide which
+events exist; each channel then takes those at or above its minimum severity
+(everything, warnings and errors, or errors only — warnings and errors by
+default). A recurring event that folds into one unread bell row is pushed
+again at most once a day.
+
+Add a channel, then **Send test**: the editor tests the draft before it is
+saved, and a saved row's test records the outcome as its status. Secrets (the
+ntfy token, the Discord webhook URL, the Telegram bot token, the webhook URL
+and bearer) are stored encrypted with the master key, never shown again, and
+kept on an edit when their field is left blank. Delivery is in the background
+— 10 s per attempt, three attempts for a network failure, 429 or 5xx, no
+redirects followed — and a failing channel shows *Failing* with the reason; it
+never raises a bell event about itself. At most ten channels. On ntfy.sh anyone
+who knows a topic can read it: choose one that is hard to guess, or protect it
+with an access token. API: docs/API.md § Push channels.
+
 ## Backup automation and daily schedules
 
 Use the [recovery runbook](recovery-runbook.md) to configure the mounted

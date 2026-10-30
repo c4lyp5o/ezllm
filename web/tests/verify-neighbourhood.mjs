@@ -208,7 +208,7 @@ for (const reduced of [false, true]) {
     await page.getByRole("button", { name: "Resume traffic", exact: true }).click();
   }
   check("no page overflow" + tag, await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-  check("legend and refresh time shown" + tag, /updated/.test(await page.locator(".nbhd ul").innerText()));
+  check("legend and refresh time shown" + tag, /updated/.test(await page.locator(".nbhd ul", { hasText: "updated" }).first().innerText()));
   check("nav entry present" + tag, (await page.getByRole("link", { name: /Neighbourhood/ }).count()) > 0);
   if (!reduced) {
     await page.waitForTimeout(400);

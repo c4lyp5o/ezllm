@@ -32,9 +32,22 @@ const (
 	envBridgeToken = "EZLLM_CLAUDE_BRIDGE_TOKEN_FILE" // shared secret for the account key
 )
 
-// flags this bridge depends on. Asserted at boot: a CLI release may drop one
-// while it still "works" (measured on 2.1.299: --max-turns and --system-prompt-file
-// are accepted but absent from --help), and silent drift here breaks every request.
+// claudeQualifiedVersion is the CLI release the bridge's measurements and live
+// proof were taken on. Any other version boots and serves, reported unqualified
+// until the updater's live proof records it (bridgecheck.go releaseState).
+const claudeQualifiedVersion = "2.1.306"
+
+// claudeVersion is the release number from `claude --version`
+// ("2.1.306 (Claude Code)").
+func claudeVersion(raw string) string {
+	if f := strings.Fields(raw); len(f) > 0 {
+		return f[0]
+	}
+	return raw
+}
+
+// flags this bridge depends on. Asserted at boot (claudeCLICheck): a CLI release
+// may drop one, and silent drift here breaks every request.
 var claudeRequiredFlags = []string{
 	"--input-format", "--output-format", "--include-partial-messages",
 	"--setting-sources", "--system-prompt-file", "--strict-mcp-config",
@@ -44,7 +57,7 @@ var claudeRequiredFlags = []string{
 // bridgeReport tells the dashboard a bridge is running (server.EnableBridge):
 // its address, the secret its account key carries, and its boot status. Nil
 // in tests that only exercise the boot checks.
-type bridgeReport func(id, addr, token string, info map[string]any)
+type bridgeReport func(id, addr, token, updateFile string, info map[string]any)
 
 // startClaudeBridge brings up the loopback surface when enabled. Enabling it
 // without a usable CLI or login is a boot failure, not a silent no-op: this
@@ -53,18 +66,12 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 	if !strings.EqualFold(strings.TrimSpace(os.Getenv(envBridge)), "on") {
 		return func() {}, nil
 	}
-	bin := strings.TrimSpace(os.Getenv(envBridgeBin))
-	if bin == "" {
-		bin = "/opt/claude/claude"
-	}
+	bin := envOrDefault(envBridgeBin, "/opt/claude/claude")
 	resolved, err := exec.LookPath(bin)
 	if err != nil {
 		return nil, fmt.Errorf("claude bridge: %s=%q does not resolve to the official Claude Code CLI: %w", envBridgeBin, bin, err)
 	}
-	dir := strings.TrimSpace(os.Getenv(envBridgeDir))
-	if dir == "" {
-		dir = "/claude-sub"
-	}
+	dir := envOrDefault(envBridgeDir, "/claude-sub")
 	addr := strings.TrimSpace(os.Getenv(envBridgeAddr))
 	if addr == "" {
 		addr = "127.0.0.1:8790"
@@ -74,6 +81,7 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 	}
 
 	cliVersion, drift := claudeCLICheck(resolved)
+	release := releaseState(bin, claudeVersion(cliVersion), claudeQualifiedVersion)
 	login, plan := claudeLoginCheck(resolved, dir)
 	token, err := claudeBridgeToken(strings.TrimSpace(os.Getenv(envBridgeToken)))
 	if err != nil {
@@ -95,6 +103,7 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 			"version":           server.Version,
 			"cli_bin":           resolved,
 			"cli_version":       cliVersion,
+			"cli_release":       release,
 			"claude_config_dir": dir,
 			"login":             login,
 			"subscription":      plan,
@@ -105,11 +114,11 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 	}
 
 	if report != nil {
-		report("claude-sub", addr, token, srv.Info)
+		report("claude-sub", addr, token, bridgeUpdateFile(bin), srv.Info)
 	}
 	httpSrv := &http.Server{Addr: addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	go func() {
-		log.Info("claude bridge listening", "addr", addr, "cli", cliVersion, "login", login, "plan", plan, "flags_drift", drift)
+		log.Info("claude bridge listening", "addr", addr, "cli", cliVersion, "release", release, "login", login, "plan", plan, "flags_drift", drift)
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Error("claude bridge serve", "err", err)
 		}
@@ -132,21 +141,25 @@ func assertLoopback(addr string) error {
 }
 
 // claudeCLICheck proves the binary runs and still accepts every flag the design
-// depends on. Flag drift is reported, not fatal: the surface can still serve, and
-// the per-request behaviour is exercised by the live proof.
+// depends on. `--help` cannot answer that — it omits --max-turns and
+// --system-prompt-file while the parser accepts them (measured on 2.1.299 and
+// 2.1.306) — so each flag goes to the parser itself: `-p FLAG` with no prompt
+// and stdin at EOF fails before any network call, with "unknown option" only
+// when the flag is gone. Flag drift is reported, not fatal, at boot: the surface
+// can still serve, and the per-request behaviour is exercised by the live proof.
 func claudeCLICheck(bin string) (version, drift string) {
 	out, err := exec.Command(bin, "--version").CombinedOutput()
 	if err != nil {
 		return "unavailable", "cannot run --version"
 	}
 	version = strings.TrimSpace(string(out))
-	help, err := exec.Command(bin, "--help").CombinedOutput()
-	if err != nil {
-		return version, "cannot run --help"
-	}
 	var missing []string
 	for _, f := range claudeRequiredFlags {
-		if !strings.Contains(string(help), f) {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		out, err := exec.CommandContext(ctx, bin, "-p", f).CombinedOutput()
+		timedOut := ctx.Err() != nil
+		cancel()
+		if err == nil || timedOut || strings.Contains(string(out), "unknown option '"+f+"'") {
 			missing = append(missing, f)
 		}
 	}

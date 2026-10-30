@@ -114,23 +114,48 @@ func RunPreflight(ctx context.Context, bin, codexHome string) (Preflight, error)
 // so a release that starts honouring it is covered too.
 var ignoredDisables = map[string]bool{"unified_exec": true}
 
-// lockdownViolations parses `codex features list` ("name  stage  enabled")
-// and returns every lockdown feature that is not reported false.
+// retiredDisables are lockdown features a release retired: `features list`
+// shows them at stage "removed" and reports them true, because the flag no
+// longer controls anything. Retired is not the same as harmless — Codex retires
+// a flag both when it deletes a feature and when it makes one unconditional —
+// so each name here was traced in that release's source to nothing a bridge
+// child can reach. 0.166.0 (traced 2026-10-30, rust-v0.163.0 vs rust-v0.166.0):
+//   - worktrees gated only TUI worktree views and the operator option
+//     `codex exec --worktree`; 0.166.0 accepts --worktree unconditionally but
+//     refuses it with --ephemeral or --ignore-user-config, which the exec channel
+//     always passes, and no model tool creates a worktree.
+//   - realtime_conversation gated only TUI voice; the app-server's
+//     thread/realtime/* methods were already ungated on 0.163.0 and are client
+//     requests this bridge never sends.
+//
+// The exception holds only at stage "removed": a release that brings either
+// feature back at any other stage must report it false again. The flags stay
+// in the argv for the same reason.
+var retiredDisables = map[string]bool{"worktrees": true, "realtime_conversation": true}
+
+// lockdownViolations parses `codex features list` ("name  stage  enabled",
+// where a stage may be two words: "under development") and returns every
+// lockdown feature that is not reported false.
 func lockdownViolations(list string) []string {
-	state := map[string]string{}
+	type feature struct{ stage, enabled string }
+	state := map[string]feature{}
 	for _, line := range strings.Split(list, "\n") {
 		f := strings.Fields(line)
 		if len(f) >= 3 {
-			state[f[0]] = f[len(f)-1]
+			state[f[0]] = feature{stage: strings.Join(f[1:len(f)-1], " "), enabled: f[len(f)-1]}
 		}
 	}
 	var bad []string
 	for _, name := range LockdownFeatures {
-		if ignoredDisables[name] && state[name] != "" {
+		s := state[name]
+		if ignoredDisables[name] && s.enabled != "" {
 			continue
 		}
-		if state[name] != "false" {
-			bad = append(bad, name+"="+orMissing(state[name]))
+		if retiredDisables[name] && s.stage == "removed" {
+			continue
+		}
+		if s.enabled != "false" {
+			bad = append(bad, name+"="+orMissing(s.enabled))
 		}
 	}
 	return bad

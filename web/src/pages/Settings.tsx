@@ -5,7 +5,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ApiError, changeDashboardPassword, clearToken } from '../utils/api';
 import { Chip, ConfirmModal, CopyButton, SectionLabel, btn, cx, inputCls, relTime } from '../components/ui';
-import { fmtUptime } from '../utils/lib';
+import { bridgeUpdateText, fmtUptime, UPDATE_TONE } from '../utils/lib';
+import PushChannels from '../components/PushChannels';
 import { settingError } from '../utils/settings';
 import PasswordStrength from '../components/PasswordStrength';
 import { MIN_PASSWORD } from '../utils/passwordStrength';
@@ -94,6 +95,9 @@ const DETAILS: Record<string, [string, string]> = {
   notify_client_budget_reached: ['Client budget reached', 'A client token has exhausted its budget.'],
   notify_price_refresh_failed: ['Price refresh failures', 'The price catalog could not be refreshed.'],
   notify_backup_failed: ['Backup failures', 'A backup did not complete or verification failed.'],
+  notify_bridge_updated: ['Bridge CLI updated', 'The bridge updater promoted a new CLI release and proved it.'],
+  notify_bridge_update_blocked: ['Bridge CLI release held back', 'A new CLI release failed the update gate; the bridge kept its current release.'],
+  notify_bridge_rolled_back: ['Bridge CLI rolled back', 'A promoted CLI release failed its proof and the bridge went back to the previous one.'],
 };
 const GROUPS: Partial<Record<Tab, string[]>> = {
   General: ['usage_timezone'],
@@ -236,7 +240,7 @@ function System() {
   return <section className={panel}><SectionLabel>System</SectionLabel>{error && <p role="alert" className="mt-3 text-bad">{error}</p>}{info && <>
     <dl className="mt-4 grid grid-cols-2 gap-3 text-sm"><dt>Version</dt><dd className="flex min-w-0 flex-wrap items-center gap-2 break-all">{info.version}<CopyButton text={info.version} label="Copy" /></dd><dt>Uptime</dt><dd title={`${Math.floor(info.uptime_seconds / 60)} minutes`}>{fmtUptime(info.uptime_seconds)}</dd><dt>Database</dt><dd>{(info.database_bytes / 1048576).toFixed(2)} MiB</dd></dl>
     {info.deployment && <dl className="mt-5 grid grid-cols-2 gap-3 text-sm"><dt>Listen address</dt><dd className="break-words">{info.deployment.listen_address} · {info.deployment.listen_source}</dd><dt>Storage</dt><dd>{info.deployment.storage}</dd><dt>Master-key source</dt><dd>{info.deployment.master_key_source}</dd><dt>Trusted proxy entries</dt><dd>{info.deployment.trusted_proxy_count}</dd></dl>}
-    <div className="mt-5 space-y-2">{info.bridges.map(b => <p key={b.id} className="flex justify-between text-sm"><span>{b.id}</span><span>{b.enabled ? 'Ready' : 'Off'}</span></p>)}</div>
+    <div className="mt-5 space-y-2">{info.bridges.map(b => { const u = b.update && bridgeUpdateText(b.update); return <div key={b.id} className="text-sm"><p className="flex justify-between gap-3"><span>{b.id}</span><span>{b.enabled ? 'Ready' : 'Off'}</span></p>{u && <p className={cx('text-xs', UPDATE_TONE[u.tone])}>CLI updates: {u.text}</p>}</div>; })}</div>
     <div className="mt-5 space-y-2">{Object.entries(info.jobs).map(([name, j]) => <div key={name} className="text-sm"><p>{name}: {j.running ? 'Running' : 'Idle'}</p><p className="text-xs text-mute">Last success: {j.last_success ? new Date(j.last_success).toLocaleString() : 'No recorded success'} · last failure: {j.last_failure ? new Date(j.last_failure).toLocaleString() : 'None recorded'}</p></div>)}</div>
     <p className="mt-5 text-xs text-mute">Network binding, data storage, trusted proxies, master-key source, bridge paths and backup paths are deployment-managed.</p>
     <a className={cx(btn.base, btn.ghost, 'mt-4')} href="/admin/settings/diagnostics?download=true" download>Download sanitized diagnostics</a>
@@ -270,7 +274,7 @@ export default function Settings() {
     {view && <SettingsGroup key={tab} tab={tab} view={view} updated={setView} onDirty={setDirty} />}
     {tab === 'Security' && <><PasswordSettings /><Sessions /></>}
     {tab === 'Backup & Recovery' && <Backups />}
-    {tab === 'Notifications' && <p className="text-xs text-mute">Preferences affect future notifications in this instance’s dashboard bell. Existing history is retained.</p>}
+    {tab === 'Notifications' && <><p className="text-xs text-mute">Preferences affect future notifications in this instance’s dashboard bell and its push channels. Existing history is retained.</p><PushChannels /></>}
     {tab === 'System' && <><System />{view && <section className={panel}><SectionLabel>Effective configuration</SectionLabel><div className="mt-4 overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr><th className="py-2">Setting</th><th>Effective value</th><th>Source</th></tr></thead><tbody>{Object.entries(view.fields).map(([k, f]) => <tr key={k} className="border-t border-line"><td className="py-2 pr-3">{DETAILS[k]?.[0] ?? k}</td><td className="pr-3">{String(f.value) || 'Unlimited'}</td><td>{f.source}</td></tr>)}</tbody></table></div></section>}</>}
     <ConfirmModal open={pendingTab != null} tone="primary" confirmLabel="Discard changes" title="Discard unsaved changes?"
       body="You have changes on this tab that are not saved. Leaving it throws them away."

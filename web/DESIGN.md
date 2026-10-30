@@ -136,6 +136,11 @@ behaves like the ones they have:
 - **A hover must not move the page.** Anything a hover changes sits where it
   cannot shift the element under the pointer (the Neighbourhood's inspector sits
   above its table, so only the scene's hover drives it).
+- **Never a blank stage**: anything that takes a moment to appear shows a
+  loader saying what is happening — an indeterminate bar, never an invented
+  percentage — until the first real frame or row is on screen (the
+  Neighbourhood's `CityLoading`). It never takes a click, and reduced motion
+  gets a still bar.
 - **Say what happened**: a dismissable notice after a save, toggle or delete; a
   failed action keeps the dialog open with the reason.
 - **One status per row**, worst first (a key is Disabled, Expired, Budget spent,

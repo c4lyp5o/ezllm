@@ -1,0 +1,13 @@
+# Bridge CLI updates (docs/bridge-update-runbook.md). A user unit: the updater
+# runs as the operator who owns the bridge folders and the docker socket access.
+[Unit]
+Description=ezllm bridge CLI update
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/workspace/ezllm/scripts/bridge_update.py
+# Downloads, three live gates, one restart and the proofs.
+TimeoutStartSec=45min
+Nice=10

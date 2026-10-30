@@ -14,17 +14,21 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/store"
 )
 
-// notify records a bell notification. Best-effort: a failed write is logged
-// and never fails the operation that raised it.
+// notify records a bell notification and queues it for the push channels
+// (push.go). Best-effort: a failed write is logged and never fails the
+// operation that raised it.
 func (s *Server) notify(in store.NotificationInput) {
 	if s.db == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := s.db.Notify(ctx, in); err != nil {
+	result, err := s.db.NotifyOutcome(ctx, in)
+	if err != nil {
 		s.log.Warn("notification write failed", "kind", in.Kind, "err", err)
+		return
 	}
+	s.queuePush(in, result)
 }
 
 // handleNotifications: GET /admin/notifications?limit=N → newest first plus

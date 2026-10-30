@@ -17,7 +17,7 @@ import { useLiveCalls } from '../utils/live';
 import { accountIssues, providerLink } from '../utils/health';
 import { pct } from '../utils/lib';
 import { Chip, EmptyState, Segmented, SectionLabel, btn, cx, formatTokens, inputCls } from '../components/ui';
-import CityScene from '../components/CityScene';
+import CityScene, { CityLoading } from '../components/CityScene';
 
 const SEED_KEY = 'ezllm.city.seed';
 const readSeed = (): number => {
@@ -228,7 +228,7 @@ export default function Neighbourhood() {
 
   if (buildings === null) return <div className="nbhd nbhd-loading flex min-h-[360px] flex-col items-center justify-center gap-4 rounded-2xl border border-line bg-surface px-6 text-center">
     <span className="text-3xl text-accent" aria-hidden>⌂</span>
-    {loading ? <p role="status" className="text-sm text-dim">Laying out the streets…</p> : <><p role="alert" className="text-sm text-dim">Could not load the neighbourhood.</p><button className={cx(btn.base, btn.ghost, 'min-h-10')} onClick={retry}>Try again</button></>}
+    {loading ? <CityLoading label="Laying out the streets…" /> : <><p role="alert" className="text-sm text-dim">Could not load the neighbourhood.</p><button className={cx(btn.base, btn.ghost, 'min-h-10')} onClick={retry}>Try again</button></>}
   </div>;
   if (!buildings.length) return <div className="space-y-4"><EmptyState title="No providers yet." hint="Add a provider under Providers and its building appears here." /><Link className={cx(btn.base, btn.primary, 'min-h-10')} to="/providers">Add a provider</Link></div>;
 

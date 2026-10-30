@@ -136,7 +136,7 @@ func TestSettingsMigrationPreservesLegacyRuleTimezones(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err = db.Writer().Exec(`UPDATE model_rules SET win_tz='' WHERE model_id='implicit';DELETE FROM schema_version WHERE version=31;INSERT OR IGNORE INTO schema_version(version) VALUES(30)`); err != nil {
+	if _, err = db.Writer().Exec(`UPDATE model_rules SET win_tz='' WHERE model_id='implicit';DELETE FROM schema_version WHERE version>30;INSERT OR IGNORE INTO schema_version(version) VALUES(30)`); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()

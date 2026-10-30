@@ -20,6 +20,17 @@ import {
 } from '../utils/city';
 import { subscribeLiveCalls, type LiveCall } from '../utils/live';
 
+// CityLoading is the stage's loading state: an indeterminate bar (it does not
+// pretend to know a percentage) and what is happening now.
+export function CityLoading({ label }: { label: string }) {
+  return (
+    <div className="nbhd-loader" role="progressbar" aria-label={label} aria-busy="true">
+      <span className="nbhd-loader-track" aria-hidden><span className="nbhd-loader-fill" /></span>
+      <span className="nbhd-loader-label">{label}</span>
+    </div>
+  );
+}
+
 const DUR = 1500;      // request pulse, ms
 const LANE = 0.62;     // lane offset from a street's centre line
 const MAX_PULSES = 6;  // per building; older pulses drop
@@ -146,6 +157,23 @@ export default function CityScene({
 }) {
   const host = useRef<HTMLDivElement | null>(null);
   const canvas = useRef<HTMLCanvasElement | null>(null);
+  // The loading bar stays up until a frame has been painted onto a sized
+  // canvas: the first draw (ground layer, sprites, seeded streets) takes long
+  // enough that a bare canvas read as a crash. `loading` then fades it out.
+  const drawn = useRef(false);
+  const [loading, setLoading] = useState<'drawing' | 'fading' | 'done'>('drawing');
+  const markDrawn = () => {
+    const el = canvas.current;
+    if (drawn.current || !el || !el.width || !el.height) return;
+    drawn.current = true;
+    setLoading('fading');
+  };
+  useEffect(() => {
+    if (loading !== 'fading') return;
+    // A timer, not transitionend: a paused scene switches transitions off.
+    const t = setTimeout(() => setLoading('done'), 320);
+    return () => clearTimeout(t);
+  }, [loading]);
   const [view, setView] = useState<View>({ scale: 1, ox: 0, oy: 0, w: 0, h: 0, dpr: 1 });
   const [boxes, setBoxes] = useState<Record<string, { box: Rect; clip: string; roof: [number, number] }>>({});
 
@@ -1229,6 +1257,7 @@ export default function CityScene({
       last = now;
       scene.current.advance(dt);
       scene.current.draw(ctx, now);
+      markDrawn();
       if (now - statsAt > 1000) {
         // Liveness counters for the regression drivers. Written once a second,
         // never per frame.
@@ -1248,11 +1277,13 @@ export default function CityScene({
       raf = requestAnimationFrame(loop);
     };
 
+    // Two frames before the first draw: the one in between is painted, so the
+    // loading bar is on screen before the long first draw holds the thread.
     if (still) {
-      scene.current.draw(ctx, performance.now());
-      return;
+      raf = requestAnimationFrame(() => { raf = requestAnimationFrame((now) => { scene.current.draw(ctx, now); markDrawn(); }); });
+      return () => cancelAnimationFrame(raf);
     }
-    raf = requestAnimationFrame((now) => { last = now; loop(now); });
+    raf = requestAnimationFrame(() => { raf = requestAnimationFrame((now) => { last = now; loop(now); }); });
     return () => cancelAnimationFrame(raf);
     // `still` restarts the loop, so a paused scene stops scheduling frames.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1264,7 +1295,7 @@ export default function CityScene({
     if (!still) return;
     ensureSeeded();
     const ctx = canvas.current?.getContext('2d');
-    if (ctx) scene.current.draw(ctx, performance.now());
+    if (ctx) { scene.current.draw(ctx, performance.now()); markDrawn(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [still, buildings, plan, view.w, view.h]);
 
@@ -1281,6 +1312,11 @@ export default function CityScene({
         role="img"
         aria-label={`A city of ${buildings.length} providers, ${liveState} serving traffic right now.`}
       />
+      {loading !== 'done' && (
+        <div className="nbhd-city-loading" data-fading={loading === 'fading'}>
+          <CityLoading label="Drawing the city…" />
+        </div>
+      )}
       <div className="nbhd-city-hits">
         {[...plan.slots].sort((a, b) => (a.x + a.w + a.y + a.d) - (b.x + b.w + b.y + b.d)).map((slot) => {
           const b = byId.get(slot.id);

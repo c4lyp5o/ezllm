@@ -59,6 +59,21 @@ export function fmtUptime(s: number): string {
 }
 
 /** Whole-number locale string, for exact counts that must not be abbreviated. */
+// bridgeUpdateText puts the bridge updater's report in words, with the tone
+// the page colours it in. Versions are named; nothing is abbreviated.
+export function bridgeUpdateText(u: { result: string; current?: string; previous?: string; candidate?: string }): { text: string; tone: 'ok' | 'mute' | 'warn' | 'bad' } {
+  const running = u.current ? `running ${u.current}` : 'running version unknown';
+  switch (u.result) {
+    case 'updated': return { text: `Updated to ${u.candidate ?? u.current}${u.previous ? ` from ${u.previous}` : ''}`, tone: 'ok' };
+    case 'up_to_date': return { text: `Up to date, ${running}`, tone: 'ok' };
+    case 'waiting': return { text: u.candidate ? `${u.candidate} queued, ${running}` : `Waiting, ${running}`, tone: 'mute' };
+    case 'blocked': return { text: `${u.candidate} held back, ${running}`, tone: 'warn' };
+    case 'rolled_back': return { text: `${u.candidate} rolled back, ${running}`, tone: 'bad' };
+    default: return { text: `The updater reported an error, ${running}`, tone: 'bad' };
+  }
+}
+export const UPDATE_TONE = { ok: 'text-ok', mute: 'text-mute', warn: 'text-warn', bad: 'text-bad' } as const;
+
 export const nfmt = (v: number) => (Number.isFinite(v) ? v.toLocaleString('en-US') : '–');
 
 /** Share of a total as a one-decimal percent that drops to whole above 10%. */

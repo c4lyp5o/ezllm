@@ -335,6 +335,23 @@ The subscription bridges this build knows, whether each is running in this proce
 turn one on. The dashboard's Add provider dialog reads it for the bridge presets. `status` is
 the bridge's own boot report (its loopback `/status`), present only while it runs. The shared
 secret is never in the response — a key add names `bridge` instead.
+
+`update` (v1.6.0) is the host bridge updater's latest report on the bridge's CLI, re-read once a
+minute from `update-status.json` in the bridge root ([bridge update runbook](bridge-update-runbook.md)).
+It is present only for a running bridge on the updater layout (its binary under `<root>/current/`)
+once the updater has run:
+
+| Field | Meaning |
+|---|---|
+| `checked_at` | RFC 3339 time of the updater run |
+| `result` | `updated`, `blocked` (a release failed the gate), `rolled_back` (failed after promotion), `up_to_date`, `waiting` (soaking, held, or outside the window), `error` |
+| `current` | the release the bridge runs now |
+| `previous` | the release it ran before an `updated` or `rolled_back` |
+| `candidate` | the release the report is about |
+| `detail` | the updater's reason (gate problems, proof summary, what it waits for) |
+
+`cli_release` in `status` (all three bridges as of v1.6.0) is `qualified` for the version the
+build was measured on or one the updater recorded in `qualified.json`, else `unqualified (…)`.
 ```jsonc
 [{"id":"claude-sub","label":"Claude Pro/Max","kind":"anthropic-compatible",
   "base_url":"http://127.0.0.1:8790/v1","usage_convention":"anthropic","enabled":true,
@@ -724,6 +741,45 @@ newest update first. `POST …/read` takes `{"ids":[…]}` or `{"all":true}` →
 | `catalog_refresh_failed` | warn | the periodic refresh cannot list an account (repeats fold) |
 | `client_budget_reached` | warn | a client token hits its cap (once per window) |
 | `price_refresh_failed` | warn | the daily price refresh fails (repeats fold) |
+| `bridge_updated` | info | the bridge updater promoted a CLI release and proved it (v1.6.0) |
+| `bridge_update_blocked` | warn | a CLI release failed the update gate; the bridge keeps its release (v1.6.0) |
+| `bridge_rolled_back` | error | a promoted CLI release failed its proof and was reverted (v1.6.0) |
+
+The three bridge events are raised once per updater report, and only for reports written while
+this process runs: the updater writes its outcome after the restart it causes.
+
+### Push channels: `/admin/notification-channels` (schema v32)
+Bell events also go to external channels. A new event is pushed to every enabled channel whose
+`min_severity` it meets (`info` < `warn` < `error`); a repeat that folds into an unread row is
+pushed again at most once a day. Delivery runs in the background: 10 s per attempt, three
+attempts for a network failure, `429` or `5xx`, redirects never followed. Its outcome is the
+channel's status — a failing channel never raises a bell event. Admin only.
+
+| Request | Effect |
+|---|---|
+| `GET /admin/notification-channels` | `{"channels":[…],"kinds":{…},"max":10}`: the channels, each kind's fields (`name`, `secret`, `required`), the cap |
+| `POST /admin/notification-channels` | add one → `201` with the channel |
+| `PATCH /admin/notification-channels/{id}` | edit → `200`; an absent field is kept, `kind` cannot change |
+| `DELETE /admin/notification-channels/{id}` | `204` |
+| `POST /admin/notification-channels/test` | send one test message, one attempt → `{"ok":true}` or `{"ok":false,"error":"…"}`; takes a draft (no `id`) or a saved `id` with optional edits; only a saved channel tested as stored records the outcome |
+
+Body fields: `kind`, `name` (1–60 characters), `enabled` (default true), `min_severity` (default
+`warn`), `config` (non-secret fields) and `secrets`. In `secrets` on an edit, an absent name keeps
+the stored value and `""` clears it. Validation errors are `400` and name the field, never a value.
+
+| `kind` | `config` | `secrets` |
+|---|---|---|
+| `ntfy` | `server` (default `https://ntfy.sh`), `topic` (required) | `token` |
+| `discord` | — | `webhook_url` (required, a `discord.com` webhook) |
+| `telegram` | `chat_id` (required) | `bot_token` (required) |
+| `webhook` | — | `url` (required), `bearer` |
+
+A channel in a response carries `id`, `kind`, `name`, `enabled`, `min_severity`, `config`,
+`secrets_set` (the names of the stored secrets — never a value), `target` (where it delivers, in
+words: the ntfy topic URL, `Telegram chat …`, a webhook's scheme and host), `last_status`
+(`""`, `ok`, `failed`), `last_error`, `last_sent_at`, `created_at`, `updated_at`. Secrets are stored
+encrypted with the master key and checked by backup verification. A webhook receives
+`{"kind","severity","title","body","created_at"}` with `Authorization: Bearer …` when set.
 
 A repeat of an unread event with the same dedup key updates that row (`count`
 + 1) instead of adding one. Read rows older than 30 days are pruned; the table
@@ -877,7 +933,7 @@ JSON object, with unknown envelope/setting fields rejected.
 | `GET /admin/settings/sessions` | Active sessions with opaque `id`, `created_at`, `expires_at`, `browser`, and `current`. IDs are independent of authentication tokens/digests. |
 | `DELETE /admin/settings/sessions/{id}` | Revoke one dashboard session; 204, including an unknown/already-revoked ID. |
 | `POST /admin/settings/sessions/revoke-all` | Revoke every dashboard session; 204. Client API tokens are unaffected. |
-| `GET /admin/settings/diagnostics` | Allowlisted `version`, `uptime_seconds`, `database_bytes`, `bridges`, `jobs`, effective `settings`, safe deployment metadata (listen address/source, storage kind, master-key source and trusted proxy count), and configured backup status. `download=true` sets an attachment filename. No filesystem paths, credentials or request content. |
+| `GET /admin/settings/diagnostics` | Allowlisted `version`, `uptime_seconds`, `database_bytes`, `bridges` (each `id`, `enabled` and, from v1.6.0, the updater's `update` verdict: `result`, `checked_at`, `current`, `candidate` — never its free-text `detail`), `jobs`, effective `settings`, safe deployment metadata (listen address/source, storage kind, master-key source and trusted proxy count), and configured backup status. `download=true` sets an attachment filename. No filesystem paths, credentials or request content. |
 | `GET /admin/backups` | `ready`, `running`, `last_outcome`, optional `last_finished`, optional sanitized `error` for inventory failures, and `backups`. `ready` describes configuration/inventory readiness; each run separately checks writability. Completed records have `id`, `created_at`, `bytes`, and `verified`. An unconfigured instance returns an empty list and `ready=false`. |
 | `POST /admin/backups` | Start a manual job; 202 with status `running`. Returns 409 if storage is unavailable, a job is already running, or shutdown has begun. Poll the GET route for completion. |
 
@@ -896,7 +952,7 @@ JSON object, with unknown envelope/setting fields rejected.
 | `backup_enabled` | Boolean, default false. Enabling requires configured writable storage and a separate backup encryption secret. |
 | `backup_hour` | Integer 0–23, instance timezone; default 3. |
 | `backup_keep` | Integer 1–365, default 7; counts completed verified backups. |
-| `notify_free_models_added`, `notify_free_models_removed`, `notify_free_model_broken`, `notify_catalog_refresh_failed`, `notify_client_budget_reached`, `notify_price_refresh_failed`, `notify_backup_failed` | Boolean, all default true. Apply to future dashboard bell events. |
+| `notify_free_models_added`, `notify_free_models_removed`, `notify_free_model_broken`, `notify_catalog_refresh_failed`, `notify_client_budget_reached`, `notify_price_refresh_failed`, `notify_backup_failed`, `notify_bridge_updated`, `notify_bridge_update_blocked`, `notify_bridge_rolled_back` | Boolean, all default true. Apply to future dashboard bell events and so to push channels. |
 
 Duration settings retain the limits of their existing YAML counterparts.
 `apply` is `immediate` for operator values; changing a deployment override still

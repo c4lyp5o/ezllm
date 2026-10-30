@@ -87,9 +87,26 @@ try {
   let release; const held = new Promise((r) => { release = r }); const loading = await dash.page(async (route, url) => {
     if (url.pathname === '/admin/accounts') { await held; await json(route, accounts); return true }
     if (url.pathname === '/admin/usage') { await json(route, usage); return true } return false;
-  }); await loading.goto(dash.base + '/neighbourhood'); await loading.getByText('Laying out the streets…', { exact: true }).waitFor();
-  await loading.screenshot({ path: `${artifacts}/neighbourhood-loading.png` }); check('loading: stable feedback visible', await loading.getByRole('status').count() > 0);
-  release(); await loading.locator('[data-building]').first().waitFor(); await loading.context().close();
+  });
+  // The stage's own loader can come and go within a second: an observer
+  // records it the moment it appears.
+  await loading.addInitScript(() => {
+    window.__stageLoader = null;
+    new MutationObserver(() => {
+      const el = document.querySelector('.nbhd-city-loading');
+      if (el && !window.__stageLoader) window.__stageLoader = { label: el.querySelector('[role="progressbar"]')?.getAttribute('aria-label'), pointer: getComputedStyle(el).pointerEvents, drawnYet: !!document.querySelector('canvas.nbhd-city-canvas')?.dataset.frames };
+    }).observe(document, { childList: true, subtree: true });
+  });
+  await loading.goto(dash.base + '/neighbourhood'); await loading.getByText('Laying out the streets…', { exact: true }).waitFor();
+  await loading.screenshot({ path: `${artifacts}/neighbourhood-loading.png` }); check('loading: a progress bar while the data loads', await loading.getByRole('progressbar', { name: 'Laying out the streets…' }).count() === 1);
+  release(); await loading.locator('[data-building]').first().waitFor();
+  await loading.waitForFunction(() => document.querySelector('canvas.nbhd-city-canvas')?.dataset.frames);
+  const stage = await loading.evaluate(() => window.__stageLoader);
+  check('loading: the stage shows a loader until the first frame', !!stage && stage.label === 'Drawing the city…' && stage.drawnYet === false, stage);
+  check('loading: the stage loader never takes a click', stage?.pointer === 'none', stage);
+  await loading.waitForFunction(() => !document.querySelector('.nbhd-city-loading'), null, { timeout: 5000 });
+  check('loading: the stage loader is gone once the city is drawn', await loading.locator('.nbhd-city-loading').count() === 0);
+  await loading.context().close();
   let reads = 0; const visibility = await dash.page(async (route, url) => {
     if (url.pathname === '/admin/accounts') { reads++; await json(route, accounts); return true }
     if (url.pathname === '/admin/usage') { await json(route, usage); return true } return false

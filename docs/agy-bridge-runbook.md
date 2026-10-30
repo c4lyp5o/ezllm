@@ -59,10 +59,24 @@ cp ~/.local/bin/agy "$HOME/.local/share/agy-bridge/$VERSION/agy"
 
 `agy` updates itself in place in the background. Mounting `~/.local/bin/agy`
 would let an update change the CLI under a running bridge; the pinned copy is
-mounted read-only, so the bridge only moves to a new release when you copy one
+mounted read-only. Make its folder read-only on the host too
+(`chmod a-w ~/.local/share/agy-bridge/VERSION`): running the pinned copy on the
+host — even `--version` — lets agy rewrite it in place, renaming the original
+to `agy.<n>.old` (measured 2026-10-30, 1.4.7 → 1.4.11). The running container
+keeps the original until the next recreate, which then boots the new release
+unannounced. With the copy read-only, so the bridge only moves to a new release when you copy one
 and change the mount. A release other than 1.4.7 still boots, and `/status`
-reports it as `unqualified`. Re-run the live proof ([verify](#verify)) after
-moving.
+reports it as `unqualified` until the live proof ([verify](#verify)) has been
+re-run and recorded in `qualified.json`.
+
+**Gate a release before promoting it.** `ezllm bridge-check agy` runs the boot
+checks against a staged CLI and exits non-zero on any problem — stricter than
+boot, which reports an empty model list and keeps serving. `--json` prints the verdict
+(`ok`, `version`, `release`, `live`, `problems`) for the bridge updater
+(`SPEC-bridge-update.md`). `--live` then drives real turns through the bridge
+(plan quota, the shared login) — only when every static check passed. A version the updater proved is listed in
+`qualified.json` in the bridge directory (next to the version folders, up to two
+levels above the binary); boot then reports it qualified.
 
 The binary is ~228 MB, dynamically linked against glibc; the ezllm image
 (distroless base-debian12) carries glibc.

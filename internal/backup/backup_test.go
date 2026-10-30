@@ -157,3 +157,35 @@ func TestSettingsBackupWrongMasterAndUnavailableStorage(t *testing.T) {
 		t.Fatal("file accepted as destination")
 	}
 }
+
+// A notification channel's secret is a credential: a backup whose key cannot
+// decrypt it must not verify, even with no provider key to trip on.
+func TestSettingsBackupVerifiesNotificationChannelSecrets(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, store.Options{Path: filepath.Join(t.TempDir(), "live.sqlite"), MasterSecret: testMaster})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if _, err = db.CreateNotificationChannel(ctx, store.NotificationChannel{Kind: "discord", Name: "ops", Enabled: true, MinSeverity: "warn"},
+		map[string]string{"webhook_url": "https://discord.com/api/webhooks/1/secret-part"}); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.CompleteDashboardSetup(ctx, "test-dashboard-password"); err != nil {
+		t.Fatal(err)
+	}
+	bad := New(db, t.TempDir(), testSecret, "wrong-master-key")
+	if err := bad.Reserve(); err != nil {
+		t.Fatal(err)
+	}
+	if err := bad.RunReserved(ctx, 7); err == nil {
+		t.Fatal("a backup that cannot decrypt the channel secret verified")
+	}
+	good := New(db, t.TempDir(), testSecret, testMaster)
+	if err := good.Reserve(); err != nil {
+		t.Fatal(err)
+	}
+	if err := good.RunReserved(ctx, 7); err != nil {
+		t.Fatalf("a good backup failed: %v", err)
+	}
+}

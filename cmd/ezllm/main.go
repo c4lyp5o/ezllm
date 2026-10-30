@@ -71,9 +71,12 @@ func run() error {
 			return runBackupCommand(os.Args[1], os.Args[2:])
 		case "github-login":
 			return runGitHubLogin()
+		case "bridge-check":
+			return runBridgeCheck(os.Args[2:], os.Stdout)
 		case "help", "-h", "--help":
 			fmt.Println("usage: ezllm [flags]            start the router")
 			fmt.Println("       ezllm github-login       authorize a GitHub Copilot account (device flow)")
+			fmt.Println("       ezllm bridge-check NAME  gate a bridge CLI (claude|codex|agy) before promoting it")
 			return nil
 		}
 	}
@@ -350,6 +353,8 @@ func run() error {
 
 	defer srv.StopBackground(15 * time.Second)
 	srv.StartSettingsJobs(ctx)
+	// Bell events to the push channels in Settings → Notifications.
+	srv.StartPush(ctx)
 
 	// Claude subscription surface: loopback-only, off unless EZLLM_CLAUDE_BRIDGE=on.
 	// Enabling it without a usable CLI or login fails the boot loudly.
@@ -370,6 +375,9 @@ func run() error {
 		stopClaude()
 		return err
 	}
+	// The host updater's reports (docs/bridge-update-runbook.md): bridge cards
+	// and bell events for promotions, held releases and rollbacks.
+	srv.WatchBridgeUpdates(ctx, time.Minute)
 
 	reqs := newRequestLifetime()
 	httpSrv := &http.Server{

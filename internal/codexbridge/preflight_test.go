@@ -88,3 +88,55 @@ func TestPreflightRefusesAReleaseThatIgnoresTheLockdown(t *testing.T) {
 		t.Fatalf("preflight = %+v, want lockdown not ok on 9.9.9", p)
 	}
 }
+
+// A retired lockdown feature passes only by name and only at stage "removed";
+// anywhere else — or for any other feature — reported true is a violation.
+func TestLockdownRetiredFeatures(t *testing.T) {
+	var b strings.Builder
+	for _, f := range LockdownFeatures {
+		b.WriteString(f + "   stable   false\n")
+	}
+	base := b.String()
+	with := func(name, line string) string {
+		return strings.Replace(base, name+"   stable   false\n", line+"\n", 1)
+	}
+	for _, c := range []struct {
+		name, list, want string
+	}{
+		{"worktrees retired", with("worktrees", "worktrees   removed   true"), ""},
+		{"realtime retired", with("realtime_conversation", "realtime_conversation   removed   true"), ""},
+		{"worktrees back at stable", with("worktrees", "worktrees   stable   true"), "worktrees=true"},
+		{"worktrees back under development", with("worktrees", "worktrees   under development   true"), "worktrees=true"},
+		{"worktrees dropped", with("worktrees", ""), "worktrees=missing"},
+		{"shell_tool is never retired", with("shell_tool", "shell_tool   removed   true"), "shell_tool=true"},
+		{"a two-word stage still reads its value", with("goals", "goals   under development   false"), ""},
+	} {
+		if got := strings.Join(lockdownViolations(c.list), ","); got != c.want {
+			t.Errorf("%s: violations %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// The real `features list` output under the bridge's lockdown argv, captured
+// from the qualified release and from 0.166.0, which retired worktrees and
+// realtime_conversation (both reported "removed  true").
+func TestLockdownAgainstMeasuredReleases(t *testing.T) {
+	for _, v := range []string{"0.163.0", "0.166.0"} {
+		raw, err := os.ReadFile(filepath.Join("testdata", "features-lockdown-"+v+".txt"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		list := string(raw)
+		if bad := lockdownViolations(list); len(bad) != 0 {
+			t.Errorf("%s: violations %v, want none", v, bad)
+		}
+		flipped := strings.Replace(list, "\nshell_tool                               stable             false\n",
+			"\nshell_tool                               stable             true\n", 1)
+		if flipped == list {
+			t.Fatalf("%s: fixture has no shell_tool line to flip", v)
+		}
+		if bad := strings.Join(lockdownViolations(flipped), ","); bad != "shell_tool=true" {
+			t.Errorf("%s with shell_tool on: violations %q, want shell_tool=true", v, bad)
+		}
+	}
+}

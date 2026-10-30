@@ -15,6 +15,10 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by rel
   (soak, stage, gate, promote in a window, prove, roll back), runbook in
   `docs/bridge-update-runbook.md`. First dry run on the box gated Claude
   2.1.308 and agy 1.4.11 ok and blocked Codex 0.166.0 on its lockdown check.
+- Codex lockdown accepts `worktrees` and `realtime_conversation` only at stage
+  `removed` (retired in 0.166.0, traced in source to nothing the bridge reaches);
+  the real 0.163.0 and 0.166.0 `features list` outputs are test fixtures.
+  Codex 0.166.0 now passes the gate.
 - Fixed: Claude boot logged `--max-turns` and `--system-prompt-file` as flag
   drift on every boot; the flags are now checked by the CLI's parser, not
   `--help`.

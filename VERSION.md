@@ -35,6 +35,14 @@ promotes by swapping a `current` link and restarting ezllm once, proves the
 promotion in the running container and rolls back on failure. Install and
 operation: `docs/bridge-update-runbook.md`.
 
+**Codex lockdown: retired flags.** Codex 0.166.0 retired `worktrees` and
+`realtime_conversation` (stage `removed`, reported `true`: the flags no longer
+control anything), which failed the lockdown check. Both were traced in the
+0.163.0 and 0.166.0 sources to nothing a bridge child can reach, and are now
+accepted by name and only at stage `removed`; at any other stage they must be
+off again. A blanket "removed passes" rule was rejected: Codex also retires a
+flag when it makes a feature unconditional.
+
 **Fixed: Claude flag drift was always reported.** The check read `--help`,
 which omits `--max-turns` and `--system-prompt-file` although the CLI accepts
 them, so every boot logged them as drift. Each flag now goes to the CLI's

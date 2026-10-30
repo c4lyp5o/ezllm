@@ -1,0 +1,16 @@
+{
+  "window": "02:00-05:00",
+  "soak_days": 3,
+  "keep": 3,
+  "container": "ezllm",
+  "healthz_url": "http://127.0.0.1:20129/healthz",
+  "gateway_url": "http://127.0.0.1:20129",
+  "proof_token_file": "~/.config/ezllm/proof.token",
+  "gate_binary": "",
+  "fallback_ntfy_url": "",
+  "bridges": {
+    "claude": {"enabled": true, "channel": "stable", "hold": []},
+    "codex": {"enabled": true, "hold": []},
+    "agy": {"enabled": true, "hold": []}
+  }
+}

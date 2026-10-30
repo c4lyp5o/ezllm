@@ -11,6 +11,10 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by rel
   updater proved reports qualified. Claude's bridge status gains `cli_release`.
 - `--live` adds real turns through the bridge's runner (plain, plus a client
   tool for Claude and Codex), only after every static check passed.
+- `scripts/bridge_update.py` + systemd units: unattended bridge CLI updates
+  (soak, stage, gate, promote in a window, prove, roll back), runbook in
+  `docs/bridge-update-runbook.md`. First dry run on the box gated Claude
+  2.1.308 and agy 1.4.11 ok and blocked Codex 0.166.0 on its lockdown check.
 - Fixed: Claude boot logged `--max-turns` and `--system-prompt-file` as flag
   drift on every boot; the flags are now checked by the CLI's parser, not
   `--help`.

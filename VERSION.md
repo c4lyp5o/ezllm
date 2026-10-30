@@ -28,6 +28,13 @@ runner in-process through a plain turn and, for Claude and Codex, a client-tool
 turn; it runs only on a CLI that passed every static check, and judges the
 answer without printing it.
 
+**`scripts/bridge_update.py`** is the host updater that uses the gate: hourly
+from a systemd user timer, it discovers releases on each CLI's official channel,
+soaks them three days, stages and gates them inside a late-night window,
+promotes by swapping a `current` link and restarting ezllm once, proves the
+promotion in the running container and rolls back on failure. Install and
+operation: `docs/bridge-update-runbook.md`.
+
 **Fixed: Claude flag drift was always reported.** The check read `--help`,
 which omits `--max-turns` and `--system-prompt-file` although the CLI accepts
 them, so every boot logged them as drift. Each flag now goes to the CLI's

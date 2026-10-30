@@ -119,9 +119,10 @@ Host config `~/.config/ezllm/bridge-update.json`:
 
 One run, per enabled bridge, at most one promotion per bridge per night:
 
-1. **Discover** the newest release through the official channel; skip
-   prereleases, anything in `hold`, and anything published less than
-   `soak_days` ago. M2 measures each channel before code depends on it:
+1. **Discover** the newest release through the official channel that is
+   ready: not a prerelease, not in `hold`, not blocked, and published at
+   least `soak_days` ago (agy publishes no date: its soak counts from the
+   updater's first sighting). Channels as measured: docs/bridge-update-runbook.md. M2 measures each channel before code depends on it:
    Codex — GitHub releases for `openai/codex`, standalone musl asset; Claude —
    the official installer run into a scratch `HOME`; agy — the official
    SHA-512-verified installer run into a scratch `HOME`. The CLIs' own updaters
@@ -160,7 +161,7 @@ minute (and at boot) — no new credential, no inbound endpoint:
 
 ```json
 {"bridge": "codex", "checked_at": "…", "current": "0.170.0", "previous": "0.163.0",
- "result": "updated|blocked|rolled_back|up_to_date|error",
+ "result": "updated|blocked|rolled_back|up_to_date|waiting|error",
  "candidate": "0.170.0", "detail": "flag drift: --disable unified_exec"}
 ```
 

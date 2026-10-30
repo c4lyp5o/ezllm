@@ -1,7 +1,8 @@
 # SPEC — bridge CLI auto-update
 
-Status: draft for operator review (2026-10-30). No production code until the
-operator confirms this surface.
+Status: built (v1.6.0, 2026-10-31) — M1 gate, M2 host updater, M3 status in
+ezllm, M4 push channels. M5 (production: compose mount migration, timer
+install, first nightly run) is the operator's, per docs/bridge-update-runbook.md.
 
 ## 1. Goal
 
@@ -207,9 +208,10 @@ backoff retries; failures are logged by channel and reason only and surface as
 a channel status, never as a bell event (no notification loops). Payloads carry
 title and body as the bell shows them — no credentials, bodies or prompts.
 
-Storage: a `notification_channels` table → `schema_version` bump with the
-matching docs/API.md entries (`GET/PUT /admin/notification-channels`,
-`POST /admin/notification-channels/{id}/test`).
+Storage: a `notification_channels` table → `schema_version` 32 with the
+matching docs/API.md entries. As built: `GET`/`POST /admin/notification-channels`,
+`PATCH`/`DELETE …/{id}`, and one `POST …/test` that takes a saved `id` or an
+unsaved draft, so the editor can test before saving.
 
 ## 5. Risks
 

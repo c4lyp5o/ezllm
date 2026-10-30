@@ -277,8 +277,11 @@ Each milestone: focused in-package tests, a live proof through the router, and t
 
 ## 7. Version pinning and boot checks
 
-The measured, qualified CLI version is **2.1.299**, pinned in the bridge image. A bump is a
-deliberate act followed by the M1 live proof. The bridge asserts at boot that the binary exists,
+The measured, qualified CLI version is **2.1.306** (2.1.299 until the CLI's auto-updater deleted
+it, 2026-10-21; §3). *(Amended 2026-10-31, v1.6.0: a bump is no longer only a manual act — the host
+bridge updater (docs/bridge-update-runbook.md) gates a newer release with `ezllm bridge-check
+--live`, promotes it in a late-night window, proves it and records it in `qualified.json`, which
+boot reads. The flag check now asks the CLI's parser, since `--help` omits flags it accepts.)* The bridge asserts at boot that the binary exists,
 that its flag surface still accepts the flags this design depends on, and that `auth status`
 reports a logged-in subscription — because `--max-turns` already showed that a flag can work while
 vanishing from `--help`.
@@ -309,7 +312,8 @@ is the container rollback. `claude-web` and every existing account are untouched
    tools and keeps that rule for what it still cannot do (server tools, `parallel_tool_calls`).
 9. Usage is declared EXCLUSIVE (native Anthropic convention); nothing is synthesized.
 10. The login directory `~/.claude-sub` mounts read-write (`/claude-sub`) and the CLI binary mounts
-    read-only (`/opt/claude/claude`, pinned to 2.1.299); `USER`/`LOGNAME` are set in the container.
+    read-only (`/opt/claude/claude`, pinned to 2.1.299; 2.1.306 since 2026-10-21; from v1.6.0 the bridge
+    root at `/opt/claude-bridge` with a `current` link); `USER`/`LOGNAME` are set in the container.
 11. Boot asserts the CLI's version, flag surface and login state; a CLI upgrade means re-pointing
     the mount and re-running the live proof.
 12. Calypso is the only gate for push and deploy.

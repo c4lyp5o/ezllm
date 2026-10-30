@@ -2,7 +2,7 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
 
-## 2026-10-30 — the bridge CLI gate (v1.6.0)
+## 2026-10-31 — bridge CLI auto-update and push channels (v1.6.0)
 
 - `ezllm bridge-check {claude|codex|agy} [--bin] [--home] [--json]` runs a
   bridge's boot checks against a staged CLI and refuses on any problem, the
@@ -19,6 +19,15 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by rel
   a *CLI updates* line on bridge presets and Settings → System, and bell events
   `bridge_updated`, `bridge_update_blocked`, `bridge_rolled_back` (toggles
   `notify_bridge_*`, default on), each raised once per report.
+- Push channels (schema 32): bell events to ntfy, Discord, Telegram or a JSON
+  webhook from Settings → Notifications, with minimum severity, Send test
+  (drafts too) and delivery status; secrets encrypted, write-only and covered
+  by backup verification; one background worker, never on the request path.
+  `/admin/notification-channels` CRUD + `…/test`. Browser driver
+  `verify-push-channels.mjs`.
+- Neighbourhood: a loading bar while the providers load and while the city's
+  first frame is drawn, instead of a blank canvas; it fades once the scene is
+  on screen and never takes a click.
 - Codex lockdown accepts `worktrees` and `realtime_conversation` only at stage
   `removed` (retired in 0.166.0, traced in source to nothing the bridge reaches);
   the real 0.163.0 and 0.166.0 `features list` outputs are test fixtures.

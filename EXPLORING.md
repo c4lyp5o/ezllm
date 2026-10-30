@@ -505,6 +505,35 @@ corrections section.
   coverage is in `web/tests/verify-railway.mjs`, `verify-neighbourhood.mjs`,
   `verify-neighbourhood-polish.mjs` and `shot-city.mjs`.
 
+### v1.6.0 — bridge CLI auto-update and push channels ✅ (2026-10-31; runbook `docs/bridge-update-runbook.md`, spec `SPEC-bridge-update.md`)
+
+Three layers, read in this order. **The gate:** `cmd/ezllm/bridgecheck.go`
+`runBridgeCheck` (the boot checks, stricter: drift refuses) and `--live`
+(`liveClaude`, `liveCodex`, `liveAgy`, judged by `judgeTurn`, never printed);
+`releaseState` / `recordQualifies` read `qualified.json` beside the version
+folders, so a proved release boots qualified without a rebuild. Claude flags
+are now checked by the CLI's parser (`claudeCLICheck`), because `--help` omits
+two it accepts. Codex lockdown exceptions are by name and stage
+(`internal/codexbridge/preflight.go` `retiredDisables`, traced in source; the
+real `features list` outputs are fixtures in `internal/codexbridge/testdata/`).
+**The host updater:** `scripts/bridge_update.py` `run` — discover per channel,
+soak, `stage` read-only, `gate` in a throwaway container, swap `current`,
+`restart_and_wait`, `prod_check`, roll back; `knows_bridge_check` guards
+against calling the subcommand on an older ezllm (which would start a second
+router). Its tests stub docker: `scripts/bridge_update_test.py`. **In the
+gateway:** `internal/server/bridges.go` `PollBridgeUpdates` (the updater's
+`update-status.json` → `update` on `GET /admin/bridges` and three bell kinds,
+announced once per report and never for one older than the process), and push
+channels — `internal/notify` (pure: `Validate`, `Build`, `Send`, `Redact`,
+`Target`), `internal/store/notification_channels.go` (secrets sealed with
+`FieldCrypto`, schema 32, checked by backup verification) and
+`internal/server/push.go` (`queuePush` off `notify`, which now reads
+`store.NotifyOutcome`; one worker, `StartPush`). Web:
+`web/src/components/PushChannels.tsx` and the Neighbourhood's `CityLoading`
+(`web/src/components/CityScene.tsx`: the stage loader stays until `markDrawn`
+sees a frame on a sized canvas). Drivers: `verify-push-channels.mjs`, and the
+loader checks in `verify-neighbourhood-polish.mjs`.
+
 ### v1.5.0 — a dashboard polish pass ✅ (2026-10-29)
 
 Every operator page was reworked in place (Dashboard, Analytics, Providers,

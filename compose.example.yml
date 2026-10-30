@@ -117,22 +117,30 @@ services:
       # - /path/to/backup-storage:/backups
       # - /path/to/backup-secret:/run/secrets/ezllm-backup:ro
 
-      # Claude bridge: a pinned copy of the CLI binary (outside the CLI's own
-      # versions directory, so its auto-updater cannot delete it under a running
-      # mount), read-only, and the login, read-write (the CLI refreshes its
-      # token there). A bind mount whose source is missing makes Docker create
-      # an empty directory, so uncomment these only when both exist.
-      # - /path/to/claude-bridge/claude-<version>:/opt/claude/claude:ro
+      # Bridges: each mounts its bridge ROOT read-only — version folders plus
+      # a relative `current` link, the layout the bridge updater keeps current
+      # (docs/bridge-update-runbook.md) — and its login read-write (the CLI
+      # refreshes its token there). Point the bridge's *_BIN above at the
+      # `current` path: /opt/claude-bridge/current/claude,
+      # /opt/codex-bridge/current/bin/codex, /opt/agy-bridge/current/agy.
+      # `python3 scripts/bridge_update.py --init` creates the layout from
+      # pinned copies. A bind mount whose source is missing makes Docker
+      # create an empty directory, so uncomment these only when both exist.
+      #
+      # Claude: <root>/<version>/claude, a copy outside the CLI's own versions
+      # directory (its auto-updater deletes old versions there).
+      # - /path/to/.local/share/claude-bridge:/opt/claude-bridge:ro
       # - /path/to/.claude-sub:/claude-sub
-
-      # Codex bridge: a pinned copy of the whole Codex CLI release (bin/ holds
-      # the CLI and the code-mode host that client tools need), read-only, and
-      # the isolated login (CODEX_HOME), read-write.
-      # - /path/to/codex-bridge/<version>:/opt/codex:ro
+      # Codex: <root>/<version>/ is the whole release (bin/ holds the CLI and
+      # the code-mode host client tools need); the isolated CODEX_HOME.
+      # - /path/to/.local/share/codex-bridge:/opt/codex-bridge:ro
       # - /path/to/.codex-sub:/codex-sub
-
-      # Antigravity bridge: a pinned copy of the agy binary (agy self-updates
-      # in place, so never mount ~/.local/bin/agy), read-only, and the login
-      # HOME made with DBUS unset, read-write (agy refreshes its token there).
-      # - /path/to/agy-bridge/<version>/agy:/opt/agy/agy:ro
+      # Antigravity: <root>/<version>/agy (agy rewrites itself in place when
+      # run from a writable folder: keep version folders read-only); the login
+      # HOME made with DBUS unset.
+      # - /path/to/.local/share/agy-bridge:/opt/agy-bridge:ro
       # - /path/to/.agy-sub:/agy-sub
+      #
+      # Still supported, without updates: a single pinned file or release
+      # folder at the *_BIN default (/opt/claude/claude, /opt/codex,
+      # /opt/agy/agy).

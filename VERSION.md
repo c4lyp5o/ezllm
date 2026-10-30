@@ -13,7 +13,7 @@ file in the same commit, or the test fails.
 
 **Current: v1.6.0**
 
-## v1.6.0 — 2026-10-30
+## v1.6.0 — 2026-10-31
 
 The first step toward unattended bridge CLI updates (`SPEC-bridge-update.md`
 M1). MINOR: a new subcommand and a new status field; no config or schema
@@ -49,6 +49,20 @@ flag when it makes a feature unconditional.
 new bell events — `bridge_updated`, `bridge_update_blocked`,
 `bridge_rolled_back` — each with a Settings → Notifications toggle (default
 on), ring once per report. Diagnostics carry the verdict and versions only.
+
+**Push channels (schema 32).** Settings → Notifications sends bell events to
+ntfy, Discord, Telegram or a JSON webhook, each with a minimum severity, a
+*Send test* (also for an unsaved draft) and a delivery status. Secrets are
+encrypted with the master key, write-only in the API and checked by backup
+verification. Delivery is one background worker off the request path: 10 s per
+attempt, three attempts, no redirects, a folded repeat pushed at most daily,
+and a failure is the channel's status and one `warn` line — never a bell event.
+New package `internal/notify`; API in docs/API.md § Push channels.
+
+**The Neighbourhood never shows a blank stage.** A loading bar says what is
+happening while the providers load and again while the city is drawn (the
+first frame takes about half a second on a large city); it fades out once a
+frame is on screen and never takes a click.
 
 **Fixed: Claude flag drift was always reported.** The check read `--help`,
 which omits `--max-turns` and `--system-prompt-file` although the CLI accepts

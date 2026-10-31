@@ -18,6 +18,15 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by rel
   (`summary.prize_tokens` = what pruning would remove from every future
   request) that gates the M2 go/no-go; `prune` mode itself is M2 and does not
   exist yet.
+- Eligibility hardening (review fixes, before any production shadow run):
+  `Tracker.Deltas` holds its lock for the whole call (two concurrent requests
+  of one session raced on its maps — a fatal concurrent map write);
+  `server_tool_use` / `mcp_tool_use` mark their tool used (Anthropic server
+  tools were otherwise never "used"); a tool result whose call site is not in
+  the body (`previous_response_id`, a compacted history) empties that
+  request's eligible set and withdraws its session's shipped-but-unused pairs
+  (`shipped_sessions` −1); a tool called in the request's own trace is never
+  eligible, whatever the pre-request stats say.
 - Verifier hardening: the UsageRow↔api.ts contract test's path went stale when
   the file moved to `web/src/utils/api.ts` and had been silently SKIPPING
   since — fixed, the pin bites again.

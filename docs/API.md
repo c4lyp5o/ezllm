@@ -213,6 +213,11 @@ for eligible rows, 0 otherwise, and `summary.prize_tokens` is their sum —
 "what pruning would remove from every future request". `policy.mode` echoes
 the effective switch (`off` | `shadow`).
 
+`shipped_sessions` can go DOWN: a session that shows a tool result whose call
+site is not in the body (`previous_response_id`, a compacted history) withdraws
+the pairs it counted for tools it never visibly used and stops counting, so a
+session that hides its calls never pushes a tool toward eligibility.
+
 ### `GET /admin/usage?group_by=&from=&to=`
 Dashboard aggregates (`store.UsageReport`), computed server-side over the FULL filtered
 set — the client never sums rows. `group_by` ∈ `account` (default) | `key` | `alias` |

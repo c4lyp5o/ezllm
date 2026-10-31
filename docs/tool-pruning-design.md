@@ -76,11 +76,21 @@ early — accepted, visible in the counts, never in request behaviour.
     && shipped_sessions >= min_unused_sessions
     && name not in keep
     && name not protected by this request's tool_choice
+    && name not called in this request's trace
 
 `tool_choice` naming a tool (`{"type":"function","function":{"name":X}}`,
 `{"type":"tool","name":X}`, `{type:"function",name:X}`) protects X;
 `tool_choice` demanding *some* call (`required` / `any`) yields an empty
 eligible set for that request. `auto` / `none` / absent: normal policy.
+
+Call sites are `tool_use`, `server_tool_use`, `mcp_tool_use`,
+`custom_tool_call`, `function_call` and chat `tool_calls`. A tool result whose
+call site is not in the body (`previous_response_id`, a compacted history) is
+**unresolved**: some tool was used and the router cannot say which. That
+request gets an empty eligible set, and its session withdraws every
+shipped-but-unused pair it had counted (`shipped_sessions` −1) and stops
+counting — a session that hides its calls never pushes a tool toward
+eligibility. The withdrawal mark is process-local like the tracker.
 
 **Booking.** `calls.tool_prune_shadow_tokens` = Σ schema tokens of eligible
 tools for that request. `mode: off` does nothing at all — no parse, no stats,

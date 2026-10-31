@@ -668,12 +668,19 @@ mode this codebase has now hit twice.
   from one decoded body across all three wire shapes (chat `function.name`,
   anthropic `name`, responses `name`; unnameable entries never eligible;
   legacy `functions` untouched). `toolChoiceOf` protects a forced target and
-  disables eligibility when a call is demanded unnamed.
+  disables eligibility when a call is demanded unnamed. `collectUsed` reads
+  call sites (`tool_use`, `server_tool_use`, `mcp_tool_use`,
+  `custom_tool_call`, `function_call`, chat `tool_calls`) and reports
+  `Observation.Unresolved` when a result's call site is missing from the body.
 - `internal/toolprune/toolprune.go` `Policy.EligibleName` — the rule:
   `used_sessions == 0 && shipped_sessions >= min_unused_sessions && !keep`,
-  used verdicts sticky lifetime. `Tracker.Deltas` counts each (session, tool)
-  pair once (process-local, TTL'd, bounded; a restart can double-count one
-  session — visible in counts, never in behaviour).
+  used verdicts sticky lifetime. `Policy.Eligible` adds the per-request
+  guards: tool_choice, a tool called in this request's trace, and an
+  unresolved result (empty set). `Tracker.Deltas` counts each (session, tool)
+  pair once under one lock held for the whole call (process-local, TTL'd,
+  bounded; a restart can double-count one session — visible in counts, never
+  in behaviour); an unresolved observation taints the session, withdrawing
+  its shipped-but-unused pairs (−1) and counting nothing after.
 - `internal/store/toolusage.go` `UpsertToolUsage` — one multi-row upsert per
   request (schema 33 `tool_usage`, `(client, tool)` aggregates only, never
   prompt content); `ToolUsageForClient` is the request-path read.

@@ -10,6 +10,7 @@ package toolprune
 
 import (
 	"encoding/json"
+	"sort"
 	"sync"
 	"time"
 
@@ -40,6 +41,11 @@ type Observation struct {
 	// one ("required"/"any"): eligibility is disabled for the request, or a
 	// request could ship zero tools while a call is demanded.
 	ChoiceDemands bool
+	// Unresolved says the trace carries a tool result whose call site is not
+	// in the body (previous_response_id, a compacted history): some tool was
+	// used and we cannot tell which, so nothing is eligible for the request
+	// and the session stops counting toward eligibility.
+	Unresolved bool
 }
 
 // StatsView is the stored aggregate slice the policy reads
@@ -73,13 +79,16 @@ func (p Policy) EligibleName(name string, st StatsView) bool {
 // Eligible returns the schemas the policy would drop, in shipped order. The
 // per-request tool_choice guards apply on top of EligibleName.
 func (p Policy) Eligible(obs Observation, stats map[string]StatsView) []Schema {
-	if obs.ChoiceDemands {
+	if obs.ChoiceDemands || obs.Unresolved {
 		return nil
 	}
 	out := make([]Schema, 0, len(obs.Shipped))
 	for _, s := range obs.Shipped {
 		if obs.ChoiceName != "" && s.Name == obs.ChoiceName {
 			continue
+		}
+		if obs.Used[s.Name] {
+			continue // the trace calls it right now, whatever the stats say
 		}
 		if p.EligibleName(s.Name, stats[s.Name]) {
 			out = append(out, s)
@@ -118,7 +127,7 @@ func Observe(root map[string]any) Observation {
 		}
 	}
 	obs.ChoiceName, obs.ChoiceDemands = toolChoiceOf(root)
-	collectUsed(root, obs.Used)
+	obs.Unresolved = collectUsed(root, obs.Used)
 	return obs
 }
 
@@ -168,10 +177,11 @@ func toolChoiceOf(root map[string]any) (name string, demands bool) {
 // collectUsed walks the visible trace (messages / input) for tool call
 // sites and tool results. Call sites record their name directly; results
 // record only an id, resolved through the call sites seen anywhere in the
-// request. Anything ambiguous marks the tool used — the safe direction.
-func collectUsed(root map[string]any, used map[string]bool) {
+// request. Anything ambiguous marks the tool used — the safe direction — and
+// a result no call site resolves reports unresolved (true).
+func collectUsed(root map[string]any, used map[string]bool) bool {
 	byID := map[string]string{} // call id -> tool name
-	var resultIDs []string
+	var results [][]string      // each result's candidate call ids
 
 	var walk func(v any)
 	walk = func(v any) {
@@ -183,7 +193,7 @@ func collectUsed(root map[string]any, used map[string]bool) {
 		case map[string]any:
 			typ, _ := t["type"].(string)
 			switch typ {
-			case "tool_use", "custom_tool_call":
+			case "tool_use", "custom_tool_call", "server_tool_use", "mcp_tool_use":
 				if s, ok := t["name"].(string); ok && s != "" {
 					used[s] = true
 				}
@@ -203,7 +213,7 @@ func collectUsed(root map[string]any, used map[string]bool) {
 					}
 				}
 			case "tool_result", "custom_tool_call_output", "function_call_output":
-				resultIDs = append(resultIDs, idOf(t)...)
+				results = append(results, idOf(t))
 			}
 			// Chat wire: assistant messages carry tool_calls / function_call
 			// as top-level keys; role:"tool" and role:"function" results
@@ -235,7 +245,7 @@ func collectUsed(root map[string]any, used map[string]bool) {
 				}
 			}
 			if role, _ := t["role"].(string); role == "tool" {
-				resultIDs = append(resultIDs, idOf(t)...)
+				results = append(results, idOf(t))
 			}
 			if role, _ := t["role"].(string); role == "function" {
 				// Legacy function-result messages name their tool outright.
@@ -253,11 +263,20 @@ func collectUsed(root map[string]any, used map[string]bool) {
 			walk(v)
 		}
 	}
-	for _, id := range resultIDs {
-		if name, ok := byID[id]; ok {
-			used[name] = true
+	unresolved := false
+	for _, ids := range results {
+		resolved := false
+		for _, id := range ids {
+			if name, ok := byID[id]; ok {
+				used[name] = true
+				resolved = true
+			}
+		}
+		if !resolved {
+			unresolved = true
 		}
 	}
+	return unresolved
 }
 
 // idOf collects every call-id field a result block might carry.
@@ -309,6 +328,10 @@ type sessionCounts struct {
 	seen    map[string]bool // shipped-counted this session
 	used    map[string]bool // used-counted this session
 	expires time.Time
+	// tainted: the session showed an unresolved tool result, so its
+	// shipped pairs were withdrawn and it never counts toward eligibility
+	// again (a restart forgets this — the same accepted limit as above).
+	tainted bool
 }
 
 // Tracker counts (session, tool) pairs once per session. Safe for concurrent
@@ -326,9 +349,10 @@ func NewTracker() *Tracker {
 // Deltas returns the stats increments this request contributes. With an
 // empty session the design (DECISIONS §5) is request counts only: the pair
 // counters never move, so a client with no derivable session can never make
-// a tool eligible (conservative by construction).
+// a tool eligible (conservative by construction). An Unresolved observation
+// withdraws the session's shipped-but-unused pairs (ShippedSessions -1).
 func (t *Tracker) Deltas(client, session string, obs Observation, now time.Time) []Delta {
-	if len(obs.Shipped) == 0 && len(obs.Used) == 0 {
+	if len(obs.Shipped) == 0 && len(obs.Used) == 0 && !obs.Unresolved {
 		return nil
 	}
 	out := make([]Delta, 0, len(obs.Shipped)+len(obs.Used))
@@ -340,9 +364,13 @@ func (t *Tracker) Deltas(client, session string, obs Observation, now time.Time)
 		})
 	}
 
+	// The session's maps are written below, so the lock covers the whole
+	// call: two concurrent requests of one session would otherwise race on
+	// them (a fatal concurrent map write).
 	var sc *sessionCounts
 	if session != "" {
 		t.mu.Lock()
+		defer t.mu.Unlock()
 		sc = t.sessions[session]
 		if sc == nil {
 			t.evictLocked(now)
@@ -351,7 +379,19 @@ func (t *Tracker) Deltas(client, session string, obs Observation, now time.Time)
 		} else {
 			sc.expires = now.Add(sessionTTL)
 		}
-		t.mu.Unlock()
+		if obs.Unresolved && !sc.tainted {
+			sc.tainted = true
+			withdrawn := make([]string, 0, len(sc.seen))
+			for name := range sc.seen {
+				if !sc.used[name] {
+					withdrawn = append(withdrawn, name)
+				}
+			}
+			sort.Strings(withdrawn)
+			for _, name := range withdrawn {
+				add(name, 0, 0, -1, 0, "")
+			}
+		}
 	}
 
 	// One delta per shipped name (duplicate names in one array are
@@ -365,7 +405,7 @@ func (t *Tracker) Deltas(client, session string, obs Observation, now time.Time)
 		var shippedSess, usedSess int64
 		var usedAt string
 		if sc != nil {
-			if !sc.seen[s.Name] {
+			if !sc.tainted && !sc.seen[s.Name] {
 				sc.seen[s.Name] = true
 				shippedSess = 1
 			}

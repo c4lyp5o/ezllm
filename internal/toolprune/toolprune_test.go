@@ -2,6 +2,8 @@ package toolprune
 
 import (
 	"encoding/json"
+	"strconv"
+	"sync"
 	"testing"
 	"time"
 )
@@ -220,5 +222,124 @@ func TestTrackerDeltas(t *testing.T) {
 		if d.ShippedSessions != 0 || d.UsedSessions != 0 {
 			t.Errorf("stateless delta %+v: want no session counters", d)
 		}
+	}
+}
+
+func TestObserveServerToolUseMarksUsed(t *testing.T) {
+	// Anthropic server tools are shipped by name but called as
+	// server_tool_use / mcp_tool_use, never tool_use.
+	obs := Observe(rootOf(t, `{
+	  "tools": [{"type":"web_search_20250305","name":"web_search"}],
+	  "messages": [
+	    {"role":"assistant","content":[
+	      {"type":"server_tool_use","id":"s1","name":"web_search","input":{}},
+	      {"type":"web_search_tool_result","tool_use_id":"s1","content":[]},
+	      {"type":"mcp_tool_use","id":"m1","name":"lookup","server_name":"x","input":{}}
+	    ]}
+	  ]
+	}`))
+	for _, name := range []string{"web_search", "lookup"} {
+		if !obs.Used[name] {
+			t.Errorf("used[%q] = false, want true", name)
+		}
+	}
+	p := Policy{MinUnusedSessions: 1}
+	if got := p.Eligible(obs, map[string]StatsView{"web_search": {ShippedSessions: 5}}); len(got) != 0 {
+		t.Errorf("a server tool in use must not be eligible, got %+v", got)
+	}
+}
+
+func TestObserveUnresolvedResult(t *testing.T) {
+	// previous_response_id: the output arrives without its function_call.
+	obs := Observe(rootOf(t, `{
+	  "previous_response_id": "resp_1",
+	  "tools": [{"type":"function","name":"Patch","parameters":{}}],
+	  "input": [{"type":"function_call_output","id":"fco_1","call_id":"k1","output":"ok"}]
+	}`))
+	if !obs.Unresolved {
+		t.Fatal("an output with no call site must report Unresolved")
+	}
+	p := Policy{MinUnusedSessions: 1}
+	if got := p.Eligible(obs, map[string]StatsView{"Patch": {ShippedSessions: 5}}); got != nil {
+		t.Errorf("unresolved request must yield no eligible set, got %+v", got)
+	}
+
+	// A result resolved by any of its ids is not unresolved.
+	ok := Observe(rootOf(t, `{
+	  "input": [
+	    {"type":"function_call","name":"Patch","call_id":"k1","arguments":"{}"},
+	    {"type":"function_call_output","id":"fco_1","call_id":"k1","output":"ok"}
+	  ]
+	}`))
+	if ok.Unresolved {
+		t.Error("a resolved output must not report Unresolved")
+	}
+}
+
+func TestEligibleSkipsToolUsedThisRequest(t *testing.T) {
+	// Stats predate this request; the trace already calls A.
+	p := Policy{MinUnusedSessions: 1}
+	obs := Observation{
+		Shipped: []Schema{{Name: "A", Tokens: 10}, {Name: "B", Tokens: 20}},
+		Used:    map[string]bool{"A": true},
+	}
+	got := p.Eligible(obs, map[string]StatsView{"A": {ShippedSessions: 5}, "B": {ShippedSessions: 5}})
+	if len(got) != 1 || got[0].Name != "B" {
+		t.Fatalf("eligible = %+v, want [B] (A is in this request's trace)", got)
+	}
+}
+
+func TestTrackerUnresolvedWithdrawsSession(t *testing.T) {
+	trk := NewTracker()
+	now := time.Now()
+	shipped := []Schema{{Name: "A", Tokens: 10}, {Name: "B", Tokens: 20}}
+	trk.Deltas("cli", "s1", Observation{Shipped: shipped, Used: map[string]bool{"A": true}}, now)
+
+	// The next request shows an orphan result: B's shipped pair is withdrawn
+	// (A was used, its pair stands) and nothing counts afterwards.
+	got := trk.Deltas("cli", "s1", Observation{Shipped: shipped, Used: map[string]bool{}, Unresolved: true}, now.Add(time.Minute))
+	sess := map[string]int64{}
+	for _, d := range got {
+		sess[d.Tool] += d.ShippedSessions
+	}
+	if sess["B"] != -1 || sess["A"] != 0 {
+		t.Fatalf("withdrawal = %v, want B:-1 A:0 (deltas %+v)", sess, got)
+	}
+	again := trk.Deltas("cli", "s1", Observation{Shipped: append(shipped, Schema{Name: "C", Tokens: 5}), Used: map[string]bool{}}, now.Add(2*time.Minute))
+	for _, d := range again {
+		if d.ShippedSessions != 0 {
+			t.Errorf("tainted session must not count pairs, got %+v", d)
+		}
+	}
+}
+
+func TestTrackerConcurrentSameSession(t *testing.T) {
+	// Parallel requests of one session (subagents, retries) share its maps.
+	// Without the lock spanning Deltas this is a fatal concurrent map write
+	// (and a -race failure).
+	trk := NewTracker()
+	obs := Observation{Used: map[string]bool{"t0": true}}
+	for i := 0; i < 64; i++ {
+		obs.Shipped = append(obs.Shipped, Schema{Name: "t" + strconv.Itoa(i), Tokens: 1})
+	}
+	var total int64
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for g := 0; g < 8; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				for _, d := range trk.Deltas("cli", "s1", obs, time.Now()) {
+					mu.Lock()
+					total += d.ShippedSessions
+					mu.Unlock()
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	if total != int64(len(obs.Shipped)) {
+		t.Errorf("shipped_sessions total = %d, want %d (each pair once)", total, len(obs.Shipped))
 	}
 }

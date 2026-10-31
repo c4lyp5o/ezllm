@@ -26,6 +26,9 @@ type CallEvent struct {
 	SavedNotional int64 `json:"compression_saved_notional"`
 	ContextPre    int64 `json:"context_tokens_pre"`
 	ContextSaved  int64 `json:"context_tokens_saved"`
+	// ToolPruneShadow is the tool-pruning M1 measurement (potential prunable
+	// schema tokens; never shipped) — see docs/tool-pruning-design.md.
+	ToolPruneShadow int64 `json:"tool_prune_shadow_tokens"`
 	// Compression is the ledger stamp: "" (never mentioned), "off" /
 	// "unknown-profile" / "disabled" (asked, no change), or the profile name.
 	Compression string `json:"compression"`
@@ -86,7 +89,8 @@ func EventFromCall(c Call) CallEvent {
 		Reasoning: c.ReasoningTokens, Saved: c.TokensSaved,
 		SavedNotional: c.TokensSavedNotional,
 		ContextPre:    c.ContextTokensPre, ContextSaved: c.ContextTokensSaved,
-		Compression: c.CompressionProfile, Applied: c.CompressionApplied,
+		ToolPruneShadow: c.ToolPruneShadowTokens,
+		Compression:     c.CompressionProfile, Applied: c.CompressionApplied,
 		Translated: c.Translated,
 		Err:        c.Err,
 	}

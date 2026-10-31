@@ -306,6 +306,12 @@ CREATE TABLE IF NOT EXISTS calls (
   -- same never-includes-cached invariant as a native row. Historical rows keep
   -- their inclusive totals.
   translated     INTEGER NOT NULL DEFAULT 0,
+  -- v33 (tool pruning M1, docs/tool-pruning-design.md): the policy-eligible
+  -- prunable tool-schema tokens measured on this request (mode=shadow).
+  -- POTENTIAL only — never shipped, never merged with shadow_tokens_saved
+  -- (compression) or context_tokens_* (budget). M2's shipped saving books
+  -- its own sibling column (tool_prune_tokens_saved).
+  tool_prune_shadow_tokens INTEGER NOT NULL DEFAULT 0,
   err            TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_calls_ts        ON calls(ts DESC);
@@ -318,6 +324,24 @@ CREATE INDEX IF NOT EXISTS idx_calls_acct_model ON calls(account_id, model, ts D
 -- session rollups filter by session_id. Both are new hot paths for /admin only.
 CREATE INDEX IF NOT EXISTS idx_calls_prefix ON calls(model, prefix_sha, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_calls_session ON calls(session_id, ts DESC);
+
+-- ── tool_usage (v33): tool-pruning learning stats, one row per (client, tool). ─
+--    Aggregates only — never prompt content. "used" verdicts are sticky
+--    lifetime (a tool used in any session is never policy-eligible again);
+--    the schema_tokens estimate is the last-seen size of the tool's schema
+--    entry as shipped. docs/tool-pruning-design.md.
+CREATE TABLE IF NOT EXISTS tool_usage (
+  client           TEXT NOT NULL,
+  tool             TEXT NOT NULL,
+  schema_tokens    INTEGER NOT NULL DEFAULT 0,
+  shipped_requests INTEGER NOT NULL DEFAULT 0,
+  shipped_sessions INTEGER NOT NULL DEFAULT 0,
+  used_sessions    INTEGER NOT NULL DEFAULT 0,
+  first_seen_at    TEXT,
+  last_seen_at     TEXT,
+  last_used_at     TEXT,
+  PRIMARY KEY (client, tool)
+);
 
 -- ── key_cooldowns: reactive backoff; persisted so it survives restart ────────
 CREATE TABLE IF NOT EXISTS key_cooldowns (

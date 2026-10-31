@@ -142,6 +142,25 @@ type Compression struct {
 	ShadowPct int `yaml:"shadow_pct"`
 }
 
+// ToolPruning is the tool-pruning measurement policy (M1,
+// docs/tool-pruning-design.md). Mode is the ONE switch, self-sufficient:
+//   - "off" (default): nothing runs — no parse, no stats, no booking.
+//   - "shadow": measure + book calls.tool_prune_shadow_tokens and collect
+//     tool_usage stats. No request body is ever rewritten.
+//
+// M2 adds "prune" (the tools array actually shrinks, frozen per session).
+// EZLLM_TOOL_PRUNING_MODE is the no-rebuild override (env wins).
+type ToolPruning struct {
+	Mode string `yaml:"mode"`
+	// MinUnusedSessions is the eligibility threshold: a tool shipped in this
+	// many sessions and called in NONE of them is policy-eligible (the
+	// paper's "3 consecutive unused tasks").
+	MinUnusedSessions int `yaml:"min_unused_sessions"`
+	// Keep lists tool names that are never eligible. Tool names are operator
+	// knowledge (the rtk.go rule) — the default is EMPTY, deliberately.
+	Keep []string `yaml:"keep"`
+}
+
 type Backup struct {
 	Directory  string `yaml:"directory"`
 	SecretFile string `yaml:"secret_file"`
@@ -164,6 +183,7 @@ type Config struct {
 	Retry              Retry               `yaml:"retry"`
 	ModelRefresh       ModelRefresh        `yaml:"model_refresh"`
 	Translation        Translation         `yaml:"translation"`
+	ToolPruning        ToolPruning         `yaml:"tool_pruning"`
 
 	// Warnings are non-fatal findings from Load (deprecated keys); main logs
 	// them at boot.
@@ -190,12 +210,16 @@ func Load(path string) (*Config, error) {
 		Translation: Translation{Enabled: true, UniversalEnabled: true},
 		Retry:       Retry{RequestAttemptBudget: 8},
 		Compression: Compression{MinAbsoluteTokens: 24, MaxPipelineMS: 250, ShadowPct: 0},
+		ToolPruning: ToolPruning{Mode: "off", MinUnusedSessions: 3},
 	}
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
 		// The yaml diagnostic names only the type, never the key. When the
 		// offender is a wrong-typed translation.universal_enabled, say so.
 		if uerr := universalValueError(raw); uerr != nil {
 			return nil, uerr
+		}
+		if terr := toolPruningValueError(raw); terr != nil {
+			return nil, terr
 		}
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
@@ -262,6 +286,36 @@ func universalValueError(raw []byte) error {
 	return fmt.Errorf("config: translation.universal_enabled must be a boolean (true/false), got %T", v)
 }
 
+// toolPruningValueError reports a wrong-typed tool_pruning leaf as a
+// field-named error, same rationale as universalValueError: the yaml
+// diagnostic names the TYPE, never the key.
+func toolPruningValueError(raw []byte) error {
+	var tree map[string]any
+	if err := yaml.Unmarshal(raw, &tree); err != nil {
+		return nil
+	}
+	sec, ok := tree["tool_pruning"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	if v, ok := sec["mode"]; ok && v != nil {
+		if _, isStr := v.(string); !isStr {
+			return fmt.Errorf("config: tool_pruning.mode must be a string (off|shadow), got %T", v)
+		}
+	}
+	if v, ok := sec["min_unused_sessions"]; ok && v != nil {
+		if _, isInt := v.(int); !isInt {
+			return fmt.Errorf("config: tool_pruning.min_unused_sessions must be an integer, got %T", v)
+		}
+	}
+	if v, ok := sec["keep"]; ok && v != nil {
+		if _, isList := v.([]any); !isList {
+			return fmt.Errorf("config: tool_pruning.keep must be a list of tool names, got %T", v)
+		}
+	}
+	return nil
+}
+
 // Validate checks structural integrity and applies defaults. It collects every
 // problem into one error so a fresh checkout reports all issues in a single run.
 func (c *Config) Validate() error {
@@ -320,6 +374,23 @@ func (c *Config) Validate() error {
 	}
 	if c.Compression.ShadowPct < 0 || c.Compression.ShadowPct > 100 {
 		errs = append(errs, "compression.shadow_pct: must be between 0 and 100")
+	}
+	// tool pruning (docs/tool-pruning-design.md): one switch; M1 knows
+	// "off" and "shadow", M2 adds "prune". A typo'd mode must fail boot, not
+	// silently measure nothing.
+	c.ToolPruning.Mode = strings.ToLower(strings.TrimSpace(c.ToolPruning.Mode))
+	switch c.ToolPruning.Mode {
+	case "off", "shadow":
+	default:
+		errs = append(errs, fmt.Sprintf("tool_pruning.mode: must be off or shadow, got %q", c.ToolPruning.Mode))
+	}
+	if c.ToolPruning.MinUnusedSessions < 1 || c.ToolPruning.MinUnusedSessions > 1000 {
+		errs = append(errs, "tool_pruning.min_unused_sessions: must be between 1 and 1000")
+	}
+	for i, name := range c.ToolPruning.Keep {
+		if strings.TrimSpace(name) == "" {
+			errs = append(errs, fmt.Sprintf("tool_pruning.keep[%d]: must be a non-empty tool name", i))
+		}
 	}
 	if c.ModelRefresh.Interval == "" {
 		c.ModelRefresh.Interval = "12h"

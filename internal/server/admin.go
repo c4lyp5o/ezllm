@@ -334,6 +334,7 @@ const callsCols = `ts, client, COALESCE(ip, '') AS ip, surface, alias, account, 
        COALESCE(tokens_saved, 0), COALESCE(compression_profile, ''),
        COALESCE(compression_applied, 0), COALESCE(compression_rules_fired, 0),
        COALESCE(context_tokens_pre, 0), COALESCE(context_tokens_saved, 0),
+       COALESCE(tool_prune_shadow_tokens, 0),
        COALESCE(compression_saved_notional, 0), COALESCE(prefix_sha, ''),
        COALESCE(session_id, ''), msg_count, tool_count, req_bytes,
        COALESCE(block_pos, 0),
@@ -348,13 +349,13 @@ func scanCalls(rows *sql.Rows) ([]map[string]any, error) {
 		var ts, client, ip, surface, alias, account, model string
 		var status int
 		var ttft, total, tin, tout, cread, cwrite, reasoning any
-		var saved, applied, rulesFired, contextPre, contextSaved int
+		var saved, applied, rulesFired, contextPre, contextSaved, toolPruneShadow int
 		var notional, msgCount, toolCount, reqBytes, blockPos int
 		var translated int
 		var prefixSHA, sessionID, profile, errText string
 		if err := rows.Scan(&ts, &client, &ip, &surface, &alias, &account, &model, &status,
 			&ttft, &total, &tin, &tout, &cread, &cwrite, &reasoning,
-			&saved, &profile, &applied, &rulesFired, &contextPre, &contextSaved,
+			&saved, &profile, &applied, &rulesFired, &contextPre, &contextSaved, &toolPruneShadow,
 			&notional, &prefixSHA, &sessionID, &msgCount, &toolCount, &reqBytes, &blockPos, &translated, &errText); err != nil {
 			return nil, err
 		}
@@ -374,8 +375,11 @@ func scanCalls(rows *sql.Rows) ([]map[string]any, error) {
 			"saved_notional":       notional,
 			"context_tokens_pre":   contextPre,
 			"context_tokens_saved": contextSaved,
-			"compression":          profile,
-			"applied":              applied != 0,
+			// tool pruning M1 measurement (potential, never shipped) —
+			// docs/tool-pruning-design.md
+			"tool_prune_shadow_tokens": toolPruneShadow,
+			"compression":              profile,
+			"applied":                  applied != 0,
 			// non-zero only when caveman prose rules rewrote something
 			"rules_fired": rulesFired,
 			// v8 research capture (see docs/API.md — cacheability section)

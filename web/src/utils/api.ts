@@ -368,7 +368,7 @@ export const stopSweep = (id: number) => del(`/admin/accounts/${id}/sync`);
 // nothing for its whole life — it sat in that contract test's "sent but
 // unread" allowlist, which is precisely why latency was invisible on the
 // dashboard. The analytics explorer's Latency focus now renders it.
-export type UsageRow = { k: string; calls: number; tin: number; tout: number; cread: number; cwrite: number; reasoning: number; saved: number; errors: number; context_pre: number; context_saved: number; p50_ttft_ms: number; applied_saved: number };
+export type UsageRow = { k: string; calls: number; tin: number; tout: number; cread: number; cwrite: number; reasoning: number; saved: number; errors: number; context_pre: number; context_saved: number; tool_prune_shadow: number; p50_ttft_ms: number; applied_saved: number };
 
 export type Health = {
   status: string; version: string; schema_version: number; accounts: number; provider_keys: number;
@@ -455,6 +455,9 @@ export type FeedRow = {
    *  ratio floor), not that compression was skipped. */
   savedNotional: number;
   contextPre?: number; contextSaved?: number;
+  /** Tool pruning M1 measurement: policy-eligible prunable tool-schema
+   *  tokens on this request (potential, never shipped). */
+  toolPruneShadow?: number;
   compression: string; applied: boolean; rulesFired?: number; error?: string;
   /** Translated hop: its wire differs from the client's surface. When set,
    *  `tin` is the vendor's INCLUSIVE total, not our cold-token convention. */
@@ -477,6 +480,7 @@ export function normalizeFeedRow(raw: any): FeedRow {
     // Snapshot rows carry the short key, live SSE rows the ledger column name.
     savedNotional: num(raw.saved_notional ?? raw.compression_saved_notional),
     contextPre: num(raw.context_tokens_pre), contextSaved: num(raw.context_tokens_saved),
+    toolPruneShadow: num(raw.tool_prune_shadow_tokens),
     compression: String(raw.compression ?? ''), applied: Boolean(raw.applied),
     error: raw.error ? String(raw.error) : undefined,
     // Snapshot rows and live SSE rows both carry the marker; absent = native.
@@ -657,7 +661,7 @@ export type RequestsSummary = {
   count: number; tin: number; tout: number; cread: number; cwrite: number;
   cached_read?: number; tokens_in?: number; tokens_out?: number;
   reasoning: number; max_tin: number; max_tout: number;
-  context_pre: number; context_saved: number; compression_saved: number;
+  context_pre: number; context_saved: number; tool_prune_shadow: number; compression_saved: number;
   // Compression-page cards (added with the four summary SQL columns):
   // applied = a rewrite actually shipped; applied_saved = its real tokens
   // (SUM(tokens_saved) sweeps in legacy declined rows, so cards read THIS);

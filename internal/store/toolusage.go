@@ -42,8 +42,9 @@ type ToolUsageRow struct {
 	LastUsedAt      string `json:"last_used_at"`
 }
 
-// UpsertToolUsage applies stats deltas in ONE statement per call (the
-// budget-reservation precedent for a synchronous pre-dispatch write). The
+// UpsertToolUsage applies stats deltas in one transaction, executing the
+// prepared upsert once per tool (the budget-reservation precedent for a
+// synchronous pre-dispatch write). The
 // conflict target is the (client, tool) primary key: counts accumulate,
 // schema_tokens is last-seen, first_seen_at never moves, and last_used_at
 // only moves on a delta that carries a usage stamp.

@@ -3,13 +3,16 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/c4lyp5o/ezllm/internal/compress"
+	"github.com/c4lyp5o/ezllm/internal/jsonbody"
 	"github.com/c4lyp5o/ezllm/internal/store"
 )
 
@@ -214,5 +217,65 @@ func TestHandleToolUsage(t *testing.T) {
 	}
 	if !strings.Contains(body, `"min_unused_sessions":3`) {
 		t.Errorf("policy must echo min_unused_sessions, body: %s", body)
+	}
+}
+
+// Catalog-free turns still carry usage and unresolved-result evidence.
+func TestToolPruneCatalogFreeEvidence(t *testing.T) {
+	for _, unresolved := range []bool{false, true} {
+		t.Run(fmt.Sprint(unresolved), func(t *testing.T) {
+			h := newHarness(t, func(http.ResponseWriter, *http.Request) {}, func(o *Options) {
+				o.ToolPruneMode = "shadow"
+				o.ToolPruneMinUnusedSessions = 1
+			})
+			r := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+			r.Header.Set("X-Ezllm-Session", "session")
+			observe := func(body string) { h.server.toolPruneShadow(r, "cli", jsonbody.Open([]byte(body))) }
+			observe(`{"tools":[{"name":"A"}],"messages":[{"role":"user","content":"hi"}]}`)
+			if unresolved {
+				observe(`{"messages":[{"role":"tool","tool_call_id":"missing","content":"ok"}]}`)
+			} else {
+				observe(`{"messages":[{"role":"assistant","tool_calls":[{"id":"c","function":{"name":"A"}}]}]}`)
+			}
+			rows, err := h.db.ToolUsageForClient(context.Background(), "cli")
+			if err != nil {
+				t.Fatal(err)
+			}
+			a := rows["A"]
+			if unresolved && a.ShippedSessions != 0 {
+				t.Fatalf("unresolved turn left shipped_sessions=%d, want 0", a.ShippedSessions)
+			}
+			if !unresolved && a.UsedSessions != 1 {
+				t.Fatalf("catalog-free use left used_sessions=%d, want 1", a.UsedSessions)
+			}
+		})
+	}
+}
+
+func TestToolPruneFailedWriteRetriesEvidence(t *testing.T) {
+	h := newHarness(t, func(http.ResponseWriter, *http.Request) {}, func(o *Options) {
+		o.ToolPruneMode = "shadow"
+		o.ToolPruneMinUnusedSessions = 1
+	})
+	r := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	r.Header.Set("X-Ezllm-Session", "session")
+	doc := jsonbody.Open([]byte(toolPruningBody))
+	ctx, cancel := context.WithCancel(r.Context())
+	cancel()
+	h.server.toolPruneShadow(r.WithContext(ctx), "cli", doc)
+	h.server.toolPruneShadow(r, "cli", doc)
+	h.server.toolPruneShadow(r, "cli", doc)
+	rows, err := h.db.ToolUsageForClient(context.Background(), "cli")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"Ghost", "Live"} {
+		row := rows[name]
+		if row.ShippedRequests != 2 || row.ShippedSessions != 1 {
+			t.Errorf("%s counts=%+v, want requests=2 sessions=1", name, row)
+		}
+	}
+	if rows["Live"].UsedSessions != 1 {
+		t.Fatalf("used_sessions=%d, want 1", rows["Live"].UsedSessions)
 	}
 }

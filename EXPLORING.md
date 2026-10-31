@@ -681,9 +681,16 @@ mode this codebase has now hit twice.
   bounded; a restart can double-count one session — visible in counts, never
   in behaviour); an unresolved observation taints the session, withdrawing
   its shipped-but-unused pairs (−1) and counting nothing after.
-- `internal/store/toolusage.go` `UpsertToolUsage` — one multi-row upsert per
-  request (schema 33 `tool_usage`, `(client, tool)` aggregates only, never
+- `internal/store/toolusage.go` `UpsertToolUsage` — one transaction of per-tool
+  upserts per observation (schema 33 `tool_usage`, `(client, tool)` aggregates only, never
   prompt content); `ToolUsageForClient` is the request-path read.
+- `internal/toolprune/toolprune.go` `Tracker.Apply` — stages the session maps
+  under the tracker lock through the atomic store write; failed writes restore
+  the prior counters so later evidence can retry used flips and withdrawals.
+  `internal/server/toolusage.go` `toolPruneShadow` also processes catalog-free
+  traces; a failed write books zero. Regression seams:
+  `TestToolPruneCatalogFreeEvidence`, `TestToolPruneFailedWriteRetriesEvidence`
+  and `TestTrackerApplyRetriesFailedWithdrawal`.
 - `internal/server/toolusage.go` `toolPruneShadow` — the inference() hook
   (after compression, before shape capture): shadow mode measures and books,
   never rewrites; `handleToolUsage` serves `GET /admin/tool-usage` with the

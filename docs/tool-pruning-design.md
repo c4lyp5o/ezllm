@@ -90,7 +90,9 @@ call site is not in the body (`previous_response_id`, a compacted history) is
 request gets an empty eligible set, and its session withdraws every
 shipped-but-unused pair it had counted (`shipped_sessions` −1) and stops
 counting — a session that hides its calls never pushes a tool toward
-eligibility. The withdrawal mark is process-local like the tracker.
+eligibility. The withdrawal mark is process-local like the tracker. Trace
+evidence is processed even when `tools` is absent or empty: a catalog-free turn can still
+mark a known tool used or withdraw the session's unused pairs.
 
 **Booking.** `calls.tool_prune_shadow_tokens` = Σ schema tokens of eligible
 tools for that request. `mode: off` does nothing at all — no parse, no stats,
@@ -125,13 +127,19 @@ no booking.
    (`tool_prune_shadow_tokens`), hasColumn-guarded in BOTH `migrate()`
    branches. Migration tests assert the `schemaVersion` constant, fresh DB
    and prior-version-stamped DB both covered.
-7. **Write path:** one synchronous multi-row upsert per request carrying the
-   deltas (request increments always, session increments and used flips once
-   per pair). Precedent: `ReserveClientBudget` already writes synchronously
-   pre-dispatch. Steady-state write volume is near zero (pairs are counted
-   once per session).
+7. **Write path:** one synchronous transaction per observation carrying the
+   deltas, with one upsert per tool (request increments whenever a schema is
+   shipped, session increments and used flips once per pair). Precedent:
+   `ReserveClientBudget` already writes synchronously pre-dispatch. Request
+   counters still write on repeated turns; only pair increments deduplicate.
+   `Tracker.Apply` holds its lock through the atomic store write, staging a
+   copy of the session counters and restoring the prior state on failure.
+   Concurrent observations cannot consume a pair before persistence succeeds.
 8. **Fail-open everywhere.** A stats write failure or an unparseable body
    changes nothing about the request; measurement can never fail traffic.
+   A failed write books zero shadow tokens and leaves session transitions
+   retryable when later requests show the evidence again. There is no
+   background retry queue; evidence not repeated after failure can be lost.
 
 ## M2 design (locked — implement only on go)
 

@@ -32,7 +32,9 @@ in the same binary.
 - **Tool-cost measurement.** A TokenEconomizer-inspired pass
   (`tool_pruning.mode: shadow`) learns which tool schemas a client ships and
   which tools its traces actually call, and books the never-used schema cost
-  per request — measurement only, no body is ever rewritten
+  per request. Usage traces still count when a turn omits its tool catalog;
+  failed stats writes leave session counters retryable on later observations.
+  Measurement only, no body is ever rewritten
   ([design + runbook](docs/tool-pruning-design.md)).
 - **Subscriptions as accounts.** Optional loopback bridges put a Claude
   ([runbook](docs/claude-bridge-runbook.md)), ChatGPT

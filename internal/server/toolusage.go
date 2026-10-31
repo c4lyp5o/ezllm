@@ -33,7 +33,7 @@ func (s *Server) toolPruneShadow(r *http.Request, client string, doc *jsonbody.B
 		return 0
 	}
 	obs := toolprune.Observe(doc.Map())
-	if len(obs.Shipped) == 0 {
+	if len(obs.Shipped) == 0 && len(obs.Used) == 0 && !obs.Unresolved {
 		return 0
 	}
 	// Session identity mirrors the compression commit ledger: an explicit
@@ -53,16 +53,23 @@ func (s *Server) toolPruneShadow(r *http.Request, client string, doc *jsonbody.B
 		shadow = toolprune.ShadowTokens(s.toolPrune.Eligible(obs, stats))
 	}
 	now := time.Now()
-	deltas := s.toolPruneTrk.Deltas(client, session, obs, now)
-	rows := make([]store.ToolUsageDelta, 0, len(deltas))
-	for _, d := range deltas {
-		rows = append(rows, store.ToolUsageDelta{
-			Client: d.Client, Tool: d.Tool, SchemaTokens: d.SchemaTokens,
-			ShippedRequests: d.ShippedRequests, ShippedSessions: d.ShippedSessions,
-			UsedSessions: d.UsedSessions, LastUsedAt: d.LastUsedAt,
-		})
+	// Pair counters advance only after the atomic write succeeds. Failed
+	// writes leave the observation retryable on the next visible trace.
+	err := s.toolPruneTrk.Apply(client, session, obs, now, func(deltas []toolprune.Delta) error {
+		rows := make([]store.ToolUsageDelta, 0, len(deltas))
+		for _, d := range deltas {
+			rows = append(rows, store.ToolUsageDelta{
+				Client: d.Client, Tool: d.Tool, SchemaTokens: d.SchemaTokens,
+				ShippedRequests: d.ShippedRequests, ShippedSessions: d.ShippedSessions,
+				UsedSessions: d.UsedSessions, LastUsedAt: d.LastUsedAt,
+			})
+		}
+		return s.db.UpsertToolUsage(r.Context(), rows)
+	})
+	if err != nil {
+		return 0 // fail open without booking a failed measurement
 	}
-	_ = s.db.UpsertToolUsage(r.Context(), rows) // best-effort: fail open
+
 	return shadow
 }
 

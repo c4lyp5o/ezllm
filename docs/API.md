@@ -216,7 +216,11 @@ the effective switch (`off` | `shadow`).
 `shipped_sessions` can go DOWN: a session that shows a tool result whose call
 site is not in the body (`previous_response_id`, a compacted history) withdraws
 the pairs it counted for tools it never visibly used and stops counting, so a
-session that hides its calls never pushes a tool toward eligibility.
+session that hides its calls never pushes a tool toward eligibility. Trace
+usage and unresolved results are processed even if that request omits `tools`
+or sends an empty array. Failed stats writes book zero shadow tokens and do
+not consume the session's pair transitions; later observations can retry them.
+There is no background replay of failed observations.
 
 ### `GET /admin/usage?group_by=&from=&to=`
 Dashboard aggregates (`store.UsageReport`), computed server-side over the FULL filtered

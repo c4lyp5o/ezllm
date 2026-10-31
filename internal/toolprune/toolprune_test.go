@@ -2,6 +2,7 @@ package toolprune
 
 import (
 	"encoding/json"
+	"errors"
 	"strconv"
 	"sync"
 	"testing"
@@ -341,5 +342,31 @@ func TestTrackerConcurrentSameSession(t *testing.T) {
 	wg.Wait()
 	if total != int64(len(obs.Shipped)) {
 		t.Errorf("shipped_sessions total = %d, want %d (each pair once)", total, len(obs.Shipped))
+	}
+}
+
+func TestTrackerApplyRetriesFailedWithdrawal(t *testing.T) {
+	trk := NewTracker()
+	now := time.Now()
+	trk.Deltas("cli", "s1", Observation{Shipped: []Schema{{Name: "A", Tokens: 10}}}, now)
+	unresolved := Observation{Unresolved: true}
+	failed := errors.New("write failed")
+	if err := trk.Apply("cli", "s1", unresolved, now, func(ds []Delta) error {
+		if len(ds) != 1 || ds[0].ShippedSessions != -1 {
+			t.Fatalf("withdrawal = %+v", ds)
+		}
+		return failed
+	}); !errors.Is(err, failed) {
+		t.Fatalf("Apply error = %v", err)
+	}
+	got := trk.Deltas("cli", "s1", unresolved, now)
+	if len(got) != 1 || got[0].ShippedSessions != -1 {
+		t.Fatalf("retry withdrawal = %+v, want A:-1", got)
+	}
+	if got := trk.Deltas("cli", "s1", unresolved, now); len(got) != 0 {
+		t.Fatalf("committed withdrawal repeated: %+v", got)
+	}
+	if got := trk.Deltas("cli", "s1", Observation{Shipped: []Schema{{Name: "B", Tokens: 10}}}, now); len(got) != 1 || got[0].ShippedSessions != 0 {
+		t.Fatalf("tainted session counted new pair: %+v", got)
 	}
 }

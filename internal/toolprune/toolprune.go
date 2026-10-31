@@ -10,6 +10,7 @@ package toolprune
 
 import (
 	"encoding/json"
+	"maps"
 	"sort"
 	"sync"
 	"time"
@@ -352,6 +353,46 @@ func NewTracker() *Tracker {
 // a tool eligible (conservative by construction). An Unresolved observation
 // withdraws the session's shipped-but-unused pairs (ShippedSessions -1).
 func (t *Tracker) Deltas(client, session string, obs Observation, now time.Time) []Delta {
+	var deltas []Delta
+	_ = t.Apply(client, session, obs, now, func(ds []Delta) error {
+		deltas = ds
+		return nil
+	})
+	return deltas
+}
+
+// Apply persists an observation before committing its session counters. The
+// lock spans persistence so concurrent requests cannot consume the same pair.
+// A failed persist restores the prior counters, allowing a later observation
+// to retry its shipped, used and unresolved-result transitions. Persist must
+// apply all deltas atomically and must not call back into this tracker.
+func (t *Tracker) Apply(client, session string, obs Observation, now time.Time, persist func([]Delta) error) error {
+	if len(obs.Shipped) == 0 && len(obs.Used) == 0 && !obs.Unresolved {
+		return nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	prior := t.sessions[session]
+	if prior != nil {
+		staged := *prior
+		staged.seen = maps.Clone(prior.seen)
+		staged.used = maps.Clone(prior.used)
+		t.sessions[session] = &staged
+	}
+	deltas := t.deltasLocked(client, session, obs, now)
+	if err := persist(deltas); err != nil {
+		if prior == nil {
+			delete(t.sessions, session)
+		} else {
+			t.sessions[session] = prior
+		}
+		return err
+	}
+	return nil
+}
+
+// deltasLocked updates the staged session; callers hold t.mu.
+func (t *Tracker) deltasLocked(client, session string, obs Observation, now time.Time) []Delta {
 	if len(obs.Shipped) == 0 && len(obs.Used) == 0 && !obs.Unresolved {
 		return nil
 	}
@@ -364,13 +405,8 @@ func (t *Tracker) Deltas(client, session string, obs Observation, now time.Time)
 		})
 	}
 
-	// The session's maps are written below, so the lock covers the whole
-	// call: two concurrent requests of one session would otherwise race on
-	// them (a fatal concurrent map write).
 	var sc *sessionCounts
 	if session != "" {
-		t.mu.Lock()
-		defer t.mu.Unlock()
 		sc = t.sessions[session]
 		if sc == nil {
 			t.evictLocked(now)

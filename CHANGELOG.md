@@ -27,6 +27,12 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by rel
   request's eligible set and withdraws its session's shipped-but-unused pairs
   (`shipped_sessions` −1); a tool called in the request's own trace is never
   eligible, whatever the pre-request stats say.
+- Tracking persistence fixes: catalog-free turns still record visible calls
+  and unresolved-result withdrawals. `Tracker.Apply` commits session counters
+  only with a successful stats transaction; failed writes book zero shadow
+  tokens and leave pair transitions retryable on later observations. Regression
+  tests cover known usage, unresolved results, canceled writes and deduplicated
+  retries. No background replay is added.
 - Verifier hardening: the UsageRow↔api.ts contract test's path went stale when
   the file moved to `web/src/utils/api.ts` and had been silently SKIPPING
   since — fixed, the pin bites again.

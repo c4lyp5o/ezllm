@@ -167,7 +167,7 @@ returned page — so the totals answer "how much lives behind this filter".
                               // the marker before comparing tin across rows; see
                               // docs/translation-runbook.md "Ledger attribution".
   "summary": { "count":23, "tin":966, "tout":69, "cread":0, "cwrite":0, "reasoning":0,
-               "context_pre":0, "context_saved":0, "compression_saved":409,
+               "context_pre":0, "context_saved":0, "tool_prune_shadow":120, "compression_saved":409,
                "max_tin":42, "max_tout":3,
                // compression accounting (whole matching set):
                // applied_* = rows where a rewrite ACTUALLY shipped shorter
@@ -187,6 +187,40 @@ Params: `min_tin` `max_tin` `min_tout` `max_tout` (non-negative integers);
 +1min grace); `limit` (1-500, default 50); `sort` = `ts_desc` (default) | `tin_desc` |
 `tout_desc`; `account`, `model`, `alias`, `client`, `session` (exact match on the ledger's account name,
 model, combo name, client (API key) name, and `X-Ezllm-Session` grouping key — never a prefix or pattern). Anything invalid → `400`.
+
+Rows also carry `tool_prune_shadow_tokens` (schema v33): the tool-pruning M1
+measurement — policy-eligible prunable tool-schema tokens for that request
+(potential, never shipped; see `docs/tool-pruning-design.md`). The summary
+sums it as `tool_prune_shadow`.
+
+### `GET /admin/tool-usage`
+Tool-pruning learning stats (M1, `docs/tool-pruning-design.md`): one row per
+`(client, tool)` — what schemas a client ships and which tools its traces
+actually call — plus the prize rollup that gates the M2 go/no-go.
+```jsonc
+{
+  "rows": [ { "client":"hermes", "tool":"Bash", "schema_tokens":42,
+              "shipped_requests":1200, "shipped_sessions":80, "used_sessions":79,
+              "first_seen_at":"…", "last_seen_at":"…", "last_used_at":"…",
+              "eligible":false, "prize_tokens":0 }, … ],
+  "policy": { "mode":"shadow", "min_unused_sessions":3, "keep":[] },
+  "summary": { "rows":55, "clients":3, "prize_tokens":123456 }
+}
+```
+`eligible` = the M1 policy verdict (never used, shipped ≥ `min_unused_sessions`
+sessions, not in `keep`); `prize_tokens` = `schema_tokens × shipped_requests`
+for eligible rows, 0 otherwise, and `summary.prize_tokens` is their sum —
+"what pruning would remove from every future request". `policy.mode` echoes
+the effective switch (`off` | `shadow`).
+
+`shipped_sessions` can go DOWN: a session that shows a tool result whose call
+site is not in the body (`previous_response_id`, a compacted history) withdraws
+the pairs it counted for tools it never visibly used and stops counting, so a
+session that hides its calls never pushes a tool toward eligibility. Trace
+usage and unresolved results are processed even if that request omits `tools`
+or sends an empty array. Failed stats writes book zero shadow tokens and do
+not consume the session's pair transitions; later observations can retry them.
+There is no background replay of failed observations.
 
 ### `GET /admin/usage?group_by=&from=&to=`
 Dashboard aggregates (`store.UsageReport`), computed server-side over the FULL filtered

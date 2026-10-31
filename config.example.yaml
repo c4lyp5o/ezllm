@@ -6,6 +6,18 @@ data_dir: ./data               # repo-relative so Docker can bind-mount ./data
 max_body_mib: 32
 # upstream_timeout: 0 = unbounded (streaming responses have no natural deadline)
 
+# Tool pruning measurement (docs/tool-pruning-design.md). One switch:
+#   off   (default) — nothing runs: no parse, no stats, no booking.
+#   shadow — measure what never-used tool schemas cost per request
+#            (calls.tool_prune_shadow_tokens) and collect tool_usage stats.
+#            No request body is ever rewritten. `prune` is M2 (not shipped).
+# EZLLM_TOOL_PRUNING_MODE overrides; keep is a list of tool names that are
+# never eligible (tool names are operator knowledge — the default is empty).
+# tool_pruning:
+#   mode: shadow
+#   min_unused_sessions: 3
+#   keep: []
+
 # NOTHING BELOW IS SEEDED BY DEFAULT — every uncommented entry is upserted into
 # SQLite at boot, ENABLED and with no key, so it appears in a fresh instance's
 # provider list and logs "model sync failed at boot" until a key is added.

@@ -787,12 +787,14 @@ export default function Dashboard() {
         tin: sum((u) => u.tin), tout: sum((u) => u.tout), cread: sum((u) => u.cread), cwrite: sum((u) => u.cwrite),
         calls: sum((u) => u.calls), errors: sum((u) => u.errors),
         saved: sum((u) => u.saved), contextSaved: sum((u) => u.context_saved),
+        toolPruneShadow: sum((u) => u.tool_prune_shadow),
       };
     }
     if (!whole || !fresh) return null;
     return {
       tin: whole.tin, tout: whole.tout, cread: whole.cread, cwrite: whole.cwrite,
       calls: whole.calls, errors: whole.errors, saved: whole.saved, contextSaved: whole.context_saved,
+      toolPruneShadow: whole.tool_prune_shadow,
     };
   }, [o, range, whole, fresh]);
 
@@ -828,7 +830,7 @@ export default function Dashboard() {
   }
 
   const known = totals !== null;
-  const t = totals ?? { tin: 0, tout: 0, cread: 0, cwrite: 0, calls: 0, errors: 0, saved: 0, contextSaved: 0 };
+  const t = totals ?? { tin: 0, tout: 0, cread: 0, cwrite: 0, calls: 0, errors: 0, saved: 0, contextSaved: 0, toolPruneShadow: 0 };
   const errRate = t.calls > 0 ? (t.errors / t.calls) * 100 : 0;
   // Cache share of ALL prompt tokens: tokens in (not cached) + cache reads +
   // cache writes. (The old card divided cache reads by tokens in alone and
@@ -970,6 +972,14 @@ export default function Dashboard() {
                 <span className="tnum w-12 text-right text-mute">
                   {t.contextSaved > 0 ? `+${formatTokens(t.contextSaved)} ctx` : ''}
                 </span>
+              </li>
+            )}
+            {t.toolPruneShadow > 0 && (
+              <li className="flex items-center gap-2 text-[13px]">
+                <span className="h-2 w-2 shrink-0 rounded-full bg-warn" />
+                <span className="text-dim">prunable tool schemas (measured)</span>
+                <span className="tnum ml-auto text-warn">{formatTokens(t.toolPruneShadow)}</span>
+                <span className="tnum w-12 text-right text-mute" />
               </li>
             )}
           </ul>

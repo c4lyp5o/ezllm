@@ -2,6 +2,41 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
 
+## Unreleased — tool pruning M1: measurement (TokenEconomizer-inspired)
+
+- `tool_pruning.mode: off|shadow` (default `off`; `EZLLM_TOOL_PRUNING_MODE` is
+  the no-rebuild override) measures what never-used tool schemas cost per
+  request — the first, zero-risk half of the TokenEconomizer port
+  (`docs/tool-pruning-design.md`). **Shadow mode never rewrites a body.**
+- `tool_usage` stats (schema v33), one row per `(client, tool)`: schemas
+  shipped vs tools the traces actually call, session-pair counted. The policy
+  (`used_sessions == 0 && shipped_sessions >= min_unused_sessions && !keep`,
+  used verdicts sticky lifetime) books its potential to the new ledger column
+  `calls.tool_prune_shadow_tokens`, threaded through the requests summary,
+  the feed projection and the dashboard totals.
+- `GET /admin/tool-usage` — the per-tool prize rollup
+  (`summary.prize_tokens` = what pruning would remove from every future
+  request) that gates the M2 go/no-go; `prune` mode itself is M2 and does not
+  exist yet.
+- Eligibility hardening (review fixes, before any production shadow run):
+  `Tracker.Deltas` holds its lock for the whole call (two concurrent requests
+  of one session raced on its maps — a fatal concurrent map write);
+  `server_tool_use` / `mcp_tool_use` mark their tool used (Anthropic server
+  tools were otherwise never "used"); a tool result whose call site is not in
+  the body (`previous_response_id`, a compacted history) empties that
+  request's eligible set and withdraws its session's shipped-but-unused pairs
+  (`shipped_sessions` −1); a tool called in the request's own trace is never
+  eligible, whatever the pre-request stats say.
+- Tracking persistence fixes: catalog-free turns still record visible calls
+  and unresolved-result withdrawals. `Tracker.Apply` commits session counters
+  only with a successful stats transaction; failed writes book zero shadow
+  tokens and leave pair transitions retryable on later observations. Regression
+  tests cover known usage, unresolved results, canceled writes and deduplicated
+  retries. No background replay is added.
+- Verifier hardening: the UsageRow↔api.ts contract test's path went stale when
+  the file moved to `web/src/utils/api.ts` and had been silently SKIPPING
+  since — fixed, the pin bites again.
+
 ## 2026-10-31 — bridge CLI auto-update and push channels (v1.6.0)
 
 - `ezllm bridge-check {claude|codex|agy} [--bin] [--home] [--json]` runs a

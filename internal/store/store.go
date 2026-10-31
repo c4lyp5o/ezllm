@@ -27,7 +27,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 32
+const schemaVersion = 33
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -233,6 +233,9 @@ func (d *DB) migrate() error {
 		if err := d.alterCallsCompressionAttribution(context.Background()); err != nil {
 			return fmt.Errorf("store: alter calls compression attribution: %w", err)
 		}
+		if err := d.alterCallsToolPrune(context.Background()); err != nil {
+			return fmt.Errorf("store: alter calls tool prune: %w", err)
+		}
 		if err := d.alterAccountMaxContext(context.Background()); err != nil {
 			return fmt.Errorf("store: alter accounts max context: %w", err)
 		}
@@ -305,6 +308,9 @@ func (d *DB) migrate() error {
 		}
 		if err := d.alterCallsCompressionAttribution(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate calls compression attribution: %w", err)
+		}
+		if err := d.alterCallsToolPrune(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate calls tool prune: %w", err)
 		}
 		if err := d.alterAccountMaxContext(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate accounts max context: %w", err)
@@ -962,6 +968,34 @@ func (d *DB) alterCallsContextTokens(ctx context.Context) error {
 		return nil
 	}
 	for _, column := range []string{"context_tokens_pre", "context_tokens_saved"} {
+		ok, err := hasColumn(ctx, d.w, "calls", column)
+		if err != nil {
+			return fmt.Errorf("check calls.%s: %w", column, err)
+		}
+		if ok {
+			continue
+		}
+		if _, err := d.w.ExecContext(ctx, fmt.Sprintf("ALTER TABLE calls ADD COLUMN %s INTEGER NOT NULL DEFAULT 0", column)); err != nil {
+			return fmt.Errorf("add calls.%s: %w", column, err)
+		}
+	}
+	return nil
+}
+
+// alterCallsToolPrune adds the tool-pruning measurement column (v33,
+// docs/tool-pruning-design.md) on databases created before it. Same guard as
+// alterCallsContextTokens: ALTER TABLE ADD COLUMN is not idempotent, and a
+// fresh database already has the column from schema.sql. M2 appends
+// tool_prune_tokens_saved to this list when prune mode ships.
+func (d *DB) alterCallsToolPrune(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "calls")
+	if err != nil {
+		return fmt.Errorf("check calls table: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+	for _, column := range []string{"tool_prune_shadow_tokens"} {
 		ok, err := hasColumn(ctx, d.w, "calls", column)
 		if err != nil {
 			return fmt.Errorf("check calls.%s: %w", column, err)

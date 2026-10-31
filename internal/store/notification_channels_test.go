@@ -141,8 +141,8 @@ func TestNotificationChannelsMigrationFromV31(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if db.SchemaVersion() != 32 {
-		t.Fatalf("schema %d, want 32", db.SchemaVersion())
+	if db.SchemaVersion() != schemaVersion {
+		t.Fatalf("schema %d, want %d", db.SchemaVersion(), schemaVersion)
 	}
 	if list, err := db.ListNotificationChannels(ctx); err != nil || len(list) != 0 {
 		t.Fatalf("channels after upgrade: %v %v", list, err)

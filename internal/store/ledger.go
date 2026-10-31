@@ -90,6 +90,11 @@ type Call struct {
 	CompressionRulesFired int
 	ContextTokensPre      int64
 	ContextTokensSaved    int64
+	// ToolPruneShadowTokens is the tool-pruning M1 measurement
+	// (docs/tool-pruning-design.md): policy-eligible prunable tool-schema
+	// tokens on this request (tool_pruning.mode=shadow). POTENTIAL only —
+	// never shipped, never merged with ShadowTokensSaved (compression).
+	ToolPruneShadowTokens int64
 	PromptTokensPre       int64
 	TokensSaved           int64
 	// TokensSavedNotional is what compression WOULD have saved on a request it
@@ -474,8 +479,8 @@ INSERT INTO calls (
   compression_profile, compression_applied, prompt_tokens_pre, tokens_saved, compression_ms,
   compression_rules_fired, context_tokens_pre, context_tokens_saved,
   compression_saved_notional, prefix_sha, msg_count, tool_count, session_id, req_bytes, block_pos, translated, err,
-  compression_version, compression_stages, shadow_tokens_saved
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+  compression_version, compression_stages, shadow_tokens_saved, tool_prune_shadow_tokens
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
@@ -501,7 +506,7 @@ INSERT INTO calls (
 			c.CompressionProfile, boolInt(c.CompressionApplied), c.PromptTokensPre, c.TokensSaved, c.CompressionMs,
 			c.CompressionRulesFired, c.ContextTokensPre, c.ContextTokensSaved,
 			c.TokensSavedNotional, c.PrefixSHA, c.MsgCount, c.ToolCount, c.SessionID, c.ReqBytes, c.BlockPos, boolInt(c.Translated), c.Err,
-			c.CompressionVersion, c.CompressionStages, c.ShadowTokensSaved,
+			c.CompressionVersion, c.CompressionStages, c.ShadowTokensSaved, c.ToolPruneShadowTokens,
 		)
 		if err != nil {
 			return fmt.Errorf("insert call: %w", err)
@@ -610,8 +615,11 @@ type UsageRow struct {
 	AppliedSaved int64 `json:"applied_saved"`
 	ContextPre   int64 `json:"context_pre"`
 	ContextSaved int64 `json:"context_saved"`
-	Errors       int64 `json:"errors"`
-	P50TTFTms    int64 `json:"p50_ttft_ms"`
+	// ToolPruneShadow sums the tool-pruning M1 measurement over the window
+	// (policy-eligible prunable schema tokens; potential, never shipped).
+	ToolPruneShadow int64 `json:"tool_prune_shadow"`
+	Errors          int64 `json:"errors"`
+	P50TTFTms       int64 `json:"p50_ttft_ms"`
 }
 
 // UsageReport aggregates the ledger. group_by: account|key|alias|client|model|surface|day.
@@ -634,6 +642,7 @@ SELECT %s AS k,
        COALESCE(SUM(CASE WHEN compression_applied=1 THEN tokens_saved ELSE 0 END),0) AS applied_saved,
        COALESCE(SUM(context_tokens_pre),0)        AS context_pre,
        COALESCE(SUM(context_tokens_saved),0)      AS context_saved,
+       COALESCE(SUM(tool_prune_shadow_tokens),0)  AS tool_prune_shadow,
        COALESCE(SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END),0) AS errors
 FROM calls
 WHERE ts >= ? AND ts < ?
@@ -649,7 +658,7 @@ ORDER BY calls DESC`, col)
 	out := []UsageRow{}
 	for rows.Next() {
 		var r UsageRow
-		if err := rows.Scan(&r.Key, &r.Calls, &r.TokensIn, &r.TokensOut, &r.CachedRead, &r.CachedWrite, &r.Reasoning, &r.TokensSaved, &r.AppliedSaved, &r.ContextPre, &r.ContextSaved, &r.Errors); err != nil {
+		if err := rows.Scan(&r.Key, &r.Calls, &r.TokensIn, &r.TokensOut, &r.CachedRead, &r.CachedWrite, &r.Reasoning, &r.TokensSaved, &r.AppliedSaved, &r.ContextPre, &r.ContextSaved, &r.ToolPruneShadow, &r.Errors); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -825,6 +834,7 @@ SELECT ts, ttft_ms,
        COALESCE(tokens_cached_read,0), COALESCE(tokens_cached_write,0),
        COALESCE(reasoning_tokens,0), COALESCE(tokens_saved,0),
        COALESCE(context_tokens_pre,0), COALESCE(context_tokens_saved,0),
+       COALESCE(tool_prune_shadow_tokens,0),
        status, COALESCE(compression_applied,0)
 FROM calls
 WHERE ts >= ? AND ts < ?`, days[0].start.UTC().Format(tsFmt), days[len(days)-1].end.UTC().Format(tsFmt))
@@ -839,9 +849,9 @@ WHERE ts >= ? AND ts < ?`, days[0].start.UTC().Format(tsFmt), days[len(days)-1].
 	var ts sql.RawBytes // valid until the next Next: compared, never kept
 	for rs.Next() {
 		var ttft sql.NullInt64
-		var tin, tout, cread, cwrite, reasoning, saved, cpre, csaved int64
+		var tin, tout, cread, cwrite, reasoning, saved, cpre, csaved, tpshadow int64
 		var status, applied int
-		if err := rs.Scan(&ts, &ttft, &tin, &tout, &cread, &cwrite, &reasoning, &saved, &cpre, &csaved, &status, &applied); err != nil {
+		if err := rs.Scan(&ts, &ttft, &tin, &tout, &cread, &cwrite, &reasoning, &saved, &cpre, &csaved, &tpshadow, &status, &applied); err != nil {
 			return nil, err
 		}
 		// First day whose end is after ts; the WHERE clause bounds ts to
@@ -870,6 +880,7 @@ WHERE ts >= ? AND ts < ?`, days[0].start.UTC().Format(tsFmt), days[len(days)-1].
 		}
 		r.ContextPre += cpre
 		r.ContextSaved += csaved
+		r.ToolPruneShadow += tpshadow
 		if status >= 400 {
 			r.Errors++
 		}
@@ -953,7 +964,8 @@ SELECT ts, client, COALESCE(ip,''), surface, alias, account, COALESCE(provider_k
        compression_rules_fired, context_tokens_pre, context_tokens_saved,
        COALESCE(compression_saved_notional,0), COALESCE(prefix_sha,''), msg_count, tool_count,
        COALESCE(session_id,''), req_bytes, COALESCE(block_pos,0), COALESCE(translated,0), COALESCE(err,''),
-       COALESCE(compression_version,''), COALESCE(compression_stages,''), COALESCE(shadow_tokens_saved,0)
+       COALESCE(compression_version,''), COALESCE(compression_stages,''), COALESCE(shadow_tokens_saved,0),
+       COALESCE(tool_prune_shadow_tokens,0)
 FROM calls ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -974,7 +986,7 @@ FROM calls ORDER BY id DESC LIMIT ?`, limit)
 			&c.CompressionRulesFired, &c.ContextTokensPre, &c.ContextTokensSaved,
 			&c.TokensSavedNotional, &c.PrefixSHA, &c.MsgCount, &c.ToolCount,
 			&c.SessionID, &c.ReqBytes, &c.BlockPos, &translated, &c.Err, &c.CompressionVersion,
-			&c.CompressionStages, &c.ShadowTokensSaved); err != nil {
+			&c.CompressionStages, &c.ShadowTokensSaved, &c.ToolPruneShadowTokens); err != nil {
 			return nil, err
 		}
 		if t, err := time.Parse("2006-01-02T15:04:05.000Z", ts); err == nil {

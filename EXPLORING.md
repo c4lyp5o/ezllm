@@ -662,6 +662,54 @@ mode this codebase has now hit twice.
   `web/scripts/check-dist.mjs` to compare the committed embedded bundle after
   normalizing checkout-dependent Vite hashes.
 
+### Unreleased — tool pruning M1, measurement ✅ (2026-10-31; design `docs/tool-pruning-design.md`)
+
+- `internal/toolprune/toolprune.go` `Observe` — tool schemas and trace usage
+  from one decoded body across all three wire shapes (chat `function.name`,
+  anthropic `name`, responses `name`; unnameable entries never eligible;
+  legacy `functions` untouched). `toolChoiceOf` protects a forced target and
+  disables eligibility when a call is demanded unnamed. `collectUsed` reads
+  call sites (`tool_use`, `server_tool_use`, `mcp_tool_use`,
+  `custom_tool_call`, `function_call`, chat `tool_calls`) and reports
+  `Observation.Unresolved` when a result's call site is missing from the body.
+- `internal/toolprune/toolprune.go` `Policy.EligibleName` — the rule:
+  `used_sessions == 0 && shipped_sessions >= min_unused_sessions && !keep`,
+  used verdicts sticky lifetime. `Policy.Eligible` adds the per-request
+  guards: tool_choice, a tool called in this request's trace, and an
+  unresolved result (empty set). `Tracker.Deltas` counts each (session, tool)
+  pair once under one lock held for the whole call (process-local, TTL'd,
+  bounded; a restart can double-count one session — visible in counts, never
+  in behaviour); an unresolved observation taints the session, withdrawing
+  its shipped-but-unused pairs (−1) and counting nothing after.
+- `internal/store/toolusage.go` `UpsertToolUsage` — one transaction of per-tool
+  upserts per observation (schema 33 `tool_usage`, `(client, tool)` aggregates only, never
+  prompt content); `ToolUsageForClient` is the request-path read.
+- `internal/toolprune/toolprune.go` `Tracker.Apply` — stages the session maps
+  under the tracker lock through the atomic store write; failed writes restore
+  the prior counters so later evidence can retry used flips and withdrawals.
+  `internal/server/toolusage.go` `toolPruneShadow` also processes catalog-free
+  traces; a failed write books zero. Regression seams:
+  `TestToolPruneCatalogFreeEvidence`, `TestToolPruneFailedWriteRetriesEvidence`
+  and `TestTrackerApplyRetriesFailedWithdrawal`.
+- `internal/server/toolusage.go` `toolPruneShadow` — the inference() hook
+  (after compression, before shape capture): shadow mode measures and books,
+  never rewrites; `handleToolUsage` serves `GET /admin/tool-usage` with the
+  prize rollup (`summary.prize_tokens` gates M2).
+- `calls.tool_prune_shadow_tokens` (schema 33) threads the full ledger
+  recipe: `store.Call` → `insertCalls` → `RecentCalls` → `admin.go
+  callsCols/scanCalls` → `requests.go` summary → `events.go CallEvent` →
+  `web/src/utils/api.ts` (UsageRow contract-pinned; the pin's path was stale
+  (`web/src/api.ts`) and silently skipped since the file moved to `utils/` —
+  fixed, it bites again) → Dashboard totals row.
+- Config: `tool_pruning.mode: off|shadow` (the ONE switch, default off),
+  `min_unused_sessions` (3), `keep` (empty); `EZLLM_TOOL_PRUNING_MODE` is the
+  env override; wrong-typed leaves fail boot naming the field
+  (`toolPruningValueError`).
+- **Verified:** go test -short ./... -count=1 green; two bite proofs fell on
+  the exact assertions (booking producer → `0, want 20`; sticky-used guard →
+  Live's tokens leaking into the shadow). M1 never rewrites a body (the
+  harness asserts the upstream sees the full tools array).
+
 ## 5. Invariants to check while reading (review checklist)
 
 These are the "if it's broken here, the project failed" spots — each must be visibly true in code:

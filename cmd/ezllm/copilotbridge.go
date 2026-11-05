@@ -40,12 +40,15 @@ const copilotQualifiedVersion = "1.0.105"
 // login actually served ("gpt-6.1-sol" default, "mai-code-1.1-flash" chosen by
 // `--model auto`). A hop is only proven after a probe answers; the curated list
 // seeds routing and nothing more.
+// Only ids this login ANSWERED are listed. A documented id the plan does not
+// include is worse than absent: the key test probes the first candidate, takes
+// the CLI's "not included in your plan" refusal for a bad credential, and
+// rejects a perfectly good bridge (measured 2026-11-05 — gpt-5.3-codex and
+// claude-haiku-4.5 are documented but not in this plan). Add an id here only
+// after a real turn answered on it.
 var copilotModelIDs = []string{
 	"auto",
 	"gpt-6.1-sol",
-	"gpt-5.3-codex",
-	"mai-code-1.1-flash",
-	"claude-haiku-4.5",
 }
 
 func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeReport) (func(), error) {

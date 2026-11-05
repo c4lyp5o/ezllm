@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -58,10 +59,94 @@ type Runner struct {
 	Home          string // COPILOT_HOME: holds the CLI's own login
 	Timeout       time.Duration
 	MaxConcurrent int
-	Logf          func(format string, args ...any)
+	// MaxQueue caps requests WAITING for a slot (default 8). Past it Run fails
+	// at once with queue_full instead of parking the caller until its context
+	// ends: a 2-slot bridge with a 300 s timeout would otherwise hold sockets
+	// for minutes behind a stall.
+	MaxQueue int
+	Logf     func(format string, args ...any)
 
 	sem  chan struct{}
 	once sync.Once
+
+	inflight, queued, served, rejected  atomic.Int64
+	firstByteNS, firstByteN, lastByteNS atomic.Int64
+	mu                                  sync.Mutex
+	outcomes                            map[string]int64
+}
+
+const defaultMaxQueue = 8
+
+// Stats is the runtime picture /status serves: pressure (in flight, queued,
+// rejected), what turns ended as, and how long the CLI takes to say anything.
+func (r *Runner) Stats() map[string]any {
+	r.init()
+	r.mu.Lock()
+	oc := make(map[string]int64, len(r.outcomes))
+	for k, v := range r.outcomes {
+		oc[k] = v
+	}
+	r.mu.Unlock()
+	avg := int64(0)
+	if n := r.firstByteN.Load(); n > 0 {
+		avg = r.firstByteNS.Load() / n / int64(time.Millisecond)
+	}
+	return map[string]any{
+		"in_flight":           r.inflight.Load(),
+		"queued":              r.queued.Load(),
+		"max_queue":           r.maxQueue(),
+		"max_concurrent":      cap(r.sem),
+		"served":              r.served.Load(),
+		"rejected_queue_full": r.rejected.Load(),
+		"outcomes":            oc,
+		"first_byte_ms_avg":   avg,
+		"first_byte_ms_last":  r.lastByteNS.Load() / int64(time.Millisecond),
+	}
+}
+
+func (r *Runner) maxQueue() int {
+	if r.MaxQueue > 0 {
+		return r.MaxQueue
+	}
+	return defaultMaxQueue
+}
+
+func (r *Runner) record(err error) {
+	code := "ok"
+	var f *Failure
+	switch {
+	case err == nil:
+	case errors.As(err, &f):
+		code = f.Code
+	case errors.Is(err, context.DeadlineExceeded):
+		code = "timeout"
+	case errors.Is(err, context.Canceled):
+		code = "canceled"
+	default:
+		code = "error"
+	}
+	r.mu.Lock()
+	if r.outcomes == nil {
+		r.outcomes = map[string]int64{}
+	}
+	r.outcomes[code]++
+	r.mu.Unlock()
+}
+
+// firstByteReader stamps how long the CLI took to emit its first output.
+type firstByteReader struct {
+	r     io.Reader
+	start time.Time
+	once  sync.Once
+	onHit func(time.Duration)
+}
+
+func (f *firstByteReader) Read(p []byte) (int, error) {
+	n, err := f.r.Read(p)
+	if n > 0 {
+		f.once.Do(func() { f.onHit(time.Since(f.start)) })
+	}
+	return n, err
 }
 
 func (r *Runner) logf(format string, args ...any) {
@@ -86,10 +171,33 @@ func (r *Runner) Run(ctx context.Context, model, prompt string, delta func(strin
 	r.init()
 	select {
 	case r.sem <- struct{}{}:
-	case <-ctx.Done():
-		return Result{}, ctx.Err()
+	default:
+		if int(r.queued.Add(1)) > r.maxQueue() {
+			r.queued.Add(-1)
+			r.rejected.Add(1)
+			err := &Failure{Code: "queue_full", Msg: "copilot bridge: every CLI slot is busy and the queue is full; retry shortly"}
+			r.record(err)
+			return Result{}, err
+		}
+		select {
+		case r.sem <- struct{}{}:
+			r.queued.Add(-1)
+		case <-ctx.Done():
+			r.queued.Add(-1)
+			r.record(ctx.Err())
+			return Result{}, ctx.Err()
+		}
 	}
 	defer func() { <-r.sem }()
+	r.inflight.Add(1)
+	defer r.inflight.Add(-1)
+	res, err := r.run(ctx, model, prompt, delta)
+	r.served.Add(1)
+	r.record(err)
+	return res, err
+}
+
+func (r *Runner) run(ctx context.Context, model, prompt string, delta func(string) error) (Result, error) {
 
 	timeout := r.Timeout
 	if timeout <= 0 {
@@ -122,7 +230,12 @@ func (r *Runner) Run(ctx context.Context, model, prompt string, delta func(strin
 		return Result{}, fmt.Errorf("copilot-bridge: start %s: %w", r.Bin, err)
 	}
 
-	res, parseErr := parseStream(stdout, delta)
+	began := time.Now()
+	res, parseErr := parseStream(&firstByteReader{r: stdout, start: began, onHit: func(d time.Duration) {
+		r.firstByteNS.Add(int64(d))
+		r.firstByteN.Add(1)
+		r.lastByteNS.Store(int64(d))
+	}}, delta)
 	if parseErr != nil && !errors.Is(parseErr, io.EOF) {
 		// Nobody reads stdout any more: kill the child now or it blocks on a
 		// full pipe until the timeout while holding a slot.

@@ -135,3 +135,44 @@ func TestRunQueueHonoursContextWhileWaitingForASlot(t *testing.T) {
 		}
 	})
 }
+
+func TestRunRejectsFastWhenTheQueueIsFull(t *testing.T) {
+	bin := stubCLI(t, "cat >/dev/null\nexec sleep 30")
+	r := &Runner{Bin: bin, Timeout: 20 * time.Second, MaxConcurrent: 1, MaxQueue: 1}
+	hold, stop := context.WithCancel(context.Background())
+	defer stop()
+	go r.Run(hold, "", "running", nil) //nolint:errcheck
+	time.Sleep(300 * time.Millisecond)
+	go r.Run(hold, "", "waiting", nil) //nolint:errcheck
+	time.Sleep(200 * time.Millisecond)
+	within(t, 2*time.Second, func() {
+		_, err := r.Run(context.Background(), "", "overflow", nil)
+		var f *Failure
+		if !errors.As(err, &f) || f.Code != "queue_full" {
+			t.Errorf("err = %v, want queue_full", err)
+		}
+	})
+	st := r.Stats()
+	if st["rejected_queue_full"].(int64) != 1 || st["in_flight"].(int64) != 1 || st["queued"].(int64) != 1 {
+		t.Errorf("stats = %v", st)
+	}
+}
+
+func TestStatsCountOutcomesAndFirstByte(t *testing.T) {
+	ok := stubCLI(t, `cat >/dev/null
+echo '{"type":"assistant.message","data":{"content":"hi"}}'`)
+	r := &Runner{Bin: ok, Timeout: 10 * time.Second}
+	if _, err := r.Run(context.Background(), "", "x", nil); err != nil {
+		t.Fatal(err)
+	}
+	r.Bin = stubCLI(t, "cat >/dev/null\necho 'not logged in' >&2\nexit 1")
+	r.Run(context.Background(), "", "x", nil) //nolint:errcheck
+	st := r.Stats()
+	oc := st["outcomes"].(map[string]int64)
+	if oc["ok"] != 1 || oc["not_logged_in"] != 1 || st["served"].(int64) != 2 {
+		t.Errorf("stats = %v", st)
+	}
+	if r.firstByteN.Load() < 1 {
+		t.Error("first-byte latency never recorded")
+	}
+}

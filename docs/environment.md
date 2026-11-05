@@ -139,6 +139,9 @@ CLI's own, so there is no client id to configure. Runbook:
 | `EZLLM_COPILOT_BRIDGE` | off | `on` starts the loopback surface; without it the provider add answers 409 naming this variable. |
 | `EZLLM_COPILOT_BIN` | `/opt/copilot/copilot` | The GitHub Copilot CLI binary. |
 | `EZLLM_COPILOT_HOME` | `/copilot-home` | `HOME` for the CLI — the directory its login lives in (mount it read-write; the CLI writes session state). |
+| `EZLLM_COPILOT_BRIDGE_CONCURRENCY` | `2` | Concurrent Copilot CLI children; a positive integer, anything else fails the boot. |
+| `EZLLM_COPILOT_BRIDGE_QUEUE` | `8` | Requests allowed to wait for a slot; past it the bridge answers 429 `queue_full` with `Retry-After: 5`. |
+| `EZLLM_COPILOT_BRIDGE_TIMEOUT` | `300s` | Per-turn limit, a Go duration of at least `1s`. |
 | `EZLLM_COPILOT_BRIDGE_ADDR` | `127.0.0.1:8793` | Listen address; non-loopback is refused. |
 | `EZLLM_COPILOT_BRIDGE_TOKEN_FILE` | — (required) | Shared secret for the account key; generated (0600) when missing. Boot refuses without a path. |
 

@@ -61,6 +61,9 @@ func (s *Server) Handler() http.Handler {
 			info[k] = v
 		}
 		// Never let a bridge card imply a capability this hop does not have.
+		if st, ok := s.Runner.(interface{ Stats() map[string]any }); ok {
+			info["runtime"] = st.Stats()
+		}
 		info["client_tools"] = "refused: the CLI runs its own agent loop (see design §10)"
 		writeJSON(w, http.StatusOK, info)
 	})
@@ -217,6 +220,10 @@ func (s *Server) writeErr(w http.ResponseWriter, err error) {
 		case "quota_exhausted":
 			writeRaw(w, http.StatusTooManyRequests, ErrorEnvelope("rate_limit_error", f.Msg, f.Code))
 			return
+		case "queue_full":
+			w.Header().Set("Retry-After", "5")
+			writeRaw(w, http.StatusTooManyRequests, ErrorEnvelope("rate_limit_error", f.Msg, f.Code))
+			return
 		case "model_not_in_plan":
 			writeRaw(w, http.StatusForbidden, ErrorEnvelope("permission_error", f.Msg, f.Code))
 			return
@@ -352,7 +359,7 @@ func asEnvelope(err error) envelope {
 		switch f.Code {
 		case "not_logged_in":
 			return envelope{"authentication_error", f.Msg, f.Code}
-		case "quota_exhausted":
+		case "quota_exhausted", "queue_full":
 			return envelope{"rate_limit_error", f.Msg, f.Code}
 		case "model_not_in_plan":
 			return envelope{"permission_error", f.Msg, f.Code}

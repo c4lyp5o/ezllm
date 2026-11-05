@@ -40,6 +40,12 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 - **Client tool schemas are refused** (`chat_tools_unsupported`) — `-p` has no
   option that yields a pending tool call. A turn that needs tools fails loudly;
   it does not silently miscount.
+- **Pressure is bounded and visible.** `EZLLM_COPILOT_BRIDGE_CONCURRENCY`
+  (2), `_QUEUE` (8) and `_TIMEOUT` (300s) are configurable; past the queue the
+  bridge answers 429 `queue_full` + `Retry-After: 5` instead of parking the
+  caller. `/status` gains a `runtime` block: in-flight, queued, rejected,
+  per-outcome counts and CLI first-byte latency. The CLI child runs on an
+  allowlisted environment, never ezllm's own secrets.
 
 ## Unreleased — removed: tool pruning (rejected feature)
 

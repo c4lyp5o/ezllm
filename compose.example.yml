@@ -74,6 +74,9 @@ services:
       # EZLLM_COPILOT_HOME: /copilot-home
       # EZLLM_COPILOT_BRIDGE_ADDR: 127.0.0.1:8793
       # EZLLM_COPILOT_BRIDGE_TOKEN_FILE: /data/copilot-bridge.token
+      # EZLLM_COPILOT_BRIDGE_CONCURRENCY: "2"
+      # EZLLM_COPILOT_BRIDGE_QUEUE: "8"
+      # EZLLM_COPILOT_BRIDGE_TIMEOUT: 300s
 
       # ── Claude subscription bridge ── docs/claude-bridge-runbook.md
       # Loopback-only; an anthropic-compatible account dials it. `on` without

@@ -223,3 +223,28 @@ func TestFailureErrorToleratesNilCause(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestQueueFullIs429WithRetryAfter(t *testing.T) {
+	s := &Server{Runner: fakeExec{err: &Failure{Code: "queue_full", Msg: "busy"}}, Token: "t", Models: []Model{{ID: "auto"}}}
+	req := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"auto","messages":[{"role":"user","content":"x"}]}`))
+	req.Header.Set("Authorization", "Bearer t")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != 429 || rec.Header().Get("Retry-After") != "5" {
+		t.Fatalf("code=%d retry-after=%q", rec.Code, rec.Header().Get("Retry-After"))
+	}
+}
+
+func TestStatusServesRunnerStats(t *testing.T) {
+	r := &Runner{Bin: "/nonexistent", MaxConcurrent: 3}
+	s := &Server{Runner: r, Token: "t", Info: map[string]any{"status": "ok"}}
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/status", nil))
+	var got map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	rt, _ := got["runtime"].(map[string]any)
+	if rt == nil || rt["max_concurrent"].(float64) != 3 {
+		t.Fatalf("runtime stats missing: %v", got)
+	}
+}

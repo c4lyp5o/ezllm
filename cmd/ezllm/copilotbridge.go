@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,12 +24,42 @@ import (
 // speaks Copilot's private API and never mints a session token — that OAuth
 // path is retired by this change (docs/copilot-cli-bridge-design.md).
 const (
-	envCopilotBridge      = "EZLLM_COPILOT_BRIDGE"            // "on" enables the surface
-	envCopilotBin         = "EZLLM_COPILOT_BIN"               // official CLI binary (mounted)
-	envCopilotHome        = "EZLLM_COPILOT_HOME"              // the CLI's own login directory
-	envCopilotBridgeAddr  = "EZLLM_COPILOT_BRIDGE_ADDR"       // default 127.0.0.1:8793
-	envCopilotBridgeToken = "EZLLM_COPILOT_BRIDGE_TOKEN_FILE" // shared secret for the account key
+	envCopilotBridge      = "EZLLM_COPILOT_BRIDGE"             // "on" enables the surface
+	envCopilotBin         = "EZLLM_COPILOT_BIN"                // official CLI binary (mounted)
+	envCopilotHome        = "EZLLM_COPILOT_HOME"               // the CLI's own login directory
+	envCopilotBridgeAddr  = "EZLLM_COPILOT_BRIDGE_ADDR"        // default 127.0.0.1:8793
+	envCopilotBridgeToken = "EZLLM_COPILOT_BRIDGE_TOKEN_FILE"  // shared secret for the account key
+	envCopilotConcurrency = "EZLLM_COPILOT_BRIDGE_CONCURRENCY" // concurrent CLI children (default 2)
+	envCopilotQueue       = "EZLLM_COPILOT_BRIDGE_QUEUE"       // requests allowed to wait for a slot (default 8)
+	envCopilotTimeout     = "EZLLM_COPILOT_BRIDGE_TIMEOUT"     // per-turn limit, a Go duration (default 300s)
 )
+
+// copilotLimits reads the three runner knobs. A malformed value fails the boot:
+// a typo that silently fell back to the default would look like a working
+// override.
+func copilotLimits(get func(string) string) (concurrency, queue int, timeout time.Duration, err error) {
+	concurrency, queue, timeout = 2, 8, 300*time.Second
+	for _, k := range []struct {
+		env string
+		dst *int
+	}{{envCopilotConcurrency, &concurrency}, {envCopilotQueue, &queue}} {
+		if v := strings.TrimSpace(get(k.env)); v != "" {
+			n, perr := strconv.Atoi(v)
+			if perr != nil || n < 1 {
+				return 0, 0, 0, fmt.Errorf("copilot bridge: %s=%q must be a positive integer", k.env, v)
+			}
+			*k.dst = n
+		}
+	}
+	if v := strings.TrimSpace(get(envCopilotTimeout)); v != "" {
+		d, perr := time.ParseDuration(v)
+		if perr != nil || d < time.Second {
+			return 0, 0, 0, fmt.Errorf("copilot bridge: %s=%q must be a duration of at least 1s (e.g. 300s)", envCopilotTimeout, v)
+		}
+		timeout = d
+	}
+	return concurrency, queue, timeout, nil
+}
 
 // copilotQualifiedVersion is the CLI release the bridge's parser fixture and live
 // proof were taken on (measured 2026-11-05). Another version boots and serves,
@@ -74,6 +105,10 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 		return nil, err
 	}
 
+	concurrency, queue, timeout, err := copilotLimits(os.Getenv)
+	if err != nil {
+		return nil, err
+	}
 	cliVersion := copilotCLIVersion(resolved)
 	release := releaseState(bin, cliVersion, copilotQualifiedVersion)
 	token, err := bridgeTokenFromFile(strings.TrimSpace(os.Getenv(envCopilotBridgeToken)), "copilot")
@@ -92,6 +127,9 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 		"cli_version": cliVersion,
 		"cli_release": release,
 		"home":        home,
+		"concurrency": concurrency,
+		"queue":       queue,
+		"timeout":     timeout.String(),
 		"models":      copilotModelIDs,
 		// Measured cost of the CLI's own agent scaffolding, so nobody reads the
 		// ledger and thinks the bridge is leaking tokens.
@@ -102,8 +140,9 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 		Runner: &copilotbridge.Runner{
 			Bin:           resolved,
 			Home:          home,
-			Timeout:       300 * time.Second,
-			MaxConcurrent: 2,
+			Timeout:       timeout,
+			MaxConcurrent: concurrency,
+			MaxQueue:      queue,
 			Logf:          log.Info,
 		},
 		Token:   token,

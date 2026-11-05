@@ -81,8 +81,10 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   an unregistrable tool name is, on a request with tools, a 400
   `chat_tools_unsupported` before anything is billed, which the router fails over
   on with no cooldown (`refusesTools`).
-  `tool_choice` required is an instruction the model can ignore, because the
-  channel has no equivalent. This replaces two earlier cuts from the same release:
+  `tool_choice`: `none` is a plain turn with no tools visible, and `required` or
+  a named function is refused up front (400, before billing) so another hop can
+  enforce it — the channel has no equivalent to force a call. This replaces two
+  earlier cuts from the same release:
   a refusal, which returned 400 on a live combo's first request, and a `<tool_call>`
   text protocol, which the model ignored and which charged for empty turns.
 - **Usage no longer depends on how the CLI writes a number.** The channel writes

@@ -458,6 +458,9 @@ export type FeedRow = {
   /** Tool pruning M1 measurement: policy-eligible prunable tool-schema
    *  tokens on this request (potential, never shipped). */
   toolPruneShadow?: number;
+  /** How a stream ended (schema v34): completed | truncated | failed |
+   *  client_gone. Absent on non-stream requests and pre-v34 rows. */
+  streamOutcome?: string;
   compression: string; applied: boolean; rulesFired?: number; error?: string;
   /** Translated hop: its wire differs from the client's surface. When set,
    *  `tin` is the vendor's INCLUSIVE total, not our cold-token convention. */
@@ -481,6 +484,7 @@ export function normalizeFeedRow(raw: any): FeedRow {
     savedNotional: num(raw.saved_notional ?? raw.compression_saved_notional),
     contextPre: num(raw.context_tokens_pre), contextSaved: num(raw.context_tokens_saved),
     toolPruneShadow: num(raw.tool_prune_shadow_tokens),
+    streamOutcome: raw.stream_outcome ? String(raw.stream_outcome) : undefined,
     compression: String(raw.compression ?? ''), applied: Boolean(raw.applied),
     error: raw.error ? String(raw.error) : undefined,
     // Snapshot rows and live SSE rows both carry the marker; absent = native.

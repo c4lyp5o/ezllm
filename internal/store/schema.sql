@@ -312,6 +312,12 @@ CREATE TABLE IF NOT EXISTS calls (
   -- (compression) or context_tokens_* (budget). M2's shipped saving books
   -- its own sibling column (tool_prune_tokens_saved).
   tool_prune_shadow_tokens INTEGER NOT NULL DEFAULT 0,
+  -- v34 (docs/hop-health-design.md): how a STREAM ended, as a first-class
+  -- fact instead of prose in err. '' = not a stream; completed; truncated
+  -- (upstream died after headers); failed (translated stream's late error
+  -- frame); client_gone (the CALLER hung up — a complete call, never a hop
+  -- fault). The hop-health rollup divides truncated by (streams - client_gone).
+  stream_outcome TEXT NOT NULL DEFAULT '',
   err            TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_calls_ts        ON calls(ts DESC);

@@ -29,6 +29,9 @@ type CallEvent struct {
 	// ToolPruneShadow is the tool-pruning M1 measurement (potential prunable
 	// schema tokens; never shipped) — see docs/tool-pruning-design.md.
 	ToolPruneShadow int64 `json:"tool_prune_shadow_tokens"`
+	// StreamOutcome is how a stream ended (schema v34, docs/hop-health-design.md):
+	// completed / truncated / failed / client_gone, or "" for a non-stream.
+	StreamOutcome string `json:"stream_outcome"`
 	// Compression is the ledger stamp: "" (never mentioned), "off" /
 	// "unknown-profile" / "disabled" (asked, no change), or the profile name.
 	Compression string `json:"compression"`
@@ -90,6 +93,7 @@ func EventFromCall(c Call) CallEvent {
 		SavedNotional: c.TokensSavedNotional,
 		ContextPre:    c.ContextTokensPre, ContextSaved: c.ContextTokensSaved,
 		ToolPruneShadow: c.ToolPruneShadowTokens,
+		StreamOutcome:   c.StreamOutcome,
 		Compression:     c.CompressionProfile, Applied: c.CompressionApplied,
 		Translated: c.Translated,
 		Err:        c.Err,

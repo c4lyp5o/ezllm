@@ -1391,6 +1391,14 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 			// half-delivered stream must never look like a clean success in
 			// the ledger.
 			res.Err = "stream truncated: " + copyErr.Error()
+			// The OUTCOME, not just the prose. StreamOutcome used to be set
+			// only for translated streams, so a NATIVE stream that died
+			// mid-body left it empty — StreamCompleted() then answered true
+			// and hop health treated a cut answer as a delivered one: no
+			// MarkHopBad, no strike, no park, and a hop-health rate that
+			// could never see the failure. Measured live: 16 mid-stream
+			// resets on one hop in 8 days, none of which struck it.
+			res.StreamOutcome = StreamOutcomeTruncated
 		}
 		// Mirror the non-stream branch's err-column rule. The stream branch
 		// had no equivalent, so a failover-committed SSE error response — a

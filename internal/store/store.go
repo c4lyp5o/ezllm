@@ -27,7 +27,20 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 33
+const schemaVersion = 34
+
+// Stream-outcome vocabulary (schema v34, docs/hop-health-design.md). Stored in
+// calls.stream_outcome; an empty value means the request was not a stream.
+// These live here
+// rather than in proxy so the ledger owns its own vocabulary and a store test
+// can assert every value without importing the dispatcher.
+const (
+	StreamOutcomeNone       = ""
+	StreamOutcomeCompleted  = "completed"
+	StreamOutcomeTruncated  = "truncated"
+	StreamOutcomeFailed     = "failed"
+	StreamOutcomeClientGone = "client_gone"
+)
 
 // DB wraps the writer/reader split.
 type DB struct {
@@ -236,6 +249,9 @@ func (d *DB) migrate() error {
 		if err := d.alterCallsToolPrune(context.Background()); err != nil {
 			return fmt.Errorf("store: alter calls tool prune: %w", err)
 		}
+		if err := d.alterCallsStreamOutcome(context.Background()); err != nil {
+			return fmt.Errorf("store: alter calls stream outcome: %w", err)
+		}
 		if err := d.alterAccountMaxContext(context.Background()); err != nil {
 			return fmt.Errorf("store: alter accounts max context: %w", err)
 		}
@@ -311,6 +327,9 @@ func (d *DB) migrate() error {
 		}
 		if err := d.alterCallsToolPrune(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate calls tool prune: %w", err)
+		}
+		if err := d.alterCallsStreamOutcome(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate calls stream outcome: %w", err)
 		}
 		if err := d.alterAccountMaxContext(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate accounts max context: %w", err)
@@ -1006,6 +1025,32 @@ func (d *DB) alterCallsToolPrune(ctx context.Context) error {
 		if _, err := d.w.ExecContext(ctx, fmt.Sprintf("ALTER TABLE calls ADD COLUMN %s INTEGER NOT NULL DEFAULT 0", column)); err != nil {
 			return fmt.Errorf("add calls.%s: %w", column, err)
 		}
+	}
+	return nil
+}
+
+// alterCallsStreamOutcome adds the hop-health outcome column (v34,
+// docs/hop-health-design.md) on databases created before it. Same guard as the
+// other ADD COLUMNs: not idempotent, and a fresh database already carries it from
+// schema.sql. TEXT with an empty default keeps every historical row honest —
+// "this row predates the recording", never a guessed verdict.
+func (d *DB) alterCallsStreamOutcome(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "calls")
+	if err != nil {
+		return fmt.Errorf("check calls table: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+	ok, err := hasColumn(ctx, d.w, "calls", "stream_outcome")
+	if err != nil {
+		return fmt.Errorf("check calls.stream_outcome: %w", err)
+	}
+	if ok {
+		return nil
+	}
+	if _, err := d.w.ExecContext(ctx, `ALTER TABLE calls ADD COLUMN stream_outcome TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("add calls.stream_outcome: %w", err)
 	}
 	return nil
 }

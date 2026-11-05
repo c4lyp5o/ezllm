@@ -66,20 +66,19 @@ func copilotLimits(get func(string) string) (concurrency, queue int, timeout tim
 // reported unqualified until the updater's live proof records it.
 const copilotQualifiedVersion = "1.0.105"
 
-// copilotModelIDs is the CURATED catalog. There is no non-interactive "list
-// models" command, so these are the ids the CLI documents plus the ones this
-// login actually served ("gpt-6.1-sol" default, "mai-code-1.1-flash" chosen by
-// `--model auto`). A hop is only proven after a probe answers; the curated list
-// seeds routing and nothing more.
-// Only ids this login ANSWERED are listed. A documented id the plan does not
-// include is worse than absent: the key test probes the first candidate, takes
-// the CLI's "not included in your plan" refusal for a bad credential, and
-// rejects a perfectly good bridge (measured 2026-11-05 — gpt-5.3-codex and
-// claude-haiku-4.5 are documented but not in this plan). Add an id here only
-// after a real turn answered on it.
+// copilotModelIDs is the CURATED seed catalog. There is no non-interactive "list
+// models" command, so these are ids the CLI documents (`copilot help config`)
+// that the operator's picker shows. "auto" MUST stay first: the key test probes
+// the first candidate, and "auto" is the one id every plan answers. The ids after
+// it are listed UNTESTED (the operator decides what is enabled); a model the
+// plan does not include fails with a typed 403 model_not_in_plan, never a
+// silent success. Ids the CLI reports on `auto` turns are learned on top of this
+// list at runtime (internal/copilotbridge Server.learn).
 var copilotModelIDs = []string{
-	"auto",
+	"auto", // displayed as "Copilot Fusion"; the stored id is "auto"
 	"gpt-6.1-sol",
+	"gpt-6-luna",
+	"gpt-5.3-codex",
 }
 
 func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeReport) (func(), error) {

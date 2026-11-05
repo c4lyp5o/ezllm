@@ -88,12 +88,19 @@ trap that looks fine until traffic arrives. In the deploy window:
 
 ## Models
 
-There is NO non-interactive model list. The bridge advertises a **curated**
-catalog and nothing else; only ids this login actually answered belong in
-`copilotModelIDs` (`cmd/ezllm/copilotbridge.go`). A documented-but-ungated id is
-worse than absent: the key test probes the first candidate, reads the CLI's
-"not included in your plan" as a bad credential, and rejects a good bridge
-(measured: `gpt-5.3-codex`, `claude-haiku-4.5`). `auto` lets Copilot choose.
+There is NO non-interactive model list. The bridge advertises a **curated seed**
+(`copilotModelIDs` in `cmd/ezllm/copilotbridge.go`: `auto`, `gpt-6.1-sol`,
+`gpt-6-luna`, `gpt-5.3-codex`) plus whatever the CLI reports for this login on
+`auto` turns (`learned_models` on `/status`). `copilot help config` documents
+every id the CLI knows, but not which your plan includes; the interactive
+`/model` picker is the only plan-aware list.
+
+- `auto` stays FIRST: the key test probes the first candidate, so it must be the
+  one id every plan answers (the picker shows it as "Copilot Fusion").
+- Ids after `auto` are listed UNTESTED. A model the plan does not include fails
+  with a typed 403 `model_not_in_plan`; the operator decides what to enable.
+- To add one, use an id from `copilot help config`; do not guess display names
+  ("GPT-6.1 Terra" is not a documented id).
 
 ## What this hop can and cannot do
 

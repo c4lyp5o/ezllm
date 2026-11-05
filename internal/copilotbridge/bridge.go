@@ -169,16 +169,13 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", err.Error(), code))
 		return
 	}
-	// Refused before a spawn: learning "unknown model" from the CLI costs a
-	// multi-second process start plus a premium request.
+	// Refused before a spawn: learning "not available" from the CLI costs a
+	// multi-second process start plus a premium request. It is the same typed
+	// 403 the CLI's own refusal maps to (writeErr), so the router treats both
+	// alike: the model is unavailable, the hop is not unhealthy.
 	if req.Model != "" && req.Model != "auto" && !s.knownModel(req.Model) {
-		cat := s.catalog()
-		ids := make([]string, 0, len(cat))
-		for _, m := range cat {
-			ids = append(ids, m.ID)
-		}
-		writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error",
-			"copilot-bridge: model "+req.Model+" is not on this login's plan (have: "+strings.Join(ids, ", ")+")", "unknown_model"))
+		writeRaw(w, http.StatusForbidden, ErrorEnvelope("permission_error",
+			"copilot-bridge: model "+req.Model+" is not available on this Copilot login (GET /v1/models lists what is)", "model_not_in_plan"))
 		return
 	}
 

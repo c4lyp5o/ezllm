@@ -52,6 +52,11 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   probes a proven id first) and shows them as `learned_models` on `/status`.
   Nothing is probed, so no premium request is spent on discovery. In-memory:
   a restart relearns on the next auto turn.
+- **The catalog is every id the CLI documents.** At boot the bridge reads
+  `copilot help config` (local, free) and lists all of them after `auto`, with a
+  built-in copy as fallback; the plan decides, and a model it lacks answers
+  403 `model_not_in_plan` (the pre-spawn refusal of an unknown id moved from
+  400 `unknown_model` to the same 403).
 
 ## Unreleased — removed: tool pruning (rejected feature)
 

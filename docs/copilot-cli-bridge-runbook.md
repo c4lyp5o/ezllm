@@ -88,19 +88,25 @@ trap that looks fine until traffic arrives. In the deploy window:
 
 ## Models
 
-There is NO non-interactive model list. The bridge advertises a **curated seed**
-(`copilotModelIDs` in `cmd/ezllm/copilotbridge.go`: `auto`, `gpt-6.1-sol`,
-`gpt-6-luna`, `gpt-5.3-codex`) plus whatever the CLI reports for this login on
-`auto` turns (`learned_models` on `/status`). `copilot help config` documents
-every id the CLI knows, but not which your plan includes; the interactive
-`/model` picker is the only plan-aware list.
+There is NO non-interactive model list, and the CLI does not say which ids a
+plan includes. So the catalog is every id the CLI KNOWS, and the plan decides at
+request time:
 
-- `auto` stays FIRST: the key test probes the first candidate, so it must be the
+- At boot the bridge runs `copilot help config` (a local help page: no network,
+  no premium request) and reads the documented `model` ids, so a CLI update is
+  picked up at the next restart. `copilotModelIDs` in `cmd/ezllm/copilotbridge.go`
+  is the built-in copy of that list (CLI 1.0.105) for when the read fails, and
+  `TestParseHelpConfigAgainstTheRealCLI` fails if the help page changes shape.
+- Ids the CLI reports on `auto` turns are learned on top (`learned_models` on
+  `/status`).
+- A model the login does not include answers **403 `model_not_in_plan`**: from the
+  bridge before any spawn when the id is not in the catalog, and from the CLI's
+  own refusal otherwise. The router treats it as "model unavailable", not as an
+  unhealthy hop.
+- `auto` stays FIRST: the key test probes the first candidate, and `auto` is the
   one id every plan answers (the picker shows it as "Copilot Fusion").
-- Ids after `auto` are listed UNTESTED. A model the plan does not include fails
-  with a typed 403 `model_not_in_plan`; the operator decides what to enable.
-- To add one, use an id from `copilot help config`; do not guess display names
-  ("GPT-6.1 Terra" is not a documented id).
+- The interactive `/model` picker is the only plan-aware list. Which models are
+  enabled for routing is the operator's call in the dashboard.
 
 ## What this hop can and cannot do
 
@@ -134,7 +140,7 @@ A turn with no usage block stores ZEROS — "unknown", never estimated.
 |---|---|---|
 | not logged in / authentication | 401 `not_logged_in` | fail fast, no backoff |
 | premium requests / quota / rate limit | 429 `quota_exhausted` | cool the hop |
-| not in your plan | 403 `model_not_in_plan` | do not park as unhealthy |
+| not in your plan / id not in the catalog | 403 `model_not_in_plan` | do not park as unhealthy |
 | anything else | 502 `cli_failed` | normal failover |
 
 ## Gates and updates

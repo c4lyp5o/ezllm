@@ -272,8 +272,8 @@ func TestCatalogLearnsFromAutoTurnsAfterTheSeed(t *testing.T) {
 		return rec
 	}
 	// Before any turn the unseeded id is refused without a spawn.
-	if rec := do("POST", "/v1/chat/completions", `{"model":"mai-code-1.1-flash","messages":[{"role":"user","content":"x"}]}`); rec.Code != 400 {
-		t.Fatalf("unlearned model code = %d", rec.Code)
+	if rec := do("POST", "/v1/chat/completions", `{"model":"mai-code-1.1-flash","messages":[{"role":"user","content":"x"}]}`); rec.Code != 403 || !strings.Contains(rec.Body.String(), "model_not_in_plan") {
+		t.Fatalf("unlearned model code = %d body %s", rec.Code, rec.Body)
 	}
 	if rec := do("POST", "/v1/chat/completions", `{"model":"auto","messages":[{"role":"user","content":"x"}]}`); rec.Code != 200 {
 		t.Fatalf("auto turn = %d %s", rec.Code, rec.Body)

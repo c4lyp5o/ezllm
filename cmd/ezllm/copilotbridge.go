@@ -66,19 +66,77 @@ func copilotLimits(get func(string) string) (concurrency, queue int, timeout tim
 // reported unqualified until the updater's live proof records it.
 const copilotQualifiedVersion = "1.0.105"
 
-// copilotModelIDs is the CURATED seed catalog. There is no non-interactive "list
-// models" command, so these are ids the CLI documents (`copilot help config`)
-// that the operator's picker shows. "auto" MUST stay first: the key test probes
-// the first candidate, and "auto" is the one id every plan answers. The ids after
-// it are listed UNTESTED (the operator decides what is enabled); a model the
-// plan does not include fails with a typed 403 model_not_in_plan, never a
-// silent success. Ids the CLI reports on `auto` turns are learned on top of this
-// list at runtime (internal/copilotbridge Server.learn).
+// copilotModelIDs is the built-in copy of the ids `copilot help config` documents
+// (CLI 1.0.105): the catalog the bridge falls back to when the live read fails.
+// There is no non-interactive "list models" command and the help text does not
+// say which ids a plan includes, so the catalog is every id the CLI KNOWS and
+// the plan decides at request time: a model the login lacks fails with a typed
+// 403 model_not_in_plan, never a silent success. "auto" MUST stay first: the key
+// test probes the first candidate, and "auto" is the one id every plan answers.
 var copilotModelIDs = []string{
 	"auto", // displayed as "Copilot Fusion"; the stored id is "auto"
-	"gpt-6.1-sol",
-	"gpt-6-luna",
-	"gpt-5.3-codex",
+	"gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-6-astra",
+	"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini",
+	"gpt-5.3-codex", "gpt-5-mini",
+	"claude-sonnet-5.5", "claude-sonnet-5", "claude-fable-5.1", "claude-fable-5",
+	"claude-opus-5.5", "claude-opus-5", "claude-opus-4.8", "claude-opus-4.8-fast",
+	"claude-sonnet-4.6", "claude-haiku-5.5", "claude-haiku-4.5",
+	"mai-code-1.1-flash", "gemini-4-argon", "gemini-3.8-flash", "gemini-3.7-flash",
+	"grok-4.7", "grok-4.6", "grok-4.5", "kimi-k3",
+}
+
+// parseHelpConfigModels reads the model ids out of `copilot help config`: the
+// quoted values under the `model` setting, up to the next setting. A CLI whose
+// help text changes shape yields nothing, and the built-in list stands.
+func parseHelpConfigModels(out string) []string {
+	var ids []string
+	in := false
+	for _, line := range strings.Split(out, "\n") {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "`model`:") {
+			in = true
+			continue
+		}
+		if in && strings.HasPrefix(trim, "`") {
+			break // the next setting
+		}
+		if in && strings.HasPrefix(trim, "- \"") && strings.HasSuffix(trim, "\"") {
+			id := strings.Trim(strings.TrimPrefix(trim, "- "), "\"")
+			if id != "" && !strings.ContainsAny(id, " \t") {
+				ids = append(ids, id)
+			}
+		}
+	}
+	return ids
+}
+
+// copilotCatalog is `auto`, then the ids the CLI documents (read live so a CLI
+// update is picked up at the next boot), then any built-in id the live read did
+// not return. Order is stable and duplicates are dropped.
+func copilotCatalog(live []string) []string {
+	out := []string{"auto"}
+	seen := map[string]bool{"auto": true}
+	for _, list := range [][]string{live, copilotModelIDs} {
+		for _, id := range list {
+			if !seen[id] {
+				seen[id] = true
+				out = append(out, id)
+			}
+		}
+	}
+	return out
+}
+
+// copilotLiveModels runs `copilot help config` (a local help page: no network,
+// no premium request) and parses the documented model ids.
+func copilotLiveModels(bin string) []string {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, "help", "config").Output()
+	if err != nil {
+		return nil
+	}
+	return parseHelpConfigModels(string(out))
 }
 
 func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeReport) (func(), error) {
@@ -115,8 +173,9 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 		return nil, err
 	}
 
-	models := make([]copilotbridge.Model, 0, len(copilotModelIDs))
-	for _, id := range copilotModelIDs {
+	catalog := copilotCatalog(copilotLiveModels(resolved))
+	models := make([]copilotbridge.Model, 0, len(catalog))
+	for _, id := range catalog {
 		models = append(models, copilotbridge.Model{ID: id, Object: "model", OwnedBy: "copilot-cli"})
 	}
 	info := map[string]any{
@@ -129,7 +188,7 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 		"concurrency": concurrency,
 		"queue":       queue,
 		"timeout":     timeout.String(),
-		"models":      copilotModelIDs,
+		"models":      catalog,
 		// Measured cost of the CLI's own agent scaffolding, so nobody reads the
 		// ledger and thinks the bridge is leaking tokens.
 		"scaffolding_tokens_per_call": "~13-14k (27 built-in tools ≈ 9.3k)",

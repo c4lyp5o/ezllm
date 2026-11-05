@@ -46,6 +46,12 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   caller. `/status` gains a `runtime` block: in-flight, queued, rejected,
   per-outcome counts and CLI first-byte latency. The CLI child runs on an
   allowlisted environment, never ezllm's own secrets.
+- **The model catalog grows itself, for free.** The CLI reports the ids a login
+  can use (`availableModels`) on every `--model auto` turn; the bridge folds
+  valid ids into `/v1/models` after the curated seed (so the key test still
+  probes a proven id first) and shows them as `learned_models` on `/status`.
+  Nothing is probed, so no premium request is spent on discovery. In-memory:
+  a restart relearns on the next auto turn.
 
 ## Unreleased — removed: tool pruning (rejected feature)
 

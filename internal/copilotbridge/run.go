@@ -40,6 +40,10 @@ type Result struct {
 	// it, because a resumed session cannot accept an external tool result (see
 	// docs/copilot-cli-bridge-design.md §10).
 	SessionID string
+	// AvailableModels is what the CLI says this login can use, read from the
+	// session.auto_mode_resolved event of an `auto` turn. It costs nothing: it
+	// rides a turn that was happening anyway.
+	AvailableModels []string
 }
 
 // Executor runs one prompt. *Runner implements it; tests inject a fake.
@@ -286,11 +290,12 @@ func parseStream(r io.Reader, delta func(string) error) (Result, error) {
 				PremiumRequests int `json:"premiumRequests"`
 			} `json:"usage"`
 			Data struct {
-				DeltaContent string `json:"deltaContent"`
-				Content      string `json:"content"`
-				Model        string `json:"model"`
-				SessionID    string `json:"sessionId"`
-				Usage        struct {
+				AvailableModels []string `json:"availableModels"`
+				DeltaContent    string   `json:"deltaContent"`
+				Content         string   `json:"content"`
+				Model           string   `json:"model"`
+				SessionID       string   `json:"sessionId"`
+				Usage           struct {
 					PremiumRequests int `json:"premiumRequests"`
 				} `json:"usage"`
 				// session.usage_checkpoint (one entry per model in the turn)
@@ -337,6 +342,8 @@ func parseStream(r io.Reader, delta func(string) error) (Result, error) {
 			if ev.Data.Model != "" {
 				res.Usage.Model = ev.Data.Model
 			}
+		case "session.auto_mode_resolved":
+			res.AvailableModels = ev.Data.AvailableModels
 		case "session.usage_checkpoint":
 			u := &res.Usage
 			snap := ev.Data.AccountingSnapshot

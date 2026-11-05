@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -33,6 +34,57 @@ type Server struct {
 	Info    map[string]any
 	Logf    func(format string, args ...any)
 	Now     func() time.Time
+
+	// Models is the curated seed. Ids the CLI reports for this login are
+	// learned on top of it (learn) and listed AFTER the seed, so the first
+	// candidate the key test probes is always one that was proven.
+	lmu     sync.Mutex
+	learned []string
+}
+
+var modelIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$`)
+
+const maxLearnedModels = 64
+
+// learn folds the CLI's own availableModels into the catalog. Ids are
+// validated (they end up in /v1/models and error text) and bounded.
+func (s *Server) learn(ids []string) {
+	if len(ids) == 0 {
+		return
+	}
+	s.lmu.Lock()
+	defer s.lmu.Unlock()
+	for _, id := range ids {
+		if !modelIDPattern.MatchString(id) || len(s.learned) >= maxLearnedModels || s.hasLocked(id) {
+			continue
+		}
+		s.learned = append(s.learned, id)
+	}
+}
+
+func (s *Server) hasLocked(id string) bool {
+	for _, m := range s.Models {
+		if m.ID == id {
+			return true
+		}
+	}
+	for _, l := range s.learned {
+		if l == id {
+			return true
+		}
+	}
+	return false
+}
+
+// catalog is the seed followed by the learned ids.
+func (s *Server) catalog() []Model {
+	s.lmu.Lock()
+	defer s.lmu.Unlock()
+	out := append([]Model(nil), s.Models...)
+	for _, id := range s.learned {
+		out = append(out, Model{ID: id, Object: "model", OwnedBy: "copilot-cli"})
+	}
+	return out
 }
 
 func (s *Server) logf(format string, args ...any) {
@@ -61,6 +113,9 @@ func (s *Server) Handler() http.Handler {
 			info[k] = v
 		}
 		// Never let a bridge card imply a capability this hop does not have.
+		if l := s.catalog(); len(l) > len(s.Models) {
+			info["learned_models"] = l[len(s.Models):]
+		}
 		if st, ok := s.Runner.(interface{ Stats() map[string]any }); ok {
 			info["runtime"] = st.Stats()
 		}
@@ -68,7 +123,7 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, info)
 	})
 	mux.HandleFunc("GET /v1/models", s.authed(func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": s.Models})
+		writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": s.catalog()})
 	}))
 	mux.HandleFunc("POST /v1/chat/completions", s.authed(s.chat))
 	return mux
@@ -87,12 +142,9 @@ func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *Server) knownModel(id string) bool {
-	for _, m := range s.Models {
-		if m.ID == id {
-			return true
-		}
-	}
-	return false
+	s.lmu.Lock()
+	defer s.lmu.Unlock()
+	return s.hasLocked(id)
 }
 
 func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
@@ -120,8 +172,9 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	// Refused before a spawn: learning "unknown model" from the CLI costs a
 	// multi-second process start plus a premium request.
 	if req.Model != "" && req.Model != "auto" && !s.knownModel(req.Model) {
-		ids := make([]string, 0, len(s.Models))
-		for _, m := range s.Models {
+		cat := s.catalog()
+		ids := make([]string, 0, len(cat))
+		for _, m := range cat {
 			ids = append(ids, m.ID)
 		}
 		writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error",
@@ -142,6 +195,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 			s.writeErr(w, err)
 			return
 		}
+		s.learn(res.AvailableModels)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"id": id, "object": "chat.completion", "created": created, "model": servedModel(model, res),
 			"choices": []map[string]any{{"index": 0, "finish_reason": "stop",
@@ -165,6 +219,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		s.logf("copilot-bridge: stream failed: %s", err)
 		return
 	}
+	s.learn(res.AvailableModels)
 	sw.model = servedModel(model, res)
 	sw.begin()
 	if !sw.sent && res.Text != "" {

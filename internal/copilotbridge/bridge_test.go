@@ -248,3 +248,46 @@ func TestStatusServesRunnerStats(t *testing.T) {
 		t.Fatalf("runtime stats missing: %v", got)
 	}
 }
+
+func TestParseStreamReadsAvailableModels(t *testing.T) {
+	res, err := parseStream(strings.NewReader(transcript), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(res.AvailableModels, ",") != "gpt-6.1-sol,mai-code-1.1-flash" {
+		t.Errorf("available = %v", res.AvailableModels)
+	}
+}
+
+func TestCatalogLearnsFromAutoTurnsAfterTheSeed(t *testing.T) {
+	s := &Server{
+		Runner: fakeExec{res: Result{Text: "ok", AvailableModels: []string{"gpt-6.1-sol", "mai-code-1.1-flash", "bad id!", "../x"}}},
+		Token:  "t", Models: []Model{{ID: "auto"}, {ID: "gpt-6.1-sol"}},
+	}
+	do := func(method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer t")
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+	// Before any turn the unseeded id is refused without a spawn.
+	if rec := do("POST", "/v1/chat/completions", `{"model":"mai-code-1.1-flash","messages":[{"role":"user","content":"x"}]}`); rec.Code != 400 {
+		t.Fatalf("unlearned model code = %d", rec.Code)
+	}
+	if rec := do("POST", "/v1/chat/completions", `{"model":"auto","messages":[{"role":"user","content":"x"}]}`); rec.Code != 200 {
+		t.Fatalf("auto turn = %d %s", rec.Code, rec.Body)
+	}
+	var list struct{ Data []Model }
+	_ = json.Unmarshal(do("GET", "/v1/models", "").Body.Bytes(), &list)
+	var ids []string
+	for _, m := range list.Data {
+		ids = append(ids, m.ID)
+	}
+	if got := strings.Join(ids, ","); got != "auto,gpt-6.1-sol,mai-code-1.1-flash" {
+		t.Errorf("catalog = %s (seed first, learned after, invalid ids dropped, no duplicates)", got)
+	}
+	if rec := do("POST", "/v1/chat/completions", `{"model":"mai-code-1.1-flash","messages":[{"role":"user","content":"x"}]}`); rec.Code != 200 {
+		t.Errorf("learned model refused: %d", rec.Code)
+	}
+}

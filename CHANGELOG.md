@@ -2,6 +2,21 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
+## Unreleased — renamed: provider presets say what they are
+
+- **The four subscription bridges are labelled as bridges** in the Add-provider
+  dropdown: `Claude Pro/Max (bridge)`, `ChatGPT Plus/Pro (bridge)`,
+  `Google Antigravity (bridge)`, `GitHub Copilot (bridge)` (was "GitHub Copilot
+  (CLI)"). Those four need a signed-in CLI and take no key — that is the
+  difference that changes what happens after Save, so it belongs in the name.
+- **The two web-session presets drop the mechanism from their name:**
+  `Claude.ai (web session)` → **`Claude.ai (web)`**, `Google Gemini (web
+  cookies)` → **`Google Gemini (web)`**. The cookie field below the dropdown
+  already says how.
+- Account names are unaffected: the `(bridge)` suffix is stripped when a name is
+  auto-seeded, so a card still reads "GitHub Copilot", not "GitHub Copilot
+  (bridge)". Existing accounts keep the names they already have.
+
 ## Unreleased — replaced: GitHub Copilot OAuth → the official CLI bridge
 
 - **The OAuth provider is gone, not deprecated.** `internal/githubcopilot`

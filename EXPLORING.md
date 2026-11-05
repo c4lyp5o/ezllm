@@ -710,6 +710,41 @@ mode this codebase has now hit twice.
   Live's tokens leaking into the shadow). M1 never rewrites a body (the
   harness asserts the upstream sees the full tools array).
 
+### M15 — hop stream health ✅ (2026-11-05; design `docs/hop-health-design.md`)
+
+A hop that sends `200` and then dies mid-body was healthy by every number the
+product had: it committed, it wrote a ledger row, its account stayed enabled.
+Measured on the live ledger (8 days to 2026-11-05): **18 genuine mid-stream
+`connection reset by peer` events, 16 of them on one hop** —
+`command-code · xiaomi/mimo-v2.6-pro`, 16/771 = 2.1% of everything routed there,
+while the SAME model on `opencode-go` was 0/754.
+- `calls.stream_outcome` (schema 34): `completed | truncated | failed |
+  client_gone`, empty for a non-stream. `finishDispatch` writes it from
+  `clientGone`, `res.StreamCompleted()` and `res.StreamOutcome`
+  (`streamOutcomeLabel`, `internal/server/dispatch.go`). **Precedence is the
+  contract**: `client_gone` first (a caller hanging up says nothing about the
+  hop; that artefact once made 442 complete calls look like failures), then a
+  translated stream's frame-level `failed`, then the socket-died inference.
+- **Defect found by the new e2e, not by reading:** the proxy set
+  `StreamOutcome` only for TRANSLATED streams, so a native stream that died
+  left it empty → `StreamCompleted()` answered true → `hopAttributableFailure`
+  said false → **no `MarkHopBad`, no strike, no park**, for every mid-stream
+  reset in the ledger above. `internal/proxy/proxy.go` (the `copyErr` branch)
+  now records `StreamOutcomeTruncated`.
+- `store.HopStreamHealth` (`internal/store/hophealth.go`) rolls the ledger up
+  per (namespace, model) over a window; `truncation_rate = truncated /
+  (streams − client_gone)`, rows the v34 recorder did not classify are excluded
+  (never inferred from `err`). Served by `/admin/health?stream_window=` (default
+  24h, capped 30d, nonsense is a 400) **and** by `healthSnapshot` so
+  `/admin/overview` — what the dashboard actually reads — carries the same key.
+- Dashboard `CutAnswers` (`web/src/pages/Dashboard.tsx`): the worst hops, rate
+  chip, "N cut of M" with truncations/failed/hangups on hover, plus a
+  "needs attention" item above 1% with ≥20 judged streams. Verified on a
+  loopback instance serving this dist: card renders 3.2% / "2 cut of 62",
+  attention names the hop, zero console errors, 390px zero overflow.
+- No routing action yet, deliberately: the park rule is justified by THIS
+  measurement, not by a plausible number (the M2 lesson).
+
 ## 5. Invariants to check while reading (review checklist)
 
 These are the "if it's broken here, the project failed" spots — each must be visibly true in code:

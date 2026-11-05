@@ -1,6 +1,31 @@
 # Changelog
 
-Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
+Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
+
+## Unreleased — hop stream health (schema v34)
+
+- `calls.stream_outcome` records how a STREAM ended — `completed`, `truncated`,
+  `failed`, `client_gone`, empty for a non-stream request — so a hop that
+  returns `200` and then dies mid-body is a fact in the ledger instead of prose
+  in `err` (`docs/hop-health-design.md`). Precedence: `client_gone` first (a
+  caller hanging up is never a hop fault; that artefact once made 442 complete
+  calls read as failures), then a translated stream's frame-level `failed`.
+- **Fixed the reason this mattered:** the proxy set `StreamOutcome` only for
+  translated streams, so a native stream that died left it empty,
+  `StreamCompleted()` answered true and hop health treated a cut answer as
+  delivered — no strike, no park. Measured live: 16 mid-stream resets on
+  `command-code · xiaomi/mimo-v2.6-pro` in 8 days (2.1% of that hop's traffic,
+  against 0/754 for the same model on `opencode-go`), none of which had ever
+  counted. The `copyErr` branch now records `StreamOutcomeTruncated`.
+- `/admin/health` gains `hop_stream_health` (`?stream_window=`: default 24h,
+  capped 30d, bounded `truncation_rate = truncated / (streams − client_gone)`,
+  worst hop first); `/admin/overview` carries the same key so the dashboard can
+  read it.
+- Dashboard: a **Cut answers** card with the rate chip and "N cut of M", and a
+  needs-attention item above 1% over at least 20 judged streams. Row-level
+  outcomes ride the feed payload (`stream_outcome`).
+- No routing action yet: the park rule is the next commit and is justified by
+  this measurement, not by a plausible number (the M2 lesson).
 
 ## Unreleased — tool pruning M1: measurement (TokenEconomizer-inspired)
 

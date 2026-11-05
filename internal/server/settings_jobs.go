@@ -114,6 +114,7 @@ func (s *Server) StartSettingsJobs(ctx context.Context) {
 		s.jobsMu.Unlock()
 	}
 	s.priceRefreshOn.Store(s.settings.Current().PriceRefresh)
+	s.startHopStreamAlerts(ctx)
 	s.goBackground(func(bg context.Context) {
 		ctx, stop := either(ctx, bg)
 		defer stop()

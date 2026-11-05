@@ -129,6 +129,12 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   outcomes ride the feed payload (`stream_outcome`).
 - No routing action yet: the park rule is the next commit and is justified by
   this measurement, not by a plausible number (the M2 lesson).
+- **The bell rings for it.** Every 15 minutes the ledger rollup is checked with
+  the dashboard's own thresholds (over 1% truncated, at least 20 judged streams,
+  24h); an offending hop raises one `stream_truncation` warning, folded per
+  (account, model) so a recurring cut is one line with a counter, and pushed
+  through the existing channels. Toggle: Settings → Notifications → "Answers cut
+  mid-stream" (`notify_stream_truncation`, default on).
 
 ## Unreleased — tool pruning M1: measurement (TokenEconomizer-inspired)
 

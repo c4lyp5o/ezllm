@@ -99,3 +99,50 @@ func TestHealthReportsHopStreamHealth(t *testing.T) {
 		t.Errorf("narrow window = %d %s, want an empty hop list", narrow.Code, narrow.Body.String())
 	}
 }
+
+// The bell must fire for a hop past the dashboard's thresholds, stay quiet for
+// one under them, and fold repeats into one line.
+func TestCheckHopStreamsRaisesOneFoldedBellPerFlakyHop(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, store.Options{
+		Path: filepath.Join(t.TempDir(), "t.sqlite"), BatchSize: 8, BatchWait: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	now := time.Now().UTC()
+	rec := func(acct, outcome string, n int) {
+		for i := 0; i < n; i++ {
+			db.RecordCall(store.Call{TS: now.Add(-time.Minute), Client: "c", Account: acct,
+				Model: "m", Status: 200, Stream: true, StreamOutcome: outcome})
+		}
+	}
+	rec("flaky", store.StreamOutcomeCompleted, 28)
+	rec("flaky", store.StreamOutcomeTruncated, 2)   // 6.7% of 30 judged: alert
+	rec("flaky", store.StreamOutcomeClientGone, 50) // never judged
+	rec("thin", store.StreamOutcomeTruncated, 3)    // 100% but only 3 judged: too thin
+	rec("steady", store.StreamOutcomeCompleted, 99)
+	rec("steady", store.StreamOutcomeTruncated, 0) // 0%: quiet
+	if err := db.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	s := New(Options{Auth: db, DB: db, MaxBodyMiB: 1})
+	s.checkHopStreams(ctx, now)
+	s.checkHopStreams(ctx, now) // a repeat folds
+
+	items, _, err := db.ListNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("notifications = %+v, want exactly one (flaky)", items)
+	}
+	n := items[0]
+	if n.Kind != store.NoteStreamTruncation || n.Severity != "warn" || !strings.Contains(n.Title, "flaky") {
+		t.Errorf("notification = %+v", n)
+	}
+	if n.Count != 2 {
+		t.Errorf("count = %d, want 2 (repeat folded, not duplicated)", n.Count)
+	}
+}

@@ -37,10 +37,11 @@ type Values struct {
 	NotifyBridgeUp   bool   `json:"notify_bridge_updated"`
 	NotifyBridgeHeld bool   `json:"notify_bridge_update_blocked"`
 	NotifyBridgeBack bool   `json:"notify_bridge_rolled_back"`
+	NotifyStreamCut  bool   `json:"notify_stream_truncation"`
 }
 
 func Defaults() Values {
-	return Values{UsageTZ: "UTC", Translation: true, AutoProbe: true, CatalogInterval: "12h", PriceRefresh: true, Retries: 3, AttemptBudget: 8, Cooldown429: "60s", Cooldown5xx: "60s", CooldownStrikes: 3, BackupHour: 3, BackupKeep: 7, NotifyAdded: true, NotifyRemoved: true, NotifyBroken: true, NotifyCatalog: true, NotifyBudget: true, NotifyPrices: true, NotifyBackup: true, NotifyBridgeUp: true, NotifyBridgeHeld: true, NotifyBridgeBack: true}
+	return Values{UsageTZ: "UTC", Translation: true, AutoProbe: true, CatalogInterval: "12h", PriceRefresh: true, Retries: 3, AttemptBudget: 8, Cooldown429: "60s", Cooldown5xx: "60s", CooldownStrikes: 3, BackupHour: 3, BackupKeep: 7, NotifyAdded: true, NotifyRemoved: true, NotifyBroken: true, NotifyCatalog: true, NotifyBudget: true, NotifyPrices: true, NotifyBackup: true, NotifyBridgeUp: true, NotifyBridgeHeld: true, NotifyBridgeBack: true, NotifyStreamCut: true}
 }
 func (v Values) Validate() error {
 	if _, err := time.LoadLocation(v.UsageTZ); err != nil || v.UsageTZ == "" {
@@ -109,6 +110,8 @@ func (v Values) Notify(kind string) bool {
 		return v.NotifyBridgeHeld
 	case "bridge_rolled_back":
 		return v.NotifyBridgeBack
+	case "stream_truncation":
+		return v.NotifyStreamCut
 	}
 	return true
 }

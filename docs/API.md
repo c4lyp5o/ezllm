@@ -748,6 +748,7 @@ newest update first. `POST …/read` takes `{"ids":[…]}` or `{"all":true}` →
 | `bridge_updated` | info | the bridge updater promoted a CLI release and proved it (v1.6.0) |
 | `bridge_update_blocked` | warn | a CLI release failed the update gate; the bridge keeps its release (v1.6.0) |
 | `bridge_rolled_back` | error | a promoted CLI release failed its proof and was reverted (v1.6.0) |
+| `stream_truncation` | warn | a hop ended >1% of its streams early over 24h, with at least 20 judged streams; one folded line per hop, checked every 15 minutes |
 
 The three bridge events are raised once per updater report, and only for reports written while
 this process runs: the updater writes its outcome after the restart it causes.
@@ -956,7 +957,7 @@ JSON object, with unknown envelope/setting fields rejected.
 | `backup_enabled` | Boolean, default false. Enabling requires configured writable storage and a separate backup encryption secret. |
 | `backup_hour` | Integer 0–23, instance timezone; default 3. |
 | `backup_keep` | Integer 1–365, default 7; counts completed verified backups. |
-| `notify_free_models_added`, `notify_free_models_removed`, `notify_free_model_broken`, `notify_catalog_refresh_failed`, `notify_client_budget_reached`, `notify_price_refresh_failed`, `notify_backup_failed`, `notify_bridge_updated`, `notify_bridge_update_blocked`, `notify_bridge_rolled_back` | Boolean, all default true. Apply to future dashboard bell events and so to push channels. |
+| `notify_free_models_added`, `notify_free_models_removed`, `notify_free_model_broken`, `notify_catalog_refresh_failed`, `notify_client_budget_reached`, `notify_price_refresh_failed`, `notify_backup_failed`, `notify_bridge_updated`, `notify_bridge_update_blocked`, `notify_bridge_rolled_back`, `notify_stream_truncation` | Boolean, all default true. Apply to future dashboard bell events and so to push channels. |
 
 Duration settings retain the limits of their existing YAML counterparts.
 `apply` is `immediate` for operator values; changing a deployment override still

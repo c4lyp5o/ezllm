@@ -1424,9 +1424,7 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 		// ledger with a blank err, the one field that diagnoses an incident
 		// after the fact. Some providers also answer 200 SSE carrying an
 		// error object inside the stream, which is equally worth recording.
-		if sseHasErrorEnvelope(first) || (res.Err == "" && res.Status >= 400) {
-			res.Err = upstreamErrorSnippet(res.Status, first)
-		}
+		res.Err = streamErrCause(res.Err, res.Status, first)
 		// The delivery outcome: a late error frame or a source that ended
 		// without a terminal event must not reach hop-health as success, even
 		// though the HTTP status said 200 and the client got bytes. Legacy
@@ -2459,6 +2457,37 @@ func copyResponseHeaders(w http.ResponseWriter, resp *http.Response) {
 // providers answer 200 with the error inside the stream's first data payload.
 // Detecting it is what lets the ledger record WHY a "successful" stream was
 // actually a failure.
+// streamErrCause decides what the ledger's err column says about a finished
+// stream, and it is a precedence rule, not a last-writer-wins assignment.
+//
+// A cause recorded earlier in the request is the precise one — "stream
+// truncated: unexpected EOF" names what actually happened to the bytes — and an
+// error envelope in the body must never replace it with a generic snippet. What
+// the envelope DOES add is the upstream's own classification of why, so when one
+// is present its cause word is appended once: "… [rate_limited]". That keeps
+// both halves of the diagnosis in a single TEXT column.
+//
+// With no cause yet, the snippet is the whole story: a failover-committed SSE
+// error response (a 429 whose reason rides in the first data payload) and a 200
+// stream carrying an error object both land here with nothing else to say.
+func streamErrCause(existing string, status int, first []byte) string {
+	if existing == "" {
+		if sseHasErrorEnvelope(first) || status >= 400 {
+			return upstreamErrorSnippet(status, first)
+		}
+		return ""
+	}
+	if sseHasErrorEnvelope(first) {
+		// The full snippet, not just its cause word: the provider's own sentence
+		// ("this model is not included in your free usage") is the most precise
+		// thing either half carries, and a later reader needs it verbatim.
+		if snippet := upstreamErrorSnippet(status, first); !strings.Contains(existing, snippet) {
+			return existing + " · " + snippet
+		}
+	}
+	return existing
+}
+
 func sseHasErrorEnvelope(payload []byte) bool {
 	if len(payload) == 0 {
 		return false

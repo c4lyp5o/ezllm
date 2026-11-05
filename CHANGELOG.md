@@ -17,6 +17,35 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   auto-seeded, so a card still reads "GitHub Copilot", not "GitHub Copilot
   (bridge)". Existing accounts keep the names they already have.
 
+## Unreleased — fixed: Codex tool calls aimed at the bridge's scratch directory
+
+- **Symptom:** a tool-using client (a VPS status sweep) got "this environment can't
+  reach its shell" from the Codex hop while the Claude hop ran the same tools.
+  Codex's own log showed the model DID call the client's `terminal` tool, twice,
+  and both calls failed with exit 126: `cd: /tmp/codex-bridge-…/cwd: No such file
+  or directory`.
+- **Cause:** the Codex child runs in a private scratch directory and says so in
+  its context; the model passed that directory as the shell tool's `workdir`, a
+  path that exists only inside the bridge. After two failures it concluded it had
+  no shell.
+- **Fix:** requests that carry client tools get a short instruction (`ClientToolsNote`)
+  saying the tools run on the caller's machine and not to pass a working
+  directory the user did not give. Measured live against the real CLI with the
+  same tool-using request: the scratch directory leaked into the tool call on
+  3 of 3 runs before, 0 of 5 after. Plain chat is unchanged.
+- **The client had a stale shell directory too, and `cd ~` cannot fix it.** The
+  first failing path in the trace, `~/.hermes/cache/scratch/…/frontend`, was the
+  client's own saved working directory, gone from disk. Its terminal wrapper
+  `cd`s there BEFORE running the command, so a model that prefixed `cd ~ &&`
+  (the first version of the note told it to) failed identically and gave up
+  ("the status command is failing before it runs"). The Claude hop's model
+  recovered by passing an explicit working directory. The note now says that: on
+  `cd: …: No such file or directory`, call the tool again with its `workdir` set
+  to a directory that always exists, such as `/`. Measured on the real CLI on the
+  transcript of two such failures: the previous note ran `pwd` and failed again on
+  4 of 4 runs; the new one passed `workdir="/"` on 4 of 4. The stale directory
+  itself is a client defect (workaround: recreate that directory).
+
 ## Unreleased — replaced: GitHub Copilot OAuth → the official CLI bridge
 
 - **The OAuth provider is gone, not deprecated.** `internal/githubcopilot`

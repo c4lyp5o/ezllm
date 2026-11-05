@@ -162,3 +162,27 @@ func TestParseRequestContinuation(t *testing.T) {
 		}
 	}
 }
+
+// The Codex child lives in a private scratch dir the caller's machine does not
+// have. A model that passes it as the shell tool's workdir gets exit 126 and
+// concludes it has no shell (measured 2026-11-05), so tool requests carry a note
+// saying where the tools actually run. Plain chat must not change.
+func TestToolRequestsCarryTheWhereToolsRunNote(t *testing.T) {
+	with, err := ParseRequest([]byte(`{"model":"m","tools":[{"type":"function","function":{"name":"terminal"}}],
+		"messages":[{"role":"system","content":"Be terse."},{"role":"user","content":"x"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(with.Instructions, "Be terse.") || !strings.HasSuffix(with.Instructions, ClientToolsNote) {
+		t.Errorf("instructions = %q", with.Instructions)
+	}
+	for _, want := range []string{"caller's machine", "never pass it", "private scratch space", "stale saved working directory", "failing cd runs first", "set to a directory that always exists"} {
+		if !strings.Contains(ClientToolsNote, want) {
+			t.Errorf("note lost %q", want)
+		}
+	}
+	without, err := ParseRequest([]byte(`{"model":"m","messages":[{"role":"system","content":"Be terse."},{"role":"user","content":"x"}]}`))
+	if err != nil || without.Instructions != "Be terse." {
+		t.Errorf("plain chat changed: %q err=%v", without.Instructions, err)
+	}
+}

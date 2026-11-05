@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -476,6 +478,13 @@ func childEnv(parent []string, home string) []string {
 	}
 	if home != "" {
 		env = append(env, "COPILOT_HOME="+home)
+	}
+	// The CLI extracts a ~236 MB bundled package into its cache dir on first run.
+	// A container uid has no home (HOME=/), so without a writable cache it dies
+	// with "EACCES: mkdir '/.cache'" (measured 2026-11-05). Default to a temp
+	// location; a deploy that wants it to survive restarts sets XDG_CACHE_HOME.
+	if !slices.ContainsFunc(env, func(kv string) bool { return strings.HasPrefix(kv, "XDG_CACHE_HOME=") }) {
+		env = append(env, "XDG_CACHE_HOME="+filepath.Join(os.TempDir(), "ezllm-copilot-cache"))
 	}
 	return env
 }

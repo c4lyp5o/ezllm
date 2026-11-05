@@ -42,6 +42,12 @@ Compose sketch:
 `distroless/cc-debian12`, not `base`. On `base` the bridge boots with
 `cli=unknown` and every turn fails with "error while loading shared libraries".
 
+**Cache directory.** The CLI unpacks a ~236 MB bundled package into its cache on
+first run, and a container uid has no home (`HOME=/`), so it fails with
+`EACCES: mkdir '/.cache'`. The bridge defaults the child's `XDG_CACHE_HOME` to a
+temp dir; set `XDG_CACHE_HOME: /data/copilot-cache` in compose so the unpack
+survives restarts.
+
 **Login.** One-time, on the host: `copilot login` (device code on a headless
 box). The token lands in `~/.copilot/`, which is what the mount above carries.
 Boot fails loudly if `EZLLM_COPILOT_HOME` is not a directory — a bridge that

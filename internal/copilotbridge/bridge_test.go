@@ -291,3 +291,14 @@ func TestCatalogLearnsFromAutoTurnsAfterTheSeed(t *testing.T) {
 		t.Errorf("learned model refused: %d", rec.Code)
 	}
 }
+
+func TestChildEnvDefaultsAWritableCacheDir(t *testing.T) {
+	got := strings.Join(childEnv([]string{"PATH=/bin"}, ""), "\n")
+	if !strings.Contains(got, "XDG_CACHE_HOME=") {
+		t.Error("no cache dir: the CLI dies on HOME=/ with EACCES mkdir /.cache")
+	}
+	kept := strings.Join(childEnv([]string{"XDG_CACHE_HOME=/data/c"}, ""), "\n")
+	if strings.Count(kept, "XDG_CACHE_HOME=") != 1 || !strings.Contains(kept, "XDG_CACHE_HOME=/data/c") {
+		t.Errorf("operator-set cache dir not preserved: %s", kept)
+	}
+}

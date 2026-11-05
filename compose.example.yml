@@ -73,6 +73,7 @@ services:
       # EZLLM_COPILOT_BIN: /opt/copilot/copilot
       # EZLLM_COPILOT_HOME: /copilot-home
       # EZLLM_COPILOT_BRIDGE_ADDR: 127.0.0.1:8793
+      # XDG_CACHE_HOME: /data/copilot-cache   # persistent CLI cache (~236 MB, extracted once)
       # EZLLM_COPILOT_BRIDGE_TOKEN_FILE: /data/copilot-bridge.token
       # EZLLM_COPILOT_BRIDGE_CONCURRENCY: "2"
       # EZLLM_COPILOT_BRIDGE_QUEUE: "8"

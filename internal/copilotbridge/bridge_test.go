@@ -185,14 +185,14 @@ func TestStreamEmitsFinalTextWhenNoDeltasArrived(t *testing.T) {
 }
 
 func TestChildEnvDropsSecrets(t *testing.T) {
-	env := childEnv([]string{"PATH=/bin", "EZLLM_ADMIN_TOKEN=s3", "OPENAI_API_KEY=k", "HOME=/h"}, "/ch")
+	env := childEnv([]string{"PATH=/bin", "USER=calypso", "XDG_CACHE_HOME=/c", "EZLLM_ADMIN_TOKEN=s3", "OPENAI_API_KEY=k", "HOME=/h"}, "/ch")
 	got := strings.Join(env, "\n")
 	for _, bad := range []string{"EZLLM_ADMIN_TOKEN", "OPENAI_API_KEY"} {
 		if strings.Contains(got, bad) {
 			t.Errorf("child env leaks %s", bad)
 		}
 	}
-	for _, want := range []string{"PATH=/bin", "HOME=/h", "COPILOT_HOME=/ch"} {
+	for _, want := range []string{"PATH=/bin", "HOME=/h", "USER=calypso", "XDG_CACHE_HOME=/c", "COPILOT_HOME=/ch"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("child env missing %s", want)
 		}

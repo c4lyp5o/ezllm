@@ -459,6 +459,11 @@ func firstLine(s string) string {
 func childEnv(parent []string, home string) []string {
 	keep := map[string]bool{
 		"PATH": true, "HOME": true, "TMPDIR": true, "LANG": true, "LC_ALL": true, "TZ": true,
+		// Identity and XDG dirs: the deploy sets USER/LOGNAME for the bridge
+		// CLIs on purpose (a container uid has no passwd entry), and a CLI that
+		// cannot resolve them or its cache dir can fail before it reaches auth.
+		"USER": true, "LOGNAME": true, "XDG_CONFIG_HOME": true, "XDG_CACHE_HOME": true,
+		"XDG_DATA_HOME": true, "XDG_STATE_HOME": true, "XDG_RUNTIME_DIR": true,
 		"HTTP_PROXY": true, "HTTPS_PROXY": true, "NO_PROXY": true,
 		"http_proxy": true, "https_proxy": true, "no_proxy": true,
 		"SSL_CERT_FILE": true, "SSL_CERT_DIR": true, "NODE_EXTRA_CA_CERTS": true,

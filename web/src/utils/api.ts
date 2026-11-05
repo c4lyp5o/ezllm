@@ -269,7 +269,7 @@ export const ghDeviceCancel = (handle: string) =>
 // how to turn one on. A key add names `bridge` instead of api_key and the
 // server supplies the shared secret — it never reaches the browser.
 export type Bridge = {
-  id: 'claude-sub' | 'chatgpt-sub' | 'antigravity-sub';
+  id: 'claude-sub' | 'chatgpt-sub' | 'antigravity-sub' | 'github-copilot';
   label: string;
   kind: string;
   base_url: string;

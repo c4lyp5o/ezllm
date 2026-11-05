@@ -144,6 +144,10 @@ const PROVIDER_PRESETS: Record<string, {
     label: 'Google Antigravity', kind: 'openai-compatible', baseURL: 'http://127.0.0.1:8792/v1',
     bridge: 'antigravity-sub',
   },
+  'copilot-sub': {
+    label: 'GitHub Copilot', kind: 'openai-compatible', baseURL: 'http://127.0.0.1:8793/v1',
+    bridge: 'github-copilot',
+  },
   'claude-platform': { label: 'Claude Platform', kind: 'anthropic-compatible', baseURL: 'https://api.anthropic.com' },
   // Web-protocol providers: no API key — credentials are browser sessions.
   // The sentinel base URL is rewritten to the in-process bridge at request

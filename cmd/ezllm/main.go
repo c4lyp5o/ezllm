@@ -374,6 +374,16 @@ func run() error {
 		stopClaude()
 		return err
 	}
+	// GitHub Copilot subscription surface: loopback-only, off unless
+	// EZLLM_COPILOT_BRIDGE=on. This replaces the OAuth/device-flow provider —
+	// the CLI's own login is the credential, ezllm never mints a session.
+	stopCopilot, err := startCopilotBridge(ctx, log, srv.EnableBridge)
+	if err != nil {
+		stopAgy()
+		stopCodex()
+		stopClaude()
+		return err
+	}
 	// The host updater's reports (docs/bridge-update-runbook.md): bridge cards
 	// and bell events for promotions, held releases and rollbacks.
 	srv.WatchBridgeUpdates(ctx, time.Minute)
@@ -416,6 +426,7 @@ func run() error {
 	reqs.drain(httpSrv, 15*time.Second, 5*time.Second, log)
 	// Bridges after the gateway (its handlers proxy into them), joined here
 	// so no CLI child outlives the process's own shutdown.
+	stopCopilot()
 	stopAgy()
 	stopCodex()
 	stopClaude()

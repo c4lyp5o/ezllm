@@ -1,0 +1,159 @@
+package copilotbridge
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+// One captured headless turn, trimmed of the opaque blobs. This is the SHAPE
+// measured on CLI 1.0.105 (piped prompt, `-s --output-format=json`): the
+// numbers below are from that run, so a parser change that reorders or
+// re-includes the cache slices fails here rather than in production.
+const transcript = `
+{"type":"session.mcp_server_status_changed","data":{"serverName":"github-mcp-server","status":"pending"},"ephemeral":true}
+{"type":"session.auto_mode_resolved","data":{"chosenModel":"gpt-6.1-sol","availableModels":["gpt-6.1-sol","mai-code-1.1-flash"]}}
+{"type":"user.message","data":{"content":"Reply with exactly: piped-ok"}}
+{"type":"assistant.message_start","data":{"messageId":"m1"}}
+{"type":"assistant.message_delta","data":{"messageId":"m1","deltaContent":"piped-"}}
+{"type":"assistant.message_delta","data":{"messageId":"m1","deltaContent":"ok"}}
+{"type":"assistant.message","data":{"messageId":"m1","model":"gpt-6.1-sol","providerId":"copilot","content":"piped-ok","toolRequests":[]}}
+{"type":"session.usage_checkpoint","data":{"totalPremiumRequests":1,"accountingSnapshot":{"totalPremiumRequestCost":1,"tokenDetails":{"input":{"tokenCount":3},"cache_read":{"tokenCount":0},"cache_write":{"tokenCount":13960},"output":{"tokenCount":7}},"providerModelMetrics":[{"provider":{"id":"copilot","kind":"copilot"},"modelId":"gpt-6.1-sol","metrics":{"requests":{"count":1,"cost":1},"usage":{"inputTokens":13963,"outputTokens":7,"cacheReadTokens":0,"cacheWriteTokens":13960,"reasoningTokens":0}}}]}}}
+{"type":"assistant.idle","data":{}}
+{"type":"result","timestamp":"2026-11-05T04:29:25.525Z","sessionId":"sess-123","exitCode":0,"usage":{"premiumRequests":1,"totalApiDurationMs":2698,"sessionDurationMs":6274}}
+`
+
+func TestParseStreamMatchesTheMeasuredTranscript(t *testing.T) {
+	var deltas []string
+	res, err := parseStream(strings.NewReader(transcript), func(s string) error {
+		deltas = append(deltas, s)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("parseStream: %v", err)
+	}
+	if got := strings.Join(deltas, ""); got != "piped-ok" {
+		t.Errorf("streamed deltas = %q, want %q (streaming must be real, not one blob)", got, "piped-ok")
+	}
+	if res.Text != "piped-ok" {
+		t.Errorf("final text = %q, want the assistant message content", res.Text)
+	}
+	if res.SessionID != "sess-123" {
+		t.Errorf("session id = %q, want sess-123", res.SessionID)
+	}
+	u := res.Usage
+	// prompt_tokens is INCLUSIVE: input (cold 3) + cache_read (0) + cache_write
+	// (13,960) = 13,963, which is the CLI's own prompt_tokens for this turn.
+	if u.PromptTokens != 13963 {
+		t.Errorf("prompt tokens = %d, want 13963 (input + cache_read + cache_write)", u.PromptTokens)
+	}
+	if u.CachedWrite != 13960 || u.CachedRead != 0 {
+		t.Errorf("cache split = read %d / write %d, want 0 / 13960", u.CachedRead, u.CachedWrite)
+	}
+	if u.CompletionTokens != 7 {
+		t.Errorf("completion tokens = %d, want 7", u.CompletionTokens)
+	}
+	if u.PremiumRequests != 1 {
+		t.Errorf("premium requests = %d, want 1", u.PremiumRequests)
+	}
+	if u.Model != "gpt-6.1-sol" {
+		t.Errorf("model = %q, want gpt-6.1-sol", u.Model)
+	}
+}
+
+// A missing usage block must stay ZERO — the bridge reports "unknown", never an
+// invented number and never a silent zero that reads as a free call.
+func TestParseStreamWithoutUsageBlock(t *testing.T) {
+	res, err := parseStream(strings.NewReader(`{"type":"assistant.message","data":{"content":"hi"}}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Text != "hi" {
+		t.Fatalf("text = %q", res.Text)
+	}
+	if res.Usage.PromptTokens != 0 || res.Usage.CompletionTokens != 0 {
+		t.Errorf("usage = %+v, want zero (unknown, not estimated)", res.Usage)
+	}
+}
+
+func TestParseRequestFlattensHistoryAndSystem(t *testing.T) {
+	body := `{"model":"gpt-6.1-sol","messages":[
+		{"role":"system","content":"You are terse."},
+		{"role":"user","content":"first"},
+		{"role":"assistant","content":"answer one"},
+		{"role":"user","content":[{"type":"text","text":"second"}]}
+	]}`
+	req, err := ParseRequest([]byte(body))
+	if err != nil {
+		t.Fatalf("ParseRequest: %v", err)
+	}
+	for _, want := range []string{"System instructions:", "You are terse.", "User: first", "Assistant: answer one", "User: second"} {
+		if !strings.Contains(req.Prompt, want) {
+			t.Errorf("prompt missing %q\n---\n%s", want, req.Prompt)
+		}
+	}
+	if req.Turns != 3 {
+		t.Errorf("turns = %d, want 3", req.Turns)
+	}
+	if strings.Index(req.Prompt, "User: second") < strings.Index(req.Prompt, "User: first") {
+		t.Error("prompt order broken: the latest user turn must come last")
+	}
+}
+
+func TestParseRequestRefusesWhatTheCLICannotCarry(t *testing.T) {
+	cases := map[string]struct{ body, code string }{
+		"client tools":     {`{"model":"m","messages":[{"role":"user","content":"x"}],"tools":[{"type":"function","function":{"name":"f"}}]}`, "chat_tools_unsupported"},
+		"legacy functions": {`{"model":"m","messages":[{"role":"user","content":"x"}],"functions":[{"name":"f"}]}`, "chat_tools_unsupported"},
+		"tool result":      {`{"model":"m","messages":[{"role":"tool","content":"x"}]}`, "chat_tools_unsupported"},
+		"n>1":              {`{"model":"m","n":2,"messages":[{"role":"user","content":"x"}]}`, "invalid_request"},
+		"json format":      {`{"model":"m","response_format":{"type":"json_object"},"messages":[{"role":"user","content":"x"}]}`, "protocol_unsupported"},
+		"image part":       {`{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:x"}}]}]}`, "invalid_request"},
+		"no user turn":     {`{"model":"m","messages":[{"role":"system","content":"x"}]}`, "invalid_request"},
+	}
+	for name, tc := range cases {
+		_, err := ParseRequest([]byte(tc.body))
+		if err == nil {
+			t.Errorf("%s: accepted, want refusal", name)
+			continue
+		}
+		var u Unsupported
+		if !strings.Contains(err.Error(), "") {
+			t.Fatal("unreachable")
+		}
+		if ok := asUnsupported(err, &u); !ok {
+			t.Errorf("%s: error is not a typed Unsupported (%T)", name, err)
+			continue
+		}
+		if u.Code != tc.code {
+			t.Errorf("%s: code = %q, want %q", name, u.Code, tc.code)
+		}
+	}
+}
+
+func asUnsupported(err error, out *Unsupported) bool {
+	var u Unsupported
+	if e, ok := err.(Unsupported); ok {
+		u = e
+	} else {
+		return false
+	}
+	*out = u
+	return true
+}
+
+// The usage map is the bridge's contract with the ledger's usage tap: an
+// inclusive prompt total plus the cached slice beside it.
+func TestOpenAIUsageShape(t *testing.T) {
+	b, _ := json.Marshal(openAIUsage(Usage{PromptTokens: 13963, CompletionTokens: 7, CachedRead: 1536, CachedWrite: 12427, PremiumRequests: 1}))
+	var got map[string]any
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["prompt_tokens"].(float64) != 13963 || got["completion_tokens"].(float64) != 7 {
+		t.Errorf("usage = %v", got)
+	}
+	details, _ := got["prompt_tokens_details"].(map[string]any)
+	if details["cached_tokens"].(float64) != 1536 {
+		t.Errorf("cached_tokens = %v, want 1536", details["cached_tokens"])
+	}
+}

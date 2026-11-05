@@ -370,10 +370,21 @@ export const stopSweep = (id: number) => del(`/admin/accounts/${id}/sync`);
 // dashboard. The analytics explorer's Latency focus now renders it.
 export type UsageRow = { k: string; calls: number; tin: number; tout: number; cread: number; cwrite: number; reasoning: number; saved: number; errors: number; context_pre: number; context_saved: number; tool_prune_shadow: number; p50_ttft_ms: number; applied_saved: number };
 
+export type HopStream = {
+  namespace: string; model: string; streams: number; completed: number;
+  truncated: number; failed: number; client_gone: number;
+  /** truncated / (streams - client_gone) — caller hang-ups are never judged. */
+  truncation_rate: number;
+};
+
 export type Health = {
   status: string; version: string; schema_version: number; accounts: number; provider_keys: number;
   models: number; combos: number; ledger_rows: number; dropped_rows: number;
   lost_rows?: number; unmetered_rows?: number; uptime_s: number;
+  /** Per-hop stream outcomes (docs/hop-health-design.md). Absent on an older
+   *  server, so every consumer must default it to []. */
+  hop_stream_health?: HopStream[];
+  stream_window_s?: number;
 };
 
 export type QuotaSnapshot = {

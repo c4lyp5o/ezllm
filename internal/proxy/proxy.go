@@ -69,6 +69,7 @@ type UsageTapper struct {
 	raw       map[string]any
 	event     []byte
 	skipEvent bool
+	terminal  bool
 }
 
 // NewUsageTapperFor builds a tapper that normalizes with the account's
@@ -91,6 +92,10 @@ func (t *UsageTapper) Observe(line []byte) {
 		return
 	}
 	data := bytes.TrimPrefix(line, []byte("data:"))
+	if t.surface == provider.SurfaceChat && bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
+		t.terminal = true
+		return
+	}
 	if len(t.event) == 0 && len(data) <= maxScanToken && json.Valid(data) {
 		t.observePayload(line)
 		return
@@ -109,6 +114,19 @@ func (t *UsageTapper) Observe(line []byte) {
 }
 
 func (t *UsageTapper) observePayload(line []byte) {
+	if t.surface != provider.SurfaceChat {
+		var event struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:"))), &event) == nil {
+			switch t.surface {
+			case provider.SurfaceAnthropic:
+				t.terminal = t.terminal || event.Type == "message_stop"
+			case provider.SurfaceResponses:
+				t.terminal = t.terminal || event.Type == "response.completed" || event.Type == "response.incomplete" || event.Type == "response.failed"
+			}
+		}
+	}
 	if u := sseUsageRaw(line, t.surface); u != nil {
 		if t.raw == nil {
 			t.raw = map[string]any{}
@@ -1378,7 +1396,7 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 		// streamCopy writes the header before its first byte, so the status
 		// is committed the moment it returns — regardless of a copy error.
 		res.Committed = true
-		ttft, usage, first, copyErr := d.streamCopy(ctx, w, resp, rt.Surface, tapConvention(rt, cross), start)
+		ttft, usage, first, copyErr := d.streamCopyTracked(ctx, w, resp, rt.Surface, tapConvention(rt, cross), start, !cross && resp.StatusCode < 400)
 		res.TTFTms = msAtLeastOne(ttft)
 		if sourceTap != nil {
 			res.Usage = sourceTap.Usage()
@@ -1406,7 +1424,7 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 		// ledger with a blank err, the one field that diagnoses an incident
 		// after the fact. Some providers also answer 200 SSE carrying an
 		// error object inside the stream, which is equally worth recording.
-		if res.Err == "" && (res.Status >= 400 || sseHasErrorEnvelope(first)) {
+		if sseHasErrorEnvelope(first) || (res.Err == "" && res.Status >= 400) {
 			res.Err = upstreamErrorSnippet(res.Status, first)
 		}
 		// The delivery outcome: a late error frame or a source that ended
@@ -1663,21 +1681,22 @@ func refusesHistory(resp *http.Response) bool {
 		strings.Contains(s, "needs the reasoning of every")
 }
 
-// refusesTools reports a 400 from a hop that cannot take client tool schemas at
-// all: the Copilot CLI bridge refuses `tools` by name (code
+// refusesTools reports a 400 from a hop that cannot honor requested tools or
+// parameters: the Copilot CLI bridge refuses `tools` by name (code
 // chat_tools_unsupported) when the CLI's tool channel is missing or at another
 // protocol version, or a tool cannot be registered. It describes the HOP, not the body, so a
 // hop that does support tools can serve the identical request — committing the
 // 400 instead ended the client run with three working hops left in the combo
 // (measured 2026-11-05, client maxine).
 //
-// Like refusesHistory it is NOT a park: the hop is healthy for requests without
-// tools, and the refusal says nothing about its availability.
+// Like refusesHistory it is NOT a park: the hop can serve other requests, and
+// the refusal says nothing about its availability.
 func refusesTools(resp *http.Response) bool {
 	if resp == nil || resp.Body == nil || resp.StatusCode != http.StatusBadRequest {
 		return false
 	}
-	return strings.Contains(strings.ToLower(string(peekBody(resp, maxErrPeek))), "chat_tools_unsupported")
+	s := strings.ToLower(string(peekBody(resp, maxErrPeek)))
+	return strings.Contains(s, "chat_tools_unsupported") || strings.Contains(s, "chat_parameter_unsupported")
 }
 
 // deniesModelAccess reports a 401/403 whose body says the HOP cannot reach the
@@ -2014,7 +2033,7 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 			}
 			// A tools refusal is a hop fact in the same way: fail over, no cooldown.
 			if err == nil && !oc.failed && refusesTools(resp) {
-				oc = hopOutcome{failed: true, reason: "hop cannot accept client tool schemas"}
+				oc = hopOutcome{failed: true, reason: "hop cannot honor requested tools or parameters"}
 			}
 			// A 403 that names model access is a fact about the hop, so park it
 			// exactly as a 429 would be: same model-scoped key, same TTL, same
@@ -2159,6 +2178,10 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 // error response carries its reason in there, and the ledger's err column is
 // blank for streams unless the caller is handed it.
 func (d *Dispatcher) streamCopy(ctx context.Context, w http.ResponseWriter, resp *http.Response, surface provider.Surface, conv provider.UsageConvention, start time.Time) (time.Duration, *store.Usage, []byte, error) {
+	return d.streamCopyTracked(ctx, w, resp, surface, conv, start, false)
+}
+
+func (d *Dispatcher) streamCopyTracked(ctx context.Context, w http.ResponseWriter, resp *http.Response, surface provider.Surface, conv provider.UsageConvention, start time.Time, requireTerminal bool) (time.Duration, *store.Usage, []byte, error) {
 	var ttft time.Duration
 	var firstEvent bool
 	var firstPayload []byte
@@ -2247,6 +2270,9 @@ func (d *Dispatcher) streamCopy(ctx context.Context, w http.ResponseWriter, resp
 			ttft = time.Since(start)
 		}
 		if rerr == io.EOF {
+			if requireTerminal && !tapper.terminal {
+				return ttft, tapper.Usage(), firstPayload, errors.New("upstream stream ended without a terminal event")
+			}
 			return ttft, tapper.Usage(), firstPayload, nil
 		}
 		// The upstream died mid-stream. The 200 is already committed, so the

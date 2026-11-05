@@ -118,9 +118,8 @@ request time:
   Consequences:
   - Only the caller's tools are visible. The CLI's shell and file tools are not,
     so nothing runs on this box, and a caller's tool named `bash` goes to the caller.
-  - `tool_choice` none is a plain turn with no tools visible. A named function
-    narrows the visible tools.
-    `required` is an instruction the model can ignore: the channel has no equivalent.
+  - `tool_choice` none is a plain turn with no tools visible. Named and
+    `required` choices are refused so another hop can enforce them.
   - Only `function` tools. Tool names may use ASCII letters, digits, underscores
     and hyphens, as the CLI enforces at session creation.
   - **If the channel breaks:** on a CLI whose channel is missing or at another
@@ -131,7 +130,8 @@ request time:
     reports the boot check and the log has `copilot bridge: channel unavailable`.
     After a CLI update that causes this, re-measure the channel and update `channelProtocolVersion`
     (`internal/copilotbridge/channel.go`).
-- No `response_format`, `n>1`, logprobs, or `reasoning_effort` mapping.
+- Output token limits are refused so another hop can enforce them. No
+  `response_format`, `n>1`, logprobs, or `reasoning_effort` mapping.
 - History is FLATTENED into one prompt. The caller's system text replaces the
   CLI's system message (on the `-p` fallback it is flattened too, behind the CLI's
   own scaffolding).

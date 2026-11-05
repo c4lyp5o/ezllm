@@ -106,14 +106,16 @@ func TestParseRequestFlattensHistoryAndSystem(t *testing.T) {
 
 func TestParseRequestRefusesWhatTheCLICannotCarry(t *testing.T) {
 	cases := map[string]struct{ body, code string }{
-		"non-function tool": {`{"model":"m","messages":[{"role":"user","content":"x"}],"tools":[{"type":"custom","custom":{"name":"f"}}]}`, "chat_tools_unsupported"},
-		"duplicate tool":    {`{"model":"m","messages":[{"role":"user","content":"x"}],"tools":[{"type":"function","function":{"name":"f"}},{"type":"function","function":{"name":"f"}}]}`, "invalid_request"},
-		"choice not listed": {`{"model":"m","messages":[{"role":"user","content":"x"}],"tools":[{"type":"function","function":{"name":"f"}}],"tool_choice":{"type":"function","function":{"name":"g"}}}`, "invalid_request"},
-		"legacy functions":  {`{"model":"m","messages":[{"role":"user","content":"x"}],"functions":[{"name":"f"}]}`, "chat_tools_unsupported"},
-		"n>1":               {`{"model":"m","n":2,"messages":[{"role":"user","content":"x"}]}`, "invalid_request"},
-		"json format":       {`{"model":"m","response_format":{"type":"json_object"},"messages":[{"role":"user","content":"x"}]}`, "protocol_unsupported"},
-		"image part":        {`{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:x"}}]}]}`, "invalid_request"},
-		"no user turn":      {`{"model":"m","messages":[{"role":"system","content":"x"}]}`, "invalid_request"},
+		"non-function tool":     {`{"model":"m","messages":[{"role":"user","content":"x"}],"tools":[{"type":"custom","custom":{"name":"f"}}]}`, "chat_tools_unsupported"},
+		"duplicate tool":        {`{"model":"m","messages":[{"role":"user","content":"x"}],"tools":[{"type":"function","function":{"name":"f"}},{"type":"function","function":{"name":"f"}}]}`, "invalid_request"},
+		"choice not listed":     {`{"model":"m","messages":[{"role":"user","content":"x"}],"tools":[{"type":"function","function":{"name":"f"}}],"tool_choice":{"type":"function","function":{"name":"g"}}}`, "invalid_request"},
+		"legacy functions":      {`{"model":"m","messages":[{"role":"user","content":"x"}],"functions":[{"name":"f"}]}`, "chat_tools_unsupported"},
+		"max tokens":            {`{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"x"}]}`, "chat_parameter_unsupported"},
+		"max completion tokens": {`{"model":"m","max_completion_tokens":10,"messages":[{"role":"user","content":"x"}]}`, "chat_parameter_unsupported"},
+		"n>1":                   {`{"model":"m","n":2,"messages":[{"role":"user","content":"x"}]}`, "invalid_request"},
+		"json format":           {`{"model":"m","response_format":{"type":"json_object"},"messages":[{"role":"user","content":"x"}]}`, "protocol_unsupported"},
+		"image part":            {`{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:x"}}]}]}`, "invalid_request"},
+		"no user turn":          {`{"model":"m","messages":[{"role":"system","content":"x"}]}`, "invalid_request"},
 	}
 	for name, tc := range cases {
 		_, err := ParseRequest([]byte(tc.body))
@@ -335,13 +337,12 @@ func TestToolChoiceParsing(t *testing.T) {
 	if len(none.Tools) != 0 {
 		t.Errorf("tool_choice none must drop the tools: %+v", none.Tools)
 	}
-	req, _ := ParseRequest([]byte(base + `,"tool_choice":"required"}`))
-	if !req.Choice.Required {
-		t.Error("required lost")
-	}
-	req, _ = ParseRequest([]byte(base + `,"tool_choice":{"type":"function","function":{"name":"get_weather"}}}`))
-	if req.Choice.Name != "get_weather" {
-		t.Error("named choice lost")
+	for _, choice := range []string{`"required"`, `{"type":"function","function":{"name":"get_weather"}}`} {
+		_, err := ParseRequest([]byte(base + `,"tool_choice":` + choice + `}`))
+		var u Unsupported
+		if !asUnsupported(err, &u) || u.Code != "chat_tools_unsupported" {
+			t.Errorf("choice %s: got %v", choice, err)
+		}
 	}
 }
 

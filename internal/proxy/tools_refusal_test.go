@@ -40,3 +40,20 @@ func TestToolsRefusalFailsOverWithoutParking(t *testing.T) {
 		t.Errorf("Cooldowns() = %+v, want none — the hop is healthy for tool-less requests", cos)
 	}
 }
+
+func TestUnsupportedOutputLimitFailsOverWithoutParking(t *testing.T) {
+	refused := upstub(t, http.StatusBadRequest, `{"error":{"code":"chat_parameter_unsupported","message":"output token limits unsupported"}}`)
+	defer refused.Close()
+	good := upstub(t, http.StatusOK, `{"ok":true,"model":"capable"}`)
+	defer good.Close()
+	d := newDispatcher()
+	req, body := reqWithBody(`{"model":"day","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}`)
+	rec := httptest.NewRecorder()
+	_, _, err := d.ForwardCandidates(context.Background(), rec, req, []Route{textRoute(refused.URL, "day"), textRoute(good.URL, "capable")}, body)
+	if err != nil || rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "capable") {
+		t.Fatalf("result = %d %s, %v", rec.Code, rec.Body.String(), err)
+	}
+	if cos := d.Cooldowns(); len(cos) != 0 {
+		t.Fatalf("unexpected cooldown: %+v", cos)
+	}
+}

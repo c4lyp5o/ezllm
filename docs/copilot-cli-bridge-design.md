@@ -280,8 +280,8 @@ not measured, so that figure could change.
 - Every turn pings first. `--headless` is undocumented and the updater can swap the
   binary under a running bridge, so a boot check alone would go stale. The ping costs
   nothing, and a failed gate is the refusal the router already fails over on.
-- `tool_choice` has no channel equivalent. A named function narrows `availableTools`;
-  `required` is an instruction only.
+- `tool_choice` has no channel equivalent. `required` and named choices are
+  refused so another hop can enforce them.
 - The channel writes `totalPremiumRequestCost` as `1.0` where `-p` wrote `1`. An int
   field dropped the whole event, so the first live run booked zero usage while every
   unit test passed on a fixture written with `1`. Numeric event fields now use a

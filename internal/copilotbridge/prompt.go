@@ -41,14 +41,16 @@ type Unsupported struct {
 func (u Unsupported) Error() string { return "copilot-bridge: " + u.Msg }
 
 type chatRequest struct {
-	Model          string          `json:"model"`
-	Messages       []chatMessage   `json:"messages"`
-	Stream         bool            `json:"stream"`
-	StreamOptions  *streamOptions  `json:"stream_options"`
-	Tools          json.RawMessage `json:"tools"`
-	ToolChoice     json.RawMessage `json:"tool_choice"`
-	Functions      json.RawMessage `json:"functions"`
-	ResponseFormat *struct {
+	Model               string          `json:"model"`
+	Messages            []chatMessage   `json:"messages"`
+	Stream              bool            `json:"stream"`
+	StreamOptions       *streamOptions  `json:"stream_options"`
+	Tools               json.RawMessage `json:"tools"`
+	ToolChoice          json.RawMessage `json:"tool_choice"`
+	Functions           json.RawMessage `json:"functions"`
+	MaxTokens           json.RawMessage `json:"max_tokens"`
+	MaxCompletionTokens json.RawMessage `json:"max_completion_tokens"`
+	ResponseFormat      *struct {
 		Type string `json:"type"`
 	} `json:"response_format"`
 	N *int `json:"n"`
@@ -119,6 +121,14 @@ func ParseRequest(body []byte) (Request, error) {
 	}
 	if choice.None {
 		defs = nil // the caller forbade calls this turn
+	}
+	if choice.Required || choice.Name != "" {
+		return Request{}, Unsupported{Code: "chat_tools_unsupported", Msg: "forced tool choices are not supported on this Copilot hop"}
+	}
+	for _, limit := range []json.RawMessage{in.MaxTokens, in.MaxCompletionTokens} {
+		if len(limit) > 0 && strings.TrimSpace(string(limit)) != "null" {
+			return Request{}, Unsupported{Code: "chat_parameter_unsupported", Msg: "output token limits are not supported on this Copilot hop"}
+		}
 	}
 	if len(in.Functions) > 0 && string(in.Functions) != "null" && string(in.Functions) != "[]" {
 		return Request{}, Unsupported{Code: "chat_tools_unsupported",

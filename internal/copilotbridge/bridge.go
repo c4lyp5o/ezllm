@@ -186,8 +186,13 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		model = "auto"
 	}
 
+	runCtx := r.Context()
+	if len(req.ToolNames) > 0 {
+		runCtx = WithoutBuiltinTools(runCtx)
+	}
+
 	if !req.Stream {
-		res, err := s.Runner.Run(r.Context(), req.Model, req.Prompt, nil)
+		res, err := s.Runner.Run(runCtx, req.Model, req.Prompt, nil)
 		if err != nil {
 			s.writeErr(w, err)
 			return
@@ -219,7 +224,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	if len(req.ToolNames) > 0 {
 		deltaFn = nil
 	}
-	res, err := s.Runner.Run(r.Context(), req.Model, req.Prompt, deltaFn)
+	res, err := s.Runner.Run(runCtx, req.Model, req.Prompt, deltaFn)
 	if err != nil {
 		if !sw.started {
 			s.writeErr(w, err)

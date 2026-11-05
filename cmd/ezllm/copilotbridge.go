@@ -139,6 +139,13 @@ func copilotLiveModels(bin string) []string {
 	return parseHelpConfigModels(string(out))
 }
 
+// printfLogger adapts a slog logger to the bridge's printf-style Logf. Passing
+// log.Info directly treats the format string as the message and every argument
+// as a key, which logged "session=%s ... !BADKEY=..." for every turn.
+func printfLogger(log *slog.Logger) func(string, ...any) {
+	return func(format string, args ...any) { log.Info(fmt.Sprintf(format, args...)) }
+}
+
 func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeReport) (func(), error) {
 	if !strings.EqualFold(strings.TrimSpace(os.Getenv(envCopilotBridge)), "on") {
 		return func() {}, nil
@@ -201,13 +208,13 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 			Timeout:       timeout,
 			MaxConcurrent: concurrency,
 			MaxQueue:      queue,
-			Logf:          log.Info,
+			Logf:          printfLogger(log),
 		},
 		Token:   token,
 		Version: server.Version,
 		Models:  models,
 		Info:    info,
-		Logf:    log.Info,
+		Logf:    printfLogger(log),
 	}
 	if report != nil {
 		report("github-copilot", addr, token, bridgeUpdateFile(bin), info)

@@ -176,3 +176,32 @@ echo '{"type":"assistant.message","data":{"content":"hi"}}'`)
 		t.Error("first-byte latency never recorded")
 	}
 }
+
+// With the caller's tools emulated, the CLI's own tools must be invisible to
+// the model; on plain chat the argv is unchanged.
+func TestRunHidesBuiltinToolsOnlyWhenAsked(t *testing.T) {
+	bin := stubCLI(t, `cat >/dev/null
+printf '{"type":"assistant.message","data":{"content":"%s"}}\n' "$*"`)
+	r := &Runner{Bin: bin, Timeout: 10 * time.Second}
+
+	plain, err := r.Run(context.Background(), "auto", "hi", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(plain.Text, "--available-tools") || strings.Contains(plain.Text, "--disable-builtin-mcps") {
+		t.Errorf("plain chat must not change: %q", plain.Text)
+	}
+
+	bare, err := r.Run(WithoutBuiltinTools(context.Background()), "auto", "hi", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"--available-tools=ezllm-no-builtin-tools", "--disable-builtin-mcps"} {
+		if !strings.Contains(bare.Text, want) {
+			t.Errorf("argv missing %s: %q", want, bare.Text)
+		}
+	}
+	if strings.Contains(bare.Text, "--allow-tool") {
+		t.Error("--allow-tool must never be passed")
+	}
+}

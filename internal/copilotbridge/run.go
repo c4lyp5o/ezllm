@@ -48,6 +48,18 @@ type Result struct {
 	AvailableModels []string
 }
 
+type bareKey struct{}
+
+// WithoutBuiltinTools marks a turn that must run with NONE of the CLI's own
+// tools visible to the model. Used when the caller's tools are emulated through
+// the prompt (tools.go): offered natively formatted built-ins (shell, file edit,
+// ...) beside a text protocol, the model reaches for the built-ins, the CLI
+// denies them (no --allow-tool), and the turn ends with "terminal access was
+// denied" instead of a <tool_call>. Measured 2026-11-05.
+func WithoutBuiltinTools(ctx context.Context) context.Context {
+	return context.WithValue(ctx, bareKey{}, true)
+}
+
 // Executor runs one prompt. *Runner implements it; tests inject a fake.
 type Executor interface {
 	Run(ctx context.Context, model, prompt string, delta func(string) error) (Result, error)
@@ -218,6 +230,12 @@ func (r *Runner) run(ctx context.Context, model, prompt string, delta func(strin
 	args := []string{"-s", "--output-format=json", "--no-ask-user"}
 	if model != "" && model != "auto" {
 		args = append(args, "--model", model)
+	}
+	if bare, _ := ctx.Value(bareKey{}).(bool); bare {
+		// --available-tools is an allowlist of what the model can SEE: naming a
+		// tool that does not exist hides every built-in. The = form keeps the
+		// variadic flag from swallowing the next argument.
+		args = append(args, "--available-tools=ezllm-no-builtin-tools", "--disable-builtin-mcps")
 	}
 	cmd := exec.CommandContext(ctx, r.Bin, args...)
 	cmd.Stdin = strings.NewReader(prompt)

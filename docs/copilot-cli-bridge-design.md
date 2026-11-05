@@ -217,6 +217,12 @@ still *emit text*, so the bridge emulates function calling in the prompt layer.
 - **Streaming:** with tools declared the reply is buffered and then emitted
   (a `<tool_call>` block cannot be unsent once streamed); without tools,
   streaming is unchanged.
+- **The CLI's own tools are hidden on these turns** (`--available-tools=` a
+  nonexistent name, which allowlists nothing, plus `--disable-builtin-mcps`).
+  Measured 2026-11-05 on a live agent client: offered its 27 natively formatted
+  built-ins beside the text protocol, the model reached for its `terminal` tool,
+  the CLI denied it (no `--allow-tool`), and the turn ended with "terminal access
+  was denied" and no `<tool_call>`. Plain chat is unchanged.
 - **What it is not:** native tool calling. Compliance is the model's choice, the
   CLI's own tools stay denied (no `--allow-tool`), and the scaffolding cost per
   turn is unchanged. A wrong or missing format degrades to a plain-text answer.

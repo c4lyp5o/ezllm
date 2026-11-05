@@ -44,7 +44,10 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   following the format and buffers the stream while tools are declared; a reply
   that does not parse is plain text, never an invented call. The first cut
   refused tools (`chat_tools_unsupported`) and a live combo returned 400 on its
-  first request. A hop that still refuses tools now fails over with no cooldown
+  first request. On those turns the CLI's own built-in tools are hidden from the
+  model (`--available-tools=` a nonexistent name, `--disable-builtin-mcps`):
+  left visible, the model preferred them over the text protocol and was denied.
+  A hop that still refuses tools now fails over with no cooldown
   (`refusesTools`) instead of ending the client run. Design §10 addendum.
 - **Pressure is bounded and visible.** `EZLLM_COPILOT_BRIDGE_CONCURRENCY`
   (2), `_QUEUE` (8) and `_TIMEOUT` (300s) are configurable; past the queue the

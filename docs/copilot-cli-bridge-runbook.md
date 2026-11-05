@@ -116,7 +116,8 @@ request time:
   `<tool_call>{"name":…,"arguments":{…}}</tool_call>`, and parses that into
   OpenAI `tool_calls` (`finish_reason: "tool_calls"`). Tool results sent on the
   next request are replayed into the transcript; `tool_choice` none / required /
-  a named function is honoured in the prompt. Consequences: it depends on the
+  a named function is honoured in the prompt. On such turns the CLI's own tools
+  are hidden from the model, so it cannot reach for them instead. Consequences: it depends on the
   model following the format (a reply that does not parse comes back as plain
   text, never as an invented call); with tools declared the stream is buffered
   until the reply is complete; the 13–14k-token scaffolding cost still applies;

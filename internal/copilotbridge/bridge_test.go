@@ -468,3 +468,27 @@ func TestWithoutToolsATagInTheAnswerIsJustText(t *testing.T) {
 		t.Errorf("no tools declared, yet: %s", rec.Body)
 	}
 }
+
+// ctxExec records whether the turn was started with the built-in tools hidden.
+type ctxExec struct {
+	bare *bool
+	res  Result
+}
+
+func (c ctxExec) Run(ctx context.Context, _, _ string, _ func(string) error) (Result, error) {
+	*c.bare, _ = ctx.Value(bareKey{}).(bool)
+	return c.res, nil
+}
+
+func TestOnlyToolEmulatingTurnsHideBuiltinTools(t *testing.T) {
+	var bare bool
+	s := &Server{Runner: ctxExec{bare: &bare, res: Result{Text: "ok"}}, Token: "t", Models: []Model{{ID: "auto"}}}
+	postChat(s, `{"model":"auto","messages":[{"role":"user","content":"x"}],`+weatherTools+`}`)
+	if !bare {
+		t.Error("a request with tools must run with the CLI's built-in tools hidden")
+	}
+	postChat(s, `{"model":"auto","messages":[{"role":"user","content":"x"}]}`)
+	if bare {
+		t.Error("plain chat must not change")
+	}
+}

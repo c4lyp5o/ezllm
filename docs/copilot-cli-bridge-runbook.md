@@ -177,12 +177,30 @@ AI-credit charge in billionths of a credit.
 
 ## Gates and updates
 
-`ezllm bridge-check copilot` before promoting a CLI release;
-`scripts/bridge_update.py` covers it like the other three (official channel:
-`copilot update`). The JSONL event set is version-sensitive: a release that
-renames `session.usage_checkpoint` records usage as unknown (zeros), and the
-parser fixtures in `internal/copilotbridge/bridge_test.go` (`-p`) and `channel_test.go`
-(the channel, with its numbers written as `1.0`) are the tripwire.
+**There is no automated gate for this CLI yet** — stated plainly because an
+earlier version of this runbook claimed one. Verified 2026-11-05:
+
+- `ezllm bridge-check copilot` answers `unknown bridge "copilot"` (the command
+  targets claude, codex and agy only, and a test pins that).
+- `scripts/bridge_update.py` does not manage it: its `BRIDGES` table lists those
+  three. There is no versioned bridge root to stage, because the CLI is a
+  standalone binary (`~/.local/bin/copilot`) updated by `copilot update`.
+
+What protects you instead:
+
+- **At runtime, per turn:** the channel's protocol version is probed before
+  anything billable happens (`ProbeChannel`, pinned to version 3). A mismatch is
+  a typed refusal — plain chat falls back to `-p`, and a turn that asked for
+  tools is refused so the router fails over at no cost.
+- **At promotion, by hand:** after `copilot update`, drive one plain turn and
+  one two-tool loop through the bridge and check `/admin/requests`. This
+  CLI's `--headless` is undocumented (see Known gaps), so a release can change
+  it without any version number moving.
+
+**Version-sensitive:** a release that renames `session.usage_checkpoint` records
+usage as unknown (zeros). Parser fixtures in `internal/copilotbridge/bridge_test.go`
+(`-p`) and `channel_test.go` (the channel, numbers written as `1.0`) are the
+tripwire — if they pass and a live turn reports zeros, the event names moved.
 
 ## Known gaps
 

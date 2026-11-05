@@ -73,7 +73,7 @@ func run() error {
 			return runBridgeCheck(os.Args[2:], os.Stdout)
 		case "help", "-h", "--help":
 			fmt.Println("usage: ezllm [flags]            start the router")
-			fmt.Println("       ezllm bridge-check NAME  gate a bridge CLI (claude|codex|agy|copilot) before promoting it")
+			fmt.Println("       ezllm bridge-check NAME  gate a bridge CLI (claude|codex|agy) before promoting it")
 			return nil
 		}
 	}

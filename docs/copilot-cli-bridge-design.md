@@ -133,20 +133,62 @@ A model id is only marked usable after a probe answers, which is exactly the
 - **M4** docs: runbook, CHANGELOG, EXPLORING landmark, and a supersession note
   at the top of `docs/github-copilot-design.md`.
 
-## 9. Decisions to lock before M1
+## 9. Locked decisions (2026-11-05, Calypso)
 
-1. **Auth path.** (a) fine-grained PAT in `COPILOT_GITHUB_TOKEN` via a 0600
-   secret file — headless, revocable, no device flow; (b) `copilot login
-   --device-code` once into a dedicated `EZLLM_COPILOT_HOME`; (c) both, PAT
-   preferred, login fallback. **Recommend (c)** — the CLI already implements the
-   precedence, so the bridge just inherits it; the PAT makes deployment
-   reproducible, the login keeps a working box working.
-2. **Retirement timing.** Soak-then-delete (M1→M2→M3 above) vs delete the OAuth
-   code in the same branch. **Recommend soak-then-delete**: the OAuth path is
-   live for one account and one combo hop, and deleting it before the bridge has
-   served real traffic leaves no fallback if the CLI's plan gate differs.
-3. **Tool-bearing traffic.** Accept `chat_tools_unsupported` on this hop (like
-   the other three bridges), or keep the OAuth provider alive only for
-   tool-bearing Copilot traffic. **Recommend accept + refuse**: a subscription
-   hop that cannot honour client tools must say so, and the combo rule already
-   exists ("never put a surface-limited hop in a tool-using combo").
+1. **Auth: CLI login only.** The bridge uses a dedicated `EZLLM_COPILOT_HOME`
+   (default `/copilot-home`, mounted) and never reads a PAT env var. The box is
+   already logged in (`~/.copilot` exists and a headless call authenticated with
+   no env token set), so the deployment mounts that directory. Fine-grained
+   PATs remain documented as a manual fallback for a fresh host, not a code
+   path.
+2. **One branch.** The bridge and the deletion of the OAuth surface land
+   together — no soak gate, no fallback provider. `internal/githubcopilot`,
+   `cmd/ezllm/githublogin.go`, `internal/server/github_device.go`, the
+   `/admin/github/device*` routes, the `device_handle` key path, the
+   `github-copilot` preset/UI and the mint-credential branch all go in the same
+   change set as `internal/copilotbridge`.
+3. **Tool bridging is in scope** — client tool schemas must reach the CLI hop,
+   not be refused. This is the part that changes the architecture; see §10.
+
+## 10. Tool bridging — what the CLI actually allows (measured 2026-11-05)
+
+The `-p` one-shot surface **cannot** carry a tool round-trip, and this was
+verified against the installed CLI, not assumed:
+
+- `assistant.message.data.toolRequests[]` exists (the model CAN ask for a
+  tool), but in `-p` mode the CLI executes its own tools itself
+  (`--allow-tool` / `--available-tools` gate what it may run) and there is **no
+  option that returns a pending tool call to the caller and accepts a result
+  back**: no `--input-format`, no permission mode that yields instead of
+  executing, and `copilot sessions` only supports `import`. `--session-id` can
+  resume a session by UUID, but nothing documented injects an external tool
+  result into it.
+- `--available-tools` / `--excluded-tools` can only narrow the CLI's OWN 27
+  tools; they cannot declare a tool the CLI does not have.
+- An MCP server (`--additional-mcp-config`) would let the CLI *see* custom
+  tools, but MCP tools execute inside the CLI's loop: the result has to exist at
+  call time, and an HTTP one-shot has no way to ask the upstream client for it.
+- The CLI ships an extension/SDK surface (`--extension-sdk-path`, bundled
+  `@github/copilot-sdk`). That — not `-p` — is the only credible route to real
+  tool bridging: a session API with host-side tool callbacks.
+
+**Therefore §10 splits into a spike plus a build, inside the same branch:**
+
+- **M1 (ships):** `-p`-driven bridge, full chat, exact usage, model catalog —
+  and client tools refused with `chat_tools_unsupported` *only while* the SDK
+  path is unproven. The refusal is the honest default the other three bridges
+  already use.
+- **M1.5 (spike, time-boxed):** read the bundled `@github/copilot-sdk` surface
+  for a session API that (a) lets the host declare tools with callbacks and
+  (b) reports a tool call to the caller. If both exist, the bridge grows a
+  Node sidecar (the SDK is JS) speaking our loopback contract; if they do not,
+  §10 ends as a documented limitation and the `chat_tools_unsupported` refusal
+  becomes permanent rather than temporary.
+- **M2:** only if the spike proves it — client tools → SDK tool callbacks →
+  OpenAI `tool_calls` back to the client, with the turn's tool results replayed
+  into the same session, and the ledger recording that hop as translated.
+
+The refusal in M1 is never silent: the bridge's `/status` names the capability
+("client tools: not yet — SDK spike pending"), so an operator reading the bridge
+card is never told the hop can do something it cannot.
+

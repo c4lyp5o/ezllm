@@ -1,0 +1,152 @@
+# GitHub Copilot CLI bridge — design
+
+Status: **proposed, awaiting sign-off on three decisions (§9).** Supersedes the
+OAuth/device-flow provider (`internal/githubcopilot`). Branch
+`melissa/copilot-cli-bridge`, off the tool-pruning-drop tip.
+
+## 1. What changes and why
+
+Today the `github-copilot` account is an OAuth provider: ezllm runs a device
+flow, mints a Copilot session token, and speaks the raw Copilot API
+(`internal/githubcopilot/auth.go` 417 lines + tests, `cmd/ezllm/githublogin.go`,
+`internal/server/github_device.go`, the dashboard device UI, the
+`device_handle` key path). That minting path is the last non-bridge
+subscription surface, and it is the thing that historically broke (the
+2026-10-17 `slow_down` bug) because we are speaking a private API that changes
+under us.
+
+The other three subscriptions already ride the official CLI behind a loopback
+surface (`claudebridge`, `codexbridge`, `agybridge`). Copilot CLI now has a
+first-class headless interface, so Copilot joins that family and the OAuth
+provider is retired.
+
+## 2. Measured facts (probe 2026-11-05, this box, CLI 1.0.105)
+
+`copilot -p "Reply with exactly: ok" -s --output-format=json --no-ask-user`
+→ rc=0, JSONL on stdout. What the stream carries:
+
+| Event | Use |
+|---|---|
+| `session.auto_mode_resolved` | `chosenModel`, and **`availableModels`** — the plan's catalog |
+| `assistant.message_delta` | `deltaContent` → SSE `content` deltas (streaming works) |
+| `assistant.message` | `model`, `content`, `toolRequests[]`, `phase` |
+| `session.usage_checkpoint` | per-model `prompt_tokens`, `cache_read`, `cache_write`, `reasoningTokens`, `totalPremiumRequests` |
+| `accountingSnapshot` | `tokenDetails.{input,cache_read,cache_write,output}` |
+| `result` | `sessionId`, `exitCode`, usage summary — the terminal record |
+
+Numbers from that single call: **prompt_tokens 13,035**, cache_read 1,536,
+output 5, **1 premium request**. The CLI ships **27 tools (9,459 schema tokens)**
+of its own — `bash`, `view`, `edit`, `edit`, `github-mcp-server-*`, … — because
+it is a full agent, not a completion endpoint.
+
+Auth: no token in the environment was needed; the CLI used its stored login in
+`~/.copilot`. Precedence is `COPILOT_GITHUB_TOKEN` > `GH_TOKEN` > `GITHUB_TOKEN`,
+and the accepted token types are **fine-grained PATs with the "Copilot Requests"
+permission** or OAuth tokens from the CLI/`gh` — **classic `ghp_` tokens are
+explicitly not supported**.
+
+## 3. Architecture (mirrors `agybridge`, the newest of the three)
+
+- `internal/copilotbridge/` — package with `Server` (`/healthz`, `/status`,
+  `/v1/models`, `/v1/chat/completions`, bearer-gated), `Runner` (spawns the CLI
+  per request), `request.go` (OpenAI chat → one prompt), `stream.go` (JSONL →
+  SSE), `usage.go` (ledger-shaped usage), `models.go` (catalog + curated ids).
+- `cmd/ezllm/copilotbridge.go` — boot wiring, env surface:
+  `EZLLM_COPILOT_BRIDGE=on|off`, `EZLLM_COPILOT_BIN` (default
+  `/opt/copilot/copilot`), `EZLLM_COPILOT_HOME` (its own login dir),
+  `EZLLM_COPILOT_ADDR` (default `127.0.0.1:8793`), `EZLLM_COPILOT_TOKEN_FILE`.
+  Boot preflight: `--version`, login check (a 1-token `-p` probe or
+  `COPILOT_GITHUB_TOKEN` present), loopback assertion — same shape as
+  `startClaudeBridge`.
+- Provider: kind `copilot-bridge`, sentinel base `internal://copilotbridge`
+  (added to the sentinel allow-list beside `internal://claudeweb` /
+  `internal://geminiweb`), preset `github-copilot-sub` in
+  `PROVIDER_PRESETS` next to `claude-sub` / `chatgpt-sub` / `antigravity-sub`
+  (no key to paste — the bridge supplies it).
+- `EnableBridge("github-copilot", …)` so `/admin/bridges`, the update notices and
+  `scripts/bridge_update.py` cover it like the other three.
+
+## 4. Request mapping (the honest cost)
+
+`-p` is one-shot: it cannot replay history or accept a system-prompt flag.
+Following the agy rule, system text and prior turns are flattened into ONE
+deterministic prompt. Consequences, stated plainly:
+
+- **Client tools are refused** (`chat_tools_unsupported`, the shared bridge
+  error code). The CLI runs its own agent loop with its own 27 tools; a caller's
+  tool schemas cannot be honoured. Any combo carrying this hop must not serve a
+  tool-using client.
+- **Client system prompts are advisory text inside the prompt**, not a real
+  system role — the CLI prepends its own ~5k-token scaffolding regardless.
+- `response_format`, `n>1`, `logprobs`, `reasoning_effort` have no CLI
+  equivalent (`--model` is the only lever); they are refused or ignored exactly
+  as the other bridges do, per the shared translation rules.
+
+## 5. Accounting (better than the OAuth path)
+
+The JSONL carries a per-model usage block with a real cache split, so the bridge
+books `tokens_in` (cold), `tokens_cached_read`, `tokens_cached_write`,
+`reasoning_tokens` and `tokens_out` from the CLI's own numbers, plus
+`totalPremiumRequests` as the subscription cost unit. **No estimation, no
+synthesized envelope** — this is the first subscription surface where the ledger
+gets exact numbers.
+
+The 13k-token floor per call is the price of the CLI's agent scaffolding; a
+`--model=auto` + `--available-tools`-restricted invocation is the lever if that
+ever matters. Report it in the runbook so nobody reads the ledger and thinks the
+bridge is leaking.
+
+## 6. Model catalog
+
+No non-interactive "list models" command exists. Two sources, in order:
+1. `session.auto_mode_resolved.availableModels` from one boot probe — the plan's
+   real catalog for that login.
+2. A curated `--model`-safe id list (documented ids only) for routing seeds.
+
+A model id is only marked usable after a probe answers, which is exactly the
+`proto_*` discipline the sweeps already apply (a green probe proves the wire).
+
+## 7. Operations
+
+- Loopback-only, bearer-gated, never public — same as the other bridges.
+- `bridge-check copilot` gate before promoting a CLI version; `bridge_update.py`
+  learns `copilot` as a fourth target (official channel = `copilot update`).
+- Failure classes to type honestly: not logged in, premium requests exhausted,
+  model not in plan, CLI version event-schema drift (the JSONL `type` set is
+  version-sensitive — a missing `usage_checkpoint` must record "usage unknown",
+  never a zero).
+
+## 8. Retirement of the OAuth provider — phased, not one big delete
+
+- **M1** build the bridge, prove it against the real CLI on a loopback instance,
+  add the preset + bridge card. Nothing is deleted.
+- **M2** re-point the existing Copilot account and the `maxine` hop 3 to the
+  bridge preset; soak real traffic; compare accounting against the OAuth rows.
+- **M3** delete the OAuth surface in its own commit: `internal/githubcopilot/`
+  (auth + provider + tests), `cmd/ezllm/githublogin.go`,
+  `internal/server/github_device.go` + `/admin/github/device*` routes, the
+  `device_handle` key path, the `pok` preset + device-flow UI in
+  `Providers.tsx`, the mint-credential sentinel/branch in registration, and the
+  `github-copilot` kind from the sentinel allow-list. Schema untouched: existing
+  `provider_keys`/`accounts` rows keep their history; the kind becomes invalid
+  for NEW accounts only.
+- **M4** docs: runbook, CHANGELOG, EXPLORING landmark, and a supersession note
+  at the top of `docs/github-copilot-design.md`.
+
+## 9. Decisions to lock before M1
+
+1. **Auth path.** (a) fine-grained PAT in `COPILOT_GITHUB_TOKEN` via a 0600
+   secret file — headless, revocable, no device flow; (b) `copilot login
+   --device-code` once into a dedicated `EZLLM_COPILOT_HOME`; (c) both, PAT
+   preferred, login fallback. **Recommend (c)** — the CLI already implements the
+   precedence, so the bridge just inherits it; the PAT makes deployment
+   reproducible, the login keeps a working box working.
+2. **Retirement timing.** Soak-then-delete (M1→M2→M3 above) vs delete the OAuth
+   code in the same branch. **Recommend soak-then-delete**: the OAuth path is
+   live for one account and one combo hop, and deleting it before the bridge has
+   served real traffic leaves no fallback if the CLI's plan gate differs.
+3. **Tool-bearing traffic.** Accept `chat_tools_unsupported` on this hop (like
+   the other three bridges), or keep the OAuth provider alive only for
+   tool-bearing Copilot traffic. **Recommend accept + refuse**: a subscription
+   hop that cannot honour client tools must say so, and the combo rule already
+   exists ("never put a surface-limited hop in a tool-using combo").

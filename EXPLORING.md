@@ -697,6 +697,10 @@ can see the failure you are trying to prevent.**
 - `cmd/ezllm/copilotbridge.go` — boot wiring, the channel probe behind `/status`, and
   `copilotCatalog`: `auto` first (the key test probes the first candidate), then every
   id `copilot help config` documents. The plan decides per request with a typed 403.
+- `internal/copilotbridge/checks.go` — the `bridge-check copilot` surface:
+  `RunPreflight` (binary, version, channel protocol 3 + `session.create`, all free)
+  and `LivePlain`/`LiveTools` (the only things that prove the login and the tool
+  batch). `QualifiedVersion` lives here.
 - `internal/provider/copilotbridge.go` — `KindCopilotBridge` (`copilot-bridge`), an adapter
   embedding `*openAICompatible`: the wire is shared, the identity is its own.
 - `internal/server/bridges.go` — registry entry id `github-copilot` (label "GitHub

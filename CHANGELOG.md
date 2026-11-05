@@ -87,6 +87,13 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   earlier cuts from the same release:
   a refusal, which returned 400 on a live combo's first request, and a `<tool_call>`
   text protocol, which the model ignored and which charged for empty turns.
+- **`ezllm bridge-check copilot` exists** (static: binary, version, and the
+  headless channel's protocol version, which is the one thing a release can move
+  without a version number; `--live`: the login, a plain turn, and a client-tool
+  batch plus its replay). The static tier deliberately does NOT claim a login:
+  an empty `COPILOT_HOME` still passes `session.create`, so promotion requires
+  `--live`. A batch of undeclared tool names now fails with the names it
+  dropped instead of "finished without an assistant message".
 - **Usage no longer depends on how the CLI writes a number.** The channel writes
   `totalPremiumRequestCost` as `1.0`, which an int field refused, dropping the
   whole event and booking zero usage. A fractional multiplier would have done the

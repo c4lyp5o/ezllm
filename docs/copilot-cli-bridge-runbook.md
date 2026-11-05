@@ -177,25 +177,39 @@ AI-credit charge in billionths of a credit.
 
 ## Gates and updates
 
-**There is no automated gate for this CLI yet** — stated plainly because an
-earlier version of this runbook claimed one. Verified 2026-11-05:
+**`ezllm bridge-check copilot` exists** and is the gate to run after every
+`copilot update`:
 
-- `ezllm bridge-check copilot` answers `unknown bridge "copilot"` (the command
-  targets claude, codex and agy only, and a test pins that).
-- `scripts/bridge_update.py` does not manage it: its `BRIDGES` table lists those
-  three. There is no versioned bridge root to stage, because the CLI is a
-  standalone binary (`~/.local/bin/copilot`) updated by `copilot update`.
+```
+ezllm bridge-check copilot --bin ~/.local/bin/copilot --home ~/.copilot --json
+ezllm bridge-check copilot --live --json     # what promotion requires
+```
 
-What protects you instead:
+Two tiers, like the other bridges:
 
-- **At runtime, per turn:** the channel's protocol version is probed before
-  anything billable happens (`ProbeChannel`, pinned to version 3). A mismatch is
-  a typed refusal — plain chat falls back to `-p`, and a turn that asked for
-  tools is refused so the router fails over at no cost.
-- **At promotion, by hand:** after `copilot update`, drive one plain turn and
-  one two-tool loop through the bridge and check `/admin/requests`. This
-  CLI's `--headless` is undocumented (see Known gaps), so a release can change
-  it without any version number moving.
+- **Static (free, no request):** the binary resolves, `--version` reports, and the
+  undocumented `--headless --stdio` channel answers at protocol **3** and accepts
+  a `session.create`. That last part is the point of the check: `--headless` is
+  not in `copilot --help`, so a release can move it without any version number
+  moving.
+- **`--live` (two premium requests):** **proves the login**, then drives a plain
+  turn and a client-tool batch plus the replay turn after it. The text is judged,
+  never printed.
+
+**The static tier cannot prove a login, and says so.** Measured 2026-11-06: an
+empty `EZLLM_COPILOT_HOME` still passes `session.create`, because the CLI only
+reads the credential when a prompt asks GitHub for something. With a stripped
+environment (`env -i`, no session stores) the same call answers
+`No GitHub OAuth token or Copilot HMAC key provided` — so **promotion requires
+`--live`**, and a static pass is a note, not a verdict:
+
+```
+{"bridge":"copilot","ok":true,"version":"1.0.105","release":"qualified","live":true,"problems":[]}
+```
+
+**Not managed by `scripts/bridge_update.py`.** Its `BRIDGES` table lists claude,
+codex and agy; there is no versioned bridge root to stage here, because the CLI is
+a standalone binary updated by `copilot update`. So the gate is manual today.
 
 **Version-sensitive:** a release that renames `session.usage_checkpoint` records
 usage as unknown (zeros). Parser fixtures in `internal/copilotbridge/bridge_test.go`

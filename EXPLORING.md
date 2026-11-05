@@ -805,6 +805,15 @@ These are the "if it's broken here, the project failed" spots — each must be v
 
 ## 7. Deliberate non-goals (don't go looking for them in the code)
 
+- **Tool pruning** — deleting tool schemas from the request to save prompt tokens.
+  M2 was rejected 2026-11-04 and the code is deleted: the prize was 89.8% frozen
+  counters from tools that had stopped shipping, the live dead tax was 481
+  tokens/request (0.9%), and usage was derived from the *request* body only, so
+  the one client that uses tools on every call (`dis-intelligence`, reading its
+  `tool_use` out of the *response*) read `used_sessions = 0` across all 23 tools
+  — prune mode would have deleted its whole catalog on structurally blind
+  evidence. Trim catalogs source-side instead. Full verdict + re-open conditions:
+  `CHANGELOG.md` § "removed: tool pruning".
 - Silent translation — every surface can reach every wire since the universal wire matrix
   (`docs/universal-wire-design.md`), but only onto hops a probe sweep PROVED, with native
   passthrough preferred, and the surface pin still refuses instead of rerouting.

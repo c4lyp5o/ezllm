@@ -55,11 +55,43 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   the rows written during the four-day measurement are the evidence the
   rejection rests on; dropping them is a destructive migration nobody asked
   for. Nothing reads or writes either any more.
-- Why it went: M2 was rejected 2026-11-04 — 89.8% of the reported 10.5M-token
-  prize was frozen counters from tools that had stopped shipping, the live dead
-  tax was 481 tokens/request (0.9% of prompt), and `used_sessions` was
-  structurally blind to single-shot clients, so prune mode would have deleted
-  DIS:Intelligence's entire tool catalog. See the EXPLORING note.
+- Why it went: **M2 was rejected 2026-11-04** on the four-day M1 evidence, and
+  the design doc went with the feature, so the verdict lives here.
+  - **The prize was history.** Of 10.5M cumulative `prize_tokens`, 9,446,068
+    (89.8%) came from tools that stopped shipping on 2026-11-01 (Hermes allowlist
+    41→8 + `tool_search.defer`). A `used_sessions == 0` row for a tool that no
+    longer ships can never flip to used, so it looks eligible forever — any
+    future go/no-go must filter on `last_seen_at`, not `eligible`.
+  - **The live tax was noise.** 481 tokens per request (mnemosyne_invalidate 117,
+    update 113, get 110, skills_list 77, forget 64), i.e. one request in six
+    hundred; the 24h gate reading decayed 3.9% → 2.7% → 1.7% → 0.9% on the only
+    days that reflect the trimmed surface, below the 2–3% trigger.
+  - **Silent capability loss is what killed it, and M1 could not even see the
+    usage that would have prevented it.** The top candidate by prize,
+    `dis-intelligence/official_report` (1,948 tok/req × 446 requests) is that
+    client's flagship tool, yet it read `used_sessions = 0`: usage is derived
+    from call sites in the *request* body, and that client's only model path
+    sends one user message and reads the `tool_use` block out of the *response*.
+    All 23 of its tools sat at zero while it used tools on essentially every
+    request — prune mode would have deleted the entire catalog of the one client
+    that uses tools every time, from evidence structurally blind to it. The 20%
+    audit window only recovers in an audit *session*, and the router by its own
+    design admission cannot observe why a run broke.
+  - **The economics never reached the hot path:** ~60k tokens/day of live shadow,
+    about half cache-read, single-digit dollars across the series — against
+    schema v34, a `tools` rewrite between compression and `captureShapeDoc`, a
+    session memo and an audit UI.
+  - **All four clients are ours.** Pruning exists to trim catalogs an operator
+    does not own; for catalogs we own a config line is strictly better —
+    deterministic, reversible, no cache surprise, no new failure mode.
+  - **Replaced by:** (1) source-side trimming in each client's own tool config
+    (`tool_search.defer`, allowlists) where the use-rate math justifies it, and
+    (2) optionally a per-client static deny list in ezllm if a client drifts back
+    to shipping a heavyweight unused catalog. **Re-open only if** a client we do
+    not control ships a large never-used catalog, or live dead tax exceeds ~2%
+    of that client's prompt — and then scope per client (canary first) and probe
+    all three wire shapes with a `tool_use` naming an undeclared tool first.
+- See also: EXPLORING §7 lists tool pruning among the deliberate non-goals.
 
 ## Unreleased — hop stream health (schema v34)
 

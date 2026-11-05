@@ -1093,6 +1093,30 @@ func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
 	if s.dispatcher != nil {
 		cooldowns = s.dispatcher.Cooldowns()
 	}
+	// Stream outcomes per hop (docs/hop-health-design.md). A hop that returns
+	// 200 and then dies mid-body is healthy by every other number on this
+	// endpoint; this is the one that shows it. Window is operator-selectable
+	// because "why did last night break" and "is this hop degrading" want
+	// different spans.
+	streamWindow := 24 * time.Hour
+	if v := strings.TrimSpace(r.URL.Query().Get("stream_window")); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			writeErr(w, http.StatusBadRequest, "invalid_request_error",
+				"stream_window must be a positive Go duration such as 24h")
+			return
+		}
+		if d > 30*24*time.Hour {
+			d = 30 * 24 * time.Hour
+		}
+		streamWindow = d
+	}
+	hopStreams, err := s.db.HopStreamHealth(r.Context(), time.Now().UTC().Add(-streamWindow), time.Now().UTC())
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, "health_check_failed",
+			"could not read stream outcomes: "+err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":             "ok",
 		"schema_version":     s.db.SchemaVersion(),
@@ -1107,6 +1131,8 @@ func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
 		"lost_rows":          store.LostRows(),
 		"unmetered_rows":     store.UnmeteredRows(),
 		"endpoint_cooldowns": cooldowns,
+		"hop_stream_health":  hopStreams,
+		"stream_window_s":    int(streamWindow.Seconds()),
 		"uptime_s":           int(time.Since(s.started).Seconds()),
 	})
 }

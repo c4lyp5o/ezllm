@@ -3,6 +3,7 @@ package registration
 import (
 	"bytes"
 	"context"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -134,11 +135,11 @@ func TestZeroValueTesterStillLogs(t *testing.T) {
 func TestWireRecordedIsLoggedWhenAMismatchProbeSucceeds(t *testing.T) {
 	ctx := context.Background()
 	db := learnStore(t)
-	tr := &copilotTransport{chatStatus: http.StatusBadRequest}
+	tr := &wireMismatchTransport{}
 	client := &http.Client{Transport: tr, Timeout: 10 * time.Second}
 	acct := provider.Account{
-		Name: "gh-copilot", Namespace: "copilot", Kind: provider.KindGitHubCopilot,
-		BaseURL: "https://api.githubcopilot.com", Enabled: true,
+		Name: "wire-mismatch", Namespace: "mismatch", Kind: provider.KindOpenAICompatible,
+		BaseURL: "https://mismatch.invalid/v1", Enabled: true,
 	}
 	aid, err := db.UpsertAccount(ctx, acct)
 	if err != nil {
@@ -160,7 +161,32 @@ func TestWireRecordedIsLoggedWhenAMismatchProbeSucceeds(t *testing.T) {
 	if !strings.Contains(out, "wire recorded") {
 		t.Fatalf("the wire change was silent:\n%s", out)
 	}
-	if !strings.Contains(out, "account=copilot") || !strings.Contains(out, "model=gpt-") {
+	if !strings.Contains(out, "account=mismatch") || !strings.Contains(out, "model=gpt-") {
 		t.Fatalf("the line does not name the model and account:\n%s", out)
 	}
+}
+
+// wireMismatchTransport pins the shape this test needs and nothing else: the
+// chat path answers 400 naming the wrong endpoint, the responses path serves a
+// completion. It replaced the retired Copilot provider's mock when that
+// provider was deleted — the behaviour under test (a probe TEACHING the router
+// where a model lives, and saying so on the console) is generic and still live.
+type wireMismatchTransport struct{}
+
+func (t *wireMismatchTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	reply := func(status int, body string) (*http.Response, error) {
+		h := make(http.Header)
+		h.Set("Content-Type", "application/json")
+		return &http.Response{StatusCode: status, Header: h,
+			Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+	}
+	switch {
+	case strings.HasSuffix(r.URL.Path, "/chat/completions"):
+		return reply(http.StatusBadRequest, `{"error":{"message":"model gpt-6.1-sol unsupported_api_for_model","type":"invalid_request_error"}}`)
+	case strings.HasSuffix(r.URL.Path, "/responses"):
+		return reply(http.StatusOK, `{"id":"r1","object":"response","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":1}}`)
+	case strings.HasSuffix(r.URL.Path, "/models"):
+		return reply(http.StatusOK, `{"data":[{"id":"gpt-6.1-sol"}]}`)
+	}
+	return reply(http.StatusNotFound, `{"error":{"message":"not found"}}`)
 }

@@ -213,7 +213,7 @@ func TestStripHeadersListed(t *testing.T) {
 }
 
 func TestParseKindAndValidKinds(t *testing.T) {
-	for _, good := range []string{"opencode-go", "openai-compatible", "anthropic-compatible", "gemini-openai", "gemini-web", "github-copilot", "claude-web", "copilot-bridge", " opencode-go "} {
+	for _, good := range []string{"opencode-go", "openai-compatible", "anthropic-compatible", "gemini-openai", "gemini-web", "claude-web", "copilot-bridge", " opencode-go "} {
 		if _, err := ParseKind(good); err != nil {
 			t.Errorf("ParseKind(%q) failed: %v", good, err)
 		}

@@ -320,8 +320,9 @@ func ValidateAccountInput(in AccountInput) error {
 	// Bridge kinds (claude-web, gemini-web) never dial a host the operator
 	// names — the adapter rewrites to the in-process bridge, so their base
 	// URL is the sentinel the runbooks document, defaulted when empty and
-	// required verbatim when present. github-copilot is NOT a bridge kind:
-	// it dials https://api.githubcopilot.com like any other provider.
+	// required verbatim when present. copilot-bridge is NOT a sentinel kind:
+	// it dials the loopback bridge over http, so the ordinary base-URL rule
+	// applies to it.
 	if sentinel, ok := bridgeSentinelFor(in.Kind); ok {
 		// Empty is legal here — CreateAccount defaults it to the sentinel
 		// before the write (this validator takes AccountInput by value).

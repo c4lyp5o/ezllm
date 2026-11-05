@@ -274,7 +274,7 @@ Add `?force=true` to delete anyway (cascades: keys, models, quota rows).
 // or, for a running subscription bridge (see GET /admin/bridges): the server supplies the key
 { "label":"primary", "bridge":"claude-sub" }
 ```
-`bridge` is refused with `api_key` or `device_handle` (`400`), for an unknown id (`400`), for an
+`bridge` is refused with `api_key` (`400`), for an unknown id (`400`), for an
 account that does not point at that bridge's kind and base URL (`400`), and while the bridge is
 not running (`409`, naming the variable that turns it on). A key test against a bridge base URL
 that is not running fails with a `hint` naming the same fix.

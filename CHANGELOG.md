@@ -2,6 +2,30 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
+## Unreleased — replaced: GitHub Copilot OAuth → the official CLI bridge
+
+- **The OAuth provider is gone, not deprecated.** `internal/githubcopilot`
+  (device flow, session minting, token refresh), `internal/provider/githubcopilot.go`
+  with the `github-copilot` kind, `cmd/ezllm/githublogin.go`, the
+  `/admin/github/device*` routes with `Server.ghDevices`, `keyTestRequest.DeviceHandle`,
+  the `KnownWireSupport` hook it alone used, and the dashboard's login panel +
+  "GitHub Copilot" preset are all deleted. `config.yaml` no longer accepts the kind.
+- **In its place:** the `copilot-bridge` kind over the GitHub Copilot CLI
+  (1.0.105), a fourth member of the claude/codex/agy bridge family. No key to
+  paste: the credential is the CLI's own login. Design
+  `docs/copilot-cli-bridge-design.md`, runbook `docs/copilot-cli-bridge-runbook.md`.
+- **Accounting is exact for the first time on this provider:** the CLI's
+  `session.usage_checkpoint` gives inclusive prompt tokens with a cached slice;
+  verified end-to-end through the gateway (bridge 13,971 inclusive / 9,420
+  cached → ledger `tokens_in 4,551` + `tokens_cached_read 9,420` + `tokens_out 6`).
+- **Costs what an agent costs:** ~13–14k prompt tokens per call even for a
+  one-word answer (≈9.4k is the CLI's own 27 tool schemas) and one premium
+  request. That is upstream's shape; it is visible in the ledger rather than
+  surprising.
+- **Client tool schemas are refused** (`chat_tools_unsupported`) — `-p` has no
+  option that yields a pending tool call. A turn that needs tools fails loudly;
+  it does not silently miscount.
+
 ## Unreleased — removed: tool pruning (rejected feature)
 
 - **Deleted the whole feature**, per the standing rule that a feature no live

@@ -360,7 +360,11 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
 - 41 new tests across four packages, bite-proven, `-race` green. Live proof
   operator-gated (test account, see runbook).
 
-### M13 — github-copilot provider ✅ (2026-10-16, device-flow live-proved; design `docs/github-copilot-design.md`, runbook `docs/github-copilot-runbook.md`)
+### M13 — github-copilot provider ❌ RETIRED 2026-11-05 (was: OAuth device flow)
+> **Deleted:** `internal/githubcopilot`, `internal/provider/githubcopilot.go`,
+> `cmd/ezllm/githublogin.go`, `/admin/github/device*`, the `github-copilot` kind and the
+> dashboard login panel. Do not go looking for them. Replaced by M16 below; the old design
+> survives as history in `docs/github-copilot-design.md` (banner-marked).
 - `internal/githubcopilot/` — the ported protocol: `auth.go` (device flow
   with the PUBLIC CLI client id + read:user, `token <gh>` mint, refresh grant
   without client_secret), `provider.go` (3-endpoint routing — claude* →
@@ -674,6 +678,22 @@ whole feature (package, route, config, stats table, UI) has since been deleted �
 the columns it wrote stay in the ledger as history. The reasoning is worth
 keeping: **measure before building the hot path, and check that your instrument
 can see the failure you are trying to prevent.**
+
+### M16 — GitHub Copilot CLI bridge ✅ (2026-11-05; design `docs/copilot-cli-bridge-design.md`, runbook `docs/copilot-cli-bridge-runbook.md`)
+- `internal/copilotbridge/` — one CLI child per request (`copilot -s --output-format=json
+  --no-ask-user [--model id]`), prompt on **stdin** (argv caps at 128 KB and real
+  prompts are 250–600 KB), JSONL parser whose fixture pins the 1.0.105 event names
+  (`assistant.message_delta`, `session.usage_checkpoint`, `result`), typed exits
+  (`not_logged_in`→401, quota→429, `model_not_in_plan`→403, else 502), and usage that is
+  exact or zero — never estimated.
+- `cmd/ezllm/copilotbridge.go` — boot wiring + `copilotModelIDs`, the **curated** catalog:
+  a documented-but-ungated id here makes the key test read "not in your plan" as a bad
+  credential and reject a good bridge, so an id is listed only after a real turn answered.
+- `internal/provider/copilotbridge.go` — `KindCopilotBridge` (`copilot-bridge`), an adapter
+  embedding `*openAICompatible`: the wire is shared, the identity is its own.
+- `internal/server/bridges.go` — registry entry id `github-copilot` (label "GitHub
+  Copilot", kind `copilot-bridge`); `web/src/pages/Providers.tsx` — the "GitHub Copilot
+  (CLI)" preset, which replaced the device-flow panel.
 
 ### M15 — hop stream health ✅ (2026-11-05; design `docs/hop-health-design.md`)
 

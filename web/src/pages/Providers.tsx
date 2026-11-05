@@ -2,11 +2,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { motion } from 'motion/react';
 import {
-  ApiError, AuthError, del, get, ghDeviceCancel, ghDeviceStart, ghDeviceStatus, listBridges,
+  ApiError, AuthError, del, get, listBridges,
   modelRules, patch, post, postKeyTestStream, setModelPin,
   setPrice, deletePrice, startSweep, stopSweep, sweepStatus,
   KINDS, STEPS,
-  type Account, type ApiErrorDetail, type Bridge, type GhDeviceStart, type GhDeviceStatus, type KeyRow, type ModelRule, type ModelRow, type Price, type SweepStatus, type TestResult, type TestStep,
+  type Account, type ApiErrorDetail, type Bridge, type KeyRow, type ModelRule, type ModelRow, type Price, type SweepStatus, type TestResult, type TestStep,
 } from '../utils/api';
 import { useSearchParams } from 'react-router-dom';
 import { Chip, ConfirmModal, Modal, SecretInput, SectionLabel, Segmented, Skeleton, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls, relTime, Mono } from '../components/ui';
@@ -163,10 +163,6 @@ const PROVIDER_PRESETS: Record<string, {
   'commandcode': { label: 'Command Code', kind: 'openai-compatible', baseURL: 'https://api.commandcode.ai/provider/v1' },
   'deepseek': { label: 'DeepSeek', kind: 'openai-compatible', baseURL: 'https://api.deepseek.com' },
   'groq': { label: 'Groq', kind: 'openai-compatible', baseURL: 'https://api.groq.com/openai/v1' },
-  'github-copilot': {
-    label: 'GitHub Copilot', kind: 'github-copilot', baseURL: 'https://api.githubcopilot.com',
-    keyHint: 'Start the GitHub login below and tap Authorize — no terminal needed. Already have a session JSON from `ezllm github-login`? Paste it instead.',
-  },
   'tokenrouter': { label: 'TokenRouter', kind: 'openai-compatible', baseURL: 'https://api.tokenrouter.com/v1' },
   // Vercel AI Gateway: OpenAI-compatible chat + /models discovery over one key,
   // model ids are `creator/model` (slashes inside the id — splitNamespace
@@ -680,18 +676,6 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
   // On completion result.steps supersedes them — same data, one append path.
   const [liveSteps, setLiveSteps] = useState<TestStep[] | null>(null);
   const [err, setErr] = useState<ApiErrorDetail | null>(null);
-  // GitHub device flow (the phone path): start → show the code → poll →
-  // the key add names the handle. The OAuth session never leaves the server,
-  // so this component only ever holds the handle, the user code and status.
-  const [ghStart, setGhStart] = useState<GhDeviceStart | null>(null);
-  const [ghStatus, setGhStatus] = useState<GhDeviceStatus | null>(null);
-  const [ghBusy, setGhBusy] = useState(false);
-  const [ghErr, setGhErr] = useState<ApiErrorDetail | null>(null);
-  // Extra seconds GitHub asked for via slow_down (RFC 8628 §3.5). Once GitHub
-  // says slow_down it will NOT hand over the token until our interval grows, so
-  // this is what stops "Waiting for authorization…" from being permanent while
-  // github.com/login/device already says success.
-  const [ghBackoff, setGhBackoff] = useState(0);
   // Subscription bridges: fetched on open so the preset shows live state.
   const [bridges, setBridges] = useState<Bridge[] | null>(null);
 
@@ -703,60 +687,11 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
   useEffect(() => {
     if (open) {
       setD(emptyDraft); setBusy(false); setResult(null); setLiveSteps(null); setErr(null);
-      setGhStart(null); setGhStatus(null); setGhBusy(false); setGhErr(null); setGhBackoff(0);
     }
   }, [open]);
 
-  // Closing without a save abandons the flow: drop the handle so its
-  // session evaporates now instead of sitting in server memory until the
-  // TTL. A consumed handle (saved) is already gone — the DELETE is a no-op.
-  useEffect(() => {
-    if (open) return;
-    const handle = ghStart?.handle;
-    setGhStart(null);
-    setGhStatus(null);
-    if (handle) void ghDeviceCancel(handle).catch(() => undefined);
-  }, [open, ghStart]);
-
-  // One status tick per interval GitHub asked for, plus any slow_down backoff.
-  // GitHub sends slow_down when polls arrive too fast and then WITHHOLDS the
-  // token until the interval grows, so the backoff is applied on receipt and
-  // the effect re-arms at the new cadence. Stops at a terminal state.
-  useEffect(() => {
-    const phase = ghStatus?.status;
-    if (!ghStart || !open || (phase != null && phase !== 'pending')) return;
-    const secs = Math.max(3, ghStart.interval || 5) + ghBackoff;
-    const iv = setInterval(() => {
-      ghDeviceStatus(ghStart.handle)
-        .then((st) => {
-          setGhStatus(st);
-          // RFC 8628 §3.5: raise the interval by 5s, capped so a hostile or
-          // broken upstream cannot push us past the code's own lifetime.
-          if (st.slow_down) setGhBackoff((b) => (b >= 30 ? b : b + 5));
-        })
-        .catch((e) => {
-          // EVERY failure must be visible: swallowing a non-ApiError left the
-          // panel saying "Waiting for authorization…" forever with no clue.
-          if (e instanceof ApiError) setGhErr(e.detail);
-          else setGhErr({ status: 0, type: 'error', message: e instanceof Error ? e.message : String(e) });
-        });
-    }, secs * 1000);
-    return () => clearInterval(iv);
-  }, [ghStart, ghStatus?.status, open, ghBackoff]);
-
-  const isGitHub = PROVIDER_PRESETS[d.preset]?.kind === 'github-copilot';
   const bridgeID = PROVIDER_PRESETS[d.preset]?.bridge;
   const bridge = bridgeID ? bridges?.find((b) => b.id === bridgeID) ?? null : null;
-
-  const startGitHub = async () => {
-    setGhBusy(true); setGhErr(null); setGhStatus(null);
-    try {
-      setGhStart(await ghDeviceStart());
-    } catch (e) {
-      if (e instanceof ApiError) setGhErr(e.detail);
-      else setGhErr({ status: 0, type: 'error', message: e instanceof Error ? e.message : String(e) });
-    } finally { setGhBusy(false); }
-  };
 
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setD((p) => ({ ...p, [k]: v }));
 
@@ -780,13 +715,11 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
       };
       const account = await post<Account>('/admin/accounts', payload);
       createdAccountID = account.id;
-      // One credential source: a pasted session JSON wins, otherwise the
-      // device handle the GitHub flow produced — the server resolves THAT
-      // into the session itself, so no credential rides in this body.
+      // One credential source: a pasted key, or a running bridge (the server
+      // supplies its secret — no credential rides in this body).
       const credential = d.apiKey.trim()
         ? { api_key: d.apiKey.trim() }
-        : bridgeID ? { bridge: bridgeID }
-        : { device_handle: ghStart?.handle ?? '' };
+        : { bridge: bridgeID ?? '' };
       // Streamed key test: every step lands in liveSteps as the server
       // records it (NDJSON), so the chain moves. Falls back to the one-shot
       // response shape when the server does not stream.
@@ -808,8 +741,8 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
     } finally { setBusy(false); }
   };
 
-  // Anything typed makes closing ask first; a half-finished GitHub login counts too.
-  const dirty = !!(d.name.trim() || d.apiKey || d.managementKey || d.notes.trim() || d.customHeaders.trim() || ghStart);
+  // Anything typed makes closing ask first.
+  const dirty = !!(d.name.trim() || d.apiKey || d.managementKey || d.notes.trim() || d.customHeaders.trim());
   // The validation steps and any failure sit together; scroll them into view
   // when a save starts or fails, so a red step is never off-screen below the fold.
   const validationRef = useRef<HTMLDivElement>(null);
@@ -823,9 +756,8 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
   const valid = d.name.trim().length > 0
     && /^[a-z0-9][a-z0-9._-]{0,62}$/.test(d.namespace.trim())
     && (!isCompat || /^https?:\/\//i.test(d.base_url.trim()))
-    // GitHub has no pasteable key: an authorized device flow substitutes for
-    // the API key. Anything else still needs its credential in hand.
-    && (d.apiKey.trim().length > 0 || (isGitHub && ghStatus?.status === 'authorized') || !!bridge?.enabled);
+    // A bridge supplies its own key; anything else needs a credential in hand.
+    && (d.apiKey.trim().length > 0 || !!bridge?.enabled);
 
   return (
     <Modal open={open} onClose={onClose} wide title="Add provider"
@@ -915,75 +847,6 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
         ) : isKnownEndpoint(d.base_url) ? null : (
           <div className="rounded-lg border border-line bg-raised/60 px-3.5 py-2.5 text-[13px] text-dim">
             Endpoint preset: <Mono>{d.base_url}</Mono>
-          </div>
-        )}
-        {isGitHub && (
-          <div className="space-y-3 rounded-lg border border-line bg-raised/60 px-4 py-3">
-            <SectionLabel>GitHub login — device flow</SectionLabel>
-            {!ghStart && (
-              <div className="flex flex-wrap items-center gap-3">
-                <p className="text-[13px] text-dim">
-                  No key to paste. Start a login and tap <span className="text-ink">Authorize</span> on your
-                  phone — the session stays on the server and never reaches this browser.
-                </p>
-                <button type="button" className={cx(btn.base, btn.ghost)} disabled={ghBusy}
-                  onClick={() => void startGitHub()}>
-                  {ghBusy ? <Spinner /> : null} Start GitHub login
-                </button>
-              </div>
-            )}
-            {ghStart && (ghStatus == null || ghStatus.status === 'pending') && (
-              <div className="space-y-2">
-                <ol className="space-y-1 text-[13px] text-dim">
-                  <li>
-                    1. Open{' '}
-                    <a className="text-ink underline underline-offset-2" href={ghStart.verification_uri}
-                      target="_blank" rel="noreferrer">{ghStart.verification_uri}</a>
-                  </li>
-                  <li>
-                    2. Enter code{' '}
-                    <Mono className="text-[15px] text-ink">{ghStart.user_code}</Mono>
-                  </li>
-                </ol>
-                <div className="flex flex-wrap items-center gap-2 text-[13px] text-mute">
-                  <Spinner /> Waiting for authorization…
-                  <span className="text-mute/70">
-                    code expires in {Math.max(1, Math.round(ghStart.expires_in / 60))} min
-                    {ghBackoff > 0 ? ` · polling every ${Math.max(3, ghStart.interval || 5) + ghBackoff}s` : ''}
-                  </span>
-                </div>
-                {ghStatus?.detail && (
-                  <p className="text-[13px] text-warn">{ghStatus.detail}</p>
-                )}
-                <button type="button" className={cx(btn.base, btn.ghost)}
-                  onClick={() => {
-                    const handle = ghStart.handle;
-                    setGhStart(null); setGhStatus(null);
-                    void ghDeviceCancel(handle).catch(() => undefined);
-                  }}>
-                  Cancel login
-                </button>
-              </div>
-            )}
-            {ghStatus?.status === 'authorized' && (
-              <p className="font-mono text-[13px] text-ok">
-                ✓ @{ghStatus.github_login} authorized — Save &amp; validate to store the key
-              </p>
-            )}
-            {(ghStatus?.status === 'expired' || ghStatus?.status === 'error') && (
-              <div className="space-y-2">
-                <p className="text-[13px] text-bad">
-                  {ghStatus.status === 'expired'
-                    ? 'The code expired before you authorized it.'
-                    : ghStatus.detail || 'GitHub refused the authorization.'}
-                </p>
-                <button type="button" className={cx(btn.base, btn.ghost)} disabled={ghBusy}
-                  onClick={() => void startGitHub()}>
-                  {ghBusy ? <Spinner /> : null} Start again
-                </button>
-              </div>
-            )}
-            <ErrBox e={ghErr} onDismiss={() => setGhErr(null)} />
           </div>
         )}
         {bridgeID && <BridgePanel bridge={bridge} loading={bridges === null} />}

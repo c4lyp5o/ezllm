@@ -238,32 +238,6 @@ export async function postKeyTestStream<T>(
   throw new ApiError({ status: 0, type: 'error', message: 'stream ended without a result' });
 }
 
-// ── GitHub Copilot device flow (the phone path) ───────────────────────────
-// Start a flow, poll its status, cancel it. The OAuth session itself never
-// crosses the wire: the key add names the handle (device_handle) and the
-// server resolves the credential itself. docs/github-copilot-runbook.md.
-export type GhDeviceStart = {
-  handle: string;
-  verification_uri: string;
-  user_code: string;
-  expires_in: number;
-  interval: number;
-};
-export type GhDeviceStatus = {
-  status: 'pending' | 'authorized' | 'expired' | 'error';
-  github_login?: string;
-  copilot_expires_at?: string;
-  detail?: string;
-  // GitHub's RFC 8628 §3.5 "poll less often". GitHub WITHHOLDS the token until
-  // the poller lengthens its interval, so this must raise ours (see Providers).
-  slow_down?: boolean;
-};
-export const ghDeviceStart = () => post<GhDeviceStart>('/admin/github/device');
-export const ghDeviceStatus = (handle: string) =>
-  get<GhDeviceStatus>(`/admin/github/device/${encodeURIComponent(handle)}`);
-export const ghDeviceCancel = (handle: string) =>
-  del(`/admin/github/device/${encodeURIComponent(handle)}`);
-
 // ── subscription bridges ─────────────────────────────────────────────────
 // GET /admin/bridges: which loopback bridges exist, which are running, and
 // how to turn one on. A key add names `bridge` instead of api_key and the

@@ -48,7 +48,11 @@ RUN apk add --no-cache file >/dev/null 2>&1 \
 # /lib/ld-linux-aarch64.so.1, also in base). base carries glibc + CA certs + NSS (DNS resolution needs libnss_dns,
 # which ldd does not list) but still no shell and no package manager. The ezllm
 # binary itself remains static.
-FROM gcr.io/distroless/base-debian12:nonroot
+# distroless/cc (base + libstdc++ and libgcc_s): the Copilot CLI is a C++-linked
+# glibc binary (ldd: libstdc++.so.6, libgcc_s.so.1) and fails to exec on plain
+# base with "error while loading shared libraries: libstdc++.so.6" — the bridge
+# boots, reports cli=unknown, and every turn fails. Measured 2026-11-05.
+FROM gcr.io/distroless/cc-debian12:nonroot
 
 COPY --from=builder /out/ezllm /app/ezllm
 

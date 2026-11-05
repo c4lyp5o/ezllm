@@ -38,6 +38,10 @@ Compose sketch:
       - ./data:/data
 ```
 
+**Image base.** The CLI links `libstdc++`/`libgcc_s`, so the image runs on
+`distroless/cc-debian12`, not `base`. On `base` the bridge boots with
+`cli=unknown` and every turn fails with "error while loading shared libraries".
+
 **Login.** One-time, on the host: `copilot login` (device code on a headless
 box). The token lands in `~/.copilot/`, which is what the mount above carries.
 Boot fails loudly if `EZLLM_COPILOT_HOME` is not a directory — a bridge that

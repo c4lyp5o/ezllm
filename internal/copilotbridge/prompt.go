@@ -6,12 +6,13 @@ import (
 	"strings"
 )
 
-// Request is one OpenAI chat call reduced to what a headless `copilot` turn can
-// carry: one prompt, one model, one stream flag.
+// Request is one OpenAI chat call reduced to what a `copilot` turn can carry: a
+// system text, a prompt, the caller's tools, one model, one stream flag.
 //
-// There is no system-prompt flag and no history replay on the CLI, so system
-// text and prior turns are flattened into the prompt as a deterministic
-// transcript (the agy rule, docs/antigravity-subscription-design.md §3).
+// Neither CLI path can replay history as real turns, so prior turns are flattened
+// into a deterministic transcript (the agy rule,
+// docs/antigravity-subscription-design.md §3). `-p` also has no system-prompt flag,
+// so its Prompt carries the system text too.
 type Request struct {
 	Model        string
 	Stream       bool

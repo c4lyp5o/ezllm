@@ -27,14 +27,17 @@ after Claude, Codex and AGY: kind `copilot-bridge`, base
 to paste and no private API to reverse-engineer. Usage is exact for the first
 time on this provider — the CLI reports inclusive prompt tokens with a cached
 slice, and the ledger derives the cold part (verified: 13,971 inclusive / 9,420
-cached → `tokens_in 4,551` + `tokens_cached_read 9,420` + `tokens_out 6`). A
-one-word answer costs ~13–14k prompt tokens and one premium request, because
-the hop carries the CLI's own 27 tool schemas: that is upstream's shape, and it
-is now visible in the ledger instead of implied.
+cached → `tokens_in 4,551` + `tokens_cached_read 9,420` + `tokens_out 6`). Each
+turn is one premium request, and on AI-credit plans the charge rides `raw_usage`
+as `copilot_nano_aiu`.
 
-**Known limitation, by design not oversight:** client tool schemas are refused
-(`chat_tools_unsupported`) — the CLI's non-interactive surface cannot hand a
-pending tool call back to a caller. A tool-using hop fails loudly.
+**Client tools are native, and the CLI's agent scaffolding is off the bill.** Every
+turn runs on the CLI's headless channel (`copilot --headless --stdio`): the model
+calls the caller's tools natively, nothing the caller did not declare can run on
+the box, and a short question measured 95 prompt tokens against 13,957 on `-p`.
+`--headless` is not in `--help`, so each turn checks the protocol version first: on
+a mismatch plain chat falls back to `-p`, and a request with tools answers
+`chat_tools_unsupported` before anything is billed, so the router fails over.
 
 Migration of an existing database is a manual three-step in the deploy window
 (add the CLI provider, re-point combos/hops, disable the old account); see

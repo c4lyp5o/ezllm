@@ -1,9 +1,11 @@
 # GitHub Copilot CLI bridge — design
 
-Status: **SHIPPED 2026-11-05** (M1; nine commits on
-`melissa/copilot-cli-bridge`, off the tool-pruning-drop tip). Supersedes the
-OAuth/device-flow provider (`internal/githubcopilot`), which is deleted in the
-same branch — see §11 for what changed between this design and the code, and
+Status: **SHIPPED 2026-11-05** on `melissa/copilot-cli-bridge`, off the
+tool-pruning-drop tip. The body below is the original `-p` design: since then every
+turn runs on the CLI's headless channel, with `-p` as plain chat's fallback (§10
+second addendum). Supersedes the OAuth/device-flow provider
+(`internal/githubcopilot`), which is deleted in the same branch — see §11 for what
+changed between this design and the code, and
 `docs/copilot-cli-bridge-runbook.md` for operating it.
 
 ## 1. What changes and why
@@ -92,10 +94,9 @@ books `tokens_in` (cold), `tokens_cached_read`, `tokens_cached_write`,
 synthesized envelope** — this is the first subscription surface where the ledger
 gets exact numbers.
 
-The 13k-token floor per call is the price of the CLI's agent scaffolding; a
-`--model=auto` + `--available-tools`-restricted invocation is the lever if that
-ever matters. Report it in the runbook so nobody reads the ledger and thinks the
-bridge is leaking.
+The 13k-token floor per call is the price of the CLI's agent scaffolding on `-p`.
+The channel removes it (§10 second addendum), so it now applies only on the fallback.
+The runbook reports both so nobody reads the ledger and thinks the bridge is leaking.
 
 ## 6. Model catalog
 
@@ -331,6 +332,8 @@ right about the shape and wrong about four details.
 
 Unchanged from the design: prompt on stdin (measured — `MAX_ARG_STRLEN` 128 KB
 against 250–600 KB prompts), no `--allow-tool`, exact-or-zero usage, typed
-and exits. The client-tools refusal did NOT survive contact with a live combo: it
-is replaced by prompt-level emulation (§10 addendum). The §10 SDK spike was NOT
-run; native tool calling remains a documented limitation.
+and exits. On the `-p` fallback that all still holds. The client-tools refusal did
+NOT survive contact with a live combo: it was replaced by prompt-level emulation
+(§10 addendum), which failed live and was replaced in turn by native tools over the
+headless channel (§10 second addendum). Over the channel the prompt goes in a
+JSON-RPC message instead of on stdin; a 189 KB prompt was measured.

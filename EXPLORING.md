@@ -680,15 +680,23 @@ keeping: **measure before building the hot path, and check that your instrument
 can see the failure you are trying to prevent.**
 
 ### M16 — GitHub Copilot CLI bridge ✅ (2026-11-05; design `docs/copilot-cli-bridge-design.md`, runbook `docs/copilot-cli-bridge-runbook.md`)
-- `internal/copilotbridge/` — one CLI child per request (`copilot -s --output-format=json
-  --no-ask-user [--model id]`), prompt on **stdin** (argv caps at 128 KB and real
-  prompts are 250–600 KB), JSONL parser whose fixture pins the 1.0.105 event names
-  (`assistant.message_delta`, `session.usage_checkpoint`, `result`), typed exits
-  (`not_logged_in`→401, quota→429, `model_not_in_plan`→403, else 502), and usage that is
-  exact or zero — never estimated.
-- `cmd/ezllm/copilotbridge.go` — boot wiring + `copilotModelIDs`, the **curated** catalog:
-  a documented-but-ungated id here makes the key test read "not in your plan" as a bad
-  credential and reject a good bridge, so an id is listed only after a real turn answered.
+- `internal/copilotbridge/channel.go` — the path every turn takes: one
+  `copilot --headless --stdio` child per request, LSP-framed JSON-RPC, single-threaded
+  on purpose. `driveTurn` pings (the free protocol gate), creates a session with the
+  caller's system text and an `availableTools` allowlist that must be present even
+  when empty, sends the transcript, and stops at the first batch of declared tool
+  calls (`session.abort`, then drains for the usage checkpoint).
+- `internal/copilotbridge/run.go` — `Runner`: slots and bounded queue shared by both
+  paths, the filtered child env, `cliEvent` + `applyUsage`, typed failures
+  (`not_logged_in`→401, quota→429, `model_not_in_plan`→403, else 502), and usage that
+  is exact or zero, never estimated. `Run` is the `copilot -p` fallback, prompt on
+  **stdin** (argv caps at 128 KB and real prompts are 250–600 KB).
+- `internal/copilotbridge/bridge.go` — `chat`: a gate refusal
+  (`chat_tools_unsupported`) falls back to `-p` for plain chat and stands for a request
+  with tools, which the router fails over on (`proxy.go` `refusesTools`).
+- `cmd/ezllm/copilotbridge.go` — boot wiring, the channel probe behind `/status`, and
+  `copilotCatalog`: `auto` first (the key test probes the first candidate), then every
+  id `copilot help config` documents. The plan decides per request with a typed 403.
 - `internal/provider/copilotbridge.go` — `KindCopilotBridge` (`copilot-bridge`), an adapter
   embedding `*openAICompatible`: the wire is shared, the identity is its own.
 - `internal/server/bridges.go` — registry entry id `github-copilot` (label "GitHub

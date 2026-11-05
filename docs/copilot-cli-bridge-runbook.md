@@ -163,6 +163,8 @@ slice rides `prompt_tokens_details.cached_tokens`, and the ledger derives the
 cold part. Verified end-to-end: bridge reported 13,971 inclusive with 9,420
 cached; the ledger row stored `tokens_in 4,551` + `tokens_cached_read 9,420`.
 A turn with no usage block stores ZEROS — "unknown", never estimated.
+`raw_usage` also carries `copilot_premium_requests` and `copilot_nano_aiu`, the turn's
+AI-credit charge in billionths of a credit.
 
 ## Failure classes
 
@@ -179,7 +181,8 @@ A turn with no usage block stores ZEROS — "unknown", never estimated.
 `scripts/bridge_update.py` covers it like the other three (official channel:
 `copilot update`). The JSONL event set is version-sensitive: a release that
 renames `session.usage_checkpoint` records usage as unknown (zeros), and the
-parser fixture in `internal/copilotbridge/bridge_test.go` is the tripwire.
+parser fixtures in `internal/copilotbridge/bridge_test.go` (`-p`) and `channel_test.go`
+(the channel, with its numbers written as `1.0`) are the tripwire.
 
 ## Known gaps
 

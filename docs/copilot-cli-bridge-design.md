@@ -1,8 +1,10 @@
 # GitHub Copilot CLI bridge — design
 
-Status: **proposed, awaiting sign-off on three decisions (§9).** Supersedes the
-OAuth/device-flow provider (`internal/githubcopilot`). Branch
-`melissa/copilot-cli-bridge`, off the tool-pruning-drop tip.
+Status: **SHIPPED 2026-11-05** (M1; nine commits on
+`melissa/copilot-cli-bridge`, off the tool-pruning-drop tip). Supersedes the
+OAuth/device-flow provider (`internal/githubcopilot`), which is deleted in the
+same branch — see §11 for what changed between this design and the code, and
+`docs/copilot-cli-bridge-runbook.md` for operating it.
 
 ## 1. What changes and why
 
@@ -192,3 +194,37 @@ The refusal in M1 is never silent: the bridge's `/status` names the capability
 ("client tools: not yet — SDK spike pending"), so an operator reading the bridge
 card is never told the hop can do something it cannot.
 
+
+## 11. What changed between this design and the shipped code
+
+Recorded because each one was found by a gate, not by review — the design was
+right about the shape and wrong about four details.
+
+1. **The catalog must be PROVEN ids only.** §5 said "curated ids plus per-model
+   probe verdicts". In practice the first catalog carried documented ids this
+   plan does not include (`gpt-5.3-codex`, `claude-haiku-4.5`, `mai-code-1.1-flash`).
+   The key test probes the first catalog candidate, so the CLI's "that model is
+   not included in your Copilot plan" came back as a REJECTED KEY (422) and a
+   perfectly good bridge was refused. `copilotModelIDs` is now `auto` +
+   `gpt-6.1-sol`, both proven by a real turn. Rule: an id joins the list after a
+   turn answers on it, never because it is documented.
+2. **The bridge registry entry's `Kind` must be the ACCOUNT kind**, not the wire
+   kind. Registering `github-copilot` with `Kind: "openai-compatible"` made the
+   key-add refuse a `copilot-bridge` account ("that account does not point at
+   this bridge"), because `bridgeForURL` compares the account's kind. It is now
+   `Kind: "copilot-bridge"` — one account kind, one wire shape.
+3. **`KnownWireSupport` died with the provider.** The router consulted it before
+   a probe ("the provider's own API shape outranks an observation"). Copilot's
+   OAuth API was the only kind declaring such facts, so the hook is gone and a
+   probe verdict is authoritative again. A future kind that needs to outrank a
+   probe should get a capability hook, not a model-id table in the router.
+4. **`config.yaml` has a SECOND kind allow-list.** `internal/config/config.go`
+   duplicates the provider kinds as strings so validation stays
+   dependency-free; it did not know `copilot-bridge` and still accepted
+   `github-copilot`. Both are fixed — a kind added to `provider.ValidKinds`
+   without this list is a config that refuses valid YAML.
+
+Unchanged from the design: prompt on stdin (measured — `MAX_ARG_STRLEN` 128 KB
+against 250–600 KB prompts), no `--allow-tool`, exact-or-zero usage, typed
+exits, and the client-tools refusal (`chat_tools_unsupported`). The §10 SDK
+spike was NOT run; the refusal stands as a documented limitation.

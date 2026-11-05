@@ -50,6 +50,32 @@ server resolves the bridge token on the key-add call (`kind: copilot-bridge`,
 base `http://127.0.0.1:8793/v1`). If the bridge is off, the add answers 409
 naming the env var.
 
+## Migrating a database that still carries an OAuth account
+
+A pre-retirement database keeps its `kind: github-copilot` account, and nothing
+stops the router from booting with it — measured on 2026-11-05 with the shipped
+binary and a planted row:
+
+- **Boot: UP.** No refusal, no warning; the account still appears in
+  `/admin/accounts` with `enabled: true`, so the dashboard looks healthy.
+- **Every request through it fails**, and this is the only signal:
+  `502 provider: unknown kind "github-copilot" (want one of [opencode-go
+  openai-compatible anthropic-compatible gemini-openai gemini-web claude-web
+  copilot-bridge])`.
+
+So the migration is not optional and it is not automatic — the old account is a
+trap that looks fine until traffic arrives. In the deploy window:
+
+1. Providers → Add provider → **GitHub Copilot (CLI)**, namespace `copilot`,
+   then Save & validate (no key to paste; the bridge must be running).
+2. Point every combo/hop that named the old account at the new one. A combo
+   referencing a dead account keeps failing even after the new one exists.
+3. Disable (or delete) the `github-copilot` account so it stops looking usable.
+4. Drive one real turn through the new hop and check `/admin/requests`: the hop
+   must show `copilot-bridge` and a usage row with a cached split. Remember:
+   a turn that needs client tools will refuse (`chat_tools_unsupported`) — that
+   is expected on this hop, not a failed migration.
+
 ## Models
 
 There is NO non-interactive model list. The bridge advertises a **curated**

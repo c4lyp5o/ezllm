@@ -11,7 +11,34 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.6.0**
+**Current: v2.0.0**
+
+## v2.0.0 — 2026-11-05
+
+MAJOR, because this is a breaking change to config and to the data model rather
+than a feature addition: the `github-copilot` provider kind no longer exists, so
+a `config.yaml` naming it is refused and an account row still carrying it fails
+every request (`502 provider: unknown kind "github-copilot"`). The three device
+routes and `ezllm github-login` are gone with it.
+
+**GitHub Copilot now rides the official CLI**, the fourth subscription bridge
+after Claude, Codex and AGY: kind `copilot-bridge`, base
+`http://127.0.0.1:8793/v1`, credential = the CLI's own login, so there is no key
+to paste and no private API to reverse-engineer. Usage is exact for the first
+time on this provider — the CLI reports inclusive prompt tokens with a cached
+slice, and the ledger derives the cold part (verified: 13,971 inclusive / 9,420
+cached → `tokens_in 4,551` + `tokens_cached_read 9,420` + `tokens_out 6`). A
+one-word answer costs ~13–14k prompt tokens and one premium request, because
+the hop carries the CLI's own 27 tool schemas: that is upstream's shape, and it
+is now visible in the ledger instead of implied.
+
+**Known limitation, by design not oversight:** client tool schemas are refused
+(`chat_tools_unsupported`) — the CLI's non-interactive surface cannot hand a
+pending tool call back to a caller. A tool-using hop fails loudly.
+
+Migration of an existing database is a manual three-step in the deploy window
+(add the CLI provider, re-point combos/hops, disable the old account); see
+`docs/copilot-cli-bridge-runbook.md` § Migrating.
 
 ## v1.6.0 — 2026-10-31
 

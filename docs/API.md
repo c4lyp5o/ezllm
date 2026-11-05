@@ -274,6 +274,10 @@ Add `?force=true` to delete anyway (cascades: keys, models, quota rows).
 // or, for a running subscription bridge (see GET /admin/bridges): the server supplies the key
 { "label":"primary", "bridge":"claude-sub" }
 ```
+Bridge ids are `claude-sub`, `codex-sub`, `agy-sub` and `github-copilot` — the
+last one belongs to the `copilot-bridge` kind (the Copilot CLI), whose base URL
+is `http://127.0.0.1:8793/v1` and whose credential is the CLI's own login, so
+there is no key to paste at all.
 `bridge` is refused with `api_key` (`400`), for an unknown id (`400`), for an
 account that does not point at that bridge's kind and base URL (`400`), and while the bridge is
 not running (`409`, naming the variable that turns it on). A key test against a bridge base URL

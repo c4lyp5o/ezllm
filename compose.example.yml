@@ -64,11 +64,16 @@ services:
       # EZLLM_BACKUP_DIR: /backups
       # EZLLM_BACKUP_SECRET_FILE: /run/secrets/ezllm-backup
 
-      # ── GitHub Copilot provider ──
-      # Copilot CLI version presented upstream. GitHub raises a floor and
-      # answers 466 below it; bump to `npm view @github/copilot version`.
-      GITHUB_COPILOT_CLI_VERSION: 1.0.103
-      # GITHUB_OAUTH_CLIENT_ID: <built-in>
+      # ── GitHub Copilot CLI bridge ── docs/copilot-cli-bridge-runbook.md
+      # The OAuth provider is deleted: the credential is the CLI's own login,
+      # so there is no client id or version header to configure. `on` without
+      # the CLI and a login (the two mounts at the end of `volumes`) fails the
+      # boot rather than starting a surface that 401s every request.
+      EZLLM_COPILOT_BRIDGE: "off"
+      # EZLLM_COPILOT_BIN: /opt/copilot/copilot
+      # EZLLM_COPILOT_HOME: /copilot-home
+      # EZLLM_COPILOT_BRIDGE_ADDR: 127.0.0.1:8793
+      # EZLLM_COPILOT_BRIDGE_TOKEN_FILE: /data/copilot-bridge.token
 
       # ── Claude subscription bridge ── docs/claude-bridge-runbook.md
       # Loopback-only; an anthropic-compatible account dials it. `on` without

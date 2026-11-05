@@ -127,12 +127,20 @@ Setup and the login that must avoid the desktop keyring: [agy-bridge-runbook.md]
 | `EZLLM_AGY_BRIDGE_TOKEN_FILE` | `/data/agy-bridge.token` | Shared secret for the account key; generated (0600) when missing. |
 | `EZLLM_AGY_BRIDGE_CONCURRENCY` | `2` | Concurrent `agy` children (~207 MB each); a positive integer, anything else fails the boot. |
 
-## GitHub Copilot provider
+## GitHub Copilot CLI bridge
+
+The OAuth provider and its two variables (`GITHUB_COPILOT_CLI_VERSION`,
+`GITHUB_OAUTH_CLIENT_ID`) are deleted — nothing reads them. The login is the
+CLI's own, so there is no client id to configure. Runbook:
+`docs/copilot-cli-bridge-runbook.md`.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `GITHUB_COPILOT_CLI_VERSION` | built-in | Overrides the Copilot CLI version ezllm presents upstream. |
-| `GITHUB_OAUTH_CLIENT_ID` | built-in | Overrides the OAuth client id for the GitHub device login. |
+| `EZLLM_COPILOT_BRIDGE` | off | `on` starts the loopback surface; without it the provider add answers 409 naming this variable. |
+| `EZLLM_COPILOT_BIN` | `/opt/copilot/copilot` | The GitHub Copilot CLI binary. |
+| `EZLLM_COPILOT_HOME` | `/copilot-home` | `HOME` for the CLI — the directory its login lives in (mount it read-write; the CLI writes session state). |
+| `EZLLM_COPILOT_BRIDGE_ADDR` | `127.0.0.1:8793` | Listen address; non-loopback is refused. |
+| `EZLLM_COPILOT_BRIDGE_TOKEN_FILE` | — (required) | Shared secret for the account key; generated (0600) when missing. Boot refuses without a path. |
 
 ## Compose-only
 

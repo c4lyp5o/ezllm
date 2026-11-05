@@ -62,22 +62,34 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   `session.usage_checkpoint` gives inclusive prompt tokens with a cached slice;
   verified end-to-end through the gateway (bridge 13,971 inclusive / 9,420
   cached → ledger `tokens_in 4,551` + `tokens_cached_read 9,420` + `tokens_out 6`).
-- **Costs what an agent costs:** ~13–14k prompt tokens per call even for a
-  one-word answer (≈9.4k is the CLI's own 27 tool schemas) and one premium
-  request. That is upstream's shape; it is visible in the ledger rather than
-  surprising.
-- **Client tools are emulated, not refused.** `-p` has no option that yields a
-  pending tool call, so the bridge renders the caller's `tools` into the prompt,
-  parses `<tool_call>` replies back into OpenAI `tool_calls`, and replays tool
-  results on the next turn (`tool_choice` honoured). It depends on the model
-  following the format and buffers the stream while tools are declared; a reply
-  that does not parse is plain text, never an invented call. The first cut
-  refused tools (`chat_tools_unsupported`) and a live combo returned 400 on its
-  first request. On those turns the CLI's own built-in tools are hidden from the
-  model (`--available-tools=` a nonexistent name, `--disable-builtin-mcps`):
-  left visible, the model preferred them over the text protocol and was denied.
-  A hop that still refuses tools now fails over with no cooldown
-  (`refusesTools`) instead of ending the client run. Design §10 addendum.
+- **Every turn runs on the CLI's headless channel, without its agent scaffolding.**
+  `copilot -p` costs ~13–14k prompt tokens even for a one-word answer (≈9.4k is the
+  CLI's own tool schemas). The channel replaces the system message and shows the
+  model only the caller's tools: the same kind of short question measured 95 prompt
+  tokens against 13,957. If the channel is unavailable, plain chat falls back to
+  `-p`, so the bridge still serves it. Only that refusal falls back; a failure at
+  the CLI is not repeated, because that would charge for it twice.
+- **Client tools are native.** `-p` has no option that yields a pending tool
+  call; `copilot --headless --stdio`, the JSON-RPC channel the CLI's bundled SDK
+  uses, does. The model calls the caller's tools
+  natively, the bridge returns the batch as OpenAI `tool_calls` with the CLI's own
+  call ids and stops the turn, and the results come back on the next request as
+  a fresh session with the history replayed as text. Only the caller's tools are
+  visible, so nothing the caller did not declare can run on the box; a caller's
+  tool named `bash` goes back to the caller. Text streams live. Each turn checks
+  the channel's protocol version first, and a mismatch, a missing `--headless` or
+  an unregistrable tool name is, on a request with tools, a 400
+  `chat_tools_unsupported` before anything is billed, which the router fails over
+  on with no cooldown (`refusesTools`).
+  `tool_choice` required is an instruction the model can ignore, because the
+  channel has no equivalent. This replaces two earlier cuts from the same release:
+  a refusal, which returned 400 on a live combo's first request, and a `<tool_call>`
+  text protocol, which the model ignored and which charged for empty turns.
+- **Usage no longer depends on how the CLI writes a number.** The channel writes
+  `totalPremiumRequestCost` as `1.0`, which an int field refused, dropping the
+  whole event and booking zero usage. A fractional multiplier would have done the
+  same on `-p`. `copilot_nano_aiu` now rides `raw_usage` for AI-credit plans.
+  Design §10 addendum.
 - **Pressure is bounded and visible.** `EZLLM_COPILOT_BRIDGE_CONCURRENCY`
   (2), `_QUEUE` (8) and `_TIMEOUT` (300s) are configurable; past the queue the
   bridge answers 429 `queue_full` + `Retry-After: 5` instead of parking the

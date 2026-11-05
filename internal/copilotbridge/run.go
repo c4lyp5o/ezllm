@@ -30,39 +30,34 @@ type Usage struct {
 	CachedRead       int
 	CachedWrite      int
 	ReasoningTokens  int
-	PremiumRequests  int
-	Model            string
+	PremiumRequests  float64 // a model multiplier can make this fractional
+	// NanoAIU is the turn's AI-credit charge in billionths of a credit, the unit
+	// token-billed plans pay in. Zero when the CLI did not report it.
+	NanoAIU int64
+	Model   string
 }
 
 // Result is one headless turn.
 type Result struct {
 	Text  string
 	Usage Usage
-	// SessionID lets a later milestone resume this conversation; M1 only logs
-	// it, because a resumed session cannot accept an external tool result (see
-	// docs/copilot-cli-bridge-design.md §10).
+	// SessionID is logged only: a later request is a fresh session (channel.go).
 	SessionID string
+	// ToolCalls is the batch the model asked the caller to run (RunChannel only).
+	ToolCalls []ToolCall
 	// AvailableModels is what the CLI says this login can use, read from the
 	// session.auto_mode_resolved event of an `auto` turn. It costs nothing: it
 	// rides a turn that was happening anyway.
 	AvailableModels []string
 }
 
-type bareKey struct{}
-
-// WithoutBuiltinTools marks a turn that must run with NONE of the CLI's own
-// tools visible to the model. Used when the caller's tools are emulated through
-// the prompt (tools.go): offered natively formatted built-ins (shell, file edit,
-// ...) beside a text protocol, the model reaches for the built-ins, the CLI
-// denies them (no --allow-tool), and the turn ends with "terminal access was
-// denied" instead of a <tool_call>. Measured 2026-11-05.
-func WithoutBuiltinTools(ctx context.Context) context.Context {
-	return context.WithValue(ctx, bareKey{}, true)
-}
-
-// Executor runs one prompt. *Runner implements it; tests inject a fake.
+// Executor runs one turn. *Runner implements it; tests inject a fake.
 type Executor interface {
+	// Run is a plain chat turn through `copilot -p`, the fallback for a CLI whose
+	// channel is unavailable.
 	Run(ctx context.Context, model, prompt string, delta func(string) error) (Result, error)
+	// RunChannel is a chat turn, with or without client tools, over the channel.
+	RunChannel(ctx context.Context, turn ChannelTurn, delta func(string) error) (Result, error)
 }
 
 // Runner spawns the official Copilot CLI once per request.
@@ -187,6 +182,11 @@ func (r *Runner) init() {
 // A delta error aborts the turn (the caller has stopped reading).
 func (r *Runner) Run(ctx context.Context, model, prompt string, delta func(string) error) (Result, error) {
 	r.init()
+	return r.slotted(ctx, func() (Result, error) { return r.run(ctx, model, prompt, delta) })
+}
+
+// slotted runs one turn under the concurrency slots and the bounded queue.
+func (r *Runner) slotted(ctx context.Context, turn func() (Result, error)) (Result, error) {
 	select {
 	case r.sem <- struct{}{}:
 	default:
@@ -209,10 +209,22 @@ func (r *Runner) Run(ctx context.Context, model, prompt string, delta func(strin
 	defer func() { <-r.sem }()
 	r.inflight.Add(1)
 	defer r.inflight.Add(-1)
-	res, err := r.run(ctx, model, prompt, delta)
+	res, err := turn()
 	r.served.Add(1)
 	r.record(err)
 	return res, err
+}
+
+func (r *Runner) stampFirstByte(d time.Duration) {
+	r.firstByteNS.Add(int64(d))
+	r.firstByteN.Add(1)
+	r.lastByteNS.Store(int64(d))
+}
+
+func (r *Runner) logTurn(res Result) {
+	r.logf("copilot-bridge: turn ok session=%s model=%s in=%d cached=%d out=%d premium=%g nano_aiu=%d tool_calls=%d",
+		res.SessionID, res.Usage.Model, res.Usage.PromptTokens, res.Usage.CachedRead,
+		res.Usage.CompletionTokens, res.Usage.PremiumRequests, res.Usage.NanoAIU, len(res.ToolCalls))
 }
 
 func (r *Runner) run(ctx context.Context, model, prompt string, delta func(string) error) (Result, error) {
@@ -230,12 +242,6 @@ func (r *Runner) run(ctx context.Context, model, prompt string, delta func(strin
 	args := []string{"-s", "--output-format=json", "--no-ask-user"}
 	if model != "" && model != "auto" {
 		args = append(args, "--model", model)
-	}
-	if bare, _ := ctx.Value(bareKey{}).(bool); bare {
-		// --available-tools is an allowlist of what the model can SEE: naming a
-		// tool that does not exist hides every built-in. The = form keeps the
-		// variadic flag from swallowing the next argument.
-		args = append(args, "--available-tools=ezllm-no-builtin-tools", "--disable-builtin-mcps")
 	}
 	cmd := exec.CommandContext(ctx, r.Bin, args...)
 	cmd.Stdin = strings.NewReader(prompt)
@@ -255,11 +261,7 @@ func (r *Runner) run(ctx context.Context, model, prompt string, delta func(strin
 	}
 
 	began := time.Now()
-	res, parseErr := parseStream(&firstByteReader{r: stdout, start: began, onHit: func(d time.Duration) {
-		r.firstByteNS.Add(int64(d))
-		r.firstByteN.Add(1)
-		r.lastByteNS.Store(int64(d))
-	}}, delta)
+	res, parseErr := parseStream(&firstByteReader{r: stdout, start: began, onHit: r.stampFirstByte}, delta)
 	if parseErr != nil && !errors.Is(parseErr, io.EOF) {
 		// Nobody reads stdout any more: kill the child now or it blocks on a
 		// full pipe until the timeout while holding a slot.
@@ -281,10 +283,113 @@ func (r *Runner) run(ctx context.Context, model, prompt string, delta func(strin
 		// receive an empty answer and no error.
 		return res, fmt.Errorf("copilot-bridge: the CLI finished without an assistant message (%s)", firstLine(stderr.String()))
 	}
-	r.logf("copilot-bridge: turn ok session=%s model=%s in=%d cached=%d out=%d premium=%d",
-		res.SessionID, res.Usage.Model, res.Usage.PromptTokens, res.Usage.CachedRead,
-		res.Usage.CompletionTokens, res.Usage.PremiumRequests)
+	r.logTurn(res)
 	return res, nil
+}
+
+// num reads a CLI number. The CLI writes the same field as 1 on -p and 1.0 on the
+// tool channel (measured, CLI 1.0.105), and a model with a fractional multiplier
+// would write 0.33. Decoding that into an int fails the WHOLE event and the turn
+// books zero usage, so nothing here is an int, and an odd value reads as zero
+// rather than losing the event.
+type num float64
+
+func (n *num) UnmarshalJSON(b []byte) error {
+	var f float64
+	if json.Unmarshal(b, &f) == nil {
+		*n = num(f)
+	}
+	return nil
+}
+
+// cliEvent is one CLI session event. `-p` emits them as JSONL and the tool
+// channel wraps the same shape in a JSON-RPC notification.
+type cliEvent struct {
+	Type string `json:"type"`
+	// `result` carries sessionId and usage at the TOP level, not under
+	// data (measured; the fixture pins it).
+	SessionID string `json:"sessionId"`
+	Usage     struct {
+		PremiumRequests num `json:"premiumRequests"`
+	} `json:"usage"`
+	Data struct {
+		AvailableModels []string `json:"availableModels"`
+		DeltaContent    string   `json:"deltaContent"`
+		Content         string   `json:"content"`
+		Model           string   `json:"model"`
+		SessionID       string   `json:"sessionId"`
+		// assistant.message: what the model asked to run.
+		ToolRequests []struct {
+			ToolCallID string          `json:"toolCallId"`
+			Name       string          `json:"name"`
+			Arguments  json.RawMessage `json:"arguments"`
+		} `json:"toolRequests"`
+		// session.error
+		ErrorType string `json:"errorType"`
+		ErrorCode string `json:"errorCode"`
+		Message   string `json:"message"`
+		Usage     struct {
+			PremiumRequests num `json:"premiumRequests"`
+		} `json:"usage"`
+		TotalNanoAIU num `json:"totalNanoAiu"`
+		// session.usage_checkpoint (one entry per model in the turn)
+		AccountingSnapshot struct {
+			TokenDetails struct {
+				Input      struct{ TokenCount num } `json:"input"`
+				CacheRead  struct{ TokenCount num } `json:"cache_read"`
+				CacheWrite struct{ TokenCount num } `json:"cache_write"`
+				Output     struct{ TokenCount num } `json:"output"`
+			} `json:"tokenDetails"`
+			ProviderModelMetrics []struct {
+				ModelID string `json:"modelId"`
+				Metrics struct {
+					Usage struct {
+						InputTokens      num `json:"inputTokens"`
+						OutputTokens     num `json:"outputTokens"`
+						CacheReadTokens  num `json:"cacheReadTokens"`
+						CacheWriteTokens num `json:"cacheWriteTokens"`
+						ReasoningTokens  num `json:"reasoningTokens"`
+					} `json:"usage"`
+				} `json:"metrics"`
+			} `json:"providerModelMetrics"`
+			TotalPremiumRequestCost num `json:"totalPremiumRequestCost"`
+		} `json:"accountingSnapshot"`
+	} `json:"data"`
+}
+
+// applyUsage folds a session.usage_checkpoint into u.
+func (ev cliEvent) applyUsage(u *Usage) {
+	snap := ev.Data.AccountingSnapshot
+	u.CachedRead = int(snap.TokenDetails.CacheRead.TokenCount)
+	u.CachedWrite = int(snap.TokenDetails.CacheWrite.TokenCount)
+	u.CompletionTokens = int(snap.TokenDetails.Output.TokenCount)
+	// INCLUSIVE prompt total: input is the COLD part, cache_read and
+	// cache_write ride beside it (measured: 3 + 0 + 13,960 = 13,963).
+	u.PromptTokens = int(snap.TokenDetails.Input.TokenCount) + u.CachedRead + u.CachedWrite
+	if u.PromptTokens == 0 {
+		// Fall back to the per-model usage block when tokenDetails is
+		// absent on a future CLI.
+		for _, m := range snap.ProviderModelMetrics {
+			mu := m.Metrics.Usage
+			if mu.InputTokens+mu.OutputTokens == 0 {
+				continue
+			}
+			u.CachedRead, u.CachedWrite = int(mu.CacheReadTokens), int(mu.CacheWriteTokens)
+			u.CompletionTokens = int(mu.OutputTokens)
+			u.ReasoningTokens = int(mu.ReasoningTokens)
+			u.PromptTokens = int(mu.InputTokens + mu.CacheReadTokens + mu.CacheWriteTokens)
+			if u.Model == "" {
+				u.Model = m.ModelID
+			}
+			break
+		}
+	}
+	if snap.TotalPremiumRequestCost > 0 {
+		u.PremiumRequests = float64(snap.TotalPremiumRequestCost)
+	}
+	if ev.Data.TotalNanoAIU > 0 {
+		u.NanoAIU = int64(ev.Data.TotalNanoAIU)
+	}
 }
 
 // parseStream reads the JSONL event stream. The event set is version-sensitive,
@@ -301,47 +406,7 @@ func parseStream(r io.Reader, delta func(string) error) (Result, error) {
 		if len(line) == 0 || line[0] != '{' {
 			continue
 		}
-		var ev struct {
-			Type string `json:"type"`
-			// `result` carries sessionId and usage at the TOP level, not under
-			// data (measured; the fixture pins it).
-			SessionID string `json:"sessionId"`
-			Usage     struct {
-				PremiumRequests int `json:"premiumRequests"`
-			} `json:"usage"`
-			Data struct {
-				AvailableModels []string `json:"availableModels"`
-				DeltaContent    string   `json:"deltaContent"`
-				Content         string   `json:"content"`
-				Model           string   `json:"model"`
-				SessionID       string   `json:"sessionId"`
-				Usage           struct {
-					PremiumRequests int `json:"premiumRequests"`
-				} `json:"usage"`
-				// session.usage_checkpoint (one entry per model in the turn)
-				AccountingSnapshot struct {
-					TokenDetails struct {
-						Input      struct{ TokenCount int } `json:"input"`
-						CacheRead  struct{ TokenCount int } `json:"cache_read"`
-						CacheWrite struct{ TokenCount int } `json:"cache_write"`
-						Output     struct{ TokenCount int } `json:"output"`
-					} `json:"tokenDetails"`
-					ProviderModelMetrics []struct {
-						ModelID string `json:"modelId"`
-						Metrics struct {
-							Usage struct {
-								InputTokens      int `json:"inputTokens"`
-								OutputTokens     int `json:"outputTokens"`
-								CacheReadTokens  int `json:"cacheReadTokens"`
-								CacheWriteTokens int `json:"cacheWriteTokens"`
-								ReasoningTokens  int `json:"reasoningTokens"`
-							} `json:"usage"`
-						} `json:"metrics"`
-					} `json:"providerModelMetrics"`
-					TotalPremiumRequestCost int `json:"totalPremiumRequestCost"`
-				} `json:"accountingSnapshot"`
-			} `json:"data"`
-		}
+		var ev cliEvent
 		if err := json.Unmarshal(line, &ev); err != nil {
 			continue // a malformed line must not kill an otherwise good turn
 		}
@@ -365,41 +430,13 @@ func parseStream(r io.Reader, delta func(string) error) (Result, error) {
 		case "session.auto_mode_resolved":
 			res.AvailableModels = ev.Data.AvailableModels
 		case "session.usage_checkpoint":
-			u := &res.Usage
-			snap := ev.Data.AccountingSnapshot
-			u.CachedRead = snap.TokenDetails.CacheRead.TokenCount
-			u.CachedWrite = snap.TokenDetails.CacheWrite.TokenCount
-			u.CompletionTokens = snap.TokenDetails.Output.TokenCount
-			// INCLUSIVE prompt total: input is the COLD part, cache_read and
-			// cache_write ride beside it (measured: 3 + 0 + 13,960 = 13,963).
-			u.PromptTokens = snap.TokenDetails.Input.TokenCount + u.CachedRead + u.CachedWrite
-			if u.PromptTokens == 0 {
-				// Fall back to the per-model usage block when tokenDetails is
-				// absent on a future CLI.
-				for _, m := range snap.ProviderModelMetrics {
-					mu := m.Metrics.Usage
-					if mu.InputTokens+mu.OutputTokens == 0 {
-						continue
-					}
-					u.CachedRead, u.CachedWrite = mu.CacheReadTokens, mu.CacheWriteTokens
-					u.CompletionTokens = mu.OutputTokens
-					u.ReasoningTokens = mu.ReasoningTokens
-					u.PromptTokens = mu.InputTokens + mu.CacheReadTokens + mu.CacheWriteTokens
-					if u.Model == "" {
-						u.Model = m.ModelID
-					}
-					break
-				}
-			}
-			if snap.TotalPremiumRequestCost > 0 {
-				u.PremiumRequests = snap.TotalPremiumRequestCost
-			}
+			ev.applyUsage(&res.Usage)
 		case "result":
 			if ev.SessionID != "" {
 				res.SessionID = ev.SessionID
 			}
 			if ev.Usage.PremiumRequests > 0 {
-				res.Usage.PremiumRequests = ev.Usage.PremiumRequests
+				res.Usage.PremiumRequests = float64(ev.Usage.PremiumRequests)
 			}
 		}
 	}
@@ -421,7 +458,7 @@ func ClassifyExit(err error, stderr string) error {
 	switch {
 	case strings.Contains(msg, "not logged in"), strings.Contains(msg, "please log in"),
 		strings.Contains(msg, "authentication failed"), strings.Contains(msg, "authentication required"),
-		strings.Contains(msg, "unauthorized"):
+		strings.Contains(msg, "unauthorized"), strings.Contains(msg, "no github oauth token"):
 		return &Failure{Code: "not_logged_in", Msg: "copilot bridge: the CLI is not logged in for this COPILOT_HOME", Cause: err}
 	case strings.Contains(msg, "premium request"), strings.Contains(msg, "quota"), strings.Contains(msg, "rate limit"):
 		return &Failure{Code: "quota_exhausted", Msg: "copilot bridge: the plan refused this request (premium requests or quota)", Cause: err}

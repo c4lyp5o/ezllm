@@ -112,14 +112,12 @@ func (s *Server) Handler() http.Handler {
 		for k, v := range s.Info {
 			info[k] = v
 		}
-		// Never let a bridge card imply a capability this hop does not have.
 		if l := s.catalog(); len(l) > len(s.Models) {
 			info["learned_models"] = l[len(s.Models):]
 		}
 		if st, ok := s.Runner.(interface{ Stats() map[string]any }); ok {
 			info["runtime"] = st.Stats()
 		}
-		info["client_tools"] = "emulated: tool schemas ride in the prompt and the model's <tool_call> replies are parsed back; the CLI has no native tool hook (see design §10)"
 		writeJSON(w, http.StatusOK, info)
 	})
 	mux.HandleFunc("GET /v1/models", s.authed(func(w http.ResponseWriter, _ *http.Request) {
@@ -186,25 +184,32 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		model = "auto"
 	}
 
-	runCtx := r.Context()
-	if len(req.ToolNames) > 0 {
-		runCtx = WithoutBuiltinTools(runCtx)
+	run := func(delta func(string) error) (Result, error) {
+		res, err := s.Runner.RunChannel(r.Context(), ChannelTurn{Model: req.Model, System: req.System, Prompt: req.Transcript, Tools: req.Tools, Choice: req.Choice}, delta)
+		// The channel refused before anything was billed or streamed. A request
+		// with tools needs the channel, so the refusal stands and the router fails
+		// over; plain chat does not, and -p can still serve it.
+		var f *Failure
+		if len(req.Tools) == 0 && errors.As(err, &f) && f.Code == "chat_tools_unsupported" {
+			s.logf("copilot-bridge: channel unavailable, plain chat falling back to -p: %s", err)
+			return s.Runner.Run(r.Context(), req.Model, req.Prompt, delta)
+		}
+		return res, err
 	}
 
 	if !req.Stream {
-		res, err := s.Runner.Run(runCtx, req.Model, req.Prompt, nil)
+		res, err := run(nil)
 		if err != nil {
 			s.writeErr(w, err)
 			return
 		}
 		s.learn(res.AvailableModels)
-		text, calls := ExtractToolCalls(res.Text, req.ToolNames, newCallID)
-		msg := map[string]any{"role": "assistant", "content": text}
+		msg := map[string]any{"role": "assistant", "content": res.Text}
 		finish := "stop"
-		if len(calls) > 0 {
+		if len(res.ToolCalls) > 0 {
 			finish = "tool_calls"
-			msg["tool_calls"] = openAIToolCalls(calls, false)
-			if text == "" {
+			msg["tool_calls"] = openAIToolCalls(res.ToolCalls, false)
+			if res.Text == "" {
 				msg["content"] = nil
 			}
 		}
@@ -218,13 +223,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 
 	sw := &sseWriter{w: w, id: id, created: created, model: model, rc: http.NewResponseController(w)}
 	defer sw.bind(r.Context())()
-	// With tools declared the reply must be parsed whole before anything is
-	// sent (a <tool_call> block cannot be unsent), so the stream is buffered.
-	deltaFn := sw.delta
-	if len(req.ToolNames) > 0 {
-		deltaFn = nil
-	}
-	res, err := s.Runner.Run(runCtx, req.Model, req.Prompt, deltaFn)
+	res, err := run(sw.delta)
 	if err != nil {
 		if !sw.started {
 			s.writeErr(w, err)
@@ -239,18 +238,13 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	s.learn(res.AvailableModels)
 	sw.model = servedModel(model, res)
 	sw.begin()
-	text, calls := res.Text, []ToolCall(nil)
-	if len(req.ToolNames) > 0 {
-		text, calls = ExtractToolCalls(res.Text, req.ToolNames, newCallID)
+	if !sw.sent && res.Text != "" {
+		// The CLI sent only a final assistant.message (no deltas): without this
+		// the client would get a 200 stream with an empty answer.
+		sw.chunk(map[string]any{"content": res.Text}, "")
 	}
-	if !sw.sent && text != "" {
-		// The CLI sent only a final assistant.message (no deltas), or the reply
-		// was buffered for tool parsing: without this the client would get a
-		// 200 stream with an empty answer.
-		sw.chunk(map[string]any{"content": text}, "")
-	}
-	if len(calls) > 0 {
-		sw.chunk(map[string]any{"tool_calls": openAIToolCalls(calls, true)}, "")
+	if len(res.ToolCalls) > 0 {
+		sw.chunk(map[string]any{"tool_calls": openAIToolCalls(res.ToolCalls, true)}, "")
 		sw.chunk(map[string]any{}, "tool_calls")
 	} else {
 		sw.chunk(map[string]any{}, "stop")
@@ -262,10 +256,8 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	sw.done()
 }
 
-func newCallID() string { return "call_" + randomHex(12) }
-
-// openAIToolCalls renders parsed calls on the wire. A stream delta carries an
-// index per call; a complete message does not.
+// openAIToolCalls renders calls on the wire. A stream delta carries an index per
+// call; a complete message does not.
 func openAIToolCalls(calls []ToolCall, indexed bool) []map[string]any {
 	out := make([]map[string]any, 0, len(calls))
 	for i, c := range calls {
@@ -303,6 +295,7 @@ func openAIUsage(u Usage) map[string]any {
 		// Not an OpenAI field; kept so the ledger's raw_usage shows what the
 		// subscription actually charged (1 per turn by default).
 		"copilot_premium_requests": u.PremiumRequests,
+		"copilot_nano_aiu":         u.NanoAIU,
 	}
 }
 
@@ -313,6 +306,11 @@ func (s *Server) writeErr(w http.ResponseWriter, err error) {
 	var f *Failure
 	if errors.As(err, &f) {
 		switch f.Code {
+		case "chat_tools_unsupported":
+			// Refused before anything billable: the router fails over on this
+			// code without parking the hop (proxy.go refusesTools).
+			writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", f.Msg, f.Code))
+			return
 		case "not_logged_in":
 			writeRaw(w, http.StatusUnauthorized, ErrorEnvelope("authentication_error", f.Msg, f.Code))
 			return

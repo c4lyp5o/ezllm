@@ -82,9 +82,8 @@ trap that looks fine until traffic arrives. In the deploy window:
    referencing a dead account keeps failing even after the new one exists.
 3. Disable (or delete) the `github-copilot` account so it stops looking usable.
 4. Drive one real turn through the new hop and check `/admin/requests`: the hop
-   must show `copilot-bridge` and a usage row with a cached split. Remember:
-   client tools are EMULATED on this hop (see below): check a tool-using client
-   once, because compliance depends on the model.
+   must show `copilot-bridge` and a usage row with a cached split. Then drive
+   one turn from a tool-using client: `/status` `client_tools` must say `native`.
 
 ## Models
 
@@ -110,30 +109,51 @@ request time:
 
 ## What this hop can and cannot do
 
-- **Client tools are emulated, not native.** The CLI runs its own agent loop and
-  has no option that yields a pending tool call to the caller, so the bridge
-  renders the caller's `tools` into the prompt, asks the model to reply with
-  `<tool_call>{"name":…,"arguments":{…}}</tool_call>`, and parses that into
-  OpenAI `tool_calls` (`finish_reason: "tool_calls"`). Tool results sent on the
-  next request are replayed into the transcript; `tool_choice` none / required /
-  a named function is honoured in the prompt. On such turns the CLI's own tools
-  are hidden from the model, so it cannot reach for them instead. Consequences: it depends on the
-  model following the format (a reply that does not parse comes back as plain
-  text, never as an invented call); with tools declared the stream is buffered
-  until the reply is complete; the 13–14k-token scaffolding cost still applies;
-  only `function` tools (a non-function type is refused
-  `chat_tools_unsupported`). `/status` says "emulated".
+- **Every turn runs over `copilot --headless --stdio`**, with `-p` as the fallback
+  for plain chat. `/status` `channel` says which applies.
+- **Client tools are native.** The model calls the caller's tools,
+  the bridge returns the batch as `tool_calls` (`finish_reason: "tool_calls"`) and
+  stops the turn, and the caller's next request replays the results as text in a
+  fresh session. Each step of a tool loop is therefore one premium request.
+  Consequences:
+  - Only the caller's tools are visible. The CLI's shell and file tools are not,
+    so nothing runs on this box, and a caller's tool named `bash` goes to the caller.
+  - `tool_choice` none is a plain turn with no tools visible. A named function
+    narrows the visible tools.
+    `required` is an instruction the model can ignore: the channel has no equivalent.
+  - Only `function` tools. Tool names may use ASCII letters, digits, underscores
+    and hyphens, as the CLI enforces at session creation.
+  - **If the channel breaks:** on a CLI whose channel is missing or at another
+    protocol version, plain chat falls back to `-p` (logged as `plain chat falling
+    back to -p`, and back to its scaffolding cost), and a request with tools answers
+    400 `chat_tools_unsupported` before anything is billed, so the router fails over
+    with no cooldown. A tool the CLI cannot register gets the same 400. `/status`
+    reports the boot check and the log has `copilot bridge: channel unavailable`.
+    After a CLI update that causes this, re-measure the channel and update `channelProtocolVersion`
+    (`internal/copilotbridge/channel.go`).
 - No `response_format`, `n>1`, logprobs, or `reasoning_effort` mapping.
-- History and system text are FLATTENED into one prompt; the CLI prepends its
-  own scaffolding regardless.
+- History is FLATTENED into one prompt. The caller's system text replaces the
+  CLI's system message (on the `-p` fallback it is flattened too, behind the CLI's
+  own scaffolding).
 
 ## Cost to expect
 
-Measured 2026-11-05, CLI 1.0.105: **~13–14k prompt tokens per call even for a
-one-word answer** (≈9.4k of it is the CLI's 27 tool schemas), and **1 premium
-request** per call. That is the price of routing through a real agent; the
-ledger shows it as `tokens_in` + `tokens_cached_read`, so it is visible rather
-than surprising.
+Measured 2026-11-05, CLI 1.0.105: **1 premium request per turn**, so one per step
+of a tool loop. On AI-credit plans the charge follows tokens and the model, and
+`copilot_nano_aiu` in `raw_usage` is that charge in billionths of a credit.
+
+| Turn (no cache) | Prompt tokens | AI credits |
+|---|---|---|
+| Plain, short, `auto` on the channel | 95 | 0.025 |
+| Two tools, `gpt-6-luna` on the channel | 182 | 0.00422 |
+| Plain, 189 KB, `gpt-6-luna` on the channel | 59,095 | 0.740 |
+| Plain, short, `gpt-6-luna` on the `-p` fallback | 13,957 | 0.1747 |
+
+The `-p` floor of ~13–14k tokens is the CLI's agent scaffolding (≈9.4k of it its 27
+tool schemas). Later `-p` calls would read part of it from cache. Channel turns took
+11–27 s end to end on this box, and each request spawns a new child. One short reply
+measured a model call of about 1 s, so most of a short turn's time is outside the
+model.
 
 ## Accounting
 
@@ -163,9 +183,14 @@ parser fixture in `internal/copilotbridge/bridge_test.go` is the tripwire.
 
 ## Known gaps
 
-- Client tools are emulated through the prompt (design §10 addendum), not
-  native; the `@github/copilot-sdk` route would make them native and is still a
-  time-boxed spike, not a shipped behaviour.
+- `--headless` is not listed in `copilot --help`; it is what the bundled SDK runs.
+  A CLI update could change it, which is why every tool turn checks the protocol
+  version and falls back to the refusal above.
+- A tool loop costs one premium request per step. Keeping the session open between
+  HTTP requests would make it one per loop, but measured only ~20% cheaper in AI
+  credits and is not built (design §10 addendum).
+- Only OpenAI-family models were driven through the channel live. A model the
+  login lacks is refused at session creation at no cost.
 - No quota panel reading: the CLI does not expose the plan's premium-request
   balance headlessly, so the dashboard shows the bridge's last usage, not live
   remaining quota.

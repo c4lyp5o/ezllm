@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -57,7 +58,7 @@ func TestParseStreamMatchesTheMeasuredTranscript(t *testing.T) {
 		t.Errorf("completion tokens = %d, want 7", u.CompletionTokens)
 	}
 	if u.PremiumRequests != 1 {
-		t.Errorf("premium requests = %d, want 1", u.PremiumRequests)
+		t.Errorf("premium requests = %g, want 1", u.PremiumRequests)
 	}
 	if u.Model != "gpt-6.1-sol" {
 		t.Errorf("model = %q, want gpt-6.1-sol", u.Model)
@@ -170,6 +171,10 @@ type fakeExec struct {
 }
 
 func (f fakeExec) Run(_ context.Context, _, _ string, _ func(string) error) (Result, error) {
+	return f.res, f.err
+}
+
+func (f fakeExec) RunChannel(_ context.Context, _ ChannelTurn, _ func(string) error) (Result, error) {
 	return f.res, f.err
 }
 
@@ -304,107 +309,66 @@ func TestChildEnvDefaultsAWritableCacheDir(t *testing.T) {
 	}
 }
 
-// ── client tools (emulated) ─────────────────────────────────────────────────
+// ── client tools ────────────────────────────────────────────────────────────
 
 const weatherTools = `"tools":[{"type":"function","function":{"name":"get_weather","description":"Weather for a city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}]`
 
-func TestToolsAreRenderedIntoThePrompt(t *testing.T) {
+func TestToolsTravelBesideThePromptNotInsideIt(t *testing.T) {
 	req, err := ParseRequest([]byte(`{"model":"m","messages":[{"role":"system","content":"Be brief."},{"role":"user","content":"weather in Paris?"}],` + weatherTools + `}`))
 	if err != nil {
 		t.Fatalf("ParseRequest: %v", err)
 	}
-	for _, want := range []string{"Be brief.", "<tool_call>", `"name":"get_weather"`, `"description":"Weather for a city"`, `"city"`, "ONLY tools", "User: weather in Paris?"} {
-		if !strings.Contains(req.Prompt, want) {
-			t.Errorf("prompt missing %q\n---\n%s", want, req.Prompt)
-		}
+	if len(req.Tools) != 1 || req.Tools[0].Function.Name != "get_weather" {
+		t.Fatalf("Tools = %+v", req.Tools)
 	}
-	if !req.ToolNames["get_weather"] {
-		t.Errorf("ToolNames = %v", req.ToolNames)
+	if req.System != "Be brief." || req.Transcript != "User: weather in Paris?" {
+		t.Errorf("System = %q, Transcript = %q", req.System, req.Transcript)
 	}
-	// No system text of its own: the tool block still gets a System header.
-	req, _ = ParseRequest([]byte(`{"model":"m","messages":[{"role":"user","content":"x"}],` + weatherTools + `}`))
-	if !strings.HasPrefix(req.Prompt, "System instructions:\nYou can call functions.") {
-		t.Errorf("prompt = %q", req.Prompt[:60])
+	if strings.Contains(req.Prompt, "get_weather") || strings.Contains(req.Prompt, "tool_call") {
+		t.Errorf("tool schemas leaked into the prompt: %q", req.Prompt)
 	}
 }
 
-func TestToolChoice(t *testing.T) {
+func TestToolChoiceParsing(t *testing.T) {
 	base := `{"model":"m","messages":[{"role":"user","content":"x"}],` + weatherTools
 	none, _ := ParseRequest([]byte(base + `,"tool_choice":"none"}`))
-	if len(none.ToolNames) != 0 || strings.Contains(none.Prompt, "You can call functions") {
-		t.Errorf("tool_choice none must drop the tools: %q", none.Prompt)
+	if len(none.Tools) != 0 {
+		t.Errorf("tool_choice none must drop the tools: %+v", none.Tools)
 	}
 	req, _ := ParseRequest([]byte(base + `,"tool_choice":"required"}`))
-	if !strings.Contains(req.Prompt, "MUST call at least one function") {
-		t.Error("required not stated")
+	if !req.Choice.Required {
+		t.Error("required lost")
 	}
 	req, _ = ParseRequest([]byte(base + `,"tool_choice":{"type":"function","function":{"name":"get_weather"}}}`))
-	if !strings.Contains(req.Prompt, "MUST call the function get_weather") {
-		t.Error("named choice not stated")
+	if req.Choice.Name != "get_weather" {
+		t.Error("named choice lost")
 	}
 }
 
 func TestToolRoundTripIsReplayedIntoTheTranscript(t *testing.T) {
-	body := `{"model":"m","messages":[
-		{"role":"user","content":"weather in Paris?"},
-		{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}]},
-		{"role":"tool","tool_call_id":"call_1","content":"18C and sunny"}
-	],` + weatherTools + `}`
-	req, err := ParseRequest([]byte(body))
+	req, err := ParseRequest([]byte(`{"model":"m","messages":[
+		{"role":"user","content":"weather?"},
+		{"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}]},
+		{"role":"tool","tool_call_id":"c1","content":"11C rain"},
+		{"role":"user","content":"thanks"}],` + weatherTools + `}`))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("ParseRequest: %v", err)
 	}
-	for _, want := range []string{
-		`Assistant: <tool_call>{"arguments":{"city":"Paris"},"name":"get_weather"}</tool_call>`,
-		"Tool result for get_weather (call_1):\n18C and sunny",
-	} {
-		if !strings.Contains(req.Prompt, want) {
-			t.Errorf("prompt missing %q\n---\n%s", want, req.Prompt)
+	for _, want := range []string{`Called get_weather (c1) with {"city":"Paris"}`, "Tool result for get_weather (c1):\n11C rain", "User: thanks"} {
+		if !strings.Contains(req.Transcript, want) {
+			t.Errorf("transcript missing %q\n---\n%s", want, req.Transcript)
 		}
 	}
-	if strings.Index(req.Prompt, "Tool result for") < strings.Index(req.Prompt, "Assistant: <tool_call>") {
-		t.Error("result must follow the call that asked for it")
+	if strings.Contains(req.Transcript, "<tool_call>") {
+		t.Errorf("a text call format invites the model to imitate it: %s", req.Transcript)
 	}
 }
 
-func TestExtractToolCalls(t *testing.T) {
-	allowed := map[string]bool{"get_weather": true, "get_time": true}
-	n := 0
-	id := func() string { n++; return "call_" + string(rune('0'+n)) }
-
-	text, calls := ExtractToolCalls(`Checking. <tool_call>{"name":"get_weather","arguments":{"city":"Paris"}}</tool_call>`, allowed, id)
-	if text != "Checking." || len(calls) != 1 || calls[0].Name != "get_weather" || calls[0].Arguments != `{"city":"Paris"}` {
-		t.Errorf("single: text=%q calls=%+v", text, calls)
-	}
-
-	_, calls = ExtractToolCalls("<tool_call>{\"name\":\"get_weather\",\"arguments\":{\"city\":\"A\"}}</tool_call>\n<tool_call>{\"name\":\"get_time\",\"arguments\":{}}</tool_call>", allowed, id)
-	if len(calls) != 2 || calls[1].Name != "get_time" || calls[0].ID == calls[1].ID {
-		t.Errorf("multiple: %+v", calls)
-	}
-
-	_, calls = ExtractToolCalls("<tool_call>\n```json\n{\"name\":\"get_time\",\"parameters\":{\"tz\":\"UTC\"}}\n```\n</tool_call>", allowed, id)
-	if len(calls) != 1 || calls[0].Arguments != `{"tz":"UTC"}` {
-		t.Errorf("fenced + parameters alias: %+v", calls)
-	}
-
-	_, calls = ExtractToolCalls(`<tool_call>{"name":"get_time","arguments":"{\"tz\":\"UTC\"}"}</tool_call>`, allowed, id)
-	if len(calls) != 1 || calls[0].Arguments != `{"tz":"UTC"}` {
-		t.Errorf("stringified arguments must be unwrapped once: %+v", calls)
-	}
-
-	// Never invent a call: an undeclared name or broken JSON stays as text.
-	for _, in := range []string{
-		`<tool_call>{"name":"rm_rf","arguments":{}}</tool_call>`,
-		`<tool_call>{not json}</tool_call>`,
-	} {
-		text, calls = ExtractToolCalls(in, allowed, id)
-		if len(calls) != 0 || text != in {
-			t.Errorf("%q -> text=%q calls=%+v, want untouched", in, text, calls)
-		}
-	}
-	// No tools declared: nothing is parsed.
-	if text, calls = ExtractToolCalls(`<tool_call>{"name":"get_time"}</tool_call>`, nil, id); len(calls) != 0 || text == "" {
-		t.Error("parsed calls although no tools were declared")
+func TestRenderCallKeepsMalformedArgumentsVisible(t *testing.T) {
+	var tc toolCallIn
+	tc.ID, tc.Function.Name, tc.Function.Arguments = "c1", "f", "{broken"
+	if got := renderCall(tc); !strings.Contains(got, "{broken") {
+		t.Errorf("renderCall = %q", got)
 	}
 }
 
@@ -416,10 +380,10 @@ func postChat(s *Server, body string) *httptest.ResponseRecorder {
 	return rec
 }
 
-const modelCall = `<tool_call>{"name":"get_weather","arguments":{"city":"Paris"}}</tool_call>`
+var parisCall = []ToolCall{{ID: "call_abc", Name: "get_weather", Arguments: `{"city":"Paris"}`}}
 
 func TestToolCallComesBackAsOpenAIToolCalls(t *testing.T) {
-	s := &Server{Runner: fakeExec{res: Result{Text: modelCall}}, Token: "t", Models: []Model{{ID: "auto"}}}
+	s := &Server{Runner: fakeExec{res: Result{ToolCalls: parisCall}}, Token: "t", Models: []Model{{ID: "auto"}}}
 	rec := postChat(s, `{"model":"auto","messages":[{"role":"user","content":"x"}],`+weatherTools+`}`)
 	var got struct {
 		Choices []struct {
@@ -442,18 +406,15 @@ func TestToolCallComesBackAsOpenAIToolCalls(t *testing.T) {
 		t.Fatalf("choice = %+v", c)
 	}
 	tc := c.Message.ToolCalls[0]
-	if tc.Type != "function" || tc.Function.Name != "get_weather" || tc.Function.Arguments != `{"city":"Paris"}` || !strings.HasPrefix(tc.ID, "call_") {
+	if tc.Type != "function" || tc.Function.Name != "get_weather" || tc.Function.Arguments != `{"city":"Paris"}` || tc.ID != "call_abc" {
 		t.Errorf("tool call = %+v", tc)
 	}
 }
 
 func TestToolCallStreamsAsToolCallDeltas(t *testing.T) {
-	s := &Server{Runner: fakeExec{res: Result{Text: "Let me check. " + modelCall}}, Token: "t", Models: []Model{{ID: "auto"}}}
+	s := &Server{Runner: fakeExec{res: Result{Text: "Let me check.", ToolCalls: parisCall}}, Token: "t", Models: []Model{{ID: "auto"}}}
 	rec := postChat(s, `{"model":"auto","stream":true,"messages":[{"role":"user","content":"x"}],`+weatherTools+`}`)
 	out := rec.Body.String()
-	if strings.Contains(out, "<tool_call>") {
-		t.Errorf("raw tool_call block leaked into the stream:\n%s", out)
-	}
 	for _, want := range []string{`"content":"Let me check."`, `"tool_calls":[{`, `"index":0`, `"name":"get_weather"`, `"finish_reason":"tool_calls"`, "[DONE]"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("stream missing %q\n%s", want, out)
@@ -461,34 +422,123 @@ func TestToolCallStreamsAsToolCallDeltas(t *testing.T) {
 	}
 }
 
-func TestWithoutToolsATagInTheAnswerIsJustText(t *testing.T) {
-	s := &Server{Runner: fakeExec{res: Result{Text: modelCall}}, Token: "t", Models: []Model{{ID: "auto"}}}
-	rec := postChat(s, `{"model":"auto","messages":[{"role":"user","content":"x"}]}`)
+// A tag in a model's plain text is just text: nothing parses replies.
+func TestATagInTheAnswerIsJustText(t *testing.T) {
+	const tagged = `<tool_call>{"name":"get_weather","arguments":{}}</tool_call>`
+	s := &Server{Runner: fakeExec{res: Result{Text: tagged}}, Token: "t", Models: []Model{{ID: "auto"}}}
+	rec := postChat(s, `{"model":"auto","messages":[{"role":"user","content":"x"}],`+weatherTools+`}`)
 	if !strings.Contains(rec.Body.String(), `"finish_reason":"stop"`) || strings.Contains(rec.Body.String(), `"tool_calls"`) {
-		t.Errorf("no tools declared, yet: %s", rec.Body)
+		t.Errorf("a text tag must not become a call: %s", rec.Body)
 	}
 }
 
-// ctxExec records whether the turn was started with the built-in tools hidden.
-type ctxExec struct {
-	bare *bool
-	res  Result
+// routeExec records which path a request took.
+type routeExec struct {
+	plain, tools *int
+	turn         *ChannelTurn
+	delta        *bool
 }
 
-func (c ctxExec) Run(ctx context.Context, _, _ string, _ func(string) error) (Result, error) {
-	*c.bare, _ = ctx.Value(bareKey{}).(bool)
-	return c.res, nil
+func (e routeExec) Run(_ context.Context, _, _ string, _ func(string) error) (Result, error) {
+	*e.plain++
+	return Result{Text: "ok"}, nil
 }
 
-func TestOnlyToolEmulatingTurnsHideBuiltinTools(t *testing.T) {
-	var bare bool
-	s := &Server{Runner: ctxExec{bare: &bare, res: Result{Text: "ok"}}, Token: "t", Models: []Model{{ID: "auto"}}}
-	postChat(s, `{"model":"auto","messages":[{"role":"user","content":"x"}],`+weatherTools+`}`)
-	if !bare {
-		t.Error("a request with tools must run with the CLI's built-in tools hidden")
+func (e routeExec) RunChannel(_ context.Context, turn ChannelTurn, delta func(string) error) (Result, error) {
+	*e.tools++
+	*e.turn = turn
+	*e.delta = delta != nil
+	return Result{Text: "ok"}, nil
+}
+
+func TestEveryTurnUsesTheChannel(t *testing.T) {
+	var plain, tools int
+	var turn ChannelTurn
+	var delta bool
+	s := &Server{Runner: routeExec{&plain, &tools, &turn, &delta}, Token: "t", Models: []Model{{ID: "auto"}}}
+	postChat(s, `{"model":"auto","messages":[{"role":"system","content":"S"},{"role":"user","content":"x"}]}`)
+	if plain != 0 || tools != 1 || len(turn.Tools) != 0 || turn.System != "S" || turn.Prompt != "User: x" {
+		t.Fatalf("plain chat: -p = %d, channel = %d, turn = %+v", plain, tools, turn)
 	}
-	postChat(s, `{"model":"auto","messages":[{"role":"user","content":"x"}]}`)
-	if bare {
-		t.Error("plain chat must not change")
+	postChat(s, `{"model":"auto","tool_choice":"none","messages":[{"role":"user","content":"x"}],`+weatherTools+`}`)
+	if plain != 0 || tools != 2 || len(turn.Tools) != 0 {
+		t.Fatalf("tool_choice none: -p = %d, channel = %d, turn = %+v", plain, tools, turn)
+	}
+	postChat(s, `{"model":"auto","stream":true,"messages":[{"role":"user","content":"x"}],`+weatherTools+`}`)
+	if plain != 0 || tools != 3 || len(turn.Tools) != 1 {
+		t.Fatalf("tools: -p = %d, channel = %d, turn = %+v", plain, tools, turn)
+	}
+	if !delta {
+		t.Error("a channel turn must stream text live, not buffer it")
+	}
+}
+
+// refusingExec is a CLI whose channel gate fails.
+type refusingExec struct {
+	plain *int
+	gotP  *string
+}
+
+func (e refusingExec) Run(_ context.Context, _, prompt string, _ func(string) error) (Result, error) {
+	*e.plain++
+	*e.gotP = prompt
+	return Result{Text: "from -p"}, nil
+}
+
+func (e refusingExec) RunChannel(context.Context, ChannelTurn, func(string) error) (Result, error) {
+	return Result{}, toolsRefused("protocol 4", nil)
+}
+
+func TestPlainChatFallsBackToPWhenTheChannelIsRefused(t *testing.T) {
+	var plain int
+	var prompt string
+	s := &Server{Runner: refusingExec{&plain, &prompt}, Token: "t", Models: []Model{{ID: "auto"}}}
+	for _, stream := range []string{"false", "true"} {
+		rec := postChat(s, `{"model":"auto","stream":`+stream+`,"messages":[{"role":"system","content":"S"},{"role":"user","content":"x"}]}`)
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "from -p") {
+			t.Errorf("stream=%s: %d %s", stream, rec.Code, rec.Body)
+		}
+	}
+	if plain != 2 || !strings.Contains(prompt, "S") || !strings.Contains(prompt, "User: x") {
+		t.Errorf("-p ran %d times with %q: it needs the flattened system text", plain, prompt)
+	}
+	// With tools -p is no use: it cannot carry them, so the refusal stands.
+	rec := postChat(s, `{"model":"auto","messages":[{"role":"user","content":"x"}],`+weatherTools+`}`)
+	if rec.Code != http.StatusBadRequest || plain != 2 {
+		t.Errorf("tools: %d %s, -p ran %d times", rec.Code, rec.Body, plain)
+	}
+}
+
+// Only the gate's refusal falls back: a real failure happened at the CLI, and
+// repeating the turn on -p would charge for it twice.
+func TestPlainChatDoesNotFallBackOnOtherFailures(t *testing.T) {
+	var plain int
+	var prompt string
+	exec := failingExec{refusingExec{&plain, &prompt}, &Failure{Code: "quota_exhausted", Msg: "no"}}
+	s := &Server{Runner: exec, Token: "t", Models: []Model{{ID: "auto"}}}
+	rec := postChat(s, `{"model":"auto","messages":[{"role":"user","content":"x"}]}`)
+	if rec.Code != http.StatusTooManyRequests || plain != 0 {
+		t.Errorf("%d %s, -p ran %d times", rec.Code, rec.Body, plain)
+	}
+}
+
+type failingExec struct {
+	refusingExec
+	err error
+}
+
+func (e failingExec) RunChannel(context.Context, ChannelTurn, func(string) error) (Result, error) {
+	return Result{}, e.err
+}
+
+// The router fails over on this exact shape (proxy.go refusesTools) without
+// parking the hop, so the refusal costs the operator nothing.
+func TestToolRefusalIsThe400TheRouterFailsOverOn(t *testing.T) {
+	s := &Server{Runner: fakeExec{err: toolsRefused("protocol 4", nil)}, Token: "t", Models: []Model{{ID: "auto"}}}
+	for _, stream := range []string{"false", "true"} {
+		rec := postChat(s, `{"model":"auto","stream":`+stream+`,"messages":[{"role":"user","content":"x"}],`+weatherTools+`}`)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"code":"chat_tools_unsupported"`) {
+			t.Errorf("stream=%s: %d %s", stream, rec.Code, rec.Body)
+		}
 	}
 }

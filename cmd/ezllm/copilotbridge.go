@@ -198,18 +198,28 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 		"models":      catalog,
 		// Measured cost of the CLI's own agent scaffolding, so nobody reads the
 		// ledger and thinks the bridge is leaking tokens.
-		"scaffolding_tokens_per_call": "~13-14k (27 built-in tools ≈ 9.3k)",
+		"scaffolding_tokens_per_call": "none on the channel; ~13-14k (27 built-in tools ≈ 9.3k) if plain chat falls back to -p",
 		"auth":                        "the CLI's stored login in COPILOT_HOME; no token in ezllm",
 	}
+	runner := &copilotbridge.Runner{
+		Bin:           resolved,
+		Home:          home,
+		Timeout:       timeout,
+		MaxConcurrent: concurrency,
+		MaxQueue:      queue,
+		Logf:          printfLogger(log),
+	}
+	// Reported at boot so the bridge card is honest. Each tool turn checks again
+	// for itself, because the updater can replace the CLI while this runs.
+	info["channel"] = "ok"
+	info["client_tools"] = "native: the model calls the caller's tools over the CLI's headless channel"
+	if err := runner.ProbeChannel(ctx); err != nil {
+		info["channel"] = "unavailable: plain chat falls back to -p"
+		info["client_tools"] = "refused with chat_tools_unsupported, so the router fails over: " + err.Error()
+		log.Warn("copilot bridge: channel unavailable: plain chat uses -p, client tools are refused", "err", err)
+	}
 	srv := &copilotbridge.Server{
-		Runner: &copilotbridge.Runner{
-			Bin:           resolved,
-			Home:          home,
-			Timeout:       timeout,
-			MaxConcurrent: concurrency,
-			MaxQueue:      queue,
-			Logf:          printfLogger(log),
-		},
+		Runner:  runner,
 		Token:   token,
 		Version: server.Version,
 		Models:  models,

@@ -74,13 +74,11 @@ explicitly not supported**.
 Following the agy rule, system text and prior turns are flattened into ONE
 deterministic prompt. Consequences, stated plainly:
 
-- **Client tools are emulated** (§10 addendum): the CLI runs its own agent loop
-  with its own 27 tools and cannot hand a call back, so the bridge carries the
-  caller's tool schemas in the prompt and parses `<tool_call>` replies back into
-  `tool_calls`. This replaced the original refusal (`chat_tools_unsupported`),
-  which made the hop unusable for tool-using clients.
-- **Client system prompts are advisory text inside the prompt**, not a real
-  system role — the CLI prepends its own ~5k-token scaffolding regardless.
+- **Client tools are native** over the CLI's headless channel (§10 second
+  addendum). This replaced an emulation through the prompt, which replaced the
+  original refusal (`chat_tools_unsupported`).
+- **Client system prompts replace the CLI's system message** on the channel. On the
+  `-p` fallback they are advisory text behind the CLI's ~5k-token scaffolding.
 - `response_format`, `n>1`, `logprobs`, `reasoning_effort` have no CLI
   equivalent (`--model` is the only lever); they are refused or ignored exactly
   as the other bridges do, per the shared translation rules.
@@ -193,10 +191,14 @@ verified against the installed CLI, not assumed:
 
 The refusal in M1 is never silent: the bridge's `/status` names the capability
 ("client tools: not yet — SDK spike pending"), so an operator reading the bridge
-card is never told the hop can do something it cannot.
+card is never told the hop can do something it cannot. (The spike ran: see the
+second addendum below.)
 
 
 ### §10 addendum (2026-11-05): emulation instead of refusal
+
+**Superseded by the next addendum and removed from the code.** Kept because it
+records why the text protocol failed.
 
 The refusal above was the honest default, but it made the hop unusable for a
 client that sends tools on every call (a live combo returned 400 on its first
@@ -229,6 +231,69 @@ still *emit text*, so the bridge emulates function calling in the prompt layer.
 - **Router:** a hop that still refuses tools (`chat_tools_unsupported`, now
   only for non-function tool types) fails over without a cooldown instead of
   ending the client run (`refusesTools`, proxy.go).
+
+### §10 second addendum (2026-11-05): native tools over the headless channel
+
+Emulation did not work live. Its last measured turn charged one premium request
+for an empty reply: the model's reasoning said it had "the perfect tool", and it
+returned no text and no call. Tuning the text format looked like a poor bet, so the
+M1.5 spike ran, and it needs no Node sidecar: the SDK is a client for a JSON-RPC
+server already in the CLI, `copilot --headless --stdio`, and Go can speak that
+directly.
+
+Measured on CLI 1.0.105 with `gpt-6-luna`:
+
+- `session.create` takes `tools`, an `availableTools` allowlist and
+  `systemMessage: {mode: "replace"}`. Read after `session.tools.initializeAndValidate`,
+  `session.tools.getCurrentMetadata` shows 0 tools for an empty allowlist and 18 for
+  none at all, including `bash` and `apply_patch`, so the key must always be sent.
+  (Without that initialize call it lists only caller tools and proves nothing.)
+- `assistant.message.toolRequests` lists the whole batch up front, with the ids the
+  model chose. The CLI then emits `external_tool.requested` and waits.
+- `session.abort` ends the wait. The usage checkpoint still arrives before
+  `session.idle`, so the turn can be booked.
+- A fresh session given the results as transcript text answered correctly and did
+  not repeat the calls.
+- Refusals at `session.create` (model not available, invalid tool name) are free,
+  because no model has been called.
+
+**One session per HTTP request (shipped), or one held open across a tool loop?**
+Answering the pending call with `session.tools.handlePendingToolCall` also worked.
+Measured on one two-tool loop:
+
+| | Premium requests | AI credits |
+|---|---|---|
+| One session per request (2 turns) | 2 | 0.00893 |
+| One session held open | 1 | 0.00719 |
+
+The operator's plan bills AI credits, so holding sessions saves ~20% on this small
+sample, in exchange for parked children, held concurrency slots, timeouts, and a
+failover or bridge restart losing the session. Not built. Long conversations were
+not measured, so that figure could change.
+
+**The failure shapes that decided the code:**
+
+- `overridesBuiltInTool` is always set, so a caller's tool that shares a built-in's
+  name is unambiguously the caller's. Measured: a forced `bash` call reached the
+  caller and its command did not run on this box.
+- Every turn pings first. `--headless` is undocumented and the updater can swap the
+  binary under a running bridge, so a boot check alone would go stale. The ping costs
+  nothing, and a failed gate is the refusal the router already fails over on.
+- `tool_choice` has no channel equivalent. A named function narrows `availableTools`;
+  `required` is an instruction only.
+- The channel writes `totalPremiumRequestCost` as `1.0` where `-p` wrote `1`. An int
+  field dropped the whole event, so the first live run booked zero usage while every
+  unit test passed on a fixture written with `1`. Numeric event fields now use a
+  tolerant type, and the fixture carries the channel's real form.
+
+**Plain chat moved to the channel too.** The same replaced system message removes
+the CLI's scaffolding, the largest cost on the hop: 95 prompt tokens against 13,957
+on `-p` for a short question. `-p` stays as plain chat's fallback when the gate
+refuses, so a CLI update that breaks the undocumented channel degrades cost rather
+than availability. Only the gate's refusal falls back: anything later happened at
+the CLI and may have been billed. A plain turn's system message tells the model it
+has no tools, and a turn with tool history and `tool_choice: none` answered in text
+rather than going empty as emulation did.
 
 ## 11. What changed between this design and the shipped code
 

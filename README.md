@@ -157,7 +157,7 @@ subscription. Choose the guide for your account:
 | Claude Pro/Max | [Claude bridge](docs/claude-bridge-runbook.md) | Install Claude Code and sign in with a separate CLI profile. |
 | ChatGPT Plus/Pro | [Codex bridge](docs/codex-bridge-runbook.md) | Linux; client tools require Landlock for the default protection. |
 | Google Antigravity | [Antigravity bridge](docs/agy-bridge-runbook.md) | Linux; text only, with no client tools or image input. |
-| GitHub Copilot | [Copilot CLI bridge](docs/copilot-cli-bridge-runbook.md) | The official `copilot` CLI signed in on the host; no key to paste. Client tools are emulated through the prompt (model-dependent). |
+| GitHub Copilot | [Copilot CLI bridge](docs/copilot-cli-bridge-runbook.md) | The official `copilot` CLI signed in on the host; no key to paste. Client tools work natively over the CLI's headless channel. |
 
 The guides use Docker Compose and explain CLI installation, separate sign-in,
 mounts, and the dashboard preset. Start ezllm and finish dashboard setup first.

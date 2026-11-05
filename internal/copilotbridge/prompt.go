@@ -16,14 +16,19 @@ type Request struct {
 	Model        string
 	Stream       bool
 	IncludeUsage bool
-	Prompt       string
+	// Prompt is system + transcript, for the `copilot -p` fallback.
+	Prompt string
+	// System and Transcript are the two halves separately, for the channel, which
+	// has a real system message.
+	System     string
+	Transcript string
 	// SystemLen and Turns are for the operator log only: they make an
 	// unexpectedly huge flattened prompt explainable after the fact.
 	SystemLen int
 	Turns     int
-	// ToolNames are the caller's declared functions; the reply is parsed for
-	// <tool_call> blocks naming one of them (tools.go). Empty = no tools.
-	ToolNames map[string]bool
+	// Tools are the caller's functions (channel.go).
+	Tools  []toolDef
+	Choice toolChoice
 }
 
 // Unsupported is a request the bridge refuses before anything is spawned.
@@ -98,9 +103,7 @@ func ParseRequest(body []byte) (Request, error) {
 	if err := json.Unmarshal(body, &in); err != nil {
 		return Request{}, Unsupported{Code: "invalid_request", Msg: "body is not a valid chat completion request"}
 	}
-	// Tools are EMULATED (tools.go): the CLI cannot hand a pending call back, so
-	// the schemas ride in the prompt and the reply is parsed for <tool_call>
-	// blocks. Only function tools exist on this wire.
+	// Only function tools exist on this wire (tools.go).
 	defs, err := parseTools(in.Tools)
 	if err != nil {
 		return Request{}, err
@@ -114,7 +117,7 @@ func ParseRequest(body []byte) (Request, error) {
 		return Request{}, err
 	}
 	if choice.None {
-		defs, names = nil, map[string]bool{} // the caller forbade calls this turn
+		defs = nil // the caller forbade calls this turn
 	}
 	if len(in.Functions) > 0 && string(in.Functions) != "null" && string(in.Functions) != "[]" {
 		return Request{}, Unsupported{Code: "chat_tools_unsupported",
@@ -167,19 +170,18 @@ func ParseRequest(body []byte) (Request, error) {
 	}
 
 	sysText := strings.Join(sys, "\n\n")
-	if len(defs) > 0 {
-		sysText = strings.TrimSpace(sysText + "\n\n" + toolPrompt(defs, choice))
-		req.ToolNames = names
-	}
+	req.System = sysText
+	req.Transcript = strings.Join(turns, "\n\n")
+	req.Tools, req.Choice = defs, choice
 	var b strings.Builder
 	if sysText != "" {
 		b.WriteString("System instructions:\n")
 		b.WriteString(sysText)
 		b.WriteString("\n\nConversation:\n")
 	}
-	b.WriteString(strings.Join(turns, "\n\n"))
+	b.WriteString(req.Transcript)
 	req.Prompt = b.String()
-	req.SystemLen = len(strings.Join(sys, "\n\n"))
+	req.SystemLen = len(sysText)
 	req.Turns = len(turns)
 	return req, nil
 }

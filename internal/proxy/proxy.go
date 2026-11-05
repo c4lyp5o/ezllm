@@ -1664,8 +1664,9 @@ func refusesHistory(resp *http.Response) bool {
 }
 
 // refusesTools reports a 400 from a hop that cannot take client tool schemas at
-// all: the Copilot CLI bridge runs its own agent loop and refuses `tools` by
-// name (code chat_tools_unsupported). It describes the HOP, not the body, so a
+// all: the Copilot CLI bridge refuses `tools` by name (code
+// chat_tools_unsupported) when the CLI's tool channel is missing or at another
+// protocol version, or a tool cannot be registered. It describes the HOP, not the body, so a
 // hop that does support tools can serve the identical request — committing the
 // 400 instead ended the client run with three working hops left in the combo
 // (measured 2026-11-05, client maxine).

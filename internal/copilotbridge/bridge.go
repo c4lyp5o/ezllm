@@ -119,7 +119,7 @@ func (s *Server) Handler() http.Handler {
 		if st, ok := s.Runner.(interface{ Stats() map[string]any }); ok {
 			info["runtime"] = st.Stats()
 		}
-		info["client_tools"] = "refused: the CLI runs its own agent loop (see design §10)"
+		info["client_tools"] = "emulated: tool schemas ride in the prompt and the model's <tool_call> replies are parsed back; the CLI has no native tool hook (see design §10)"
 		writeJSON(w, http.StatusOK, info)
 	})
 	mux.HandleFunc("GET /v1/models", s.authed(func(w http.ResponseWriter, _ *http.Request) {
@@ -193,18 +193,33 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.learn(res.AvailableModels)
+		text, calls := ExtractToolCalls(res.Text, req.ToolNames, newCallID)
+		msg := map[string]any{"role": "assistant", "content": text}
+		finish := "stop"
+		if len(calls) > 0 {
+			finish = "tool_calls"
+			msg["tool_calls"] = openAIToolCalls(calls, false)
+			if text == "" {
+				msg["content"] = nil
+			}
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"id": id, "object": "chat.completion", "created": created, "model": servedModel(model, res),
-			"choices": []map[string]any{{"index": 0, "finish_reason": "stop",
-				"message": map[string]any{"role": "assistant", "content": res.Text}}},
-			"usage": openAIUsage(res.Usage),
+			"choices": []map[string]any{{"index": 0, "finish_reason": finish, "message": msg}},
+			"usage":   openAIUsage(res.Usage),
 		})
 		return
 	}
 
 	sw := &sseWriter{w: w, id: id, created: created, model: model, rc: http.NewResponseController(w)}
 	defer sw.bind(r.Context())()
-	res, err := s.Runner.Run(r.Context(), req.Model, req.Prompt, sw.delta)
+	// With tools declared the reply must be parsed whole before anything is
+	// sent (a <tool_call> block cannot be unsent), so the stream is buffered.
+	deltaFn := sw.delta
+	if len(req.ToolNames) > 0 {
+		deltaFn = nil
+	}
+	res, err := s.Runner.Run(r.Context(), req.Model, req.Prompt, deltaFn)
 	if err != nil {
 		if !sw.started {
 			s.writeErr(w, err)
@@ -219,17 +234,44 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	s.learn(res.AvailableModels)
 	sw.model = servedModel(model, res)
 	sw.begin()
-	if !sw.sent && res.Text != "" {
-		// The CLI sent only a final assistant.message (no deltas): without this
-		// the client would get a 200 stream with an empty answer.
-		sw.chunk(map[string]any{"content": res.Text}, "")
+	text, calls := res.Text, []ToolCall(nil)
+	if len(req.ToolNames) > 0 {
+		text, calls = ExtractToolCalls(res.Text, req.ToolNames, newCallID)
 	}
-	sw.chunk(map[string]any{}, "stop")
+	if !sw.sent && text != "" {
+		// The CLI sent only a final assistant.message (no deltas), or the reply
+		// was buffered for tool parsing: without this the client would get a
+		// 200 stream with an empty answer.
+		sw.chunk(map[string]any{"content": text}, "")
+	}
+	if len(calls) > 0 {
+		sw.chunk(map[string]any{"tool_calls": openAIToolCalls(calls, true)}, "")
+		sw.chunk(map[string]any{}, "tool_calls")
+	} else {
+		sw.chunk(map[string]any{}, "stop")
+	}
 	if req.IncludeUsage {
 		sw.event(map[string]any{"id": id, "object": "chat.completion.chunk", "created": created,
 			"model": sw.model, "choices": []any{}, "usage": openAIUsage(res.Usage)})
 	}
 	sw.done()
+}
+
+func newCallID() string { return "call_" + randomHex(12) }
+
+// openAIToolCalls renders parsed calls on the wire. A stream delta carries an
+// index per call; a complete message does not.
+func openAIToolCalls(calls []ToolCall, indexed bool) []map[string]any {
+	out := make([]map[string]any, 0, len(calls))
+	for i, c := range calls {
+		m := map[string]any{"id": c.ID, "type": "function",
+			"function": map[string]any{"name": c.Name, "arguments": c.Arguments}}
+		if indexed {
+			m["index"] = i
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 func servedModel(requested string, res Result) string {

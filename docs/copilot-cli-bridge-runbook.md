@@ -83,8 +83,8 @@ trap that looks fine until traffic arrives. In the deploy window:
 3. Disable (or delete) the `github-copilot` account so it stops looking usable.
 4. Drive one real turn through the new hop and check `/admin/requests`: the hop
    must show `copilot-bridge` and a usage row with a cached split. Remember:
-   a turn that needs client tools will refuse (`chat_tools_unsupported`) — that
-   is expected on this hop, not a failed migration.
+   client tools are EMULATED on this hop (see below): check a tool-using client
+   once, because compliance depends on the model.
 
 ## Models
 
@@ -110,9 +110,18 @@ request time:
 
 ## What this hop can and cannot do
 
-- **Cannot** accept client tool schemas (`chat_tools_unsupported`): the CLI runs
-  its own 27-tool agent loop and there is no option that yields a pending tool
-  call back to the caller. `/status` says so — never assume it from silence.
+- **Client tools are emulated, not native.** The CLI runs its own agent loop and
+  has no option that yields a pending tool call to the caller, so the bridge
+  renders the caller's `tools` into the prompt, asks the model to reply with
+  `<tool_call>{"name":…,"arguments":{…}}</tool_call>`, and parses that into
+  OpenAI `tool_calls` (`finish_reason: "tool_calls"`). Tool results sent on the
+  next request are replayed into the transcript; `tool_choice` none / required /
+  a named function is honoured in the prompt. Consequences: it depends on the
+  model following the format (a reply that does not parse comes back as plain
+  text, never as an invented call); with tools declared the stream is buffered
+  until the reply is complete; the 13–14k-token scaffolding cost still applies;
+  only `function` tools (a non-function type is refused
+  `chat_tools_unsupported`). `/status` says "emulated".
 - No `response_format`, `n>1`, logprobs, or `reasoning_effort` mapping.
 - History and system text are FLATTENED into one prompt; the CLI prepends its
   own scaffolding regardless.
@@ -153,8 +162,9 @@ parser fixture in `internal/copilotbridge/bridge_test.go` is the tripwire.
 
 ## Known gaps
 
-- Client tools: refused (design §10; the `@github/copilot-sdk` route is a
-  time-boxed spike, not a shipped behaviour).
+- Client tools are emulated through the prompt (design §10 addendum), not
+  native; the `@github/copilot-sdk` route would make them native and is still a
+  time-boxed spike, not a shipped behaviour.
 - No quota panel reading: the CLI does not expose the plan's premium-request
   balance headlessly, so the dashboard shows the bridge's last usage, not live
   remaining quota.

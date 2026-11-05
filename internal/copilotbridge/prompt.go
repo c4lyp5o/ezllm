@@ -21,6 +21,9 @@ type Request struct {
 	// unexpectedly huge flattened prompt explainable after the fact.
 	SystemLen int
 	Turns     int
+	// ToolNames are the caller's declared functions; the reply is parsed for
+	// <tool_call> blocks naming one of them (tools.go). Empty = no tools.
+	ToolNames map[string]bool
 }
 
 // Unsupported is a request the bridge refuses before anything is spawned.
@@ -37,6 +40,7 @@ type chatRequest struct {
 	Stream         bool            `json:"stream"`
 	StreamOptions  *streamOptions  `json:"stream_options"`
 	Tools          json.RawMessage `json:"tools"`
+	ToolChoice     json.RawMessage `json:"tool_choice"`
 	Functions      json.RawMessage `json:"functions"`
 	ResponseFormat *struct {
 		Type string `json:"type"`
@@ -49,8 +53,11 @@ type streamOptions struct {
 }
 
 type chatMessage struct {
-	Role    string          `json:"role"`
-	Content json.RawMessage `json:"content"`
+	Role       string          `json:"role"`
+	Content    json.RawMessage `json:"content"`
+	ToolCalls  []toolCallIn    `json:"tool_calls"`
+	ToolCallID string          `json:"tool_call_id"`
+	Name       string          `json:"name"`
 }
 
 // contentText accepts the two shapes a chat message's content takes: a plain
@@ -91,12 +98,23 @@ func ParseRequest(body []byte) (Request, error) {
 	if err := json.Unmarshal(body, &in); err != nil {
 		return Request{}, Unsupported{Code: "invalid_request", Msg: "body is not a valid chat completion request"}
 	}
-	// Tools: the CLI runs its OWN 27-tool agent loop and cannot be handed a
-	// caller's function schemas (design §10). Refuse by name — a silent drop
-	// would let an agent loop spin forever waiting for tool_calls.
-	if len(in.Tools) > 0 && string(in.Tools) != "null" && string(in.Tools) != "[]" {
-		return Request{}, Unsupported{Code: "chat_tools_unsupported",
-			Msg: "this Copilot hop runs the CLI's own agent loop and cannot accept client tool schemas"}
+	// Tools are EMULATED (tools.go): the CLI cannot hand a pending call back, so
+	// the schemas ride in the prompt and the reply is parsed for <tool_call>
+	// blocks. Only function tools exist on this wire.
+	defs, err := parseTools(in.Tools)
+	if err != nil {
+		return Request{}, err
+	}
+	names := map[string]bool{}
+	for _, d := range defs {
+		names[d.Function.Name] = true
+	}
+	choice, err := parseToolChoice(in.ToolChoice, names)
+	if err != nil {
+		return Request{}, err
+	}
+	if choice.None {
+		defs, names = nil, map[string]bool{} // the caller forbade calls this turn
 	}
 	if len(in.Functions) > 0 && string(in.Functions) != "null" && string(in.Functions) != "[]" {
 		return Request{}, Unsupported{Code: "chat_tools_unsupported",
@@ -117,6 +135,7 @@ func ParseRequest(body []byte) (Request, error) {
 
 	var sys []string
 	var turns []string
+	callName := map[string]string{} // tool_call id -> function name, for result turns
 	for _, m := range in.Messages {
 		text, err := contentText(m.Content)
 		if err != nil {
@@ -126,12 +145,19 @@ func ParseRequest(body []byte) (Request, error) {
 		case "system", "developer":
 			sys = append(sys, text)
 		case "assistant":
-			turns = append(turns, "Assistant: "+text)
+			for _, tc := range m.ToolCalls {
+				callName[tc.ID] = tc.Function.Name
+				text += "\n" + renderCall(tc)
+			}
+			turns = append(turns, "Assistant: "+strings.TrimSpace(text))
 		case "user":
 			turns = append(turns, "User: "+text)
 		case "tool":
-			return Request{}, Unsupported{Code: "chat_tools_unsupported",
-				Msg: "tool results cannot be replayed into a Copilot hop"}
+			name := callName[m.ToolCallID]
+			if name == "" {
+				name = m.Name
+			}
+			turns = append(turns, fmt.Sprintf("Tool result for %s (%s):\n%s", name, m.ToolCallID, text))
 		default:
 			return Request{}, Unsupported{Code: "invalid_request", Msg: "unknown role " + m.Role}
 		}
@@ -140,10 +166,15 @@ func ParseRequest(body []byte) (Request, error) {
 		return Request{}, Unsupported{Code: "invalid_request", Msg: "no user message"}
 	}
 
+	sysText := strings.Join(sys, "\n\n")
+	if len(defs) > 0 {
+		sysText = strings.TrimSpace(sysText + "\n\n" + toolPrompt(defs, choice))
+		req.ToolNames = names
+	}
 	var b strings.Builder
-	if len(sys) > 0 {
+	if sysText != "" {
 		b.WriteString("System instructions:\n")
-		b.WriteString(strings.Join(sys, "\n\n"))
+		b.WriteString(sysText)
 		b.WriteString("\n\nConversation:\n")
 	}
 	b.WriteString(strings.Join(turns, "\n\n"))

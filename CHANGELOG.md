@@ -37,9 +37,15 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   one-word answer (≈9.4k is the CLI's own 27 tool schemas) and one premium
   request. That is upstream's shape; it is visible in the ledger rather than
   surprising.
-- **Client tool schemas are refused** (`chat_tools_unsupported`) — `-p` has no
-  option that yields a pending tool call. A turn that needs tools fails loudly;
-  it does not silently miscount.
+- **Client tools are emulated, not refused.** `-p` has no option that yields a
+  pending tool call, so the bridge renders the caller's `tools` into the prompt,
+  parses `<tool_call>` replies back into OpenAI `tool_calls`, and replays tool
+  results on the next turn (`tool_choice` honoured). It depends on the model
+  following the format and buffers the stream while tools are declared; a reply
+  that does not parse is plain text, never an invented call. The first cut
+  refused tools (`chat_tools_unsupported`) and a live combo returned 400 on its
+  first request. A hop that still refuses tools now fails over with no cooldown
+  (`refusesTools`) instead of ending the client run. Design §10 addendum.
 - **Pressure is bounded and visible.** `EZLLM_COPILOT_BRIDGE_CONCURRENCY`
   (2), `_QUEUE` (8) and `_TIMEOUT` (300s) are configurable; past the queue the
   bridge answers 429 `queue_full` + `Retry-After: 5` instead of parking the

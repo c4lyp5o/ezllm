@@ -74,10 +74,11 @@ explicitly not supported**.
 Following the agy rule, system text and prior turns are flattened into ONE
 deterministic prompt. Consequences, stated plainly:
 
-- **Client tools are refused** (`chat_tools_unsupported`, the shared bridge
-  error code). The CLI runs its own agent loop with its own 27 tools; a caller's
-  tool schemas cannot be honoured. Any combo carrying this hop must not serve a
-  tool-using client.
+- **Client tools are emulated** (§10 addendum): the CLI runs its own agent loop
+  with its own 27 tools and cannot hand a call back, so the bridge carries the
+  caller's tool schemas in the prompt and parses `<tool_call>` replies back into
+  `tool_calls`. This replaced the original refusal (`chat_tools_unsupported`),
+  which made the hop unusable for tool-using clients.
 - **Client system prompts are advisory text inside the prompt**, not a real
   system role — the CLI prepends its own ~5k-token scaffolding regardless.
 - `response_format`, `n>1`, `logprobs`, `reasoning_effort` have no CLI
@@ -195,6 +196,34 @@ The refusal in M1 is never silent: the bridge's `/status` names the capability
 card is never told the hop can do something it cannot.
 
 
+### §10 addendum (2026-11-05): emulation instead of refusal
+
+The refusal above was the honest default, but it made the hop unusable for a
+client that sends tools on every call (a live combo returned 400 on its first
+request). The spike is not needed to do better than refusing: a one-shot CLI can
+still *emit text*, so the bridge emulates function calling in the prompt layer.
+
+- **Out:** `tools` → a "Functions" block (name, description, JSON-schema
+  parameters) plus the instruction to reply with `<tool_call>{"name","arguments"}</tool_call>`
+  and to treat those functions as its ONLY tools. `tool_choice` none drops the
+  block; required / a named function adds a MUST line.
+- **Back:** the reply is scanned for `<tool_call>` blocks. A block counts only if
+  it parses and names a DECLARED function; anything else stays text. Valid
+  blocks become OpenAI `tool_calls` (ids `call_…`, `arguments` as a JSON
+  string), text outside them stays as `content`, `finish_reason` is `tool_calls`.
+- **Round trip:** a prior assistant `tool_calls` message is rendered in the same
+  tag format and a `tool` message becomes `Tool result for <name> (<id>):`, so
+  the next request's transcript reads consistently.
+- **Streaming:** with tools declared the reply is buffered and then emitted
+  (a `<tool_call>` block cannot be unsent once streamed); without tools,
+  streaming is unchanged.
+- **What it is not:** native tool calling. Compliance is the model's choice, the
+  CLI's own tools stay denied (no `--allow-tool`), and the scaffolding cost per
+  turn is unchanged. A wrong or missing format degrades to a plain-text answer.
+- **Router:** a hop that still refuses tools (`chat_tools_unsupported`, now
+  only for non-function tool types) fails over without a cooldown instead of
+  ending the client run (`refusesTools`, proxy.go).
+
 ## 11. What changed between this design and the shipped code
 
 Recorded because each one was found by a gate, not by review — the design was
@@ -208,6 +237,11 @@ right about the shape and wrong about four details.
    perfectly good bridge was refused. `copilotModelIDs` is now `auto` +
    `gpt-6.1-sol`, both proven by a real turn. Rule: an id joins the list after a
    turn answers on it, never because it is documented.
+   **Superseded (2026-11-05):** the real fault was the key test probing a
+   non-`auto` first candidate. With `auto` pinned FIRST (a test guards it) the
+   catalog is now every id `copilot help config` documents, read at boot, and the
+   plan decides per request with a typed 403 `model_not_in_plan`; the operator
+   chooses what to enable. See the runbook's Models section.
 2. **The bridge registry entry's `Kind` must be the ACCOUNT kind**, not the wire
    kind. Registering `github-copilot` with `Kind: "openai-compatible"` made the
    key-add refuse a `copilot-bridge` account ("that account does not point at
@@ -226,5 +260,6 @@ right about the shape and wrong about four details.
 
 Unchanged from the design: prompt on stdin (measured — `MAX_ARG_STRLEN` 128 KB
 against 250–600 KB prompts), no `--allow-tool`, exact-or-zero usage, typed
-exits, and the client-tools refusal (`chat_tools_unsupported`). The §10 SDK
-spike was NOT run; the refusal stands as a documented limitation.
+and exits. The client-tools refusal did NOT survive contact with a live combo: it
+is replaced by prompt-level emulation (§10 addendum). The §10 SDK spike was NOT
+run; native tool calling remains a documented limitation.

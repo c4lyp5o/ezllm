@@ -1663,6 +1663,22 @@ func refusesHistory(resp *http.Response) bool {
 		strings.Contains(s, "needs the reasoning of every")
 }
 
+// refusesTools reports a 400 from a hop that cannot take client tool schemas at
+// all: the Copilot CLI bridge runs its own agent loop and refuses `tools` by
+// name (code chat_tools_unsupported). It describes the HOP, not the body, so a
+// hop that does support tools can serve the identical request — committing the
+// 400 instead ended the client run with three working hops left in the combo
+// (measured 2026-11-05, client maxine).
+//
+// Like refusesHistory it is NOT a park: the hop is healthy for requests without
+// tools, and the refusal says nothing about its availability.
+func refusesTools(resp *http.Response) bool {
+	if resp == nil || resp.Body == nil || resp.StatusCode != http.StatusBadRequest {
+		return false
+	}
+	return strings.Contains(strings.ToLower(string(peekBody(resp, maxErrPeek))), "chat_tools_unsupported")
+}
+
 // deniesModelAccess reports a 401/403 whose body says the HOP cannot reach the
 // model it was asked for ("Access to model denied", "model access denied",
 // "does not have access to"). Measured 2026-10-23: an account answered 403 for
@@ -1994,6 +2010,10 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 			// — the attempt trail and the cause carry the explanation.
 			if err == nil && !oc.failed && refusesHistory(resp) {
 				oc = hopOutcome{failed: true, reason: "history has no reasoning this model requires"}
+			}
+			// A tools refusal is a hop fact in the same way: fail over, no cooldown.
+			if err == nil && !oc.failed && refusesTools(resp) {
+				oc = hopOutcome{failed: true, reason: "hop cannot accept client tool schemas"}
 			}
 			// A 403 that names model access is a fact about the hop, so park it
 			// exactly as a 429 would be: same model-scoped key, same TTL, same

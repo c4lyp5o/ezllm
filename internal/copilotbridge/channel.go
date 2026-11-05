@@ -334,6 +334,7 @@ func driveTurn(c *rpcConn, turn ChannelTurn, delta func(string) error, onFirst f
 	}
 	var built strings.Builder
 	finalText := ""
+	dropped := make([]string, 0, 2) // tool names the model asked for but the caller never declared
 	first := false
 	stamp := func() {
 		if !first {
@@ -376,10 +377,14 @@ func driveTurn(c *rpcConn, turn ChannelTurn, delta func(string) error, onFirst f
 				res.Usage.Model = ev.Data.Model
 			}
 			// An undeclared name is a hallucination: the CLI answers it itself
-			// and the model carries on, so it is not handed to the caller.
+			// and the model carries on, so it is not handed to the caller. It is
+			// remembered, though: a turn that ends with nothing but dropped calls
+			// must say which names it dropped, not "no assistant message".
 			for _, tr := range ev.Data.ToolRequests {
 				if declared[tr.Name] {
 					res.ToolCalls = append(res.ToolCalls, ToolCall{ID: tr.ToolCallID, Name: tr.Name, Arguments: normaliseArgs(tr.Arguments)})
+				} else if tr.Name != "" {
+					dropped = append(dropped, tr.Name)
 				}
 			}
 			if len(res.ToolCalls) > 0 {
@@ -396,9 +401,29 @@ func driveTurn(c *rpcConn, turn ChannelTurn, delta func(string) error, onFirst f
 			return res, classifySession(ev)
 		case "session.idle":
 			finish()
+			if res.Text == "" && len(res.ToolCalls) == 0 && len(dropped) > 0 {
+				// The body carried calls, every one of them undeclared, and the
+				// model then stopped: the precise cause is the names, which a
+				// generic "no assistant message" would have hidden.
+				return res, &Failure{Code: "chat_tools_unsupported",
+					Msg: "copilot bridge: the model asked for tools the caller never declared: " + strings.Join(unique(dropped), ", ")}
+			}
 			return res, nil
 		}
 	}
+}
+
+// unique keeps the first occurrence of each name, for a stable message.
+func unique(names []string) []string {
+	seen := make(map[string]bool, len(names))
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // drainAborted stops the turn and collects its usage. A failure here costs only

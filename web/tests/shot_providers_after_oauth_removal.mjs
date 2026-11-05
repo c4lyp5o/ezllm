@@ -17,7 +17,7 @@ await p.waitForTimeout(1500);
 await p.goto(BASE + '/providers', { waitUntil: 'networkidle' });
 await p.waitForTimeout(1200);
 const cards = await p.locator('body').innerText();
-const hasCopilotCLI = cards.includes('GitHub Copilot (CLI)');
+const hasCopilotCLI = cards.includes('GitHub Copilot (bridge)');
 const hasOldCopilot = /GitHub Copilot(?! \(CLI\))/.test(cards);
 await p.screenshot({ path: '/tmp/providers.png' });
 
@@ -26,10 +26,10 @@ const add = p.getByRole('button', { name: /add provider/i }).first();
 await add.click();
 await p.waitForTimeout(600);
 const opts = await p.locator('select').first().locator('option').allTextContents();
-const hasCLIOption = opts.some((o) => o.includes('GitHub Copilot (CLI)'));
+const hasCLIOption = opts.some((o) => o.includes('GitHub Copilot (bridge)'));
 const hasOldOption = opts.some((o) => o.trim() === 'GitHub Copilot' || o.includes('GitHub Copilot') && !o.includes('(CLI)'));
 if (hasCLIOption) {
-  await p.locator('select').first().selectOption({ label: opts.find((o) => o.includes('GitHub Copilot (CLI)')) });
+  await p.locator('select').first().selectOption({ label: opts.find((o) => o.includes('GitHub Copilot (bridge)')) });
   await p.waitForTimeout(500);
 }
 const modalText = await p.locator('body').innerText();

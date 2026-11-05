@@ -133,20 +133,20 @@ const PROVIDER_PRESETS: Record<string, {
   // paste — docs/claude-bridge-runbook.md, docs/codex-bridge-runbook.md,
   // docs/agy-bridge-runbook.md.
   'claude-sub': {
-    label: 'Claude Pro/Max', kind: 'anthropic-compatible', baseURL: 'http://127.0.0.1:8790/v1',
+    label: 'Claude Pro/Max (bridge)', kind: 'anthropic-compatible', baseURL: 'http://127.0.0.1:8790/v1',
     bridge: 'claude-sub', usageConvention: 'anthropic',
   },
   'chatgpt-sub': {
-    label: 'ChatGPT Plus/Pro', kind: 'openai-compatible', baseURL: 'http://127.0.0.1:8791/v1',
+    label: 'ChatGPT Plus/Pro (bridge)', kind: 'openai-compatible', baseURL: 'http://127.0.0.1:8791/v1',
     bridge: 'chatgpt-sub',
   },
   'antigravity-sub': {
-    label: 'Google Antigravity', kind: 'openai-compatible', baseURL: 'http://127.0.0.1:8792/v1',
+    label: 'Google Antigravity (bridge)', kind: 'openai-compatible', baseURL: 'http://127.0.0.1:8792/v1',
     bridge: 'antigravity-sub',
   },
   // The CLI bridge is its own provider kind, listed under GitHub Copilot.
   'copilot-sub': {
-    label: 'GitHub Copilot (CLI)', kind: 'copilot-bridge', baseURL: 'http://127.0.0.1:8793/v1',
+    label: 'GitHub Copilot (bridge)', kind: 'copilot-bridge', baseURL: 'http://127.0.0.1:8793/v1',
     bridge: 'github-copilot',
   },
   'claude-platform': { label: 'Claude Platform', kind: 'anthropic-compatible', baseURL: 'https://api.anthropic.com' },
@@ -154,7 +154,7 @@ const PROVIDER_PRESETS: Record<string, {
   // The sentinel base URL is rewritten to the in-process bridge at request
   // time (docs/claude-web-runbook.md, docs/gemini-web-runbook.md).
   'claude-web': {
-    label: 'Claude.ai (web session)', kind: 'claude-web', baseURL: 'internal://claudeweb',
+    label: 'Claude.ai (web)', kind: 'claude-web', baseURL: 'internal://claudeweb',
     keyHint: 'claude.ai sessionKey cookie, pasted as sessionKey=sk-ant-… (runbook: DevTools → Cookies → claude.ai)',
   },
   'opencode-go': { label: 'OpenCode Go', kind: 'opencode-go', baseURL: 'https://opencode.ai/zen/go/v1', sessionHeader: true },
@@ -178,7 +178,7 @@ const PROVIDER_PRESETS: Record<string, {
   },
   'gemini': { label: 'Google AI Studio', kind: 'gemini-openai', baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai' },
   'gemini-web': {
-    label: 'Google Gemini (web cookies)', kind: 'gemini-web', baseURL: 'internal://geminiweb',
+    label: 'Google Gemini (web)', kind: 'gemini-web', baseURL: 'internal://geminiweb',
     multilineKey: true,
     keyHint: 'Paste the WHOLE cookie header (all cookies, semicolon-separated) — we keep __Secure-1PSID and __Secure-1PSIDTS. Two lines work too. Use a TEST Google account only.',
   },

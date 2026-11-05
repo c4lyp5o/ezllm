@@ -693,7 +693,7 @@ can see the failure you are trying to prevent.**
   embedding `*openAICompatible`: the wire is shared, the identity is its own.
 - `internal/server/bridges.go` — registry entry id `github-copilot` (label "GitHub
   Copilot", kind `copilot-bridge`); `web/src/pages/Providers.tsx` — the "GitHub Copilot
-  (CLI)" preset, which replaced the device-flow panel.
+  (bridge)" preset, which replaced the device-flow panel.
 
 ### M15 — hop stream health ✅ (2026-11-05; design `docs/hop-health-design.md`)
 

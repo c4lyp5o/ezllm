@@ -45,7 +45,7 @@ started without a login would look healthy while every request 401s.
 
 ## Adding the provider
 
-Providers → Add provider → **GitHub Copilot (CLI)**. No key to paste: the
+Providers → Add provider → **GitHub Copilot (bridge)**. No key to paste: the
 server resolves the bridge token on the key-add call (`kind: copilot-bridge`,
 base `http://127.0.0.1:8793/v1`). If the bridge is off, the add answers 409
 naming the env var.
@@ -66,7 +66,7 @@ binary and a planted row:
 So the migration is not optional and it is not automatic — the old account is a
 trap that looks fine until traffic arrives. In the deploy window:
 
-1. Providers → Add provider → **GitHub Copilot (CLI)**, namespace `copilot`,
+1. Providers → Add provider → **GitHub Copilot (bridge)**, namespace `copilot`,
    then Save & validate (no key to paste; the bridge must be running).
 2. Point every combo/hop that named the old account at the new one. A combo
    referencing a dead account keeps failing even after the new one exists.

@@ -516,11 +516,6 @@ type keyTestRequest struct {
 	SkipInference bool   `json:"skip_inference"`
 	// ProbeMaxModels caps the deferred protocol sweep (default 6).
 	ProbeMaxModels int `json:"probe_max_models"`
-	// DeviceHandle is the dashboard device-flow alternative to APIKey
-	// (github-copilot): the OAuth session never left the server, so the
-	// caller names the pending flow instead of pasting its JSON. Refused
-	// together with APIKey — one credential source per add.
-	DeviceHandle string `json:"device_handle"`
 	// Bridge names a running subscription bridge (claude-sub, chatgpt-sub)
 	// whose shared secret the server fills in itself (bridges.go). Refused
 	// together with APIKey, and unless the account points at that bridge.
@@ -550,24 +545,8 @@ func (s *Server) handleAddKey(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(in.Label) == "" {
 		in.Label = "default"
 	}
-	// Device flow resolves the credential server-side; the session JSON the
-	// dashboard would otherwise be holding comes out of the registry, under
-	// the handle it asked for, and only for this one request.
-	if in.DeviceHandle != "" {
-		if strings.TrimSpace(in.APIKey) != "" {
-			writeErr(w, http.StatusBadRequest, "invalid_request_error",
-				"pass either device_handle or api_key, not both")
-			return
-		}
-		session, code, msg := s.ghSession(in.DeviceHandle)
-		if code != 0 {
-			writeErr(w, code, "invalid_request_error", msg)
-			return
-		}
-		in.APIKey = session
-	}
 	if in.Bridge != "" {
-		if strings.TrimSpace(in.APIKey) != "" || in.DeviceHandle != "" {
+		if strings.TrimSpace(in.APIKey) != "" {
 			writeErr(w, http.StatusBadRequest, "invalid_request_error",
 				"pass bridge alone — the server supplies its key")
 			return
@@ -600,12 +579,6 @@ func (s *Server) handleAddKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.deferProtocol(accountID, keyID, acct, in.APIKey, test, in.ProbeMaxModels)
-	// Retired only now: the session has a permanent home, so the handle's
-	// copy must stop working (a failed test above leaves it alive for retry).
-	if in.DeviceHandle != "" {
-		s.ghConsume(in.DeviceHandle)
-	}
-
 	keys, _ := s.db.ListKeys(r.Context(), accountID)
 	sink.result(findKey(keys, keyID), test)
 }

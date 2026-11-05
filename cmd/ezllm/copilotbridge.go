@@ -173,7 +173,7 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 	if err != nil {
 		return nil, err
 	}
-	cliVersion := copilotCLIVersion(resolved)
+	cliVersion := copilotbridge.CLIVersion(resolved)
 	release := releaseState(bin, cliVersion, copilotQualifiedVersion)
 	token, err := bridgeTokenFromFile(strings.TrimSpace(os.Getenv(envCopilotBridgeToken)), "copilot")
 	if err != nil {
@@ -237,20 +237,6 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 		}
 	}()
 	return func() { shutdownBridgeHTTP(httpSrv) }, nil
-}
-
-// copilotCLIVersion reads `copilot --version` ("GitHub Copilot CLI 1.0.105.").
-func copilotCLIVersion(bin string) string {
-	out, err := exec.Command(bin, "--version").Output()
-	if err != nil {
-		return "unknown"
-	}
-	for _, f := range strings.Fields(string(out)) {
-		if f[0] >= '0' && f[0] <= '9' {
-			return strings.TrimSuffix(f, ".")
-		}
-	}
-	return strings.TrimSpace(string(out))
 }
 
 // bridgeTokenFromFile mints (once) and reads the loopback shared secret, 0600.

@@ -134,7 +134,8 @@ func TestBridgeCheckClaudeRefusesAMissingLogin(t *testing.T) {
 }
 
 func TestBridgeCheckUsage(t *testing.T) {
-	for _, args := range [][]string{nil, {"--json"}, {"copilot"}} {
+	// "copilot" is a real target now; an unknown name must still be a usage error.
+	for _, args := range [][]string{nil, {"--json"}, {"nope"}} {
 		if err := runBridgeCheck(args, &bytes.Buffer{}); err == nil || errors.Is(err, errBridgeCheckFailed) {
 			t.Errorf("args %v: err = %v, want a usage error", args, err)
 		}
@@ -215,5 +216,19 @@ func TestBridgeUpdateFile(t *testing.T) {
 		if got := bridgeUpdateFile(bin); got != want {
 			t.Errorf("bridgeUpdateFile(%q) = %q, want %q", bin, got, want)
 		}
+	}
+}
+
+// The copilot target must be routable and must fail closed: a binary that is not
+// there is a problem, not a panic and not a silent pass. The check's own logic
+// (protocol, login, live turns) is tested in internal/copilotbridge against a
+// subprocess stub, so this pins the wiring only.
+func TestBridgeCheckCopilotRoutesAndFailsClosed(t *testing.T) {
+	v, err := checkJSON(t, "copilot", "--bin", filepath.Join(t.TempDir(), "nope"))
+	if !errors.Is(err, errBridgeCheckFailed) {
+		t.Fatalf("err = %v, want errBridgeCheckFailed", err)
+	}
+	if len(v.Problems) == 0 || !strings.Contains(v.Problems[0], "does not resolve") {
+		t.Fatalf("problems = %v, want a resolution failure", v.Problems)
 	}
 }

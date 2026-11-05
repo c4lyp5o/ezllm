@@ -26,9 +26,6 @@ type CallEvent struct {
 	SavedNotional int64 `json:"compression_saved_notional"`
 	ContextPre    int64 `json:"context_tokens_pre"`
 	ContextSaved  int64 `json:"context_tokens_saved"`
-	// ToolPruneShadow is the tool-pruning M1 measurement (potential prunable
-	// schema tokens; never shipped) — see docs/tool-pruning-design.md.
-	ToolPruneShadow int64 `json:"tool_prune_shadow_tokens"`
 	// StreamOutcome is how a stream ended (schema v34, docs/hop-health-design.md):
 	// completed / truncated / failed / client_gone, or "" for a non-stream.
 	StreamOutcome string `json:"stream_outcome"`
@@ -92,9 +89,8 @@ func EventFromCall(c Call) CallEvent {
 		Reasoning: c.ReasoningTokens, Saved: c.TokensSaved,
 		SavedNotional: c.TokensSavedNotional,
 		ContextPre:    c.ContextTokensPre, ContextSaved: c.ContextTokensSaved,
-		ToolPruneShadow: c.ToolPruneShadowTokens,
-		StreamOutcome:   c.StreamOutcome,
-		Compression:     c.CompressionProfile, Applied: c.CompressionApplied,
+		StreamOutcome: c.StreamOutcome,
+		Compression:   c.CompressionProfile, Applied: c.CompressionApplied,
 		Translated: c.Translated,
 		Err:        c.Err,
 	}

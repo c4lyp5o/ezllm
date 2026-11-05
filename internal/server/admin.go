@@ -308,21 +308,34 @@ func (s *Server) healthSnapshot(ctx context.Context) (map[string]any, error) {
 		`SELECT COALESCE(MIN(ts),''),COALESCE(MAX(ts),'') FROM calls`).Scan(&oldest, &newest); err != nil {
 		return nil, err
 	}
+	// The overview is what the DASHBOARD actually reads, and /admin/health is a
+	// separate handler with its own payload — a field added to only one of them
+	// is invisible to the operator (this cost a build: the card rendered nothing
+	// while /admin/health answered correctly). Both surfaces carry the same
+	// key; only /admin/health takes a window parameter, so the overview names
+	// its fixed 24h.
+	now := time.Now().UTC()
+	hopStreams, err := s.db.HopStreamHealth(ctx, now.Add(-24*time.Hour), now)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{
-		"status":         "ok",
-		"version":        Version,
-		"schema_version": s.db.SchemaVersion(),
-		"db_path":        s.db.Path(),
-		"accounts":       accounts,
-		"provider_keys":  keys,
-		"models":         models,
-		"combos":         combos,
-		"ledger_rows":    calls,
-		"ledger_span":    map[string]string{"oldest": oldest, "newest": newest},
-		"dropped_rows":   store.DroppedCalls(),
-		"lost_rows":      store.LostRows(),
-		"unmetered_rows": store.UnmeteredRows(),
-		"uptime_s":       int(time.Since(s.started).Seconds()),
+		"status":            "ok",
+		"version":           Version,
+		"schema_version":    s.db.SchemaVersion(),
+		"db_path":           s.db.Path(),
+		"accounts":          accounts,
+		"provider_keys":     keys,
+		"models":            models,
+		"combos":            combos,
+		"ledger_rows":       calls,
+		"ledger_span":       map[string]string{"oldest": oldest, "newest": newest},
+		"dropped_rows":      store.DroppedCalls(),
+		"lost_rows":         store.LostRows(),
+		"unmetered_rows":    store.UnmeteredRows(),
+		"hop_stream_health": hopStreams,
+		"stream_window_s":   24 * 3600,
+		"uptime_s":          int(time.Since(s.started).Seconds()),
 	}, nil
 }
 
@@ -334,7 +347,6 @@ const callsCols = `ts, client, COALESCE(ip, '') AS ip, surface, alias, account, 
        COALESCE(tokens_saved, 0), COALESCE(compression_profile, ''),
        COALESCE(compression_applied, 0), COALESCE(compression_rules_fired, 0),
        COALESCE(context_tokens_pre, 0), COALESCE(context_tokens_saved, 0),
-       COALESCE(tool_prune_shadow_tokens, 0),
        COALESCE(compression_saved_notional, 0), COALESCE(prefix_sha, ''),
        COALESCE(session_id, ''), msg_count, tool_count, req_bytes,
        COALESCE(block_pos, 0),
@@ -349,13 +361,13 @@ func scanCalls(rows *sql.Rows) ([]map[string]any, error) {
 		var ts, client, ip, surface, alias, account, model string
 		var status int
 		var ttft, total, tin, tout, cread, cwrite, reasoning any
-		var saved, applied, rulesFired, contextPre, contextSaved, toolPruneShadow int
+		var saved, applied, rulesFired, contextPre, contextSaved int
 		var notional, msgCount, toolCount, reqBytes, blockPos int
 		var translated int
 		var prefixSHA, sessionID, profile, errText string
 		if err := rows.Scan(&ts, &client, &ip, &surface, &alias, &account, &model, &status,
 			&ttft, &total, &tin, &tout, &cread, &cwrite, &reasoning,
-			&saved, &profile, &applied, &rulesFired, &contextPre, &contextSaved, &toolPruneShadow,
+			&saved, &profile, &applied, &rulesFired, &contextPre, &contextSaved,
 			&notional, &prefixSHA, &sessionID, &msgCount, &toolCount, &reqBytes, &blockPos, &translated, &errText); err != nil {
 			return nil, err
 		}
@@ -375,11 +387,8 @@ func scanCalls(rows *sql.Rows) ([]map[string]any, error) {
 			"saved_notional":       notional,
 			"context_tokens_pre":   contextPre,
 			"context_tokens_saved": contextSaved,
-			// tool pruning M1 measurement (potential, never shipped) —
-			// docs/tool-pruning-design.md
-			"tool_prune_shadow_tokens": toolPruneShadow,
-			"compression":              profile,
-			"applied":                  applied != 0,
+			"compression":          profile,
+			"applied":              applied != 0,
 			// non-zero only when caveman prose rules rewrote something
 			"rules_fired": rulesFired,
 			// v8 research capture (see docs/API.md — cacheability section)

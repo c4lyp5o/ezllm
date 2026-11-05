@@ -1001,11 +1001,12 @@ func (d *DB) alterCallsContextTokens(ctx context.Context) error {
 	return nil
 }
 
-// alterCallsToolPrune adds the tool-pruning measurement column (v33,
-// docs/tool-pruning-design.md) on databases created before it. Same guard as
-// alterCallsContextTokens: ALTER TABLE ADD COLUMN is not idempotent, and a
-// fresh database already has the column from schema.sql. M2 appends
-// tool_prune_tokens_saved to this list when prune mode ships.
+// alterCallsToolPrune adds the v33 tool-pruning column on databases created
+// before it. Same guard as alterCallsContextTokens: ALTER TABLE ADD COLUMN is
+// not idempotent, and a fresh database already has the column from schema.sql.
+// The feature itself is REJECTED and deleted (2026-11-05); this migration stays
+// because the column is frozen history and an old database must still open
+// without a "no such column" on the ledger insert path.
 func (d *DB) alterCallsToolPrune(ctx context.Context) error {
 	exists, err := hasTable(ctx, d.w, "calls")
 	if err != nil {

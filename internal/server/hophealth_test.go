@@ -83,6 +83,16 @@ func TestHealthReportsHopStreamHealth(t *testing.T) {
 	if bad := get("/admin/health?stream_window=nope"); bad.Code != http.StatusBadRequest {
 		t.Errorf("bad window status = %d, want 400 (body %s)", bad.Code, bad.Body.String())
 	}
+	// The DASHBOARD reads /admin/overview, not /admin/health — the field must be
+	// on both or the operator sees nothing (this is how the card first shipped
+	// blank).
+	ov := get("/admin/overview")
+	if ov.Code != http.StatusOK {
+		t.Fatalf("overview status = %d", ov.Code)
+	}
+	if !strings.Contains(ov.Body.String(), `"hop_stream_health"`) {
+		t.Errorf("overview payload lacks hop_stream_health: %.300s", ov.Body.String())
+	}
 	// And the window actually narrows: a 1ns window excludes every row.
 	if narrow := get("/admin/health?stream_window=1ns"); narrow.Code != http.StatusOK ||
 		!strings.Contains(narrow.Body.String(), `"hop_stream_health":[]`) {

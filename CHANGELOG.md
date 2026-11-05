@@ -2,6 +2,26 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
+## Unreleased — removed: tool pruning (rejected feature)
+
+- **Deleted the whole feature**, per the standing rule that a feature no live
+  data uses is removed outright rather than deprecated: `internal/toolprune`
+  (policy + tracker + tests), the `inference()` shadow hook,
+  `internal/server/toolusage.go` and `GET /admin/tool-usage`, the store stats
+  layer, the `tool_pruning` config block with its env override and validators,
+  the dashboard totals row and the feed/summary field, and
+  `docs/tool-pruning-design.md`.
+- **Kept, frozen and documented**: `calls.tool_prune_shadow_tokens` and the
+  `tool_usage` table stay in the schema. Ledger rows are immutable history and
+  the rows written during the four-day measurement are the evidence the
+  rejection rests on; dropping them is a destructive migration nobody asked
+  for. Nothing reads or writes either any more.
+- Why it went: M2 was rejected 2026-11-04 — 89.8% of the reported 10.5M-token
+  prize was frozen counters from tools that had stopped shipping, the live dead
+  tax was 481 tokens/request (0.9% of prompt), and `used_sessions` was
+  structurally blind to single-shot clients, so prune mode would have deleted
+  DIS:Intelligence's entire tool catalog. See the EXPLORING note.
+
 ## Unreleased — hop stream health (schema v34)
 
 - `calls.stream_outcome` records how a STREAM ended — `completed`, `truncated`,

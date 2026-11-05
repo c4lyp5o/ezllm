@@ -36,7 +36,6 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/rules"
 	"github.com/c4lyp5o/ezllm/internal/settings"
 	"github.com/c4lyp5o/ezllm/internal/store"
-	"github.com/c4lyp5o/ezllm/internal/toolprune"
 )
 
 type ctxKey int
@@ -102,13 +101,6 @@ type Server struct {
 	// shadowSampler decides whether a request runs the discarded shadow pass
 	// (addendum #7). Injectable for tests; nil = never.
 	shadowSampler func() bool
-	// toolPrune is the tool-pruning measurement (M1,
-	// docs/tool-pruning-design.md): mode + eligibility policy + the
-	// per-session pair tracker. Mode "" = off (the unit-test default) —
-	// nothing parses, nothing books, nothing is rewritten.
-	toolPruneMode string
-	toolPrune     toolprune.Policy
-	toolPruneTrk  *toolprune.Tracker
 	log           *slog.Logger
 	mux           *http.ServeMux
 	// bridges lists the subscription bridges for the Add Provider dialog
@@ -213,12 +205,6 @@ type Options struct {
 	// ShadowSampler (addendum #7): per-request lambda for the discarded
 	// shadow pass. Nil = no shadow.
 	ShadowSampler func() bool
-	// Tool pruning M1 (docs/tool-pruning-design.md). ToolPruneMode is
-	// "off"|"shadow"; anything else behaves as off. Zero values = off,
-	// which is what unit tests get.
-	ToolPruneMode              string
-	ToolPruneMinUnusedSessions int
-	ToolPruneKeep              []string
 	// GitHubDevice configures the dashboard's GitHub Copilot device flow.
 	// Zero value = the production GitHub endpoints (public CLI client id);
 	// tests inject a routed HTTP client. See internal/githubcopilot.
@@ -273,9 +259,6 @@ func New(opts Options) *Server {
 		usageTZ:           usageTZOrDefault(opts.UsageTZ),
 		compressionMinAbs: opts.CompressionMinAbs, compressionMaxMS: opts.CompressionMaxMS,
 		shadowSampler:  opts.ShadowSampler,
-		toolPruneMode:  opts.ToolPruneMode,
-		toolPrune:      toolprune.Policy{MinUnusedSessions: opts.ToolPruneMinUnusedSessions, Keep: toolPruneKeepSet(opts.ToolPruneKeep)},
-		toolPruneTrk:   toolprune.NewTracker(),
 		ghDevices:      map[string]*ghDevice{},
 		ghCfg:          opts.GitHubDevice,
 		comboAutoProbe: opts.ComboAutoProbe,
@@ -379,7 +362,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /admin/usage", s.admin(s.handleUsage))
 	s.mux.HandleFunc("GET /admin/overview", s.admin(s.handleOverview))
 	// Tool-usage learning stats + the pruning prize rollup (docs/tool-pruning-design.md).
-	s.mux.HandleFunc("GET /admin/tool-usage", s.admin(s.handleToolUsage))
 	// The same routable catalog /v1/models serves, behind the dashboard
 	// session: the UI needs to know which ids the gateway can actually route
 	// without holding a bearer key (it never has one — see web/src/utils/api.ts).
@@ -837,12 +819,6 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			doc = jsonbody.Open(body)
 		}
 
-		// Tool pruning M1 (docs/tool-pruning-design.md): measurement only —
-		// shadow mode parses the action space, updates tool_usage stats and
-		// books the potential; it never rewrites the body. Off mode is a
-		// pure no-op.
-		tpShadow := s.toolPruneShadow(r, client, doc)
-
 		// v8 (M9): shape capture for cacheability research. Runs AFTER
 		// compression so the hash describes what actually goes upstream —
 		// if a profile rewrites history, that IS a cache break and must
@@ -860,8 +836,6 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			PrefixSHA: sh.PrefixSHA, MsgCount: sh.MsgCount, ToolCount: sh.ToolCount,
 			SessionID: sessionOf(r), ReqBytes: sh.ReqBytes,
 			ReservationID: reservation,
-			// Tool pruning M1 measurement (potential, never shipped).
-			ToolPruneShadowTokens: tpShadow,
 		}
 		reservation = 0 // handed to the ledger row
 		attachCompressionMetrics(&call, compRes)

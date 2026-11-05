@@ -93,7 +93,7 @@ func UpstreamURL(baseURL string, kind Kind, path string) string {
 
 // ValidKinds lists the kinds this build can register (used by config/admin validation).
 func ValidKinds() []Kind {
-	return []Kind{KindOpenCodeGo, KindOpenAICompatible, KindAnthropicCompat, KindGeminiOpenAI, KindGeminiWeb, KindGitHubCopilot, KindClaudeWeb}
+	return []Kind{KindOpenCodeGo, KindOpenAICompatible, KindAnthropicCompat, KindGeminiOpenAI, KindGeminiWeb, KindGitHubCopilot, KindClaudeWeb, KindCopilotBridge}
 }
 
 // ParseKind validates a kind string.
@@ -288,6 +288,7 @@ func NewRegistry(client *http.Client) *Registry {
 	r.Register(NewGeminiOpenAI(client))
 	r.Register(NewGeminiWeb("http://"+config.DefaultListen+"/internal/geminiweb/v1", client))
 	r.Register(NewGitHubCopilot(client))
+	r.Register(NewCopilotBridge(client)) // the CLI bridge, its own kind
 	r.Register(NewClaudeWeb("http://"+config.DefaultListen+"/internal/claudeweb/v1", client))
 	return r
 }

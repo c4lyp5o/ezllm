@@ -144,8 +144,9 @@ const PROVIDER_PRESETS: Record<string, {
     label: 'Google Antigravity', kind: 'openai-compatible', baseURL: 'http://127.0.0.1:8792/v1',
     bridge: 'antigravity-sub',
   },
+  // The CLI bridge is its own provider kind, listed under GitHub Copilot.
   'copilot-sub': {
-    label: 'GitHub Copilot', kind: 'openai-compatible', baseURL: 'http://127.0.0.1:8793/v1',
+    label: 'GitHub Copilot (CLI)', kind: 'copilot-bridge', baseURL: 'http://127.0.0.1:8793/v1',
     bridge: 'github-copilot',
   },
   'claude-platform': { label: 'Claude Platform', kind: 'anthropic-compatible', baseURL: 'https://api.anthropic.com' },

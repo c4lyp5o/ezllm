@@ -1,7 +1,10 @@
 package copilotbridge
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -155,5 +158,68 @@ func TestOpenAIUsageShape(t *testing.T) {
 	details, _ := got["prompt_tokens_details"].(map[string]any)
 	if details["cached_tokens"].(float64) != 1536 {
 		t.Errorf("cached_tokens = %v, want 1536", details["cached_tokens"])
+	}
+}
+
+// A CLI that sends only the final assistant.message (no deltas) must still
+// deliver the answer on a stream.
+type fakeExec struct {
+	res Result
+	err error
+}
+
+func (f fakeExec) Run(_ context.Context, _, _ string, _ func(string) error) (Result, error) {
+	return f.res, f.err
+}
+
+func TestStreamEmitsFinalTextWhenNoDeltasArrived(t *testing.T) {
+	s := &Server{Runner: fakeExec{res: Result{Text: "final-only"}}, Token: "t", Models: []Model{{ID: "auto"}}}
+	req := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"auto","stream":true,"messages":[{"role":"user","content":"x"}]}`))
+	req.Header.Set("Authorization", "Bearer t")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if !strings.Contains(rec.Body.String(), `"content":"final-only"`) {
+		t.Fatalf("stream lost the answer:\n%s", rec.Body.String())
+	}
+}
+
+func TestChildEnvDropsSecrets(t *testing.T) {
+	env := childEnv([]string{"PATH=/bin", "EZLLM_ADMIN_TOKEN=s3", "OPENAI_API_KEY=k", "HOME=/h"}, "/ch")
+	got := strings.Join(env, "\n")
+	for _, bad := range []string{"EZLLM_ADMIN_TOKEN", "OPENAI_API_KEY"} {
+		if strings.Contains(got, bad) {
+			t.Errorf("child env leaks %s", bad)
+		}
+	}
+	for _, want := range []string{"PATH=/bin", "HOME=/h", "COPILOT_HOME=/ch"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("child env missing %s", want)
+		}
+	}
+}
+
+func TestClassifyExitIsSpecific(t *testing.T) {
+	code := func(stderr string) string {
+		var f *Failure
+		errors.As(ClassifyExit(errors.New("exit 1"), stderr), &f)
+		return f.Code
+	}
+	for in, want := range map[string]string{
+		"Error: not logged in":                     "not_logged_in",
+		"model gpt-x is not included in your plan": "model_not_in_plan",
+		"premium request limit reached":            "quota_exhausted",
+		"update available: feature not available":  "cli_failed",
+		"something else":                           "cli_failed",
+	} {
+		if got := code(in); got != want {
+			t.Errorf("%q -> %s, want %s", in, got, want)
+		}
+	}
+}
+
+func TestFailureErrorToleratesNilCause(t *testing.T) {
+	if got := (&Failure{Msg: "m"}).Error(); got != "m" {
+		t.Errorf("got %q", got)
 	}
 }

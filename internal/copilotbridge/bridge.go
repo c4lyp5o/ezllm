@@ -149,6 +149,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sw := &sseWriter{w: w, id: id, created: created, model: model, rc: http.NewResponseController(w)}
+	defer sw.bind(r.Context())()
 	res, err := s.Runner.Run(r.Context(), req.Model, req.Prompt, sw.delta)
 	if err != nil {
 		if !sw.started {
@@ -163,6 +164,11 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	}
 	sw.model = servedModel(model, res)
 	sw.begin()
+	if !sw.sent && res.Text != "" {
+		// The CLI sent only a final assistant.message (no deltas): without this
+		// the client would get a 200 stream with an empty answer.
+		sw.chunk(map[string]any{"content": res.Text}, "")
+	}
 	sw.chunk(map[string]any{}, "stop")
 	if req.IncludeUsage {
 		sw.event(map[string]any{"id": id, "object": "chat.completion.chunk", "created": created,
@@ -233,6 +239,7 @@ type sseWriter struct {
 	created int64
 	model   string
 	started bool
+	sent    bool // at least one content delta reached the client
 
 	rc        *http.ResponseController
 	dmu       sync.Mutex
@@ -313,6 +320,7 @@ func (s *sseWriter) delta(text string) error {
 		return nil
 	}
 	s.begin()
+	s.sent = true
 	s.chunk(map[string]any{"content": text}, "")
 	return s.arm()
 }

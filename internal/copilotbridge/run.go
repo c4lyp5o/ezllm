@@ -108,11 +108,10 @@ func (r *Runner) Run(ctx context.Context, model, prompt string, delta func(strin
 	cmd := exec.CommandContext(ctx, r.Bin, args...)
 	cmd.Stdin = strings.NewReader(prompt)
 	cmd.Dir = os.TempDir() // no repository context: this is a completion call
-	env := os.Environ()
-	if r.Home != "" {
-		env = append(env, "COPILOT_HOME="+r.Home)
-	}
-	cmd.Env = env
+	cmd.Env = childEnv(os.Environ(), r.Home)
+	// A grandchild holding the stdout pipe must not pin Wait (and a concurrency
+	// slot) after the kill.
+	cmd.WaitDelay = 5 * time.Second
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return Result{}, fmt.Errorf("copilot-bridge: stdout: %w", err)
@@ -124,6 +123,11 @@ func (r *Runner) Run(ctx context.Context, model, prompt string, delta func(strin
 	}
 
 	res, parseErr := parseStream(stdout, delta)
+	if parseErr != nil && !errors.Is(parseErr, io.EOF) {
+		// Nobody reads stdout any more: kill the child now or it blocks on a
+		// full pipe until the timeout while holding a slot.
+		cancel()
+	}
 	werr := cmd.Wait()
 
 	if parseErr != nil && !errors.Is(parseErr, io.EOF) {
@@ -275,11 +279,14 @@ func parseStream(r io.Reader, delta func(string) error) (Result, error) {
 func ClassifyExit(err error, stderr string) error {
 	msg := strings.ToLower(stderr)
 	switch {
-	case strings.Contains(msg, "not logged in"), strings.Contains(msg, "authentication"), strings.Contains(msg, "unauthorized"):
+	case strings.Contains(msg, "not logged in"), strings.Contains(msg, "please log in"),
+		strings.Contains(msg, "authentication failed"), strings.Contains(msg, "authentication required"),
+		strings.Contains(msg, "unauthorized"):
 		return &Failure{Code: "not_logged_in", Msg: "copilot bridge: the CLI is not logged in for this COPILOT_HOME", Cause: err}
 	case strings.Contains(msg, "premium request"), strings.Contains(msg, "quota"), strings.Contains(msg, "rate limit"):
 		return &Failure{Code: "quota_exhausted", Msg: "copilot bridge: the plan refused this request (premium requests or quota)", Cause: err}
-	case strings.Contains(msg, "not available"), strings.Contains(msg, "not in your plan"):
+	case strings.Contains(msg, "not included in your plan"), strings.Contains(msg, "not in your plan"),
+		strings.Contains(msg, "model") && strings.Contains(msg, "not available"):
 		return &Failure{Code: "model_not_in_plan", Msg: "copilot bridge: that model is not included in this Copilot plan", Cause: err}
 	}
 	return &Failure{Code: "cli_failed", Msg: "copilot bridge: the CLI exited with an error", Cause: err}
@@ -293,7 +300,12 @@ type Failure struct {
 	Cause error
 }
 
-func (f *Failure) Error() string { return f.Msg + ": " + f.Cause.Error() }
+func (f *Failure) Error() string {
+	if f.Cause == nil {
+		return f.Msg
+	}
+	return f.Msg + ": " + f.Cause.Error()
+}
 func (f *Failure) Unwrap() error { return f.Cause }
 
 type limitedWriter struct {
@@ -319,4 +331,26 @@ func firstLine(s string) string {
 		s = s[:i]
 	}
 	return strings.TrimSpace(s)
+}
+
+// childEnv is the CLI child's environment: an allowlist, not os.Environ(). The
+// child runs an agent loop, and ezllm's own process carries admin tokens and
+// provider keys that it has no business seeing.
+func childEnv(parent []string, home string) []string {
+	keep := map[string]bool{
+		"PATH": true, "HOME": true, "TMPDIR": true, "LANG": true, "LC_ALL": true, "TZ": true,
+		"HTTP_PROXY": true, "HTTPS_PROXY": true, "NO_PROXY": true,
+		"http_proxy": true, "https_proxy": true, "no_proxy": true,
+		"SSL_CERT_FILE": true, "SSL_CERT_DIR": true, "NODE_EXTRA_CA_CERTS": true,
+	}
+	env := make([]string, 0, len(keep)+1)
+	for _, kv := range parent {
+		if k, _, ok := strings.Cut(kv, "="); ok && keep[k] {
+			env = append(env, kv)
+		}
+	}
+	if home != "" {
+		env = append(env, "COPILOT_HOME="+home)
+	}
+	return env
 }

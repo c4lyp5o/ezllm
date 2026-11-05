@@ -11,15 +11,16 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v2.0.0**
+**Current: v1.7.0**
 
-## v2.0.0 — 2026-11-05
+## v1.7.0 — 2026-11-05
 
-MAJOR, because this is a breaking change to config and to the data model rather
-than a feature addition: the `github-copilot` provider kind no longer exists, so
-a `config.yaml` naming it is refused and an account row still carrying it fails
-every request (`502 provider: unknown kind "github-copilot"`). The three device
-routes and `ezllm github-login` are gone with it.
+MINOR by Calypso's call on a pre-1.8 line. It is not a small change though, so
+read the next sentence before deploying: **the `github-copilot` provider kind no
+longer exists.** A `config.yaml` naming it is refused, and an account row still
+carrying it fails every request (`502 provider: unknown kind "github-copilot"`)
+— the migration is a manual three-step in the deploy window (runbook §
+Migrating). The three device routes and `ezllm github-login` are gone with it.
 
 **GitHub Copilot now rides the official CLI**, the fourth subscription bridge
 after Claude, Codex and AGY: kind `copilot-bridge`, base

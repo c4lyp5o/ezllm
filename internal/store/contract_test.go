@@ -23,7 +23,7 @@ import (
 func usageRowTSKeys(t *testing.T) []string {
 	t.Helper()
 	// repo root is two levels up from internal/store
-	path := filepath.Join("..", "..", "web", "src", "api.ts")
+	path := filepath.Join("..", "..", "web", "src", "utils", "api.ts")
 	src, err := os.ReadFile(path)
 	if err != nil {
 		t.Skipf("frontend not present (%v) — nothing to compare against", err)

@@ -83,6 +83,14 @@ func newBridgeRegistry() *bridgeRegistry {
 			BaseURL: "http://127.0.0.1:8792/v1", UsageConvention: "auto",
 			Env: "EZLLM_AGY_BRIDGE", Runbook: "docs/agy-bridge-runbook.md",
 		},
+		{
+			// Replaces the retired OAuth/device-flow provider: the CLI's own
+			// login is the credential. Its usage is the CLI's measured split
+			// (inclusive prompt + cache details), so the openai convention fits.
+			ID: "github-copilot", Label: "GitHub Copilot", Kind: "copilot-bridge",
+			BaseURL: "http://127.0.0.1:8793/v1", UsageConvention: "openai",
+			Env: "EZLLM_COPILOT_BRIDGE", Runbook: "docs/copilot-cli-bridge-runbook.md",
+		},
 	}}
 }
 

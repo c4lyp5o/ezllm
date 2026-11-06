@@ -27,6 +27,10 @@ func ErrorCause(status int, body []byte) string {
 		// refusal describes the HISTORY, not the body we sent, so another hop
 		// of the same family may still serve it — see refusesHistory.
 		return "reasoning_echo_required"
+	case strings.Contains(s, "chat_tools_unsupported"):
+		// A bridge hop (Copilot CLI) whose channel cannot take client tools right
+		// now and refuses them by name. About the HOP, not the body: see refusesTools.
+		return "chat_tools_unsupported"
 	// The bracketed cause opencode's edge puts INSIDE its "Upstream request
 	// failed:" envelope is more specific than the envelope, and it is about
 	// the BODY, not the backend. Ordering matters: without these the generic

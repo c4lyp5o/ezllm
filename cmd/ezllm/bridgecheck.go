@@ -18,6 +18,7 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/agybridge"
 	"github.com/c4lyp5o/ezllm/internal/claudebridge"
 	"github.com/c4lyp5o/ezllm/internal/codexbridge"
+	"github.com/c4lyp5o/ezllm/internal/copilotbridge"
 	"github.com/c4lyp5o/ezllm/internal/server"
 )
 
@@ -108,13 +109,16 @@ type bridgeVerdict struct {
 	Release  string   `json:"release,omitempty"`
 	Live     bool     `json:"live"`
 	Problems []string `json:"problems"`
+	// Notes carry what the run did NOT prove, so a reader (or the updater) never
+	// mistakes a static pass for a full one.
+	Notes []string `json:"notes,omitempty"`
 }
 
 var errBridgeCheckFailed = errors.New("bridge-check: the CLI did not pass")
 
 func runBridgeCheck(args []string, stdout io.Writer) error {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return errors.New("usage: ezllm bridge-check {claude|codex|agy} [--bin PATH] [--home PATH] [--live [--model ID] [--tool-model ID]] [--json]")
+		return errors.New("usage: ezllm bridge-check {claude|codex|agy|copilot} [--bin PATH] [--home PATH] [--live [--model ID] [--tool-model ID]] [--json]")
 	}
 	name := args[0]
 	set := flag.NewFlagSet("bridge-check "+name, flag.ContinueOnError)
@@ -123,7 +127,7 @@ func runBridgeCheck(args []string, stdout io.Writer) error {
 	asJSON := set.Bool("json", false, "print the verdict as JSON")
 	live := set.Bool("live", false, "after the static checks pass, drive the bridge through real turns (spends plan quota)")
 	model := set.String("model", "", "model for the plain live turn (default: the bridge's smallest)")
-	toolModel := set.String("tool-model", "", "model for the client-tool live turn (claude, codex)")
+	toolModel := set.String("tool-model", "", "model for the client-tool live turn (claude, codex, copilot)")
 	if err := set.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -149,8 +153,17 @@ func runBridgeCheck(args []string, stdout io.Writer) error {
 		b, h := or(*bin, envOrDefault(envAgyBin, "/opt/agy/agy")), or(*home, envOrDefault(envAgyHome, "/agy-sub"))
 		v = checkAgyCLI(ctx, b, h)
 		liveRun = func() []string { return liveAgy(ctx, b, h, or(*model, "gemini-3.8-flash-low")) }
+	case "copilot":
+		b, h := or(*bin, envOrDefault(envCopilotBin, "/opt/copilot/copilot")), or(*home, envOrDefault(envCopilotHome, "/copilot-home"))
+		v = checkCopilotCLI(ctx, b, h)
+		liveRun = func() []string { return liveCopilot(ctx, b, h, *model) }
+		if !*live {
+			// Measured: an empty COPILOT_HOME passes session.create, so the
+			// static tier cannot see a login that does not work.
+			v.Notes = append(v.Notes, "the login is unproven without --live (an empty COPILOT_HOME still creates a session)")
+		}
 	default:
-		return fmt.Errorf("bridge-check: unknown bridge %q (claude, codex or agy)", name)
+		return fmt.Errorf("bridge-check: unknown bridge %q (claude, codex, agy or copilot)", name)
 	}
 	// Live turns spend quota and prove nothing a static refusal has not already
 	// decided, so they run only on a CLI that passed every static check.
@@ -169,6 +182,9 @@ func runBridgeCheck(args []string, stdout io.Writer) error {
 		fmt.Fprintf(stdout, "%s %s: %s\n", v.Bridge, v.Version, v.Release)
 		for _, p := range v.Problems {
 			fmt.Fprintln(stdout, "  problem:", p)
+		}
+		for _, n := range v.Notes {
+			fmt.Fprintln(stdout, "  note:", n)
 		}
 	}
 	if !v.OK {
@@ -261,6 +277,47 @@ func checkAgyCLI(ctx context.Context, bin, home string) bridgeVerdict {
 		v.Problems = append(v.Problems, "the CLI listed no models")
 	}
 	return v
+}
+
+func checkCopilotCLI(ctx context.Context, bin, home string) bridgeVerdict {
+	v := bridgeVerdict{Bridge: "copilot"}
+	// The login lives in COPILOT_HOME and the GUI-less channel is the CLI's own
+	// headless surface; RunPreflight proves both without spending a request.
+	pre, err := copilotbridge.RunPreflight(ctx, bin, home)
+	v.Version = pre.Version
+	if pre.Version != "" {
+		v.Release = releaseState(bin, pre.Version, copilotbridge.QualifiedVersion)
+	}
+	if err != nil {
+		v.Problems = append(v.Problems, err.Error())
+	}
+	return v
+}
+
+// liveCopilot proves the two paths this bridge actually broke on: a plain turn,
+// then a client-tool batch and the replay turn after it. Both go through the
+// bridge's own Runner in-process — no HTTP, no gateway, no ledger.
+func liveCopilot(ctx context.Context, bin, home, model string) []string {
+	r := &copilotbridge.Runner{Bin: bin, Home: home, Timeout: liveTurnTimeout}
+	ctx, cancel := context.WithTimeout(ctx, 3*liveTurnTimeout)
+	defer cancel()
+	var problems []string
+	problems = appendIf(problems, judgeLive("plain", copilotbridge.LivePlain(ctx, r, model)))
+	problems = appendIf(problems, judgeLive("client tools", copilotbridge.LiveTools(ctx, r, model)))
+	return problems
+}
+
+// judgeLive turns a live-check error into a problem line, keeping the CLI's own
+// words (trimmed) and nothing else: a check must not print model output.
+func judgeLive(turn string, err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	if len(msg) > 200 {
+		msg = msg[:200] + "…"
+	}
+	return "live " + turn + ": " + msg
 }
 
 // Live turns (--live). Each drives the bridge's own Runner in-process — no

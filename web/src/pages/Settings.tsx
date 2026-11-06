@@ -98,6 +98,7 @@ const DETAILS: Record<string, [string, string]> = {
   notify_bridge_updated: ['Bridge CLI updated', 'The bridge updater promoted a new CLI release and proved it.'],
   notify_bridge_update_blocked: ['Bridge CLI release held back', 'A new CLI release failed the update gate; the bridge kept its current release.'],
   notify_bridge_rolled_back: ['Bridge CLI rolled back', 'A promoted CLI release failed its proof and the bridge went back to the previous one.'],
+  notify_stream_truncation: ['Answers cut mid-stream', 'A provider hop ended more than 1% of its streams early (24 hours, at least 20 streams judged).'],
 };
 const GROUPS: Partial<Record<Tab, string[]>> = {
   General: ['usage_timezone'],

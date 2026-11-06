@@ -90,8 +90,13 @@ type Call struct {
 	CompressionRulesFired int
 	ContextTokensPre      int64
 	ContextTokensSaved    int64
-	PromptTokensPre       int64
-	TokensSaved           int64
+	// StreamOutcome is how a STREAM ended (schema v34): one of
+	// StreamOutcomeCompleted/Truncated/Failed/ClientGone, or "" for a
+	// non-stream request. Written from the dispatcher's own verdict; the err
+	// column stays prose and is never parsed for this again.
+	StreamOutcome   string
+	PromptTokensPre int64
+	TokensSaved     int64
 	// TokensSavedNotional is what compression WOULD have saved on a request it
 	// ultimately shipped unchanged (ratio-floor reject / fail-open). Kept apart
 	// from TokensSaved so the dashboard headline never counts bytes we did not
@@ -474,8 +479,8 @@ INSERT INTO calls (
   compression_profile, compression_applied, prompt_tokens_pre, tokens_saved, compression_ms,
   compression_rules_fired, context_tokens_pre, context_tokens_saved,
   compression_saved_notional, prefix_sha, msg_count, tool_count, session_id, req_bytes, block_pos, translated, err,
-  compression_version, compression_stages, shadow_tokens_saved
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+  compression_version, compression_stages, shadow_tokens_saved, stream_outcome
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
@@ -501,7 +506,7 @@ INSERT INTO calls (
 			c.CompressionProfile, boolInt(c.CompressionApplied), c.PromptTokensPre, c.TokensSaved, c.CompressionMs,
 			c.CompressionRulesFired, c.ContextTokensPre, c.ContextTokensSaved,
 			c.TokensSavedNotional, c.PrefixSHA, c.MsgCount, c.ToolCount, c.SessionID, c.ReqBytes, c.BlockPos, boolInt(c.Translated), c.Err,
-			c.CompressionVersion, c.CompressionStages, c.ShadowTokensSaved,
+			c.CompressionVersion, c.CompressionStages, c.ShadowTokensSaved, c.StreamOutcome,
 		)
 		if err != nil {
 			return fmt.Errorf("insert call: %w", err)
@@ -953,7 +958,8 @@ SELECT ts, client, COALESCE(ip,''), surface, alias, account, COALESCE(provider_k
        compression_rules_fired, context_tokens_pre, context_tokens_saved,
        COALESCE(compression_saved_notional,0), COALESCE(prefix_sha,''), msg_count, tool_count,
        COALESCE(session_id,''), req_bytes, COALESCE(block_pos,0), COALESCE(translated,0), COALESCE(err,''),
-       COALESCE(compression_version,''), COALESCE(compression_stages,''), COALESCE(shadow_tokens_saved,0)
+       COALESCE(compression_version,''), COALESCE(compression_stages,''), COALESCE(shadow_tokens_saved,0),
+       COALESCE(stream_outcome,'')
 FROM calls ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -974,7 +980,7 @@ FROM calls ORDER BY id DESC LIMIT ?`, limit)
 			&c.CompressionRulesFired, &c.ContextTokensPre, &c.ContextTokensSaved,
 			&c.TokensSavedNotional, &c.PrefixSHA, &c.MsgCount, &c.ToolCount,
 			&c.SessionID, &c.ReqBytes, &c.BlockPos, &translated, &c.Err, &c.CompressionVersion,
-			&c.CompressionStages, &c.ShadowTokensSaved); err != nil {
+			&c.CompressionStages, &c.ShadowTokensSaved, &c.StreamOutcome); err != nil {
 			return nil, err
 		}
 		if t, err := time.Parse("2006-01-02T15:04:05.000Z", ts); err == nil {

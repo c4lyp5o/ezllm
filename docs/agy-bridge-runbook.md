@@ -79,7 +79,7 @@ boot, which reports an empty model list and keeps serving. `--json` prints the v
 levels above the binary); boot then reports it qualified.
 
 The binary is ~228 MB, dynamically linked against glibc; the ezllm image
-(distroless base-debian12) carries glibc.
+(distroless cc-debian12) carries glibc and libstdc++.
 
 ## Log in
 

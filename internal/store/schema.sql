@@ -306,6 +306,17 @@ CREATE TABLE IF NOT EXISTS calls (
   -- same never-includes-cached invariant as a native row. Historical rows keep
   -- their inclusive totals.
   translated     INTEGER NOT NULL DEFAULT 0,
+  -- v33, FROZEN: tool pruning was rejected 2026-11-04 (M2) and its code is
+  -- gone; no path writes this column any more. Kept because ledger rows are
+  -- immutable history — rows that DID carry a measurement must not lose it.
+  -- Dropping it is a destructive migration, deliberately not taken.
+  tool_prune_shadow_tokens INTEGER NOT NULL DEFAULT 0,
+  -- v34 (docs/hop-health-design.md): how a STREAM ended, as a first-class
+  -- fact instead of prose in err. '' = not a stream; completed; truncated
+  -- (upstream died after headers); failed (translated stream's late error
+  -- frame); client_gone (the CALLER hung up — a complete call, never a hop
+  -- fault). The hop-health rollup divides truncated by (streams - client_gone).
+  stream_outcome TEXT NOT NULL DEFAULT '',
   err            TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_calls_ts        ON calls(ts DESC);
@@ -318,6 +329,24 @@ CREATE INDEX IF NOT EXISTS idx_calls_acct_model ON calls(account_id, model, ts D
 -- session rollups filter by session_id. Both are new hot paths for /admin only.
 CREATE INDEX IF NOT EXISTS idx_calls_prefix ON calls(model, prefix_sha, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_calls_session ON calls(session_id, ts DESC);
+
+-- ── tool_usage (v33), FROZEN: tool pruning was rejected 2026-11-04 and its ────
+--    reader/writer code is gone (internal/toolprune, /admin/tool-usage).
+--    Kept as history only: the table holds the four days of measurement the
+--    rejection was argued from. Nothing reads or writes it; dropping it is a
+--    destructive migration, deliberately not taken here.
+CREATE TABLE IF NOT EXISTS tool_usage (
+  client           TEXT NOT NULL,
+  tool             TEXT NOT NULL,
+  schema_tokens    INTEGER NOT NULL DEFAULT 0,
+  shipped_requests INTEGER NOT NULL DEFAULT 0,
+  shipped_sessions INTEGER NOT NULL DEFAULT 0,
+  used_sessions    INTEGER NOT NULL DEFAULT 0,
+  first_seen_at    TEXT,
+  last_seen_at     TEXT,
+  last_used_at     TEXT,
+  PRIMARY KEY (client, tool)
+);
 
 -- ── key_cooldowns: reactive backoff; persisted so it survives restart ────────
 CREATE TABLE IF NOT EXISTS key_cooldowns (

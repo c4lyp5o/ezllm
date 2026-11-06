@@ -238,38 +238,12 @@ export async function postKeyTestStream<T>(
   throw new ApiError({ status: 0, type: 'error', message: 'stream ended without a result' });
 }
 
-// ── GitHub Copilot device flow (the phone path) ───────────────────────────
-// Start a flow, poll its status, cancel it. The OAuth session itself never
-// crosses the wire: the key add names the handle (device_handle) and the
-// server resolves the credential itself. docs/github-copilot-runbook.md.
-export type GhDeviceStart = {
-  handle: string;
-  verification_uri: string;
-  user_code: string;
-  expires_in: number;
-  interval: number;
-};
-export type GhDeviceStatus = {
-  status: 'pending' | 'authorized' | 'expired' | 'error';
-  github_login?: string;
-  copilot_expires_at?: string;
-  detail?: string;
-  // GitHub's RFC 8628 §3.5 "poll less often". GitHub WITHHOLDS the token until
-  // the poller lengthens its interval, so this must raise ours (see Providers).
-  slow_down?: boolean;
-};
-export const ghDeviceStart = () => post<GhDeviceStart>('/admin/github/device');
-export const ghDeviceStatus = (handle: string) =>
-  get<GhDeviceStatus>(`/admin/github/device/${encodeURIComponent(handle)}`);
-export const ghDeviceCancel = (handle: string) =>
-  del(`/admin/github/device/${encodeURIComponent(handle)}`);
-
 // ── subscription bridges ─────────────────────────────────────────────────
 // GET /admin/bridges: which loopback bridges exist, which are running, and
 // how to turn one on. A key add names `bridge` instead of api_key and the
 // server supplies the shared secret — it never reaches the browser.
 export type Bridge = {
-  id: 'claude-sub' | 'chatgpt-sub' | 'antigravity-sub';
+  id: 'claude-sub' | 'chatgpt-sub' | 'antigravity-sub' | 'github-copilot';
   label: string;
   kind: string;
   base_url: string;
@@ -370,10 +344,21 @@ export const stopSweep = (id: number) => del(`/admin/accounts/${id}/sync`);
 // dashboard. The analytics explorer's Latency focus now renders it.
 export type UsageRow = { k: string; calls: number; tin: number; tout: number; cread: number; cwrite: number; reasoning: number; saved: number; errors: number; context_pre: number; context_saved: number; p50_ttft_ms: number; applied_saved: number };
 
+export type HopStream = {
+  namespace: string; model: string; streams: number; completed: number;
+  truncated: number; failed: number; client_gone: number;
+  /** truncated / (streams - client_gone) — caller hang-ups are never judged. */
+  truncation_rate: number;
+};
+
 export type Health = {
   status: string; version: string; schema_version: number; accounts: number; provider_keys: number;
   models: number; combos: number; ledger_rows: number; dropped_rows: number;
   lost_rows?: number; unmetered_rows?: number; uptime_s: number;
+  /** Per-hop stream outcomes (docs/hop-health-design.md). Absent on an older
+   *  server, so every consumer must default it to []. */
+  hop_stream_health?: HopStream[];
+  stream_window_s?: number;
 };
 
 export type QuotaSnapshot = {
@@ -455,6 +440,11 @@ export type FeedRow = {
    *  ratio floor), not that compression was skipped. */
   savedNotional: number;
   contextPre?: number; contextSaved?: number;
+  /** Tool pruning M1 measurement: policy-eligible prunable tool-schema
+   *  tokens on this request (potential, never shipped). */
+  /** How a stream ended (schema v34): completed | truncated | failed |
+   *  client_gone. Absent on non-stream requests and pre-v34 rows. */
+  streamOutcome?: string;
   compression: string; applied: boolean; rulesFired?: number; error?: string;
   /** Translated hop: its wire differs from the client's surface. When set,
    *  `tin` is the vendor's INCLUSIVE total, not our cold-token convention. */
@@ -477,6 +467,7 @@ export function normalizeFeedRow(raw: any): FeedRow {
     // Snapshot rows carry the short key, live SSE rows the ledger column name.
     savedNotional: num(raw.saved_notional ?? raw.compression_saved_notional),
     contextPre: num(raw.context_tokens_pre), contextSaved: num(raw.context_tokens_saved),
+    streamOutcome: raw.stream_outcome ? String(raw.stream_outcome) : undefined,
     compression: String(raw.compression ?? ''), applied: Boolean(raw.applied),
     error: raw.error ? String(raw.error) : undefined,
     // Snapshot rows and live SSE rows both carry the marker; absent = native.

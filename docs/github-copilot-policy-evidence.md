@@ -1,3 +1,11 @@
+> **SUPERSEDED 2026-11-05.** This documents the OAuth provider's policy position, which is
+> retired: `internal/githubcopilot`, the `/admin/github/device*` routes,
+> `ezllm github-login` and the `github-copilot` kind are deleted. The
+> provider is now the GitHub Copilot **CLI bridge** — see
+> `docs/copilot-cli-bridge-design.md` and `docs/copilot-cli-bridge-runbook.md`.
+> Kept for history: it explains what was measured and why the account
+> shape was what it was.
+
 # GitHub Copilot third-party access — policy evidence (October 2026)
 
 **Question asked (Calypso, 2026-10-15):** can ezllm add GitHub Copilot as an OAuth provider

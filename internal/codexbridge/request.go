@@ -67,6 +67,21 @@ func (u Unsupported) Error() string { return "codex-bridge: " + u.Msg }
 // and steer toward tools that are switched off here (§2.4).
 const DefaultInstructions = "You are a helpful assistant."
 
+// ClientToolsNote is appended when the caller supplies tools. The Codex child
+// runs in a private scratch directory (/tmp/codex-bridge-*/cwd) and says so in
+// its context; a Codex model then habitually passes that directory as the
+// working directory of the caller's shell tool, which `cd`s into a path that
+// exists only inside this bridge and fails with exit 126. Measured 2026-11-05:
+// a status sweep ended with "this environment can't reach its shell" after two
+// such failures. The tools run on the CALLER'S machine, not here.
+const ClientToolsNote = "Your tools run on the caller's machine, not where you run. " +
+	"The directory you appear to be in is private scratch space that does not exist on the caller's machine: " +
+	"never pass it, or a directory you invented, as a working directory (workdir, cwd, or a leading cd). " +
+	"If a command fails with \"cd: <path>: No such file or directory\" before it runs, the caller's shell has a stale saved " +
+	"working directory; a `cd` inside your own command cannot help because the failing cd runs first. " +
+	"Do not give up and do not conclude you have no shell access: call the tool again with its working-directory " +
+	"parameter (workdir) set to a directory that always exists, such as `/`."
+
 type chatRequest struct {
 	Model           string          `json:"model"`
 	Messages        []chatMessage   `json:"messages"`
@@ -198,6 +213,9 @@ func ParseRequest(body []byte) (Request, error) {
 	}
 	if err := parseTools(&req, cr); err != nil {
 		return Request{}, err
+	}
+	if len(req.Tools) > 0 {
+		req.Instructions += "\n\n" + ClientToolsNote
 	}
 	if rf := cr.ResponseFormat; rf != nil {
 		switch rf.Type {

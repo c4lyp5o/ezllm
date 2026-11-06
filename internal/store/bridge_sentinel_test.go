@@ -28,8 +28,8 @@ func TestValidateAccountInputBridgeSentinels(t *testing.T) {
 		{"gemini-web empty defaults to sentinel", "gemini-web", "", ""},
 		{"gemini-web explicit sentinel", "gemini-web", "internal://geminiweb", ""},
 		{"gemini-web wrong sentinel refused", "gemini-web", "internal://claudeweb", "must be internal://geminiweb"},
-		{"github-copilot is NOT a bridge kind", "github-copilot", "https://api.githubcopilot.com", ""},
-		{"github-copilot sentinel refused", "github-copilot", "internal://claudeweb", "http://"},
+		{"copilot-bridge is NOT a sentinel kind (it dials loopback over http)", "copilot-bridge", "http://127.0.0.1:8793/v1", ""},
+		{"copilot-bridge sentinel refused", "copilot-bridge", "internal://claudeweb", "http://"},
 		{"openai-compatible keeps the old rule", "openai-compatible", "internal://anything", "http://"},
 		{"openai-compatible https still fine", "openai-compatible", "https://api.example.com/v1", ""},
 	}

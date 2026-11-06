@@ -308,21 +308,34 @@ func (s *Server) healthSnapshot(ctx context.Context) (map[string]any, error) {
 		`SELECT COALESCE(MIN(ts),''),COALESCE(MAX(ts),'') FROM calls`).Scan(&oldest, &newest); err != nil {
 		return nil, err
 	}
+	// The overview is what the DASHBOARD actually reads, and /admin/health is a
+	// separate handler with its own payload — a field added to only one of them
+	// is invisible to the operator (this cost a build: the card rendered nothing
+	// while /admin/health answered correctly). Both surfaces carry the same
+	// key; only /admin/health takes a window parameter, so the overview names
+	// its fixed 24h.
+	now := time.Now().UTC()
+	hopStreams, err := s.db.HopStreamHealth(ctx, now.Add(-24*time.Hour), now)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{
-		"status":         "ok",
-		"version":        Version,
-		"schema_version": s.db.SchemaVersion(),
-		"db_path":        s.db.Path(),
-		"accounts":       accounts,
-		"provider_keys":  keys,
-		"models":         models,
-		"combos":         combos,
-		"ledger_rows":    calls,
-		"ledger_span":    map[string]string{"oldest": oldest, "newest": newest},
-		"dropped_rows":   store.DroppedCalls(),
-		"lost_rows":      store.LostRows(),
-		"unmetered_rows": store.UnmeteredRows(),
-		"uptime_s":       int(time.Since(s.started).Seconds()),
+		"status":            "ok",
+		"version":           Version,
+		"schema_version":    s.db.SchemaVersion(),
+		"db_path":           s.db.Path(),
+		"accounts":          accounts,
+		"provider_keys":     keys,
+		"models":            models,
+		"combos":            combos,
+		"ledger_rows":       calls,
+		"ledger_span":       map[string]string{"oldest": oldest, "newest": newest},
+		"dropped_rows":      store.DroppedCalls(),
+		"lost_rows":         store.LostRows(),
+		"unmetered_rows":    store.UnmeteredRows(),
+		"hop_stream_health": hopStreams,
+		"stream_window_s":   24 * 3600,
+		"uptime_s":          int(time.Since(s.started).Seconds()),
 	}, nil
 }
 
@@ -503,11 +516,6 @@ type keyTestRequest struct {
 	SkipInference bool   `json:"skip_inference"`
 	// ProbeMaxModels caps the deferred protocol sweep (default 6).
 	ProbeMaxModels int `json:"probe_max_models"`
-	// DeviceHandle is the dashboard device-flow alternative to APIKey
-	// (github-copilot): the OAuth session never left the server, so the
-	// caller names the pending flow instead of pasting its JSON. Refused
-	// together with APIKey — one credential source per add.
-	DeviceHandle string `json:"device_handle"`
 	// Bridge names a running subscription bridge (claude-sub, chatgpt-sub)
 	// whose shared secret the server fills in itself (bridges.go). Refused
 	// together with APIKey, and unless the account points at that bridge.
@@ -537,24 +545,8 @@ func (s *Server) handleAddKey(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(in.Label) == "" {
 		in.Label = "default"
 	}
-	// Device flow resolves the credential server-side; the session JSON the
-	// dashboard would otherwise be holding comes out of the registry, under
-	// the handle it asked for, and only for this one request.
-	if in.DeviceHandle != "" {
-		if strings.TrimSpace(in.APIKey) != "" {
-			writeErr(w, http.StatusBadRequest, "invalid_request_error",
-				"pass either device_handle or api_key, not both")
-			return
-		}
-		session, code, msg := s.ghSession(in.DeviceHandle)
-		if code != 0 {
-			writeErr(w, code, "invalid_request_error", msg)
-			return
-		}
-		in.APIKey = session
-	}
 	if in.Bridge != "" {
-		if strings.TrimSpace(in.APIKey) != "" || in.DeviceHandle != "" {
+		if strings.TrimSpace(in.APIKey) != "" {
 			writeErr(w, http.StatusBadRequest, "invalid_request_error",
 				"pass bridge alone — the server supplies its key")
 			return
@@ -587,12 +579,6 @@ func (s *Server) handleAddKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.deferProtocol(accountID, keyID, acct, in.APIKey, test, in.ProbeMaxModels)
-	// Retired only now: the session has a permanent home, so the handle's
-	// copy must stop working (a failed test above leaves it alive for retry).
-	if in.DeviceHandle != "" {
-		s.ghConsume(in.DeviceHandle)
-	}
-
 	keys, _ := s.db.ListKeys(r.Context(), accountID)
 	sink.result(findKey(keys, keyID), test)
 }

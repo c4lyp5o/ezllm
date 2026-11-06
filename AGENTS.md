@@ -79,9 +79,10 @@ internal/ratelimit/ per-account request limiter
 internal/notify/    push channels for bell events (ntfy, Discord, Telegram, webhook): validate, build, send, redact
 internal/jsonbody/  single-parse request document
 internal/logx/      structured logging setup and the first-boot banner
-internal/{claudeweb,geminiweb,githubcopilot}/  web-protocol providers
+internal/{claudeweb,geminiweb}/  web-protocol providers
 internal/claudebridge/  Claude subscription surface (loopback-only): CLI spawn, body injection, SSE
 internal/codexbridge/   ChatGPT subscription surface (loopback-only): Codex app-server JSON-RPC, lockdown, exec fallback
+internal/copilotbridge/ Copilot subscription surface (loopback-only): CLI headless channel JSON-RPC, native client tools, -p fallback
 internal/agybridge/     Antigravity subscription surface (loopback-only): headless agy spawn, preflight, lockdown
 web/                React+Vite dashboard; web/tests/ = Playwright drivers
 tests/              Python live-proof scripts (not part of go test)

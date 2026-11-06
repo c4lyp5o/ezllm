@@ -1,6 +1,239 @@
 # Changelog
 
-Notable changes, reverse-chronological. Milestone-tagged (M1–M14), then by release; full history via `git log`.
+Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
+
+## Unreleased — renamed: provider presets say what they are
+
+- **The four subscription bridges are labelled as bridges** in the Add-provider
+  dropdown: `Claude Pro/Max (bridge)`, `ChatGPT Plus/Pro (bridge)`,
+  `Google Antigravity (bridge)`, `GitHub Copilot (bridge)` (was "GitHub Copilot
+  (CLI)"). Those four need a signed-in CLI and take no key — that is the
+  difference that changes what happens after Save, so it belongs in the name.
+- **The two web-session presets drop the mechanism from their name:**
+  `Claude.ai (web session)` → **`Claude.ai (web)`**, `Google Gemini (web
+  cookies)` → **`Google Gemini (web)`**. The cookie field below the dropdown
+  already says how.
+- Account names are unaffected: the `(bridge)` suffix is stripped when a name is
+  auto-seeded, so a card still reads "GitHub Copilot", not "GitHub Copilot
+  (bridge)". Existing accounts keep the names they already have.
+
+## Unreleased — fixed: Codex tool calls aimed at the bridge's scratch directory
+
+- **Symptom:** a tool-using client (a VPS status sweep) got "this environment can't
+  reach its shell" from the Codex hop while the Claude hop ran the same tools.
+  Codex's own log showed the model DID call the client's `terminal` tool, twice,
+  and both calls failed with exit 126: `cd: /tmp/codex-bridge-…/cwd: No such file
+  or directory`.
+- **Cause:** the Codex child runs in a private scratch directory and says so in
+  its context; the model passed that directory as the shell tool's `workdir`, a
+  path that exists only inside the bridge. After two failures it concluded it had
+  no shell.
+- **Fix:** requests that carry client tools get a short instruction (`ClientToolsNote`)
+  saying the tools run on the caller's machine and not to pass a working
+  directory the user did not give. Measured live against the real CLI with the
+  same tool-using request: the scratch directory leaked into the tool call on
+  3 of 3 runs before, 0 of 5 after. Plain chat is unchanged.
+- **The client had a stale shell directory too, and `cd ~` cannot fix it.** The
+  first failing path in the trace, `~/.hermes/cache/scratch/…/frontend`, was the
+  client's own saved working directory, gone from disk. Its terminal wrapper
+  `cd`s there BEFORE running the command, so a model that prefixed `cd ~ &&`
+  (the first version of the note told it to) failed identically and gave up
+  ("the status command is failing before it runs"). The Claude hop's model
+  recovered by passing an explicit working directory. The note now says that: on
+  `cd: …: No such file or directory`, call the tool again with its `workdir` set
+  to a directory that always exists, such as `/`. Measured on the real CLI on the
+  transcript of two such failures: the previous note ran `pwd` and failed again on
+  4 of 4 runs; the new one passed `workdir="/"` on 4 of 4. The stale directory
+  itself is a client defect (workaround: recreate that directory).
+
+## Unreleased — replaced: GitHub Copilot OAuth → the official CLI bridge
+
+- **The OAuth provider is gone, not deprecated.** `internal/githubcopilot`
+  (device flow, session minting, token refresh), `internal/provider/githubcopilot.go`
+  with the `github-copilot` kind, `cmd/ezllm/githublogin.go`, the
+  `/admin/github/device*` routes with `Server.ghDevices`, `keyTestRequest.DeviceHandle`,
+  the `KnownWireSupport` hook it alone used, and the dashboard's login panel +
+  "GitHub Copilot" preset are all deleted. `config.yaml` no longer accepts the kind.
+- **In its place:** the `copilot-bridge` kind over the GitHub Copilot CLI
+  (1.0.105), a fourth member of the claude/codex/agy bridge family. No key to
+  paste: the credential is the CLI's own login. Design
+  `docs/copilot-cli-bridge-design.md`, runbook `docs/copilot-cli-bridge-runbook.md`.
+- **Accounting is exact for the first time on this provider:** the CLI's
+  `session.usage_checkpoint` gives inclusive prompt tokens with a cached slice;
+  verified end-to-end through the gateway (bridge 13,971 inclusive / 9,420
+  cached → ledger `tokens_in 4,551` + `tokens_cached_read 9,420` + `tokens_out 6`).
+- **Every turn runs on the CLI's headless channel, without its agent scaffolding.**
+  `copilot -p` costs ~13–14k prompt tokens even for a one-word answer (≈9.4k is the
+  CLI's own tool schemas). The channel replaces the system message and shows the
+  model only the caller's tools: the same kind of short question measured 95 prompt
+  tokens against 13,957. If the channel is unavailable, plain chat falls back to
+  `-p`, so the bridge still serves it. Only that refusal falls back; a failure at
+  the CLI is not repeated, because that would charge for it twice.
+- **Client tools are native.** `-p` has no option that yields a pending tool
+  call; `copilot --headless --stdio`, the JSON-RPC channel the CLI's bundled SDK
+  uses, does. The model calls the caller's tools
+  natively, the bridge returns the batch as OpenAI `tool_calls` with the CLI's own
+  call ids and stops the turn, and the results come back on the next request as
+  a fresh session with the history replayed as text. Only the caller's tools are
+  visible, so nothing the caller did not declare can run on the box; a caller's
+  tool named `bash` goes back to the caller. Text streams live. Each turn checks
+  the channel's protocol version first, and a mismatch, a missing `--headless` or
+  an unregistrable tool name is, on a request with tools, a 400
+  `chat_tools_unsupported` before anything is billed, which the router fails over
+  on with no cooldown (`refusesTools`).
+  `tool_choice`: `none` is a plain turn with no tools visible, and `required` or
+  a named function is refused up front (400, before billing) so another hop can
+  enforce it — the channel has no equivalent to force a call. This replaces two
+  earlier cuts from the same release:
+  a refusal, which returned 400 on a live combo's first request, and a `<tool_call>`
+  text protocol, which the model ignored and which charged for empty turns.
+- **`ezllm bridge-check copilot` exists** (static: binary, version, and the
+  headless channel's protocol version, which is the one thing a release can move
+  without a version number; `--live`: the login, a plain turn, and a client-tool
+  batch plus its replay). The static tier deliberately does NOT claim a login:
+  an empty `COPILOT_HOME` still passes `session.create`, so promotion requires
+  `--live`. A batch of undeclared tool names now fails with the names it
+  dropped instead of "finished without an assistant message".
+- **Usage no longer depends on how the CLI writes a number.** The channel writes
+  `totalPremiumRequestCost` as `1.0`, which an int field refused, dropping the
+  whole event and booking zero usage. A fractional multiplier would have done the
+  same on `-p`. `copilot_nano_aiu` now rides `raw_usage` for AI-credit plans.
+  Design §10 addendum.
+- **Pressure is bounded and visible.** `EZLLM_COPILOT_BRIDGE_CONCURRENCY`
+  (2), `_QUEUE` (8) and `_TIMEOUT` (300s) are configurable; past the queue the
+  bridge answers 429 `queue_full` + `Retry-After: 5` instead of parking the
+  caller. `/status` gains a `runtime` block: in-flight, queued, rejected,
+  per-outcome counts and CLI first-byte latency. The CLI child runs on an
+  allowlisted environment, never ezllm's own secrets.
+- **The model catalog grows itself, for free.** The CLI reports the ids a login
+  can use (`availableModels`) on every `--model auto` turn; the bridge folds
+  valid ids into `/v1/models` after the curated seed (so the key test still
+  probes a proven id first) and shows them as `learned_models` on `/status`.
+  Nothing is probed, so no premium request is spent on discovery. In-memory:
+  a restart relearns on the next auto turn.
+- **The catalog is every id the CLI documents.** At boot the bridge reads
+  `copilot help config` (local, free) and lists all of them after `auto`, with a
+  built-in copy as fallback; the plan decides, and a model it lacks answers
+  403 `model_not_in_plan` (the pre-spawn refusal of an unknown id moved from
+  400 `unknown_model` to the same 403).
+
+## Unreleased — removed: tool pruning (rejected feature)
+
+- **Deleted the whole feature**, per the standing rule that a feature no live
+  data uses is removed outright rather than deprecated: `internal/toolprune`
+  (policy + tracker + tests), the `inference()` shadow hook,
+  `internal/server/toolusage.go` and `GET /admin/tool-usage`, the store stats
+  layer, the `tool_pruning` config block with its env override and validators,
+  the dashboard totals row and the feed/summary field, and
+  `docs/tool-pruning-design.md`.
+- **Kept, frozen and documented**: `calls.tool_prune_shadow_tokens` and the
+  `tool_usage` table stay in the schema. Ledger rows are immutable history and
+  the rows written during the four-day measurement are the evidence the
+  rejection rests on; dropping them is a destructive migration nobody asked
+  for. Nothing reads or writes either any more.
+- Why it went: **M2 was rejected 2026-11-04** on the four-day M1 evidence, and
+  the design doc went with the feature, so the verdict lives here.
+  - **The prize was history.** Of 10.5M cumulative `prize_tokens`, 9,446,068
+    (89.8%) came from tools that stopped shipping on 2026-11-01 (Hermes allowlist
+    41→8 + `tool_search.defer`). A `used_sessions == 0` row for a tool that no
+    longer ships can never flip to used, so it looks eligible forever — any
+    future go/no-go must filter on `last_seen_at`, not `eligible`.
+  - **The live tax was noise.** 481 tokens per request (mnemosyne_invalidate 117,
+    update 113, get 110, skills_list 77, forget 64), i.e. one request in six
+    hundred; the 24h gate reading decayed 3.9% → 2.7% → 1.7% → 0.9% on the only
+    days that reflect the trimmed surface, below the 2–3% trigger.
+  - **Silent capability loss is what killed it, and M1 could not even see the
+    usage that would have prevented it.** The top candidate by prize,
+    `dis-intelligence/official_report` (1,948 tok/req × 446 requests) is that
+    client's flagship tool, yet it read `used_sessions = 0`: usage is derived
+    from call sites in the *request* body, and that client's only model path
+    sends one user message and reads the `tool_use` block out of the *response*.
+    All 23 of its tools sat at zero while it used tools on essentially every
+    request — prune mode would have deleted the entire catalog of the one client
+    that uses tools every time, from evidence structurally blind to it. The 20%
+    audit window only recovers in an audit *session*, and the router by its own
+    design admission cannot observe why a run broke.
+  - **The economics never reached the hot path:** ~60k tokens/day of live shadow,
+    about half cache-read, single-digit dollars across the series — against
+    schema v34, a `tools` rewrite between compression and `captureShapeDoc`, a
+    session memo and an audit UI.
+  - **All four clients are ours.** Pruning exists to trim catalogs an operator
+    does not own; for catalogs we own a config line is strictly better —
+    deterministic, reversible, no cache surprise, no new failure mode.
+  - **Replaced by:** (1) source-side trimming in each client's own tool config
+    (`tool_search.defer`, allowlists) where the use-rate math justifies it, and
+    (2) optionally a per-client static deny list in ezllm if a client drifts back
+    to shipping a heavyweight unused catalog. **Re-open only if** a client we do
+    not control ships a large never-used catalog, or live dead tax exceeds ~2%
+    of that client's prompt — and then scope per client (canary first) and probe
+    all three wire shapes with a `tool_use` naming an undeclared tool first.
+- See also: EXPLORING §7 lists tool pruning among the deliberate non-goals.
+
+## Unreleased — hop stream health (schema v34)
+
+- `calls.stream_outcome` records how a STREAM ended — `completed`, `truncated`,
+  `failed`, `client_gone`, empty for a non-stream request — so a hop that
+  returns `200` and then dies mid-body is a fact in the ledger instead of prose
+  in `err` (`docs/hop-health-design.md`). Precedence: `client_gone` first (a
+  caller hanging up is never a hop fault; that artefact once made 442 complete
+  calls read as failures), then a translated stream's frame-level `failed`.
+- **Fixed the reason this mattered:** the proxy set `StreamOutcome` only for
+  translated streams, so a native stream that died left it empty,
+  `StreamCompleted()` answered true and hop health treated a cut answer as
+  delivered — no strike, no park. Measured live: 16 mid-stream resets on
+  `command-code · xiaomi/mimo-v2.6-pro` in 8 days (2.1% of that hop's traffic,
+  against 0/754 for the same model on `opencode-go`), none of which had ever
+  counted. The `copyErr` branch now records `StreamOutcomeTruncated`.
+- `/admin/health` gains `hop_stream_health` (`?stream_window=`: default 24h,
+  capped 30d, bounded `truncation_rate = truncated / (streams − client_gone)`,
+  worst hop first); `/admin/overview` carries the same key so the dashboard can
+  read it.
+- Dashboard: a **Cut answers** card with the rate chip and "N cut of M", and a
+  needs-attention item above 1% over at least 20 judged streams. Row-level
+  outcomes ride the feed payload (`stream_outcome`).
+- No routing action yet: the park rule is the next commit and is justified by
+  this measurement, not by a plausible number (the M2 lesson).
+- **The bell rings for it.** Every 15 minutes the ledger rollup is checked with
+  the dashboard's own thresholds (over 1% truncated, at least 20 judged streams,
+  24h); an offending hop raises one `stream_truncation` warning, folded per
+  (account, model) so a recurring cut is one line with a counter, and pushed
+  through the existing channels. Toggle: Settings → Notifications → "Answers cut
+  mid-stream" (`notify_stream_truncation`, default on).
+
+## Unreleased — tool pruning M1: measurement (TokenEconomizer-inspired)
+
+- `tool_pruning.mode: off|shadow` (default `off`; `EZLLM_TOOL_PRUNING_MODE` is
+  the no-rebuild override) measures what never-used tool schemas cost per
+  request — the first, zero-risk half of the TokenEconomizer port
+  (`docs/tool-pruning-design.md`). **Shadow mode never rewrites a body.**
+- `tool_usage` stats (schema v33), one row per `(client, tool)`: schemas
+  shipped vs tools the traces actually call, session-pair counted. The policy
+  (`used_sessions == 0 && shipped_sessions >= min_unused_sessions && !keep`,
+  used verdicts sticky lifetime) books its potential to the new ledger column
+  `calls.tool_prune_shadow_tokens`, threaded through the requests summary,
+  the feed projection and the dashboard totals.
+- `GET /admin/tool-usage` — the per-tool prize rollup
+  (`summary.prize_tokens` = what pruning would remove from every future
+  request) that gates the M2 go/no-go; `prune` mode itself is M2 and does not
+  exist yet.
+- Eligibility hardening (review fixes, before any production shadow run):
+  `Tracker.Deltas` holds its lock for the whole call (two concurrent requests
+  of one session raced on its maps — a fatal concurrent map write);
+  `server_tool_use` / `mcp_tool_use` mark their tool used (Anthropic server
+  tools were otherwise never "used"); a tool result whose call site is not in
+  the body (`previous_response_id`, a compacted history) empties that
+  request's eligible set and withdraws its session's shipped-but-unused pairs
+  (`shipped_sessions` −1); a tool called in the request's own trace is never
+  eligible, whatever the pre-request stats say.
+- Tracking persistence fixes: catalog-free turns still record visible calls
+  and unresolved-result withdrawals. `Tracker.Apply` commits session counters
+  only with a successful stats transaction; failed writes book zero shadow
+  tokens and leave pair transitions retryable on later observations. Regression
+  tests cover known usage, unresolved results, canceled writes and deduplicated
+  retries. No background replay is added.
+- Verifier hardening: the UsageRow↔api.ts contract test's path went stale when
+  the file moved to `web/src/utils/api.ts` and had been silently SKIPPING
+  since — fixed, the pin bites again.
 
 ## 2026-10-31 — bridge CLI auto-update and push channels (v1.6.0)
 

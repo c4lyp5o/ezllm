@@ -27,7 +27,6 @@ import (
 
 	"github.com/c4lyp5o/ezllm/internal/backup"
 	"github.com/c4lyp5o/ezllm/internal/compress"
-	"github.com/c4lyp5o/ezllm/internal/githubcopilot"
 	"github.com/c4lyp5o/ezllm/internal/jsonbody"
 	"github.com/c4lyp5o/ezllm/internal/provider"
 	"github.com/c4lyp5o/ezllm/internal/proxy"
@@ -143,18 +142,6 @@ type Server struct {
 	setupCode string
 	// trustedProxies: whose forwarding headers sourceIP believes.
 	trustedProxies []netip.Prefix
-
-	// ghMu guards ghDevices: the in-flight GitHub device flows started from
-	// the dashboard (POST /admin/github/device). An entry holds GitHub's
-	// device code and — once authorized — the OAuth session, which leaves
-	// only through a key add naming the handle (device_handle). The session
-	// is never serialized into a response.
-	ghMu      sync.Mutex
-	ghDevices map[string]*ghDevice
-	// ghCfg points the device flow at GitHub. Zero value = production
-	// endpoints; tests inject a routed HTTP client so no test ever dials
-	// github.com (internal/githubcopilot's own test technique, one level up).
-	ghCfg githubcopilot.Config
 }
 
 // sweepRun is one in-flight protocol sweep for an account. cancel stops the
@@ -205,10 +192,6 @@ type Options struct {
 	// ShadowSampler (addendum #7): per-request lambda for the discarded
 	// shadow pass. Nil = no shadow.
 	ShadowSampler func() bool
-	// GitHubDevice configures the dashboard's GitHub Copilot device flow.
-	// Zero value = the production GitHub endpoints (public CLI client id);
-	// tests inject a routed HTTP client. See internal/githubcopilot.
-	GitHubDevice githubcopilot.Config
 	// ComboAutoProbe probes a combo's untested hop models, in the background,
 	// whenever the combo is created or its hops change. main.go turns it on
 	// unless EZLLM_COMBO_AUTOPROBE=off.
@@ -259,8 +242,6 @@ func New(opts Options) *Server {
 		usageTZ:           usageTZOrDefault(opts.UsageTZ),
 		compressionMinAbs: opts.CompressionMinAbs, compressionMaxMS: opts.CompressionMaxMS,
 		shadowSampler:  opts.ShadowSampler,
-		ghDevices:      map[string]*ghDevice{},
-		ghCfg:          opts.GitHubDevice,
 		comboAutoProbe: opts.ComboAutoProbe,
 		setupCode:      opts.SetupCode,
 		trustedProxies: opts.TrustedProxies,
@@ -361,6 +342,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /admin/health", s.admin(s.handleAdminHealth))
 	s.mux.HandleFunc("GET /admin/usage", s.admin(s.handleUsage))
 	s.mux.HandleFunc("GET /admin/overview", s.admin(s.handleOverview))
+	// Tool-usage learning stats + the pruning prize rollup (docs/tool-pruning-design.md).
 	// The same routable catalog /v1/models serves, behind the dashboard
 	// session: the UI needs to know which ids the gateway can actually route
 	// without holding a bearer key (it never has one — see web/src/utils/api.ts).
@@ -374,15 +356,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PATCH /admin/notification-channels/{id}", s.admin(s.handleNotificationChannel))
 	s.mux.HandleFunc("DELETE /admin/notification-channels/{id}", s.admin(s.handleNotificationChannel))
 	s.mux.HandleFunc("POST /admin/notification-channels/test", s.admin(s.handleNotificationChannelTest))
-
-	// Dashboard GitHub device flow: the browser taps Authorize, the server
-	// does every other step (code request, poll, mint, session storage) so
-	// the OAuth session never reaches a client. The handle a POST returns is
-	// then named as device_handle on the normal key-add route.
-	// docs/github-copilot-runbook.md § Adding an account.
-	s.mux.HandleFunc("POST /admin/github/device", s.admin(s.handleGitHubDeviceStart))
-	s.mux.HandleFunc("GET /admin/github/device/{handle}", s.admin(s.handleGitHubDeviceStatus))
-	s.mux.HandleFunc("DELETE /admin/github/device/{handle}", s.admin(s.handleGitHubDeviceCancel))
 
 	// Subscription bridges: which exist, which are running, how to enable
 	// them (bridges.go). The shared secret is never in the response.
@@ -1066,6 +1039,30 @@ func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
 	if s.dispatcher != nil {
 		cooldowns = s.dispatcher.Cooldowns()
 	}
+	// Stream outcomes per hop (docs/hop-health-design.md). A hop that returns
+	// 200 and then dies mid-body is healthy by every other number on this
+	// endpoint; this is the one that shows it. Window is operator-selectable
+	// because "why did last night break" and "is this hop degrading" want
+	// different spans.
+	streamWindow := 24 * time.Hour
+	if v := strings.TrimSpace(r.URL.Query().Get("stream_window")); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			writeErr(w, http.StatusBadRequest, "invalid_request_error",
+				"stream_window must be a positive Go duration such as 24h")
+			return
+		}
+		if d > 30*24*time.Hour {
+			d = 30 * 24 * time.Hour
+		}
+		streamWindow = d
+	}
+	hopStreams, err := s.db.HopStreamHealth(r.Context(), time.Now().UTC().Add(-streamWindow), time.Now().UTC())
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, "health_check_failed",
+			"could not read stream outcomes: "+err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":             "ok",
 		"schema_version":     s.db.SchemaVersion(),
@@ -1080,6 +1077,8 @@ func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
 		"lost_rows":          store.LostRows(),
 		"unmetered_rows":     store.UnmeteredRows(),
 		"endpoint_cooldowns": cooldowns,
+		"hop_stream_health":  hopStreams,
+		"stream_window_s":    int(streamWindow.Seconds()),
 		"uptime_s":           int(time.Since(s.started).Seconds()),
 	})
 }

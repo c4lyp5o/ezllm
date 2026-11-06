@@ -21,6 +21,7 @@ const (
 	NoteBridgeUpdated        = "bridge_updated"
 	NoteBridgeUpdateBlocked  = "bridge_update_blocked"
 	NoteBridgeRolledBack     = "bridge_rolled_back"
+	NoteStreamTruncation     = "stream_truncation"
 )
 
 // Notification is one bell entry.

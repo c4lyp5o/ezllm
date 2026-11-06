@@ -374,11 +374,12 @@ func (f *hopFacts) pin() (string, error) {
 }
 
 func (f *hopFacts) supports(s provider.Surface) (*bool, error) {
-	// The provider's own API shape outranks a probe: it is a fact about the
-	// model id, not an observation that may be stale.
-	if v := provider.KnownWireSupport(f.kind, f.model, s); v != nil {
-		return v, nil
-	}
+	// No kind declares wire-shape facts any more: GitHub Copilot's OAuth API was
+	// the only one (some ids answered ONLY on /responses), and that provider is
+	// retired in favour of the CLI bridge, which speaks Chat Completions and is
+	// probed like any other hop. A probe verdict is authoritative again; if a
+	// future kind needs to outrank one, give it a capability hook rather than
+	// special-casing a model id here.
 	if ok, err := f.loadRow(); ok {
 		if err != nil {
 			return nil, err

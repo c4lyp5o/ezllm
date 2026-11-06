@@ -360,7 +360,11 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
 - 41 new tests across four packages, bite-proven, `-race` green. Live proof
   operator-gated (test account, see runbook).
 
-### M13 — github-copilot provider ✅ (2026-10-16, device-flow live-proved; design `docs/github-copilot-design.md`, runbook `docs/github-copilot-runbook.md`)
+### M13 — github-copilot provider ❌ RETIRED 2026-11-05 (was: OAuth device flow)
+> **Deleted:** `internal/githubcopilot`, `internal/provider/githubcopilot.go`,
+> `cmd/ezllm/githublogin.go`, `/admin/github/device*`, the `github-copilot` kind and the
+> dashboard login panel. Do not go looking for them. Replaced by M16 below; the old design
+> survives as history in `docs/github-copilot-design.md` (banner-marked).
 - `internal/githubcopilot/` — the ported protocol: `auth.go` (device flow
   with the PUBLIC CLI client id + read:user, `token <gh>` mint, refresh grant
   without client_secret), `provider.go` (3-endpoint routing — claude* →
@@ -662,53 +666,81 @@ mode this codebase has now hit twice.
   `web/scripts/check-dist.mjs` to compare the committed embedded bundle after
   normalizing checkout-dependent Vite hashes.
 
-### Unreleased — tool pruning M1, measurement ✅ (2026-10-31; design `docs/tool-pruning-design.md`)
+### Tool pruning — BUILT, MEASURED, REJECTED, REMOVED (2026-10-31 → 11-05)
 
-- `internal/toolprune/toolprune.go` `Observe` — tool schemas and trace usage
-  from one decoded body across all three wire shapes (chat `function.name`,
-  anthropic `name`, responses `name`; unnameable entries never eligible;
-  legacy `functions` untouched). `toolChoiceOf` protects a forced target and
-  disables eligibility when a call is demanded unnamed. `collectUsed` reads
-  call sites (`tool_use`, `server_tool_use`, `mcp_tool_use`,
-  `custom_tool_call`, `function_call`, chat `tool_calls`) and reports
-  `Observation.Unresolved` when a result's call site is missing from the body.
-- `internal/toolprune/toolprune.go` `Policy.EligibleName` — the rule:
-  `used_sessions == 0 && shipped_sessions >= min_unused_sessions && !keep`,
-  used verdicts sticky lifetime. `Policy.Eligible` adds the per-request
-  guards: tool_choice, a tool called in this request's trace, and an
-  unresolved result (empty set). `Tracker.Deltas` counts each (session, tool)
-  pair once under one lock held for the whole call (process-local, TTL'd,
-  bounded; a restart can double-count one session — visible in counts, never
-  in behaviour); an unresolved observation taints the session, withdrawing
-  its shipped-but-unused pairs (−1) and counting nothing after.
-- `internal/store/toolusage.go` `UpsertToolUsage` — one transaction of per-tool
-  upserts per observation (schema 33 `tool_usage`, `(client, tool)` aggregates only, never
-  prompt content); `ToolUsageForClient` is the request-path read.
-- `internal/toolprune/toolprune.go` `Tracker.Apply` — stages the session maps
-  under the tracker lock through the atomic store write; failed writes restore
-  the prior counters so later evidence can retry used flips and withdrawals.
-  `internal/server/toolusage.go` `toolPruneShadow` also processes catalog-free
-  traces; a failed write books zero. Regression seams:
-  `TestToolPruneCatalogFreeEvidence`, `TestToolPruneFailedWriteRetriesEvidence`
-  and `TestTrackerApplyRetriesFailedWithdrawal`.
-- `internal/server/toolusage.go` `toolPruneShadow` — the inference() hook
-  (after compression, before shape capture): shadow mode measures and books,
-  never rewrites; `handleToolUsage` serves `GET /admin/tool-usage` with the
-  prize rollup (`summary.prize_tokens` gates M2).
-- `calls.tool_prune_shadow_tokens` (schema 33) threads the full ledger
-  recipe: `store.Call` → `insertCalls` → `RecentCalls` → `admin.go
-  callsCols/scanCalls` → `requests.go` summary → `events.go CallEvent` →
-  `web/src/utils/api.ts` (UsageRow contract-pinned; the pin's path was stale
-  (`web/src/api.ts`) and silently skipped since the file moved to `utils/` —
-  fixed, it bites again) → Dashboard totals row.
-- Config: `tool_pruning.mode: off|shadow` (the ONE switch, default off),
-  `min_unused_sessions` (3), `keep` (empty); `EZLLM_TOOL_PRUNING_MODE` is the
-  env override; wrong-typed leaves fail boot naming the field
-  (`toolPruningValueError`).
-- **Verified:** go test -short ./... -count=1 green; two bite proofs fell on
-  the exact assertions (booking producer → `0, want 20`; sticky-used guard →
-  Live's tokens leaking into the shadow). M1 never rewrites a body (the
-  harness asserts the upstream sees the full tools array).
+A TokenEconomizer-inspired shadow pass measured what never-used tool schemas
+cost per request. It ran four days and reported a 10.5M-token "prize", of which
+**89.8% was frozen counters from tools that had stopped shipping**, and a live
+dead tax of 481 tokens/request (0.9% of prompt). Worse, `used_sessions` was
+structurally blind to single-shot clients, so prune mode would have deleted
+DIS:Intelligence's entire catalog. M2 was rejected on those numbers and the
+whole feature (package, route, config, stats table, UI) has since been deleted —
+the columns it wrote stay in the ledger as history. The reasoning is worth
+keeping: **measure before building the hot path, and check that your instrument
+can see the failure you are trying to prevent.**
+
+### M16 — GitHub Copilot CLI bridge ✅ (2026-11-05; design `docs/copilot-cli-bridge-design.md`, runbook `docs/copilot-cli-bridge-runbook.md`)
+- `internal/copilotbridge/channel.go` — the path every turn takes: one
+  `copilot --headless --stdio` child per request, LSP-framed JSON-RPC, single-threaded
+  on purpose. `driveTurn` pings (the free protocol gate), creates a session with the
+  caller's system text and an `availableTools` allowlist that must be present even
+  when empty, sends the transcript, and stops at the first batch of declared tool
+  calls (`session.abort`, then drains for the usage checkpoint).
+- `internal/copilotbridge/run.go` — `Runner`: slots and bounded queue shared by both
+  paths, the filtered child env, `cliEvent` + `applyUsage`, typed failures
+  (`not_logged_in`→401, quota→429, `model_not_in_plan`→403, else 502), and usage that
+  is exact or zero, never estimated. `Run` is the `copilot -p` fallback, prompt on
+  **stdin** (argv caps at 128 KB and real prompts are 250–600 KB).
+- `internal/copilotbridge/bridge.go` — `chat`: a gate refusal
+  (`chat_tools_unsupported`) falls back to `-p` for plain chat and stands for a request
+  with tools, which the router fails over on (`proxy.go` `refusesTools`).
+- `cmd/ezllm/copilotbridge.go` — boot wiring, the channel probe behind `/status`, and
+  `copilotCatalog`: `auto` first (the key test probes the first candidate), then every
+  id `copilot help config` documents. The plan decides per request with a typed 403.
+- `internal/copilotbridge/checks.go` — the `bridge-check copilot` surface:
+  `RunPreflight` (binary, version, channel protocol 3 + `session.create`, all free)
+  and `LivePlain`/`LiveTools` (the only things that prove the login and the tool
+  batch). `QualifiedVersion` lives here.
+- `internal/provider/copilotbridge.go` — `KindCopilotBridge` (`copilot-bridge`), an adapter
+  embedding `*openAICompatible`: the wire is shared, the identity is its own.
+- `internal/server/bridges.go` — registry entry id `github-copilot` (label "GitHub
+  Copilot", kind `copilot-bridge`); `web/src/pages/Providers.tsx` — the "GitHub Copilot
+  (bridge)" preset, which replaced the device-flow panel.
+
+### M15 — hop stream health ✅ (2026-11-05; design `docs/hop-health-design.md`)
+
+A hop that sends `200` and then dies mid-body was healthy by every number the
+product had: it committed, it wrote a ledger row, its account stayed enabled.
+Measured on the live ledger (8 days to 2026-11-05): **18 genuine mid-stream
+`connection reset by peer` events, 16 of them on one hop** —
+`command-code · xiaomi/mimo-v2.6-pro`, 16/771 = 2.1% of everything routed there,
+while the SAME model on `opencode-go` was 0/754.
+- `calls.stream_outcome` (schema 34): `completed | truncated | failed |
+  client_gone`, empty for a non-stream. `finishDispatch` writes it from
+  `clientGone`, `res.StreamCompleted()` and `res.StreamOutcome`
+  (`streamOutcomeLabel`, `internal/server/dispatch.go`). **Precedence is the
+  contract**: `client_gone` first (a caller hanging up says nothing about the
+  hop; that artefact once made 442 complete calls look like failures), then a
+  translated stream's frame-level `failed`, then the socket-died inference.
+- **Defect found by the new e2e, not by reading:** the proxy set
+  `StreamOutcome` only for TRANSLATED streams, so a native stream that died
+  left it empty → `StreamCompleted()` answered true → `hopAttributableFailure`
+  said false → **no `MarkHopBad`, no strike, no park**, for every mid-stream
+  reset in the ledger above. `internal/proxy/proxy.go` (the `copyErr` branch)
+  now records `StreamOutcomeTruncated`.
+- `store.HopStreamHealth` (`internal/store/hophealth.go`) rolls the ledger up
+  per (namespace, model) over a window; `truncation_rate = truncated /
+  (streams − client_gone)`, rows the v34 recorder did not classify are excluded
+  (never inferred from `err`). Served by `/admin/health?stream_window=` (default
+  24h, capped 30d, nonsense is a 400) **and** by `healthSnapshot` so
+  `/admin/overview` — what the dashboard actually reads — carries the same key.
+- Dashboard `CutAnswers` (`web/src/pages/Dashboard.tsx`): the worst hops, rate
+  chip, "N cut of M" with truncations/failed/hangups on hover, plus a
+  "needs attention" item above 1% with ≥20 judged streams. Verified on a
+  loopback instance serving this dist: card renders 3.2% / "2 cut of 62",
+  attention names the hop, zero console errors, 390px zero overflow.
+- No routing action yet, deliberately: the park rule is justified by THIS
+  measurement, not by a plausible number (the M2 lesson).
 
 ## 5. Invariants to check while reading (review checklist)
 
@@ -785,6 +817,15 @@ These are the "if it's broken here, the project failed" spots — each must be v
 
 ## 7. Deliberate non-goals (don't go looking for them in the code)
 
+- **Tool pruning** — deleting tool schemas from the request to save prompt tokens.
+  M2 was rejected 2026-11-04 and the code is deleted: the prize was 89.8% frozen
+  counters from tools that had stopped shipping, the live dead tax was 481
+  tokens/request (0.9%), and usage was derived from the *request* body only, so
+  the one client that uses tools on every call (`dis-intelligence`, reading its
+  `tool_use` out of the *response*) read `used_sessions = 0` across all 23 tools
+  — prune mode would have deleted its whole catalog on structurally blind
+  evidence. Trim catalogs source-side instead. Full verdict + re-open conditions:
+  `CHANGELOG.md` § "removed: tool pruning".
 - Silent translation — every surface can reach every wire since the universal wire matrix
   (`docs/universal-wire-design.md`), but only onto hops a probe sweep PROVED, with native
   passthrough preferred, and the surface pin still refuses instead of rerouting.

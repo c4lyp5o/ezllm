@@ -69,13 +69,10 @@ func run() error {
 		switch os.Args[1] {
 		case "backup-verify", "backup-restore":
 			return runBackupCommand(os.Args[1], os.Args[2:])
-		case "github-login":
-			return runGitHubLogin()
 		case "bridge-check":
 			return runBridgeCheck(os.Args[2:], os.Stdout)
 		case "help", "-h", "--help":
 			fmt.Println("usage: ezllm [flags]            start the router")
-			fmt.Println("       ezllm github-login       authorize a GitHub Copilot account (device flow)")
 			fmt.Println("       ezllm bridge-check NAME  gate a bridge CLI (claude|codex|agy) before promoting it")
 			return nil
 		}
@@ -124,12 +121,6 @@ func run() error {
 	} else if w != "" {
 		log.Warn(w)
 	}
-	// Tool pruning (docs/tool-pruning-design.md): EZLLM_TOOL_PRUNING_MODE is
-	// the no-rebuild override of the ONE switch (env wins).
-	if err := toolPruningFromEnv(&cfg.ToolPruning, os.Getenv); err != nil {
-		return err
-	}
-
 	// ── master key (at-rest encryption of provider keys) ────────────────
 	masterSecret := strings.TrimSpace(os.Getenv("EZLLM_MASTER_KEY"))
 	if masterSecret == "" {
@@ -302,9 +293,6 @@ func run() error {
 	resolver = resolver.WithUniversal(cfg.Translation.Enabled)
 	log.Info("translation", "enabled", cfg.Translation.Enabled,
 		"responses_wire_models", cfg.Translation.ResponsesModels)
-	log.Info("tool_pruning", "mode", cfg.ToolPruning.Mode,
-		"min_unused_sessions", cfg.ToolPruning.MinUnusedSessions,
-		"keep", cfg.ToolPruning.Keep)
 
 	// EZLLM_USAGE_TZ sets the default zone for group_by=day bucketing so the
 	// dashboard's day view agrees with a usage rule's day. Validated HERE,
@@ -353,10 +341,6 @@ func run() error {
 		CompressionMaxMS:  cfg.Compression.MaxPipelineMS,
 		// Sampled shadow compression (addendum #7): off unless configured.
 		ShadowSampler: shadowSamplerFor(cfg.Compression.ShadowPct),
-		// Tool pruning measurement (docs/tool-pruning-design.md).
-		ToolPruneMode:              cfg.ToolPruning.Mode,
-		ToolPruneMinUnusedSessions: cfg.ToolPruning.MinUnusedSessions,
-		ToolPruneKeep:              cfg.ToolPruning.Keep,
 		// A combo write probes only its own untested hops — never a catalog.
 		ComboAutoProbe: policy.AutoProbe,
 		SetupCode:      setupCode,
@@ -383,6 +367,16 @@ func run() error {
 	// Antigravity subscription surface: loopback-only, off unless EZLLM_AGY_BRIDGE=on.
 	stopAgy, err := startAgyBridge(ctx, log, srv.EnableBridge)
 	if err != nil {
+		stopCodex()
+		stopClaude()
+		return err
+	}
+	// GitHub Copilot subscription surface: loopback-only, off unless
+	// EZLLM_COPILOT_BRIDGE=on. This replaces the OAuth/device-flow provider —
+	// the CLI's own login is the credential, ezllm never mints a session.
+	stopCopilot, err := startCopilotBridge(ctx, log, srv.EnableBridge)
+	if err != nil {
+		stopAgy()
 		stopCodex()
 		stopClaude()
 		return err
@@ -429,6 +423,7 @@ func run() error {
 	reqs.drain(httpSrv, 15*time.Second, 5*time.Second, log)
 	// Bridges after the gateway (its handlers proxy into them), joined here
 	// so no CLI child outlives the process's own shutdown.
+	stopCopilot()
 	stopAgy()
 	stopCodex()
 	stopClaude()
@@ -627,21 +622,4 @@ func translationFromEnv(t *config.Translation, getenv func(string) string) (stri
 		t.Enabled, t.UniversalEnabled = on, on
 	}
 	return warning, nil
-}
-
-// toolPruningFromEnv applies the env override of the ONE tool-pruning switch.
-// EZLLM_TOOL_PRUNING_MODE wins over config.yaml; a malformed value is a
-// startup error (the translationFromEnv rule: silently defaulting an "off"
-// to "on" would leave the operator wondering why nothing measures).
-func toolPruningFromEnv(tp *config.ToolPruning, getenv func(string) string) error {
-	v := strings.ToLower(strings.TrimSpace(getenv("EZLLM_TOOL_PRUNING_MODE")))
-	switch v {
-	case "":
-		return nil
-	case "off", "shadow":
-		tp.Mode = v
-		return nil
-	default:
-		return fmt.Errorf("EZLLM_TOOL_PRUNING_MODE=%q is not a mode (want off|shadow)", v)
-	}
 }

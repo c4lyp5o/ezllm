@@ -267,6 +267,18 @@ function attentionItems(o: Overview): Attn[] {
   for (const [name, n] of hops) {
     if (n >= 3) out.push({ id: `failover-${name}`, tone: 'warn', text: `${name} failed over ${n} times in the last 15 minutes`, to: '/combos', action: 'Open combos' });
   }
+  // A hop cutting answers is not a failure the error rate can see: every row
+  // carries a 200. Judge only hops with enough evidence to mean something.
+  for (const h of o.health?.hop_stream_health ?? []) {
+    const judged = h.streams - h.client_gone;
+    if (judged >= 20 && h.truncation_rate >= 0.01) {
+      out.push({
+        id: `cut-${h.namespace}-${h.model}`, tone: 'bad',
+        text: `${h.namespace} · ${h.model} cut ${h.truncated + h.failed} of ${judged} answers (${(h.truncation_rate * 100).toFixed(1)}%) in the last 24 hours`,
+        to: '/requests?range=24h', action: 'Open requests',
+      });
+    }
+  }
   return out.sort((a, b) => (a.tone === b.tone ? 0 : a.tone === 'bad' ? -1 : 1));
 }
 
@@ -379,6 +391,38 @@ function LatencyCard({ rows }: { rows: UsageRow[] }) {
         Slowest first token: <span className="tnum text-ink">{fmtMs(worst.p50_ttft_ms)}</span> on{' '}
         <span className="text-dim">{worst.k}</span>.
       </p>
+    </Panel>
+  );
+}
+
+// A hop that returns 200 and then dies mid-body is healthy by every other number
+// on this page: delivered status, a ledger row, an enabled account. This is the
+// only surface that shows it (docs/hop-health-design.md). Caller hang-ups are
+// excluded by the server's rate, so "cut of N" is the judged denominator.
+function CutAnswers({ o }: { o: Overview }) {
+  const hops = (o.health?.hop_stream_health ?? []).filter((h) => h.truncated > 0 || h.failed > 0);
+  if (hops.length === 0) return null;
+  const hours = Math.max(1, Math.round((o.health?.stream_window_s ?? 86400) / 3600));
+  return (
+    <Panel label={<SectionLabel>Cut answers · streams that ended early</SectionLabel>}
+      aside={<span className="text-[12px] text-mute">last {hours}h</span>}>
+      <ul className="space-y-1.5">
+        {hops.slice(0, 8).map((h) => {
+          const judged = h.streams - h.client_gone;
+          const cut = h.truncated + h.failed;
+          const pct = (h.truncation_rate * 100).toFixed(1);
+          return (
+            <li key={`${h.namespace}|${h.model}`} className="flex items-center gap-2 text-[13px]">
+              <Chip tone={h.truncation_rate >= 0.01 ? 'bad' : 'warn'}>{pct}%</Chip>
+              <span className="min-w-0 truncate text-dim">{h.namespace} · {h.model}</span>
+              <span className="tnum ml-auto shrink-0 text-[11px] text-mute"
+                title={`${h.truncated} truncated, ${h.failed} failed of ${judged} judged; ${h.client_gone} caller hang-ups excluded`}>
+                {cut} cut of {judged}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
     </Panel>
   );
 }
@@ -787,14 +831,12 @@ export default function Dashboard() {
         tin: sum((u) => u.tin), tout: sum((u) => u.tout), cread: sum((u) => u.cread), cwrite: sum((u) => u.cwrite),
         calls: sum((u) => u.calls), errors: sum((u) => u.errors),
         saved: sum((u) => u.saved), contextSaved: sum((u) => u.context_saved),
-        toolPruneShadow: sum((u) => u.tool_prune_shadow),
       };
     }
     if (!whole || !fresh) return null;
     return {
       tin: whole.tin, tout: whole.tout, cread: whole.cread, cwrite: whole.cwrite,
       calls: whole.calls, errors: whole.errors, saved: whole.saved, contextSaved: whole.context_saved,
-      toolPruneShadow: whole.tool_prune_shadow,
     };
   }, [o, range, whole, fresh]);
 
@@ -830,7 +872,7 @@ export default function Dashboard() {
   }
 
   const known = totals !== null;
-  const t = totals ?? { tin: 0, tout: 0, cread: 0, cwrite: 0, calls: 0, errors: 0, saved: 0, contextSaved: 0, toolPruneShadow: 0 };
+  const t = totals ?? { tin: 0, tout: 0, cread: 0, cwrite: 0, calls: 0, errors: 0, saved: 0, contextSaved: 0 };
   const errRate = t.calls > 0 ? (t.errors / t.calls) * 100 : 0;
   // Cache share of ALL prompt tokens: tokens in (not cached) + cache reads +
   // cache writes. (The old card divided cache reads by tokens in alone and
@@ -974,14 +1016,6 @@ export default function Dashboard() {
                 </span>
               </li>
             )}
-            {t.toolPruneShadow > 0 && (
-              <li className="flex items-center gap-2 text-[13px]">
-                <span className="h-2 w-2 shrink-0 rounded-full bg-warn" />
-                <span className="text-dim">prunable tool schemas (measured)</span>
-                <span className="tnum ml-auto text-warn">{formatTokens(t.toolPruneShadow)}</span>
-                <span className="tnum w-12 text-right text-mute" />
-              </li>
-            )}
           </ul>
             </>
           )}
@@ -1009,6 +1043,7 @@ export default function Dashboard() {
       </div>
 
       <RescuedCalls o={o} />
+      <CutAnswers o={o} />
       <RecentCalls o={o} />
     </div>
   );

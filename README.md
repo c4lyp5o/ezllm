@@ -29,13 +29,6 @@ in the same binary.
   `session_dedup`, `rtk`, `headroom`, `lite`, `caveman`, `ansi`, `fold`,
   `jsonmin`, `tool_ref`, `blobs` — with per-profile configuration and
   fail-open semantics.
-- **Tool-cost measurement.** A TokenEconomizer-inspired pass
-  (`tool_pruning.mode: shadow`) learns which tool schemas a client ships and
-  which tools its traces actually call, and books the never-used schema cost
-  per request. Usage traces still count when a turn omits its tool catalog;
-  failed stats writes leave session counters retryable on later observations.
-  Measurement only, no body is ever rewritten
-  ([design + runbook](docs/tool-pruning-design.md)).
 - **Subscriptions as accounts.** Optional loopback bridges put a Claude
   ([runbook](docs/claude-bridge-runbook.md)), ChatGPT
   ([runbook](docs/codex-bridge-runbook.md)) or Google Antigravity
@@ -164,6 +157,7 @@ subscription. Choose the guide for your account:
 | Claude Pro/Max | [Claude bridge](docs/claude-bridge-runbook.md) | Install Claude Code and sign in with a separate CLI profile. |
 | ChatGPT Plus/Pro | [Codex bridge](docs/codex-bridge-runbook.md) | Linux; client tools require Landlock for the default protection. |
 | Google Antigravity | [Antigravity bridge](docs/agy-bridge-runbook.md) | Linux; text only, with no client tools or image input. |
+| GitHub Copilot | [Copilot CLI bridge](docs/copilot-cli-bridge-runbook.md) | The official `copilot` CLI signed in on the host; no key to paste. Client tools work natively over the CLI's headless channel. |
 
 The guides use Docker Compose and explain CLI installation, separate sign-in,
 mounts, and the dashboard preset. Start ezllm and finish dashboard setup first.
@@ -183,7 +177,7 @@ Full contract — every endpoint, request/response shape, and error code — in
 | Inference | `POST /v1/chat/completions` · `/v1/messages` · `/v1/responses` | client token |
 | Extended | `POST /v1/embeddings` · `/v1/images/generations` · `/v1/audio/speech` · `/v1/audio/transcriptions` | client token |
 | Catalog | `GET /v1/models` (namespaced ids + combos; `?protocol=anthropic`) | client token |
-| Admin | `/admin/*` — overview, usage, requests, tool-usage, accounts, combos, rules, compression, services, pricing, export, SSE feed, chat | admin session / token |
+| Admin | `/admin/*` — overview, usage, requests, accounts, combos, rules, compression, services, pricing, export, SSE feed, chat | admin session / token |
 
 Errors are OpenAI-shaped (`{"error":{"type","message","code"}}`).
 

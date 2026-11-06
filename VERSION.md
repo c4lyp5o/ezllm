@@ -11,7 +11,38 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.6.0**
+**Current: v1.7.0**
+
+## v1.7.0 — 2026-11-05
+
+MINOR by Calypso's call on a pre-1.8 line. It is not a small change though, so
+read the next sentence before deploying: **the `github-copilot` provider kind no
+longer exists.** A `config.yaml` naming it is refused, and an account row still
+carrying it fails every request (`502 provider: unknown kind "github-copilot"`)
+— the migration is a manual three-step in the deploy window (runbook §
+Migrating). The three device routes and `ezllm github-login` are gone with it.
+
+**GitHub Copilot now rides the official CLI**, the fourth subscription bridge
+after Claude, Codex and AGY: kind `copilot-bridge`, base
+`http://127.0.0.1:8793/v1`, credential = the CLI's own login, so there is no key
+to paste and no private API to reverse-engineer. Usage is exact for the first
+time on this provider — the CLI reports inclusive prompt tokens with a cached
+slice, and the ledger derives the cold part (verified: 13,971 inclusive / 9,420
+cached → `tokens_in 4,551` + `tokens_cached_read 9,420` + `tokens_out 6`). Each
+turn is one premium request, and on AI-credit plans the charge rides `raw_usage`
+as `copilot_nano_aiu`.
+
+**Client tools are native, and the CLI's agent scaffolding is off the bill.** Every
+turn runs on the CLI's headless channel (`copilot --headless --stdio`): the model
+calls the caller's tools natively, nothing the caller did not declare can run on
+the box, and a short question measured 95 prompt tokens against 13,957 on `-p`.
+`--headless` is not in `--help`, so each turn checks the protocol version first: on
+a mismatch plain chat falls back to `-p`, and a request with tools answers
+`chat_tools_unsupported` before anything is billed, so the router fails over.
+
+Migration of an existing database is a manual three-step in the deploy window
+(add the CLI provider, re-point combos/hops, disable the old account); see
+`docs/copilot-cli-bridge-runbook.md` § Migrating.
 
 ## v1.6.0 — 2026-10-31
 

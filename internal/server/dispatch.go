@@ -175,6 +175,7 @@ func (s *Server) finishDispatch(w http.ResponseWriter, r *http.Request, call sto
 	call.AccountID, call.Account = served.Account.ID, served.Account.Namespace
 	call.KeyID, call.KeyHint, call.Model = served.KeyID, served.KeyHint, served.Model
 	call.Status, call.Stream = status, res.Stream
+	call.StreamOutcome = streamOutcomeLabel(res, clientGone)
 	call.TTFTms, call.Totalms = res.TTFTms, res.Totalms
 	call.EndpointID, call.UpstreamModel = res.EndpointID, res.UpstreamModel
 	applyUsage(&call, res.Usage)
@@ -204,6 +205,31 @@ func (s *Server) finishDispatch(w http.ResponseWriter, r *http.Request, call sto
 	call.Translated = served.Translated || served.ResponsesWire
 	s.ledgerAttempts(call, res)
 	s.ledger(call)
+}
+
+// streamOutcomeLabel classifies a delivered stream for the ledger (schema v34,
+// docs/hop-health-design.md).
+//
+// The precedence is the whole point of the column. A CALLER that hung up says
+// nothing about the hop — that artefact once made 442 complete calls look like
+// failures, and only a tokens_out split could tell them apart. So client_gone is
+// decided FIRST and is never counted as a truncation. A translated stream's own
+// frame-level verdict then outranks StreamCompleted's inference: "a late error
+// frame arrived" is a different fact from "the socket died mid-answer", and a
+// hop-health rate that merged them would hide which one is happening.
+func streamOutcomeLabel(res proxy.Result, clientGone bool) string {
+	if !res.Stream {
+		return store.StreamOutcomeNone
+	}
+	switch {
+	case clientGone:
+		return store.StreamOutcomeClientGone
+	case res.StreamOutcome == proxy.StreamOutcomeFailed:
+		return store.StreamOutcomeFailed
+	case !res.StreamCompleted():
+		return store.StreamOutcomeTruncated
+	}
+	return store.StreamOutcomeCompleted
 }
 
 // appendNote joins ledger err notes with "; ", skipping empty ones.

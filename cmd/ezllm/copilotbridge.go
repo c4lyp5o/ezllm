@@ -24,6 +24,7 @@ import (
 // speaks Copilot's private API and never mints a session token — that OAuth
 // path is retired by this change (docs/copilot-cli-bridge-design.md).
 const (
+	envCopilotWarmPool    = "EZLLM_COPILOT_BRIDGE_WARM_POOL"   // off by default
 	envCopilotBridge      = "EZLLM_COPILOT_BRIDGE"             // "on" enables the surface
 	envCopilotBin         = "EZLLM_COPILOT_BIN"                // official CLI binary (mounted)
 	envCopilotHome        = "EZLLM_COPILOT_HOME"               // the CLI's own login directory
@@ -173,6 +174,10 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 	if err != nil {
 		return nil, err
 	}
+	warmPool, err := copilotWarmPool(os.Getenv)
+	if err != nil {
+		return nil, err
+	}
 	cliVersion := copilotbridge.CLIVersion(resolved)
 	release := releaseState(bin, cliVersion, copilotQualifiedVersion)
 	token, err := bridgeTokenFromFile(strings.TrimSpace(os.Getenv(envCopilotBridgeToken)), "copilot")
@@ -193,6 +198,7 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 		"cli_release": release,
 		"home":        home,
 		"concurrency": concurrency,
+		"warm_pool":   warmPool,
 		"queue":       queue,
 		"timeout":     timeout.String(),
 		"models":      catalog,
@@ -207,6 +213,7 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 		Timeout:       timeout,
 		MaxConcurrent: concurrency,
 		MaxQueue:      queue,
+		WarmPool:      warmPool,
 		Logf:          printfLogger(log),
 	}
 	// Reported at boot so the bridge card is honest. Each tool turn checks again
@@ -236,7 +243,7 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 			log.Error("copilot bridge serve", "err", err)
 		}
 	}()
-	return func() { shutdownBridgeHTTP(httpSrv) }, nil
+	return func() { shutdownBridgeHTTP(httpSrv); runner.Close() }, nil
 }
 
 // bridgeTokenFromFile mints (once) and reads the loopback shared secret, 0600.
@@ -263,4 +270,15 @@ func bridgeTokenFromFile(path, label string) (string, error) {
 		return "", fmt.Errorf("%s bridge: write token: %w", label, err)
 	}
 	return token, nil
+}
+
+func copilotWarmPool(get func(string) string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(get(envCopilotWarmPool))) {
+	case "", "off", "false", "0":
+		return false, nil
+	case "on", "true", "1":
+		return true, nil
+	default:
+		return false, fmt.Errorf("copilot bridge: %s must be on or off", envCopilotWarmPool)
+	}
 }

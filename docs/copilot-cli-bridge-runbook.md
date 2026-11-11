@@ -245,3 +245,32 @@ completion still follow cleanup, so clients that wait for `[DONE]` before
 executing tools retain that wait. Do not shorten the accounting timeout based
 on first-response latency alone. Measured examples and limitations are in
 [copilot-latency-diagnostics.md](copilot-latency-diagnostics.md).
+
+## Opt-in warm CLI processes
+
+Set `EZLLM_COPILOT_BRIDGE_WARM_POOL=on` and restart ezllm to enable process
+reuse. The default is `off`; setting it back to `off` and restarting restores
+one process per request. Accepted enabled values are `on`, `true`, `1`; disabled
+values are `off`, `false`, `0`, or unset. Invalid values fail startup.
+
+The pool starts lazily and uses the existing concurrency/queue settings. Each
+process serves one request at a time and each request creates a fresh session
+with its own system message and explicit tool allowlist. Reuse requires usage,
+idle and a successful session deletion. Cancellation, timeouts, protocol errors
+or uncertain cleanup discard the process; possibly billed inference is not
+replayed automatically. Delayed events from completed sessions are discarded;
+missing or unexpected session IDs fail the turn and retire the worker.
+
+Idle workers expire after one minute. Workers also retire after 100 successful
+turns or 15 minutes of age, checked between requests. Binary identity/size/mtime
+is checked before reuse; a changed binary causes replacement. Configuration or
+login changes should be followed by a restart. Shutdown drains HTTP requests
+within the existing grace period, then kills and reaps warm workers.
+
+`GET /status` exposes `runtime.pool` (`enabled`, `workers`, `idle`, `closed`) and
+`runtime.stage_timings`. Watch setup timings and memory before enabling this
+beyond a controlled rollout. On this host one CLI retained approximately
+270–282 MiB RSS over a three-turn proof; two warm workers can therefore retain
+substantial memory. That sample does not establish a steady-state memory bound.
+The existing concurrency cap and worker expiry limit exposure. First requests
+are still cold, and model processing time is unaffected by process reuse.

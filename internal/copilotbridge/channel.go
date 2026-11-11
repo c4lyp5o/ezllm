@@ -19,7 +19,8 @@ import (
 // system message, caller-defined tools the model calls natively, and no CLI
 // scaffolding on the bill (~14k prompt tokens per turn on `-p`).
 //
-// One child serves one HTTP request and, with tools, stops at the first batch of
+// By default one child serves one HTTP request. The opt-in pool reuses a child
+// only after a fresh session completes cleanup. With tools, each turn stops at the first batch of
 // calls. The caller runs them and sends the results on its next request, which is
 // a fresh session with the history replayed as text. Holding the session open
 // between HTTP requests would keep one premium request per loop, but on AI-credit
@@ -82,12 +83,19 @@ func (e *rpcError) Error() string { return e.Message }
 // reads until its own response arrives and queues the events it passes, so there
 // is no reader goroutine to leak or race. Blocking reads end when closeRead runs.
 type rpcConn struct {
-	w         io.Writer
-	r         *bufio.Reader
-	closeRead func()
-	observe   func(string, time.Duration)
-	nextID    int
-	queue     []cliEvent
+	w                   io.Writer
+	r                   *bufio.Reader
+	closeRead           func()
+	observe             func(string, time.Duration)
+	nextID              int
+	queue               []cliEvent
+	strict              bool
+	session             string
+	retired             map[string]bool
+	pending             []rpcMessage
+	tainted             bool
+	reusable            bool
+	idleSeen, usageSeen bool
 }
 
 type rpcMessage struct {
@@ -96,7 +104,8 @@ type rpcMessage struct {
 	Result json.RawMessage `json:"result"`
 	Error  *rpcError       `json:"error"`
 	Params struct {
-		Event json.RawMessage `json:"event"`
+		SessionID string          `json:"sessionId"`
+		Event     json.RawMessage `json:"event"`
 	} `json:"params"`
 }
 
@@ -151,9 +160,37 @@ func (c *rpcConn) read() (rpcMessage, error) {
 func (c *rpcConn) dispatch(msg rpcMessage) error {
 	switch {
 	case msg.Method == "session.event":
+		if c.strict {
+			id := msg.Params.SessionID
+			if id == "" {
+				c.reusable = false
+				return errors.New("copilot-bridge: session event has no session id")
+			}
+			if c.retired[id] {
+				return nil
+			}
+			if c.session == "" {
+				c.pending = append(c.pending, msg)
+				if len(c.pending) > 256 {
+					return errors.New("copilot-bridge: too many pending session events")
+				}
+				return nil
+			}
+			if id != c.session {
+				c.reusable = false
+				return errors.New("copilot-bridge: unexpected session event")
+			}
+		}
 		var ev cliEvent
-		if json.Unmarshal(msg.Params.Event, &ev) == nil {
+		if err := json.Unmarshal(msg.Params.Event, &ev); err != nil {
+			if c.strict {
+				return errors.New("copilot-bridge: malformed session event")
+			}
+		} else {
 			c.queue = append(c.queue, ev)
+			if len(c.queue) > 4096 {
+				return errors.New("copilot-bridge: session event queue exceeded limit")
+			}
 		}
 	case msg.Method != "" && len(msg.ID) > 0:
 		return c.write(map[string]any{"jsonrpc": "2.0", "id": msg.ID,
@@ -203,15 +240,29 @@ func (c *rpcConn) nextEvent() (cliEvent, error) {
 		}
 	}
 	ev := c.queue[0]
+	c.queue[0] = cliEvent{}
 	c.queue = c.queue[1:]
+	if ev.Type == "session.usage_checkpoint" {
+		c.usageSeen = true
+	}
+	if ev.Type == "session.idle" {
+		c.idleSeen = true
+	}
 	return ev, nil
 }
 
 // bounded runs f, closing the read side if it outlives d. Used for the
 // best-effort steps after the answer is already known.
 func (c *rpcConn) bounded(d time.Duration, f func()) {
-	t := time.AfterFunc(d, c.closeRead)
-	defer t.Stop()
+	done := make(chan struct{})
+	t := time.AfterFunc(d, func() { defer close(done); c.closeRead() })
+	defer func() {
+		if !t.Stop() {
+			<-done
+			c.tainted = true
+			c.reusable = false
+		}
+	}()
 	f()
 }
 
@@ -317,6 +368,9 @@ func clipDetail(s string) string {
 // events until the model calls a declared tool or the session goes idle.
 func driveTurn(c *rpcConn, turn ChannelTurn, delta func(string) error, onFirst func()) (Result, error) {
 	var res Result
+	c.reusable = false
+	c.tainted = false
+	c.idleSeen, c.usageSeen = false, false
 	began := time.Now()
 	if err := c.ping(); err != nil {
 		return res, err
@@ -327,11 +381,33 @@ func driveTurn(c *rpcConn, turn ChannelTurn, delta func(string) error, onFirst f
 	if err := c.call("session.create", sessionConfig(turn), &created); err != nil {
 		return res, classifyCreate(err)
 	}
+	if created.SessionID == "" || (c.strict && c.retired[created.SessionID]) {
+		return res, errors.New("copilot-bridge: empty or reused session id")
+	}
+	c.session = created.SessionID
 	res.SessionID = created.SessionID
 	// -p leaves a session directory behind per turn; this path need not.
 	defer c.bounded(deleteTimeout, func() {
-		_ = c.call("session.delete", map[string]any{"sessionId": created.SessionID}, nil)
+		var deleted struct {
+			Success bool `json:"success"`
+		}
+		err := c.call("session.delete", map[string]any{"sessionId": created.SessionID}, &deleted)
+		c.reusable = deleted.Success && err == nil && c.idleSeen && c.usageSeen && !c.tainted
+		if c.retired == nil {
+			c.retired = make(map[string]bool)
+		}
+		c.retired[created.SessionID] = true
+		c.session = ""
+		c.queue = nil
+		c.pending = nil
 	})
+	pending := c.pending
+	c.pending = nil
+	for _, msg := range pending {
+		if err := c.dispatch(msg); err != nil {
+			return res, err
+		}
+	}
 	if err := c.call("session.send", map[string]any{"sessionId": created.SessionID, "prompt": turn.Prompt}, nil); err != nil {
 		return res, classifyCreate(err)
 	}
@@ -483,16 +559,20 @@ func (r *Runner) RunChannel(ctx context.Context, turn ChannelTurn, delta func(st
 		defer cancel()
 		began := time.Now()
 		var res Result
-		err := r.withChannel(ctx, func(c *rpcConn) error {
+		with := r.withChannel
+		if r.WarmPool {
+			with = r.withPooledChannel
+		}
+		err := with(ctx, func(c *rpcConn) error {
 			var e error
 			res, e = driveTurn(c, turn, delta, func() { r.stampFirstByte(time.Since(began)) })
+			if e == nil && res.Text == "" && len(res.ToolCalls) == 0 {
+				e = errors.New("copilot-bridge: the CLI finished without an assistant message or a tool call")
+			}
 			return e
 		})
 		if err != nil {
 			return res, err
-		}
-		if res.Text == "" && len(res.ToolCalls) == 0 {
-			return res, errors.New("copilot-bridge: the CLI finished without an assistant message or a tool call")
 		}
 		r.logTurn(res)
 		return res, nil

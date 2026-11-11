@@ -1,6 +1,7 @@
 # Copilot warm-process exploration — 2026-11-11
 
-Status: feasibility measured; production pooling is not implemented.
+Status: implemented as an opt-in pool in v1.9.0; disabled by default.
+The original findings and acceptance plan below explain the design.
 
 ## Finding
 
@@ -45,11 +46,11 @@ empty after each turn. This is a behavioral smoke check, not proof against all
 cross-session leakage: delayed events can still be in the OS pipe, and only one
 model and one sequence were tested. Responses and credentials were not printed.
 
-## Recommended production design
+## Production design
 
 Use a small process pool, capped by the existing concurrency setting, with one
 leased process serving one HTTP request at a time. Keep a fresh session for
-every request. Initially make pooling opt-in and retain the current cold path
+every request. Pooling is opt-in and retains the current cold path
 as the rollback mode. No session IDs need to become part of the client API.
 
 A worker owns the process, stdin/stdout, one `rpcConn`, stderr capture and its
@@ -63,7 +64,7 @@ a second independent queue inside the pool. Start workers lazily, allow idle
 workers to expire, and measure retained RSS before choosing a default idle TTL.
 Prewarming can be an explicit later option; it should not generate model calls.
 
-### Required changes before reuse is safe
+### Lifecycle and isolation requirements
 
 - **Confirm cleanup.** `driveTurn` currently ignores deletion failures because
   `withChannel` kills the process afterward. A pool must surface abort/drain and
@@ -107,9 +108,36 @@ Prewarming can be an explicit later option; it should not generate model calls.
 7. Interleaved cold/warm benchmarks with identical prompt, model, tools and
    history compare setup, first output, completion and exact usage separately.
 
-## Next step
+## Implementation and validation
 
-Implement the opt-in pool only with the lifecycle and isolation tests above.
-The measured setup saving justifies that work; the current probe does not justify
-enabling reuse by default. Keep the one-request/one-session contract and the
-exact usage collection introduced by the existing bridge.
+`internal/copilotbridge/pool.go` implements exclusive leases, lazy startup,
+expiry, binary identity checks, cancellation and shutdown. Existing admission
+slots remain the concurrency bound. `channel.go` tracks session IDs, confirmed
+usage/idle/deletion and joined cleanup timers. Errors discard the worker; no
+inference request is automatically replayed.
+
+Subprocess regressions cover fresh sessions, tools followed by no tools,
+delayed old usage/output, missing/unexpected session IDs, malformed frames,
+failed cleanup, missing usage, active/idle death, cancellation at each RPC,
+concurrent leases, queue saturation, age/turn/idle expiry, binary replacement,
+shutdown and cleanup-timer joining. Targeted race tests exercise this lifecycle.
+
+The implemented pool passed a live text → two-tool → text sequence with three
+distinct sessions, positive usage on all turns and one retained process:
+
+| Turn | Ping | Session create | Total |
+|---|---:|---:|---:|
+| First text | 890.5 ms | 1329.8 ms | 5442 ms |
+| Tools, fresh session | 0.4 ms | 52.6 ms | 4429 ms |
+| Text after tools, fresh session | 0.4 ms | 36.0 ms | 5135 ms |
+
+A separate no-inference probe initialized actual CLI tool metadata: the first
+session exposed exactly the two caller tools; a subsequent empty-allowlist
+session on that process exposed zero tools. That check passed with explicit
+count assertions. Temporary live probes were removed after recording results.
+
+Retained RSS measured approximately 270–282 MiB for one worker over the three
+turns. This is not a long-run leak or plateau test. Reuse remains disabled by
+default; roll out with status and memory monitoring before considering a default
+change. Idle expiry is one minute, maximum age 15 minutes, maximum turns 100.
+See the runbook for activation and rollback.

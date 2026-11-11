@@ -11,7 +11,14 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.8.1**
+**Current: v1.9.0**
+
+## v1.9.0 — 2026-11-11
+
+Adds opt-in Copilot CLI process reuse with a fresh session per request. Enable
+with `EZLLM_COPILOT_BRIDGE_WARM_POOL=on`; the default remains cold processes.
+Workers retire on uncertain cleanup, cancellation, expiry or binary replacement.
+No schema migration.
 
 ## v1.8.1 — 2026-11-11
 

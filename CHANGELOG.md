@@ -2,6 +2,19 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
+## v1.9.0 — opt-in Copilot warm processes
+
+- `EZLLM_COPILOT_BRIDGE_WARM_POOL=on` reuses CLI processes under the existing
+  concurrency and queue limits. Every request still creates a fresh session
+  with its own system message and explicit client-tool allowlist.
+- Only confirmed idle/usage/delete cleanup permits reuse. Cancellation, uncertain
+  cleanup, protocol errors, worker death and binary replacement retire workers;
+  possibly billed inference is never automatically replayed. Session IDs filter
+  delayed events and cleanup timers are joined before a worker can be leased.
+- Workers expire after one idle minute, 15 minutes of age or 100 successful turns.
+  Bridge shutdown drains HTTP work then terminates and reaps all warm children.
+  Status reports pool state alongside stage timings. Pooling defaults off.
+
 ## v1.8.1 — Copilot tool streaming and latency diagnostics
 
 - Complete declared tool batches stream before abort/usage collection and session

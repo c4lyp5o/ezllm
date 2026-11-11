@@ -60,11 +60,12 @@ const plainNote = "You have no tools in this conversation; answer from what you 
 
 // ChannelTurn is one chat turn. Tools may be empty.
 type ChannelTurn struct {
-	Model  string
-	System string
-	Prompt string // the transcript, without the system text
-	Tools  []toolDef
-	Choice toolChoice
+	Model       string
+	System      string
+	Prompt      string // the transcript, without the system text
+	Tools       []toolDef
+	Choice      toolChoice
+	Attachments []ImageAttachment
 	// OnTools synchronously delivers a complete batch before accounting cleanup.
 	OnTools func(Result) error
 }
@@ -180,6 +181,19 @@ func (c *rpcConn) dispatch(msg rpcMessage) error {
 				c.reusable = false
 				return errors.New("copilot-bridge: unexpected session event")
 			}
+		}
+		// Metadata/user events can carry multimodal content arrays. Decode only
+		// events the turn consumes; never coerce an image echo into text.
+		var kind struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(msg.Params.Event, &kind); err != nil {
+			return errors.New("copilot-bridge: malformed session event")
+		}
+		switch kind.Type {
+		case "assistant.message_delta", "assistant.message", "session.auto_mode_resolved", "session.usage_checkpoint", "session.error", "session.idle":
+		default:
+			return nil
 		}
 		var ev cliEvent
 		if err := json.Unmarshal(msg.Params.Event, &ev); err != nil {
@@ -375,6 +389,11 @@ func driveTurn(c *rpcConn, turn ChannelTurn, delta func(string) error, onFirst f
 	if err := c.ping(); err != nil {
 		return res, err
 	}
+	if len(turn.Attachments) > 0 {
+		if err := c.validateImages(turn.Model, turn.Attachments); err != nil {
+			return res, err
+		}
+	}
 	var created struct {
 		SessionID string `json:"sessionId"`
 	}
@@ -408,7 +427,11 @@ func driveTurn(c *rpcConn, turn ChannelTurn, delta func(string) error, onFirst f
 			return res, err
 		}
 	}
-	if err := c.call("session.send", map[string]any{"sessionId": created.SessionID, "prompt": turn.Prompt}, nil); err != nil {
+	send := map[string]any{"sessionId": created.SessionID, "prompt": turn.Prompt}
+	if len(turn.Attachments) > 0 {
+		send["attachments"] = turn.Attachments
+	}
+	if err := c.call("session.send", send, nil); err != nil {
 		return res, classifyCreate(err)
 	}
 

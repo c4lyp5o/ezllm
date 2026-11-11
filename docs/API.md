@@ -87,6 +87,21 @@ map. A combo row is bare (`owned_by: "ezllm"`) and adds a non-standard `combo` k
 picker can say what the name routes to; OpenAI clients that don't know the key ignore it. Combo names
 can never contain `/`, so a bare id is unambiguous. Disabled combos are never listed.
 
+### Copilot subscription image inputs
+
+The Copilot bridge accepts `image_url` parts in user-message content arrays for
+inline base64 PNG/JPEG images. An explicit model ID with CLI-advertised vision
+support is required. Remote URLs, local files, other formats, images in other
+roles, and `detail` values other than omitted/`auto` are refused. Global bridge
+bounds are four images, 4 MiB decoded per image, 8 MiB total and 20 million
+pixels per image; stricter model limits also apply before inference. The bridge
+uses native in-memory attachments and never falls back to a text-only request.
+Input validation returns `400 invalid_request`; unverified/non-vision models
+return `400 vision_unsupported`, and advertised model-limit refusals return
+`400 invalid_image`, all in the existing OpenAI error envelope.
+See [the Copilot runbook](copilot-cli-bridge-runbook.md) for tested limits and
+behavior. Antigravity's current headless bridge remains text-only.
+
 ## M3 — accounts, keys, models, quota
 
 | GET | `/admin/combos` | Lists combos with strategy, hops, compression profile, and advertised `context_size` (default 200000) |

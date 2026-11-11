@@ -101,6 +101,8 @@ func (f *fakeCLI) serve(in *bufio.Reader, out io.Writer) {
 		f.mu.Unlock()
 		reply := func(r string) { send(`{"jsonrpc":"2.0","id":` + string(msg.ID) + `,"result":` + r + `}`) }
 		switch msg.Method {
+		case "models.list":
+			reply(visionCatalogFixture)
 		case "ping":
 			reply(fmt.Sprintf(`{"message":"pong","protocolVersion":%d}`, f.protocol))
 		case "session.create":

@@ -74,7 +74,7 @@ subscription inference.
 | Claude | Implemented in v1.8.0 | Maintain Anthropic framing and stalled-write/cancellation coverage. |
 | Antigravity (`agybridge`) | Implemented in v1.8.0 | Maintain OpenAI framing and live HTTP acceptance coverage. |
 | Codex | Not migrated | Move stream writes/flush/deadlines onto the shared transport; retain app-server RPC, sandboxing, parked tool turns and usage handling. |
-| Copilot | Not migrated | Move stream writes/flush/deadlines onto the shared transport; retain early tool delivery, exact usage and warm-worker ownership. |
+| Copilot | Not migrated | Move stream writes/flush/deadlines onto the shared transport; retain native image attachments/capability checks, early tool delivery, exact usage and warm-worker ownership. |
 
 Migrate Codex and Copilot in separate changes. For each, capture the existing
 header timing, error framing, tool/finish/usage ordering and disconnect behavior

@@ -4,6 +4,18 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## v1.8.0 — Meta API, dependency updates and bridge improvements
 
+### Copilot image input
+
+- Inline PNG/JPEG `image_url` parts map to native in-memory CLI blobs. Numbered
+  markers preserve image ordering in the flattened transcript; base64 is not
+  included in prompt text. Remote URLs and file paths are refused.
+- Explicit model vision capability and MIME/count/size checks run before
+  inference, alongside bridge byte/pixel bounds. `auto` and non-auto detail
+  settings are refused; image requests cannot fall back to text-only `-p`.
+- Multimodal user metadata no longer gets decoded as assistant text. Consumed
+  event validation and session isolation remain enforced. Live HTTP checks on
+  `gpt-6-luna` passed in both response modes with positive usage.
+
 ### Shared bridge documentation
 
 - Updated the overview, code tour and four bridge guides with migration status.

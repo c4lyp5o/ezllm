@@ -440,8 +440,6 @@ export type FeedRow = {
    *  ratio floor), not that compression was skipped. */
   savedNotional: number;
   contextPre?: number; contextSaved?: number;
-  /** Tool pruning M1 measurement: policy-eligible prunable tool-schema
-   *  tokens on this request (potential, never shipped). */
   /** How a stream ended (schema v34): completed | truncated | failed |
    *  client_gone. Absent on non-stream requests and pre-v34 rows. */
   streamOutcome?: string;

@@ -134,3 +134,10 @@ in place of the image's own — for gating before 1.6.0 is deployed.
 `python3 -m unittest scripts/bridge_update_test.py` — staging against local
 payloads for all three formats, the soak and window rules, and the promotion
 state machine (gate refusal, promotion, rollback) with docker stubbed.
+
+## Shared transport and qualification
+
+Claude and Antigravity use the shared streaming transport; Codex and Copilot
+migration remains outstanding. This does not replace any CLI's preflight or live
+qualification gate: protocol, isolation and accounting still belong to each
+adapter. See [the shared transport design](shared-bridge-transport-design.md).

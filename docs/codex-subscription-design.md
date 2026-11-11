@@ -349,3 +349,11 @@ login present; non-loopback bind refused. Failure is fatal, not logged.
    start the bridge. Operator-facing detail:
    [codex-bridge-runbook.md](codex-bridge-runbook.md#platform-requirements--read-this-first).
 
+
+## Shared transport update — 2026-11-11
+
+Streaming transport still uses the provider-local implementation; migration
+to `internal/bridgeutil` remains outstanding.
+Claude and Antigravity are migrated; Codex and Copilot are the remaining bridges.
+See [the shared transport design](shared-bridge-transport-design.md) for scope
+and per-bridge migration acceptance. Historical decisions above remain as recorded.

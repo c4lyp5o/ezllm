@@ -60,7 +60,7 @@ type Executor interface {
 	RunChannel(ctx context.Context, turn ChannelTurn, delta func(string) error) (Result, error)
 }
 
-// Runner spawns the official Copilot CLI once per request.
+// Runner uses the official Copilot CLI, cold by default or in an opt-in process pool.
 //
 // The prompt goes in on STDIN, never argv: this client's prompts run 250-600 KB
 // and a single argv element is capped at MAX_ARG_STRLEN (128 KB), which fails
@@ -77,7 +77,16 @@ type Runner struct {
 	// ends: a 2-slot bridge with a 300 s timeout would otherwise hold sockets
 	// for minutes behind a stall.
 	MaxQueue int
-	Logf     func(format string, args ...any)
+	// WarmPool reuses processes, with a fresh session per request. Off by default.
+	WarmPool        bool
+	PoolIdleTimeout time.Duration
+	PoolMaxAge      time.Duration
+	PoolMaxTurns    int
+	poolMu          sync.Mutex
+	workers         map[*channelWorker]bool
+	idleWorkers     []*channelWorker
+	closed          bool
+	Logf            func(format string, args ...any)
 
 	sem  chan struct{}
 	once sync.Once
@@ -86,6 +95,7 @@ type Runner struct {
 	firstByteNS, firstByteN, lastByteNS atomic.Int64
 	mu                                  sync.Mutex
 	outcomes                            map[string]int64
+	stages                              map[string]stageTiming
 }
 
 const defaultMaxQueue = 8
@@ -99,7 +109,14 @@ func (r *Runner) Stats() map[string]any {
 	for k, v := range r.outcomes {
 		oc[k] = v
 	}
+	stages := make(map[string]any, len(r.stages))
+	for name, v := range r.stages {
+		stages[name] = map[string]any{"count": v.count, "avg_ms": float64(v.total) / float64(v.count) / float64(time.Millisecond), "last_ms": float64(v.last) / float64(time.Millisecond)}
+	}
 	r.mu.Unlock()
+	r.poolMu.Lock()
+	pool := map[string]any{"enabled": r.WarmPool, "workers": len(r.workers), "idle": len(r.idleWorkers), "closed": r.closed}
+	r.poolMu.Unlock()
 	avg := int64(0)
 	if n := r.firstByteN.Load(); n > 0 {
 		avg = r.firstByteNS.Load() / n / int64(time.Millisecond)
@@ -112,6 +129,8 @@ func (r *Runner) Stats() map[string]any {
 		"served":              r.served.Load(),
 		"rejected_queue_full": r.rejected.Load(),
 		"outcomes":            oc,
+		"stage_timings":       stages,
+		"pool":                pool,
 		"first_byte_ms_avg":   avg,
 		"first_byte_ms_last":  r.lastByteNS.Load() / int64(time.Millisecond),
 	}
@@ -187,6 +206,10 @@ func (r *Runner) Run(ctx context.Context, model, prompt string, delta func(strin
 
 // slotted runs one turn under the concurrency slots and the bounded queue.
 func (r *Runner) slotted(ctx context.Context, turn func() (Result, error)) (Result, error) {
+	if err := r.accepting(ctx); err != nil {
+		return Result{}, err
+	}
+	waitStart := time.Now()
 	select {
 	case r.sem <- struct{}{}:
 	default:
@@ -206,6 +229,11 @@ func (r *Runner) slotted(ctx context.Context, turn func() (Result, error)) (Resu
 			return Result{}, ctx.Err()
 		}
 	}
+	if err := r.accepting(ctx); err != nil {
+		<-r.sem
+		return Result{}, err
+	}
+	r.observeStage("queue", time.Since(waitStart))
 	defer func() { <-r.sem }()
 	r.inflight.Add(1)
 	defer r.inflight.Add(-1)
@@ -542,4 +570,23 @@ func childEnv(parent []string, home string) []string {
 		env = append(env, "XDG_CACHE_HOME="+filepath.Join(os.TempDir(), "ezllm-copilot-cache"))
 	}
 	return env
+}
+
+// stageTiming holds aggregate diagnostics only; no request content.
+type stageTiming struct {
+	count       int64
+	total, last time.Duration
+}
+
+func (r *Runner) observeStage(name string, elapsed time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.stages == nil {
+		r.stages = make(map[string]stageTiming)
+	}
+	v := r.stages[name]
+	v.count++
+	v.total += elapsed
+	v.last = elapsed
+	r.stages[name] = v
 }

@@ -200,3 +200,12 @@ For an end-to-end check, use the gateway's [model-list command](../README.md#set
 then send a short text prompt to a model from this account. The dashboard preset
 shows bridge status; `docker compose logs ezllm` shows startup failures. The
 internal listener is loopback-only, and the distroless image has no shell or curl.
+
+## Shared transport status
+
+Antigravity uses `internal/bridgeutil` for streaming byte writes, flushing,
+write deadlines and cancellation cleanup as of v1.8.0. Its event format,
+authentication, accounting and CLI lifecycle remain provider-specific.
+
+Claude and Antigravity are migrated; Codex and Copilot still need expansion.
+See [shared transport status and remaining work](shared-bridge-transport-design.md).

@@ -229,3 +229,57 @@ tripwire — if they pass and a live turn reports zeros, the event names moved.
 - No quota panel reading: the CLI does not expose the plan's premium-request
   balance headlessly, so the dashboard shows the bridge's last usage, not live
   remaining quota.
+
+## Slow responses
+
+The loopback bridge's `/status` response includes `runtime.stage_timings`, with
+`count`, `avg_ms` and `last_ms` for each observed stage. Inspect `ping` and
+`session.create` for CLI readiness/session overhead, `model_wait` for the wait
+after send acknowledgement, and `usage_drain`/`session.delete` for cleanup.
+`queue` measures wait for an acquired concurrency slot. These are aggregate,
+overlapping measurements, not additive phases or percentiles; concurrent calls
+can update different last values. No request content is retained.
+
+Streamed tool batches are flushed before accounting cleanup. Usage and stream
+completion still follow cleanup, so clients that wait for `[DONE]` before
+executing tools retain that wait. Do not shorten the accounting timeout based
+on first-response latency alone. Measured examples and limitations are in
+[copilot-latency-diagnostics.md](copilot-latency-diagnostics.md).
+
+## Opt-in warm CLI processes
+
+Set `EZLLM_COPILOT_BRIDGE_WARM_POOL=on` and restart ezllm to enable process
+reuse. The default is `off`; setting it back to `off` and restarting restores
+one process per request. Accepted enabled values are `on`, `true`, `1`; disabled
+values are `off`, `false`, `0`, or unset. Invalid values fail startup.
+
+The pool starts lazily and uses the existing concurrency/queue settings. Each
+process serves one request at a time and each request creates a fresh session
+with its own system message and explicit tool allowlist. Reuse requires usage,
+idle and a successful session deletion. Cancellation, timeouts, protocol errors
+or uncertain cleanup discard the process; possibly billed inference is not
+replayed automatically. Delayed events from completed sessions are discarded;
+missing or unexpected session IDs fail the turn and retire the worker.
+
+Idle workers expire after one minute. Workers also retire after 100 successful
+turns or 15 minutes of age, checked between requests. Binary identity/size/mtime
+is checked before reuse; a changed binary causes replacement. Configuration or
+login changes should be followed by a restart. Shutdown drains HTTP requests
+within the existing grace period, then kills and reaps warm workers.
+
+`GET /status` exposes `runtime.pool` (`enabled`, `workers`, `idle`, `closed`) and
+`runtime.stage_timings`. Watch setup timings and memory before enabling this
+beyond a controlled rollout. On this host one CLI retained approximately
+270–282 MiB RSS over a three-turn proof; two warm workers can therefore retain
+substantial memory. That sample does not establish a steady-state memory bound.
+The existing concurrency cap and worker expiry limit exposure. First requests
+are still cold, and model processing time is unaffected by process reuse.
+
+## Shared transport status
+
+Copilot still uses its own streaming transport. **Migration to the shared
+`internal/bridgeutil` transport remains outstanding.** The current bridge
+continues operating independently; no shared lifecycle migration has shipped.
+
+Claude and Antigravity are migrated; Codex and Copilot still need expansion.
+See [shared transport status and remaining work](shared-bridge-transport-design.md).

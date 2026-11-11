@@ -337,3 +337,11 @@ NOT survive contact with a live combo: it was replaced by prompt-level emulation
 (§10 addendum), which failed live and was replaced in turn by native tools over the
 headless channel (§10 second addendum). Over the channel the prompt goes in a
 JSON-RPC message instead of on stdin; a 189 KB prompt was measured.
+
+## Shared transport update — 2026-11-11
+
+Streaming transport still uses the provider-local implementation; migration
+to `internal/bridgeutil` remains outstanding.
+Claude and Antigravity are migrated; Codex and Copilot are the remaining bridges.
+See [the shared transport design](shared-bridge-transport-design.md) for scope
+and per-bridge migration acceptance. Historical decisions above remain as recorded.

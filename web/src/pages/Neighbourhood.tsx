@@ -230,7 +230,7 @@ export default function Neighbourhood() {
     <span className="text-3xl text-accent" aria-hidden>⌂</span>
     {loading ? <CityLoading label="Laying out the streets…" /> : <><p role="alert" className="text-sm text-dim">Could not load the neighbourhood.</p><button className={cx(btn.base, btn.ghost, 'min-h-10')} onClick={retry}>Try again</button></>}
   </div>;
-  if (!buildings.length) return <div className="space-y-4"><EmptyState title="No providers yet." hint="Add a provider under Providers and its building appears here." /><Link className={cx(btn.base, btn.primary, 'min-h-10')} to="/providers">Add a provider</Link></div>;
+  if (!buildings.length) return <div className="space-y-4"><EmptyState title="No providers yet." hint="Add a provider to see its building here." /><Link className={cx(btn.base, btn.primary, 'min-h-10')} to="/providers">Add a provider</Link></div>;
 
   const issues = detailAccount ? accountIssues(detailAccount) : [];
   const attentionN = stormy;
@@ -317,7 +317,7 @@ export default function Neighbourhood() {
               : <span className={d > 0 ? 'text-ok' : 'text-warn'}><span aria-hidden>{d > 0 ? '▲' : '▼'}</span> {formatTokens(Math.abs(Math.round(d)))} {d > 0 ? 'up' : 'down'} since the last update</span>;
           })()}
         </div>
-      </> : <><p className="text-sm text-dim">Every provider has a building here.</p><p className="text-xs text-mute">Hover, focus or select a building to look inside.</p></>}
+      </> : <><p className="text-sm text-dim">Every provider has a building here.</p><p className="text-xs text-mute">Hover over or select a building to see its details.</p></>}
     </div>
     <div className="space-y-2">
       <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-mute">

@@ -162,7 +162,7 @@ const PROVIDER_PRESETS: Record<string, {
   'alibaba-model-studio-token-plan': { label: 'Alibaba Cloud Model Studio token plan', kind: 'openai-compatible', baseURL: 'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1' },
   'commandcode': { label: 'Command Code', kind: 'openai-compatible', baseURL: 'https://api.commandcode.ai/provider/v1' },
   'deepseek': { label: 'DeepSeek', kind: 'openai-compatible', baseURL: 'https://api.deepseek.com' },
-  'meta-api': { label: 'Meta API', kind: 'openai-compatible', baseURL: 'https://api.meta.ai/v1', keyHint: 'Meta Model API key (MODEL_API_KEY)' },
+  'meta-api': { label: 'Meta Model', kind: 'openai-compatible', baseURL: 'https://api.meta.ai/v1', keyHint: 'Meta Model API key (MODEL_API_KEY)' },
   'groq': { label: 'Groq', kind: 'openai-compatible', baseURL: 'https://api.groq.com/openai/v1' },
   'tokenrouter': { label: 'TokenRouter', kind: 'openai-compatible', baseURL: 'https://api.tokenrouter.com/v1' },
   // Vercel AI Gateway: OpenAI-compatible chat + /models discovery over one key,
@@ -967,7 +967,7 @@ function EditAccountModal({ account, initialTab = 'settings', onClose, onSaved }
 
   return (
     <Modal open onClose={onClose} title={`Edit ${account.name}`}
-      subtitle="Settings save with Save. Keys are validated and saved on their own, from the Keys tab."
+      subtitle="Save provider settings here. To validate and save keys, use the Keys tab."
       busy={busy} dirty={fieldsDirty || keyDirty} onSubmit={() => void save()}
       footer={(close) => <>
         <button type="button" className={cx(btn.base, btn.ghost)} onClick={close} disabled={busy}>
@@ -1640,7 +1640,7 @@ function QuotaModal({ account, onClose, onRead }: { account: Account; onClose: (
           <SectionLabel>Usage</SectionLabel>
           {busy && !live && <Skeleton className="mt-2 h-3.5 w-56" />}
           {!busy && live?.kind === 'none' && (
-            <p className="mt-2 text-[13px] text-mute">This provider exposes no quota endpoint its key can read.</p>
+            <p className="mt-2 text-[13px] text-mute">This provider does not offer quota information for this key.</p>
           )}
           {live && live.kind !== 'none' && (
             <div className="mt-2 space-y-3">

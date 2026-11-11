@@ -591,7 +591,7 @@ func (t *Tester) probeModel(
 	probeSpec := provider.AuthProbe{
 		Method: http.MethodPost,
 		Path:   provider.SurfacePath(surface),
-		Body:   chatProbeBody(model),
+		Body:   chatProbeBodyFor(acct.Kind, model),
 	}
 
 	var (
@@ -1020,7 +1020,7 @@ func (t *Tester) probeSurface(
 	if surface == provider.SurfaceResponses {
 		body = responsesProbeBody(model)
 	} else {
-		body = chatProbeBody(model)
+		body = chatProbeBodyFor(acct.Kind, model)
 	}
 	spec := provider.AuthProbe{Method: http.MethodPost, Path: provider.SurfacePath(surface)}
 

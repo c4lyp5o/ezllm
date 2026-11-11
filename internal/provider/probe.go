@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 )
@@ -126,6 +127,16 @@ func ClassifyProbeResult(status int, body string) (v ProbeVerdict, authFailure b
 		// The surface endpoint itself doesn't exist → this kind can't serve it.
 		return VerdictUnsupported, false
 	case status == http.StatusBadRequest || status == http.StatusUnprocessableEntity:
+		// A rejected request option says nothing about wire support, even when
+		// its message contains the otherwise useful "not supported" hint.
+		var envelope struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		if json.Unmarshal([]byte(body), &envelope) == nil && envelope.Error.Code == "chat_parameter_unsupported" {
+			return VerdictUnknown, false
+		}
 		if bodyHasProtocolHint(body) {
 			return VerdictUnsupported, false
 		}

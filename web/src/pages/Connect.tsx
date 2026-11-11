@@ -190,7 +190,7 @@ function CreateKeyModal({ open, names, ids, onClose, onCreated }: {
           <Segmented<'infer' | 'admin'> label="Role" value={d.role} onChange={(r) => set({ role: r })}
             options={[{ key: 'infer', label: 'Inference only' }, { key: 'admin', label: 'Full admin' }]} />
           {d.role === 'infer'
-            ? <p className="mt-1.5 text-[12px] text-mute">Can call models on /v1 and nothing else. The right choice for any tool or app.</p>
+            ? <p className="mt-1.5 text-[12px] text-mute">Can call models on /v1. Use this for tools and apps.</p>
             : <p className="mt-1.5 rounded-lg border border-warn/30 bg-warn-dim p-2.5 text-[13px] leading-relaxed text-warn">
               Full admin can also add providers, read provider keys and mint other keys. Keep it for yourself, never for a tool.
             </p>}
@@ -348,7 +348,7 @@ function ModelsBrowser({ models }: { models: V1Model[] }) {
         Models you can call <span className="font-normal text-mute">· {nfmt(models.length)} routable right now</span>
       </summary>
       {models.length === 0 ? (
-        <p className="mt-3 text-[13px] text-mute">Nothing is routable yet. Add and validate a provider, or create a combo.</p>
+        <p className="mt-3 text-[13px] text-mute">No models are available yet. Add and validate a provider, or create a combo.</p>
       ) : (
         <div className="mt-3 space-y-2">
           <input aria-label="Search models" type="search" className={cx(inputCls, 'max-w-sm py-1.5')} placeholder={`Search ${nfmt(models.length)} models…`} value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -534,7 +534,7 @@ export default function Connect() {
                 ]} />
             </div>
             {shown.length === 0 ? (
-              <EmptyState title="No key matches" hint="Nothing fits the search and filter together."
+              <EmptyState title="No key matches" hint="Try a different search or change the filter."
                 action={<button type="button" className={cx(btn.base, btn.ghost)} onClick={() => { setQuery(''); setFilter('all'); }}>Clear search and filter</button>} />
             ) : (
               <Stagger className="space-y-2">

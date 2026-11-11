@@ -464,7 +464,7 @@ export default function Economics() {
             bodyClass="p-0">
             {rows.length === 0 ? (
               <EmptyState title="No matching calls in this range"
-                hint="Raise the minimum input or widen the range. This is where the outliers answer whether the client is sending too much history, or the model is burning it on output." />
+                hint="Adjust the minimum input or widen the date range to see calls here." />
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[1000px] text-[13px]">

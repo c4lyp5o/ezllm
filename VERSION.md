@@ -11,7 +11,14 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.8.0**
+**Current: v1.8.1**
+
+## v1.8.1 — 2026-11-11
+
+Fixes Copilot key, wire and combo probes by omitting output-token caps that the
+CLI cannot enforce. Parameter refusals no longer disprove wire support.
+After upgrading, re-run affected wire probes to replace failed verdicts with
+measured support before pinning chat. No schema migration.
 
 ## v1.8.0 — 2026-11-11
 
@@ -33,7 +40,7 @@ Copilot streams complete client-tool batches before usage collection and session
 deletion. Exact usage and completion still follow cleanup. Bridge status adds
 aggregate stage timings to distinguish startup, model wait and cleanup.
 
-Adds the Meta API preset, updates Go and dashboard dependencies, and rejects
+Adds the Meta Model API preset, updates Go and dashboard dependencies, and rejects
 oversized successful provider JSON responses. No schema migration.
 
 ## v1.7.0 — 2026-11-05

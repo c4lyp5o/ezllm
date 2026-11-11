@@ -1640,7 +1640,7 @@ func causeFromSnippet(s string) string {
 //   - No translation/responses-wire marking on the probe: it is a bare
 //     <surface> request, so a protocol refusal here is genuine signal about
 //     the hop's native support (the markings are applied by the router).
-//   - It SPENDS: one request per hop, max_tokens 16, non-streaming.
+//   - It SPENDS: one request per hop, max_tokens 16 except on Copilot, non-streaming.
 //   - It uses the real dispatcher, so parks and cooldowns behave exactly as in
 //     production — a probe that parks a hop LEAVES it parked, because it failed
 //     for real. The probe itself is NOT written to the ledger.
@@ -1726,7 +1726,7 @@ func (s *Server) handleComboTest(w http.ResponseWriter, r *http.Request) {
 		}
 		hr.Namespace = rt.Account.Namespace
 
-		body := probeBody(h.ModelID)
+		body := probeBodyFor(rt.Account.Kind, h.ModelID)
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, probePath(surface), bytes.NewReader(body))
 		if reqErr != nil {
@@ -1764,6 +1764,15 @@ func (s *Server) handleComboTest(w http.ResponseWriter, r *http.Request) {
 		"surface": string(surface),
 		"hops":    hops,
 	})
+}
+
+// probeBodyFor adapts the diagnostic request to the provider's supported options.
+func probeBodyFor(kind provider.Kind, model string) []byte {
+	if kind == provider.KindCopilotBridge {
+		m, _ := json.Marshal(model)
+		return []byte(fmt.Sprintf(`{"model":%s,"messages":[{"role":"user","content":"ezllm combo test: reply ok"}]}`, m))
+	}
+	return probeBody(model)
 }
 
 // probeBody is the smallest request that proves a hop answers: one user

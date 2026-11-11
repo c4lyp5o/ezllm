@@ -779,7 +779,7 @@ export default function Chat() {
               )}
               <Scroller follow={follow} label={`Conversation ${idx + 1}`}>
                 {c.messages.length === 0 && !c.busy && (
-                  <EmptyState title="No messages yet." hint="Pick a model above, then send from the composer below." />
+                  <EmptyState title="No messages yet." hint="Choose a model, then send a message." />
                 )}
                 {c.messages.map((m) => (
                   <TurnView key={m.id} turn={m} canAct={!c.busy}

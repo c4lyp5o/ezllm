@@ -382,7 +382,7 @@ export default function Stats() {
           ) : (
             <EmptyState
               title={`No calls in the last ${RANGE_LABEL[range]}.`}
-              hint="The ledger is empty for this window and dimension. Widen the range, or route a request through a combo and it appears here within a second." />
+              hint="No matching ledger entries for this period. Widen the range or route a request through a combo." />
           )}
         </Panel>
       )}

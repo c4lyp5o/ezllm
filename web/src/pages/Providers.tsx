@@ -967,7 +967,7 @@ function EditAccountModal({ account, initialTab = 'settings', onClose, onSaved }
 
   return (
     <Modal open onClose={onClose} title={`Edit ${account.name}`}
-      subtitle="Settings save with Save. Keys are validated and saved on their own, from the Keys tab."
+      subtitle="Save provider settings here. To validate and save keys, use the Keys tab."
       busy={busy} dirty={fieldsDirty || keyDirty} onSubmit={() => void save()}
       footer={(close) => <>
         <button type="button" className={cx(btn.base, btn.ghost)} onClick={close} disabled={busy}>
@@ -1640,7 +1640,7 @@ function QuotaModal({ account, onClose, onRead }: { account: Account; onClose: (
           <SectionLabel>Usage</SectionLabel>
           {busy && !live && <Skeleton className="mt-2 h-3.5 w-56" />}
           {!busy && live?.kind === 'none' && (
-            <p className="mt-2 text-[13px] text-mute">This provider exposes no quota endpoint its key can read.</p>
+            <p className="mt-2 text-[13px] text-mute">This provider does not offer quota information for this key.</p>
           )}
           {live && live.kind !== 'none' && (
             <div className="mt-2 space-y-3">

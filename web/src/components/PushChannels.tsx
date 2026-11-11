@@ -134,7 +134,7 @@ function ChannelEditor({ view, target, open, onClose, onSaved }: {
   return (
     <Modal open={open} onClose={onClose} busy={busy !== ''} dirty={dirty} onSubmit={() => void save()}
       title={target ? `Edit push channel — ${target.name}` : 'Add a push channel'}
-      subtitle="Bell events that meet the minimum severity are sent here as they happen"
+      subtitle="Events at or above the selected severity are sent to this channel."
       footer={(close) => <>
         {showAll && Object.keys(errors).length > 0 && <span className="mr-auto text-[12px] text-bad">Fix the fields marked in red.</span>}
         <button type="button" disabled={busy !== ''} className={cx(btn.base, btn.ghost)} onClick={() => void sendTest()}>{busy === 'test' ? <Spinner /> : null}Send test</button>
@@ -153,7 +153,7 @@ function ChannelEditor({ view, target, open, onClose, onSaved }: {
           <label className={labelCls} htmlFor="pc-name">Name</label>
           <input id="pc-name" className={cx(inputCls, shown('name') && 'border-bad/60')} value={d.name} placeholder="My phone" spellCheck={false}
             aria-invalid={!!shown('name')} onChange={(e) => set({ name: e.target.value })} />
-          {shown('name') ? <p className="mt-1 text-[12px] text-bad">{shown('name')}</p> : <p className="mt-1 text-[12px] text-mute">How this channel is listed here.</p>}
+          {shown('name') ? <p className="mt-1 text-[12px] text-bad">{shown('name')}</p> : <p className="mt-1 text-[12px] text-mute">A name to identify this channel.</p>}
         </div>
         {fields.map((f) => {
           const meta = FIELD[f.name] ?? { label: f.name, placeholder: '', help: '' };
@@ -286,7 +286,7 @@ export default function PushChannels() {
           onSaved={(c, created) => { setAdding(false); setEditing(null); setNotice(created ? `Added ${c.name}. Send a test to check it reaches you.` : `Saved ${c.name}.`); void load(); }} />
       )}
       <ConfirmModal open={deleting != null} title={`Delete ${deleting?.name ?? 'this channel'}?`} busy={rowBusy === deleting?.id}
-        body="Bell events stop going to this channel. Its stored secrets are deleted with it."
+        body="Events will no longer be sent to this channel. Its saved secrets will also be deleted."
         onClose={() => setDeleting(null)}
         onConfirm={() => { const c = deleting; if (!c) return; void act(c, async () => { await deleteChannel(c.id); return `Deleted ${c.name}.`; }).then(() => setDeleting(null)); }} />
     </section>

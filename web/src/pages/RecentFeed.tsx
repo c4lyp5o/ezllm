@@ -176,7 +176,7 @@ export default function RecentFeed() {
                             INCLUSIVE total. */}
                         {c.translated && (
                           <span
-                            title="translated hop: its wire differs from the client's surface; in-tokens below are the vendor's INCLUSIVE total (cache counted inside)"
+                            title="This request was translated to the provider's protocol. Input tokens include cached tokens, as reported by the provider."
                             className="ml-1.5 rounded px-1 py-0.5 font-mono text-[11px] align-middle text-accent"
                           >
                             ⇄ translated

@@ -210,7 +210,7 @@ export default function Requests() {
     <div className="space-y-5">
       {/* Filter bar — token bounds commit on Apply; range/sort apply instantly. */}
       <form onSubmit={submit} className="rounded-xl border border-line bg-surface px-6 py-5">
-        <SectionLabel>dissect · filter the calls ledger</SectionLabel>
+        <SectionLabel>Filter request history</SectionLabel>
         <div className="mt-3 flex flex-wrap items-end gap-3">
           {FIELDS.map((f) => (
             <label key={f.key} className="block">
@@ -350,7 +350,7 @@ export default function Requests() {
                         INCLUSIVE total — read before comparing tin. */}
                     {r.translated && (
                       <div className="text-[11px] text-accent"
-                        title="translated hop: its wire differs from the client's surface (anthropic client -> chat-only hop, or a hop curated for /v1/responses). The in-tokens on this row are the vendor's INCLUSIVE total (cache counted inside), not ezllm's cold-token convention">
+                        title="This request was translated to the provider's protocol. Input tokens include cached tokens, as reported by the provider.">
                         ⇄ translated
                       </div>
                     )}

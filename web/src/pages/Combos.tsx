@@ -622,7 +622,7 @@ function TestComboModal({ target, onClose, onResult }: {
   return (
     <Modal open={target != null} onClose={onClose} wide busy={running}
       title={combo ? `Test ${combo.name}` : 'Test combo'}
-      subtitle="One real request per hop: tiny (16 tokens out) and not recorded in the ledger"
+      subtitle="Sends one request per hop. These requests are not recorded in the ledger."
       footer={(close) => <>
         <span className="mr-auto flex items-center gap-2 text-[13px] text-mute">
           Surface
@@ -1054,11 +1054,11 @@ export default function Combos() {
       ) : combos.length === 0 ? (
         <div className="rounded-xl border border-line bg-surface px-6 py-14 text-center">
           <p className="text-[14px] font-medium">No combos yet</p>
-          <p className="mt-1 text-[13px] text-mute">A combo is an ordered chain of hops. Clients pick one by name and it tries the hops according to its strategy.</p>
+          <p className="mt-1 text-[13px] text-mute">A combo routes requests through its hops using the selected strategy. Clients use the combo name as the model ID.</p>
           <button type="button" className={cx(btn.base, btn.primary, 'mt-5')} onClick={openNew}>＋ Create your first combo</button>
         </div>
       ) : shown.length === 0 ? (
-        <EmptyState title="No combo matches" hint="Nothing fits the search and filter together."
+        <EmptyState title="No combo matches" hint="Try a different search or change the filter."
           action={<button type="button" className={cx(btn.base, btn.ghost)} onClick={() => { setQuery(''); setFilter('all'); }}>Clear search and filter</button>} />
       ) : (
         <Stagger className="space-y-3">

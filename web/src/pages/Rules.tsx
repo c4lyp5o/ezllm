@@ -289,7 +289,7 @@ function RuleModal({ target, accounts, rules, onClose, onSave }: {
                 <input aria-label="Window end" type="time" className={cx(inputCls, '!w-32 font-mono', errors.window && 'border-bad/60')}
                   value={d.win_end} onChange={(e) => set({ win_end: e.target.value })} />
               </div>
-              <p className="mt-1 text-[12px] text-mute">An end before the start wraps midnight.</p>
+              <p className="mt-1 text-[12px] text-mute">Set the end time before the start time to span midnight.</p>
             </div>
             <div>
               <label className={labelCls} htmlFor="rl-tz">Timezone</label>
@@ -325,7 +325,7 @@ function RuleModal({ target, accounts, rules, onClose, onSave }: {
                 );
               })}
             </div>
-            <p className="mt-1 text-[12px] text-mute">None selected means every day.</p>
+            <p className="mt-1 text-[12px] text-mute">Leave all days unselected to apply the rule every day.</p>
           </div>
         </section>
 
@@ -564,7 +564,7 @@ export default function Rules() {
           <button type="button" className={cx(btn.base, btn.primary, 'mt-5')} onClick={openNew}>+ Create your first rule</button>
         </div>
       ) : shown.length === 0 ? (
-        <EmptyState title="No rule matches" hint="Nothing fits the search and filters together."
+        <EmptyState title="No rule matches" hint="Try a different search or change the filters."
           action={<button type="button" className={cx(btn.base, btn.ghost)} onClick={() => { setQuery(''); setFilter('all'); setProviderFilter(0); }}>Clear search and filters</button>} />
       ) : (
         <div className="overflow-hidden rounded-xl border border-line bg-surface">

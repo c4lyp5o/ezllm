@@ -119,7 +119,7 @@ export default function NotificationBell() {
             </div>
             <div className="max-h-[min(70vh,480px)] overflow-y-auto">
               {items.length === 0 ? (
-                <p className="px-4 py-8 text-center text-[13px] text-mute">Nothing yet. New free models, failed refreshes and spent budgets show up here.</p>
+                <p className="px-4 py-8 text-center text-[13px] text-mute">No notifications yet. New free models, failed refreshes and spent budgets will appear here.</p>
               ) : items.map((n) => (
                 <button type="button" key={n.id} onClick={() => pick(n)}
                   className="flex w-full gap-3 border-b border-line px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-hover">

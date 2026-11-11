@@ -11,7 +11,30 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.7.0**
+**Current: v1.8.0**
+
+## v1.8.0 — 2026-11-11
+
+Copilot supports inline PNG/JPEG user images through native blob attachments,
+with explicit model-capability checks, bounded input and no text-only fallback.
+
+Claude and Antigravity share bounded streaming writes, flushing and cancellation
+through `internal/bridgeutil`. Provider event formats, auth, usage and process
+lifecycles stay local. Claude gains stalled-client write protection.
+Codex and Copilot transport migration remains outstanding; see
+[the shared transport design](docs/shared-bridge-transport-design.md).
+
+Adds opt-in Copilot CLI process reuse with a fresh session per request. Enable
+with `EZLLM_COPILOT_BRIDGE_WARM_POOL=on`; the default remains cold processes.
+Workers retire on uncertain cleanup, cancellation, expiry or binary replacement.
+No schema migration.
+
+Copilot streams complete client-tool batches before usage collection and session
+deletion. Exact usage and completion still follow cleanup. Bridge status adds
+aggregate stage timings to distinguish startup, model wait and cleanup.
+
+Adds the Meta API preset, updates Go and dashboard dependencies, and rejects
+oversized successful provider JSON responses. No schema migration.
 
 ## v1.7.0 — 2026-11-05
 

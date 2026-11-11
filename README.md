@@ -157,7 +157,7 @@ subscription. Choose the guide for your account:
 | Claude Pro/Max | [Claude bridge](docs/claude-bridge-runbook.md) | Install Claude Code and sign in with a separate CLI profile. |
 | ChatGPT Plus/Pro | [Codex bridge](docs/codex-bridge-runbook.md) | Linux; client tools require Landlock for the default protection. |
 | Google Antigravity | [Antigravity bridge](docs/agy-bridge-runbook.md) | Linux; text only, with no client tools or image input. |
-| GitHub Copilot | [Copilot CLI bridge](docs/copilot-cli-bridge-runbook.md) | The official `copilot` CLI signed in on the host; no key to paste. Client tools work natively over the CLI's headless channel. |
+| GitHub Copilot | [Copilot CLI bridge](docs/copilot-cli-bridge-runbook.md) | The official `copilot` CLI signed in on the host; no key to paste. Client tools and inline PNG/JPEG images work natively over the headless channel; image requests require an explicit vision-capable model. |
 
 The guides use Docker Compose and explain CLI installation, separate sign-in,
 mounts, and the dashboard preset. Start ezllm and finish dashboard setup first.
@@ -165,6 +165,11 @@ Each bridge is optional and disabled by default. Enabling one with missing
 prerequisites prevents ezllm from starting; check `docker compose logs ezllm`
 if startup fails. Subscription requests and validation probes consume plan
 quota. See the guides for model and tool limitations and how to set Rules.
+
+For maintainers, Claude and Antigravity share the streaming transport in
+`internal/bridgeutil`. **Codex and Copilot migration is still outstanding.**
+See the [shared transport design and migration status](docs/shared-bridge-transport-design.md).
+Each provider retains its own protocol, subscription login and process lifecycle.
 
 ## API surface
 
@@ -365,6 +370,8 @@ run separately; they are not part of this CI gate.
 | [docs/claude-bridge-runbook.md](docs/claude-bridge-runbook.md) | Claude subscription bridge: setup, account, plan windows |
 | [docs/codex-bridge-runbook.md](docs/codex-bridge-runbook.md) | ChatGPT subscription bridge: platform requirements, lockdown, tools, setup |
 | [docs/agy-bridge-runbook.md](docs/agy-bridge-runbook.md) | Antigravity (Google) subscription bridge: keyring-free login, setup, limits |
+| [docs/copilot-cli-bridge-runbook.md](docs/copilot-cli-bridge-runbook.md) | GitHub Copilot CLI bridge: native tools, exact usage, opt-in warm processes |
+| [docs/shared-bridge-transport-design.md](docs/shared-bridge-transport-design.md) | shared streaming transport: Claude/Antigravity implemented; Codex/Copilot migration outstanding |
 | [docs/bridge-update-runbook.md](docs/bridge-update-runbook.md) | bridge CLI auto-update: layout, install, supervised runs, holds and rollback |
 | [VERSION.md](VERSION.md) | release history; what changed on each date |
 | [CHANGELOG.md](CHANGELOG.md) | milestone-tagged change narrative |

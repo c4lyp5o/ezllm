@@ -19,7 +19,8 @@ import (
 // system message, caller-defined tools the model calls natively, and no CLI
 // scaffolding on the bill (~14k prompt tokens per turn on `-p`).
 //
-// One child serves one HTTP request and, with tools, stops at the first batch of
+// By default one child serves one HTTP request. The opt-in pool reuses a child
+// only after a fresh session completes cleanup. With tools, each turn stops at the first batch of
 // calls. The caller runs them and sends the results on its next request, which is
 // a fresh session with the history replayed as text. Holding the session open
 // between HTTP requests would keep one premium request per loop, but on AI-credit
@@ -59,11 +60,14 @@ const plainNote = "You have no tools in this conversation; answer from what you 
 
 // ChannelTurn is one chat turn. Tools may be empty.
 type ChannelTurn struct {
-	Model  string
-	System string
-	Prompt string // the transcript, without the system text
-	Tools  []toolDef
-	Choice toolChoice
+	Model       string
+	System      string
+	Prompt      string // the transcript, without the system text
+	Tools       []toolDef
+	Choice      toolChoice
+	Attachments []ImageAttachment
+	// OnTools synchronously delivers a complete batch before accounting cleanup.
+	OnTools func(Result) error
 }
 
 // errChannelClosed means the child's stdout ended before the turn did.
@@ -80,11 +84,19 @@ func (e *rpcError) Error() string { return e.Message }
 // reads until its own response arrives and queues the events it passes, so there
 // is no reader goroutine to leak or race. Blocking reads end when closeRead runs.
 type rpcConn struct {
-	w         io.Writer
-	r         *bufio.Reader
-	closeRead func()
-	nextID    int
-	queue     []cliEvent
+	w                   io.Writer
+	r                   *bufio.Reader
+	closeRead           func()
+	observe             func(string, time.Duration)
+	nextID              int
+	queue               []cliEvent
+	strict              bool
+	session             string
+	retired             map[string]bool
+	pending             []rpcMessage
+	tainted             bool
+	reusable            bool
+	idleSeen, usageSeen bool
 }
 
 type rpcMessage struct {
@@ -93,7 +105,8 @@ type rpcMessage struct {
 	Result json.RawMessage `json:"result"`
 	Error  *rpcError       `json:"error"`
 	Params struct {
-		Event json.RawMessage `json:"event"`
+		SessionID string          `json:"sessionId"`
+		Event     json.RawMessage `json:"event"`
 	} `json:"params"`
 }
 
@@ -148,9 +161,50 @@ func (c *rpcConn) read() (rpcMessage, error) {
 func (c *rpcConn) dispatch(msg rpcMessage) error {
 	switch {
 	case msg.Method == "session.event":
+		if c.strict {
+			id := msg.Params.SessionID
+			if id == "" {
+				c.reusable = false
+				return errors.New("copilot-bridge: session event has no session id")
+			}
+			if c.retired[id] {
+				return nil
+			}
+			if c.session == "" {
+				c.pending = append(c.pending, msg)
+				if len(c.pending) > 256 {
+					return errors.New("copilot-bridge: too many pending session events")
+				}
+				return nil
+			}
+			if id != c.session {
+				c.reusable = false
+				return errors.New("copilot-bridge: unexpected session event")
+			}
+		}
+		// Metadata/user events can carry multimodal content arrays. Decode only
+		// events the turn consumes; never coerce an image echo into text.
+		var kind struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(msg.Params.Event, &kind); err != nil {
+			return errors.New("copilot-bridge: malformed session event")
+		}
+		switch kind.Type {
+		case "assistant.message_delta", "assistant.message", "session.auto_mode_resolved", "session.usage_checkpoint", "session.error", "session.idle":
+		default:
+			return nil
+		}
 		var ev cliEvent
-		if json.Unmarshal(msg.Params.Event, &ev) == nil {
+		if err := json.Unmarshal(msg.Params.Event, &ev); err != nil {
+			if c.strict {
+				return errors.New("copilot-bridge: malformed session event")
+			}
+		} else {
 			c.queue = append(c.queue, ev)
+			if len(c.queue) > 4096 {
+				return errors.New("copilot-bridge: session event queue exceeded limit")
+			}
 		}
 	case msg.Method != "" && len(msg.ID) > 0:
 		return c.write(map[string]any{"jsonrpc": "2.0", "id": msg.ID,
@@ -160,6 +214,10 @@ func (c *rpcConn) dispatch(msg rpcMessage) error {
 }
 
 func (c *rpcConn) call(method string, params, out any) error {
+	start := time.Now()
+	if c.observe != nil {
+		defer func() { c.observe(method, time.Since(start)) }()
+	}
 	c.nextID++
 	id := strconv.Itoa(c.nextID)
 	if err := c.write(map[string]any{"jsonrpc": "2.0", "id": c.nextID, "method": method, "params": params}); err != nil {
@@ -196,15 +254,29 @@ func (c *rpcConn) nextEvent() (cliEvent, error) {
 		}
 	}
 	ev := c.queue[0]
+	c.queue[0] = cliEvent{}
 	c.queue = c.queue[1:]
+	if ev.Type == "session.usage_checkpoint" {
+		c.usageSeen = true
+	}
+	if ev.Type == "session.idle" {
+		c.idleSeen = true
+	}
 	return ev, nil
 }
 
 // bounded runs f, closing the read side if it outlives d. Used for the
 // best-effort steps after the answer is already known.
 func (c *rpcConn) bounded(d time.Duration, f func()) {
-	t := time.AfterFunc(d, c.closeRead)
-	defer t.Stop()
+	done := make(chan struct{})
+	t := time.AfterFunc(d, func() { defer close(done); c.closeRead() })
+	defer func() {
+		if !t.Stop() {
+			<-done
+			c.tainted = true
+			c.reusable = false
+		}
+	}()
 	f()
 }
 
@@ -310,8 +382,17 @@ func clipDetail(s string) string {
 // events until the model calls a declared tool or the session goes idle.
 func driveTurn(c *rpcConn, turn ChannelTurn, delta func(string) error, onFirst func()) (Result, error) {
 	var res Result
+	c.reusable = false
+	c.tainted = false
+	c.idleSeen, c.usageSeen = false, false
+	began := time.Now()
 	if err := c.ping(); err != nil {
 		return res, err
+	}
+	if len(turn.Attachments) > 0 {
+		if err := c.validateImages(turn.Model, turn.Attachments); err != nil {
+			return res, err
+		}
 	}
 	var created struct {
 		SessionID string `json:"sessionId"`
@@ -319,15 +400,42 @@ func driveTurn(c *rpcConn, turn ChannelTurn, delta func(string) error, onFirst f
 	if err := c.call("session.create", sessionConfig(turn), &created); err != nil {
 		return res, classifyCreate(err)
 	}
+	if created.SessionID == "" || (c.strict && c.retired[created.SessionID]) {
+		return res, errors.New("copilot-bridge: empty or reused session id")
+	}
+	c.session = created.SessionID
 	res.SessionID = created.SessionID
 	// -p leaves a session directory behind per turn; this path need not.
 	defer c.bounded(deleteTimeout, func() {
-		_ = c.call("session.delete", map[string]any{"sessionId": created.SessionID}, nil)
+		var deleted struct {
+			Success bool `json:"success"`
+		}
+		err := c.call("session.delete", map[string]any{"sessionId": created.SessionID}, &deleted)
+		c.reusable = deleted.Success && err == nil && c.idleSeen && c.usageSeen && !c.tainted
+		if c.retired == nil {
+			c.retired = make(map[string]bool)
+		}
+		c.retired[created.SessionID] = true
+		c.session = ""
+		c.queue = nil
+		c.pending = nil
 	})
-	if err := c.call("session.send", map[string]any{"sessionId": created.SessionID, "prompt": turn.Prompt}, nil); err != nil {
+	pending := c.pending
+	c.pending = nil
+	for _, msg := range pending {
+		if err := c.dispatch(msg); err != nil {
+			return res, err
+		}
+	}
+	send := map[string]any{"sessionId": created.SessionID, "prompt": turn.Prompt}
+	if len(turn.Attachments) > 0 {
+		send["attachments"] = turn.Attachments
+	}
+	if err := c.call("session.send", send, nil); err != nil {
 		return res, classifyCreate(err)
 	}
 
+	modelStart := time.Now()
 	declared := make(map[string]bool, len(turn.Tools))
 	for _, d := range turn.Tools {
 		declared[d.Function.Name] = true
@@ -339,6 +447,10 @@ func driveTurn(c *rpcConn, turn ChannelTurn, delta func(string) error, onFirst f
 	stamp := func() {
 		if !first {
 			first = true
+			if c.observe != nil {
+				c.observe("first_event", time.Since(began))
+				c.observe("model_wait", time.Since(modelStart))
+			}
 			if onFirst != nil {
 				onFirst()
 			}
@@ -389,8 +501,19 @@ func driveTurn(c *rpcConn, turn ChannelTurn, delta func(string) error, onFirst f
 			}
 			if len(res.ToolCalls) > 0 {
 				finish()
+				if c.observe != nil {
+					c.observe("tool_batch", time.Since(began))
+				}
+				var deliveryErr error
+				if turn.OnTools != nil {
+					deliveryErr = turn.OnTools(res)
+				}
+				drainStart := time.Now()
 				c.bounded(drainTimeout, func() { drainAborted(c, created.SessionID, &res) })
-				return res, nil
+				if c.observe != nil {
+					c.observe("usage_drain", time.Since(drainStart))
+				}
+				return res, deliveryErr
 			}
 		case "session.auto_mode_resolved":
 			res.AvailableModels = ev.Data.AvailableModels
@@ -459,16 +582,20 @@ func (r *Runner) RunChannel(ctx context.Context, turn ChannelTurn, delta func(st
 		defer cancel()
 		began := time.Now()
 		var res Result
-		err := r.withChannel(ctx, func(c *rpcConn) error {
+		with := r.withChannel
+		if r.WarmPool {
+			with = r.withPooledChannel
+		}
+		err := with(ctx, func(c *rpcConn) error {
 			var e error
 			res, e = driveTurn(c, turn, delta, func() { r.stampFirstByte(time.Since(began)) })
+			if e == nil && res.Text == "" && len(res.ToolCalls) == 0 {
+				e = errors.New("copilot-bridge: the CLI finished without an assistant message or a tool call")
+			}
 			return e
 		})
 		if err != nil {
 			return res, err
-		}
-		if res.Text == "" && len(res.ToolCalls) == 0 {
-			return res, errors.New("copilot-bridge: the CLI finished without an assistant message or a tool call")
 		}
 		r.logTurn(res)
 		return res, nil
@@ -502,15 +629,17 @@ func (r *Runner) withChannel(ctx context.Context, f func(*rpcConn) error) error 
 	}
 	var stderr strings.Builder
 	cmd.Stderr = &limitedWriter{w: &stderr, max: 8 << 10}
+	spawnStart := time.Now()
 	if err := cmd.Start(); err != nil {
 		return toolsRefused("the CLI could not start", err)
 	}
+	r.observeStage("spawn", time.Since(spawnStart))
 	// A blocked read has no context of its own: closing it is what ends it.
 	closeRead := func() { _ = stdout.Close() }
 	stop := context.AfterFunc(ctx, closeRead)
 	defer stop()
 
-	ferr := f(&rpcConn{w: stdin, r: bufio.NewReader(stdout), closeRead: closeRead})
+	ferr := f(&rpcConn{w: stdin, r: bufio.NewReader(stdout), closeRead: closeRead, observe: r.observeStage})
 	ctxErr := ctx.Err() // before kill() makes it non-nil
 	_ = stdin.Close()
 	kill()

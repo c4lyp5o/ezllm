@@ -184,13 +184,13 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		model = "auto"
 	}
 
-	run := func(delta func(string) error) (Result, error) {
-		res, err := s.Runner.RunChannel(r.Context(), ChannelTurn{Model: req.Model, System: req.System, Prompt: req.Transcript, Tools: req.Tools, Choice: req.Choice}, delta)
+	run := func(delta func(string) error, onTools func(Result) error) (Result, error) {
+		res, err := s.Runner.RunChannel(r.Context(), ChannelTurn{Model: req.Model, System: req.System, Prompt: req.Transcript, Tools: req.Tools, Choice: req.Choice, Attachments: req.Attachments, OnTools: onTools}, delta)
 		// The channel refused before anything was billed or streamed. A request
 		// with tools needs the channel, so the refusal stands and the router fails
 		// over; plain chat does not, and -p can still serve it.
 		var f *Failure
-		if len(req.Tools) == 0 && errors.As(err, &f) && f.Code == "chat_tools_unsupported" {
+		if len(req.Tools) == 0 && len(req.Attachments) == 0 && errors.As(err, &f) && f.Code == "chat_tools_unsupported" {
 			s.logf("copilot-bridge: channel unavailable, plain chat falling back to -p: %s", err)
 			return s.Runner.Run(r.Context(), req.Model, req.Prompt, delta)
 		}
@@ -198,7 +198,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !req.Stream {
-		res, err := run(nil)
+		res, err := run(nil, nil)
 		if err != nil {
 			s.writeErr(w, err)
 			return
@@ -223,7 +223,19 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 
 	sw := &sseWriter{w: w, id: id, created: created, model: model, rc: http.NewResponseController(w)}
 	defer sw.bind(r.Context())()
-	res, err := run(sw.delta)
+	toolsSent := false
+	res, err := run(sw.delta, func(batch Result) error {
+		sw.model = servedModel(model, batch)
+		sw.begin()
+		if !sw.sent && batch.Text != "" {
+			if err := sw.delta(batch.Text); err != nil {
+				return err
+			}
+		}
+		sw.chunk(map[string]any{"tool_calls": openAIToolCalls(batch.ToolCalls, true)}, "")
+		toolsSent = true
+		return sw.arm()
+	})
 	if err != nil {
 		if !sw.started {
 			s.writeErr(w, err)
@@ -244,7 +256,9 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		sw.chunk(map[string]any{"content": res.Text}, "")
 	}
 	if len(res.ToolCalls) > 0 {
-		sw.chunk(map[string]any{"tool_calls": openAIToolCalls(res.ToolCalls, true)}, "")
+		if !toolsSent {
+			sw.chunk(map[string]any{"tool_calls": openAIToolCalls(res.ToolCalls, true)}, "")
+		}
 		sw.chunk(map[string]any{}, "tool_calls")
 	} else {
 		sw.chunk(map[string]any{}, "stop")
@@ -306,6 +320,9 @@ func (s *Server) writeErr(w http.ResponseWriter, err error) {
 	var f *Failure
 	if errors.As(err, &f) {
 		switch f.Code {
+		case "vision_unsupported", "invalid_image":
+			writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", f.Msg, f.Code))
+			return
 		case "chat_tools_unsupported":
 			// Refused before anything billable: the router fails over on this
 			// code without parking the hop (proxy.go refusesTools).

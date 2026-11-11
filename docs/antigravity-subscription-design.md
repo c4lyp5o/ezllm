@@ -94,3 +94,11 @@ Consequences: the harness overhead makes a trivial turn cost ~4–7k input
 tokens of plan quota, so this account suits interactive chat, not
 high-frequency agent traffic; and streaming clients get time-to-first-token
 equal to the whole turn.
+
+## Shared transport update — 2026-11-11
+
+Streaming transport now uses `internal/bridgeutil` (v1.8.0); provider protocol,
+accounting and process lifecycle remain local.
+Claude and Antigravity are migrated; Codex and Copilot are the remaining bridges.
+See [the shared transport design](shared-bridge-transport-design.md) for scope
+and per-bridge migration acceptance. Historical decisions above remain as recorded.

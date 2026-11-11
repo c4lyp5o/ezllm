@@ -137,6 +137,7 @@ CLI's own, so there is no client id to configure. Runbook:
 | Variable | Default | What it does |
 |---|---|---|
 | `EZLLM_COPILOT_BRIDGE` | off | `on` starts the loopback surface; without it the provider add answers 409 naming this variable. |
+| `EZLLM_COPILOT_BRIDGE_WARM_POOL` | `off` | Opt-in CLI process reuse with fresh sessions; `on`/`true`/`1` enables it. Existing concurrency and queue limits apply. Restart to change. |
 | `EZLLM_COPILOT_BIN` | `/opt/copilot/copilot` | The GitHub Copilot CLI binary. |
 | `EZLLM_COPILOT_HOME` | `/copilot-home` | `COPILOT_HOME` for the CLI — the directory its login lives in (mount it read-write; the CLI writes session state). |
 | `EZLLM_COPILOT_BRIDGE_CONCURRENCY` | `2` | Concurrent Copilot CLI children; a positive integer, anything else fails the boot. |

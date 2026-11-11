@@ -337,3 +337,31 @@ NOT survive contact with a live combo: it was replaced by prompt-level emulation
 (§10 addendum), which failed live and was replaced in turn by native tools over the
 headless channel (§10 second addendum). Over the channel the prompt goes in a
 JSON-RPC message instead of on stdin; a 189 KB prompt was measured.
+
+## Shared transport update — 2026-11-11
+
+Streaming transport still uses the provider-local implementation; migration
+to `internal/bridgeutil` remains outstanding.
+Claude and Antigravity are migrated; Codex and Copilot are the remaining bridges.
+See [the shared transport design](shared-bridge-transport-design.md) for scope
+and per-bridge migration acceptance. Historical decisions above remain as recorded.
+
+## Native image attachments — 2026-11-11
+
+OpenAI user-message `image_url` parts with inline PNG/JPEG data URLs map to
+`session.send` blob attachments (`type`, `data`, `mimeType`, `displayName`).
+Request parsing enforces decoded byte/count/pixel bounds, leaves image data out
+of prompt text and adds stable numbered transcript markers. Images remain
+associated by order/name when historical turns are flattened.
+
+The selected explicit model must advertise vision through the CLI's free
+`models.list` RPC. Model-specific MIME/count/size limits are checked before
+creating the session. Unknown capabilities and `auto` fail closed. Native user
+metadata can carry multimodal arrays; only the event kinds the bridge consumes
+are decoded into its text/usage schema. Session-ID validation still precedes
+that filtering, and malformed consumed events remain failures.
+
+No HTTP image fetching, local file access or prompt-based image emulation is
+introduced. Image requests cannot fall back to the text-only `-p` invocation.
+The warm pool keeps fresh sessions and attachment isolation. Live CLI and HTTP
+checks proved a small PNG on `gpt-6-luna`; see the runbook for limits.

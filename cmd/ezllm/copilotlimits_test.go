@@ -24,3 +24,19 @@ func TestCopilotLimits(t *testing.T) {
 		}
 	}
 }
+
+func TestCopilotWarmPoolIsOptInAndRejectsTypos(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  bool
+		bad   bool
+	}{
+		{"", false, false}, {"off", false, false}, {"false", false, false}, {"0", false, false},
+		{"on", true, false}, {" TRUE ", true, false}, {"1", true, false}, {"enabled", false, true},
+	} {
+		got, err := copilotWarmPool(func(string) string { return tc.value })
+		if got != tc.want || (err != nil) != tc.bad {
+			t.Errorf("%q: got=%v err=%v", tc.value, got, err)
+		}
+	}
+}

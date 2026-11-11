@@ -2,6 +2,69 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
+## v1.8.0 — Meta API, dependency updates and bridge improvements
+
+### Copilot image input
+
+- Inline PNG/JPEG `image_url` parts map to native in-memory CLI blobs. Numbered
+  markers preserve image ordering in the flattened transcript; base64 is not
+  included in prompt text. Remote URLs and file paths are refused.
+- Explicit model vision capability and MIME/count/size checks run before
+  inference, alongside bridge byte/pixel bounds. `auto` and non-auto detail
+  settings are refused; image requests cannot fall back to text-only `-p`.
+- Multimodal user metadata no longer gets decoded as assistant text. Consumed
+  event validation and session isolation remain enforced. Live HTTP checks on
+  `gpt-6-luna` passed in both response modes with positive usage.
+
+### Shared bridge documentation
+
+- Updated the overview, code tour and four bridge guides with migration status.
+  Claude and Antigravity use the shared stream transport; Codex and Copilot
+  expansion remains outstanding. The shared design records per-bridge scope
+  and acceptance checks for those follow-up migrations.
+
+### Shared transport for Claude and Antigravity
+
+- Extracted protocol-independent streaming bytes, flush, cancellation and write
+  deadlines into `internal/bridgeutil`. Claude retains Anthropic events;
+  Antigravity retains OpenAI chunks, header timing and usage mapping.
+- Claude now bounds stalled client writes. Both adapters stop emitting after
+  transport failure and join cancellation callbacks before clearing deadlines.
+- Antigravity passed live CLI and HTTP checks before migration and live HTTP
+  streaming/non-streaming checks afterward on the current CLI 1.4.12.
+
+### Opt-in Copilot warm processes
+
+- `EZLLM_COPILOT_BRIDGE_WARM_POOL=on` reuses CLI processes under the existing
+  concurrency and queue limits. Every request still creates a fresh session
+  with its own system message and explicit client-tool allowlist.
+- Only confirmed idle/usage/delete cleanup permits reuse. Cancellation, uncertain
+  cleanup, protocol errors, worker death and binary replacement retire workers;
+  possibly billed inference is never automatically replayed. Session IDs filter
+  delayed events and cleanup timers are joined before a worker can be leased.
+- Workers expire after one idle minute, 15 minutes of age or 100 successful turns.
+  Bridge shutdown drains HTTP work then terminates and reaps all warm children.
+  Status reports pool state alongside stage timings. Pooling defaults off.
+
+### Copilot tool streaming and latency diagnostics
+
+- Complete declared tool batches stream before abort/usage collection and session
+  deletion. Usage, finish reason and stream completion follow cleanup; batches
+  are emitted once and non-stream requests retain full-response semantics.
+- Copilot bridge status includes aggregate queue, spawn, RPC, model-wait,
+  first-event, tool-batch and usage-drain timings. No request content is retained.
+- Controlled live text and tool calls succeeded with usage. Measured startup
+  and session creation dominated cleanup in those small requests; see the
+  Copilot latency diagnostic note for measurements and limits.
+
+### Meta API and dependency refresh
+
+- Added Meta API at `https://api.meta.ai/v1` using existing model discovery
+  and protocol probes. Updated Go and dashboard dependencies.
+- Reject successful provider JSON responses over 8 MiB instead of accepting a
+  truncated valid JSON prefix. HTTP failures retain their status classification.
+- Removed an orphaned dashboard comment from the retired tool-pruning feature.
+
 ## Unreleased — renamed: provider presets say what they are
 
 - **The four subscription bridges are labelled as bridges** in the Add-provider

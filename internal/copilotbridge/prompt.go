@@ -28,8 +28,9 @@ type Request struct {
 	SystemLen int
 	Turns     int
 	// Tools are the caller's functions (channel.go).
-	Tools  []toolDef
-	Choice toolChoice
+	Tools       []toolDef
+	Choice      toolChoice
+	Attachments []ImageAttachment
 }
 
 // Unsupported is a request the bridge refuses before anything is spawned.
@@ -66,37 +67,6 @@ type chatMessage struct {
 	ToolCalls  []toolCallIn    `json:"tool_calls"`
 	ToolCallID string          `json:"tool_call_id"`
 	Name       string          `json:"name"`
-}
-
-// contentText accepts the two shapes a chat message's content takes: a plain
-// string, or the array of typed parts a vision-capable client sends. Text parts
-// are joined; an image part is refused by name rather than silently dropped,
-// because dropping it would answer a question about a picture nobody saw.
-func contentText(raw json.RawMessage) (string, error) {
-	if len(raw) == 0 {
-		return "", nil
-	}
-	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
-		return s, nil
-	}
-	var parts []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	}
-	if err := json.Unmarshal(raw, &parts); err != nil {
-		return "", fmt.Errorf("message content is neither a string nor a parts array")
-	}
-	var b strings.Builder
-	for _, p := range parts {
-		switch p.Type {
-		case "text", "input_text":
-			b.WriteString(p.Text)
-		default:
-			return "", fmt.Errorf("content part %q is not supported by this bridge", p.Type)
-		}
-	}
-	return b.String(), nil
 }
 
 // ParseRequest validates and flattens. Every refusal is typed so the ledger's
@@ -149,11 +119,16 @@ func ParseRequest(body []byte) (Request, error) {
 
 	var sys []string
 	var turns []string
+	imageBytes := 0
 	callName := map[string]string{} // tool_call id -> function name, for result turns
 	for _, m := range in.Messages {
-		text, err := contentText(m.Content)
+		before := len(req.Attachments)
+		text, err := contentWithImages(m.Content, &req.Attachments, &imageBytes)
 		if err != nil {
 			return Request{}, Unsupported{Code: "invalid_request", Msg: err.Error()}
+		}
+		if len(req.Attachments) != before && strings.ToLower(strings.TrimSpace(m.Role)) != "user" {
+			return Request{}, Unsupported{Code: "invalid_request", Msg: "image attachments are supported only in user messages"}
 		}
 		switch strings.ToLower(strings.TrimSpace(m.Role)) {
 		case "system", "developer":

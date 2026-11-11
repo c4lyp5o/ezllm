@@ -113,3 +113,8 @@ values may belong to different calls. They are diagnostics, not percentiles.
 Overlapping timings must not be summed. Queue aggregates also include plain
 fallback requests; RPC stages describe only the headless channel. No prompt,
 credential, tool name, arguments or session identifier is stored in these stats.
+
+A subsequent [warm-process exploration](copilot-warm-process-design.md) measured
+roughly 2.2 seconds less setup on fresh sessions within one process. It records
+the live samples, their limits, and the worker lifecycle/isolation requirements
+before a production pool can be enabled.

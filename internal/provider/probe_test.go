@@ -93,3 +93,12 @@ func TestClassifyProbeResultCases(t *testing.T) {
 		}
 	}
 }
+
+func TestParameterRefusalDoesNotDisproveWire(t *testing.T) {
+	for _, status := range []int{400, 422} {
+		verdict, authDead := ClassifyProbeResult(status, `{"error":{"code":"chat_parameter_unsupported","message":"output token limits are not supported on this Copilot hop"}}`)
+		if verdict != VerdictUnknown || authDead {
+			t.Fatalf("status %d: got %v, authDead=%v", status, verdict, authDead)
+		}
+	}
+}

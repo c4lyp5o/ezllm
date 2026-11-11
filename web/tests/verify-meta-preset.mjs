@@ -5,8 +5,9 @@ try {
   await page.goto(rig.base + '/providers');
   await page.getByRole('button', { name: /add provider/i }).first().click();
   const select = page.locator('select').filter({ has: page.locator('option[value="meta-api"]') });
+  check('Meta Model label', await select.locator('option[value="meta-api"]').textContent() === 'Meta Model');
   await select.selectOption('meta-api');
-  check('Meta API selected', await select.inputValue() === 'meta-api');
+  check('Meta Model selected', await select.inputValue() === 'meta-api');
   check('Meta credential guidance', await page.getByText('Meta Model API key (MODEL_API_KEY)', { exact: true }).count() > 0);
   await page.locator('#ap-name').fill('Meta test');
   await page.locator('#ap-key').fill('fixture-key');

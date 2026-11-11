@@ -246,7 +246,7 @@ function ProfileModal({ target, profiles, onClose, onSaved }: {
               <input id="cp-ratio" type="number" min={5} max={95} step={1} className={cx(inputCls, '!w-28 font-mono tabular-nums', errors.ratio && 'border-bad/60')}
                 value={Math.round(d.min_compress_ratio * 100)} onChange={(e) => update('min_compress_ratio', (Number(e.target.value) || 0) / 100)} />
               {errors.ratio ? <p className="mt-1 text-[12px] text-bad">{errors.ratio}</p>
-                : <p className="mt-1 text-[12px] text-mute">A smaller saving is not worth changing the request (and its cache) for, so the original ships.</p>}
+                : <p className="mt-1 text-[12px] text-mute">If savings are below this threshold, ezllm sends the original request.</p>}
             </div>
             <div className="space-y-3">
               <label className="flex items-start gap-2.5 text-[13px] text-dim">
@@ -319,7 +319,7 @@ function ProfileModal({ target, profiles, onClose, onSaved }: {
                         className="rounded p-1 text-mute hover:bg-hover hover:text-bad" onClick={() => setD((cur) => ({ ...cur, stages: cur.stages.filter((s) => s.uid !== stage.uid) }))}>✕</button>
                     </div>
                   </div>
-                  <p className="mt-1.5 pl-7 text-[12px] leading-snug text-mute">{info?.note ?? 'An engine this editor has no description for.'}</p>
+                  <p className="mt-1.5 pl-7 text-[12px] leading-snug text-mute">{info?.note ?? 'No description is available for this engine.'}</p>
                   <div className="mt-1.5 flex flex-wrap items-center gap-x-4 pl-7 text-[12px] text-mute">
                     {i > 1 && <button type="button" className="hover:text-ink" onClick={() => moveStage(i, 0)}>Move to top</button>}
                     <button type="button" className="hover:text-ink"

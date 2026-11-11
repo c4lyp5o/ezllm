@@ -238,7 +238,7 @@ function ServiceCardView({
                 <option value="auto">Auto</option>
               </select>
               <p className="mt-1.5 text-[12px] leading-relaxed text-mute">
-                {mode === 'off' && <>Requests must include their own <code className="font-mono text-dim">model</code>. The safest first-run state.</>}
+                {mode === 'off' && <>Requests must include their own <code className="font-mono text-dim">model</code>. This is the default setting.</>}
                 {mode === 'manual' && 'Use the model chosen here when a request omits one.'}
                 {mode === 'auto' && 'Use the model that most recently passed a real test for this endpoint.'}
               </p>
@@ -257,7 +257,7 @@ function ServiceCardView({
                       onChange={setTarget} loadingText={loadingModels ? 'Loading provider models…' : 'No synced models'}
                       disabled={options.length === 0 && loadingModels} placeholder="Search provider models…" />
                   )}
-                  {target && !selectedIsListed && !loadingModels && <p className="mt-1 text-[12px] text-warn">The saved target is not in the current enabled-provider catalog.</p>}
+                  {target && !selectedIsListed && !loadingModels && <p className="mt-1 text-[12px] text-warn">The saved model is not in the catalog of enabled providers.</p>}
                   {verified.length > 0 && <p className="mt-1.5 text-[12px] text-mute">Models already verified here are listed first.</p>}
                 </>
               )}
@@ -360,7 +360,7 @@ function ServiceCardView({
                   {card.resolved_target ? (
                     <ServiceTryIt key={card.resolved_target} surface={card.surface} model={card.resolved_target} />
                   ) : (
-                    <p className="text-[12px] text-mute">Save a default model for this service to generate with it here.</p>
+                    <p className="text-[12px] text-mute">Save a default model to try this service here.</p>
                   )}
                 </div>
               </Collapse>
@@ -569,7 +569,7 @@ export default function Services() {
       )}
 
       {shown.length === 0 ? (
-        <EmptyState title="No service matches this filter." hint="Switch the filter to see every endpoint." />
+        <EmptyState title="No service matches this filter." hint="Change the filter to see other endpoints." />
       ) : (
         <Stagger className="grid gap-4">
           {shown.map((card) => (

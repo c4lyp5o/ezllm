@@ -223,7 +223,7 @@ export function ServiceTryIt({ surface, model }: { surface: ServiceSurface; mode
               <a key={l} href={l} target="_blank" rel="noreferrer" className="block break-all text-[12px] text-accent underline-offset-2 hover:underline">{l}</a>
             ))}
             {result.media.length === 0 && !result.text && result.links.length === 0 && (
-              <p className="text-[12px] text-mute">Nothing playable was found in the response — the raw answer is below.</p>
+              <p className="text-[12px] text-mute">No playable audio was found. The raw response is below.</p>
             )}
             {result.raw && (
               <details>

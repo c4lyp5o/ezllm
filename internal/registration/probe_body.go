@@ -3,10 +3,12 @@ package registration
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/c4lyp5o/ezllm/internal/provider"
 )
 
-// probeMaxTokens is the output budget every probe body carries. It is not a
-// cost knob: models with MANDATORY thinking (Claude Haiku 5.5, measured on the
+// probeMaxTokens is the output budget for providers that support a cap.
+// It is not a cost knob: models with MANDATORY thinking (Claude Haiku 5.5, measured on the
 // subscription surface) refuse to answer inside a tiny budget and come back with
 // `max_output_tokens` — which the key test then reports as a failed inference
 // step for a perfectly good key. A probe must budget for the model it probes.
@@ -28,4 +30,13 @@ func chatProbeBody(model string) string {
 // responsesProbeBody is the Responses-shaped surface probe.
 func responsesProbeBody(model string) string {
 	return fmt.Sprintf(`{"model":%s,"max_output_tokens":%d,"input":"ping"}`, jsonString(model), probeMaxTokens)
+}
+
+// chatProbeBodyFor preserves output budgets except on the Copilot CLI, which
+// cannot enforce them and explicitly refuses requests carrying them.
+func chatProbeBodyFor(kind provider.Kind, model string) string {
+	if kind == provider.KindCopilotBridge {
+		return fmt.Sprintf(`{"model":%s,"messages":[{"role":"user","content":"Reply exactly ok"}]}`, jsonString(model))
+	}
+	return chatProbeBody(model)
 }

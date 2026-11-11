@@ -195,7 +195,7 @@ function Sessions() {
     } catch (e) { setError(errorMessage(e)); } finally { setBusy(false); setPending(null); }
   };
   const what = pending?.session ? (pending.session.current ? 'this browser' : 'this session') : 'every dashboard session, including this browser';
-  return <section className={panel}><SectionLabel>Active sessions</SectionLabel><p className="mt-2 text-sm text-mute">Browser descriptions are supplied by the browser. Older sessions may have no description.</p>
+  return <section className={panel}><SectionLabel>Active sessions</SectionLabel><p className="mt-2 text-sm text-mute">Your browser supplies these descriptions. Older sessions may not have one.</p>
     <ul className="mt-4 space-y-3">{rows.map(s => <li key={s.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-3"><div className="min-w-0"><p className="break-words text-sm">{s.current && <Chip tone="accent" className="mr-2">This browser</Chip>}{s.browser || 'Browser description unavailable'}</p><p className="mt-1 text-xs text-mute" title={`Created ${new Date(s.created_at).toLocaleString()}`}>Created {relTime(s.created_at)} · expires {new Date(s.expires_at).toLocaleString()}</p></div><button className={cx(btn.base, btn.ghost)} disabled={busy} onClick={() => setPending({ session: s })}>Sign out</button></li>)}</ul>
     {error && <p role="alert" className="mt-3 text-sm text-bad">{error}</p>}<button className={cx(btn.base, btn.ghost, 'mt-4')} disabled={busy || !rows.length} onClick={() => setPending({})}>Sign out all devices</button>
     <ConfirmModal open={pending != null} title={`Sign out ${what}?`} confirmLabel="Sign out" busy={busy}

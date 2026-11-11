@@ -374,7 +374,7 @@ function LatencyCard({ rows }: { rows: UsageRow[] }) {
       <Panel label={<SectionLabel>Latency · p50 time to first token</SectionLabel>}>
         <EmptyState
           title="No streaming calls measured yet"
-          hint="Time-to-first-token only exists on a streaming request. Non-streaming calls are rendered as “–” everywhere, on purpose — 0 would be a lie." />
+          hint="Time to first token is available for streaming requests only. Non-streaming calls show “–”." />
       </Panel>
     );
   }
@@ -501,7 +501,7 @@ function RecentCalls({ o }: { o: Overview }) {
       bodyClass="p-0">
       {live.length === 0 ? (
         <EmptyState title="No calls yet."
-          hint="Route something through a combo and it lands here; this table refreshes itself every few seconds." />
+          hint="Requests routed through a combo appear here. This table refreshes every few seconds." />
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-5 py-2.5">
@@ -520,7 +520,7 @@ function RecentCalls({ o }: { o: Overview }) {
           </div>
           {rows.length === 0 ? (
             <EmptyState title="No recent call matches."
-              hint="The filter and search apply to the rows shown here, not to the whole ledger. Requests searches the ledger." />
+              hint="Search and filters apply to the rows shown here. Use Requests to search the full ledger." />
           ) : (
         <div className="overflow-x-auto" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
           <table className="w-full min-w-[860px] text-[13px]">
@@ -939,7 +939,7 @@ export default function Dashboard() {
         ) : undefined}>
         {series.length === 0 ? (
           <EmptyState title="No traffic in the last 7 days."
-            hint="Nothing has been routed through a combo in this window. The table below fills the moment it happens." />
+            hint="Requests routed through a combo in this period will appear below." />
         ) : (
           <div className="h-56">
             <ResponsiveContainer width="100%" height="100%">

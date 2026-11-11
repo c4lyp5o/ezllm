@@ -9,7 +9,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   wire. Re-run the wire probe after upgrading to replace an earlier failed
   verdict with a measured result before pinning the chat wire.
 
-## v1.8.0 — Meta API, dependency updates and bridge improvements
+## v1.8.0 — Meta Model API, dependency updates and bridge improvements
 
 ### Copilot image input
 
@@ -64,9 +64,9 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   and session creation dominated cleanup in those small requests; see the
   Copilot latency diagnostic note for measurements and limits.
 
-### Meta API and dependency refresh
+### Meta Model API and dependency refresh
 
-- Added Meta API at `https://api.meta.ai/v1` using existing model discovery
+- Added Meta Model API at `https://api.meta.ai/v1` using existing model discovery
   and protocol probes. Updated Go and dashboard dependencies.
 - Reject successful provider JSON responses over 8 MiB instead of accepting a
   truncated valid JSON prefix. HTTP failures retain their status classification.

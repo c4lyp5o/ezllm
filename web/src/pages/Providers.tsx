@@ -162,7 +162,7 @@ const PROVIDER_PRESETS: Record<string, {
   'alibaba-model-studio-token-plan': { label: 'Alibaba Cloud Model Studio token plan', kind: 'openai-compatible', baseURL: 'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1' },
   'commandcode': { label: 'Command Code', kind: 'openai-compatible', baseURL: 'https://api.commandcode.ai/provider/v1' },
   'deepseek': { label: 'DeepSeek', kind: 'openai-compatible', baseURL: 'https://api.deepseek.com' },
-  'meta-api': { label: 'Meta API', kind: 'openai-compatible', baseURL: 'https://api.meta.ai/v1', keyHint: 'Meta Model API key (MODEL_API_KEY)' },
+  'meta-api': { label: 'Meta Model', kind: 'openai-compatible', baseURL: 'https://api.meta.ai/v1', keyHint: 'Meta Model API key (MODEL_API_KEY)' },
   'groq': { label: 'Groq', kind: 'openai-compatible', baseURL: 'https://api.groq.com/openai/v1' },
   'tokenrouter': { label: 'TokenRouter', kind: 'openai-compatible', baseURL: 'https://api.tokenrouter.com/v1' },
   // Vercel AI Gateway: OpenAI-compatible chat + /models discovery over one key,

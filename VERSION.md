@@ -40,7 +40,7 @@ Copilot streams complete client-tool batches before usage collection and session
 deletion. Exact usage and completion still follow cleanup. Bridge status adds
 aggregate stage timings to distinguish startup, model wait and cleanup.
 
-Adds the Meta API preset, updates Go and dashboard dependencies, and rejects
+Adds the Meta Model API preset, updates Go and dashboard dependencies, and rejects
 oversized successful provider JSON responses. No schema migration.
 
 ## v1.7.0 — 2026-11-05

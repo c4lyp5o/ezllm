@@ -491,10 +491,27 @@ func TestRunChannelKillsAHungChildAtTimeout(t *testing.T) {
 
 func TestRunChannelDeathMidTurnIsClassifiedFromStderr(t *testing.T) {
 	var b strings.Builder
-	emit := func(s string) { fmt.Fprintf(&b, "printf 'Content-Length: %d\\r\\n\\r\\n%%s' '%s'\n", len(s), s) }
-	emit(fmt.Sprintf(`{"id":1,"result":{"protocolVersion":%d}}`, channelProtocolVersion))
-	emit(`{"id":2,"result":{"sessionId":"s1"}}`)
-	emit(`{"id":3,"result":{"messageId":"m1"}}`)
+	// Consume each complete request before replying. Unsolicited replies followed
+	// by exit can close stdin before ping is written, testing gate failure instead.
+	b.WriteString(`read_request() {
+  IFS= read -r header || exit 91
+  size=$(printf '%s' "$header" | tr -cd '0-9')
+  IFS= read -r blank || exit 92
+  request=$(dd bs=1 count="$size" 2>/dev/null)
+  case "$request" in
+    *\"method\":\"$1\"*) ;;
+    *) exit 93 ;;
+  esac
+}
+`)
+
+	emit := func(method, s string) {
+		fmt.Fprintf(&b, "read_request %s\n", method)
+		fmt.Fprintf(&b, "printf 'Content-Length: %d\\r\\n\\r\\n%%s' '%s'\n", len(s), s)
+	}
+	emit("ping", fmt.Sprintf(`{"id":1,"result":{"protocolVersion":%d}}`, channelProtocolVersion))
+	emit("session.create", `{"id":2,"result":{"sessionId":"s1"}}`)
+	emit("session.send", `{"id":3,"result":{"messageId":"m1"}}`)
 	r := &Runner{Bin: stubCLI(t, b.String()+`echo "premium request limit reached" >&2; exit 1`), Timeout: 10 * time.Second}
 	within(t, 8*time.Second, func() {
 		if _, err := r.RunChannel(context.Background(), channelTurn(), nil); failureCode(err) != "quota_exhausted" {

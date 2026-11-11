@@ -11,7 +11,13 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.9.0**
+**Current: v1.9.1**
+
+## v1.9.1 — 2026-11-11
+
+Claude and Antigravity share bounded streaming writes, flushing and cancellation
+through `internal/bridgeutil`. Provider event formats, auth, usage and process
+lifecycles stay local. Claude gains stalled-client write protection.
 
 ## v1.9.0 — 2026-11-11
 

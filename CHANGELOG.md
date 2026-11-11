@@ -2,6 +2,16 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
+## v1.9.1 — shared transport for Claude and Antigravity
+
+- Extracted protocol-independent streaming bytes, flush, cancellation and write
+  deadlines into `internal/bridgeutil`. Claude retains Anthropic events;
+  Antigravity retains OpenAI chunks, header timing and usage mapping.
+- Claude now bounds stalled client writes. Both adapters stop emitting after
+  transport failure and join cancellation callbacks before clearing deadlines.
+- Antigravity passed live CLI and HTTP checks before migration and live HTTP
+  streaming/non-streaming checks afterward on the current CLI 1.4.12.
+
 ## v1.9.0 — opt-in Copilot warm processes
 
 - `EZLLM_COPILOT_BRIDGE_WARM_POOL=on` reuses CLI processes under the existing

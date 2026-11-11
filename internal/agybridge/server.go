@@ -1,7 +1,6 @@
 package agybridge
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
@@ -10,8 +9,9 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 )
 
 const maxBodyBytes = 32 << 20
@@ -125,8 +125,9 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sw := &sseWriter{w: w, id: id, created: created, model: req.Model, rc: http.NewResponseController(w)}
-	defer sw.bind(r.Context())()
+	transport := bridgeutil.NewStream(r.Context(), w, bridgeutil.StreamWriteStall)
+	defer transport.Close()
+	sw := &sseWriter{w: w, id: id, created: created, model: req.Model, transport: transport}
 	res, err := s.Runner.Run(r.Context(), req, sw.delta)
 	if err != nil {
 		if !sw.started {
@@ -161,51 +162,14 @@ func openAIUsage(u Usage) map[string]any {
 	}
 }
 
-// streamWriteStall bounds one stream write: a client that has not drained a
-// write in this long has stopped reading.
-const streamWriteStall = 60 * time.Second
-
-// sseWriter emits chat.completion.chunk events. Headers are written on the
-// first delta, so a failure before any output still gets its real status.
+// sseWriter owns OpenAI event encoding and header timing. Transport is shared.
 type sseWriter struct {
-	w       http.ResponseWriter
-	id      string
-	created int64
-	model   string
-	started bool
-
-	rc        *http.ResponseController
-	dmu       sync.Mutex
-	cancelled bool
-}
-
-// bind makes cancelling ctx interrupt a write stuck on a client that stopped
-// reading; the returned func detaches and clears the deadline.
-func (s *sseWriter) bind(ctx context.Context) func() {
-	stop := context.AfterFunc(ctx, func() {
-		s.dmu.Lock()
-		s.cancelled = true
-		_ = s.rc.SetWriteDeadline(time.Now())
-		s.dmu.Unlock()
-	})
-	return func() {
-		if stop() {
-			_ = s.rc.SetWriteDeadline(time.Time{})
-		}
-	}
-}
-
-func (s *sseWriter) arm() error {
-	if s.rc == nil {
-		return nil
-	}
-	s.dmu.Lock()
-	defer s.dmu.Unlock()
-	if s.cancelled {
-		return context.Canceled
-	}
-	_ = s.rc.SetWriteDeadline(time.Now().Add(streamWriteStall))
-	return nil
+	w         http.ResponseWriter
+	id        string
+	created   int64
+	model     string
+	started   bool
+	transport *bridgeutil.Stream
 }
 
 func (s *sseWriter) begin() {
@@ -226,16 +190,8 @@ func (s *sseWriter) event(v any) error {
 	if err != nil {
 		return err
 	}
-	if err := s.arm(); err != nil {
-		return err
-	}
-	if _, err := s.w.Write([]byte("data: " + string(b) + "\n\n")); err != nil {
-		return err
-	}
-	if f, ok := s.w.(http.Flusher); ok {
-		f.Flush()
-	}
-	return nil
+	_, err = s.transport.Write([]byte("data: " + string(b) + "\n\n"))
+	return err
 }
 
 func (s *sseWriter) chunk(delta map[string]any, finish string) error {
@@ -253,10 +209,7 @@ func (s *sseWriter) delta(text string) error {
 }
 
 func (s *sseWriter) done() {
-	_, _ = s.w.Write([]byte("data: [DONE]\n\n"))
-	if f, ok := s.w.(http.Flusher); ok {
-		f.Flush()
-	}
+	_, _ = s.transport.Write([]byte("data: [DONE]\n\n"))
 }
 
 func asNative(err error) *NativeError {

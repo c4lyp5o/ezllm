@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 )
 
 // maxBodyBytes caps a request. The upstream body is replayed to native through a
@@ -153,19 +155,16 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) stream(w http.ResponseWriter, r *http.Request, req Request, alias string) {
-	flusher, _ := w.(http.Flusher)
+	transport := bridgeutil.NewStream(r.Context(), w, bridgeutil.StreamWriteStall)
+	defer transport.Close()
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
-	if flusher != nil {
-		flusher.Flush()
+	if err := transport.Flush(); err != nil {
+		return
 	}
-	sw := &StreamWriter{W: w, Flush: func() {
-		if flusher != nil {
-			flusher.Flush()
-		}
-	}}
+	sw := &StreamWriter{W: transport}
 	res, err := s.Runner.Run(r.Context(), req, alias, sw.Handle)
 	s.Limits.Observe(res.RateLimit, time.Now())
 	if err != nil {
@@ -178,10 +177,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request, req Request, ali
 			_ = status
 		}
 		payload := ErrorEnvelope(errType, err.Error(), code)
-		_, _ = w.Write([]byte("event: error\ndata: " + string(payload) + "\n\n"))
-		if flusher != nil {
-			flusher.Flush()
-		}
+		_, _ = transport.Write([]byte("event: error\ndata: " + string(payload) + "\n\n"))
 		s.logf("claude-bridge: stream failed: %s", err)
 		return
 	}

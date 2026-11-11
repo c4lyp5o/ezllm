@@ -166,6 +166,11 @@ prerequisites prevents ezllm from starting; check `docker compose logs ezllm`
 if startup fails. Subscription requests and validation probes consume plan
 quota. See the guides for model and tool limitations and how to set Rules.
 
+For maintainers, Claude and Antigravity share the streaming transport in
+`internal/bridgeutil`. **Codex and Copilot migration is still outstanding.**
+See the [shared transport design and migration status](docs/shared-bridge-transport-design.md).
+Each provider retains its own protocol, subscription login and process lifecycle.
+
 ## API surface
 
 Full contract — every endpoint, request/response shape, and error code — in
@@ -365,6 +370,8 @@ run separately; they are not part of this CI gate.
 | [docs/claude-bridge-runbook.md](docs/claude-bridge-runbook.md) | Claude subscription bridge: setup, account, plan windows |
 | [docs/codex-bridge-runbook.md](docs/codex-bridge-runbook.md) | ChatGPT subscription bridge: platform requirements, lockdown, tools, setup |
 | [docs/agy-bridge-runbook.md](docs/agy-bridge-runbook.md) | Antigravity (Google) subscription bridge: keyring-free login, setup, limits |
+| [docs/copilot-cli-bridge-runbook.md](docs/copilot-cli-bridge-runbook.md) | GitHub Copilot CLI bridge: native tools, exact usage, opt-in warm processes |
+| [docs/shared-bridge-transport-design.md](docs/shared-bridge-transport-design.md) | shared streaming transport: Claude/Antigravity implemented; Codex/Copilot migration outstanding |
 | [docs/bridge-update-runbook.md](docs/bridge-update-runbook.md) | bridge CLI auto-update: layout, install, supervised runs, holds and rollback |
 | [VERSION.md](VERSION.md) | release history; what changed on each date |
 | [CHANGELOG.md](CHANGELOG.md) | milestone-tagged change narrative |

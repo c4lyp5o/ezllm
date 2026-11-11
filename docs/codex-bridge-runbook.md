@@ -368,3 +368,12 @@ change, nothing else is touched.
   different container seccomp profiles. Compare `/status` on both.
 - **"The bridge won't start on macOS / Windows."** It is a Linux feature; run
   ezllm in a Linux container.
+
+## Shared transport status
+
+Codex still uses its own streaming transport. **Migration to the shared
+`internal/bridgeutil` transport remains outstanding.** The current bridge
+continues operating independently; no shared lifecycle migration has shipped.
+
+Claude and Antigravity are migrated; Codex and Copilot still need expansion.
+See [shared transport status and remaining work](shared-bridge-transport-design.md).

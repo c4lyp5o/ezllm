@@ -141,3 +141,11 @@ turns. This is not a long-run leak or plateau test. Reuse remains disabled by
 default; roll out with status and memory monitoring before considering a default
 change. Idle expiry is one minute, maximum age 15 minutes, maximum turns 100.
 See the runbook for activation and rollback.
+
+## Shared transport boundary
+
+The warm pool remains Copilot-specific. Copilot has not yet migrated to
+`internal/bridgeutil.Stream`; that transport extraction is outstanding alongside
+Codex. It must preserve early tool delivery, usage/finish ordering and the
+worker cancellation/retirement contract. See
+[shared transport migration status](shared-bridge-transport-design.md).

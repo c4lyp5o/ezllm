@@ -1,7 +1,8 @@
 # Shared CLI bridge streaming transport
 
 Implemented in v1.9.1 for Claude and Antigravity. Codex and Copilot retain their
-current transport pending separate migrations.
+current transport pending separate migrations. **The shared bridge work is not
+complete: expansion to Codex and Copilot remains outstanding.**
 
 ## Boundary
 
@@ -65,3 +66,24 @@ used and only one failed write is attempted, including error/terminal paths.
 Existing Anthropic/OpenAI framing, auth, usage and process tests remain intact.
 Claude validation for this extraction uses regression fixtures, not live
 subscription inference.
+
+## Migration status and remaining work
+
+| Bridge | Shared `bridgeutil.Stream` | Remaining work |
+|---|---|---|
+| Claude | Implemented in v1.9.1 | Maintain Anthropic framing and stalled-write/cancellation coverage. |
+| Antigravity (`agybridge`) | Implemented in v1.9.1 | Maintain OpenAI framing and live HTTP acceptance coverage. |
+| Codex | Not migrated | Move stream writes/flush/deadlines onto the shared transport; retain app-server RPC, sandboxing, parked tool turns and usage handling. |
+| Copilot | Not migrated | Move stream writes/flush/deadlines onto the shared transport; retain early tool delivery, exact usage and warm-worker ownership. |
+
+Migrate Codex and Copilot in separate changes. For each, capture the existing
+header timing, error framing, tool/finish/usage ordering and disconnect behavior
+before extraction. Preserve those assertions, then run `make test-short`,
+targeted race checks, vet and a static build. Controlled live acceptance should
+exercise text and tools with usage; subscription requests require authorization.
+Do not mark a bridge migrated based only on importing `bridgeutil`.
+
+The next scope is transport reuse, not a universal bridge lifecycle. Shared
+authentication mechanics, admission primitives and timing helpers remain later
+candidates after equivalent behavior is established. Process pools, sessions,
+CLI environments, sandboxing and provider accounting stay adapter-owned.

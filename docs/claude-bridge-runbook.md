@@ -203,3 +203,12 @@ shape the Providers page already draws — **rolling** = the 5-hour window,
 `EZLLM_CLAUDE_BRIDGE=off` and recreate the container, then disable the account (or
 delete the combo) in the dashboard. No schema, no other provider, and no client
 configuration is affected.
+
+## Shared transport status
+
+Claude uses `internal/bridgeutil` for streaming byte writes, flushing,
+write deadlines and cancellation cleanup as of v1.9.1. Its event format,
+authentication, accounting and CLI lifecycle remain provider-specific.
+
+Claude and Antigravity are migrated; Codex and Copilot still need expansion.
+See [shared transport status and remaining work](shared-bridge-transport-design.md).

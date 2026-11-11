@@ -26,10 +26,10 @@ client (Claude Code / Hermes / curl / anything OpenAI- or Anthropic-speaking)
    │                           │
    ▼                           ▼
 provider accounts (one namespace each), seven kinds: opencode-go ·
-openai-compatible · anthropic-compatible · gemini-openai · github-copilot ·
+openai-compatible · anthropic-compatible · gemini-openai · copilot-bridge ·
 gemini-web · claude-web — each ships an adapter (`provider.Adapter`); the
-account row carries the base URL + key pool. The Claude and ChatGPT
-subscription bridges are loopback accounts of the compatible kinds.
+account row carries the base URL + key pool. Claude, ChatGPT and Antigravity
+subscription bridges are loopback compatible accounts; Copilot uses copilot-bridge.
 ```
 
 On native passthrough paths, SSE bytes flow back as they arrive while usage is
@@ -438,8 +438,9 @@ corrections section.
   `tools.go` parks a turn that stopped on client tool calls until the results arrive
   (`park`, `Shutdown` reaps them), `landlock_linux.go`/`sandbox.go` confine every child,
   `exec.go` is the `codex exec` fallback. Wired in `cmd/ezllm/codexbridge.go`.
-- Both bridges are loopback-only accounts of the compatible kinds; children end with their
-  request, and the runner timeout covers the wait for a slot.
+- Both bridges are loopback-only accounts of the compatible kinds. Claude children end
+  with their request; Codex can park tool turns for continuation. Preserve each
+  runner's timeout and cleanup semantics when changing shared support code.
 
 ### v1.1.1 — audit fixes ✅ (2026-10-23)
 - Security boundaries: `cookieOrigins` (`internal/server/admin.go`) refuses cookie writes
@@ -681,7 +682,8 @@ can see the failure you are trying to prevent.**
 
 ### M16 — GitHub Copilot CLI bridge ✅ (2026-11-05; design `docs/copilot-cli-bridge-design.md`, runbook `docs/copilot-cli-bridge-runbook.md`)
 - `internal/copilotbridge/channel.go` — the path every turn takes: one
-  `copilot --headless --stdio` child per request, LSP-framed JSON-RPC, single-threaded
+  `copilot --headless --stdio` child per request by default (opt-in warm reuse in
+  `pool.go` with a fresh session per request), LSP-framed JSON-RPC, single-threaded
   on purpose. `driveTurn` pings (the free protocol gate), creates a session with the
   caller's system text and an `availableTools` allowlist that must be present even
   when empty, sends the transcript, and stops at the first batch of declared tool
@@ -741,6 +743,22 @@ while the SAME model on `opencode-go` was 0/754.
   attention names the hop, zero console errors, 390px zero overflow.
 - No routing action yet, deliberately: the park rule is justified by THIS
   measurement, not by a plausible number (the M2 lesson).
+
+### v1.9.1 — shared CLI bridge transport (2026-11-11)
+
+- `internal/bridgeutil/stream.go` `Stream`, `NewStream`, `Write`, `Flush` and
+  `Close` own protocol-independent writes, stall deadlines, flushing and joined
+  cancellation cleanup. Each adapter still owns encoded events and headers.
+- `internal/claudebridge/server.go` `stream` supplies the shared writer to
+  `internal/claudebridge/stream.go` `StreamWriter`; Anthropic framing stays local.
+- `internal/agybridge/server.go` `chat` supplies it to `sseWriter`; OpenAI chunks,
+  delayed headers and usage mapping stay local. `live_test.go` `TestLiveHTTP`
+  verifies the actual CLI-backed streaming and non-streaming HTTP surfaces.
+- **Codex and Copilot are not migrated.** Their stream transport extraction is
+  outstanding, one bridge per change. Keep Codex RPC/sandbox/tool-turn lifecycle
+  and Copilot channel/early-tool/usage/warm-pool behavior adapter-owned.
+- Scope, baseline results and migration acceptance live in
+  [the shared transport design](docs/shared-bridge-transport-design.md).
 
 ## 5. Invariants to check while reading (review checklist)
 

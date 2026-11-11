@@ -122,7 +122,7 @@ Docs are claims about code — verify before writing:
 
 - Cite code by file and symbol (`proxy.go` `Forward`), not `file.go:NN`:
   line numbers drift with every edit. Check the symbol exists before citing it.
-- No stale markers: `⏳ TBD TODO FIXME` in `*.md` should read zero.
+- No unresolved placeholder or in-progress markers in Markdown files.
 - Status lines age: prefer "shipped — <what>, verified <date>" over bare
   milestone tags.
 - Milestone history goes in `CHANGELOG.md` (reverse-chronological, dated);
@@ -165,3 +165,16 @@ an asset.
   diff does not earn one.
 - Never commit secrets: `config.yaml`, `data/`, and token files are
   gitignored for a reason.
+
+## Shared CLI bridge transport
+
+Claude and Antigravity use `internal/bridgeutil.Stream` for byte writes, flushing,
+stall deadlines and cancellation cleanup. **Codex and Copilot transport migration
+remains outstanding.** The [shared transport design](docs/shared-bridge-transport-design.md)
+tracks each adapter's status and acceptance checks.
+
+Keep event encoding, header timing, auth/error contracts, usage, CLI isolation
+and process lifecycles in their provider packages. When changing shared transport,
+run the short gate and targeted race checks for the shared package and migrated
+bridges; preserve both Anthropic and OpenAI event tests. Live subscription checks
+spend quota and require authorization. Migrate each remaining bridge separately.

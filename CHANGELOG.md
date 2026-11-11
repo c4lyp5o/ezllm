@@ -2,6 +2,13 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
+## Unreleased — shared bridge documentation
+
+- Updated the overview, code tour and four bridge guides with migration status.
+  Claude and Antigravity use the shared stream transport; Codex and Copilot
+  expansion remains outstanding. The shared design records per-bridge scope
+  and acceptance checks for those follow-up migrations.
+
 ## v1.9.1 — shared transport for Claude and Antigravity
 
 - Extracted protocol-independent streaming bytes, flush, cancellation and write

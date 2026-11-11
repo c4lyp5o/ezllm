@@ -18,6 +18,8 @@ file in the same commit, or the test fails.
 Claude and Antigravity share bounded streaming writes, flushing and cancellation
 through `internal/bridgeutil`. Provider event formats, auth, usage and process
 lifecycles stay local. Claude gains stalled-client write protection.
+Codex and Copilot transport migration remains outstanding; see
+[the shared transport design](docs/shared-bridge-transport-design.md).
 
 ## v1.9.0 — 2026-11-11
 

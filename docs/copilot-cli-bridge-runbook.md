@@ -274,3 +274,12 @@ beyond a controlled rollout. On this host one CLI retained approximately
 substantial memory. That sample does not establish a steady-state memory bound.
 The existing concurrency cap and worker expiry limit exposure. First requests
 are still cold, and model processing time is unaffected by process reuse.
+
+## Shared transport status
+
+Copilot still uses its own streaming transport. **Migration to the shared
+`internal/bridgeutil` transport remains outstanding.** The current bridge
+continues operating independently; no shared lifecycle migration has shipped.
+
+Claude and Antigravity are migrated; Codex and Copilot still need expansion.
+See [shared transport status and remaining work](shared-bridge-transport-design.md).

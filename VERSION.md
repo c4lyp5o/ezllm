@@ -11,7 +11,12 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.7.0**
+**Current: v1.8.0**
+
+## v1.8.0 — 2026-11-11
+
+Adds the Meta API preset, updates Go and dashboard dependencies, and rejects
+oversized successful provider JSON responses. No schema migration.
 
 ## v1.7.0 — 2026-11-05
 

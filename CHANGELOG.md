@@ -2,6 +2,14 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
+## v1.8.0 — Meta API and dependency refresh
+
+- Added Meta API at `https://api.meta.ai/v1` using existing model discovery
+  and protocol probes. Updated Go and dashboard dependencies.
+- Reject successful provider JSON responses over 8 MiB instead of accepting a
+  truncated valid JSON prefix. HTTP failures retain their status classification.
+- Removed an orphaned dashboard comment from the retired tool-pruning feature.
+
 ## Unreleased — renamed: provider presets say what they are
 
 - **The four subscription bridges are labelled as bridges** in the Add-provider

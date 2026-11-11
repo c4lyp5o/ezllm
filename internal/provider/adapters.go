@@ -649,7 +649,7 @@ func getJSONStatus(ctx context.Context, c *http.Client, url string, hdrs map[str
 		return nil, 0, err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, (8<<20)+1))
 	if err != nil {
 		return nil, resp.StatusCode, err
 	}
@@ -657,6 +657,9 @@ func getJSONStatus(ctx context.Context, c *http.Client, url string, hdrs map[str
 		return body, resp.StatusCode, &HTTPError{
 			URL: url, Status: resp.StatusCode, Body: string(body),
 		}
+	}
+	if len(body) > 8<<20 {
+		return nil, resp.StatusCode, fmt.Errorf("provider: JSON response exceeds 8 MiB")
 	}
 	return body, resp.StatusCode, nil
 }

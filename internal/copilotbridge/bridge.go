@@ -185,12 +185,12 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	run := func(delta func(string) error, onTools func(Result) error) (Result, error) {
-		res, err := s.Runner.RunChannel(r.Context(), ChannelTurn{Model: req.Model, System: req.System, Prompt: req.Transcript, Tools: req.Tools, Choice: req.Choice, OnTools: onTools}, delta)
+		res, err := s.Runner.RunChannel(r.Context(), ChannelTurn{Model: req.Model, System: req.System, Prompt: req.Transcript, Tools: req.Tools, Choice: req.Choice, Attachments: req.Attachments, OnTools: onTools}, delta)
 		// The channel refused before anything was billed or streamed. A request
 		// with tools needs the channel, so the refusal stands and the router fails
 		// over; plain chat does not, and -p can still serve it.
 		var f *Failure
-		if len(req.Tools) == 0 && errors.As(err, &f) && f.Code == "chat_tools_unsupported" {
+		if len(req.Tools) == 0 && len(req.Attachments) == 0 && errors.As(err, &f) && f.Code == "chat_tools_unsupported" {
 			s.logf("copilot-bridge: channel unavailable, plain chat falling back to -p: %s", err)
 			return s.Runner.Run(r.Context(), req.Model, req.Prompt, delta)
 		}
@@ -320,6 +320,9 @@ func (s *Server) writeErr(w http.ResponseWriter, err error) {
 	var f *Failure
 	if errors.As(err, &f) {
 		switch f.Code {
+		case "vision_unsupported", "invalid_image":
+			writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", f.Msg, f.Code))
+			return
 		case "chat_tools_unsupported":
 			// Refused before anything billable: the router fails over on this
 			// code without parking the hop (proxy.go refusesTools).

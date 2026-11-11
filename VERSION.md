@@ -15,6 +15,9 @@ file in the same commit, or the test fails.
 
 ## v1.8.0 — 2026-11-11
 
+Copilot supports inline PNG/JPEG user images through native blob attachments,
+with explicit model-capability checks, bounded input and no text-only fallback.
+
 Claude and Antigravity share bounded streaming writes, flushing and cancellation
 through `internal/bridgeutil`. Provider event formats, auth, usage and process
 lifecycles stay local. Claude gains stalled-client write protection.

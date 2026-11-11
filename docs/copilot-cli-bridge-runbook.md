@@ -8,9 +8,12 @@ mints a session token. Design: `docs/copilot-cli-bridge-design.md`.
 
 `internal/copilotbridge` serves `/healthz`, `/status`, `/v1/models` and
 `/v1/chat/completions` on `127.0.0.1:8793` (loopback only, bearer-gated with the
-bridge token). One CLI child per request: `copilot -s --output-format=json
---no-ask-user [--model <id>]`, prompt on **stdin** (argv would break on a
-600 KB prompt: one argv element caps at 128 KB).
+bridge token). Requests use `copilot --headless --stdio` with a fresh session.
+Processes are cold by default; the opt-in warm pool reuses only successfully
+cleaned-up processes. Plain text can fall back to `copilot -p`; requests carrying
+tools or images cannot take that fallback. Prompts and native image blobs travel
+on stdin, not argv.
+
 
 ## Enabling it
 
@@ -283,3 +286,33 @@ continues operating independently; no shared lifecycle migration has shipped.
 
 Claude and Antigravity are migrated; Codex and Copilot still need expansion.
 See [shared transport status and remaining work](shared-bridge-transport-design.md).
+
+## Image input
+
+Copilot accepts OpenAI `image_url` parts in user messages when the URL is an
+inline `data:image/png;base64,...` or `data:image/jpeg;base64,...` value. The
+bridge validates base64, image header/MIME agreement and dimensions, then sends
+native in-memory blob attachments through `session.send`. Base64 stays out of
+the text prompt; numbered markers preserve image order and historical-message
+association in the flattened transcript. No image file is written by the bridge.
+
+| Constraint | Behavior |
+|---|---|
+| Model | Use an explicit model ID; image requests with `auto` are refused. |
+| Formats | Inline PNG and JPEG only. Remote HTTP URLs, file paths and other formats are refused. |
+| Bridge bounds | At most four images, 4 MiB decoded per image, 8 MiB decoded total, 20 million pixels per image. |
+| Model bounds | The CLI's `models.list` must advertise vision and usable count, size and MIME limits; its stricter limits apply before session creation/inference. |
+| `detail` | Omitted or `auto`; `low`/`high` are refused because the CLI owns image processing. |
+| Message roles | User messages only, including historical user messages. |
+| Channel failure | Refusal is preserved; no text-only fallback that drops the image. |
+
+Measured on CLI 1.0.105, `gpt-6-luna` advertises **one image, up to 3 MiB**.
+Two tiny live HTTP requests through the implementation, non-streaming and
+streaming, both identified a two-color PNG correctly and returned positive usage.
+The warmed process remained reusable. This proves that tested model/path, not
+vision availability on every model in the catalog. Usage remains the CLI's
+reported accounting; each request creates its own session.
+
+Image/parameter refusals occur before inference. Check the selected model's
+advertised limits when an image is refused rather than increasing the bridge's
+global bounds. Antigravity's headless stream-json input remains text-only.

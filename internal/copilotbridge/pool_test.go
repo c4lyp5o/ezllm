@@ -57,6 +57,10 @@ func TestPoolCLIHelper(t *testing.T) {
 			time.Sleep(time.Minute)
 		}
 		switch req.Method {
+		case "models.list":
+			var models any
+			json.Unmarshal([]byte(visionCatalogFixture), &models)
+			reply(models)
 		case "ping":
 			reply(map[string]any{"protocolVersion": channelProtocolVersion})
 		case "session.create":
@@ -74,6 +78,14 @@ func TestPoolCLIHelper(t *testing.T) {
 			}
 			reply(map[string]any{"sessionId": sid})
 		case "session.send":
+			if mode == "image-isolation" {
+				var attachments []ImageAttachment
+				json.Unmarshal(req.Params["attachments"], &attachments)
+				want := sessions % 2
+				if len(attachments) != want {
+					os.Exit(5)
+				}
+			}
 			if mode == "die" {
 				os.Exit(1)
 			}
@@ -466,5 +478,29 @@ func TestPoolRejectsReusedSessionIDBeforeSend(t *testing.T) {
 	pids, _ := poolCalls(t, path)
 	if len(pids) != 2 {
 		t.Fatal("reused-id worker was not discarded")
+	}
+}
+
+func TestPoolHTTPImageRequestsDoNotLeakAttachmentsIntoNextSession(t *testing.T) {
+	r, path := poolRig(t, "image-isolation")
+	s := &Server{Runner: r, Token: "t", Models: []Model{{ID: "auto"}, {ID: "gpt-6-luna"}}}
+	for _, stream := range []bool{false, true} {
+		var body map[string]any
+		json.Unmarshal(imageRequest([]string{imageFixture(t, false)}, "user", ""), &body)
+		body["stream"] = stream
+		b, _ := json.Marshal(body)
+		rec := postChat(s, string(b))
+		if rec.Code != 200 || !strings.Contains(rec.Body.String(), "ok") {
+			t.Fatalf("image HTTP status=%d", rec.Code)
+		}
+		plain := fmt.Sprintf(`{"model":"auto","stream":%v,"messages":[{"role":"user","content":"plain"}]}`, stream)
+		rec = postChat(s, plain)
+		if rec.Code != 200 || !strings.Contains(rec.Body.String(), "ok") {
+			t.Fatalf("plain HTTP status=%d", rec.Code)
+		}
+	}
+	pids, _ := poolCalls(t, path)
+	if len(pids) != 1 {
+		t.Fatal("image isolation not exercised on a reused worker")
 	}
 }

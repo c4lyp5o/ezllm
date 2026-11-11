@@ -146,6 +146,7 @@ See the runbook for activation and rollback.
 
 The warm pool remains Copilot-specific. Copilot has not yet migrated to
 `internal/bridgeutil.Stream`; that transport extraction is outstanding alongside
-Codex. It must preserve early tool delivery, usage/finish ordering and the
+Codex. It must preserve native image attachments and their per-session isolation,
+early tool delivery, usage/finish ordering and the
 worker cancellation/retirement contract. See
 [shared transport migration status](shared-bridge-transport-design.md).

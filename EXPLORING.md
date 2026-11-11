@@ -744,7 +744,7 @@ while the SAME model on `opencode-go` was 0/754.
 - No routing action yet, deliberately: the park rule is justified by THIS
   measurement, not by a plausible number (the M2 lesson).
 
-### v1.9.1 — shared CLI bridge transport (2026-11-11)
+### v1.8.0 — shared CLI bridge transport (2026-11-11)
 
 - `internal/bridgeutil/stream.go` `Stream`, `NewStream`, `Write`, `Flush` and
   `Close` own protocol-independent writes, stall deadlines, flushing and joined

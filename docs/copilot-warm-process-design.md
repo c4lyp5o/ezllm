@@ -1,6 +1,6 @@
 # Copilot warm-process exploration — 2026-11-11
 
-Status: implemented as an opt-in pool in v1.9.0; disabled by default.
+Status: implemented as an opt-in pool in v1.8.0; disabled by default.
 The original findings and acceptance plan below explain the design.
 
 ## Finding

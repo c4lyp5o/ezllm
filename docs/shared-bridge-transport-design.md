@@ -1,6 +1,6 @@
 # Shared CLI bridge streaming transport
 
-Implemented in v1.9.1 for Claude and Antigravity. Codex and Copilot retain their
+Implemented in v1.8.0 for Claude and Antigravity. Codex and Copilot retain their
 current transport pending separate migrations. **The shared bridge work is not
 complete: expansion to Codex and Copilot remains outstanding.**
 
@@ -71,8 +71,8 @@ subscription inference.
 
 | Bridge | Shared `bridgeutil.Stream` | Remaining work |
 |---|---|---|
-| Claude | Implemented in v1.9.1 | Maintain Anthropic framing and stalled-write/cancellation coverage. |
-| Antigravity (`agybridge`) | Implemented in v1.9.1 | Maintain OpenAI framing and live HTTP acceptance coverage. |
+| Claude | Implemented in v1.8.0 | Maintain Anthropic framing and stalled-write/cancellation coverage. |
+| Antigravity (`agybridge`) | Implemented in v1.8.0 | Maintain OpenAI framing and live HTTP acceptance coverage. |
 | Codex | Not migrated | Move stream writes/flush/deadlines onto the shared transport; retain app-server RPC, sandboxing, parked tool turns and usage handling. |
 | Copilot | Not migrated | Move stream writes/flush/deadlines onto the shared transport; retain early tool delivery, exact usage and warm-worker ownership. |
 

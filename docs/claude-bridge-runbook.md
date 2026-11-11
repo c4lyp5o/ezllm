@@ -207,7 +207,7 @@ configuration is affected.
 ## Shared transport status
 
 Claude uses `internal/bridgeutil` for streaming byte writes, flushing,
-write deadlines and cancellation cleanup as of v1.9.1. Its event format,
+write deadlines and cancellation cleanup as of v1.8.0. Its event format,
 authentication, accounting and CLI lifecycle remain provider-specific.
 
 Claude and Antigravity are migrated; Codex and Copilot still need expansion.

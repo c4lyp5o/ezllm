@@ -2,14 +2,16 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
-## Unreleased — shared bridge documentation
+## v1.8.0 — Meta API, dependency updates and bridge improvements
+
+### Shared bridge documentation
 
 - Updated the overview, code tour and four bridge guides with migration status.
   Claude and Antigravity use the shared stream transport; Codex and Copilot
   expansion remains outstanding. The shared design records per-bridge scope
   and acceptance checks for those follow-up migrations.
 
-## v1.9.1 — shared transport for Claude and Antigravity
+### Shared transport for Claude and Antigravity
 
 - Extracted protocol-independent streaming bytes, flush, cancellation and write
   deadlines into `internal/bridgeutil`. Claude retains Anthropic events;
@@ -19,7 +21,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 - Antigravity passed live CLI and HTTP checks before migration and live HTTP
   streaming/non-streaming checks afterward on the current CLI 1.4.12.
 
-## v1.9.0 — opt-in Copilot warm processes
+### Opt-in Copilot warm processes
 
 - `EZLLM_COPILOT_BRIDGE_WARM_POOL=on` reuses CLI processes under the existing
   concurrency and queue limits. Every request still creates a fresh session
@@ -32,7 +34,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   Bridge shutdown drains HTTP work then terminates and reaps all warm children.
   Status reports pool state alongside stage timings. Pooling defaults off.
 
-## v1.8.1 — Copilot tool streaming and latency diagnostics
+### Copilot tool streaming and latency diagnostics
 
 - Complete declared tool batches stream before abort/usage collection and session
   deletion. Usage, finish reason and stream completion follow cleanup; batches
@@ -43,7 +45,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   and session creation dominated cleanup in those small requests; see the
   Copilot latency diagnostic note for measurements and limits.
 
-## v1.8.0 — Meta API and dependency refresh
+### Meta API and dependency refresh
 
 - Added Meta API at `https://api.meta.ai/v1` using existing model discovery
   and protocol probes. Updated Go and dashboard dependencies.

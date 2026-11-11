@@ -7,6 +7,7 @@ package registration
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -255,5 +256,35 @@ func TestSweepLeavesCallerSurfacesIntact(t *testing.T) {
 		if surfaces[i] != want[i] {
 			t.Fatalf("caller's surfaces changed to %v", surfaces)
 		}
+	}
+}
+
+// Copilot rejects output caps before generation. A sweep must still obtain
+// real chat evidence rather than recording that parameter error as a wire gap.
+func TestCopilotSweepProvesChatWithoutOutputCap(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			w.WriteHeader(400)
+			return
+		}
+		if _, capped := body["max_tokens"]; capped {
+			w.WriteHeader(400)
+			w.Write([]byte(`{"error":{"code":"chat_parameter_unsupported","message":"output token limits are not supported on this Copilot hop"}}`))
+			return
+		}
+		if body["model"] != "gpt-6-luna" {
+			t.Errorf("wrong model: %v", body["model"])
+		}
+		w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`))
+	}))
+	defer srv.Close()
+	acct := compatAccount(srv.URL)
+	acct.Kind = provider.KindCopilotBridge
+	result := noSleepTester(srv.Client(), nil).ProtocolSweep(context.Background(), acct, "k", []provider.ModelInfo{{ID: "gpt-6-luna"}}, Options{Surfaces: []provider.Surface{provider.SurfaceChat}})
+	got := result.Rows["gpt-6-luna"][string(provider.SurfaceChat)]
+	if got == nil || !*got {
+		t.Fatalf("chat not proven: %+v", result)
 	}
 }

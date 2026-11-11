@@ -2,6 +2,13 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
+## Unreleased
+
+- Copilot key, wire and combo probes omit output-token caps that the CLI cannot
+  enforce. Parameter refusals no longer count as evidence of an unsupported
+  wire. Re-run the wire probe after upgrading to replace an earlier failed
+  verdict with a measured result before pinning the chat wire.
+
 ## v1.8.0 — Meta API, dependency updates and bridge improvements
 
 ### Copilot image input

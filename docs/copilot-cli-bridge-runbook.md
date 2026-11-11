@@ -229,3 +229,19 @@ tripwire — if they pass and a live turn reports zeros, the event names moved.
 - No quota panel reading: the CLI does not expose the plan's premium-request
   balance headlessly, so the dashboard shows the bridge's last usage, not live
   remaining quota.
+
+## Slow responses
+
+The loopback bridge's `/status` response includes `runtime.stage_timings`, with
+`count`, `avg_ms` and `last_ms` for each observed stage. Inspect `ping` and
+`session.create` for CLI readiness/session overhead, `model_wait` for the wait
+after send acknowledgement, and `usage_drain`/`session.delete` for cleanup.
+`queue` measures wait for an acquired concurrency slot. These are aggregate,
+overlapping measurements, not additive phases or percentiles; concurrent calls
+can update different last values. No request content is retained.
+
+Streamed tool batches are flushed before accounting cleanup. Usage and stream
+completion still follow cleanup, so clients that wait for `[DONE]` before
+executing tools retain that wait. Do not shorten the accounting timeout based
+on first-response latency alone. Measured examples and limitations are in
+[copilot-latency-diagnostics.md](copilot-latency-diagnostics.md).

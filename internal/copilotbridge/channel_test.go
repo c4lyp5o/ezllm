@@ -458,6 +458,14 @@ env > `+env+`
 	if st := r.Stats(); st["served"].(int64) != 1 || st["first_byte_ms_avg"] == nil {
 		t.Errorf("stats = %+v", st)
 	}
+	stages := r.Stats()["stage_timings"].(map[string]any)
+	for _, name := range []string{"queue", "spawn", "ping", "session.create", "session.send", "first_event", "model_wait", "session.delete"} {
+		v, ok := stages[name].(map[string]any)
+		if !ok || v["count"] != int64(1) {
+			t.Errorf("missing stage %s: %v", name, stages)
+		}
+	}
+
 }
 
 func TestProbeChannelGate(t *testing.T) {

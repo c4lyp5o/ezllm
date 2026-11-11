@@ -2,6 +2,17 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
+## v1.8.1 — Copilot tool streaming and latency diagnostics
+
+- Complete declared tool batches stream before abort/usage collection and session
+  deletion. Usage, finish reason and stream completion follow cleanup; batches
+  are emitted once and non-stream requests retain full-response semantics.
+- Copilot bridge status includes aggregate queue, spawn, RPC, model-wait,
+  first-event, tool-batch and usage-drain timings. No request content is retained.
+- Controlled live text and tool calls succeeded with usage. Measured startup
+  and session creation dominated cleanup in those small requests; see the
+  Copilot latency diagnostic note for measurements and limits.
+
 ## v1.8.0 — Meta API and dependency refresh
 
 - Added Meta API at `https://api.meta.ai/v1` using existing model discovery

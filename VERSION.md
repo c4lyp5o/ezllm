@@ -11,7 +11,13 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.8.0**
+**Current: v1.8.1**
+
+## v1.8.1 — 2026-11-11
+
+Copilot streams complete client-tool batches before usage collection and session
+deletion. Exact usage and completion still follow cleanup. Bridge status adds
+aggregate stage timings to distinguish startup, model wait and cleanup.
 
 ## v1.8.0 — 2026-11-11
 

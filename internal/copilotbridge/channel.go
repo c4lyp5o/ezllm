@@ -64,6 +64,8 @@ type ChannelTurn struct {
 	Prompt string // the transcript, without the system text
 	Tools  []toolDef
 	Choice toolChoice
+	// OnTools synchronously delivers a complete batch before accounting cleanup.
+	OnTools func(Result) error
 }
 
 // errChannelClosed means the child's stdout ended before the turn did.
@@ -83,6 +85,7 @@ type rpcConn struct {
 	w         io.Writer
 	r         *bufio.Reader
 	closeRead func()
+	observe   func(string, time.Duration)
 	nextID    int
 	queue     []cliEvent
 }
@@ -160,6 +163,10 @@ func (c *rpcConn) dispatch(msg rpcMessage) error {
 }
 
 func (c *rpcConn) call(method string, params, out any) error {
+	start := time.Now()
+	if c.observe != nil {
+		defer func() { c.observe(method, time.Since(start)) }()
+	}
 	c.nextID++
 	id := strconv.Itoa(c.nextID)
 	if err := c.write(map[string]any{"jsonrpc": "2.0", "id": c.nextID, "method": method, "params": params}); err != nil {
@@ -310,6 +317,7 @@ func clipDetail(s string) string {
 // events until the model calls a declared tool or the session goes idle.
 func driveTurn(c *rpcConn, turn ChannelTurn, delta func(string) error, onFirst func()) (Result, error) {
 	var res Result
+	began := time.Now()
 	if err := c.ping(); err != nil {
 		return res, err
 	}
@@ -328,6 +336,7 @@ func driveTurn(c *rpcConn, turn ChannelTurn, delta func(string) error, onFirst f
 		return res, classifyCreate(err)
 	}
 
+	modelStart := time.Now()
 	declared := make(map[string]bool, len(turn.Tools))
 	for _, d := range turn.Tools {
 		declared[d.Function.Name] = true
@@ -339,6 +348,10 @@ func driveTurn(c *rpcConn, turn ChannelTurn, delta func(string) error, onFirst f
 	stamp := func() {
 		if !first {
 			first = true
+			if c.observe != nil {
+				c.observe("first_event", time.Since(began))
+				c.observe("model_wait", time.Since(modelStart))
+			}
 			if onFirst != nil {
 				onFirst()
 			}
@@ -389,8 +402,19 @@ func driveTurn(c *rpcConn, turn ChannelTurn, delta func(string) error, onFirst f
 			}
 			if len(res.ToolCalls) > 0 {
 				finish()
+				if c.observe != nil {
+					c.observe("tool_batch", time.Since(began))
+				}
+				var deliveryErr error
+				if turn.OnTools != nil {
+					deliveryErr = turn.OnTools(res)
+				}
+				drainStart := time.Now()
 				c.bounded(drainTimeout, func() { drainAborted(c, created.SessionID, &res) })
-				return res, nil
+				if c.observe != nil {
+					c.observe("usage_drain", time.Since(drainStart))
+				}
+				return res, deliveryErr
 			}
 		case "session.auto_mode_resolved":
 			res.AvailableModels = ev.Data.AvailableModels
@@ -502,15 +526,17 @@ func (r *Runner) withChannel(ctx context.Context, f func(*rpcConn) error) error 
 	}
 	var stderr strings.Builder
 	cmd.Stderr = &limitedWriter{w: &stderr, max: 8 << 10}
+	spawnStart := time.Now()
 	if err := cmd.Start(); err != nil {
 		return toolsRefused("the CLI could not start", err)
 	}
+	r.observeStage("spawn", time.Since(spawnStart))
 	// A blocked read has no context of its own: closing it is what ends it.
 	closeRead := func() { _ = stdout.Close() }
 	stop := context.AfterFunc(ctx, closeRead)
 	defer stop()
 
-	ferr := f(&rpcConn{w: stdin, r: bufio.NewReader(stdout), closeRead: closeRead})
+	ferr := f(&rpcConn{w: stdin, r: bufio.NewReader(stdout), closeRead: closeRead, observe: r.observeStage})
 	ctxErr := ctx.Err() // before kill() makes it non-nil
 	_ = stdin.Close()
 	kill()

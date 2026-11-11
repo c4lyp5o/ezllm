@@ -64,3 +64,52 @@ analysis.
 request and checks its method before replying. The child cannot exit before
 ping is written. The quota classification assertion is unchanged; the repaired
 fixture passed 100 consecutive isolated runs.
+
+## Mitigation and controlled live proof
+
+`driveTurn` now invokes a synchronous `ChannelTurn.OnTools` callback as soon as
+it has the complete declared batch. `chat` flushes this batch once, then waits
+for the existing accounting and deletion path before emitting the finish reason,
+usage (when requested), and `[DONE]`. Non-stream requests still wait for the
+complete result. Clients that wait for stream completion before executing tools
+will still wait for cleanup; this change improves early visibility, not every
+client's full tool-loop time. No timeout was shortened and no usage was estimated.
+
+Regression tests block cleanup until the HTTP client has received the batch,
+verify the batch is emitted once, and check usage/completion after release.
+Delivery-error coverage also verifies abort, deletion and usage collection.
+
+Two controlled local calls through CLI 1.0.105 and model `gpt-6-luna` succeeded:
+
+| Request | First output | Tool batch | Complete stream | Ping/readiness | Session create | Session delete |
+|---|---:|---:|---:|---:|---:|---:|
+| Short text | 10.178 s | — | 10.288 s | 4.529 s | 1.631 s | 0.057 s |
+| One diagnostic tool | 5.766 s | 5.766 s | 5.840 s | 0.917 s | 1.343 s | 0.033 s |
+
+Both returned usage and completed the stream. The tool call's abort RPC took
+0.015 s. A preliminary forced-tool-choice request was rejected locally without
+inference; the successful tool proof used the supported automatic choice.
+These are two small samples, not an A/B benchmark or a production speedup claim.
+They show significant startup/session cost and only about 74 ms after tool
+arrival in that tool request. Warm-process reuse merits a separate design and
+proof covering session isolation, cancellation, process crashes and concurrency.
+
+### Reading stage timings
+
+The loopback bridge `GET /status` returns `runtime.stage_timings`.
+Each observed stage has `count`, `avg_ms`, and `last_ms` (fractional milliseconds).
+Counters aggregate across requests and probes; concurrent requests mean last
+values may belong to different calls. They are diagnostics, not percentiles.
+
+- `queue`: wait for an acquired CLI slot, including immediately acquired slots.
+- `spawn`: OS process-start call only; CLI readiness is included in `ping`.
+- `ping`, `session.create`, `session.send`, `session.abort`, `session.delete`:
+  elapsed time of each RPC, including failed calls.
+- `first_event`: channel-turn start through first assistant text/message event.
+- `model_wait`: send acknowledgement through that first assistant event.
+- `tool_batch`: channel-turn start through the complete declared batch.
+- `usage_drain`: abort request through checkpoint/idle collection or its bound.
+
+Overlapping timings must not be summed. Queue aggregates also include plain
+fallback requests; RPC stages describe only the headless channel. No prompt,
+credential, tool name, arguments or session identifier is stored in these stats.

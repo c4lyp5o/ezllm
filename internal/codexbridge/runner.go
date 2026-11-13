@@ -32,6 +32,55 @@ var LockdownFeatures = []string{
 	"tool_call_mcp_elicitation", "in_app_updates",
 }
 
+// SandboxMode names the Codex filesystem policy for one child. Default is
+// read-only; writable is an explicit operator opt-in via EZLLM_CODEX_SANDBOX.
+type SandboxMode string
+
+const (
+	// SandboxReadOnly is the default: the model cannot write or execute
+	// on the host (proven by the §2.5 sentinel, not assumed from flags).
+	SandboxReadOnly SandboxMode = "read-only"
+	// SandboxWritable lets Codex write inside the request's own temp workdir
+	// (Codex's workspace-write policy). Landlock still confines the child:
+	// the writable set is unchanged (the temp dir + CODEX_HOME), everything
+	// else stays read-only. Nothing outside the domain becomes writable.
+	SandboxWritable SandboxMode = "workspace-write"
+)
+
+// SandboxEnvKey is the operator opt-in: EZLLM_CODEX_SANDBOX=writable.
+// Any other value (including unset) means read-only.
+const SandboxEnvKey = "EZLLM_CODEX_SANDBOX"
+
+// SandboxModeFromEnv reads the operator opt-in. Fail-closed: unknown
+// values return read-only, never writable.
+func SandboxModeFromEnv(getenv func(string) string) SandboxMode {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	if strings.EqualFold(strings.TrimSpace(getenv(SandboxEnvKey)), "writable") {
+		return SandboxWritable
+	}
+	return SandboxReadOnly
+}
+
+// ApprovalFor maps the sandbox mode to the Codex approval policy:
+// read-only never asks (nothing can execute), writable asks per action.
+func (m SandboxMode) ApprovalFor() string {
+	if m == SandboxWritable {
+		return "on-request"
+	}
+	return "never"
+}
+
+// sandboxMode returns the effective policy, fail-closed: anything that is
+// not explicitly writable reads back as read-only.
+func (r *Runner) sandboxMode() SandboxMode {
+	if r != nil && r.SandboxMode == SandboxWritable {
+		return SandboxWritable
+	}
+	return SandboxReadOnly
+}
+
 // LockdownArgs is the argv tail for a Codex child. codeMode leaves the
 // code-mode host on: client tools are reachable only through its JavaScript
 // isolate in 0.163.0 (§2.12), so it is on exactly for tool-bearing requests.
@@ -62,6 +111,9 @@ type Runner struct {
 	Channel string
 	// Sandbox, when set, runs every child inside Landlock.
 	Sandbox *Sandbox
+	// SandboxMode is the Codex filesystem policy, from SandboxModeFromEnv.
+	// Zero value = read-only (fail-closed).
+	SandboxMode SandboxMode
 	// ToolHold bounds how long a parked turn waits for its tool results
 	// (default 10 minutes); MaxParked caps parked children (default 8, the
 	// oldest is evicted). An evicted or expired turn's follow-up replays.
@@ -631,8 +683,8 @@ func (r *Runner) runAppServer(ctx context.Context, req Request, sink func(Delta)
 		"model":            req.Model,
 		"cwd":              c.cwd,
 		"ephemeral":        true,
-		"sandbox":          "read-only",
-		"approvalPolicy":   "never",
+		"sandbox":          string(r.sandboxMode()),
+		"approvalPolicy":   r.sandboxMode().ApprovalFor(),
 		"baseInstructions": req.Instructions,
 	}
 	if tools {

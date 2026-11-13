@@ -130,6 +130,7 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 		Logf:          log.Info,
 		Channel:       pre.Channel,
 		Sandbox:       tools.sandbox,
+		SandboxMode:   codexbridge.SandboxModeFromEnv(os.Getenv),
 	}
 	srv := &codexbridge.Server{
 		Runner:   runner,
@@ -149,6 +150,7 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 			"concurrency":  concurrency,
 			"landlock":     tools.landlock,
 			"client_tools": tools.status,
+			"sandbox":      string(codexbridge.SandboxModeFromEnv(os.Getenv)),
 		},
 		Logf: log.Info,
 	}

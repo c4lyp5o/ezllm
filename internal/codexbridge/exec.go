@@ -47,8 +47,9 @@ func (r *Runner) runExec(ctx context.Context, req Request, sink func(Delta) erro
 	}
 
 	args := []string{"exec", "--json", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config",
-		"--ignore-rules", "--sandbox", "read-only", "-C", cwd}
+		"--ignore-rules", "--sandbox", string(r.sandboxMode()), "-C", cwd}
 	args = append(args, LockdownArgs(false)...)
+	args = append(args, "--ask-for-approval", r.sandboxMode().ApprovalFor())
 	args = append(args, "-m", req.Model, "-c", "instructions="+strconv.Quote(req.Instructions))
 	if req.Effort != "" {
 		args = append(args, "-c", "model_reasoning_effort="+strconv.Quote(req.Effort))

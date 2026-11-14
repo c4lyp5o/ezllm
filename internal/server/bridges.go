@@ -89,7 +89,7 @@ func newBridgeRegistry() *bridgeRegistry {
 			// (inclusive prompt + cache details), so the openai convention fits.
 			ID: "github-copilot", Label: "GitHub Copilot", Kind: "copilot-bridge",
 			BaseURL: "http://127.0.0.1:8793/v1", UsageConvention: "openai",
-			Env: "EZLLM_COPILOT_BRIDGE", Runbook: "docs/copilot-cli-bridge-runbook.md",
+			Env: "EZLLM_COPILOT_BRIDGE", Runbook: "docs/copilot-bridge-runbook.md",
 		},
 	}}
 }

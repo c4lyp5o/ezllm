@@ -131,12 +131,12 @@ Setup and the login that must avoid the desktop keyring: [agy-bridge-runbook.md]
 | `EZLLM_AGY_EXPERIMENTAL_TOOLS` | off | `on` enables the structured-output caller-tool adapter. Requires CLI `--json-schema`. The calling harness executes tools; no ACP/MCP or persistent process. See the Antigravity runbook for limitations. |
 | `EZLLM_AGY_BRIDGE_SESSION_CACHE` | `off` | Opt-in exact-history conversation resume for tool-adapter requests; requires experimental tools and CLI `--conversation`. Retains bounded metadata/private workspaces, no idle CLI processes. Complete caller tool-result groups can resume. Restart to change. |
 
-## GitHub Copilot CLI bridge
+## GitHub Copilot subscription bridge
 
 The OAuth provider and its two variables (`GITHUB_COPILOT_CLI_VERSION`,
 `GITHUB_OAUTH_CLIENT_ID`) are deleted — nothing reads them. The login is the
 CLI's own, so there is no client id to configure. Runbook:
-`docs/copilot-cli-bridge-runbook.md`.
+`docs/copilot-bridge-runbook.md`.
 
 | Variable | Default | What it does |
 |---|---|---|

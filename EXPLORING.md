@@ -363,7 +363,7 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
 ### M13 — github-copilot provider ❌ RETIRED 2026-11-05 (was: OAuth device flow)
 > **Deleted:** `internal/githubcopilot`, `internal/provider/githubcopilot.go`,
 > `cmd/ezllm/githublogin.go`, `/admin/github/device*`, the `github-copilot` kind and the
-> dashboard login panel. Do not go looking for them. Replaced by M16 (Copilot CLI bridge);
+> dashboard login panel. Do not go looking for them. Replaced by M16 (Copilot subscription bridge);
 > the original design and policy records were removed in v1.9.0 and remain in git history.
 
 ### M14 — claude-web provider ✅ (2026-10-16; design `docs/claude-web-design.md`, runbook `docs/claude-web-runbook.md`)
@@ -652,7 +652,7 @@ the columns it wrote stay in the ledger as history. The reasoning is worth
 keeping: **measure before building the hot path, and check that your instrument
 can see the failure you are trying to prevent.**
 
-### M16 — GitHub Copilot CLI bridge ✅ (2026-11-05; design `docs/copilot-cli-bridge-design.md`, runbook `docs/copilot-cli-bridge-runbook.md`)
+### M16 — GitHub Copilot subscription bridge ✅ (2026-11-05; design `docs/copilot-cli-bridge-design.md`, runbook `docs/copilot-bridge-runbook.md`)
 - `internal/copilotbridge/channel.go` — the path every turn takes: one
   `copilot --headless --stdio` child per request by default (opt-in warm reuse in
   `pool.go` with a fresh session per request), LSP-framed JSON-RPC, single-threaded

@@ -300,7 +300,7 @@ ran in production before release; security records cite them by those numbers.
 - **In its place:** the `copilot-bridge` kind over the GitHub Copilot CLI
   (1.0.105), a fourth member of the claude/codex/agy bridge family. No key to
   paste: the credential is the CLI's own login. Design
-  `docs/copilot-cli-bridge-design.md`, runbook `docs/copilot-cli-bridge-runbook.md`.
+  `docs/copilot-cli-bridge-design.md`, runbook `docs/copilot-bridge-runbook.md`.
 - **Accounting is exact for the first time on this provider:** the CLI's
   `session.usage_checkpoint` gives inclusive prompt tokens with a cached slice;
   verified end-to-end through the gateway (bridge 13,971 inclusive / 9,420

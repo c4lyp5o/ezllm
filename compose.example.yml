@@ -64,7 +64,7 @@ services:
       # EZLLM_BACKUP_DIR: /backups
       # EZLLM_BACKUP_SECRET_FILE: /run/secrets/ezllm-backup
 
-      # ── GitHub Copilot CLI bridge ── docs/copilot-cli-bridge-runbook.md
+      # ── GitHub Copilot subscription bridge ── docs/copilot-bridge-runbook.md
       # The OAuth provider is deleted: the credential is the CLI's own login,
       # so there is no client id or version header to configure. `on` without
       # the CLI and a login (the two mounts at the end of `volumes`) fails the

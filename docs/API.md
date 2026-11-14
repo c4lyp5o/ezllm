@@ -99,7 +99,7 @@ uses native in-memory attachments and never falls back to a text-only request.
 Input validation returns `400 invalid_request`; unverified/non-vision models
 return `400 vision_unsupported`, and advertised model-limit refusals return
 `400 invalid_image`, all in the existing OpenAI error envelope.
-See [the Copilot runbook](copilot-cli-bridge-runbook.md) for tested limits and
+See [the Copilot runbook](copilot-bridge-runbook.md) for tested limits and
 behavior. Antigravity continues to reject image input.
 
 AGY tool-adapter conversation caching is an operator opt-in. Clients continue

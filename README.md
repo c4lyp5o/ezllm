@@ -132,7 +132,7 @@ dashboard setup first, then follow the guide for your account:
 |---|---|---|
 | Claude Pro/Max | [Claude bridge](docs/claude-bridge-runbook.md) | Install Claude Code and sign in with a separate CLI profile. |
 | ChatGPT Plus/Pro | [Codex bridge](docs/codex-bridge-runbook.md) | Linux. Client tools need Landlock for the default protection. |
-| GitHub Copilot | [Copilot CLI bridge](docs/copilot-cli-bridge-runbook.md) | Sign in to the official `copilot` CLI on the host. Supports client tools and PNG/JPEG images with a vision-capable model. |
+| GitHub Copilot | [Copilot bridge](docs/copilot-bridge-runbook.md) | Sign in to the official `copilot` CLI on the host. Supports client tools and PNG/JPEG images with a vision-capable model. |
 | Google Antigravity | [Antigravity bridge](docs/agy-bridge-runbook.md) | Linux. Text chat by default; caller tools are experimental. No image input. |
 
 The guides use Docker Compose and cover installing the CLI, signing in, the
@@ -330,7 +330,7 @@ in `internal/bridgeutil`; moving Codex and Copilot onto it is still to do
 | [docs/pricing-runbook.md](docs/pricing-runbook.md) | Model price catalog: refresh, import, query |
 | [docs/claude-bridge-runbook.md](docs/claude-bridge-runbook.md) | Claude subscription bridge |
 | [docs/codex-bridge-runbook.md](docs/codex-bridge-runbook.md) | ChatGPT subscription bridge, including model choice for long tool tasks |
-| [docs/copilot-cli-bridge-runbook.md](docs/copilot-cli-bridge-runbook.md) | GitHub Copilot CLI bridge |
+| [docs/copilot-bridge-runbook.md](docs/copilot-bridge-runbook.md) | GitHub Copilot subscription bridge |
 | [docs/agy-bridge-runbook.md](docs/agy-bridge-runbook.md) | Google Antigravity subscription bridge |
 | [docs/bridge-update-runbook.md](docs/bridge-update-runbook.md) | Automatic bridge CLI updates, holds and rollback |
 | [docs/bridge-token-usage-audit.md](docs/bridge-token-usage-audit.md) | Bridge token usage findings and accounting fixes |

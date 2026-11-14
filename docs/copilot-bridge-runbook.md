@@ -1,4 +1,4 @@
-# GitHub Copilot CLI bridge — runbook
+# GitHub Copilot subscription bridge — runbook
 
 Replaces the retired OAuth/device-flow provider. The official Copilot CLI runs
 behind a loopback listener; ezllm never speaks Copilot's private API and never

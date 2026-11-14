@@ -180,7 +180,7 @@ a mismatch plain chat falls back to `-p`, and a request with tools answers
 
 Migration of an existing database is a manual three-step in the deploy window
 (add the CLI provider, re-point combos/hops, disable the old account); see
-`docs/copilot-cli-bridge-runbook.md` § Migrating.
+`docs/copilot-bridge-runbook.md` § Migrating.
 
 ## v1.6.0 — 2026-10-31
 

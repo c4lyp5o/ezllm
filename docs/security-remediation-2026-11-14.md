@@ -1,21 +1,21 @@
 # Security remediation — v1.14.1
 
 Follow-up to the [whole-application audit](security-audit-2026-11-14.md).
-The application fixes are implemented and tested. The host port configuration
-has been changed to the operator's selected localhost binding and validated.
-The running service has not been recreated or upgraded by this change.
+The application fixes are implemented, tested and deployed as v1.14.1.
+Host port 20129 is bound only to localhost, as selected by the operator.
+Local and certificate-validated Traefik HTTPS health checks pass.
 
 ## Resolution by finding
 
 | Finding | Source/configuration resolution | Runtime rollout |
 | --- | --- | --- |
-| SEC-01 | Bounded global/per-client inference admission and retained input-memory reservations | Requires new application image |
-| SEC-02 | Provider Set-Cookie, Set-Cookie2 and Clear-Site-Data headers removed before client responses | Requires new application image |
-| SEC-03 | Authentication/access/panic paths redact full credentials, including encoded slash tokens; panic payloads are omitted | Requires new application image |
-| SEC-04 | Pending Codex state bound to authenticated caller identity and canonical history; native ID collisions cannot overwrite another turn | Requires new application image |
-| SEC-05 | Example and local deployment Compose files bind host port 20129 to 127.0.0.1 | Prepared; requires container recreation |
-| SEC-06 | Go 1.27.4 pin and reachable-vulnerability CI gate | Source/release builds patched; observed existing container was already on Go 1.27.4 |
-| SEC-07 | Settings writes reuse the shared bounded/deadlined admin decoder while retaining their 32 KiB cap | Requires new application image |
+| SEC-01 | Bounded global/per-client inference admission and retained input-memory reservations | Deployed in v1.14.1 |
+| SEC-02 | Provider Set-Cookie, Set-Cookie2 and Clear-Site-Data headers removed before client responses | Deployed in v1.14.1 |
+| SEC-03 | Authentication/access/panic paths redact full credentials, including encoded slash tokens; panic payloads are omitted | Deployed in v1.14.1 |
+| SEC-04 | Pending Codex state bound to authenticated caller identity and canonical history; native ID collisions cannot overwrite another turn | Deployed in v1.14.1 |
+| SEC-05 | Example and local deployment Compose files bind host port 20129 to 127.0.0.1 | Verified live: localhost only |
+| SEC-06 | Go 1.27.4 pin and reachable-vulnerability CI gate | Source, CI and deployed image use patched Go 1.27.4 |
+| SEC-07 | Settings writes reuse the shared bounded/deadlined admin decoder while retaining their 32 KiB cap | Deployed in v1.14.1 |
 
 No real client credentials were rotated, no vendor sessions were updated and no
 paid inference requests were made for these fixes. Historical log exposure is
@@ -121,16 +121,20 @@ No browser UI sources were changed, so the embedded dashboard needs no rebuild.
 
 ## Deployment boundary
 
-The observed running service was ezllm 1.8.1. Deploying v1.14.1 also carries the
-previous branch changes, including bridge cache features; this is a service
-upgrade in addition to a port-binding change. The prepared Compose mapping is
-`127.0.0.1:20129:20129`. Traefik continues to reach the container through its
-existing Docker network; local clients retain the host port.
+The service was upgraded from v1.8.1 to v1.14.1 using image
+`ezllm:security-1.14.1-e0177f3`, built from commit `e0177f3` with Go 1.27.4.
+This includes the preceding branch's bridge cache changes. The image passed an
+isolated smoke test before deployment. Both versions use database schema 34;
+no schema migration was needed.
 
-Private Compose files and their backups are excluded from the Docker build
-context alongside live config, secrets and data. Local test builds and disposable
-smoke containers do not replace the running service. Before production recreation,
-verify the new image, retain a consistent database backup and the current image,
-then check localhost health, authentication and proxy routing after recreation.
-The current runtime status must be rechecked after that rollout; a source fix is
-not evidence that an older running process has changed.
+Before recreation, the online SQLite backup passed its integrity check and was
+saved with the active master-key file in a private local backup directory.
+The previous image and a rollback Compose file are retained. Private Compose
+files and backups are excluded from the Docker build context.
+
+Post-deployment checks verified the exact v1.14.1 health response, expected image
+ID, localhost-only host publication, preserved Traefik network, unauthenticated
+401 responses on account/model endpoints, dashboard security headers, and HTTPS
+proxy health with certificate validation. No paid inference calls were used.
+The detailed runtime check is recorded in
+[the rollout evidence](security-rollout-2026-11-14.json).

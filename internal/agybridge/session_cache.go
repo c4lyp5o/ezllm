@@ -218,7 +218,10 @@ func (r *Runner) runCached(ctx context.Context, req Request, delta func(string) 
 	native := res.Usage
 	if req.cacheConversation != "" && (runErr == nil || native != (Usage{})) {
 		if res.ConversationID != entry.conversation {
-			res.Usage = Usage{}
+			// Native started a new conversation, so its counters began at
+			// zero: the native totals are this generation's real cost. The
+			// answer lacks the history and is refused, but the spend is kept.
+			res.Usage = native
 			if runErr != nil {
 				return res, runErr
 			}
@@ -227,7 +230,9 @@ func (r *Runner) runCached(ctx context.Context, req Request, delta func(string) 
 		var ok bool
 		res.Usage, ok = usageDifference(native, entry.native)
 		if !ok {
-			res.Usage = Usage{}
+			// Counters went backwards: native restarted them, so the totals
+			// are again this generation's cost rather than a delta.
+			res.Usage = native
 			if runErr != nil {
 				return res, runErr
 			}

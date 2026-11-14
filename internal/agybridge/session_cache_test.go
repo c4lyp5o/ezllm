@@ -374,3 +374,30 @@ func TestConversationCacheErrorsReturnUsageDeltas(t *testing.T) {
 		t.Fatal("native error retained a conversation")
 	}
 }
+
+func TestConversationCacheInvalidResumeKeepsBilledUsage(t *testing.T) {
+	native := Usage{InputTokens: 20156, OutputTokens: 38, CacheRead: 15697, TotalTokens: 20194}
+	for _, mode := range []string{"identity", "usage-reset"} {
+		t.Run(mode, func(t *testing.T) {
+			r, dir := cacheRig(t, cacheAnswer, cacheAnswer)
+			if _, err := r.Run(context.Background(), cacheReq(t, cacheBase), nil); err != nil {
+				t.Fatal(err)
+			}
+			want := native
+			bad := cacheStream(t, "b933be96-f1f8-40bd-bfec-7cc4525c606f", cacheAnswer, native)
+			if mode == "usage-reset" {
+				want = Usage{InputTokens: 1, OutputTokens: 1, TotalTokens: 2}
+				bad = cacheStream(t, testConversationID, cacheAnswer, want)
+			}
+			os.WriteFile(dir+"/second.out", []byte(bad), 0600)
+			next := cacheReq(t, nextCacheBody(t, map[string]any{"role": "assistant", "content": "pong"}, map[string]any{"role": "user", "content": "next"}))
+			res, err := r.Run(context.Background(), next, nil)
+			if err == nil {
+				t.Fatal("invalid native resume accepted")
+			}
+			if res.Usage != want {
+				t.Fatalf("billed generation usage = %+v, want %+v", res.Usage, want)
+			}
+		})
+	}
+}

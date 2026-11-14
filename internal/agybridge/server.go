@@ -126,7 +126,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	if !req.Stream {
 		res, err := s.Runner.Run(r.Context(), req, nil)
 		if err != nil {
-			s.writeErr(w, err)
+			s.writeRunErr(w, err, res.Usage)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -145,7 +145,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if !sw.started {
 			// Nothing reached the client yet: the failure keeps its real status.
-			s.writeErr(w, err)
+			s.writeRunErr(w, err, res.Usage)
 			return
 		}
 		ne := asNative(err)
@@ -238,6 +238,26 @@ func (s *Server) writeErr(w http.ResponseWriter, err error) {
 	writeRaw(w, ne.Status, ErrorEnvelope(ne.Type, ne.Message, ne.Code))
 }
 
+// writeRunErr is writeErr for a failure after native may have generated. A
+// billed generation keeps its usage next to the error so the gateway ledger
+// records the spend (proxy discardAttempt reads usage on error bodies).
+func (s *Server) writeRunErr(w http.ResponseWriter, err error, usage Usage) {
+	if usage == (Usage{}) {
+		s.writeErr(w, err)
+		return
+	}
+	ne := asNative(err)
+	body, merr := json.Marshal(map[string]any{
+		"error": map[string]any{"type": ne.Type, "message": ne.Message, "code": ne.Code},
+		"usage": openAIUsage(usage),
+	})
+	if merr != nil {
+		s.writeErr(w, err)
+		return
+	}
+	writeRaw(w, ne.Status, body)
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -265,12 +285,12 @@ func randomHex(n int) string {
 func (s *Server) adaptedChat(w http.ResponseWriter, r *http.Request, req Request) {
 	res, err := s.Runner.Run(r.Context(), req, nil)
 	if err != nil {
-		s.writeErr(w, err)
+		s.writeRunErr(w, err, res.Usage)
 		return
 	}
 	text, calls, err := req.Adapter.decode(res)
 	if err != nil {
-		s.writeErr(w, err)
+		s.writeRunErr(w, err, res.Usage)
 		return
 	}
 	id, created := "chatcmpl-"+randomHex(12), s.now().Unix()

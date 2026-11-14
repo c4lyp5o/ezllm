@@ -40,3 +40,17 @@ func TestCopilotWarmPoolIsOptInAndRejectsTypos(t *testing.T) {
 		}
 	}
 }
+
+func TestCopilotSessionCacheIsOptInAndRequiresPool(t *testing.T) {
+	for _, tc := range []struct {
+		value           string
+		warm, want, bad bool
+	}{
+		{"", false, false, false}, {"off", true, false, false}, {"on", false, false, true}, {"on", true, true, false}, {" TRUE ", true, true, false}, {"1", true, true, false}, {"enabled", true, false, true},
+	} {
+		got, err := copilotSessionCache(func(string) string { return tc.value }, tc.warm)
+		if got != tc.want || (err != nil) != tc.bad {
+			t.Errorf("%q warm=%v: %v %v", tc.value, tc.warm, got, err)
+		}
+	}
+}

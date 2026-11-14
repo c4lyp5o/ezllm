@@ -33,7 +33,9 @@ type Preflight struct {
 	MissingRPCs []string
 	// Channel is ChannelAppServer, or ChannelExec when the app-server lacks a
 	// method this bridge needs (operator decision §4.1).
-	Channel string
+	Channel       string
+	Cache         CacheSelection
+	NativeHistory bool // qualified raw Responses-item injection, independent of fork caching
 }
 
 // execFlags are the `codex exec` flags the fallback channel depends on.
@@ -85,6 +87,7 @@ func RunPreflight(ctx context.Context, bin, codexHome string) (Preflight, error)
 	p.MissingRPCs = missingNames(string(requests), RequiredMethods)
 	p.MissingRPCs = append(p.MissingRPCs, missingNames(string(notes), RequiredNotifications)...)
 	p.SchemaOK = len(p.MissingRPCs) == 0
+	p.NativeHistory = p.SchemaOK && len(missingNames(string(requests), []string{"thread/inject_items"})) == 0
 	p.Channel = ChannelAppServer
 	if !p.SchemaOK {
 		help, _ := run("exec", "--help")
@@ -103,7 +106,8 @@ func RunPreflight(ctx context.Context, bin, codexHome string) (Preflight, error)
 	if err != nil || !strings.Contains(strings.ToLower(out), "logged in") {
 		return p, fmt.Errorf("codex bridge: login check failed in %s: %s", codexHome, p.Login)
 	}
-	return p, nil
+	p.Cache, err = ResolveForkCache(ctx, bin, codexHome, p.Channel, os.Getenv)
+	return p, err
 }
 
 // ignoredDisables are lockdown flags the CLI accepts but does not act on.

@@ -45,7 +45,7 @@ func TestExecChannelRunsWithTheSameLockdown(t *testing.T) {
 	}
 	args, stdin := readExec(t, home)
 	for _, want := range []string{"--json", "--ephemeral", "--ignore-user-config", "--ignore-rules", "read-only", "shell_tool", "code_mode_host",
-		`instructions="You are a helpful assistant."`, `model_reasoning_effort="high"`} {
+		`approval_policy="never"`, `instructions="You are a helpful assistant."`, `model_reasoning_effort="high"`} {
 		if !slices.Contains(args, want) {
 			t.Errorf("exec argv lacks %q: %v", want, args)
 		}
@@ -109,5 +109,15 @@ func TestWriteDataURL(t *testing.T) {
 		if _, err := writeDataURL(dir, 2, bad); err == nil {
 			t.Errorf("%q accepted", bad)
 		}
+	}
+}
+
+func TestSilentFailureAfterTurnStartDoesNotSpendAgain(t *testing.T) {
+	r, home := fakeRunner(t, "exit_silent")
+	if _, err := r.Run(context.Background(), simpleRequest(), nil); err == nil {
+		t.Fatal("want silent native failure")
+	}
+	if _, err := os.Stat(filepath.Join(home, "exec.json")); !os.IsNotExist(err) {
+		t.Fatal("exec retried a possibly paid turn")
 	}
 }

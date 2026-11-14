@@ -73,7 +73,7 @@ func run() error {
 			return runBridgeCheck(os.Args[2:], os.Stdout)
 		case "help", "-h", "--help":
 			fmt.Println("usage: ezllm [flags]            start the router")
-			fmt.Println("       ezllm bridge-check NAME  gate a bridge CLI (claude|codex|agy) before promoting it")
+			fmt.Println("       ezllm bridge-check NAME  gate a bridge CLI (claude|codex|agy|copilot) before promoting it")
 			return nil
 		}
 	}
@@ -333,9 +333,10 @@ func run() error {
 		Settings:   operator, Backups: backups,
 		Auth: db, Resolver: resolver, Dispatcher: dispatcher, DB: db,
 		Registry: registry, Log: log, Rules: ruleEngine,
-		MaxBodyMiB:  cfg.MaxBodyMiB,
-		CORSOrigins: nil,
-		UsageTZ:     usageTZ,
+		MaxBodyMiB:    cfg.MaxBodyMiB,
+		RequestLimits: server.RequestLimits{GlobalInflight: cfg.RequestLimits.GlobalInflight, PerClientInflight: cfg.RequestLimits.PerClientInflight, BodyMemoryMiB: cfg.RequestLimits.BodyMemoryMiB},
+		CORSOrigins:   nil,
+		UsageTZ:       usageTZ,
 		// Compression policy (addendum #5): absolute floor + CPU cap.
 		CompressionMinAbs: cfg.Compression.MinAbsoluteTokens,
 		CompressionMaxMS:  cfg.Compression.MaxPipelineMS,

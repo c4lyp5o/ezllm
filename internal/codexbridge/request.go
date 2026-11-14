@@ -7,16 +7,22 @@ import (
 )
 
 // Request is one OpenAI Chat Completions call, reduced to what a Codex turn
-// takes. Prior turns travel as a flattened transcript (operator decision,
-// docs/codex-subscription-design.md §4.2): the structured `history` field on
-// thread/resume is documented for Codex Cloud only and is not used.
+// takes. Qualified app-server builds preserve native message/tool history;
+// the flattened Input remains available for older CLIs and the exec channel.
 type Request struct {
-	Model        string
-	Stream       bool
-	IncludeUsage bool
-	Effort       string
-	Instructions string
-	Input        []UserInput
+	// CallerID is trusted transport metadata, never a JSON request field.
+	CallerID string
+	// History hashes bind a pending turn without retaining another prompt copy.
+	hasHistory     bool
+	historyHash    [32]byte
+	toolParentHash [32]byte
+	turns          []chatMessage // original roles for native history; never template configuration
+	Model          string
+	Stream         bool
+	IncludeUsage   bool
+	Effort         string
+	Instructions   string
+	Input          []UserInput
 
 	// Tools are the client's function tools (stage 2): declared to Codex as
 	// dynamicTools, called by the model from code-mode, answered by the client.
@@ -75,6 +81,17 @@ const DefaultInstructions = "You are a helpful assistant."
 // a status sweep ended with "this environment can't reach its shell" after two
 // such failures. The tools run on the CALLER'S machine, not here.
 const ClientToolsNote = "Your tools run on the caller's machine, not where you run. " +
+	"Local sandbox and approval restrictions describe only the Codex bridge process; they do not describe the caller's tools or filesystem. " +
+	"Use the caller-provided tools for authorized reads, writes, and commands in the workspace designated by the caller. " +
+	"Continue work the user has already authorized without repeatedly asking for permission to use those tools. " +
+	"When the user requests implementation, continue through the authorized implementation and appropriate verification. " +
+	"Successful environment checks, repository inspection, plans and progress reports are intermediate steps. " +
+	"Do not end the turn merely to report that implementation has not started. " +
+	"Stop when the requested work is complete, the user pauses it, or a concrete blocker requires user input. Identify that blocker precisely. " +
+	"Ask only when additional authorization or essential missing information is actually required. " +
+	"Do not refuse a caller-workspace write solely because your local sandbox is read-only or the path is outside your local workspace. " +
+	"Determine access from the caller tool's actual result; report a permission failure only when that tool returns one, and respect any caller-side approval requirements. " +
+	"Resolve `~` using the caller's environment through its tools, never the bridge's HOME; use the resulting absolute path when a tool requires one. " +
 	"The directory you appear to be in is private scratch space that does not exist on the caller's machine: " +
 	"never pass it, or a directory you invented, as a working directory (workdir, cwd, or a leading cd). " +
 	"If a command fails with \"cd: <path>: No such file or directory\" before it runs, the caller's shell has a stale saved " +
@@ -120,6 +137,7 @@ type streamOptions struct {
 
 type chatMessage struct {
 	Role       string          `json:"role"`
+	Phase      string          `json:"phase,omitempty"`
 	Content    json.RawMessage `json:"content"`
 	Name       string          `json:"name"`
 	ToolCalls  []chatToolCall  `json:"tool_calls"`
@@ -199,6 +217,9 @@ func ParseRequest(body []byte) (Request, error) {
 				system = append(system, text)
 			}
 		case "user", "assistant", "tool":
+			if m.Role == "assistant" && m.Phase != "" && m.Phase != "commentary" && m.Phase != "final_answer" {
+				return Request{}, Unsupported{Code: "invalid_request", Msg: "assistant phase must be commentary or final_answer"}
+			}
 			turns = append(turns, m)
 		default:
 			return Request{}, Unsupported{Code: "invalid_request", Msg: fmt.Sprintf("unknown message role %q", m.Role)}
@@ -247,6 +268,10 @@ func ParseRequest(body []byte) (Request, error) {
 		}
 	}
 
+	if err := req.bindHistory(turns); err != nil {
+		return Request{}, err
+	}
+	req.turns = turns
 	text, images, err := buildTranscript(turns)
 	if err != nil {
 		return Request{}, err

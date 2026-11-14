@@ -145,6 +145,7 @@ class Staging(Home):
         (root / "9.9.9").mkdir()
         (root / "9.9.9" / "agy").write_bytes(b"old")
         self.assertEqual(bu.stage("agy", {"version": "9.9.9"}, root), root / "9.9.9")
+        self.assert_read_only(root / "9.9.9")
 
 
 class Layout(Home):
@@ -282,6 +283,322 @@ class Run(Home):
         self.assertIn("dry run", self.status()["detail"])
         bu.restart_and_wait.assert_not_called()
 
+
+class Copilot(Home):
+    release = Staging.release
+    assert_read_only = Staging.assert_read_only
+
+    def test_discovery_uses_only_stable_digest_verified_assets(self):
+        def rel(tag, prerelease=False, digest="sha256:" + "a" * 64):
+            return {"tag_name": tag, "prerelease": prerelease, "published_at": "2026-11-01T00:00:00Z",
+                    "assets": [{"name": bu.COPILOT_ASSET, "digest": digest, "browser_download_url": "https://example.test/release", "size": 12}]}
+        with mock.patch.object(bu, "http_json", return_value=[rel("v1.0.111"), rel("v1.0.112-0", True), rel("v1.0.109", digest=None), rel("v1.0.110")]):
+            releases = bu.discover_copilot()
+        self.assertEqual([r["version"] for r in releases], ["1.0.111", "1.0.110"])
+        self.assertEqual(releases[0]["kind"], "copilot-tarball")
+
+    def test_stage_keeps_the_release_directory_read_only(self):
+        root = self.root("copilot")
+        out = bu.stage("copilot", self.release("copilot-tarball", tar_bytes({"copilot": b"bin", "resources/required": b"resource"})), root)
+        self.assertEqual((out / "copilot").read_bytes(), b"bin")
+        self.assertEqual((out / "resources/required").read_bytes(), b"resource")
+        self.assert_read_only(out)
+
+    def test_init_copies_the_existing_binary_without_replacing_it(self):
+        src = self.home / "bin/copilot"
+        src.parent.mkdir()
+        src.write_bytes(b"running")
+        info = {"Config": {"Env": []}, "Mounts": [{"Source": str(src), "Destination": "/opt/copilot/copilot"}]}
+        args = mock.Mock(config=str(self.home / "absent.json"), bridge="copilot")
+        with mock.patch.object(bu, "inspect", return_value=info), mock.patch.object(bu, "docker", return_value=mock.Mock(stdout="GitHub Copilot CLI 1.0.105.")):
+            self.assertEqual(bu.init_layout(args), 0)
+        root = self.root("copilot")
+        self.assertEqual(bu.current_version(root), "1.0.105")
+        self.assertEqual((root / "current/copilot").read_bytes(), b"running")
+        self.assertEqual(src.read_bytes(), b"running")
+        self.assertFalse(src.is_symlink())
+
+
+class Gate(Home):
+    def info(self):
+        return {"Name": "/ezllm", "Image": "sha256:running-image", "Config": {"Entrypoint": ["/app/ezllm"], "Image": "mutable:tag", "User": "1000:1000",
+                "Env": ["EZLLM_CODEX_SANDBOX=writable", "EZLLM_AGY_EXPERIMENTAL_TOOLS=on", "EZLLM_COPILOT_BRIDGE_WARM_POOL=on", "EZLLM_MASTER_KEY=must-not-copy"]},
+                "Mounts": [{"Source": str(self.home / "actual-login"), "Destination": "/codex-sub"}]}
+
+    def test_gate_uses_running_image_and_production_policy_without_secrets(self):
+        cfg = bu.load_config(self.home / "absent")
+        verdict = {"bridge": "codex", "version": "0.169.0", "ok": True, "live": True, "policy": {"sandbox": "workspace-write", "approval_policy": "never", "history": "native-if-supported-v1", "cache": "auto"}, "problems": []}
+        result = mock.Mock(stdout=json.dumps(verdict), returncode=0)
+        copied, requests = [], []
+        def run(*args, **kwargs):
+            if args[0] == "run":
+                copied.append(Path(args[args.index("--env-file") + 1]).read_text())
+                requests.append(args)
+            return result
+        with mock.patch.object(bu, "knows_bridge_check", return_value=True), mock.patch.object(bu, "docker", side_effect=run) as docker:
+            self.assertTrue(bu.gate("codex", self.home / "0.169.0", self.info(), cfg)["ok"])
+        args = requests[0]
+        self.assertEqual(docker.call_args.args[:2], ("rm", "-f"))
+        self.assertIn("sha256:running-image", args)
+        self.assertNotIn("mutable:tag", args)
+        self.assertIn("EZLLM_CODEX_SANDBOX=writable", copied[0])
+        self.assertIn("EZLLM_AGY_EXPERIMENTAL_TOOLS=on", copied[0])
+        self.assertNotIn("must-not-copy", copied[0])
+        self.assertIn(str(self.home / "actual-login") + ":/codex-sub", args)
+        self.assertFalse(Path(args[args.index("--env-file") + 1]).exists())
+        self.assertNotIn("must-not-copy", " ".join(args))
+
+    def test_static_wrong_version_and_ignored_policy_cannot_qualify(self):
+        clean = {"bridge": "agy", "version": "1.5.8", "ok": True, "live": True, "policy": {"caller_tools": "structured-output"}, "problems": []}
+        for changes in ({"live": False}, {"version": "1.4.12"}, {"policy": {}}, {"bridge": "codex"}, {"problems": ["not really passed"]}):
+            verdict = {**clean, **changes}
+            with self.assertRaises(ValueError):
+                bu.checked_verdict(mock.Mock(stdout=json.dumps(verdict), returncode=0), "agy", True, "1.5.8", {"caller_tools": "structured-output"})
+        with self.assertRaises(ValueError):
+            bu.checked_verdict(mock.Mock(stdout=json.dumps(clean), returncode=1), "agy", True, "1.5.8")
+
+    def test_config_rejects_unsafe_typos_before_updating(self):
+        for patch in ({"keep": 1}, {"soak_days": -1}, {"retry_hours": -1}, {"bridges": {"copilot": {"enabled": "off"}}}, {"bridges": {"unknown": {"enabled": True}}}):
+            path = self.home / "config.json"
+            path.write_text(json.dumps(patch))
+            with self.assertRaises(ValueError):
+                bu.load_config(path)
+
+    def test_timeout_removes_only_the_unique_gate_and_environment_file(self):
+        info = self.info()
+        cfg = bu.load_config(self.home / "absent")
+        requests = []
+        def docker(*args, **kw):
+            requests.append(args)
+            if args[0] == "run":
+                self.assertEqual(Path(args[args.index("--env-file") + 1]).stat().st_mode & 0o777, 0o600)
+                raise TimeoutError("simulated Docker client timeout")
+            return mock.Mock(returncode=0, stdout="")
+        with mock.patch.object(bu, "knows_bridge_check", return_value=True), mock.patch.object(bu, "docker", side_effect=docker):
+            with self.assertRaises(TimeoutError):
+                bu.gate("codex", self.home / "0.169.0", info, cfg)
+        gate = requests[0]
+        name = gate[gate.index("--name") + 1]
+        self.assertTrue(name.startswith("ezllm-gate-codex-"))
+        self.assertEqual(requests[-1], ("rm", "-f", name))
+        self.assertFalse(Path(gate[gate.index("--env-file") + 1]).exists())
+
+    def test_login_path_comes_from_actual_production_mount(self):
+        info = self.info()
+        info["Config"]["Env"].append("EZLLM_CODEX_HOME=/auth/codex")
+        info["Mounts"] = [{"Source": str(self.home / "shared-auth"), "Destination": "/auth"}]
+        self.assertEqual(bu.login_source("codex", info), self.home / "shared-auth/codex")
+        self.assertEqual(bu.production_home("codex", info), "/auth/codex")
+        info["Mounts"] = []
+        with self.assertRaises(ValueError):
+            bu.login_source("codex", info)
+
+    def test_every_bridge_login_defaults_to_a_sub_folder(self):
+        info = self.info()
+        for name in bu.BRIDGES:
+            self.assertEqual(bu.production_home(name, info), f"/{name}-sub")
+            self.assertTrue(bu.BRIDGES[name]["login"].endswith(f"/.{name}-sub"))
+
+
+class Reliability(Run):
+    def test_quota_failure_defers_without_permanently_blocking_release(self):
+        gate = mock.Mock(return_value={"ok": False, "retryable": True, "problems": ["live plain: session limit"]})
+        with mock.patch.object(bu, "gate", gate):
+            self.assertEqual(self.go(), 0)
+            self.assertEqual(self.go(), 0)
+        gate.assert_called_once()
+        state = json.loads(self.state.read_text())
+        self.assertNotIn("1.4.11", state["blocked"].get("agy", {}))
+        self.assertIn("1.4.11", state["retry_after"]["agy"])
+        self.assertEqual(bu.current_version(self.root_), "1.4.7")
+        bu.restart_and_wait.assert_not_called()
+
+    def test_legacy_quota_blocks_are_migrated_but_compatibility_blocks_stay(self):
+        state = json.loads(self.state.read_text())
+        state["blocked"] = {"agy": {"1.4.11": "live plain: You've hit your session limit", "1.4.10": "unknown flag --print"}}
+        self.state.write_text(json.dumps(state))
+        with mock.patch.object(bu, "gate", mock.Mock()) as gate:
+            self.go()
+        gate.assert_not_called()
+        state = json.loads(self.state.read_text())
+        self.assertNotIn("1.4.11", state["blocked"]["agy"])
+        self.assertIn("1.4.10", state["blocked"]["agy"])
+        self.assertIn("1.4.11", state["retry_after"]["agy"])
+
+    def test_window_is_rechecked_after_a_long_gate(self):
+        current = [at("2026-10-31T04:59")]
+        def gate(*args):
+            current[0] = at("2026-10-31T05:01")
+            return {"ok": True}
+        with mock.patch.object(bu, "now", lambda: current[0]), mock.patch.object(bu, "gate", gate):
+            self.go()
+        self.assertEqual(bu.current_version(self.root_), "1.4.7")
+        self.assertIn("window closed", self.status()["detail"])
+        bu.restart_and_wait.assert_not_called()
+
+    def test_post_promotion_timeout_rolls_back_and_clears_journal(self):
+        with mock.patch.object(bu, "gate", return_value={"ok": True}), \
+             mock.patch.object(bu, "prod_check", side_effect=[TimeoutError(), {"ok": True}]):
+            self.assertEqual(self.go(), 0)
+        self.assertEqual(bu.current_version(self.root_), "1.4.7")
+        self.assertEqual(self.status()["result"], "rolled_back")
+        state = json.loads(self.state.read_text())
+        self.assertNotIn("pending", state)
+        self.assertNotIn("agy", state["promoted_at"])
+        self.assertIn("1.4.11", state["retry_after"]["agy"])
+        bu.restart_and_wait.assert_called()
+
+    def test_proof_exception_also_rolls_back(self):
+        with mock.patch.object(bu, "gate", return_value={"ok": True}), \
+             mock.patch.object(bu, "prod_check", return_value={"ok": True}), \
+             mock.patch.object(bu, "proof_script", side_effect=TimeoutError()):
+            self.assertEqual(self.go(), 0)
+        self.assertEqual(bu.current_version(self.root_), "1.4.7")
+        self.assertEqual(bu.restart_and_wait.call_count, 2)
+        self.assertNotIn("pending", json.loads(self.state.read_text()))
+
+    def test_failed_rollback_retains_journal_for_next_run(self):
+        with mock.patch.object(bu, "gate", return_value={"ok": True}), \
+             mock.patch.object(bu, "restart_and_wait", return_value=False), \
+             mock.patch.object(bu, "notify_fallback", mock.Mock()) as fallback:
+            self.assertEqual(self.go(), 2)
+        self.assertIn("pending", json.loads(self.state.read_text()))
+        self.assertEqual(self.status()["result"], "error")
+        fallback.assert_called_once()
+
+    def test_interrupted_promotion_is_recovered_outside_window_without_new_gate(self):
+        state = json.loads(self.state.read_text())
+        state["pending"] = {"agy": {"previous": "1.4.7", "candidate": "1.4.11"}}
+        self.state.write_text(json.dumps(state))
+        bu.swap_current(self.root_, "1.4.11")
+        with mock.patch.object(bu, "now", lambda: at("2026-10-31T12:00")), \
+             mock.patch.object(bu, "gate", mock.Mock()) as gate, \
+             mock.patch.object(bu, "prod_check", return_value={"ok": True}):
+            self.assertEqual(self.go(), 0)
+        gate.assert_not_called()
+        self.assertEqual(bu.current_version(self.root_), "1.4.7")
+        self.assertNotIn("pending", json.loads(self.state.read_text()))
+        bu.restart_and_wait.assert_called_once()
+
+    def test_dry_run_does_not_recover_or_restart(self):
+        state = json.loads(self.state.read_text())
+        state["pending"] = {"agy": {"previous": "1.4.7", "candidate": "1.4.11"}}
+        self.state.write_text(json.dumps(state))
+        bu.swap_current(self.root_, "1.4.11")
+        self.assertEqual(self.go(dry_run=True), 2)
+        self.assertEqual(bu.current_version(self.root_), "1.4.11")
+        self.assertIn("pending", json.loads(self.state.read_text()))
+        bu.restart_and_wait.assert_not_called()
+
+    def test_candidate_status_does_not_regress_to_current_while_newest_soaks(self):
+        rels = [{"version": "1.5.0", "published": "2026-10-30T00:00:00Z"}, {"version": "1.4.7", "published": "2026-10-01T00:00:00Z"}]
+        with mock.patch.object(bu, "discover", return_value=rels):
+            self.go()
+        self.assertEqual(self.status()["candidate"], "1.5.0")
+        self.assertIn("1.5.0 soaking", self.status()["detail"])
+
+    def test_changed_production_container_defers_promotion(self):
+        old = bu.inspect("ezllm")
+        new = json.loads(json.dumps(old))
+        new["Config"]["Image"] = "new-image"
+        with mock.patch.object(bu, "inspect", side_effect=[old, new]), mock.patch.object(bu, "gate", return_value={"ok": True}):
+            self.go()
+        self.assertEqual(bu.current_version(self.root_), "1.4.7")
+        self.assertIn("production changed", self.status()["detail"])
+        bu.restart_and_wait.assert_not_called()
+
+    def test_commit_write_failure_preserves_journal_until_rollback(self):
+        original = bu.write_json_atomic
+        def write(path, data):
+            if path == self.state and data.get("promoted_at", {}).get("agy"):
+                raise OSError("simulated state commit failure")
+            return original(path, data)
+        with mock.patch.object(bu, "gate", return_value={"ok": True}), mock.patch.object(bu, "prod_check", return_value={"ok": True}), mock.patch.object(bu, "write_json_atomic", side_effect=write):
+            self.assertEqual(self.go(), 0)
+        self.assertEqual(bu.current_version(self.root_), "1.4.7")
+        self.assertNotIn("pending", json.loads(self.state.read_text()))
+        self.assertEqual(self.status()["result"], "rolled_back")
+
+
+    def test_batch_is_rolled_back_together_when_one_bridge_fails(self):
+        self.cfg.write_text(json.dumps({"bridges": {"claude": {"enabled": False}, "copilot": {"enabled": False}}}))
+        root = self.root("codex")
+        for v in ("0.167.0", "0.168.0"):
+            (root / v / "bin").mkdir(parents=True)
+            (root / v / "bin/codex").write_bytes(b"fixture")
+        bu.swap_current(root, "0.167.0")
+        info = bu.inspect("ezllm")
+        info["Mounts"].append({"Source": str(root), "Destination": "/opt/codex-bridge"})
+        def release(name, cfg):
+            return [{"version": "0.168.0" if name == "codex" else "1.4.11", "published": "2026-10-20T00:00:00Z"}]
+        def check(name, info, live=True, **kw):
+            if name == "codex" and live:
+                return {"ok": False, "problems": ["tool protocol changed"], "retryable": False}
+            return {"ok": True}
+        with mock.patch.object(bu, "discover", side_effect=release), mock.patch.object(bu, "gate", return_value={"ok": True}), mock.patch.object(bu, "prod_check", side_effect=check):
+            self.assertEqual(self.go(), 0)
+        self.assertEqual(bu.current_version(root), "0.167.0")
+        self.assertEqual(bu.current_version(self.root_), "1.4.7")
+        self.assertFalse((root / "qualified.json").exists())
+        self.assertFalse((self.root_ / "qualified.json").exists())
+        state = json.loads(self.state.read_text())
+        self.assertNotIn("pending", state)
+        self.assertIn("0.168.0", state["blocked"]["codex"])
+        self.assertNotIn("agy", state["blocked"])
+        self.assertEqual(bu.restart_and_wait.call_count, 2)
+
+    def test_recovery_never_restarts_a_replaced_container(self):
+        state = json.loads(self.state.read_text())
+        state["pending"] = {"agy": {"previous": "1.4.7", "candidate": "1.4.11"}}
+        state["pending_container"] = "original-container-id"
+        self.state.write_text(json.dumps(state))
+        bu.swap_current(self.root_, "1.4.11")
+        info = bu.inspect("ezllm")
+        info["Id"] = "replacement-container-id"
+        with mock.patch.object(bu, "notify_fallback", mock.Mock()):
+            self.assertEqual(self.go(), 2)
+        self.assertEqual(bu.current_version(self.root_), "1.4.11")
+        self.assertIn("pending", json.loads(self.state.read_text()))
+        bu.restart_and_wait.assert_not_called()
+
+
+
+class SessionCachePolicy(unittest.TestCase):
+    def test_cache_mode_must_be_proven(self):
+        info = {"Config": {"Env": ["EZLLM_COPILOT_BRIDGE_WARM_POOL=on", "EZLLM_COPILOT_BRIDGE_SESSION_CACHE=on"]}}
+        self.assertIn("EZLLM_COPILOT_BRIDGE_SESSION_CACHE", bu.GATE_ENV)
+        self.assertEqual(bu.gate_policy("copilot", info), {"warm_pool": "on", "session_cache": "completed-prefix"})
+        info["Config"]["Env"].pop()
+        self.assertEqual(bu.gate_policy("copilot", info), {"warm_pool": "on"})
+
+
+class CodexForkCachePolicy(unittest.TestCase):
+    def test_fork_mode_must_be_proven(self):
+        info = {"Config": {"Env": ["EZLLM_CODEX_SANDBOX=writable", "EZLLM_CODEX_BRIDGE_CACHE=on"]}}
+        self.assertIn("EZLLM_CODEX_BRIDGE_CACHE", bu.GATE_ENV)
+        self.assertEqual(bu.gate_policy("codex", info), {"sandbox": "workspace-write", "approval_policy": "never", "history": "native-if-supported-v1", "cache": "ephemeral-forks"})
+        info["Config"]["Env"].pop()
+        self.assertEqual(bu.gate_policy("codex", info), {"sandbox": "workspace-write", "approval_policy": "never", "history": "native-if-supported-v1", "cache": "auto"})
+        info["Config"]["Env"].append("EZLLM_CODEX_BRIDGE_CACHE=off")
+        self.assertEqual(bu.gate_policy("codex", info), {"sandbox": "workspace-write", "approval_policy": "never", "history": "native-if-supported-v1", "cache": "off"})
+        info["Config"]["Env"][-1] = "EZLLM_CODEX_BRIDGE_CACHE=typo"
+        with self.assertRaises(ValueError):
+            bu.gate_policy("codex", info)
+
+    def test_old_qualification_cannot_prove_auto_or_noninteractive_policy(self):
+        for policy in ({"sandbox": "read-only"}, {"sandbox": "read-only", "cache": "auto"}, {"sandbox": "read-only", "cache": "auto", "approval_policy": "never"}):
+            verdict = {"bridge": "codex", "version": "0.167.0", "ok": True, "live": True, "policy": policy, "problems": []}
+            with self.assertRaises(ValueError):
+                bu.checked_verdict(mock.Mock(stdout=json.dumps(verdict), returncode=0), "codex", True, "0.167.0", bu.gate_policy("codex", {"Config": {"Env": []}}))
+
+
+class AGYConversationCachePolicy(unittest.TestCase):
+    def test_resume_mode_must_be_proven(self):
+        info = {"Config": {"Env": ["EZLLM_AGY_EXPERIMENTAL_TOOLS=on", "EZLLM_AGY_BRIDGE_SESSION_CACHE=on"]}}
+        self.assertIn("EZLLM_AGY_BRIDGE_SESSION_CACHE", bu.GATE_ENV)
+        self.assertEqual(bu.gate_policy("agy", info), {"caller_tools": "structured-output", "session_cache": "conversation-resume"})
+        info["Config"]["Env"].pop()
+        self.assertEqual(bu.gate_policy("agy", info), {"caller_tools": "structured-output"})
 
 if __name__ == "__main__":
     unittest.main()

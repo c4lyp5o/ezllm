@@ -1,0 +1,137 @@
+{
+  "date": "2026-11-14",
+  "source_commit": "368717a",
+  "source_version": "1.14.0",
+  "runtime_version": "1.8.1",
+  "runtime_go": "1.27.4",
+  "local_go": "1.27.2",
+  "scope": "whole application source and read-only deployment metadata",
+  "production_mutations": false,
+  "paid_inference_calls": 0,
+  "findings": [
+    {
+      "id": "SEC-01",
+      "severity": "high"
+    },
+    {
+      "id": "SEC-02",
+      "severity": "medium"
+    },
+    {
+      "id": "SEC-03",
+      "severity": "medium"
+    },
+    {
+      "id": "SEC-04",
+      "severity": "medium"
+    },
+    {
+      "id": "SEC-05",
+      "severity": "medium"
+    },
+    {
+      "id": "SEC-06",
+      "severity": "medium"
+    },
+    {
+      "id": "SEC-07",
+      "severity": "low"
+    }
+  ],
+  "body_allocation_probe": {
+    "connections": 8,
+    "declared_bytes_each": 2097152,
+    "body_bytes_sent_each": 1,
+    "payload_buffers_bytes": 16777216,
+    "upstream_calls": 0
+  },
+  "settings_timeout_probe": {
+    "configured_admin_body_budget_ms": 100,
+    "still_pending_after_ms": 500
+  },
+  "npm_audit": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 0,
+      "critical": 0,
+      "total": 0
+    },
+    "dependencies": {
+      "prod": 54,
+      "dev": 97,
+      "optional": 65,
+      "peer": 1,
+      "peerOptional": 0,
+      "total": 151
+    }
+  },
+  "history_secret_pattern_scan": {
+    "scope": "all local git refs; added diff lines; high-confidence token patterns only",
+    "exit": 0,
+    "lines_scanned": 332265,
+    "locations": []
+  },
+  "runtime": {
+    "runtime_user": "1000:1000",
+    "privileged": false,
+    "read_only_rootfs": false,
+    "memory_limit": 0,
+    "pids_limit": null,
+    "network_mode": "traefik_default",
+    "published_ports": {
+      "20129/tcp": [
+        {
+          "HostIp": "0.0.0.0",
+          "HostPort": "20129"
+        },
+        {
+          "HostIp": "::",
+          "HostPort": "20129"
+        }
+      ]
+    },
+    "security_options": null,
+    "cap_add": null,
+    "cap_drop": null,
+    "codex_without_landlock_override": false
+  },
+  "dependency_triage": {
+    "source_stdlib_records": [
+      "GO-2026-6809",
+      "GO-2026-6859"
+    ],
+    "minimum_go_patch": "1.27.4",
+    "production_stdlib_already_patched": true,
+    "openpgp_record": "GO-2026-5932",
+    "openpgp_exploit_demonstrated": false
+  },
+  "os_probe": {
+    "unconfined_parent_sentinel_readable": true,
+    "confined_parent_sentinel_readable": false
+  },
+  "checks": {
+    "short_gate": "passed",
+    "vet": "passed",
+    "updater_tests": 54,
+    "synthetic_reproductions": 5
+  },
+  "remediation": {
+    "version": "1.14.1",
+    "source_fixes": [
+      "SEC-01",
+      "SEC-02",
+      "SEC-03",
+      "SEC-04",
+      "SEC-06",
+      "SEC-07"
+    ],
+    "prepared_config_fixes": [
+      "SEC-05"
+    ],
+    "runtime_rollout": "not performed",
+    "approved_binding": "127.0.0.1:20129:20129",
+    "audit_driver": "permanent security regressions; no positive exploit assertions"
+  }
+}

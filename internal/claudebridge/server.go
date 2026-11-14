@@ -167,6 +167,17 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request, req Request, ali
 	sw := &StreamWriter{W: transport}
 	res, err := s.Runner.Run(r.Context(), req, alias, sw.Handle)
 	s.Limits.Observe(res.RateLimit, time.Now())
+	if err != nil && sw.stopped {
+		// The visible message already finished (native sent message_stop); only
+		// a later internal retry or the CLI exit failed. Close the stream with
+		// the usage known so far rather than turning a complete answer into an
+		// error the client would discard.
+		s.logf("claude-bridge: native failed after the visible message completed: %s", err)
+		if ferr := sw.Finish(); ferr != nil {
+			s.logf("claude-bridge: stream finish failed: %s", ferr)
+		}
+		return
+	}
 	if err != nil {
 		// The stream is already open: the failure travels as an Anthropic error
 		// event, with the CLI's own words, never as a silent truncation.

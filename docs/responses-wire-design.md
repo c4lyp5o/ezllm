@@ -115,7 +115,8 @@ lines). Golden fixtures pin the bytes.
 
 - **New functions in `internal/translate`:** `responses_request.go`
   (`ChatToResponses`), `responses_response.go` (`ResponsesToChat`),
-  `responses_sse.go` (`NewResponsesSSEReader(r, clientModel)`). Same package,
+  and a Responses stream decoder, since folded into the universal
+  `stream_codec.go` (`NewStreamReader(r, source, target, clientModel, opts)`). Same package,
   same ordered-struct discipline, `testdata/` golden pairs.
 - **Route marking:** `Route.ResponsesWire bool`, set by the router when the hop
   matches the curated list and the client surface is openai. The route keeps

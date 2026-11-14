@@ -2,6 +2,7 @@ package copilotbridge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -161,12 +162,7 @@ func LiveTools(ctx context.Context, r *Runner, model string) error {
 		return fmt.Errorf("tool turn: %w", err)
 	}
 	if len(first.ToolCalls) == 0 {
-		// A turn that ends with neither text nor a batch is the empty case, not
-		// a broken channel: say which it is.
-		if strings.Contains(err.Error(), "without an assistant message") {
-			return errors.New("the model asked for no tool and said nothing, so the batch path is unproven")
-		}
-		return fmt.Errorf("the model asked for no tool, so the batch path is unproven: %w", err)
+		return errors.New("the model asked for no tool, so the batch path is unproven")
 	}
 	declared := map[string]bool{"weather": true, "clock": true}
 	for _, c := range first.ToolCalls {
@@ -192,6 +188,49 @@ func LiveTools(ctx context.Context, r *Runner, model string) error {
 	}
 	if strings.TrimSpace(second.Text) == "" {
 		return errors.New("the replay turn produced no answer")
+	}
+	return nil
+}
+
+// LiveSessionCache proves exact-history continuation and request usage deltas.
+// Provider cache hits are not guaranteed for a tiny gate prompt, so the gate
+// checks native session reuse rather than requiring a particular token discount.
+func LiveSessionCache(ctx context.Context, r *Runner, model string) error {
+	if !r.SessionCacheEnabled() {
+		return errors.New("completed-session cache is not enabled")
+	}
+	if model == "" || model == "auto" {
+		model = "gpt-6-luna"
+	}
+	messages := []map[string]any{{"role": "user", "content": livePlainPrompt}}
+	send := func() (Result, error) {
+		body, _ := json.Marshal(map[string]any{"model": model, "messages": messages})
+		req, err := ParseRequest(body)
+		if err != nil {
+			return Result{}, err
+		}
+		return r.RunChannel(ctx, ChannelTurn{Model: req.Model, System: req.System, Prompt: req.Transcript, cacheHistory: canonicalCacheHistory(body)}, nil)
+	}
+	r.mu.Lock()
+	before := r.stages["session_cache_hit"].count
+	r.mu.Unlock()
+	first, err := send()
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(strings.ToLower(first.Text), "pong") || first.Usage.CompletionTokens <= 0 {
+		return errors.New("initial cache turn failed its answer/usage proof")
+	}
+	messages = append(messages, map[string]any{"role": "assistant", "content": first.Text}, map[string]any{"role": "user", "content": livePlainPrompt})
+	next, err := send()
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	after := r.stages["session_cache_hit"].count
+	r.mu.Unlock()
+	if first.SessionID == "" || next.SessionID != first.SessionID || after != before+1 || !strings.Contains(strings.ToLower(next.Text), "pong") || next.Usage.CompletionTokens <= 0 {
+		return errors.New("completed-session continuation failed its identity/answer/usage proof")
 	}
 	return nil
 }

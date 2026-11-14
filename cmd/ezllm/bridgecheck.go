@@ -103,12 +103,15 @@ func envOrDefault(key, def string) string {
 
 // bridgeVerdict is what `ezllm bridge-check --json` prints for the updater.
 type bridgeVerdict struct {
-	Bridge   string   `json:"bridge"`
-	OK       bool     `json:"ok"`
-	Version  string   `json:"version,omitempty"`
-	Release  string   `json:"release,omitempty"`
-	Live     bool     `json:"live"`
-	Problems []string `json:"problems"`
+	CacheSelection *codexbridge.CacheSelection `json:"cache_selection,omitempty"`
+	Bridge         string                      `json:"bridge"`
+	OK             bool                        `json:"ok"`
+	Retryable      bool                        `json:"retryable"`
+	Policy         map[string]string           `json:"policy,omitempty"`
+	Version        string                      `json:"version,omitempty"`
+	Release        string                      `json:"release,omitempty"`
+	Live           bool                        `json:"live"`
+	Problems       []string                    `json:"problems"`
 	// Notes carry what the run did NOT prove, so a reader (or the updater) never
 	// mistakes a static pass for a full one.
 	Notes []string `json:"notes,omitempty"`
@@ -127,7 +130,7 @@ func runBridgeCheck(args []string, stdout io.Writer) error {
 	asJSON := set.Bool("json", false, "print the verdict as JSON")
 	live := set.Bool("live", false, "after the static checks pass, drive the bridge through real turns (spends plan quota)")
 	model := set.String("model", "", "model for the plain live turn (default: the bridge's smallest)")
-	toolModel := set.String("tool-model", "", "model for the client-tool live turn (claude, codex, copilot)")
+	toolModel := set.String("tool-model", "", "model for the client-tool live turn (where enabled)")
 	if err := set.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -152,11 +155,13 @@ func runBridgeCheck(args []string, stdout io.Writer) error {
 	case "agy":
 		b, h := or(*bin, envOrDefault(envAgyBin, "/opt/agy/agy")), or(*home, envOrDefault(envAgyHome, "/agy-sub"))
 		v = checkAgyCLI(ctx, b, h)
-		liveRun = func() []string { return liveAgy(ctx, b, h, or(*model, "gemini-3.8-flash-low")) }
+		liveRun = func() []string {
+			return liveAgy(ctx, b, h, or(*model, "gemini-3.8-flash-low"), or(*toolModel, or(*model, "gemini-3.8-flash-low")))
+		}
 	case "copilot":
-		b, h := or(*bin, envOrDefault(envCopilotBin, "/opt/copilot/copilot")), or(*home, envOrDefault(envCopilotHome, "/copilot-home"))
+		b, h := or(*bin, envOrDefault(envCopilotBin, "/opt/copilot/copilot")), or(*home, copilotHome(os.Getenv))
 		v = checkCopilotCLI(ctx, b, h)
-		liveRun = func() []string { return liveCopilot(ctx, b, h, *model) }
+		liveRun = func() []string { return liveCopilot(ctx, b, h, *model, or(*toolModel, *model)) }
 		if !*live {
 			// Measured: an empty COPILOT_HOME passes session.create, so the
 			// static tier cannot see a login that does not work.
@@ -165,6 +170,45 @@ func runBridgeCheck(args []string, stdout io.Writer) error {
 	default:
 		return fmt.Errorf("bridge-check: unknown bridge %q (claude, codex, agy or copilot)", name)
 	}
+	switch name {
+	case "codex":
+		v.Policy = map[string]string{"sandbox": string(codexbridge.SandboxModeFromEnv(os.Getenv))}
+		v.Policy["approval_policy"] = codexbridge.ApprovalPolicy
+		v.Policy["history"] = "native-if-supported-v1"
+		if policy, err := codexbridge.ForkCachePolicy(os.Getenv); err == nil {
+			v.Policy["cache"] = policy
+		}
+	case "agy":
+		mode := "off"
+		if strings.EqualFold(strings.TrimSpace(os.Getenv(envAgyTools)), "on") {
+			mode = "structured-output"
+		}
+		v.Policy = map[string]string{"caller_tools": mode}
+		cache, cacheErr := agySessionCache(os.Getenv, mode == "structured-output")
+		if cacheErr != nil {
+			v.Problems = append(v.Problems, cacheErr.Error())
+		}
+		if cache {
+			v.Policy["session_cache"] = "conversation-resume"
+		}
+	case "copilot":
+		mode := "off"
+		warm, err := copilotWarmPool(os.Getenv)
+		if err != nil {
+			v.Problems = append(v.Problems, err.Error())
+		}
+		if warm {
+			mode = "on"
+		}
+		v.Policy = map[string]string{"warm_pool": mode}
+		cache, cacheErr := copilotSessionCache(os.Getenv, warm)
+		if cacheErr != nil {
+			v.Problems = append(v.Problems, cacheErr.Error())
+		}
+		if cache {
+			v.Policy["session_cache"] = "completed-prefix"
+		}
+	}
 	// Live turns spend quota and prove nothing a static refusal has not already
 	// decided, so they run only on a CLI that passed every static check.
 	if *live && len(v.Problems) == 0 {
@@ -172,6 +216,7 @@ func runBridgeCheck(args []string, stdout io.Writer) error {
 		v.Problems = liveRun()
 	}
 	v.OK = len(v.Problems) == 0
+	v.Retryable = !v.OK && retryableBridgeProblems(v.Problems)
 	if v.Problems == nil {
 		v.Problems = []string{}
 	}
@@ -244,6 +289,10 @@ func checkCodexCLI(ctx context.Context, bin, home string) (bridgeVerdict, codexb
 		v.Problems = append(v.Problems, err.Error())
 		return v, pre
 	}
+	v.CacheSelection = &pre.Cache
+	if pre.Cache.Mode == "auto" && !pre.Cache.Enabled {
+		v.Notes = append(v.Notes, "automatic cache disabled: "+pre.Cache.Reason)
+	}
 	if pre.Channel == codexbridge.ChannelExec {
 		v.Problems = append(v.Problems, "app-server lacks "+strings.Join(pre.MissingRPCs, ", ")+": the bridge would fall back to exec")
 	}
@@ -276,6 +325,17 @@ func checkAgyCLI(ctx context.Context, bin, home string) bridgeVerdict {
 	if len(pre.Models) == 0 {
 		v.Problems = append(v.Problems, "the CLI listed no models")
 	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv(envAgyTools)), "on") && !pre.StructuredOutput {
+		v.Problems = append(v.Problems, "experimental caller tools require --json-schema")
+	}
+	cache, cacheErr := agySessionCache(os.Getenv, strings.EqualFold(strings.TrimSpace(os.Getenv(envAgyTools)), "on"))
+	if cacheErr != nil {
+		v.Problems = append(v.Problems, cacheErr.Error())
+	}
+	if cache && !pre.ConversationResume {
+		v.Problems = append(v.Problems, "conversation cache requires --conversation")
+	}
+
 	return v
 }
 
@@ -297,13 +357,33 @@ func checkCopilotCLI(ctx context.Context, bin, home string) bridgeVerdict {
 // liveCopilot proves the two paths this bridge actually broke on: a plain turn,
 // then a client-tool batch and the replay turn after it. Both go through the
 // bridge's own Runner in-process — no HTTP, no gateway, no ledger.
-func liveCopilot(ctx context.Context, bin, home, model string) []string {
-	r := &copilotbridge.Runner{Bin: bin, Home: home, Timeout: liveTurnTimeout}
-	ctx, cancel := context.WithTimeout(ctx, 3*liveTurnTimeout)
+func liveCopilot(ctx context.Context, bin, home, model, toolModel string) []string {
+	warm, err := copilotWarmPool(os.Getenv)
+	if err != nil {
+		return []string{err.Error()}
+	}
+	cache, err := copilotSessionCache(os.Getenv, warm)
+	if err != nil {
+		return []string{err.Error()}
+	}
+	r := &copilotbridge.Runner{Bin: bin, Home: home, Timeout: liveTurnTimeout, WarmPool: warm, SessionCache: cache}
+	defer r.Close()
+	turns := 3
+	if cache {
+		turns = 4
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(turns)*liveTurnTimeout)
 	defer cancel()
 	var problems []string
-	problems = appendIf(problems, judgeLive("plain", copilotbridge.LivePlain(ctx, r, model)))
-	problems = appendIf(problems, judgeLive("client tools", copilotbridge.LiveTools(ctx, r, model)))
+	if cache {
+		problems = appendIf(problems, judgeLive("session cache", copilotbridge.LiveSessionCache(ctx, r, model)))
+	} else {
+		problems = appendIf(problems, judgeLive("plain", copilotbridge.LivePlain(ctx, r, model)))
+	}
+	if retryableBridgeProblems(problems) {
+		return problems
+	}
+	problems = appendIf(problems, judgeLive("client tools", copilotbridge.LiveTools(ctx, r, toolModel)))
 	return problems
 }
 
@@ -393,44 +473,131 @@ func liveClaude(ctx context.Context, bin, dir, model, toolModel string) []string
 	var problems []string
 	res, text, _, err := turn(claudebridge.Request{Model: model, MaxTokens: 64, Stream: true, Messages: user(livePrompt)})
 	problems = appendIf(problems, judgeTurn("plain turn", err, text, int64(res.Usage.OutputTokens), "", ""))
+	if retryableBridgeProblems(problems) {
+		return problems
+	}
 	tools := `[{"name":"get_weather","description":"Get the current weather for a city","input_schema":` + liveWeatherSchema + `}]`
 	res, _, tool, err := turn(claudebridge.Request{Model: toolModel, MaxTokens: 1024, Stream: true, Tools: json.RawMessage(tools),
 		Messages: user("What's the weather in Paris right now? Use the tool.")})
 	return appendIf(problems, judgeTurn("tool turn", err, "", int64(res.Usage.OutputTokens), "get_weather", tool))
 }
 
-func liveCodex(ctx context.Context, bin, home string, pre codexbridge.Preflight, model, toolModel string) []string {
+func liveCodex(ctx context.Context, bin, home string, pre codexbridge.Preflight, model, toolModel string) (problems []string) {
 	helper, err := os.Executable()
 	if err != nil {
 		return []string{"live: cannot locate this binary for the Landlock helper: " + err.Error()}
 	}
 	tools := decideCodexTools(helper, bin, strings.EqualFold(strings.TrimSpace(os.Getenv(envCodexToolsNoLL)), "on"))
 	r := &codexbridge.Runner{Bin: bin, CodexHome: home, Timeout: liveTurnTimeout, MaxConcurrent: 1,
-		Version: server.Version, Channel: pre.Channel, Sandbox: tools.sandbox}
-	// The tool turn parks its child for a follow-up that never comes.
-	defer r.Shutdown()
-
-	var problems []string
-	res, err := r.Run(ctx, codexbridge.Request{Model: model, Instructions: codexbridge.DefaultInstructions,
-		Input: []codexbridge.UserInput{{Type: "text", Text: livePrompt}}}, nil)
+		Version: server.Version, Channel: pre.Channel, Sandbox: tools.sandbox, ForkCache: pre.Cache.Enabled, NativeHistory: pre.NativeHistory,
+		SandboxMode: codexbridge.SandboxModeFromEnv(os.Getenv)}
+	// Drain retained parents too: cleanup is part of cache qualification.
+	defer func() {
+		r.Shutdown()
+		stats := r.CacheStats()
+		if r.ForkCache && (stats.CleanupFailures > 0 || stats.Credits > 0) {
+			problems = append(problems, "live cached fork: template cleanup failed")
+		}
+	}()
+	plainReq := codexbridge.Request{Model: model, Instructions: codexbridge.DefaultInstructions, Input: []codexbridge.UserInput{{Type: "text", Text: livePrompt}}}
+	res, err := r.Run(ctx, plainReq, nil)
 	problems = appendIf(problems, judgeTurn("plain turn", err, res.Text, res.Usage.OutputTokens, "", ""))
+	if r.ForkCache && len(problems) == 0 {
+		res, err = r.Run(ctx, plainReq, nil)
+		problems = appendIf(problems, judgeTurn("cached fork", err, res.Text, res.Usage.OutputTokens, "", ""))
+		if r.CacheHits() != 1 {
+			problems = append(problems, "live cached fork: template not reused")
+		}
+	}
+	if r.NativeHistory && len(problems) == 0 {
+		fact := fmt.Sprintf("history_fact_%d", time.Now().UnixNano())
+		body, _ := json.Marshal(map[string]any{"model": model, "messages": []any{
+			map[string]any{"role": "user", "content": "Remember the project codename: " + fact},
+			map[string]any{"role": "assistant", "phase": "commentary", "content": "Checking the project context."},
+			map[string]any{"role": "user", "content": "Reply with exactly the project codename from the earlier user message."},
+		}})
+		historyReq, parseErr := codexbridge.ParseRequest(body)
+		if parseErr != nil {
+			problems = append(problems, "live native history: cannot construct proof")
+		} else {
+			historyRes, historyErr := r.Run(ctx, historyReq, nil)
+			problems = appendIf(problems, judgeTurn("native history", historyErr, historyRes.Text, historyRes.Usage.OutputTokens, "", ""))
+			if historyErr == nil && !strings.Contains(historyRes.Text, fact) {
+				problems = append(problems, "live native history: prior user fact not recalled")
+			}
+		}
+	}
+	if retryableBridgeProblems(problems) {
+		return problems
+	}
 	// A host without Landlock serves no client tools in production either: the
 	// tool turn would test a path this bridge does not offer here.
 	if tools.off != "" {
 		return problems
 	}
-	res, err = r.Run(ctx, codexbridge.Request{Model: toolModel, Instructions: codexbridge.DefaultInstructions + " Use the provided tools when they help.",
-		Input: []codexbridge.UserInput{{Type: "text", Text: "What's the weather in Kuala Lumpur? Use get_weather, then answer in one sentence."}},
-		Tools: []codexbridge.ToolSpec{{Name: "get_weather", Description: "Get the current weather for a city", Parameters: json.RawMessage(liveWeatherSchema)}}}, nil)
+	toolReq := codexbridge.Request{Model: toolModel, Instructions: codexbridge.DefaultInstructions + " Use the provided tools when they help.",
+		Input: []codexbridge.UserInput{{Type: "text", Text: "What's the weather in Kuala Lumpur? Use get_weather, then repeat the exact value the caller returns."}},
+		Tools: []codexbridge.ToolSpec{{Name: "get_weather", Description: "Get the current weather for a city", Parameters: json.RawMessage(liveWeatherSchema)}}}
+	res, err = r.Run(ctx, toolReq, nil)
 	var got string
 	if len(res.ToolCalls) > 0 {
 		got = res.ToolCalls[0].Name
 	}
-	return appendIf(problems, judgeTurn("tool turn", err, "", res.Usage.OutputTokens, "get_weather", got))
+	problems = appendIf(problems, judgeTurn("tool turn", err, "", res.Usage.OutputTokens, "get_weather", got))
+	if err != nil || len(res.ToolCalls) == 0 {
+		return problems
+	}
+	value := fmt.Sprintf("bridge_weather_%d", time.Now().UnixNano())
+	toolReq.ToolResults = map[string]string{}
+	for _, call := range res.ToolCalls {
+		toolReq.ToolResults[call.ID] = value
+	}
+	res, err = r.Run(ctx, toolReq, nil)
+	if err != nil {
+		return appendIf(problems, judgeLive("tool result replay", err))
+	}
+	if !strings.Contains(res.Text, value) || len(res.ToolCalls) != 0 || res.Usage.OutputTokens <= 0 {
+		problems = append(problems, "live tool result replay: no final answer using the caller result with usage")
+	}
+	return problems
 }
 
-func liveAgy(ctx context.Context, bin, home, model string) []string {
-	r := &agybridge.Runner{Bin: bin, Home: home, Timeout: liveTurnTimeout, MaxConcurrent: 1}
+func liveAgy(ctx context.Context, bin, home, model, toolModel string) []string {
+	cache, err := agySessionCache(os.Getenv, strings.EqualFold(strings.TrimSpace(os.Getenv(envAgyTools)), "on"))
+	if err != nil {
+		return []string{err.Error()}
+	}
+	r := &agybridge.Runner{Bin: bin, Home: home, Timeout: liveTurnTimeout, MaxConcurrent: 1, SessionCache: cache}
+	defer r.Close()
 	res, err := r.Run(ctx, agybridge.Request{Model: model, Prompt: livePrompt}, func(string) error { return nil })
-	return appendIf(nil, judgeTurn("plain turn", err, res.Text, int64(res.Usage.OutputTokens), "", ""))
+	problems := appendIf(nil, judgeTurn("plain turn", err, res.Text, int64(res.Usage.OutputTokens), "", ""))
+	if len(problems) == 0 && strings.EqualFold(strings.TrimSpace(os.Getenv(envAgyTools)), "on") {
+		problems = appendIf(problems, judgeLive("caller tools", agybridge.LiveTools(ctx, r, toolModel)))
+		if cache && len(problems) == 0 {
+			problems = appendIf(problems, judgeLive("conversation cache", agybridge.LiveConversationCache(ctx, r, toolModel)))
+		}
+	}
+	return problems
+}
+
+// Operational failures are retryable: quota, auth and transport do not establish
+// that a CLI release is incompatible. Mixed failures remain compatibility refusals.
+func retryableBridgeProblems(problems []string) bool {
+	if len(problems) == 0 {
+		return false
+	}
+	for _, problem := range problems {
+		p := strings.ToLower(problem)
+		found := false
+		for _, marker := range []string{"status 429", "status 502", "status 503", "status 504", "http 429", "http 502", "http 503", "http 504", "upstream 503", "bad gateway", "gateway timeout", "overloaded", "rate limit", "rate_limit", "too many requests", "session limit", "usage limit", "quota", "temporarily unavailable", "service unavailable", "timeout", "timed out", "deadline exceeded", "connection reset", "connection refused", "unexpected eof", "unauthorized", "logged-out", "not logged in", "token expired", "login expired", "authentication", "no github oauth token"} {
+			if strings.Contains(p, marker) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }

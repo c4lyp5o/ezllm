@@ -1,0 +1,118 @@
+{
+  "cli": "0.167.0",
+  "model": "gpt-6.1-terra",
+  "landlock": true,
+  "task_files": 6,
+  "scope": "synthetic caller-tool task, not original large Hermes session",
+  "cases": [
+    {
+      "cache": false,
+      "cache_hits": 0,
+      "final_chars": 274,
+      "independent_routes_passed": true,
+      "input_tokens": 56455,
+      "model_tests_passed": true,
+      "output_tokens": 1496,
+      "required_files": 6,
+      "tool_batches": 7,
+      "tool_calls": 7,
+      "stage": "legacy"
+    },
+    {
+      "cache": true,
+      "cache_hits": 0,
+      "final_chars": 181,
+      "independent_routes_passed": true,
+      "input_tokens": 27772,
+      "model_tests_passed": true,
+      "output_tokens": 1315,
+      "required_files": 6,
+      "tool_batches": 8,
+      "tool_calls": 8,
+      "stage": "legacy"
+    },
+    {
+      "cache": false,
+      "cache_hits": 0,
+      "final_chars": 205,
+      "independent_routes_passed": true,
+      "input_tokens": 56611,
+      "model_tests_passed": true,
+      "output_tokens": 1578,
+      "required_files": 6,
+      "tool_batches": 7,
+      "tool_calls": 7,
+      "stage": "structured_prototype"
+    },
+    {
+      "cache": true,
+      "cache_hits": 0,
+      "final_chars": 180,
+      "independent_routes_passed": true,
+      "input_tokens": 56138,
+      "model_tests_passed": true,
+      "output_tokens": 1361,
+      "required_files": 6,
+      "tool_batches": 7,
+      "tool_calls": 7,
+      "stage": "structured_prototype"
+    },
+    {
+      "cache": false,
+      "cache_hits": 0,
+      "final_chars": 213,
+      "independent_routes_passed": true,
+      "input_tokens": 56597,
+      "model_tests_passed": true,
+      "native_history": true,
+      "output_tokens": 1588,
+      "required_files": 6,
+      "tool_batches": 7,
+      "tool_calls": 7,
+      "stage": "structured_with_phase"
+    },
+    {
+      "cache": true,
+      "cache_hits": 1,
+      "final_chars": 208,
+      "independent_routes_passed": true,
+      "input_tokens": 57308,
+      "model_tests_passed": true,
+      "native_history": true,
+      "output_tokens": 1604,
+      "required_files": 6,
+      "tool_batches": 7,
+      "tool_calls": 7,
+      "stage": "structured_with_phase"
+    }
+  ],
+  "conclusion": "All cases completed; original premature stopping not reproduced. Structured phase-aware replay and clean-template reuse verified.",
+  "deployment": {
+    "health": {
+      "status": "ok",
+      "version": "1.14.3"
+    },
+    "image": "sha256:f7ec2a4084636b6b095786fedaa1489b40825a119862b25295d51b21ea2270ae",
+    "localhost_binding": true,
+    "https_health": "verified",
+    "auth_guards": "passed",
+    "trial_flags": "preserved",
+    "restarts": 0,
+    "native_history": true,
+    "cache": {
+      "mode": "auto",
+      "enabled": true
+    },
+    "approval_policy": "never",
+    "gateway_tool_proof": {
+      "surface": "OpenAI Chat Completions SSE",
+      "model": "chatgpt-sub/gpt-6.1-terra",
+      "gateway_requests": 2,
+      "native_tool_continuation": "passed",
+      "explicit_commentary_history": "accepted",
+      "caller_tools_have_side_effects": false,
+      "final_value_matched": true,
+      "request_usage_present": true
+    }
+  }
+}

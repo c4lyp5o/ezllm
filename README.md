@@ -1,81 +1,43 @@
 # ezllm
 
-**A self-hosted LLM router and gateway.** One static Go binary that fronts any
-mix of OpenAI-, Anthropic-, and Gemini-compatible providers behind a single
-endpoint: namespace-aware routing, combo failover, per-model rules, request
-compression, protocol translation, and a SQLite usage ledger that reconciles
-token accounting across all three wire protocols — with an operator dashboard
-in the same binary.
+ezllm is a self-hosted LLM gateway. It is one Go binary that sits between your
+apps and your model providers. Your apps talk to a single endpoint using the
+OpenAI or Anthropic API, and ezllm routes each request to the right provider
+account, retries or fails over when a provider has trouble, and records every
+request's token usage and cost. It ships with a web dashboard for setup and
+monitoring.
 
 [![Tests](https://github.com/c4lyp5o/ezllm/actions/workflows/test.yml/badge.svg)](https://github.com/c4lyp5o/ezllm/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
----
+## What it does
 
-## Why ezllm
-
-- **One endpoint, many providers.** Clients speak OpenAI, Anthropic, or
-  Responses; upstreams are reached on whichever wire they actually support —
-  natively or via probe-gated [translation](docs/translation-runbook.md).
-- **Routing that survives failures.** Combos (ordered hop lists) with
-  failover, round-robin, sticky, and block strategies; per-hop retry budgets,
-  key pools with cooldown, and dead-endpoint backoff. A failed hop is never
-  leaked to a live response (attempt/commit split).
-- **Honest numbers.** A normalized ledger (`tokens_in/out/cached_read/cached_write`)
-  across all three protocols, request-shape capture for cache research,
-  versioned model prices with derived cost, and real-vs-notional compression
-  savings.
-- **Compression that ships bytes, not promises.** Staged engines —
-  `session_dedup`, `rtk`, `headroom`, `lite`, `caveman`, `ansi`, `fold`,
-  `jsonmin`, `tool_ref`, `blobs` — with per-profile configuration and
-  fail-open semantics.
-- **Subscriptions as accounts.** Optional loopback bridges put a Claude
-  ([runbook](docs/claude-bridge-runbook.md)), ChatGPT
-  ([runbook](docs/codex-bridge-runbook.md)) or Google Antigravity
-  ([runbook](docs/agy-bridge-runbook.md)) subscription behind the router
-  through each vendor's official CLI, with plan windows on the provider card
-  where the vendor reports them. An optional host updater keeps each CLI
-  current: soaked, gated, promoted in a late-night window, proved and rolled
-  back on failure ([runbook](docs/bridge-update-runbook.md)).
-- **Ops surface included.** Dashboard, live request feed, analytics, key-test
-  pipeline with protocol sweeps, and configuration exports — all served from
-  the same binary. Full recovery uses the [database/key backup procedure](docs/master-key-runbook.md).
+- **One endpoint for many providers.** Clients can call Chat Completions,
+  Anthropic Messages or the Responses API. ezllm sends each request to the
+  provider in a format that provider supports, translating between formats
+  when needed ([translation runbook](docs/translation-runbook.md)).
+- **Failover and load balancing.** Group models into a *combo* with a strategy
+  such as failover or round-robin. A failing hop is retried or skipped before
+  any response reaches your app.
+- **Usage you can compare.** Token counts, cache reads and writes, and cost are
+  stored in one consistent format across all three APIs, alongside the
+  provider's original usage data.
+- **Request compression.** Optional profiles shrink large tool outputs and
+  repeated context before they are sent, without changing tool calls or
+  results.
+- **Subscriptions as providers.** Optional bridges let you use a Claude,
+  ChatGPT, GitHub Copilot or Google Antigravity subscription through each
+  vendor's official CLI. An optional updater keeps those CLIs current.
+- **Dashboard included.** Provider setup, API keys, a live request feed,
+  analytics, rules and backups, all served by the same binary.
 
 ## Quick start
 
-Choose one way to start ezllm, then follow **Set up the dashboard** below:
+### 1. Start ezllm
 
-- **Released binary:** follow the [installation guide](docs/install-binary.md)
-  for Linux, macOS, or Windows. No Go installation is needed.
-- **Docker:** use the commands below from a checkout of this repository.
-- **From source:** install Go 1.27+, then run:
+Pick one of these.
 
-  ```bash
-  git clone https://github.com/c4lyp5o/ezllm.git
-  cd ezllm
-  cp config.example.yaml config.yaml
-  make run
-  ```
-
-  Keep the terminal open while ezllm runs. Press Ctrl+C to stop it. Developers
-  can run `make test-short` to check the functional suite; a test run is not
-  required to start the server.
-
-No Go toolchain? [docs/install-binary.md](docs/install-binary.md) covers the
-released binaries (Linux, macOS, Windows): download, checksum, `config.yaml`,
-and running one as a systemd unit or a launchd agent.
-
-There is no default dashboard password. On first boot the server prints an
-ezllm banner with a one-time **setup code**, and the dashboard at `/` shows
-only a set-password page that asks for it. The code changes on every restart
-until setup is done. To skip the page, set `EZLLM_DASHBOARD_PASSWORD` (or
-`EZLLM_DASHBOARD_PASSWORD_FILE`) before the first boot. Add provider accounts and
-keys from the Providers page — keys are validated by a live probe chain
-(catalog → auth → quota → inference → protocol), never by format checks.
-
-### Docker
-
-With Docker installed, clone this repository and run the published image:
+**Docker** (Linux or macOS shell):
 
 ```bash
 git clone https://github.com/c4lyp5o/ezllm.git
@@ -90,13 +52,7 @@ docker run -d --name ezllm --user "$(id -u):$(id -g)" \
 docker logs ezllm
 ```
 
-These commands use a shell on Linux or macOS. The data directory stores the
-SQLite database and master key across container restarts. Keep it private and
-back up both together; see the [master key runbook](docs/master-key-runbook.md).
-To stop the container, run `docker stop ezllm`; to start it again, run
-`docker start ezllm`.
-
-Alternatively, use Docker Compose from the repository directory:
+**Docker Compose**, from the cloned repository:
 
 ```bash
 cp config.example.yaml config.yaml
@@ -106,279 +62,307 @@ docker compose up -d --no-build
 docker compose logs ezllm
 ```
 
-The example runs as UID and GID 1000 by default. If those do not match the
-owner of `data`, set `UID` and `GID` in your Compose environment so the
-container can write to that directory. See [compose.example.yml](compose.example.yml)
-for deployment options. The Compose example publishes the port on all host
-interfaces; restrict it or configure a reverse proxy as appropriate for your host.
+The Compose example runs as UID/GID 1000. If your `data` directory belongs to
+another user, set `UID` and `GID` in your Compose environment.
 
-### Set up the dashboard
+**Released binary** for Linux, macOS or Windows, with no Go or Docker needed:
+follow the [installation guide](docs/install-binary.md). It also covers running
+ezllm as a systemd service or launchd agent.
 
-1. Open [http://127.0.0.1:20129](http://127.0.0.1:20129) on the machine
-   running ezllm. Find the one-time setup code in the server output, or in
-   `docker logs ezllm` for Docker. Enter it and choose a dashboard password.
-   The code changes on restart until setup is complete.
-2. In **Providers**, choose **Add provider** and enter your provider account
-   and API key. The dashboard tests the key and discovers available models.
-   These probes can make inference requests and may incur provider charges.
-3. In **Connect**, under **Create an API key**, enter a name and choose **Inference only**, then select **Create key**. Copy it immediately: ezllm shows the full key only once.
-   This is the key your applications use to call ezllm; it is separate from
-   your provider's key.
-4. Choose an available model from Connect and copy its full ID, including the
-   account namespace, such as `myprovider/model-name`. Connect also shows the
-   base URL and environment variables for your client.
-
-To check the gateway from another terminal, substitute your new ezllm key:
+**From source** (Go 1.27.4 or newer):
 
 ```bash
-curl http://127.0.0.1:20129/v1/models \
-  -H "Authorization: Bearer YOUR_EZLLM_KEY"
+git clone https://github.com/c4lyp5o/ezllm.git
+cd ezllm
+cp config.example.yaml config.yaml
+make run
 ```
 
-A successful response contains a `data` list of model IDs. Use one of those IDs
-in a chat request; see the [API reference](docs/API.md). If the list is empty,
-check the provider key and model discovery in Providers. A `401` means the
-client key is missing, invalid, or disabled. `GET /healthz` is available
-without a key for a basic liveness check.
+ezllm listens on `http://127.0.0.1:20129`. The `data` directory holds the
+SQLite database and the master key that encrypts your provider keys. Keep it
+private and back up both files together; without the key, stored provider keys
+cannot be recovered ([master key runbook](docs/master-key-runbook.md)).
 
-There is no default dashboard password. To set one before first boot instead of
-using the setup code, configure `EZLLM_DASHBOARD_PASSWORD` or
-`EZLLM_DASHBOARD_PASSWORD_FILE`. Behind a reverse proxy, set
-`EZLLM_TRUSTED_PROXIES` and apply a per-source rate limit to `/admin/login`
-and `/admin/setup`; see [environment variables](docs/environment.md).
+### 2. Finish setup in the dashboard
+
+1. Open [http://127.0.0.1:20129](http://127.0.0.1:20129). There is no default
+   password: the server prints a one-time **setup code** in its output
+   (`docker logs ezllm` for Docker). Enter it and choose a dashboard password.
+   The code changes on each restart until setup is done. To skip this step,
+   set `EZLLM_DASHBOARD_PASSWORD` or `EZLLM_DASHBOARD_PASSWORD_FILE` before the
+   first start.
+2. In **Providers**, choose **Add provider** and enter the account and API key.
+   ezllm tests the key with real requests and discovers the available models.
+   These test requests may be billed by the provider.
+3. In **Connect**, under **Create an API key**, enter a name, choose
+   **Inference only** and select **Create key**. Copy the key now; it is shown
+   only once. Your apps use this key to call ezllm. It is not your provider key.
+4. Still in **Connect**, pick a model and copy its full ID, for example
+   `myprovider/model-name`. Connect also shows the base URL and ready-made
+   environment variables for common clients.
+
+### 3. Send a request
+
+```bash
+curl http://127.0.0.1:20129/v1/chat/completions \
+  -H "Authorization: Bearer YOUR_EZLLM_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"myprovider/model-name","messages":[{"role":"user","content":"hi"}]}'
+```
+
+For OpenAI-compatible apps, set the base URL to `http://127.0.0.1:20129/v1` and
+the API key to your ezllm key. For Anthropic-compatible apps, use
+`http://127.0.0.1:20129` as the base URL.
+
+If something fails:
+
+- `401`: the ezllm key is missing, wrong or disabled.
+- `404` for a model: use the full `namespace/model` ID. The error lists the
+  namespaces that serve that model.
+- `GET /v1/models` with your key lists every model ID you can use.
+- `GET /healthz` needs no key and confirms the server is up.
 
 ## Use a subscription bridge
 
-A bridge lets ezllm route requests through an official CLI signed in to a
-subscription. Choose the guide for your account:
+A bridge lets ezllm send requests through a vendor's official CLI, signed in to
+your subscription. Each bridge is optional and off by default. Finish the
+dashboard setup first, then follow the guide for your account:
 
-| Account | Guide | Before you start |
+| Account | Guide | Notes |
 |---|---|---|
 | Claude Pro/Max | [Claude bridge](docs/claude-bridge-runbook.md) | Install Claude Code and sign in with a separate CLI profile. |
-| ChatGPT Plus/Pro | [Codex bridge](docs/codex-bridge-runbook.md) | Linux; client tools require Landlock for the default protection. |
-| Google Antigravity | [Antigravity bridge](docs/agy-bridge-runbook.md) | Linux; text only, with no client tools or image input. |
-| GitHub Copilot | [Copilot CLI bridge](docs/copilot-cli-bridge-runbook.md) | The official `copilot` CLI signed in on the host; no key to paste. Client tools and inline PNG/JPEG images work natively over the headless channel; image requests require an explicit vision-capable model. |
+| ChatGPT Plus/Pro | [Codex bridge](docs/codex-bridge-runbook.md) | Linux. Client tools need Landlock for the default protection. |
+| GitHub Copilot | [Copilot bridge](docs/copilot-bridge-runbook.md) | Sign in to the official `copilot` CLI on the host. Supports client tools and PNG/JPEG images with a vision-capable model. |
+| Google Antigravity | [Antigravity bridge](docs/agy-bridge-runbook.md) | Linux. Text chat by default; caller tools are experimental. No image input. |
 
-The guides use Docker Compose and explain CLI installation, separate sign-in,
-mounts, and the dashboard preset. Start ezllm and finish dashboard setup first.
-Each bridge is optional and disabled by default. Enabling one with missing
-prerequisites prevents ezllm from starting; check `docker compose logs ezllm`
-if startup fails. Subscription requests and validation probes consume plan
-quota. See the guides for model and tool limitations and how to set Rules.
+The guides use Docker Compose and cover installing the CLI, signing in, the
+mounts and the dashboard preset. If a bridge is enabled but something it needs
+is missing, ezllm refuses to start and says why in `docker compose logs ezllm`.
+Requests through a bridge, including key tests, use your plan's quota.
 
-For maintainers, Claude and Antigravity share the streaming transport in
-`internal/bridgeutil`. **Codex and Copilot migration is still outstanding.**
-See the [shared transport design and migration status](docs/shared-bridge-transport-design.md).
-Each provider retains its own protocol, subscription login and process lifecycle.
+### Sign in to a bridge
 
-## API surface
+Every bridge signs in to its own folder named `~/.<bridge>-sub`, never the
+folder your everyday CLI uses. That keeps the bridge's login, sessions and
+settings separate from yours, so signing out of your own CLI never breaks the
+bridge. Run the login once on the host, using the same binary the bridge runs.
+The paths below are the bridge updater's layout; replace them with your binary's
+path if you pinned it elsewhere.
 
-Full contract — every endpoint, request/response shape, and error code — in
-**[docs/API.md](docs/API.md)**. The shape of it:
-
-| Layer | Routes | Auth |
+| Bridge | Sign in | Check |
 |---|---|---|
-| Liveness | `GET /healthz` → `{"status":"ok","version":"<release>"}` | none |
-| Inference | `POST /v1/chat/completions` · `/v1/messages` · `/v1/responses` | client token |
-| Extended | `POST /v1/embeddings` · `/v1/images/generations` · `/v1/audio/speech` · `/v1/audio/transcriptions` | client token |
-| Catalog | `GET /v1/models` (namespaced ids + combos; `?protocol=anthropic`) | client token |
-| Admin | `/admin/*` — overview, usage, requests, accounts, combos, rules, compression, services, pricing, export, SSE feed, chat | admin session / token |
+| Claude | `CLAUDE_CONFIG_DIR=~/.claude-sub ~/.local/share/claude-bridge/current/claude auth login` | `CLAUDE_CONFIG_DIR=~/.claude-sub ~/.local/share/claude-bridge/current/claude auth status` |
+| Codex | `CODEX_HOME=~/.codex-sub ~/.local/share/codex-bridge/current/bin/codex login --device-auth` | `CODEX_HOME=~/.codex-sub ~/.local/share/codex-bridge/current/bin/codex login status` |
+| Copilot | `env -u DBUS_SESSION_BUS_ADDRESS COPILOT_HOME=~/.copilot-sub ~/.local/share/copilot-bridge/current/copilot login --device-code` | `ls ~/.copilot-sub/config.json` |
+| Antigravity | `mkdir -p ~/.agy-sub && chmod 700 ~/.agy-sub`, then `env -u DBUS_SESSION_BUS_ADDRESS HOME=$HOME/.agy-sub ~/.local/share/agy-bridge/current/agy` | `ls ~/.agy-sub/.gemini/antigravity-cli/antigravity-oauth-token` |
 
-Errors are OpenAI-shaped (`{"error":{"type","message","code"}}`).
+Codex and Copilot print a URL and a code to enter in your browser. Antigravity
+opens its interactive CLI: sign in, send one prompt, then type `/exit`. Unsetting
+`DBUS_SESSION_BUS_ADDRESS` makes Copilot and Antigravity save the login to a file
+the container can read instead of your desktop keyring. Then mount the folder
+read-write at `/<bridge>-sub` in `compose.yml` (for example
+`~/.copilot-sub:/copilot-sub`), as each guide shows.
 
-## Routing model
+### Recommended cache settings
 
-### Namespaces
+Prompt caching makes long conversations cheaper and faster, and uses less of
+your plan. To get the most out of it, add these lines to
+`services.ezllm.environment` in `compose.yml`, keeping only the bridges you use.
+They turn on caching; they do not enable the bridges themselves.
 
-A model is addressed `<namespace>/<model>`, where the namespace identifies a
-**provider account** (combos have no namespace):
+```yaml
+environment:
+  # Codex: use the prompt cache whenever the installed CLI supports it (default).
+  EZLLM_CODEX_BRIDGE_CACHE: "auto"
 
-```bash
-curl -s localhost:20129/v1/chat/completions \
-  -H "Authorization: Bearer ***" -H "Content-Type: application/json" \
-  -d '{"model":"myprov/qwen-flash","messages":[{"role":"user","content":"hi"}]}'
+  # Copilot: keep workers warm and reuse finished conversations (needs both).
+  EZLLM_COPILOT_BRIDGE_WARM_POOL: "on"
+  EZLLM_COPILOT_BRIDGE_SESSION_CACHE: "on"
+
+  # Antigravity: resume conversations (needs the experimental tool adapter).
+  EZLLM_AGY_EXPERIMENTAL_TOOLS: "on"
+  EZLLM_AGY_BRIDGE_SESSION_CACHE: "on"
 ```
 
-A bare model id is **404 by design**: the same id can exist on several
-accounts, so guessing would mis-attribute spend. The 404 lists every
-namespace that serves it.
+Apply changes with `docker compose up -d --no-build`; `docker compose restart`
+does not pick up new environment values. For a binary or source install, set
+the same variables in the environment that starts ezllm.
+
+A few things worth knowing:
+
+- Caching works best when your app keeps the model, system prompt and tool
+  definitions the same between requests and sends the full conversation each
+  time.
+- With `auto`, Codex falls back to uncached requests on CLIs that lack support,
+  and `/status` shows why. Use `on` to make caching mandatory or `off` to
+  disable it.
+- The Claude bridge needs no cache setting.
+- Compression does not break caching: each session resends the exact bytes it
+  sent before, so the start of the conversation stays the same.
+- Cached tokens show up in the usage records, but how much plan quota they save
+  depends on the vendor.
+
+Details and limits: [Codex](docs/codex-empty-template-cache-design.md),
+[Copilot](docs/copilot-completed-session-cache-design.md),
+[Antigravity](docs/agy-conversation-cache-design.md). The Antigravity tool
+adapter is experimental; read its [limitations](docs/agy-bridge-runbook.md)
+first.
+
+## How routing works
+
+### Model IDs
+
+Every model is addressed as `<namespace>/<model>`, where the namespace is the
+provider account, for example `myprov/qwen-flash`. A bare model name returns
+`404` on purpose: the same model can exist on several accounts, and guessing
+would charge the wrong one. The error lists the namespaces that serve it.
 
 ### Combos
 
-A combo is a bare name (`fallback`) → ordered hops `[{account, model}, …]`
-plus a strategy:
+A combo has a plain name (such as `fallback`) and an ordered list of
+`{account, model}` hops, plus a strategy:
 
 | Strategy | Behaviour |
 |---|---|
-| `failover` (default) | transient failure (429/5xx/timeout/transport) → retry budget per hop → next hop; a 4xx goes straight back to the client |
-| `true_round_robin` | stateless uniform roll across healthy hops |
-| `block_round_robin` | consecutive dispatches per hop; with *hold-until-failure*, a hop keeps its block while it succeeds |
-| `sticky_last_good` | stick to the hop that last served, until it fails |
-| `least_used` | send each request to the hop with the least recent traffic (in-process; each hop's count halves every 10 minutes, ties keep hop order) |
+| `failover` (default) | On a temporary failure (429, 5xx, timeout, connection error), retry the hop, then move to the next. Other 4xx errors go straight back to the client. |
+| `true_round_robin` | Pick a healthy hop at random for each request. |
+| `block_round_robin` | Send a run of requests to one hop before moving on; optionally stay on a hop until it fails. |
+| `sticky_last_good` | Keep using the hop that last succeeded until it fails. |
+| `least_used` | Send each request to the hop with the least recent traffic. |
 
-Hop eligibility layers on top: per-(account, model) **rules** (token caps and
-allowed-hours windows, see [docs/rules-engine-design.md](docs/rules-engine-design.md)),
-per-model **surface pins**, context-size filtering, and cooldowns for dead
-endpoints. Rules refuse with `429` naming the rule — before any upstream dial,
-so a refusal costs zero tokens.
+### Rules, pins and translation
 
-### Surface pins
-
-Every model can carry an enforced pin (`openai` | `anthropic` | `responses` |
-auto). A pinned model called on the wrong surface is refused with
-`400 pinned_surface` **before dialling upstream** — enforcement, never a
-silent reroute, because ezllm passes bodies through untranslated on native
-paths and switching the shape behind the client's back would be dishonest.
-
-### Protocol translation
-
-Any client surface can be routed onto any upstream wire, gated behind
-`translation.enabled` (default **on**; `EZLLM_TRANSLATION_ENABLED=false`
-turns it off) and per-hop probe verdicts.
-Native passthrough remains the default for every unmarked hop. Design and
-runbooks: [docs/universal-wire-design.md](docs/universal-wire-design.md),
-[docs/translation-runbook.md](docs/translation-runbook.md).
+- **Rules** set token caps and allowed hours per account and model. A request
+  that breaks a rule gets a `429` naming the rule, before anything is sent
+  upstream, so it costs nothing ([rules design](docs/rules-engine-design.md)).
+- **Surface pins** tie a model to one API (`openai`, `anthropic` or
+  `responses`). Calling it through another API returns `400 pinned_surface`
+  instead of silently changing the request.
+- **Translation** lets any client API reach any provider format once a probe
+  has verified that hop. It is on by default; set
+  `EZLLM_TRANSLATION_ENABLED=false` to turn it off
+  ([design](docs/universal-wire-design.md), [runbook](docs/translation-runbook.md)).
 
 ## Compression
 
-Profiles of ordered stages over the ten engines, selected per request
-(`x-ezllm-compression` header → combo default → off). Contract: the final
-message is exempt (a profile can open a purely tool-output final message to
-tool-output engines), tool-call arguments are never touched, tool results are
-never dropped or structurally changed, and engine errors fail open. A session
-replays what it already shipped, so history stays byte-stable across requests. Savings are ledgered as **real** (bytes that
-actually shipped shorter) vs **notional** (rejected by ratio floor), so
-dashboards are never inflated. Design and measured numbers:
-[docs/compression-design.md](docs/compression-design.md).
+Compression profiles run a chain of engines (for example deduplication, JSON
+minification and long tool-output folding) on each request. A profile is chosen
+by the `x-ezllm-compression` header, or by the combo's default; otherwise
+compression is off. The last message is never compressed (except a final
+tool-output message), tool-call arguments are never touched, tool results are
+never dropped, and if an engine fails the original request is sent. Savings are
+reported as **real** (bytes actually removed) or **notional** (a saving that was
+rejected as too small), so the numbers are never inflated. Details and
+measurements: [compression design](docs/compression-design.md).
 
 ## Token accounting
 
-The three surfaces disagree about caching, so raw numbers cannot be summed:
+The three APIs count cached tokens differently, so their raw numbers cannot be
+added together:
 
-| Surface | cached tokens are… | cache-write reported? |
+| API | Cached tokens are | Cache writes reported? |
 |---|---|---|
-| `/v1/chat/completions` | **included** in `prompt_tokens` | no |
-| `/v1/messages` | **excluded** from `input_tokens` | yes |
-| `/v1/responses` | **included** in `input_tokens` | yes |
+| `/v1/chat/completions` | included in `prompt_tokens` | no |
+| `/v1/messages` | excluded from `input_tokens` | yes |
+| `/v1/responses` | included in `input_tokens` | yes |
 
-Every ledger row stores normalized `tokens_in / tokens_out /
-tokens_cached_read / tokens_cached_write` (+ `reasoning_tokens`) plus the
-verbatim `raw_usage` JSON for audit.
+ezllm stores every request as `tokens_in`, `tokens_out`, `tokens_cached_read`,
+`tokens_cached_write` and `reasoning_tokens` in one consistent form, plus the
+provider's original usage JSON.
 
 ## Dashboard
 
-Same binary, served at `/`; the UI renders and fetches nothing until
-unlocked. Everything under `/admin/*` except sign-in and first-boot setup
-requires an admin session or an admin client token. The sidebar shows the
-running **version**; the overview shows uptime and account, model and combo
-counts and warnings for dropped, lost, or unmetered ledger rows. Overview and
-Connect warn when usage reports cannot refresh; Economics and Compression show
-errors when cost or savings data is unavailable. Connect provides a copyable
-example request, and Chat cancels active requests when their column is removed
-or you leave the page. Settings covers browser preferences, sessions,
-backup/recovery, gateway policy, notification preferences, push channels (ntfy, Discord, Telegram or a
-webhook) and safe system diagnostics. Encrypted backup
-scheduling is disabled by default; configure a separate encryption secret and a
-mounted destination before enabling it. See the
-[recovery runbook](docs/recovery-runbook.md).
+The dashboard is served at `/` and shows nothing until you sign in. It covers
+providers and keys, API keys and client setup (**Connect**), a chat playground,
+live requests, usage and cost analytics, compression savings, rules and
+**Settings** (sessions, backups, gateway policy, notifications through ntfy,
+Discord, Telegram or a webhook, and diagnostics). The sidebar shows the running
+version. Scheduled encrypted backups are off by default; see the
+[recovery runbook](docs/recovery-runbook.md) before turning them on.
 
 ## Configuration
 
-Precedence for supported operator controls: command-line flags → `EZLLM_*`
-environment → saved Settings → explicit `config.yaml` → built-in defaults.
-Settings manages runtime policy, preferences, sessions and encrypted backups;
-deployment paths and bridge startup remain YAML/environment controls. See
-[Settings administration](docs/settings-runbook.md).
+Settings are applied in this order, first match wins: command-line flags,
+`EZLLM_*` environment variables, values saved in the dashboard's Settings,
+`config.yaml`, then built-in defaults. Bridges and file paths are set only by
+environment or `config.yaml`.
 
-New install? Choose your usage timezone in Settings → General, or enforce it
-with `EZLLM_USAGE_TZ` (which locks that dashboard control). Keep subscription
-bridges off unless you run them (they are off in `compose.example.yml`).
-The compose example explicitly sets `EZLLM_USAGE_TZ: UTC`; remove that entry
-to manage the timezone from Settings.
-Every variable and its default: **[docs/environment.md](docs/environment.md)**.
-Logs go to stdout, one line per record — `docker logs ezllm`; what each level
-carries and why there is no log file: **[docs/logging.md](docs/logging.md)**.
-
-Provider credentials live in SQLite only, managed from the dashboard or the
-admin API — never in `config.yaml`. Upstream retry policy defaults to 3
-retries per hop for transient failures only; keep `data/ezllm.sqlite` private
-and backed up.
+- Every environment variable and its default: [docs/environment.md](docs/environment.md).
+- Settings page reference: [settings runbook](docs/settings-runbook.md).
+- Logs go to stdout only (`docker logs ezllm`): [docs/logging.md](docs/logging.md).
+- Set your usage timezone in Settings → General, or fix it with `EZLLM_USAGE_TZ`.
+  The Compose example sets `UTC`; remove that line to manage it from Settings.
+- Provider keys are stored encrypted in SQLite and managed from the dashboard
+  or admin API, never in `config.yaml`.
+- `request_limits` in [config.example.yaml](config.example.yaml) caps concurrent
+  work: by default 32 active requests in total, 8 per API key and a 256 MiB
+  input buffer. Extra requests get a retryable `429`.
+- Behind a reverse proxy, set `EZLLM_TRUSTED_PROXIES` and rate-limit
+  `/admin/login` and `/admin/setup` at the proxy.
 
 ## Security
 
-- **Provider keys** (and per-account management keys) are encrypted at rest
-  with AES-256-GCM under a master key that never enters the database. Back up
-  the master key with the database, or the stored keys are unrecoverable — see
-  [docs/master-key-runbook.md](docs/master-key-runbook.md).
-- `GET /healthz` is the only unauthenticated data route: liveness plus the
-  release version, nothing else. Besides it, only the dashboard's static files
-  and the sign-in/setup endpoints answer without credentials; all counts,
-  paths, and uptime live behind `/admin/*`.
-- The dashboard session cookie is `HttpOnly`, `SameSite=Strict`, and
-  cookie-authenticated writes from another origin (even another port on the
-  same host) are refused with `403`.
-- Client tokens are SHA-256 hashed, dashboard passwords bcrypt-hashed;
-  plaintext credentials are never returned after creation. Only a masked key
-  hint is ever exposed.
-- The upstream's own credentials replace the client's on forwarding:
-  `Authorization`, `x-api-key`, `Cookie`, and `Origin` (Anthropic rejects
-  foreign browser Origins with a 401) are stripped, along with
-  `X-Ezllm-Session`, `X-Ezllm-Compression` and `X-Ezllm-Bridge-Secret`.
-- Provider clients never follow a redirect to another origin, so provider
-  keys and prompts stay with the host they were sent to.
-- Loopback by default; the dashboard hides all data pre-auth.
+- Provider keys are encrypted at rest with AES-256-GCM. The master key is kept
+  outside the database; back it up with the database.
+- `GET /healthz` is the only route that returns data without credentials, and it
+  returns only `status` and `version`.
+- The dashboard cookie is `HttpOnly` and `SameSite=Strict`, and cookie-based
+  writes from another origin are refused.
+- API keys are stored as SHA-256 hashes and dashboard passwords with bcrypt.
+  A key is shown once when created; afterwards only a masked hint is visible.
+- Your client's credentials and ezllm's own headers are removed before a request
+  is forwarded, and provider clients never follow redirects to another host.
+- ezllm listens on localhost by default.
 
 ## Development
 
 ```bash
-make test-short  # local functional suite; always use -short for Go tests
-make verify      # acceptance check against a live ledger
+make test-short  # functional test suite; always pass -short to go test
+make verify      # acceptance check against a live usage ledger
 ```
 
-Repository layout:
+The full suite includes performance tests that need several GiB of memory; CI
+runs it. Always use `-short` locally.
 
-- `cmd/`, `internal/` — Go source; `_test.go` files live **in-package**
-  (Go toolchain requirement — see [CONTRIBUTING.md](CONTRIBUTING.md))
-- `tests/` — live proof scripts (Python) run against a real instance
-- `web/tests/` — Playwright screenshot/verification drivers for the dashboard
-- `scripts/` — operator utilities: `backup_sqlite.py` (online SQLite backup),
-  `ezllm-mac.sh` (macOS binary installer + launchd agent)
-- `docs/` — design records and runbooks; `EXPLORING.md` is the codebase tour
-- `VERSION.md` — release history (semantic versioning)
+- `cmd/`, `internal/`: Go source. Tests live next to the code they test
+  ([CONTRIBUTING.md](CONTRIBUTING.md) explains why).
+- `web/`: the React dashboard. `web/dist/` is committed and embedded in the
+  binary, so rebuild and commit it with every web change; CI checks it matches.
+- `tests/`: live proof scripts (Python) run against a real instance.
+- `scripts/`: operator tools such as `backup_sqlite.py` and `ezllm-mac.sh`.
+- `docs/`: design records and runbooks. [EXPLORING.md](EXPLORING.md) is the
+  code tour.
 
-The local test suite must always use `-short`; the full suite and performance
-harnesses can choke this machine. CI runs the full suite.
-
-CI: [test.yml](.github/workflows/test.yml) gates
+CI runs [test.yml](.github/workflows/test.yml) before
 [docker-publish.yml](.github/workflows/docker-publish.yml) and
-[release.yml](.github/workflows/release.yml) — a red suite never produces
-an image or a release asset. CI checks that the committed `web/dist/` matches a fresh build; publishers
-embed that bundle. Rebuild and commit it for every web change. Browser verification scripts are
-run separately; they are not part of this CI gate.
+[release.yml](.github/workflows/release.yml), so a failing suite never produces
+an image or release. Claude and Antigravity bridges share a streaming transport
+in `internal/bridgeutil`; moving Codex and Copilot onto it is still to do
+([status](docs/shared-bridge-transport-design.md)).
 
 ## Documentation
 
-| Document | What it holds |
+| Document | Contents |
 |---|---|
-| [docs/install-binary.md](docs/install-binary.md) | running a released binary: platforms, checksum, `config.yaml`, service units, upgrades |
-| [docs/API.md](docs/API.md) | the admin + public API contract |
-| [docs/settings-runbook.md](docs/settings-runbook.md) | settings ownership, live updates, timezones, sessions and diagnostics |
-| [docs/recovery-runbook.md](docs/recovery-runbook.md) | encrypted scheduled backups, offline verification/restore and upgrades |
-| [docs/environment.md](docs/environment.md) | every environment variable and its default; what a new install sets |
-| [docs/master-key-runbook.md](docs/master-key-runbook.md) | at-rest key encryption: paths, backup, rotation |
-| [docs/pricing-runbook.md](docs/pricing-runbook.md) | price catalog: refresh cadence, import, query |
-| [docs/claude-bridge-runbook.md](docs/claude-bridge-runbook.md) | Claude subscription bridge: setup, account, plan windows |
-| [docs/codex-bridge-runbook.md](docs/codex-bridge-runbook.md) | ChatGPT subscription bridge: platform requirements, lockdown, tools, setup |
-| [docs/agy-bridge-runbook.md](docs/agy-bridge-runbook.md) | Antigravity (Google) subscription bridge: keyring-free login, setup, limits |
-| [docs/copilot-cli-bridge-runbook.md](docs/copilot-cli-bridge-runbook.md) | GitHub Copilot CLI bridge: native tools, exact usage, opt-in warm processes |
-| [docs/shared-bridge-transport-design.md](docs/shared-bridge-transport-design.md) | shared streaming transport: Claude/Antigravity implemented; Codex/Copilot migration outstanding |
-| [docs/bridge-update-runbook.md](docs/bridge-update-runbook.md) | bridge CLI auto-update: layout, install, supervised runs, holds and rollback |
-| [VERSION.md](VERSION.md) | release history; what changed on each date |
-| [CHANGELOG.md](CHANGELOG.md) | milestone-tagged change narrative |
-| [EXPLORING.md](EXPLORING.md) | codebase tour: reading order, invariants, landmarks |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | workflow, conventions, known issues |
-| [AGENTS.md](AGENTS.md) | agent/maintainer instructions: hard rules, layout map |
-| [docs/](docs/) | design records and runbooks per subsystem |
+| [docs/install-binary.md](docs/install-binary.md) | Installing a released binary: platforms, checksums, service units, upgrades |
+| [docs/API.md](docs/API.md) | Public and admin API reference |
+| [docs/environment.md](docs/environment.md) | Every environment variable and its default |
+| [docs/settings-runbook.md](docs/settings-runbook.md) | Dashboard settings, timezones, sessions and diagnostics |
+| [docs/recovery-runbook.md](docs/recovery-runbook.md) | Encrypted backups, restore and upgrades |
+| [docs/master-key-runbook.md](docs/master-key-runbook.md) | Key encryption: paths, backup, rotation |
+| [docs/pricing-runbook.md](docs/pricing-runbook.md) | Model price catalog: refresh, import, query |
+| [docs/claude-bridge-runbook.md](docs/claude-bridge-runbook.md) | Claude subscription bridge |
+| [docs/codex-bridge-runbook.md](docs/codex-bridge-runbook.md) | ChatGPT subscription bridge, including model choice for long tool tasks |
+| [docs/copilot-bridge-runbook.md](docs/copilot-bridge-runbook.md) | GitHub Copilot subscription bridge |
+| [docs/agy-bridge-runbook.md](docs/agy-bridge-runbook.md) | Google Antigravity subscription bridge |
+| [docs/bridge-update-runbook.md](docs/bridge-update-runbook.md) | Automatic bridge CLI updates, holds and rollback |
+| [docs/bridge-token-usage-audit.md](docs/bridge-token-usage-audit.md) | Bridge token usage findings and accounting fixes |
+| [VERSION.md](VERSION.md) | Release history |
+| [CHANGELOG.md](CHANGELOG.md) | Detailed change history |
+| [EXPLORING.md](EXPLORING.md) | Code tour: reading order, invariants, landmarks |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Workflow and conventions |
+| [AGENTS.md](AGENTS.md) | Rules for AI agents and maintainers |
+| [docs/](docs/) | All design records and runbooks |
 
 ## License
 

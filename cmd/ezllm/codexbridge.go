@@ -110,6 +110,7 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 	if err != nil {
 		return nil, err
 	}
+	cache := pre.Cache.Enabled
 	token, err := codexBridgeToken(strings.TrimSpace(os.Getenv(envCodexToken)))
 	if err != nil {
 		return nil, err
@@ -122,6 +123,8 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 	qualified := releaseState(bin, pre.Version, codexbridge.QualifiedVersion)
 
 	runner := &codexbridge.Runner{
+		ForkCache:     cache,
+		NativeHistory: pre.NativeHistory,
 		Bin:           resolved,
 		CodexHome:     home,
 		Timeout:       300 * time.Second,
@@ -130,25 +133,31 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 		Logf:          log.Info,
 		Channel:       pre.Channel,
 		Sandbox:       tools.sandbox,
+		SandboxMode:   codexbridge.SandboxModeFromEnv(os.Getenv),
 	}
 	srv := &codexbridge.Server{
-		Runner:   runner,
-		ToolsOff: tools.off,
-		Token:    token,
-		Version:  server.Version,
+		Runner:        runner,
+		RequireCaller: true,
+		ToolsOff:      tools.off,
+		Token:         token,
+		Version:       server.Version,
 		Info: map[string]any{
-			"status":       "ok",
-			"version":      server.Version,
-			"cli_bin":      resolved,
-			"cli_version":  pre.Version,
-			"cli_release":  qualified,
-			"codex_home":   home,
-			"login":        pre.Login,
-			"lockdown":     "verified at boot",
-			"channel":      channelInfo(pre),
-			"concurrency":  concurrency,
-			"landlock":     tools.landlock,
-			"client_tools": tools.status,
+			"status":          "ok",
+			"version":         server.Version,
+			"cli_bin":         resolved,
+			"cli_version":     pre.Version,
+			"cli_release":     qualified,
+			"codex_home":      home,
+			"login":           pre.Login,
+			"lockdown":        "verified at boot",
+			"channel":         channelInfo(pre),
+			"concurrency":     concurrency,
+			"landlock":        tools.landlock,
+			"client_tools":    tools.status,
+			"cache_selection": pre.Cache,
+			"native_history":  pre.NativeHistory,
+			"approval_policy": codexbridge.ApprovalPolicy,
+			"sandbox":         string(codexbridge.SandboxModeFromEnv(os.Getenv)),
 		},
 		Logf: log.Info,
 	}

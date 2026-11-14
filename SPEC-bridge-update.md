@@ -1,6 +1,6 @@
 # SPEC — bridge CLI auto-update
 
-Status: built (v1.6.0, 2026-10-31) — M1 gate, M2 host updater, M3 status in
+Original design status: built (v1.6.0, 2026-10-31) — M1 gate, M2 host updater, M3 status in
 ezllm, M4 push channels. M5 (production: compose mount migration, timer
 install, first nightly run) is the operator's, per docs/bridge-update-runbook.md.
 
@@ -254,3 +254,41 @@ Each milestone ships with in-package tests, `make test-short`, and a version bum
 - Pausing or holding updates from the dashboard (the mount is read-only; holds
   live in the host config).
 - Email delivery.
+
+## 8. Revision — v1.9.0 (2026-11-14)
+
+The current policy and installation steps are in `docs/bridge-update-runbook.md`.
+The original three-bridge design above is historical; the revision retains the
+same Python host process and systemd timer, adding optional Copilot enrollment
+rather than a new updater service.
+
+- `bridge_update.py` `discover_copilot` selects stable official GitHub assets
+  with SHA-256 digests; `stage` retains the release directory. `init_layout`
+  copies the running standalone binary into a versioned root without replacing
+  the original mount. Copilot defaults to disabled until root migration.
+- `gate` uses a private environment file; `gate_with_env` uses the running image
+  ID, actual login mount, production user and network. Unique gate container
+  names allow cleanup even after a Docker-client timeout. `checked_verdict`
+  requires a matching version, successful live tier and requested policy.
+- `bridgecheck.go` `runBridgeCheck` reports effective policy and operational
+  retryability. `liveCodex` carries the sandbox mode and proves continuation;
+  `liveAgy` calls `agybridge.LiveTools` when the experimental adapter is enabled;
+  `liveCopilot` uses the configured warm pool and closes it after qualification.
+- `run` rechecks the window and production configuration before promotion.
+  A durable pending journal precedes symlink changes. A batch commits only after
+  every proof succeeds; any failure or exception restores the whole batch.
+  `rollback_pending` verifies old versions and retains unfinished recovery state.
+  Recovery may restart outside the promotion window, but never starts a new
+  promotion in that recovery run or restarts a replaced container.
+- Operational failures use configurable six-hour backoff instead of permanent
+  release blocks. Known legacy quota blocks migrate automatically; operator
+  holds and compatibility blocks remain. The original three-day soak and
+  02:00–05:00 promotion window are unchanged. Candidate status retains the newest
+  pending version when discovery also encounters the installed version.
+- The supplied service timeout becomes 90 minutes for four gates and proofs.
+  Installed units require an explicit refresh; source edits do not reload them.
+
+Qualification records remain version records and now include the policy used by
+the successful proof. They are not a claim that all models, images, long-context
+requests or client harnesses were tested. The gateway proof remains optional
+when no script/token is configured, and its absence is explicit in the report.

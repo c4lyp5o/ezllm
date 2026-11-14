@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/provider"
 )
 
 // maxBodyBytes caps a request (images arrive inline as data: URLs).
@@ -39,7 +41,8 @@ type Server struct {
 	Now     func() time.Time
 	// ToolsOff, when set, is why client tools are refused on this host
 	// (decision §4.7: no Landlock and no operator override).
-	ToolsOff string
+	ToolsOff      string
+	RequireCaller bool
 
 	mu        sync.Mutex
 	catalog   []Model
@@ -74,6 +77,9 @@ func (s *Server) Handler() http.Handler {
 		}
 		if p, ok := s.Runner.(interface{ ParkedTurns() int }); ok {
 			info["parked_tool_turns"] = p.ParkedTurns()
+		}
+		if p, ok := s.Runner.(interface{ CacheStats() CacheStats }); ok {
+			info["fork_cache"] = p.CacheStats()
 		}
 		writeJSON(w, http.StatusOK, info)
 	})
@@ -197,6 +203,11 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error",
 			"client tools are disabled on this host: "+s.ToolsOff+". See docs/codex-bridge-runbook.md#platform-requirements--read-this-first",
 			"chat_tools_unsupported"))
+		return
+	}
+	req.CallerID = strings.TrimSpace(r.Header.Get(provider.BridgeCallerHeader))
+	if len(req.CallerID) > 128 || (s.RequireCaller && len(req.Tools) > 0 && req.CallerID == "") {
+		writeRaw(w, http.StatusForbidden, ErrorEnvelope("permission_error", "codex-bridge: authenticated caller identity required; use the gateway", "caller_identity_required"))
 		return
 	}
 	if err := s.validate(r.Context(), req); err != nil {

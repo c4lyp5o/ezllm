@@ -1,0 +1,37 @@
+{
+  "health": {
+    "status": "ok",
+    "version": "1.14.1"
+  },
+  "image": "sha256:5ca10b41a93f2db1dd2b05faeb7e9c94082b48760805479201a74ed9e51b1b31",
+  "ports": [
+    {
+      "HostIp": "127.0.0.1",
+      "HostPort": "20129"
+    }
+  ],
+  "auth": {
+    "/admin/accounts": 401,
+    "/v1/models": 401
+  },
+  "networks": [
+    "traefik_default"
+  ],
+  "https_proxy_health": "verified with certificate validation",
+  "dashboard_security_headers": "verified",
+  "bridge_cache_trial": {
+    "codex": {
+      "mode": "auto",
+      "enabled": true,
+      "approval_policy": "never"
+    },
+    "agy": {
+      "experimental_tools": true,
+      "session_cache": true
+    },
+    "copilot": {
+      "warm_pool": true,
+      "session_cache": true
+    }
+  }
+}

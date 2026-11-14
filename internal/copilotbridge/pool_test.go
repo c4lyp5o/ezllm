@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -25,6 +26,7 @@ func TestPoolCLIHelper(t *testing.T) {
 	in := bufio.NewReader(os.Stdin)
 	sid := ""
 	sessions := 0
+	sends := 0
 	tools := 0
 	event := func(kind string, data any) {
 		out(map[string]any{"method": "session.event", "params": map[string]any{"sessionId": sid, "event": map[string]any{"type": kind, "data": data}}})
@@ -78,6 +80,14 @@ func TestPoolCLIHelper(t *testing.T) {
 			}
 			reply(map[string]any{"sessionId": sid})
 		case "session.send":
+			sends++
+			if mode == "cache" && sends == 2 {
+				var prompt string
+				json.Unmarshal(req.Params["prompt"], &prompt)
+				if prompt != "User: next" {
+					os.Exit(9)
+				}
+			}
 			if mode == "image-isolation" {
 				var attachments []ImageAttachment
 				json.Unmarshal(req.Params["attachments"], &attachments)
@@ -100,12 +110,15 @@ func TestPoolCLIHelper(t *testing.T) {
 			if mode == "missing" {
 				sid = ""
 			}
-			if tools > 0 {
+			if tools > 0 && !(mode == "cache-tools" && sends == 1) {
 				var ev map[string]any
 				json.Unmarshal([]byte(evBatch), &ev)
 				event("assistant.message", ev["data"])
 			} else {
 				text := "ok"
+				if mode == "cache-gate" {
+					text = "pong"
+				}
 				if mode == "empty" {
 					text = ""
 				}
@@ -113,6 +126,13 @@ func TestPoolCLIHelper(t *testing.T) {
 				if mode != "nousage" {
 					var ev map[string]any
 					json.Unmarshal([]byte(evUsage), &ev)
+					if strings.HasPrefix(mode, "cache") {
+						count := sends
+						if mode == "cache-reset" && sends > 1 {
+							count = 0
+						}
+						ev["data"] = map[string]any{"totalNanoAiu": 1000 * count, "accountingSnapshot": map[string]any{"totalPremiumRequestCost": count, "tokenDetails": map[string]any{"input": map[string]any{"tokenCount": 10 * count}, "cache_read": map[string]any{"tokenCount": 100 * max(count-1, 0)}, "cache_write": map[string]any{"tokenCount": 90 * min(count, 1)}, "output": map[string]any{"tokenCount": 5 * count}}}}
+					}
 					event("session.usage_checkpoint", ev["data"])
 				}
 				event("session.idle", map[string]any{})
@@ -121,6 +141,9 @@ func TestPoolCLIHelper(t *testing.T) {
 			reply(map[string]any{"success": true})
 			var ev map[string]any
 			json.Unmarshal([]byte(evUsage), &ev)
+			if mode == "cache-tools" {
+				ev["data"] = map[string]any{"totalNanoAiu": 2000, "accountingSnapshot": map[string]any{"totalPremiumRequestCost": 2, "tokenDetails": map[string]any{"input": map[string]any{"tokenCount": 20}, "cache_read": map[string]any{"tokenCount": 100}, "cache_write": map[string]any{"tokenCount": 90}, "output": map[string]any{"tokenCount": 10}}}}
+			}
 			event("session.usage_checkpoint", ev["data"])
 			event("session.idle", map[string]any{})
 		case "session.delete":
@@ -502,5 +525,56 @@ func TestPoolHTTPImageRequestsDoNotLeakAttachmentsIntoNextSession(t *testing.T) 
 	pids, _ := poolCalls(t, path)
 	if len(pids) != 1 {
 		t.Fatal("image isolation not exercised on a reused worker")
+	}
+}
+
+// Reaping a stale idle worker whose session.delete hangs must not hold the
+// pool lock: the next acquisition and every other pool operation keep going.
+func TestPoolReapsStaleWorkerOutsideTheLock(t *testing.T) {
+	r, _ := poolRig(t, "ok")
+	if _, err := r.RunChannel(context.Background(), plainPoolTurn(), nil); err != nil {
+		t.Fatal(err)
+	}
+	r.poolMu.Lock()
+	if len(r.idleWorkers) != 1 {
+		r.poolMu.Unlock()
+		t.Fatalf("idle workers = %d, want 1", len(r.idleWorkers))
+	}
+	stale := r.idleWorkers[0]
+	stale.born = time.Now().Add(-time.Hour)
+	// A channel that never answers: session.delete blocks for deleteTimeout.
+	silent, hold := io.Pipe()
+	t.Cleanup(func() { hold.Close() })
+	stale.conn = &rpcConn{w: io.Discard, r: bufio.NewReader(silent), closeRead: func() { hold.Close() },
+		completed: completedFrom(plainPoolTurn(), Result{Text: "ok"}), session: "retained-session"}
+	r.poolMu.Unlock()
+
+	start := time.Now()
+	w, err := r.takeWorkerFor(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w == stale {
+		t.Fatal("stale worker was handed out")
+	}
+	if took := time.Since(start); took > time.Second {
+		t.Fatalf("takeWorkerFor blocked %v on the stale worker's session.delete", took)
+	}
+	r.retireWorker(w)
+	w.stop()
+}
+
+// A reused worker that cannot delete its previous cached session refuses the
+// turn with a typed, pre-inference failure rather than an anonymous error.
+func TestCachedSessionCleanupFailureIsTypedAndPreInference(t *testing.T) {
+	r, _ := poolRig(t, "negative-delete")
+	r.SessionCache = true
+	if _, err := r.RunChannel(context.Background(), cacheTurn(t, cacheFirst), nil); err != nil {
+		t.Fatal(err)
+	}
+	_, err := r.RunChannel(context.Background(), cacheTurn(t, strings.Replace(cacheNext, "start", "edited", 1)), nil)
+	var f *Failure
+	if !errors.As(err, &f) || f.Code != codeCachedSessionCleanup || !f.BeforeInference {
+		t.Fatalf("cleanup failure = %#v, want a typed pre-inference %s failure", err, codeCachedSessionCleanup)
 	}
 }

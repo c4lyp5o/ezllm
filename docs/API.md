@@ -99,8 +99,52 @@ uses native in-memory attachments and never falls back to a text-only request.
 Input validation returns `400 invalid_request`; unverified/non-vision models
 return `400 vision_unsupported`, and advertised model-limit refusals return
 `400 invalid_image`, all in the existing OpenAI error envelope.
-See [the Copilot runbook](copilot-cli-bridge-runbook.md) for tested limits and
-behavior. Antigravity's current headless bridge remains text-only.
+See [the Copilot runbook](copilot-bridge-runbook.md) for tested limits and
+behavior. Antigravity continues to reject image input.
+
+AGY tool-adapter conversation caching is an operator opt-in. Clients continue
+sending full history, including assistant call IDs and complete tool-result
+groups; no native session field is added. Usage is per request, with native
+cold input plus cache reads converted to inclusive OpenAI prompt totals. See
+[the AGY cache design](agy-conversation-cache-design.md).
+
+Copilot completed-conversation reuse is an operator opt-in documented in the
+runbook. Clients keep sending full history; no session ID or new request field
+is required. Usage remains per request, including cache-write and reasoning
+breakdowns. Images and active tool-result continuations use fresh sessions.
+
+### Antigravity experimental caller tools
+
+With `EZLLM_AGY_EXPERIMENTAL_TOOLS=on`, the Antigravity bridge accepts OpenAI
+function `tools`, assistant `tool_calls` and matching `tool` messages. It uses
+the CLI's structured-output mode rather than native client-tool registration.
+Tools execute in the calling harness. Every request starts a fresh process and
+replays the supplied transcript, so clients must include prior calls and their
+results; an orphaned, duplicate or incomplete result group returns `400
+invalid_request` before inference.
+
+`tool_choice` supports `auto`, `none`, `required`, or a named function object;
+`parallel_tool_calls=false` limits output to one call. Up to 128 function tools
+are accepted, with inline parameter schemas declaring `type: object`; `$ref`
+schemas, legacy `functions`, images, and a simultaneous non-text
+`response_format` are refused. Argument schemas are passed to the CLI for
+structured-output validation; ezllm independently checks the envelope, declared
+names, JSON object arguments, tool choice and call limits. The caller remains
+responsible for validating and authorizing execution.
+
+A call response uses normal OpenAI `tool_calls`, bridge-generated call IDs,
+JSON-encoded function arguments and `finish_reason: tool_calls`. A final answer
+uses `finish_reason: stop`. Streaming requests receive a complete validated
+content or tool-call delta, the finish event, optional usage and `[DONE]`;
+raw envelope text is never streamed. The envelope limit is 1 MiB and the call
+limit is 16 per turn. Invalid output or a reported native agent tool step other than the CLI's
+structured-output `finish` submission returns `502 invalid_tool_output` before response commitment, allowing existing
+retry/failover policy to apply. With the option off, client tools remain
+`400 chat_tools_unsupported`.
+
+This is experimental model-mediated tool selection. It does not add ACP, MCP,
+a sidecar or retained sessions; model compliance can vary. See the
+[Antigravity runbook](agy-bridge-runbook.md#experimental-caller-tools).
 
 ## M3 — accounts, keys, models, quota
 

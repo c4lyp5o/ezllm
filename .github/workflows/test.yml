@@ -60,6 +60,9 @@ jobs:
       - name: 🩺 go vet
         run: go vet ./...
 
+      - name: Go vulnerability check
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
       - name: 🧪 go test
         env:
           GOMEMLIMIT: 3GiB

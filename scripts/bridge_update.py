@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unattended bridge CLI updates for claude-bridge, codex-bridge and agy-bridge.
+"""Unattended bridge CLI updates for Claude, Codex, Antigravity and Copilot bridges.
 
 Design: SPEC-bridge-update.md §4.4. Runs on the host (systemd timer, hourly):
 
@@ -38,6 +38,7 @@ DEFAULT_CONFIG = {
     "window": "02:00-05:00",
     "soak_days": 3,
     "keep": 3,
+    "retry_hours": 6,
     "container": "ezllm",
     "healthz_url": "http://127.0.0.1:20129/healthz",
     "gateway_url": "http://127.0.0.1:20129",
@@ -49,6 +50,7 @@ DEFAULT_CONFIG = {
         "claude": {"enabled": True, "channel": "stable", "hold": []},
         "codex": {"enabled": True, "hold": []},
         "agy": {"enabled": True, "hold": []},
+        "copilot": {"enabled": False, "hold": []},
     },
 }
 
@@ -61,15 +63,24 @@ BRIDGES = {
               "mount": "/opt/codex-bridge", "login_mount": "/codex-sub", "bin": "bin/codex"},
     "agy": {"root": "~/.local/share/agy-bridge", "login": "~/.agy-sub",
             "mount": "/opt/agy-bridge", "login_mount": "/agy-sub", "bin": "agy"},
+    "copilot": {"root": "~/.local/share/copilot-bridge", "login": "~/.copilot-sub",
+                "mount": "/opt/copilot-bridge", "login_mount": "/copilot-sub", "bin": "copilot"},
 }
 
 # Container environment the gate copies from production: what the bridges read
 # besides their paths. Values are never logged.
-GATE_ENV = ["USER", "LOGNAME", "TZ", "SSL_CERT_FILE", "EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK"]
+GATE_ENV = ["USER", "LOGNAME", "TZ", "SSL_CERT_FILE", "SSL_CERT_DIR",
+            "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY",
+            "http_proxy", "https_proxy", "no_proxy", "all_proxy",
+            "EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK", "EZLLM_CODEX_SANDBOX", "EZLLM_CODEX_BRIDGE_CACHE",
+            "EZLLM_AGY_EXPERIMENTAL_TOOLS", "EZLLM_AGY_BRIDGE_SESSION_CACHE", "EZLLM_COPILOT_BRIDGE_WARM_POOL",
+            "EZLLM_COPILOT_BRIDGE_SESSION_CACHE"]
 
 CLAUDE_BASE = "https://downloads.claude.ai/claude-code-releases"
 CODEX_RELEASES = "https://api.github.com/repos/openai/codex/releases?per_page=30"
 CODEX_ASSET = "codex-package-x86_64-unknown-linux-musl.tar.gz"
+COPILOT_RELEASES = "https://api.github.com/repos/github/copilot-cli/releases?per_page=30"
+COPILOT_ASSET = "copilot-linux-x64.tar.gz"
 AGY_MANIFEST = "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_amd64.json"
 
 
@@ -135,12 +146,33 @@ def discover_agy():
              "url": m["url"], "algo": "sha512", "digest": m["sha512"], "size": None}]
 
 
+def discover_copilot():
+    found = []
+    for rel in http_json(COPILOT_RELEASES):
+        version = rel.get("tag_name", "").removeprefix("v")
+        if rel.get("prerelease") or rel.get("draft") or not VERSION_RE.fullmatch(version):
+            continue
+        asset = next((a for a in rel.get("assets", []) if a.get("name") == COPILOT_ASSET), None)
+        if not asset or not str(asset.get("digest", "")).startswith("sha256:"):
+            continue
+        found.append({"version": version, "published": rel.get("published_at"), "kind": "copilot-tarball",
+                      "url": asset["browser_download_url"], "algo": "sha256",
+                      "digest": asset["digest"].removeprefix("sha256:"), "size": asset.get("size")})
+    if not found:
+        raise ValueError("no stable copilot release carries a verified " + COPILOT_ASSET)
+    return sorted(found, key=lambda r: vtuple(r["version"]), reverse=True)
+
+
 def discover(name, bcfg):
     if name == "claude":
         return discover_claude(bcfg.get("channel", "stable"))
     if name == "codex":
         return discover_codex()
-    return discover_agy()
+    if name == "agy":
+        return discover_agy()
+    if name == "copilot":
+        return discover_copilot()
+    raise ValueError("unknown bridge")
 
 
 # ── candidate selection ──────────────────────────────────────────────────────
@@ -209,8 +241,15 @@ def write_json_atomic(path, data):
     with os.fdopen(fd, "w") as f:
         json.dump(data, f, indent=2)
         f.write("\n")
+        f.flush()
+        os.fsync(f.fileno())
     os.chmod(tmp, 0o644)
     os.replace(tmp, path)
+    fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 # ── staging ──────────────────────────────────────────────────────────────────
@@ -234,6 +273,7 @@ def stage(name, release, root):
     if final.exists():
         if not binary.is_file():
             raise ValueError(f"{final} exists without {BRIDGES[name]['bin']}: remove it to restage")
+        set_writable(final, False)
         return final
     work = Path(tempfile.mkdtemp(dir=root, prefix=f".staging-{v}-"))
     try:
@@ -248,7 +288,16 @@ def stage(name, release, root):
                 member = t.getmember("antigravity")
                 t.extract(member, work / "x", filter="data")
             (work / "x" / "antigravity").rename(out / "agy")
-        else:
+        elif release["kind"] == "copilot-tarball":
+            with tarfile.open(payload) as t:
+                t.extractall(work / "x", filter="data")
+            found = [p for p in (work / "x").glob("**/copilot") if p.is_file() and not p.is_symlink()
+                     and len(p.relative_to(work / "x").parts) <= 2]
+            if len(found) != 1:
+                raise ValueError("copilot tarball has no single release directory containing copilot")
+            out.rmdir()
+            found[0].parent.rename(out)
+        elif release["kind"] == "codex-package":
             with tarfile.open(payload) as t:
                 t.extractall(work / "x", filter="data")
             # The package is the release folder (bin/codex and the code-mode
@@ -258,6 +307,8 @@ def stage(name, release, root):
                 raise ValueError("codex package has no single release folder with bin/codex and bin/codex-code-mode-host")
             out.rmdir()
             found[0].rename(out)
+        else:
+            raise ValueError("unknown release payload kind")
         (out / BRIDGES[name]["bin"]).chmod(0o755)
         # Moving a directory rewrites its `..` entry, so it is made read-only
         # only once it is in place.
@@ -319,28 +370,113 @@ def parse_verdict(out):
     raise ValueError("bridge-check printed no verdict")
 
 
+def checked_verdict(result, name, live, version=None, policy=None):
+    verdict = parse_verdict(result.stdout)
+    if (verdict.get("bridge") != name or not isinstance(verdict.get("ok"), bool)
+            or not isinstance(verdict.get("problems"), list)
+            or not all(isinstance(p, str) for p in verdict["problems"])):
+        raise ValueError("bridge-check returned an invalid verdict")
+    if verdict["ok"] and (result.returncode != 0 or verdict.get("live") is not live
+                          or verdict["problems"] or not VERSION_RE.fullmatch(verdict.get("version", ""))
+                          or version is not None and verdict["version"] != version):
+        raise ValueError("bridge-check did not prove the requested CLI version and live tier")
+    if verdict["ok"] and live and policy and any(verdict.get("policy", {}).get(k) != value for k, value in policy.items()):
+        raise ValueError("bridge-check did not prove the configured bridge policy; deploy the updated gate binary")
+    return verdict
+
+
+def model_args(bcfg):
+    args = []
+    for key, flag in (("model", "--model"), ("tool_model", "--tool-model")):
+        if bcfg.get(key):
+            args += [flag, bcfg[key]]
+    return args
+
+
+def gate_policy(name, info):
+    env = container_env(info, GATE_ENV)
+    if name == "codex":
+        mode = "workspace-write" if env.get("EZLLM_CODEX_SANDBOX", "").strip().lower() == "writable" else "read-only"
+        cache = env.get("EZLLM_CODEX_BRIDGE_CACHE", "").strip().lower() or "auto"
+        if cache not in ("auto", "on", "off"):
+            raise ValueError("EZLLM_CODEX_BRIDGE_CACHE must be auto, on or off")
+        return {"sandbox": mode, "approval_policy": "never", "history": "native-if-supported-v1", "cache": "ephemeral-forks" if cache == "on" else cache}
+    if name == "agy":
+        policy = {"caller_tools": "structured-output" if env.get("EZLLM_AGY_EXPERIMENTAL_TOOLS", "").strip().lower() == "on" else "off"}
+        if env.get("EZLLM_AGY_BRIDGE_SESSION_CACHE", "").strip().lower() in ("on", "true", "1"):
+            policy["session_cache"] = "conversation-resume"
+        return policy
+    if name == "copilot":
+        warm = env.get("EZLLM_COPILOT_BRIDGE_WARM_POOL", "").strip().lower() in ("on", "true", "1")
+        policy = {"warm_pool": "on" if warm else "off"}
+        if env.get("EZLLM_COPILOT_BRIDGE_SESSION_CACHE", "").strip().lower() in ("on", "true", "1"):
+            policy["session_cache"] = "completed-prefix"
+        return policy
+    return {}
+
+
+LOGIN_ENV = {"claude": "EZLLM_CLAUDE_CONFIG_DIR", "codex": "EZLLM_CODEX_HOME",
+             "agy": "EZLLM_AGY_HOME", "copilot": "EZLLM_COPILOT_HOME"}
+
+
+def production_home(name, info):
+    return container_env(info, [LOGIN_ENV[name]]).get(LOGIN_ENV[name], "").strip() or BRIDGES[name]["login_mount"]
+
+
+def login_source(name, info):
+    dest = Path(production_home(name, info))
+    covering = [m for m in info["Mounts"] if dest == Path(m["Destination"]) or Path(m["Destination"]) in dest.parents]
+    if not covering:
+        raise ValueError("production bridge login is not mounted; cannot qualify with the same login")
+    mount = max(covering, key=lambda m: len(Path(m["Destination"]).parts))
+    return Path(mount["Source"]) / dest.relative_to(mount["Destination"])
+
+
 def gate(name, verdir, info, cfg):
+    # Proxy URLs can contain credentials. Keep copied environment values out of
+    # process argv and remove the private file after both helper invocations.
+    env = container_env(info, GATE_ENV)
+    if name == "copilot":
+        env["XDG_CACHE_HOME"] = "/tmp/copilot-gate-cache"
+    with tempfile.NamedTemporaryFile(mode="w", prefix=".ezllm-bridge-gate-") as f:
+        for key, value in env.items():
+            if "\n" in value or "\r" in value:
+                raise ValueError("multiline gate environment is unsupported")
+            f.write(key + "=" + value + "\n")
+        f.flush()
+        return gate_with_env(name, verdir, info, cfg, f.name)
+
+
+def gate_with_env(name, verdir, info, cfg, env_file):
     """bridge-check --live in a throwaway container: production's image, user
     and bridge env, the staged CLI read-only, the shared login read-write."""
     b = BRIDGES[name]
     entry = info["Config"]["Entrypoint"][0]
-    args = ["run", "--rm", "--user", info["Config"]["User"] or "1000:1000",
-            "-v", f"{verdir}:/opt/candidate:ro", "-v", f"{Path(b['login']).expanduser()}:{b['login_mount']}"]
-    for k, v in container_env(info, GATE_ENV).items():
-        args += ["-e", f"{k}={v}"]
+    gate_name = f"ezllm-gate-{name}-{os.getpid()}-{os.urandom(4).hex()}"
+    args = ["run", "--rm", "--name", gate_name, "--user", info["Config"]["User"] or "0:0",
+            "-v", f"{verdir}:/opt/candidate:ro", "-v", f"{login_source(name, info)}:{b['login_mount']}",
+            "--env-file", env_file]
+    network = info.get("HostConfig", {}).get("NetworkMode")
+    if network:
+        args += ["--network", network]
     if cfg["gate_binary"]:
         args += ["-v", f"{Path(cfg['gate_binary']).expanduser()}:/opt/ezllm-gate:ro"]
         entry = "/opt/ezllm-gate"
-    args += ["--entrypoint", entry, info["Config"]["Image"]]
+    args += ["--entrypoint", entry, info.get("Image", info["Config"]["Image"])]
     probe = ["docker", *args]
-    if not knows_bridge_check(probe):
-        raise RuntimeError("the gate image predates bridge-check (ezllm 1.6.0); set gate_binary or deploy 1.6.0")
-    r = docker(*args, "bridge-check", name, "--bin", f"/opt/candidate/{b['bin']}",
-               "--home", b["login_mount"], "--live", "--json", check=False)
-    return parse_verdict(r.stdout)
+    try:
+        if not knows_bridge_check(probe):
+            raise RuntimeError("the gate image predates bridge-check (ezllm 1.6.0); set gate_binary or deploy the updated image")
+        r = docker(*args, "bridge-check", name, "--bin", f"/opt/candidate/{b['bin']}",
+                   "--home", b["login_mount"], *model_args(cfg["bridges"][name]), "--live", "--json", check=False)
+        return checked_verdict(r, name, live=True, version=verdir.name, policy=gate_policy(name, info))
+    finally:
+        # A timed-out docker client does not stop its container. Remove only
+        # this invocation's unique gate; --rm may already have removed it.
+        docker("rm", "-f", gate_name, timeout=30, check=False)
 
 
-def prod_check(name, info, live=True):
+def prod_check(name, info, live=True, bcfg=None):
     """bridge-check inside the running container: its real mounts, env and
     user, through the promoted `current` path."""
     entry = info["Config"]["Entrypoint"][0]
@@ -348,8 +484,10 @@ def prod_check(name, info, live=True):
     args = ["exec", info["Name"].lstrip("/"), entry, "bridge-check", name, "--bin", f"{b['mount']}/current/{b['bin']}"]
     if live:
         args.append("--live")
+        args += model_args(bcfg or {})
+    args += ["--home", production_home(name, info)]
     r = docker(*args, "--json", check=False)
-    return parse_verdict(r.stdout)
+    return checked_verdict(r, name, live=live, policy=gate_policy(name, info))
 
 
 def restart_and_wait(cfg, info):
@@ -397,6 +535,25 @@ def load_config(path):
         for name, b in user.pop("bridges", {}).items():
             cfg["bridges"].setdefault(name, {}).update(b)
         cfg.update(user)
+    if set(cfg["bridges"]) - set(BRIDGES):
+        raise ValueError("unknown bridge in updater configuration")
+    if not isinstance(cfg["keep"], int) or cfg["keep"] < 2:
+        raise ValueError("keep must be an integer of at least 2")
+    for key in ("soak_days", "retry_hours"):
+        if not isinstance(cfg[key], (int, float)) or isinstance(cfg[key], bool) or cfg[key] < 0:
+            raise ValueError(key + " must be nonnegative")
+    for name, bridge in cfg["bridges"].items():
+        if not isinstance(bridge.get("enabled"), bool):
+            raise ValueError(name + " enabled must be a boolean")
+        holds = bridge.get("hold", [])
+        if not isinstance(holds, list) or not all(isinstance(v, str) and VERSION_RE.fullmatch(v) for v in holds):
+            raise ValueError(name + " hold must be a list of versions")
+        for key in ("model", "tool_model"):
+            if key in bridge and (not isinstance(bridge[key], str) or not bridge[key].strip()):
+                raise ValueError(name + " " + key + " must be a nonempty model ID")
+    if cfg["bridges"]["claude"].get("channel", "stable") not in ("stable", "latest"):
+        raise ValueError("claude channel must be stable or latest")
+    in_window(cfg["window"], now())
     return cfg
 
 
@@ -407,11 +564,11 @@ def status(root, name, **fields):
         f"candidate={fields.get('candidate') or '-'} {fields.get('detail', '')}".rstrip())
 
 
-def record_qualified(root, version, check, proof):
+def record_qualified(root, version, check, proof, policy=None):
     path = root / "qualified.json"
     rec = json.loads(path.read_text()) if path.is_file() else {"versions": {}}
     rec.setdefault("versions", {})[version] = {"qualified_at": now().isoformat(timespec="seconds"),
-                                               "check": check, "proof": proof}
+                                               "check": check, "proof": proof, "policy": policy or {}}
     write_json_atomic(path, rec)
 
 
@@ -420,12 +577,27 @@ def run(args):
     state_path = Path(cfg["state_file"]).expanduser()
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state = json.loads(state_path.read_text()) if state_path.is_file() else {}
-    for k in ("first_seen", "blocked", "promoted_at"):
+    for k in ("first_seen", "blocked", "promoted_at", "retry_after"):
         state.setdefault(k, {})
     at = now()
     repo = Path(__file__).resolve().parent.parent
     window = args.force_window or in_window(cfg["window"], at)
     names = [args.bridge] if args.bridge else [n for n, b in cfg["bridges"].items() if b.get("enabled")]
+
+    if state.get("pending"):
+        if args.dry_run:
+            log("unfinished promotion needs recovery; dry run will not alter it")
+            return 2
+        info = inspect(cfg["container"])
+        return 0 if rollback_pending(cfg, info, state, state_path, "interrupted promotion recovery") else 2
+
+    # Old updater versions permanently blocked quota failures. Release only
+    # known operational refusals, retaining compatibility blocks and holds.
+    for name, blocked in state["blocked"].items():
+        for version, reason in list(blocked.items()):
+            if operational_failure({"problems": [reason]}):
+                del blocked[version]
+                state["retry_after"].setdefault(name, {})[version] = (at + dt.timedelta(hours=cfg["retry_hours"])).isoformat()
 
     candidates = {}
     for name in names:
@@ -444,10 +616,15 @@ def run(args):
         for r in releases:
             seen = state["first_seen"].setdefault(name, {}).setdefault(r["version"], at.isoformat(timespec="seconds"))
             rv, rwhy = pick_candidate(r, cur, cfg["bridges"][name], state["blocked"].get(name, {}), seen, cfg["soak_days"], at)
+            retry_at = state["retry_after"].get(name, {}).get(r["version"])
+            if rv and retry_at and at < dt.datetime.fromisoformat(retry_at):
+                rv, rwhy = None, f"{r['version']} operational retry after {retry_at}"
             if r is releases[0]:
                 why = rwhy
-            if rv or rwhy == "up_to_date":
+            if rv:
                 rel, v = r, rv
+                break
+            if rwhy == "up_to_date":
                 break
         last = state["promoted_at"].get(name)
         if v and last and at - dt.datetime.fromisoformat(last) < dt.timedelta(hours=12):
@@ -475,12 +652,18 @@ def run(args):
             verdir = stage(name, rel, root)
             verdict = gate(name, verdir, info, cfg)
         except Exception as e:
+            state["retry_after"].setdefault(name, {})[v] = (now() + dt.timedelta(hours=cfg["retry_hours"])).isoformat()
             status(root, name, result="error", current=cur, candidate=v, detail=f"stage/gate: {e}"[:300])
             continue
         if not verdict.get("ok"):
             reason = "; ".join(verdict.get("problems", []))[:300]
-            state["blocked"].setdefault(name, {})[v] = reason
-            status(root, name, result="blocked", current=cur, candidate=v, detail=reason)
+            retry = operational_failure(verdict)
+            if retry:
+                state["retry_after"].setdefault(name, {})[v] = (now() + dt.timedelta(hours=cfg["retry_hours"])).isoformat()
+            else:
+                state["blocked"].setdefault(name, {})[v] = reason
+            status(root, name, result="waiting" if retry else "blocked", current=cur, candidate=v,
+                   detail=("operational failure; will retry: " if retry else "") + reason)
             continue
         if args.dry_run:
             status(root, name, result="waiting", current=cur, candidate=v, detail="dry run: staged and gated ok")
@@ -496,37 +679,143 @@ def run(args):
                    detail="production ezllm predates bridge-check (1.6.0): cannot prove a promotion")
         return 0
 
-    for name, (root, cur, v) in passed.items():
-        swap_current(root, v)
-    healthy = restart_and_wait(cfg, info)
-    failed = []
-    for name, (root, cur, v) in passed.items():
-        verdict = prod_check(name, info) if healthy else {"ok": False, "problems": ["ezllm did not come back healthy"]}
-        ok, proof = (proof_script(name, cfg, repo) if verdict.get("ok") else (False, "; ".join(verdict["problems"])[:300]))
-        if ok:
-            record_qualified(root, v, "live", proof)
-            state["promoted_at"][name] = at.isoformat(timespec="seconds")
-            status(root, name, result="updated", current=v, previous=cur, candidate=v, detail=proof)
-        else:
-            swap_current(root, cur)
-            state["blocked"].setdefault(name, {})[v] = "failed after promotion: " + proof
-            failed.append((name, root, cur, v, proof))
+    # Gates can span the end of the window. Recheck before any symlink change.
+    if not args.force_window and not in_window(cfg["window"], now()):
+        for name, (root, cur, v) in passed.items():
+            status(root, name, result="waiting", current=cur, candidate=v,
+                   detail="gate passed after the update window closed; promotion deferred")
+        return 0
+    fresh = inspect(cfg["container"])
+    if (fresh.get("Id"), fresh.get("Image"), fresh["Config"], fresh["Mounts"], fresh.get("HostConfig", {}).get("NetworkMode")) != (info.get("Id"), info.get("Image"), info["Config"], info["Mounts"], info.get("HostConfig", {}).get("NetworkMode")):
+        for name, (root, cur, v) in passed.items():
+            status(root, name, result="error", current=cur, candidate=v,
+                   detail="production changed during qualification; run again against the current container")
+        return 0
+    state["pending"] = {name: {"previous": cur, "candidate": v} for name, (_, cur, v) in passed.items()}
+    state["pending_container"] = info.get("Id")
     write_json_atomic(state_path, state)
-
-    if failed:
-        healthy = restart_and_wait(cfg, info)
-        for name, root, cur, v, proof in failed:
-            back = prod_check(name, info, live=False) if healthy else {"ok": False}
-            detail = f"{v} failed ({proof}); back on {cur}" + ("" if back.get("ok") else ", which does not pass either")
-            status(root, name, result="rolled_back", current=cur, previous=v, candidate=v, detail=detail[:300])
-        if not healthy:
-            notify_fallback(cfg, "ezllm down after bridge rollback",
-                            "ezllm did not come back healthy after rolling back " + ", ".join(f[0] for f in failed))
-            return 2
+    proofs, policies, failures = {}, {}, {}
+    phase = "symlink promotion"
+    try:
+        for name, (root, cur, v) in passed.items():
+            swap_current(root, v)
+        phase = "promotion restart"
+        if not restart_and_wait(cfg, info):
+            raise RuntimeError("ezllm did not come back healthy after promotion")
+        for name, (root, cur, v) in passed.items():
+            phase = "post-promotion check " + name
+            verdict = prod_check(name, info, bcfg=cfg["bridges"][name])
+            if verdict.get("ok"):
+                policies[name] = verdict.get("policy", {})
+                if verdict.get("version", v) != v:
+                    raise RuntimeError("post-promotion proof reported the wrong version")
+                phase = "gateway proof " + name
+                ok, proof = proof_script(name, cfg, repo)
+                if not ok:
+                    failures[name] = {"problems": [proof], "retryable": True}
+            else:
+                failures[name] = verdict
+                proof = "; ".join(verdict.get("problems", []))[:300]
+            proofs[name] = proof
+        if failures:
+            for name, verdict in failures.items():
+                v = passed[name][2]
+                reason = "; ".join(verdict.get("problems", []))[:300]
+                if operational_failure(verdict):
+                    state["retry_after"].setdefault(name, {})[v] = (now() + dt.timedelta(hours=cfg["retry_hours"])).isoformat()
+                else:
+                    state["blocked"].setdefault(name, {})[v] = "failed after promotion: " + reason
+            write_json_atomic(state_path, state)
+            detail = "post-promotion proof failed: " + "; ".join(f"{name}: {proofs[name]}" for name in failures)
+            return 0 if rollback_pending(cfg, info, state, state_path, detail) else 2
+        for name, (root, cur, v) in passed.items():
+            phase = "qualification record " + name
+            record_qualified(root, v, "live", proofs[name], policy=policies[name])
+        committed = json.loads(json.dumps(state))
+        for name, (root, cur, v) in passed.items():
+            committed["promoted_at"][name] = now().isoformat(timespec="seconds")
+        del committed["pending"]
+        committed.pop("pending_container", None)
+        phase = "transaction commit"
+        write_json_atomic(state_path, committed)
+        state = committed
+    except Exception as e:
+        # Verdict JSON, docker, proof timeouts and metadata writes can all fail
+        # after current has changed. Preserve the recovery journal until every
+        # previous version is restored and checked.
+        detail = phase + " interrupted: " + type(e).__name__
+        return 0 if rollback_pending(cfg, info, state, state_path, detail) else 2
 
     for name, (root, cur, v) in passed.items():
-        prune(root, cfg["keep"], {current_version(root), cur, v})
+        status(root, name, result="updated", current=v, previous=cur, candidate=v, detail=proofs[name])
+        prune(root, cfg["keep"], {current_version(root), cur})
     return 0
+
+
+# A typed new verdict is authoritative; the fallback supports older deployed
+# ezllm binaries and migration of quota blocks written by the old updater.
+OPERATIONAL_MARKERS = ("status 429", "status 502", "status 503", "status 504", "http 429", "http 502", "http 503", "http 504", "upstream 503", "bad gateway", "gateway timeout", "overloaded", "rate limit", "rate_limit", "too many requests", "session limit", "usage limit", "quota",
+                       "temporarily unavailable", "service unavailable", "timeout", "timed out", "deadline exceeded",
+                       "connection reset", "connection refused", "unexpected eof", "unauthorized", "logged-out",
+                       "not logged in", "token expired", "login expired", "authentication", "no github oauth token")
+
+
+def operational_failure(verdict):
+    if isinstance(verdict.get("retryable"), bool):
+        return verdict["retryable"]
+    problems = verdict.get("problems", [])
+    return bool(problems) and all(any(m in p.lower() for m in OPERATIONAL_MARKERS) for p in problems)
+
+
+def rollback_pending(cfg, info, state, state_path, reason):
+    pending = dict(state["pending"])
+    try:
+        if state.get("pending_container") and state["pending_container"] != info.get("Id"):
+            raise ValueError("production container changed since promotion")
+        for name, versions in pending.items():
+            if name not in BRIDGES or not VERSION_RE.fullmatch(versions["previous"]) or not VERSION_RE.fullmatch(versions["candidate"]):
+                raise ValueError("invalid rollback journal")
+            root = Path(BRIDGES[name]["root"]).expanduser()
+            if not mounts_root(info, name):
+                raise ValueError("rollback bridge root is no longer mounted")
+            if not (root / versions["previous"] / BRIDGES[name]["bin"]).is_file():
+                raise ValueError("previous bridge binary is missing")
+            swap_current(root, versions["previous"])
+        if not restart_and_wait(cfg, info):
+            raise RuntimeError("rollback restart did not become healthy")
+        for name, versions in pending.items():
+            verdict = prod_check(name, info, live=False)
+            if not verdict.get("ok") or verdict.get("version", versions["previous"]) != versions["previous"]:
+                raise RuntimeError("previous bridge did not pass its static check")
+        recovered = json.loads(json.dumps(state))
+        for name, versions in pending.items():
+            recovered.setdefault("retry_after", {}).setdefault(name, {})[versions["candidate"]] = (now() + dt.timedelta(hours=cfg["retry_hours"])).isoformat()
+        del recovered["pending"]
+        recovered.pop("pending_container", None)
+        write_json_atomic(state_path, recovered)
+        state.clear()
+        state.update(recovered)
+        for name, versions in pending.items():
+            status(Path(BRIDGES[name]["root"]).expanduser(), name, result="rolled_back",
+                   current=versions["previous"], previous=versions["candidate"], candidate=versions["candidate"],
+                   detail=(reason + "; restored previous version")[:300])
+        return True
+    except Exception as e:
+        state["pending"] = pending
+        try:
+            write_json_atomic(state_path, state)
+        except OSError:
+            pass  # The pre-promotion journal is already durable.
+        for name, versions in pending.items():
+            if name in BRIDGES:
+                try:
+                    status(Path(BRIDGES[name]["root"]).expanduser(), name, result="error",
+                           current=current_version(Path(BRIDGES[name]["root"]).expanduser()), candidate=versions["candidate"],
+                           detail="rollback incomplete; recovery journal retained (" + type(e).__name__ + ")")
+                except OSError:
+                    pass
+        notify_fallback(cfg, "ezllm bridge rollback incomplete", "Automatic bridge rollback needs operator attention")
+        return False
 
 
 def init_layout(args):
@@ -535,7 +824,7 @@ def init_layout(args):
     cfg = load_config(Path(args.config).expanduser())
     info = inspect(cfg["container"])
     by_dest = {m["Destination"]: Path(m["Source"]) for m in info["Mounts"]}
-    legacy = {"claude": "/opt/claude/claude", "codex": "/opt/codex", "agy": "/opt/agy/agy"}
+    legacy = {"claude": "/opt/claude/claude", "codex": "/opt/codex", "agy": "/opt/agy/agy", "copilot": "/opt/copilot/copilot"}
     for name in ([args.bridge] if args.bridge else BRIDGES):
         root = Path(BRIDGES[name]["root"]).expanduser()
         if current_version(root):
@@ -550,14 +839,21 @@ def init_layout(args):
         # when run from a writable folder.
         m = re.search(r"\d+\.\d+\.\d+", src.name if name == "claude" else
                       (src.name if name == "codex" else src.parent.name))
+        if not m and name == "copilot":
+            result = docker("exec", cfg["container"], legacy[name], "--no-auto-update", "--version", timeout=60)
+            m = re.search(r"\b\d+\.\d+\.\d+\b", result.stdout)
         if not m:
             log(f"{name}: no version in the mounted path {src}; skipped")
             continue
         v = m.group(0)
         verdir = root / v
-        if name == "claude" and not verdir.exists():
-            verdir.mkdir()
-            shutil.copy2(src, verdir / "claude")
+        if not verdir.exists():
+            root.mkdir(parents=True, exist_ok=True)
+            if src.is_dir():
+                shutil.copytree(src, verdir, symlinks=False)
+            else:
+                verdir.mkdir()
+                shutil.copy2(src, verdir / BRIDGES[name]["bin"])
         if not (verdir / BRIDGES[name]["bin"]).is_file():
             log(f"{name}: {verdir / BRIDGES[name]['bin']} missing; skipped")
             continue

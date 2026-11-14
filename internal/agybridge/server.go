@@ -18,13 +18,14 @@ const maxBodyBytes = 32 << 20
 
 // Server exposes OpenAI Chat Completions over the CLI. Only ezllm dials it.
 type Server struct {
-	Runner  Executor
-	Token   string
-	Version string
-	Models  []Model // the login's catalog from boot (`agy models`)
-	Info    map[string]any
-	Logf    func(format string, args ...any)
-	Now     func() time.Time
+	ExperimentalTools bool
+	Runner            Executor
+	Token             string
+	Version           string
+	Models            []Model // the login's catalog from boot (`agy models`)
+	Info              map[string]any
+	Logf              func(format string, args ...any)
+	Now               func() time.Time
 }
 
 func (s *Server) logf(format string, args ...any) {
@@ -48,7 +49,14 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "version": s.Version})
 	})
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, s.Info)
+		info := make(map[string]any, len(s.Info)+1)
+		for k, v := range s.Info {
+			info[k] = v
+		}
+		if cache, ok := s.Runner.(interface{ CacheStats() map[string]any }); ok {
+			info["runtime"] = map[string]any{"conversation_cache": cache.CacheStats()}
+		}
+		writeJSON(w, http.StatusOK, info)
 	})
 	mux.HandleFunc("GET /v1/models", s.authed(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": s.Models})
@@ -87,7 +95,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		writeRaw(w, http.StatusRequestEntityTooLarge, ErrorEnvelope("invalid_request_error", "agy-bridge: request body too large", "invalid_request"))
 		return
 	}
-	req, err := ParseRequest(body)
+	req, err := parseRequest(body, s.ExperimentalTools)
 	if err != nil {
 		code := "invalid_request"
 		var u Unsupported
@@ -108,12 +116,17 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Adapter != nil {
+		s.adaptedChat(w, r, req)
+		return
+	}
+
 	id := "chatcmpl-" + randomHex(12)
 	created := s.now().Unix()
 	if !req.Stream {
 		res, err := s.Runner.Run(r.Context(), req, nil)
 		if err != nil {
-			s.writeErr(w, err)
+			s.writeRunErr(w, err, res.Usage)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -132,7 +145,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if !sw.started {
 			// Nothing reached the client yet: the failure keeps its real status.
-			s.writeErr(w, err)
+			s.writeRunErr(w, err, res.Usage)
 			return
 		}
 		ne := asNative(err)
@@ -151,12 +164,12 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 }
 
 // openAIUsage maps the result envelope to OpenAI usage. Thinking tokens are
-// part of output and cache reads part of input (total = input + output).
+// part of output; native cold input excludes cache reads, while OpenAI includes them.
 func openAIUsage(u Usage) map[string]any {
 	return map[string]any{
-		"prompt_tokens":             u.InputTokens,
+		"prompt_tokens":             u.InputTokens + u.CacheRead,
 		"completion_tokens":         u.OutputTokens,
-		"total_tokens":              u.InputTokens + u.OutputTokens,
+		"total_tokens":              u.InputTokens + u.CacheRead + u.OutputTokens,
 		"prompt_tokens_details":     map[string]any{"cached_tokens": u.CacheRead},
 		"completion_tokens_details": map[string]any{"reasoning_tokens": u.ThinkingTokens},
 	}
@@ -225,6 +238,26 @@ func (s *Server) writeErr(w http.ResponseWriter, err error) {
 	writeRaw(w, ne.Status, ErrorEnvelope(ne.Type, ne.Message, ne.Code))
 }
 
+// writeRunErr is writeErr for a failure after native may have generated. A
+// billed generation keeps its usage next to the error so the gateway ledger
+// records the spend (proxy discardAttempt reads usage on error bodies).
+func (s *Server) writeRunErr(w http.ResponseWriter, err error, usage Usage) {
+	if usage == (Usage{}) {
+		s.writeErr(w, err)
+		return
+	}
+	ne := asNative(err)
+	body, merr := json.Marshal(map[string]any{
+		"error": map[string]any{"type": ne.Type, "message": ne.Message, "code": ne.Code},
+		"usage": openAIUsage(usage),
+	})
+	if merr != nil {
+		s.writeErr(w, err)
+		return
+	}
+	writeRaw(w, ne.Status, body)
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -244,4 +277,57 @@ func randomHex(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// adaptedChat buffers only this turn's envelope. Tool execution belongs to the
+// caller; the agy child has exited before tool calls ship.
+// An opt-in runner may remember validated conversation metadata for exact replay.
+func (s *Server) adaptedChat(w http.ResponseWriter, r *http.Request, req Request) {
+	res, err := s.Runner.Run(r.Context(), req, nil)
+	if err != nil {
+		s.writeRunErr(w, err, res.Usage)
+		return
+	}
+	text, calls, err := req.Adapter.decode(res)
+	if err != nil {
+		s.writeRunErr(w, err, res.Usage)
+		return
+	}
+	id, created := "chatcmpl-"+randomHex(12), s.now().Unix()
+	finish := "stop"
+	message := map[string]any{"role": "assistant", "content": text}
+	if len(calls) > 0 {
+		finish = "tool_calls"
+		message["content"] = nil
+		message["tool_calls"] = calls
+	}
+	if !req.Stream {
+		writeJSON(w, http.StatusOK, map[string]any{"id": id, "object": "chat.completion", "created": created, "model": req.Model,
+			"choices": []any{map[string]any{"index": 0, "finish_reason": finish, "message": message}}, "usage": openAIUsage(res.Usage)})
+		return
+	}
+	transport := bridgeutil.NewStream(r.Context(), w, bridgeutil.StreamWriteStall)
+	defer transport.Close()
+	sw := &sseWriter{w: w, id: id, created: created, model: req.Model, transport: transport}
+	sw.begin()
+	delta := map[string]any{"content": text}
+	if len(calls) > 0 {
+		indexed := make([]map[string]any, 0, len(calls))
+		for i, c := range calls {
+			indexed = append(indexed, map[string]any{"index": i, "id": c.ID, "type": c.Type, "function": c.Function})
+		}
+		delta = map[string]any{"tool_calls": indexed}
+	}
+	if sw.chunk(delta, "") != nil {
+		return
+	}
+	if sw.chunk(map[string]any{}, finish) != nil {
+		return
+	}
+	if req.IncludeUsage {
+		if sw.event(map[string]any{"id": id, "object": "chat.completion.chunk", "created": created, "model": req.Model, "choices": []any{}, "usage": openAIUsage(res.Usage)}) != nil {
+			return
+		}
+	}
+	sw.done()
 }

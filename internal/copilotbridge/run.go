@@ -41,7 +41,7 @@ type Usage struct {
 type Result struct {
 	Text  string
 	Usage Usage
-	// SessionID is logged only: a later request is a fresh session (channel.go).
+	// SessionID identifies the native turn for diagnostics and cache qualification.
 	SessionID string
 	// ToolCalls is the batch the model asked the caller to run (RunChannel only).
 	ToolCalls []ToolCall
@@ -77,8 +77,10 @@ type Runner struct {
 	// ends: a 2-slot bridge with a 300 s timeout would otherwise hold sockets
 	// for minutes behind a stall.
 	MaxQueue int
-	// WarmPool reuses processes, with a fresh session per request. Off by default.
-	WarmPool        bool
+	// WarmPool reuses processes. Sessions stay fresh unless SessionCache is enabled.
+	WarmPool bool
+	// SessionCache retains completed conversations only with exact history matches.
+	SessionCache    bool
 	PoolIdleTimeout time.Duration
 	PoolMaxAge      time.Duration
 	PoolMaxTurns    int
@@ -394,22 +396,25 @@ func (ev cliEvent) applyUsage(u *Usage) {
 	// INCLUSIVE prompt total: input is the COLD part, cache_read and
 	// cache_write ride beside it (measured: 3 + 0 + 13,960 = 13,963).
 	u.PromptTokens = int(snap.TokenDetails.Input.TokenCount) + u.CachedRead + u.CachedWrite
+	// Per-model inputTokens is already inclusive, unlike tokenDetails.input.
+	// The CLI fixture reports 13,963 here alongside 13,960 cache-write tokens;
+	// adding cache again would turn the same request into 27,923 input tokens.
+	var perModel Usage
+	for _, m := range snap.ProviderModelMetrics {
+		mu := m.Metrics.Usage
+		perModel.PromptTokens += int(mu.InputTokens)
+		perModel.CachedRead += int(mu.CacheReadTokens)
+		perModel.CachedWrite += int(mu.CacheWriteTokens)
+		perModel.CompletionTokens += int(mu.OutputTokens)
+		perModel.ReasoningTokens += int(mu.ReasoningTokens)
+	}
+	u.ReasoningTokens = perModel.ReasoningTokens // subset of output, never added to it
 	if u.PromptTokens == 0 {
-		// Fall back to the per-model usage block when tokenDetails is
-		// absent on a future CLI.
-		for _, m := range snap.ProviderModelMetrics {
-			mu := m.Metrics.Usage
-			if mu.InputTokens+mu.OutputTokens == 0 {
-				continue
-			}
-			u.CachedRead, u.CachedWrite = int(mu.CacheReadTokens), int(mu.CacheWriteTokens)
-			u.CompletionTokens = int(mu.OutputTokens)
-			u.ReasoningTokens = int(mu.ReasoningTokens)
-			u.PromptTokens = int(mu.InputTokens + mu.CacheReadTokens + mu.CacheWriteTokens)
-			if u.Model == "" {
-				u.Model = m.ModelID
-			}
-			break
+		u.PromptTokens = perModel.PromptTokens
+		u.CachedRead, u.CachedWrite = perModel.CachedRead, perModel.CachedWrite
+		u.CompletionTokens = perModel.CompletionTokens
+		if u.Model == "" && len(snap.ProviderModelMetrics) == 1 {
+			u.Model = snap.ProviderModelMetrics[0].ModelID
 		}
 	}
 	if snap.TotalPremiumRequestCost > 0 {
@@ -503,6 +508,9 @@ type Failure struct {
 	Code  string
 	Msg   string
 	Cause error
+	// BeforeInference is set only for local startup/handshake/registration
+	// refusals. A missing usage counter does not establish that work was free.
+	BeforeInference bool
 }
 
 func (f *Failure) Error() string {

@@ -67,7 +67,8 @@ type ChannelTurn struct {
 	Choice      toolChoice
 	Attachments []ImageAttachment
 	// OnTools synchronously delivers a complete batch before accounting cleanup.
-	OnTools func(Result) error
+	OnTools      func(Result) error
+	cacheHistory []json.RawMessage
 }
 
 // errChannelClosed means the child's stdout ended before the turn did.
@@ -97,6 +98,8 @@ type rpcConn struct {
 	tainted             bool
 	reusable            bool
 	idleSeen, usageSeen bool
+	cacheEnabled        bool
+	completed           *completedSession
 }
 
 type rpcMessage struct {
@@ -295,7 +298,7 @@ func (c *rpcConn) ping() error {
 }
 
 func toolsRefused(why string, cause error) error {
-	return &Failure{Code: "chat_tools_unsupported", Msg: "copilot bridge: client tools are unavailable: " + why, Cause: cause}
+	return &Failure{Code: "chat_tools_unsupported", Msg: "copilot bridge: client tools are unavailable: " + why, Cause: cause, BeforeInference: true}
 }
 
 // sessionConfig builds session.create. availableTools is an allowlist, so the
@@ -380,8 +383,7 @@ func clipDetail(s string) string {
 
 // driveTurn runs one turn over an open channel: gate, create, send, then
 // events until the model calls a declared tool or the session goes idle.
-func driveTurn(c *rpcConn, turn ChannelTurn, delta func(string) error, onFirst func()) (Result, error) {
-	var res Result
+func driveTurn(c *rpcConn, turn ChannelTurn, delta func(string) error, onFirst func()) (res Result, retErr error) {
 	c.reusable = false
 	c.tainted = false
 	c.idleSeen, c.usageSeen = false, false
@@ -397,29 +399,61 @@ func driveTurn(c *rpcConn, turn ChannelTurn, delta func(string) error, onFirst f
 	var created struct {
 		SessionID string `json:"sessionId"`
 	}
-	if err := c.call("session.create", sessionConfig(turn), &created); err != nil {
-		return res, classifyCreate(err)
+	prompt := turn.Prompt
+	var prior Usage
+	reused := false
+	if c.completed != nil {
+		if next, ok := c.completed.continuation(turn); ok && c.cacheEnabled {
+			prompt = next
+			prior = c.completed.usage
+			reused = true
+			created.SessionID = c.session
+			c.queue = nil
+			c.pending = nil
+			if c.observe != nil {
+				c.observe("session_cache_hit", 0)
+			}
+		} else if !c.deleteSession(c.session) {
+			// Nothing has been sent for this turn yet: the failure is local and
+			// pre-inference. No new inference is dispatched while cleanup of the
+			// previous session is uncertain; the caller gets a typed refusal.
+			return res, &Failure{Code: codeCachedSessionCleanup, Msg: "copilot-bridge: cached session cleanup failed", BeforeInference: true}
+		}
 	}
-	if created.SessionID == "" || (c.strict && c.retired[created.SessionID]) {
-		return res, errors.New("copilot-bridge: empty or reused session id")
+	if !reused {
+		if err := c.call("session.create", sessionConfig(turn), &created); err != nil {
+			return res, classifyCreate(err)
+		}
+		if created.SessionID == "" || (c.strict && c.retired[created.SessionID]) {
+			return res, errors.New("copilot-bridge: empty or reused session id")
+		}
+		c.session = created.SessionID
 	}
-	c.session = created.SessionID
 	res.SessionID = created.SessionID
-	// -p leaves a session directory behind per turn; this path need not.
-	defer c.bounded(deleteTimeout, func() {
-		var deleted struct {
-			Success bool `json:"success"`
+	defer func() {
+		cumulative := res.Usage
+		if reused && c.usageSeen {
+			var ok bool
+			res.Usage, ok = usageDelta(cumulative, prior)
+			if !ok {
+				c.tainted = true
+				if retErr == nil {
+					retErr = errSessionUsageReset
+				}
+			}
 		}
-		err := c.call("session.delete", map[string]any{"sessionId": created.SessionID}, &deleted)
-		c.reusable = deleted.Success && err == nil && c.idleSeen && c.usageSeen && !c.tainted
-		if c.retired == nil {
-			c.retired = make(map[string]bool)
+		if c.cacheEnabled && c.strict && cacheEligible(turn) && retErr == nil && len(res.ToolCalls) == 0 && c.idleSeen && c.usageSeen && !c.tainted {
+			hold := res
+			hold.Usage = cumulative
+			if entry := completedFrom(turn, hold); entry != nil {
+				c.completed = entry
+				c.reusable = true
+				return
+			}
 		}
-		c.retired[created.SessionID] = true
-		c.session = ""
-		c.queue = nil
-		c.pending = nil
-	})
+		clean := c.deleteSession(created.SessionID)
+		c.reusable = clean && c.idleSeen && c.usageSeen && !c.tainted
+	}()
 	pending := c.pending
 	c.pending = nil
 	for _, msg := range pending {
@@ -427,12 +461,17 @@ func driveTurn(c *rpcConn, turn ChannelTurn, delta func(string) error, onFirst f
 			return res, err
 		}
 	}
-	send := map[string]any{"sessionId": created.SessionID, "prompt": turn.Prompt}
+	send := map[string]any{"sessionId": created.SessionID, "prompt": prompt}
 	if len(turn.Attachments) > 0 {
 		send["attachments"] = turn.Attachments
 	}
 	if err := c.call("session.send", send, nil); err != nil {
-		return res, classifyCreate(err)
+		failure := classifyCreate(err)
+		var typed *Failure
+		if errors.As(failure, &typed) {
+			typed.BeforeInference = false // dispatch may already have started a model call
+		}
+		return res, failure
 	}
 
 	modelStart := time.Now()
@@ -497,6 +536,7 @@ func driveTurn(c *rpcConn, turn ChannelTurn, delta func(string) error, onFirst f
 					res.ToolCalls = append(res.ToolCalls, ToolCall{ID: tr.ToolCallID, Name: tr.Name, Arguments: normaliseArgs(tr.Arguments)})
 				} else if tr.Name != "" {
 					dropped = append(dropped, tr.Name)
+					c.tainted = true
 				}
 			}
 			if len(res.ToolCalls) > 0 {
@@ -571,6 +611,10 @@ func drainAborted(c *rpcConn, sessionID string, res *Result) {
 
 // RunChannel executes one turn over the channel, under the same slots and queue
 // as Run. Result.ToolCalls holds the batch if the model made one.
+// codeCachedSessionCleanup marks a reused worker that could not delete its
+// previous cached session before this turn started.
+const codeCachedSessionCleanup = "cached_session_cleanup"
+
 func (r *Runner) RunChannel(ctx context.Context, turn ChannelTurn, delta func(string) error) (Result, error) {
 	r.init()
 	return r.slotted(ctx, func() (Result, error) {
@@ -584,16 +628,18 @@ func (r *Runner) RunChannel(ctx context.Context, turn ChannelTurn, delta func(st
 		var res Result
 		with := r.withChannel
 		if r.WarmPool {
-			with = r.withPooledChannel
+			with = func(ctx context.Context, f func(*rpcConn) error) error { return r.withPooledTurn(ctx, &turn, f) }
 		}
-		err := with(ctx, func(c *rpcConn) error {
+		run := func(c *rpcConn) error {
 			var e error
+			c.cacheEnabled = r.SessionCacheEnabled()
 			res, e = driveTurn(c, turn, delta, func() { r.stampFirstByte(time.Since(began)) })
 			if e == nil && res.Text == "" && len(res.ToolCalls) == 0 {
 				e = errors.New("copilot-bridge: the CLI finished without an assistant message or a tool call")
 			}
 			return e
-		})
+		}
+		err := with(ctx, run)
 		if err != nil {
 			return res, err
 		}

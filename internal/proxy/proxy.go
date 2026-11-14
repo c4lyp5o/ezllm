@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -340,6 +341,7 @@ type Rewriter interface {
 
 // Dispatcher performs the actual upstream call.
 type Dispatcher struct {
+	callerBridge  atomic.Pointer[callerBridge]
 	client        *http.Client
 	registry      *provider.Registry
 	retryAttempts int
@@ -1222,6 +1224,7 @@ func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, bod
 	if err := ad.PrepareRequest(ctx, upReq, rt.Account, rt.KeyPlain, dialSurface); err != nil {
 		return nil, Result{}, time.Time{}, err
 	}
+	d.stampCaller(ctx, upReq, rt.KeyPlain)
 	// Google AI Studio native audio uses x-goog-api-key, not Bearer.
 	if isGeminiNativeAudio(rt, rt.Surface) {
 		upReq.Header.Set("x-goog-api-key", rt.KeyPlain)
@@ -2412,7 +2415,8 @@ var stripAlways = map[string]bool{
 	"X-Ezllm-Compression": true,
 	// The in-process web bridges' admission secret. A client cannot know it,
 	// but a value it sends is still never repeated to any upstream.
-	"X-Ezllm-Bridge-Secret": true,
+	"X-Ezllm-Bridge-Secret":     true,
+	provider.BridgeCallerHeader: true,
 }
 
 // copyClientHeaders copies src's headers onto dst minus stripAlways and the
@@ -2441,7 +2445,8 @@ func containsFold(names []string, k string) bool {
 
 func copyResponseHeaders(w http.ResponseWriter, resp *http.Response) {
 	for k, vs := range resp.Header {
-		if hopByHop[http.CanonicalHeaderKey(k)] {
+		canonical := http.CanonicalHeaderKey(k)
+		if hopByHop[canonical] || canonical == "Set-Cookie" || canonical == "Set-Cookie2" || canonical == "Clear-Site-Data" {
 			continue
 		}
 		for _, v := range vs {

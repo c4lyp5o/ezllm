@@ -112,6 +112,8 @@ Setup, platform requirements and the lockdown: [codex-bridge-runbook.md](codex-b
 | `EZLLM_CODEX_BRIDGE_ADDR` | `127.0.0.1:8791` | Bridge listen address; non-loopback addresses are refused. |
 | `EZLLM_CODEX_BRIDGE_TOKEN_FILE` | `/data/codex-bridge.token` | Shared secret for the account key; generated (0600) when missing. |
 | `EZLLM_CODEX_BRIDGE_CONCURRENCY` | `2` | Concurrent Codex children; a positive integer, anything else fails the boot. |
+| `EZLLM_CODEX_BRIDGE_CACHE` | auto | `auto` (v1.9.0+) enables empty-template forks when the CLI supports them; otherwise uses the original path and reports the reason on `/status`. `on` requires support; `off` disables caching. Invalid values fail startup. No idle CLI workers; bounded native parent retention and cleanup. Set before startup; recreate containers to change. |
+| `EZLLM_CODEX_SANDBOX` | read-only | `writable` selects Codex workspace-write in the request temp directory. Both modes use approval policy `never` for headless operation. Native tools stay disabled and Landlock remains in force. |
 | `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK` | unset | `on` allows client tools on a host without Landlock. Read the runbook's platform section before setting it. |
 
 ## Antigravity (Google subscription) bridge
@@ -126,20 +128,23 @@ Setup and the login that must avoid the desktop keyring: [agy-bridge-runbook.md]
 | `EZLLM_AGY_BRIDGE_ADDR` | `127.0.0.1:8792` | Bridge listen address; non-loopback addresses are refused. |
 | `EZLLM_AGY_BRIDGE_TOKEN_FILE` | `/data/agy-bridge.token` | Shared secret for the account key; generated (0600) when missing. |
 | `EZLLM_AGY_BRIDGE_CONCURRENCY` | `2` | Concurrent `agy` children (~207 MB each); a positive integer, anything else fails the boot. |
+| `EZLLM_AGY_EXPERIMENTAL_TOOLS` | off | `on` enables the structured-output caller-tool adapter. Requires CLI `--json-schema`. The calling harness executes tools; no ACP/MCP or persistent process. See the Antigravity runbook for limitations. |
+| `EZLLM_AGY_BRIDGE_SESSION_CACHE` | `off` | Opt-in exact-history conversation resume for tool-adapter requests; requires experimental tools and CLI `--conversation`. Retains bounded metadata/private workspaces, no idle CLI processes. Complete caller tool-result groups can resume. Restart to change. |
 
-## GitHub Copilot CLI bridge
+## GitHub Copilot subscription bridge
 
 The OAuth provider and its two variables (`GITHUB_COPILOT_CLI_VERSION`,
 `GITHUB_OAUTH_CLIENT_ID`) are deleted — nothing reads them. The login is the
 CLI's own, so there is no client id to configure. Runbook:
-`docs/copilot-cli-bridge-runbook.md`.
+`docs/copilot-bridge-runbook.md`.
 
 | Variable | Default | What it does |
 |---|---|---|
 | `EZLLM_COPILOT_BRIDGE` | off | `on` starts the loopback surface; without it the provider add answers 409 naming this variable. |
-| `EZLLM_COPILOT_BRIDGE_WARM_POOL` | `off` | Opt-in CLI process reuse with fresh sessions; `on`/`true`/`1` enables it. Existing concurrency and queue limits apply. Restart to change. |
+| `EZLLM_COPILOT_BRIDGE_WARM_POOL` | `off` | Opt-in CLI process reuse; sessions are fresh unless session caching is enabled; `on`/`true`/`1` enables it. Existing concurrency and queue limits apply. Restart to change. |
+| `EZLLM_COPILOT_BRIDGE_SESSION_CACHE` | `off` | Opt-in exact-history reuse of completed native conversations. Requires warm pool; `on`/`true`/`1` enables it. Active tool-result continuations, images and `auto` use fresh sessions. Existing worker expiry and a 1 MiB history bound apply. Restart to change. |
 | `EZLLM_COPILOT_BIN` | `/opt/copilot/copilot` | The GitHub Copilot CLI binary. |
-| `EZLLM_COPILOT_HOME` | `/copilot-home` | `COPILOT_HOME` for the CLI — the directory its login lives in (mount it read-write; the CLI writes session state). |
+| `EZLLM_COPILOT_HOME` | `/copilot-sub` | `COPILOT_HOME` for the CLI — the bridge's dedicated login directory, mounted from `~/.copilot-sub` (read-write; the CLI writes session state). Before 1.9.0 the default was `/copilot-home`. |
 | `EZLLM_COPILOT_BRIDGE_CONCURRENCY` | `2` | Concurrent Copilot CLI children; a positive integer, anything else fails the boot. |
 | `EZLLM_COPILOT_BRIDGE_QUEUE` | `8` | Requests allowed to wait for a slot; past it the bridge answers 429 `queue_full` with `Retry-After: 5`. |
 | `EZLLM_COPILOT_BRIDGE_TIMEOUT` | `300s` | Per-turn limit, a Go duration of at least `1s`. |
@@ -197,3 +202,21 @@ secret require a restart to change.
 
 See [settings-runbook.md](settings-runbook.md) for live-update behavior and
 [recovery-runbook.md](recovery-runbook.md) for encrypted offline recovery.
+
+
+## Request admission (configuration YAML)
+
+`request_limits.global_inflight` defaults to 32,
+`request_limits.per_client_inflight` to 8 and
+`request_limits.body_memory_mib` to 256. These are YAML settings, not environment
+variables. All must be positive and at most 4096; per-client concurrency cannot
+exceed global concurrency, and the memory budget must cover `max_body_mib`.
+They cannot be disabled with zero. Configure them before startup.
+
+Admission runs after authentication and before reading inference bodies. It
+reserves the declared `Content-Length`, or a whole allowed body when the length
+is unknown (chunked input), shrinks to the actual body size after completion and retains that reservation until the
+handler/stream ends. Excess requests receive 429 with `Retry-After: 1`; there is
+no unbounded waiting queue. Native CLI concurrency limits continue to apply too.
+The budget counts retained input bytes, not JSON object overhead, response
+buffers or CLI processes; choose limits appropriate to measured process memory.

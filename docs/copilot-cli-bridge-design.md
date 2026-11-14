@@ -1,4 +1,4 @@
-# GitHub Copilot CLI bridge — design
+# GitHub Copilot subscription bridge — design
 
 Status: **SHIPPED 2026-11-05** on `melissa/copilot-cli-bridge`, off the
 tool-pruning-drop tip. The body below is the original `-p` design: since then every
@@ -6,7 +6,7 @@ turn runs on the CLI's headless channel, with `-p` as plain chat's fallback (§1
 second addendum). Supersedes the OAuth/device-flow provider
 (`internal/githubcopilot`), which is deleted in the same branch — see §11 for what
 changed between this design and the code, and
-`docs/copilot-cli-bridge-runbook.md` for operating it.
+`docs/copilot-bridge-runbook.md` for operating it.
 
 ## 1. What changes and why
 
@@ -132,15 +132,17 @@ A model id is only marked usable after a probe answers, which is exactly the
   `github-copilot` kind from the sentinel allow-list. Schema untouched: existing
   `provider_keys`/`accounts` rows keep their history; the kind becomes invalid
   for NEW accounts only.
-- **M4** docs: runbook, CHANGELOG, EXPLORING landmark, and a supersession note
-  at the top of `docs/github-copilot-design.md`.
+- **M4** docs: runbook, CHANGELOG and EXPLORING landmark. The superseded
+  OAuth design and policy-evidence docs were removed in v1.9.0 (git history keeps them).
 
 ## 9. Locked decisions (2026-11-05, Calypso)
 
 1. **Auth: CLI login only.** The bridge uses a dedicated `EZLLM_COPILOT_HOME`
    (default `/copilot-home`, mounted) and never reads a PAT env var. The box is
    already logged in (`~/.copilot` exists and a headless call authenticated with
-   no env token set), so the deployment mounts that directory. Fine-grained
+   no env token set), so the deployment mounts that directory. *Revised in
+   1.9.0:* the bridge now uses a dedicated login, `~/.copilot-sub` mounted at
+   `/copilot-sub` (the new default), like the other subscription bridges. Fine-grained
    PATs remain documented as a manual fallback for a fresh host, not a code
    path.
 2. **One branch.** The bridge and the deletion of the OAuth surface land
@@ -365,3 +367,13 @@ No HTTP image fetching, local file access or prompt-based image emulation is
 introduced. Image requests cannot fall back to the text-only `-p` invocation.
 The warm pool keeps fresh sessions and attachment isolation. Live CLI and HTTP
 checks proved a small PNG on `gpt-6-luna`; see the runbook for limits.
+
+
+## Completed-history cache extension — 2026-11-14
+
+One session per request remains the default and the active tool-loop path. The
+optional v1.9.0 completed-conversation mode retains normally finished sessions
+only for an exact full-history continuation with one new user message. It adds
+no new service or pool. See the
+[completed-session cache design](copilot-completed-session-cache-design.md) for
+measured native cache reuse, billing deltas and lifecycle limits.

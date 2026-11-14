@@ -150,3 +150,12 @@ Codex. It must preserve native image attachments and their per-session isolation
 early tool delivery, usage/finish ordering and the
 worker cancellation/retirement contract. See
 [shared transport migration status](shared-bridge-transport-design.md).
+
+
+## Completed-session extension — 2026-11-14
+
+The fresh-session decision above remains the default. v1.9.0 adds an opt-in
+completed-history continuation mode within the same workers, with usage deltas,
+exact content/configuration matching and normal expiry. Active tool batches
+still use fresh result replay. See
+[copilot-completed-session-cache-design.md](copilot-completed-session-cache-design.md).

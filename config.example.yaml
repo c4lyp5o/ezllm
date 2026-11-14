@@ -4,6 +4,12 @@ listen: "127.0.0.1:20129"     # loopback by default; override with -addr for LAN
 data_dir: ./data               # repo-relative so Docker can bind-mount ./data
 
 max_body_mib: 32
+# Security admission applies before body allocation and lasts through streaming.
+# Zero is not an opt-out. Limits must be positive, and memory must cover one body.
+request_limits:
+  global_inflight: 32
+  per_client_inflight: 8
+  body_memory_mib: 256
 # upstream_timeout: 0 = unbounded (streaming responses have no natural deadline)
 
 # NOTHING BELOW IS SEEDED BY DEFAULT — every uncommented entry is upserted into

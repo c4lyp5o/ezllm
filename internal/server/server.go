@@ -108,6 +108,7 @@ type Server struct {
 	push        *pusher // external push channels for bell events (push.go)
 	started     time.Time
 	maxBody     int64
+	admission   *admission
 	web         fs.FS // dashboard source: embedded dist/ or EZLLM_WEB_DIR
 	corsOrigins []string
 	// usageTZ is the default zone for group_by=day. Never nil: UTC unless
@@ -167,19 +168,20 @@ var memoSweepEvery = time.Minute
 
 // Options configures New.
 type Options struct {
-	Deployment  DeploymentInfo
-	Settings    *settings.Manager
-	Backups     *backup.Manager
-	Auth        Auth
-	Resolver    *router.Resolver
-	Dispatcher  *proxy.Dispatcher
-	DB          *store.DB
-	Registry    *provider.Registry // key tests + sync (optional in unit tests)
-	Tester      *registration.Tester
-	Rules       *rules.Engine // M5: reload after model_rules writes (optional)
-	Log         *slog.Logger
-	MaxBodyMiB  int      // request body cap; default 32
-	CORSOrigins []string // EZLLM_CORS_ORIGINS: empty = any origin, /v1 only
+	Deployment    DeploymentInfo
+	Settings      *settings.Manager
+	Backups       *backup.Manager
+	Auth          Auth
+	Resolver      *router.Resolver
+	Dispatcher    *proxy.Dispatcher
+	DB            *store.DB
+	Registry      *provider.Registry // key tests + sync (optional in unit tests)
+	Tester        *registration.Tester
+	Rules         *rules.Engine // M5: reload after model_rules writes (optional)
+	Log           *slog.Logger
+	MaxBodyMiB    int // request body cap; default 32
+	RequestLimits RequestLimits
+	CORSOrigins   []string // EZLLM_CORS_ORIGINS: empty = any origin, /v1 only
 	// UsageTZ is the default timezone for group_by=day bucketing, from
 	// EZLLM_USAGE_TZ. Empty = UTC (the historical behaviour). A per-request
 	// ?tz= overrides it. It must already RESOLVE: main.go validates it at
@@ -237,7 +239,7 @@ func New(opts Options) *Server {
 		auth: opts.Auth, resolver: opts.Resolver, dispatcher: opts.Dispatcher,
 		db: opts.DB, registry: opts.Registry, tester: opts.Tester,
 		log: opts.Log, mux: http.NewServeMux(), rulesEngine: opts.Rules,
-		started: time.Now(), maxBody: maxBody, bridges: newBridgeRegistry(), push: newPusher(),
+		started: time.Now(), maxBody: maxBody, admission: newAdmission(opts.RequestLimits, maxBody), bridges: newBridgeRegistry(), push: newPusher(),
 		web: webFS(), corsOrigins: opts.CORSOrigins,
 		usageTZ:           usageTZOrDefault(opts.UsageTZ),
 		compressionMinAbs: opts.CompressionMinAbs, compressionMaxMS: opts.CompressionMaxMS,
@@ -667,6 +669,12 @@ func maxOutputTokens(m map[string]any) int64 {
 // body: read -> resolve -> swap model -> forward -> ledger.
 func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		lease := s.admit(w, r)
+		if lease == nil {
+			return
+		}
+		defer lease.release()
+		r = r.WithContext(withRequestLease(r.Context(), lease))
 		start := time.Now()
 		// Audio STT and image edits are multipart/form-data, not JSON: the
 		// model lives in a form field, not a JSON key, so the generic JSON
@@ -694,6 +702,7 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			return
 		}
 		liftDeadline()
+		lease.shrink(int64(len(body)))
 
 		// Single-parse dispatch (docs/single-parse-dispatch-design.md): one
 		// decode of the client body serves model extraction, compression,
@@ -841,6 +850,9 @@ func (s *Server) inferenceMultipart(w http.ResponseWriter, r *http.Request, surf
 		return
 	}
 	liftDeadline()
+	if lease := requestLeaseOf(r.Context()); lease != nil {
+		lease.shrink(int64(len(body)))
+	}
 	// Extract the model from the multipart form (read a copy — the original
 	// body bytes stay intact for forwarding).
 	requested, err := extractModelMultipart(body)
@@ -1286,8 +1298,9 @@ func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 			// when an operator turns debug on. This refusal reaches neither the
 			// ledger nor any other log today, so without this line it is
 			// invisible everywhere.
-			s.log.Debug("request refused", "why", "missing token",
-				"path", r.URL.Path, "remote", r.RemoteAddr)
+			if s.log.Enabled(r.Context(), slog.LevelDebug) {
+				s.log.Debug("request refused", "why", "missing token", "path", logRequestPath(r), "remote", r.RemoteAddr)
+			}
 			writeErr(w, http.StatusUnauthorized, "invalid_request_error", "missing bearer token")
 			return
 		}
@@ -1311,7 +1324,9 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, token stri
 		}
 		// The token itself is never logged — not even its hint. What an
 		// operator needs is "which path, which kind of refusal".
-		s.log.Debug("request refused", "why", why, "path", r.URL.Path)
+		if s.log.Enabled(r.Context(), slog.LevelDebug) {
+			s.log.Debug("request refused", "why", why, "path", logRequestPath(r))
+		}
 		if why == "expired token" {
 			writeErr(w, http.StatusUnauthorized, "invalid_request_error", "token expired")
 			return r, false
@@ -1336,7 +1351,8 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, token stri
 			return r, false
 		}
 	}
-	ctx := context.WithValue(r.Context(), rolesKey{}, roles)
+	ctx := proxy.WithCaller(r.Context(), "client:"+store.HashToken(token))
+	ctx = context.WithValue(ctx, rolesKey{}, roles)
 	ctx = context.WithValue(ctx, clientKey{}, name)
 	if info := reqInfoOf(r); info != nil {
 		info.client = name
@@ -1421,7 +1437,7 @@ func (s *Server) recoverer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
-				s.log.Error("panic", "err", rec, "path", r.URL.Path, "stack", string(debug.Stack()))
+				s.log.Error("panic", "panic_type", fmt.Sprintf("%T", rec), "path", logRequestPath(r), "stack", string(debug.Stack()))
 				writeErr(w, http.StatusInternalServerError, "server_error", "internal error")
 			}
 		}()
@@ -1475,7 +1491,7 @@ func (s *Server) accessLog(next http.Handler) http.Handler {
 		}
 		// Attribution only — never a token, key, or Authorization value.
 		attrs := []any{
-			"method", r.Method, "path", logPath(r.URL.Path), "status", status,
+			"method", r.Method, "path", logRequestPath(r), "status", status,
 			"ms", time.Since(start).Milliseconds(), "bytes", sw.bytes,
 			"client", info.client, "account", info.account,
 			"model", info.model, "surface", info.surface,
@@ -1526,6 +1542,36 @@ const vscodePathPrefix = "/api/v1/vscode/"
 // (/api/v1/vscode/{token}/…), so that segment is masked; every other path is
 // logged as-is. A reverse proxy in front logs the raw path itself and needs
 // its own redaction.
+// logRequestPath also handles encoded slashes inside custom path tokens and
+// encoded static prefix characters. URL.Path alone has lost segment boundaries.
+func logRequestPath(r *http.Request) string {
+	if strings.HasPrefix(r.URL.Path, vscodePathPrefix) {
+		// Split the path exactly as the client sent it. URL.EscapedPath()
+		// re-escapes the decoded path whenever RawPath is not a valid encoding
+		// (an unescaped '|', say), turning a %2F inside the token into a real
+		// '/' that would shift the token's tail into the logged remainder.
+		parts := strings.SplitN(rawRequestPath(r), "/", 6)
+		if len(parts) == 6 {
+			return vscodePathPrefix + "***/" + parts[5]
+		}
+		return vscodePathPrefix + "***"
+	}
+	return logPath(r.URL.Path)
+}
+
+// rawRequestPath is the path portion of the request line as received, falling
+// back to the escaped URL path for absolute-form or synthetic requests.
+func rawRequestPath(r *http.Request) string {
+	raw := r.RequestURI
+	if i := strings.IndexByte(raw, '?'); i >= 0 {
+		raw = raw[:i]
+	}
+	if strings.HasPrefix(raw, "/") {
+		return raw
+	}
+	return r.URL.EscapedPath()
+}
+
 func logPath(p string) string {
 	rest, ok := strings.CutPrefix(p, vscodePathPrefix)
 	if !ok || rest == "" {

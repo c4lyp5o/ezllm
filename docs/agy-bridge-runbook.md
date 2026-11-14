@@ -4,14 +4,16 @@ Operating the Google Antigravity subscription surface (agy-bridge). Decisions
 live in `antigravity-subscription-design.md`; this is the how.
 
 **Status:** text chat and streaming, with usage, against the Antigravity CLI
-1.4.7. Client tools, images and plan windows are not offered (see
-[limits](#limits)). Linux only.
+1.4.7. An opt-in experimental structured-output adapter supports caller tools
+on CLIs with `--json-schema`; see [caller tools](#experimental-caller-tools).
+Images and plan windows are not offered. Linux only.
 
 ## Quick setup
 
 Start with a working ezllm installation and dashboard ([quick start](../README.md#quick-start)).
 This guide uses Docker Compose in a Linux environment and a separate Google login.
-This bridge is text-only and cannot serve client tool calls or image input.
+By default this bridge is text-only. Caller tools require an explicit experimental
+opt-in; image input remains unsupported.
 Validation and test requests use subscription quota. Each step links to details below.
 
 1. **Install the official CLI on the host** and pin a copy of the binary
@@ -165,11 +167,64 @@ and refuses anything looser:
 The agent's tool steps are counted and logged per turn
 (`agy-bridge: turn attempted N agent tool step(s)`); they never reach the client.
 
+## Experimental caller tools
+
+Set `EZLLM_AGY_EXPERIMENTAL_TOOLS=on` in the ezllm service environment, rebuild
+with this version, and recreate the container. Boot requires `--json-schema`
+in the mounted CLI's help. The bridge `/status` field `client_tools` reports
+`experimental (structured output; caller executes)` when enabled. No new
+process type, listener, dependency or service is installed.
+
+The bridge supplies tool definitions and conversation history as JSON in a
+prompt and passes an output schema through a private temporary file. It
+validates the CLI's complete envelope, then emits ordinary OpenAI tool calls.
+Hermes or another harness executes those calls using its own workspace and
+permissions. The follow-up request must include assistant tool calls and all
+matching tool results. Each request starts a new `agy` process: nothing stays
+parked while the caller runs its tools. The tradeoff is repeated CLI startup
+and transcript/prompt overhead. The optional conversation cache below avoids
+replaying unchanged transcript prefixes while preserving one process per request.
+
+Supported: function tools, `auto`, `none`, `required` or named function choice,
+and `parallel_tool_calls=false`. Limits: 128 declared tools, 16 generated calls
+per turn, and a 1 MiB output envelope. Parameter schemas must be inline JSON
+Schema objects with `type: object`; references are refused because embedding
+changes their resolution root. The CLI performs argument-schema validation;
+ezllm independently checks envelope structure, names, object arguments, choice
+and call limits. The harness must validate and authorize execution as usual.
+Legacy functions, images and combining tools with non-text `response_format`
+are unsupported.
+
+The envelope is buffered even for streaming requests, so time to first output
+includes the full CLI turn. Invalid envelopes return `502 invalid_tool_output`
+without leaking JSON into chat. There are no automatic repair prompts. The
+existing router retry/failover policy can handle the upstream failure.
+
+Native agent tool permissions are not loosened. The prompt directs the CLI to
+select caller tools instead of using its built-ins. The CLI's `finish` tool
+may submit structured output; every other reported native tool step fails the
+adapter turn. The submitted output still has to pass validation. This is a detection guard, not a native tools-off
+switch: existing headless lockdown and the empty workspace remain necessary.
+Model compliance is not guaranteed. Keep this option off for workloads that
+need proven native function calling.
+
+Run the two-turn live proof (uses subscription quota) against your pinned CLI:
+
+```bash
+EZLLM_AGY_LIVE=1 EZLLM_AGY_BIN=/path/to/pinned/agy \
+  go test -short ./internal/agybridge -run '^TestLiveExperimentalToolRoundTrip$' -count=1 -v
+```
+
+It requests a harmless lookup call, simulates the result in the caller, and
+checks that the next turn consumes a fresh result value. It does not execute
+filesystem or shell tools. Use `EZLLM_AGY_MODEL` to test another model.
+
 ## Limits
 
-- **Text only.** Client `tools`, `tool` messages and image parts are refused
-  with 400 (`chat_tools_unsupported` / `invalid_request`), never dropped. The
-  headless stream-json input takes text blocks only.
+- **Text input only.** Image parts are always refused. Without the experimental
+  option, client tools and tool messages are also refused with 400, never
+  dropped. The adapter serializes tool definitions and history into text;
+  it does not change the CLI's stream-json input protocol.
 - **History is flattened.** `agy` has no system-prompt flag and no history
   replay, so system messages and earlier turns travel inside the one prompt as
   a deterministic transcript.
@@ -181,8 +236,55 @@ The agent's tool steps are counted and logged per turn
 - **No token-by-token streaming.** 1.4.7 delivers the answer in one chunk at
   the end of the turn; a streaming client gets a single content delta.
 - **Harness overhead.** Every turn carries the CLI's agent prompt: ~6.7k input
-  tokens on Gemini, ~4k (mostly cache reads) on Claude, measured on a one-word
-  reply.
+  tokens on Gemini; the earlier Claude sample reported ~4k native cold input
+  plus ~3.8k separate cache reads, measured on a one-word reply. Cached reads
+  are separate from native input, then included in the OpenAI prompt total.
+
+## Opt-in conversation cache
+
+On v1.9.0 or later, enable both settings in the built ezllm service and restart:
+
+```text
+EZLLM_AGY_EXPERIMENTAL_TOOLS=on
+EZLLM_AGY_BRIDGE_SESSION_CACHE=on
+```
+
+The cache defaults off and requires CLI `--conversation`. It applies to
+experimental tool-adapter requests, including completed caller tool-result
+groups. Plain text-only requests stay fresh. Clients continue sending full
+history; they provide no native conversation ID.
+
+A match requires unchanged prior messages, the exact previous assistant reply,
+and the same model, effort and tool policy. Only the new user message or matching
+result group is sent. Caller tool IDs remain stable, and Hermes executes the
+tools. Edited histories, changed IDs/tools/model/policy, partial results and
+identical stateless retries cannot reuse unrelated context.
+
+The CLI still exits after every request. The cache retains a private workspace
+with its schema file and bounded in-memory metadata, with no idle process,
+extra service or persistent ezllm metadata store. Idle entries are capped by the
+existing concurrency setting; history plus expected reply is limited to 1 MiB.
+Idle expiry is one minute; lifetime checks between requests cap age at 15 minutes
+and turns at 100. Busy entries cannot be shared. Expiry/eviction/graceful shutdown
+remove idle workspaces; hard crashes cannot guarantee cleanup of temporary files
+or the CLI's own backend conversation storage.
+
+The loopback `/status` reports `session_cache` and
+`runtime.conversation_cache` (`enabled`, `idle`, `hits`, `closed`). A hit confirms
+native resume, not a particular vendor discount. On Gemini Flash CLI 1.4.12,
+a synthetic Hermes-shaped caller-tool result used 2,733 cold input tokens plus
+15,733 cache reads, compared with 17,791 cold input tokens on the initial turn.
+This is a token measurement, not a quota-credit reduction percentage.
+
+Native AGY input excludes cache reads. The bridge adds them for standard OpenAI
+prompt totals and subtracts resumed cumulative counters for per-request usage.
+Historical cached-input ledger rows under the previous mapping are unchanged.
+Qualification in cache mode requires a separate caller-result resume proof,
+adding two small CLI turns to the normal live gate. No internal repair call is
+made after a failed resume. Set the flag to `off` and restart for stateless replay.
+
+See [the cache design and captured counters](agy-conversation-cache-design.md)
+for matching, lifecycle, accounting and experiment limits.
 
 ## Verify
 
@@ -196,7 +298,7 @@ one small turn (default model `gemini-3.8-flash-low`, override with
 cleared [eligibility](#eligibility) it skips, after checking the 403 and the
 withheld link.
 
-For an end-to-end check, use the gateway's [model-list command](../README.md#set-up-the-dashboard),
+For an end-to-end check, use the gateway's [model-list command](../README.md#2-finish-setup-in-the-dashboard),
 then send a short text prompt to a model from this account. The dashboard preset
 shows bridge status; `docker compose logs ezllm` shows startup failures. The
 internal listener is loopback-only, and the distroless image has no shell or curl.

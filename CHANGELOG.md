@@ -2,6 +2,188 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
+## v1.9.0 — Bridge caching, Codex fidelity and security remediation
+
+First release after v1.8.1. The subsections below are the pre-release builds that
+ran in production before release; security records cite them by those numbers.
+
+### Copilot bridge uses a dedicated login (breaking)
+
+- `EZLLM_COPILOT_HOME` now defaults to `/copilot-sub` instead of `/copilot-home`, so
+  every subscription bridge signs in to its own `~/.<bridge>-sub` folder rather than
+  the CLI's everyday home. There is no fallback: log in with
+  `COPILOT_HOME=~/.copilot-sub`, mount it at `/copilot-sub` and recreate the container.
+  The bridge updater's Copilot gate uses the same default.
+- The README lists the sign-in command for each bridge.
+
+### Codex conversation fidelity (pre-release 1.14.3)
+
+- Uses native history injection when advertised by the CLI, keeping user and
+  assistant roles, function-call/result links, assistant phases and image order
+  instead of embedding the entire conversation in one user transcript.
+- Preserves explicit assistant phases; reconstructs commentary for tool-bearing
+  Chat Completions messages and final-answer phase for completed responses.
+- Injects caller history only after the request fork, leaving shared templates
+  empty. Pending caller tools retain their existing authenticated continuation.
+- Updates CLI qualification to prove native history and reject older qualification
+  policies. Adds protocol regressions and a bounded, explicitly gated live task comparison.
+  Small synthetic tasks complete with cache both on and off; the original long
+  Hermes-session stopping behavior is not reproduced by those tests.
+
+### Codex task persistence guidance (pre-release 1.14.2)
+
+- Tells tool-bearing Codex requests to continue authorized implementation and
+  verification after environment checks, inspection and planning. A final report
+  that work has not started is not a substitute for implementation; concrete
+  blockers and user pauses still stop work.
+- Verifies instructions reach native threads with empty-template caching enabled
+  and disabled, while plain chat retains its original instructions. There is no
+  new env flag, forced tool call or automatic retry loop.
+- Measured afterwards (2026-11-14 Hermes replays): this guidance did not change
+  `gpt-6.1-terra` ending long tasks early; switching the model to `gpt-6.1-sol`
+  did. See `docs/codex-bridge-runbook.md` "Model choice for long caller-tool tasks".
+
+### Security audit remediation (pre-release 1.14.1)
+
+- Bounds inference admission before body allocation: default 32 global/eight
+  per-client active requests and 256 MiB of input reservations. Excess work
+  receives retryable 429; reservations are released on completion, cancellation
+  and panic. Limits are configurable and cannot be disabled with zero.
+- Strips provider cookies and origin-state headers on public and dashboard
+  inference responses. Auth and panic logs redact path credentials, including
+  encoded slash tokens; panic payloads are not logged.
+- Binds pending Codex tool conversations to gateway-authenticated callers and
+  full canonical history. Spoofed identity headers never establish ownership,
+  and recycled native IDs cannot replace another parked conversation.
+- Shares the bounded/deadlined admin decoder for settings writes.
+- Pins Go 1.27.4 and adds a reachable-vulnerability CI check. Compose examples
+  bind HTTP to localhost; private deployment files are excluded from image builds.
+- Replaces the audit's vulnerable-behavior probes with permanent rejection,
+  redaction, cleanup and continuation regressions. Runtime rollout is separate
+  from the source fixes; see the dated remediation notes.
+
+### Automatic Codex caching and noninteractive CLI defaults (pre-release 1.14.0)
+
+- Defaults `EZLLM_CODEX_BRIDGE_CACHE` to `auto`: enable supported empty-template
+  forks at startup, otherwise expose the reason and use the original path.
+  `on` requires support; `off` opts out. Invalid values are configuration errors.
+- Reports the requested mode, effective decision and fallback reason on `/status`.
+  Updater policy proofs now cover auto/on/off and `approval_policy=never`.
+- Pins approval policy to `never` in CLI configuration for all app-server and exec
+  children, in addition to existing thread creation/resume settings. Prediction
+  forks inherit that policy. Caller-tool instructions continue authorized work
+  without repeated permission questions; actual caller approval requirements apply.
+
+### Codex prompt-cache affinity across fresh processes (pre-release 1.13.0)
+
+- Adds `EZLLM_CODEX_BRIDGE_CACHE=on`: persisted empty configuration templates
+  feed separate ephemeral prediction forks. Every independent request still
+  supplies its full caller transcript; no caller dialogue enters the parent.
+- Reuses private scratch paths while scrubbing contents after process exit.
+  Keeps no idle CLI process, new service or dependency. Limits idle entries to
+  concurrency, with one-minute idle and 15-minute/100-request lifetime bounds.
+- Preserves native pending-tool callbacks and usage deltas. Changed configuration
+  cannot resume a cached tool turn. Parent notifications cannot meter a child.
+- Deletes retired parents via native control calls, bounds cleanup credits and
+  reports counts on loopback `/status`. Updater qualification proves cache mode.
+- Restricts automatic exec retry to known pre-inference failures; silent failure
+  after `turn/start` cannot trigger a second generation.
+- Native synthetic Hermes-shaped proof on CLI 0.167.0: second fresh-process
+  request read 12,416 cached tokens of 12,657 input (98.1%). Both caller-tool
+  cycles passed under Landlock; results are provider observations, not a quota
+  reduction guarantee.
+
+### Antigravity conversation cache and usage correction (pre-release 1.12.0)
+
+- Adds `EZLLM_AGY_BRIDGE_SESSION_CACHE=on`, requiring the experimental caller-tool
+  adapter. Exact histories resume the native conversation in its private workspace;
+  only the new user turn or complete caller tool-result group is sent. Tool-call
+  IDs remain stable and the caller still executes all tools.
+- Retains at most one idle entry per concurrency slot, with 1 MiB history limits,
+  one-minute idle expiry and 15-minute/100-turn age limits. No idle CLI process,
+  new service, dependency or independent on-disk cache is added.
+- Corrects AGY usage: native input excludes cache reads. OpenAI prompt totals now
+  include them, while the ledger records the actual cold/read split. Resumed native
+  cumulative counters are returned as per-request deltas. Historical rows are unchanged.
+- Deadlines terminate native process groups even after a result, and expired
+  results cannot enter the cache. Failed resumes preserve per-request usage.
+- Requires resume-capability and cache-mode live proofs before CLI qualification.
+  Failures, counter resets and changed native conversation IDs never trigger an
+  internal repair generation.
+
+### Bounded Copilot conversation cache (pre-release 1.11.0)
+
+- Adds `EZLLM_COPILOT_BRIDGE_SESSION_CACHE=on`, off by default and requiring
+  the existing warm pool. Exact completed-history continuations send only the
+  new user turn, preserving native prompt-cache lineage without a new service,
+  dependency or worker pool.
+- Keeps one completed session per worker, bounded by existing idle/age/turn
+  limits and 1 MiB of normalized history. Moved Hermes cache markers are
+  treated as transport metadata; changed text, model, system or tools cannot hit.
+- Bills deltas of native cumulative counters. Pending tool batches are accounted
+  and deleted; images, automatic model selection and tool-result continuations
+  use the fresh-session path. Idle eviction and graceful close delete sessions.
+- CLI updater gates verify completed-session continuation when the mode is on.
+  Real Gemini Flash Antigravity probes showed no cache reads; Codex stable-cwd
+  and Copilot recreated-ID probes did not improve reuse. The retained Copilot
+  HTTP sample reported roughly 90% lower credits on its continuation, which
+  is a small-model sample rather than a production-wide savings guarantee.
+
+### Bridge usage accounting and fallback guards (pre-release 1.10.1)
+
+- Copilot's per-model input fallback no longer counts cached input twice,
+  includes all reported models, and preserves reasoning as a subset of output.
+- Plain Copilot requests only fall back to `-p` after a proven pre-inference
+  refusal with no observed work; send-phase failures cannot authorize a retry.
+- Claude text still streams immediately; terminal events wait for the CLI result
+  and report aggregate usage, including any native internal retry calls, while
+  keeping the first message's content and stop reason.
+- Live Hermes-shaped probes additionally preserve Copilot cache-write counters
+  on the wire and Claude terminal thinking details; recorded counters exercise
+  the ledger usage tap without additional vendor calls.
+- Records the Hermes-only historical findings and remaining measurement limits
+  in `docs/bridge-token-usage-audit.md`. No new runtime dependency is added.
+
+### Bridge updater reliability and coverage (pre-release 1.10.0)
+
+- Copilot can join the existing versioned-root updater: stable official GitHub
+  assets, SHA-256 verification, staging, live gate, grouped restart and proof.
+  It remains disabled in updater defaults until its mount is migrated.
+- Promotions use a durable recovery journal and roll back the entire batch
+  when any proof fails or raises. An interrupted transaction is recovered on
+  the next run; failed recovery retains the journal and exits nonzero.
+- Gates use the running image ID, actual login mount, configured user/network,
+  and a private temporary environment file. Policy verdicts must match Codex
+  sandbox mode, Antigravity caller-tool mode and Copilot warm-pool mode.
+- Quota, auth and transport refusals wait for a configurable retry instead of
+  permanently blocking a CLI release. Known legacy quota blocks migrate to
+  backoff. Compatibility failures remain blocked.
+- Rechecks the window before changing symlinks and keeps the newest pending
+  candidate in status. Codex and Antigravity live checks prove caller result
+  replay; fixes a Copilot live-check panic on an ordinary answer without tools.
+
+### Experimental Antigravity caller tools (pre-release 1.9.0)
+
+- `EZLLM_AGY_EXPERIMENTAL_TOOLS=on` enables a structured-output adapter for
+  function tools. Tool calls return to the calling harness for execution;
+  assistant calls and matching tool results replay into a fresh CLI process
+  on the next request. No ACP, MCP, sidecar, new dependency or parked process.
+- Supports auto, none, required and named function choice, plus
+  `parallel_tool_calls=false`. Invalid envelopes return `502 invalid_tool_output`
+  before any streaming output. Output is bounded to 1 MiB and 16 calls per turn.
+- Plain chat retains its existing behavior. Images and legacy functions remain
+  unsupported. The CLI must expose `--json-schema`; the feature is off by default.
+
+### Codex bridge caller tools and headless permissions (pre-release 1.8.2)
+
+- Tool-bearing requests distinguish the bridge's local sandbox from the
+  caller's tool permissions. Authorized workspace writes use caller tools;
+  home-directory resolution uses the caller's environment. Permission errors
+  come from actual tool results, rather than assumptions about the bridge.
+- Writable mode uses noninteractive approval policy `never`; the exec fallback
+  passes approval policy through a supported config override. Native tools
+  remain disabled and Landlock confinement stays in force.
+
 ## v1.8.1 — Copilot wire probe fix
 
 - Copilot key, wire and combo probes omit output-token caps that the CLI cannot
@@ -72,7 +254,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   truncated valid JSON prefix. HTTP failures retain their status classification.
 - Removed an orphaned dashboard comment from the retired tool-pruning feature.
 
-## Unreleased — renamed: provider presets say what they are
+## v1.7.0 — renamed: provider presets say what they are
 
 - **The four subscription bridges are labelled as bridges** in the Add-provider
   dropdown: `Claude Pro/Max (bridge)`, `ChatGPT Plus/Pro (bridge)`,
@@ -87,7 +269,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   auto-seeded, so a card still reads "GitHub Copilot", not "GitHub Copilot
   (bridge)". Existing accounts keep the names they already have.
 
-## Unreleased — fixed: Codex tool calls aimed at the bridge's scratch directory
+## v1.7.0 — fixed: Codex tool calls aimed at the bridge's scratch directory
 
 - **Symptom:** a tool-using client (a VPS status sweep) got "this environment can't
   reach its shell" from the Codex hop while the Claude hop ran the same tools.
@@ -116,7 +298,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   4 of 4 runs; the new one passed `workdir="/"` on 4 of 4. The stale directory
   itself is a client defect (workaround: recreate that directory).
 
-## Unreleased — replaced: GitHub Copilot OAuth → the official CLI bridge
+## v1.7.0 — replaced: GitHub Copilot OAuth → the official CLI bridge
 
 - **The OAuth provider is gone, not deprecated.** `internal/githubcopilot`
   (device flow, session minting, token refresh), `internal/provider/githubcopilot.go`
@@ -127,7 +309,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 - **In its place:** the `copilot-bridge` kind over the GitHub Copilot CLI
   (1.0.105), a fourth member of the claude/codex/agy bridge family. No key to
   paste: the credential is the CLI's own login. Design
-  `docs/copilot-cli-bridge-design.md`, runbook `docs/copilot-cli-bridge-runbook.md`.
+  `docs/copilot-cli-bridge-design.md`, runbook `docs/copilot-bridge-runbook.md`.
 - **Accounting is exact for the first time on this provider:** the CLI's
   `session.usage_checkpoint` gives inclusive prompt tokens with a cached slice;
   verified end-to-end through the gateway (bridge 13,971 inclusive / 9,420
@@ -187,7 +369,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   403 `model_not_in_plan` (the pre-spawn refusal of an unknown id moved from
   400 `unknown_model` to the same 403).
 
-## Unreleased — removed: tool pruning (rejected feature)
+## v1.7.0 — removed: tool pruning (rejected feature)
 
 - **Deleted the whole feature**, per the standing rule that a feature no live
   data uses is removed outright rather than deprecated: `internal/toolprune`
@@ -239,7 +421,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
     all three wire shapes with a `tool_use` naming an undeclared tool first.
 - See also: EXPLORING §7 lists tool pruning among the deliberate non-goals.
 
-## Unreleased — hop stream health (schema v34)
+## v1.7.0 — hop stream health (schema v34)
 
 - `calls.stream_outcome` records how a STREAM ended — `completed`, `truncated`,
   `failed`, `client_gone`, empty for a non-stream request — so a hop that
@@ -270,7 +452,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   through the existing channels. Toggle: Settings → Notifications → "Answers cut
   mid-stream" (`notify_stream_truncation`, default on).
 
-## Unreleased — tool pruning M1: measurement (TokenEconomizer-inspired)
+## v1.7.0 — tool pruning M1: measurement (TokenEconomizer-inspired)
 
 - `tool_pruning.mode: off|shadow` (default `off`; `EZLLM_TOOL_PRUNING_MODE` is
   the no-rebuild override) measures what never-used tool schemas cost per
@@ -1226,9 +1408,8 @@ ported from omniroute's production implementation (design:
 
 ## 2026-10-16 — M13 github-copilot provider: official CLI device flow ✅
 GitHub Copilot as a provider, ported from omniroute's production
-implementation (design: `docs/github-copilot-design.md`, evidence:
-`docs/github-copilot-policy-evidence.md`, runbook:
-`docs/github-copilot-runbook.md`). The auth path is the OFFICIAL CLI's:
+implementation (its design, policy-evidence and runbook docs were
+removed after the provider was retired; see git history). The auth path is the OFFICIAL CLI's:
 device flow with GitHub's public Copilot CLI client id and scope
 `read:user` — not a custom third-party app (restricted tier/403), no
 client-id spoofing. Live-proved 2026-10-16: the device-code request

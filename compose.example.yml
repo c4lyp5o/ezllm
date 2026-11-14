@@ -24,7 +24,7 @@ services:
     ports:
       # Overridable so a second instance (staging, a test) does not need its
       # own file:  EZLLM_PORT=20130 EZLLM_DATA=./data-staging docker compose up -d
-      - "${EZLLM_PORT:-20129}:20129"
+      - "127.0.0.1:${EZLLM_PORT:-20129}:20129"
 
     environment:
       # ── server ──
@@ -64,14 +64,19 @@ services:
       # EZLLM_BACKUP_DIR: /backups
       # EZLLM_BACKUP_SECRET_FILE: /run/secrets/ezllm-backup
 
-      # ── GitHub Copilot CLI bridge ── docs/copilot-cli-bridge-runbook.md
+      # ── GitHub Copilot subscription bridge ── docs/copilot-bridge-runbook.md
       # The OAuth provider is deleted: the credential is the CLI's own login,
       # so there is no client id or version header to configure. `on` without
       # the CLI and a login (the two mounts at the end of `volumes`) fails the
       # boot rather than starting a surface that 401s every request.
       EZLLM_COPILOT_BRIDGE: "off"
+      # Recommended for cache reuse: completed-history cache requires both on (v1.9.0+).
+      # EZLLM_COPILOT_BRIDGE_WARM_POOL: "on"
+      # EZLLM_COPILOT_BRIDGE_SESSION_CACHE: "on"
       # EZLLM_COPILOT_BIN: /opt/copilot/copilot
-      # EZLLM_COPILOT_HOME: /copilot-home
+      # Managed updater alternative, after root migration (bridge-update-runbook.md):
+      # EZLLM_COPILOT_BIN: /opt/copilot-bridge/current/copilot
+      # EZLLM_COPILOT_HOME: /copilot-sub
       # EZLLM_COPILOT_BRIDGE_ADDR: 127.0.0.1:8793
       # XDG_CACHE_HOME: /data/copilot-cache   # persistent CLI cache (~236 MB, extracted once)
       # EZLLM_COPILOT_BRIDGE_TOKEN_FILE: /data/copilot-bridge.token
@@ -96,11 +101,16 @@ services:
       # Loopback-only; an openai-compatible account dials it. Linux only. `on`
       # without the CLI and a login (the two mounts below) fails the boot.
       EZLLM_CODEX_BRIDGE: "off"
+      # Recommended: automatic cache support detection, the default (v1.9.0+).
+      # Use "on" to require caching or "off" to disable it. Native approvals stay never.
+      # EZLLM_CODEX_BRIDGE_CACHE: "auto"
       # EZLLM_CODEX_BIN: /opt/codex/bin/codex
       # EZLLM_CODEX_HOME: /codex-sub
       # EZLLM_CODEX_BRIDGE_ADDR: 127.0.0.1:8791
       # EZLLM_CODEX_BRIDGE_TOKEN_FILE: /data/codex-bridge.token
       # EZLLM_CODEX_BRIDGE_CONCURRENCY: "2"
+      # Private request workspace writes; native shell stays disabled.
+      # EZLLM_CODEX_SANDBOX: writable
       # Client tools without Landlock: read the runbook before setting this.
       # EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK: "on"
 
@@ -113,6 +123,10 @@ services:
       # EZLLM_AGY_BRIDGE_ADDR: 127.0.0.1:8792
       # EZLLM_AGY_BRIDGE_TOKEN_FILE: /data/agy-bridge.token
       # EZLLM_AGY_BRIDGE_CONCURRENCY: "2"
+      # Experimental caller tools via structured output; CLI needs --json-schema.
+      # EZLLM_AGY_EXPERIMENTAL_TOOLS: "on"
+      # Recommended for cache reuse: exact-history/tool-result resume; requires experimental tools (v1.9.0+).
+      # EZLLM_AGY_BRIDGE_SESSION_CACHE: "on"
 
     volumes:
       # Non-secret runtime defaults; credentials stay in SQLite.
@@ -144,6 +158,10 @@ services:
       # the code-mode host client tools need); the isolated CODEX_HOME.
       # - /path/to/.local/share/codex-bridge:/opt/codex-bridge:ro
       # - /path/to/.codex-sub:/codex-sub
+      # Copilot: the managed updater root (replaces the standalone binary
+      # mount) and the dedicated login made with COPILOT_HOME=~/.copilot-sub.
+      # - /path/to/.local/share/copilot-bridge:/opt/copilot-bridge:ro
+      # - /path/to/.copilot-sub:/copilot-sub
       # Antigravity: <root>/<version>/agy (agy rewrites itself in place when
       # run from a writable folder: keep version folders read-only); the login
       # HOME made with DBUS unset.

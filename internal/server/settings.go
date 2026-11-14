@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"os"
 	"time"
@@ -24,16 +23,14 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		Revision *int64                     `json:"revision"`
 		Values   map[string]json.RawMessage `json:"values"`
 	}
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&in); err != nil || in.Revision == nil || len(in.Values) == 0 {
+	if !decodeBodyLimit(w, r, &in, 32<<10) {
+		return
+	}
+	if in.Revision == nil || len(in.Values) == 0 {
 		writeErr(w, 400, "invalid_request_error", "send revision and a nonempty values object")
 		return
 	}
-	if err := dec.Decode(new(any)); err != io.EOF {
-		writeErr(w, 400, "invalid_request_error", "send a single JSON object")
-		return
-	}
+
 	view, err := s.settings.Patch(r.Context(), *in.Revision, in.Values)
 	if err != nil {
 		if errors.Is(err, settings.ErrPersistence) {

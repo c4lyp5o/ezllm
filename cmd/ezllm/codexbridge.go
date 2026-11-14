@@ -156,7 +156,7 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 			"client_tools":    tools.status,
 			"cache_selection": pre.Cache,
 			"native_history":  pre.NativeHistory,
-			"approval_policy": "never",
+			"approval_policy": codexbridge.ApprovalPolicy,
 			"sandbox":         string(codexbridge.SandboxModeFromEnv(os.Getenv)),
 		},
 		Logf: log.Info,

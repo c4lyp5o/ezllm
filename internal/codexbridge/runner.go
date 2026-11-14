@@ -63,12 +63,11 @@ func SandboxModeFromEnv(getenv func(string) string) SandboxMode {
 	return SandboxReadOnly
 }
 
-// ApprovalFor keeps both modes noninteractive. The bridge has no approval UI
-// and declines approval RPCs; on-request would advertise an unusable escalation
-// path. The sandbox independently controls which operations are allowed.
-func (m SandboxMode) ApprovalFor() string {
-	return "never"
-}
+// ApprovalPolicy is the only approval policy a Codex child runs with, in both
+// sandbox modes. The bridge has no approval UI and declines approval RPCs;
+// on-request would advertise an unusable escalation path. The sandbox
+// independently controls which operations are allowed.
+const ApprovalPolicy = "never"
 
 // sandboxMode returns the effective policy, fail-closed: anything that is
 // not explicitly writable reads back as read-only.
@@ -90,7 +89,7 @@ func LockdownArgs(codeMode bool) []string {
 		}
 		args = append(args, "--disable", f)
 	}
-	return append(args, "-c", `approval_policy="never"`, "-c", "tools.web_search=false", "-c", `web_search="disabled"`)
+	return append(args, "-c", fmt.Sprintf("approval_policy=%q", ApprovalPolicy), "-c", "tools.web_search=false", "-c", `web_search="disabled"`)
 }
 
 // Runner spawns one app-server child per request (claude-bridge's shape): a
@@ -749,7 +748,7 @@ func (r *Runner) runAppServer(ctx context.Context, req Request, sink func(Delta)
 		"cwd":              c.cwd,
 		"ephemeral":        true,
 		"sandbox":          string(r.sandboxMode()),
-		"approvalPolicy":   r.sandboxMode().ApprovalFor(),
+		"approvalPolicy":   ApprovalPolicy,
 		"baseInstructions": req.Instructions,
 	}
 	if tools {

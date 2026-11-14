@@ -173,7 +173,7 @@ func runBridgeCheck(args []string, stdout io.Writer) error {
 	switch name {
 	case "codex":
 		v.Policy = map[string]string{"sandbox": string(codexbridge.SandboxModeFromEnv(os.Getenv))}
-		v.Policy["approval_policy"] = "never"
+		v.Policy["approval_policy"] = codexbridge.ApprovalPolicy
 		v.Policy["history"] = "native-if-supported-v1"
 		if policy, err := codexbridge.ForkCachePolicy(os.Getenv); err == nil {
 			v.Policy["cache"] = policy

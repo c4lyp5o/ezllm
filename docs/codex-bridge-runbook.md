@@ -183,6 +183,27 @@ subscription default effort is `low`; the bridge forwards the client's
 CLI 0.167.0 exposes caller tools only through code mode — disabling
 `code_mode_host` makes them unavailable to the model.
 
+### Zero-token steps and usage attribution
+
+In code mode the model calls caller tools from a JavaScript script. Each awaited
+call reaches the caller as its own request; when the result comes back, the
+script continues to its next call without new model work. Those requests are
+successful but record no tokens, and each costs one 250 ms tool-batch window.
+The dashboard labels them "no tokens" and Analytics → Requests can hide them
+(`hide_empty`). Measured 2026-11-14: about 65% of `gpt-6.1-sol` requests in a
+long Hermes task were such steps.
+
+Usage for the model call that wrote the script arrives only after the script's
+tool calls finish (measured event order: tool calls, then
+`thread/tokenUsage/updated`). While the bridge waits for the caller's results,
+that usage cannot be known, so it is recorded on a later request of the same
+turn. Totals stay correct; per-request attribution in code mode lags by design.
+
+Independent tool calls are already batched: in six measured runs, with and
+without extra guidance, the model issued three independent calls together, so
+they reached the caller as one batch. Sequential steps in agent traces are
+dependent calls (for example a patch, then its test run).
+
 Instructions participate in the template cache key. Updating this guidance
 selects a new template and may cause an initial cache warm-up; unchanged
 subsequent requests retain affinity. Restarting the service also clears parked

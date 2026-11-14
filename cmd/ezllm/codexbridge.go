@@ -110,6 +110,15 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 	if err != nil {
 		return nil, err
 	}
+	cache := codexbridge.ForkCacheEnabled(os.Getenv)
+	if cache {
+		if pre.Channel != codexbridge.ChannelAppServer {
+			return nil, fmt.Errorf("codex cache requires app-server")
+		}
+		if err := codexbridge.RunCachePreflight(ctx, resolved, home); err != nil {
+			return nil, err
+		}
+	}
 	token, err := codexBridgeToken(strings.TrimSpace(os.Getenv(envCodexToken)))
 	if err != nil {
 		return nil, err
@@ -122,6 +131,7 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 	qualified := releaseState(bin, pre.Version, codexbridge.QualifiedVersion)
 
 	runner := &codexbridge.Runner{
+		ForkCache:     cache,
 		Bin:           resolved,
 		CodexHome:     home,
 		Timeout:       300 * time.Second,

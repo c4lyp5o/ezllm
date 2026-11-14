@@ -2,6 +2,25 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
+## v1.13.0 — Codex prompt-cache affinity across fresh processes
+
+- Adds `EZLLM_CODEX_BRIDGE_CACHE=on`: persisted empty configuration templates
+  feed separate ephemeral prediction forks. Every independent request still
+  supplies its full caller transcript; no caller dialogue enters the parent.
+- Reuses private scratch paths while scrubbing contents after process exit.
+  Keeps no idle CLI process, new service or dependency. Limits idle entries to
+  concurrency, with one-minute idle and 15-minute/100-request lifetime bounds.
+- Preserves native pending-tool callbacks and usage deltas. Changed configuration
+  cannot resume a cached tool turn. Parent notifications cannot meter a child.
+- Deletes retired parents via native control calls, bounds cleanup credits and
+  reports counts on loopback `/status`. Updater qualification proves cache mode.
+- Restricts automatic exec retry to known pre-inference failures; silent failure
+  after `turn/start` cannot trigger a second generation.
+- Native synthetic Hermes-shaped proof on CLI 0.167.0: second fresh-process
+  request read 12,416 cached tokens of 12,657 input (98.1%). Both caller-tool
+  cycles passed under Landlock; results are provider observations, not a quota
+  reduction guarantee.
+
 ## v1.12.0 — Antigravity conversation cache and usage correction
 
 - Adds `EZLLM_AGY_BRIDGE_SESSION_CACHE=on`, requiring the experimental caller-tool

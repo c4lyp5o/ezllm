@@ -566,6 +566,15 @@ class SessionCachePolicy(unittest.TestCase):
         self.assertEqual(bu.gate_policy("copilot", info), {"warm_pool": "on"})
 
 
+class CodexForkCachePolicy(unittest.TestCase):
+    def test_fork_mode_must_be_proven(self):
+        info = {"Config": {"Env": ["EZLLM_CODEX_SANDBOX=writable", "EZLLM_CODEX_BRIDGE_CACHE=on"]}}
+        self.assertIn("EZLLM_CODEX_BRIDGE_CACHE", bu.GATE_ENV)
+        self.assertEqual(bu.gate_policy("codex", info), {"sandbox": "workspace-write", "cache": "ephemeral-forks"})
+        info["Config"]["Env"].pop()
+        self.assertEqual(bu.gate_policy("codex", info), {"sandbox": "workspace-write"})
+
+
 class AGYConversationCachePolicy(unittest.TestCase):
     def test_resume_mode_must_be_proven(self):
         info = {"Config": {"Env": ["EZLLM_AGY_EXPERIMENTAL_TOOLS=on", "EZLLM_AGY_BRIDGE_SESSION_CACHE=on"]}}

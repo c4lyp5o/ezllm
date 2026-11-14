@@ -72,7 +72,7 @@ BRIDGES = {
 GATE_ENV = ["USER", "LOGNAME", "TZ", "SSL_CERT_FILE", "SSL_CERT_DIR",
             "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY",
             "http_proxy", "https_proxy", "no_proxy", "all_proxy",
-            "EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK", "EZLLM_CODEX_SANDBOX",
+            "EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK", "EZLLM_CODEX_SANDBOX", "EZLLM_CODEX_BRIDGE_CACHE",
             "EZLLM_AGY_EXPERIMENTAL_TOOLS", "EZLLM_AGY_BRIDGE_SESSION_CACHE", "EZLLM_COPILOT_BRIDGE_WARM_POOL",
             "EZLLM_COPILOT_BRIDGE_SESSION_CACHE"]
 
@@ -397,7 +397,10 @@ def gate_policy(name, info):
     env = container_env(info, GATE_ENV)
     if name == "codex":
         mode = "workspace-write" if env.get("EZLLM_CODEX_SANDBOX", "").strip().lower() == "writable" else "read-only"
-        return {"sandbox": mode}
+        policy = {"sandbox": mode}
+        if env.get("EZLLM_CODEX_BRIDGE_CACHE", "").strip().lower() == "on":
+            policy["cache"] = "ephemeral-forks"
+        return policy
     if name == "agy":
         policy = {"caller_tools": "structured-output" if env.get("EZLLM_AGY_EXPERIMENTAL_TOOLS", "").strip().lower() == "on" else "off"}
         if env.get("EZLLM_AGY_BRIDGE_SESSION_CACHE", "").strip().lower() in ("on", "true", "1"):

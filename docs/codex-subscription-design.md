@@ -291,7 +291,7 @@ updater's directory, mounted read-only. **Landlock** (kernel-enforced, unprivile
 applied by a re-exec helper before `exec codex`): writes only to the private temp dir
 and `CODEX_HOME`, no access to `/data`. This makes the no-write guarantee independent
 of Codex's own policy code. Without Landlock, client tools are off (§4.7). Channel fallback: if the app-server schema check fails at
-boot, or the child fails before the first byte, serve the request through
+boot, or the child fails with positive evidence that inference has not started, serve the request through
 `codex exec --json` (single-chunk stream, text only).
 
 **Stage 1 — transport.** `POST /v1/chat/completions` on `127.0.0.1:8791`, stream and
@@ -319,7 +319,8 @@ login present; non-loopback bind refused. Failure is fatal, not logged.
 ## 4. Operator decisions (2026-10-23)
 
 1. **Channel:** **app-server**, with `codex exec --json` as the fallback when the
-   boot schema check fails or the child dies before the first byte.
+   boot schema check fails or the child fails before inference. Silence after
+   `turn/start` is ambiguous and never triggers a repair generation (v1.13.0).
 2. **History:** the `[UNSTABLE]` `history` field is **rejected** — it is
    documented for Codex Cloud, which ezllm does not use. M1 sends prior turns as
    a flattened transcript in the turn input; recall and cache behaviour of that
@@ -357,3 +358,13 @@ to `internal/bridgeutil` remains outstanding.
 Claude and Antigravity are migrated; Codex and Copilot are the remaining bridges.
 See [the shared transport design](shared-bridge-transport-design.md) for scope
 and per-bridge migration acceptance. Historical decisions above remain as recorded.
+
+
+## Empty-template cache opt-in (2026-11-14)
+
+`EZLLM_CODEX_BRIDGE_CACHE=on` uses an empty persisted configuration parent and
+independent ephemeral prediction forks, retaining no caller dialogue in the
+parent and no idle CLI process. This extends fresh-request caching while
+preserving full caller history and native pending-tool callbacks. See
+[codex-empty-template-cache-design.md](codex-empty-template-cache-design.md)
+for configuration keys, expiry, deletion, qualification and measured evidence.

@@ -301,3 +301,17 @@ split, and resumed cumulative counters are returned as per-request deltas. Old
 cached rows are unchanged; earlier zero-cache Gemini measurements are unaffected.
 Captured counters and validation checks are in
 [agy-cache-experiment-results.json](agy-cache-experiment-results.json).
+
+
+### Codex empty-template cache follow-up — 2026-11-14
+
+The earlier fresh-thread cache gap now has an opt-in implementation:
+`EZLLM_CODEX_BRIDGE_CACHE=on`. Empty configuration parents feed independent
+prediction forks across fresh CLI processes, without a paid priming turn.
+The synthetic Hermes-shaped implementation proof read 12,416 cached tokens of
+12,657 input on its second request (98.1%). Native caller-tool continuation and
+parent deletion passed, including Landlock confinement. See the
+[design and limits](codex-empty-template-cache-design.md) and
+[numeric evidence](codex-cache-experiment-results.json).
+Exec fallback now requires positive pre-inference evidence; silence after
+`turn/start` cannot trigger a duplicate paid generation.

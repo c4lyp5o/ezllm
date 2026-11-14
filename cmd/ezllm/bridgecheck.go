@@ -172,6 +172,9 @@ func runBridgeCheck(args []string, stdout io.Writer) error {
 	switch name {
 	case "codex":
 		v.Policy = map[string]string{"sandbox": string(codexbridge.SandboxModeFromEnv(os.Getenv))}
+		if codexbridge.ForkCacheEnabled(os.Getenv) {
+			v.Policy["cache"] = "ephemeral-forks"
+		}
 	case "agy":
 		mode := "off"
 		if strings.EqualFold(strings.TrimSpace(os.Getenv(envAgyTools)), "on") {
@@ -282,6 +285,11 @@ func checkCodexCLI(ctx context.Context, bin, home string) (bridgeVerdict, codexb
 	if err != nil {
 		v.Problems = append(v.Problems, err.Error())
 		return v, pre
+	}
+	if codexbridge.ForkCacheEnabled(os.Getenv) {
+		if err := codexbridge.RunCachePreflight(ctx, resolved, home); err != nil {
+			v.Problems = append(v.Problems, err.Error())
+		}
 	}
 	if pre.Channel == codexbridge.ChannelExec {
 		v.Problems = append(v.Problems, "app-server lacks "+strings.Join(pre.MissingRPCs, ", ")+": the bridge would fall back to exec")
@@ -472,22 +480,33 @@ func liveClaude(ctx context.Context, bin, dir, model, toolModel string) []string
 	return appendIf(problems, judgeTurn("tool turn", err, "", int64(res.Usage.OutputTokens), "get_weather", tool))
 }
 
-func liveCodex(ctx context.Context, bin, home string, pre codexbridge.Preflight, model, toolModel string) []string {
+func liveCodex(ctx context.Context, bin, home string, pre codexbridge.Preflight, model, toolModel string) (problems []string) {
 	helper, err := os.Executable()
 	if err != nil {
 		return []string{"live: cannot locate this binary for the Landlock helper: " + err.Error()}
 	}
 	tools := decideCodexTools(helper, bin, strings.EqualFold(strings.TrimSpace(os.Getenv(envCodexToolsNoLL)), "on"))
 	r := &codexbridge.Runner{Bin: bin, CodexHome: home, Timeout: liveTurnTimeout, MaxConcurrent: 1,
-		Version: server.Version, Channel: pre.Channel, Sandbox: tools.sandbox,
+		Version: server.Version, Channel: pre.Channel, Sandbox: tools.sandbox, ForkCache: codexbridge.ForkCacheEnabled(os.Getenv),
 		SandboxMode: codexbridge.SandboxModeFromEnv(os.Getenv)}
-	// The tool turn parks its child for a follow-up that never comes.
-	defer r.Shutdown()
-
-	var problems []string
-	res, err := r.Run(ctx, codexbridge.Request{Model: model, Instructions: codexbridge.DefaultInstructions,
-		Input: []codexbridge.UserInput{{Type: "text", Text: livePrompt}}}, nil)
+	// Drain retained parents too: cleanup is part of cache qualification.
+	defer func() {
+		r.Shutdown()
+		stats := r.CacheStats()
+		if r.ForkCache && (stats.CleanupFailures > 0 || stats.Credits > 0) {
+			problems = append(problems, "live cached fork: template cleanup failed")
+		}
+	}()
+	plainReq := codexbridge.Request{Model: model, Instructions: codexbridge.DefaultInstructions, Input: []codexbridge.UserInput{{Type: "text", Text: livePrompt}}}
+	res, err := r.Run(ctx, plainReq, nil)
 	problems = appendIf(problems, judgeTurn("plain turn", err, res.Text, res.Usage.OutputTokens, "", ""))
+	if r.ForkCache && len(problems) == 0 {
+		res, err = r.Run(ctx, plainReq, nil)
+		problems = appendIf(problems, judgeTurn("cached fork", err, res.Text, res.Usage.OutputTokens, "", ""))
+		if r.CacheHits() != 1 {
+			problems = append(problems, "live cached fork: template not reused")
+		}
+	}
 	if retryableBridgeProblems(problems) {
 		return problems
 	}

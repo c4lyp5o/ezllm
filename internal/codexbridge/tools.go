@@ -45,7 +45,7 @@ func (r *Runner) park(c *child, st *turnState, calls []ToolCall) {
 	r.pmu.Lock()
 	if r.shut {
 		r.pmu.Unlock()
-		c.close() // shutting down: nothing will ever resume it
+		c.dispose() // shutting down: nothing will ever resume it
 		return
 	}
 	if r.parked == nil {
@@ -69,13 +69,13 @@ func (r *Runner) park(c *child, st *turnState, calls []ToolCall) {
 		r.pmu.Unlock()
 		if live {
 			r.logf("codex-bridge: parked tool turn expired without results", "calls", len(pt.ids))
-			pt.c.close()
+			pt.c.dispose()
 		}
 	})
 	r.pmu.Unlock()
 	for _, e := range evict {
 		r.logf("codex-bridge: parked tool turn evicted (MaxParked)", "calls", len(e.ids))
-		e.c.close()
+		e.c.dispose()
 	}
 }
 
@@ -157,18 +157,21 @@ func (r *Runner) resume(ctx context.Context, pt *parkedTurn, req Request, sink f
 
 	res, park, err := r.segment(ctx, pt.c, st)
 	if err != nil {
-		pt.c.close()
+		pt.c.dispose()
 		return Result{}, err
 	}
 	if park {
 		if !pt.c.release() {
-			pt.c.close()
+			pt.c.dispose()
 			return Result{}, r.childErr(ctx, pt.c, "turn", ctx.Err())
 		}
 		r.park(pt.c, st, res.ToolCalls)
 		return res, nil
 	}
-	pt.c.close()
+	if pt.c.lease != nil && ctx.Err() == nil && validTemplateUsage(pt.st.usage) {
+		pt.c.lease.good.Store(true)
+	}
+	pt.c.dispose()
 	return res, nil
 }
 
@@ -177,6 +180,7 @@ func (r *Runner) resume(ctx context.Context, pt *parkedTurn, req Request, sink f
 // outlive their HTTP request by design, so an HTTP drain alone never reached
 // them. Active runs end through their own request contexts.
 func (r *Runner) Shutdown() {
+	r.shutdownTemplates()
 	r.pmu.Lock()
 	r.shut = true
 	var reap []*parkedTurn
@@ -187,6 +191,7 @@ func (r *Runner) Shutdown() {
 	}
 	r.pmu.Unlock()
 	for _, pt := range reap {
-		pt.c.close()
+		pt.c.dispose()
 	}
+	r.waitTemplateCleanup()
 }

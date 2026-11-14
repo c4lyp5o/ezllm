@@ -11,7 +11,17 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.12.0**
+**Current: v1.13.0**
+
+## v1.13.0 — 2026-11-14
+
+Adds opt-in Codex empty-template forks for prompt-cache reuse across fresh CLI
+processes. Each request supplies its complete history to a separate ephemeral
+child; templates contain configuration and an empty seed only. Retention,
+control-only deletion and scratch cleanup are bounded. Pending caller tools keep
+their existing native continuation. CLI qualification covers this mode when
+configured. Exec repair now requires positive evidence of a pre-inference
+failure, preventing silent mid-turn failures from spending twice.
 
 ## v1.12.0 — 2026-11-14
 

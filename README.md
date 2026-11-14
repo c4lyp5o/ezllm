@@ -368,6 +368,7 @@ run separately; they are not part of this CI gate.
 | [docs/master-key-runbook.md](docs/master-key-runbook.md) | at-rest key encryption: paths, backup, rotation |
 | [docs/pricing-runbook.md](docs/pricing-runbook.md) | price catalog: refresh cadence, import, query |
 | [docs/agy-conversation-cache-design.md](docs/agy-conversation-cache-design.md) | Optional native AGY conversation resume, caller tool-result reuse and corrected cache accounting |
+| [docs/codex-empty-template-cache-design.md](docs/codex-empty-template-cache-design.md) | Optional empty-template forks for Codex cache reuse across fresh CLI processes |
 | [docs/copilot-completed-session-cache-design.md](docs/copilot-completed-session-cache-design.md) | Optional completed-history cache within warm Copilot workers, matching and billing limits |
 | [docs/bridge-token-usage-audit.md](docs/bridge-token-usage-audit.md) | Hermes bridge token findings, accounting fixes and measurement limits |
 | [docs/claude-bridge-runbook.md](docs/claude-bridge-runbook.md) | Claude subscription bridge: setup, account, plan windows |

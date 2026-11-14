@@ -118,6 +118,10 @@ type Runner struct {
 	ToolHold  time.Duration
 	MaxParked int
 
+	// ForkCache reuses empty configuration templates, never caller dialogue.
+	ForkCache bool
+	cache     templateCache
+
 	sem  chan struct{}
 	once sync.Once
 
@@ -190,6 +194,8 @@ type child struct {
 	stderr   *tailBuffer
 	readDone chan struct{}
 	once     sync.Once
+	lease    *templateLease
+	keepWork bool
 	unbind   func() bool // set by bind; stops the cancellation hook
 }
 
@@ -213,16 +219,22 @@ func (c *child) release() bool {
 }
 
 type spawnOpts struct {
-	tools bool
+	tools        bool
+	experimental bool
+	workRoot     string
 }
 
 // spawn starts the child and completes the initialize handshake.
 func (r *Runner) spawn(ctx context.Context, opts spawnOpts, onNotify func(string, json.RawMessage), onRequest RequestHandler) (*child, error) {
-	tmp, err := os.MkdirTemp("", "codex-bridge-")
+	tmp := opts.workRoot
+	var err error
+	if tmp == "" {
+		tmp, err = os.MkdirTemp("", "codex-bridge-")
+	}
 	if err != nil {
 		return nil, fmt.Errorf("codex-bridge: cannot create work dir: %w", err)
 	}
-	c := &child{tmp: tmp, cwd: filepath.Join(tmp, "cwd"), stderr: &tailBuffer{}, readDone: make(chan struct{})}
+	c := &child{keepWork: opts.workRoot != "", tmp: tmp, cwd: filepath.Join(tmp, "cwd"), stderr: &tailBuffer{}, readDone: make(chan struct{})}
 	home, tmpdir := filepath.Join(tmp, "home"), filepath.Join(tmp, "tmp")
 	for _, d := range []string{c.cwd, home, tmpdir} {
 		if err := os.Mkdir(d, 0o700); err != nil {
@@ -235,7 +247,9 @@ func (r *Runner) spawn(ctx context.Context, opts spawnOpts, onNotify func(string
 	env := childEnv(home, r.CodexHome)
 	if r.Sandbox != nil {
 		bin, args = r.Sandbox.wrap(bin, args, tmp, r.CodexHome)
-		env = append(env, "TMPDIR="+tmpdir) // the only writable temp dir inside the domain
+	}
+	if r.Sandbox != nil || opts.workRoot != "" {
+		env = append(env, "TMPDIR="+tmpdir) // private temp path, stable for template forks
 	}
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = c.cwd
@@ -276,7 +290,7 @@ func (r *Runner) spawn(ctx context.Context, opts spawnOpts, onNotify func(string
 	c.bind(ctx)
 
 	init := map[string]any{"clientInfo": map[string]any{"name": "ezllm-codex-bridge", "version": r.Version}}
-	if opts.tools {
+	if opts.tools || opts.experimental {
 		init["capabilities"] = map[string]any{"experimentalApi": true} // dynamicTools is experimental
 	}
 	if _, err := c.conn.call(ctx, "initialize", init); err != nil {
@@ -302,8 +316,17 @@ func (c *child) close() {
 			_ = c.cmd.Wait()
 		}
 		<-c.readDone
-		os.RemoveAll(c.tmp)
+		if !c.keepWork {
+			os.RemoveAll(c.tmp)
+		}
 	})
+}
+
+func (c *child) dispose() {
+	c.close()
+	if c.lease != nil {
+		c.lease.release()
+	}
 }
 
 func (r *Runner) childErr(ctx context.Context, c *child, step string, err error) error {
@@ -319,7 +342,7 @@ func (r *Runner) childErr(ctx context.Context, c *child, step string, err error)
 	if tail := c.stderr.tail(); tail != "" {
 		msg += " | stderr: " + tail
 	}
-	return &NativeError{Status: 502, Type: "api_error", Code: "native_closed", Message: msg}
+	return &NativeError{Status: 502, Type: "api_error", Code: "native_closed", Message: msg, BeforeInference: step == "initialize" || step == "initialized" || step == "thread/start"}
 }
 
 // declineRequests answers every server→client request a run does not serve:
@@ -372,6 +395,7 @@ type turnState struct {
 	abort    func() // asynchronously reaps the child on backlog overflow
 	text     strings.Builder
 	lastItem string
+	threadID string // cache mode: ignore template and unrelated thread events
 
 	reasoning     strings.Builder
 	reasoningPart bool // a new summary part began: separate it
@@ -414,6 +438,14 @@ func (t *turnState) handle(method string, params json.RawMessage) {
 	defer t.mu.Unlock()
 	if t.finished {
 		return
+	}
+	if t.threadID != "" {
+		var envelope struct {
+			ThreadID string `json:"threadId"`
+		}
+		if json.Unmarshal(params, &envelope) != nil || envelope.ThreadID != t.threadID {
+			return
+		}
 	}
 	switch method {
 	case "item/agentMessage/delta":
@@ -512,6 +544,7 @@ func (t *turnState) onRequest(id json.RawMessage, method string, params json.Raw
 		return declineRequests(id, method, params)
 	}
 	var p struct {
+		ThreadID  string          `json:"threadId"`
 		CallID    string          `json:"callId"`
 		Tool      string          `json:"tool"`
 		Arguments json.RawMessage `json:"arguments"`
@@ -521,6 +554,9 @@ func (t *turnState) onRequest(id json.RawMessage, method string, params json.Raw
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.threadID != "" && p.ThreadID != t.threadID {
+		return nil, &rpcError{Code: -32602, Message: "codex-bridge: tool call belongs to another thread"}
+	}
 	t.calls = append(t.calls, ToolCall{ID: p.CallID, Name: p.Tool, Arguments: toolArguments(p.Arguments)})
 	t.replyTo[p.CallID] = id
 	if t.batch == nil {
@@ -613,7 +649,7 @@ func (r *Runner) segment(ctx context.Context, c *child, st *turnState) (res Resu
 
 // Run executes one request. A request carrying the results for a parked
 // turn's tool calls resumes that turn; otherwise a new ephemeral thread runs.
-// An app-server child that dies before its first byte is retried once on the
+// A positively pre-inference app-server failure is retried once on the
 // exec channel (§4.1) — text requests only, exec has no client tools.
 func (r *Runner) Run(ctx context.Context, req Request, sink func(Delta) error) (Result, error) {
 	// The timeout bounds the whole request, the wait for a slot included: a
@@ -631,7 +667,15 @@ func (r *Runner) Run(ctx context.Context, req Request, sink func(Delta) error) (
 
 	if len(req.ToolResults) > 0 {
 		if pt := r.takeParked(req.ToolResults); pt != nil {
-			return r.resume(ctx, pt, req, sink)
+			compatible := true
+			if pt.c.lease != nil {
+				key, ok := r.templateKey(req)
+				compatible = ok && key == pt.c.lease.key
+			}
+			if compatible {
+				return r.resume(ctx, pt, req, sink)
+			}
+			pt.c.dispose()
 		}
 		r.logf("codex-bridge: tool results match no parked turn, replaying the transcript")
 	}
@@ -651,8 +695,8 @@ func (r *Runner) Run(ctx context.Context, req Request, sink func(Delta) error) (
 		return nil
 	})
 	var ne *NativeError
-	if err != nil && !emitted && len(req.Tools) == 0 && ctx.Err() == nil && errors.As(err, &ne) && ne.Code == "native_closed" {
-		r.logf("codex-bridge: app-server failed before the first byte, retrying on exec", "err", ne.Message)
+	if err != nil && !emitted && len(req.Tools) == 0 && ctx.Err() == nil && errors.As(err, &ne) && ne.Code == "native_closed" && ne.BeforeInference {
+		r.logf("codex-bridge: app-server failed before inference, retrying on exec", "err", ne.Message)
 		return r.runExec(ctx, req, sink)
 	}
 	return res, err
@@ -665,15 +709,25 @@ func (r *Runner) runAppServer(ctx context.Context, req Request, sink func(Delta)
 	if tools {
 		handler = st.onRequest
 	}
-	c, err := r.spawn(ctx, spawnOpts{tools: tools}, st.handle, handler)
+	lease := r.borrowTemplate(req)
+	opts := spawnOpts{tools: tools}
+	if lease != nil {
+		opts.workRoot, opts.experimental = lease.root, true
+		st.threadID = "awaiting-fork" // ignore parent startup notifications
+	}
+	c, err := r.spawn(ctx, opts, st.handle, handler)
 	if err != nil {
+		if lease != nil {
+			lease.release()
+		}
 		return Result{}, err
 	}
+	c.lease = lease
 	st.bindChild(c)
 	parked := false
 	defer func() {
 		if !parked {
-			c.close()
+			c.dispose()
 		}
 	}()
 
@@ -693,7 +747,12 @@ func (r *Runner) runAppServer(ctx context.Context, req Request, sink func(Delta)
 		}
 		thread["dynamicTools"] = specs
 	}
-	raw, err := c.conn.call(ctx, "thread/start", thread)
+	var raw json.RawMessage
+	if lease != nil {
+		raw, err = r.forkTemplate(ctx, c, lease, thread)
+	} else {
+		raw, err = c.conn.call(ctx, "thread/start", thread)
+	}
 	if err != nil {
 		return Result{}, r.startErr(ctx, c, "thread/start", err)
 	}
@@ -704,6 +763,11 @@ func (r *Runner) runAppServer(ctx context.Context, req Request, sink func(Delta)
 	}
 	if err := json.Unmarshal(raw, &started); err != nil || started.Thread.ID == "" {
 		return Result{}, r.childErr(ctx, c, "thread/start", fmt.Errorf("no thread id in %s", raw))
+	}
+	if lease != nil {
+		st.mu.Lock()
+		st.threadID = started.Thread.ID
+		st.mu.Unlock()
 	}
 	turn := map[string]any{"threadId": started.Thread.ID, "input": req.Input}
 	if req.Effort != "" {
@@ -729,6 +793,8 @@ func (r *Runner) runAppServer(ctx context.Context, req Request, sink func(Delta)
 		}
 		r.park(c, st, res.ToolCalls)
 		parked = true
+	} else if lease != nil && ctx.Err() == nil && validTemplateUsage(res.Usage) {
+		lease.good.Store(true)
 	}
 	return res, nil
 }

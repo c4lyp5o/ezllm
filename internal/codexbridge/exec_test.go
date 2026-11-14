@@ -111,3 +111,13 @@ func TestWriteDataURL(t *testing.T) {
 		}
 	}
 }
+
+func TestSilentFailureAfterTurnStartDoesNotSpendAgain(t *testing.T) {
+	r, home := fakeRunner(t, "exit_silent")
+	if _, err := r.Run(context.Background(), simpleRequest(), nil); err == nil {
+		t.Fatal("want silent native failure")
+	}
+	if _, err := os.Stat(filepath.Join(home, "exec.json")); !os.IsNotExist(err) {
+		t.Fatal("exec retried a possibly paid turn")
+	}
+}

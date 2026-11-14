@@ -242,6 +242,7 @@ Boot fails loudly — the process does not start — when:
 | `EZLLM_CODEX_BRIDGE_ADDR` | `127.0.0.1:8791` | loopback listener |
 | `EZLLM_CODEX_BRIDGE_TOKEN_FILE` | `/data/codex-bridge.token` | shared secret, generated on first boot |
 | `EZLLM_CODEX_BRIDGE_CONCURRENCY` | `2` | CLI children at once (a turn parked on tool calls holds none) |
+| `EZLLM_CODEX_BRIDGE_CACHE` | `off` | `on` reuses empty configuration templates for fresh ephemeral forks; requires experimental fork schema |
 | `EZLLM_CODEX_SANDBOX` | `read-only` | `writable` permits writes in the request temp workspace; no interactive approvals |
 | `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK` | `off` | `on` = client tools without Landlock ([what you give up](#the-override-and-what-you-give-up)) |
 
@@ -397,3 +398,38 @@ continues operating independently; no shared lifecycle migration has shipped.
 
 Claude and Antigravity are migrated; Codex and Copilot still need expansion.
 See [shared transport status and remaining work](shared-bridge-transport-design.md).
+
+
+## Prompt-cache affinity
+
+Set `EZLLM_CODEX_BRIDGE_CACHE=on` to enable empty-template forks. Boot validates
+experimental `thread/fork`, `thread/resume`, `thread/inject_items` and
+`thread/delete` support; the mode requires app-server. CLI 0.167.0 passed the
+native proof. Leave the variable unset to use the existing ephemeral-thread path.
+
+Each independent request launches a new CLI, resumes a matching empty template,
+and forks a separate ephemeral prediction thread with the caller's complete
+history. Templates retain model, instructions, tools and scratch paths, never
+caller dialogue or child answers. Caller tools still execute in Hermes or the
+calling harness. A pending native tool turn keeps its existing process until
+its caller supplies results; completed turns return only their empty template.
+
+`GET /status` reports `fork_cache` counts: `enabled`, `hits`, `idle`, `credits`
+and `cleanup_failures`. A hit means template reuse; actual cache reads remain
+in native usage and OpenAI `prompt_tokens_details.cached_tokens`. Input totals
+already include those reads. No extra warm-up model turn is sent.
+
+Idle templates keep no process and expire after one minute. Their private scratch
+contents are removed after process exit. Idle capacity equals concurrency; total
+credits are concurrency plus the parked-tool limit. Templates retire after
+15 minutes or 100 requests. Supported native deletion uses transient control-only
+CLI processes under the same admission cap, never a model turn. Failed deletion
+holds its credit until restart, bounding additional retained parents; inspect
+`cleanup_failures` before restarting. Graceful shutdown waits up to 21 seconds
+for cleanup. An abrupt kill can leave empty templates in native `CODEX_HOME`
+rollout/index storage, including their instructions and tool definitions.
+
+The updater copies the setting into qualification and requires an
+`ephemeral-forks` policy proof with fresh-request reuse and caller-tool
+continuation. Changing the setting requires requalification. Measured results
+and design: [empty-template cache](codex-empty-template-cache-design.md).

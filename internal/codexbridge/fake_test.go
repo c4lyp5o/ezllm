@@ -140,6 +140,21 @@ func fakeAppServer(home string) {
 			reply(map[string]any{"rateLimits": map[string]any{"planType": "plus",
 				"primary":   map[string]any{"usedPercent": 1, "windowDurationMins": 300, "resetsAt": 1792739595},
 				"secondary": map[string]any{"usedPercent": 12.5, "windowDurationMins": 10080, "resetsAt": 1793326395}}})
+		case "thread/inject_items", "thread/resume", "thread/fork", "thread/delete":
+			if f, err := os.OpenFile(filepath.Join(home, "cache_rpc.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600); err == nil {
+				fmt.Fprintln(f, string(sc.Bytes()))
+				f.Close()
+			}
+			if m.Method == "thread/delete" && mode == "cleanup_error" {
+				send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "error": map[string]any{"code": -32000, "message": "synthetic delete failure"}})
+				continue
+			}
+			if m.Method == "thread/fork" {
+				// Parent noise must never finish or meter the fork.
+				reply(map[string]any{"thread": map[string]any{"id": "thr-1"}})
+			} else {
+				reply(map[string]any{})
+			}
 		case "thread/start":
 			_ = os.WriteFile(filepath.Join(home, "thread_start.json"), m.Params, 0o600)
 			if mode == "bad_model" {
@@ -171,6 +186,8 @@ func fakeAppServer(home string) {
 					notify("item/agentMessage/delta", map[string]any{"itemId": "m1", "delta": fmt.Sprint(i), "threadId": "thr-1", "turnId": "turn-1"})
 					time.Sleep(5 * time.Millisecond)
 				}
+			case "exit_silent":
+				os.Exit(1)
 			case "exit_midturn":
 				notify("item/agentMessage/delta", map[string]any{"itemId": "m1", "delta": "par", "threadId": "thr-1", "turnId": "turn-1"})
 				os.Exit(3)

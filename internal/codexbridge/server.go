@@ -75,6 +75,9 @@ func (s *Server) Handler() http.Handler {
 		if p, ok := s.Runner.(interface{ ParkedTurns() int }); ok {
 			info["parked_tool_turns"] = p.ParkedTurns()
 		}
+		if p, ok := s.Runner.(interface{ CacheStats() CacheStats }); ok {
+			info["fork_cache"] = p.CacheStats()
+		}
 		writeJSON(w, http.StatusOK, info)
 	})
 	mux.HandleFunc("GET /v1/models", s.authed(s.listModels))

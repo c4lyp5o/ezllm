@@ -238,7 +238,7 @@ func TestBridgeCheckReportsConfiguredPolicy(t *testing.T) {
 	t.Setenv("EZLLM_AGY_EXPERIMENTAL_TOOLS", "on")
 	t.Setenv("EZLLM_COPILOT_BRIDGE_WARM_POOL", "on")
 	for _, tc := range []struct{ name, key, want string }{
-		{"codex", "sandbox", "workspace-write"}, {"agy", "caller_tools", "structured-output"}, {"copilot", "warm_pool", "on"},
+		{"codex", "sandbox", "workspace-write"}, {"codex", "history", "native-if-supported-v1"}, {"agy", "caller_tools", "structured-output"}, {"copilot", "warm_pool", "on"},
 	} {
 		v, err := checkJSON(t, tc.name, "--bin", filepath.Join(t.TempDir(), "missing"))
 		if !errors.Is(err, errBridgeCheckFailed) || v.Policy[tc.key] != tc.want {

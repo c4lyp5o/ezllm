@@ -140,6 +140,8 @@ Apply environment changes with `docker compose up -d --no-build`; a plain
 that includes the indicated features. Codex `auto` enables caching when its CLI
 supports experimental prediction forks; otherwise it uses the original path and
 reports the reason in `/status`. Use `on` to require caching or `off` to opt out.
+Codex also preserves native conversation roles and phases automatically on
+supported CLIs (v1.14.3+); this does not add a cache flag or continuation loop.
 Antigravity requires `--json-schema` and `--conversation`; boot checks reject
 unsupported explicit modes. The Antigravity tool adapter remains experimental;
 see its [limitations](docs/agy-bridge-runbook.md) before enabling it.

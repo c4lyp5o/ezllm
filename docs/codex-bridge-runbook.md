@@ -414,6 +414,32 @@ Claude and Antigravity are migrated; Codex and Copilot still need expansion.
 See [shared transport status and remaining work](shared-bridge-transport-design.md).
 
 
+## Conversation history
+
+From v1.14.3, startup automatically selects native structured history when the
+CLI advertises `thread/inject_items`; `/status.native_history` reports the
+selection. No additional environment flag is required. Older CLIs and exec
+keep text-transcript replay. Incomplete historical tool groups also use legacy
+replay before inference. A native injection error fails before inference;
+it does not spend a second model request to repair history.
+
+Fresh app-server requests retain user/assistant roles, function-call and result
+IDs, and text/image ordering. Explicit assistant `phase` labels are preserved;
+Chat Completions messages without them use commentary when tool calls are present
+and final-answer otherwise. This reconstructs the available turn boundary; it
+cannot recover arbitrary interleaved phases already flattened by a client.
+
+Native history is injected into the request thread after any template fork.
+Shared cache templates remain configuration-only, and matching parked tool
+results still resume their existing child without reinjection. Caller ownership
+and canonical history checks include semantic phase. Cache identity does not
+include caller history. Landlock and approval policy `never` remain in force.
+
+OpenAI documents phase preservation as relevant to early stopping. This corrects
+conversation representation, but the small live comparison does not establish
+that it fixes every long-session persistence failure. See the
+[design and measured evidence](codex-conversation-fidelity-design.md).
+
 ## Prompt-cache affinity
 
 `EZLLM_CODEX_BRIDGE_CACHE` defaults to `auto` (v1.14+). Boot validates

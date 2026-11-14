@@ -11,7 +11,15 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.14.2**
+**Current: v1.14.3**
+
+## v1.14.3 — 2026-11-14
+
+Preserves structured conversation history on Codex CLIs advertising
+`thread/inject_items`. Assistant phases, message roles, tool relationships and
+image order reach the native request thread. Caller history never enters shared
+empty templates; parked continuations still resume directly. Older CLIs and
+exec retain text replay. No additional env flag or automatic continuation loop.
 
 ## v1.14.2 — 2026-11-14
 

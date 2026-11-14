@@ -124,6 +124,7 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 
 	runner := &codexbridge.Runner{
 		ForkCache:     cache,
+		NativeHistory: pre.NativeHistory,
 		Bin:           resolved,
 		CodexHome:     home,
 		Timeout:       300 * time.Second,
@@ -154,6 +155,7 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 			"landlock":        tools.landlock,
 			"client_tools":    tools.status,
 			"cache_selection": pre.Cache,
+			"native_history":  pre.NativeHistory,
 			"approval_policy": "never",
 			"sandbox":         string(codexbridge.SandboxModeFromEnv(os.Getenv)),
 		},

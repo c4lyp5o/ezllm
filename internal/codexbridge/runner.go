@@ -120,7 +120,9 @@ type Runner struct {
 
 	// ForkCache reuses empty configuration templates, never caller dialogue.
 	ForkCache bool
-	cache     templateCache
+	// NativeHistory uses the qualified raw-item API to retain conversation roles.
+	NativeHistory bool
+	cache         templateCache
 
 	sem  chan struct{}
 	once sync.Once
@@ -721,7 +723,7 @@ func (r *Runner) runAppServer(ctx context.Context, req Request, sink func(Delta)
 		handler = st.onRequest
 	}
 	lease := r.borrowTemplate(req)
-	opts := spawnOpts{tools: tools}
+	opts := spawnOpts{tools: tools, experimental: r.NativeHistory}
 	if lease != nil {
 		opts.workRoot, opts.experimental = lease.root, true
 		st.threadID = "awaiting-fork" // ignore parent startup notifications
@@ -780,7 +782,22 @@ func (r *Runner) runAppServer(ctx context.Context, req Request, sink func(Delta)
 		st.threadID = started.Thread.ID
 		st.mu.Unlock()
 	}
-	turn := map[string]any{"threadId": started.Thread.ID, "input": req.Input}
+	input := req.Input
+	if r.NativeHistory && len(req.turns) > 0 {
+		items, latest, historyErr := nativeConversation(req.turns)
+		if historyErr != nil && !errors.Is(historyErr, errUnpairedNativeHistory) {
+			return Result{}, historyErr
+		}
+		if historyErr == nil {
+			input = latest
+		}
+		if len(items) > 0 {
+			if _, err := c.conn.call(ctx, "thread/inject_items", map[string]any{"threadId": started.Thread.ID, "items": items}); err != nil {
+				return Result{}, r.startErr(ctx, c, "thread/inject_items", err)
+			}
+		}
+	}
+	turn := map[string]any{"threadId": started.Thread.ID, "input": input}
 	if req.Effort != "" {
 		turn["effort"] = req.Effort
 	}

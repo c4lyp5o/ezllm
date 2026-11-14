@@ -7,9 +7,8 @@ import (
 )
 
 // Request is one OpenAI Chat Completions call, reduced to what a Codex turn
-// takes. Prior turns travel as a flattened transcript (operator decision,
-// docs/codex-subscription-design.md §4.2): the structured `history` field on
-// thread/resume is documented for Codex Cloud only and is not used.
+// takes. Qualified app-server builds preserve native message/tool history;
+// the flattened Input remains available for older CLIs and the exec channel.
 type Request struct {
 	// CallerID is trusted transport metadata, never a JSON request field.
 	CallerID string
@@ -17,6 +16,7 @@ type Request struct {
 	hasHistory     bool
 	historyHash    [32]byte
 	toolParentHash [32]byte
+	turns          []chatMessage // original roles for native history; never template configuration
 	Model          string
 	Stream         bool
 	IncludeUsage   bool
@@ -137,6 +137,7 @@ type streamOptions struct {
 
 type chatMessage struct {
 	Role       string          `json:"role"`
+	Phase      string          `json:"phase,omitempty"`
 	Content    json.RawMessage `json:"content"`
 	Name       string          `json:"name"`
 	ToolCalls  []chatToolCall  `json:"tool_calls"`
@@ -216,6 +217,9 @@ func ParseRequest(body []byte) (Request, error) {
 				system = append(system, text)
 			}
 		case "user", "assistant", "tool":
+			if m.Role == "assistant" && m.Phase != "" && m.Phase != "commentary" && m.Phase != "final_answer" {
+				return Request{}, Unsupported{Code: "invalid_request", Msg: "assistant phase must be commentary or final_answer"}
+			}
 			turns = append(turns, m)
 		default:
 			return Request{}, Unsupported{Code: "invalid_request", Msg: fmt.Sprintf("unknown message role %q", m.Role)}
@@ -267,6 +271,7 @@ func ParseRequest(body []byte) (Request, error) {
 	if err := req.bindHistory(turns); err != nil {
 		return Request{}, err
 	}
+	req.turns = turns
 	text, images, err := buildTranscript(turns)
 	if err != nil {
 		return Request{}, err

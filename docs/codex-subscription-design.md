@@ -321,10 +321,14 @@ login present; non-loopback bind refused. Failure is fatal, not logged.
 1. **Channel:** **app-server**, with `codex exec --json` as the fallback when the
    boot schema check fails or the child fails before inference. Silence after
    `turn/start` is ambiguous and never triggers a repair generation (v1.13.0).
-2. **History:** the `[UNSTABLE]` `history` field is **rejected** — it is
-   documented for Codex Cloud, which ezllm does not use. M1 sends prior turns as
-   a flattened transcript in the turn input; recall and cache behaviour of that
-   shape are M1 live-proof items.
+2. **History:** the original Cloud-only `thread/resume.history` field remains
+   unused. From v1.14.3, CLIs advertising `thread/inject_items` receive raw
+   Responses items on each fresh request thread or fork, followed by only the
+   latest user input. Message roles, tool-call/result relationships, assistant
+   phases and image order are preserved. A pending tool turn still resumes on
+   its existing child. Older CLIs and exec retain flattened replay. This
+   supersedes the original universal transcript decision; see the
+   [conversation fidelity design](codex-conversation-fidelity-design.md).
 3. **No-execution:** Codex's built-in tools stay stripped (they would run on the
    ezllm host); client tools pass through, as in claude-bridge M2. Open: accepting
    code-mode (§2.12) is **accepted** as the route for client tools, with Landlock

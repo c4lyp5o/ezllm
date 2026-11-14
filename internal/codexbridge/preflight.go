@@ -33,8 +33,9 @@ type Preflight struct {
 	MissingRPCs []string
 	// Channel is ChannelAppServer, or ChannelExec when the app-server lacks a
 	// method this bridge needs (operator decision §4.1).
-	Channel string
-	Cache   CacheSelection
+	Channel       string
+	Cache         CacheSelection
+	NativeHistory bool // qualified raw Responses-item injection, independent of fork caching
 }
 
 // execFlags are the `codex exec` flags the fallback channel depends on.
@@ -86,6 +87,7 @@ func RunPreflight(ctx context.Context, bin, codexHome string) (Preflight, error)
 	p.MissingRPCs = missingNames(string(requests), RequiredMethods)
 	p.MissingRPCs = append(p.MissingRPCs, missingNames(string(notes), RequiredNotifications)...)
 	p.SchemaOK = len(p.MissingRPCs) == 0
+	p.NativeHistory = p.SchemaOK && len(missingNames(string(requests), []string{"thread/inject_items"})) == 0
 	p.Channel = ChannelAppServer
 	if !p.SchemaOK {
 		help, _ := run("exec", "--help")

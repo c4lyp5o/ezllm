@@ -10,7 +10,7 @@ import (
 // Cache markers and reasoning metadata are transport-only. Tool arguments keep
 // numeric precision while normalizing JSON object order.
 func messageCanonical(m chatMessage) ([]byte, error) {
-	text, images, err := contentText(m.Content)
+	content, err := nativeUserInput(m.Content)
 	if err != nil {
 		return nil, err
 	}
@@ -27,11 +27,12 @@ func messageCanonical(m chatMessage) ([]byte, error) {
 		}
 	}
 	return json.Marshal(struct {
-		Role, Text string
-		Images     []string
-		Calls      []chatToolCall
-		ToolID     string
-	}{m.Role, text, images, calls, m.ToolCallID})
+		Role    string
+		Content []UserInput
+		Phase   string
+		Calls   []chatToolCall
+		ToolID  string
+	}{m.Role, content, canonicalPhase(m), calls, m.ToolCallID})
 }
 func extendHistory(prior [32]byte, m chatMessage) ([32]byte, error) {
 	b, err := messageCanonical(m)
@@ -76,3 +77,10 @@ func assistantHash(prior [32]byte, res Result) [32]byte {
 	return hash
 }
 func inputHash(input []UserInput) [32]byte { b, _ := json.Marshal(input); return sha256.Sum256(b) }
+
+func canonicalPhase(m chatMessage) string {
+	if m.Role == "assistant" {
+		return assistantPhase(m)
+	}
+	return ""
+}

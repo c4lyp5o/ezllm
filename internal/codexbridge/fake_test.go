@@ -145,6 +145,10 @@ func fakeAppServer(home string) {
 				fmt.Fprintln(f, string(sc.Bytes()))
 				f.Close()
 			}
+			if m.Method == "thread/inject_items" && mode == "inject_error" {
+				send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "error": map[string]any{"code": -32602, "message": "synthetic history rejection"}})
+				continue
+			}
 			if m.Method == "thread/delete" && mode == "cleanup_error" {
 				send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "error": map[string]any{"code": -32000, "message": "synthetic delete failure"}})
 				continue

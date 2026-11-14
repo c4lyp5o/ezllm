@@ -2,6 +2,20 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
+## v1.14.3 — Codex conversation fidelity
+
+- Uses native history injection when advertised by the CLI, keeping user and
+  assistant roles, function-call/result links, assistant phases and image order
+  instead of embedding the entire conversation in one user transcript.
+- Preserves explicit assistant phases; reconstructs commentary for tool-bearing
+  Chat Completions messages and final-answer phase for completed responses.
+- Injects caller history only after the request fork, leaving shared templates
+  empty. Pending caller tools retain their existing authenticated continuation.
+- Updates CLI qualification to prove native history and reject older qualification
+  policies. Adds protocol regressions and a bounded, explicitly gated live task comparison.
+  Small synthetic tasks complete with cache both on and off; the original long
+  Hermes-session stopping behavior is not reproduced by those tests.
+
 ## v1.14.2 — Codex task persistence guidance
 
 - Tells tool-bearing Codex requests to continue authorized implementation and

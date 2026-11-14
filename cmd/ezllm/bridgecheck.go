@@ -174,6 +174,7 @@ func runBridgeCheck(args []string, stdout io.Writer) error {
 	case "codex":
 		v.Policy = map[string]string{"sandbox": string(codexbridge.SandboxModeFromEnv(os.Getenv))}
 		v.Policy["approval_policy"] = "never"
+		v.Policy["history"] = "native-if-supported-v1"
 		if policy, err := codexbridge.ForkCachePolicy(os.Getenv); err == nil {
 			v.Policy["cache"] = policy
 		}
@@ -488,7 +489,7 @@ func liveCodex(ctx context.Context, bin, home string, pre codexbridge.Preflight,
 	}
 	tools := decideCodexTools(helper, bin, strings.EqualFold(strings.TrimSpace(os.Getenv(envCodexToolsNoLL)), "on"))
 	r := &codexbridge.Runner{Bin: bin, CodexHome: home, Timeout: liveTurnTimeout, MaxConcurrent: 1,
-		Version: server.Version, Channel: pre.Channel, Sandbox: tools.sandbox, ForkCache: pre.Cache.Enabled,
+		Version: server.Version, Channel: pre.Channel, Sandbox: tools.sandbox, ForkCache: pre.Cache.Enabled, NativeHistory: pre.NativeHistory,
 		SandboxMode: codexbridge.SandboxModeFromEnv(os.Getenv)}
 	// Drain retained parents too: cleanup is part of cache qualification.
 	defer func() {
@@ -506,6 +507,24 @@ func liveCodex(ctx context.Context, bin, home string, pre codexbridge.Preflight,
 		problems = appendIf(problems, judgeTurn("cached fork", err, res.Text, res.Usage.OutputTokens, "", ""))
 		if r.CacheHits() != 1 {
 			problems = append(problems, "live cached fork: template not reused")
+		}
+	}
+	if r.NativeHistory && len(problems) == 0 {
+		fact := fmt.Sprintf("history_fact_%d", time.Now().UnixNano())
+		body, _ := json.Marshal(map[string]any{"model": model, "messages": []any{
+			map[string]any{"role": "user", "content": "Remember the project codename: " + fact},
+			map[string]any{"role": "assistant", "phase": "commentary", "content": "Checking the project context."},
+			map[string]any{"role": "user", "content": "Reply with exactly the project codename from the earlier user message."},
+		}})
+		historyReq, parseErr := codexbridge.ParseRequest(body)
+		if parseErr != nil {
+			problems = append(problems, "live native history: cannot construct proof")
+		} else {
+			historyRes, historyErr := r.Run(ctx, historyReq, nil)
+			problems = appendIf(problems, judgeTurn("native history", historyErr, historyRes.Text, historyRes.Usage.OutputTokens, "", ""))
+			if historyErr == nil && !strings.Contains(historyRes.Text, fact) {
+				problems = append(problems, "live native history: prior user fact not recalled")
+			}
 		}
 	}
 	if retryableBridgeProblems(problems) {

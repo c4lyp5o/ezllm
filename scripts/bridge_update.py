@@ -400,7 +400,7 @@ def gate_policy(name, info):
         cache = env.get("EZLLM_CODEX_BRIDGE_CACHE", "").strip().lower() or "auto"
         if cache not in ("auto", "on", "off"):
             raise ValueError("EZLLM_CODEX_BRIDGE_CACHE must be auto, on or off")
-        return {"sandbox": mode, "approval_policy": "never", "cache": "ephemeral-forks" if cache == "on" else cache}
+        return {"sandbox": mode, "approval_policy": "never", "history": "native-if-supported-v1", "cache": "ephemeral-forks" if cache == "on" else cache}
     if name == "agy":
         policy = {"caller_tools": "structured-output" if env.get("EZLLM_AGY_EXPERIMENTAL_TOOLS", "").strip().lower() == "on" else "off"}
         if env.get("EZLLM_AGY_BRIDGE_SESSION_CACHE", "").strip().lower() in ("on", "true", "1"):

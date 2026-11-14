@@ -69,7 +69,7 @@ for auto/on modes; off skips the optional check. `bridge-check` reports the
 startup decision under `cache_selection`, and proves fresh-process template reuse
 and the existing caller-tool cycle. The updater includes `cache=auto`,
 `cache=ephemeral-forks` (explicit on) or `cache=off`, plus `approval_policy=never`,
-in its qualification policy. Auto qualification proves reuse when its native
+and `history=native-if-supported-v1` in its qualification policy. Auto qualification proves reuse when its native
 capabilities are present and reports a reason when unavailable. Small live gates
 require reuse rather than an unreliable minimum native KV-cache read count.
 

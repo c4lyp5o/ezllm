@@ -510,8 +510,10 @@ use the gateway inference endpoint. This header is an internal implementation
 boundary, not a client setting.
 
 A pending tool conversation must match that identity and the canonical caller
-history, including the selected assistant tool-call message. A different caller
-receives 403 without consuming the legitimate parked turn. Changed/truncated
+history, including the selected assistant tool-call message. Parked turns are
+scoped per caller (`tools.go` `parkKey`): another caller's call ID matches nothing
+and that request replays in its own fresh child, so it can neither resume nor
+remove the legitimate parked turn, nor learn that it exists. Changed/truncated
 history uses fresh transcript replay without loading the old conversation.
 Cache-control markers and equivalent text-block formatting do not change the
 history hash. Rotated client keys and distinct dashboard sessions are distinct

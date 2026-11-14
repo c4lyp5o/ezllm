@@ -79,6 +79,10 @@ Equivalent text-block representation and cache-control metadata normalize.
 A pending turn stores hashes rather than a second copy of caller history.
 The complete prior history and emitted assistant tool-call message must match
 before a child can resume. Sequential tool batches advance the chain.
+*Revised in v1.9.0:* parked turns are keyed by caller as well as call ID, so a
+foreign caller's lookup finds nothing and falls back to replay instead of
+receiving 403; the regression test still proves it cannot resume or remove the
+owner's turn.
 
 Foreign caller IDs are refused with 403 before the original parked turn is
 removed. Changed or truncated history uses a fresh replay without exposing the

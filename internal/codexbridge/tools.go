@@ -63,9 +63,9 @@ func (r *Runner) park(c *child, st *turnState, res Result) {
 	st.mu.Lock()
 	for i := range calls {
 		original := calls[i].ID
-		if r.parked[original] != nil {
+		if r.idParked(original) {
 			alias := "call_" + randomHex(16)
-			for r.parked[alias] != nil {
+			for r.idParked(alias) {
 				alias = "call_" + randomHex(16)
 			}
 			rpcID := st.replyTo[original]
@@ -80,11 +80,11 @@ func (r *Runner) park(c *child, st *turnState, res Result) {
 	}
 	st.mu.Unlock()
 	for _, id := range pt.ids {
-		r.parked[id] = pt
+		r.parked[parkKey(pt.caller, id)] = pt
 	}
 	pt.timer = time.AfterFunc(r.toolHold(), func() {
 		r.pmu.Lock()
-		live := r.parked[pt.ids[0]] == pt
+		live := r.parked[parkKey(pt.caller, pt.ids[0])] == pt
 		if live {
 			r.unregister(pt)
 		}
@@ -101,15 +101,32 @@ func (r *Runner) park(c *child, st *turnState, res Result) {
 	}
 }
 
+// parkKey scopes a parked turn to its authenticated caller. A caller can only
+// ever find its own parked turns: another caller's call id, however obtained,
+// matches nothing and falls back to the stateless transcript replay.
+func parkKey(caller, id string) string { return caller + "\x00" + id }
+
+// idParked reports whether any caller's parked turn already uses id; pmu must
+// be held. Lookups are scoped per caller, but client-facing ids stay unique
+// across callers so a recycled native id never shows up twice. MaxParked bounds
+// the scan to a handful of turns.
+func (r *Runner) idParked(id string) bool {
+	for pt := range r.uniqueParked() {
+		for _, used := range pt.ids {
+			if used == id {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // takeParked removes and returns the parked turn these results answer.
 func (r *Runner) takeParked(req Request) (*parkedTurn, error) {
 	r.pmu.Lock()
 	defer r.pmu.Unlock()
 	for id := range req.ToolResults {
-		if pt, ok := r.parked[id]; ok {
-			if pt.caller != req.CallerID {
-				return nil, &NativeError{Status: 403, Type: "permission_error", Code: "tool_session_mismatch", Message: "codex-bridge: tool continuation does not belong to this caller"}
-			}
+		if pt, ok := r.parked[parkKey(req.CallerID, id)]; ok {
 			hash := req.toolParentHash
 			if !req.hasHistory {
 				hash = inputHash(req.Input)
@@ -128,8 +145,8 @@ func (r *Runner) takeParked(req Request) (*parkedTurn, error) {
 // unregister drops every id of pt; pmu must be held.
 func (r *Runner) unregister(pt *parkedTurn) {
 	for _, id := range pt.ids {
-		if r.parked[id] == pt {
-			delete(r.parked, id)
+		if key := parkKey(pt.caller, id); r.parked[key] == pt {
+			delete(r.parked, key)
 		}
 	}
 }

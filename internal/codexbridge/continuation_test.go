@@ -24,15 +24,20 @@ func TestSecurityRegressionForeignCallerCannotTakeParkedTurn(t *testing.T) {
 				t.Fatalf("setup: %v", err)
 			}
 			req.ToolResults = map[string]string{res.ToolCalls[0].ID: "31C"}
+			// Parked turns are scoped per caller: caller-a's call id finds
+			// nothing for caller-b, which replays in its own fresh child and
+			// never resumes, removes or learns about caller-a's turn.
 			req.CallerID = "caller-b"
-			_, err = r.Run(context.Background(), req, nil)
-			if err == nil || asNative(err).Status != 403 || r.ParkedTurns() != 1 || spawnCount(t, home) != 1 {
-				t.Fatal("foreign caller accessed or removed parked turn")
+			if _, err = r.Run(context.Background(), req, nil); err != nil {
+				t.Fatalf("foreign caller's replay failed: %v", err)
+			}
+			if spawnCount(t, home) != 2 || r.ParkedTurns() != 2 {
+				t.Fatalf("foreign caller did not replay separately: spawns=%d parked=%d", spawnCount(t, home), r.ParkedTurns())
 			}
 			req.CallerID = "caller-a"
 			final, err := r.Run(context.Background(), req, nil)
-			if err != nil || final.Text != "KL is 31C" || spawnCount(t, home) != 1 {
-				t.Fatalf("owner could not resume: %+v %v", final, err)
+			if err != nil || final.Text != "KL is 31C" || spawnCount(t, home) != 2 {
+				t.Fatalf("owner could not resume its untouched parked turn: %+v %v", final, err)
 			}
 		})
 	}

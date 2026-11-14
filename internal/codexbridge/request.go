@@ -77,6 +77,8 @@ const DefaultInstructions = "You are a helpful assistant."
 const ClientToolsNote = "Your tools run on the caller's machine, not where you run. " +
 	"Local sandbox and approval restrictions describe only the Codex bridge process; they do not describe the caller's tools or filesystem. " +
 	"Use the caller-provided tools for authorized reads, writes, and commands in the workspace designated by the caller. " +
+	"Continue work the user has already authorized without repeatedly asking for permission to use those tools. " +
+	"Ask only when additional authorization or essential missing information is actually required. " +
 	"Do not refuse a caller-workspace write solely because your local sandbox is read-only or the path is outside your local workspace. " +
 	"Determine access from the caller tool's actual result; report a permission failure only when that tool returns one, and respect any caller-side approval requirements. " +
 	"Resolve `~` using the caller's environment through its tools, never the bridge's HOME; use the resulting absolute path when a tool requires one. " +

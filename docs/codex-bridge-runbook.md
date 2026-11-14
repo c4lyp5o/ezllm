@@ -141,7 +141,8 @@ long as it is set.
 
 Set `EZLLM_CODEX_SANDBOX=writable` to select Codex's `workspace-write`
 policy for the private per-request working directory. Unset or unknown values
-select `read-only`. Both modes use `approvalPolicy=never`: this headless bridge
+select `read-only`. Both modes use `approvalPolicy=never`, also pinned as `approval_policy="never"`
+in CLI startup configuration: this headless bridge
 has no approval UI and declines approval RPCs, so `on-request` cannot provide a
 usable escalation path. Operations outside the selected sandbox still fail.
 
@@ -242,7 +243,7 @@ Boot fails loudly — the process does not start — when:
 | `EZLLM_CODEX_BRIDGE_ADDR` | `127.0.0.1:8791` | loopback listener |
 | `EZLLM_CODEX_BRIDGE_TOKEN_FILE` | `/data/codex-bridge.token` | shared secret, generated on first boot |
 | `EZLLM_CODEX_BRIDGE_CONCURRENCY` | `2` | CLI children at once (a turn parked on tool calls holds none) |
-| `EZLLM_CODEX_BRIDGE_CACHE` | `off` | `on` reuses empty configuration templates for fresh ephemeral forks; requires experimental fork schema |
+| `EZLLM_CODEX_BRIDGE_CACHE` | `auto` | Enable empty-template forks when supported; report fallback reason otherwise. `on` requires support; `off` disables caching. |
 | `EZLLM_CODEX_SANDBOX` | `read-only` | `writable` permits writes in the request temp workspace; no interactive approvals |
 | `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK` | `off` | `on` = client tools without Landlock ([what you give up](#the-override-and-what-you-give-up)) |
 
@@ -402,10 +403,14 @@ See [shared transport status and remaining work](shared-bridge-transport-design.
 
 ## Prompt-cache affinity
 
-Set `EZLLM_CODEX_BRIDGE_CACHE=on` to enable empty-template forks. Boot validates
+`EZLLM_CODEX_BRIDGE_CACHE` defaults to `auto` (v1.14+). Boot validates
 experimental `thread/fork`, `thread/resume`, `thread/inject_items` and
-`thread/delete` support; the mode requires app-server. CLI 0.167.0 passed the
-native proof. Leave the variable unset to use the existing ephemeral-thread path.
+`thread/delete` support and enables empty-template forks when available.
+Otherwise auto uses the original path and reports the reason in
+`/status.cache_selection`. `on` requires support and fails startup if unavailable;
+`off` explicitly selects the original path. Unknown values fail startup.
+The cache requires app-server; CLI 0.167.0 passed the native proof. The decision
+happens before inference, never as a second model call to repair a failed turn.
 
 Each independent request launches a new CLI, resumes a matching empty template,
 and forks a separate ephemeral prediction thread with the caller's complete
@@ -414,7 +419,8 @@ caller dialogue or child answers. Caller tools still execute in Hermes or the
 calling harness. A pending native tool turn keeps its existing process until
 its caller supplies results; completed turns return only their empty template.
 
-`GET /status` reports `fork_cache` counts: `enabled`, `hits`, `idle`, `credits`
+`GET /status` reports `approval_policy=never`, the requested/effective mode and
+reason under `cache_selection`, and `fork_cache` counts: `enabled`, `hits`, `idle`, `credits`
 and `cleanup_failures`. A hit means template reuse; actual cache reads remain
 in native usage and OpenAI `prompt_tokens_details.cached_tokens`. Input totals
 already include those reads. No extra warm-up model turn is sent.
@@ -430,6 +436,7 @@ for cleanup. An abrupt kill can leave empty templates in native `CODEX_HOME`
 rollout/index storage, including their instructions and tool definitions.
 
 The updater copies the setting into qualification and requires an
-`ephemeral-forks` policy proof with fresh-request reuse and caller-tool
-continuation. Changing the setting requires requalification. Measured results
+`auto`, `ephemeral-forks` (explicit `on`) or `off` policy proof, plus
+`approval_policy=never`. Effective cache mode proves fresh-request reuse and
+caller-tool continuation; unsupported auto mode reports its fallback reason. Changing the setting requires requalification. Measured results
 and design: [empty-template cache](codex-empty-template-cache-design.md).

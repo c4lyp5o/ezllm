@@ -90,7 +90,7 @@ func LockdownArgs(codeMode bool) []string {
 		}
 		args = append(args, "--disable", f)
 	}
-	return append(args, "-c", "tools.web_search=false", "-c", `web_search="disabled"`)
+	return append(args, "-c", `approval_policy="never"`, "-c", "tools.web_search=false", "-c", `web_search="disabled"`)
 }
 
 // Runner spawns one app-server child per request (claude-bridge's shape): a

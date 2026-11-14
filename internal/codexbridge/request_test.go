@@ -176,7 +176,7 @@ func TestToolRequestsCarryTheWhereToolsRunNote(t *testing.T) {
 	if !strings.HasPrefix(with.Instructions, "Be terse.") || !strings.HasSuffix(with.Instructions, ClientToolsNote) {
 		t.Errorf("instructions = %q", with.Instructions)
 	}
-	for _, want := range []string{"caller's machine", "never pass it", "private scratch space", "stale saved working directory", "failing cd runs first", "set to a directory that always exists"} {
+	for _, want := range []string{"caller's machine", "never pass it", "private scratch space", "stale saved working directory", "failing cd runs first", "set to a directory that always exists", "without repeatedly asking for permission", "respect any caller-side approval requirements"} {
 		if !strings.Contains(ClientToolsNote, want) {
 			t.Errorf("note lost %q", want)
 		}

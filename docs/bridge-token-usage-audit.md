@@ -315,3 +315,15 @@ parent deletion passed, including Landlock confinement. See the
 [numeric evidence](codex-cache-experiment-results.json).
 Exec fallback now requires positive pre-inference evidence; silence after
 `turn/start` cannot trigger a duplicate paid generation.
+
+
+### Codex automatic default — v1.14.0
+
+Codex cache selection now defaults to `auto`. Supported CLIs enable the tested
+empty-template path; unsupported CLIs keep the original path with a reason in
+`/status.cache_selection`. Explicit `on` requires support and `off` disables it.
+The native CLI approval policy is pinned to `never` at startup, thread creation
+and resume. Caller-tool instructions continue already-authorized work without
+repeated permission questions, while respecting actual caller approval requirements.
+The real CLI auto-mode live gate passed plain reuse, caller-tool continuation and
+native parent cleanup without setting the cache environment variable.

@@ -11,7 +11,17 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.13.0**
+**Current: v1.14.0**
+
+## v1.14.0 — 2026-11-14
+
+Codex caching now defaults to `auto`: startup enables empty-template forks when
+supported, otherwise reports the reason and keeps the original request path.
+`on` requires support, `off` disables caching, and invalid modes fail startup.
+Pins native approval policy to `never` at CLI startup as well as thread creation
+and resume. Caller-tool instructions discourage repeated permission questions
+for already-authorized work while respecting actual caller approval requirements.
+Updater qualification includes automatic cache selection and noninteractive policy.
 
 ## v1.13.0 — 2026-11-14
 

@@ -71,5 +71,35 @@
       "landlock": true,
       "turn": 2
     }
-  ]
+  ],
+  "auto_default_validation": {
+    "date": "2026-11-14",
+    "ezllm_version": "1.14.0",
+    "cache_env_unset": true,
+    "landlock": true,
+    "model": "gpt-5.6-luna",
+    "verdict": {
+      "bridge": "codex",
+      "ok": true,
+      "policy": {
+        "approval_policy": "never",
+        "cache": "auto",
+        "sandbox": "read-only"
+      },
+      "version": "0.167.0",
+      "live": true,
+      "problems": []
+    },
+    "bridge_requests": 4,
+    "native_turn_starts": 3,
+    "startup_selection": {
+      "mode": "auto",
+      "enabled": true
+    },
+    "explicit_opt_out": {
+      "mode": "off",
+      "enabled": false,
+      "reason": "disabled by operator"
+    }
+  }
 }

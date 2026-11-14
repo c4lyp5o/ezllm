@@ -110,15 +110,7 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 	if err != nil {
 		return nil, err
 	}
-	cache := codexbridge.ForkCacheEnabled(os.Getenv)
-	if cache {
-		if pre.Channel != codexbridge.ChannelAppServer {
-			return nil, fmt.Errorf("codex cache requires app-server")
-		}
-		if err := codexbridge.RunCachePreflight(ctx, resolved, home); err != nil {
-			return nil, err
-		}
-	}
+	cache := pre.Cache.Enabled
 	token, err := codexBridgeToken(strings.TrimSpace(os.Getenv(envCodexToken)))
 	if err != nil {
 		return nil, err
@@ -148,19 +140,21 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 		Token:    token,
 		Version:  server.Version,
 		Info: map[string]any{
-			"status":       "ok",
-			"version":      server.Version,
-			"cli_bin":      resolved,
-			"cli_version":  pre.Version,
-			"cli_release":  qualified,
-			"codex_home":   home,
-			"login":        pre.Login,
-			"lockdown":     "verified at boot",
-			"channel":      channelInfo(pre),
-			"concurrency":  concurrency,
-			"landlock":     tools.landlock,
-			"client_tools": tools.status,
-			"sandbox":      string(codexbridge.SandboxModeFromEnv(os.Getenv)),
+			"status":          "ok",
+			"version":         server.Version,
+			"cli_bin":         resolved,
+			"cli_version":     pre.Version,
+			"cli_release":     qualified,
+			"codex_home":      home,
+			"login":           pre.Login,
+			"lockdown":        "verified at boot",
+			"channel":         channelInfo(pre),
+			"concurrency":     concurrency,
+			"landlock":        tools.landlock,
+			"client_tools":    tools.status,
+			"cache_selection": pre.Cache,
+			"approval_policy": "never",
+			"sandbox":         string(codexbridge.SandboxModeFromEnv(os.Getenv)),
 		},
 		Logf: log.Info,
 	}

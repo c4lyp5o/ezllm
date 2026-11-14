@@ -360,9 +360,10 @@ See [the shared transport design](shared-bridge-transport-design.md) for scope
 and per-bridge migration acceptance. Historical decisions above remain as recorded.
 
 
-## Empty-template cache opt-in (2026-11-14)
+## Empty-template cache (2026-11-14)
 
-`EZLLM_CODEX_BRIDGE_CACHE=on` uses an empty persisted configuration parent and
+`EZLLM_CODEX_BRIDGE_CACHE=auto` is the v1.14+ default. Supported CLIs use an
+empty persisted configuration parent and
 independent ephemeral prediction forks, retaining no caller dialogue in the
 parent and no idle CLI process. This extends fresh-request caching while
 preserving full caller history and native pending-tool callbacks. See

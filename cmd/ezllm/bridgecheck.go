@@ -103,14 +103,15 @@ func envOrDefault(key, def string) string {
 
 // bridgeVerdict is what `ezllm bridge-check --json` prints for the updater.
 type bridgeVerdict struct {
-	Bridge    string            `json:"bridge"`
-	OK        bool              `json:"ok"`
-	Retryable bool              `json:"retryable"`
-	Policy    map[string]string `json:"policy,omitempty"`
-	Version   string            `json:"version,omitempty"`
-	Release   string            `json:"release,omitempty"`
-	Live      bool              `json:"live"`
-	Problems  []string          `json:"problems"`
+	CacheSelection *codexbridge.CacheSelection `json:"cache_selection,omitempty"`
+	Bridge         string                      `json:"bridge"`
+	OK             bool                        `json:"ok"`
+	Retryable      bool                        `json:"retryable"`
+	Policy         map[string]string           `json:"policy,omitempty"`
+	Version        string                      `json:"version,omitempty"`
+	Release        string                      `json:"release,omitempty"`
+	Live           bool                        `json:"live"`
+	Problems       []string                    `json:"problems"`
 	// Notes carry what the run did NOT prove, so a reader (or the updater) never
 	// mistakes a static pass for a full one.
 	Notes []string `json:"notes,omitempty"`
@@ -172,8 +173,9 @@ func runBridgeCheck(args []string, stdout io.Writer) error {
 	switch name {
 	case "codex":
 		v.Policy = map[string]string{"sandbox": string(codexbridge.SandboxModeFromEnv(os.Getenv))}
-		if codexbridge.ForkCacheEnabled(os.Getenv) {
-			v.Policy["cache"] = "ephemeral-forks"
+		v.Policy["approval_policy"] = "never"
+		if policy, err := codexbridge.ForkCachePolicy(os.Getenv); err == nil {
+			v.Policy["cache"] = policy
 		}
 	case "agy":
 		mode := "off"
@@ -286,10 +288,9 @@ func checkCodexCLI(ctx context.Context, bin, home string) (bridgeVerdict, codexb
 		v.Problems = append(v.Problems, err.Error())
 		return v, pre
 	}
-	if codexbridge.ForkCacheEnabled(os.Getenv) {
-		if err := codexbridge.RunCachePreflight(ctx, resolved, home); err != nil {
-			v.Problems = append(v.Problems, err.Error())
-		}
+	v.CacheSelection = &pre.Cache
+	if pre.Cache.Mode == "auto" && !pre.Cache.Enabled {
+		v.Notes = append(v.Notes, "automatic cache disabled: "+pre.Cache.Reason)
 	}
 	if pre.Channel == codexbridge.ChannelExec {
 		v.Problems = append(v.Problems, "app-server lacks "+strings.Join(pre.MissingRPCs, ", ")+": the bridge would fall back to exec")
@@ -487,7 +488,7 @@ func liveCodex(ctx context.Context, bin, home string, pre codexbridge.Preflight,
 	}
 	tools := decideCodexTools(helper, bin, strings.EqualFold(strings.TrimSpace(os.Getenv(envCodexToolsNoLL)), "on"))
 	r := &codexbridge.Runner{Bin: bin, CodexHome: home, Timeout: liveTurnTimeout, MaxConcurrent: 1,
-		Version: server.Version, Channel: pre.Channel, Sandbox: tools.sandbox, ForkCache: codexbridge.ForkCacheEnabled(os.Getenv),
+		Version: server.Version, Channel: pre.Channel, Sandbox: tools.sandbox, ForkCache: pre.Cache.Enabled,
 		SandboxMode: codexbridge.SandboxModeFromEnv(os.Getenv)}
 	// Drain retained parents too: cleanup is part of cache qualification.
 	defer func() {

@@ -2,10 +2,13 @@
 
 ## Decision
 
-Use the installed CLI's experimental prediction-fork path, gated by
-`EZLLM_CODEX_BRIDGE_CACHE=on`. Codex remains a bridge for caller-owned tools.
+Use the installed CLI's experimental prediction-fork path when available.
+`EZLLM_CODEX_BRIDGE_CACHE` defaults to `auto` from v1.14.0: startup validates
+support, enables caching when supported and otherwise reports a fallback reason.
+Explicit `on` requires support; `off` disables it. Unknown modes fail startup. Codex remains a bridge for caller-owned tools.
 No ACP adapter, daemon, pool of idle processes, extra service or dependency is
-needed. The default remains the existing independent ephemeral-thread path.
+needed. Capability fallback uses the existing independent ephemeral-thread path
+before any inference; requests never probe compatibility with a paid turn.
 
 The native probe found that identical Hermes-shaped requests in fresh threads
 had zero cache reads; retaining a directory alone also had zero reads. Forking
@@ -61,11 +64,14 @@ Silence after `turn/start` is ambiguous and cannot trigger another generation.
 
 ## Qualification and evidence
 
-`RunCachePreflight` checks the experimental methods and fork shape only when the
-mode is requested. `bridge-check` proves fresh-process template reuse and the
-existing caller-tool cycle. The updater includes `cache=ephemeral-forks` in its
-mode-specific qualification policy. Small live gates require reuse rather than
-an unreliable minimum native KV-cache read count.
+`RunCachePreflight` checks the experimental methods and fork shape at startup
+for auto/on modes; off skips the optional check. `bridge-check` reports the
+startup decision under `cache_selection`, and proves fresh-process template reuse
+and the existing caller-tool cycle. The updater includes `cache=auto`,
+`cache=ephemeral-forks` (explicit on) or `cache=off`, plus `approval_policy=never`,
+in its qualification policy. Auto qualification proves reuse when its native
+capabilities are present and reports a reason when unavailable. Small live gates
+require reuse rather than an unreliable minimum native KV-cache read count.
 
 The synthetic Hermes-shaped proof on CLI 0.167.0 and gpt-5.6-luna reported
 12,657 input tokens on each request, with 12,416 cached on the second (98.1%).
@@ -79,3 +85,13 @@ for other models, configurations or times.
 Fake-CLI regressions cover isolation, full-input forwarding, canonical keys,
 configuration changes, tool continuation, scratch cleanup, stale expiry,
 capacity, age, cancellation, shutdown, event filtering and pre-inference retry.
+
+
+## Noninteractive approval policy
+
+`LockdownArgs` pins `approval_policy="never"` before app-server or exec starts.
+New and resumed threads also specify `approvalPolicy=never`; prediction forks
+inherit it. Client tools remain caller-owned. Their instruction note asks the
+model to continue already-authorized work without repeated permission questions,
+while respecting actual caller approval requirements. Local scratch restrictions
+do not describe the caller's workspace permissions.

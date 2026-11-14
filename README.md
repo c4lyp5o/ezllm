@@ -122,8 +122,8 @@ configure caching and do not enable the bridges themselves.
 
 ```yaml
 environment:
-  # Codex: empty-template reuse across fresh CLI processes (v1.13+).
-  EZLLM_CODEX_BRIDGE_CACHE: "on"
+  # Codex: automatic cache support detection; this is the default (v1.14+).
+  EZLLM_CODEX_BRIDGE_CACHE: "auto"
 
   # Copilot: completed-conversation reuse requires both flags (v1.11+).
   EZLLM_COPILOT_BRIDGE_WARM_POOL: "on"
@@ -136,21 +136,25 @@ environment:
 
 Apply environment changes with `docker compose up -d --no-build`; a plain
 `docker compose restart` does not update the container environment. Use a build
-that includes the indicated features. Codex requires experimental prediction-fork
-support; Antigravity requires `--json-schema` and `--conversation`. Boot checks
-reject unsupported modes. The Antigravity tool adapter remains experimental;
+that includes the indicated features. Codex `auto` enables caching when its CLI
+supports experimental prediction forks; otherwise it uses the original path and
+reports the reason in `/status`. Use `on` to require caching or `off` to opt out.
+Antigravity requires `--json-schema` and `--conversation`; boot checks reject
+unsupported explicit modes. The Antigravity tool adapter remains experimental;
 see its [limitations](docs/agy-bridge-runbook.md) before enabling it.
 
 For a binary or source installation, export the same variables in the environment
 that starts ezllm. For example, with the Codex bridge already configured:
 
 ```bash
-EZLLM_CODEX_BRIDGE_CACHE=on make run
+EZLLM_CODEX_BRIDGE_CACHE=auto make run
 ```
 
 Keep model, system instructions and tool definitions stable, and let Hermes or
 your other harness send the complete conversation history. Caller tools continue
-to run in that harness. Codex and Antigravity keep no idle CLI process; Copilot's
+to run in that harness. Codex runs with native approval policy `never` and
+continues already-authorized caller work without repeated permission requests;
+any actual caller-side approval requirements still apply. Codex and Antigravity keep no idle CLI process; Copilot's
 warm pool retains bounded workers. Claude has no additional ezllm cache toggle.
 These settings improve native cache reuse where supported; cached-token counts
 do not guarantee a particular subscription-quota reduction. See

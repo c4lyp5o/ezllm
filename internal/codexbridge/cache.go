@@ -276,16 +276,77 @@ func (r *Runner) forkTemplate(ctx context.Context, c *child, l *templateLease, p
 	return c.conn.call(ctx, "thread/fork", map[string]any{"threadId": l.id, "ephemeral": true, "experimentalPredictionMode": true, "excludeTurns": true})
 }
 
-// ForkCacheEnabled keeps the experimental protocol opt-in explicit.
-func ForkCacheEnabled(getenv func(string) string) bool {
+// CacheSelection records the startup decision; auto fallback never retries a turn.
+type CacheSelection struct {
+	Mode    string `json:"mode"`
+	Enabled bool   `json:"enabled"`
+	Reason  string `json:"reason,omitempty"`
+}
+
+// ForkCacheModeFromEnv defaults to auto; spelling mistakes are configuration errors.
+func ForkCacheModeFromEnv(getenv func(string) string) (string, error) {
 	if getenv == nil {
 		getenv = os.Getenv
 	}
-	return strings.EqualFold(strings.TrimSpace(getenv(CacheEnvKey)), "on")
+	mode := strings.ToLower(strings.TrimSpace(getenv(CacheEnvKey)))
+	switch mode {
+	case "", "auto":
+		return "auto", nil
+	case "on", "off":
+		return mode, nil
+	}
+	return "", fmt.Errorf("codex bridge: %s must be auto, on or off", CacheEnvKey)
 }
 
-// RunCachePreflight qualifies only cache-enabled installations. Older CLI
-// schemas remain sufficient when this mode is off.
+// ForkCachePolicy is shared by boot qualification and the updater's policy.
+func ForkCachePolicy(getenv func(string) string) (string, error) {
+	mode, err := ForkCacheModeFromEnv(getenv)
+	if mode == "on" {
+		return "ephemeral-forks", err
+	}
+	return mode, err
+}
+
+func ResolveForkCache(ctx context.Context, bin, home, channel string, getenv func(string) string) (CacheSelection, error) {
+	mode, err := ForkCacheModeFromEnv(getenv)
+	if err != nil {
+		return CacheSelection{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return CacheSelection{Mode: mode}, err
+	}
+	selected, err := selectForkCache(mode, channel, func() error { return RunCachePreflight(ctx, bin, home) })
+	if ctx.Err() != nil {
+		return selected, ctx.Err()
+	}
+	return selected, err
+}
+
+func selectForkCache(mode, channel string, check func() error) (CacheSelection, error) {
+	selected := CacheSelection{Mode: mode}
+	if mode == "off" {
+		selected.Reason = "disabled by operator"
+		return selected, nil
+	}
+	var err error
+	if channel == ChannelExec {
+		err = fmt.Errorf("codex cache requires app-server")
+	} else {
+		err = check()
+	}
+	if err != nil {
+		if mode == "on" {
+			return selected, err
+		}
+		selected.Reason = err.Error()
+		return selected, nil
+	}
+	selected.Enabled = true
+	return selected, nil
+}
+
+// RunCachePreflight checks experimental support without making model requests.
+// Auto mode uses the original path when these optional capabilities are absent.
 func RunCachePreflight(ctx context.Context, bin, home string) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()

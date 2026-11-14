@@ -397,10 +397,10 @@ def gate_policy(name, info):
     env = container_env(info, GATE_ENV)
     if name == "codex":
         mode = "workspace-write" if env.get("EZLLM_CODEX_SANDBOX", "").strip().lower() == "writable" else "read-only"
-        policy = {"sandbox": mode}
-        if env.get("EZLLM_CODEX_BRIDGE_CACHE", "").strip().lower() == "on":
-            policy["cache"] = "ephemeral-forks"
-        return policy
+        cache = env.get("EZLLM_CODEX_BRIDGE_CACHE", "").strip().lower() or "auto"
+        if cache not in ("auto", "on", "off"):
+            raise ValueError("EZLLM_CODEX_BRIDGE_CACHE must be auto, on or off")
+        return {"sandbox": mode, "approval_policy": "never", "cache": "ephemeral-forks" if cache == "on" else cache}
     if name == "agy":
         policy = {"caller_tools": "structured-output" if env.get("EZLLM_AGY_EXPERIMENTAL_TOOLS", "").strip().lower() == "on" else "off"}
         if env.get("EZLLM_AGY_BRIDGE_SESSION_CACHE", "").strip().lower() in ("on", "true", "1"):

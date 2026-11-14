@@ -2,6 +2,18 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
+## v1.14.0 — Automatic Codex caching and noninteractive CLI defaults
+
+- Defaults `EZLLM_CODEX_BRIDGE_CACHE` to `auto`: enable supported empty-template
+  forks at startup, otherwise expose the reason and use the original path.
+  `on` requires support; `off` opts out. Invalid values are configuration errors.
+- Reports the requested mode, effective decision and fallback reason on `/status`.
+  Updater policy proofs now cover auto/on/off and `approval_policy=never`.
+- Pins approval policy to `never` in CLI configuration for all app-server and exec
+  children, in addition to existing thread creation/resume settings. Prediction
+  forks inherit that policy. Caller-tool instructions continue authorized work
+  without repeated permission questions; actual caller approval requirements apply.
+
 ## v1.13.0 — Codex prompt-cache affinity across fresh processes
 
 - Adds `EZLLM_CODEX_BRIDGE_CACHE=on`: persisted empty configuration templates

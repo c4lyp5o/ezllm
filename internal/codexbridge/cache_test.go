@@ -3,6 +3,7 @@ package codexbridge
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -240,15 +241,19 @@ func TestForkCacheChangedToolConfigurationReplays(t *testing.T) {
 	waitTemplatesDeleted(t, r)
 }
 
-func TestCacheOptInAndUsageValidation(t *testing.T) {
-	for _, v := range []string{"", "off", "true", "1", "unknown"} {
-		if ForkCacheEnabled(func(string) string { return v }) {
-			t.Fatal(v)
+func TestCacheModeAndUsageValidation(t *testing.T) {
+	for _, tc := range []struct{ value, want string }{{"", "auto"}, {"auto", "auto"}, {" AUTO ", "auto"}, {" ON ", "on"}, {"off", "off"}} {
+		mode, err := ForkCacheModeFromEnv(func(string) string { return tc.value })
+		if err != nil || mode != tc.want {
+			t.Fatalf("%q: %q %v", tc.value, mode, err)
 		}
 	}
-	if !ForkCacheEnabled(func(string) string { return " ON " }) {
-		t.Fatal("opt in ignored")
+	for _, v := range []string{"true", "1", "unknown"} {
+		if _, err := ForkCacheModeFromEnv(func(string) string { return v }); err == nil {
+			t.Fatalf("accepted typo %q", v)
+		}
 	}
+
 	for _, u := range []Usage{{}, {InputTokens: 10, CachedTokens: 11}, {InputTokens: 10, OutputTokens: -1}, {InputTokens: 10, OutputTokens: 1, ReasoningTokens: 2}} {
 		if validTemplateUsage(u) {
 			t.Fatalf("invalid usage %+v", u)
@@ -332,4 +337,63 @@ func TestFailedDeletionRetainsCreditAndStopsOrphanGrowth(t *testing.T) {
 		t.Fatal("cleanup failures allowed unbounded templates")
 	}
 	r.Shutdown()
+}
+
+func TestAutomaticCacheSelectionBeforeInference(t *testing.T) {
+	unsupported := fmt.Errorf("experimental prediction fork unavailable")
+	for _, tc := range []struct {
+		mode, channel                        string
+		supported, enabled, wantError, probe bool
+	}{
+		{"auto", ChannelAppServer, true, true, false, true},
+		{"auto", ChannelAppServer, false, false, false, true},
+		{"auto", ChannelExec, false, false, false, false},
+		{"on", ChannelAppServer, true, true, false, true},
+		{"on", ChannelAppServer, false, false, true, true},
+		{"on", ChannelExec, false, false, true, false},
+		{"off", ChannelAppServer, true, false, false, false},
+	} {
+		called := false
+		selected, err := selectForkCache(tc.mode, tc.channel, func() error {
+			called = true
+			if !tc.supported {
+				return unsupported
+			}
+			return nil
+		})
+		if selected.Mode != tc.mode || selected.Enabled != tc.enabled || (err != nil) != tc.wantError || called != tc.probe {
+			t.Fatalf("%+v: %+v err=%v probe=%v", tc, selected, err, called)
+		}
+		if !selected.Enabled && !tc.wantError && selected.Reason == "" {
+			t.Fatal("disabled reason missing")
+		}
+	}
+	for _, tc := range []struct{ value, want string }{{"", "auto"}, {"auto", "auto"}, {"on", "ephemeral-forks"}, {"off", "off"}} {
+		policy, err := ForkCachePolicy(func(string) string { return tc.value })
+		if err != nil || policy != tc.want {
+			t.Fatalf("%q: %q %v", tc.value, policy, err)
+		}
+	}
+}
+
+func TestAutomaticCacheDefaultResolvesCapabilitiesWithoutInference(t *testing.T) {
+	// Missing executable stands in for an unsupported experimental schema. This
+	// optional capability failure must not prevent auto/off startup.
+	bin := filepath.Join(t.TempDir(), "missing-codex")
+	selected, err := ResolveForkCache(context.Background(), bin, t.TempDir(), ChannelAppServer, func(string) string { return "" })
+	if err != nil || selected.Mode != "auto" || selected.Enabled || selected.Reason == "" {
+		t.Fatalf("%+v %v", selected, err)
+	}
+	if _, err = ResolveForkCache(context.Background(), bin, t.TempDir(), ChannelAppServer, func(string) string { return "on" }); err == nil {
+		t.Fatal("required mode ignored missing capability")
+	}
+	selected, err = ResolveForkCache(context.Background(), bin, t.TempDir(), ChannelAppServer, func(string) string { return "off" })
+	if err != nil || selected.Enabled {
+		t.Fatalf("%+v %v", selected, err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err = ResolveForkCache(ctx, bin, t.TempDir(), ChannelAppServer, func(string) string { return "" }); err != context.Canceled {
+		t.Fatalf("ignored startup cancellation: %v", err)
+	}
 }

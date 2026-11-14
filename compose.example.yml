@@ -101,6 +101,8 @@ services:
       # Loopback-only; an openai-compatible account dials it. Linux only. `on`
       # without the CLI and a login (the two mounts below) fails the boot.
       EZLLM_CODEX_BRIDGE: "off"
+      # Empty-template cache reuse; needs experimental CLI support (v1.13+).
+      # EZLLM_CODEX_BRIDGE_CACHE: "on"
       # EZLLM_CODEX_BIN: /opt/codex/bin/codex
       # EZLLM_CODEX_HOME: /codex-sub
       # EZLLM_CODEX_BRIDGE_ADDR: 127.0.0.1:8791

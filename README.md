@@ -112,6 +112,52 @@ container can write to that directory. See [compose.example.yml](compose.example
 for deployment options. The Compose example publishes the port on all host
 interfaces; restrict it or configure a reverse proxy as appropriate for your host.
 
+### Bridge cache settings
+
+For subscription bridges, first install and enable your chosen CLIs and mount
+their login directories using the [bridge guides](#use-a-subscription-bridge).
+Then add the matching settings below to the existing `services.ezllm.environment`
+section in `compose.yml`. Keep only settings for bridges you use; these flags
+configure caching and do not enable the bridges themselves.
+
+```yaml
+environment:
+  # Codex: empty-template reuse across fresh CLI processes (v1.13+).
+  EZLLM_CODEX_BRIDGE_CACHE: "on"
+
+  # Copilot: completed-conversation reuse requires both flags (v1.11+).
+  EZLLM_COPILOT_BRIDGE_WARM_POOL: "on"
+  EZLLM_COPILOT_BRIDGE_SESSION_CACHE: "on"
+
+  # Antigravity: conversation resume requires the experimental tool adapter (v1.12+).
+  EZLLM_AGY_EXPERIMENTAL_TOOLS: "on"
+  EZLLM_AGY_BRIDGE_SESSION_CACHE: "on"
+```
+
+Apply environment changes with `docker compose up -d --no-build`; a plain
+`docker compose restart` does not update the container environment. Use a build
+that includes the indicated features. Codex requires experimental prediction-fork
+support; Antigravity requires `--json-schema` and `--conversation`. Boot checks
+reject unsupported modes. The Antigravity tool adapter remains experimental;
+see its [limitations](docs/agy-bridge-runbook.md) before enabling it.
+
+For a binary or source installation, export the same variables in the environment
+that starts ezllm. For example, with the Codex bridge already configured:
+
+```bash
+EZLLM_CODEX_BRIDGE_CACHE=on make run
+```
+
+Keep model, system instructions and tool definitions stable, and let Hermes or
+your other harness send the complete conversation history. Caller tools continue
+to run in that harness. Codex and Antigravity keep no idle CLI process; Copilot's
+warm pool retains bounded workers. Claude has no additional ezllm cache toggle.
+These settings improve native cache reuse where supported; cached-token counts
+do not guarantee a particular subscription-quota reduction. See
+[Codex](docs/codex-empty-template-cache-design.md),
+[Copilot](docs/copilot-completed-session-cache-design.md) and
+[Antigravity](docs/agy-conversation-cache-design.md) for matching and lifetime limits.
+
 ### Set up the dashboard
 
 1. Open [http://127.0.0.1:20129](http://127.0.0.1:20129) on the machine

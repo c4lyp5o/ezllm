@@ -47,9 +47,11 @@ func newAdmission(limits RequestLimits, maxBody int64) *admission {
 	return &admission{limits: limits, maxBody: maxBody, budget: int64(limits.BodyMemoryMiB) << 20, clients: make(map[string]int)}
 }
 
-// admit does not queue or read the body. Reserving the whole request cap first
-// covers chunked input and inconsistent size hints. Once read, shrink keeps
-// only the actual input bytes charged until the handler and stream finish.
+// admit does not queue or read the body. A declared Content-Length is reserved
+// exactly: net/http never reads past it, so it bounds the allocation. A body of
+// unknown length (chunked, or HTTP/2 without the header) reserves the whole
+// request cap. Once read, shrink keeps only the actual input bytes charged until
+// the handler and stream finish.
 func (s *Server) admit(w http.ResponseWriter, r *http.Request) *requestLease {
 	if r.ContentLength > s.maxBody {
 		refuseBody(w, r)
@@ -59,7 +61,11 @@ func (s *Server) admit(w http.ResponseWriter, r *http.Request) *requestLease {
 	client := clientName(r)
 	gate := s.admission
 	gate.mu.Lock()
-	if gate.active >= gate.limits.GlobalInflight || gate.clients[client] >= gate.limits.PerClientInflight || gate.maxBody > gate.budget-gate.used {
+	reserve := gate.maxBody
+	if r.ContentLength >= 0 {
+		reserve = r.ContentLength
+	}
+	if gate.active >= gate.limits.GlobalInflight || gate.clients[client] >= gate.limits.PerClientInflight || reserve > gate.budget-gate.used {
 		gate.mu.Unlock()
 		refuseBody(w, r)
 		w.Header().Set("Retry-After", "1")
@@ -68,9 +74,9 @@ func (s *Server) admit(w http.ResponseWriter, r *http.Request) *requestLease {
 	}
 	gate.active++
 	gate.clients[client]++
-	gate.used += gate.maxBody
+	gate.used += reserve
 	gate.mu.Unlock()
-	return &requestLease{gate: gate, client: client, bytes: gate.maxBody}
+	return &requestLease{gate: gate, client: client, bytes: reserve}
 }
 
 // Reject without draining an attacker-controlled HTTP/1 body. HTTP/2 ends only

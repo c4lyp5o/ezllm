@@ -214,8 +214,8 @@ exceed global concurrency, and the memory budget must cover `max_body_mib`.
 They cannot be disabled with zero. Configure them before startup.
 
 Admission runs after authentication and before reading inference bodies. It
-reserves a whole allowed body while reading (including chunked input), shrinks
-to the actual body size after completion and retains that reservation until the
+reserves the declared `Content-Length`, or a whole allowed body when the length
+is unknown (chunked input), shrinks to the actual body size after completion and retains that reservation until the
 handler/stream ends. Excess requests receive 429 with `Retry-After: 1`; there is
 no unbounded waiting queue. Native CLI concurrency limits continue to apply too.
 The budget counts retained input bytes, not JSON object overhead, response

@@ -50,6 +50,9 @@ routing, upstream work and streaming. Completion, errors, cancellation and panic
 release the reservation and remove idle per-client counters. Excess requests
 receive 429 plus `Retry-After: 1` without queuing or reading another body. HTTP/1
 rejections close instead of blocking on a stalled-body drain.
+*Revised in v1.9.0:* a declared `Content-Length` is now reserved exactly (net/http
+never reads past it); only bodies of unknown length reserve the full request cap,
+so small requests are no longer limited to `body_memory_mib / max_body_mib` at once.
 
 The memory budget is an input-byte budget, not a process RSS ceiling: decoded
 JSON, transformed copies, response buffers, SQLite and CLI children use memory

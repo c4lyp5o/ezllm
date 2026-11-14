@@ -158,6 +158,19 @@ func TestLogPath(t *testing.T) {
 	}
 }
 
+func TestLogRequestPathMasksTokenWithEncodedSlashAndInvalidRawPath(t *testing.T) {
+	// The unescaped '|' makes RawPath invalid, so URL.EscapedPath() would
+	// rebuild the path from its decoded form and split the token at %2F.
+	r := httptest.NewRequest("GET", "/api/v1/vscode/abc%2Fsecret|x/chat/completions", nil)
+	got := logRequestPath(r)
+	if strings.Contains(got, "secret") {
+		t.Fatalf("logRequestPath leaked part of the token: %q", got)
+	}
+	if got != "/api/v1/vscode/***/chat/completions" {
+		t.Fatalf("logRequestPath = %q, want /api/v1/vscode/***/chat/completions", got)
+	}
+}
+
 // syncBuffer is a bytes.Buffer safe for the logger's concurrent writes.
 type syncBuffer struct {
 	mu  sync.Mutex

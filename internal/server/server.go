@@ -1546,13 +1546,30 @@ const vscodePathPrefix = "/api/v1/vscode/"
 // encoded static prefix characters. URL.Path alone has lost segment boundaries.
 func logRequestPath(r *http.Request) string {
 	if strings.HasPrefix(r.URL.Path, vscodePathPrefix) {
-		parts := strings.SplitN(r.URL.EscapedPath(), "/", 6)
+		// Split the path exactly as the client sent it. URL.EscapedPath()
+		// re-escapes the decoded path whenever RawPath is not a valid encoding
+		// (an unescaped '|', say), turning a %2F inside the token into a real
+		// '/' that would shift the token's tail into the logged remainder.
+		parts := strings.SplitN(rawRequestPath(r), "/", 6)
 		if len(parts) == 6 {
 			return vscodePathPrefix + "***/" + parts[5]
 		}
 		return vscodePathPrefix + "***"
 	}
 	return logPath(r.URL.Path)
+}
+
+// rawRequestPath is the path portion of the request line as received, falling
+// back to the escaped URL path for absolute-form or synthetic requests.
+func rawRequestPath(r *http.Request) string {
+	raw := r.RequestURI
+	if i := strings.IndexByte(raw, '?'); i >= 0 {
+		raw = raw[:i]
+	}
+	if strings.HasPrefix(raw, "/") {
+		return raw
+	}
+	return r.URL.EscapedPath()
 }
 
 func logPath(p string) string {

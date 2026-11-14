@@ -18,5 +18,20 @@
     "traefik_default"
   ],
   "https_proxy_health": "verified with certificate validation",
-  "dashboard_security_headers": "verified"
+  "dashboard_security_headers": "verified",
+  "bridge_cache_trial": {
+    "codex": {
+      "mode": "auto",
+      "enabled": true,
+      "approval_policy": "never"
+    },
+    "agy": {
+      "experimental_tools": true,
+      "session_cache": true
+    },
+    "copilot": {
+      "warm_pool": true,
+      "session_cache": true
+    }
+  }
 }

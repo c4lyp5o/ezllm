@@ -138,3 +138,33 @@ ID, localhost-only host publication, preserved Traefik network, unauthenticated
 proxy health with certificate validation. No paid inference calls were used.
 The detailed runtime check is recorded in
 [the rollout evidence](security-rollout-2026-11-14.json).
+
+## Bridge cache trial deployment
+
+The operator enabled the following settings for a multi-day trial after the
+security rollout. The container was recreated to apply the environment:
+
+```dotenv
+EZLLM_CODEX_BRIDGE_CACHE=auto
+EZLLM_COPILOT_BRIDGE_WARM_POOL=on
+EZLLM_COPILOT_BRIDGE_SESSION_CACHE=on
+EZLLM_AGY_EXPERIMENTAL_TOOLS=on
+EZLLM_AGY_BRIDGE_SESSION_CACHE=on
+```
+
+Authenticated, local bridge status checks confirmed Codex cache selection
+`enabled: true`, mode `auto`, client tools enabled and approval policy `never`;
+AGY experimental caller tools and session cache enabled; and Copilot warm pool
+and session cache enabled. Local and certificate-validated HTTPS gateway health
+checks passed after recreation. Verification did not send inference requests.
+
+AGY session reuse applies to experimental tool-adapter requests; text-only
+requests remain fresh. Reuse requires matching history and policy, so enabling
+these settings does not guarantee provider prompt-cache hits. Hermes continues
+to execute caller tools. During the trial, compare cache-read usage and total
+input/output usage on comparable conversations, and check tool-result handling.
+The shared [README settings](../README.md#bridge-cache-settings) describe how to
+apply these flags. To opt out, set the corresponding cache flags to `off`; set
+`EZLLM_AGY_EXPERIMENTAL_TOOLS=off` too if disabling the AGY adapter. Recreate the
+container after environment changes. A private pre-trial Compose copy is retained
+under the ignored local backup directory.

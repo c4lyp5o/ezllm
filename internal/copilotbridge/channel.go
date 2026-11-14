@@ -414,7 +414,10 @@ func driveTurn(c *rpcConn, turn ChannelTurn, delta func(string) error, onFirst f
 				c.observe("session_cache_hit", 0)
 			}
 		} else if !c.deleteSession(c.session) {
-			return res, errors.New("copilot-bridge: cached session cleanup failed")
+			// Nothing has been sent for this turn yet: the failure is local and
+			// pre-inference. No new inference is dispatched while cleanup of the
+			// previous session is uncertain; the caller gets a typed refusal.
+			return res, &Failure{Code: codeCachedSessionCleanup, Msg: "copilot-bridge: cached session cleanup failed", BeforeInference: true}
 		}
 	}
 	if !reused {
@@ -608,6 +611,10 @@ func drainAborted(c *rpcConn, sessionID string, res *Result) {
 
 // RunChannel executes one turn over the channel, under the same slots and queue
 // as Run. Result.ToolCalls holds the batch if the model made one.
+// codeCachedSessionCleanup marks a reused worker that could not delete its
+// previous cached session before this turn started.
+const codeCachedSessionCleanup = "cached_session_cleanup"
+
 func (r *Runner) RunChannel(ctx context.Context, turn ChannelTurn, delta func(string) error) (Result, error) {
 	r.init()
 	return r.slotted(ctx, func() (Result, error) {
@@ -623,7 +630,7 @@ func (r *Runner) RunChannel(ctx context.Context, turn ChannelTurn, delta func(st
 		if r.WarmPool {
 			with = func(ctx context.Context, f func(*rpcConn) error) error { return r.withPooledTurn(ctx, &turn, f) }
 		}
-		err := with(ctx, func(c *rpcConn) error {
+		run := func(c *rpcConn) error {
 			var e error
 			c.cacheEnabled = r.SessionCacheEnabled()
 			res, e = driveTurn(c, turn, delta, func() { r.stampFirstByte(time.Since(began)) })
@@ -631,7 +638,8 @@ func (r *Runner) RunChannel(ctx context.Context, turn ChannelTurn, delta func(st
 				e = errors.New("copilot-bridge: the CLI finished without an assistant message or a tool call")
 			}
 			return e
-		})
+		}
+		err := with(ctx, run)
 		if err != nil {
 			return res, err
 		}

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -561,4 +562,19 @@ func TestPoolReapsStaleWorkerOutsideTheLock(t *testing.T) {
 	}
 	r.retireWorker(w)
 	w.stop()
+}
+
+// A reused worker that cannot delete its previous cached session refuses the
+// turn with a typed, pre-inference failure rather than an anonymous error.
+func TestCachedSessionCleanupFailureIsTypedAndPreInference(t *testing.T) {
+	r, _ := poolRig(t, "negative-delete")
+	r.SessionCache = true
+	if _, err := r.RunChannel(context.Background(), cacheTurn(t, cacheFirst), nil); err != nil {
+		t.Fatal(err)
+	}
+	_, err := r.RunChannel(context.Background(), cacheTurn(t, strings.Replace(cacheNext, "start", "edited", 1)), nil)
+	var f *Failure
+	if !errors.As(err, &f) || f.Code != codeCachedSessionCleanup || !f.BeforeInference {
+		t.Fatalf("cleanup failure = %#v, want a typed pre-inference %s failure", err, codeCachedSessionCleanup)
+	}
 }

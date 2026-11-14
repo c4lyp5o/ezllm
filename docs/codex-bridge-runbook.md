@@ -137,6 +137,25 @@ sensitive the ezllm user can write to). It is off by default, it is logged at
 boot, and `/status` shows `enabled without Landlock (operator override)` for as
 long as it is set.
 
+### Writable request workspace
+
+Set `EZLLM_CODEX_SANDBOX=writable` to select Codex's `workspace-write`
+policy for the private per-request working directory. Unset or unknown values
+select `read-only`. Both modes use `approvalPolicy=never`: this headless bridge
+has no approval UI and declines approval RPCs, so `on-request` cannot provide a
+usable escalation path. Operations outside the selected sandbox still fail.
+
+This option does not enable Codex's native shell, grant access to the client's
+workspace, or remove the outer Landlock domain. Client tools execute in the
+calling application. Their filesystem permissions are independent of the Codex
+child's sandbox: for Hermes, use its tools to resolve `~/workspace` on the
+Hermes machine and perform authorized writes there. The bridge adds this
+context to tool-bearing requests so the model attempts caller tools instead of
+inferring a caller-side denial from its local read-only sandbox. Actual caller
+tool failures and approval requirements still apply. This is instruction
+steering, not a guarantee of model behavior or a grant of filesystem access.
+Recreate the container after changing the environment.
+
 ## Prerequisites
 
 - **The official CLI release, pinned by path** (qualified: **0.163.0**, the
@@ -223,6 +242,7 @@ Boot fails loudly — the process does not start — when:
 | `EZLLM_CODEX_BRIDGE_ADDR` | `127.0.0.1:8791` | loopback listener |
 | `EZLLM_CODEX_BRIDGE_TOKEN_FILE` | `/data/codex-bridge.token` | shared secret, generated on first boot |
 | `EZLLM_CODEX_BRIDGE_CONCURRENCY` | `2` | CLI children at once (a turn parked on tool calls holds none) |
+| `EZLLM_CODEX_SANDBOX` | `read-only` | `writable` permits writes in the request temp workspace; no interactive approvals |
 | `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK` | `off` | `on` = client tools without Landlock ([what you give up](#the-override-and-what-you-give-up)) |
 
 ```sh

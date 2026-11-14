@@ -92,11 +92,27 @@ func (r *Runner) freshWorker(w *channelWorker) bool {
 		return true
 	}
 }
-func (r *Runner) takeWorker() (*channelWorker, error) {
+func (r *Runner) takeWorker() (*channelWorker, error) { return r.takeWorkerFor(nil) }
+func (w *channelWorker) stopIdle() {
+	if w.conn != nil && w.conn.completed != nil {
+		w.conn.deleteSession(w.conn.session)
+	}
+	w.stop()
+}
+func (r *Runner) takeWorkerFor(turn *ChannelTurn) (*channelWorker, error) {
 	r.poolMu.Lock()
 	defer r.poolMu.Unlock()
 	if r.closed {
 		return nil, errors.New("copilot-bridge: runner is closed")
+	}
+	if turn != nil && r.SessionCacheEnabled() {
+		for i, w := range r.idleWorkers {
+			if _, ok := w.conn.completed.continuation(*turn); ok {
+				last := len(r.idleWorkers) - 1
+				r.idleWorkers[i], r.idleWorkers[last] = r.idleWorkers[last], w
+				break
+			}
+		}
 	}
 	for len(r.idleWorkers) > 0 {
 		n := len(r.idleWorkers) - 1
@@ -111,7 +127,7 @@ func (r *Runner) takeWorker() (*channelWorker, error) {
 			return w, nil
 		}
 		delete(r.workers, w)
-		w.stop()
+		w.stopIdle()
 	}
 	st, err := os.Stat(r.Bin)
 	if err != nil {
@@ -161,7 +177,10 @@ func (r *Runner) retireWorker(w *channelWorker) {
 	w.stop()
 }
 func (r *Runner) withPooledChannel(ctx context.Context, f func(*rpcConn) error) error {
-	w, err := r.takeWorker()
+	return r.withPooledTurn(ctx, nil, f)
+}
+func (r *Runner) withPooledTurn(ctx context.Context, turn *ChannelTurn, f func(*rpcConn) error) error {
+	w, err := r.takeWorkerFor(turn)
 	if err != nil {
 		return err
 	}
@@ -189,7 +208,7 @@ func (r *Runner) withPooledChannel(ctx context.Context, f func(*rpcConn) error) 
 	if r.closed || !r.freshWorker(w) {
 		delete(r.workers, w)
 		r.poolMu.Unlock()
-		w.stop()
+		w.stopIdle()
 		return nil
 	}
 	r.idleWorkers = append(r.idleWorkers, w)
@@ -210,7 +229,7 @@ func (r *Runner) withPooledChannel(ctx context.Context, f func(*rpcConn) error) 
 		}
 		r.poolMu.Unlock()
 		if found {
-			w.stop()
+			w.stopIdle()
 		}
 	})
 	r.poolMu.Unlock()
@@ -222,6 +241,10 @@ func (r *Runner) withPooledChannel(ctx context.Context, f func(*rpcConn) error) 
 func (r *Runner) Close() {
 	r.poolMu.Lock()
 	r.closed = true
+	idle := make(map[*channelWorker]bool)
+	for _, w := range r.idleWorkers {
+		idle[w] = true
+	}
 	workers := make([]*channelWorker, 0, len(r.workers))
 	for w := range r.workers {
 		workers = append(workers, w)
@@ -233,6 +256,10 @@ func (r *Runner) Close() {
 	r.idleWorkers = nil
 	r.poolMu.Unlock()
 	for _, w := range workers {
-		w.stop()
+		if idle[w] {
+			w.stopIdle()
+		} else {
+			w.stop()
+		}
 	}
 }

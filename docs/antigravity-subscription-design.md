@@ -57,10 +57,12 @@ Findings that shape the build:
    messages become an `<instructions>` block and earlier turns a deterministic
    `<turn role=…>` transcript (byte-stable prefix for caching), as in the Codex
    bridge. A lone user message passes through unchanged.
-4. **Usage mapping.** `prompt_tokens = input_tokens` (includes
-   `cache_read_tokens`, reported as `cached_tokens`), `completion_tokens =
-   output_tokens` (includes `thinking_tokens`, reported as `reasoning_tokens`),
-   per the documented envelope where total = input + output.
+4. **Usage mapping (corrected in v1.12.0).** Native input is cold input,
+   separate from cache reads. `prompt_tokens = input_tokens + cache_read_tokens`,
+   with reads also reported as `cached_tokens`. Output includes thinking, which
+   remains a subset. Native total excludes reads; OpenAI total includes them.
+   The original inclusive-input interpretation was contradicted by the resumed
+   CLI 1.4.12 probe documented in the conversation-cache design.
 5. **Text only in M1.** Client tools, tool messages and images are refused with
    400, not dropped. `agy` has no client-tool channel in headless mode, and its
    stream-json input takes text blocks only.
@@ -83,7 +85,7 @@ Findings that shape the build:
 | probe | result |
 | --- | --- |
 | `pong` on `gemini-3.8-flash-low` | 4.8–5.9 s wall; 6,750 input tokens, 1 output token — the agent harness is ~6.7k input tokens per turn, none of it cache-read |
-| `pong` on `claude-sonnet-4-6` | 4.6 s wall; 4,076 input tokens, 3,851 of them cache reads; 15 output tokens |
+| `pong` on `claude-sonnet-4-6` | 4.6 s wall; 4,076 native input tokens plus 3,851 separate cache reads; 15 output tokens |
 | 200-word paragraph, Gemini Flash low | 9.5 s wall; 1,323 characters, 238 output tokens |
 | streaming | the answer arrives as **one** chunk at the end of the turn, even at 1.3k characters: clients see a single content delta, not token-by-token text |
 | two concurrent turns, one `HOME` | both succeeded (4.8 s, 6.4 s); no contention on the CLI's state files |
@@ -102,3 +104,56 @@ accounting and process lifecycle remain local.
 Claude and Antigravity are migrated; Codex and Copilot are the remaining bridges.
 See [the shared transport design](shared-bridge-transport-design.md) for scope
 and per-bridge migration acceptance. Historical decisions above remain as recorded.
+
+## Experimental caller tools — 2026-11-14
+
+The original M1 text-only behavior remains the default. The optional
+`EZLLM_AGY_EXPERIMENTAL_TOOLS=on` adapter uses the CLI's `--json-schema` output
+mode and JSON-framed caller history. `tools.go` `parseAdaptedRequest` builds
+the request-local envelope schema; `toolAdapter.decode` checks completed output
+before `server.go` `adaptedChat` exposes OpenAI tool calls or content.
+`runner.go` `Run` writes the schema in the private workspace and suppresses
+raw deltas for adapted requests. The caller executes all requested tools and
+returns their results in its next full-history request.
+
+This preserves one process per request and adds no dependency, ACP/MCP endpoint,
+sidecar, process pool or session map. The cost is repeated CLI startup/history
+and model-mediated tool selection. No speculative parsing or repair turns:
+invalid output returns a retriable 502. The native agent's permissions stay
+unchanged; observed native tool steps fail the adapted turn, except the CLI's
+`finish` submission for structured output, whose result must still validate. This detects
+noncompliance without claiming a tools-off guarantee the CLI does not provide.
+Operational bounds and live-proof commands are in `agy-bridge-runbook.md`.
+
+### Initial measurements
+
+On 2026-11-14, the mounted CLI 1.4.12 with `gemini-3.8-flash-low`
+passed two consecutive two-turn proofs after the envelope schema was tightened
+into mutually exclusive answer/call shapes. Each proof selected a harmless
+caller lookup and consumed a fresh caller-supplied result, without reported filesystem or command tools. The two round trips took 17.42 s and 13.20 s. An earlier
+permissive schema produced a mixed answer/call envelope on a repeat; the
+adapter rejected it rather than exposing a malformed tool call.
+
+The final auto-choice schema also keeps `type: object` and `properties` at its
+root, since the CLI derives its structured-output `finish` tool's fields from
+them. `finish` is allowed as an output submission, while other observed native
+tools fail the adapter turn. With that shape, two consecutive auto-choice
+round trips passed in 11.10 s and 9.70 s on the same CLI/model, without reported
+filesystem or command tools. This tests selection and result replay with a
+synthetic caller lookup, not a real Hermes workspace write.
+
+A Linux amd64 static build with `CGO_ENABLED=0`, `-trimpath` and
+`-ldflags='-s -w'` grew from 19,202,208 to 19,243,168 bytes when adding the
+Antigravity adapter: 40,960 bytes (40 KiB, 0.213%). Both builds included the
+same Codex fixes and version constant. This measures binary size, not runtime
+RSS. No runtime-memory delta or other model's compliance has been measured.
+
+
+## Optional conversation resume — 2026-11-14
+
+The default remains one fresh conversation per request. v1.12.0 optionally
+resumes exact caller histories, including complete tool-result groups, while
+still exiting the CLI after every request. Only bounded metadata and a private
+workspace remain idle. The native input/cache mapping is also corrected. See
+[the conversation-cache design](agy-conversation-cache-design.md) for the native
+and HTTP evidence, counter semantics, lifecycle bounds and qualification.

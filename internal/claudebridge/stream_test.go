@@ -24,8 +24,8 @@ func frame(t *testing.T, typ string, event map[string]any) Frame {
 	return f
 }
 
-// Native's stream events ARE Anthropic events; the bridge must forward them byte
-// for byte rather than re-encoding text through a second wire.
+// Text events retain their native payloads. Terminal events wait until Finish
+// so aggregate accounting can replace their usage without delaying text.
 func TestStreamWriterForwardsNativeEventsVerbatim(t *testing.T) {
 	var buf bytes.Buffer
 	sw := &StreamWriter{W: &buf}
@@ -47,6 +47,9 @@ func TestStreamWriterForwardsNativeEventsVerbatim(t *testing.T) {
 		if err := sw.Handle(frame(t, "stream_event", ev)); err != nil {
 			t.Fatalf("Handle: %v", err)
 		}
+	}
+	if err := sw.Finish(); err != nil {
+		t.Fatal(err)
 	}
 	out := buf.String()
 	for _, want := range []string{"event: message_start", "event: content_block_delta", "event: message_stop",
@@ -246,5 +249,53 @@ func TestStreamWriterRelaysOnlyTheFirstMessage(t *testing.T) {
 	}
 	if n := strings.Count(out, "event: message_stop"); n != 1 {
 		t.Errorf("message_stop count = %d, want 1", n)
+	}
+}
+
+func TestTerminalUsageIncludesNativeRetryCalls(t *testing.T) {
+	var buf bytes.Buffer
+	sw := &StreamWriter{W: &buf}
+	for _, f := range fixtureFrames(t, "m2_none.jsonl") {
+		if err := sw.Handle(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if strings.Contains(buf.String(), "event: message_stop") {
+		t.Fatal("terminal event sent before aggregate accounting")
+	}
+	if err := sw.Finish(); err != nil {
+		t.Fatal(err)
+	}
+	if sw.usage.InputTokens != 832 || sw.usage.OutputTokens != 2 {
+		t.Fatalf("aggregate usage = %+v", sw.usage)
+	}
+	if !strings.Contains(buf.String(), `"input_tokens":832`) || !strings.Contains(buf.String(), `"output_tokens":2`) {
+		t.Fatalf("missing aggregate stream usage: %s", buf.String())
+	}
+	msg := sw.Message("")
+	u := msg["usage"].(map[string]any)
+	if u["input_tokens"] != 832 || u["output_tokens"] != 2 {
+		t.Fatalf("message usage = %v", u)
+	}
+}
+
+// CLI 2.1.311's live Hermes-shaped probe reports thinking in the terminal
+// aggregate even when the visible message stream omits that breakdown.
+func TestTerminalUsagePreservesThinkingBreakdown(t *testing.T) {
+	var buf bytes.Buffer
+	sw := &StreamWriter{W: &buf}
+	if err := sw.Handle(frame(t, "stream_event", map[string]any{"type": "message_start", "message": map[string]any{"id": "msg_audit"}})); err != nil {
+		t.Fatal(err)
+	}
+	if err := sw.Handle(Frame{Type: "result", NumTurns: 1, Usage: json.RawMessage(`{"input_tokens":9652,"output_tokens":25,"cache_creation_input_tokens":2615,"output_tokens_details":{"thinking_tokens":21}}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sw.Finish(); err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range []string{buf.String(), string(mustJSON(sw.Message("claude-haiku-5-5")))} {
+		if !strings.Contains(raw, `"thinking_tokens":21`) || !strings.Contains(raw, `"output_tokens":25`) {
+			t.Fatalf("missing aggregate thinking breakdown: %s", raw)
+		}
 	}
 }

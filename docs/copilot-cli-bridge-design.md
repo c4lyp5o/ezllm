@@ -365,3 +365,13 @@ No HTTP image fetching, local file access or prompt-based image emulation is
 introduced. Image requests cannot fall back to the text-only `-p` invocation.
 The warm pool keeps fresh sessions and attachment isolation. Live CLI and HTTP
 checks proved a small PNG on `gpt-6-luna`; see the runbook for limits.
+
+
+## Completed-history cache extension — 2026-11-14
+
+One session per request remains the default and the active tool-loop path. The
+optional v1.11.0 completed-conversation mode retains normally finished sessions
+only for an exact full-history continuation with one new user message. It adds
+no new service or pool. See the
+[completed-session cache design](copilot-completed-session-cache-design.md) for
+measured native cache reuse, billing deltas and lifecycle limits.

@@ -55,8 +55,8 @@ func TestWritableSandboxModeReachesThreadStart(t *testing.T) {
 	var ts map[string]any
 	b, _ := os.ReadFile(filepath.Join(home, "thread_start.json"))
 	_ = json.Unmarshal(b, &ts)
-	if ts["sandbox"] != "workspace-write" || ts["approvalPolicy"] != "on-request" {
-		t.Fatalf("writable thread/start = %v, want workspace-write/on-request", ts)
+	if ts["sandbox"] != "workspace-write" || ts["approvalPolicy"] != "never" {
+		t.Fatalf("writable thread/start = %v, want workspace-write/never", ts)
 	}
 }
 
@@ -72,8 +72,11 @@ func TestWritableSandboxModeReachesExecArgv(t *testing.T) {
 	if !slices.Contains(args, "workspace-write") {
 		t.Errorf("writable exec argv lacks workspace-write: %v", args)
 	}
-	if i := slices.Index(args, "--ask-for-approval"); i < 0 || args[i+1] != "on-request" {
-		t.Errorf("writable exec argv lacks --ask-for-approval on-request: %v", args)
+	if i := slices.Index(args, `approval_policy="never"`); i < 1 || args[i-1] != "-c" {
+		t.Errorf("writable exec argv lacks headless approval config: %v", args)
+	}
+	if slices.Contains(args, "--ask-for-approval") {
+		t.Errorf("exec does not accept --ask-for-approval after the subcommand: %v", args)
 	}
 	if slices.Contains(args, "read-only") {
 		t.Errorf("writable exec argv still carries read-only: %v", args)

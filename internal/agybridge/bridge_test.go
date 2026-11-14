@@ -249,7 +249,7 @@ func TestServerChat(t *testing.T) {
 		Usage map[string]any `json:"usage"`
 	}
 	_ = json.NewDecoder(resp.Body).Decode(&out)
-	if resp.StatusCode != 200 || out.Choices[0].Message.Content != "pong" || out.Usage["prompt_tokens"] != 120.0 || out.Usage["completion_tokens"] != 30.0 {
+	if resp.StatusCode != 200 || out.Choices[0].Message.Content != "pong" || out.Usage["prompt_tokens"] != 200.0 || out.Usage["completion_tokens"] != 30.0 {
 		t.Fatalf("non-stream %d %+v", resp.StatusCode, out)
 	}
 

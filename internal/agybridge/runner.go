@@ -8,14 +8,15 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 )
 
 // Usage is the result envelope's usage block. Measured shape (headless docs,
-// 1.4.7): output_tokens includes thinking_tokens, input_tokens includes
-// cache_read_tokens, total = input + output.
+// 1.4.12): output_tokens includes thinking_tokens; input_tokens is cold input,
+// separate from cache_read_tokens. Native total = cold input + output.
 type Usage struct {
 	InputTokens    int `json:"input_tokens"`
 	OutputTokens   int `json:"output_tokens"`
@@ -26,10 +27,12 @@ type Usage struct {
 
 // Result is what one turn produced.
 type Result struct {
-	Text           string
-	Usage          Usage
-	ConversationID string
-	ToolSteps      int // agent tool steps the turn attempted (logged, never surfaced)
+	Text             string
+	StructuredOutput json.RawMessage
+	Usage            Usage
+	ConversationID   string
+	ToolSteps        int // agent tool steps the turn attempted (logged, never surfaced)
+	decoded          *decodedReply
 }
 
 // Executor runs one request. *Runner implements it; tests inject a fake.
@@ -38,7 +41,8 @@ type Executor interface {
 }
 
 // Runner spawns the official Antigravity CLI once per request: `agy -p` in
-// headless stream-json mode, in a fresh empty workspace. It is the only thing
+// headless stream-json mode. Workspaces are fresh by default; opt-in conversation
+// reuse retains only a matched private workspace and metadata. It is the only thing
 // in this package that talks to the subscription — the login never leaves the
 // CLI's own token file under Home.
 type Runner struct {
@@ -47,6 +51,13 @@ type Runner struct {
 	Timeout       time.Duration
 	MaxConcurrent int
 	Logf          func(format string, args ...any)
+	// SessionCache keeps bounded metadata and workspaces, never idle processes.
+	SessionCache     bool
+	CacheIdleTimeout time.Duration
+	cacheMu          sync.Mutex
+	cached           map[*cachedConversation]struct{}
+	cacheClosed      bool
+	cacheHits        uint64
 
 	sem  chan struct{}
 	once sync.Once
@@ -94,15 +105,23 @@ type frame struct {
 	TextDelta      string `json:"text_delta"`
 	State          string `json:"state"`
 	ToolName       string `json:"tool_name"`
-	Init           *struct {
+	StepUpdate     *struct {
+		ConversationID string `json:"conversation_id"`
+		StepType       string `json:"step_type"`
+		TextDelta      string `json:"text_delta"`
+		State          string `json:"state"`
+		ToolName       string `json:"tool_name"`
+	} `json:"step_update"`
+	Init *struct {
 		PermissionMode string `json:"permission_mode"`
 	} `json:"init"`
 	Result *struct {
-		ConversationID string `json:"conversation_id"`
-		Status         string `json:"status"`
-		Response       string `json:"response"`
-		Error          string `json:"error"`
-		Usage          Usage  `json:"usage"`
+		ConversationID   string          `json:"conversation_id"`
+		Status           string          `json:"status"`
+		Response         string          `json:"response"`
+		StructuredOutput json.RawMessage `json:"structured_output"`
+		Error            string          `json:"error"`
+		Usage            Usage           `json:"usage"`
 	} `json:"result"`
 }
 
@@ -122,13 +141,37 @@ func (r *Runner) Run(ctx context.Context, req Request, delta func(string) error)
 			Message: "agy-bridge: timed out waiting for a free slot"}
 	}
 
-	work, err := os.MkdirTemp("", "agy-bridge-")
-	if err != nil {
-		return Result{}, fmt.Errorf("agy-bridge: cannot create work dir: %w", err)
+	if r.SessionCache && req.Adapter != nil {
+		return r.runCached(runCtx, req, delta)
 	}
-	defer os.RemoveAll(work)
+	return r.run(runCtx, req, delta)
+}
 
-	cmd := exec.Command(r.Bin, argv(req)...)
+func (r *Runner) run(runCtx context.Context, req Request, delta func(string) error) (Result, error) {
+	work := req.cacheWork
+	if work == "" {
+		var err error
+		work, err = os.MkdirTemp("", "agy-bridge-")
+		if err != nil {
+			return Result{}, fmt.Errorf("agy-bridge: cannot create work dir: %w", err)
+		}
+		defer os.RemoveAll(work)
+	}
+
+	args := argv(req)
+	if req.cacheConversation != "" {
+		args = append(args, "--conversation", req.cacheConversation)
+	}
+	if req.Adapter != nil {
+		schemaPath := filepath.Join(work, "caller-tools-schema.json")
+		if err := os.WriteFile(schemaPath, req.Adapter.Schema, 0o600); err != nil {
+			return Result{}, fmt.Errorf("agy-bridge: cannot write tool output schema: %w", err)
+		}
+		args = append(args, "--json-schema", schemaPath)
+		// Adapter envelopes must be validated in full before any client output.
+		delta = nil
+	}
+	cmd := exec.Command(r.Bin, args...)
 	cmd.Dir = work
 	cmd.Env = childEnv(r.Home)
 	setProcessGroup(cmd)
@@ -171,7 +214,11 @@ func (r *Runner) Run(ctx context.Context, req Request, delta func(string) error)
 
 	// The prompt goes in on stdin, never argv: it stays out of ps and off
 	// ARG_MAX. Closing stdin ends the session after this one turn.
-	stopStdin := context.AfterFunc(runCtx, func() { _ = stdin.Close() })
+	stopStdin := context.AfterFunc(runCtx, func() {
+		_ = stdin.Close()
+		// Also unblock a native process that emitted a result but has not exited.
+		killGroup(cmd)
+	})
 	defer stopStdin()
 	msg, _ := json.Marshal(map[string]any{"event": "user", "message": map[string]any{"content": req.Prompt}})
 	if _, err := stdin.Write(append(msg, '\n')); err != nil {
@@ -225,6 +272,11 @@ func (r *Runner) Run(ctx context.Context, req Request, delta func(string) error)
 					Message: "agy-bridge: the CLI reports permission_mode " + f.Init.PermissionMode + "; refusing the turn (docs/agy-bridge-runbook.md#lockdown)"}
 			}
 		case "step_update":
+			// Current releases nest step payloads; retain flat-frame support for
+			// previously qualified releases and fixtures.
+			if step := f.StepUpdate; step != nil {
+				f.ConversationID, f.StepType, f.TextDelta, f.State, f.ToolName = step.ConversationID, step.StepType, step.TextDelta, step.State, step.ToolName
+			}
 			if f.ConversationID != "" {
 				res.ConversationID = f.ConversationID
 			}
@@ -233,13 +285,24 @@ func (r *Runner) Run(ctx context.Context, req Request, delta func(string) error)
 				if f.TextDelta == "" {
 					continue
 				}
-				streamed.WriteString(f.TextDelta)
+				if delta != nil {
+					streamed.WriteString(f.TextDelta)
+				}
 				if delta != nil {
 					if err := delta(f.TextDelta); err != nil {
 						return res, err
 					}
 				}
 			case "tool":
+				if req.Adapter != nil {
+					// finish is the CLI's structured-output submission, not a
+					// filesystem or command operation. Its result still passes
+					// envelope validation; every other native tool fails closed.
+					if f.ToolName == "finish" {
+						continue
+					}
+					return res, &NativeError{Status: 502, Type: "api_error", Code: "invalid_tool_output", Message: "agy-bridge: tool adapter turn attempted a native agent tool"}
+				}
 				if f.State == "DONE" {
 					res.ToolSteps++
 				}
@@ -280,6 +343,7 @@ func (r *Runner) Run(ctx context.Context, req Request, delta func(string) error)
 		return res, mapError(out.Status, m)
 	}
 	res.Text = out.Response
+	res.StructuredOutput = out.StructuredOutput
 	// A turn that streamed nothing (or less than its answer) still delivers
 	// the whole response: the envelope is authoritative.
 	if delta != nil && streamed.Len() == 0 && res.Text != "" {

@@ -70,7 +70,12 @@ services:
       # the CLI and a login (the two mounts at the end of `volumes`) fails the
       # boot rather than starting a surface that 401s every request.
       EZLLM_COPILOT_BRIDGE: "off"
+      # Optional process reuse; completed-history cache requires both on (v1.11+).
+      # EZLLM_COPILOT_BRIDGE_WARM_POOL: "on"
+      # EZLLM_COPILOT_BRIDGE_SESSION_CACHE: "on"
       # EZLLM_COPILOT_BIN: /opt/copilot/copilot
+      # Managed updater alternative, after root migration (bridge-update-runbook.md):
+      # EZLLM_COPILOT_BIN: /opt/copilot-bridge/current/copilot
       # EZLLM_COPILOT_HOME: /copilot-home
       # EZLLM_COPILOT_BRIDGE_ADDR: 127.0.0.1:8793
       # XDG_CACHE_HOME: /data/copilot-cache   # persistent CLI cache (~236 MB, extracted once)
@@ -101,6 +106,8 @@ services:
       # EZLLM_CODEX_BRIDGE_ADDR: 127.0.0.1:8791
       # EZLLM_CODEX_BRIDGE_TOKEN_FILE: /data/codex-bridge.token
       # EZLLM_CODEX_BRIDGE_CONCURRENCY: "2"
+      # Private request workspace writes; native shell stays disabled.
+      # EZLLM_CODEX_SANDBOX: writable
       # Client tools without Landlock: read the runbook before setting this.
       # EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK: "on"
 
@@ -113,6 +120,10 @@ services:
       # EZLLM_AGY_BRIDGE_ADDR: 127.0.0.1:8792
       # EZLLM_AGY_BRIDGE_TOKEN_FILE: /data/agy-bridge.token
       # EZLLM_AGY_BRIDGE_CONCURRENCY: "2"
+      # Experimental caller tools via structured output; CLI needs --json-schema.
+      # EZLLM_AGY_EXPERIMENTAL_TOOLS: "on"
+      # Optional exact-history/tool-result resume; requires experimental tools (v1.12+).
+      # EZLLM_AGY_BRIDGE_SESSION_CACHE: "on"
 
     volumes:
       # Non-secret runtime defaults; credentials stay in SQLite.
@@ -144,6 +155,8 @@ services:
       # the code-mode host client tools need); the isolated CODEX_HOME.
       # - /path/to/.local/share/codex-bridge:/opt/codex-bridge:ro
       # - /path/to/.codex-sub:/codex-sub
+      # Copilot managed updater alternative (replace the standalone binary mount):
+      # - /home/you/.local/share/copilot-bridge:/opt/copilot-bridge:ro
       # Antigravity: <root>/<version>/agy (agy rewrites itself in place when
       # run from a writable folder: keep version folders read-only); the login
       # HOME made with DBUS unset.

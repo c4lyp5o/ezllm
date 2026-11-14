@@ -63,12 +63,10 @@ func SandboxModeFromEnv(getenv func(string) string) SandboxMode {
 	return SandboxReadOnly
 }
 
-// ApprovalFor maps the sandbox mode to the Codex approval policy:
-// read-only never asks (nothing can execute), writable asks per action.
+// ApprovalFor keeps both modes noninteractive. The bridge has no approval UI
+// and declines approval RPCs; on-request would advertise an unusable escalation
+// path. The sandbox independently controls which operations are allowed.
 func (m SandboxMode) ApprovalFor() string {
-	if m == SandboxWritable {
-		return "on-request"
-	}
 	return "never"
 }
 

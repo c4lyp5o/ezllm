@@ -1,0 +1,274 @@
+{
+  "date": "2026-11-14",
+  "cli_version": "1.4.12",
+  "model": "gemini-3.8-flash-low",
+  "successful_cli_turns": 8,
+  "shape": {
+    "messages": 202,
+    "caller_tools": 24,
+    "synthetic": true
+  },
+  "native_retained_process": [
+    {
+      "delta": {
+        "input_tokens": 17754,
+        "output_tokens": 316,
+        "thinking_tokens": 297,
+        "cache_read_tokens": 0,
+        "total_tokens": 18070
+      },
+      "large": false,
+      "model": "gemini-3.8-flash-low",
+      "ms": 6868,
+      "native_cumulative": {
+        "input_tokens": 17754,
+        "output_tokens": 316,
+        "thinking_tokens": 297,
+        "cache_read_tokens": 0,
+        "total_tokens": 18070
+      },
+      "ok": true,
+      "turn": 1
+    },
+    {
+      "delta": {
+        "input_tokens": 2563,
+        "output_tokens": 19,
+        "thinking_tokens": 0,
+        "cache_read_tokens": 15695,
+        "total_tokens": 2582
+      },
+      "large": false,
+      "model": "gemini-3.8-flash-low",
+      "ms": 2298,
+      "native_cumulative": {
+        "input_tokens": 20317,
+        "output_tokens": 335,
+        "thinking_tokens": 297,
+        "cache_read_tokens": 15695,
+        "total_tokens": 20652
+      },
+      "ok": true,
+      "turn": 2
+    }
+  ],
+  "native_resumed_process": [
+    {
+      "model": "gemini-3.8-flash-low",
+      "ms": 8131,
+      "native_turns": 1,
+      "ok": true,
+      "resume": false,
+      "same_conversation": true,
+      "subtract_prior": {
+        "input_tokens": 17756,
+        "output_tokens": 19,
+        "thinking_tokens": 0,
+        "cache_read_tokens": 0,
+        "total_tokens": 17775
+      },
+      "turn": 1,
+      "usage": {
+        "input_tokens": 17756,
+        "output_tokens": 19,
+        "thinking_tokens": 0,
+        "cache_read_tokens": 0,
+        "total_tokens": 17775
+      }
+    },
+    {
+      "model": "gemini-3.8-flash-low",
+      "ms": 6426,
+      "native_turns": 2,
+      "ok": true,
+      "resume": true,
+      "same_conversation": true,
+      "subtract_prior": {
+        "input_tokens": 2400,
+        "output_tokens": 19,
+        "thinking_tokens": 0,
+        "cache_read_tokens": 15697,
+        "total_tokens": 2419
+      },
+      "turn": 2,
+      "usage": {
+        "input_tokens": 20156,
+        "output_tokens": 38,
+        "thinking_tokens": 0,
+        "cache_read_tokens": 15697,
+        "total_tokens": 20194
+      }
+    }
+  ],
+  "bridge_http_completed_answer": [
+    {
+      "answer_pong": true,
+      "bridge": "agy",
+      "case": "hermes_shaped",
+      "elapsed_ms": 7585,
+      "failed": false,
+      "message_count": 202,
+      "model": "gemini-3.8-flash-low",
+      "request_bytes": 43540,
+      "status": 200,
+      "tool_call_chunks": 0,
+      "usage_events": [
+        {
+          "completion_tokens": 212,
+          "completion_tokens_details": {
+            "reasoning_tokens": 193
+          },
+          "prompt_tokens": 17739,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "total_tokens": 17951
+        }
+      ],
+      "native_cumulative": {
+        "input_tokens": 17739,
+        "output_tokens": 212,
+        "thinking_tokens": 193,
+        "cache_read_tokens": 0,
+        "total_tokens": 17951
+      },
+      "native_request_delta": {
+        "input_tokens": 17739,
+        "output_tokens": 212,
+        "thinking_tokens": 193,
+        "cache_read_tokens": 0,
+        "total_tokens": 17951
+      },
+      "native_num_turns": 1
+    },
+    {
+      "answer_pong": true,
+      "bridge": "agy",
+      "case": "hermes_continuation",
+      "elapsed_ms": 6486,
+      "failed": false,
+      "message_count": 204,
+      "model": "gemini-3.8-flash-low",
+      "request_bytes": 43697,
+      "status": 200,
+      "tool_call_chunks": 0,
+      "usage_events": [
+        {
+          "completion_tokens": 19,
+          "completion_tokens_details": {
+            "reasoning_tokens": 0
+          },
+          "prompt_tokens": 18336,
+          "prompt_tokens_details": {
+            "cached_tokens": 15681
+          },
+          "total_tokens": 18355
+        }
+      ],
+      "native_cumulative": {
+        "input_tokens": 20394,
+        "output_tokens": 231,
+        "thinking_tokens": 193,
+        "cache_read_tokens": 15681,
+        "total_tokens": 20625
+      },
+      "native_request_delta": {
+        "input_tokens": 2655,
+        "output_tokens": 19,
+        "thinking_tokens": 0,
+        "cache_read_tokens": 15681,
+        "total_tokens": 2674
+      },
+      "native_num_turns": 2
+    }
+  ],
+  "bridge_http_caller_tool_loop": [
+    {
+      "cache": {
+        "closed": false,
+        "enabled": true,
+        "hits": 0,
+        "idle": 1
+      },
+      "model": "gemini-3.8-flash-low",
+      "ms": 7738,
+      "phase": "caller_tool_selection",
+      "usage": {
+        "completion_tokens": 189,
+        "completion_tokens_details": {
+          "reasoning_tokens": 151
+        },
+        "prompt_tokens": 17791,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 17980
+      },
+      "native_cumulative": {
+        "input_tokens": 17791,
+        "output_tokens": 189,
+        "thinking_tokens": 151,
+        "cache_read_tokens": 0,
+        "total_tokens": 17980
+      },
+      "native_request_delta": {
+        "input_tokens": 17791,
+        "output_tokens": 189,
+        "thinking_tokens": 151,
+        "cache_read_tokens": 0,
+        "total_tokens": 17980
+      },
+      "native_num_turns": 1
+    },
+    {
+      "cache": {
+        "closed": false,
+        "enabled": true,
+        "hits": 1,
+        "idle": 1
+      },
+      "model": "gemini-3.8-flash-low",
+      "ms": 6346,
+      "phase": "caller_tool_result",
+      "usage": {
+        "completion_tokens": 200,
+        "completion_tokens_details": {
+          "reasoning_tokens": 157
+        },
+        "prompt_tokens": 18466,
+        "prompt_tokens_details": {
+          "cached_tokens": 15733
+        },
+        "total_tokens": 18666
+      },
+      "native_cumulative": {
+        "input_tokens": 20524,
+        "output_tokens": 389,
+        "thinking_tokens": 308,
+        "cache_read_tokens": 15733,
+        "total_tokens": 20913
+      },
+      "native_request_delta": {
+        "input_tokens": 2733,
+        "output_tokens": 200,
+        "thinking_tokens": 157,
+        "cache_read_tokens": 15733,
+        "total_tokens": 2933
+      },
+      "native_num_turns": 2
+    }
+  ],
+  "checks": {
+    "native_http_counters_reconciled": true,
+    "caller_tool_selected": true,
+    "caller_result_consumed_exactly": true,
+    "caller_tool_resume_hit": true
+  },
+  "limitations": [
+    "Synthetic Hermes-shaped traffic, not an actual Hermes process or production routing/compression.",
+    "Counters cover native CLI user turns; internal model-request counts are not independently measured.",
+    "No AGY credit/quota discount percentage was reported by the CLI.",
+    "Cold input is separate from cache-read tokens; native total excludes cache reads.",
+    "Native workspace and conversation were reused together; their individual effects were not isolated."
+  ]
+}

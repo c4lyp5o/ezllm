@@ -2,6 +2,97 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
+## v1.12.0 — Antigravity conversation cache and usage correction
+
+- Adds `EZLLM_AGY_BRIDGE_SESSION_CACHE=on`, requiring the experimental caller-tool
+  adapter. Exact histories resume the native conversation in its private workspace;
+  only the new user turn or complete caller tool-result group is sent. Tool-call
+  IDs remain stable and the caller still executes all tools.
+- Retains at most one idle entry per concurrency slot, with 1 MiB history limits,
+  one-minute idle expiry and 15-minute/100-turn age limits. No idle CLI process,
+  new service, dependency or independent on-disk cache is added.
+- Corrects AGY usage: native input excludes cache reads. OpenAI prompt totals now
+  include them, while the ledger records the actual cold/read split. Resumed native
+  cumulative counters are returned as per-request deltas. Historical rows are unchanged.
+- Deadlines terminate native process groups even after a result, and expired
+  results cannot enter the cache. Failed resumes preserve per-request usage.
+- Requires resume-capability and cache-mode live proofs before CLI qualification.
+  Failures, counter resets and changed native conversation IDs never trigger an
+  internal repair generation.
+
+## v1.11.0 — Bounded Copilot conversation cache
+
+- Adds `EZLLM_COPILOT_BRIDGE_SESSION_CACHE=on`, off by default and requiring
+  the existing warm pool. Exact completed-history continuations send only the
+  new user turn, preserving native prompt-cache lineage without a new service,
+  dependency or worker pool.
+- Keeps one completed session per worker, bounded by existing idle/age/turn
+  limits and 1 MiB of normalized history. Moved Hermes cache markers are
+  treated as transport metadata; changed text, model, system or tools cannot hit.
+- Bills deltas of native cumulative counters. Pending tool batches are accounted
+  and deleted; images, automatic model selection and tool-result continuations
+  use the fresh-session path. Idle eviction and graceful close delete sessions.
+- CLI updater gates verify completed-session continuation when the mode is on.
+  Real Gemini Flash Antigravity probes showed no cache reads; Codex stable-cwd
+  and Copilot recreated-ID probes did not improve reuse. The retained Copilot
+  HTTP sample reported roughly 90% lower credits on its continuation, which
+  is a small-model sample rather than a production-wide savings guarantee.
+
+## v1.10.1 — Bridge usage accounting and fallback guards
+
+- Copilot's per-model input fallback no longer counts cached input twice,
+  includes all reported models, and preserves reasoning as a subset of output.
+- Plain Copilot requests only fall back to `-p` after a proven pre-inference
+  refusal with no observed work; send-phase failures cannot authorize a retry.
+- Claude text still streams immediately; terminal events wait for the CLI result
+  and report aggregate usage, including any native internal retry calls, while
+  keeping the first message's content and stop reason.
+- Live Hermes-shaped probes additionally preserve Copilot cache-write counters
+  on the wire and Claude terminal thinking details; recorded counters exercise
+  the ledger usage tap without additional vendor calls.
+- Records the Hermes-only historical findings and remaining measurement limits
+  in `docs/bridge-token-usage-audit.md`. No new runtime dependency is added.
+
+## v1.10.0 — Bridge updater reliability and coverage
+
+- Copilot can join the existing versioned-root updater: stable official GitHub
+  assets, SHA-256 verification, staging, live gate, grouped restart and proof.
+  It remains disabled in updater defaults until its mount is migrated.
+- Promotions use a durable recovery journal and roll back the entire batch
+  when any proof fails or raises. An interrupted transaction is recovered on
+  the next run; failed recovery retains the journal and exits nonzero.
+- Gates use the running image ID, actual login mount, configured user/network,
+  and a private temporary environment file. Policy verdicts must match Codex
+  sandbox mode, Antigravity caller-tool mode and Copilot warm-pool mode.
+- Quota, auth and transport refusals wait for a configurable retry instead of
+  permanently blocking a CLI release. Known legacy quota blocks migrate to
+  backoff. Compatibility failures remain blocked.
+- Rechecks the window before changing symlinks and keeps the newest pending
+  candidate in status. Codex and Antigravity live checks prove caller result
+  replay; fixes a Copilot live-check panic on an ordinary answer without tools.
+
+## v1.9.0 — Experimental Antigravity caller tools
+
+- `EZLLM_AGY_EXPERIMENTAL_TOOLS=on` enables a structured-output adapter for
+  function tools. Tool calls return to the calling harness for execution;
+  assistant calls and matching tool results replay into a fresh CLI process
+  on the next request. No ACP, MCP, sidecar, new dependency or parked process.
+- Supports auto, none, required and named function choice, plus
+  `parallel_tool_calls=false`. Invalid envelopes return `502 invalid_tool_output`
+  before any streaming output. Output is bounded to 1 MiB and 16 calls per turn.
+- Plain chat retains its existing behavior. Images and legacy functions remain
+  unsupported. The CLI must expose `--json-schema`; the feature is off by default.
+
+## v1.8.2 — Codex bridge caller tools and headless permissions
+
+- Tool-bearing requests distinguish the bridge's local sandbox from the
+  caller's tool permissions. Authorized workspace writes use caller tools;
+  home-directory resolution uses the caller's environment. Permission errors
+  come from actual tool results, rather than assumptions about the bridge.
+- Writable mode uses noninteractive approval policy `never`; the exec fallback
+  passes approval policy through a supported config override. Native tools
+  remain disabled and Landlock confinement stays in force.
+
 ## v1.8.1 — Copilot wire probe fix
 
 - Copilot key, wire and combo probes omit output-token caps that the CLI cannot

@@ -184,13 +184,26 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		model = "auto"
 	}
 
+	var cacheHistory []json.RawMessage
+	if enabled, ok := s.Runner.(interface{ SessionCacheEnabled() bool }); ok && enabled.SessionCacheEnabled() && len(req.Attachments) == 0 {
+		cacheHistory = canonicalCacheHistory(body)
+	}
 	run := func(delta func(string) error, onTools func(Result) error) (Result, error) {
-		res, err := s.Runner.RunChannel(r.Context(), ChannelTurn{Model: req.Model, System: req.System, Prompt: req.Transcript, Tools: req.Tools, Choice: req.Choice, Attachments: req.Attachments, OnTools: onTools}, delta)
+		started := false
+		var textSink func(string) error
+		if delta != nil {
+			textSink = func(text string) error { started = true; return delta(text) }
+		}
+		var toolSink func(Result) error
+		if onTools != nil {
+			toolSink = func(batch Result) error { started = true; return onTools(batch) }
+		}
+		res, err := s.Runner.RunChannel(r.Context(), ChannelTurn{Model: req.Model, System: req.System, Prompt: req.Transcript, Tools: req.Tools, Choice: req.Choice, Attachments: req.Attachments, OnTools: toolSink, cacheHistory: cacheHistory}, textSink)
 		// The channel refused before anything was billed or streamed. A request
 		// with tools needs the channel, so the refusal stands and the router fails
 		// over; plain chat does not, and -p can still serve it.
 		var f *Failure
-		if len(req.Tools) == 0 && len(req.Attachments) == 0 && errors.As(err, &f) && f.Code == "chat_tools_unsupported" {
+		if len(req.Tools) == 0 && len(req.Attachments) == 0 && !started && errors.As(err, &f) && f.Code == "chat_tools_unsupported" && f.BeforeInference && !res.hasWork() {
 			s.logf("copilot-bridge: channel unavailable, plain chat falling back to -p: %s", err)
 			return s.Runner.Run(r.Context(), req.Model, req.Prompt, delta)
 		}
@@ -304,7 +317,7 @@ func openAIUsage(u Usage) map[string]any {
 		"prompt_tokens":             u.PromptTokens,
 		"completion_tokens":         u.CompletionTokens,
 		"total_tokens":              u.PromptTokens + u.CompletionTokens,
-		"prompt_tokens_details":     map[string]any{"cached_tokens": u.CachedRead},
+		"prompt_tokens_details":     map[string]any{"cached_tokens": u.CachedRead, "cache_write_tokens": u.CachedWrite},
 		"completion_tokens_details": map[string]any{"reasoning_tokens": u.ReasoningTokens},
 		// Not an OpenAI field; kept so the ledger's raw_usage shows what the
 		// subscription actually charged (1 per turn by default).
@@ -501,4 +514,11 @@ func randomHex(n int) string {
 		return fmt.Sprintf("%d", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(b)
+}
+
+// Known output or usage forbids a second generation even if a refusal was
+// mistakenly labelled pre-inference. Unknown usage alone never permits fallback.
+func (r Result) hasWork() bool {
+	u := r.Usage
+	return r.Text != "" || len(r.ToolCalls) > 0 || u.PromptTokens != 0 || u.CompletionTokens != 0 || u.CachedRead != 0 || u.CachedWrite != 0 || u.ReasoningTokens != 0 || u.PremiumRequests != 0 || u.NanoAIU != 0
 }

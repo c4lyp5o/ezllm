@@ -186,3 +186,24 @@ func TestToolRequestsCarryTheWhereToolsRunNote(t *testing.T) {
 		t.Errorf("plain chat changed: %q err=%v", without.Instructions, err)
 	}
 }
+
+// A caller's filesystem tools have their own permissions. The bridge's local
+// sandbox must not cause a refusal before the model even calls those tools.
+func TestClientToolInstructionsSeparateCallerWorkspacePermissions(t *testing.T) {
+	req, err := ParseRequest([]byte(`{"model":"m","tools":[{"type":"function","function":{"name":"terminal"}}],"messages":[{"role":"system","content":"You are Hermes. Your designated workspace is ~/workspace."},{"role":"user","content":"Write report.txt in my workspace."}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"Your designated workspace is ~/workspace.",
+		"Local sandbox and approval restrictions describe only the Codex bridge process",
+		"Use the caller-provided tools for authorized reads, writes, and commands",
+		"Do not refuse a caller-workspace write solely because your local sandbox is read-only",
+		"Determine access from the caller tool's actual result",
+		"Resolve `~` using the caller's environment",
+	} {
+		if !strings.Contains(req.Instructions, want) {
+			t.Errorf("tool request instructions lack %q", want)
+		}
+	}
+}

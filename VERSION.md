@@ -11,7 +11,58 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.8.1**
+**Current: v1.12.0**
+
+## v1.12.0 — 2026-11-14
+
+Adds opt-in Antigravity conversation resume for exact caller histories, including
+complete external tool-result groups. It retains bounded metadata/workspaces and
+no idle CLI process. Corrects native cold-input/cache-read mapping to inclusive
+OpenAI usage, reports per-request counter deltas, and qualifies the cache mode
+through the bridge updater. Gemini Flash native/HTTP proofs showed cache reuse.
+
+## v1.11.0 — 2026-11-14
+
+Adds opt-in exact-history reuse of completed Copilot conversations within the
+existing warm process pool. Usage remains per request through cumulative-counter
+deltas; edited histories, tool-result continuations, images and uncertain cleanup
+use fresh sessions. Records native cache experiments including Antigravity and
+requires cache-mode qualification in the CLI updater when enabled.
+
+## v1.10.1 — 2026-11-14
+
+Corrects Copilot fallback token accounting and reasoning visibility, prevents
+plain-chat fallback after inference may have started, and reports Claude CLI
+aggregate usage including internal retries and thinking details. Preserves
+Copilot cache writes on the HTTP wire. Adds a measured Hermes bridge
+usage audit without changing live models, compression or session isolation.
+
+## v1.10.0 — 2026-11-14
+
+Revises bridge CLI updates with journalled batch promotion and rollback recovery,
+a post-gate window check, operational-failure backoff and accurate candidate
+status. Adds optional Copilot release discovery/staging on the same host timer.
+Live gates report and exercise Codex sandbox mode, Antigravity caller tools
+when enabled, and Copilot warm-pool mode. No new service or schema migration.
+
+## v1.9.0 — 2026-11-14
+
+Adds opt-in experimental Antigravity caller tools through structured output.
+The existing CLI returns an envelope which ezllm validates and converts into
+OpenAI tool calls; the caller executes them and sends results in its next
+request. One CLI process per request, with no ACP, MCP, sidecar, new dependency
+or persistent session. Existing text-only behavior remains the default.
+No schema migration.
+
+## v1.8.2 — 2026-11-14
+
+Fixes Codex bridge headless permissions: writable requests use approval policy
+`never` instead of requesting approvals the bridge declines. The exec fallback
+passes that policy as a config override accepted by the CLI. Native tool
+lockdown and Landlock confinement remain in force. Tool-bearing requests also
+explain that caller tools (such as Hermes workspace tools) have independent
+filesystem permissions, and direct the model to use their actual results rather
+than infer a denial from the bridge sandbox. No schema migration.
 
 ## v1.8.1 — 2026-11-11
 

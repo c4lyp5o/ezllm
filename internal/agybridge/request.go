@@ -11,11 +11,14 @@ import (
 // history replay, so system text and prior turns travel inside the prompt as a
 // deterministic transcript (docs/antigravity-subscription-design.md §3).
 type Request struct {
-	Model        string
-	Stream       bool
-	IncludeUsage bool
-	Effort       string
-	Prompt       string
+	Model             string
+	Stream            bool
+	IncludeUsage      bool
+	Effort            string
+	Prompt            string
+	Adapter           *toolAdapter
+	cacheWork         string
+	cacheConversation string
 }
 
 // Unsupported is a request the bridge refuses before anything is spawned.
@@ -34,6 +37,8 @@ type chatRequest struct {
 	ReasoningEffort string          `json:"reasoning_effort"`
 	N               *int            `json:"n"`
 	Tools           json.RawMessage `json:"tools"`
+	ToolChoice      json.RawMessage `json:"tool_choice"`
+	ParallelTools   *bool           `json:"parallel_tool_calls"`
 	Functions       json.RawMessage `json:"functions"`
 	ResponseFormat  *struct {
 		Type string `json:"type"`
@@ -45,8 +50,11 @@ type streamOptions struct {
 }
 
 type chatMessage struct {
-	Role    string          `json:"role"`
-	Content json.RawMessage `json:"content"`
+	Role         string          `json:"role"`
+	Content      json.RawMessage `json:"content"`
+	ToolCalls    json.RawMessage `json:"tool_calls"`
+	ToolCallID   string          `json:"tool_call_id"`
+	FunctionCall json.RawMessage `json:"function_call"`
 }
 
 type contentPart struct {
@@ -59,11 +67,14 @@ func present(raw json.RawMessage) bool {
 	return s != "" && s != "null" && s != "[]"
 }
 
-// ParseRequest validates a Chat Completions body and builds the prompt. Client
-// tools and images are refused, not dropped: the headless stream-json input
-// takes text blocks only, and agy's own tools are the agent's, not the
-// client's.
+// ParseRequest validates the default text-only surface. The HTTP server may
+// explicitly opt into parseRequest's experimental structured-output adapter.
+// Images and unsupported tool shapes are refused rather than dropped.
 func ParseRequest(body []byte) (Request, error) {
+	return parseRequest(body, false)
+}
+
+func parseRequest(body []byte, enableTools bool) (Request, error) {
 	var cr chatRequest
 	if err := json.Unmarshal(body, &cr); err != nil {
 		return Request{}, Unsupported{Code: "invalid_request", Msg: "request body is not valid JSON: " + err.Error()}
@@ -71,7 +82,14 @@ func ParseRequest(body []byte) (Request, error) {
 	if strings.TrimSpace(cr.Model) == "" {
 		return Request{}, Unsupported{Code: "invalid_request", Msg: "model is required"}
 	}
-	if present(cr.Tools) || present(cr.Functions) {
+	hasTools := present(cr.Tools) || present(cr.Functions)
+	for _, m := range cr.Messages {
+		hasTools = hasTools || m.Role == "tool" || present(m.ToolCalls) || present(m.FunctionCall)
+	}
+	if enableTools && (hasTools || present(cr.ToolChoice)) {
+		return parseAdaptedRequest(cr)
+	}
+	if hasTools {
 		return Request{}, Unsupported{Code: "chat_tools_unsupported", Msg: "client tools are not supported by the Antigravity bridge"}
 	}
 	if cr.N != nil && *cr.N != 1 {

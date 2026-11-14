@@ -26,12 +26,14 @@ import (
 // Decisions: docs/antigravity-subscription-design.md; operation:
 // docs/agy-bridge-runbook.md.
 const (
-	envAgyBridge      = "EZLLM_AGY_BRIDGE"            // "on" enables the surface
-	envAgyBin         = "EZLLM_AGY_BIN"               // official CLI binary (mounted: /opt/agy/agy)
-	envAgyHome        = "EZLLM_AGY_HOME"              // HOME holding the login's token file
-	envAgyAddr        = "EZLLM_AGY_BRIDGE_ADDR"       // default 127.0.0.1:8792
-	envAgyToken       = "EZLLM_AGY_BRIDGE_TOKEN_FILE" // shared secret for the account key
-	envAgyConcurrency = "EZLLM_AGY_BRIDGE_CONCURRENCY"
+	envAgyBridge       = "EZLLM_AGY_BRIDGE"            // "on" enables the surface
+	envAgyBin          = "EZLLM_AGY_BIN"               // official CLI binary (mounted: /opt/agy/agy)
+	envAgyHome         = "EZLLM_AGY_HOME"              // HOME holding the login's token file
+	envAgyAddr         = "EZLLM_AGY_BRIDGE_ADDR"       // default 127.0.0.1:8792
+	envAgyToken        = "EZLLM_AGY_BRIDGE_TOKEN_FILE" // shared secret for the account key
+	envAgyConcurrency  = "EZLLM_AGY_BRIDGE_CONCURRENCY"
+	envAgyTools        = "EZLLM_AGY_EXPERIMENTAL_TOOLS"
+	envAgySessionCache = "EZLLM_AGY_BRIDGE_SESSION_CACHE"
 )
 
 // startAgyBridge brings up the loopback surface when enabled. A missing binary
@@ -70,6 +72,21 @@ func startAgyBridge(ctx context.Context, log *slog.Logger, report bridgeReport) 
 	if err != nil {
 		return nil, err
 	}
+	experimentalTools := strings.EqualFold(strings.TrimSpace(os.Getenv(envAgyTools)), "on")
+	if experimentalTools && !pre.StructuredOutput {
+		return nil, fmt.Errorf("agy bridge: %s=on requires a CLI with --json-schema", envAgyTools)
+	}
+	sessionCache, err := agySessionCache(os.Getenv, experimentalTools)
+	if err != nil {
+		return nil, err
+	}
+	if sessionCache && !pre.ConversationResume {
+		return nil, fmt.Errorf("agy bridge: %s=on requires --conversation", envAgySessionCache)
+	}
+	clientTools := "disabled (text chat only)"
+	if experimentalTools {
+		clientTools = "experimental (structured output; caller executes)"
+	}
 	token, err := agyBridgeToken(strings.TrimSpace(os.Getenv(envAgyToken)))
 	if err != nil {
 		return nil, err
@@ -80,28 +97,25 @@ func startAgyBridge(ctx context.Context, log *slog.Logger, report bridgeReport) 
 		ids = append(ids, m.ID)
 	}
 
+	runner := &agybridge.Runner{Bin: resolved, Home: home, Timeout: 300 * time.Second, MaxConcurrent: concurrency, Logf: log.Info, SessionCache: sessionCache}
 	srv := &agybridge.Server{
-		Runner: &agybridge.Runner{
-			Bin:           resolved,
-			Home:          home,
-			Timeout:       300 * time.Second,
-			MaxConcurrent: concurrency,
-			Logf:          log.Info,
-		},
-		Token:   token,
-		Version: server.Version,
-		Models:  pre.Models,
+		ExperimentalTools: experimentalTools,
+		Runner:            runner,
+		Token:             token,
+		Version:           server.Version,
+		Models:            pre.Models,
 		Info: map[string]any{
-			"status":       "ok",
-			"version":      server.Version,
-			"cli_bin":      resolved,
-			"cli_version":  pre.Version,
-			"cli_release":  qualified,
-			"agy_home":     home,
-			"login":        "logged in (token file; models listed at boot)",
-			"models":       strings.Join(ids, ", "),
-			"concurrency":  concurrency,
-			"client_tools": "disabled (text chat only)",
+			"status":        "ok",
+			"version":       server.Version,
+			"cli_bin":       resolved,
+			"cli_version":   pre.Version,
+			"cli_release":   qualified,
+			"agy_home":      home,
+			"login":         "logged in (token file; models listed at boot)",
+			"models":        strings.Join(ids, ", "),
+			"concurrency":   concurrency,
+			"client_tools":  clientTools,
+			"session_cache": sessionCache,
 		},
 		Logf: log.Info,
 	}
@@ -116,7 +130,7 @@ func startAgyBridge(ctx context.Context, log *slog.Logger, report bridgeReport) 
 			log.Error("agy bridge serve", "err", err)
 		}
 	}()
-	return func() { shutdownBridgeHTTP(httpSrv) }, nil
+	return func() { shutdownBridgeHTTP(httpSrv); runner.Close() }, nil
 }
 
 // assertAgyLoopback keeps this surface invisible from outside the container:
@@ -151,4 +165,19 @@ func agyBridgeToken(path string) (string, error) {
 		return "", fmt.Errorf("agy bridge: cannot write %s: %w", path, err)
 	}
 	return token, nil
+}
+
+func agySessionCache(get func(string) string, tools bool) (bool, error) {
+	var enabled bool
+	switch strings.ToLower(strings.TrimSpace(get(envAgySessionCache))) {
+	case "", "off", "false", "0":
+	case "on", "true", "1":
+		enabled = true
+	default:
+		return false, fmt.Errorf("agy bridge: %s must be on or off", envAgySessionCache)
+	}
+	if enabled && !tools {
+		return false, fmt.Errorf("agy bridge: %s requires %s=on", envAgySessionCache, envAgyTools)
+	}
+	return enabled, nil
 }

@@ -9,8 +9,23 @@
   "gate_binary": "",
   "fallback_ntfy_url": "",
   "bridges": {
-    "claude": {"enabled": true, "channel": "stable", "hold": []},
-    "codex": {"enabled": true, "hold": []},
-    "agy": {"enabled": true, "hold": []}
-  }
+    "claude": {
+      "enabled": true,
+      "channel": "stable",
+      "hold": []
+    },
+    "codex": {
+      "enabled": true,
+      "hold": []
+    },
+    "agy": {
+      "enabled": true,
+      "hold": []
+    },
+    "copilot": {
+      "enabled": false,
+      "hold": []
+    }
+  },
+  "retry_hours": 6
 }

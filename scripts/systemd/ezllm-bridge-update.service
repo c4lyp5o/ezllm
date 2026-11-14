@@ -8,6 +8,6 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/python3 %h/workspace/ezllm/scripts/bridge_update.py
-# Downloads, three live gates, one restart and the proofs.
-TimeoutStartSec=45min
+# Downloads, up to four live gates, one restart and the proofs.
+TimeoutStartSec=90min
 Nice=10

@@ -34,7 +34,7 @@ in the same binary.
   ([runbook](docs/codex-bridge-runbook.md)) or Google Antigravity
   ([runbook](docs/agy-bridge-runbook.md)) subscription behind the router
   through each vendor's official CLI, with plan windows on the provider card
-  where the vendor reports them. An optional host updater keeps each CLI
+  where the vendor reports them. An optional host updater keeps the bridge CLIs
   current: soaked, gated, promoted in a late-night window, proved and rolled
   back on failure ([runbook](docs/bridge-update-runbook.md)).
 - **Ops surface included.** Dashboard, live request feed, analytics, key-test
@@ -156,7 +156,7 @@ subscription. Choose the guide for your account:
 |---|---|---|
 | Claude Pro/Max | [Claude bridge](docs/claude-bridge-runbook.md) | Install Claude Code and sign in with a separate CLI profile. |
 | ChatGPT Plus/Pro | [Codex bridge](docs/codex-bridge-runbook.md) | Linux; client tools require Landlock for the default protection. |
-| Google Antigravity | [Antigravity bridge](docs/agy-bridge-runbook.md) | Linux; text only, with no client tools or image input. |
+| Google Antigravity | [Antigravity bridge](docs/agy-bridge-runbook.md) | Linux; text chat by default, experimental caller tools via structured output; no image input. |
 | GitHub Copilot | [Copilot CLI bridge](docs/copilot-cli-bridge-runbook.md) | The official `copilot` CLI signed in on the host; no key to paste. Client tools and inline PNG/JPEG images work natively over the headless channel; image requests require an explicit vision-capable model. |
 
 The guides use Docker Compose and explain CLI installation, separate sign-in,
@@ -367,6 +367,9 @@ run separately; they are not part of this CI gate.
 | [docs/environment.md](docs/environment.md) | every environment variable and its default; what a new install sets |
 | [docs/master-key-runbook.md](docs/master-key-runbook.md) | at-rest key encryption: paths, backup, rotation |
 | [docs/pricing-runbook.md](docs/pricing-runbook.md) | price catalog: refresh cadence, import, query |
+| [docs/agy-conversation-cache-design.md](docs/agy-conversation-cache-design.md) | Optional native AGY conversation resume, caller tool-result reuse and corrected cache accounting |
+| [docs/copilot-completed-session-cache-design.md](docs/copilot-completed-session-cache-design.md) | Optional completed-history cache within warm Copilot workers, matching and billing limits |
+| [docs/bridge-token-usage-audit.md](docs/bridge-token-usage-audit.md) | Hermes bridge token findings, accounting fixes and measurement limits |
 | [docs/claude-bridge-runbook.md](docs/claude-bridge-runbook.md) | Claude subscription bridge: setup, account, plan windows |
 | [docs/codex-bridge-runbook.md](docs/codex-bridge-runbook.md) | ChatGPT subscription bridge: platform requirements, lockdown, tools, setup |
 | [docs/agy-bridge-runbook.md](docs/agy-bridge-runbook.md) | Antigravity (Google) subscription bridge: keyring-free login, setup, limits |

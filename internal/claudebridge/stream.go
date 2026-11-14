@@ -89,25 +89,28 @@ func (u *Usage) Overlay(raw json.RawMessage) {
 }
 
 // StreamWriter turns native frames into an Anthropic stream, or assembles one
-// complete message for a non-stream request. Streaming forwards native's own
-// stream events verbatim — they already are Anthropic events — so there is no
-// re-encoding of text and no second wire to keep in sync.
+// complete message for a non-stream request. Text events stream unchanged.
+// The terminal pair waits for native's result so usage includes internal retries
+// as well as the visible message.
 type StreamWriter struct {
 	W     io.Writer
 	Flush func()
 
-	started bool
-	stopped bool
-	msgID   string
-	model   string
-	stop    string
-	usage   Usage
-	text    strings.Builder
-	blocks  []map[string]any
+	started       bool
+	stopped       bool
+	finished      bool
+	terminal      map[string]any
+	outputDetails json.RawMessage
+	msgID         string
+	model         string
+	stop          string
+	usage         Usage
+	text          strings.Builder
+	blocks        []map[string]any
 }
 
 // Handle consumes one frame. Frames that are not part of the stream (system,
-// rate_limit_event, result bookkeeping) are absorbed and reported through fields.
+// rate_limit_event and result accounting) are absorbed and reported through fields.
 //
 // Only the first upstream message reaches the client. Measured on CLI 2.1.306: an
 // empty first answer makes native append its own "[Your previous response had no
@@ -144,8 +147,11 @@ func (s *StreamWriter) Handle(f Frame) error {
 			if raw, err := json.Marshal(ev["usage"]); err == nil {
 				s.usage.Overlay(raw)
 			}
+			s.terminal = ev
+			return nil
 		case "message_stop":
 			s.stopped = true
+			return nil
 		case "content_block_delta":
 			if d, ok := ev["delta"].(map[string]any); ok {
 				if d["type"] == "text_delta" {
@@ -156,6 +162,16 @@ func (s *StreamWriter) Handle(f Frame) error {
 			}
 		}
 		return s.writeEvent(kind, f.Event)
+	case "result":
+		// Native may make internal retry calls after the visible message. Its
+		// terminal aggregate accounts for all of them without exposing their text.
+		s.usage.Overlay(f.Usage)
+		var detail struct {
+			Output json.RawMessage `json:"output_tokens_details"`
+		}
+		if json.Unmarshal(f.Usage, &detail) == nil && len(detail.Output) > 0 && string(detail.Output) != "null" {
+			s.outputDetails = detail.Output
+		}
 	case "assistant":
 		// Native emits one assistant frame per content block (measured: three
 		// parallel tool calls arrive as three frames sharing one message id), so
@@ -193,11 +209,10 @@ func (s *StreamWriter) writeEvent(kind string, payload json.RawMessage) error {
 	return nil
 }
 
-// Finish closes an open stream. If native died before message_stop (a mid-stream
-// error, a kill), the client still gets a well-formed terminal pair instead of a
-// stream that simply stops.
+// Finish emits the terminal pair after aggregate accounting is available.
+// If no native terminal pair arrived, it synthesizes one from captured fields.
 func (s *StreamWriter) Finish() error {
-	if s.stopped || !s.started {
+	if s.finished || !s.started {
 		return nil
 	}
 	payload := map[string]any{
@@ -205,12 +220,16 @@ func (s *StreamWriter) Finish() error {
 		"delta": map[string]any{"stop_reason": s.stopReasonOr("end_turn"), "stop_sequence": nil},
 		"usage": s.usageMap(),
 	}
+	if s.terminal != nil {
+		payload = s.terminal
+		payload["usage"] = s.usageMap()
+	}
 	raw, _ := json.Marshal(payload)
 	if err := s.writeEvent("message_delta", raw); err != nil {
 		return err
 	}
 	rawStop, _ := json.Marshal(map[string]any{"type": "message_stop"})
-	s.stopped = true
+	s.finished = true
 	return s.writeEvent("message_stop", rawStop)
 }
 
@@ -224,12 +243,16 @@ func (s *StreamWriter) stopReasonOr(fallback string) string {
 // usageMap is the terminal usage an Anthropic client expects on message_delta,
 // with the cache fields carried so the ledger's name-based reads work unchanged.
 func (s *StreamWriter) usageMap() map[string]any {
-	return map[string]any{
+	usage := map[string]any{
 		"input_tokens":                s.usage.InputTokens,
 		"output_tokens":               s.usage.OutputTokens,
 		"cache_creation_input_tokens": s.usage.CacheCreationInputTokens,
 		"cache_read_input_tokens":     s.usage.CacheReadInputTokens,
 	}
+	if len(s.outputDetails) > 0 {
+		usage["output_tokens_details"] = s.outputDetails
+	}
+	return usage
 }
 
 // Message assembles the complete response for a non-stream request.

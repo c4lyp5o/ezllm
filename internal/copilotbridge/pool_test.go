@@ -25,6 +25,7 @@ func TestPoolCLIHelper(t *testing.T) {
 	in := bufio.NewReader(os.Stdin)
 	sid := ""
 	sessions := 0
+	sends := 0
 	tools := 0
 	event := func(kind string, data any) {
 		out(map[string]any{"method": "session.event", "params": map[string]any{"sessionId": sid, "event": map[string]any{"type": kind, "data": data}}})
@@ -78,6 +79,14 @@ func TestPoolCLIHelper(t *testing.T) {
 			}
 			reply(map[string]any{"sessionId": sid})
 		case "session.send":
+			sends++
+			if mode == "cache" && sends == 2 {
+				var prompt string
+				json.Unmarshal(req.Params["prompt"], &prompt)
+				if prompt != "User: next" {
+					os.Exit(9)
+				}
+			}
 			if mode == "image-isolation" {
 				var attachments []ImageAttachment
 				json.Unmarshal(req.Params["attachments"], &attachments)
@@ -100,12 +109,15 @@ func TestPoolCLIHelper(t *testing.T) {
 			if mode == "missing" {
 				sid = ""
 			}
-			if tools > 0 {
+			if tools > 0 && !(mode == "cache-tools" && sends == 1) {
 				var ev map[string]any
 				json.Unmarshal([]byte(evBatch), &ev)
 				event("assistant.message", ev["data"])
 			} else {
 				text := "ok"
+				if mode == "cache-gate" {
+					text = "pong"
+				}
 				if mode == "empty" {
 					text = ""
 				}
@@ -113,6 +125,13 @@ func TestPoolCLIHelper(t *testing.T) {
 				if mode != "nousage" {
 					var ev map[string]any
 					json.Unmarshal([]byte(evUsage), &ev)
+					if strings.HasPrefix(mode, "cache") {
+						count := sends
+						if mode == "cache-reset" && sends > 1 {
+							count = 0
+						}
+						ev["data"] = map[string]any{"totalNanoAiu": 1000 * count, "accountingSnapshot": map[string]any{"totalPremiumRequestCost": count, "tokenDetails": map[string]any{"input": map[string]any{"tokenCount": 10 * count}, "cache_read": map[string]any{"tokenCount": 100 * max(count-1, 0)}, "cache_write": map[string]any{"tokenCount": 90 * min(count, 1)}, "output": map[string]any{"tokenCount": 5 * count}}}}
+					}
 					event("session.usage_checkpoint", ev["data"])
 				}
 				event("session.idle", map[string]any{})
@@ -121,6 +140,9 @@ func TestPoolCLIHelper(t *testing.T) {
 			reply(map[string]any{"success": true})
 			var ev map[string]any
 			json.Unmarshal([]byte(evUsage), &ev)
+			if mode == "cache-tools" {
+				ev["data"] = map[string]any{"totalNanoAiu": 2000, "accountingSnapshot": map[string]any{"totalPremiumRequestCost": 2, "tokenDetails": map[string]any{"input": map[string]any{"tokenCount": 20}, "cache_read": map[string]any{"tokenCount": 100}, "cache_write": map[string]any{"tokenCount": 90}, "output": map[string]any{"tokenCount": 10}}}}
+			}
 			event("session.usage_checkpoint", ev["data"])
 			event("session.idle", map[string]any{})
 		case "session.delete":

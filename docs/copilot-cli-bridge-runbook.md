@@ -210,9 +210,14 @@ environment (`env -i`, no session stores) the same call answers
 {"bridge":"copilot","ok":true,"version":"1.0.105","release":"qualified","live":true,"problems":[]}
 ```
 
-**Not managed by `scripts/bridge_update.py`.** Its `BRIDGES` table lists claude,
-codex and agy; there is no versioned bridge root to stage here, because the CLI is
-a standalone binary updated by `copilot update`. So the gate is manual today.
+**Optional managed updates.** The host updater now supports Copilot through
+stable, digest-verified official releases and the same gate/promotion/recovery
+flow as the other bridges. It is disabled in updater defaults until you migrate
+the legacy standalone binary mount to `/opt/copilot-bridge` and point
+`EZLLM_COPILOT_BIN` at `/opt/copilot-bridge/current/copilot`. Initialization copies
+the existing binary without replacing it. Follow the
+[bridge update runbook](bridge-update-runbook.md) before enabling it.
+The live gate honors warm-pool mode and closes its workers when finished.
 
 **Version-sensitive:** a release that renames `session.usage_checkpoint` records
 usage as unknown (zeros). Parser fixtures in `internal/copilotbridge/bridge_test.go`
@@ -257,7 +262,7 @@ one process per request. Accepted enabled values are `on`, `true`, `1`; disabled
 values are `off`, `false`, `0`, or unset. Invalid values fail startup.
 
 The pool starts lazily and uses the existing concurrency/queue settings. Each
-process serves one request at a time and each request creates a fresh session
+process serves one request at a time. With session caching off, each request creates a fresh session
 with its own system message and explicit tool allowlist. Reuse requires usage,
 idle and a successful session deletion. Cancellation, timeouts, protocol errors
 or uncertain cleanup discard the process; possibly billed inference is not
@@ -277,6 +282,40 @@ beyond a controlled rollout. On this host one CLI retained approximately
 substantial memory. That sample does not establish a steady-state memory bound.
 The existing concurrency cap and worker expiry limit exposure. First requests
 are still cold, and model processing time is unaffected by process reuse.
+
+## Opt-in completed-conversation cache
+
+On v1.11.0 or later, enable both settings and restart the built ezllm image:
+
+```text
+EZLLM_COPILOT_BRIDGE_WARM_POOL=on
+EZLLM_COPILOT_BRIDGE_SESSION_CACHE=on
+```
+
+The second setting defaults off; enabling it without the warm pool fails startup.
+A matching request must supply the unchanged prior messages and assistant answer,
+then one new user message, with the same explicit model, system and tools.
+Hermes cache markers may move without changing the actual conversation.
+Only the new user turn is sent to the retained native conversation. No new
+service or worker pool is added. Each worker retains at most one completed
+session, capped at 1 MiB of normalized history and the existing expiry limits.
+
+Tool availability does not prevent reuse, but a newly emitted tool batch is
+accounted and deleted. Tool-result continuations, images, `auto`, edits and
+identical stateless retries take the fresh-session path. This mode does not yet
+cache an active Hermes tool loop. Failed cleanup or regressed usage counters
+cannot trigger another inference automatically.
+
+The loopback `/status` reports `session_cache`; watch
+`runtime.stage_timings.session_cache_hit.count` along with vendor cache-read and
+credit counters. Native checkpoints are cumulative, while HTTP/ledger usage
+remains per request. A matching native session does not guarantee provider cache
+hits. Setting the cache flag back to `off` and restarting restores fresh sessions
+while retaining process pooling. Run CLI qualification in the same configured
+mode; cache mode adds one small call to its live gate.
+
+See [the cache design and measured evidence](copilot-completed-session-cache-design.md)
+for matching, accounting, lifecycle and experiment limits.
 
 ## Shared transport status
 

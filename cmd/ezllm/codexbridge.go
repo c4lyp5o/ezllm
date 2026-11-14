@@ -135,10 +135,11 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 		SandboxMode:   codexbridge.SandboxModeFromEnv(os.Getenv),
 	}
 	srv := &codexbridge.Server{
-		Runner:   runner,
-		ToolsOff: tools.off,
-		Token:    token,
-		Version:  server.Version,
+		Runner:        runner,
+		RequireCaller: true,
+		ToolsOff:      tools.off,
+		Token:         token,
+		Version:       server.Version,
 		Info: map[string]any{
 			"status":          "ok",
 			"version":         server.Version,

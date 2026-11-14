@@ -202,3 +202,21 @@ secret require a restart to change.
 
 See [settings-runbook.md](settings-runbook.md) for live-update behavior and
 [recovery-runbook.md](recovery-runbook.md) for encrypted offline recovery.
+
+
+## Request admission (configuration YAML)
+
+`request_limits.global_inflight` defaults to 32,
+`request_limits.per_client_inflight` to 8 and
+`request_limits.body_memory_mib` to 256. These are YAML settings, not environment
+variables. All must be positive and at most 4096; per-client concurrency cannot
+exceed global concurrency, and the memory budget must cover `max_body_mib`.
+They cannot be disabled with zero. Configure them before startup.
+
+Admission runs after authentication and before reading inference bodies. It
+reserves a whole allowed body while reading (including chunked input), shrinks
+to the actual body size after completion and retains that reservation until the
+handler/stream ends. Excess requests receive 429 with `Retry-After: 1`; there is
+no unbounded waiting queue. Native CLI concurrency limits continue to apply too.
+The budget counts retained input bytes, not JSON object overhead, response
+buffers or CLI processes; choose limits appropriate to measured process memory.

@@ -116,5 +116,22 @@
     "vet": "passed",
     "updater_tests": 54,
     "synthetic_reproductions": 5
+  },
+  "remediation": {
+    "version": "1.14.1",
+    "source_fixes": [
+      "SEC-01",
+      "SEC-02",
+      "SEC-03",
+      "SEC-04",
+      "SEC-06",
+      "SEC-07"
+    ],
+    "prepared_config_fixes": [
+      "SEC-05"
+    ],
+    "runtime_rollout": "not performed",
+    "approved_binding": "127.0.0.1:20129:20129",
+    "audit_driver": "permanent security regressions; no positive exploit assertions"
   }
 }

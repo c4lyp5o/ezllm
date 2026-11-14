@@ -147,6 +147,12 @@ type Backup struct {
 	SecretFile string `yaml:"secret_file"`
 }
 
+type RequestLimits struct {
+	GlobalInflight    int `yaml:"global_inflight"`
+	PerClientInflight int `yaml:"per_client_inflight"`
+	BodyMemoryMiB     int `yaml:"body_memory_mib"`
+}
+
 type Config struct {
 	Backup             Backup              `yaml:"backup"`
 	Explicit           map[string]bool     `yaml:"-"`
@@ -155,6 +161,7 @@ type Config struct {
 	AutoProbe          *bool               `yaml:"automatic_probing"`
 	Listen             string              `yaml:"listen"`
 	DataDir            string              `yaml:"data_dir"`
+	RequestLimits      RequestLimits       `yaml:"request_limits"`
 	MaxBodyMiB         int                 `yaml:"max_body_mib"`
 	UpstreamTimeoutStr string              `yaml:"upstream_timeout"`
 	Providers          map[string]Provider `yaml:"providers"`
@@ -284,6 +291,30 @@ func (c *Config) Validate() error {
 		c.MaxBodyMiB = 32
 	} else if c.MaxBodyMiB > 256 {
 		errs = append(errs, "max_body_mib: above 256 is almost certainly a mistake")
+	}
+
+	// Bound every request, even if all callers use one upstream bridge.
+	for _, field := range []struct {
+		name     string
+		value    *int
+		fallback int
+	}{
+		{"global_inflight", &c.RequestLimits.GlobalInflight, 32},
+		{"per_client_inflight", &c.RequestLimits.PerClientInflight, 8},
+		{"body_memory_mib", &c.RequestLimits.BodyMemoryMiB, 256},
+	} {
+		if *field.value == 0 && !c.Explicit["request_limits."+field.name] {
+			*field.value = field.fallback
+		}
+		if *field.value < 1 || *field.value > 4096 {
+			errs = append(errs, "request_limits."+field.name+": must be between 1 and 4096")
+		}
+	}
+	if c.RequestLimits.PerClientInflight > c.RequestLimits.GlobalInflight {
+		errs = append(errs, "request_limits.per_client_inflight: must not exceed global_inflight")
+	}
+	if c.RequestLimits.BodyMemoryMiB < c.MaxBodyMiB {
+		errs = append(errs, "request_limits.body_memory_mib: must cover max_body_mib")
 	}
 
 	// --- upstream timeout ---

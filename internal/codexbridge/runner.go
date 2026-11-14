@@ -388,14 +388,17 @@ const (
 // Deltas are queued, not delivered here: a sink blocked on a client that
 // stopped reading must never stall the reader (and with it child cleanup).
 type turnState struct {
-	mu       sync.Mutex
-	sink     func(Delta) error
-	out      []Delta // queued for the request goroutine; the reader never calls sink
-	outBytes int
-	abort    func() // asynchronously reaps the child on backlog overflow
-	text     strings.Builder
-	lastItem string
-	threadID string // cache mode: ignore template and unrelated thread events
+	caller      string
+	hasHistory  bool
+	historyHash [32]byte
+	mu          sync.Mutex
+	sink        func(Delta) error
+	out         []Delta // queued for the request goroutine; the reader never calls sink
+	outBytes    int
+	abort       func() // asynchronously reaps the child on backlog overflow
+	text        strings.Builder
+	lastItem    string
+	threadID    string // cache mode: ignore template and unrelated thread events
 
 	reasoning     strings.Builder
 	reasoningPart bool // a new summary part began: separate it
@@ -666,7 +669,11 @@ func (r *Runner) Run(ctx context.Context, req Request, sink func(Delta) error) (
 	}
 
 	if len(req.ToolResults) > 0 {
-		if pt := r.takeParked(req.ToolResults); pt != nil {
+		pt, takeErr := r.takeParked(req)
+		if takeErr != nil {
+			return Result{}, takeErr
+		}
+		if pt != nil {
 			compatible := true
 			if pt.c.lease != nil {
 				key, ok := r.templateKey(req)
@@ -704,6 +711,10 @@ func (r *Runner) Run(ctx context.Context, req Request, sink func(Delta) error) (
 
 func (r *Runner) runAppServer(ctx context.Context, req Request, sink func(Delta) error) (Result, error) {
 	st := newTurnState(sink)
+	st.caller, st.hasHistory, st.historyHash = req.CallerID, req.hasHistory, req.historyHash
+	if !req.hasHistory {
+		st.historyHash = inputHash(req.Input)
+	}
 	tools := len(req.Tools) > 0
 	handler := RequestHandler(declineRequests)
 	if tools {
@@ -791,7 +802,7 @@ func (r *Runner) runAppServer(ctx context.Context, req Request, sink func(Delta)
 		if !c.release() {
 			return Result{}, r.childErr(ctx, c, "turn", ctx.Err())
 		}
-		r.park(c, st, res.ToolCalls)
+		r.park(c, st, res)
 		parked = true
 	} else if lease != nil && ctx.Err() == nil && validTemplateUsage(res.Usage) {
 		lease.good.Store(true)

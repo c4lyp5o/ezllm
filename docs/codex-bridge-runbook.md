@@ -440,3 +440,26 @@ The updater copies the setting into qualification and requires an
 `approval_policy=never`. Effective cache mode proves fresh-request reuse and
 caller-tool continuation; unsupported auto mode reports its fallback reason. Changing the setting requires requalification. Measured results
 and design: [empty-template cache](codex-empty-template-cache-design.md).
+
+
+## Caller ownership of pending tools (v1.14.1+)
+
+Gateway authentication derives an opaque identity per client key or dashboard
+session. The proxy strips externally supplied `X-Ezllm-Caller` values and stamps
+its own value only for the registered loopback bridge with the matching service
+credential. Tool-bearing direct bridge requests without this metadata are refused;
+use the gateway inference endpoint. This header is an internal implementation
+boundary, not a client setting.
+
+A pending tool conversation must match that identity and the canonical caller
+history, including the selected assistant tool-call message. A different caller
+receives 403 without consuming the legitimate parked turn. Changed/truncated
+history uses fresh transcript replay without loading the old conversation.
+Cache-control markers and equivalent text-block formatting do not change the
+history hash. Rotated client keys and distinct dashboard sessions are distinct
+principals. Native IDs recycled in another child receive a new client-facing
+alias rather than overwriting an existing parked conversation.
+
+Empty cache templates still contain configuration only and can share affinity
+across callers; caller identity is never sent in model instructions or input.
+Native approval policy remains `never`, and caller tools still execute in Hermes.

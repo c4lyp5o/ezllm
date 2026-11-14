@@ -1,5 +1,8 @@
 # Whole-application security audit — 2026-11-14
 
+Remediation follow-up: [v1.14.1 fixes and rollout status](security-remediation-2026-11-14.md).
+The findings below describe the audited revision; deployment status is tracked separately.
+
 ## Scope and result
 
 Reviewed source at `368717a` on `feat/bridge-cache-and-updater` (ezllm v1.14.0),
@@ -177,14 +180,14 @@ Recommended fix: route this payload through the existing bounded/deadlined
 `decodeBody` helper, preserving its single-JSON-object and unknown-field checks.
 Add a stalled-settings-body regression alongside the existing login timeout test.
 
-## Checks and evidence
+## Checks and evidence at the audited revision
 
 | Check | Result |
 | --- | --- |
 | `make test-short` | Passed; full local functional gate, including auth, CSRF, ownership, redirect, backup and bridge regressions |
 | `go vet ./...` | Passed |
 | `python3 -m unittest discover -s scripts -p 'bridge_update_test.py'` | 54 tests passed |
-| `python3 tests/security_audit.py` | Five synthetic/local reproductions: SEC-01/02/03/04/07 |
+| `python3 tests/security_audit.py` at `401dfbc` | Five synthetic/local reproductions: SEC-01/02/03/04/07 |
 | `npm audit --package-lock-only --json` in `web/` | Zero reported vulnerabilities across the lockfile graph |
 | `govulncheck` source scan | Two standard-library security records with source-symbol traces; one uncalled OpenPGP deprecation record |
 | `govulncheck` running-binary scan | No two stdlib records above; OpenPGP wildcard/deprecation record needs reachability triage |
@@ -192,13 +195,13 @@ Add a stalled-settings-body regression alongside the existing login timeout test
 | Landlock synthetic parent-environment probe | Unconfined control read its parent's synthetic sentinel; confined child was denied |
 | Runtime metadata | Nonroot UID/GID 1000, not privileged, no Codex Landlock override; all-interface HTTP publication; no Docker memory cap |
 
-`tests/security_audit.py` temporarily creates exclusive in-package Go probes,
-runs them with `-short` and removes them in `finally`. It does not touch a real
+At audit commit `401dfbc`, `tests/security_audit.py` temporarily created exclusive in-package Go probes,
+ran them with `-short` and removed them in `finally`. It did not touch a real
 database, subscription login or live gateway. Its successful exit means the
 findings **reproduced**, not that security passed. The body-allocation proof is
-limited to 16 MiB. After remediation, convert the relevant expectations into
-permanent regressions asserting rejection/redaction; this audit driver should
-then be updated or retired rather than weakening those regressions.
+limited to 16 MiB. In v1.14.1 the driver instead runs permanent regressions asserting rejection,
+redaction and correct caller continuation. It no longer generates temporary tests
+or expects vulnerable behavior to succeed.
 
 The OpenPGP record is `GO-2026-5932` against `golang.org/x/crypto`. Current source
 imports no `openpgp` package. The binary scan's apparent function matches are
@@ -243,5 +246,6 @@ No firewall audit, internet-facing penetration test, credential rotation, broad
 fuzzing campaign or full browser attack matrix was performed. Regex history
 scanning is not proof that no secret of any format has ever been committed.
 Paid inference behavior and vendor CLI implementation security were not retested.
-Findings are open; no application or deployment remediation is included in this
-report-only change.
+No application or deployment remediation was included in audit commit `401dfbc`.
+The subsequent v1.14.1 remediation and remaining rollout boundary are recorded in
+[the remediation notes](security-remediation-2026-11-14.md).

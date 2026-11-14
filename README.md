@@ -48,7 +48,7 @@ Choose one way to start ezllm, then follow **Set up the dashboard** below:
 - **Released binary:** follow the [installation guide](docs/install-binary.md)
   for Linux, macOS, or Windows. No Go installation is needed.
 - **Docker:** use the commands below from a checkout of this repository.
-- **From source:** install Go 1.27+, then run:
+- **From source:** install Go 1.27.4+, then run:
 
   ```bash
   git clone https://github.com/c4lyp5o/ezllm.git
@@ -109,8 +109,9 @@ docker compose logs ezllm
 The example runs as UID and GID 1000 by default. If those do not match the
 owner of `data`, set `UID` and `GID` in your Compose environment so the
 container can write to that directory. See [compose.example.yml](compose.example.yml)
-for deployment options. The Compose example publishes the port on all host
-interfaces; restrict it or configure a reverse proxy as appropriate for your host.
+for deployment options. The Compose example publishes port 20129 on localhost.
+A reverse proxy on the same Docker network can reach the container directly;
+local clients can use `http://127.0.0.1:20129`.
 
 ### Bridge cache settings
 
@@ -196,6 +197,13 @@ using the setup code, configure `EZLLM_DASHBOARD_PASSWORD` or
 `EZLLM_DASHBOARD_PASSWORD_FILE`. Behind a reverse proxy, set
 `EZLLM_TRUSTED_PROXIES` and apply a per-source rate limit to `/admin/login`
 and `/admin/setup`; see [environment variables](docs/environment.md).
+
+Inference admission is bounded by `request_limits` in
+[config.example.yaml](config.example.yaml): 32 active requests globally, eight per
+client key, and a 256 MiB input-buffer budget by default. These include streams;
+excess requests return a retryable 429 before reading another body. See the
+[security remediation notes](docs/security-remediation-2026-11-14.md) for tuning
+and the difference between this buffer budget and total process memory.
 
 ## Use a subscription bridge
 

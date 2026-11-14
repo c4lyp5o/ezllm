@@ -15,11 +15,14 @@ import (
 // to the stateless transcript replay.
 
 type parkedTurn struct {
-	c     *child
-	st    *turnState
-	ids   []string
-	at    time.Time
-	timer *time.Timer
+	caller     string
+	hasHistory bool
+	parentHash [32]byte
+	c          *child
+	st         *turnState
+	ids        []string
+	at         time.Time
+	timer      *time.Timer
 }
 
 func (r *Runner) toolHold() time.Duration {
@@ -37,11 +40,9 @@ func (r *Runner) maxParked() int {
 }
 
 // park registers a stopped turn under each of its pending call ids.
-func (r *Runner) park(c *child, st *turnState, calls []ToolCall) {
-	pt := &parkedTurn{c: c, st: st, at: time.Now()}
-	for _, call := range calls {
-		pt.ids = append(pt.ids, call.ID)
-	}
+func (r *Runner) park(c *child, st *turnState, res Result) {
+	calls := res.ToolCalls
+	pt := &parkedTurn{c: c, st: st, at: time.Now(), caller: st.caller, hasHistory: st.hasHistory, parentHash: st.historyHash}
 	r.pmu.Lock()
 	if r.shut {
 		r.pmu.Unlock()
@@ -57,6 +58,27 @@ func (r *Runner) park(c *child, st *turnState, calls []ToolCall) {
 		r.unregister(oldest)
 		evict = append(evict, oldest)
 	}
+	// A CLI may recycle native IDs in another child. Never overwrite another
+	// parked conversation; aliases are client-facing only, replies use RPC IDs.
+	st.mu.Lock()
+	for i := range calls {
+		original := calls[i].ID
+		if r.parked[original] != nil {
+			alias := "call_" + randomHex(16)
+			for r.parked[alias] != nil {
+				alias = "call_" + randomHex(16)
+			}
+			rpcID := st.replyTo[original]
+			delete(st.replyTo, original)
+			st.replyTo[alias] = rpcID
+			calls[i].ID = alias
+		}
+		pt.ids = append(pt.ids, calls[i].ID)
+	}
+	if st.hasHistory {
+		pt.parentHash = assistantHash(st.historyHash, res)
+	}
+	st.mu.Unlock()
 	for _, id := range pt.ids {
 		r.parked[id] = pt
 	}
@@ -80,17 +102,27 @@ func (r *Runner) park(c *child, st *turnState, calls []ToolCall) {
 }
 
 // takeParked removes and returns the parked turn these results answer.
-func (r *Runner) takeParked(results map[string]string) *parkedTurn {
+func (r *Runner) takeParked(req Request) (*parkedTurn, error) {
 	r.pmu.Lock()
 	defer r.pmu.Unlock()
-	for id := range results {
+	for id := range req.ToolResults {
 		if pt, ok := r.parked[id]; ok {
+			if pt.caller != req.CallerID {
+				return nil, &NativeError{Status: 403, Type: "permission_error", Code: "tool_session_mismatch", Message: "codex-bridge: tool continuation does not belong to this caller"}
+			}
+			hash := req.toolParentHash
+			if !req.hasHistory {
+				hash = inputHash(req.Input)
+			}
+			if pt.hasHistory != req.hasHistory || pt.parentHash != hash {
+				return nil, nil
+			}
 			r.unregister(pt)
 			pt.timer.Stop()
-			return pt
+			return pt, nil
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // unregister drops every id of pt; pmu must be held.
@@ -134,6 +166,9 @@ func (r *Runner) resume(ctx context.Context, pt *parkedTurn, req Request, sink f
 	st := pt.st
 	st.mu.Lock()
 	st.sink = sink
+	if req.hasHistory {
+		st.historyHash = req.historyHash
+	}
 	pending := st.replyTo
 	st.replyTo = map[string]json.RawMessage{}
 	st.calls = nil
@@ -165,7 +200,7 @@ func (r *Runner) resume(ctx context.Context, pt *parkedTurn, req Request, sink f
 			pt.c.dispose()
 			return Result{}, r.childErr(ctx, pt.c, "turn", ctx.Err())
 		}
-		r.park(pt.c, st, res.ToolCalls)
+		r.park(pt.c, st, res)
 		return res, nil
 	}
 	if pt.c.lease != nil && ctx.Err() == nil && validTemplateUsage(pt.st.usage) {

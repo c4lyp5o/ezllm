@@ -110,6 +110,9 @@ func (s *Server) EnableBridge(id, addr, token, updateFile string, status map[str
 		if addr != "" {
 			b.BaseURL = "http://" + addr + "/v1"
 		}
+		if id == "chatgpt-sub" && s.dispatcher != nil {
+			s.dispatcher.RegisterCallerBridge(b.BaseURL, token)
+		}
 		b.token = token
 		b.updateFile = updateFile
 		b.Status = status

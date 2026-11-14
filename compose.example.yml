@@ -24,7 +24,7 @@ services:
     ports:
       # Overridable so a second instance (staging, a test) does not need its
       # own file:  EZLLM_PORT=20130 EZLLM_DATA=./data-staging docker compose up -d
-      - "${EZLLM_PORT:-20129}:20129"
+      - "127.0.0.1:${EZLLM_PORT:-20129}:20129"
 
     environment:
       # ── server ──

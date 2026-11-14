@@ -303,3 +303,24 @@ providers: { p1: { kind: openai-compatible, base_url: https://x/v1, keys: [{env:
 		t.Errorf("data_dir default = %q, want %q", cfg.DataDir, DefaultDataDir)
 	}
 }
+
+func TestSecurityRequestLimitsAreBounded(t *testing.T) {
+	cfg, err := Load(writeTemp(t, "providers: {}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RequestLimits.GlobalInflight != 32 || cfg.RequestLimits.PerClientInflight != 8 || cfg.RequestLimits.BodyMemoryMiB != 256 {
+		t.Fatalf("%+v", cfg.RequestLimits)
+	}
+	for _, value := range []string{
+		"global_inflight: 0", "per_client_inflight: -1", "body_memory_mib: 0", "global_inflight: 4097", "body_memory_mib: 16", "global_inflight: 1\n  per_client_inflight: 2",
+	} {
+		if _, err := Load(writeTemp(t, "request_limits:\n  "+value+"\nproviders: {}\n")); err == nil {
+			t.Fatalf("accepted unsafe limits %q", value)
+		}
+	}
+	cfg, err = Load(writeTemp(t, "request_limits:\n  global_inflight: 16\n  per_client_inflight: 4\n  body_memory_mib: 64\nproviders: {}\n"))
+	if err != nil || cfg.RequestLimits.GlobalInflight != 16 || cfg.RequestLimits.PerClientInflight != 4 || cfg.RequestLimits.BodyMemoryMiB != 64 {
+		t.Fatalf("%+v %v", cfg, err)
+	}
+}

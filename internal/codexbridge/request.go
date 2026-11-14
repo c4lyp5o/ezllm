@@ -11,12 +11,18 @@ import (
 // docs/codex-subscription-design.md §4.2): the structured `history` field on
 // thread/resume is documented for Codex Cloud only and is not used.
 type Request struct {
-	Model        string
-	Stream       bool
-	IncludeUsage bool
-	Effort       string
-	Instructions string
-	Input        []UserInput
+	// CallerID is trusted transport metadata, never a JSON request field.
+	CallerID string
+	// History hashes bind a pending turn without retaining another prompt copy.
+	hasHistory     bool
+	historyHash    [32]byte
+	toolParentHash [32]byte
+	Model          string
+	Stream         bool
+	IncludeUsage   bool
+	Effort         string
+	Instructions   string
+	Input          []UserInput
 
 	// Tools are the client's function tools (stage 2): declared to Codex as
 	// dynamicTools, called by the model from code-mode, answered by the client.
@@ -254,6 +260,9 @@ func ParseRequest(body []byte) (Request, error) {
 		}
 	}
 
+	if err := req.bindHistory(turns); err != nil {
+		return Request{}, err
+	}
 	text, images, err := buildTranscript(turns)
 	if err != nil {
 		return Request{}, err

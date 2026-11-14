@@ -11,7 +11,17 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.14.0**
+**Current: v1.14.1**
+
+## v1.14.1 — 2026-11-14
+
+Addresses the whole-application audit with bounded inference admission and
+body-memory reservations, provider response-cookie/state-header filtering,
+credential-safe auth/panic diagnostics, and settings body-read deadlines.
+Codex pending conversations bind to authenticated callers and full canonical
+history; recycled native IDs cannot overwrite another parked turn. The Go
+toolchain pin is 1.27.4 and CI checks reachable Go vulnerabilities. Compose
+publishes the HTTP port on localhost by default.
 
 ## v1.14.0 — 2026-11-14
 

@@ -5,6 +5,15 @@
 
 # secrets / live config (config.example.yaml IS needed — it is copied in)
 /config.yaml
+# Private Compose deployment files and local backups may contain env secrets.
+/compose.yml
+/compose.yml.*
+/compose.yaml
+/compose.yaml.*
+/compose.override.yml
+/compose.override.yaml
+/docker-compose.yml
+/docker-compose.yaml
 /.env
 **/.env
 *.key

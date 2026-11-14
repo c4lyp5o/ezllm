@@ -2,6 +2,25 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
+## v1.14.1 — Security audit remediation
+
+- Bounds inference admission before body allocation: default 32 global/eight
+  per-client active requests and 256 MiB of input reservations. Excess work
+  receives retryable 429; reservations are released on completion, cancellation
+  and panic. Limits are configurable and cannot be disabled with zero.
+- Strips provider cookies and origin-state headers on public and dashboard
+  inference responses. Auth and panic logs redact path credentials, including
+  encoded slash tokens; panic payloads are not logged.
+- Binds pending Codex tool conversations to gateway-authenticated callers and
+  full canonical history. Spoofed identity headers never establish ownership,
+  and recycled native IDs cannot replace another parked conversation.
+- Shares the bounded/deadlined admin decoder for settings writes.
+- Pins Go 1.27.4 and adds a reachable-vulnerability CI check. Compose examples
+  bind HTTP to localhost; private deployment files are excluded from image builds.
+- Replaces the audit's vulnerable-behavior probes with permanent rejection,
+  redaction, cleanup and continuation regressions. Runtime rollout is separate
+  from the source fixes; see the dated remediation notes.
+
 ## v1.14.0 — Automatic Codex caching and noninteractive CLI defaults
 
 - Defaults `EZLLM_CODEX_BRIDGE_CACHE` to `auto`: enable supported empty-template

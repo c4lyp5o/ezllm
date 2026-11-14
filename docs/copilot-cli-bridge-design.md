@@ -140,7 +140,9 @@ A model id is only marked usable after a probe answers, which is exactly the
 1. **Auth: CLI login only.** The bridge uses a dedicated `EZLLM_COPILOT_HOME`
    (default `/copilot-home`, mounted) and never reads a PAT env var. The box is
    already logged in (`~/.copilot` exists and a headless call authenticated with
-   no env token set), so the deployment mounts that directory. Fine-grained
+   no env token set), so the deployment mounts that directory. *Revised in
+   1.9.0:* the bridge now uses a dedicated login, `~/.copilot-sub` mounted at
+   `/copilot-sub` (the new default), like the other subscription bridges. Fine-grained
    PATs remain documented as a manual fallback for a fresh host, not a code
    path.
 2. **One branch.** The bridge and the deletion of the OAuth surface land

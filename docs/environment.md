@@ -144,7 +144,7 @@ CLI's own, so there is no client id to configure. Runbook:
 | `EZLLM_COPILOT_BRIDGE_WARM_POOL` | `off` | Opt-in CLI process reuse; sessions are fresh unless session caching is enabled; `on`/`true`/`1` enables it. Existing concurrency and queue limits apply. Restart to change. |
 | `EZLLM_COPILOT_BRIDGE_SESSION_CACHE` | `off` | Opt-in exact-history reuse of completed native conversations. Requires warm pool; `on`/`true`/`1` enables it. Active tool-result continuations, images and `auto` use fresh sessions. Existing worker expiry and a 1 MiB history bound apply. Restart to change. |
 | `EZLLM_COPILOT_BIN` | `/opt/copilot/copilot` | The GitHub Copilot CLI binary. |
-| `EZLLM_COPILOT_HOME` | `/copilot-home` | `COPILOT_HOME` for the CLI — the directory its login lives in (mount it read-write; the CLI writes session state). |
+| `EZLLM_COPILOT_HOME` | `/copilot-sub` | `COPILOT_HOME` for the CLI — the bridge's dedicated login directory, mounted from `~/.copilot-sub` (read-write; the CLI writes session state). Before 1.9.0 the default was `/copilot-home`. |
 | `EZLLM_COPILOT_BRIDGE_CONCURRENCY` | `2` | Concurrent Copilot CLI children; a positive integer, anything else fails the boot. |
 | `EZLLM_COPILOT_BRIDGE_QUEUE` | `8` | Requests allowed to wait for a slot; past it the bridge answers 429 `queue_full` with `Retry-After: 5`. |
 | `EZLLM_COPILOT_BRIDGE_TIMEOUT` | `300s` | Per-turn limit, a Go duration of at least `1s`. |

@@ -140,6 +140,29 @@ mounts and the dashboard preset. If a bridge is enabled but something it needs
 is missing, ezllm refuses to start and says why in `docker compose logs ezllm`.
 Requests through a bridge, including key tests, use your plan's quota.
 
+### Sign in to a bridge
+
+Every bridge signs in to its own folder named `~/.<bridge>-sub`, never the
+folder your everyday CLI uses. That keeps the bridge's login, sessions and
+settings separate from yours, so signing out of your own CLI never breaks the
+bridge. Run the login once on the host, using the same binary the bridge runs.
+The paths below are the bridge updater's layout; replace them with your binary's
+path if you pinned it elsewhere.
+
+| Bridge | Sign in | Check |
+|---|---|---|
+| Claude | `CLAUDE_CONFIG_DIR=~/.claude-sub ~/.local/share/claude-bridge/current/claude auth login` | `CLAUDE_CONFIG_DIR=~/.claude-sub ~/.local/share/claude-bridge/current/claude auth status` |
+| Codex | `CODEX_HOME=~/.codex-sub ~/.local/share/codex-bridge/current/bin/codex login --device-auth` | `CODEX_HOME=~/.codex-sub ~/.local/share/codex-bridge/current/bin/codex login status` |
+| Copilot | `env -u DBUS_SESSION_BUS_ADDRESS COPILOT_HOME=~/.copilot-sub ~/.local/share/copilot-bridge/current/copilot login --device-code` | `ls ~/.copilot-sub/config.json` |
+| Antigravity | `mkdir -p ~/.agy-sub && chmod 700 ~/.agy-sub`, then `env -u DBUS_SESSION_BUS_ADDRESS HOME=$HOME/.agy-sub ~/.local/share/agy-bridge/current/agy` | `ls ~/.agy-sub/.gemini/antigravity-cli/antigravity-oauth-token` |
+
+Codex and Copilot print a URL and a code to enter in your browser. Antigravity
+opens its interactive CLI: sign in, send one prompt, then type `/exit`. Unsetting
+`DBUS_SESSION_BUS_ADDRESS` makes Copilot and Antigravity save the login to a file
+the container can read instead of your desktop keyring. Then mount the folder
+read-write at `/<bridge>-sub` in `compose.yml` (for example
+`~/.copilot-sub:/copilot-sub`), as each guide shows.
+
 ### Recommended cache settings
 
 Prompt caching makes long conversations cheaper and faster, and uses less of

@@ -21,7 +21,7 @@ on stdin, not argv.
 |---|---|
 | `EZLLM_COPILOT_BRIDGE=on` | starts the surface |
 | `EZLLM_COPILOT_BIN` | CLI binary (default `/opt/copilot/copilot`) |
-| `EZLLM_COPILOT_HOME` | the CLI's own login directory (default `/copilot-home`) |
+| `EZLLM_COPILOT_HOME` | the bridge's own login directory (default `/copilot-sub`) |
 | `EZLLM_COPILOT_BRIDGE_ADDR` | default `127.0.0.1:8793`, must be loopback |
 | `EZLLM_COPILOT_BRIDGE_TOKEN_FILE` | shared secret; minted 0600 on first boot |
 
@@ -31,12 +31,12 @@ Compose sketch:
     environment:
       EZLLM_COPILOT_BRIDGE: "on"
       EZLLM_COPILOT_BIN: /opt/copilot/copilot
-      EZLLM_COPILOT_HOME: /copilot-home
+      EZLLM_COPILOT_HOME: /copilot-sub
       EZLLM_COPILOT_BRIDGE_ADDR: 127.0.0.1:8793
       EZLLM_COPILOT_BRIDGE_TOKEN_FILE: /data/copilot-bridge.token
     volumes:
       - /opt/copilot:/opt/copilot:ro      # the CLI release
-      - /home/<user>/.copilot:/copilot-home   # the login (read-write: the CLI
+      - /home/<user>/.copilot-sub:/copilot-sub   # the login (read-write: the CLI
                                               # writes session state)
       - ./data:/data
 ```
@@ -51,10 +51,34 @@ first run, and a container uid has no home (`HOME=/`), so it fails with
 temp dir; set `XDG_CACHE_HOME: /data/copilot-cache` in compose so the unpack
 survives restarts.
 
-**Login.** One-time, on the host: `copilot login` (device code on a headless
-box). The token lands in `~/.copilot/`, which is what the mount above carries.
+**Login.** Sign the bridge in to its own folder, `~/.copilot-sub`, never your
+everyday `~/.copilot` — the same `*-sub` layout as the Claude, Codex and
+Antigravity bridges. A personal `~/.copilot` also carries your sessions,
+plugins and IDE links, and signing out there would break the bridge. Run this
+once on the host, with the same CLI binary the bridge mounts:
+
+```sh
+env -u DBUS_SESSION_BUS_ADDRESS COPILOT_HOME=~/.copilot-sub \
+  /opt/copilot/copilot login --device-code
+ls ~/.copilot-sub/config.json   # the stored login the container reads
+```
+
+Replace `/opt/copilot/copilot` with the host path of that binary. It prints a
+URL and a code; open the URL, enter the code and approve with the GitHub account
+that has the Copilot plan. Unsetting D-Bus matters on a desktop host: with a
+keyring available the CLI stores the token there, where the container cannot
+reach it; without one it writes `config.json` in `COPILOT_HOME`.
+
 Boot fails loudly if `EZLLM_COPILOT_HOME` is not a directory — a bridge that
 started without a login would look healthy while every request 401s.
+
+**Upgrading from before 1.9.0.** The default login directory changed from
+`/copilot-home` to `/copilot-sub`, and there is no fallback. Log in to
+`~/.copilot-sub` as above, change the mount to `~/.copilot-sub:/copilot-sub`,
+set `EZLLM_COPILOT_HOME: /copilot-sub` (or remove the variable to use the
+default) and recreate the container (`docker compose up -d --no-build`). A
+deployment that still mounts `/copilot-home` without setting the variable
+refuses to start, naming the missing directory.
 
 ## Adding the provider
 
@@ -184,7 +208,7 @@ AI-credit charge in billionths of a credit.
 `copilot update`:
 
 ```
-ezllm bridge-check copilot --bin ~/.local/bin/copilot --home ~/.copilot --json
+ezllm bridge-check copilot --bin ~/.local/bin/copilot --home ~/.copilot-sub --json
 ezllm bridge-check copilot --live --json     # what promotion requires
 ```
 

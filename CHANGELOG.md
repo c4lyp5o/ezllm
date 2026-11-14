@@ -7,6 +7,15 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 First release after v1.8.1. The subsections below are the pre-release builds that
 ran in production before release; security records cite them by those numbers.
 
+### Copilot bridge uses a dedicated login (breaking)
+
+- `EZLLM_COPILOT_HOME` now defaults to `/copilot-sub` instead of `/copilot-home`, so
+  every subscription bridge signs in to its own `~/.<bridge>-sub` folder rather than
+  the CLI's everyday home. There is no fallback: log in with
+  `COPILOT_HOME=~/.copilot-sub`, mount it at `/copilot-sub` and recreate the container.
+  The bridge updater's Copilot gate uses the same default.
+- The README lists the sign-in command for each bridge.
+
 ### Codex conversation fidelity (pre-release 1.14.3)
 
 - Uses native history injection when advertised by the CLI, keeping user and

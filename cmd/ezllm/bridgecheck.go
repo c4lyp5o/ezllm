@@ -159,7 +159,7 @@ func runBridgeCheck(args []string, stdout io.Writer) error {
 			return liveAgy(ctx, b, h, or(*model, "gemini-3.8-flash-low"), or(*toolModel, or(*model, "gemini-3.8-flash-low")))
 		}
 	case "copilot":
-		b, h := or(*bin, envOrDefault(envCopilotBin, "/opt/copilot/copilot")), or(*home, envOrDefault(envCopilotHome, "/copilot-home"))
+		b, h := or(*bin, envOrDefault(envCopilotBin, "/opt/copilot/copilot")), or(*home, copilotHome(os.Getenv))
 		v = checkCopilotCLI(ctx, b, h)
 		liveRun = func() []string { return liveCopilot(ctx, b, h, *model, or(*toolModel, *model)) }
 		if !*live {

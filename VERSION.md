@@ -24,6 +24,11 @@ No schema migration. New environment settings: `EZLLM_CODEX_SANDBOX`,
 `EZLLM_AGY_BRIDGE_SESSION_CACHE` and `EZLLM_COPILOT_BRIDGE_SESSION_CACHE`
 (see `docs/environment.md`).
 
+**Breaking:** the Copilot bridge's default login directory is now `/copilot-sub`
+(was `/copilot-home`), matching the other bridges' dedicated `*-sub` logins. Log in
+with `COPILOT_HOME=~/.copilot-sub`, mount it at `/copilot-sub` and recreate the
+container; see `docs/copilot-bridge-runbook.md`.
+
 ### Pre-release 1.14.3
 
 Preserves structured conversation history on Codex CLIs advertising

@@ -393,6 +393,12 @@ class Gate(Home):
         with self.assertRaises(ValueError):
             bu.login_source("codex", info)
 
+    def test_every_bridge_login_defaults_to_a_sub_folder(self):
+        info = self.info()
+        for name in bu.BRIDGES:
+            self.assertEqual(bu.production_home(name, info), f"/{name}-sub")
+            self.assertTrue(bu.BRIDGES[name]["login"].endswith(f"/.{name}-sub"))
+
 
 class Reliability(Run):
     def test_quota_failure_defers_without_permanently_blocking_release(self):

@@ -76,7 +76,7 @@ services:
       # EZLLM_COPILOT_BIN: /opt/copilot/copilot
       # Managed updater alternative, after root migration (bridge-update-runbook.md):
       # EZLLM_COPILOT_BIN: /opt/copilot-bridge/current/copilot
-      # EZLLM_COPILOT_HOME: /copilot-home
+      # EZLLM_COPILOT_HOME: /copilot-sub
       # EZLLM_COPILOT_BRIDGE_ADDR: 127.0.0.1:8793
       # XDG_CACHE_HOME: /data/copilot-cache   # persistent CLI cache (~236 MB, extracted once)
       # EZLLM_COPILOT_BRIDGE_TOKEN_FILE: /data/copilot-bridge.token
@@ -158,8 +158,10 @@ services:
       # the code-mode host client tools need); the isolated CODEX_HOME.
       # - /path/to/.local/share/codex-bridge:/opt/codex-bridge:ro
       # - /path/to/.codex-sub:/codex-sub
-      # Copilot managed updater alternative (replace the standalone binary mount):
-      # - /home/you/.local/share/copilot-bridge:/opt/copilot-bridge:ro
+      # Copilot: the managed updater root (replaces the standalone binary
+      # mount) and the dedicated login made with COPILOT_HOME=~/.copilot-sub.
+      # - /path/to/.local/share/copilot-bridge:/opt/copilot-bridge:ro
+      # - /path/to/.copilot-sub:/copilot-sub
       # Antigravity: <root>/<version>/agy (agy rewrites itself in place when
       # run from a writable folder: keep version folders read-only); the login
       # HOME made with DBUS unset.

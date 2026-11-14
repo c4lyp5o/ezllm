@@ -63,8 +63,8 @@ BRIDGES = {
               "mount": "/opt/codex-bridge", "login_mount": "/codex-sub", "bin": "bin/codex"},
     "agy": {"root": "~/.local/share/agy-bridge", "login": "~/.agy-sub",
             "mount": "/opt/agy-bridge", "login_mount": "/agy-sub", "bin": "agy"},
-    "copilot": {"root": "~/.local/share/copilot-bridge", "login": "~/.copilot",
-                "mount": "/opt/copilot-bridge", "login_mount": "/copilot-home", "bin": "copilot"},
+    "copilot": {"root": "~/.local/share/copilot-bridge", "login": "~/.copilot-sub",
+                "mount": "/opt/copilot-bridge", "login_mount": "/copilot-sub", "bin": "copilot"},
 }
 
 # Container environment the gate copies from production: what the bridges read

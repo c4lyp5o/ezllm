@@ -157,7 +157,7 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 	if err != nil {
 		return nil, fmt.Errorf("copilot bridge: %s=%q does not resolve to the official Copilot CLI: %w", envCopilotBin, bin, err)
 	}
-	home := envOrDefault(envCopilotHome, "/copilot-home")
+	home := copilotHome(os.Getenv)
 	if st, err := os.Stat(home); err != nil || !st.IsDir() {
 		// A missing login directory is a boot failure, not a lazy 401 later: the
 		// surface would look healthy while every request failed.
@@ -277,6 +277,15 @@ func bridgeTokenFromFile(path, label string) (string, error) {
 		return "", fmt.Errorf("%s bridge: write token: %w", label, err)
 	}
 	return token, nil
+}
+
+// copilotHome is the bridge's own login directory. Like every subscription
+// bridge it defaults to a dedicated *-sub folder, never the CLI's everyday home.
+func copilotHome(get func(string) string) string {
+	if v := strings.TrimSpace(get(envCopilotHome)); v != "" {
+		return v
+	}
+	return "/copilot-sub"
 }
 
 func copilotWarmPool(get func(string) string) (bool, error) {

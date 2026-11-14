@@ -2,7 +2,12 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
-## v1.14.3 — Codex conversation fidelity
+## v1.9.0 — Bridge caching, Codex fidelity and security remediation
+
+First release after v1.8.1. The subsections below are the pre-release builds that
+ran in production before release; security records cite them by those numbers.
+
+### Codex conversation fidelity (pre-release 1.14.3)
 
 - Uses native history injection when advertised by the CLI, keeping user and
   assistant roles, function-call/result links, assistant phases and image order
@@ -16,7 +21,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   Small synthetic tasks complete with cache both on and off; the original long
   Hermes-session stopping behavior is not reproduced by those tests.
 
-## v1.14.2 — Codex task persistence guidance
+### Codex task persistence guidance (pre-release 1.14.2)
 
 - Tells tool-bearing Codex requests to continue authorized implementation and
   verification after environment checks, inspection and planning. A final report
@@ -25,8 +30,11 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 - Verifies instructions reach native threads with empty-template caching enabled
   and disabled, while plain chat retains its original instructions. There is no
   new env flag, forced tool call or automatic retry loop.
+- Measured afterwards (2026-11-14 Hermes replays): this guidance did not change
+  `gpt-6.1-terra` ending long tasks early; switching the model to `gpt-6.1-sol`
+  did. See `docs/codex-bridge-runbook.md` "Model choice for long caller-tool tasks".
 
-## v1.14.1 — Security audit remediation
+### Security audit remediation (pre-release 1.14.1)
 
 - Bounds inference admission before body allocation: default 32 global/eight
   per-client active requests and 256 MiB of input reservations. Excess work
@@ -45,7 +53,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   redaction, cleanup and continuation regressions. Runtime rollout is separate
   from the source fixes; see the dated remediation notes.
 
-## v1.14.0 — Automatic Codex caching and noninteractive CLI defaults
+### Automatic Codex caching and noninteractive CLI defaults (pre-release 1.14.0)
 
 - Defaults `EZLLM_CODEX_BRIDGE_CACHE` to `auto`: enable supported empty-template
   forks at startup, otherwise expose the reason and use the original path.
@@ -57,7 +65,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   forks inherit that policy. Caller-tool instructions continue authorized work
   without repeated permission questions; actual caller approval requirements apply.
 
-## v1.13.0 — Codex prompt-cache affinity across fresh processes
+### Codex prompt-cache affinity across fresh processes (pre-release 1.13.0)
 
 - Adds `EZLLM_CODEX_BRIDGE_CACHE=on`: persisted empty configuration templates
   feed separate ephemeral prediction forks. Every independent request still
@@ -76,7 +84,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   cycles passed under Landlock; results are provider observations, not a quota
   reduction guarantee.
 
-## v1.12.0 — Antigravity conversation cache and usage correction
+### Antigravity conversation cache and usage correction (pre-release 1.12.0)
 
 - Adds `EZLLM_AGY_BRIDGE_SESSION_CACHE=on`, requiring the experimental caller-tool
   adapter. Exact histories resume the native conversation in its private workspace;
@@ -94,7 +102,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   Failures, counter resets and changed native conversation IDs never trigger an
   internal repair generation.
 
-## v1.11.0 — Bounded Copilot conversation cache
+### Bounded Copilot conversation cache (pre-release 1.11.0)
 
 - Adds `EZLLM_COPILOT_BRIDGE_SESSION_CACHE=on`, off by default and requiring
   the existing warm pool. Exact completed-history continuations send only the
@@ -112,7 +120,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   HTTP sample reported roughly 90% lower credits on its continuation, which
   is a small-model sample rather than a production-wide savings guarantee.
 
-## v1.10.1 — Bridge usage accounting and fallback guards
+### Bridge usage accounting and fallback guards (pre-release 1.10.1)
 
 - Copilot's per-model input fallback no longer counts cached input twice,
   includes all reported models, and preserves reasoning as a subset of output.
@@ -127,7 +135,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 - Records the Hermes-only historical findings and remaining measurement limits
   in `docs/bridge-token-usage-audit.md`. No new runtime dependency is added.
 
-## v1.10.0 — Bridge updater reliability and coverage
+### Bridge updater reliability and coverage (pre-release 1.10.0)
 
 - Copilot can join the existing versioned-root updater: stable official GitHub
   assets, SHA-256 verification, staging, live gate, grouped restart and proof.
@@ -145,7 +153,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   candidate in status. Codex and Antigravity live checks prove caller result
   replay; fixes a Copilot live-check panic on an ordinary answer without tools.
 
-## v1.9.0 — Experimental Antigravity caller tools
+### Experimental Antigravity caller tools (pre-release 1.9.0)
 
 - `EZLLM_AGY_EXPERIMENTAL_TOOLS=on` enables a structured-output adapter for
   function tools. Tool calls return to the calling harness for execution;
@@ -157,7 +165,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 - Plain chat retains its existing behavior. Images and legacy functions remain
   unsupported. The CLI must expose `--json-schema`; the feature is off by default.
 
-## v1.8.2 — Codex bridge caller tools and headless permissions
+### Codex bridge caller tools and headless permissions (pre-release 1.8.2)
 
 - Tool-bearing requests distinguish the bridge's local sandbox from the
   caller's tool permissions. Authorized workspace writes use caller tools;
@@ -237,7 +245,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   truncated valid JSON prefix. HTTP failures retain their status classification.
 - Removed an orphaned dashboard comment from the retired tool-pruning feature.
 
-## Unreleased — renamed: provider presets say what they are
+## v1.7.0 — renamed: provider presets say what they are
 
 - **The four subscription bridges are labelled as bridges** in the Add-provider
   dropdown: `Claude Pro/Max (bridge)`, `ChatGPT Plus/Pro (bridge)`,
@@ -252,7 +260,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   auto-seeded, so a card still reads "GitHub Copilot", not "GitHub Copilot
   (bridge)". Existing accounts keep the names they already have.
 
-## Unreleased — fixed: Codex tool calls aimed at the bridge's scratch directory
+## v1.7.0 — fixed: Codex tool calls aimed at the bridge's scratch directory
 
 - **Symptom:** a tool-using client (a VPS status sweep) got "this environment can't
   reach its shell" from the Codex hop while the Claude hop ran the same tools.
@@ -281,7 +289,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   4 of 4 runs; the new one passed `workdir="/"` on 4 of 4. The stale directory
   itself is a client defect (workaround: recreate that directory).
 
-## Unreleased — replaced: GitHub Copilot OAuth → the official CLI bridge
+## v1.7.0 — replaced: GitHub Copilot OAuth → the official CLI bridge
 
 - **The OAuth provider is gone, not deprecated.** `internal/githubcopilot`
   (device flow, session minting, token refresh), `internal/provider/githubcopilot.go`
@@ -352,7 +360,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   403 `model_not_in_plan` (the pre-spawn refusal of an unknown id moved from
   400 `unknown_model` to the same 403).
 
-## Unreleased — removed: tool pruning (rejected feature)
+## v1.7.0 — removed: tool pruning (rejected feature)
 
 - **Deleted the whole feature**, per the standing rule that a feature no live
   data uses is removed outright rather than deprecated: `internal/toolprune`
@@ -404,7 +412,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
     all three wire shapes with a `tool_use` naming an undeclared tool first.
 - See also: EXPLORING §7 lists tool pruning among the deliberate non-goals.
 
-## Unreleased — hop stream health (schema v34)
+## v1.7.0 — hop stream health (schema v34)
 
 - `calls.stream_outcome` records how a STREAM ended — `completed`, `truncated`,
   `failed`, `client_gone`, empty for a non-stream request — so a hop that
@@ -435,7 +443,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   through the existing channels. Toggle: Settings → Notifications → "Answers cut
   mid-stream" (`notify_stream_truncation`, default on).
 
-## Unreleased — tool pruning M1: measurement (TokenEconomizer-inspired)
+## v1.7.0 — tool pruning M1: measurement (TokenEconomizer-inspired)
 
 - `tool_pruning.mode: off|shadow` (default `off`; `EZLLM_TOOL_PRUNING_MODE` is
   the no-rebuild override) measures what never-used tool schemas cost per
@@ -1391,9 +1399,8 @@ ported from omniroute's production implementation (design:
 
 ## 2026-10-16 — M13 github-copilot provider: official CLI device flow ✅
 GitHub Copilot as a provider, ported from omniroute's production
-implementation (design: `docs/github-copilot-design.md`, evidence:
-`docs/github-copilot-policy-evidence.md`, runbook:
-`docs/github-copilot-runbook.md`). The auth path is the OFFICIAL CLI's:
+implementation (its design, policy-evidence and runbook docs were
+removed after the provider was retired; see git history). The auth path is the OFFICIAL CLI's:
 device flow with GitHub's public Copilot CLI client id and scope
 `read:user` — not a custom third-party app (restricted tier/403), no
 client-id spoofing. Live-proved 2026-10-16: the device-code request

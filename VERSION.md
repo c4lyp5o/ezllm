@@ -11,9 +11,20 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.14.3**
+**Current: v1.9.0**
 
-## v1.14.3 — 2026-11-14
+## v1.9.0 — 2026-11-14
+
+First release after v1.8.1. It consolidates the bridge caching, Codex
+conversation-fidelity, CLI updater and security-audit work that ran in
+production as pre-release builds 1.8.2 and 1.9.0–1.14.3. The security audit,
+remediation and rollout records name those builds by their pre-release numbers.
+No schema migration. New environment settings: `EZLLM_CODEX_SANDBOX`,
+`EZLLM_CODEX_BRIDGE_CACHE`, `EZLLM_AGY_EXPERIMENTAL_TOOLS`,
+`EZLLM_AGY_BRIDGE_SESSION_CACHE` and `EZLLM_COPILOT_BRIDGE_SESSION_CACHE`
+(see `docs/environment.md`).
+
+### Pre-release 1.14.3
 
 Preserves structured conversation history on Codex CLIs advertising
 `thread/inject_items`. Assistant phases, message roles, tool relationships and
@@ -21,7 +32,7 @@ image order reach the native request thread. Caller history never enters shared
 empty templates; parked continuations still resume directly. Older CLIs and
 exec retain text replay. No additional env flag or automatic continuation loop.
 
-## v1.14.2 — 2026-11-14
+### Pre-release 1.14.2
 
 Strengthens Codex caller-tool instructions to continue authorized implementation
 through verification instead of ending after prerequisite checks. Real blockers,
@@ -29,7 +40,7 @@ user pauses and caller-side approval requirements remain stopping conditions.
 This is prompt guidance, not an automatic continuation loop. Instruction changes
 select a new cache template; stable subsequent requests retain cache affinity.
 
-## v1.14.1 — 2026-11-14
+### Pre-release 1.14.1
 
 Addresses the whole-application audit with bounded inference admission and
 body-memory reservations, provider response-cookie/state-header filtering,
@@ -39,7 +50,7 @@ history; recycled native IDs cannot overwrite another parked turn. The Go
 toolchain pin is 1.27.4 and CI checks reachable Go vulnerabilities. Compose
 publishes the HTTP port on localhost by default.
 
-## v1.14.0 — 2026-11-14
+### Pre-release 1.14.0
 
 Codex caching now defaults to `auto`: startup enables empty-template forks when
 supported, otherwise reports the reason and keeps the original request path.
@@ -49,7 +60,7 @@ and resume. Caller-tool instructions discourage repeated permission questions
 for already-authorized work while respecting actual caller approval requirements.
 Updater qualification includes automatic cache selection and noninteractive policy.
 
-## v1.13.0 — 2026-11-14
+### Pre-release 1.13.0
 
 Adds opt-in Codex empty-template forks for prompt-cache reuse across fresh CLI
 processes. Each request supplies its complete history to a separate ephemeral
@@ -59,7 +70,7 @@ their existing native continuation. CLI qualification covers this mode when
 configured. Exec repair now requires positive evidence of a pre-inference
 failure, preventing silent mid-turn failures from spending twice.
 
-## v1.12.0 — 2026-11-14
+### Pre-release 1.12.0
 
 Adds opt-in Antigravity conversation resume for exact caller histories, including
 complete external tool-result groups. It retains bounded metadata/workspaces and
@@ -67,7 +78,7 @@ no idle CLI process. Corrects native cold-input/cache-read mapping to inclusive
 OpenAI usage, reports per-request counter deltas, and qualifies the cache mode
 through the bridge updater. Gemini Flash native/HTTP proofs showed cache reuse.
 
-## v1.11.0 — 2026-11-14
+### Pre-release 1.11.0
 
 Adds opt-in exact-history reuse of completed Copilot conversations within the
 existing warm process pool. Usage remains per request through cumulative-counter
@@ -75,7 +86,7 @@ deltas; edited histories, tool-result continuations, images and uncertain cleanu
 use fresh sessions. Records native cache experiments including Antigravity and
 requires cache-mode qualification in the CLI updater when enabled.
 
-## v1.10.1 — 2026-11-14
+### Pre-release 1.10.1
 
 Corrects Copilot fallback token accounting and reasoning visibility, prevents
 plain-chat fallback after inference may have started, and reports Claude CLI
@@ -83,7 +94,7 @@ aggregate usage including internal retries and thinking details. Preserves
 Copilot cache writes on the HTTP wire. Adds a measured Hermes bridge
 usage audit without changing live models, compression or session isolation.
 
-## v1.10.0 — 2026-11-14
+### Pre-release 1.10.0
 
 Revises bridge CLI updates with journalled batch promotion and rollback recovery,
 a post-gate window check, operational-failure backoff and accurate candidate
@@ -91,7 +102,7 @@ status. Adds optional Copilot release discovery/staging on the same host timer.
 Live gates report and exercise Codex sandbox mode, Antigravity caller tools
 when enabled, and Copilot warm-pool mode. No new service or schema migration.
 
-## v1.9.0 — 2026-11-14
+### Pre-release 1.9.0
 
 Adds opt-in experimental Antigravity caller tools through structured output.
 The existing CLI returns an envelope which ezllm validates and converts into
@@ -100,7 +111,7 @@ request. One CLI process per request, with no ACP, MCP, sidecar, new dependency
 or persistent session. Existing text-only behavior remains the default.
 No schema migration.
 
-## v1.8.2 — 2026-11-14
+### Pre-release 1.8.2
 
 Fixes Codex bridge headless permissions: writable requests use approval policy
 `never` instead of requesting approvals the bridge declines. The exec fallback

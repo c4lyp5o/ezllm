@@ -246,6 +246,10 @@ Params: `min_tin` `max_tin` `min_tout` `max_tout` (non-negative integers);
 +1min grace); `limit` (1-500, default 50); `sort` = `ts_desc` (default) | `tin_desc` |
 `tout_desc`; `account`, `model`, `alias`, `client`, `session` (exact match on the ledger's account name,
 model, combo name, client (API key) name, and `X-Ezllm-Session` grouping key — never a prefix or pattern). Anything invalid → `400`.
+`hide_empty` = `1`/`true` drops zero-token steps: successful (2xx) rows that recorded no
+input, output, cached-read or cached-write tokens. On subscription bridges these are code-mode
+tool steps or steps whose usage arrived on a later row of the same turn. `summary.empty_steps`
+counts them in the matching set, and `filter.hide_empty` echoes the setting.
 
 ### `GET /admin/usage?group_by=&from=&to=`
 Dashboard aggregates (`store.UsageReport`), computed server-side over the FULL filtered

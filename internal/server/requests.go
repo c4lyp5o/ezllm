@@ -27,6 +27,12 @@ import (
 // timestamps against the same string encoding.
 const tsBoundFormat = "2006-01-02T15:04:05.000Z"
 
+// zeroTokenStep is a successful row that recorded no tokens at all. On the
+// subscription bridges these are code-mode tool steps (a script's next tool
+// call, no model work) or steps whose usage arrived on a later row of the same
+// turn. The explorer can count and hide them; they are never errors.
+const zeroTokenStep = "(status BETWEEN 200 AND 299 AND tokens_in = 0 AND tokens_out = 0 AND tokens_cached_read = 0 AND tokens_cached_write = 0)"
+
 var requestSorts = map[string]string{
 	"ts_desc":   "ts DESC, id DESC",
 	"tin_desc":  "tokens_in DESC, id DESC",
@@ -86,6 +92,17 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	hideEmpty := false
+	switch v := q.Get("hide_empty"); v {
+	case "", "0", "false":
+	case "1", "true":
+		hideEmpty = true
+	default:
+		writeErr(w, http.StatusBadRequest, "invalid_request_error",
+			fmt.Sprintf("hide_empty must be 1/true or 0/false, got %q", v))
+		return
+	}
+
 	// WHERE: the window always, token bounds only when set.
 	where := " WHERE ts >= ? AND ts < ?"
 	args := []any{from.Format(tsBoundFormat), to.Format(tsBoundFormat)}
@@ -99,6 +116,9 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 	add(" AND tokens_in <= ?", "max_tin", bounds["max_tin"])
 	add(" AND tokens_out >= ?", "min_tout", bounds["min_tout"])
 	add(" AND tokens_out <= ?", "max_tout", bounds["max_tout"])
+	if hideEmpty {
+		where += " AND NOT " + zeroTokenStep
+	}
 	// Exact-match name filters, bound as parameters like everything else.
 	for param, col := range map[string]string{"account": "account", "model": "model", "alias": "alias", "client": "client", "session": "session_id"} {
 		if v := q.Get(param); v != "" {
@@ -118,7 +138,7 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 	// rows also sweeps in ~21k legacy tokens_saved sitting on declined rows.
 	var sum struct {
 		Count, Tin, Tout, Cread, Cwrite, Reasoning, ContextPre, ContextSaved, CompressionSaved, MaxTin, MaxTout int64
-		AppliedCalls, AppliedSaved, DeclinedCalls, HeldNotional                                                 int64
+		AppliedCalls, AppliedSaved, DeclinedCalls, HeldNotional, EmptySteps                                     int64
 	}
 	sargs := append([]any(nil), args...)
 	row := s.db.Reader().QueryRowContext(r.Context(), `
@@ -130,11 +150,12 @@ SELECT COUNT(*), COALESCE(SUM(tokens_in),0), COALESCE(SUM(tokens_out),0),
        COALESCE(SUM(CASE WHEN compression_applied=1 THEN 1 ELSE 0 END),0),
        COALESCE(SUM(CASE WHEN compression_applied=1 THEN tokens_saved ELSE 0 END),0),
        COALESCE(SUM(CASE WHEN compression_applied=0 AND compression_saved_notional>0 THEN 1 ELSE 0 END),0),
-       COALESCE(SUM(CASE WHEN compression_applied=0 THEN compression_saved_notional ELSE 0 END),0)
+       COALESCE(SUM(CASE WHEN compression_applied=0 THEN compression_saved_notional ELSE 0 END),0),
+       COALESCE(SUM(CASE WHEN `+zeroTokenStep+` THEN 1 ELSE 0 END),0)
 FROM calls`+where, sargs...)
 	if err := row.Scan(&sum.Count, &sum.Tin, &sum.Tout, &sum.Cread, &sum.Cwrite,
 		&sum.Reasoning, &sum.ContextPre, &sum.ContextSaved, &sum.CompressionSaved, &sum.MaxTin, &sum.MaxTout,
-		&sum.AppliedCalls, &sum.AppliedSaved, &sum.DeclinedCalls, &sum.HeldNotional); err != nil {
+		&sum.AppliedCalls, &sum.AppliedSaved, &sum.DeclinedCalls, &sum.HeldNotional, &sum.EmptySteps); err != nil {
 		writeErr(w, http.StatusInternalServerError, "api_error", err.Error())
 		return
 	}
@@ -154,6 +175,7 @@ FROM calls`+where, sargs...)
 			"compression_saved": sum.CompressionSaved, "max_tin": sum.MaxTin, "max_tout": sum.MaxTout,
 			"applied_calls": sum.AppliedCalls, "applied_saved": sum.AppliedSaved,
 			"declined_calls": sum.DeclinedCalls, "held_notional": sum.HeldNotional,
+			"empty_steps": sum.EmptySteps,
 		},
 		"filter": map[string]any{
 			"from": from.Format(time.RFC3339), "to": to.Format(time.RFC3339),
@@ -161,6 +183,7 @@ FROM calls`+where, sargs...)
 			"min_tout": bounds["min_tout"], "max_tout": bounds["max_tout"],
 			"limit": limit, "sort": sortKey,
 			"account": q.Get("account"), "model": q.Get("model"), "alias": q.Get("alias"), "client": q.Get("client"), "session": q.Get("session"),
+			"hide_empty": hideEmpty,
 		},
 	})
 }

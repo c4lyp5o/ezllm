@@ -2,6 +2,16 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
+## v1.14.2 — Codex task persistence guidance
+
+- Tells tool-bearing Codex requests to continue authorized implementation and
+  verification after environment checks, inspection and planning. A final report
+  that work has not started is not a substitute for implementation; concrete
+  blockers and user pauses still stop work.
+- Verifies instructions reach native threads with empty-template caching enabled
+  and disabled, while plain chat retains its original instructions. There is no
+  new env flag, forced tool call or automatic retry loop.
+
 ## v1.14.1 — Security audit remediation
 
 - Bounds inference admission before body allocation: default 32 global/eight

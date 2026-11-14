@@ -11,7 +11,15 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.14.1**
+**Current: v1.14.2**
+
+## v1.14.2 — 2026-11-14
+
+Strengthens Codex caller-tool instructions to continue authorized implementation
+through verification instead of ending after prerequisite checks. Real blockers,
+user pauses and caller-side approval requirements remain stopping conditions.
+This is prompt guidance, not an automatic continuation loop. Instruction changes
+select a new cache template; stable subsequent requests retain cache affinity.
 
 ## v1.14.1 — 2026-11-14
 

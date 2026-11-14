@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,6 +17,56 @@ import (
 func simpleRequest() Request {
 	return Request{Model: "gpt-6.1-sol", Instructions: DefaultInstructions,
 		Input: []UserInput{{Type: "text", Text: "Reply with exactly: pong"}}}
+}
+
+// Verify the caller guidance reaches the native thread on both cache paths;
+// plain chat must retain the caller's original instructions.
+func TestCallerTaskPersistenceReachesNativeThread(t *testing.T) {
+	for _, cache := range []bool{false, true} {
+		for _, tools := range []bool{false, true} {
+			t.Run(fmt.Sprintf("cache=%t/tools=%t", cache, tools), func(t *testing.T) {
+				r, home := fakeRunner(t, "ok")
+				r.ForkCache = cache
+				body := `{"model":"gpt-6.1-sol","messages":[{"role":"system","content":"You are Hermes."},{"role":"user","content":"Build the app and verify it."}]`
+				if tools {
+					body += `,"tools":[{"type":"function","function":{"name":"terminal","parameters":{"type":"object"}}}]`
+				}
+				req, err := ParseRequest([]byte(body + `}`))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := r.Run(context.Background(), req, nil); err != nil {
+					t.Fatal(err)
+				}
+				b, err := os.ReadFile(filepath.Join(home, "thread_start.json"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var native struct {
+					Instructions string `json:"baseInstructions"`
+				}
+				if err := json.Unmarshal(b, &native); err != nil {
+					t.Fatal(err)
+				}
+				if !tools {
+					if native.Instructions != "You are Hermes." {
+						t.Fatal("plain chat instructions changed")
+					}
+					return
+				}
+				for _, want := range []string{
+					"continue through the authorized implementation and appropriate verification",
+					"Successful environment checks, repository inspection, plans and progress reports are intermediate steps",
+					"Stop when the requested work is complete, the user pauses it, or a concrete blocker requires user input",
+					"respect any caller-side approval requirements",
+				} {
+					if !strings.Contains(native.Instructions, want) {
+						t.Errorf("native instructions lack %q", want)
+					}
+				}
+			})
+		}
+	}
 }
 
 func TestRunStreamsDeltasAndReturnsTheTurnUsage(t *testing.T) {

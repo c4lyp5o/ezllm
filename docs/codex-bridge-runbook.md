@@ -157,6 +157,19 @@ tool failures and approval requirements still apply. This is instruction
 steering, not a guarantee of model behavior or a grant of filesystem access.
 Recreate the container after changing the environment.
 
+From v1.14.2, caller-tool guidance also treats environment checks, repository
+inspection, plans and progress reports as intermediate steps of an implementation
+request. Codex is instructed to continue authorized implementation and appropriate
+verification, stopping for completion, a user pause or a concrete blocker needing
+user input. This is model guidance, not an enforced completion guarantee or an
+automatic continuation loop. No additional environment flag is required.
+
+Instructions participate in the template cache key. Updating this guidance
+selects a new template and may cause an initial cache warm-up; unchanged
+subsequent requests retain affinity. Restarting the service also clears parked
+tool turns and in-memory templates, so deploy between active tasks where possible.
+The caller's full history remains available for fresh replay after a restart.
+
 ## Prerequisites
 
 - **The official CLI release, pinned by path** (qualified: **0.163.0**, the

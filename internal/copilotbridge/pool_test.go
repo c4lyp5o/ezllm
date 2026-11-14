@@ -526,3 +526,39 @@ func TestPoolHTTPImageRequestsDoNotLeakAttachmentsIntoNextSession(t *testing.T) 
 		t.Fatal("image isolation not exercised on a reused worker")
 	}
 }
+
+// Reaping a stale idle worker whose session.delete hangs must not hold the
+// pool lock: the next acquisition and every other pool operation keep going.
+func TestPoolReapsStaleWorkerOutsideTheLock(t *testing.T) {
+	r, _ := poolRig(t, "ok")
+	if _, err := r.RunChannel(context.Background(), plainPoolTurn(), nil); err != nil {
+		t.Fatal(err)
+	}
+	r.poolMu.Lock()
+	if len(r.idleWorkers) != 1 {
+		r.poolMu.Unlock()
+		t.Fatalf("idle workers = %d, want 1", len(r.idleWorkers))
+	}
+	stale := r.idleWorkers[0]
+	stale.born = time.Now().Add(-time.Hour)
+	// A channel that never answers: session.delete blocks for deleteTimeout.
+	silent, hold := io.Pipe()
+	t.Cleanup(func() { hold.Close() })
+	stale.conn = &rpcConn{w: io.Discard, r: bufio.NewReader(silent), closeRead: func() { hold.Close() },
+		completed: completedFrom(plainPoolTurn(), Result{Text: "ok"}), session: "retained-session"}
+	r.poolMu.Unlock()
+
+	start := time.Now()
+	w, err := r.takeWorkerFor(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w == stale {
+		t.Fatal("stale worker was handed out")
+	}
+	if took := time.Since(start); took > time.Second {
+		t.Fatalf("takeWorkerFor blocked %v on the stale worker's session.delete", took)
+	}
+	r.retireWorker(w)
+	w.stop()
+}

@@ -8,7 +8,7 @@ import { useRange } from '../utils/preferences';
 import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
-  normalizeFeedRow, requests, usage, RANGE_LABEL,
+  isZeroTokenStep, normalizeFeedRow, requests, usage, RANGE_LABEL, ZERO_TOKEN_STEP_HINT,
   type FeedRow, type RangeKey, type RequestSort, type RequestsResp,
 } from '../utils/api';
 import { CauseChip, CopyButton, SectionLabel, Segmented, btn, cx, inputCls, labelCls } from '../components/ui';
@@ -115,6 +115,7 @@ export default function Requests() {
   const model = params.get('model') ?? '';
   const alias = params.get('alias') ?? '';
   const client = params.get('client') ?? '';
+  const hideEmpty = params.get('hide_empty') === '1';
   const urlRange = params.get('range');
   const range: RangeKey = (RANGES as string[]).includes(urlRange ?? '') ? urlRange as RangeKey : prefRange;
   const urlSort = params.get('sort');
@@ -171,7 +172,7 @@ export default function Requests() {
     setLoading(true);
     setErr(null);
     try {
-      const r = await requests({ ...JSON.parse(appliedKey) as Applied, range, sort, account, model, alias, client, limit });
+      const r = await requests({ ...JSON.parse(appliedKey) as Applied, range, sort, account, model, alias, client, limit, hideEmpty });
       if (gen !== loadGen.current) return;
       setData(r);
       setRows(r.rows.map(normalizeFeedRow));
@@ -181,7 +182,7 @@ export default function Requests() {
     } finally {
       if (gen === loadGen.current) setLoading(false);
     }
-  }, [appliedKey, range, sort, account, model, alias, client, limit]);
+  }, [appliedKey, range, sort, account, model, alias, client, limit, hideEmpty]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -271,12 +272,17 @@ export default function Requests() {
           <SectionLabel>rows</SectionLabel>
           <Seg options={PAGE_SIZES.map((n) => ({ key: String(n), label: String(n) }))} value={String(limit)}
             onChange={(v) => patch({ limit: v === String(PAGE_SIZES[0]) ? undefined : v })} />
+          <label className="flex cursor-pointer items-center gap-2 text-[13px] text-dim" title={ZERO_TOKEN_STEP_HINT}>
+            <input type="checkbox" checked={hideEmpty}
+              onChange={(e) => patch({ hide_empty: e.target.checked ? '1' : undefined })} />
+            Hide zero-token steps
+          </label>
         </div>
       </form>
 
       {/* Summary strip — over the WHOLE matching set, not the returned page. */}
       {s && (
-        <Stagger className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <Stagger className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <StaggerItem>
             <Stat label="requests" value={nfmt(s.count)} sub="matching the filter" />
           </StaggerItem>
@@ -291,6 +297,10 @@ export default function Requests() {
           </StaggerItem>
           <StaggerItem>
             <Stat label="reasoning" value={nfmt(s.reasoning)} sub="Σ burned on thinking" />
+          </StaggerItem>
+          <StaggerItem>
+            <Stat label="zero-token steps" value={nfmt(s.empty_steps ?? 0)}
+              sub={hideEmpty ? 'hidden from this list' : 'tool steps, no usage'} />
           </StaggerItem>
         </Stagger>
       )}
@@ -360,11 +370,17 @@ export default function Requests() {
                     <div>{r.status}</div>
                     <CauseChip err={r.error} status={r.status} />
                   </td>
+                  {isZeroTokenStep(r) ? (
+                    <td className="px-4 py-2 text-right" title={ZERO_TOKEN_STEP_HINT}>
+                      <span className="rounded border border-line px-1.5 py-0.5 text-[11px] text-mute">no tokens</span>
+                    </td>
+                  ) : (
                   <td className="px-4 py-2 text-right font-mono tabular-nums"
                     title={`tokens in ${nfmt(r.tin)} (↑) · tokens out ${nfmt(r.tout)} (↓)`}>
                     <span title="tokens in — prompt, cache counted inside">↑{nfmt(r.tin)}</span>{' '}
                     <span className="text-mute" title="tokens out — completion">↓{nfmt(r.tout)}</span>
                   </td>
+                  )}
                   <td className="px-4 py-2 text-right font-mono tabular-nums text-mute">{nfmt(r.cread ?? 0)}</td>
                   <td className={cx('px-4 py-2 text-right font-mono tabular-nums',
                     (r.reasoning ?? 0) > 0 ? 'text-warn' : 'text-mute')}>

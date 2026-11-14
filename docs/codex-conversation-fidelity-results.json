@@ -86,5 +86,33 @@
       "stage": "structured_with_phase"
     }
   ],
-  "conclusion": "All cases completed; original premature stopping not reproduced. Structured phase-aware replay and clean-template reuse verified."
+  "conclusion": "All cases completed; original premature stopping not reproduced. Structured phase-aware replay and clean-template reuse verified.",
+  "deployment": {
+    "health": {
+      "status": "ok",
+      "version": "1.14.3"
+    },
+    "image": "sha256:f7ec2a4084636b6b095786fedaa1489b40825a119862b25295d51b21ea2270ae",
+    "localhost_binding": true,
+    "https_health": "verified",
+    "auth_guards": "passed",
+    "trial_flags": "preserved",
+    "restarts": 0,
+    "native_history": true,
+    "cache": {
+      "mode": "auto",
+      "enabled": true
+    },
+    "approval_policy": "never",
+    "gateway_tool_proof": {
+      "surface": "OpenAI Chat Completions SSE",
+      "model": "chatgpt-sub/gpt-6.1-terra",
+      "gateway_requests": 2,
+      "native_tool_continuation": "passed",
+      "explicit_commentary_history": "accepted",
+      "caller_tools_have_side_effects": false,
+      "final_value_matched": true,
+      "request_usage_present": true
+    }
+  }
 }

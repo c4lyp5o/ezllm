@@ -59,8 +59,8 @@ fact that must be recorded, never derived from the adapter kind.
 - `'anthropic'` — EXCLUSIVE, stated explicitly (real Anthropic accounts).
 - `'total'` — INCLUSIVE: subtract the cached part on the anthropic surface.
 
-**D2. The truth lives in `store.NormalizeUsage`, not in the proxy.** New
-`NormalizeUsageShape(surface, raw, usageConvention)`; the two tap helpers and the
+**D2. The truth lives in `store.NormalizeUsageWith`, not in the proxy.** New
+`NormalizeUsageWith(surface, raw, usageConvention)`; the two tap helpers and the
 `UsageTapper` carry the account's convention so no call site can silently default it back.
 
 **D3. An arithmetic guard overrides a wrong setting.** An inclusive envelope can never report
@@ -87,7 +87,7 @@ the audit trail.
 Fresh schema **and** forward migration (`schema.sql`, `schemaVersion` bump, guarded
 `ALTER TABLE ... ADD COLUMN` in BOTH migrate branches, `ALTER` before `schema.sql` re-applies);
 `provider.Account` + the store's `Account` read path (select order and NULL handling);
-`NormalizeUsageShape` + every tap call site; `api.ts` account type + the account PATCH decoder
+`NormalizeUsageWith` + every tap call site; `api.ts` account type + the account PATCH decoder
 (absent keeps / `null` clears / a value validates — `json.RawMessage` for this field); the
 Providers page representation; `/admin/accounts/{id}` responses; a regression test that inserts a
 row and reads it back through `RecentCalls`; docs. A fresh-database test does NOT prove the
@@ -121,7 +121,7 @@ prod redeploy to take effect. Items 2–3 are process-local and need neither.
 
 ## Related
 
-- `internal/store/ledger.go` `NormalizeUsage` (the fix site)
+- `internal/store/ledger.go` `NormalizeUsageWith` (the fix site)
 - `docs/API.md` token-accounting section (states the two conventions — extend with D3)
 - `references/token-economics-and-canary.md`, `references/implementation-pitfalls.md` (NULL-into-string)
 

@@ -62,7 +62,7 @@ equal, something is buffering — go read `streamCopy` in `internal/proxy/proxy.
 | # | Read first | Then | Ask yourself |
 |---|-----------|------|--------------|
 | M1 | `cmd/ezllm/main.go` → `internal/config` → `internal/server` | `config.example.yaml` | Where would I add a fourth account? (config seeds; the DB is runtime truth) |
-| M2 | `internal/proxy/proxy.go` (`Forward` → `streamCopy` → `tapSSELine`) → `internal/store/ledger.go` (`NormalizeUsage`) | `git show` of M2 | How do native streaming and translated streaming differ? |
+| M2 | `internal/proxy/proxy.go` (`Forward` → `streamCopy` → `UsageTapper.Observe`) → `internal/store/ledger.go` (`NormalizeUsageWith`) | `git show` of M2 | How do native streaming and translated streaming differ? |
 | M3 | `internal/registration` + `internal/provider/adapters.go` + admin handlers in `internal/server` | `docs/API.md` | Can I trace an account from DB row → adapter → first upstream byte? |
 | M4 | `internal/router` (hops → strategies → key pick/cooldown) + `internal/rules` | `go test -short ./internal/router ./internal/rules` | What happens on 429 with 1 key left? (answer must be in a test) |
 | M5 | `internal/compress` (engines + stage pipeline) + `internal/server/compression.go` | `docs/compression-design.md` | Where is "never touch final turn / tool results" enforced, and where does fail-open live? |
@@ -105,7 +105,7 @@ names the pre-fix call sites.)*
 
 ### M2 — store + crypto + 3-surface passthrough ✅ (2026-10-06, LIVE-verified vs 2 real providers)
 **Where to look first:** `internal/proxy/proxy.go` `Forward` — it is the whole request path in
-one function. Then `store.NormalizeUsage` (`ledger.go`) for the accounting rules.
+one function. Then `store.NormalizeUsageWith` (`ledger.go`) for the accounting rules.
 
 - `internal/store/schema.sql` — the schema (v28 now; `schemaVersion` in `store.go`), embedded via `go:embed`. **FK order matters**:
   `compression_profiles` is declared *before* `combos` (combos references it). `calls` and
@@ -124,7 +124,7 @@ one function. Then `store.NormalizeUsage` (`ledger.go`) for the accounting rules
   than adding latency to a stream; invariant #5). `Flush()` uses an **in-band barrier on
   the same FIFO channel** so it's deterministic — an earlier 2-channel version let `select` serve a
   flush while rows were still queued, silently losing ledger rows.
-- `internal/store/ledger.go` `NormalizeUsage` — **THE accounting decision.** Three surfaces
+- `internal/store/ledger.go` `NormalizeUsageWith` — **THE accounting decision.** Three surfaces
   disagree about cache: OpenAI includes `cached_tokens` in `prompt_tokens`; Anthropic EXCLUDES
   `cache_read` from `input_tokens`; Responses includes cached and is the only one reporting
   `cache_write`. Read the doc comment before touching this.
@@ -144,7 +144,7 @@ one function. Then `store.NormalizeUsage` (`ledger.go`) for the accounting rules
   Rejects `null` explicitly (assigning into a nil map panics — a client could have crashed us).
 - `internal/proxy/proxy.go` `streamCopy` — scanner + `Flush()` per line, re-emitting the `\n`
   the scanner strips so forwarding stays byte-exact. Over-long lines fall back to a raw `io.Copy`.
-- `internal/proxy/proxy.go` `tapSSELine` + `UsageTapper` — **merges** usage across events
+- `internal/proxy/proxy.go` `UsageTapper` (`Observe`) — **merges** usage across events
   rather than taking the first hit. Two live-only bugs hid here: Anthropic's `message_start` has
   `output_tokens:0` (final totals come in `message_delta`), and a `max_output_tokens`-truncated
   Responses stream ends on `response.incomplete`, not `.completed`.
@@ -363,24 +363,8 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
 ### M13 — github-copilot provider ❌ RETIRED 2026-11-05 (was: OAuth device flow)
 > **Deleted:** `internal/githubcopilot`, `internal/provider/githubcopilot.go`,
 > `cmd/ezllm/githublogin.go`, `/admin/github/device*`, the `github-copilot` kind and the
-> dashboard login panel. Do not go looking for them. Replaced by M16 below; the old design
-> survives as history in `docs/github-copilot-design.md` (banner-marked).
-- `internal/githubcopilot/` — the ported protocol: `auth.go` (device flow
-  with the PUBLIC CLI client id + read:user, `token <gh>` mint, refresh grant
-  without client_secret), `provider.go` (3-endpoint routing — claude* →
-  /v1/messages, codex → /responses, default /chat/completions — CLI header
-  set with configurable version, body quirks, /models discovery +
-  37-model fallback, EnsureSession chain).
-- `internal/provider/githubcopilot.go` — KindGitHubCopilot: per-account
-  in-memory mint cache, /v1/messages anchoring, header install, in-place
-  quirks, GET /models oracle (mint in PrepareRequest so calibration
-  exercises the real path), honest quota-unsupported.
-- `cmd/ezllm/githublogin.go` — `ezllm github-login`: prints the device URL +
-  code, polls, verifies the mint, lists the catalog, prints the session row.
-  Live: the device-code request against real GitHub succeeds (code issued).
-- Evidence doc records the correction: the parked experiment's 403 was a
-  CUSTOM app; the CLI's public identity + read:user works in production
-  (omniroute, verified 2026-10-02).
+> dashboard login panel. Do not go looking for them. Replaced by M16 (Copilot CLI bridge);
+> the original design and policy records were removed in v1.9.0 and remain in git history.
 
 ### M14 — claude-web provider ✅ (2026-10-16; design `docs/claude-web-design.md`, runbook `docs/claude-web-runbook.md`)
 - `internal/claudeweb/` — the ported protocol. `tlsclient.go` (uTLS
@@ -592,18 +576,6 @@ won the race (9 failures in 50 runs of `TestClientCancelStopsTheFailoverLoop`;
 0 in 200 after). The v1.3.2 landmark below stopped a cancellation from *parking*
 the hop; this closes the other half. Seam: `internal/proxy/client_cancel_test.go`.
 
-### v1.3.3 — cancellation outranks a parked fallback ✅ (2026-10-27)
-
-`ForwardCandidates`' loop head now discards a parked fallback response when the
-context is already cancelled and answers from the error path. Before, the context
-check only recorded the error when NO response was parked, so a hop that had
-answered a failover status was committed after the caller left — `commit` wrote
-that 503 and returned nil, so the cancellation reached neither the server nor the
-ledger. Whether it happened depended on whether the hop's transport or its 503
-won the race (9 failures in 50 runs of `TestClientCancelStopsTheFailoverLoop`;
-0 in 200 after). The v1.3.2 landmark below stopped a cancellation from *parking*
-the hop; this closes the other half. Seam: `internal/proxy/client_cancel_test.go`.
-
 ### v1.3.2 — five fixes the ledger found, and a dead-code pass ✅ (2026-10-27)
 
 None of these came from review; each came from a query over `calls`. Read them as
@@ -646,7 +618,7 @@ examples of a class of bug rather than as history.
 one shipped, because "documented but in a function the linker removed" is a failure
 mode this codebase has now hit twice.
 
-### Unreleased — account safety and dashboard reliability
+### v1.4.0 — account safety and dashboard reliability
 
 - `internal/server/admin.go` `handleRetest` checks the key's owning account;
   `internal/store/admin.go` `EnableKey` scopes the update to the account.
@@ -743,6 +715,31 @@ while the SAME model on `opencode-go` was 0/754.
   attention names the hop, zero console errors, 390px zero overflow.
 - No routing action yet, deliberately: the park rule is justified by THIS
   measurement, not by a plausible number (the M2 lesson).
+
+### v1.9.0 — bridge caching, Codex fidelity, security remediation ✅ (2026-11-14; runbooks `docs/codex-bridge-runbook.md`, `docs/bridge-update-runbook.md`; audit `docs/security-audit-2026-11-14.md`)
+
+- `internal/codexbridge/cache.go` `borrowTemplate` / `forkTemplate` — empty
+  persisted parent threads forked per request for prompt-cache affinity across
+  fresh CLI processes; `ResolveForkCache` makes the boot-time `auto|on|off`
+  decision (`EZLLM_CODEX_BRIDGE_CACHE`). Caller history never enters a parent.
+- `internal/codexbridge/native_history.go` `nativeConversation` — structured
+  history (roles, tool pairs, image order, assistant phases) injected with
+  `thread/inject_items`; `preflight.go` `RunPreflight` enables it when the CLI
+  advertises the method. Older CLIs keep text replay.
+- `internal/codexbridge/continuation.go` `bindHistory` + `internal/proxy/caller.go`
+  `WithCaller` — parked tool turns are bound to the authenticated caller and the
+  canonical history hash, so recycled IDs cannot resume another caller's turn.
+- `internal/codexbridge/request.go` `ClientToolsNote` — caller-tool guidance
+  (caller filesystem, no bridge-scratch workdirs, continue authorized work).
+- `internal/copilotbridge/session_cache.go` and `internal/agybridge/session_cache.go`
+  — opt-in exact-history conversation reuse with per-request usage deltas;
+  `internal/agybridge/tools.go` `parseAdaptedRequest` — Antigravity caller tools
+  through structured output (`EZLLM_AGY_EXPERIMENTAL_TOOLS`).
+- `internal/server/admission.go` `newAdmission` — bounded inference admission and
+  body-memory reservations; `internal/proxy/proxy.go` `copyResponseHeaders` strips
+  provider `Set-Cookie`/`Set-Cookie2`/`Clear-Site-Data`.
+- `cmd/ezllm/bridgecheck.go` + `scripts/bridge_update.py` — CLI updater gates that
+  qualify sandbox, cache and native-history modes before promoting a binary.
 
 ### v1.8.0 — shared CLI bridge transport (2026-11-11)
 

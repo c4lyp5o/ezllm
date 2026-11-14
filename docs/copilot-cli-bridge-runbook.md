@@ -285,7 +285,7 @@ are still cold, and model processing time is unaffected by process reuse.
 
 ## Opt-in completed-conversation cache
 
-On v1.11.0 or later, enable both settings and restart the built ezllm image:
+On v1.9.0 or later, enable both settings and restart the built ezllm image:
 
 ```text
 EZLLM_COPILOT_BRIDGE_WARM_POOL=on

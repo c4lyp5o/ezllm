@@ -2,7 +2,7 @@
 
 ## Decision
 
-From v1.14.3, `RunPreflight` detects `thread/inject_items` independently of fork
+From v1.9.0, `RunPreflight` detects `thread/inject_items` independently of fork
 cache mode. `Runner.runAppServer` uses `nativeConversation` to inject prior
 Responses items into a fresh request thread, then starts the latest user input.
 On a cached request, injection occurs after `thread/fork`, never on the parent.
@@ -78,6 +78,8 @@ go test -short ./internal/codexbridge -run '^TestLiveCallerTaskFidelity$' -count
 ```
 
 `EZLLM_CODEX_FIDELITY_NATIVE` is a test-only switch, not a deployment option.
+Set `EZLLM_CODEX_FIDELITY_OUTPUT=<path>` to also write the run's results as JSON
+to that path; it is likewise test-only.
 Use its absence for the legacy replay comparison. The test requires Bun on PATH and spends subscription quota.
 No ezdb files, Hermes installation files or live gateway configuration are
 modified by the experiment. Numeric results are retained in

@@ -70,7 +70,7 @@ services:
       # the CLI and a login (the two mounts at the end of `volumes`) fails the
       # boot rather than starting a surface that 401s every request.
       EZLLM_COPILOT_BRIDGE: "off"
-      # Optional process reuse; completed-history cache requires both on (v1.11+).
+      # Recommended for cache reuse: completed-history cache requires both on (v1.9.0+).
       # EZLLM_COPILOT_BRIDGE_WARM_POOL: "on"
       # EZLLM_COPILOT_BRIDGE_SESSION_CACHE: "on"
       # EZLLM_COPILOT_BIN: /opt/copilot/copilot
@@ -101,7 +101,7 @@ services:
       # Loopback-only; an openai-compatible account dials it. Linux only. `on`
       # without the CLI and a login (the two mounts below) fails the boot.
       EZLLM_CODEX_BRIDGE: "off"
-      # Automatic cache support detection is the default (v1.14+).
+      # Recommended: automatic cache support detection, the default (v1.9.0+).
       # Use "on" to require caching or "off" to disable it. Native approvals stay never.
       # EZLLM_CODEX_BRIDGE_CACHE: "auto"
       # EZLLM_CODEX_BIN: /opt/codex/bin/codex
@@ -125,7 +125,7 @@ services:
       # EZLLM_AGY_BRIDGE_CONCURRENCY: "2"
       # Experimental caller tools via structured output; CLI needs --json-schema.
       # EZLLM_AGY_EXPERIMENTAL_TOOLS: "on"
-      # Optional exact-history/tool-result resume; requires experimental tools (v1.12+).
+      # Recommended for cache reuse: exact-history/tool-result resume; requires experimental tools (v1.9.0+).
       # EZLLM_AGY_BRIDGE_SESSION_CACHE: "on"
 
     volumes:

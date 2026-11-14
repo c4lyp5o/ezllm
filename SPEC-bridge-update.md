@@ -255,7 +255,7 @@ Each milestone ships with in-package tests, `make test-short`, and a version bum
   live in the host config).
 - Email delivery.
 
-## 8. Revision — v1.10.0 (2026-11-14)
+## 8. Revision — v1.9.0 (2026-11-14)
 
 The current policy and installation steps are in `docs/bridge-update-runbook.md`.
 The original three-bridge design above is historical; the revision retains the

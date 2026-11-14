@@ -132,8 +132,8 @@ A model id is only marked usable after a probe answers, which is exactly the
   `github-copilot` kind from the sentinel allow-list. Schema untouched: existing
   `provider_keys`/`accounts` rows keep their history; the kind becomes invalid
   for NEW accounts only.
-- **M4** docs: runbook, CHANGELOG, EXPLORING landmark, and a supersession note
-  at the top of `docs/github-copilot-design.md`.
+- **M4** docs: runbook, CHANGELOG and EXPLORING landmark. The superseded
+  OAuth design and policy-evidence docs were removed in v1.9.0 (git history keeps them).
 
 ## 9. Locked decisions (2026-11-05, Calypso)
 
@@ -370,7 +370,7 @@ checks proved a small PNG on `gpt-6-luna`; see the runbook for limits.
 ## Completed-history cache extension — 2026-11-14
 
 One session per request remains the default and the active tool-loop path. The
-optional v1.11.0 completed-conversation mode retains normally finished sessions
+optional v1.9.0 completed-conversation mode retains normally finished sessions
 only for an exact full-history continuation with one new user message. It adds
 no new service or pool. See the
 [completed-session cache design](copilot-completed-session-cache-design.md) for

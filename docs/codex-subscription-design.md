@@ -320,9 +320,9 @@ login present; non-loopback bind refused. Failure is fatal, not logged.
 
 1. **Channel:** **app-server**, with `codex exec --json` as the fallback when the
    boot schema check fails or the child fails before inference. Silence after
-   `turn/start` is ambiguous and never triggers a repair generation (v1.13.0).
+   `turn/start` is ambiguous and never triggers a repair generation (v1.9.0).
 2. **History:** the original Cloud-only `thread/resume.history` field remains
-   unused. From v1.14.3, CLIs advertising `thread/inject_items` receive raw
+   unused. From v1.9.0, CLIs advertising `thread/inject_items` receive raw
    Responses items on each fresh request thread or fork, followed by only the
    latest user input. Message roles, tool-call/result relationships, assistant
    phases and image order are preserved. A pending tool turn still resumes on
@@ -366,7 +366,7 @@ and per-bridge migration acceptance. Historical decisions above remain as record
 
 ## Empty-template cache (2026-11-14)
 
-`EZLLM_CODEX_BRIDGE_CACHE=auto` is the v1.14+ default. Supported CLIs use an
+`EZLLM_CODEX_BRIDGE_CACHE=auto` is the v1.9.0+ default. Supported CLIs use an
 empty persisted configuration parent and
 independent ephemeral prediction forks, retaining no caller dialogue in the
 parent and no idle CLI process. This extends fresh-request caching while

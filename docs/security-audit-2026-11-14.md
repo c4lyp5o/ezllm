@@ -2,6 +2,8 @@
 
 Remediation follow-up: [v1.14.1 fixes and rollout status](security-remediation-2026-11-14.md).
 The findings below describe the audited revision; deployment status is tracked separately.
+The audited pre-release 1.14.0 and its 1.14.1 fixes ship in release v1.9.0.
+Machine-readable reproduction results: [security-audit-2026-11-14-results.json](security-audit-2026-11-14-results.json).
 
 ## Scope and result
 

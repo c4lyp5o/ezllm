@@ -3,7 +3,7 @@
 ## Decision
 
 Use the installed CLI's experimental prediction-fork path when available.
-`EZLLM_CODEX_BRIDGE_CACHE` defaults to `auto` from v1.14.0: startup validates
+`EZLLM_CODEX_BRIDGE_CACHE` defaults to `auto` from v1.9.0: startup validates
 support, enables caching when supported and otherwise reports a fallback reason.
 Explicit `on` requires support; `off` disables it. Unknown modes fail startup. Codex remains a bridge for caller-owned tools.
 No ACP adapter, daemon, pool of idle processes, extra service or dependency is

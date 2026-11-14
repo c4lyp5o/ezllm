@@ -57,7 +57,7 @@ Findings that shape the build:
    messages become an `<instructions>` block and earlier turns a deterministic
    `<turn role=…>` transcript (byte-stable prefix for caching), as in the Codex
    bridge. A lone user message passes through unchanged.
-4. **Usage mapping (corrected in v1.12.0).** Native input is cold input,
+4. **Usage mapping (corrected in v1.9.0).** Native input is cold input,
    separate from cache reads. `prompt_tokens = input_tokens + cache_read_tokens`,
    with reads also reported as `cached_tokens`. Output includes thinking, which
    remains a subset. Native total excludes reads; OpenAI total includes them.
@@ -151,7 +151,7 @@ RSS. No runtime-memory delta or other model's compliance has been measured.
 
 ## Optional conversation resume — 2026-11-14
 
-The default remains one fresh conversation per request. v1.12.0 optionally
+The default remains one fresh conversation per request. v1.9.0 optionally
 resumes exact caller histories, including complete tool-result groups, while
 still exiting the CLI after every request. Only bounded metadata and a private
 workspace remain idle. The native input/cache mapping is also corrected. See

@@ -107,7 +107,7 @@ a synthetic result. Answers, tool arguments and result values are not printed.
 
 ## Install or migrate
 
-1. Deploy an ezllm build with the revised gates (v1.10.0 or later). Keep the
+1. Deploy an ezllm build with the revised gates (v1.9.0 or later). Keep the
    current CLI versions while doing so.
 2. Initialize any missing roots from the running container's legacy mounts:
 

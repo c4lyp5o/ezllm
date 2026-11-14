@@ -2,7 +2,8 @@
 
 **Historical specification:** implemented 2026-10-21 (approach A) and included in
 subsequent releases. Deployment and operator-specific completion are not established
-by this document; see [tasks/todo.md](tasks/todo.md) and verify the live instance.
+by this document; verify the live instance. (The plan and checklist that accompanied it
+were removed in v1.9.0 and remain in git history.)
 The requirements and commands below record the original plan, not current status.
 **Parent design:** [docs/claude-subscription-design.md](docs/claude-subscription-design.md) §6 (M2)
 
@@ -197,4 +198,4 @@ does not revive `accounts.cap_tokens`.
    keeps working only because its bind mount still holds the deleted file, so the
    next container recreate breaks the bridge at boot. Recommended fix: requalify
    on the newest CLI and copy that binary to a path the updater doesn't manage
-   (`tasks/plan.md` Task 0).
+   (the original plan's Task 0).

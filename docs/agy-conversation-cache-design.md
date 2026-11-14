@@ -139,7 +139,7 @@ ledger's separate cold/read counters and vendor dashboard over matching time
 windows. This feature was tested with Gemini 3.8 Flash low on CLI 1.4.12; use
 `--tool-model` during supervised qualification for another intended model.
 
-Deploy v1.12.0 or later before enabling the mode. Turn it off and restart to
+Deploy v1.9.0 or later before enabling the mode. Turn it off and restart to
 restore stateless tool replay. The production runtime was left unchanged by the
 experiment. No AGY native calls were added to ordinary short tests; captured
 counters and subprocess fixtures exercise cache matching, ID linkage, usage

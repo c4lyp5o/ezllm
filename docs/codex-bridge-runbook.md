@@ -157,12 +157,31 @@ tool failures and approval requirements still apply. This is instruction
 steering, not a guarantee of model behavior or a grant of filesystem access.
 Recreate the container after changing the environment.
 
-From v1.14.2, caller-tool guidance also treats environment checks, repository
+From v1.9.0, caller-tool guidance also treats environment checks, repository
 inspection, plans and progress reports as intermediate steps of an implementation
 request. Codex is instructed to continue authorized implementation and appropriate
 verification, stopping for completion, a user pause or a concrete blocker needing
 user input. This is model guidance, not an enforced completion guarantee or an
 automatic continuation loop. No additional environment flag is required.
+
+### Model choice for long caller-tool tasks
+
+Measured 2026-11-14 by replaying one stalled Hermes turn (same 78-message
+history, tools and prompt) through this bridge on the ChatGPT subscription:
+
+- `gpt-6.1-terra` ended after 4–9 requests and reported the task unfinished in
+  both runs. Removing persona lines that ask for consensus did not change this;
+  `xhigh` effort extended it to 41 requests, still unfinished.
+- `gpt-6.1-sol` ran 70 and 110 requests and finished both runs (tests, browser
+  CRUD, lint and build verified). `gpt-6-astra` finished in 57 requests.
+
+The stopping is a model trait, not a bridge fault: the same bridge path, code
+mode and caller guidance sustained long runs with sol and astra. Terra's
+subscription default effort is `low`; the bridge forwards the client's
+`reasoning_effort` unchanged. For long autonomous caller-tool work, route to
+`gpt-6.1-sol` (or `gpt-6-astra`); longer runs consume more subscription quota.
+CLI 0.167.0 exposes caller tools only through code mode — disabling
+`code_mode_host` makes them unavailable to the model.
 
 Instructions participate in the template cache key. Updating this guidance
 selects a new template and may cause an initial cache warm-up; unchanged
@@ -355,7 +374,7 @@ the Rules caps.
 
 ## Verify
 
-For a first check, use the gateway's [model-list command](../README.md#set-up-the-dashboard),
+For a first check, use the gateway's [model-list command](../README.md#2-finish-setup-in-the-dashboard),
 then send a short prompt to an available model through the dashboard or your client.
 Requests consume subscription quota.
 
@@ -416,7 +435,7 @@ See [shared transport status and remaining work](shared-bridge-transport-design.
 
 ## Conversation history
 
-From v1.14.3, startup automatically selects native structured history when the
+From v1.9.0, startup automatically selects native structured history when the
 CLI advertises `thread/inject_items`; `/status.native_history` reports the
 selection. No additional environment flag is required. Older CLIs and exec
 keep text-transcript replay. Incomplete historical tool groups also use legacy
@@ -442,7 +461,7 @@ that it fixes every long-session persistence failure. See the
 
 ## Prompt-cache affinity
 
-`EZLLM_CODEX_BRIDGE_CACHE` defaults to `auto` (v1.14+). Boot validates
+`EZLLM_CODEX_BRIDGE_CACHE` defaults to `auto` (v1.9.0+). Boot validates
 experimental `thread/fork`, `thread/resume`, `thread/inject_items` and
 `thread/delete` support and enables empty-template forks when available.
 Otherwise auto uses the original path and reports the reason in
@@ -481,7 +500,7 @@ caller-tool continuation; unsupported auto mode reports its fallback reason. Cha
 and design: [empty-template cache](codex-empty-template-cache-design.md).
 
 
-## Caller ownership of pending tools (v1.14.1+)
+## Caller ownership of pending tools (v1.9.0+)
 
 Gateway authentication derives an opaque identity per client key or dashboard
 session. The proxy strips externally supplied `X-Ezllm-Caller` values and stamps

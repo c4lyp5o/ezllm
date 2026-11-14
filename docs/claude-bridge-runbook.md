@@ -145,7 +145,7 @@ two `cache_control` markers survive (native spends two of upstream's four).
 
 ## Verify
 
-For a simple first check, use the gateway's [model-list command](../README.md#set-up-the-dashboard)
+For a simple first check, use the gateway's [model-list command](../README.md#2-finish-setup-in-the-dashboard)
 and select a model from this account. Send a short prompt through the dashboard
 or your client. Requests consume subscription quota.
 

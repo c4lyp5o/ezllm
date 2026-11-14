@@ -3,7 +3,7 @@
 The historical ledger shows substantial Hermes context traffic, particularly
 uncached Copilot input. It does not establish that all quota consumption is
 unavoidable. This audit found accounting defects and an unsafe fallback path;
-these are corrected in v1.10.1. Accounting corrections improve visibility and
+these are corrected in v1.9.0. Accounting corrections improve visibility and
 must not be represented as equivalent reductions in vendor usage.
 
 ## Evidence and scope
@@ -273,7 +273,7 @@ and 7 seconds respectively. This comparison uses a growing conversation and a
 small model, not identical stateless requests or a model-matched production
 Hermes run.
 
-The resulting v1.11.0 feature is a bounded opt-in completed-history cache inside
+The resulting v1.9.0 feature is a bounded opt-in completed-history cache inside
 the existing Copilot warm workers. It reuses only an unchanged prior history and
 answer plus one new user message with the same model/system/tools. It reports
 usage deltas and deletes sessions on mismatch or normal eviction. It does not
@@ -292,7 +292,7 @@ retained conversation and with explicit resume in a new process using the same
 private workspace. The implemented HTTP caller-tool round trip reused 15,733
 tokens and reported 2,733 new input tokens after 17,791 new input tokens on the
 initial turn. This measures cold input, not vendor credits. Production remains
-unchanged. The v1.12.0 opt-in cache includes complete external tool-result groups
+unchanged. The v1.9.0 opt-in cache includes complete external tool-result groups
 without retaining an idle CLI process or executing tools in ezllm.
 
 The experiment also disproved the old AGY input mapping: native input excludes
@@ -317,7 +317,7 @@ Exec fallback now requires positive pre-inference evidence; silence after
 `turn/start` cannot trigger a duplicate paid generation.
 
 
-### Codex automatic default — v1.14.0
+### Codex automatic default — v1.9.0
 
 Codex cache selection now defaults to `auto`. Supported CLIs enable the tested
 empty-template path; unsupported CLIs keep the original path with a reason in

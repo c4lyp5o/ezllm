@@ -1,5 +1,8 @@
 # Security remediation — v1.14.1
 
+> Pre-release 1.14.1 ships in release **v1.9.0**; this record keeps the build
+> numbers that were deployed and measured.
+
 Follow-up to the [whole-application audit](security-audit-2026-11-14.md).
 The application fixes are implemented, tested and deployed as v1.14.1.
 Host port 20129 is bound only to localhost, as selected by the operator.
@@ -163,7 +166,7 @@ requests remain fresh. Reuse requires matching history and policy, so enabling
 these settings does not guarantee provider prompt-cache hits. Hermes continues
 to execute caller tools. During the trial, compare cache-read usage and total
 input/output usage on comparable conversations, and check tool-result handling.
-The shared [README settings](../README.md#bridge-cache-settings) describe how to
+The shared [README settings](../README.md#recommended-cache-settings) describe how to
 apply these flags. To opt out, set the corresponding cache flags to `off`; set
 `EZLLM_AGY_EXPERIMENTAL_TOOLS=off` too if disabling the AGY adapter. Recreate the
 container after environment changes. A private pre-trial Compose copy is retained

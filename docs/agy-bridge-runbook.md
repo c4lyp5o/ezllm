@@ -242,7 +242,7 @@ filesystem or shell tools. Use `EZLLM_AGY_MODEL` to test another model.
 
 ## Opt-in conversation cache
 
-On v1.12.0 or later, enable both settings in the built ezllm service and restart:
+On v1.9.0 or later, enable both settings in the built ezllm service and restart:
 
 ```text
 EZLLM_AGY_EXPERIMENTAL_TOOLS=on
@@ -298,7 +298,7 @@ one small turn (default model `gemini-3.8-flash-low`, override with
 cleared [eligibility](#eligibility) it skips, after checking the 403 and the
 withheld link.
 
-For an end-to-end check, use the gateway's [model-list command](../README.md#set-up-the-dashboard),
+For an end-to-end check, use the gateway's [model-list command](../README.md#2-finish-setup-in-the-dashboard),
 then send a short text prompt to a model from this account. The dashboard preset
 shows bridge status; `docker compose logs ezllm` shows startup failures. The
 internal listener is loopback-only, and the distroless image has no shell or curl.

@@ -310,6 +310,11 @@ func (c *Config) Validate() error {
 			errs = append(errs, "request_limits."+field.name+": must be between 1 and 4096")
 		}
 	}
+	// An unset per-client limit defaults to 8 but never above the global limit,
+	// matching newAdmission; only an explicit value above it is a mistake.
+	if !c.Explicit["request_limits.per_client_inflight"] && c.RequestLimits.PerClientInflight > c.RequestLimits.GlobalInflight && c.RequestLimits.GlobalInflight >= 1 {
+		c.RequestLimits.PerClientInflight = c.RequestLimits.GlobalInflight
+	}
 	if c.RequestLimits.PerClientInflight > c.RequestLimits.GlobalInflight {
 		errs = append(errs, "request_limits.per_client_inflight: must not exceed global_inflight")
 	}

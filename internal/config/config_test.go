@@ -319,6 +319,11 @@ func TestSecurityRequestLimitsAreBounded(t *testing.T) {
 			t.Fatalf("accepted unsafe limits %q", value)
 		}
 	}
+	// Only global_inflight set below the per-client default: the default clamps.
+	cfg, err = Load(writeTemp(t, "request_limits:\n  global_inflight: 4\nproviders: {}\n"))
+	if err != nil || cfg.RequestLimits.GlobalInflight != 4 || cfg.RequestLimits.PerClientInflight != 4 {
+		t.Fatalf("global_inflight alone should clamp the per-client default: %+v %v", cfg.RequestLimits, err)
+	}
 	cfg, err = Load(writeTemp(t, "request_limits:\n  global_inflight: 16\n  per_client_inflight: 4\n  body_memory_mib: 64\nproviders: {}\n"))
 	if err != nil || cfg.RequestLimits.GlobalInflight != 16 || cfg.RequestLimits.PerClientInflight != 4 || cfg.RequestLimits.BodyMemoryMiB != 64 {
 		t.Fatalf("%+v %v", cfg, err)

@@ -306,7 +306,7 @@ are still cold, and model processing time is unaffected by process reuse.
 
 ## Completed-conversation cache
 
-On by default since 1.9.0: unset, `EZLLM_COPILOT_BRIDGE_SESSION_CACHE` follows
+On by default since 1.9.0: unset, `EZLLM_COPILOT_BRIDGE_CACHE` follows
 the warm pool. Set it to `off` to disable it; an explicit `on` with the warm
 pool off fails startup.
 A matching request must supply the unchanged prior messages and assistant answer,

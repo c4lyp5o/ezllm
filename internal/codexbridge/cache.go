@@ -283,19 +283,23 @@ type CacheSelection struct {
 	Reason  string `json:"reason,omitempty"`
 }
 
-// ForkCacheModeFromEnv defaults to auto; spelling mistakes are configuration errors.
+// ForkCacheModeFromEnv: caching is the default and "off" is the opt-out.
+// Unset ("default") caches wherever the CLI supports it; an explicit "on"
+// fails the boot where it cannot. Spelling mistakes are configuration errors.
 func ForkCacheModeFromEnv(getenv func(string) string) (string, error) {
 	if getenv == nil {
 		getenv = os.Getenv
 	}
 	mode := strings.ToLower(strings.TrimSpace(getenv(CacheEnvKey)))
 	switch mode {
-	case "", "auto":
-		return "auto", nil
+	case "":
+		return "default", nil
 	case "on", "off":
 		return mode, nil
+	case "auto":
+		return "", fmt.Errorf("codex bridge: %s=auto was removed in 1.9.0: caching is the default, so leave it unset (or set off to opt out)", CacheEnvKey)
 	}
-	return "", fmt.Errorf("codex bridge: %s must be auto, on or off", CacheEnvKey)
+	return "", fmt.Errorf("codex bridge: %s must be on or off", CacheEnvKey)
 }
 
 // ForkCachePolicy is shared by boot qualification and the updater's policy.
@@ -346,7 +350,7 @@ func selectForkCache(mode, channel string, check func() error) (CacheSelection, 
 }
 
 // RunCachePreflight checks experimental support without making model requests.
-// Auto mode uses the original path when these optional capabilities are absent.
+// The default mode uses the original path when these optional capabilities are absent.
 func RunCachePreflight(ctx context.Context, bin, home string) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()

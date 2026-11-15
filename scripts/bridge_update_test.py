@@ -327,7 +327,7 @@ class Gate(Home):
 
     def test_gate_uses_running_image_and_production_policy_without_secrets(self):
         cfg = bu.load_config(self.home / "absent")
-        verdict = {"bridge": "codex", "version": "0.169.0", "ok": True, "live": True, "policy": {"sandbox": "workspace-write", "approval_policy": "never", "history": "native-if-supported-v1", "cache": "auto"}, "problems": []}
+        verdict = {"bridge": "codex", "version": "0.169.0", "ok": True, "live": True, "policy": {"sandbox": "workspace-write", "approval_policy": "never", "history": "native-if-supported-v1", "cache": "default"}, "problems": []}
         result = mock.Mock(stdout=json.dumps(verdict), returncode=0)
         copied, requests = [], []
         def run(*args, **kwargs):
@@ -565,10 +565,10 @@ class Reliability(Run):
 
 class SessionCachePolicy(unittest.TestCase):
     def test_cache_mode_must_be_proven(self):
-        info = {"Config": {"Env": ["EZLLM_COPILOT_BRIDGE_WARM_POOL=on", "EZLLM_COPILOT_BRIDGE_SESSION_CACHE=on"]}}
-        self.assertIn("EZLLM_COPILOT_BRIDGE_SESSION_CACHE", bu.GATE_ENV)
+        info = {"Config": {"Env": ["EZLLM_COPILOT_BRIDGE_WARM_POOL=on", "EZLLM_COPILOT_BRIDGE_CACHE=on"]}}
+        self.assertIn("EZLLM_COPILOT_BRIDGE_CACHE", bu.GATE_ENV)
         self.assertEqual(bu.gate_policy("copilot", info), {"warm_pool": "on", "session_cache": "completed-prefix"})
-        info["Config"]["Env"][-1] = "EZLLM_COPILOT_BRIDGE_SESSION_CACHE=off"
+        info["Config"]["Env"][-1] = "EZLLM_COPILOT_BRIDGE_CACHE=off"
         self.assertEqual(bu.gate_policy("copilot", info), {"warm_pool": "on"})
 
     def test_copilot_caches_default_on(self):
@@ -583,9 +583,13 @@ class CodexForkCachePolicy(unittest.TestCase):
         self.assertIn("EZLLM_CODEX_BRIDGE_CACHE", bu.GATE_ENV)
         self.assertEqual(bu.gate_policy("codex", info), {"sandbox": "workspace-write", "approval_policy": "never", "history": "native-if-supported-v1", "cache": "ephemeral-forks"})
         info["Config"]["Env"].pop()
-        self.assertEqual(bu.gate_policy("codex", info), {"sandbox": "workspace-write", "approval_policy": "never", "history": "native-if-supported-v1", "cache": "auto"})
+        self.assertEqual(bu.gate_policy("codex", info), {"sandbox": "workspace-write", "approval_policy": "never", "history": "native-if-supported-v1", "cache": "default"})
         info["Config"]["Env"].append("EZLLM_CODEX_BRIDGE_CACHE=off")
         self.assertEqual(bu.gate_policy("codex", info), {"sandbox": "workspace-write", "approval_policy": "never", "history": "native-if-supported-v1", "cache": "off"})
+        for removed in ("typo", "auto"):
+            info["Config"]["Env"][-1] = "EZLLM_CODEX_BRIDGE_CACHE=" + removed
+            with self.assertRaises(ValueError):
+                bu.gate_policy("codex", info)
         info["Config"]["Env"][-1] = "EZLLM_CODEX_BRIDGE_CACHE=typo"
         with self.assertRaises(ValueError):
             bu.gate_policy("codex", info)
@@ -599,10 +603,10 @@ class CodexForkCachePolicy(unittest.TestCase):
 
 class AGYConversationCachePolicy(unittest.TestCase):
     def test_resume_mode_must_be_proven(self):
-        info = {"Config": {"Env": ["EZLLM_AGY_EXPERIMENTAL_TOOLS=on", "EZLLM_AGY_BRIDGE_SESSION_CACHE=on"]}}
-        self.assertIn("EZLLM_AGY_BRIDGE_SESSION_CACHE", bu.GATE_ENV)
+        info = {"Config": {"Env": ["EZLLM_AGY_EXPERIMENTAL_TOOLS=on", "EZLLM_AGY_BRIDGE_CACHE=on"]}}
+        self.assertIn("EZLLM_AGY_BRIDGE_CACHE", bu.GATE_ENV)
         self.assertEqual(bu.gate_policy("agy", info), {"caller_tools": "structured-output", "session_cache": "conversation-resume"})
-        info["Config"]["Env"][-1] = "EZLLM_AGY_BRIDGE_SESSION_CACHE=off"
+        info["Config"]["Env"][-1] = "EZLLM_AGY_BRIDGE_CACHE=off"
         self.assertEqual(bu.gate_policy("agy", info), {"caller_tools": "structured-output"})
 
     def test_resume_defaults_on_with_tools(self):

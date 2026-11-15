@@ -180,8 +180,8 @@ environment:
 ```
 
 To turn a cache off, set `EZLLM_CODEX_BRIDGE_CACHE`,
-`EZLLM_COPILOT_BRIDGE_SESSION_CACHE` (or `EZLLM_COPILOT_BRIDGE_WARM_POOL`) or
-`EZLLM_AGY_BRIDGE_SESSION_CACHE` to `"off"`.
+`EZLLM_COPILOT_BRIDGE_CACHE` (or `EZLLM_COPILOT_BRIDGE_WARM_POOL`) or
+`EZLLM_AGY_BRIDGE_CACHE` to `"off"`.
 
 Apply changes with `docker compose up -d --no-build`; `docker compose restart`
 does not pick up new environment values. For a binary or source install, set

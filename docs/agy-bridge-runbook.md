@@ -244,7 +244,7 @@ filesystem or shell tools. Use `EZLLM_AGY_MODEL` to test another model.
 
 On by default since 1.9.0 whenever the tool adapter is on
 (`EZLLM_AGY_EXPERIMENTAL_TOOLS=on`) and the CLI supports `--conversation`. Set
-`EZLLM_AGY_BRIDGE_SESSION_CACHE=off` to disable it; an explicit `on` without
+`EZLLM_AGY_BRIDGE_CACHE=off` to disable it; an explicit `on` without
 the adapter or `--conversation` fails startup. It applies to
 experimental tool-adapter requests, including completed caller tool-result
 groups. Plain text-only requests stay fresh. Clients continue sending full

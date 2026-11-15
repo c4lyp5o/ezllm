@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/c4lyp5o/ezllm/internal/codexbridge"
 )
 
 func writeExec(t *testing.T, path, body string) {
@@ -359,5 +361,14 @@ func TestBridgeConcurrencyDefaultsToOne(t *testing.T) {
 				t.Errorf("%s=%q accepted", env, bad)
 			}
 		}
+	}
+}
+
+func TestCodexCacheNoteNamesTheDefaultFallback(t *testing.T) {
+	if note := codexCacheNote(codexbridge.CacheSelection{Mode: "default", Reason: "no fork"}); note != "default cache disabled: no fork" {
+		t.Fatalf("note = %q", note)
+	}
+	if note := codexCacheNote(codexbridge.CacheSelection{Mode: "off", Reason: "disabled by operator"}); note != "" {
+		t.Fatalf("off note = %q, want none", note)
 	}
 }

@@ -296,7 +296,7 @@ Boot fails loudly — the process does not start — when:
 | `EZLLM_CODEX_BRIDGE_ADDR` | `127.0.0.1:8791` | loopback listener |
 | `EZLLM_CODEX_BRIDGE_TOKEN_FILE` | `/data/codex-bridge.token` | shared secret, generated on first boot |
 | `EZLLM_CODEX_BRIDGE_CONCURRENCY` | `1` | CLI children at once (a turn parked on tool calls holds none) |
-| `EZLLM_CODEX_BRIDGE_CACHE` | `auto` | Enable empty-template forks when supported; report fallback reason otherwise. `on` requires support; `off` disables caching. |
+| `EZLLM_CODEX_BRIDGE_CACHE` | unset (on where supported) | Empty-template forks whenever supported; report the fallback reason otherwise. `on` requires support; `off` opts out. |
 | `EZLLM_CODEX_SANDBOX` | `read-only` | `writable` permits writes in the request temp workspace; no interactive approvals |
 | `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK` | `off` | `on` = client tools without Landlock ([what you give up](#the-override-and-what-you-give-up)) |
 
@@ -482,11 +482,11 @@ that it fixes every long-session persistence failure. See the
 
 ## Prompt-cache affinity
 
-`EZLLM_CODEX_BRIDGE_CACHE` defaults to `auto` (v1.9.0+). Boot validates
-experimental `thread/fork`, `thread/resume`, `thread/inject_items` and
-`thread/delete` support and enables empty-template forks when available.
-Otherwise auto uses the original path and reports the reason in
-`/status.cache_selection`. `on` requires support and fails startup if unavailable;
+Caching is on by default (v1.9.0+); `EZLLM_CODEX_BRIDGE_CACHE=off` opts out.
+Boot validates experimental `thread/fork`, `thread/resume`,
+`thread/inject_items` and `thread/delete` support and enables empty-template
+forks when available. Otherwise the default uses the original path and reports
+the reason in `/status.cache_selection` (mode `default`). `on` requires support and fails startup if unavailable;
 `off` explicitly selects the original path. Unknown values fail startup.
 The cache requires app-server; CLI 0.167.0 passed the native proof. The decision
 happens before inference, never as a second model call to repair a failed turn.

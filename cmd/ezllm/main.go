@@ -353,6 +353,9 @@ func run() error {
 	// Bell events to the push channels in Settings → Notifications.
 	srv.StartPush(ctx)
 
+	if err := checkRetiredBridgeEnv(os.Getenv); err != nil {
+		return err
+	}
 	// Claude subscription surface: loopback-only, off unless EZLLM_CLAUDE_BRIDGE=on.
 	// Enabling it without a usable CLI or login fails the boot loudly.
 	stopClaude, err := startClaudeBridge(ctx, log, srv.EnableBridge)

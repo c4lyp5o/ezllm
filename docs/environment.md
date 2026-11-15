@@ -113,7 +113,7 @@ Setup, platform requirements and the lockdown: [codex-bridge-runbook.md](codex-b
 | `EZLLM_CODEX_BRIDGE_ADDR` | `127.0.0.1:8791` | Bridge listen address; non-loopback addresses are refused. |
 | `EZLLM_CODEX_BRIDGE_TOKEN_FILE` | `/data/codex-bridge.token` | Shared secret for the account key; generated (0600) when missing. |
 | `EZLLM_CODEX_BRIDGE_CONCURRENCY` | `1` | Concurrent Codex children; a positive integer, anything else fails the boot. |
-| `EZLLM_CODEX_BRIDGE_CACHE` | auto | `auto` (v1.9.0+) enables empty-template forks when the CLI supports them; otherwise uses the original path and reports the reason on `/status`. `on` requires support; `off` disables caching. Invalid values fail startup. No idle CLI workers; bounded native parent retention and cleanup. Set before startup; recreate containers to change. |
+| `EZLLM_CODEX_BRIDGE_CACHE` | on where supported | Unset, empty-template forks are used whenever the CLI supports them; otherwise the original path is used and `/status` reports why. `on` requires support; `off` opts out. `auto` was removed in 1.9.0 and, like any other value, fails startup. No idle CLI workers; bounded native parent retention and cleanup. Set before startup; recreate containers to change. |
 | `EZLLM_CODEX_SANDBOX` | read-only | `writable` selects Codex workspace-write in the request temp directory. Both modes use approval policy `never` for headless operation. Native tools stay disabled and Landlock remains in force. |
 | `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK` | unset | `on` allows client tools on a host without Landlock. Read the runbook's platform section before setting it. |
 
@@ -130,7 +130,7 @@ Setup and the login that must avoid the desktop keyring: [agy-bridge-runbook.md]
 | `EZLLM_AGY_BRIDGE_TOKEN_FILE` | `/data/agy-bridge.token` | Shared secret for the account key; generated (0600) when missing. |
 | `EZLLM_AGY_BRIDGE_CONCURRENCY` | `1` | Concurrent `agy` children (~207 MB each); a positive integer, anything else fails the boot. |
 | `EZLLM_AGY_EXPERIMENTAL_TOOLS` | off | `on` enables the structured-output caller-tool adapter. Requires CLI `--json-schema`. The calling harness executes tools; no ACP/MCP or persistent process. See the Antigravity runbook for limitations. |
-| `EZLLM_AGY_BRIDGE_SESSION_CACHE` | on when tools are on | Exact-history conversation resume for tool-adapter requests. Unset, it is on whenever experimental tools are on and the CLI supports `--conversation`; an explicit `on` without either fails the boot; `off` disables it. Before 1.9.0 it was opt-in. Retains bounded metadata/private workspaces, no idle CLI processes. Complete caller tool-result groups can resume. Restart to change. |
+| `EZLLM_AGY_BRIDGE_CACHE` | on when tools are on | Named `EZLLM_AGY_BRIDGE_SESSION_CACHE` before 1.9.0 (the old name fails the boot). Exact-history conversation resume for tool-adapter requests. Unset, it is on whenever experimental tools are on and the CLI supports `--conversation`; an explicit `on` without either fails the boot; `off` disables it. Before 1.9.0 it was opt-in. Retains bounded metadata/private workspaces, no idle CLI processes. Complete caller tool-result groups can resume. Restart to change. |
 
 ## GitHub Copilot subscription bridge
 
@@ -143,7 +143,7 @@ CLI's own, so there is no client id to configure. Runbook:
 |---|---|---|
 | `EZLLM_COPILOT_BRIDGE` | off | `on` starts the loopback surface; without it the provider add answers 409 naming this variable. |
 | `EZLLM_COPILOT_BRIDGE_WARM_POOL` | `on` | CLI process reuse; sessions are fresh unless session caching is enabled; `off`/`false`/`0` disables it. Before 1.9.0 it was opt-in. Existing concurrency and queue limits apply. Restart to change. |
-| `EZLLM_COPILOT_BRIDGE_SESSION_CACHE` | follows warm pool | Exact-history reuse of completed native conversations. Unset, it follows the warm pool; an explicit `on` without the pool fails the boot; `off` disables it. Before 1.9.0 it was opt-in. Active tool-result continuations, images and `auto` use fresh sessions. Existing worker expiry and a 1 MiB history bound apply. Restart to change. |
+| `EZLLM_COPILOT_BRIDGE_CACHE` | follows warm pool | Named `EZLLM_COPILOT_BRIDGE_SESSION_CACHE` before 1.9.0 (the old name fails the boot). Exact-history reuse of completed native conversations. Unset, it follows the warm pool; an explicit `on` without the pool fails the boot; `off` disables it. Before 1.9.0 it was opt-in. Active tool-result continuations, images and `auto` use fresh sessions. Existing worker expiry and a 1 MiB history bound apply. Restart to change. |
 | `EZLLM_COPILOT_BIN` | `/opt/copilot-bridge/current/copilot` | The GitHub Copilot CLI binary: the updater-managed bridge root mounted at `/opt/copilot-bridge`. Before 1.9.0 the default was `/opt/copilot/copilot`. |
 | `EZLLM_COPILOT_HOME` | `/copilot-sub` | `COPILOT_HOME` for the CLI — the bridge's dedicated login directory, mounted from `~/.copilot-sub` (read-write; the CLI writes session state). Before 1.9.0 the default was `/copilot-home`. |
 | `EZLLM_COPILOT_BRIDGE_CONCURRENCY` | `1` | Concurrent Copilot CLI children; a positive integer, anything else fails the boot. |

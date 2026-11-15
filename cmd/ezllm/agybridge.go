@@ -32,7 +32,7 @@ const (
 	envAgyToken        = "EZLLM_AGY_BRIDGE_TOKEN_FILE" // shared secret for the account key
 	envAgyConcurrency  = "EZLLM_AGY_BRIDGE_CONCURRENCY"
 	envAgyTools        = "EZLLM_AGY_EXPERIMENTAL_TOOLS"
-	envAgySessionCache = "EZLLM_AGY_BRIDGE_SESSION_CACHE"
+	envAgySessionCache = "EZLLM_AGY_BRIDGE_CACHE"
 )
 
 // startAgyBridge brings up the loopback surface when enabled. A missing binary

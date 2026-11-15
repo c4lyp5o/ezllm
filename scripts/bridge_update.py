@@ -73,8 +73,8 @@ GATE_ENV = ["USER", "LOGNAME", "TZ", "SSL_CERT_FILE", "SSL_CERT_DIR",
             "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY",
             "http_proxy", "https_proxy", "no_proxy", "all_proxy",
             "EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK", "EZLLM_CODEX_SANDBOX", "EZLLM_CODEX_BRIDGE_CACHE",
-            "EZLLM_AGY_EXPERIMENTAL_TOOLS", "EZLLM_AGY_BRIDGE_SESSION_CACHE", "EZLLM_COPILOT_BRIDGE_WARM_POOL",
-            "EZLLM_COPILOT_BRIDGE_SESSION_CACHE"]
+            "EZLLM_AGY_EXPERIMENTAL_TOOLS", "EZLLM_AGY_BRIDGE_CACHE", "EZLLM_COPILOT_BRIDGE_WARM_POOL",
+            "EZLLM_COPILOT_BRIDGE_CACHE"]
 
 CLAUDE_BASE = "https://downloads.claude.ai/claude-code-releases"
 CODEX_RELEASES = "https://api.github.com/repos/openai/codex/releases?per_page=30"
@@ -403,22 +403,22 @@ def gate_policy(name, info):
     env = container_env(info, GATE_ENV)
     if name == "codex":
         mode = "workspace-write" if env.get("EZLLM_CODEX_SANDBOX", "").strip().lower() == "writable" else "read-only"
-        cache = env.get("EZLLM_CODEX_BRIDGE_CACHE", "").strip().lower() or "auto"
-        if cache not in ("auto", "on", "off"):
-            raise ValueError("EZLLM_CODEX_BRIDGE_CACHE must be auto, on or off")
+        cache = env.get("EZLLM_CODEX_BRIDGE_CACHE", "").strip().lower() or "default"
+        if cache not in ("default", "on", "off"):
+            raise ValueError("EZLLM_CODEX_BRIDGE_CACHE must be on or off (unset caches by default)")
         return {"sandbox": mode, "approval_policy": "never", "history": "native-if-supported-v1", "cache": "ephemeral-forks" if cache == "on" else cache}
     # Caches are on by default (1.9.0): unset follows the prerequisite flag, so
     # a candidate that would silently lose its cache is not promoted.
     if name == "agy":
         tools = env.get("EZLLM_AGY_EXPERIMENTAL_TOOLS", "").strip().lower() == "on"
         policy = {"caller_tools": "structured-output" if tools else "off"}
-        if switch(env.get("EZLLM_AGY_BRIDGE_SESSION_CACHE", ""), tools):
+        if switch(env.get("EZLLM_AGY_BRIDGE_CACHE", ""), tools):
             policy["session_cache"] = "conversation-resume"
         return policy
     if name == "copilot":
         warm = switch(env.get("EZLLM_COPILOT_BRIDGE_WARM_POOL", ""), True)
         policy = {"warm_pool": "on" if warm else "off"}
-        if switch(env.get("EZLLM_COPILOT_BRIDGE_SESSION_CACHE", ""), warm):
+        if switch(env.get("EZLLM_COPILOT_BRIDGE_CACHE", ""), warm):
             policy["session_cache"] = "completed-prefix"
         return policy
     return {}

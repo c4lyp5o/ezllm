@@ -242,13 +242,13 @@ func TestForkCacheChangedToolConfigurationReplays(t *testing.T) {
 }
 
 func TestCacheModeAndUsageValidation(t *testing.T) {
-	for _, tc := range []struct{ value, want string }{{"", "auto"}, {"auto", "auto"}, {" AUTO ", "auto"}, {" ON ", "on"}, {"off", "off"}} {
+	for _, tc := range []struct{ value, want string }{{"", "default"}, {" ON ", "on"}, {"off", "off"}} {
 		mode, err := ForkCacheModeFromEnv(func(string) string { return tc.value })
 		if err != nil || mode != tc.want {
 			t.Fatalf("%q: %q %v", tc.value, mode, err)
 		}
 	}
-	for _, v := range []string{"true", "1", "unknown"} {
+	for _, v := range []string{"true", "1", "unknown", "auto", " AUTO "} {
 		if _, err := ForkCacheModeFromEnv(func(string) string { return v }); err == nil {
 			t.Fatalf("accepted typo %q", v)
 		}
@@ -345,9 +345,9 @@ func TestAutomaticCacheSelectionBeforeInference(t *testing.T) {
 		mode, channel                        string
 		supported, enabled, wantError, probe bool
 	}{
-		{"auto", ChannelAppServer, true, true, false, true},
-		{"auto", ChannelAppServer, false, false, false, true},
-		{"auto", ChannelExec, false, false, false, false},
+		{"default", ChannelAppServer, true, true, false, true},
+		{"default", ChannelAppServer, false, false, false, true},
+		{"default", ChannelExec, false, false, false, false},
 		{"on", ChannelAppServer, true, true, false, true},
 		{"on", ChannelAppServer, false, false, true, true},
 		{"on", ChannelExec, false, false, true, false},
@@ -368,7 +368,7 @@ func TestAutomaticCacheSelectionBeforeInference(t *testing.T) {
 			t.Fatal("disabled reason missing")
 		}
 	}
-	for _, tc := range []struct{ value, want string }{{"", "auto"}, {"auto", "auto"}, {"on", "ephemeral-forks"}, {"off", "off"}} {
+	for _, tc := range []struct{ value, want string }{{"", "default"}, {"on", "ephemeral-forks"}, {"off", "off"}} {
 		policy, err := ForkCachePolicy(func(string) string { return tc.value })
 		if err != nil || policy != tc.want {
 			t.Fatalf("%q: %q %v", tc.value, policy, err)
@@ -378,10 +378,10 @@ func TestAutomaticCacheSelectionBeforeInference(t *testing.T) {
 
 func TestAutomaticCacheDefaultResolvesCapabilitiesWithoutInference(t *testing.T) {
 	// Missing executable stands in for an unsupported experimental schema. This
-	// optional capability failure must not prevent auto/off startup.
+	// optional capability failure must not prevent default/off startup.
 	bin := filepath.Join(t.TempDir(), "missing-codex")
 	selected, err := ResolveForkCache(context.Background(), bin, t.TempDir(), ChannelAppServer, func(string) string { return "" })
-	if err != nil || selected.Mode != "auto" || selected.Enabled || selected.Reason == "" {
+	if err != nil || selected.Mode != "default" || selected.Enabled || selected.Reason == "" {
 		t.Fatalf("%+v %v", selected, err)
 	}
 	if _, err = ResolveForkCache(context.Background(), bin, t.TempDir(), ChannelAppServer, func(string) string { return "on" }); err == nil {

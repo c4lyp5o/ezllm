@@ -23,7 +23,7 @@ import (
 // speaks Copilot's private API and never mints a session token — that OAuth
 // path is retired by this change (docs/copilot-cli-bridge-design.md).
 const (
-	envCopilotSessionCache = "EZLLM_COPILOT_BRIDGE_SESSION_CACHE"
+	envCopilotSessionCache = "EZLLM_COPILOT_BRIDGE_CACHE"
 	envCopilotWarmPool     = "EZLLM_COPILOT_BRIDGE_WARM_POOL"   // on by default
 	envCopilotBridge       = "EZLLM_COPILOT_BRIDGE"             // "on" enables the surface
 	envCopilotBin          = "EZLLM_COPILOT_BIN"                // official CLI binary (mounted)

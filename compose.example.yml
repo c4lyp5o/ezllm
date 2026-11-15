@@ -71,8 +71,8 @@ services:
       # boot rather than starting a surface that 401s every request.
       EZLLM_COPILOT_BRIDGE: "off"
       # Caches are on by default (v1.9.0+); set either to "off" to disable.
-      # EZLLM_COPILOT_BRIDGE_WARM_POOL: "on"
-      # EZLLM_COPILOT_BRIDGE_SESSION_CACHE: "on"
+      # EZLLM_COPILOT_BRIDGE_WARM_POOL: "off"
+      # EZLLM_COPILOT_BRIDGE_CACHE: "off"
       # EZLLM_COPILOT_BIN: /opt/copilot-bridge/current/copilot
       # EZLLM_COPILOT_HOME: /copilot-sub
       # EZLLM_COPILOT_BRIDGE_ADDR: 127.0.0.1:8793
@@ -100,9 +100,9 @@ services:
       # Loopback-only; an openai-compatible account dials it. Linux only. `on`
       # without the CLI and a login (the two mounts below) fails the boot.
       EZLLM_CODEX_BRIDGE: "off"
-      # Recommended: automatic cache support detection, the default (v1.9.0+).
-      # Use "on" to require caching or "off" to disable it. Native approvals stay never.
-      # EZLLM_CODEX_BRIDGE_CACHE: "auto"
+      # Caches by default wherever the CLI supports it (v1.9.0+); "off" opts out,
+      # "on" fails the boot if caching is unavailable.
+      # EZLLM_CODEX_BRIDGE_CACHE: "off"
       # EZLLM_CODEX_BIN: /opt/codex-bridge/current/bin/codex
       # EZLLM_CODEX_HOME: /codex-sub
       # EZLLM_CODEX_BRIDGE_ADDR: 127.0.0.1:8791
@@ -125,7 +125,7 @@ services:
       # Experimental caller tools via structured output; CLI needs --json-schema.
       # EZLLM_AGY_EXPERIMENTAL_TOOLS: "on"
       # Conversation resume is on by default wherever tools are on (v1.9.0+).
-      # EZLLM_AGY_BRIDGE_SESSION_CACHE: "on"
+      # EZLLM_AGY_BRIDGE_CACHE: "off"
 
     volumes:
       # Non-secret runtime defaults; credentials stay in SQLite.

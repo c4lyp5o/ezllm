@@ -141,7 +141,7 @@ func runBridgeCheck(args []string, stdout io.Writer) error {
 	var agyResume bool
 	switch name {
 	case "claude":
-		b, d := or(*bin, envOrDefault(envBridgeBin, defaultClaudeBin)), or(*home, claudeHomeOrDefault())
+		b, d := or(*bin, envOrDefault(envBridgeBin, defaultClaudeBin)), or(*home, claudeHome(os.Getenv))
 		v = checkClaudeCLI(b, d)
 		liveRun = func() []string {
 			return liveClaude(ctx, b, d, or(*model, "claude-haiku-5-5"), or(*toolModel, "claude-haiku-5-5"))
@@ -287,8 +287,8 @@ func checkCodexCLI(ctx context.Context, bin, home string) (bridgeVerdict, codexb
 		return v, pre
 	}
 	v.CacheSelection = &pre.Cache
-	if pre.Cache.Mode == "auto" && !pre.Cache.Enabled {
-		v.Notes = append(v.Notes, "automatic cache disabled: "+pre.Cache.Reason)
+	if note := codexCacheNote(pre.Cache); note != "" {
+		v.Notes = append(v.Notes, note)
 	}
 	if pre.Channel == codexbridge.ChannelExec {
 		v.Problems = append(v.Problems, "app-server lacks "+strings.Join(pre.MissingRPCs, ", ")+": the bridge would fall back to exec")
@@ -594,4 +594,13 @@ func retryableBridgeProblems(problems []string) bool {
 		}
 	}
 	return true
+}
+
+// codexCacheNote explains a default-mode cache that fell back; an explicit
+// "on" that cannot cache is a boot failure, not a note.
+func codexCacheNote(sel codexbridge.CacheSelection) string {
+	if sel.Mode == "default" && !sel.Enabled {
+		return "default cache disabled: " + sel.Reason
+	}
+	return ""
 }

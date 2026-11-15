@@ -31,6 +31,12 @@ New environment settings: `EZLLM_CODEX_SANDBOX`,
 with `COPILOT_HOME=~/.copilot-sub`, mount it at `/copilot-sub` and recreate the
 container; see `docs/copilot-bridge-runbook.md`.
 
+**Breaking:** bridge `*_BIN` defaults moved to the updater layout
+(`/opt/<bridge>-bridge/current/...`); a compose mounting a single binary at the
+old `/opt/<bridge>/...` path must set `*_BIN`. The Copilot token file defaults to
+`/data/copilot-bridge.token`. The Copilot warm pool and the Copilot and
+Antigravity session caches are on by default; set them to `off` to opt out.
+
 Release review fixes: request-limit defaults no longer block startup when only
 `global_inflight` is set; VS Code path tokens stay masked in access logs;
 completed Claude streams end cleanly if the CLI fails afterwards; refused

@@ -47,6 +47,19 @@ ran in production before release; security records cite them by those numbers.
   The bridge updater's Copilot gate uses the same default.
 - The README lists the sign-in command for each bridge.
 
+### Bridge environment defaults (breaking)
+
+- Every `*_BIN` default is now the updater-managed path,
+  `/opt/<bridge>-bridge/current/...` (was `/opt/claude/claude`,
+  `/opt/codex/bin/codex`, `/opt/agy/agy`, `/opt/copilot/copilot`). A compose that
+  mounted a single binary at the old path must set `*_BIN` or mount the bridge root.
+- `EZLLM_COPILOT_BRIDGE_TOKEN_FILE` defaults to `/data/copilot-bridge.token`, like
+  the other bridges, instead of refusing to boot.
+- Caches are on by default: the Copilot warm pool, and the Copilot and Antigravity
+  session caches, which follow their prerequisite (warm pool; tool adapter plus
+  CLI `--conversation`) when unset. An explicit `on` that cannot work still fails
+  the boot; `off` disables each. The updater gate expects the same defaults.
+
 ### Codex conversation fidelity (pre-release 1.14.3)
 
 - Uses native history injection when advertised by the CLI, keeping user and

@@ -21,10 +21,9 @@ production as pre-release builds 1.8.2 and 1.9.0–1.14.3. The security audit,
 remediation and rollout records name those builds by their pre-release numbers.
 Schema v35: drops `calls.tool_prune_shadow_tokens` from the shelved tool-pruning
 experiment (its 2,875 measurements are in `docs/tool-prune-shadow-results.json`).
-New environment settings: `EZLLM_CODEX_SANDBOX`,
-`EZLLM_CODEX_BRIDGE_CACHE`, `EZLLM_AGY_EXPERIMENTAL_TOOLS`,
-`EZLLM_AGY_BRIDGE_SESSION_CACHE` and `EZLLM_COPILOT_BRIDGE_SESSION_CACHE`
-(see `docs/environment.md`).
+New environment settings: `EZLLM_CODEX_BRIDGE_CACHE`, `EZLLM_AGY_BRIDGE_CACHE`,
+`EZLLM_COPILOT_BRIDGE_CACHE`, `EZLLM_AGY_EXPERIMENTAL_TOOLS` and
+`EZLLM_CLAUDE_BRIDGE_CONCURRENCY` (see `docs/environment.md`).
 
 **Breaking:** the Copilot bridge's default login directory is now `/copilot-sub`
 (was `/copilot-home`), matching the other bridges' dedicated `*-sub` logins. Log in
@@ -35,8 +34,11 @@ container; see `docs/copilot-bridge-runbook.md`.
 (`/opt/<bridge>-bridge/current/...`); a compose mounting a single binary at the
 old `/opt/<bridge>/...` path must set `*_BIN`. `EZLLM_CLAUDE_CONFIG_DIR` is
 renamed `EZLLM_CLAUDE_HOME`. The Copilot token file defaults to
-`/data/copilot-bridge.token`. The Copilot warm pool and the Copilot and
-Antigravity session caches are on by default; set them to `off` to opt out.
+`/data/copilot-bridge.token`. Every bridge caches by default and `off` is the
+only opt-out: `EZLLM_CODEX_BRIDGE_CACHE=auto` is gone, and the Copilot and
+Antigravity caches are `EZLLM_<BRIDGE>_BRIDGE_CACHE`. The Codex sandbox is always
+writable (`EZLLM_CODEX_SANDBOX` removed). Every bridge runs one CLI process at a
+time by default (`*_BRIDGE_CONCURRENCY`, was 2). Retired names fail the boot.
 
 Release review fixes: request-limit defaults no longer block startup when only
 `global_inflight` is set; VS Code path tokens stay masked in access logs;

@@ -57,10 +57,19 @@ ran in production before release; security records cite them by those numbers.
   folder is `EZLLM_<BRIDGE>_HOME`. The old name fails the boot with a rename message.
 - `EZLLM_COPILOT_BRIDGE_TOKEN_FILE` defaults to `/data/copilot-bridge.token`, like
   the other bridges, instead of refusing to boot.
-- Caches are on by default: the Copilot warm pool, and the Copilot and Antigravity
-  session caches, which follow their prerequisite (warm pool; tool adapter plus
-  CLI `--conversation`) when unset. An explicit `on` that cannot work still fails
-  the boot; `off` disables each. The updater gate expects the same defaults.
+- Caching is the default on every bridge and `off` is the only opt-out.
+  `EZLLM_CODEX_BRIDGE_CACHE=auto` is removed (unset caches wherever the CLI supports
+  it). `EZLLM_COPILOT_BRIDGE_SESSION_CACHE` and `EZLLM_AGY_BRIDGE_SESSION_CACHE` are
+  renamed `EZLLM_COPILOT_BRIDGE_CACHE` and `EZLLM_AGY_BRIDGE_CACHE`. The Copilot warm
+  pool is on, and the Copilot and Antigravity caches follow their prerequisite (warm
+  pool; tool adapter plus CLI `--conversation`) when unset. An explicit `on` that
+  cannot work still fails the boot. The updater gate expects the same defaults.
+- The Codex sandbox is always `workspace-write`; `EZLLM_CODEX_SANDBOX` and the
+  read-only mode are removed.
+- `EZLLM_CLAUDE_BRIDGE_CONCURRENCY` is new, and every bridge's concurrency now
+  defaults to 1 CLI process (was 2; Claude's was fixed at 2).
+- Retired names (`EZLLM_CLAUDE_CONFIG_DIR`, `EZLLM_CODEX_SANDBOX`, both
+  `*_SESSION_CACHE`) fail the boot with a message naming the replacement.
 
 ### Codex conversation fidelity (pre-release 1.14.3)
 

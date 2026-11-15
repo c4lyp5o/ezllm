@@ -19,7 +19,9 @@ First release after v1.8.1. It consolidates the bridge caching, Codex
 conversation-fidelity, CLI updater and security-audit work that ran in
 production as pre-release builds 1.8.2 and 1.9.0–1.14.3. The security audit,
 remediation and rollout records name those builds by their pre-release numbers.
-No schema migration. New environment settings: `EZLLM_CODEX_SANDBOX`,
+Schema v35: drops `calls.tool_prune_shadow_tokens` from the shelved tool-pruning
+experiment (its 2,875 measurements are in `docs/tool-prune-shadow-results.json`).
+New environment settings: `EZLLM_CODEX_SANDBOX`,
 `EZLLM_CODEX_BRIDGE_CACHE`, `EZLLM_AGY_EXPERIMENTAL_TOOLS`,
 `EZLLM_AGY_BRIDGE_SESSION_CACHE` and `EZLLM_COPILOT_BRIDGE_SESSION_CACHE`
 (see `docs/environment.md`).

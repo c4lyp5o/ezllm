@@ -23,7 +23,11 @@ ran in production before release; security records cite them by those numbers.
   tool streams.
 - **Ledger:** compression stage attribution is stored only when a stage changed
   something (an all-zero list was a third of the table), and
-  "upstream attempts" notes only when a request retried.
+  "upstream attempts" notes only when a request retried. Schema v35 drops
+  `calls.tool_prune_shadow_tokens` from the shelved tool-pruning experiment;
+  its 2,875 measurements (11,850,055 shadow tokens, Oct 31 to Nov 4) were
+  exported to `docs/tool-prune-shadow-results.json` first. The migration runs
+  once on startup and rewrites the `calls` table.
 - **Request explorer:** `/admin/requests` adds `summary.empty_steps` and a
   `hide_empty` filter; the dashboard shows a "no tokens" badge for zero-token
   steps (code-mode tool steps, or usage reported later in the turn) and a

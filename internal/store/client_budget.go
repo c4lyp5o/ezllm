@@ -82,7 +82,7 @@ func (d *DB) ReserveClientBudget(ctx context.Context, client string, tokens int6
 		return 0, false, err
 	}
 	now := time.Now()
-	bucket := CountBucket(now, window, time.Local)
+	bucket := CountBucket(now, window, d.usageLocation())
 	err = d.WithWriteTx(ctx, func(tx *sql.Tx) error {
 		// Pruning is housekeeping only — the reserved sum below already ignores
 		// expired rows — so it runs at most once per reservationSweepEvery
@@ -180,7 +180,7 @@ func (d *DB) ClientBudgetStatus(ctx context.Context, name string) (ClientBudget,
 		return ClientBudget{}, err
 	}
 	now := time.Now()
-	bucket := CountBucket(now, window, time.Local)
+	bucket := CountBucket(now, window, d.usageLocation())
 	var used int64
 	err = d.r.QueryRowContext(ctx,
 		`SELECT COALESCE(tokens,0) FROM client_usage_counters WHERE client = ? AND bucket = ?`,
@@ -200,7 +200,7 @@ func (d *DB) ClientBudgetStatus(ctx context.Context, name string) (ClientBudget,
 // counter. This runs only when the counter row is missing (new cap on an
 // existing key, or a migrated database), so the hot path stays a PK lookup.
 func (d *DB) backfillClientBucket(ctx context.Context, name, window, bucket string, now time.Time) (int64, error) {
-	start, end := BucketRange(now, window, time.Local)
+	start, end := BucketRange(now, window, d.usageLocation())
 	var used, calls int64
 	err := d.r.QueryRowContext(ctx,
 		`SELECT COALESCE(SUM(tokens_in + tokens_out),0), COUNT(*)
@@ -312,7 +312,7 @@ type clientCounterGroup struct {
 	calls  int64
 }
 
-func groupForClientCounter(rows []Call, windows map[string]windowSpec) []clientCounterGroup {
+func groupForClientCounter(rows []Call, windows map[string]windowSpec, loc *time.Location) []clientCounterGroup {
 	type key struct{ client, bucket string }
 	byKey := map[key]*clientCounterGroup{}
 	var order []key
@@ -324,7 +324,7 @@ func groupForClientCounter(rows []Call, windows map[string]windowSpec) []clientC
 		if !ok {
 			continue
 		}
-		bucket := CountBucket(c.TS, w.window, time.Local)
+		bucket := CountBucket(c.TS, w.window, loc)
 		k := key{c.Client, bucket}
 		g := byKey[k]
 		if g == nil {
@@ -370,5 +370,5 @@ func (d *DB) meterClientsInTx(ctx context.Context, tx *sql.Tx, rows []Call) erro
 	if err != nil {
 		return err
 	}
-	return bumpClientCounters(ctx, tx, groupForClientCounter(rows, windows))
+	return bumpClientCounters(ctx, tx, groupForClientCounter(rows, windows, d.usageLocation()))
 }

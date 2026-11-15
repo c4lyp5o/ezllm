@@ -189,14 +189,8 @@ func (s *Server) finishDispatch(w http.ResponseWriter, r *http.Request, call sto
 	// accounting rows; the trail still shows skipped or unmetered failures.
 	call.Err = appendNote(call.Err, failoverTrail(res.Attempts))
 	// Request-wide attempt usage (addendum #3): what the budget allowed and
-	// what was spent. Unlimited is a word, never a zero-left ambiguity.
-	if res.UpstreamAttempts > 0 {
-		budget := "unlimited"
-		if res.AttemptBudget > 0 {
-			budget = fmt.Sprintf("%d", res.AttemptBudget)
-		}
-		call.Err = appendNote(call.Err, fmt.Sprintf("upstream attempts %d/%s", res.UpstreamAttempts, budget))
-	}
+	// what was spent, recorded when there was more than one attempt.
+	call.Err = appendNote(call.Err, attemptNote(res.UpstreamAttempts, res.AttemptBudget))
 	call.BlockPos = served.BlockPos
 	// Attribution for hops whose WIRE differs from the client's surface: the
 	// bodies were translated; usage still follows the normalized cold-token
@@ -250,4 +244,19 @@ func (s *Server) ledgerAttempts(delivery store.Call, res proxy.Result) {
 		c.Client, c.IP, c.SessionID = delivery.Client, delivery.IP, delivery.SessionID
 		s.ledger(c)
 	}
+}
+
+// attemptNote describes request-wide upstream attempts against the budget.
+// A single attempt is the normal case and says nothing, so successful rows do
+// not each carry "upstream attempts 1/N". Unlimited is a word, never a
+// zero-left ambiguity.
+func attemptNote(attempts, budget int) string {
+	if attempts <= 1 {
+		return ""
+	}
+	limit := "unlimited"
+	if budget > 0 {
+		limit = fmt.Sprintf("%d", budget)
+	}
+	return fmt.Sprintf("upstream attempts %d/%s", attempts, limit)
 }

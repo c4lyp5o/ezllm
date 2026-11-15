@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -69,5 +70,35 @@ func TestMasterKeyConcurrentFirstBoot(t *testing.T) {
 	info, err := os.Stat(path)
 	if err != nil || runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
 		t.Fatalf("permissions %v %v", info, err)
+	}
+}
+
+// The default key lives in the data directory, and a key at the pre-2.0.0
+// Hermes path refuses the boot rather than being replaced by a new one.
+func TestDefaultMasterKeyPathRefusesALegacyKey(t *testing.T) {
+	data, home := t.TempDir(), t.TempDir()
+	want := filepath.Join(data, "ezllm-master.key")
+	if got, err := defaultMasterKeyPath(data, home); err != nil || got != want {
+		t.Fatalf("fresh install = %q %v, want %q", got, err, want)
+	}
+	for _, legacyRoot := range []string{home, data} {
+		legacy := filepath.Join(legacyRoot, ".hermes", "secrets", "ezllm-master.key")
+		if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(legacy, []byte("k\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := defaultMasterKeyPath(data, home); err == nil || !strings.Contains(err.Error(), legacy) {
+			t.Fatalf("legacy key at %s: err=%v, want a refusal naming it", legacy, err)
+		}
+		if err := os.WriteFile(want, []byte("k\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := defaultMasterKeyPath(data, home); err != nil || got != want {
+			t.Fatalf("moved key = %q %v", got, err)
+		}
+		os.Remove(want)
+		os.RemoveAll(filepath.Join(legacyRoot, ".hermes"))
 	}
 }

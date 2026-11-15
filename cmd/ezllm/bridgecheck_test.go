@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/c4lyp5o/ezllm/internal/codexbridge"
 )
 
 func writeExec(t *testing.T, path, body string) {
@@ -230,5 +232,143 @@ func TestBridgeCheckCopilotRoutesAndFailsClosed(t *testing.T) {
 	}
 	if len(v.Problems) == 0 || !strings.Contains(v.Problems[0], "does not resolve") {
 		t.Fatalf("problems = %v, want a resolution failure", v.Problems)
+	}
+}
+
+func TestBridgeCheckReportsConfiguredPolicy(t *testing.T) {
+	t.Setenv("EZLLM_CODEX_SANDBOX", "writable")
+	t.Setenv("EZLLM_AGY_EXPERIMENTAL_TOOLS", "on")
+	t.Setenv("EZLLM_COPILOT_BRIDGE_WARM_POOL", "on")
+	for _, tc := range []struct{ name, key, want string }{
+		{"codex", "sandbox", "workspace-write"}, {"codex", "history", "native-if-supported-v1"}, {"agy", "caller_tools", "structured-output"}, {"copilot", "warm_pool", "on"},
+	} {
+		v, err := checkJSON(t, tc.name, "--bin", filepath.Join(t.TempDir(), "missing"))
+		if !errors.Is(err, errBridgeCheckFailed) || v.Policy[tc.key] != tc.want {
+			t.Fatalf("%s: %+v err=%v", tc.name, v, err)
+		}
+	}
+}
+
+func TestBridgeOperationalFailuresAreRetryableButCompatibilityFailuresAreNot(t *testing.T) {
+	for _, tc := range []struct {
+		problems []string
+		want     bool
+	}{
+		{nil, false}, {[]string{"live plain: You've hit your session limit"}, true},
+		{[]string{"live tool: rate limited", "live plain: quota exhausted"}, true},
+		{[]string{"live plain: context deadline exceeded"}, true},
+		{[]string{"login logged-out"}, true},
+		{[]string{"flag missing --json-schema"}, false},
+		{[]string{"live tool turn: no get_weather tool call came back"}, false},
+		{[]string{"live plain: quota exhausted", "code-mode host missing"}, false},
+	} {
+		if got := retryableBridgeProblems(tc.problems); got != tc.want {
+			t.Fatalf("%v: got %v want %v", tc.problems, got, tc.want)
+		}
+	}
+}
+
+func TestAgyGateRequiresSchemaFlagWhenExperimentalToolsEnabled(t *testing.T) {
+	t.Setenv("EZLLM_AGY_EXPERIMENTAL_TOOLS", "on")
+	home := t.TempDir()
+	dir := filepath.Join(home, ".gemini", "antigravity-cli")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "antigravity-oauth-token"), []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(t.TempDir(), "agy")
+	for _, schema := range []bool{false, true} {
+		help := "--print --output-format --input-format --model --effort --disable-slash-commands "
+		if schema {
+			help += "--json-schema "
+		}
+		writeExec(t, bin, `case "$1" in
+--version) echo '1.4.12';;
+--help) echo '`+help+`';;
+models) printf 'gemini-3.8-flash-low\tGemini\n';;
+esac
+`)
+		v, err := checkJSON(t, "agy", "--bin", bin, "--home", home)
+		if schema {
+			if err != nil || !v.OK {
+				t.Fatalf("capable CLI refused: %+v %v", v, err)
+			}
+		} else if !errors.Is(err, errBridgeCheckFailed) || v.OK {
+			t.Fatalf("schema-less CLI qualified: %+v %v", v, err)
+		}
+	}
+}
+
+func TestAgyCacheGateRequiresConversationFlag(t *testing.T) {
+	t.Setenv(envAgyTools, "on")
+	t.Setenv(envAgySessionCache, "on")
+	home := t.TempDir()
+	dir := filepath.Join(home, ".gemini", "antigravity-cli")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "antigravity-oauth-token"), []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(t.TempDir(), "agy")
+	for _, resume := range []bool{false, true} {
+		help := "--print --output-format --input-format --model --effort --disable-slash-commands --json-schema "
+		if resume {
+			help += "--conversation "
+		}
+		writeExec(t, bin, `case "$1" in
+--version) echo '1.4.12';;
+--help) echo '`+help+`';;
+models) printf 'gemini-3.8-flash-low\tGemini\n';;
+esac
+`)
+		v, err := checkJSON(t, "agy", "--bin", bin, "--home", home)
+		if resume {
+			if err != nil || !v.OK || v.Policy["session_cache"] != "conversation-resume" {
+				t.Fatalf("cache-capable CLI refused: %+v %v", v, err)
+			}
+		} else if !errors.Is(err, errBridgeCheckFailed) || v.OK {
+			t.Fatalf("resume-less CLI qualified: %+v %v", v, err)
+		}
+	}
+}
+
+// Every default binary sits in the updater-managed layout, so the update status
+// beside `current` is found without a *_BIN override.
+func TestDefaultBridgeBinsFollowUpdaterLayout(t *testing.T) {
+	for name, bin := range map[string]string{"claude": defaultClaudeBin, "codex": defaultCodexBin, "agy": defaultAgyBin, "copilot": defaultCopilotBin} {
+		if want := "/opt/" + name + "-bridge/update-status.json"; bridgeUpdateFile(bin) != want {
+			t.Errorf("%s default %q is outside /opt/%s-bridge/current", name, bin, name)
+		}
+	}
+}
+
+// Every bridge runs one CLI process at a time unless told otherwise, and a
+// typo fails the boot instead of quietly taking the default.
+func TestBridgeConcurrencyDefaultsToOne(t *testing.T) {
+	get := func(v string) func(string) string { return func(string) string { return v } }
+	for _, env := range []string{envClaudeConcurrency, envCodexConcurrency, envAgyConcurrency, envCopilotConcurrency} {
+		if n, err := bridgeConcurrency(get(""), env, "x"); err != nil || n != 1 {
+			t.Errorf("%s default = %d %v, want 1", env, n, err)
+		}
+		if n, err := bridgeConcurrency(get(" 3 "), env, "x"); err != nil || n != 3 {
+			t.Errorf("%s=3 = %d %v", env, n, err)
+		}
+		for _, bad := range []string{"0", "-2", "two"} {
+			if _, err := bridgeConcurrency(get(bad), env, "x"); err == nil {
+				t.Errorf("%s=%q accepted", env, bad)
+			}
+		}
+	}
+}
+
+func TestCodexCacheNoteNamesTheDefaultFallback(t *testing.T) {
+	if note := codexCacheNote(codexbridge.CacheSelection{Mode: "default", Reason: "no fork"}); note != "default cache disabled: no fork" {
+		t.Fatalf("note = %q", note)
+	}
+	if note := codexCacheNote(codexbridge.CacheSelection{Mode: "off", Reason: "disabled by operator"}); note != "" {
+		t.Fatalf("off note = %q, want none", note)
 	}
 }

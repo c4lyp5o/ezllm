@@ -2,6 +2,8 @@ package codexbridge
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -138,5 +140,39 @@ func TestLockdownAgainstMeasuredReleases(t *testing.T) {
 		if bad := strings.Join(lockdownViolations(flipped), ","); bad != "shell_tool=true" {
 			t.Errorf("%s with shell_tool on: violations %q, want shell_tool=true", v, bad)
 		}
+	}
+}
+
+func TestNativeHistoryCapabilityDoesNotDisableLegacyTools(t *testing.T) {
+	t.Setenv(CacheEnvKey, "off")
+	for _, supported := range []bool{false, true} {
+		t.Run(fmt.Sprintf("supported=%t", supported), func(t *testing.T) {
+			dir := t.TempDir()
+			var features strings.Builder
+			for _, name := range LockdownFeatures {
+				features.WriteString(name + " stable false\n")
+			}
+			methods := append([]string(nil), RequiredMethods...)
+			if supported {
+				methods = append(methods, "thread/inject_items")
+			}
+			requests, _ := json.Marshal(methods)
+			notes, _ := json.Marshal(RequiredNotifications)
+			script := "#!/bin/sh\ncase \"$*\" in\n--version) echo codex-cli 0.167.0;;\n*'features list'*) cat <<'EOF'\n" + features.String() + "EOF\n;;\n*generate-json-schema*) for arg do last=\"$arg\"; done\nmkdir -p \"$last\"\ncat > \"$last/ClientRequest.json\" <<'EOF'\n" + string(requests) + "\nEOF\ncat > \"$last/ServerNotification.json\" <<'EOF'\n" + string(notes) + "\nEOF\n;;\n*'login status'*) echo Logged in using ChatGPT;;\nesac\n"
+			bin := filepath.Join(dir, "codex")
+			if err := os.WriteFile(bin, []byte(script), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "auth.json"), []byte(`{}`), 0600); err != nil {
+				t.Fatal(err)
+			}
+			p, err := RunPreflight(context.Background(), bin, dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p.NativeHistory != supported || p.Channel != ChannelAppServer {
+				t.Fatalf("capability selection: %+v", p)
+			}
+		})
 	}
 }

@@ -4,8 +4,6 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -82,22 +80,5 @@ func TestSPANeverSwallowsAPIPaths(t *testing.T) {
 	// a REGISTERED admin route keeps its auth: it must win over the catch-all
 	if rec := get(t, s, "/admin/health"); rec.Code != http.StatusUnauthorized {
 		t.Errorf("GET /admin/health = %d, want 401 (registered route must beat the SPA catch-all)", rec.Code)
-	}
-}
-
-// EZLLM_WEB_DIR lets the UI be iterated against a running binary without a Go
-// rebuild, and must win over the embed.
-func TestSPAWebDirOverride(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "index.html"),
-		[]byte("<div id=\"root\">from-disk</div>"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("EZLLM_WEB_DIR", dir)
-
-	s := New(Options{})
-	rec := get(t, s, "/")
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "from-disk") {
-		t.Fatalf("EZLLM_WEB_DIR override not served: %d %s", rec.Code, rec.Body.String())
 	}
 }

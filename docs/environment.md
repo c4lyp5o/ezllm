@@ -21,9 +21,10 @@ and data location.
 1. **Usage timezone** — choose it in Settings → General, or set
    **`EZLLM_USAGE_TZ`** to enforce it from the deployment. Use an IANA name
    (`Europe/Berlin`, `America/New_York`, `Asia/Kuala_Lumpur`). It controls
-   report days, model rules set to `instance`, and daily price/backup schedules.
-   An explicit rule timezone remains independent; client-token budgets retain
-   their server-local boundaries. An environment override locks the dashboard
+   report days, model rules set to `instance`, client-token budget days and
+   date-only token expiries, daily price/backup schedules and log timestamps
+   (it is the only timezone setting; `TZ` is ignored). An explicit rule
+   timezone remains independent. An environment override locks the dashboard
    control. Without an override, saved settings and YAML are considered before
    UTC; an unresolvable effective name stops boot.
 2. **`EZLLM_DASHBOARD_PASSWORD_FILE`** (or `EZLLM_DASHBOARD_PASSWORD`) — the
@@ -59,21 +60,20 @@ provider key unreadable. See [master-key-runbook.md](master-key-runbook.md).
 |---|---|---|
 | `EZLLM_ADDR` | config `listen` (loopback); image: `0.0.0.0:20129` | Listen address. `-addr` overrides it. |
 | `EZLLM_DATA_DIR` | config `data_dir` (`data`); image: `/data` | Ledger and data location. |
-| `EZLLM_USAGE_TZ` | saved setting → YAML `usage_timezone` → UTC | Deployment override for report days, inherited model-rule windows/caps and daily schedules; locks the dashboard control. An unresolvable name fails boot. Report `?tz=` overrides the default grouping timezone. |
+| `EZLLM_USAGE_TZ` | saved setting → YAML `usage_timezone` → UTC | The one timezone setting, as a deployment override: report days, inherited model-rule windows/caps, client-token budgets and date-only expiries, daily schedules and log timestamps; locks the dashboard control. An unresolvable name fails boot. Report `?tz=` overrides the default grouping timezone. |
 | `EZLLM_LOG_LEVEL` | `info` | `debug` \| `info` \| `warn` \| `error`. Env-only (needed before the config is read); an unknown value logs a warning and uses `info`. The effective value is stated at boot. |
 | `EZLLM_LOG_COLOR` | `auto` | `auto` (color only on a terminal) \| `always` \| `never`. |
 | `EZLLM_LOG_FORMAT` | `console` | `console` \| `json`. JSON emits one object per line for a collector; the console format is for `docker logs`. See [logging.md](logging.md). |
 | `NO_COLOR` | unset | Any value disables color under `auto`. |
 | `EZLLM_TRUSTED_PROXIES` | unset | Comma-separated IPs/CIDRs of reverse proxies in front of ezllm. The sign-in/setup rate limiter reads `X-Forwarded-For` only from these; unset, it keys on the socket peer. Set it behind any proxy, or every client shares the proxy's limit. |
-| `EZLLM_WEB_DIR` | unset (embedded `web/dist`) | Serve the dashboard from a directory of built assets instead, to iterate on the UI without a Go rebuild. |
-| `TZ` | image: `Asia/Kuala_Lumpur` | Server-local clock used by log timestamps and existing client-token budget boundaries. Report defaults, inherited model rules and schedules use the effective usage timezone. |
+| `TZ` | not used | ezllm ignores the process timezone. `EZLLM_USAGE_TZ` (or the dashboard/YAML setting) is the one timezone: report days, model rules, client-token budgets, schedules and log timestamps. Before 2.0.0 `TZ` set log timestamps and client-token budgets, and the image set it to `Asia/Kuala_Lumpur`. |
 
 ## Secrets
 
 | Variable | Default | What it does |
 |---|---|---|
 | `EZLLM_MASTER_KEY` | unset | Master key for at-rest encryption of provider keys. Wins over the file. |
-| `EZLLM_MASTER_KEY_FILE` | `~/.hermes/secrets/ezllm-master.key` (data dir when there is no usable home); compose: `/data/ezllm-master.key` | Master key file; generated on first boot. Do not change it on an existing install without moving the key. |
+| `EZLLM_MASTER_KEY_FILE` | `<data_dir>/ezllm-master.key` | Master key file; generated on first boot. Before 2.0.0 the default was `~/.hermes/secrets/ezllm-master.key`; a key found there refuses the boot until it is moved (see [master-key-runbook.md](master-key-runbook.md)). Do not change it on an existing install without moving the key. |
 | `EZLLM_DASHBOARD_PASSWORD` | unset | First dashboard password (at least 12 characters), used only while setup is pending. Never overwrites a password already set. |
 | `EZLLM_DASHBOARD_PASSWORD_FILE` | unset | Same, read from a file (Docker/compose secrets); one trailing newline is trimmed. The plain variable wins. |
 
@@ -82,7 +82,6 @@ provider key unreadable. See [master-key-runbook.md](master-key-runbook.md).
 | Variable | Default | What it does |
 |---|---|---|
 | `EZLLM_TRANSLATION_ENABLED` | saved setting → YAML → on | The one switch for wire-protocol translation (pairwise translators and the universal matrix). `false` turns it off without a rebuild. Non-boolean values fail the boot. See [translation-runbook.md](translation-runbook.md). |
-| `EZLLM_TRANSLATION_UNIVERSAL_ENABLED` | unset | **Deprecated** (merged into `EZLLM_TRANSLATION_ENABLED`). Still honored when the new variable is unset, with a warning at boot. |
 | `EZLLM_COMBO_AUTOPROBE` | saved setting → YAML `automatic_probing` → on | An explicit value locks the dashboard control. `off` disables automatic combo-hop and free-model probes; manual probes remain available. |
 | `EZLLM_PRICE_REFRESH` | saved setting → YAML `price_refresh` → on | An explicit value locks the dashboard control. `off` stops scheduled price refresh (boot + daily); manual refresh remains available. See [pricing-runbook.md](pricing-runbook.md). |
 
@@ -93,8 +92,9 @@ Setup and operation: [claude-bridge-runbook.md](claude-bridge-runbook.md).
 | Variable | Default | What it does |
 |---|---|---|
 | `EZLLM_CLAUDE_BRIDGE` | off | `on` starts the loopback surface. Enabled without a usable CLI or login, the boot fails. |
-| `EZLLM_CLAUDE_BIN` | `/opt/claude/claude` | Official Claude Code CLI binary inside the container (compose mounts it here). |
-| `EZLLM_CLAUDE_CONFIG_DIR` | `/claude-sub` | Subscription login directory inside the container (compose mounts it here). |
+| `EZLLM_CLAUDE_BIN` | `/opt/claude-bridge/current/claude` | Official Claude Code CLI binary inside the container: the updater-managed bridge root mounted at `/opt/claude-bridge`. Before 2.0.0 the default was `/opt/claude/claude`. |
+| `EZLLM_CLAUDE_HOME` | `/claude-sub` | Subscription login directory inside the container (compose mounts it here); passed to the CLI as `CLAUDE_CONFIG_DIR`. Named `EZLLM_CLAUDE_CONFIG_DIR` before 2.0.0; the old name now fails the boot. |
+| `EZLLM_CLAUDE_BRIDGE_CONCURRENCY` | `1` | Concurrent Claude CLI processes; a positive integer, anything else fails the boot. Every bridge defaults to 1 (before 2.0.0: 2, and fixed for Claude). |
 | `EZLLM_CLAUDE_BRIDGE_ADDR` | `127.0.0.1:8790` | Bridge listen address; non-loopback addresses are refused. |
 | `EZLLM_CLAUDE_BRIDGE_TOKEN_FILE` | `/data/claude-bridge.token` | Shared secret for the account key; generated (0600) when missing. |
 | `USER`, `LOGNAME` | unset | Both must be set when the bridge is on (the CLI's login check reads process identity). |
@@ -102,17 +102,17 @@ Setup and operation: [claude-bridge-runbook.md](claude-bridge-runbook.md).
 
 ## Codex (ChatGPT subscription) bridge
 
-Setup, platform requirements and the lockdown: [codex-bridge-runbook.md](codex-bridge-runbook.md). Linux only.
+Setup, platform requirements and the lockdown: [codex-bridge-runbook.md](codex-bridge-runbook.md). Linux only. Every child runs Codex's `workspace-write` policy in its own temp directory; `EZLLM_CODEX_SANDBOX` was removed in 2.0.0 and now fails the boot.
 
 | Variable | Default | What it does |
 |---|---|---|
 | `EZLLM_CODEX_BRIDGE` | off | `on` starts the loopback surface. Enabled without a usable CLI, login or required app-server methods, the boot fails. |
-| `EZLLM_CODEX_BIN` | `/opt/codex/bin/codex` | Official Codex CLI binary inside the container (compose mounts the release directory at `/opt/codex`). |
+| `EZLLM_CODEX_BIN` | `/opt/codex-bridge/current/bin/codex` | Official Codex CLI binary inside the container: the updater-managed bridge root mounted at `/opt/codex-bridge`. Before 2.0.0 the default was `/opt/codex/bin/codex`. |
 | `EZLLM_CODEX_HOME` | `/codex-sub` | `CODEX_HOME` holding the subscription login (compose mounts it here). |
 | `EZLLM_CODEX_BRIDGE_ADDR` | `127.0.0.1:8791` | Bridge listen address; non-loopback addresses are refused. |
 | `EZLLM_CODEX_BRIDGE_TOKEN_FILE` | `/data/codex-bridge.token` | Shared secret for the account key; generated (0600) when missing. |
-| `EZLLM_CODEX_BRIDGE_CONCURRENCY` | `2` | Concurrent Codex children; a positive integer, anything else fails the boot. |
-| `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK` | unset | `on` allows client tools on a host without Landlock. Read the runbook's platform section before setting it. |
+| `EZLLM_CODEX_BRIDGE_CONCURRENCY` | `1` | Concurrent Codex children; a positive integer, anything else fails the boot. |
+| `EZLLM_CODEX_BRIDGE_CACHE` | on where supported | Unset, empty-template forks are used whenever the CLI supports them; otherwise the original path is used and `/status` reports why. `on` requires support; `off` opts out. `auto` was removed in 2.0.0 and, like any other value, fails startup. No idle CLI workers; bounded native parent retention and cleanup. Set before startup; recreate containers to change. |
 
 ## Antigravity (Google subscription) bridge
 
@@ -121,41 +121,45 @@ Setup and the login that must avoid the desktop keyring: [agy-bridge-runbook.md]
 | Variable | Default | What it does |
 |---|---|---|
 | `EZLLM_AGY_BRIDGE` | off | `on` starts the loopback surface. Enabled without a usable CLI, a token file or a working `agy models`, the boot fails. |
-| `EZLLM_AGY_BIN` | `/opt/agy/agy` | Official Antigravity CLI binary inside the container (compose mounts a pinned copy here). |
+| `EZLLM_AGY_BIN` | `/opt/agy-bridge/current/agy` | Official Antigravity CLI binary inside the container: the updater-managed bridge root mounted at `/opt/agy-bridge`. Before 2.0.0 the default was `/opt/agy/agy`. |
 | `EZLLM_AGY_HOME` | `/agy-sub` | `HOME` for the CLI: holds `.gemini/antigravity-cli/antigravity-oauth-token` (compose mounts the login here, read-write). |
 | `EZLLM_AGY_BRIDGE_ADDR` | `127.0.0.1:8792` | Bridge listen address; non-loopback addresses are refused. |
 | `EZLLM_AGY_BRIDGE_TOKEN_FILE` | `/data/agy-bridge.token` | Shared secret for the account key; generated (0600) when missing. |
-| `EZLLM_AGY_BRIDGE_CONCURRENCY` | `2` | Concurrent `agy` children (~207 MB each); a positive integer, anything else fails the boot. |
+| `EZLLM_AGY_BRIDGE_CONCURRENCY` | `1` | Concurrent `agy` children (~207 MB each); a positive integer, anything else fails the boot. |
+| `EZLLM_AGY_EXPERIMENTAL_TOOLS` | off | `on` enables the structured-output caller-tool adapter. Requires CLI `--json-schema`. The calling harness executes tools; no ACP/MCP or persistent process. See the Antigravity runbook for limitations. |
+| `EZLLM_AGY_BRIDGE_CACHE` | on when tools are on | Named `EZLLM_AGY_BRIDGE_SESSION_CACHE` before 2.0.0 (the old name fails the boot). Exact-history conversation resume for tool-adapter requests. Unset, it is on whenever experimental tools are on and the CLI supports `--conversation`; an explicit `on` without either fails the boot; `off` disables it. Before 2.0.0 it was opt-in. Retains bounded metadata/private workspaces, no idle CLI processes. Complete caller tool-result groups can resume. Restart to change. |
 
-## GitHub Copilot CLI bridge
+## GitHub Copilot subscription bridge
 
 The OAuth provider and its two variables (`GITHUB_COPILOT_CLI_VERSION`,
 `GITHUB_OAUTH_CLIENT_ID`) are deleted — nothing reads them. The login is the
 CLI's own, so there is no client id to configure. Runbook:
-`docs/copilot-cli-bridge-runbook.md`.
+`docs/copilot-bridge-runbook.md`.
 
 | Variable | Default | What it does |
 |---|---|---|
 | `EZLLM_COPILOT_BRIDGE` | off | `on` starts the loopback surface; without it the provider add answers 409 naming this variable. |
-| `EZLLM_COPILOT_BRIDGE_WARM_POOL` | `off` | Opt-in CLI process reuse with fresh sessions; `on`/`true`/`1` enables it. Existing concurrency and queue limits apply. Restart to change. |
-| `EZLLM_COPILOT_BIN` | `/opt/copilot/copilot` | The GitHub Copilot CLI binary. |
-| `EZLLM_COPILOT_HOME` | `/copilot-home` | `COPILOT_HOME` for the CLI — the directory its login lives in (mount it read-write; the CLI writes session state). |
-| `EZLLM_COPILOT_BRIDGE_CONCURRENCY` | `2` | Concurrent Copilot CLI children; a positive integer, anything else fails the boot. |
+| `EZLLM_COPILOT_BRIDGE_WARM_POOL` | `on` | CLI process reuse; sessions are fresh unless session caching is enabled; `off`/`false`/`0` disables it. Before 2.0.0 it was opt-in. Existing concurrency and queue limits apply. Restart to change. |
+| `EZLLM_COPILOT_BRIDGE_CACHE` | follows warm pool | Named `EZLLM_COPILOT_BRIDGE_SESSION_CACHE` before 2.0.0 (the old name fails the boot). Exact-history reuse of completed native conversations. Unset, it follows the warm pool; an explicit `on` without the pool fails the boot; `off` disables it. Before 2.0.0 it was opt-in. Active tool-result continuations, images and `auto` use fresh sessions. Existing worker expiry and a 1 MiB history bound apply. Restart to change. |
+| `EZLLM_COPILOT_BIN` | `/opt/copilot-bridge/current/copilot` | The GitHub Copilot CLI binary: the updater-managed bridge root mounted at `/opt/copilot-bridge`. Before 2.0.0 the default was `/opt/copilot/copilot`. |
+| `EZLLM_COPILOT_HOME` | `/copilot-sub` | `COPILOT_HOME` for the CLI — the bridge's dedicated login directory, mounted from `~/.copilot-sub` (read-write; the CLI writes session state). Before 2.0.0 the default was `/copilot-home`. |
+| `EZLLM_COPILOT_BRIDGE_CONCURRENCY` | `1` | Concurrent Copilot CLI children; a positive integer, anything else fails the boot. |
 | `EZLLM_COPILOT_BRIDGE_QUEUE` | `8` | Requests allowed to wait for a slot; past it the bridge answers 429 `queue_full` with `Retry-After: 5`. |
 | `EZLLM_COPILOT_BRIDGE_TIMEOUT` | `300s` | Per-turn limit, a Go duration of at least `1s`. |
 | `EZLLM_COPILOT_BRIDGE_ADDR` | `127.0.0.1:8793` | Listen address; non-loopback is refused. |
-| `EZLLM_COPILOT_BRIDGE_TOKEN_FILE` | — (required) | Shared secret for the account key; generated (0600) when missing. Boot refuses without a path. |
+| `EZLLM_COPILOT_BRIDGE_TOKEN_FILE` | `/data/copilot-bridge.token` | Shared secret for the account key; generated (0600) when missing. Before 2.0.0 there was no default and boot refused without a path. |
 
 ## Compose-only
 
-Substituted into `compose.example.yml`; the binary never reads them. Bridge
-mount paths are written into your `compose.yml` directly.
+Substituted into `compose.example.yml`; the binary never reads them. The data
+directory and bridge mount paths are written into your `compose.yml` directly
+(`EZLLM_DATA` was removed in 2.0.0; inside the container the path is always
+`EZLLM_DATA_DIR`, `/data`).
 
 | Variable | Default | Used for |
 |---|---|---|
 | `UID`, `GID` | `1000` | Container user. |
 | `EZLLM_PORT` | `20129` | Published host port. |
-| `EZLLM_DATA` | `./data` | Host directory mounted at `/data`. |
 
 ## Tests only
 
@@ -197,3 +201,21 @@ secret require a restart to change.
 
 See [settings-runbook.md](settings-runbook.md) for live-update behavior and
 [recovery-runbook.md](recovery-runbook.md) for encrypted offline recovery.
+
+
+## Request admission (configuration YAML)
+
+`request_limits.global_inflight` defaults to 32,
+`request_limits.per_client_inflight` to 8 and
+`request_limits.body_memory_mib` to 256. These are YAML settings, not environment
+variables. All must be positive and at most 4096; per-client concurrency cannot
+exceed global concurrency, and the memory budget must cover `max_body_mib`.
+They cannot be disabled with zero. Configure them before startup.
+
+Admission runs after authentication and before reading inference bodies. It
+reserves the declared `Content-Length`, or a whole allowed body when the length
+is unknown (chunked input), shrinks to the actual body size after completion and retains that reservation until the
+handler/stream ends. Excess requests receive 429 with `Retry-After: 1`; there is
+no unbounded waiting queue. Native CLI concurrency limits continue to apply too.
+The budget counts retained input bytes, not JSON object overhead, response
+buffers or CLI processes; choose limits appropriate to measured process memory.

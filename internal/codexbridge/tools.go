@@ -15,11 +15,14 @@ import (
 // to the stateless transcript replay.
 
 type parkedTurn struct {
-	c     *child
-	st    *turnState
-	ids   []string
-	at    time.Time
-	timer *time.Timer
+	caller     string
+	hasHistory bool
+	parentHash [32]byte
+	c          *child
+	st         *turnState
+	ids        []string
+	at         time.Time
+	timer      *time.Timer
 }
 
 func (r *Runner) toolHold() time.Duration {
@@ -37,15 +40,13 @@ func (r *Runner) maxParked() int {
 }
 
 // park registers a stopped turn under each of its pending call ids.
-func (r *Runner) park(c *child, st *turnState, calls []ToolCall) {
-	pt := &parkedTurn{c: c, st: st, at: time.Now()}
-	for _, call := range calls {
-		pt.ids = append(pt.ids, call.ID)
-	}
+func (r *Runner) park(c *child, st *turnState, res Result) {
+	calls := res.ToolCalls
+	pt := &parkedTurn{c: c, st: st, at: time.Now(), caller: st.caller, hasHistory: st.hasHistory, parentHash: st.historyHash}
 	r.pmu.Lock()
 	if r.shut {
 		r.pmu.Unlock()
-		c.close() // shutting down: nothing will ever resume it
+		c.dispose() // shutting down: nothing will ever resume it
 		return
 	}
 	if r.parked == nil {
@@ -57,47 +58,95 @@ func (r *Runner) park(c *child, st *turnState, calls []ToolCall) {
 		r.unregister(oldest)
 		evict = append(evict, oldest)
 	}
+	// A CLI may recycle native IDs in another child. Never overwrite another
+	// parked conversation; aliases are client-facing only, replies use RPC IDs.
+	st.mu.Lock()
+	for i := range calls {
+		original := calls[i].ID
+		if r.idParked(original) {
+			alias := "call_" + randomHex(16)
+			for r.idParked(alias) {
+				alias = "call_" + randomHex(16)
+			}
+			rpcID := st.replyTo[original]
+			delete(st.replyTo, original)
+			st.replyTo[alias] = rpcID
+			calls[i].ID = alias
+		}
+		pt.ids = append(pt.ids, calls[i].ID)
+	}
+	if st.hasHistory {
+		pt.parentHash = assistantHash(st.historyHash, res)
+	}
+	st.mu.Unlock()
 	for _, id := range pt.ids {
-		r.parked[id] = pt
+		r.parked[parkKey(pt.caller, id)] = pt
 	}
 	pt.timer = time.AfterFunc(r.toolHold(), func() {
 		r.pmu.Lock()
-		live := r.parked[pt.ids[0]] == pt
+		live := r.parked[parkKey(pt.caller, pt.ids[0])] == pt
 		if live {
 			r.unregister(pt)
 		}
 		r.pmu.Unlock()
 		if live {
 			r.logf("codex-bridge: parked tool turn expired without results", "calls", len(pt.ids))
-			pt.c.close()
+			pt.c.dispose()
 		}
 	})
 	r.pmu.Unlock()
 	for _, e := range evict {
 		r.logf("codex-bridge: parked tool turn evicted (MaxParked)", "calls", len(e.ids))
-		e.c.close()
+		e.c.dispose()
 	}
 }
 
-// takeParked removes and returns the parked turn these results answer.
-func (r *Runner) takeParked(results map[string]string) *parkedTurn {
-	r.pmu.Lock()
-	defer r.pmu.Unlock()
-	for id := range results {
-		if pt, ok := r.parked[id]; ok {
-			r.unregister(pt)
-			pt.timer.Stop()
-			return pt
+// parkKey scopes a parked turn to its authenticated caller. A caller can only
+// ever find its own parked turns: another caller's call id, however obtained,
+// matches nothing and falls back to the stateless transcript replay.
+func parkKey(caller, id string) string { return caller + "\x00" + id }
+
+// idParked reports whether any caller's parked turn already uses id; pmu must
+// be held. Lookups are scoped per caller, but client-facing ids stay unique
+// across callers so a recycled native id never shows up twice. MaxParked bounds
+// the scan to a handful of turns.
+func (r *Runner) idParked(id string) bool {
+	for pt := range r.uniqueParked() {
+		for _, used := range pt.ids {
+			if used == id {
+				return true
+			}
 		}
 	}
-	return nil
+	return false
+}
+
+// takeParked removes and returns the parked turn these results answer.
+func (r *Runner) takeParked(req Request) (*parkedTurn, error) {
+	r.pmu.Lock()
+	defer r.pmu.Unlock()
+	for id := range req.ToolResults {
+		if pt, ok := r.parked[parkKey(req.CallerID, id)]; ok {
+			hash := req.toolParentHash
+			if !req.hasHistory {
+				hash = inputHash(req.Input)
+			}
+			if pt.hasHistory != req.hasHistory || pt.parentHash != hash {
+				return nil, nil
+			}
+			r.unregister(pt)
+			pt.timer.Stop()
+			return pt, nil
+		}
+	}
+	return nil, nil
 }
 
 // unregister drops every id of pt; pmu must be held.
 func (r *Runner) unregister(pt *parkedTurn) {
 	for _, id := range pt.ids {
-		if r.parked[id] == pt {
-			delete(r.parked, id)
+		if key := parkKey(pt.caller, id); r.parked[key] == pt {
+			delete(r.parked, key)
 		}
 	}
 }
@@ -134,6 +183,9 @@ func (r *Runner) resume(ctx context.Context, pt *parkedTurn, req Request, sink f
 	st := pt.st
 	st.mu.Lock()
 	st.sink = sink
+	if req.hasHistory {
+		st.historyHash = req.historyHash
+	}
 	pending := st.replyTo
 	st.replyTo = map[string]json.RawMessage{}
 	st.calls = nil
@@ -157,18 +209,21 @@ func (r *Runner) resume(ctx context.Context, pt *parkedTurn, req Request, sink f
 
 	res, park, err := r.segment(ctx, pt.c, st)
 	if err != nil {
-		pt.c.close()
+		pt.c.dispose()
 		return Result{}, err
 	}
 	if park {
 		if !pt.c.release() {
-			pt.c.close()
+			pt.c.dispose()
 			return Result{}, r.childErr(ctx, pt.c, "turn", ctx.Err())
 		}
-		r.park(pt.c, st, res.ToolCalls)
+		r.park(pt.c, st, res)
 		return res, nil
 	}
-	pt.c.close()
+	if pt.c.lease != nil && ctx.Err() == nil && validTemplateUsage(pt.st.usage) {
+		pt.c.lease.good.Store(true)
+	}
+	pt.c.dispose()
 	return res, nil
 }
 
@@ -177,6 +232,7 @@ func (r *Runner) resume(ctx context.Context, pt *parkedTurn, req Request, sink f
 // outlive their HTTP request by design, so an HTTP drain alone never reached
 // them. Active runs end through their own request contexts.
 func (r *Runner) Shutdown() {
+	r.shutdownTemplates()
 	r.pmu.Lock()
 	r.shut = true
 	var reap []*parkedTurn
@@ -187,6 +243,7 @@ func (r *Runner) Shutdown() {
 	}
 	r.pmu.Unlock()
 	for _, pt := range reap {
-		pt.c.close()
+		pt.c.dispose()
 	}
+	r.waitTemplateCleanup()
 }

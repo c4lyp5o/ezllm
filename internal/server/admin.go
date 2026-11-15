@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strconv"
@@ -53,7 +54,8 @@ func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 			}
 		}
 		if s.db != nil && s.db.DashboardSession(r.Context(), token) {
-			ctx := context.WithValue(r.Context(), rolesKey{}, []string{"admin"})
+			ctx := proxy.WithCaller(r.Context(), "dashboard:"+store.HashToken(token))
+			ctx = context.WithValue(ctx, rolesKey{}, []string{"admin"})
 			ctx = context.WithValue(ctx, clientKey{}, "dashboard")
 			next(w, r.WithContext(ctx))
 			return
@@ -62,8 +64,9 @@ func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 			if !hasRole(r, "admin") {
 				// A client token without the admin role is a misconfiguration
 				// someone will hunt for; name the path, never the token.
-				s.log.Debug("admin refused", "why", "client token lacks the admin role",
-					"path", r.URL.Path)
+				if s.log.Enabled(r.Context(), slog.LevelDebug) {
+					s.log.Debug("admin refused", "why", "client token lacks the admin role", "path", logRequestPath(r))
+				}
 				writeErr(w, http.StatusForbidden, "forbidden", "admin role required")
 				return
 			}
@@ -78,20 +81,25 @@ const adminBodyMax = 1 << 20
 // decodeBody reads a bounded JSON body into dst. Unknown fields are rejected:
 // a typo'd field name silently ignored is how a "saved" setting never saves.
 func decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {
+	return decodeBodyLimit(w, r, dst, adminBodyMax)
+}
+
+// decodeBodyLimit shares validation and deadlines with smaller admin payloads.
+func decodeBodyLimit(w http.ResponseWriter, r *http.Request, dst any, max int64) bool {
 	// Lifted only after a clean read: on failure the deadline must stay, so
 	// net/http's post-handler drain of the unread body fails fast too
 	// (see limitBodyRead).
 	lift := limitBodyRead(w, adminBodyTimeout)
 	// An oversized body is refused, never truncated: the cut prefix would
 	// decode as the whole body.
-	body, tooLarge, err := readBody(r, adminBodyMax)
+	body, tooLarge, err := readBody(r, max)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid_request_error", "could not read body: "+err.Error())
 		return false
 	}
 	if tooLarge {
 		writeErr(w, http.StatusBadRequest, "invalid_request_error",
-			fmt.Sprintf("request body exceeds %d bytes", adminBodyMax))
+			fmt.Sprintf("request body exceeds %d bytes", max))
 		return false
 	}
 	dec := json.NewDecoder(bytes.NewReader(body))

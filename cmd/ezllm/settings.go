@@ -46,7 +46,7 @@ func operatorSettings(ctx context.Context, db *store.DB, c *config.Config) (*set
 		v.UsageTZ = raw
 		sources["usage_timezone"] = "environment"
 	}
-	if os.Getenv("EZLLM_TRANSLATION_ENABLED") != "" || os.Getenv("EZLLM_TRANSLATION_UNIVERSAL_ENABLED") != "" {
+	if os.Getenv("EZLLM_TRANSLATION_ENABLED") != "" {
 		sources["translation_enabled"] = "environment"
 	}
 	if raw := os.Getenv("EZLLM_PRICE_REFRESH"); raw != "" {

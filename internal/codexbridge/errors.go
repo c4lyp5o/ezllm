@@ -8,10 +8,11 @@ import (
 // NativeError is a failure with the status and OpenAI error type the client
 // receives. Message carries the CLI's own words; nothing is rewritten.
 type NativeError struct {
-	Status  int
-	Type    string
-	Code    string
-	Message string
+	BeforeInference bool // true only when no turn/start has been dispatched
+	Status          int
+	Type            string
+	Code            string
+	Message         string
 }
 
 func (e *NativeError) Error() string { return e.Message }

@@ -98,13 +98,8 @@ const ANALYTICS_TABS = [
 const isAnalytics = (path: string) => (ANALYTICS_ROUTES as readonly string[]).some((p) => path === p || path.startsWith(`${p}/`));
 
 const LOGO = (
-  // The mark is a monogram "R" (same glyph as the favicon) — labelled here so
-  // it reads as the ezllm router instead of an unexplained letter.
-  <svg viewBox="0 0 24 24" className="h-5 w-5 text-accent" fill="none" stroke="currentColor" strokeWidth="1.8"
-    strokeLinecap="round" strokeLinejoin="round" role="img" aria-label="ezllm router mark">
-    <title>ezllm router mark</title>
-    <path d="M4 18V6h4.5a3.5 3.5 0 0 1 0 7H4m4.5 0L13 18" />
-  </svg>
+  // The shared ez mark (same image as the favicon and the ezconv app icon).
+  <img src="/icons/icon-192.png" alt="ezllm" width={20} height={20} className="h-5 w-5 rounded-[4px]" />
 );
 
 // The version beside the wordmark is the RUNNING server's, read from the

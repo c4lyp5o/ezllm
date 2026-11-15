@@ -1,0 +1,105 @@
+{
+  "date": "2026-11-14",
+  "cli_version": "0.167.0",
+  "model": "gpt-5.6-luna",
+  "reasoning_effort": "low",
+  "synthetic_only": true,
+  "independent_process_per_request": true,
+  "parent_deleted_via_native_api": true,
+  "records": [
+    {
+      "answer_pong": true,
+      "cache_hits": 0,
+      "case": "implemented_empty_template",
+      "ms": 2714,
+      "turn": 1,
+      "usage": {
+        "inputTokens": 12657,
+        "cachedInputTokens": 0,
+        "outputTokens": 5,
+        "reasoningOutputTokens": 0
+      }
+    },
+    {
+      "answer_pong": true,
+      "cache_hits": 1,
+      "case": "implemented_empty_template",
+      "ms": 2239,
+      "turn": 2,
+      "usage": {
+        "inputTokens": 12657,
+        "cachedInputTokens": 12416,
+        "outputTokens": 5,
+        "reasoningOutputTokens": 0
+      }
+    },
+    {
+      "cache_hits": 0,
+      "case": "implemented_fork_tool_continuation",
+      "correct": true,
+      "final_usage": {
+        "inputTokens": 6791,
+        "cachedInputTokens": 3200,
+        "outputTokens": 52,
+        "reasoningOutputTokens": 13
+      },
+      "initial_usage": {
+        "inputTokens": 0,
+        "cachedInputTokens": 0,
+        "outputTokens": 0,
+        "reasoningOutputTokens": 0
+      },
+      "landlock": true,
+      "turn": 1
+    },
+    {
+      "cache_hits": 1,
+      "case": "implemented_fork_tool_continuation",
+      "correct": true,
+      "final_usage": {
+        "inputTokens": 6799,
+        "cachedInputTokens": 6400,
+        "outputTokens": 60,
+        "reasoningOutputTokens": 21
+      },
+      "initial_usage": {
+        "inputTokens": 0,
+        "cachedInputTokens": 0,
+        "outputTokens": 0,
+        "reasoningOutputTokens": 0
+      },
+      "landlock": true,
+      "turn": 2
+    }
+  ],
+  "auto_default_validation": {
+    "date": "2026-11-14",
+    "ezllm_version": "1.14.0",
+    "cache_env_unset": true,
+    "landlock": true,
+    "model": "gpt-5.6-luna",
+    "verdict": {
+      "bridge": "codex",
+      "ok": true,
+      "policy": {
+        "approval_policy": "never",
+        "cache": "auto",
+        "sandbox": "read-only"
+      },
+      "version": "0.167.0",
+      "live": true,
+      "problems": []
+    },
+    "bridge_requests": 4,
+    "native_turn_starts": 3,
+    "startup_selection": {
+      "mode": "auto",
+      "enabled": true
+    },
+    "explicit_opt_out": {
+      "mode": "off",
+      "enabled": false,
+      "reason": "disabled by operator"
+    }
+  }
+}

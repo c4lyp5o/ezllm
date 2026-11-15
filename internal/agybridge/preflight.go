@@ -38,9 +38,11 @@ type Model struct {
 
 // Preflight is what boot learned about the CLI.
 type Preflight struct {
-	Version   string
-	Qualified bool
-	Models    []Model
+	Version            string
+	Qualified          bool
+	Models             []Model
+	StructuredOutput   bool
+	ConversationResume bool
 }
 
 // RunPreflight proves the CLI is the one this bridge speaks to and that the
@@ -65,6 +67,8 @@ func RunPreflight(ctx context.Context, bin, home string) (Preflight, error) {
 	p.Qualified = p.Version == QualifiedVersion
 
 	help, _ := run("--help")
+	p.StructuredOutput = strings.Contains(help, "--json-schema ")
+	p.ConversationResume = strings.Contains(help, "--conversation ")
 	for _, f := range RequiredFlags {
 		if !strings.Contains(help, f+" ") {
 			return p, fmt.Errorf("agy bridge: agy %s no longer offers %s; this bridge was qualified on %s — pin that release (docs/agy-bridge-runbook.md)", p.Version, f, QualifiedVersion)

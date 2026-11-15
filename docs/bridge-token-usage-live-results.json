@@ -1,0 +1,456 @@
+{
+  "date": "2026-11-14",
+  "scope": "Synthetic requests through current-checkout bridge HTTP handlers and installed native CLIs, with numeric-only native stdout capture. No production gateway routing or ledger insertion.",
+  "versions": {
+    "claude": "2.1.311",
+    "codex": "0.167.0",
+    "copilot": "1.0.105"
+  },
+  "successful_inference_requests": 11,
+  "pre_inference_rejections": 1,
+  "shape": {
+    "history_cycles": 50,
+    "tools": 24,
+    "messages_anthropic": 201,
+    "messages_openai": 202,
+    "synthetic_only": true
+  },
+  "results": [
+    {
+      "answer_pong": true,
+      "bridge": "claude",
+      "case": "short",
+      "elapsed_ms": 2868,
+      "failed": false,
+      "message_count": 1,
+      "model": "claude-haiku-5-5",
+      "request_bytes": 340,
+      "status": 200,
+      "tool_call_chunks": 0,
+      "usage_events": [
+        {
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "inference_geo": "global",
+          "input_tokens": 103,
+          "output_tokens": 4,
+          "service_tier": "standard",
+          "speed": "standard"
+        },
+        {
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "input_tokens": 103,
+          "output_tokens": 4
+        }
+      ],
+      "native": {
+        "input": 103,
+        "read": 0,
+        "write": 0,
+        "output": 4,
+        "reasoning": 0,
+        "native_turns": 1
+      },
+      "missing_wire_thinking_tokens_before_fix": 0
+    },
+    {
+      "answer_pong": true,
+      "bridge": "claude",
+      "case": "hermes_shaped",
+      "elapsed_ms": 2932,
+      "failed": false,
+      "message_count": 201,
+      "model": "claude-haiku-5-5",
+      "request_bytes": 42406,
+      "status": 200,
+      "tool_call_chunks": 0,
+      "usage_events": [
+        {
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 2615,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "cache_creation_input_tokens": 2615,
+          "cache_read_input_tokens": 0,
+          "inference_geo": "global",
+          "input_tokens": 9652,
+          "output_tokens": 3,
+          "service_tier": "standard",
+          "speed": "standard"
+        },
+        {
+          "cache_creation_input_tokens": 2615,
+          "cache_read_input_tokens": 0,
+          "input_tokens": 9652,
+          "output_tokens": 25
+        }
+      ],
+      "native": {
+        "input": 9652,
+        "read": 0,
+        "write": 2615,
+        "output": 25,
+        "reasoning": 21,
+        "native_turns": 1
+      },
+      "missing_wire_thinking_tokens_before_fix": 21
+    },
+    {
+      "answer_pong": true,
+      "bridge": "claude",
+      "case": "hermes_shaped_repeat",
+      "elapsed_ms": 2500,
+      "failed": false,
+      "message_count": 201,
+      "model": "claude-haiku-5-5",
+      "request_bytes": 42406,
+      "status": 200,
+      "tool_call_chunks": 0,
+      "usage_events": [
+        {
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 2615,
+          "inference_geo": "global",
+          "input_tokens": 9652,
+          "output_tokens": 4,
+          "service_tier": "standard",
+          "speed": "standard"
+        },
+        {
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 2615,
+          "input_tokens": 9652,
+          "output_tokens": 4
+        }
+      ],
+      "native": {
+        "input": 9652,
+        "read": 2615,
+        "write": 0,
+        "output": 4,
+        "reasoning": 0,
+        "native_turns": 1
+      },
+      "missing_wire_thinking_tokens_before_fix": 0
+    },
+    {
+      "answer_pong": true,
+      "bridge": "codex",
+      "case": "short",
+      "elapsed_ms": 2527,
+      "failed": false,
+      "message_count": 2,
+      "model": "gpt-5.6-luna",
+      "request_bytes": 420,
+      "status": 200,
+      "tool_call_chunks": 0,
+      "usage_events": [
+        {
+          "completion_tokens": 5,
+          "completion_tokens_details": {
+            "reasoning_tokens": 0
+          },
+          "prompt_tokens": 3261,
+          "prompt_tokens_details": {
+            "cached_tokens": 2176
+          },
+          "total_tokens": 3266
+        }
+      ],
+      "native": {
+        "input_inclusive": 3261,
+        "read": 2176,
+        "write": 0,
+        "output": 5,
+        "reasoning": 0
+      },
+      "missing_wire_cache_write_tokens_before_fix": 0
+    },
+    {
+      "answer_pong": true,
+      "bridge": "codex",
+      "case": "hermes_shaped",
+      "elapsed_ms": 2618,
+      "failed": false,
+      "message_count": 202,
+      "model": "gpt-5.6-luna",
+      "request_bytes": 43532,
+      "status": 200,
+      "tool_call_chunks": 0,
+      "usage_events": [
+        {
+          "completion_tokens": 16,
+          "completion_tokens_details": {
+            "reasoning_tokens": 9
+          },
+          "prompt_tokens": 12587,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "total_tokens": 12603
+        }
+      ],
+      "native": {
+        "input_inclusive": 12587,
+        "read": 0,
+        "write": 0,
+        "output": 16,
+        "reasoning": 9
+      },
+      "missing_wire_cache_write_tokens_before_fix": 0
+    },
+    {
+      "answer_pong": true,
+      "bridge": "codex",
+      "case": "hermes_shaped_repeat",
+      "elapsed_ms": 2190,
+      "failed": false,
+      "message_count": 202,
+      "model": "gpt-5.6-luna",
+      "request_bytes": 43532,
+      "status": 200,
+      "tool_call_chunks": 0,
+      "usage_events": [
+        {
+          "completion_tokens": 5,
+          "completion_tokens_details": {
+            "reasoning_tokens": 0
+          },
+          "prompt_tokens": 12595,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "total_tokens": 12600
+        }
+      ],
+      "native": {
+        "input_inclusive": 12595,
+        "read": 0,
+        "write": 0,
+        "output": 5,
+        "reasoning": 0
+      },
+      "missing_wire_cache_write_tokens_before_fix": 0
+    },
+    {
+      "answer_pong": false,
+      "bridge": "copilot",
+      "case": "short",
+      "elapsed_ms": 0,
+      "failed": true,
+      "message_count": 2,
+      "model": "gpt-6-luna",
+      "request_bytes": 418,
+      "status": 400,
+      "tool_call_chunks": 0,
+      "usage_events": []
+    },
+    {
+      "answer_pong": true,
+      "bridge": "copilot",
+      "case": "short",
+      "elapsed_ms": 8612,
+      "failed": false,
+      "message_count": 2,
+      "model": "gpt-6-luna",
+      "request_bytes": 377,
+      "status": 200,
+      "tool_call_chunks": 0,
+      "usage_events": [
+        {
+          "completion_tokens": 17,
+          "completion_tokens_details": {
+            "reasoning_tokens": 10
+          },
+          "copilot_nano_aiu": 2110000,
+          "copilot_premium_requests": 1,
+          "prompt_tokens": 126,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "total_tokens": 143
+        }
+      ],
+      "native": {
+        "input": 126,
+        "read": 0,
+        "write": 0,
+        "output": 17,
+        "reasoning": 10,
+        "nano_aiu": 2110000
+      },
+      "missing_wire_cache_write_tokens_before_fix": 0
+    },
+    {
+      "answer_pong": true,
+      "bridge": "copilot",
+      "case": "hermes_shaped",
+      "elapsed_ms": 6511,
+      "failed": false,
+      "message_count": 202,
+      "model": "gpt-6-luna",
+      "request_bytes": 43489,
+      "status": 200,
+      "tool_call_chunks": 0,
+      "usage_events": [
+        {
+          "completion_tokens": 15,
+          "completion_tokens_details": {
+            "reasoning_tokens": 8
+          },
+          "copilot_nano_aiu": 93342500,
+          "copilot_premium_requests": 1,
+          "prompt_tokens": 7408,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "total_tokens": 7423
+        }
+      ],
+      "native": {
+        "input": 3,
+        "read": 0,
+        "write": 7405,
+        "output": 15,
+        "reasoning": 8,
+        "nano_aiu": 93342500
+      },
+      "missing_wire_cache_write_tokens_before_fix": 7405
+    },
+    {
+      "answer_pong": true,
+      "bridge": "copilot",
+      "case": "hermes_shaped_repeat",
+      "elapsed_ms": 4300,
+      "failed": false,
+      "message_count": 202,
+      "model": "gpt-6-luna",
+      "request_bytes": 43489,
+      "status": 200,
+      "tool_call_chunks": 0,
+      "usage_events": [
+        {
+          "completion_tokens": 15,
+          "completion_tokens_details": {
+            "reasoning_tokens": 8
+          },
+          "copilot_nano_aiu": 93342500,
+          "copilot_premium_requests": 1,
+          "prompt_tokens": 7408,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "total_tokens": 7423
+        }
+      ],
+      "native": {
+        "input": 3,
+        "read": 0,
+        "write": 7405,
+        "output": 15,
+        "reasoning": 8,
+        "nano_aiu": 93342500
+      },
+      "missing_wire_cache_write_tokens_before_fix": 7405
+    },
+    {
+      "answer_pong": true,
+      "bridge": "claude",
+      "case": "hermes_shaped_cache_markers",
+      "elapsed_ms": 2517,
+      "failed": false,
+      "message_count": 201,
+      "model": "claude-haiku-5-5",
+      "request_bytes": 42567,
+      "status": 200,
+      "tool_call_chunks": 0,
+      "usage_events": [
+        {
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 9648
+          },
+          "cache_creation_input_tokens": 9648,
+          "cache_read_input_tokens": 2615,
+          "inference_geo": "global",
+          "input_tokens": 4,
+          "output_tokens": 4,
+          "service_tier": "standard",
+          "speed": "standard"
+        },
+        {
+          "cache_creation_input_tokens": 9648,
+          "cache_read_input_tokens": 2615,
+          "input_tokens": 4,
+          "output_tokens": 26,
+          "output_tokens_details": {
+            "thinking_tokens": 22
+          }
+        }
+      ],
+      "native": {
+        "input": 4,
+        "read": 2615,
+        "write": 9648,
+        "output": 26,
+        "reasoning": 22,
+        "native_turns": 1
+      },
+      "missing_wire_thinking_tokens_before_fix": 0
+    },
+    {
+      "answer_pong": true,
+      "bridge": "claude",
+      "case": "hermes_shaped_repeat_cache_markers",
+      "elapsed_ms": 2522,
+      "failed": false,
+      "message_count": 201,
+      "model": "claude-haiku-5-5",
+      "request_bytes": 42567,
+      "status": 200,
+      "tool_call_chunks": 0,
+      "usage_events": [
+        {
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 12263,
+          "inference_geo": "global",
+          "input_tokens": 4,
+          "output_tokens": 4,
+          "service_tier": "standard",
+          "speed": "standard"
+        },
+        {
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 12263,
+          "input_tokens": 4,
+          "output_tokens": 4,
+          "output_tokens_details": {
+            "thinking_tokens": 0
+          }
+        }
+      ],
+      "native": {
+        "input": 4,
+        "read": 12263,
+        "write": 0,
+        "output": 4,
+        "reasoning": 0,
+        "native_turns": 1
+      },
+      "missing_wire_thinking_tokens_before_fix": 0
+    }
+  ]
+}

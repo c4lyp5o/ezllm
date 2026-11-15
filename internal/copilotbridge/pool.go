@@ -92,11 +92,39 @@ func (r *Runner) freshWorker(w *channelWorker) bool {
 		return true
 	}
 }
-func (r *Runner) takeWorker() (*channelWorker, error) {
+func (r *Runner) takeWorker() (*channelWorker, error) { return r.takeWorkerFor(nil) }
+func (w *channelWorker) stopIdle() {
+	if w.conn != nil && w.conn.completed != nil {
+		w.conn.deleteSession(w.conn.session)
+	}
+	w.stop()
+}
+
+// takeWorkerFor hands out a warm or new worker. Stale idle workers are
+// detached under poolMu but reaped after it is released: their session.delete
+// can block for deleteTimeout and must not stall every other pool operation.
+func (r *Runner) takeWorkerFor(turn *ChannelTurn) (*channelWorker, error) {
+	w, stale, err := r.takeWorkerLocked(turn)
+	for _, s := range stale {
+		go s.stopIdle()
+	}
+	return w, err
+}
+
+func (r *Runner) takeWorkerLocked(turn *ChannelTurn) (_ *channelWorker, stale []*channelWorker, _ error) {
 	r.poolMu.Lock()
 	defer r.poolMu.Unlock()
 	if r.closed {
-		return nil, errors.New("copilot-bridge: runner is closed")
+		return nil, nil, errors.New("copilot-bridge: runner is closed")
+	}
+	if turn != nil && r.SessionCacheEnabled() {
+		for i, w := range r.idleWorkers {
+			if _, ok := w.conn.completed.continuation(*turn); ok {
+				last := len(r.idleWorkers) - 1
+				r.idleWorkers[i], r.idleWorkers[last] = r.idleWorkers[last], w
+				break
+			}
+		}
 	}
 	for len(r.idleWorkers) > 0 {
 		n := len(r.idleWorkers) - 1
@@ -108,14 +136,14 @@ func (r *Runner) takeWorker() (*channelWorker, error) {
 		}
 		if r.freshWorker(w) {
 			w.stderr.Reset()
-			return w, nil
+			return w, stale, nil
 		}
 		delete(r.workers, w)
-		w.stop()
+		stale = append(stale, w)
 	}
 	st, err := os.Stat(r.Bin)
 	if err != nil {
-		return nil, toolsRefused("the CLI could not start", err)
+		return nil, stale, toolsRefused("the CLI could not start", err)
 	}
 	w := &channelWorker{born: time.Now(), binary: st, done: make(chan struct{})}
 	// No request context: an explicit lease cancellation or Close owns termination.
@@ -126,18 +154,18 @@ func (r *Runner) takeWorker() (*channelWorker, error) {
 	w.cmd.Stderr = &w.stderr
 	w.stdin, err = w.cmd.StdinPipe()
 	if err != nil {
-		return nil, err
+		return nil, stale, err
 	}
 	w.stdout, err = w.cmd.StdoutPipe()
 	if err != nil {
 		w.stdin.Close()
-		return nil, err
+		return nil, stale, err
 	}
 	began := time.Now()
 	if err = w.cmd.Start(); err != nil {
 		w.stdin.Close()
 		w.stdout.Close()
-		return nil, toolsRefused("the CLI could not start", err)
+		return nil, stale, toolsRefused("the CLI could not start", err)
 	}
 	r.observeStage("spawn", time.Since(began))
 	go func() { _ = w.cmd.Wait(); close(w.done) }()
@@ -146,7 +174,7 @@ func (r *Runner) takeWorker() (*channelWorker, error) {
 		r.workers = make(map[*channelWorker]bool)
 	}
 	r.workers[w] = true
-	return w, nil
+	return w, stale, nil
 }
 func (r *Runner) retireWorker(w *channelWorker) {
 	r.poolMu.Lock()
@@ -161,7 +189,10 @@ func (r *Runner) retireWorker(w *channelWorker) {
 	w.stop()
 }
 func (r *Runner) withPooledChannel(ctx context.Context, f func(*rpcConn) error) error {
-	w, err := r.takeWorker()
+	return r.withPooledTurn(ctx, nil, f)
+}
+func (r *Runner) withPooledTurn(ctx context.Context, turn *ChannelTurn, f func(*rpcConn) error) error {
+	w, err := r.takeWorkerFor(turn)
 	if err != nil {
 		return err
 	}
@@ -189,7 +220,7 @@ func (r *Runner) withPooledChannel(ctx context.Context, f func(*rpcConn) error) 
 	if r.closed || !r.freshWorker(w) {
 		delete(r.workers, w)
 		r.poolMu.Unlock()
-		w.stop()
+		w.stopIdle()
 		return nil
 	}
 	r.idleWorkers = append(r.idleWorkers, w)
@@ -210,7 +241,7 @@ func (r *Runner) withPooledChannel(ctx context.Context, f func(*rpcConn) error) 
 		}
 		r.poolMu.Unlock()
 		if found {
-			w.stop()
+			w.stopIdle()
 		}
 	})
 	r.poolMu.Unlock()
@@ -222,6 +253,10 @@ func (r *Runner) withPooledChannel(ctx context.Context, f func(*rpcConn) error) 
 func (r *Runner) Close() {
 	r.poolMu.Lock()
 	r.closed = true
+	idle := make(map[*channelWorker]bool)
+	for _, w := range r.idleWorkers {
+		idle[w] = true
+	}
 	workers := make([]*channelWorker, 0, len(r.workers))
 	for w := range r.workers {
 		workers = append(workers, w)
@@ -233,6 +268,10 @@ func (r *Runner) Close() {
 	r.idleWorkers = nil
 	r.poolMu.Unlock()
 	for _, w := range workers {
-		w.stop()
+		if idle[w] {
+			w.stopIdle()
+		} else {
+			w.stop()
+		}
 	}
 }

@@ -134,8 +134,10 @@ func attachCompressionMetrics(call *store.Call, res compress.Result) {
 	call.CompressionVersion = res.ProfileVersion
 	// Per-engine attribution (addendum #7): every stage that ran, with its
 	// before/after, as JSON. Empty when nothing ran — an empty column, never
-	// a fabricated "[]".
-	if len(res.Stages) > 0 {
+	// a fabricated "[]" — and empty when no stage changed anything: an
+	// all-zero list carries no attribution and was a third of the ledger's
+	// bytes. compression_ms still records the time spent.
+	if stagesChanged(res.Stages) {
 		if b, err := json.Marshal(res.Stages); err == nil {
 			call.CompressionStages = string(b)
 		}
@@ -153,6 +155,17 @@ func attachCompressionMetrics(call *store.Call, res compress.Result) {
 // compressionProfileOf is the ledger stamp for rows that never reached
 // applyCompression (an early error). It re-derives the skip reason so an
 // off/unknown-profile request still records WHY nothing ran.
+// stagesChanged reports whether any stage fired a rule, saved tokens or
+// changed the token count.
+func stagesChanged(stages []compress.StageStat) bool {
+	for _, st := range stages {
+		if st.Fired != 0 || st.Saved != 0 || st.Pre != st.Post {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) compressionProfileOf(r *http.Request, requested string) string {
 	prof, skip := s.compressionFor(r, requested)
 	return profileName(prof, skip)

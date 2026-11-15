@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -249,7 +250,7 @@ func TestServerChat(t *testing.T) {
 		Usage map[string]any `json:"usage"`
 	}
 	_ = json.NewDecoder(resp.Body).Decode(&out)
-	if resp.StatusCode != 200 || out.Choices[0].Message.Content != "pong" || out.Usage["prompt_tokens"] != 120.0 || out.Usage["completion_tokens"] != 30.0 {
+	if resp.StatusCode != 200 || out.Choices[0].Message.Content != "pong" || out.Usage["prompt_tokens"] != 200.0 || out.Usage["completion_tokens"] != 30.0 {
 		t.Fatalf("non-stream %d %+v", resp.StatusCode, out)
 	}
 
@@ -334,5 +335,31 @@ func TestCheckSettings(t *testing.T) {
 		if err := CheckSettings(write(body)); err == nil {
 			t.Errorf("%s accepted", body)
 		}
+	}
+}
+
+func TestServerErrorAfterGenerationCarriesUsage(t *testing.T) {
+	billed := &fakeExec{res: Result{Usage: Usage{InputTokens: 100, OutputTokens: 42}},
+		err: cacheError("cache_resume_invalid", "native conversation identity changed")}
+	srv := newTestServer(billed)
+	defer srv.Close()
+	resp := post(t, srv.URL, "tok", `{"model":"gemini-3.8-flash-high","messages":[{"role":"user","content":"hi"}]}`)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 502 || !strings.Contains(string(body), `"cache_resume_invalid"`) {
+		t.Fatalf("status %d body %s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), `"completion_tokens":42`) || !strings.Contains(string(body), `"prompt_tokens":100`) {
+		t.Fatalf("billed error lost its usage: %s", body)
+	}
+
+	unbilled := &fakeExec{err: cacheError("cache_closed", "conversation cache is closed")}
+	srv2 := newTestServer(unbilled)
+	defer srv2.Close()
+	resp = post(t, srv2.URL, "tok", `{"model":"gemini-3.8-flash-high","messages":[{"role":"user","content":"hi"}]}`)
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if strings.Contains(string(body), `"usage"`) {
+		t.Fatalf("error without generation invented usage: %s", body)
 	}
 }

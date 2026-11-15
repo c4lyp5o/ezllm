@@ -71,7 +71,6 @@ requests included; tools additionally switch the code-mode runtime on.
 | --- | --- | --- | --- |
 | Linux, kernel ≥ 5.13, Landlock enabled, container allows the syscalls | yes | ✅ | ✅ |
 | Linux without Landlock (old kernel, disabled LSM, or blocked by seccomp) | no | ✅ | ❌ — 400 `chat_tools_unsupported` |
-| Linux without Landlock + `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK=on` | no | ✅ | ✅ — weaker guarantee, see below |
 | macOS, Windows (native binaries) | — | ❌ bridge refuses to start | ❌ |
 | Docker on Linux, **default** seccomp profile (verified 2026-10-23, kernel 6.8) | yes | ✅ | ✅ |
 | Docker Desktop (Mac/Windows) | depends on its Linux VM kernel | check `/status` | check `/status` |
@@ -98,7 +97,7 @@ namespace, and the distroless container has no shell or curl:
 | field | values |
 | --- | --- |
 | `landlock` | `available (ABI <n>)` · `unavailable: <reason from the kernel>` |
-| `client_tools` | `enabled` · `disabled (no Landlock)` · `enabled without Landlock (operator override)` |
+| `client_tools` | `enabled` · `disabled (no Landlock)` · `disabled (code-mode host missing)` |
 
 ### What a client sees when tools are off
 
@@ -126,16 +125,87 @@ has Landlock — route it to another account, or fix the host.
   not run the container with `seccomp=unconfined` to get there: it removes
   far more protection than Landlock adds.
 
-### The override, and what you give up
+### No override
 
-`EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK=on` turns client tools on without Landlock.
-The bridge then relies **only** on Codex's own read-only policy to refuse
-`apply_patch` writes. That held in every spike run, but it is Codex's code, it
-can change with any CLI version, and nothing in the kernel backs it. Turn it on
-only on a host where a write by the Codex process would not matter (nothing
-sensitive the ezllm user can write to). It is off by default, it is logged at
-boot, and `/status` shows `enabled without Landlock (operator override)` for as
-long as it is set.
+There is no way to enable client tools without Landlock. Before 2.0.0
+`EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK=on` did, relying on Codex's read-only policy
+alone; with the sandbox always writable that would leave nothing confining the
+child, so the setting was removed and setting it now fails the boot.
+
+### Writable request workspace
+
+Every Codex child runs Codex's `workspace-write` policy for its private
+per-request working directory. Before 2.0.0 this was opt-in through
+`EZLLM_CODEX_SANDBOX=writable` and read-only by default; read-only crippled
+Codex, so the setting was removed and setting it now fails the boot. The child
+uses `approvalPolicy=never`, also pinned as `approval_policy="never"`
+in CLI startup configuration: this headless bridge
+has no approval UI and declines approval RPCs, so `on-request` cannot provide a
+usable escalation path. Operations outside the workspace still fail.
+
+Writable mode does not enable Codex's native shell, grant access to the client's
+workspace, or remove the outer Landlock domain. Client tools execute in the
+calling application. Their filesystem permissions are independent of the Codex
+child's sandbox: for Hermes, use its tools to resolve `~/workspace` on the
+Hermes machine and perform authorized writes there. The bridge adds this
+context to tool-bearing requests so the model attempts caller tools instead of
+inferring a caller-side denial from its local sandbox. Actual caller
+tool failures and approval requirements still apply. This is instruction
+steering, not a guarantee of model behavior or a grant of filesystem access.
+Recreate the container after changing the environment.
+
+From v2.0.0, caller-tool guidance also treats environment checks, repository
+inspection, plans and progress reports as intermediate steps of an implementation
+request. Codex is instructed to continue authorized implementation and appropriate
+verification, stopping for completion, a user pause or a concrete blocker needing
+user input. This is model guidance, not an enforced completion guarantee or an
+automatic continuation loop. No additional environment flag is required.
+
+### Model choice for long caller-tool tasks
+
+Measured 2026-11-14 by replaying one stalled Hermes turn (same 78-message
+history, tools and prompt) through this bridge on the ChatGPT subscription:
+
+- `gpt-6.1-terra` ended after 4–9 requests and reported the task unfinished in
+  both runs. Removing persona lines that ask for consensus did not change this;
+  `xhigh` effort extended it to 41 requests, still unfinished.
+- `gpt-6.1-sol` ran 70 and 110 requests and finished both runs (tests, browser
+  CRUD, lint and build verified). `gpt-6-astra` finished in 57 requests.
+
+The stopping is a model trait, not a bridge fault: the same bridge path, code
+mode and caller guidance sustained long runs with sol and astra. Terra's
+subscription default effort is `low`; the bridge forwards the client's
+`reasoning_effort` unchanged. For long autonomous caller-tool work, route to
+`gpt-6.1-sol` (or `gpt-6-astra`); longer runs consume more subscription quota.
+CLI 0.167.0 exposes caller tools only through code mode — disabling
+`code_mode_host` makes them unavailable to the model.
+
+### Zero-token steps and usage attribution
+
+In code mode the model calls caller tools from a JavaScript script. Each awaited
+call reaches the caller as its own request; when the result comes back, the
+script continues to its next call without new model work. Those requests are
+successful but record no tokens, and each costs one 250 ms tool-batch window.
+The dashboard labels them "no tokens" and Analytics → Requests can hide them
+(`hide_empty`). Measured 2026-11-14: about 65% of `gpt-6.1-sol` requests in a
+long Hermes task were such steps.
+
+Usage for the model call that wrote the script arrives only after the script's
+tool calls finish (measured event order: tool calls, then
+`thread/tokenUsage/updated`). While the bridge waits for the caller's results,
+that usage cannot be known, so it is recorded on a later request of the same
+turn. Totals stay correct; per-request attribution in code mode lags by design.
+
+Independent tool calls are already batched: in six measured runs, with and
+without extra guidance, the model issued three independent calls together, so
+they reached the caller as one batch. Sequential steps in agent traces are
+dependent calls (for example a patch, then its test run).
+
+Instructions participate in the template cache key. Updating this guidance
+selects a new template and may cause an initial cache warm-up; unchanged
+subsequent requests retain affinity. Restarting the service also clears parked
+tool turns and in-memory templates, so deploy between active tasks where possible.
+The caller's full history remains available for fresh replay after a restart.
 
 ## Prerequisites
 
@@ -207,7 +277,7 @@ docker compose up -d
 
 Boot fails loudly — the process does not start — when:
 
-- the binary is missing (`EZLLM_CODEX_BIN`, default `/opt/codex/bin/codex`);
+- the binary is missing (`EZLLM_CODEX_BIN`, default `/opt/codex-bridge/current/bin/codex`);
 - the CLI refuses a lockdown flag, or reports a locked feature as still enabled
   (one exception, `unified_exec`, is explained in design §2.5);
 - the app-server lacks a method **and** `codex exec` lacks a fallback flag;
@@ -218,12 +288,12 @@ Boot fails loudly — the process does not start — when:
 | variable | default | meaning |
 | --- | --- | --- |
 | `EZLLM_CODEX_BRIDGE` | `off` | `on` starts the surface |
-| `EZLLM_CODEX_BIN` | `/opt/codex/bin/codex` | the CLI inside the mounted release |
+| `EZLLM_CODEX_BIN` | `/opt/codex-bridge/current/bin/codex` | the CLI inside the mounted bridge root |
 | `EZLLM_CODEX_HOME` | `/codex-sub` | the mounted login (`CODEX_HOME`) |
 | `EZLLM_CODEX_BRIDGE_ADDR` | `127.0.0.1:8791` | loopback listener |
 | `EZLLM_CODEX_BRIDGE_TOKEN_FILE` | `/data/codex-bridge.token` | shared secret, generated on first boot |
-| `EZLLM_CODEX_BRIDGE_CONCURRENCY` | `2` | CLI children at once (a turn parked on tool calls holds none) |
-| `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK` | `off` | `on` = client tools without Landlock ([what you give up](#the-override-and-what-you-give-up)) |
+| `EZLLM_CODEX_BRIDGE_CONCURRENCY` | `1` | CLI children at once (a turn parked on tool calls holds none) |
+| `EZLLM_CODEX_BRIDGE_CACHE` | unset (on where supported) | Empty-template forks whenever supported; report the fallback reason otherwise. `on` requires support; `off` opts out. |
 
 ```sh
 docker logs ezllm | grep -i "codex bridge"   # cli version, release, login, channel
@@ -320,7 +390,7 @@ the Rules caps.
 
 ## Verify
 
-For a first check, use the gateway's [model-list command](../README.md#set-up-the-dashboard),
+For a first check, use the gateway's [model-list command](../README.md#2-finish-setup-in-the-dashboard),
 then send a short prompt to an available model through the dashboard or your client.
 Requests consume subscription quota.
 
@@ -377,3 +447,95 @@ continues operating independently; no shared lifecycle migration has shipped.
 
 Claude and Antigravity are migrated; Codex and Copilot still need expansion.
 See [shared transport status and remaining work](shared-bridge-transport-design.md).
+
+
+## Conversation history
+
+From v2.0.0, startup automatically selects native structured history when the
+CLI advertises `thread/inject_items`; `/status.native_history` reports the
+selection. No additional environment flag is required. Older CLIs and exec
+keep text-transcript replay. Incomplete historical tool groups also use legacy
+replay before inference. A native injection error fails before inference;
+it does not spend a second model request to repair history.
+
+Fresh app-server requests retain user/assistant roles, function-call and result
+IDs, and text/image ordering. Explicit assistant `phase` labels are preserved;
+Chat Completions messages without them use commentary when tool calls are present
+and final-answer otherwise. This reconstructs the available turn boundary; it
+cannot recover arbitrary interleaved phases already flattened by a client.
+
+Native history is injected into the request thread after any template fork.
+Shared cache templates remain configuration-only, and matching parked tool
+results still resume their existing child without reinjection. Caller ownership
+and canonical history checks include semantic phase. Cache identity does not
+include caller history. Landlock and approval policy `never` remain in force.
+
+OpenAI documents phase preservation as relevant to early stopping. This corrects
+conversation representation, but the small live comparison does not establish
+that it fixes every long-session persistence failure. See the
+[design and measured evidence](codex-conversation-fidelity-design.md).
+
+## Prompt-cache affinity
+
+Caching is on by default (v2.0.0+); `EZLLM_CODEX_BRIDGE_CACHE=off` opts out.
+Boot validates experimental `thread/fork`, `thread/resume`,
+`thread/inject_items` and `thread/delete` support and enables empty-template
+forks when available. Otherwise the default uses the original path and reports
+the reason in `/status.cache_selection` (mode `default`). `on` requires support and fails startup if unavailable;
+`off` explicitly selects the original path. Unknown values fail startup.
+The cache requires app-server; CLI 0.167.0 passed the native proof. The decision
+happens before inference, never as a second model call to repair a failed turn.
+
+Each independent request launches a new CLI, resumes a matching empty template,
+and forks a separate ephemeral prediction thread with the caller's complete
+history. Templates retain model, instructions, tools and scratch paths, never
+caller dialogue or child answers. Caller tools still execute in Hermes or the
+calling harness. A pending native tool turn keeps its existing process until
+its caller supplies results; completed turns return only their empty template.
+
+`GET /status` reports `approval_policy=never`, the requested/effective mode and
+reason under `cache_selection`, and `fork_cache` counts: `enabled`, `hits`, `idle`, `credits`
+and `cleanup_failures`. A hit means template reuse; actual cache reads remain
+in native usage and OpenAI `prompt_tokens_details.cached_tokens`. Input totals
+already include those reads. No extra warm-up model turn is sent.
+
+Idle templates keep no process and expire after one minute. Their private scratch
+contents are removed after process exit. Idle capacity equals concurrency; total
+credits are concurrency plus the parked-tool limit. Templates retire after
+15 minutes or 100 requests. Supported native deletion uses transient control-only
+CLI processes under the same admission cap, never a model turn. Failed deletion
+holds its credit until restart, bounding additional retained parents; inspect
+`cleanup_failures` before restarting. Graceful shutdown waits up to 21 seconds
+for cleanup. An abrupt kill can leave empty templates in native `CODEX_HOME`
+rollout/index storage, including their instructions and tool definitions.
+
+The updater copies the setting into qualification and requires an
+`auto`, `ephemeral-forks` (explicit `on`) or `off` policy proof, plus
+`approval_policy=never`. Effective cache mode proves fresh-request reuse and
+caller-tool continuation; unsupported auto mode reports its fallback reason. Changing the setting requires requalification. Measured results
+and design: [empty-template cache](codex-empty-template-cache-design.md).
+
+
+## Caller ownership of pending tools (v2.0.0+)
+
+Gateway authentication derives an opaque identity per client key or dashboard
+session. The proxy strips externally supplied `X-Ezllm-Caller` values and stamps
+its own value only for the registered loopback bridge with the matching service
+credential. Tool-bearing direct bridge requests without this metadata are refused;
+use the gateway inference endpoint. This header is an internal implementation
+boundary, not a client setting.
+
+A pending tool conversation must match that identity and the canonical caller
+history, including the selected assistant tool-call message. Parked turns are
+scoped per caller (`tools.go` `parkKey`): another caller's call ID matches nothing
+and that request replays in its own fresh child, so it can neither resume nor
+remove the legitimate parked turn, nor learn that it exists. Changed/truncated
+history uses fresh transcript replay without loading the old conversation.
+Cache-control markers and equivalent text-block formatting do not change the
+history hash. Rotated client keys and distinct dashboard sessions are distinct
+principals. Native IDs recycled in another child receive a new client-facing
+alias rather than overwriting an existing parked conversation.
+
+Empty cache templates still contain configuration only and can share affinity
+across callers; caller identity is never sent in model instructions or input.
+Native approval policy remains `never`, and caller tools still execute in Hermes.

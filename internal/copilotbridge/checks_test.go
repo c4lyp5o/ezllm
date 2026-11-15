@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -167,5 +169,34 @@ func TestLivePlainAcceptsAPongAndUsage(t *testing.T) {
 	}
 	if err := LivePlain(context.Background(), liveRunner(t, bin), "auto"); err != nil {
 		t.Fatalf("LivePlain: %v", err)
+	}
+}
+
+// A successful plain answer to a tool prompt must be a refusal, not a nil-error
+// dereference in the qualification gate.
+func TestLiveToolsRefusesPlainAnswerWithoutPanicking(t *testing.T) {
+	bin := liveStub(t, nil)
+	body, err := os.ReadFile(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(string(body), "\n")
+	length := regexp.MustCompile(`Content-Length: (\d+)`)
+	for i, line := range lines {
+		if !strings.Contains(line, `"content":"","toolRequests":[]`) {
+			continue
+		}
+		updated := strings.Replace(line, `"content":"","toolRequests":[]`, `"content":"No tool needed","toolRequests":[]`, 1)
+		match := length.FindStringSubmatch(line)
+		n, _ := strconv.Atoi(match[1])
+		lines[i] = length.ReplaceAllString(updated, "Content-Length: "+strconv.Itoa(n+len(updated)-len(line)))
+	}
+	body = []byte(strings.Join(lines, "\n"))
+	if err := os.WriteFile(bin, body, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	err = LiveTools(context.Background(), liveRunner(t, bin), "auto")
+	if err == nil || !strings.Contains(err.Error(), "asked for no tool") {
+		t.Fatalf("got %v", err)
 	}
 }

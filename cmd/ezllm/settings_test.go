@@ -17,7 +17,7 @@ import (
 )
 
 func TestSettingsExplicitYAMLAndEnvironmentPrecedence(t *testing.T) {
-	for _, name := range []string{"EZLLM_USAGE_TZ", "EZLLM_PRICE_REFRESH", "EZLLM_COMBO_AUTOPROBE", "EZLLM_TRANSLATION_ENABLED", "EZLLM_TRANSLATION_UNIVERSAL_ENABLED"} {
+	for _, name := range []string{"EZLLM_USAGE_TZ", "EZLLM_PRICE_REFRESH", "EZLLM_COMBO_AUTOPROBE", "EZLLM_TRANSLATION_ENABLED"} {
 		t.Setenv(name, "")
 	}
 	root := t.TempDir()
@@ -134,5 +134,28 @@ func TestSettingsUnavailableBackupStorageDoesNotBlockPolicyEdits(t *testing.T) {
 	}
 	if _, err = m.Patch(ctx, 3, map[string]json.RawMessage{"backup_enabled": json.RawMessage(`true`)}); err == nil {
 		t.Fatal("enabling backups without storage succeeded")
+	}
+}
+
+// A dashboard change to the usage timezone reaches the change hook, which is
+// how log timestamps follow it at runtime.
+func TestSettingsOnChangeSeesTheNewUsageTimezone(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, store.Options{Path: filepath.Join(t.TempDir(), "s.sqlite"), MasterSecret: "test-secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	m, err := settings.New(ctx, db, settings.Defaults(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seen string
+	m.OnChange = func(v settings.Values) { seen = v.Location().String() }
+	if _, err := m.Patch(ctx, 0, map[string]json.RawMessage{"usage_timezone": json.RawMessage(`"Asia/Tokyo"`)}); err != nil {
+		t.Fatal(err)
+	}
+	if seen != "Asia/Tokyo" {
+		t.Fatalf("OnChange saw %q, want Asia/Tokyo", seen)
 	}
 }

@@ -73,6 +73,9 @@ ran in production before release; security records cite them by those numbers.
 - The master key defaults to `<data_dir>/ezllm-master.key` instead of
   `~/.hermes/secrets/ezllm-master.key`. A key left at the old path refuses the boot
   until it is moved; ezllm never generates a replacement over it.
+- Client-token budget days and date-only token expiries follow the usage timezone
+  (`EZLLM_USAGE_TZ` / dashboard / YAML) like reports and model rules; `TZ` now only
+  affects log timestamps.
 - Retired names (`EZLLM_CLAUDE_CONFIG_DIR`, `EZLLM_CODEX_SANDBOX`,
   `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK`, both
   `*_SESSION_CACHE`) fail the boot with a message naming the replacement.

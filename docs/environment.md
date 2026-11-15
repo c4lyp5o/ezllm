@@ -21,9 +21,9 @@ and data location.
 1. **Usage timezone** — choose it in Settings → General, or set
    **`EZLLM_USAGE_TZ`** to enforce it from the deployment. Use an IANA name
    (`Europe/Berlin`, `America/New_York`, `Asia/Kuala_Lumpur`). It controls
-   report days, model rules set to `instance`, and daily price/backup schedules.
-   An explicit rule timezone remains independent; client-token budgets retain
-   their server-local boundaries. An environment override locks the dashboard
+   report days, model rules set to `instance`, client-token budget days and
+   date-only token expiries, and daily price/backup schedules. An explicit rule
+   timezone remains independent. An environment override locks the dashboard
    control. Without an override, saved settings and YAML are considered before
    UTC; an unresolvable effective name stops boot.
 2. **`EZLLM_DASHBOARD_PASSWORD_FILE`** (or `EZLLM_DASHBOARD_PASSWORD`) — the
@@ -59,14 +59,14 @@ provider key unreadable. See [master-key-runbook.md](master-key-runbook.md).
 |---|---|---|
 | `EZLLM_ADDR` | config `listen` (loopback); image: `0.0.0.0:20129` | Listen address. `-addr` overrides it. |
 | `EZLLM_DATA_DIR` | config `data_dir` (`data`); image: `/data` | Ledger and data location. |
-| `EZLLM_USAGE_TZ` | saved setting → YAML `usage_timezone` → UTC | Deployment override for report days, inherited model-rule windows/caps and daily schedules; locks the dashboard control. An unresolvable name fails boot. Report `?tz=` overrides the default grouping timezone. |
+| `EZLLM_USAGE_TZ` | saved setting → YAML `usage_timezone` → UTC | Deployment override for report days, inherited model-rule windows/caps, client-token budgets and date-only expiries, and daily schedules; locks the dashboard control. An unresolvable name fails boot. Report `?tz=` overrides the default grouping timezone. |
 | `EZLLM_LOG_LEVEL` | `info` | `debug` \| `info` \| `warn` \| `error`. Env-only (needed before the config is read); an unknown value logs a warning and uses `info`. The effective value is stated at boot. |
 | `EZLLM_LOG_COLOR` | `auto` | `auto` (color only on a terminal) \| `always` \| `never`. |
 | `EZLLM_LOG_FORMAT` | `console` | `console` \| `json`. JSON emits one object per line for a collector; the console format is for `docker logs`. See [logging.md](logging.md). |
 | `NO_COLOR` | unset | Any value disables color under `auto`. |
 | `EZLLM_TRUSTED_PROXIES` | unset | Comma-separated IPs/CIDRs of reverse proxies in front of ezllm. The sign-in/setup rate limiter reads `X-Forwarded-For` only from these; unset, it keys on the socket peer. Set it behind any proxy, or every client shares the proxy's limit. |
 | `EZLLM_WEB_DIR` | unset (embedded `web/dist`) | Serve the dashboard from a directory of built assets instead, to iterate on the UI without a Go rebuild. |
-| `TZ` | image: `Asia/Kuala_Lumpur` | Server-local clock used by log timestamps and existing client-token budget boundaries. Report defaults, inherited model rules and schedules use the effective usage timezone. |
+| `TZ` | image: `Asia/Kuala_Lumpur` | Server-local clock for log timestamps only. Every day boundary (reports, model rules, client-token budgets, schedules) uses the effective usage timezone. Before 2.0.0 client-token budgets used `TZ`. |
 
 ## Secrets
 

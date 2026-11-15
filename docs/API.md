@@ -1034,7 +1034,7 @@ version 31.
 Model-rule `win_tz` additionally accepts `instance`, now the default for new
 rules. Existing empty timezone rows migrate to UTC; explicit zones are preserved.
 Inherited rule usage reads committed ledger timestamps in the admitted timezone's
-calendar range. Existing client-token budget timezone semantics remain unchanged.
+calendar range. Client-token budgets and date-only expiries use the same usage timezone (2.0.0+; before that, the server-local `TZ`).
 
 Configuration exports retain format version 1 and add `settings`, containing
 saved non-secret operator overrides. Existing export fields and streamed completion

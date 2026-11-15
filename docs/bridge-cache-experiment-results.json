@@ -1,0 +1,336 @@
+{
+  "date": "2026-11-14",
+  "scope": "Synthetic cache follow-up through native CLIs and current checkout; no production deployment or ledger insertion.",
+  "versions": {
+    "agy": "1.4.12",
+    "codex": "0.167.0",
+    "copilot": "1.0.105"
+  },
+  "successful_inference_requests": 11,
+  "groups": {
+    "agy": [
+      {
+        "answer_pong": true,
+        "bridge": "agy",
+        "case": "short",
+        "elapsed_ms": 5787,
+        "failed": false,
+        "message_count": 2,
+        "model": "gemini-3.8-flash-low",
+        "request_bytes": 428,
+        "status": 200,
+        "tool_call_chunks": 0,
+        "usage_events": [
+          {
+            "completion_tokens": 1,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "prompt_tokens": 6802,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "total_tokens": 6803
+          }
+        ],
+        "native": {
+          "input_tokens": 6802,
+          "output_tokens": 1,
+          "thinking_tokens": 0,
+          "cache_read_tokens": 0,
+          "total_tokens": 6803
+        }
+      },
+      {
+        "answer_pong": true,
+        "bridge": "agy",
+        "case": "hermes_shaped",
+        "elapsed_ms": 6536,
+        "failed": false,
+        "message_count": 202,
+        "model": "gemini-3.8-flash-low",
+        "request_bytes": 43540,
+        "status": 200,
+        "tool_call_chunks": 0,
+        "usage_events": [
+          {
+            "completion_tokens": 19,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "prompt_tokens": 17745,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "total_tokens": 17764
+          }
+        ],
+        "native": {
+          "input_tokens": 17745,
+          "output_tokens": 19,
+          "thinking_tokens": 0,
+          "cache_read_tokens": 0,
+          "total_tokens": 17764
+        }
+      },
+      {
+        "answer_pong": true,
+        "bridge": "agy",
+        "case": "hermes_shaped_repeat",
+        "elapsed_ms": 7397,
+        "failed": false,
+        "message_count": 202,
+        "model": "gemini-3.8-flash-low",
+        "request_bytes": 43540,
+        "status": 200,
+        "tool_call_chunks": 0,
+        "usage_events": [
+          {
+            "completion_tokens": 19,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "prompt_tokens": 17745,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "total_tokens": 17764
+          }
+        ],
+        "native": {
+          "input_tokens": 17745,
+          "output_tokens": 19,
+          "thinking_tokens": 0,
+          "cache_read_tokens": 0,
+          "total_tokens": 17764
+        }
+      }
+    ],
+    "codex_stable_cwd": [
+      {
+        "answer_pong": true,
+        "bridge": "codex",
+        "case": "hermes_shaped",
+        "elapsed_ms": 3394,
+        "failed": false,
+        "message_count": 202,
+        "model": "gpt-5.6-luna",
+        "request_bytes": 43532,
+        "status": 200,
+        "tool_call_chunks": 0,
+        "usage_events": [
+          {
+            "completion_tokens": 5,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "prompt_tokens": 12587,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "total_tokens": 12592
+          }
+        ]
+      },
+      {
+        "answer_pong": true,
+        "bridge": "codex",
+        "case": "hermes_shaped_repeat",
+        "elapsed_ms": 1916,
+        "failed": false,
+        "message_count": 202,
+        "model": "gpt-5.6-luna",
+        "request_bytes": 43532,
+        "status": 200,
+        "tool_call_chunks": 0,
+        "usage_events": [
+          {
+            "completion_tokens": 5,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "prompt_tokens": 12587,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "total_tokens": 12592
+          }
+        ]
+      }
+    ],
+    "copilot_recreated_id": [
+      {
+        "answer_pong": true,
+        "bridge": "copilot",
+        "case": "hermes_shaped",
+        "elapsed_ms": 8268,
+        "failed": false,
+        "message_count": 202,
+        "model": "gpt-6-luna",
+        "request_bytes": 43489,
+        "status": 200,
+        "tool_call_chunks": 0,
+        "usage_events": [
+          {
+            "completion_tokens": 18,
+            "completion_tokens_details": {
+              "reasoning_tokens": 11
+            },
+            "copilot_nano_aiu": 93492500,
+            "copilot_premium_requests": 1,
+            "prompt_tokens": 7408,
+            "prompt_tokens_details": {
+              "cache_write_tokens": 7405,
+              "cached_tokens": 0
+            },
+            "total_tokens": 7426
+          }
+        ]
+      },
+      {
+        "answer_pong": true,
+        "bridge": "copilot",
+        "case": "hermes_shaped_repeat",
+        "elapsed_ms": 7636,
+        "failed": false,
+        "message_count": 202,
+        "model": "gpt-6-luna",
+        "request_bytes": 43489,
+        "status": 200,
+        "tool_call_chunks": 0,
+        "usage_events": [
+          {
+            "completion_tokens": 15,
+            "completion_tokens_details": {
+              "reasoning_tokens": 8
+            },
+            "copilot_nano_aiu": 93342500,
+            "copilot_premium_requests": 1,
+            "prompt_tokens": 7408,
+            "prompt_tokens_details": {
+              "cache_write_tokens": 7405,
+              "cached_tokens": 0
+            },
+            "total_tokens": 7423
+          }
+        ]
+      }
+    ],
+    "copilot_cache_http": [
+      {
+        "answer_pong": true,
+        "bridge": "copilot",
+        "case": "hermes_shaped",
+        "elapsed_ms": 7034,
+        "failed": false,
+        "message_count": 202,
+        "model": "gpt-6-luna",
+        "request_bytes": 43489,
+        "status": 200,
+        "tool_call_chunks": 0,
+        "usage_events": [
+          {
+            "completion_tokens": 16,
+            "completion_tokens_details": {
+              "reasoning_tokens": 9
+            },
+            "copilot_nano_aiu": 93392500,
+            "copilot_premium_requests": 1,
+            "prompt_tokens": 7408,
+            "prompt_tokens_details": {
+              "cache_write_tokens": 7405,
+              "cached_tokens": 0
+            },
+            "total_tokens": 7424
+          }
+        ],
+        "native_cumulative": {
+          "prompt": 7408,
+          "output": 16,
+          "read": 0,
+          "write": 7405,
+          "nano_aiu": 93392500,
+          "reasoning": 9
+        },
+        "native_delta": {
+          "prompt": 7408,
+          "output": 16,
+          "read": 0,
+          "write": 7405,
+          "nano_aiu": 93392500,
+          "reasoning": 9
+        }
+      },
+      {
+        "answer_pong": true,
+        "bridge": "copilot",
+        "case": "hermes_continuation",
+        "elapsed_ms": 1726,
+        "failed": false,
+        "message_count": 204,
+        "model": "gpt-6-luna",
+        "request_bytes": 43646,
+        "status": 200,
+        "tool_call_chunks": 0,
+        "usage_events": [
+          {
+            "completion_tokens": 23,
+            "completion_tokens_details": {
+              "reasoning_tokens": 16
+            },
+            "copilot_nano_aiu": 9435000,
+            "copilot_premium_requests": 1,
+            "prompt_tokens": 7476,
+            "prompt_tokens_details": {
+              "cache_write_tokens": 68,
+              "cached_tokens": 7405
+            },
+            "total_tokens": 7499
+          }
+        ],
+        "native_cumulative": {
+          "prompt": 14884,
+          "output": 39,
+          "read": 7405,
+          "write": 7473,
+          "nano_aiu": 102827500,
+          "reasoning": 25
+        },
+        "native_delta": {
+          "prompt": 7476,
+          "output": 23,
+          "read": 7405,
+          "write": 68,
+          "nano_aiu": 9435000,
+          "reasoning": 16
+        }
+      }
+    ]
+  },
+  "copilot_retained_native_probe": [
+    {
+      "nano_aiu": 92842500,
+      "output": 5,
+      "prompt": 7408,
+      "read": 0,
+      "reasoning": 0,
+      "turn": 1,
+      "write": 7405
+    },
+    {
+      "nano_aiu": 8372500,
+      "output": 5,
+      "prompt": 7463,
+      "read": 7405,
+      "reasoning": 0,
+      "turn": 2,
+      "write": 55
+    }
+  ],
+  "limitations": [
+    "Small models only; synthetic histories, not the actual Hermes process.",
+    "Stable-CWD and recreated-ID comparisons did not prove the cause of cache misses.",
+    "Retained sessions compare a completed conversation plus a new user question, not identical stateless requests.",
+    "No native tool-result continuation is retained by the new mode."
+  ]
+}

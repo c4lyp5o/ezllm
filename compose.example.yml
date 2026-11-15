@@ -22,19 +22,17 @@ services:
     user: "${UID:-1000}:${GID:-1000}"
 
     ports:
-      # Overridable so a second instance (staging, a test) does not need its
-      # own file:  EZLLM_PORT=20130 EZLLM_DATA=./data-staging docker compose up -d
-      - "${EZLLM_PORT:-20129}:20129"
+      # Overridable for a second instance (staging, a test); give that copy of
+      # this file its own data path below as well.
+      - "127.0.0.1:${EZLLM_PORT:-20129}:20129"
 
     environment:
       # ── server ──
-      # Deployment override for report days, inherited model rules and daily
-      # schedules. Remove this entry to manage the timezone in Settings;
-      # otherwise the dashboard control is locked. No configured value = UTC.
+      # The one timezone setting: report days, model rules, client-token
+      # budgets, schedules and log timestamps. Remove this entry to manage it in
+      # Settings; otherwise the dashboard control is locked. No value = UTC.
+      # TZ is not used.
       EZLLM_USAGE_TZ: UTC
-      # Server-local clock: logs and existing client-token budget boundaries.
-      # Instance report/rule/schedule defaults use the usage timezone above.
-      # TZ: UTC
       # Reverse proxies whose X-Forwarded-For the sign-in limiter trusts. Set it
       # behind any proxy, or every client shares the proxy's limit.
       # EZLLM_TRUSTED_PROXIES: 172.18.0.0/16
@@ -64,18 +62,21 @@ services:
       # EZLLM_BACKUP_DIR: /backups
       # EZLLM_BACKUP_SECRET_FILE: /run/secrets/ezllm-backup
 
-      # ── GitHub Copilot CLI bridge ── docs/copilot-cli-bridge-runbook.md
+      # ── GitHub Copilot subscription bridge ── docs/copilot-bridge-runbook.md
       # The OAuth provider is deleted: the credential is the CLI's own login,
       # so there is no client id or version header to configure. `on` without
       # the CLI and a login (the two mounts at the end of `volumes`) fails the
       # boot rather than starting a surface that 401s every request.
       EZLLM_COPILOT_BRIDGE: "off"
-      # EZLLM_COPILOT_BIN: /opt/copilot/copilot
-      # EZLLM_COPILOT_HOME: /copilot-home
+      # Caches are on by default (v2.0.0+); set either to "off" to disable.
+      # EZLLM_COPILOT_BRIDGE_WARM_POOL: "off"
+      # EZLLM_COPILOT_BRIDGE_CACHE: "off"
+      # EZLLM_COPILOT_BIN: /opt/copilot-bridge/current/copilot
+      # EZLLM_COPILOT_HOME: /copilot-sub
       # EZLLM_COPILOT_BRIDGE_ADDR: 127.0.0.1:8793
       # XDG_CACHE_HOME: /data/copilot-cache   # persistent CLI cache (~236 MB, extracted once)
-      # EZLLM_COPILOT_BRIDGE_TOKEN_FILE: /data/copilot-bridge.token
-      # EZLLM_COPILOT_BRIDGE_CONCURRENCY: "2"
+      # EZLLM_COPILOT_BRIDGE_TOKEN_FILE: /data/copilot-bridge.token   # the default
+      # EZLLM_COPILOT_BRIDGE_CONCURRENCY: "1"
       # EZLLM_COPILOT_BRIDGE_QUEUE: "8"
       # EZLLM_COPILOT_BRIDGE_TIMEOUT: 300s
 
@@ -87,39 +88,45 @@ services:
       # must name the owner of the mounted login directory.
       # USER: you
       # LOGNAME: you
-      # EZLLM_CLAUDE_BIN: /opt/claude/claude
-      # EZLLM_CLAUDE_CONFIG_DIR: /claude-sub
+      # EZLLM_CLAUDE_BIN: /opt/claude-bridge/current/claude
+      # EZLLM_CLAUDE_HOME: /claude-sub
       # EZLLM_CLAUDE_BRIDGE_ADDR: 127.0.0.1:8790
       # EZLLM_CLAUDE_BRIDGE_TOKEN_FILE: /data/claude-bridge.token
+      # EZLLM_CLAUDE_BRIDGE_CONCURRENCY: "1"
 
       # ── ChatGPT subscription bridge ── docs/codex-bridge-runbook.md
       # Loopback-only; an openai-compatible account dials it. Linux only. `on`
       # without the CLI and a login (the two mounts below) fails the boot.
       EZLLM_CODEX_BRIDGE: "off"
-      # EZLLM_CODEX_BIN: /opt/codex/bin/codex
+      # Caches by default wherever the CLI supports it (v2.0.0+); "off" opts out,
+      # "on" fails the boot if caching is unavailable.
+      # EZLLM_CODEX_BRIDGE_CACHE: "off"
+      # EZLLM_CODEX_BIN: /opt/codex-bridge/current/bin/codex
       # EZLLM_CODEX_HOME: /codex-sub
       # EZLLM_CODEX_BRIDGE_ADDR: 127.0.0.1:8791
       # EZLLM_CODEX_BRIDGE_TOKEN_FILE: /data/codex-bridge.token
-      # EZLLM_CODEX_BRIDGE_CONCURRENCY: "2"
-      # Client tools without Landlock: read the runbook before setting this.
-      # EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK: "on"
+      # EZLLM_CODEX_BRIDGE_CONCURRENCY: "1"
 
       # ── Antigravity subscription bridge ── docs/agy-bridge-runbook.md
       # Loopback-only; an openai-compatible account dials it. Linux only. `on`
       # without the CLI and a login (the two mounts below) fails the boot.
       EZLLM_AGY_BRIDGE: "off"
-      # EZLLM_AGY_BIN: /opt/agy/agy
+      # EZLLM_AGY_BIN: /opt/agy-bridge/current/agy
       # EZLLM_AGY_HOME: /agy-sub
       # EZLLM_AGY_BRIDGE_ADDR: 127.0.0.1:8792
       # EZLLM_AGY_BRIDGE_TOKEN_FILE: /data/agy-bridge.token
-      # EZLLM_AGY_BRIDGE_CONCURRENCY: "2"
+      # EZLLM_AGY_BRIDGE_CONCURRENCY: "1"
+      # Experimental caller tools via structured output; CLI needs --json-schema.
+      # EZLLM_AGY_EXPERIMENTAL_TOOLS: "on"
+      # Conversation resume is on by default wherever tools are on (v2.0.0+).
+      # EZLLM_AGY_BRIDGE_CACHE: "off"
 
     volumes:
       # Non-secret runtime defaults; credentials stay in SQLite.
       - ./config.yaml:/app/config.yaml:ro
       # The ledger, master key and bridge tokens. Without it, a restart loses
       # everything.
-      - "${EZLLM_DATA:-./data}:/data"
+      - ./data:/data
 
       # Optional backup storage (writable by the container user) and a
       # separately protected encryption-secret file; create both first.
@@ -129,9 +136,9 @@ services:
       # Bridges: each mounts its bridge ROOT read-only — version folders plus
       # a relative `current` link, the layout the bridge updater keeps current
       # (docs/bridge-update-runbook.md) — and its login read-write (the CLI
-      # refreshes its token there). Point the bridge's *_BIN above at the
-      # `current` path: /opt/claude-bridge/current/claude,
-      # /opt/codex-bridge/current/bin/codex, /opt/agy-bridge/current/agy.
+      # refreshes its token there). Each *_BIN default is already the
+      # `current` path (/opt/<name>-bridge/current/...), so no override is
+      # needed.
       # `python3 scripts/bridge_update.py --init` creates the layout from
       # pinned copies. A bind mount whose source is missing makes Docker
       # create an empty directory, so uncomment these only when both exist.
@@ -144,6 +151,10 @@ services:
       # the code-mode host client tools need); the isolated CODEX_HOME.
       # - /path/to/.local/share/codex-bridge:/opt/codex-bridge:ro
       # - /path/to/.codex-sub:/codex-sub
+      # Copilot: the managed updater root (replaces the standalone binary
+      # mount) and the dedicated login made with COPILOT_HOME=~/.copilot-sub.
+      # - /path/to/.local/share/copilot-bridge:/opt/copilot-bridge:ro
+      # - /path/to/.copilot-sub:/copilot-sub
       # Antigravity: <root>/<version>/agy (agy rewrites itself in place when
       # run from a writable folder: keep version folders read-only); the login
       # HOME made with DBUS unset.
@@ -151,5 +162,4 @@ services:
       # - /path/to/.agy-sub:/agy-sub
       #
       # Still supported, without updates: a single pinned file or release
-      # folder at the *_BIN default (/opt/claude/claude, /opt/codex,
-      # /opt/agy/agy).
+      # folder mounted anywhere, with *_BIN pointing at it.

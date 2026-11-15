@@ -4,9 +4,7 @@
 //
 // Build order: `npm run build` in web/ FIRST, then `go build ./...`. The dist/
 // tree is tracked in git precisely because go:embed needs it present at compile
-// time (a fresh clone must build without node). For UI iteration without a Go
-// rebuild, point EZLLM_WEB_DIR at a directory and the server serves from disk
-// instead of this embed.
+// time (a fresh clone must build without node).
 package web
 
 import "embed"

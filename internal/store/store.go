@@ -27,7 +27,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 34
+const schemaVersion = 35
 
 // Stream-outcome vocabulary (schema v34, docs/hop-health-design.md). Stored in
 // calls.stream_outcome; an empty value means the request was not a stream.
@@ -246,9 +246,6 @@ func (d *DB) migrate() error {
 		if err := d.alterCallsCompressionAttribution(context.Background()); err != nil {
 			return fmt.Errorf("store: alter calls compression attribution: %w", err)
 		}
-		if err := d.alterCallsToolPrune(context.Background()); err != nil {
-			return fmt.Errorf("store: alter calls tool prune: %w", err)
-		}
 		if err := d.alterCallsStreamOutcome(context.Background()); err != nil {
 			return fmt.Errorf("store: alter calls stream outcome: %w", err)
 		}
@@ -325,8 +322,8 @@ func (d *DB) migrate() error {
 		if err := d.alterCallsCompressionAttribution(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate calls compression attribution: %w", err)
 		}
-		if err := d.alterCallsToolPrune(context.Background()); err != nil {
-			return fmt.Errorf("store: migrate calls tool prune: %w", err)
+		if err := d.dropCallsToolPrune(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate drop calls tool prune: %w", err)
 		}
 		if err := d.alterCallsStreamOutcome(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate calls stream outcome: %w", err)
@@ -1001,13 +998,12 @@ func (d *DB) alterCallsContextTokens(ctx context.Context) error {
 	return nil
 }
 
-// alterCallsToolPrune adds the v33 tool-pruning column on databases created
-// before it. Same guard as alterCallsContextTokens: ALTER TABLE ADD COLUMN is
-// not idempotent, and a fresh database already has the column from schema.sql.
-// The feature itself is REJECTED and deleted (2026-11-05); this migration stays
-// because the column is frozen history and an old database must still open
-// without a "no such column" on the ledger insert path.
-func (d *DB) alterCallsToolPrune(ctx context.Context) error {
+// dropCallsToolPrune (v35) removes the v33 tool-pruning column. The feature was
+// rejected and deleted on 2026-11-05 and nothing reads or writes the column;
+// the experiment's measurements were exported to
+// docs/tool-prune-shadow-results.json before the drop. A no-op once applied and
+// on databases that never had it.
+func (d *DB) dropCallsToolPrune(ctx context.Context) error {
 	exists, err := hasTable(ctx, d.w, "calls")
 	if err != nil {
 		return fmt.Errorf("check calls table: %w", err)
@@ -1015,17 +1011,15 @@ func (d *DB) alterCallsToolPrune(ctx context.Context) error {
 	if !exists {
 		return nil
 	}
-	for _, column := range []string{"tool_prune_shadow_tokens"} {
-		ok, err := hasColumn(ctx, d.w, "calls", column)
-		if err != nil {
-			return fmt.Errorf("check calls.%s: %w", column, err)
-		}
-		if ok {
-			continue
-		}
-		if _, err := d.w.ExecContext(ctx, fmt.Sprintf("ALTER TABLE calls ADD COLUMN %s INTEGER NOT NULL DEFAULT 0", column)); err != nil {
-			return fmt.Errorf("add calls.%s: %w", column, err)
-		}
+	ok, err := hasColumn(ctx, d.w, "calls", "tool_prune_shadow_tokens")
+	if err != nil {
+		return fmt.Errorf("check calls.tool_prune_shadow_tokens: %w", err)
+	}
+	if !ok {
+		return nil
+	}
+	if _, err := d.w.ExecContext(ctx, `ALTER TABLE calls DROP COLUMN tool_prune_shadow_tokens`); err != nil {
+		return fmt.Errorf("drop calls.tool_prune_shadow_tokens: %w", err)
 	}
 	return nil
 }

@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -24,32 +23,31 @@ import (
 // speaks Copilot's private API and never mints a session token — that OAuth
 // path is retired by this change (docs/copilot-cli-bridge-design.md).
 const (
-	envCopilotWarmPool    = "EZLLM_COPILOT_BRIDGE_WARM_POOL"   // off by default
-	envCopilotBridge      = "EZLLM_COPILOT_BRIDGE"             // "on" enables the surface
-	envCopilotBin         = "EZLLM_COPILOT_BIN"                // official CLI binary (mounted)
-	envCopilotHome        = "EZLLM_COPILOT_HOME"               // the CLI's own login directory
-	envCopilotBridgeAddr  = "EZLLM_COPILOT_BRIDGE_ADDR"        // default 127.0.0.1:8793
-	envCopilotBridgeToken = "EZLLM_COPILOT_BRIDGE_TOKEN_FILE"  // shared secret for the account key
-	envCopilotConcurrency = "EZLLM_COPILOT_BRIDGE_CONCURRENCY" // concurrent CLI children (default 2)
-	envCopilotQueue       = "EZLLM_COPILOT_BRIDGE_QUEUE"       // requests allowed to wait for a slot (default 8)
-	envCopilotTimeout     = "EZLLM_COPILOT_BRIDGE_TIMEOUT"     // per-turn limit, a Go duration (default 300s)
+	envCopilotSessionCache = "EZLLM_COPILOT_BRIDGE_CACHE"
+	envCopilotWarmPool     = "EZLLM_COPILOT_BRIDGE_WARM_POOL"   // on by default
+	envCopilotBridge       = "EZLLM_COPILOT_BRIDGE"             // "on" enables the surface
+	envCopilotBin          = "EZLLM_COPILOT_BIN"                // official CLI binary (mounted)
+	envCopilotHome         = "EZLLM_COPILOT_HOME"               // the CLI's own login directory
+	envCopilotBridgeAddr   = "EZLLM_COPILOT_BRIDGE_ADDR"        // default 127.0.0.1:8793
+	envCopilotBridgeToken  = "EZLLM_COPILOT_BRIDGE_TOKEN_FILE"  // shared secret for the account key
+	envCopilotConcurrency  = "EZLLM_COPILOT_BRIDGE_CONCURRENCY" // concurrent CLI children (default 1)
+	envCopilotQueue        = "EZLLM_COPILOT_BRIDGE_QUEUE"       // requests allowed to wait for a slot (default 8)
+	envCopilotTimeout      = "EZLLM_COPILOT_BRIDGE_TIMEOUT"     // per-turn limit, a Go duration (default 300s)
 )
 
 // copilotLimits reads the three runner knobs. A malformed value fails the boot:
 // a typo that silently fell back to the default would look like a working
 // override.
 func copilotLimits(get func(string) string) (concurrency, queue int, timeout time.Duration, err error) {
-	concurrency, queue, timeout = 2, 8, 300*time.Second
-	for _, k := range []struct {
-		env string
-		dst *int
-	}{{envCopilotConcurrency, &concurrency}, {envCopilotQueue, &queue}} {
-		if v := strings.TrimSpace(get(k.env)); v != "" {
-			n, perr := strconv.Atoi(v)
-			if perr != nil || n < 1 {
-				return 0, 0, 0, fmt.Errorf("copilot bridge: %s=%q must be a positive integer", k.env, v)
-			}
-			*k.dst = n
+	timeout = 300 * time.Second
+	if concurrency, err = bridgeConcurrency(get, envCopilotConcurrency, "copilot"); err != nil {
+		return 0, 0, 0, err
+	}
+	// The queue shares the positive-integer rule; only its default differs.
+	queue = 8
+	if strings.TrimSpace(get(envCopilotQueue)) != "" {
+		if queue, err = bridgeConcurrency(get, envCopilotQueue, "copilot"); err != nil {
+			return 0, 0, 0, err
 		}
 	}
 	if v := strings.TrimSpace(get(envCopilotTimeout)); v != "" {
@@ -151,12 +149,12 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 	if !strings.EqualFold(strings.TrimSpace(os.Getenv(envCopilotBridge)), "on") {
 		return func() {}, nil
 	}
-	bin := envOrDefault(envCopilotBin, "/opt/copilot/copilot")
+	bin := envOrDefault(envCopilotBin, defaultCopilotBin)
 	resolved, err := exec.LookPath(bin)
 	if err != nil {
 		return nil, fmt.Errorf("copilot bridge: %s=%q does not resolve to the official Copilot CLI: %w", envCopilotBin, bin, err)
 	}
-	home := envOrDefault(envCopilotHome, "/copilot-home")
+	home := copilotHome(os.Getenv)
 	if st, err := os.Stat(home); err != nil || !st.IsDir() {
 		// A missing login directory is a boot failure, not a lazy 401 later: the
 		// surface would look healthy while every request failed.
@@ -178,6 +176,10 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 	if err != nil {
 		return nil, err
 	}
+	sessionCache, err := copilotSessionCache(os.Getenv, warmPool)
+	if err != nil {
+		return nil, err
+	}
 	cliVersion := copilotbridge.CLIVersion(resolved)
 	release := releaseState(bin, cliVersion, copilotQualifiedVersion)
 	token, err := bridgeTokenFromFile(strings.TrimSpace(os.Getenv(envCopilotBridgeToken)), "copilot")
@@ -191,17 +193,18 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 		models = append(models, copilotbridge.Model{ID: id, Object: "model", OwnedBy: "copilot-cli"})
 	}
 	info := map[string]any{
-		"status":      "ok",
-		"version":     server.Version,
-		"cli_bin":     resolved,
-		"cli_version": cliVersion,
-		"cli_release": release,
-		"home":        home,
-		"concurrency": concurrency,
-		"warm_pool":   warmPool,
-		"queue":       queue,
-		"timeout":     timeout.String(),
-		"models":      catalog,
+		"status":        "ok",
+		"version":       server.Version,
+		"cli_bin":       resolved,
+		"cli_version":   cliVersion,
+		"cli_release":   release,
+		"home":          home,
+		"concurrency":   concurrency,
+		"warm_pool":     warmPool,
+		"session_cache": sessionCache,
+		"queue":         queue,
+		"timeout":       timeout.String(),
+		"models":        catalog,
 		// Measured cost of the CLI's own agent scaffolding, so nobody reads the
 		// ledger and thinks the bridge is leaking tokens.
 		"scaffolding_tokens_per_call": "none on the channel; ~13-14k (27 built-in tools ≈ 9.3k) if plain chat falls back to -p",
@@ -214,6 +217,7 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 		MaxConcurrent: concurrency,
 		MaxQueue:      queue,
 		WarmPool:      warmPool,
+		SessionCache:  sessionCache,
 		Logf:          printfLogger(log),
 	}
 	// Reported at boot so the bridge card is honest. Each tool turn checks again
@@ -250,9 +254,7 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 // The account key ezllm stores is this value; nothing else authenticates the
 // bridge surface.
 func bridgeTokenFromFile(path, label string) (string, error) {
-	if path == "" {
-		return "", fmt.Errorf("%s bridge: a token file path is required so the account key can authenticate the surface", label)
-	}
+	path = bridgeTokenPath(path, label)
 	if b, err := os.ReadFile(path); err == nil {
 		if t := strings.TrimSpace(string(b)); t != "" {
 			return t, nil
@@ -272,13 +274,50 @@ func bridgeTokenFromFile(path, label string) (string, error) {
 	return token, nil
 }
 
+// bridgeTokenPath defaults an unset path to /data/<label>-bridge.token, on the
+// data volume like the other bridges' tokens, so it is backed up with the ledger.
+func bridgeTokenPath(path, label string) string {
+	if path == "" {
+		return "/data/" + label + "-bridge.token"
+	}
+	return path
+}
+
+// copilotHome is the bridge's own login directory. Like every subscription
+// bridge it defaults to a dedicated *-sub folder, never the CLI's everyday home.
+func copilotHome(get func(string) string) string {
+	if v := strings.TrimSpace(get(envCopilotHome)); v != "" {
+		return v
+	}
+	return "/copilot-sub"
+}
+
+// copilotWarmPool reuses CLI processes unless turned off.
 func copilotWarmPool(get func(string) string) (bool, error) {
 	switch strings.ToLower(strings.TrimSpace(get(envCopilotWarmPool))) {
-	case "", "off", "false", "0":
-		return false, nil
-	case "on", "true", "1":
+	case "", "on", "true", "1":
 		return true, nil
+	case "off", "false", "0":
+		return false, nil
 	default:
 		return false, fmt.Errorf("copilot bridge: %s must be on or off", envCopilotWarmPool)
 	}
+}
+
+// copilotSessionCache follows the warm pool when unset; an explicit "on"
+// without the pool fails the boot.
+func copilotSessionCache(get func(string) string, warm bool) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(get(envCopilotSessionCache))) {
+	case "":
+		return warm, nil
+	case "off", "false", "0":
+		return false, nil
+	case "on", "true", "1":
+	default:
+		return false, fmt.Errorf("copilot bridge: %s must be on or off", envCopilotSessionCache)
+	}
+	if !warm {
+		return false, fmt.Errorf("copilot bridge: %s requires %s=on", envCopilotSessionCache, envCopilotWarmPool)
+	}
+	return true, nil
 }

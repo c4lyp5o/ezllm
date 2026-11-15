@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -144,6 +145,42 @@ func TestMessagesStreamsToolUse(t *testing.T) {
 	}
 	if strings.Contains(out, "No such tool available") {
 		t.Error("native's synthetic tool_result leaked into the stream")
+	}
+}
+
+func TestStreamFailureAfterCompleteMessageStillEndsTheMessage(t *testing.T) {
+	// Native finished the visible message, then failed (an internal retry or
+	// the CLI exit): the client keeps a complete answer with its terminal pair.
+	frames := fixtureFrames(t, "m2_single.jsonl")
+	var upToStop []Frame
+	for _, f := range frames {
+		upToStop = append(upToStop, f)
+		if f.Type == "stream_event" && strings.Contains(string(f.Event), `"message_stop"`) {
+			break
+		}
+	}
+	rec := post(t, testServer(&fakeExec{frames: upToStop, err: errors.New("native exited 1")}), weatherToolRequest+`,"stream":true}`)
+	out := rec.Body.String()
+	if strings.Contains(out, "event: error") {
+		t.Fatalf("complete message turned into an error:\n%s", out)
+	}
+	for _, want := range []string{"event: message_delta", "event: message_stop", `"stop_reason":"tool_use"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stream missing %q\n%s", want, out)
+		}
+	}
+
+	// A failure before the visible message finished is still reported.
+	var beforeStop []Frame
+	for _, f := range upToStop {
+		if f.Type == "stream_event" && strings.Contains(string(f.Event), `"message_delta"`) {
+			break
+		}
+		beforeStop = append(beforeStop, f)
+	}
+	rec = post(t, testServer(&fakeExec{frames: beforeStop, err: errors.New("native exited 1")}), weatherToolRequest+`,"stream":true}`)
+	if out := rec.Body.String(); !strings.Contains(out, "event: error") || strings.Contains(out, "event: message_stop") {
+		t.Fatalf("mid-message failure must surface as an error event:\n%s", out)
 	}
 }
 

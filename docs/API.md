@@ -35,7 +35,7 @@ Errors are OpenAI-shaped: `{"error":{"type":"...","message":"...","code":422}}`.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/healthz` | no auth; **liveness + release version** — `{"status":"ok","version":"1.0.0"}` after a DB ping (503 `{"status":"down","version":"…"}` if the ping fails). Version is the only extra field; no counts/paths/uptime. |
+| GET | `/healthz` | no auth; **liveness + release version** — `{"status":"ok","version":"2.0.0"}` after a DB ping (503 `{"status":"down","version":"…"}` if the ping fails). Version is the only extra field; no counts/paths/uptime. |
 | GET | `/v1/models?protocol=` | `openai` (default) / `anthropic` shape; ids are `<namespace>/<model>`, plus one bare id per **enabled** combo |
 | POST | `/v1/chat/completions` | OpenAI stream + non-stream |
 | POST | `/v1/messages` | Anthropic (`x-api-key` or Bearer) |
@@ -99,8 +99,52 @@ uses native in-memory attachments and never falls back to a text-only request.
 Input validation returns `400 invalid_request`; unverified/non-vision models
 return `400 vision_unsupported`, and advertised model-limit refusals return
 `400 invalid_image`, all in the existing OpenAI error envelope.
-See [the Copilot runbook](copilot-cli-bridge-runbook.md) for tested limits and
-behavior. Antigravity's current headless bridge remains text-only.
+See [the Copilot runbook](copilot-bridge-runbook.md) for tested limits and
+behavior. Antigravity continues to reject image input.
+
+AGY tool-adapter conversation caching is an operator opt-in. Clients continue
+sending full history, including assistant call IDs and complete tool-result
+groups; no native session field is added. Usage is per request, with native
+cold input plus cache reads converted to inclusive OpenAI prompt totals. See
+[the AGY cache design](agy-conversation-cache-design.md).
+
+Copilot completed-conversation reuse is an operator opt-in documented in the
+runbook. Clients keep sending full history; no session ID or new request field
+is required. Usage remains per request, including cache-write and reasoning
+breakdowns. Images and active tool-result continuations use fresh sessions.
+
+### Antigravity experimental caller tools
+
+With `EZLLM_AGY_EXPERIMENTAL_TOOLS=on`, the Antigravity bridge accepts OpenAI
+function `tools`, assistant `tool_calls` and matching `tool` messages. It uses
+the CLI's structured-output mode rather than native client-tool registration.
+Tools execute in the calling harness. Every request starts a fresh process and
+replays the supplied transcript, so clients must include prior calls and their
+results; an orphaned, duplicate or incomplete result group returns `400
+invalid_request` before inference.
+
+`tool_choice` supports `auto`, `none`, `required`, or a named function object;
+`parallel_tool_calls=false` limits output to one call. Up to 128 function tools
+are accepted, with inline parameter schemas declaring `type: object`; `$ref`
+schemas, legacy `functions`, images, and a simultaneous non-text
+`response_format` are refused. Argument schemas are passed to the CLI for
+structured-output validation; ezllm independently checks the envelope, declared
+names, JSON object arguments, tool choice and call limits. The caller remains
+responsible for validating and authorizing execution.
+
+A call response uses normal OpenAI `tool_calls`, bridge-generated call IDs,
+JSON-encoded function arguments and `finish_reason: tool_calls`. A final answer
+uses `finish_reason: stop`. Streaming requests receive a complete validated
+content or tool-call delta, the finish event, optional usage and `[DONE]`;
+raw envelope text is never streamed. The envelope limit is 1 MiB and the call
+limit is 16 per turn. Invalid output or a reported native agent tool step other than the CLI's
+structured-output `finish` submission returns `502 invalid_tool_output` before response commitment, allowing existing
+retry/failover policy to apply. With the option off, client tools remain
+`400 chat_tools_unsupported`.
+
+This is experimental model-mediated tool selection. It does not add ACP, MCP,
+a sidecar or retained sessions; model compliance can vary. See the
+[Antigravity runbook](agy-bridge-runbook.md#experimental-caller-tools).
 
 ## M3 — accounts, keys, models, quota
 
@@ -202,6 +246,10 @@ Params: `min_tin` `max_tin` `min_tout` `max_tout` (non-negative integers);
 +1min grace); `limit` (1-500, default 50); `sort` = `ts_desc` (default) | `tin_desc` |
 `tout_desc`; `account`, `model`, `alias`, `client`, `session` (exact match on the ledger's account name,
 model, combo name, client (API key) name, and `X-Ezllm-Session` grouping key — never a prefix or pattern). Anything invalid → `400`.
+`hide_empty` = `1`/`true` drops zero-token steps: successful (2xx) rows that recorded no
+input, output, cached-read or cached-write tokens. On subscription bridges these are code-mode
+tool steps or steps whose usage arrived on a later row of the same turn. `summary.empty_steps`
+counts them in the matching set, and `filter.hide_empty` echoes the setting.
 
 ### `GET /admin/usage?group_by=&from=&to=`
 Dashboard aggregates (`store.UsageReport`), computed server-side over the FULL filtered
@@ -986,7 +1034,7 @@ version 31.
 Model-rule `win_tz` additionally accepts `instance`, now the default for new
 rules. Existing empty timezone rows migrate to UTC; explicit zones are preserved.
 Inherited rule usage reads committed ledger timestamps in the admitted timezone's
-calendar range. Existing client-token budget timezone semantics remain unchanged.
+calendar range. Client-token budgets and date-only expiries use the same usage timezone (2.0.0+; before that, the server-local `TZ`).
 
 Configuration exports retain format version 1 and add `settings`, containing
 saved non-secret operator overrides. Existing export fields and streamed completion

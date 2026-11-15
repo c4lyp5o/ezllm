@@ -13,6 +13,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
+	"github.com/c4lyp5o/ezllm/internal/provider"
 )
 
 // maxBodyBytes caps a request (images arrive inline as data: URLs).
@@ -38,8 +41,9 @@ type Server struct {
 	Logf    func(format string, args ...any)
 	Now     func() time.Time
 	// ToolsOff, when set, is why client tools are refused on this host
-	// (decision §4.7: no Landlock and no operator override).
-	ToolsOff string
+	// (decision §4.7: no Landlock).
+	ToolsOff      string
+	RequireCaller bool
 
 	mu        sync.Mutex
 	catalog   []Model
@@ -74,6 +78,9 @@ func (s *Server) Handler() http.Handler {
 		}
 		if p, ok := s.Runner.(interface{ ParkedTurns() int }); ok {
 			info["parked_tool_turns"] = p.ParkedTurns()
+		}
+		if p, ok := s.Runner.(interface{ CacheStats() CacheStats }); ok {
+			info["fork_cache"] = p.CacheStats()
 		}
 		writeJSON(w, http.StatusOK, info)
 	})
@@ -199,6 +206,11 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 			"chat_tools_unsupported"))
 		return
 	}
+	req.CallerID = strings.TrimSpace(r.Header.Get(provider.BridgeCallerHeader))
+	if len(req.CallerID) > 128 || (s.RequireCaller && len(req.Tools) > 0 && req.CallerID == "") {
+		writeRaw(w, http.StatusForbidden, ErrorEnvelope("permission_error", "codex-bridge: authenticated caller identity required; use the gateway", "caller_identity_required"))
+		return
+	}
 	if err := s.validate(r.Context(), req); err != nil {
 		s.writeErr(w, err)
 		return
@@ -232,8 +244,9 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sw := &sseWriter{w: w, id: id, created: created, model: req.Model, rc: http.NewResponseController(w)}
-	defer sw.bind(r.Context())()
+	transport := bridgeutil.NewStream(r.Context(), w, bridgeutil.StreamWriteStall)
+	defer transport.Close()
+	sw := &sseWriter{w: w, id: id, created: created, model: req.Model, transport: transport}
 	res, err := s.Runner.Run(r.Context(), req, sw.delta)
 	if err != nil {
 		if !sw.started {
@@ -287,11 +300,6 @@ func openAIUsage(u Usage) map[string]any {
 	}
 }
 
-// streamWriteStall bounds one stream write. A client that has not drained a
-// write in this long has stopped reading; the bound is per write, never on
-// the stream's total duration.
-const streamWriteStall = 60 * time.Second
-
 // sseWriter emits chat.completion.chunk events. Headers are written on the
 // first delta, so a failure before any output still gets its real status.
 type sseWriter struct {
@@ -300,43 +308,9 @@ type sseWriter struct {
 	created int64
 	model   string
 	started bool
-
-	// rc sets write deadlines; dmu orders them so a write can never push
-	// back the immediate deadline cancellation set.
-	rc        *http.ResponseController
-	dmu       sync.Mutex
-	cancelled bool
-}
-
-// bind makes cancelling ctx interrupt a write stuck on a client that stopped
-// reading (an immediate write deadline). The returned func detaches and
-// clears the deadline so a reused keep-alive connection starts clean.
-func (s *sseWriter) bind(ctx context.Context) func() {
-	stop := context.AfterFunc(ctx, func() {
-		s.dmu.Lock()
-		s.cancelled = true
-		_ = s.rc.SetWriteDeadline(time.Now())
-		s.dmu.Unlock()
-	})
-	return func() {
-		if stop() {
-			_ = s.rc.SetWriteDeadline(time.Time{})
-		}
-	}
-}
-
-// arm sets the per-write stall deadline unless cancellation already fired.
-func (s *sseWriter) arm() error {
-	if s.rc == nil {
-		return nil
-	}
-	s.dmu.Lock()
-	defer s.dmu.Unlock()
-	if s.cancelled {
-		return context.Canceled
-	}
-	_ = s.rc.SetWriteDeadline(time.Now().Add(streamWriteStall))
-	return nil
+	// transport owns write deadlines, flushing and cancellation
+	// (internal/bridgeutil, shared with the Claude and Antigravity bridges).
+	transport *bridgeutil.Stream
 }
 
 func (s *sseWriter) begin() {
@@ -357,16 +331,8 @@ func (s *sseWriter) event(v any) error {
 	if err != nil {
 		return err
 	}
-	if err := s.arm(); err != nil {
-		return err
-	}
-	if _, err := s.w.Write([]byte("data: " + string(b) + "\n\n")); err != nil {
-		return err
-	}
-	if f, ok := s.w.(http.Flusher); ok {
-		f.Flush()
-	}
-	return nil
+	_, err = s.transport.Write([]byte("data: " + string(b) + "\n\n"))
+	return err
 }
 
 func (s *sseWriter) chunk(delta map[string]any, finish string) error {
@@ -387,10 +353,7 @@ func (s *sseWriter) delta(d Delta) error {
 }
 
 func (s *sseWriter) done() {
-	_, _ = s.w.Write([]byte("data: [DONE]\n\n"))
-	if f, ok := s.w.(http.Flusher); ok {
-		f.Flush()
-	}
+	_, _ = s.transport.Write([]byte("data: [DONE]\n\n"))
 }
 
 func asNative(err error) *NativeError {

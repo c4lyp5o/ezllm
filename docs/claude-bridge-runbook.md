@@ -62,9 +62,11 @@ nothing else ever holds the subscription credential. One container, no sidecar.
 ## Enable
 
 In your `compose.yml` (from `compose.example.yml`): uncomment the two Claude
-mounts (the CLI read-only at `/opt/claude/claude`, the login read-write at
+mounts (the bridge root read-only at `/opt/claude-bridge`, the login read-write at
 `/claude-sub`), set `USER`/`LOGNAME` to the login's owner (the CLI's login check
-reads process identity), and set `EZLLM_CLAUDE_BRIDGE: "on"`. Replace `/home/you`, the version,
+reads process identity), and set `EZLLM_CLAUDE_BRIDGE: "on"`. The default `EZLLM_CLAUDE_BIN` is
+`/opt/claude-bridge/current/claude`, the layout `scripts/bridge_update.py --init`
+creates. Replace `/home/you`
 and the login name below with your actual host values; keep the existing
 `environment` and `volumes` entries for ezllm's data and config.
 
@@ -74,7 +76,7 @@ and the login name below with your actual host values; keep the existing
       USER: your-login
       LOGNAME: your-login
     volumes:
-      - /home/you/.local/share/claude-bridge/claude-2.1.306:/opt/claude/claude:ro
+      - /home/you/.local/share/claude-bridge:/opt/claude-bridge:ro
       - /home/you/.claude-sub:/claude-sub
 ```
 
@@ -145,7 +147,7 @@ two `cache_control` markers survive (native spends two of upstream's four).
 
 ## Verify
 
-For a simple first check, use the gateway's [model-list command](../README.md#set-up-the-dashboard)
+For a simple first check, use the gateway's [model-list command](../README.md#2-finish-setup-in-the-dashboard)
 and select a model from this account. Send a short prompt through the dashboard
 or your client. Requests consume subscription quota.
 
@@ -196,7 +198,8 @@ shape the Providers page already draws — **rolling** = the 5-hour window,
   (`web_search_*`, `code_execution_*`, …), an OpenAI-shaped tool on `/v1/messages`,
   or `parallel_tool_calls`. The message names the field; send client tools only.
 - **Boot: "does not resolve to the official Claude Code CLI"** — the
-  `/opt/claude/claude` mount in your `compose.yml` is missing or points at nothing.
+  `/opt/claude-bridge` mount in your `compose.yml` is missing, or its `current`
+  link points at nothing.
 
 ## Rollback
 

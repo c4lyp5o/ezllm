@@ -2,7 +2,7 @@ module github.com/c4lyp5o/ezllm
 
 go 1.27
 
-toolchain go1.27.2
+toolchain go1.27.4
 
 require (
 	filippo.io/age v1.3.2

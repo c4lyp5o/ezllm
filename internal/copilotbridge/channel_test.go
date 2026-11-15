@@ -23,6 +23,7 @@ type fakeCLI struct {
 	protocol int
 	// createErr makes session.create fail with an RPC error.
 	createErr string
+	sendErr   string
 	// events follow session.send, oldest first. Aborted follows session.abort.
 	events, aborted []string
 	// ask, if set, is a server request sent before the first event.
@@ -112,6 +113,10 @@ func (f *fakeCLI) serve(in *bufio.Reader, out io.Writer) {
 			}
 			reply(`{"sessionId":"s1"}`)
 		case "session.send":
+			if f.sendErr != "" {
+				send(`{"jsonrpc":"2.0","id":` + string(msg.ID) + `,"error":{"code":-32603,"message":` + strconv.Quote(f.sendErr) + `}}`)
+				continue
+			}
 			reply(`{"messageId":"m1"}`)
 			if f.ask != "" {
 				send(`{"jsonrpc":"2.0","id":"srv-1","method":"` + f.ask + `","params":{}}`)
@@ -568,5 +573,17 @@ func TestUsageSurvivesFloatAndFractionalNumbers(t *testing.T) {
 	ev.applyUsage(&u)
 	if u.PromptTokens != 7 || u.NanoAIU != 0 {
 		t.Errorf("usage = %+v", u)
+	}
+}
+
+func TestSendRefusalCannotAuthorizeFallback(t *testing.T) {
+	f := &fakeCLI{sendErr: "externalToolDefinitions: invalid tool"}
+	_, err := f.drive(t, channelTurn(), nil)
+	failure, ok := err.(*Failure)
+	if !ok || failure.BeforeInference {
+		t.Fatalf("send failure must not authorize a second generation: %v", err)
+	}
+	if !f.called("session.send") {
+		t.Fatal("send path not exercised")
 	}
 }

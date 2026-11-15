@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 )
@@ -32,6 +33,27 @@ const (
 )
 
 const timeFormat = "2006-01-02 15:04:05.000"
+
+// location is the zone log timestamps are written in: the usage timezone, so
+// logs, reports and budgets share one clock and the process TZ plays no part.
+// UTC until SetLocation is called.
+var location atomic.Pointer[time.Location]
+
+// SetLocation sets the zone for log timestamps; nil means UTC. Safe to call
+// while logging (the dashboard can change the usage timezone at runtime).
+func SetLocation(loc *time.Location) {
+	if loc == nil {
+		loc = time.UTC
+	}
+	location.Store(loc)
+}
+
+func logLocation() *time.Location {
+	if l := location.Load(); l != nil {
+		return l
+	}
+	return time.UTC
+}
 
 // ParseLevel reads EZLLM_LOG_LEVEL's vocabulary. Empty means info; an
 // unknown value reports ok=false so the caller can say so instead of
@@ -108,7 +130,12 @@ func NewHandler(w io.Writer, opts Options) slog.Handler {
 		lv = slog.LevelInfo
 	}
 	if opts.JSON {
-		return slog.NewJSONHandler(w, &slog.HandlerOptions{Level: lv})
+		return slog.NewJSONHandler(w, &slog.HandlerOptions{Level: lv, ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if len(groups) == 0 && a.Key == slog.TimeKey && a.Value.Kind() == slog.KindTime {
+				a.Value = slog.TimeValue(a.Value.Time().In(logLocation()))
+			}
+			return a
+		}})
 	}
 	return &handler{mu: &sync.Mutex{}, w: w, level: lv, color: opts.Color}
 }
@@ -127,7 +154,7 @@ func (h *handler) Enabled(_ context.Context, l slog.Level) bool { return l >= h.
 func (h *handler) Handle(_ context.Context, r slog.Record) error {
 	buf := make([]byte, 0, 256)
 	if !r.Time.IsZero() {
-		buf = h.paint(buf, dim, r.Time.Format(timeFormat))
+		buf = h.paint(buf, dim, r.Time.In(logLocation()).Format(timeFormat))
 		buf = append(buf, ' ')
 	}
 	buf = h.paint(buf, levelColor(r.Level), fmt.Sprintf("%-5s", r.Level.String()))

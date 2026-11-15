@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { openCallStream } from '../utils/stream';
-import type { FeedRow } from '../utils/api';
+import { isZeroTokenStep, ZERO_TOKEN_STEP_HINT, type FeedRow } from '../utils/api';
 import { SectionLabel, cx, formatTokens } from '../components/ui';
 import { SlideRow } from '../components/motion';
 
@@ -186,6 +186,11 @@ export default function RecentFeed() {
                       <span className="text-mute w-24 shrink-0 hidden sm:block truncate">
                         {c.account}
                       </span>
+                      {isZeroTokenStep(c) ? (
+                      <span className="w-28 shrink-0 text-right" title={ZERO_TOKEN_STEP_HINT}>
+                        <span className="rounded border border-line px-1.5 py-0.5 text-[11px] text-mute">no tokens</span>
+                      </span>
+                      ) : (
                       <span className="font-mono tabular-nums text-mute w-28 shrink-0 text-right"
                         title={`tokens in ${formatTokens(c.tin)} (↑, prompt with cache inside) · tokens out ${formatTokens(c.tout)} (↓, completion)`}>
                         <span title="tokens in — prompt, cache counted inside">↑{formatTokens(c.tin)}</span>
@@ -198,6 +203,7 @@ export default function RecentFeed() {
                           </span>
                         )}
                       </span>
+                      )}
                       <span className="font-mono tabular-nums text-mute w-14 shrink-0 text-right">
                         {c.total_ms != null ? `${c.total_ms}ms` : '—'}
                       </span>

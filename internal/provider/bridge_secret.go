@@ -15,6 +15,10 @@ import (
 // every hop they rewrite to a bridge, and the bridges refuse anything else.
 const BridgeSecretHeader = "X-Ezllm-Bridge-Secret"
 
+// BridgeCallerHeader binds parked Codex state to gateway-authenticated callers.
+// It is overwritten at the trusted loopback hop, never accepted from clients.
+const BridgeCallerHeader = "X-Ezllm-Caller"
+
 // BridgeSecret returns this process's bridge secret, generated on first use.
 // It is never persisted or logged: adapter and bridge live in one process, so
 // a restart simply mints a new one.

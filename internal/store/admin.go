@@ -1424,7 +1424,7 @@ func (in TokenInput) Validate() error {
 			return fmt.Errorf("role %q must be infer|admin", r)
 		}
 	}
-	if _, err := normalizeExpiry(in.ExpiresAt); err != nil {
+	if _, err := normalizeExpiry(in.ExpiresAt, time.UTC); err != nil { // validation: the zone cannot make it fail
 		return err
 	}
 	return nil
@@ -1433,7 +1433,7 @@ func (in TokenInput) Validate() error {
 // normalizeExpiry stores RFC3339 UTC. A bare YYYY-MM-DD means end of that day
 // in the gateway's local timezone (the same day the budget windows use) so a
 // date picker does not expire a key at midnight at the start.
-func normalizeExpiry(s string) (string, error) {
+func normalizeExpiry(s string, loc *time.Location) (string, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return "", nil
@@ -1441,7 +1441,7 @@ func normalizeExpiry(s string) (string, error) {
 	if t, err := time.Parse(time.RFC3339, s); err == nil {
 		return t.UTC().Format(time.RFC3339), nil
 	}
-	if t, err := time.ParseInLocation("2006-01-02", s, time.Local); err == nil {
+	if t, err := time.ParseInLocation("2006-01-02", s, loc); err == nil {
 		return t.Add(24*time.Hour - time.Second).UTC().Format(time.RFC3339), nil
 	}
 	return "", fmt.Errorf("expires_at must be RFC3339 or YYYY-MM-DD")
@@ -1464,7 +1464,7 @@ func (d *DB) UpsertToken(ctx context.Context, in TokenInput) (id int64, plaintex
 	if len(roles) == 0 {
 		roles = []string{"infer"}
 	}
-	expires, err := normalizeExpiry(in.ExpiresAt)
+	expires, err := normalizeExpiry(in.ExpiresAt, d.usageLocation())
 	if err != nil {
 		return 0, "", err
 	}
@@ -1552,7 +1552,7 @@ func (d *DB) UpdateToken(ctx context.Context, id int64, enabled *bool, roles []s
 			}
 		}
 		if expiresAt != nil {
-			exp, err := normalizeExpiry(*expiresAt)
+			exp, err := normalizeExpiry(*expiresAt, d.usageLocation())
 			if err != nil {
 				return err
 			}

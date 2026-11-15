@@ -26,25 +26,25 @@ import (
 // docs/codex-subscription-design.md; operation: docs/codex-bridge-runbook.md.
 const (
 	envCodexBridge      = "EZLLM_CODEX_BRIDGE"            // "on" enables the surface
-	envCodexBin         = "EZLLM_CODEX_BIN"               // official CLI binary (mounted release: /opt/codex/bin/codex)
+	envCodexBin         = "EZLLM_CODEX_BIN"               // official CLI binary (updater layout: /opt/codex-bridge/current/bin/codex)
 	envCodexHome        = "EZLLM_CODEX_HOME"              // isolated ChatGPT login (CODEX_HOME)
 	envCodexAddr        = "EZLLM_CODEX_BRIDGE_ADDR"       // default 127.0.0.1:8791
 	envCodexToken       = "EZLLM_CODEX_BRIDGE_TOKEN_FILE" // shared secret for the account key
 	envCodexConcurrency = "EZLLM_CODEX_BRIDGE_CONCURRENCY"
-	envCodexToolsNoLL   = "EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK" // "on" = client tools without Landlock
 )
 
 // codexTools decides client tools for this host (decision §4.7): with Landlock
-// every child is confined and tools are on; without it they are off unless the
-// operator overrides, and a missing code-mode host turns them off regardless.
+// every child is confined and tools are on; without it they are off (the
+// writable sandbox needs the kernel boundary), and a missing code-mode host
+// turns them off regardless.
 type codexTools struct {
 	sandbox  *codexbridge.Sandbox
 	landlock string // /status: available (ABI n) | unavailable: reason
-	status   string // /status: enabled | disabled (…) | enabled without Landlock (operator override)
+	status   string // /status: enabled | disabled (…)
 	off      string // non-empty: why tool requests are refused
 }
 
-func decideCodexTools(helper, bin string, override bool) codexTools {
+func decideCodexTools(helper, bin string) codexTools {
 	var t codexTools
 	abi, err := codexbridge.ProbeLandlock(helper)
 	if err == nil {
@@ -60,8 +60,6 @@ func decideCodexTools(helper, bin string, override bool) codexTools {
 		t.off = "the code-mode host the CLI needs for tools is missing (" + host + ")"
 	case err == nil:
 		t.status = "enabled"
-	case override:
-		t.status = "enabled without Landlock (operator override)"
 	default:
 		t.status = "disabled (no Landlock)"
 		t.off = "Landlock is unavailable (" + err.Error() + ")"
@@ -84,7 +82,7 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 	if runtime.GOOS != "linux" {
 		return nil, fmt.Errorf("codex bridge: %s=on is a Linux feature (this build is %s); run ezllm in a Linux container — docs/codex-bridge-runbook.md", envCodexBridge, runtime.GOOS)
 	}
-	bin := envOrDefault(envCodexBin, "/opt/codex/bin/codex")
+	bin := envOrDefault(envCodexBin, defaultCodexBin)
 	resolved, err := exec.LookPath(bin)
 	if err != nil {
 		return nil, fmt.Errorf("codex bridge: %s=%q does not resolve to the official Codex CLI: %w", envCodexBin, bin, err)
@@ -97,19 +95,16 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 	if err := assertCodexLoopback(addr); err != nil {
 		return nil, err
 	}
-	concurrency := 2
-	if v := strings.TrimSpace(os.Getenv(envCodexConcurrency)); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 {
-			return nil, fmt.Errorf("codex bridge: %s=%q must be a positive integer", envCodexConcurrency, v)
-		}
-		concurrency = n
+	concurrency, err := bridgeConcurrency(os.Getenv, envCodexConcurrency, "codex")
+	if err != nil {
+		return nil, err
 	}
 
 	pre, err := codexbridge.RunPreflight(ctx, resolved, home)
 	if err != nil {
 		return nil, err
 	}
+	cache := pre.Cache.Enabled
 	token, err := codexBridgeToken(strings.TrimSpace(os.Getenv(envCodexToken)))
 	if err != nil {
 		return nil, err
@@ -118,10 +113,12 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 	if err != nil {
 		return nil, fmt.Errorf("codex bridge: cannot locate this binary for the Landlock helper: %w", err)
 	}
-	tools := decideCodexTools(helper, resolved, strings.EqualFold(strings.TrimSpace(os.Getenv(envCodexToolsNoLL)), "on"))
+	tools := decideCodexTools(helper, resolved)
 	qualified := releaseState(bin, pre.Version, codexbridge.QualifiedVersion)
 
 	runner := &codexbridge.Runner{
+		ForkCache:     cache,
+		NativeHistory: pre.NativeHistory,
 		Bin:           resolved,
 		CodexHome:     home,
 		Timeout:       300 * time.Second,
@@ -132,23 +129,28 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 		Sandbox:       tools.sandbox,
 	}
 	srv := &codexbridge.Server{
-		Runner:   runner,
-		ToolsOff: tools.off,
-		Token:    token,
-		Version:  server.Version,
+		Runner:        runner,
+		RequireCaller: true,
+		ToolsOff:      tools.off,
+		Token:         token,
+		Version:       server.Version,
 		Info: map[string]any{
-			"status":       "ok",
-			"version":      server.Version,
-			"cli_bin":      resolved,
-			"cli_version":  pre.Version,
-			"cli_release":  qualified,
-			"codex_home":   home,
-			"login":        pre.Login,
-			"lockdown":     "verified at boot",
-			"channel":      channelInfo(pre),
-			"concurrency":  concurrency,
-			"landlock":     tools.landlock,
-			"client_tools": tools.status,
+			"status":          "ok",
+			"version":         server.Version,
+			"cli_bin":         resolved,
+			"cli_version":     pre.Version,
+			"cli_release":     qualified,
+			"codex_home":      home,
+			"login":           pre.Login,
+			"lockdown":        "verified at boot",
+			"channel":         channelInfo(pre),
+			"concurrency":     concurrency,
+			"landlock":        tools.landlock,
+			"client_tools":    tools.status,
+			"cache_selection": pre.Cache,
+			"native_history":  pre.NativeHistory,
+			"approval_policy": codexbridge.ApprovalPolicy,
+			"sandbox":         codexbridge.SandboxPolicy,
 		},
 		Logf: log.Info,
 	}

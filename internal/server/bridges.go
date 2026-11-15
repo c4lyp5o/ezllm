@@ -89,7 +89,7 @@ func newBridgeRegistry() *bridgeRegistry {
 			// (inclusive prompt + cache details), so the openai convention fits.
 			ID: "github-copilot", Label: "GitHub Copilot", Kind: "copilot-bridge",
 			BaseURL: "http://127.0.0.1:8793/v1", UsageConvention: "openai",
-			Env: "EZLLM_COPILOT_BRIDGE", Runbook: "docs/copilot-cli-bridge-runbook.md",
+			Env: "EZLLM_COPILOT_BRIDGE", Runbook: "docs/copilot-bridge-runbook.md",
 		},
 	}}
 }
@@ -109,6 +109,9 @@ func (s *Server) EnableBridge(id, addr, token, updateFile string, status map[str
 		b.Enabled = true
 		if addr != "" {
 			b.BaseURL = "http://" + addr + "/v1"
+		}
+		if id == "chatgpt-sub" && s.dispatcher != nil {
+			s.dispatcher.RegisterCallerBridge(b.BaseURL, token)
 		}
 		b.token = token
 		b.updateFile = updateFile

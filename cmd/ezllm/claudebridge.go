@@ -25,11 +25,12 @@ import (
 // subscription. No second service, no second image, no inter-service token.
 // Decisions: docs/claude-subscription-design.md.
 const (
-	envBridge      = "EZLLM_CLAUDE_BRIDGE"            // "on" enables the surface
-	envBridgeBin   = "EZLLM_CLAUDE_BIN"               // official CLI binary (mounted)
-	envBridgeDir   = "EZLLM_CLAUDE_CONFIG_DIR"        // subscription login directory
-	envBridgeAddr  = "EZLLM_CLAUDE_BRIDGE_ADDR"       // default 127.0.0.1:8790
-	envBridgeToken = "EZLLM_CLAUDE_BRIDGE_TOKEN_FILE" // shared secret for the account key
+	envBridge            = "EZLLM_CLAUDE_BRIDGE"             // "on" enables the surface
+	envBridgeBin         = "EZLLM_CLAUDE_BIN"                // official CLI binary (mounted)
+	envBridgeDir         = "EZLLM_CLAUDE_HOME"               // subscription login directory (the CLI's CLAUDE_CONFIG_DIR)
+	envBridgeAddr        = "EZLLM_CLAUDE_BRIDGE_ADDR"        // default 127.0.0.1:8790
+	envBridgeToken       = "EZLLM_CLAUDE_BRIDGE_TOKEN_FILE"  // shared secret for the account key
+	envClaudeConcurrency = "EZLLM_CLAUDE_BRIDGE_CONCURRENCY" // concurrent CLI processes (default 1)
 )
 
 // claudeQualifiedVersion is the CLI release the bridge's measurements and live
@@ -66,12 +67,12 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 	if !strings.EqualFold(strings.TrimSpace(os.Getenv(envBridge)), "on") {
 		return func() {}, nil
 	}
-	bin := envOrDefault(envBridgeBin, "/opt/claude/claude")
+	bin := envOrDefault(envBridgeBin, defaultClaudeBin)
 	resolved, err := exec.LookPath(bin)
 	if err != nil {
 		return nil, fmt.Errorf("claude bridge: %s=%q does not resolve to the official Claude Code CLI: %w", envBridgeBin, bin, err)
 	}
-	dir := envOrDefault(envBridgeDir, "/claude-sub")
+	dir := claudeHome(os.Getenv)
 	addr := strings.TrimSpace(os.Getenv(envBridgeAddr))
 	if addr == "" {
 		addr = "127.0.0.1:8790"
@@ -87,13 +88,17 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 	if err != nil {
 		return nil, err
 	}
+	concurrency, err := bridgeConcurrency(os.Getenv, envClaudeConcurrency, "claude")
+	if err != nil {
+		return nil, err
+	}
 
 	srv := &claudebridge.Server{
 		Runner: &claudebridge.Runner{
 			Bin:           resolved,
 			ConfigDir:     dir,
 			Timeout:       300 * time.Second,
-			MaxConcurrent: 2,
+			MaxConcurrent: concurrency,
 			Logf:          log.Info,
 		},
 		Token:   token,
@@ -224,4 +229,13 @@ func claudeBridgeToken(path string) (string, error) {
 		return "", fmt.Errorf("claude bridge: cannot write %s: %w", path, err)
 	}
 	return token, nil
+}
+
+// claudeHome is the bridge's login directory, EZLLM_CLAUDE_HOME like every
+// other bridge's *_HOME (handed to the CLI as CLAUDE_CONFIG_DIR).
+func claudeHome(get func(string) string) string {
+	if v := strings.TrimSpace(get(envBridgeDir)); v != "" {
+		return v
+	}
+	return "/claude-sub"
 }

@@ -9,7 +9,7 @@ import {
   type Account, type ApiErrorDetail, type Bridge, type KeyRow, type ModelRule, type ModelRow, type Price, type SweepStatus, type TestResult, type TestStep,
 } from '../utils/api';
 import { useSearchParams } from 'react-router-dom';
-import { Chip, ConfirmModal, Modal, SecretInput, SectionLabel, Segmented, Skeleton, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls, relTime, Mono } from '../components/ui';
+import { Chip, ConfirmModal, CopyButton, Modal, SecretInput, SectionLabel, Segmented, Skeleton, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls, relTime, Mono } from '../components/ui';
 import { Collapse, Stagger, StaggerItem } from '../components/motion';
 import { bridgeUpdateText, fmtMoney, nfmt, UPDATE_TONE } from '../utils/lib';
 import { accountIssues, type Issue } from '../utils/health';
@@ -609,6 +609,51 @@ function BridgeUpdateNote({ update }: { update: NonNullable<Bridge['update']> })
   );
 }
 
+// Sign-in commands per bridge, matching the README: every bridge logs in to its
+// own ~/.<bridge>-sub folder with the binary the bridge mounts (the updater's
+// layout; the runbook covers other install paths).
+const BRIDGE_SIGN_IN: Record<string, { login: string[]; check: string; note: string }> = {
+  'claude-sub': {
+    login: ['CLAUDE_CONFIG_DIR=~/.claude-sub ~/.local/share/claude-bridge/current/claude auth login'],
+    check: 'CLAUDE_CONFIG_DIR=~/.claude-sub ~/.local/share/claude-bridge/current/claude auth status',
+    note: 'Opens a browser sign-in for the account with the Claude plan.',
+  },
+  'chatgpt-sub': {
+    login: ['CODEX_HOME=~/.codex-sub ~/.local/share/codex-bridge/current/bin/codex login --device-auth'],
+    check: 'CODEX_HOME=~/.codex-sub ~/.local/share/codex-bridge/current/bin/codex login status',
+    note: 'Prints a URL and a code: open the URL, enter the code and approve with the ChatGPT account.',
+  },
+  'antigravity-sub': {
+    login: ['mkdir -p ~/.agy-sub && chmod 700 ~/.agy-sub', 'env -u DBUS_SESSION_BUS_ADDRESS HOME=$HOME/.agy-sub ~/.local/share/agy-bridge/current/agy'],
+    check: 'ls ~/.agy-sub/.gemini/antigravity-cli/antigravity-oauth-token',
+    note: 'Opens the interactive CLI: sign in, send one prompt, then type /exit. Unsetting D-Bus saves the login to a file the container can read.',
+  },
+  'github-copilot': {
+    login: ['env -u DBUS_SESSION_BUS_ADDRESS COPILOT_HOME=~/.copilot-sub ~/.local/share/copilot-bridge/current/copilot login --device-code'],
+    check: 'ls ~/.copilot-sub/config.json',
+    note: 'Prints a URL and a code: open the URL, enter the code and approve with the GitHub account that has Copilot.',
+  },
+};
+
+function SignInCommands({ id }: { id: string }) {
+  const s = BRIDGE_SIGN_IN[id];
+  if (!s) return null;
+  const line = (cmd: string) => (
+    <div key={cmd} className="flex items-start gap-2">
+      <code className="font-code min-w-0 flex-1 break-all rounded bg-shade px-2 py-1 text-[12px] text-dim">{cmd}</code>
+      <CopyButton text={cmd} label="Copy" />
+    </div>
+  );
+  return (
+    <div className="space-y-1.5 text-[12px]">
+      <p className="text-mute">Sign in on the host (once):</p>
+      {s.login.map(line)}
+      <p className="text-mute">{s.note} Check it worked:</p>
+      {line(s.check)}
+    </div>
+  );
+}
+
 // BridgePanel stands in for the key field on a subscription preset: running →
 // what the bridge reported at boot and "no key needed"; off → the exact steps
 // that turn it on, with the runbook one click away.
@@ -650,6 +695,7 @@ function BridgePanel({ bridge, loading }: { bridge: Bridge | null; loading: bool
         {bridge.update && <BridgeUpdateNote update={bridge.update} />}
         {toolsDisabled && <p className="text-[12px] text-warn">Client tool calls are unavailable on this bridge. See {runbook} for the reason and options.</p>}
         {loggedOut && <p className="text-[12px] text-warn">The CLI does not report a login — the key test will fail until you log in again ({runbook}).</p>}
+        {loggedOut && <SignInCommands id={bridge.id} />}
         <p className="text-[12px] text-mute">Status was recorded at startup. Setup and troubleshooting: {runbook}</p>
         <p className="text-[12px] text-mute">Save &amp; validate uses the bridge&apos;s own key. Cap the account under Rules before agents use it.</p>
       </div>
@@ -659,7 +705,9 @@ function BridgePanel({ bridge, loading }: { bridge: Bridge | null; loading: bool
     <div className="space-y-2 rounded-lg border border-warn/40 bg-warn-dim/40 px-4 py-3 text-[13px]">
       <p className="flex items-center gap-2 text-warn"><span className="size-1.5 rounded-full bg-warn" /> This bridge is not running on this server</p>
       <ol className="list-decimal space-y-1 pl-5 text-dim">
-        <li>On the host, install the official CLI and log in to a separate folder (the runbook has the exact commands).</li>
+        <li>On the host, install the official CLI and sign it in to its own folder:
+          <div className="mt-1.5"><SignInCommands id={bridge.id} /></div>
+        </li>
         <li>In <Mono>compose.yml</Mono>, uncomment the bridge&apos;s two mounts and set <Mono>{bridge.env}: &quot;on&quot;</Mono>.</li>
         <li>Run <Mono>docker compose up -d</Mono>, then reopen this dialog. If ezllm does not start, check <Mono>docker compose logs ezllm</Mono>.</li>
       </ol>

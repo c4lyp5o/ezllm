@@ -183,11 +183,11 @@ client whose native wire a hop provably cannot serve.
 setting as automatic pairwise translation (merged 2026-10-22). Manage it live in
 Settings or through the deployment fallbacks described above.
 
-The former matrix switch, `translation.universal_enabled` /
-`EZLLM_TRANSLATION_UNIVERSAL_ENABLED`, is **deprecated** and logs a warning at boot. It still
-participates in deployment fallback resolution: explicit false in config disables
-translation when no saved/environment value overrides it. The deprecated env var
-applies when `EZLLM_TRANSLATION_ENABLED` is unset and locks the Settings control.
+The former matrix switch's YAML key, `translation.universal_enabled`, is
+**deprecated** and logs a warning at boot. It still participates in deployment
+fallback resolution: explicit false in config disables translation when no
+saved/environment value overrides it. Its environment alias,
+`EZLLM_TRANSLATION_UNIVERSAL_ENABLED`, was removed in 2.0.0 and now fails the boot.
 A wrong-typed value still fails boot naming the field.
 
 **Usage convention on a Messages destination:** `auto` (the default) reads the upstream's

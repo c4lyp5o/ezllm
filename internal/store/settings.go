@@ -63,6 +63,17 @@ func (d *DB) InheritedRuleUsage(ctx context.Context, account int64, model, windo
 
 func (d *DB) SetOperatorSettings(m *settings.Manager) { d.operatorSettings.Store(m) }
 
+// usageLocation is the effective usage timezone (dashboard → YAML →
+// EZLLM_USAGE_TZ → UTC). Client-token budgets and date-only expiries follow it,
+// like reports and model rules, so the container's TZ only affects log
+// timestamps. Without operator settings wired (tests), it is UTC.
+func (d *DB) usageLocation() *time.Location {
+	if m := d.operatorSettings.Load(); m != nil {
+		return m.Current().Location()
+	}
+	return time.UTC
+}
+
 type JobHealth struct {
 	LastSuccess string `json:"last_success,omitempty"`
 	LastFailure string `json:"last_failure,omitempty"`

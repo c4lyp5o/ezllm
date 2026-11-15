@@ -11,7 +11,149 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.8.1**
+**Current: v2.0.0**
+
+## v2.0.0 — 2026-11-15
+
+First release after v1.8.1, and a major version because the bridge environment
+settings changed incompatibly (see Breaking below). It consolidates the bridge caching, Codex
+conversation-fidelity, CLI updater and security-audit work that ran in
+production as pre-release builds 1.8.2 and 1.9.0–1.14.3. The security audit,
+remediation and rollout records name those builds by their pre-release numbers.
+Schema v35: drops `calls.tool_prune_shadow_tokens` from the shelved tool-pruning
+experiment (its 2,875 measurements are in `docs/tool-prune-shadow-results.json`).
+New environment settings: `EZLLM_CODEX_BRIDGE_CACHE`, `EZLLM_AGY_BRIDGE_CACHE`,
+`EZLLM_COPILOT_BRIDGE_CACHE`, `EZLLM_AGY_EXPERIMENTAL_TOOLS` and
+`EZLLM_CLAUDE_BRIDGE_CONCURRENCY` (see `docs/environment.md`).
+
+**Breaking:** the Copilot bridge's default login directory is now `/copilot-sub`
+(was `/copilot-home`), matching the other bridges' dedicated `*-sub` logins. Log in
+with `COPILOT_HOME=~/.copilot-sub`, mount it at `/copilot-sub` and recreate the
+container; see `docs/copilot-bridge-runbook.md`.
+
+**Breaking:** bridge `*_BIN` defaults moved to the updater layout
+(`/opt/<bridge>-bridge/current/...`); a compose mounting a single binary at the
+old `/opt/<bridge>/...` path must set `*_BIN`. `EZLLM_CLAUDE_CONFIG_DIR` is
+renamed `EZLLM_CLAUDE_HOME`. The Copilot token file defaults to
+`/data/copilot-bridge.token`. Every bridge caches by default and `off` is the
+only opt-out: `EZLLM_CODEX_BRIDGE_CACHE=auto` is gone, and the Copilot and
+Antigravity caches are `EZLLM_<BRIDGE>_BRIDGE_CACHE`. The Codex sandbox is always
+writable (`EZLLM_CODEX_SANDBOX` removed), and Codex client tools always require
+Landlock (`EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK` removed). Every bridge runs one CLI process at a
+time by default (`*_BRIDGE_CONCURRENCY`, was 2). Retired names fail the boot.
+The master key defaults to `<data_dir>/ezllm-master.key` (was
+`~/.hermes/secrets/ezllm-master.key`); a key at the old path refuses the boot
+until moved. `EZLLM_USAGE_TZ` is the only timezone setting (logs and client-token
+budgets included; `TZ` is ignored). `EZLLM_WEB_DIR` and the deprecated
+`EZLLM_TRANSLATION_UNIVERSAL_ENABLED` are removed.
+
+Release review fixes: request-limit defaults no longer block startup when only
+`global_inflight` is set; VS Code path tokens stay masked in access logs;
+completed Claude streams end cleanly if the CLI fails afterwards; refused
+Antigravity resumes keep their billed usage; admission reserves a declared body
+length instead of the whole cap; stale Copilot workers are reaped outside the
+pool lock; parked Codex tool turns are scoped per caller. Codex and Copilot now
+stream through the shared bridge transport. The ledger stops storing all-zero
+compression stage lists and single-attempt notes. The dashboard labels and can
+hide zero-token steps, shows each bridge's sign-in commands, and uses the ez
+icon.
+
+### Pre-release 1.14.3
+
+Preserves structured conversation history on Codex CLIs advertising
+`thread/inject_items`. Assistant phases, message roles, tool relationships and
+image order reach the native request thread. Caller history never enters shared
+empty templates; parked continuations still resume directly. Older CLIs and
+exec retain text replay. No additional env flag or automatic continuation loop.
+
+### Pre-release 1.14.2
+
+Strengthens Codex caller-tool instructions to continue authorized implementation
+through verification instead of ending after prerequisite checks. Real blockers,
+user pauses and caller-side approval requirements remain stopping conditions.
+This is prompt guidance, not an automatic continuation loop. Instruction changes
+select a new cache template; stable subsequent requests retain cache affinity.
+
+### Pre-release 1.14.1
+
+Addresses the whole-application audit with bounded inference admission and
+body-memory reservations, provider response-cookie/state-header filtering,
+credential-safe auth/panic diagnostics, and settings body-read deadlines.
+Codex pending conversations bind to authenticated callers and full canonical
+history; recycled native IDs cannot overwrite another parked turn. The Go
+toolchain pin is 1.27.4 and CI checks reachable Go vulnerabilities. Compose
+publishes the HTTP port on localhost by default.
+
+### Pre-release 1.14.0
+
+Codex caching now defaults to `auto`: startup enables empty-template forks when
+supported, otherwise reports the reason and keeps the original request path.
+`on` requires support, `off` disables caching, and invalid modes fail startup.
+Pins native approval policy to `never` at CLI startup as well as thread creation
+and resume. Caller-tool instructions discourage repeated permission questions
+for already-authorized work while respecting actual caller approval requirements.
+Updater qualification includes automatic cache selection and noninteractive policy.
+
+### Pre-release 1.13.0
+
+Adds opt-in Codex empty-template forks for prompt-cache reuse across fresh CLI
+processes. Each request supplies its complete history to a separate ephemeral
+child; templates contain configuration and an empty seed only. Retention,
+control-only deletion and scratch cleanup are bounded. Pending caller tools keep
+their existing native continuation. CLI qualification covers this mode when
+configured. Exec repair now requires positive evidence of a pre-inference
+failure, preventing silent mid-turn failures from spending twice.
+
+### Pre-release 1.12.0
+
+Adds opt-in Antigravity conversation resume for exact caller histories, including
+complete external tool-result groups. It retains bounded metadata/workspaces and
+no idle CLI process. Corrects native cold-input/cache-read mapping to inclusive
+OpenAI usage, reports per-request counter deltas, and qualifies the cache mode
+through the bridge updater. Gemini Flash native/HTTP proofs showed cache reuse.
+
+### Pre-release 1.11.0
+
+Adds opt-in exact-history reuse of completed Copilot conversations within the
+existing warm process pool. Usage remains per request through cumulative-counter
+deltas; edited histories, tool-result continuations, images and uncertain cleanup
+use fresh sessions. Records native cache experiments including Antigravity and
+requires cache-mode qualification in the CLI updater when enabled.
+
+### Pre-release 1.10.1
+
+Corrects Copilot fallback token accounting and reasoning visibility, prevents
+plain-chat fallback after inference may have started, and reports Claude CLI
+aggregate usage including internal retries and thinking details. Preserves
+Copilot cache writes on the HTTP wire. Adds a measured Hermes bridge
+usage audit without changing live models, compression or session isolation.
+
+### Pre-release 1.10.0
+
+Revises bridge CLI updates with journalled batch promotion and rollback recovery,
+a post-gate window check, operational-failure backoff and accurate candidate
+status. Adds optional Copilot release discovery/staging on the same host timer.
+Live gates report and exercise Codex sandbox mode, Antigravity caller tools
+when enabled, and Copilot warm-pool mode. No new service or schema migration.
+
+### Pre-release 1.9.0
+
+Adds opt-in experimental Antigravity caller tools through structured output.
+The existing CLI returns an envelope which ezllm validates and converts into
+OpenAI tool calls; the caller executes them and sends results in its next
+request. One CLI process per request, with no ACP, MCP, sidecar, new dependency
+or persistent session. Existing text-only behavior remains the default.
+No schema migration.
+
+### Pre-release 1.8.2
+
+Fixes Codex bridge headless permissions: writable requests use approval policy
+`never` instead of requesting approvals the bridge declines. The exec fallback
+passes that policy as a config override accepted by the CLI. Native tool
+lockdown and Landlock confinement remain in force. Tool-bearing requests also
+explain that caller tools (such as Hermes workspace tools) have independent
+filesystem permissions, and direct the model to use their actual results rather
+than infer a denial from the bridge sandbox. No schema migration.
 
 ## v1.8.1 — 2026-11-11
 
@@ -72,7 +214,7 @@ a mismatch plain chat falls back to `-p`, and a request with tools answers
 
 Migration of an existing database is a manual three-step in the deploy window
 (add the CLI provider, re-point combos/hops, disable the old account); see
-`docs/copilot-cli-bridge-runbook.md` § Migrating.
+`docs/copilot-bridge-runbook.md` § Migrating.
 
 ## v1.6.0 — 2026-10-31
 

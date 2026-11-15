@@ -70,15 +70,14 @@ ENV EZLLM_DATA_DIR=/data
 # -addr > EZLLM_ADDR > config.listen (main.go:184). Config defaults to
 # loopback, so container users MUST override this to serve anything.
 ENV EZLLM_ADDR=0.0.0.0:20129
-ENV TZ=Asia/Kuala_Lumpur
 
 # Claude subscription surface: off unless EZLLM_CLAUDE_BRIDGE=on, and it
-# expects the official CLI at /opt/claude/claude and the subscription login at
+# expects the official CLI at /opt/claude-bridge/current/claude and the subscription login at
 # /claude-sub (claudebridge.go defaults), bind-mounted by your compose.yml. Never
 # bake either into the image.
 #
 # ChatGPT subscription surface: off unless EZLLM_CODEX_BRIDGE=on; it expects the
-# official Codex CLI release at /opt/codex (binary /opt/codex/bin/codex, a static
+# official Codex CLI release at /opt/codex-bridge/current (binary bin/codex, a static
 # musl build — any base runs it — with its code-mode host beside it) and the
 # isolated ChatGPT login at /codex-sub (codexbridge.go defaults).
 # Same rule: mounted, never baked. docs/codex-bridge-runbook.md.

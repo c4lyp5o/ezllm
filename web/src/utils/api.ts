@@ -434,7 +434,7 @@ export type FeedRow = {
   /** Caller address (see RecentCall.ip). */
   ip?: string;
   status: number; stream?: boolean; ttft_ms?: number; total_ms?: number;
-  tin: number; tout: number; cread?: number; reasoning?: number; saved: number;
+  tin: number; tout: number; cread?: number; cwrite?: number; reasoning?: number; saved: number;
   /** What a REJECTED rewrite would have saved. Non-zero while `applied` is
    *  false is the proof the pipeline ran and declined (usually the minimum
    *  ratio floor), not that compression was skipped. */
@@ -449,6 +449,15 @@ export type FeedRow = {
   translated?: boolean;
 };
 const num = (v: unknown): number => (typeof v === 'number' ? v : 0);
+/** A successful request that recorded no tokens at all — the same definition
+ *  as the server's hide_empty filter. On subscription bridges these are
+ *  code-mode tool steps (a script's next tool call, no model work) or steps
+ *  whose usage arrived on a later request of the same turn. Never an error. */
+export function isZeroTokenStep(r: FeedRow): boolean {
+  return r.status >= 200 && r.status < 300 && !r.tin && !r.tout && !r.cread && !r.cwrite;
+}
+export const ZERO_TOKEN_STEP_HINT =
+  'No tokens were recorded for this request. On subscription bridges this is usually a tool step (the model\'s script made its next tool call without new model work) or usage that was reported on a later request of the same turn.';
 export function normalizeFeedRow(raw: any): FeedRow {
   return {
     ts: String(raw.ts ?? ''), client: String(raw.client ?? ''),
@@ -459,6 +468,7 @@ export function normalizeFeedRow(raw: any): FeedRow {
     total_ms: raw.total_ms == null ? undefined : num(raw.total_ms),
     tin: num(raw.tin ?? raw.tokens_in), tout: num(raw.tout ?? raw.tokens_out),
     cread: num(raw.cread ?? raw.tokens_cached_read),
+    cwrite: num(raw.cwrite ?? raw.tokens_cached_write),
     reasoning: num(raw.reasoning ?? raw.reasoning_tokens),
     rulesFired: num(raw.rules_fired ?? raw.compression_rules_fired),
     saved: num(raw.saved ?? raw.tokens_saved),
@@ -654,11 +664,13 @@ export type RequestsSummary = {
   // = what those rejected rewrites would have saved.
   applied_calls: number; applied_saved: number;
   declined_calls: number; held_notional: number;
+  /** Successful rows with no tokens recorded (see isZeroTokenStep). */
+  empty_steps?: number;
 };
 export type RequestsResp = {
   rows: FeedRow[];
   summary: RequestsSummary;
-  filter: { from: string; to: string; limit: number; sort: string };
+  filter: { from: string; to: string; limit: number; sort: string; hide_empty?: boolean };
 };
 export type RequestSort = 'ts_desc' | 'tin_desc' | 'tout_desc';
 export type RequestFilter = {
@@ -666,6 +678,8 @@ export type RequestFilter = {
   range?: RangeKey; /** An exact look-back in hours; wins over range (a 2x window for a prior-period comparison). */ hours?: number; sort?: RequestSort; limit?: number;
   /** Exact ledger names (the dashboard's click-through). */
   account?: string; model?: string; alias?: string; client?: string; session?: string;
+  /** Drop zero-token steps (successful rows with no tokens recorded). */
+  hideEmpty?: boolean;
 };
 export function requests(f: RequestFilter = {}): Promise<RequestsResp> {
   const hours = f.hours ?? RANGE_HOURS[f.range ?? '24h'];
@@ -681,6 +695,7 @@ export function requests(f: RequestFilter = {}): Promise<RequestsResp> {
   if (f.alias) params.set('alias', f.alias);
   if (f.client) params.set('client', f.client);
   if (f.session) params.set('session', f.session);
+  if (f.hideEmpty) params.set('hide_empty', '1');
   return get<RequestsResp>(`/admin/requests?${params.toString()}`);
 }
 

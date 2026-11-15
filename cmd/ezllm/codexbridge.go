@@ -26,7 +26,7 @@ import (
 // docs/codex-subscription-design.md; operation: docs/codex-bridge-runbook.md.
 const (
 	envCodexBridge      = "EZLLM_CODEX_BRIDGE"            // "on" enables the surface
-	envCodexBin         = "EZLLM_CODEX_BIN"               // official CLI binary (mounted release: /opt/codex/bin/codex)
+	envCodexBin         = "EZLLM_CODEX_BIN"               // official CLI binary (updater layout: /opt/codex-bridge/current/bin/codex)
 	envCodexHome        = "EZLLM_CODEX_HOME"              // isolated ChatGPT login (CODEX_HOME)
 	envCodexAddr        = "EZLLM_CODEX_BRIDGE_ADDR"       // default 127.0.0.1:8791
 	envCodexToken       = "EZLLM_CODEX_BRIDGE_TOKEN_FILE" // shared secret for the account key
@@ -84,7 +84,7 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 	if runtime.GOOS != "linux" {
 		return nil, fmt.Errorf("codex bridge: %s=on is a Linux feature (this build is %s); run ezllm in a Linux container — docs/codex-bridge-runbook.md", envCodexBridge, runtime.GOOS)
 	}
-	bin := envOrDefault(envCodexBin, "/opt/codex/bin/codex")
+	bin := envOrDefault(envCodexBin, defaultCodexBin)
 	resolved, err := exec.LookPath(bin)
 	if err != nil {
 		return nil, fmt.Errorf("codex bridge: %s=%q does not resolve to the official Codex CLI: %w", envCodexBin, bin, err)

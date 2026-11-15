@@ -140,26 +140,26 @@ func runBridgeCheck(args []string, stdout io.Writer) error {
 	var liveRun func() []string
 	switch name {
 	case "claude":
-		b, d := or(*bin, envOrDefault(envBridgeBin, "/opt/claude/claude")), or(*home, envOrDefault(envBridgeDir, "/claude-sub"))
+		b, d := or(*bin, envOrDefault(envBridgeBin, defaultClaudeBin)), or(*home, envOrDefault(envBridgeDir, "/claude-sub"))
 		v = checkClaudeCLI(b, d)
 		liveRun = func() []string {
 			return liveClaude(ctx, b, d, or(*model, "claude-haiku-5-5"), or(*toolModel, "claude-haiku-5-5"))
 		}
 	case "codex":
-		b, h := or(*bin, envOrDefault(envCodexBin, "/opt/codex/bin/codex")), or(*home, envOrDefault(envCodexHome, "/codex-sub"))
+		b, h := or(*bin, envOrDefault(envCodexBin, defaultCodexBin)), or(*home, envOrDefault(envCodexHome, "/codex-sub"))
 		var pre codexbridge.Preflight
 		v, pre = checkCodexCLI(ctx, b, h)
 		liveRun = func() []string {
 			return liveCodex(ctx, b, h, pre, or(*model, "gpt-5.6-luna"), or(*toolModel, "gpt-6.1-sol"))
 		}
 	case "agy":
-		b, h := or(*bin, envOrDefault(envAgyBin, "/opt/agy/agy")), or(*home, envOrDefault(envAgyHome, "/agy-sub"))
+		b, h := or(*bin, envOrDefault(envAgyBin, defaultAgyBin)), or(*home, envOrDefault(envAgyHome, "/agy-sub"))
 		v = checkAgyCLI(ctx, b, h)
 		liveRun = func() []string {
 			return liveAgy(ctx, b, h, or(*model, "gemini-3.8-flash-low"), or(*toolModel, or(*model, "gemini-3.8-flash-low")))
 		}
 	case "copilot":
-		b, h := or(*bin, envOrDefault(envCopilotBin, "/opt/copilot/copilot")), or(*home, copilotHome(os.Getenv))
+		b, h := or(*bin, envOrDefault(envCopilotBin, defaultCopilotBin)), or(*home, copilotHome(os.Getenv))
 		v = checkCopilotCLI(ctx, b, h)
 		liveRun = func() []string { return liveCopilot(ctx, b, h, *model, or(*toolModel, *model)) }
 		if !*live {

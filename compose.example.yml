@@ -73,8 +73,6 @@ services:
       # Recommended for cache reuse: completed-history cache requires both on (v1.9.0+).
       # EZLLM_COPILOT_BRIDGE_WARM_POOL: "on"
       # EZLLM_COPILOT_BRIDGE_SESSION_CACHE: "on"
-      # EZLLM_COPILOT_BIN: /opt/copilot/copilot
-      # Managed updater alternative, after root migration (bridge-update-runbook.md):
       # EZLLM_COPILOT_BIN: /opt/copilot-bridge/current/copilot
       # EZLLM_COPILOT_HOME: /copilot-sub
       # EZLLM_COPILOT_BRIDGE_ADDR: 127.0.0.1:8793
@@ -92,7 +90,7 @@ services:
       # must name the owner of the mounted login directory.
       # USER: you
       # LOGNAME: you
-      # EZLLM_CLAUDE_BIN: /opt/claude/claude
+      # EZLLM_CLAUDE_BIN: /opt/claude-bridge/current/claude
       # EZLLM_CLAUDE_CONFIG_DIR: /claude-sub
       # EZLLM_CLAUDE_BRIDGE_ADDR: 127.0.0.1:8790
       # EZLLM_CLAUDE_BRIDGE_TOKEN_FILE: /data/claude-bridge.token
@@ -104,7 +102,7 @@ services:
       # Recommended: automatic cache support detection, the default (v1.9.0+).
       # Use "on" to require caching or "off" to disable it. Native approvals stay never.
       # EZLLM_CODEX_BRIDGE_CACHE: "auto"
-      # EZLLM_CODEX_BIN: /opt/codex/bin/codex
+      # EZLLM_CODEX_BIN: /opt/codex-bridge/current/bin/codex
       # EZLLM_CODEX_HOME: /codex-sub
       # EZLLM_CODEX_BRIDGE_ADDR: 127.0.0.1:8791
       # EZLLM_CODEX_BRIDGE_TOKEN_FILE: /data/codex-bridge.token
@@ -118,7 +116,7 @@ services:
       # Loopback-only; an openai-compatible account dials it. Linux only. `on`
       # without the CLI and a login (the two mounts below) fails the boot.
       EZLLM_AGY_BRIDGE: "off"
-      # EZLLM_AGY_BIN: /opt/agy/agy
+      # EZLLM_AGY_BIN: /opt/agy-bridge/current/agy
       # EZLLM_AGY_HOME: /agy-sub
       # EZLLM_AGY_BRIDGE_ADDR: 127.0.0.1:8792
       # EZLLM_AGY_BRIDGE_TOKEN_FILE: /data/agy-bridge.token
@@ -143,9 +141,9 @@ services:
       # Bridges: each mounts its bridge ROOT read-only — version folders plus
       # a relative `current` link, the layout the bridge updater keeps current
       # (docs/bridge-update-runbook.md) — and its login read-write (the CLI
-      # refreshes its token there). Point the bridge's *_BIN above at the
-      # `current` path: /opt/claude-bridge/current/claude,
-      # /opt/codex-bridge/current/bin/codex, /opt/agy-bridge/current/agy.
+      # refreshes its token there). Each *_BIN default is already the
+      # `current` path (/opt/<name>-bridge/current/...), so no override is
+      # needed.
       # `python3 scripts/bridge_update.py --init` creates the layout from
       # pinned copies. A bind mount whose source is missing makes Docker
       # create an empty directory, so uncomment these only when both exist.
@@ -169,5 +167,4 @@ services:
       # - /path/to/.agy-sub:/agy-sub
       #
       # Still supported, without updates: a single pinned file or release
-      # folder at the *_BIN default (/opt/claude/claude, /opt/codex,
-      # /opt/agy/agy).
+      # folder mounted anywhere, with *_BIN pointing at it.

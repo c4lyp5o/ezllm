@@ -119,15 +119,15 @@ personal account.
 ## Enable
 
 In `compose.yml`, under the ezllm service, add these entries to the existing
-`environment` and `volumes` sections. Replace `/home/you` and the version with
-your actual host paths. The Compose service user must be able to execute the
+`environment` and `volumes` sections. Replace `/home/you` with your actual host
+path; the default `EZLLM_AGY_BIN` is `/opt/agy-bridge/current/agy`. The Compose service user must be able to execute the
 CLI and read and write the login directory:
 
 ```yaml
     environment:
       EZLLM_AGY_BRIDGE: "on"
     volumes:
-      - /home/you/.local/share/agy-bridge/1.4.7/agy:/opt/agy/agy:ro
+      - /home/you/.local/share/agy-bridge:/opt/agy-bridge:ro
       - /home/you/.agy-sub:/agy-sub
 ```
 

@@ -332,3 +332,13 @@ esac
 		}
 	}
 }
+
+// Every default binary sits in the updater-managed layout, so the update status
+// beside `current` is found without a *_BIN override.
+func TestDefaultBridgeBinsFollowUpdaterLayout(t *testing.T) {
+	for name, bin := range map[string]string{"claude": defaultClaudeBin, "codex": defaultCodexBin, "agy": defaultAgyBin, "copilot": defaultCopilotBin} {
+		if want := "/opt/" + name + "-bridge/update-status.json"; bridgeUpdateFile(bin) != want {
+			t.Errorf("%s default %q is outside /opt/%s-bridge/current", name, bin, name)
+		}
+	}
+}

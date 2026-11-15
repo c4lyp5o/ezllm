@@ -280,7 +280,7 @@ docker compose up -d
 
 Boot fails loudly — the process does not start — when:
 
-- the binary is missing (`EZLLM_CODEX_BIN`, default `/opt/codex/bin/codex`);
+- the binary is missing (`EZLLM_CODEX_BIN`, default `/opt/codex-bridge/current/bin/codex`);
 - the CLI refuses a lockdown flag, or reports a locked feature as still enabled
   (one exception, `unified_exec`, is explained in design §2.5);
 - the app-server lacks a method **and** `codex exec` lacks a fallback flag;
@@ -291,7 +291,7 @@ Boot fails loudly — the process does not start — when:
 | variable | default | meaning |
 | --- | --- | --- |
 | `EZLLM_CODEX_BRIDGE` | `off` | `on` starts the surface |
-| `EZLLM_CODEX_BIN` | `/opt/codex/bin/codex` | the CLI inside the mounted release |
+| `EZLLM_CODEX_BIN` | `/opt/codex-bridge/current/bin/codex` | the CLI inside the mounted bridge root |
 | `EZLLM_CODEX_HOME` | `/codex-sub` | the mounted login (`CODEX_HOME`) |
 | `EZLLM_CODEX_BRIDGE_ADDR` | `127.0.0.1:8791` | loopback listener |
 | `EZLLM_CODEX_BRIDGE_TOKEN_FILE` | `/data/codex-bridge.token` | shared secret, generated on first boot |

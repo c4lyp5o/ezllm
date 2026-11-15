@@ -20,7 +20,7 @@ on stdin, not argv.
 | Env | Meaning |
 |---|---|
 | `EZLLM_COPILOT_BRIDGE=on` | starts the surface |
-| `EZLLM_COPILOT_BIN` | CLI binary (default `/opt/copilot/copilot`) |
+| `EZLLM_COPILOT_BIN` | CLI binary (default `/opt/copilot-bridge/current/copilot`) |
 | `EZLLM_COPILOT_HOME` | the bridge's own login directory (default `/copilot-sub`) |
 | `EZLLM_COPILOT_BRIDGE_ADDR` | default `127.0.0.1:8793`, must be loopback |
 | `EZLLM_COPILOT_BRIDGE_TOKEN_FILE` | shared secret; minted 0600 on first boot |
@@ -30,12 +30,11 @@ Compose sketch:
 ```yaml
     environment:
       EZLLM_COPILOT_BRIDGE: "on"
-      EZLLM_COPILOT_BIN: /opt/copilot/copilot
       EZLLM_COPILOT_HOME: /copilot-sub
       EZLLM_COPILOT_BRIDGE_ADDR: 127.0.0.1:8793
       EZLLM_COPILOT_BRIDGE_TOKEN_FILE: /data/copilot-bridge.token
     volumes:
-      - /opt/copilot:/opt/copilot:ro      # the CLI release
+      - /home/<user>/.local/share/copilot-bridge:/opt/copilot-bridge:ro  # bridge root
       - /home/<user>/.copilot-sub:/copilot-sub   # the login (read-write: the CLI
                                               # writes session state)
       - ./data:/data
@@ -59,11 +58,11 @@ once on the host, with the same CLI binary the bridge mounts:
 
 ```sh
 env -u DBUS_SESSION_BUS_ADDRESS COPILOT_HOME=~/.copilot-sub \
-  /opt/copilot/copilot login --device-code
+  ~/.local/share/copilot-bridge/current/copilot login --device-code
 ls ~/.copilot-sub/config.json   # the stored login the container reads
 ```
 
-Replace `/opt/copilot/copilot` with the host path of that binary. It prints a
+Use the host path of the binary the bridge mounts. It prints a
 URL and a code; open the URL, enter the code and approve with the GitHub account
 that has the Copilot plan. Unsetting D-Bus matters on a desktop host: with a
 keyring available the CLI stores the token there, where the container cannot

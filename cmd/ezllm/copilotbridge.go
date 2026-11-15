@@ -152,7 +152,7 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 	if !strings.EqualFold(strings.TrimSpace(os.Getenv(envCopilotBridge)), "on") {
 		return func() {}, nil
 	}
-	bin := envOrDefault(envCopilotBin, "/opt/copilot/copilot")
+	bin := envOrDefault(envCopilotBin, defaultCopilotBin)
 	resolved, err := exec.LookPath(bin)
 	if err != nil {
 		return nil, fmt.Errorf("copilot bridge: %s=%q does not resolve to the official Copilot CLI: %w", envCopilotBin, bin, err)

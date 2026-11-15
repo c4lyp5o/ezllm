@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 )
 
 const maxBodyBytes = 32 << 20
@@ -234,8 +236,9 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sw := &sseWriter{w: w, id: id, created: created, model: model, rc: http.NewResponseController(w)}
-	defer sw.bind(r.Context())()
+	transport := bridgeutil.NewStream(r.Context(), w, bridgeutil.StreamWriteStall)
+	defer transport.Close()
+	sw := &sseWriter{w: w, id: id, created: created, model: model, transport: transport}
 	toolsSent := false
 	res, err := run(sw.delta, func(batch Result) error {
 		sw.model = servedModel(model, batch)
@@ -245,9 +248,11 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		sw.chunk(map[string]any{"tool_calls": openAIToolCalls(batch.ToolCalls, true)}, "")
+		if err := sw.chunk(map[string]any{"tool_calls": openAIToolCalls(batch.ToolCalls, true)}, ""); err != nil {
+			return err
+		}
 		toolsSent = true
-		return sw.arm()
+		return nil
 	})
 	if err != nil {
 		if !sw.started {
@@ -365,8 +370,6 @@ func (s *Server) writeErr(w http.ResponseWriter, err error) {
 
 // ── SSE ─────────────────────────────────────────────────────────────────────
 
-const streamWriteStall = 60 * time.Second
-
 type sseWriter struct {
 	w       http.ResponseWriter
 	id      string
@@ -374,37 +377,10 @@ type sseWriter struct {
 	model   string
 	started bool
 	sent    bool // at least one content delta reached the client
-
-	rc        *http.ResponseController
-	dmu       sync.Mutex
-	cancelled bool
-}
-
-func (s *sseWriter) bind(ctx context.Context) func() {
-	stop := context.AfterFunc(ctx, func() {
-		s.dmu.Lock()
-		s.cancelled = true
-		_ = s.rc.SetWriteDeadline(time.Now())
-		s.dmu.Unlock()
-	})
-	return func() {
-		if stop() {
-			_ = s.rc.SetWriteDeadline(time.Time{})
-		}
-	}
-}
-
-func (s *sseWriter) arm() error {
-	if s.rc == nil {
-		return nil
-	}
-	s.dmu.Lock()
-	defer s.dmu.Unlock()
-	if s.cancelled {
-		return context.Canceled
-	}
-	_ = s.rc.SetWriteDeadline(time.Now().Add(streamWriteStall))
-	return nil
+	// transport owns write deadlines, flushing and cancellation
+	// (internal/bridgeutil, shared with the other bridges). A failed write is
+	// sticky: no later event or [DONE] reaches the client.
+	transport *bridgeutil.Stream
 }
 
 func (s *sseWriter) begin() {
@@ -416,12 +392,10 @@ func (s *sseWriter) begin() {
 	s.w.Header().Set("Cache-Control", "no-cache")
 	s.w.Header().Set("Connection", "keep-alive")
 	s.w.WriteHeader(http.StatusOK)
-	if s.rc != nil {
-		_ = s.rc.Flush()
-	}
+	_ = s.transport.Flush()
 }
 
-func (s *sseWriter) event(v any) {
+func (s *sseWriter) event(v any) error {
 	var b []byte
 	switch t := v.(type) {
 	case json.RawMessage:
@@ -429,21 +403,16 @@ func (s *sseWriter) event(v any) {
 	default:
 		b, _ = json.Marshal(t)
 	}
-	if err := s.arm(); err != nil {
-		return
-	}
-	_, _ = fmt.Fprintf(s.w, "data: %s\n\n", b)
-	if s.rc != nil {
-		_ = s.rc.Flush()
-	}
+	_, err := s.transport.Write([]byte("data: " + string(b) + "\n\n"))
+	return err
 }
 
-func (s *sseWriter) chunk(delta map[string]any, finish string) {
+func (s *sseWriter) chunk(delta map[string]any, finish string) error {
 	var fr any
 	if finish != "" {
 		fr = finish
 	}
-	s.event(map[string]any{
+	return s.event(map[string]any{
 		"id": s.id, "object": "chat.completion.chunk", "created": s.created, "model": s.model,
 		"choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": fr}},
 	})
@@ -455,18 +424,11 @@ func (s *sseWriter) delta(text string) error {
 	}
 	s.begin()
 	s.sent = true
-	s.chunk(map[string]any{"content": text}, "")
-	return s.arm()
+	return s.chunk(map[string]any{"content": text}, "")
 }
 
 func (s *sseWriter) done() {
-	if err := s.arm(); err != nil {
-		return
-	}
-	_, _ = io.WriteString(s.w, "data: [DONE]\n\n")
-	if s.rc != nil {
-		_ = s.rc.Flush()
-	}
+	_, _ = s.transport.Write([]byte("data: [DONE]\n\n"))
 }
 
 // ── envelopes ───────────────────────────────────────────────────────────────

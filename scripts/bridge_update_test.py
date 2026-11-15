@@ -568,8 +568,13 @@ class SessionCachePolicy(unittest.TestCase):
         info = {"Config": {"Env": ["EZLLM_COPILOT_BRIDGE_WARM_POOL=on", "EZLLM_COPILOT_BRIDGE_SESSION_CACHE=on"]}}
         self.assertIn("EZLLM_COPILOT_BRIDGE_SESSION_CACHE", bu.GATE_ENV)
         self.assertEqual(bu.gate_policy("copilot", info), {"warm_pool": "on", "session_cache": "completed-prefix"})
-        info["Config"]["Env"].pop()
+        info["Config"]["Env"][-1] = "EZLLM_COPILOT_BRIDGE_SESSION_CACHE=off"
         self.assertEqual(bu.gate_policy("copilot", info), {"warm_pool": "on"})
+
+    def test_copilot_caches_default_on(self):
+        self.assertEqual(bu.gate_policy("copilot", {"Config": {"Env": []}}), {"warm_pool": "on", "session_cache": "completed-prefix"})
+        info = {"Config": {"Env": ["EZLLM_COPILOT_BRIDGE_WARM_POOL=off"]}}
+        self.assertEqual(bu.gate_policy("copilot", info), {"warm_pool": "off"})
 
 
 class CodexForkCachePolicy(unittest.TestCase):
@@ -597,8 +602,13 @@ class AGYConversationCachePolicy(unittest.TestCase):
         info = {"Config": {"Env": ["EZLLM_AGY_EXPERIMENTAL_TOOLS=on", "EZLLM_AGY_BRIDGE_SESSION_CACHE=on"]}}
         self.assertIn("EZLLM_AGY_BRIDGE_SESSION_CACHE", bu.GATE_ENV)
         self.assertEqual(bu.gate_policy("agy", info), {"caller_tools": "structured-output", "session_cache": "conversation-resume"})
-        info["Config"]["Env"].pop()
+        info["Config"]["Env"][-1] = "EZLLM_AGY_BRIDGE_SESSION_CACHE=off"
         self.assertEqual(bu.gate_policy("agy", info), {"caller_tools": "structured-output"})
+
+    def test_resume_defaults_on_with_tools(self):
+        info = {"Config": {"Env": ["EZLLM_AGY_EXPERIMENTAL_TOOLS=on"]}}
+        self.assertEqual(bu.gate_policy("agy", info), {"caller_tools": "structured-output", "session_cache": "conversation-resume"})
+        self.assertEqual(bu.gate_policy("agy", {"Config": {"Env": []}}), {"caller_tools": "off"})
 
 if __name__ == "__main__":
     unittest.main()

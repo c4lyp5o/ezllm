@@ -166,23 +166,22 @@ read-write at `/<bridge>-sub` in `compose.yml` (for example
 ### Recommended cache settings
 
 Prompt caching makes long conversations cheaper and faster, and uses less of
-your plan. To get the most out of it, add these lines to
-`services.ezllm.environment` in `compose.yml`, keeping only the bridges you use.
-They turn on caching; they do not enable the bridges themselves.
+your plan. From 1.9.0 every bridge caches by default, so there is nothing to
+set: Codex uses its prompt cache whenever the CLI supports it, Copilot keeps
+workers warm and reuses finished conversations, and Antigravity resumes
+conversations. Claude Code caches on its own.
+
+The one extra for Antigravity: its cache works only with the experimental tool
+adapter, which stays off until you turn it on:
 
 ```yaml
 environment:
-  # Codex: use the prompt cache whenever the installed CLI supports it (default).
-  EZLLM_CODEX_BRIDGE_CACHE: "auto"
-
-  # Copilot: keep workers warm and reuse finished conversations (needs both).
-  EZLLM_COPILOT_BRIDGE_WARM_POOL: "on"
-  EZLLM_COPILOT_BRIDGE_SESSION_CACHE: "on"
-
-  # Antigravity: resume conversations (needs the experimental tool adapter).
   EZLLM_AGY_EXPERIMENTAL_TOOLS: "on"
-  EZLLM_AGY_BRIDGE_SESSION_CACHE: "on"
 ```
+
+To turn a cache off, set `EZLLM_CODEX_BRIDGE_CACHE`,
+`EZLLM_COPILOT_BRIDGE_SESSION_CACHE` (or `EZLLM_COPILOT_BRIDGE_WARM_POOL`) or
+`EZLLM_AGY_BRIDGE_SESSION_CACHE` to `"off"`.
 
 Apply changes with `docker compose up -d --no-build`; `docker compose restart`
 does not pick up new environment values. For a binary or source install, set

@@ -25,13 +25,13 @@ func TestCopilotLimits(t *testing.T) {
 	}
 }
 
-func TestCopilotWarmPoolIsOptInAndRejectsTypos(t *testing.T) {
+func TestCopilotWarmPoolIsOnByDefaultAndRejectsTypos(t *testing.T) {
 	for _, tc := range []struct {
 		value string
 		want  bool
 		bad   bool
 	}{
-		{"", false, false}, {"off", false, false}, {"false", false, false}, {"0", false, false},
+		{"", true, false}, {"off", false, false}, {"false", false, false}, {"0", false, false},
 		{"on", true, false}, {" TRUE ", true, false}, {"1", true, false}, {"enabled", false, true},
 	} {
 		got, err := copilotWarmPool(func(string) string { return tc.value })
@@ -41,12 +41,12 @@ func TestCopilotWarmPoolIsOptInAndRejectsTypos(t *testing.T) {
 	}
 }
 
-func TestCopilotSessionCacheIsOptInAndRequiresPool(t *testing.T) {
+func TestCopilotSessionCacheFollowsPoolAndRequiresIt(t *testing.T) {
 	for _, tc := range []struct {
 		value           string
 		warm, want, bad bool
 	}{
-		{"", false, false, false}, {"off", true, false, false}, {"on", false, false, true}, {"on", true, true, false}, {" TRUE ", true, true, false}, {"1", true, true, false}, {"enabled", true, false, true},
+		{"", false, false, false}, {"", true, true, false}, {"off", true, false, false}, {"on", false, false, true}, {"on", true, true, false}, {" TRUE ", true, true, false}, {"1", true, true, false}, {"enabled", true, false, true},
 	} {
 		got, err := copilotSessionCache(func(string) string { return tc.value }, tc.warm)
 		if got != tc.want || (err != nil) != tc.bad {

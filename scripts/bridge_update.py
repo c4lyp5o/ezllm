@@ -393,6 +393,12 @@ def model_args(bcfg):
     return args
 
 
+def switch(value, default):
+    """An on/off flag as ezllm reads it: unset takes the default."""
+    v = value.strip().lower()
+    return default if v == "" else v in ("on", "true", "1")
+
+
 def gate_policy(name, info):
     env = container_env(info, GATE_ENV)
     if name == "codex":
@@ -401,15 +407,18 @@ def gate_policy(name, info):
         if cache not in ("auto", "on", "off"):
             raise ValueError("EZLLM_CODEX_BRIDGE_CACHE must be auto, on or off")
         return {"sandbox": mode, "approval_policy": "never", "history": "native-if-supported-v1", "cache": "ephemeral-forks" if cache == "on" else cache}
+    # Caches are on by default (1.9.0): unset follows the prerequisite flag, so
+    # a candidate that would silently lose its cache is not promoted.
     if name == "agy":
-        policy = {"caller_tools": "structured-output" if env.get("EZLLM_AGY_EXPERIMENTAL_TOOLS", "").strip().lower() == "on" else "off"}
-        if env.get("EZLLM_AGY_BRIDGE_SESSION_CACHE", "").strip().lower() in ("on", "true", "1"):
+        tools = env.get("EZLLM_AGY_EXPERIMENTAL_TOOLS", "").strip().lower() == "on"
+        policy = {"caller_tools": "structured-output" if tools else "off"}
+        if switch(env.get("EZLLM_AGY_BRIDGE_SESSION_CACHE", ""), tools):
             policy["session_cache"] = "conversation-resume"
         return policy
     if name == "copilot":
-        warm = env.get("EZLLM_COPILOT_BRIDGE_WARM_POOL", "").strip().lower() in ("on", "true", "1")
+        warm = switch(env.get("EZLLM_COPILOT_BRIDGE_WARM_POOL", ""), True)
         policy = {"warm_pool": "on" if warm else "off"}
-        if env.get("EZLLM_COPILOT_BRIDGE_SESSION_CACHE", "").strip().lower() in ("on", "true", "1"):
+        if switch(env.get("EZLLM_COPILOT_BRIDGE_SESSION_CACHE", ""), warm):
             policy["session_cache"] = "completed-prefix"
         return policy
     return {}

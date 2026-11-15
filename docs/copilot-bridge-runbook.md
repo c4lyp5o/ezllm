@@ -9,7 +9,7 @@ mints a session token. Design: `docs/copilot-cli-bridge-design.md`.
 `internal/copilotbridge` serves `/healthz`, `/status`, `/v1/models` and
 `/v1/chat/completions` on `127.0.0.1:8793` (loopback only, bearer-gated with the
 bridge token). Requests use `copilot --headless --stdio` with a fresh session.
-Processes are cold by default; the opt-in warm pool reuses only successfully
+Since 1.9.0 the warm pool is on by default and reuses only successfully
 cleaned-up processes. Plain text can fall back to `copilot -p`; requests carrying
 tools or images cannot take that fallback. Prompts and native image blobs travel
 on stdin, not argv.
@@ -276,12 +276,12 @@ executing tools retain that wait. Do not shorten the accounting timeout based
 on first-response latency alone. Measured examples and limitations are in
 [copilot-latency-diagnostics.md](copilot-latency-diagnostics.md).
 
-## Opt-in warm CLI processes
+## Warm CLI processes
 
-Set `EZLLM_COPILOT_BRIDGE_WARM_POOL=on` and restart ezllm to enable process
-reuse. The default is `off`; setting it back to `off` and restarting restores
-one process per request. Accepted enabled values are `on`, `true`, `1`; disabled
-values are `off`, `false`, `0`, or unset. Invalid values fail startup.
+Process reuse is on by default since 1.9.0. Set
+`EZLLM_COPILOT_BRIDGE_WARM_POOL=off` and restart to go back to one process per
+request. Accepted enabled values are `on`, `true`, `1`, or unset; disabled
+values are `off`, `false`, `0`. Invalid values fail startup.
 
 The pool starts lazily and uses the existing concurrency/queue settings. Each
 process serves one request at a time. With session caching off, each request creates a fresh session
@@ -298,23 +298,17 @@ login changes should be followed by a restart. Shutdown drains HTTP requests
 within the existing grace period, then kills and reaps warm workers.
 
 `GET /status` exposes `runtime.pool` (`enabled`, `workers`, `idle`, `closed`) and
-`runtime.stage_timings`. Watch setup timings and memory before enabling this
-beyond a controlled rollout. On this host one CLI retained approximately
+`runtime.stage_timings`. Watch setup timings and memory on a small host. On this host one CLI retained approximately
 270–282 MiB RSS over a three-turn proof; two warm workers can therefore retain
 substantial memory. That sample does not establish a steady-state memory bound.
 The existing concurrency cap and worker expiry limit exposure. First requests
 are still cold, and model processing time is unaffected by process reuse.
 
-## Opt-in completed-conversation cache
+## Completed-conversation cache
 
-On v1.9.0 or later, enable both settings and restart the built ezllm image:
-
-```text
-EZLLM_COPILOT_BRIDGE_WARM_POOL=on
-EZLLM_COPILOT_BRIDGE_SESSION_CACHE=on
-```
-
-The second setting defaults off; enabling it without the warm pool fails startup.
+On by default since 1.9.0: unset, `EZLLM_COPILOT_BRIDGE_SESSION_CACHE` follows
+the warm pool. Set it to `off` to disable it; an explicit `on` with the warm
+pool off fails startup.
 A matching request must supply the unchanged prior messages and assistant answer,
 then one new user message, with the same explicit model, system and tools.
 Hermes cache markers may move without changing the actual conversation.

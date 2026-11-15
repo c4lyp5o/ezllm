@@ -70,7 +70,7 @@ services:
       # the CLI and a login (the two mounts at the end of `volumes`) fails the
       # boot rather than starting a surface that 401s every request.
       EZLLM_COPILOT_BRIDGE: "off"
-      # Recommended for cache reuse: completed-history cache requires both on (v1.9.0+).
+      # Caches are on by default (v1.9.0+); set either to "off" to disable.
       # EZLLM_COPILOT_BRIDGE_WARM_POOL: "on"
       # EZLLM_COPILOT_BRIDGE_SESSION_CACHE: "on"
       # EZLLM_COPILOT_BIN: /opt/copilot-bridge/current/copilot
@@ -123,7 +123,7 @@ services:
       # EZLLM_AGY_BRIDGE_CONCURRENCY: "2"
       # Experimental caller tools via structured output; CLI needs --json-schema.
       # EZLLM_AGY_EXPERIMENTAL_TOOLS: "on"
-      # Recommended for cache reuse: exact-history/tool-result resume; requires experimental tools (v1.9.0+).
+      # Conversation resume is on by default wherever tools are on (v1.9.0+).
       # EZLLM_AGY_BRIDGE_SESSION_CACHE: "on"
 
     volumes:

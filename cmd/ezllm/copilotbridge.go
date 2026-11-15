@@ -25,7 +25,7 @@ import (
 // path is retired by this change (docs/copilot-cli-bridge-design.md).
 const (
 	envCopilotSessionCache = "EZLLM_COPILOT_BRIDGE_SESSION_CACHE"
-	envCopilotWarmPool     = "EZLLM_COPILOT_BRIDGE_WARM_POOL"   // off by default
+	envCopilotWarmPool     = "EZLLM_COPILOT_BRIDGE_WARM_POOL"   // on by default
 	envCopilotBridge       = "EZLLM_COPILOT_BRIDGE"             // "on" enables the surface
 	envCopilotBin          = "EZLLM_COPILOT_BIN"                // official CLI binary (mounted)
 	envCopilotHome         = "EZLLM_COPILOT_HOME"               // the CLI's own login directory
@@ -295,28 +295,32 @@ func copilotHome(get func(string) string) string {
 	return "/copilot-sub"
 }
 
+// copilotWarmPool reuses CLI processes unless turned off.
 func copilotWarmPool(get func(string) string) (bool, error) {
 	switch strings.ToLower(strings.TrimSpace(get(envCopilotWarmPool))) {
-	case "", "off", "false", "0":
-		return false, nil
-	case "on", "true", "1":
+	case "", "on", "true", "1":
 		return true, nil
+	case "off", "false", "0":
+		return false, nil
 	default:
 		return false, fmt.Errorf("copilot bridge: %s must be on or off", envCopilotWarmPool)
 	}
 }
 
+// copilotSessionCache follows the warm pool when unset; an explicit "on"
+// without the pool fails the boot.
 func copilotSessionCache(get func(string) string, warm bool) (bool, error) {
-	var enabled bool
 	switch strings.ToLower(strings.TrimSpace(get(envCopilotSessionCache))) {
-	case "", "off", "false", "0":
+	case "":
+		return warm, nil
+	case "off", "false", "0":
+		return false, nil
 	case "on", "true", "1":
-		enabled = true
 	default:
 		return false, fmt.Errorf("copilot bridge: %s must be on or off", envCopilotSessionCache)
 	}
-	if enabled && !warm {
+	if !warm {
 		return false, fmt.Errorf("copilot bridge: %s requires %s=on", envCopilotSessionCache, envCopilotWarmPool)
 	}
-	return enabled, nil
+	return true, nil
 }

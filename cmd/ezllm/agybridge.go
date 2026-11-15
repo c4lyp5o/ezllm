@@ -76,12 +76,9 @@ func startAgyBridge(ctx context.Context, log *slog.Logger, report bridgeReport) 
 	if experimentalTools && !pre.StructuredOutput {
 		return nil, fmt.Errorf("agy bridge: %s=on requires a CLI with --json-schema", envAgyTools)
 	}
-	sessionCache, err := agySessionCache(os.Getenv, experimentalTools)
+	sessionCache, err := agySessionCache(os.Getenv, experimentalTools, pre.ConversationResume)
 	if err != nil {
 		return nil, err
-	}
-	if sessionCache && !pre.ConversationResume {
-		return nil, fmt.Errorf("agy bridge: %s=on requires --conversation", envAgySessionCache)
 	}
 	clientTools := "disabled (text chat only)"
 	if experimentalTools {
@@ -167,17 +164,24 @@ func agyBridgeToken(path string) (string, error) {
 	return token, nil
 }
 
-func agySessionCache(get func(string) string, tools bool) (bool, error) {
-	var enabled bool
+// agySessionCache is on by default wherever it can work: with the tool adapter
+// on and a CLI that resumes conversations. An explicit "on" that cannot work
+// fails the boot instead of silently serving uncached.
+func agySessionCache(get func(string) string, tools, resume bool) (bool, error) {
 	switch strings.ToLower(strings.TrimSpace(get(envAgySessionCache))) {
-	case "", "off", "false", "0":
+	case "":
+		return tools && resume, nil
+	case "off", "false", "0":
+		return false, nil
 	case "on", "true", "1":
-		enabled = true
 	default:
 		return false, fmt.Errorf("agy bridge: %s must be on or off", envAgySessionCache)
 	}
-	if enabled && !tools {
+	if !tools {
 		return false, fmt.Errorf("agy bridge: %s requires %s=on", envAgySessionCache, envAgyTools)
 	}
-	return enabled, nil
+	if !resume {
+		return false, fmt.Errorf("agy bridge: %s=on requires --conversation", envAgySessionCache)
+	}
+	return true, nil
 }

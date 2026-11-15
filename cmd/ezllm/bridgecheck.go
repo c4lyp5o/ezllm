@@ -138,6 +138,7 @@ func runBridgeCheck(args []string, stdout io.Writer) error {
 	ctx := context.Background()
 	var v bridgeVerdict
 	var liveRun func() []string
+	var agyResume bool
 	switch name {
 	case "claude":
 		b, d := or(*bin, envOrDefault(envBridgeBin, defaultClaudeBin)), or(*home, envOrDefault(envBridgeDir, "/claude-sub"))
@@ -154,9 +155,9 @@ func runBridgeCheck(args []string, stdout io.Writer) error {
 		}
 	case "agy":
 		b, h := or(*bin, envOrDefault(envAgyBin, defaultAgyBin)), or(*home, envOrDefault(envAgyHome, "/agy-sub"))
-		v = checkAgyCLI(ctx, b, h)
+		v, agyResume = checkAgyCLI(ctx, b, h)
 		liveRun = func() []string {
-			return liveAgy(ctx, b, h, or(*model, "gemini-3.8-flash-low"), or(*toolModel, or(*model, "gemini-3.8-flash-low")))
+			return liveAgy(ctx, b, h, or(*model, "gemini-3.8-flash-low"), or(*toolModel, or(*model, "gemini-3.8-flash-low")), agyResume)
 		}
 	case "copilot":
 		b, h := or(*bin, envOrDefault(envCopilotBin, defaultCopilotBin)), or(*home, copilotHome(os.Getenv))
@@ -184,11 +185,7 @@ func runBridgeCheck(args []string, stdout io.Writer) error {
 			mode = "structured-output"
 		}
 		v.Policy = map[string]string{"caller_tools": mode}
-		cache, cacheErr := agySessionCache(os.Getenv, mode == "structured-output")
-		if cacheErr != nil {
-			v.Problems = append(v.Problems, cacheErr.Error())
-		}
-		if cache {
+		if cache, _ := agySessionCache(os.Getenv, mode == "structured-output", agyResume); cache {
 			v.Policy["session_cache"] = "conversation-resume"
 		}
 	case "copilot":
@@ -302,16 +299,18 @@ func checkCodexCLI(ctx context.Context, bin, home string) (bridgeVerdict, codexb
 	return v, pre
 }
 
-func checkAgyCLI(ctx context.Context, bin, home string) bridgeVerdict {
+// checkAgyCLI also reports whether the CLI resumes conversations: the session
+// cache defaults on only where it can.
+func checkAgyCLI(ctx context.Context, bin, home string) (bridgeVerdict, bool) {
 	v := bridgeVerdict{Bridge: "agy"}
 	if runtime.GOOS != "linux" {
 		v.Problems = append(v.Problems, "the agy bridge is a Linux feature (this build is "+runtime.GOOS+")")
-		return v
+		return v, false
 	}
 	resolved, err := exec.LookPath(bin)
 	if err != nil {
 		v.Problems = append(v.Problems, "binary does not resolve: "+err.Error())
-		return v
+		return v, false
 	}
 	pre, err := agybridge.RunPreflight(ctx, resolved, home)
 	v.Version = pre.Version
@@ -320,7 +319,7 @@ func checkAgyCLI(ctx context.Context, bin, home string) bridgeVerdict {
 	}
 	if err != nil {
 		v.Problems = append(v.Problems, err.Error())
-		return v
+		return v, false
 	}
 	if len(pre.Models) == 0 {
 		v.Problems = append(v.Problems, "the CLI listed no models")
@@ -328,15 +327,10 @@ func checkAgyCLI(ctx context.Context, bin, home string) bridgeVerdict {
 	if strings.EqualFold(strings.TrimSpace(os.Getenv(envAgyTools)), "on") && !pre.StructuredOutput {
 		v.Problems = append(v.Problems, "experimental caller tools require --json-schema")
 	}
-	cache, cacheErr := agySessionCache(os.Getenv, strings.EqualFold(strings.TrimSpace(os.Getenv(envAgyTools)), "on"))
-	if cacheErr != nil {
+	if _, cacheErr := agySessionCache(os.Getenv, strings.EqualFold(strings.TrimSpace(os.Getenv(envAgyTools)), "on"), pre.ConversationResume); cacheErr != nil {
 		v.Problems = append(v.Problems, cacheErr.Error())
 	}
-	if cache && !pre.ConversationResume {
-		v.Problems = append(v.Problems, "conversation cache requires --conversation")
-	}
-
-	return v
+	return v, pre.ConversationResume
 }
 
 func checkCopilotCLI(ctx context.Context, bin, home string) bridgeVerdict {
@@ -562,8 +556,8 @@ func liveCodex(ctx context.Context, bin, home string, pre codexbridge.Preflight,
 	return problems
 }
 
-func liveAgy(ctx context.Context, bin, home, model, toolModel string) []string {
-	cache, err := agySessionCache(os.Getenv, strings.EqualFold(strings.TrimSpace(os.Getenv(envAgyTools)), "on"))
+func liveAgy(ctx context.Context, bin, home, model, toolModel string, resume bool) []string {
+	cache, err := agySessionCache(os.Getenv, strings.EqualFold(strings.TrimSpace(os.Getenv(envAgyTools)), "on"), resume)
 	if err != nil {
 		return []string{err.Error()}
 	}

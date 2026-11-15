@@ -140,7 +140,7 @@ long as it is set.
 ### Writable request workspace
 
 Every Codex child runs Codex's `workspace-write` policy for its private
-per-request working directory. Before 1.9.0 this was opt-in through
+per-request working directory. Before 2.0.0 this was opt-in through
 `EZLLM_CODEX_SANDBOX=writable` and read-only by default; read-only crippled
 Codex, so the setting was removed and setting it now fails the boot. The child
 uses `approvalPolicy=never`, also pinned as `approval_policy="never"`
@@ -159,7 +159,7 @@ tool failures and approval requirements still apply. This is instruction
 steering, not a guarantee of model behavior or a grant of filesystem access.
 Recreate the container after changing the environment.
 
-From v1.9.0, caller-tool guidance also treats environment checks, repository
+From v2.0.0, caller-tool guidance also treats environment checks, repository
 inspection, plans and progress reports as intermediate steps of an implementation
 request. Codex is instructed to continue authorized implementation and appropriate
 verification, stopping for completion, a user pause or a concrete blocker needing
@@ -457,7 +457,7 @@ See [shared transport status and remaining work](shared-bridge-transport-design.
 
 ## Conversation history
 
-From v1.9.0, startup automatically selects native structured history when the
+From v2.0.0, startup automatically selects native structured history when the
 CLI advertises `thread/inject_items`; `/status.native_history` reports the
 selection. No additional environment flag is required. Older CLIs and exec
 keep text-transcript replay. Incomplete historical tool groups also use legacy
@@ -483,7 +483,7 @@ that it fixes every long-session persistence failure. See the
 
 ## Prompt-cache affinity
 
-Caching is on by default (v1.9.0+); `EZLLM_CODEX_BRIDGE_CACHE=off` opts out.
+Caching is on by default (v2.0.0+); `EZLLM_CODEX_BRIDGE_CACHE=off` opts out.
 Boot validates experimental `thread/fork`, `thread/resume`,
 `thread/inject_items` and `thread/delete` support and enables empty-template
 forks when available. Otherwise the default uses the original path and reports
@@ -522,7 +522,7 @@ caller-tool continuation; unsupported auto mode reports its fallback reason. Cha
 and design: [empty-template cache](codex-empty-template-cache-design.md).
 
 
-## Caller ownership of pending tools (v1.9.0+)
+## Caller ownership of pending tools (v2.0.0+)
 
 Gateway authentication derives an opaque identity per client key or dashboard
 session. The proxy strips externally supplied `X-Ezllm-Caller` values and stamps

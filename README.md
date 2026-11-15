@@ -166,7 +166,7 @@ read-write at `/<bridge>-sub` in `compose.yml` (for example
 ### Recommended cache settings
 
 Prompt caching makes long conversations cheaper and faster, and uses less of
-your plan. From 1.9.0 every bridge caches by default, so there is nothing to
+your plan. From 2.0.0 every bridge caches by default, so there is nothing to
 set: Codex uses its prompt cache whenever the CLI supports it, Copilot keeps
 workers warm and reuses finished conversations, and Antigravity resumes
 conversations. Claude Code caches on its own.

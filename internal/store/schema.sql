@@ -306,7 +306,7 @@ CREATE TABLE IF NOT EXISTS calls (
   -- same never-includes-cached invariant as a native row. Historical rows keep
   -- their inclusive totals.
   translated     INTEGER NOT NULL DEFAULT 0,
-  -- v33's tool_prune_shadow_tokens was dropped in v35 (1.9.0): the shelved
+  -- v33's tool_prune_shadow_tokens was dropped in v35 (2.0.0): the shelved
   -- tool-pruning experiment's measurements were exported first, to
   -- docs/tool-prune-shadow-results.json.
   -- v34 (docs/hop-health-design.md): how a STREAM ended, as a first-class

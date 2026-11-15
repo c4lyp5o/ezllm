@@ -93,9 +93,9 @@ Setup and operation: [claude-bridge-runbook.md](claude-bridge-runbook.md).
 | Variable | Default | What it does |
 |---|---|---|
 | `EZLLM_CLAUDE_BRIDGE` | off | `on` starts the loopback surface. Enabled without a usable CLI or login, the boot fails. |
-| `EZLLM_CLAUDE_BIN` | `/opt/claude-bridge/current/claude` | Official Claude Code CLI binary inside the container: the updater-managed bridge root mounted at `/opt/claude-bridge`. Before 1.9.0 the default was `/opt/claude/claude`. |
-| `EZLLM_CLAUDE_HOME` | `/claude-sub` | Subscription login directory inside the container (compose mounts it here); passed to the CLI as `CLAUDE_CONFIG_DIR`. Named `EZLLM_CLAUDE_CONFIG_DIR` before 1.9.0; the old name now fails the boot. |
-| `EZLLM_CLAUDE_BRIDGE_CONCURRENCY` | `1` | Concurrent Claude CLI processes; a positive integer, anything else fails the boot. Every bridge defaults to 1 (before 1.9.0: 2, and fixed for Claude). |
+| `EZLLM_CLAUDE_BIN` | `/opt/claude-bridge/current/claude` | Official Claude Code CLI binary inside the container: the updater-managed bridge root mounted at `/opt/claude-bridge`. Before 2.0.0 the default was `/opt/claude/claude`. |
+| `EZLLM_CLAUDE_HOME` | `/claude-sub` | Subscription login directory inside the container (compose mounts it here); passed to the CLI as `CLAUDE_CONFIG_DIR`. Named `EZLLM_CLAUDE_CONFIG_DIR` before 2.0.0; the old name now fails the boot. |
+| `EZLLM_CLAUDE_BRIDGE_CONCURRENCY` | `1` | Concurrent Claude CLI processes; a positive integer, anything else fails the boot. Every bridge defaults to 1 (before 2.0.0: 2, and fixed for Claude). |
 | `EZLLM_CLAUDE_BRIDGE_ADDR` | `127.0.0.1:8790` | Bridge listen address; non-loopback addresses are refused. |
 | `EZLLM_CLAUDE_BRIDGE_TOKEN_FILE` | `/data/claude-bridge.token` | Shared secret for the account key; generated (0600) when missing. |
 | `USER`, `LOGNAME` | unset | Both must be set when the bridge is on (the CLI's login check reads process identity). |
@@ -103,17 +103,17 @@ Setup and operation: [claude-bridge-runbook.md](claude-bridge-runbook.md).
 
 ## Codex (ChatGPT subscription) bridge
 
-Setup, platform requirements and the lockdown: [codex-bridge-runbook.md](codex-bridge-runbook.md). Linux only. Every child runs Codex's `workspace-write` policy in its own temp directory; `EZLLM_CODEX_SANDBOX` was removed in 1.9.0 and now fails the boot.
+Setup, platform requirements and the lockdown: [codex-bridge-runbook.md](codex-bridge-runbook.md). Linux only. Every child runs Codex's `workspace-write` policy in its own temp directory; `EZLLM_CODEX_SANDBOX` was removed in 2.0.0 and now fails the boot.
 
 | Variable | Default | What it does |
 |---|---|---|
 | `EZLLM_CODEX_BRIDGE` | off | `on` starts the loopback surface. Enabled without a usable CLI, login or required app-server methods, the boot fails. |
-| `EZLLM_CODEX_BIN` | `/opt/codex-bridge/current/bin/codex` | Official Codex CLI binary inside the container: the updater-managed bridge root mounted at `/opt/codex-bridge`. Before 1.9.0 the default was `/opt/codex/bin/codex`. |
+| `EZLLM_CODEX_BIN` | `/opt/codex-bridge/current/bin/codex` | Official Codex CLI binary inside the container: the updater-managed bridge root mounted at `/opt/codex-bridge`. Before 2.0.0 the default was `/opt/codex/bin/codex`. |
 | `EZLLM_CODEX_HOME` | `/codex-sub` | `CODEX_HOME` holding the subscription login (compose mounts it here). |
 | `EZLLM_CODEX_BRIDGE_ADDR` | `127.0.0.1:8791` | Bridge listen address; non-loopback addresses are refused. |
 | `EZLLM_CODEX_BRIDGE_TOKEN_FILE` | `/data/codex-bridge.token` | Shared secret for the account key; generated (0600) when missing. |
 | `EZLLM_CODEX_BRIDGE_CONCURRENCY` | `1` | Concurrent Codex children; a positive integer, anything else fails the boot. |
-| `EZLLM_CODEX_BRIDGE_CACHE` | on where supported | Unset, empty-template forks are used whenever the CLI supports them; otherwise the original path is used and `/status` reports why. `on` requires support; `off` opts out. `auto` was removed in 1.9.0 and, like any other value, fails startup. No idle CLI workers; bounded native parent retention and cleanup. Set before startup; recreate containers to change. |
+| `EZLLM_CODEX_BRIDGE_CACHE` | on where supported | Unset, empty-template forks are used whenever the CLI supports them; otherwise the original path is used and `/status` reports why. `on` requires support; `off` opts out. `auto` was removed in 2.0.0 and, like any other value, fails startup. No idle CLI workers; bounded native parent retention and cleanup. Set before startup; recreate containers to change. |
 | `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK` | unset | `on` allows client tools on a host without Landlock. Read the runbook's platform section before setting it. |
 
 ## Antigravity (Google subscription) bridge
@@ -123,13 +123,13 @@ Setup and the login that must avoid the desktop keyring: [agy-bridge-runbook.md]
 | Variable | Default | What it does |
 |---|---|---|
 | `EZLLM_AGY_BRIDGE` | off | `on` starts the loopback surface. Enabled without a usable CLI, a token file or a working `agy models`, the boot fails. |
-| `EZLLM_AGY_BIN` | `/opt/agy-bridge/current/agy` | Official Antigravity CLI binary inside the container: the updater-managed bridge root mounted at `/opt/agy-bridge`. Before 1.9.0 the default was `/opt/agy/agy`. |
+| `EZLLM_AGY_BIN` | `/opt/agy-bridge/current/agy` | Official Antigravity CLI binary inside the container: the updater-managed bridge root mounted at `/opt/agy-bridge`. Before 2.0.0 the default was `/opt/agy/agy`. |
 | `EZLLM_AGY_HOME` | `/agy-sub` | `HOME` for the CLI: holds `.gemini/antigravity-cli/antigravity-oauth-token` (compose mounts the login here, read-write). |
 | `EZLLM_AGY_BRIDGE_ADDR` | `127.0.0.1:8792` | Bridge listen address; non-loopback addresses are refused. |
 | `EZLLM_AGY_BRIDGE_TOKEN_FILE` | `/data/agy-bridge.token` | Shared secret for the account key; generated (0600) when missing. |
 | `EZLLM_AGY_BRIDGE_CONCURRENCY` | `1` | Concurrent `agy` children (~207 MB each); a positive integer, anything else fails the boot. |
 | `EZLLM_AGY_EXPERIMENTAL_TOOLS` | off | `on` enables the structured-output caller-tool adapter. Requires CLI `--json-schema`. The calling harness executes tools; no ACP/MCP or persistent process. See the Antigravity runbook for limitations. |
-| `EZLLM_AGY_BRIDGE_CACHE` | on when tools are on | Named `EZLLM_AGY_BRIDGE_SESSION_CACHE` before 1.9.0 (the old name fails the boot). Exact-history conversation resume for tool-adapter requests. Unset, it is on whenever experimental tools are on and the CLI supports `--conversation`; an explicit `on` without either fails the boot; `off` disables it. Before 1.9.0 it was opt-in. Retains bounded metadata/private workspaces, no idle CLI processes. Complete caller tool-result groups can resume. Restart to change. |
+| `EZLLM_AGY_BRIDGE_CACHE` | on when tools are on | Named `EZLLM_AGY_BRIDGE_SESSION_CACHE` before 2.0.0 (the old name fails the boot). Exact-history conversation resume for tool-adapter requests. Unset, it is on whenever experimental tools are on and the CLI supports `--conversation`; an explicit `on` without either fails the boot; `off` disables it. Before 2.0.0 it was opt-in. Retains bounded metadata/private workspaces, no idle CLI processes. Complete caller tool-result groups can resume. Restart to change. |
 
 ## GitHub Copilot subscription bridge
 
@@ -141,15 +141,15 @@ CLI's own, so there is no client id to configure. Runbook:
 | Variable | Default | What it does |
 |---|---|---|
 | `EZLLM_COPILOT_BRIDGE` | off | `on` starts the loopback surface; without it the provider add answers 409 naming this variable. |
-| `EZLLM_COPILOT_BRIDGE_WARM_POOL` | `on` | CLI process reuse; sessions are fresh unless session caching is enabled; `off`/`false`/`0` disables it. Before 1.9.0 it was opt-in. Existing concurrency and queue limits apply. Restart to change. |
-| `EZLLM_COPILOT_BRIDGE_CACHE` | follows warm pool | Named `EZLLM_COPILOT_BRIDGE_SESSION_CACHE` before 1.9.0 (the old name fails the boot). Exact-history reuse of completed native conversations. Unset, it follows the warm pool; an explicit `on` without the pool fails the boot; `off` disables it. Before 1.9.0 it was opt-in. Active tool-result continuations, images and `auto` use fresh sessions. Existing worker expiry and a 1 MiB history bound apply. Restart to change. |
-| `EZLLM_COPILOT_BIN` | `/opt/copilot-bridge/current/copilot` | The GitHub Copilot CLI binary: the updater-managed bridge root mounted at `/opt/copilot-bridge`. Before 1.9.0 the default was `/opt/copilot/copilot`. |
-| `EZLLM_COPILOT_HOME` | `/copilot-sub` | `COPILOT_HOME` for the CLI — the bridge's dedicated login directory, mounted from `~/.copilot-sub` (read-write; the CLI writes session state). Before 1.9.0 the default was `/copilot-home`. |
+| `EZLLM_COPILOT_BRIDGE_WARM_POOL` | `on` | CLI process reuse; sessions are fresh unless session caching is enabled; `off`/`false`/`0` disables it. Before 2.0.0 it was opt-in. Existing concurrency and queue limits apply. Restart to change. |
+| `EZLLM_COPILOT_BRIDGE_CACHE` | follows warm pool | Named `EZLLM_COPILOT_BRIDGE_SESSION_CACHE` before 2.0.0 (the old name fails the boot). Exact-history reuse of completed native conversations. Unset, it follows the warm pool; an explicit `on` without the pool fails the boot; `off` disables it. Before 2.0.0 it was opt-in. Active tool-result continuations, images and `auto` use fresh sessions. Existing worker expiry and a 1 MiB history bound apply. Restart to change. |
+| `EZLLM_COPILOT_BIN` | `/opt/copilot-bridge/current/copilot` | The GitHub Copilot CLI binary: the updater-managed bridge root mounted at `/opt/copilot-bridge`. Before 2.0.0 the default was `/opt/copilot/copilot`. |
+| `EZLLM_COPILOT_HOME` | `/copilot-sub` | `COPILOT_HOME` for the CLI — the bridge's dedicated login directory, mounted from `~/.copilot-sub` (read-write; the CLI writes session state). Before 2.0.0 the default was `/copilot-home`. |
 | `EZLLM_COPILOT_BRIDGE_CONCURRENCY` | `1` | Concurrent Copilot CLI children; a positive integer, anything else fails the boot. |
 | `EZLLM_COPILOT_BRIDGE_QUEUE` | `8` | Requests allowed to wait for a slot; past it the bridge answers 429 `queue_full` with `Retry-After: 5`. |
 | `EZLLM_COPILOT_BRIDGE_TIMEOUT` | `300s` | Per-turn limit, a Go duration of at least `1s`. |
 | `EZLLM_COPILOT_BRIDGE_ADDR` | `127.0.0.1:8793` | Listen address; non-loopback is refused. |
-| `EZLLM_COPILOT_BRIDGE_TOKEN_FILE` | `/data/copilot-bridge.token` | Shared secret for the account key; generated (0600) when missing. Before 1.9.0 there was no default and boot refused without a path. |
+| `EZLLM_COPILOT_BRIDGE_TOKEN_FILE` | `/data/copilot-bridge.token` | Shared secret for the account key; generated (0600) when missing. Before 2.0.0 there was no default and boot refused without a path. |
 
 ## Compose-only
 

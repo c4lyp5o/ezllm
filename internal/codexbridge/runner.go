@@ -36,7 +36,7 @@ var LockdownFeatures = []string{
 // write inside the request's own temp workdir (Codex's workspace-write
 // policy). Landlock still confines the child: the writable set is the temp
 // dir plus CODEX_HOME, everything else stays read-only. Read-only was retired
-// in 1.9.0: a Codex that cannot write its own scratch space cannot work.
+// in 2.0.0: a Codex that cannot write its own scratch space cannot work.
 const SandboxPolicy = "workspace-write"
 
 // ApprovalPolicy is the only approval policy a Codex child runs with. The

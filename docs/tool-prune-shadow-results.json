@@ -1,5 +1,5 @@
 {
- "description": "Shadow measurements from the shelved tool-pruning (token economizer) experiment: tokens the pruner estimated it would have removed, never applied. Exported from calls.tool_prune_shadow_tokens before the column was dropped in schema v35 (ezllm 1.9.0).",
+ "description": "Shadow measurements from the shelved tool-pruning (token economizer) experiment: tokens the pruner estimated it would have removed, never applied. Exported from calls.tool_prune_shadow_tokens before the column was dropped in schema v35 (ezllm 2.0.0).",
  "exported_at": "2026-11-15",
  "rows": 2875,
  "total_shadow_tokens": 11850055,

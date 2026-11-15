@@ -70,7 +70,7 @@ services:
       # the CLI and a login (the two mounts at the end of `volumes`) fails the
       # boot rather than starting a surface that 401s every request.
       EZLLM_COPILOT_BRIDGE: "off"
-      # Caches are on by default (v1.9.0+); set either to "off" to disable.
+      # Caches are on by default (v2.0.0+); set either to "off" to disable.
       # EZLLM_COPILOT_BRIDGE_WARM_POOL: "off"
       # EZLLM_COPILOT_BRIDGE_CACHE: "off"
       # EZLLM_COPILOT_BIN: /opt/copilot-bridge/current/copilot
@@ -100,7 +100,7 @@ services:
       # Loopback-only; an openai-compatible account dials it. Linux only. `on`
       # without the CLI and a login (the two mounts below) fails the boot.
       EZLLM_CODEX_BRIDGE: "off"
-      # Caches by default wherever the CLI supports it (v1.9.0+); "off" opts out,
+      # Caches by default wherever the CLI supports it (v2.0.0+); "off" opts out,
       # "on" fails the boot if caching is unavailable.
       # EZLLM_CODEX_BRIDGE_CACHE: "off"
       # EZLLM_CODEX_BIN: /opt/codex-bridge/current/bin/codex
@@ -122,7 +122,7 @@ services:
       # EZLLM_AGY_BRIDGE_CONCURRENCY: "1"
       # Experimental caller tools via structured output; CLI needs --json-schema.
       # EZLLM_AGY_EXPERIMENTAL_TOOLS: "on"
-      # Conversation resume is on by default wherever tools are on (v1.9.0+).
+      # Conversation resume is on by default wherever tools are on (v2.0.0+).
       # EZLLM_AGY_BRIDGE_CACHE: "off"
 
     volumes:

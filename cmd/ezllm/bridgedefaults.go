@@ -51,7 +51,7 @@ func checkRetiredBridgeEnv(get func(string) string) error {
 	sort.Strings(names)
 	for _, name := range names {
 		if strings.TrimSpace(get(name)) != "" {
-			return fmt.Errorf("bridge settings: %s was %s in 1.9.0", name, retiredBridgeEnv[name])
+			return fmt.Errorf("bridge settings: %s was %s in 2.0.0", name, retiredBridgeEnv[name])
 		}
 	}
 	return nil

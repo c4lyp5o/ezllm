@@ -133,7 +133,7 @@ A model id is only marked usable after a probe answers, which is exactly the
   `provider_keys`/`accounts` rows keep their history; the kind becomes invalid
   for NEW accounts only.
 - **M4** docs: runbook, CHANGELOG and EXPLORING landmark. The superseded
-  OAuth design and policy-evidence docs were removed in v1.9.0 (git history keeps them).
+  OAuth design and policy-evidence docs were removed in v2.0.0 (git history keeps them).
 
 ## 9. Locked decisions (2026-11-05, Calypso)
 
@@ -141,7 +141,7 @@ A model id is only marked usable after a probe answers, which is exactly the
    (default `/copilot-home`, mounted) and never reads a PAT env var. The box is
    already logged in (`~/.copilot` exists and a headless call authenticated with
    no env token set), so the deployment mounts that directory. *Revised in
-   1.9.0:* the bridge now uses a dedicated login, `~/.copilot-sub` mounted at
+   2.0.0:* the bridge now uses a dedicated login, `~/.copilot-sub` mounted at
    `/copilot-sub` (the new default), like the other subscription bridges. Fine-grained
    PATs remain documented as a manual fallback for a fresh host, not a code
    path.
@@ -372,7 +372,7 @@ checks proved a small PNG on `gpt-6-luna`; see the runbook for limits.
 ## Completed-history cache extension — 2026-11-14
 
 One session per request remains the default and the active tool-loop path. The
-optional v1.9.0 completed-conversation mode retains normally finished sessions
+optional v2.0.0 completed-conversation mode retains normally finished sessions
 only for an exact full-history continuation with one new user message. It adds
 no new service or pool. See the
 [completed-session cache design](copilot-completed-session-cache-design.md) for

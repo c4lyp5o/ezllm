@@ -406,7 +406,7 @@ def gate_policy(name, info):
         if cache not in ("default", "on", "off"):
             raise ValueError("EZLLM_CODEX_BRIDGE_CACHE must be on or off (unset caches by default)")
         return {"sandbox": "workspace-write", "approval_policy": "never", "history": "native-if-supported-v1", "cache": "ephemeral-forks" if cache == "on" else cache}
-    # Caches are on by default (1.9.0): unset follows the prerequisite flag, so
+    # Caches are on by default (2.0.0): unset follows the prerequisite flag, so
     # a candidate that would silently lose its cache is not promoted.
     if name == "agy":
         tools = env.get("EZLLM_AGY_EXPERIMENTAL_TOOLS", "").strip().lower() == "on"

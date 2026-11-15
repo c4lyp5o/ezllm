@@ -3,7 +3,7 @@
 **Historical specification:** implemented 2026-10-21 (approach A) and included in
 subsequent releases. Deployment and operator-specific completion are not established
 by this document; verify the live instance. (The plan and checklist that accompanied it
-were removed in v1.9.0 and remain in git history.)
+were removed in v2.0.0 and remain in git history.)
 The requirements and commands below record the original plan, not current status.
 **Parent design:** [docs/claude-subscription-design.md](docs/claude-subscription-design.md) §6 (M2)
 

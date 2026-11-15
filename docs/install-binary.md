@@ -219,7 +219,7 @@ the dashboard.
 Verify (any OS; `curl.exe` on Windows):
 
 ```bash
-curl -s localhost:20129/healthz                      # {"status":"ok","version":"1.9.0"}
+curl -s localhost:20129/healthz                      # {"status":"ok","version":"2.0.0"}
 curl -s -o /dev/null -w '%{http_code}\n' localhost:20129/v1/models   # 401 without a token
 ```
 

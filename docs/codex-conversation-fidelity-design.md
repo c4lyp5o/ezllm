@@ -2,7 +2,7 @@
 
 ## Decision
 
-From v1.9.0, `RunPreflight` detects `thread/inject_items` independently of fork
+From v2.0.0, `RunPreflight` detects `thread/inject_items` independently of fork
 cache mode. `Runner.runAppServer` uses `nativeConversation` to inject prior
 Responses items into a fresh request thread, then starts the latest user input.
 On a cached request, injection occurs after `thread/fork`, never on the parent.

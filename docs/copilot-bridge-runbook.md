@@ -9,7 +9,7 @@ mints a session token. Design: `docs/copilot-cli-bridge-design.md`.
 `internal/copilotbridge` serves `/healthz`, `/status`, `/v1/models` and
 `/v1/chat/completions` on `127.0.0.1:8793` (loopback only, bearer-gated with the
 bridge token). Requests use `copilot --headless --stdio` with a fresh session.
-Since 1.9.0 the warm pool is on by default and reuses only successfully
+Since 2.0.0 the warm pool is on by default and reuses only successfully
 cleaned-up processes. Plain text can fall back to `copilot -p`; requests carrying
 tools or images cannot take that fallback. Prompts and native image blobs travel
 on stdin, not argv.
@@ -70,7 +70,7 @@ reach it; without one it writes `config.json` in `COPILOT_HOME`.
 Boot fails loudly if `EZLLM_COPILOT_HOME` is not a directory — a bridge that
 started without a login would look healthy while every request 401s.
 
-**Upgrading from before 1.9.0.** The default login directory changed from
+**Upgrading from before 2.0.0.** The default login directory changed from
 `/copilot-home` to `/copilot-sub`, and there is no fallback. Log in to
 `~/.copilot-sub` as above, change the mount to `~/.copilot-sub:/copilot-sub`,
 set `EZLLM_COPILOT_HOME: /copilot-sub` (or remove the variable to use the
@@ -278,7 +278,7 @@ on first-response latency alone. Measured examples and limitations are in
 
 ## Warm CLI processes
 
-Process reuse is on by default since 1.9.0. Set
+Process reuse is on by default since 2.0.0. Set
 `EZLLM_COPILOT_BRIDGE_WARM_POOL=off` and restart to go back to one process per
 request. Accepted enabled values are `on`, `true`, `1`, or unset; disabled
 values are `off`, `false`, `0`. Invalid values fail startup.
@@ -306,7 +306,7 @@ are still cold, and model processing time is unaffected by process reuse.
 
 ## Completed-conversation cache
 
-On by default since 1.9.0: unset, `EZLLM_COPILOT_BRIDGE_CACHE` follows
+On by default since 2.0.0: unset, `EZLLM_COPILOT_BRIDGE_CACHE` follows
 the warm pool. Set it to `off` to disable it; an explicit `on` with the warm
 pool off fails startup.
 A matching request must supply the unchanged prior messages and assistant answer,

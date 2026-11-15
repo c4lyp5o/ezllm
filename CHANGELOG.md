@@ -2,7 +2,7 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
-## v1.9.0 — Bridge caching, Codex fidelity and security remediation
+## v2.0.0 — Bridge environment cleanup, caching, Codex fidelity and security remediation
 
 First release after v1.8.1. The subsections below are the pre-release builds that
 ran in production before release; security records cite them by those numbers.

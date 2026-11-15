@@ -1,6 +1,6 @@
 # Security remediation — v1.14.1
 
-> Pre-release 1.14.1 ships in release **v1.9.0**; this record keeps the build
+> Pre-release 1.14.1 ships in release **v2.0.0**; this record keeps the build
 > numbers that were deployed and measured.
 
 Follow-up to the [whole-application audit](security-audit-2026-11-14.md).
@@ -50,7 +50,7 @@ routing, upstream work and streaming. Completion, errors, cancellation and panic
 release the reservation and remove idle per-client counters. Excess requests
 receive 429 plus `Retry-After: 1` without queuing or reading another body. HTTP/1
 rejections close instead of blocking on a stalled-body drain.
-*Revised in v1.9.0:* a declared `Content-Length` is now reserved exactly (net/http
+*Revised in v2.0.0:* a declared `Content-Length` is now reserved exactly (net/http
 never reads past it); only bodies of unknown length reserve the full request cap,
 so small requests are no longer limited to `body_memory_mib / max_body_mib` at once.
 
@@ -79,7 +79,7 @@ Equivalent text-block representation and cache-control metadata normalize.
 A pending turn stores hashes rather than a second copy of caller history.
 The complete prior history and emitted assistant tool-call message must match
 before a child can resume. Sequential tool batches advance the chain.
-*Revised in v1.9.0:* parked turns are keyed by caller as well as call ID, so a
+*Revised in v2.0.0:* parked turns are keyed by caller as well as call ID, so a
 foreign caller's lookup finds nothing and falls back to replay instead of
 receiving 403; the regression test still proves it cannot resume or remove the
 owner's turn.

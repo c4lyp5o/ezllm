@@ -1,6 +1,6 @@
 # Shared CLI bridge streaming transport
 
-Implemented in v1.8.0 for Claude and Antigravity, and in v1.9.0 for Codex and
+Implemented in v1.8.0 for Claude and Antigravity, and in v2.0.0 for Codex and
 Copilot. All four subscription bridges now stream through `bridgeutil.Stream`.
 
 ## Boundary
@@ -72,8 +72,8 @@ subscription inference.
 |---|---|---|
 | Claude | Implemented in v1.8.0 | Maintain Anthropic framing and stalled-write/cancellation coverage. |
 | Antigravity (`agybridge`) | Implemented in v1.8.0 | Maintain OpenAI framing and live HTTP acceptance coverage. |
-| Codex | Implemented in v1.9.0 | Maintain OpenAI framing; app-server RPC, sandboxing, parked tool turns and usage stay adapter-owned. |
-| Copilot | Implemented in v1.9.0 | Maintain OpenAI framing; image attachments, early tool delivery, exact usage and warm workers stay adapter-owned. |
+| Codex | Implemented in v2.0.0 | Maintain OpenAI framing; app-server RPC, sandboxing, parked tool turns and usage stay adapter-owned. |
+| Copilot | Implemented in v2.0.0 | Maintain OpenAI framing; image attachments, early tool delivery, exact usage and warm workers stay adapter-owned. |
 
 Codex and Copilot were migrated in separate commits (2026-11-15). Header timing,
 error framing and tool/finish/usage ordering are unchanged; a failed write is now

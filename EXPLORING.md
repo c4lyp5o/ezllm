@@ -364,7 +364,7 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
 > **Deleted:** `internal/githubcopilot`, `internal/provider/githubcopilot.go`,
 > `cmd/ezllm/githublogin.go`, `/admin/github/device*`, the `github-copilot` kind and the
 > dashboard login panel. Do not go looking for them. Replaced by M16 (Copilot subscription bridge);
-> the original design and policy records were removed in v1.9.0 and remain in git history.
+> the original design and policy records were removed in v2.0.0 and remain in git history.
 
 ### M14 — claude-web provider ✅ (2026-10-16; design `docs/claude-web-design.md`, runbook `docs/claude-web-runbook.md`)
 - `internal/claudeweb/` — the ported protocol. `tlsclient.go` (uTLS
@@ -716,7 +716,7 @@ while the SAME model on `opencode-go` was 0/754.
 - No routing action yet, deliberately: the park rule is justified by THIS
   measurement, not by a plausible number (the M2 lesson).
 
-### v1.9.0 — bridge caching, Codex fidelity, security remediation ✅ (2026-11-14; runbooks `docs/codex-bridge-runbook.md`, `docs/bridge-update-runbook.md`; audit `docs/security-audit-2026-11-14.md`)
+### v2.0.0 — bridge caching, Codex fidelity, security remediation ✅ (2026-11-14; runbooks `docs/codex-bridge-runbook.md`, `docs/bridge-update-runbook.md`; audit `docs/security-audit-2026-11-14.md`)
 
 - `internal/codexbridge/cache.go` `borrowTemplate` / `forkTemplate` — empty
   persisted parent threads forked per request for prompt-cache affinity across

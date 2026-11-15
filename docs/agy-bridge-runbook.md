@@ -242,7 +242,7 @@ filesystem or shell tools. Use `EZLLM_AGY_MODEL` to test another model.
 
 ## Conversation cache
 
-On by default since 1.9.0 whenever the tool adapter is on
+On by default since 2.0.0 whenever the tool adapter is on
 (`EZLLM_AGY_EXPERIMENTAL_TOOLS=on`) and the CLI supports `--conversation`. Set
 `EZLLM_AGY_BRIDGE_CACHE=off` to disable it; an explicit `on` without
 the adapter or `--conversation` fails startup. It applies to

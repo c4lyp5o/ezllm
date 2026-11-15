@@ -296,7 +296,7 @@ func ForkCacheModeFromEnv(getenv func(string) string) (string, error) {
 	case "on", "off":
 		return mode, nil
 	case "auto":
-		return "", fmt.Errorf("codex bridge: %s=auto was removed in 1.9.0: caching is the default, so leave it unset (or set off to opt out)", CacheEnvKey)
+		return "", fmt.Errorf("codex bridge: %s=auto was removed in 2.0.0: caching is the default, so leave it unset (or set off to opt out)", CacheEnvKey)
 	}
 	return "", fmt.Errorf("codex bridge: %s must be on or off", CacheEnvKey)
 }

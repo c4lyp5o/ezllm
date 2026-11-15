@@ -11,11 +11,12 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v1.9.0**
+**Current: v2.0.0**
 
-## v1.9.0 — 2026-11-14
+## v2.0.0 — 2026-11-15
 
-First release after v1.8.1. It consolidates the bridge caching, Codex
+First release after v1.8.1, and a major version because the bridge environment
+settings changed incompatibly (see Breaking below). It consolidates the bridge caching, Codex
 conversation-fidelity, CLI updater and security-audit work that ran in
 production as pre-release builds 1.8.2 and 1.9.0–1.14.3. The security audit,
 remediation and rollout records name those builds by their pre-release numbers.

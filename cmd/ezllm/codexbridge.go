@@ -129,7 +129,6 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 		Logf:          log.Info,
 		Channel:       pre.Channel,
 		Sandbox:       tools.sandbox,
-		SandboxMode:   codexbridge.SandboxModeFromEnv(os.Getenv),
 	}
 	srv := &codexbridge.Server{
 		Runner:        runner,
@@ -153,7 +152,7 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 			"cache_selection": pre.Cache,
 			"native_history":  pre.NativeHistory,
 			"approval_policy": codexbridge.ApprovalPolicy,
-			"sandbox":         string(codexbridge.SandboxModeFromEnv(os.Getenv)),
+			"sandbox":         codexbridge.SandboxPolicy,
 		},
 		Logf: log.Info,
 	}

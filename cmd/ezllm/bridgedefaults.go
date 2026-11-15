@@ -40,6 +40,7 @@ var retiredBridgeEnv = map[string]string{
 	"EZLLM_CLAUDE_CONFIG_DIR":            "renamed to EZLLM_CLAUDE_HOME",
 	"EZLLM_COPILOT_BRIDGE_SESSION_CACHE": "renamed to EZLLM_COPILOT_BRIDGE_CACHE",
 	"EZLLM_AGY_BRIDGE_SESSION_CACHE":     "renamed to EZLLM_AGY_BRIDGE_CACHE",
+	"EZLLM_CODEX_SANDBOX":                "removed: the Codex sandbox is always writable",
 }
 
 func checkRetiredBridgeEnv(get func(string) string) error {

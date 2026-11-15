@@ -32,51 +32,18 @@ var LockdownFeatures = []string{
 	"tool_call_mcp_elicitation", "in_app_updates",
 }
 
-// SandboxMode names the Codex filesystem policy for one child. Default is
-// read-only; writable is an explicit operator opt-in via EZLLM_CODEX_SANDBOX.
-type SandboxMode string
+// SandboxPolicy is the Codex filesystem policy every child runs with: it may
+// write inside the request's own temp workdir (Codex's workspace-write
+// policy). Landlock still confines the child: the writable set is the temp
+// dir plus CODEX_HOME, everything else stays read-only. Read-only was retired
+// in 1.9.0: a Codex that cannot write its own scratch space cannot work.
+const SandboxPolicy = "workspace-write"
 
-const (
-	// SandboxReadOnly is the default: the model cannot write or execute
-	// on the host (proven by the §2.5 sentinel, not assumed from flags).
-	SandboxReadOnly SandboxMode = "read-only"
-	// SandboxWritable lets Codex write inside the request's own temp workdir
-	// (Codex's workspace-write policy). Landlock still confines the child:
-	// the writable set is unchanged (the temp dir + CODEX_HOME), everything
-	// else stays read-only. Nothing outside the domain becomes writable.
-	SandboxWritable SandboxMode = "workspace-write"
-)
-
-// SandboxEnvKey is the operator opt-in: EZLLM_CODEX_SANDBOX=writable.
-// Any other value (including unset) means read-only.
-const SandboxEnvKey = "EZLLM_CODEX_SANDBOX"
-
-// SandboxModeFromEnv reads the operator opt-in. Fail-closed: unknown
-// values return read-only, never writable.
-func SandboxModeFromEnv(getenv func(string) string) SandboxMode {
-	if getenv == nil {
-		getenv = os.Getenv
-	}
-	if strings.EqualFold(strings.TrimSpace(getenv(SandboxEnvKey)), "writable") {
-		return SandboxWritable
-	}
-	return SandboxReadOnly
-}
-
-// ApprovalPolicy is the only approval policy a Codex child runs with, in both
-// sandbox modes. The bridge has no approval UI and declines approval RPCs;
-// on-request would advertise an unusable escalation path. The sandbox
+// ApprovalPolicy is the only approval policy a Codex child runs with. The
+// bridge has no approval UI and declines approval RPCs; on-request would
+// advertise an unusable escalation path. The sandbox
 // independently controls which operations are allowed.
 const ApprovalPolicy = "never"
-
-// sandboxMode returns the effective policy, fail-closed: anything that is
-// not explicitly writable reads back as read-only.
-func (r *Runner) sandboxMode() SandboxMode {
-	if r != nil && r.SandboxMode == SandboxWritable {
-		return SandboxWritable
-	}
-	return SandboxReadOnly
-}
 
 // LockdownArgs is the argv tail for a Codex child. codeMode leaves the
 // code-mode host on: client tools are reachable only through its JavaScript
@@ -108,9 +75,6 @@ type Runner struct {
 	Channel string
 	// Sandbox, when set, runs every child inside Landlock.
 	Sandbox *Sandbox
-	// SandboxMode is the Codex filesystem policy, from SandboxModeFromEnv.
-	// Zero value = read-only (fail-closed).
-	SandboxMode SandboxMode
 	// ToolHold bounds how long a parked turn waits for its tool results
 	// (default 10 minutes); MaxParked caps parked children (default 8, the
 	// oldest is evicted). An evicted or expired turn's follow-up replays.
@@ -747,7 +711,7 @@ func (r *Runner) runAppServer(ctx context.Context, req Request, sink func(Delta)
 		"model":            req.Model,
 		"cwd":              c.cwd,
 		"ephemeral":        true,
-		"sandbox":          string(r.sandboxMode()),
+		"sandbox":          SandboxPolicy,
 		"approvalPolicy":   ApprovalPolicy,
 		"baseInstructions": req.Instructions,
 	}

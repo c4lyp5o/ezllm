@@ -26,7 +26,7 @@ func TestLiveCallerTaskFidelity(t *testing.T) {
 	for _, cache := range []bool{false, true} {
 		t.Run(fmt.Sprintf("cache=%t", cache), func(t *testing.T) {
 			dir := t.TempDir()
-			r := &Runner{Bin: bin, CodexHome: home, Timeout: 90 * time.Second, ForkCache: cache, NativeHistory: os.Getenv("EZLLM_CODEX_FIDELITY_NATIVE") == "1", SandboxMode: SandboxWritable, Sandbox: &Sandbox{Helper: os.Args[0]}}
+			r := &Runner{Bin: bin, CodexHome: home, Timeout: 90 * time.Second, ForkCache: cache, NativeHistory: os.Getenv("EZLLM_CODEX_FIDELITY_NATIVE") == "1", Sandbox: &Sandbox{Helper: os.Args[0]}}
 			defer r.Shutdown()
 			schema := func(s string) any {
 				var v any

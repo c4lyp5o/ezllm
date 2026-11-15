@@ -29,7 +29,7 @@ func TestRetiredBridgeSettingsFailTheBoot(t *testing.T) {
 			t.Errorf("%s accepted", name)
 		}
 	}
-	for _, name := range []string{"EZLLM_CLAUDE_CONFIG_DIR", "EZLLM_COPILOT_BRIDGE_SESSION_CACHE", "EZLLM_AGY_BRIDGE_SESSION_CACHE"} {
+	for _, name := range []string{"EZLLM_CLAUDE_CONFIG_DIR", "EZLLM_COPILOT_BRIDGE_SESSION_CACHE", "EZLLM_AGY_BRIDGE_SESSION_CACHE", "EZLLM_CODEX_SANDBOX"} {
 		if _, ok := retiredBridgeEnv[name]; !ok {
 			t.Errorf("%s is not retired", name)
 		}

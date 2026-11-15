@@ -56,9 +56,8 @@ func (r *Runner) templateKey(req Request) ([32]byte, bool) {
 		Model, Instructions, Effort, Summary string
 		Tools                                []ToolSpec
 		Schema                               json.RawMessage
-		Sandbox                              SandboxMode
 		Binary                               string
-	}{req.Model, req.Instructions, req.Effort, req.Summary, req.Tools, req.OutputSchema, r.sandboxMode(), binaryIdentity(r.Bin)})
+	}{req.Model, req.Instructions, req.Effort, req.Summary, req.Tools, req.OutputSchema, binaryIdentity(r.Bin)})
 	if err != nil || len(raw) > 1<<20 {
 		return [32]byte{}, false
 	}

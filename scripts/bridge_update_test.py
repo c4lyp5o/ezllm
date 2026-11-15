@@ -322,12 +322,12 @@ class Copilot(Home):
 class Gate(Home):
     def info(self):
         return {"Name": "/ezllm", "Image": "sha256:running-image", "Config": {"Entrypoint": ["/app/ezllm"], "Image": "mutable:tag", "User": "1000:1000",
-                "Env": ["EZLLM_CODEX_SANDBOX=writable", "EZLLM_AGY_EXPERIMENTAL_TOOLS=on", "EZLLM_COPILOT_BRIDGE_WARM_POOL=on", "EZLLM_MASTER_KEY=must-not-copy"]},
+                "Env": ["EZLLM_CODEX_BRIDGE_CACHE=off", "EZLLM_AGY_EXPERIMENTAL_TOOLS=on", "EZLLM_COPILOT_BRIDGE_WARM_POOL=on", "EZLLM_MASTER_KEY=must-not-copy"]},
                 "Mounts": [{"Source": str(self.home / "actual-login"), "Destination": "/codex-sub"}]}
 
     def test_gate_uses_running_image_and_production_policy_without_secrets(self):
         cfg = bu.load_config(self.home / "absent")
-        verdict = {"bridge": "codex", "version": "0.169.0", "ok": True, "live": True, "policy": {"sandbox": "workspace-write", "approval_policy": "never", "history": "native-if-supported-v1", "cache": "default"}, "problems": []}
+        verdict = {"bridge": "codex", "version": "0.169.0", "ok": True, "live": True, "policy": {"sandbox": "workspace-write", "approval_policy": "never", "history": "native-if-supported-v1", "cache": "off"}, "problems": []}
         result = mock.Mock(stdout=json.dumps(verdict), returncode=0)
         copied, requests = [], []
         def run(*args, **kwargs):
@@ -341,7 +341,7 @@ class Gate(Home):
         self.assertEqual(docker.call_args.args[:2], ("rm", "-f"))
         self.assertIn("sha256:running-image", args)
         self.assertNotIn("mutable:tag", args)
-        self.assertIn("EZLLM_CODEX_SANDBOX=writable", copied[0])
+        self.assertIn("EZLLM_CODEX_BRIDGE_CACHE=off", copied[0])
         self.assertIn("EZLLM_AGY_EXPERIMENTAL_TOOLS=on", copied[0])
         self.assertNotIn("must-not-copy", copied[0])
         self.assertIn(str(self.home / "actual-login") + ":/codex-sub", args)
@@ -579,7 +579,7 @@ class SessionCachePolicy(unittest.TestCase):
 
 class CodexForkCachePolicy(unittest.TestCase):
     def test_fork_mode_must_be_proven(self):
-        info = {"Config": {"Env": ["EZLLM_CODEX_SANDBOX=writable", "EZLLM_CODEX_BRIDGE_CACHE=on"]}}
+        info = {"Config": {"Env": ["EZLLM_CODEX_BRIDGE_CACHE=on"]}}
         self.assertIn("EZLLM_CODEX_BRIDGE_CACHE", bu.GATE_ENV)
         self.assertEqual(bu.gate_policy("codex", info), {"sandbox": "workspace-write", "approval_policy": "never", "history": "native-if-supported-v1", "cache": "ephemeral-forks"})
         info["Config"]["Env"].pop()

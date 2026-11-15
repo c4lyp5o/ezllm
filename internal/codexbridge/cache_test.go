@@ -90,11 +90,6 @@ func TestTemplateKeySeparatesConfiguration(t *testing.T) {
 			t.Fatal("different configuration shared template")
 		}
 	}
-	r.SandboxMode = SandboxWritable
-	k, _ := r.templateKey(req)
-	if k == key {
-		t.Fatal("sandbox shared template")
-	}
 }
 func TestTemplateScratchIsScrubbedAndOldTimerCannotEvictBorrower(t *testing.T) {
 	r, _ := fakeRunner(t, "ok")

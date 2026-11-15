@@ -89,7 +89,7 @@ func TestRunStreamsDeltasAndReturnsTheTurnUsage(t *testing.T) {
 	var ts map[string]any
 	b, _ := os.ReadFile(filepath.Join(home, "thread_start.json"))
 	_ = json.Unmarshal(b, &ts)
-	if ts["sandbox"] != "read-only" || ts["approvalPolicy"] != "never" || ts["ephemeral"] != true ||
+	if ts["sandbox"] != "workspace-write" || ts["approvalPolicy"] != "never" || ts["ephemeral"] != true ||
 		ts["baseInstructions"] != DefaultInstructions || ts["model"] != "gpt-6.1-sol" {
 		t.Fatalf("thread/start params = %v", ts)
 	}

@@ -173,7 +173,7 @@ func runBridgeCheck(args []string, stdout io.Writer) error {
 	}
 	switch name {
 	case "codex":
-		v.Policy = map[string]string{"sandbox": string(codexbridge.SandboxModeFromEnv(os.Getenv))}
+		v.Policy = map[string]string{"sandbox": codexbridge.SandboxPolicy}
 		v.Policy["approval_policy"] = codexbridge.ApprovalPolicy
 		v.Policy["history"] = "native-if-supported-v1"
 		if policy, err := codexbridge.ForkCachePolicy(os.Getenv); err == nil {
@@ -483,8 +483,7 @@ func liveCodex(ctx context.Context, bin, home string, pre codexbridge.Preflight,
 	}
 	tools := decideCodexTools(helper, bin, strings.EqualFold(strings.TrimSpace(os.Getenv(envCodexToolsNoLL)), "on"))
 	r := &codexbridge.Runner{Bin: bin, CodexHome: home, Timeout: liveTurnTimeout, MaxConcurrent: 1,
-		Version: server.Version, Channel: pre.Channel, Sandbox: tools.sandbox, ForkCache: pre.Cache.Enabled, NativeHistory: pre.NativeHistory,
-		SandboxMode: codexbridge.SandboxModeFromEnv(os.Getenv)}
+		Version: server.Version, Channel: pre.Channel, Sandbox: tools.sandbox, ForkCache: pre.Cache.Enabled, NativeHistory: pre.NativeHistory}
 	// Drain retained parents too: cleanup is part of cache qualification.
 	defer func() {
 		r.Shutdown()

@@ -44,7 +44,7 @@ func TestExecChannelRunsWithTheSameLockdown(t *testing.T) {
 		t.Fatalf("res=%+v chunks=%v (exec emits the message whole)", res, chunks)
 	}
 	args, stdin := readExec(t, home)
-	for _, want := range []string{"--json", "--ephemeral", "--ignore-user-config", "--ignore-rules", "read-only", "shell_tool", "code_mode_host",
+	for _, want := range []string{"--json", "--ephemeral", "--ignore-user-config", "--ignore-rules", "workspace-write", "shell_tool", "code_mode_host",
 		`approval_policy="never"`, `instructions="You are a helpful assistant."`, `model_reasoning_effort="high"`} {
 		if !slices.Contains(args, want) {
 			t.Errorf("exec argv lacks %q: %v", want, args)

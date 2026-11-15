@@ -481,7 +481,7 @@ func liveCodex(ctx context.Context, bin, home string, pre codexbridge.Preflight,
 	if err != nil {
 		return []string{"live: cannot locate this binary for the Landlock helper: " + err.Error()}
 	}
-	tools := decideCodexTools(helper, bin, strings.EqualFold(strings.TrimSpace(os.Getenv(envCodexToolsNoLL)), "on"))
+	tools := decideCodexTools(helper, bin)
 	r := &codexbridge.Runner{Bin: bin, CodexHome: home, Timeout: liveTurnTimeout, MaxConcurrent: 1,
 		Version: server.Version, Channel: pre.Channel, Sandbox: tools.sandbox, ForkCache: pre.Cache.Enabled, NativeHistory: pre.NativeHistory}
 	// Drain retained parents too: cleanup is part of cache qualification.

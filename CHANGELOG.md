@@ -66,9 +66,12 @@ ran in production before release; security records cite them by those numbers.
   cannot work still fails the boot. The updater gate expects the same defaults.
 - The Codex sandbox is always `workspace-write`; `EZLLM_CODEX_SANDBOX` and the
   read-only mode are removed.
+- `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK` is removed: with a writable sandbox, Codex
+  client tools always require Landlock.
 - `EZLLM_CLAUDE_BRIDGE_CONCURRENCY` is new, and every bridge's concurrency now
   defaults to 1 CLI process (was 2; Claude's was fixed at 2).
-- Retired names (`EZLLM_CLAUDE_CONFIG_DIR`, `EZLLM_CODEX_SANDBOX`, both
+- Retired names (`EZLLM_CLAUDE_CONFIG_DIR`, `EZLLM_CODEX_SANDBOX`,
+  `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK`, both
   `*_SESSION_CACHE`) fail the boot with a message naming the replacement.
 
 ### Codex conversation fidelity (pre-release 1.14.3)

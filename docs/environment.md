@@ -114,7 +114,6 @@ Setup, platform requirements and the lockdown: [codex-bridge-runbook.md](codex-b
 | `EZLLM_CODEX_BRIDGE_TOKEN_FILE` | `/data/codex-bridge.token` | Shared secret for the account key; generated (0600) when missing. |
 | `EZLLM_CODEX_BRIDGE_CONCURRENCY` | `1` | Concurrent Codex children; a positive integer, anything else fails the boot. |
 | `EZLLM_CODEX_BRIDGE_CACHE` | on where supported | Unset, empty-template forks are used whenever the CLI supports them; otherwise the original path is used and `/status` reports why. `on` requires support; `off` opts out. `auto` was removed in 2.0.0 and, like any other value, fails startup. No idle CLI workers; bounded native parent retention and cleanup. Set before startup; recreate containers to change. |
-| `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK` | unset | `on` allows client tools on a host without Landlock. Read the runbook's platform section before setting it. |
 
 ## Antigravity (Google subscription) bridge
 

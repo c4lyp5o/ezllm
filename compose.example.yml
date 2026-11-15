@@ -108,8 +108,6 @@ services:
       # EZLLM_CODEX_BRIDGE_ADDR: 127.0.0.1:8791
       # EZLLM_CODEX_BRIDGE_TOKEN_FILE: /data/codex-bridge.token
       # EZLLM_CODEX_BRIDGE_CONCURRENCY: "1"
-      # Client tools without Landlock: read the runbook before setting this.
-      # EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK: "on"
 
       # ── Antigravity subscription bridge ── docs/agy-bridge-runbook.md
       # Loopback-only; an openai-compatible account dials it. Linux only. `on`

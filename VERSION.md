@@ -38,7 +38,8 @@ renamed `EZLLM_CLAUDE_HOME`. The Copilot token file defaults to
 `/data/copilot-bridge.token`. Every bridge caches by default and `off` is the
 only opt-out: `EZLLM_CODEX_BRIDGE_CACHE=auto` is gone, and the Copilot and
 Antigravity caches are `EZLLM_<BRIDGE>_BRIDGE_CACHE`. The Codex sandbox is always
-writable (`EZLLM_CODEX_SANDBOX` removed). Every bridge runs one CLI process at a
+writable (`EZLLM_CODEX_SANDBOX` removed), and Codex client tools always require
+Landlock (`EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK` removed). Every bridge runs one CLI process at a
 time by default (`*_BRIDGE_CONCURRENCY`, was 2). Retired names fail the boot.
 
 Release review fixes: request-limit defaults no longer block startup when only

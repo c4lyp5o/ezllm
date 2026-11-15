@@ -71,7 +71,6 @@ requests included; tools additionally switch the code-mode runtime on.
 | --- | --- | --- | --- |
 | Linux, kernel ≥ 5.13, Landlock enabled, container allows the syscalls | yes | ✅ | ✅ |
 | Linux without Landlock (old kernel, disabled LSM, or blocked by seccomp) | no | ✅ | ❌ — 400 `chat_tools_unsupported` |
-| Linux without Landlock + `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK=on` | no | ✅ | ✅ — weaker guarantee, see below |
 | macOS, Windows (native binaries) | — | ❌ bridge refuses to start | ❌ |
 | Docker on Linux, **default** seccomp profile (verified 2026-10-23, kernel 6.8) | yes | ✅ | ✅ |
 | Docker Desktop (Mac/Windows) | depends on its Linux VM kernel | check `/status` | check `/status` |
@@ -98,7 +97,7 @@ namespace, and the distroless container has no shell or curl:
 | field | values |
 | --- | --- |
 | `landlock` | `available (ABI <n>)` · `unavailable: <reason from the kernel>` |
-| `client_tools` | `enabled` · `disabled (no Landlock)` · `enabled without Landlock (operator override)` |
+| `client_tools` | `enabled` · `disabled (no Landlock)` · `disabled (code-mode host missing)` |
 
 ### What a client sees when tools are off
 
@@ -126,16 +125,12 @@ has Landlock — route it to another account, or fix the host.
   not run the container with `seccomp=unconfined` to get there: it removes
   far more protection than Landlock adds.
 
-### The override, and what you give up
+### No override
 
-`EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK=on` turns client tools on without Landlock.
-The bridge then relies **only** on Codex's own read-only policy to refuse
-`apply_patch` writes. That held in every spike run, but it is Codex's code, it
-can change with any CLI version, and nothing in the kernel backs it. Turn it on
-only on a host where a write by the Codex process would not matter (nothing
-sensitive the ezllm user can write to). It is off by default, it is logged at
-boot, and `/status` shows `enabled without Landlock (operator override)` for as
-long as it is set.
+There is no way to enable client tools without Landlock. Before 2.0.0
+`EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK=on` did, relying on Codex's read-only policy
+alone; with the sandbox always writable that would leave nothing confining the
+child, so the setting was removed and setting it now fails the boot.
 
 ### Writable request workspace
 
@@ -299,7 +294,6 @@ Boot fails loudly — the process does not start — when:
 | `EZLLM_CODEX_BRIDGE_TOKEN_FILE` | `/data/codex-bridge.token` | shared secret, generated on first boot |
 | `EZLLM_CODEX_BRIDGE_CONCURRENCY` | `1` | CLI children at once (a turn parked on tool calls holds none) |
 | `EZLLM_CODEX_BRIDGE_CACHE` | unset (on where supported) | Empty-template forks whenever supported; report the fallback reason otherwise. `on` requires support; `off` opts out. |
-| `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK` | `off` | `on` = client tools without Landlock ([what you give up](#the-override-and-what-you-give-up)) |
 
 ```sh
 docker logs ezllm | grep -i "codex bridge"   # cli version, release, login, channel

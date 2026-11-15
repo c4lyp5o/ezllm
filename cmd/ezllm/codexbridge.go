@@ -31,20 +31,20 @@ const (
 	envCodexAddr        = "EZLLM_CODEX_BRIDGE_ADDR"       // default 127.0.0.1:8791
 	envCodexToken       = "EZLLM_CODEX_BRIDGE_TOKEN_FILE" // shared secret for the account key
 	envCodexConcurrency = "EZLLM_CODEX_BRIDGE_CONCURRENCY"
-	envCodexToolsNoLL   = "EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK" // "on" = client tools without Landlock
 )
 
 // codexTools decides client tools for this host (decision §4.7): with Landlock
-// every child is confined and tools are on; without it they are off unless the
-// operator overrides, and a missing code-mode host turns them off regardless.
+// every child is confined and tools are on; without it they are off (the
+// writable sandbox needs the kernel boundary), and a missing code-mode host
+// turns them off regardless.
 type codexTools struct {
 	sandbox  *codexbridge.Sandbox
 	landlock string // /status: available (ABI n) | unavailable: reason
-	status   string // /status: enabled | disabled (…) | enabled without Landlock (operator override)
+	status   string // /status: enabled | disabled (…)
 	off      string // non-empty: why tool requests are refused
 }
 
-func decideCodexTools(helper, bin string, override bool) codexTools {
+func decideCodexTools(helper, bin string) codexTools {
 	var t codexTools
 	abi, err := codexbridge.ProbeLandlock(helper)
 	if err == nil {
@@ -60,8 +60,6 @@ func decideCodexTools(helper, bin string, override bool) codexTools {
 		t.off = "the code-mode host the CLI needs for tools is missing (" + host + ")"
 	case err == nil:
 		t.status = "enabled"
-	case override:
-		t.status = "enabled without Landlock (operator override)"
 	default:
 		t.status = "disabled (no Landlock)"
 		t.off = "Landlock is unavailable (" + err.Error() + ")"
@@ -115,7 +113,7 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 	if err != nil {
 		return nil, fmt.Errorf("codex bridge: cannot locate this binary for the Landlock helper: %w", err)
 	}
-	tools := decideCodexTools(helper, resolved, strings.EqualFold(strings.TrimSpace(os.Getenv(envCodexToolsNoLL)), "on"))
+	tools := decideCodexTools(helper, resolved)
 	qualified := releaseState(bin, pre.Version, codexbridge.QualifiedVersion)
 
 	runner := &codexbridge.Runner{

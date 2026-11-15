@@ -41,6 +41,7 @@ var retiredBridgeEnv = map[string]string{
 	"EZLLM_COPILOT_BRIDGE_SESSION_CACHE": "renamed to EZLLM_COPILOT_BRIDGE_CACHE",
 	"EZLLM_AGY_BRIDGE_SESSION_CACHE":     "renamed to EZLLM_AGY_BRIDGE_CACHE",
 	"EZLLM_CODEX_SANDBOX":                "removed: the Codex sandbox is always writable",
+	"EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK": "removed: Codex client tools require Landlock",
 }
 
 func checkRetiredBridgeEnv(get func(string) string) error {

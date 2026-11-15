@@ -41,7 +41,7 @@ type Server struct {
 	Logf    func(format string, args ...any)
 	Now     func() time.Time
 	// ToolsOff, when set, is why client tools are refused on this host
-	// (decision §4.7: no Landlock and no operator override).
+	// (decision §4.7: no Landlock).
 	ToolsOff      string
 	RequireCaller bool
 

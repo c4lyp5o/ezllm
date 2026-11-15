@@ -7,6 +7,33 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 First release after v1.8.1. The subsections below are the pre-release builds that
 ran in production before release; security records cite them by those numbers.
 
+### Release review, transport and dashboard
+
+- **Fixes:** an unset `per_client_inflight` is clamped to `global_inflight`;
+  VS Code path tokens are masked from the raw request path; a Claude stream whose
+  CLI fails after the visible message still ends with `message_delta`/`message_stop`;
+  a refused Antigravity resume records its billed usage on the error body;
+  admission reserves a declared `Content-Length` instead of `max_body`; stale
+  Copilot workers are reaped after the pool lock is released; Copilot cleanup
+  failures are a typed pre-inference `cached_session_cleanup`; parked Codex
+  tool turns are keyed by caller, so a foreign call ID replays instead of 403.
+- **Shared transport:** Codex and Copilot stream through `internal/bridgeutil`
+  like Claude and Antigravity. Failed writes are sticky; Copilot no longer
+  ignores them. Verified live with Codex and Copilot (`gpt-6-luna`) text and
+  tool streams.
+- **Ledger:** compression stage attribution is stored only when a stage changed
+  something (an all-zero list was a third of the table), and
+  "upstream attempts" notes only when a request retried.
+- **Request explorer:** `/admin/requests` adds `summary.empty_steps` and a
+  `hide_empty` filter; the dashboard shows a "no tokens" badge for zero-token
+  steps (code-mode tool steps, or usage reported later in the turn) and a
+  toggle to hide them.
+- **Dashboard:** bridge cards list the exact `~/.<bridge>-sub` sign-in and check
+  commands; the favicon and sidebar mark use the shared ez icon.
+- **Measured, no change needed:** Codex usage in code mode arrives after the
+  script's tool calls finish, so it lands on a later row (totals correct); Codex
+  already batches independent tool calls.
+
 ### Copilot bridge uses a dedicated login (breaking)
 
 - `EZLLM_COPILOT_HOME` now defaults to `/copilot-sub` instead of `/copilot-home`, so

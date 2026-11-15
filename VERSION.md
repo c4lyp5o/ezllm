@@ -29,6 +29,17 @@ No schema migration. New environment settings: `EZLLM_CODEX_SANDBOX`,
 with `COPILOT_HOME=~/.copilot-sub`, mount it at `/copilot-sub` and recreate the
 container; see `docs/copilot-bridge-runbook.md`.
 
+Release review fixes: request-limit defaults no longer block startup when only
+`global_inflight` is set; VS Code path tokens stay masked in access logs;
+completed Claude streams end cleanly if the CLI fails afterwards; refused
+Antigravity resumes keep their billed usage; admission reserves a declared body
+length instead of the whole cap; stale Copilot workers are reaped outside the
+pool lock; parked Codex tool turns are scoped per caller. Codex and Copilot now
+stream through the shared bridge transport. The ledger stops storing all-zero
+compression stage lists and single-attempt notes. The dashboard labels and can
+hide zero-token steps, shows each bridge's sign-in commands, and uses the ez
+icon.
+
 ### Pre-release 1.14.3
 
 Preserves structured conversation history on Codex CLIs advertising

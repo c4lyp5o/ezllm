@@ -22,8 +22,8 @@ services:
     user: "${UID:-1000}:${GID:-1000}"
 
     ports:
-      # Overridable so a second instance (staging, a test) does not need its
-      # own file:  EZLLM_PORT=20130 EZLLM_DATA=./data-staging docker compose up -d
+      # Overridable for a second instance (staging, a test); give that copy of
+      # this file its own data path below as well.
       - "127.0.0.1:${EZLLM_PORT:-20129}:20129"
 
     environment:
@@ -128,7 +128,7 @@ services:
       - ./config.yaml:/app/config.yaml:ro
       # The ledger, master key and bridge tokens. Without it, a restart loses
       # everything.
-      - "${EZLLM_DATA:-./data}:/data"
+      - ./data:/data
 
       # Optional backup storage (writable by the container user) and a
       # separately protected encryption-secret file; create both first.

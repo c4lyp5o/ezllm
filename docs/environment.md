@@ -152,14 +152,15 @@ CLI's own, so there is no client id to configure. Runbook:
 
 ## Compose-only
 
-Substituted into `compose.example.yml`; the binary never reads them. Bridge
-mount paths are written into your `compose.yml` directly.
+Substituted into `compose.example.yml`; the binary never reads them. The data
+directory and bridge mount paths are written into your `compose.yml` directly
+(`EZLLM_DATA` was removed in 2.0.0; inside the container the path is always
+`EZLLM_DATA_DIR`, `/data`).
 
 | Variable | Default | Used for |
 |---|---|---|
 | `UID`, `GID` | `1000` | Container user. |
 | `EZLLM_PORT` | `20129` | Published host port. |
-| `EZLLM_DATA` | `./data` | Host directory mounted at `/data`. |
 
 ## Tests only
 

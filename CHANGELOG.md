@@ -76,6 +76,8 @@ ran in production before release; security records cite them by those numbers.
 - Client-token budget days and date-only token expiries follow the usage timezone
   (`EZLLM_USAGE_TZ` / dashboard / YAML) like reports and model rules; `TZ` now only
   affects log timestamps.
+- `compose.example.yml` no longer substitutes `EZLLM_DATA`: write the host data path
+  into the `volumes` entry directly. `EZLLM_DATA_DIR` is the only data setting.
 - Retired names (`EZLLM_CLAUDE_CONFIG_DIR`, `EZLLM_CODEX_SANDBOX`,
   `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK`, both
   `*_SESSION_CACHE`) fail the boot with a message naming the replacement.

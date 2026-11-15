@@ -159,6 +159,9 @@ type Manager struct {
 	current atomic.Pointer[Values]
 	// Check validates deployment-dependent capabilities before persistence.
 	Check func(Values) error
+	// OnChange runs after a saved change takes effect (under the manager's
+	// lock: keep it cheap and non-blocking).
+	OnChange func(Values)
 }
 
 func New(ctx context.Context, store Store, base Values, sources map[string]string) (*Manager, error) {
@@ -263,6 +266,9 @@ func (m *Manager) Patch(ctx context.Context, revision int64, changes map[string]
 	}
 	m.state = next
 	m.current.Store(&v)
+	if m.OnChange != nil {
+		m.OnChange(v)
+	}
 	return m.view(), nil
 }
 

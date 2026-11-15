@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -31,29 +30,4 @@ func bridgeConcurrency(get func(string) string, env, label string) (int, error) 
 		return 0, fmt.Errorf("%s bridge: %s=%q must be a positive integer", label, env, v)
 	}
 	return n, nil
-}
-
-// retiredBridgeEnv maps settings that no longer exist to what replaced them.
-// A retired name fails the boot rather than being ignored: ignoring it would
-// silently change behavior the operator asked for.
-var retiredBridgeEnv = map[string]string{
-	"EZLLM_CLAUDE_CONFIG_DIR":            "renamed to EZLLM_CLAUDE_HOME",
-	"EZLLM_COPILOT_BRIDGE_SESSION_CACHE": "renamed to EZLLM_COPILOT_BRIDGE_CACHE",
-	"EZLLM_AGY_BRIDGE_SESSION_CACHE":     "renamed to EZLLM_AGY_BRIDGE_CACHE",
-	"EZLLM_CODEX_SANDBOX":                "removed: the Codex sandbox is always writable",
-	"EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK": "removed: Codex client tools require Landlock",
-}
-
-func checkRetiredBridgeEnv(get func(string) string) error {
-	names := make([]string, 0, len(retiredBridgeEnv))
-	for name := range retiredBridgeEnv {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		if strings.TrimSpace(get(name)) != "" {
-			return fmt.Errorf("bridge settings: %s was %s in 2.0.0", name, retiredBridgeEnv[name])
-		}
-	}
-	return nil
 }

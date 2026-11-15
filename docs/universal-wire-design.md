@@ -46,8 +46,8 @@ universal selection together. Since v1.4 it resolves environment override → sa
 its own snapshot. Settings can change it live; deployment overrides require a
 restart and lock the dashboard control.
 
-`translation.universal_enabled` / `EZLLM_TRANSLATION_UNIVERSAL_ENABLED` remain
-deprecated deployment aliases, not a matrix-only control. See the
+`translation.universal_enabled` remains a deprecated YAML alias (its environment
+form was removed in 2.0.0), not a matrix-only control. See the
 [translation runbook](translation-runbook.md) for precedence and rollback; curated
 Responses-wire overrides remain a separate deployment choice. Wrong-typed YAML
 still fails startup naming the field.

@@ -97,6 +97,11 @@ func run() error {
 	// Say what the console will actually do. A typo'd or ignored level is
 	// silent otherwise: the operator sees fewer lines and cannot tell whether
 	// the gateway is quiet or the switch did not take.
+	// Boot lines before the operator settings load already use the deployment
+	// usage timezone when it is set (an unresolvable name fails later, loudly).
+	if loc, err := time.LoadLocation(strings.TrimSpace(os.Getenv("EZLLM_USAGE_TZ"))); err == nil && os.Getenv("EZLLM_USAGE_TZ") != "" {
+		logx.SetLocation(loc)
+	}
 	announceLogging(log, level, jsonFormat, color)
 
 	cfg, err := config.Load(*cfgPath)
@@ -116,10 +121,11 @@ func run() error {
 	for _, w := range cfg.Warnings {
 		log.Warn(w)
 	}
-	if w, err := translationFromEnv(&cfg.Translation, os.Getenv); err != nil {
+	if err := checkRetiredEnv(os.Getenv); err != nil {
 		return err
-	} else if w != "" {
-		log.Warn(w)
+	}
+	if err := translationFromEnv(&cfg.Translation, os.Getenv); err != nil {
+		return err
 	}
 	// ── master key (at-rest encryption of provider keys) ────────────────
 	masterSecret := strings.TrimSpace(os.Getenv("EZLLM_MASTER_KEY"))
@@ -166,6 +172,10 @@ func run() error {
 		return fmt.Errorf("operator settings: %w", err)
 	}
 	db.SetOperatorSettings(operator)
+	// One clock: log timestamps follow the effective usage timezone, now and
+	// whenever the dashboard changes it. The process TZ plays no part.
+	logx.SetLocation(operator.Current().Location())
+	operator.OnChange = func(v settings.Values) { logx.SetLocation(v.Location()) }
 	backups, err := configuredBackups(db, cfg, masterSecret)
 	if err != nil {
 		return err
@@ -350,9 +360,6 @@ func run() error {
 	// Bell events to the push channels in Settings → Notifications.
 	srv.StartPush(ctx)
 
-	if err := checkRetiredBridgeEnv(os.Getenv); err != nil {
-		return err
-	}
 	// Claude subscription surface: loopback-only, off unless EZLLM_CLAUDE_BRIDGE=on.
 	// Enabling it without a usable CLI or login fails the boot loudly.
 	stopClaude, err := startClaudeBridge(ctx, log, srv.EnableBridge)
@@ -585,42 +592,20 @@ func upstreamClient(cfg *config.Config) *http.Client {
 	return &http.Client{Transport: tr, Timeout: cfg.UpstreamTimeout, CheckRedirect: provider.SameOriginRedirect}
 }
 
-// translationFromEnv applies the env override of the ONE translation switch.
-// EZLLM_TRANSLATION_ENABLED wins; the deprecated
-// EZLLM_TRANSLATION_UNIVERSAL_ENABLED still applies when it is the only one
-// set, so an old rollback keeps working, and returns a deprecation warning
-// either way. A malformed value is a startup error: silently defaulting an
-// "off" to "on" would leave the operator wondering why traffic still
-// translates.
-func translationFromEnv(t *config.Translation, getenv func(string) string) (string, error) {
-	parse := func(name string) (bool, bool, error) {
-		v := strings.TrimSpace(getenv(name))
-		if v == "" {
-			return false, false, nil
-		}
-		on, err := strconv.ParseBool(v)
-		if err != nil {
-			return false, false, fmt.Errorf("%s=%q is not a boolean (want true/false/1/0): %w", name, v, err)
-		}
-		return on, true, nil
+// translationFromEnv applies EZLLM_TRANSLATION_ENABLED, the env override of
+// the one translation switch. A malformed value is a startup error: silently
+// defaulting an "off" to "on" would leave the operator wondering why traffic
+// still translates. (The deprecated EZLLM_TRANSLATION_UNIVERSAL_ENABLED was
+// removed in 2.0.0; checkRetiredEnv refuses it.)
+func translationFromEnv(t *config.Translation, getenv func(string) string) error {
+	v := strings.TrimSpace(getenv("EZLLM_TRANSLATION_ENABLED"))
+	if v == "" {
+		return nil
 	}
-	on, set, err := parse("EZLLM_TRANSLATION_ENABLED")
+	on, err := strconv.ParseBool(v)
 	if err != nil {
-		return "", err
+		return fmt.Errorf("EZLLM_TRANSLATION_ENABLED=%q is not a boolean (want true/false/1/0): %w", v, err)
 	}
-	legacyOn, legacySet, err := parse("EZLLM_TRANSLATION_UNIVERSAL_ENABLED")
-	if err != nil {
-		return "", err
-	}
-	warning := ""
-	if legacySet {
-		warning = "EZLLM_TRANSLATION_UNIVERSAL_ENABLED is deprecated: EZLLM_TRANSLATION_ENABLED is the one switch now"
-		if !set {
-			on, set = legacyOn, true
-		}
-	}
-	if set {
-		t.Enabled, t.UniversalEnabled = on, on
-	}
-	return warning, nil
+	t.Enabled, t.UniversalEnabled = on, on
+	return nil
 }

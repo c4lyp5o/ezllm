@@ -22,7 +22,8 @@ and data location.
    **`EZLLM_USAGE_TZ`** to enforce it from the deployment. Use an IANA name
    (`Europe/Berlin`, `America/New_York`, `Asia/Kuala_Lumpur`). It controls
    report days, model rules set to `instance`, client-token budget days and
-   date-only token expiries, and daily price/backup schedules. An explicit rule
+   date-only token expiries, daily price/backup schedules and log timestamps
+   (it is the only timezone setting; `TZ` is ignored). An explicit rule
    timezone remains independent. An environment override locks the dashboard
    control. Without an override, saved settings and YAML are considered before
    UTC; an unresolvable effective name stops boot.
@@ -59,14 +60,13 @@ provider key unreadable. See [master-key-runbook.md](master-key-runbook.md).
 |---|---|---|
 | `EZLLM_ADDR` | config `listen` (loopback); image: `0.0.0.0:20129` | Listen address. `-addr` overrides it. |
 | `EZLLM_DATA_DIR` | config `data_dir` (`data`); image: `/data` | Ledger and data location. |
-| `EZLLM_USAGE_TZ` | saved setting → YAML `usage_timezone` → UTC | Deployment override for report days, inherited model-rule windows/caps, client-token budgets and date-only expiries, and daily schedules; locks the dashboard control. An unresolvable name fails boot. Report `?tz=` overrides the default grouping timezone. |
+| `EZLLM_USAGE_TZ` | saved setting → YAML `usage_timezone` → UTC | The one timezone setting, as a deployment override: report days, inherited model-rule windows/caps, client-token budgets and date-only expiries, daily schedules and log timestamps; locks the dashboard control. An unresolvable name fails boot. Report `?tz=` overrides the default grouping timezone. |
 | `EZLLM_LOG_LEVEL` | `info` | `debug` \| `info` \| `warn` \| `error`. Env-only (needed before the config is read); an unknown value logs a warning and uses `info`. The effective value is stated at boot. |
 | `EZLLM_LOG_COLOR` | `auto` | `auto` (color only on a terminal) \| `always` \| `never`. |
 | `EZLLM_LOG_FORMAT` | `console` | `console` \| `json`. JSON emits one object per line for a collector; the console format is for `docker logs`. See [logging.md](logging.md). |
 | `NO_COLOR` | unset | Any value disables color under `auto`. |
 | `EZLLM_TRUSTED_PROXIES` | unset | Comma-separated IPs/CIDRs of reverse proxies in front of ezllm. The sign-in/setup rate limiter reads `X-Forwarded-For` only from these; unset, it keys on the socket peer. Set it behind any proxy, or every client shares the proxy's limit. |
-| `EZLLM_WEB_DIR` | unset (embedded `web/dist`) | Serve the dashboard from a directory of built assets instead, to iterate on the UI without a Go rebuild. |
-| `TZ` | image: `Asia/Kuala_Lumpur` | Server-local clock for log timestamps only. Every day boundary (reports, model rules, client-token budgets, schedules) uses the effective usage timezone. Before 2.0.0 client-token budgets used `TZ`. |
+| `TZ` | not used | ezllm ignores the process timezone. `EZLLM_USAGE_TZ` (or the dashboard/YAML setting) is the one timezone: report days, model rules, client-token budgets, schedules and log timestamps. Before 2.0.0 `TZ` set log timestamps and client-token budgets, and the image set it to `Asia/Kuala_Lumpur`. |
 
 ## Secrets
 
@@ -82,7 +82,6 @@ provider key unreadable. See [master-key-runbook.md](master-key-runbook.md).
 | Variable | Default | What it does |
 |---|---|---|
 | `EZLLM_TRANSLATION_ENABLED` | saved setting → YAML → on | The one switch for wire-protocol translation (pairwise translators and the universal matrix). `false` turns it off without a rebuild. Non-boolean values fail the boot. See [translation-runbook.md](translation-runbook.md). |
-| `EZLLM_TRANSLATION_UNIVERSAL_ENABLED` | unset | **Deprecated** (merged into `EZLLM_TRANSLATION_ENABLED`). Still honored when the new variable is unset, with a warning at boot. |
 | `EZLLM_COMBO_AUTOPROBE` | saved setting → YAML `automatic_probing` → on | An explicit value locks the dashboard control. `off` disables automatic combo-hop and free-model probes; manual probes remain available. |
 | `EZLLM_PRICE_REFRESH` | saved setting → YAML `price_refresh` → on | An explicit value locks the dashboard control. `off` stops scheduled price refresh (boot + daily); manual refresh remains available. See [pricing-runbook.md](pricing-runbook.md). |
 

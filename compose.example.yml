@@ -28,13 +28,11 @@ services:
 
     environment:
       # ── server ──
-      # Deployment override for report days, inherited model rules and daily
-      # schedules. Remove this entry to manage the timezone in Settings;
-      # otherwise the dashboard control is locked. No configured value = UTC.
+      # The one timezone setting: report days, model rules, client-token
+      # budgets, schedules and log timestamps. Remove this entry to manage it in
+      # Settings; otherwise the dashboard control is locked. No value = UTC.
+      # TZ is not used.
       EZLLM_USAGE_TZ: UTC
-      # Server-local clock: logs and existing client-token budget boundaries.
-      # Instance report/rule/schedule defaults use the usage timezone above.
-      # TZ: UTC
       # Reverse proxies whose X-Forwarded-For the sign-in limiter trusts. Set it
       # behind any proxy, or every client shares the proxy's limit.
       # EZLLM_TRUSTED_PROXIES: 172.18.0.0/16

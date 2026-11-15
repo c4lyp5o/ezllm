@@ -15,7 +15,7 @@
 #   EZLLM_VERSION   release to install            (default 1.3.2)
 #   EZLLM_PREFIX    install root                  (default ~/ezllm)
 #   EZLLM_ADDR      listen address                (default 127.0.0.1:20129)
-#   EZLLM_USAGE_TZ  report/schedule timezone      (default Asia/Kuala_Lumpur)
+#   EZLLM_USAGE_TZ  the one timezone: reports, budgets, schedules, logs (default Asia/Kuala_Lumpur)
 #   EZLLM_LOG_LEVEL debug|info|warn|error         (default info)
 #   EZLLM_ARCH      arm64|amd64, skips autodetect (testing only)
 #   EZLLM_TARBALL   local tarball, skips the download and its checksum
@@ -154,8 +154,6 @@ write_plist() {
         <string>$TZNAME</string>
         <key>EZLLM_LOG_LEVEL</key>
         <string>${EZLLM_LOG_LEVEL:-info}</string>
-        <key>TZ</key>
-        <string>$TZNAME</string>
     </dict>
     <key>RunAtLoad</key>
     <true/>

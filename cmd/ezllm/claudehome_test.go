@@ -15,11 +15,11 @@ func TestClaudeHomeUsesTheUniformName(t *testing.T) {
 // A retired setting fails the boot, naming its replacement, instead of being
 // silently ignored.
 func TestRetiredBridgeSettingsFailTheBoot(t *testing.T) {
-	if err := checkRetiredBridgeEnv(func(string) string { return "" }); err != nil {
+	if err := checkRetiredEnv(func(string) string { return "" }); err != nil {
 		t.Fatalf("clean env refused: %v", err)
 	}
-	for name := range retiredBridgeEnv {
-		err := checkRetiredBridgeEnv(func(k string) string {
+	for name := range retiredEnv {
+		err := checkRetiredEnv(func(k string) string {
 			if k == name {
 				return "on"
 			}
@@ -29,8 +29,8 @@ func TestRetiredBridgeSettingsFailTheBoot(t *testing.T) {
 			t.Errorf("%s accepted", name)
 		}
 	}
-	for _, name := range []string{"EZLLM_CLAUDE_CONFIG_DIR", "EZLLM_COPILOT_BRIDGE_SESSION_CACHE", "EZLLM_AGY_BRIDGE_SESSION_CACHE", "EZLLM_CODEX_SANDBOX", "EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK"} {
-		if _, ok := retiredBridgeEnv[name]; !ok {
+	for _, name := range []string{"EZLLM_CLAUDE_CONFIG_DIR", "EZLLM_COPILOT_BRIDGE_SESSION_CACHE", "EZLLM_AGY_BRIDGE_SESSION_CACHE", "EZLLM_CODEX_SANDBOX", "EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK", "EZLLM_TRANSLATION_UNIVERSAL_ENABLED", "EZLLM_WEB_DIR"} {
+		if _, ok := retiredEnv[name]; !ok {
 			t.Errorf("%s is not retired", name)
 		}
 	}

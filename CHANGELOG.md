@@ -73,13 +73,18 @@ ran in production before release; security records cite them by those numbers.
 - The master key defaults to `<data_dir>/ezllm-master.key` instead of
   `~/.hermes/secrets/ezllm-master.key`. A key left at the old path refuses the boot
   until it is moved; ezllm never generates a replacement over it.
-- Client-token budget days and date-only token expiries follow the usage timezone
-  (`EZLLM_USAGE_TZ` / dashboard / YAML) like reports and model rules; `TZ` now only
-  affects log timestamps.
+- `EZLLM_USAGE_TZ` (with its dashboard/YAML setting) is the only timezone: report
+  days, model rules, client-token budgets, date-only token expiries, schedules and log
+  timestamps all follow it, and a dashboard change reaches the logs immediately. `TZ`
+  is ignored and the image no longer sets it.
+- `EZLLM_WEB_DIR` is removed: the dashboard is always the one built into the binary.
+- The deprecated `EZLLM_TRANSLATION_UNIVERSAL_ENABLED` alias is removed;
+  `EZLLM_TRANSLATION_ENABLED` is the switch.
 - `compose.example.yml` no longer substitutes `EZLLM_DATA`: write the host data path
   into the `volumes` entry directly. `EZLLM_DATA_DIR` is the only data setting.
 - Retired names (`EZLLM_CLAUDE_CONFIG_DIR`, `EZLLM_CODEX_SANDBOX`,
-  `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK`, both
+  `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK`, `EZLLM_WEB_DIR`,
+  `EZLLM_TRANSLATION_UNIVERSAL_ENABLED`, both
   `*_SESSION_CACHE`) fail the boot with a message naming the replacement.
 
 ### Codex conversation fidelity (pre-release 1.14.3)

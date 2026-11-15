@@ -25,37 +25,28 @@ func TestBridgeBaseIsLoopbackForWildcardBinds(t *testing.T) {
 	}
 }
 
-// EZLLM_TRANSLATION_ENABLED is the one switch; the deprecated universal env
-// var still rolls translation back when it is the only one set, and warns.
+// EZLLM_TRANSLATION_ENABLED is the one switch, and a malformed value fails
+// the boot.
 func TestTranslationFromEnv(t *testing.T) {
 	cases := []struct {
-		name          string
-		env           map[string]string
-		start, want   bool
-		warn, wantErr bool
+		name        string
+		env         map[string]string
+		start, want bool
+		wantErr     bool
 	}{
-		{"unset keeps config", nil, true, true, false, false},
-		{"new var off", map[string]string{"EZLLM_TRANSLATION_ENABLED": "false"}, true, false, false, false},
-		{"new var on overrides config off", map[string]string{"EZLLM_TRANSLATION_ENABLED": "1"}, false, true, false, false},
-		{"deprecated alone still rolls back", map[string]string{"EZLLM_TRANSLATION_UNIVERSAL_ENABLED": "false"}, true, false, true, false},
-		{"new var wins over deprecated", map[string]string{"EZLLM_TRANSLATION_ENABLED": "true", "EZLLM_TRANSLATION_UNIVERSAL_ENABLED": "false"}, true, true, true, false},
-		{"malformed new var fails", map[string]string{"EZLLM_TRANSLATION_ENABLED": "maybe"}, true, true, false, true},
-		{"malformed deprecated var fails", map[string]string{"EZLLM_TRANSLATION_UNIVERSAL_ENABLED": "maybe"}, true, true, false, true},
+		{"unset keeps config", nil, true, true, false},
+		{"off", map[string]string{"EZLLM_TRANSLATION_ENABLED": "false"}, true, false, false},
+		{"on overrides config off", map[string]string{"EZLLM_TRANSLATION_ENABLED": "1"}, false, true, false},
+		{"malformed fails", map[string]string{"EZLLM_TRANSLATION_ENABLED": "maybe"}, true, true, true},
 	}
 	for _, c := range cases {
 		tr := config.Translation{Enabled: c.start, UniversalEnabled: c.start}
-		warn, err := translationFromEnv(&tr, func(k string) string { return c.env[k] })
+		err := translationFromEnv(&tr, func(k string) string { return c.env[k] })
 		if (err != nil) != c.wantErr {
 			t.Fatalf("%s: err = %v, wantErr %v", c.name, err, c.wantErr)
 		}
-		if c.wantErr {
-			continue
-		}
-		if tr.Enabled != c.want || tr.UniversalEnabled != c.want {
+		if !c.wantErr && (tr.Enabled != c.want || tr.UniversalEnabled != c.want) {
 			t.Errorf("%s: enabled=%v universal=%v, want both %v", c.name, tr.Enabled, tr.UniversalEnabled, c.want)
-		}
-		if got := strings.Contains(warn, "deprecated"); got != c.warn {
-			t.Errorf("%s: warning %q, want deprecation=%v", c.name, warn, c.warn)
 		}
 	}
 }

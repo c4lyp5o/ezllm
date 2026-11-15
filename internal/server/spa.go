@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"io/fs"
 	"net/http"
-	"os"
 	"path"
 	"regexp"
 	"strings"
@@ -13,13 +12,9 @@ import (
 	"github.com/c4lyp5o/ezllm/web"
 )
 
-// webFS resolves the dashboard source. EZLLM_WEB_DIR (a directory of built
-// assets) wins so the UI can be iterated against a running binary without a
-// Go rebuild; otherwise the dist/ tree compiled into this binary is served.
+// webFS is the dist/ tree compiled into this binary: the dashboard is always
+// the one built with it (EZLLM_WEB_DIR was removed in 2.0.0).
 func webFS() fs.FS {
-	if dir := strings.TrimSpace(os.Getenv("EZLLM_WEB_DIR")); dir != "" {
-		return os.DirFS(dir)
-	}
 	// //go:embed dist keeps the directory in the path (dist/index.html), so root
 	// the FS at dist/ — otherwise every lookup misses and the dashboard 404s.
 	if sub, err := fs.Sub(web.Dist, "dist"); err == nil {

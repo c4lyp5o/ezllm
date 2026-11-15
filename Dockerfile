@@ -70,7 +70,6 @@ ENV EZLLM_DATA_DIR=/data
 # -addr > EZLLM_ADDR > config.listen (main.go:184). Config defaults to
 # loopback, so container users MUST override this to serve anything.
 ENV EZLLM_ADDR=0.0.0.0:20129
-ENV TZ=Asia/Kuala_Lumpur
 
 # Claude subscription surface: off unless EZLLM_CLAUDE_BRIDGE=on, and it
 # expects the official CLI at /opt/claude-bridge/current/claude and the subscription login at

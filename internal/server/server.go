@@ -109,7 +109,7 @@ type Server struct {
 	started     time.Time
 	maxBody     int64
 	admission   *admission
-	web         fs.FS // dashboard source: embedded dist/ or EZLLM_WEB_DIR
+	web         fs.FS // dashboard source: the embedded dist/
 	corsOrigins []string
 	// usageTZ is the default zone for group_by=day. Never nil: UTC unless
 	// EZLLM_USAGE_TZ says otherwise (validated at boot).

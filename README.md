@@ -336,9 +336,8 @@ runs it. Always use `-short` locally.
 CI runs [test.yml](.github/workflows/test.yml) before
 [docker-publish.yml](.github/workflows/docker-publish.yml) and
 [release.yml](.github/workflows/release.yml), so a failing suite never produces
-an image or release. Claude and Antigravity bridges share a streaming transport
-in `internal/bridgeutil`; moving Codex and Copilot onto it is still to do
-([status](docs/shared-bridge-transport-design.md)).
+an image or release. All four subscription bridges share one streaming
+transport in `internal/bridgeutil` ([design](docs/shared-bridge-transport-design.md)).
 
 ## Documentation
 

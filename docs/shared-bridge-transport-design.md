@@ -1,8 +1,7 @@
 # Shared CLI bridge streaming transport
 
-Implemented in v1.8.0 for Claude and Antigravity. Codex and Copilot retain their
-current transport pending separate migrations. **The shared bridge work is not
-complete: expansion to Codex and Copilot remains outstanding.**
+Implemented in v1.8.0 for Claude and Antigravity, and in v1.9.0 for Codex and
+Copilot. All four subscription bridges now stream through `bridgeutil.Stream`.
 
 ## Boundary
 
@@ -73,15 +72,17 @@ subscription inference.
 |---|---|---|
 | Claude | Implemented in v1.8.0 | Maintain Anthropic framing and stalled-write/cancellation coverage. |
 | Antigravity (`agybridge`) | Implemented in v1.8.0 | Maintain OpenAI framing and live HTTP acceptance coverage. |
-| Codex | Not migrated | Move stream writes/flush/deadlines onto the shared transport; retain app-server RPC, sandboxing, parked tool turns and usage handling. |
-| Copilot | Not migrated | Move stream writes/flush/deadlines onto the shared transport; retain native image attachments/capability checks, early tool delivery, exact usage and warm-worker ownership. |
+| Codex | Implemented in v1.9.0 | Maintain OpenAI framing; app-server RPC, sandboxing, parked tool turns and usage stay adapter-owned. |
+| Copilot | Implemented in v1.9.0 | Maintain OpenAI framing; image attachments, early tool delivery, exact usage and warm workers stay adapter-owned. |
 
-Migrate Codex and Copilot in separate changes. For each, capture the existing
-header timing, error framing, tool/finish/usage ordering and disconnect behavior
-before extraction. Preserve those assertions, then run `make test-short`,
-targeted race checks, vet and a static build. Controlled live acceptance should
-exercise text and tools with usage; subscription requests require authorization.
-Do not mark a bridge migrated based only on importing `bridgeutil`.
+Codex and Copilot were migrated in separate commits (2026-11-15). Header timing,
+error framing and tool/finish/usage ordering are unchanged; a failed write is now
+sticky for both, and Copilot no longer ignores write errors (a client that stops
+reading ends the turn). Each passed `make test-quiet`, targeted `-race -short`
+runs, vet and a static build, plus live acceptance: Codex `TestLiveHTTPSurface`
+(streamed text, usage, `[DONE]`) and `TestLiveToolRoundTripWithContinuation`;
+Copilot streamed `gpt-6-luna` text with usage and a `get_weather` tool call with
+`finish_reason: tool_calls`, usage and `[DONE]`, through the branch's bridge.
 
 The next scope is transport reuse, not a universal bridge lifecycle. Shared
 authentication mechanics, admission primitives and timing helpers remain later

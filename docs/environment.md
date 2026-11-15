@@ -149,7 +149,7 @@ CLI's own, so there is no client id to configure. Runbook:
 | `EZLLM_COPILOT_BRIDGE_QUEUE` | `8` | Requests allowed to wait for a slot; past it the bridge answers 429 `queue_full` with `Retry-After: 5`. |
 | `EZLLM_COPILOT_BRIDGE_TIMEOUT` | `300s` | Per-turn limit, a Go duration of at least `1s`. |
 | `EZLLM_COPILOT_BRIDGE_ADDR` | `127.0.0.1:8793` | Listen address; non-loopback is refused. |
-| `EZLLM_COPILOT_BRIDGE_TOKEN_FILE` | — (required) | Shared secret for the account key; generated (0600) when missing. Boot refuses without a path. |
+| `EZLLM_COPILOT_BRIDGE_TOKEN_FILE` | `/data/copilot-bridge.token` | Shared secret for the account key; generated (0600) when missing. Before 1.9.0 there was no default and boot refused without a path. |
 
 ## Compose-only
 

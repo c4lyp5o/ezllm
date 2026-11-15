@@ -257,9 +257,7 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 // The account key ezllm stores is this value; nothing else authenticates the
 // bridge surface.
 func bridgeTokenFromFile(path, label string) (string, error) {
-	if path == "" {
-		return "", fmt.Errorf("%s bridge: a token file path is required so the account key can authenticate the surface", label)
-	}
+	path = bridgeTokenPath(path, label)
 	if b, err := os.ReadFile(path); err == nil {
 		if t := strings.TrimSpace(string(b)); t != "" {
 			return t, nil
@@ -277,6 +275,15 @@ func bridgeTokenFromFile(path, label string) (string, error) {
 		return "", fmt.Errorf("%s bridge: write token: %w", label, err)
 	}
 	return token, nil
+}
+
+// bridgeTokenPath defaults an unset path to /data/<label>-bridge.token, on the
+// data volume like the other bridges' tokens, so it is backed up with the ledger.
+func bridgeTokenPath(path, label string) string {
+	if path == "" {
+		return "/data/" + label + "-bridge.token"
+	}
+	return path
 }
 
 // copilotHome is the bridge's own login directory. Like every subscription

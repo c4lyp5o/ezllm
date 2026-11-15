@@ -23,7 +23,7 @@ on stdin, not argv.
 | `EZLLM_COPILOT_BIN` | CLI binary (default `/opt/copilot-bridge/current/copilot`) |
 | `EZLLM_COPILOT_HOME` | the bridge's own login directory (default `/copilot-sub`) |
 | `EZLLM_COPILOT_BRIDGE_ADDR` | default `127.0.0.1:8793`, must be loopback |
-| `EZLLM_COPILOT_BRIDGE_TOKEN_FILE` | shared secret; minted 0600 on first boot |
+| `EZLLM_COPILOT_BRIDGE_TOKEN_FILE` | shared secret (default `/data/copilot-bridge.token`); minted 0600 on first boot |
 
 Compose sketch:
 
@@ -32,7 +32,6 @@ Compose sketch:
       EZLLM_COPILOT_BRIDGE: "on"
       EZLLM_COPILOT_HOME: /copilot-sub
       EZLLM_COPILOT_BRIDGE_ADDR: 127.0.0.1:8793
-      EZLLM_COPILOT_BRIDGE_TOKEN_FILE: /data/copilot-bridge.token
     volumes:
       - /home/<user>/.local/share/copilot-bridge:/opt/copilot-bridge:ro  # bridge root
       - /home/<user>/.copilot-sub:/copilot-sub   # the login (read-write: the CLI

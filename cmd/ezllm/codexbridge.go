@@ -97,13 +97,9 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 	if err := assertCodexLoopback(addr); err != nil {
 		return nil, err
 	}
-	concurrency := 2
-	if v := strings.TrimSpace(os.Getenv(envCodexConcurrency)); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 {
-			return nil, fmt.Errorf("codex bridge: %s=%q must be a positive integer", envCodexConcurrency, v)
-		}
-		concurrency = n
+	concurrency, err := bridgeConcurrency(os.Getenv, envCodexConcurrency, "codex")
+	if err != nil {
+		return nil, err
 	}
 
 	pre, err := codexbridge.RunPreflight(ctx, resolved, home)

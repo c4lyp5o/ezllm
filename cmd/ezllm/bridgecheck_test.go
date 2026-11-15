@@ -342,3 +342,22 @@ func TestDefaultBridgeBinsFollowUpdaterLayout(t *testing.T) {
 		}
 	}
 }
+
+// Every bridge runs one CLI process at a time unless told otherwise, and a
+// typo fails the boot instead of quietly taking the default.
+func TestBridgeConcurrencyDefaultsToOne(t *testing.T) {
+	get := func(v string) func(string) string { return func(string) string { return v } }
+	for _, env := range []string{envClaudeConcurrency, envCodexConcurrency, envAgyConcurrency, envCopilotConcurrency} {
+		if n, err := bridgeConcurrency(get(""), env, "x"); err != nil || n != 1 {
+			t.Errorf("%s default = %d %v, want 1", env, n, err)
+		}
+		if n, err := bridgeConcurrency(get(" 3 "), env, "x"); err != nil || n != 3 {
+			t.Errorf("%s=3 = %d %v", env, n, err)
+		}
+		for _, bad := range []string{"0", "-2", "two"} {
+			if _, err := bridgeConcurrency(get(bad), env, "x"); err == nil {
+				t.Errorf("%s=%q accepted", env, bad)
+			}
+		}
+	}
+}

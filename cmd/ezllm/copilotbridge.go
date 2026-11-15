@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -31,7 +30,7 @@ const (
 	envCopilotHome         = "EZLLM_COPILOT_HOME"               // the CLI's own login directory
 	envCopilotBridgeAddr   = "EZLLM_COPILOT_BRIDGE_ADDR"        // default 127.0.0.1:8793
 	envCopilotBridgeToken  = "EZLLM_COPILOT_BRIDGE_TOKEN_FILE"  // shared secret for the account key
-	envCopilotConcurrency  = "EZLLM_COPILOT_BRIDGE_CONCURRENCY" // concurrent CLI children (default 2)
+	envCopilotConcurrency  = "EZLLM_COPILOT_BRIDGE_CONCURRENCY" // concurrent CLI children (default 1)
 	envCopilotQueue        = "EZLLM_COPILOT_BRIDGE_QUEUE"       // requests allowed to wait for a slot (default 8)
 	envCopilotTimeout      = "EZLLM_COPILOT_BRIDGE_TIMEOUT"     // per-turn limit, a Go duration (default 300s)
 )
@@ -40,17 +39,15 @@ const (
 // a typo that silently fell back to the default would look like a working
 // override.
 func copilotLimits(get func(string) string) (concurrency, queue int, timeout time.Duration, err error) {
-	concurrency, queue, timeout = 2, 8, 300*time.Second
-	for _, k := range []struct {
-		env string
-		dst *int
-	}{{envCopilotConcurrency, &concurrency}, {envCopilotQueue, &queue}} {
-		if v := strings.TrimSpace(get(k.env)); v != "" {
-			n, perr := strconv.Atoi(v)
-			if perr != nil || n < 1 {
-				return 0, 0, 0, fmt.Errorf("copilot bridge: %s=%q must be a positive integer", k.env, v)
-			}
-			*k.dst = n
+	timeout = 300 * time.Second
+	if concurrency, err = bridgeConcurrency(get, envCopilotConcurrency, "copilot"); err != nil {
+		return 0, 0, 0, err
+	}
+	// The queue shares the positive-integer rule; only its default differs.
+	queue = 8
+	if strings.TrimSpace(get(envCopilotQueue)) != "" {
+		if queue, err = bridgeConcurrency(get, envCopilotQueue, "copilot"); err != nil {
+			return 0, 0, 0, err
 		}
 	}
 	if v := strings.TrimSpace(get(envCopilotTimeout)); v != "" {

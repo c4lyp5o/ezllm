@@ -25,11 +25,12 @@ import (
 // subscription. No second service, no second image, no inter-service token.
 // Decisions: docs/claude-subscription-design.md.
 const (
-	envBridge      = "EZLLM_CLAUDE_BRIDGE"            // "on" enables the surface
-	envBridgeBin   = "EZLLM_CLAUDE_BIN"               // official CLI binary (mounted)
-	envBridgeDir   = "EZLLM_CLAUDE_HOME"              // subscription login directory (the CLI's CLAUDE_CONFIG_DIR)
-	envBridgeAddr  = "EZLLM_CLAUDE_BRIDGE_ADDR"       // default 127.0.0.1:8790
-	envBridgeToken = "EZLLM_CLAUDE_BRIDGE_TOKEN_FILE" // shared secret for the account key
+	envBridge            = "EZLLM_CLAUDE_BRIDGE"             // "on" enables the surface
+	envBridgeBin         = "EZLLM_CLAUDE_BIN"                // official CLI binary (mounted)
+	envBridgeDir         = "EZLLM_CLAUDE_HOME"               // subscription login directory (the CLI's CLAUDE_CONFIG_DIR)
+	envBridgeAddr        = "EZLLM_CLAUDE_BRIDGE_ADDR"        // default 127.0.0.1:8790
+	envBridgeToken       = "EZLLM_CLAUDE_BRIDGE_TOKEN_FILE"  // shared secret for the account key
+	envClaudeConcurrency = "EZLLM_CLAUDE_BRIDGE_CONCURRENCY" // concurrent CLI processes (default 1)
 )
 
 // claudeQualifiedVersion is the CLI release the bridge's measurements and live
@@ -90,13 +91,17 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 	if err != nil {
 		return nil, err
 	}
+	concurrency, err := bridgeConcurrency(os.Getenv, envClaudeConcurrency, "claude")
+	if err != nil {
+		return nil, err
+	}
 
 	srv := &claudebridge.Server{
 		Runner: &claudebridge.Runner{
 			Bin:           resolved,
 			ConfigDir:     dir,
 			Timeout:       300 * time.Second,
-			MaxConcurrent: 2,
+			MaxConcurrent: concurrency,
 			Logf:          log.Info,
 		},
 		Token:   token,

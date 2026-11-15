@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
@@ -58,14 +57,10 @@ func startAgyBridge(ctx context.Context, log *slog.Logger, report bridgeReport) 
 	if err := assertAgyLoopback(addr); err != nil {
 		return nil, err
 	}
-	// ~207 MB RSS per CLI process (measured, 1.4.7): the default stays low.
-	concurrency := 2
-	if v := strings.TrimSpace(os.Getenv(envAgyConcurrency)); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 {
-			return nil, fmt.Errorf("agy bridge: %s=%q must be a positive integer", envAgyConcurrency, v)
-		}
-		concurrency = n
+	// ~207 MB RSS per CLI process (measured, 1.4.7).
+	concurrency, err := bridgeConcurrency(os.Getenv, envAgyConcurrency, "agy")
+	if err != nil {
+		return nil, err
 	}
 
 	pre, err := agybridge.RunPreflight(ctx, resolved, home)

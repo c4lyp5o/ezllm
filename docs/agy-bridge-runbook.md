@@ -232,7 +232,7 @@ filesystem or shell tools. Use `EZLLM_AGY_MODEL` to test another model.
   provider card shows usage from the ledger, not the plan's remaining quota.
   Quota exhaustion reaches the router as 429, so a combo moves on.
 - **One process per request.** A trivial turn takes ~4.5–6 s and ~207 MB RSS
-  (measured); `EZLLM_AGY_BRIDGE_CONCURRENCY` (default 2) caps them.
+  (measured); `EZLLM_AGY_BRIDGE_CONCURRENCY` (default 1) caps them.
 - **No token-by-token streaming.** 1.4.7 delivers the answer in one chunk at
   the end of the turn; a streaming client gets a single content delta.
 - **Harness overhead.** Every turn carries the CLI's agent prompt: ~6.7k input

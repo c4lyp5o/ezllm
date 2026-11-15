@@ -295,7 +295,7 @@ Boot fails loudly — the process does not start — when:
 | `EZLLM_CODEX_HOME` | `/codex-sub` | the mounted login (`CODEX_HOME`) |
 | `EZLLM_CODEX_BRIDGE_ADDR` | `127.0.0.1:8791` | loopback listener |
 | `EZLLM_CODEX_BRIDGE_TOKEN_FILE` | `/data/codex-bridge.token` | shared secret, generated on first boot |
-| `EZLLM_CODEX_BRIDGE_CONCURRENCY` | `2` | CLI children at once (a turn parked on tool calls holds none) |
+| `EZLLM_CODEX_BRIDGE_CONCURRENCY` | `1` | CLI children at once (a turn parked on tool calls holds none) |
 | `EZLLM_CODEX_BRIDGE_CACHE` | `auto` | Enable empty-template forks when supported; report fallback reason otherwise. `on` requires support; `off` disables caching. |
 | `EZLLM_CODEX_SANDBOX` | `read-only` | `writable` permits writes in the request temp workspace; no interactive approvals |
 | `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK` | `off` | `on` = client tools without Landlock ([what you give up](#the-override-and-what-you-give-up)) |

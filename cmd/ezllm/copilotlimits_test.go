@@ -8,7 +8,7 @@ import (
 func TestCopilotLimits(t *testing.T) {
 	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
 	c, q, d, err := copilotLimits(env(nil))
-	if err != nil || c != 2 || q != 8 || d != 300*time.Second {
+	if err != nil || c != 1 || q != 8 || d != 300*time.Second {
 		t.Fatalf("defaults = %d %d %v %v", c, q, d, err)
 	}
 	c, q, d, err = copilotLimits(env(map[string]string{envCopilotConcurrency: "4", envCopilotQueue: "16", envCopilotTimeout: "90s"}))

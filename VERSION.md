@@ -33,7 +33,8 @@ container; see `docs/copilot-bridge-runbook.md`.
 
 **Breaking:** bridge `*_BIN` defaults moved to the updater layout
 (`/opt/<bridge>-bridge/current/...`); a compose mounting a single binary at the
-old `/opt/<bridge>/...` path must set `*_BIN`. The Copilot token file defaults to
+old `/opt/<bridge>/...` path must set `*_BIN`. `EZLLM_CLAUDE_CONFIG_DIR` is
+renamed `EZLLM_CLAUDE_HOME`. The Copilot token file defaults to
 `/data/copilot-bridge.token`. The Copilot warm pool and the Copilot and
 Antigravity session caches are on by default; set them to `off` to opt out.
 

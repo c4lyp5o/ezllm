@@ -424,7 +424,7 @@ def gate_policy(name, info):
     return {}
 
 
-LOGIN_ENV = {"claude": "EZLLM_CLAUDE_CONFIG_DIR", "codex": "EZLLM_CODEX_HOME",
+LOGIN_ENV = {"claude": "EZLLM_CLAUDE_HOME", "codex": "EZLLM_CODEX_HOME",
              "agy": "EZLLM_AGY_HOME", "copilot": "EZLLM_COPILOT_HOME"}
 
 

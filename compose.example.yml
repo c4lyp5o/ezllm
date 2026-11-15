@@ -91,7 +91,7 @@ services:
       # USER: you
       # LOGNAME: you
       # EZLLM_CLAUDE_BIN: /opt/claude-bridge/current/claude
-      # EZLLM_CLAUDE_CONFIG_DIR: /claude-sub
+      # EZLLM_CLAUDE_HOME: /claude-sub
       # EZLLM_CLAUDE_BRIDGE_ADDR: 127.0.0.1:8790
       # EZLLM_CLAUDE_BRIDGE_TOKEN_FILE: /data/claude-bridge.token
 

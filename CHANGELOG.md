@@ -53,6 +53,8 @@ ran in production before release; security records cite them by those numbers.
   `/opt/<bridge>-bridge/current/...` (was `/opt/claude/claude`,
   `/opt/codex/bin/codex`, `/opt/agy/agy`, `/opt/copilot/copilot`). A compose that
   mounted a single binary at the old path must set `*_BIN` or mount the bridge root.
+- `EZLLM_CLAUDE_CONFIG_DIR` is renamed `EZLLM_CLAUDE_HOME`, so every bridge's login
+  folder is `EZLLM_<BRIDGE>_HOME`. The old name fails the boot with a rename message.
 - `EZLLM_COPILOT_BRIDGE_TOKEN_FILE` defaults to `/data/copilot-bridge.token`, like
   the other bridges, instead of refusing to boot.
 - Caches are on by default: the Copilot warm pool, and the Copilot and Antigravity

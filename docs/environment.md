@@ -94,7 +94,7 @@ Setup and operation: [claude-bridge-runbook.md](claude-bridge-runbook.md).
 |---|---|---|
 | `EZLLM_CLAUDE_BRIDGE` | off | `on` starts the loopback surface. Enabled without a usable CLI or login, the boot fails. |
 | `EZLLM_CLAUDE_BIN` | `/opt/claude-bridge/current/claude` | Official Claude Code CLI binary inside the container: the updater-managed bridge root mounted at `/opt/claude-bridge`. Before 1.9.0 the default was `/opt/claude/claude`. |
-| `EZLLM_CLAUDE_CONFIG_DIR` | `/claude-sub` | Subscription login directory inside the container (compose mounts it here). |
+| `EZLLM_CLAUDE_HOME` | `/claude-sub` | Subscription login directory inside the container (compose mounts it here); passed to the CLI as `CLAUDE_CONFIG_DIR`. Named `EZLLM_CLAUDE_CONFIG_DIR` before 1.9.0; the old name now fails the boot. |
 | `EZLLM_CLAUDE_BRIDGE_ADDR` | `127.0.0.1:8790` | Bridge listen address; non-loopback addresses are refused. |
 | `EZLLM_CLAUDE_BRIDGE_TOKEN_FILE` | `/data/claude-bridge.token` | Shared secret for the account key; generated (0600) when missing. |
 | `USER`, `LOGNAME` | unset | Both must be set when the bridge is on (the CLI's login check reads process identity). |

@@ -141,7 +141,7 @@ func runBridgeCheck(args []string, stdout io.Writer) error {
 	var agyResume bool
 	switch name {
 	case "claude":
-		b, d := or(*bin, envOrDefault(envBridgeBin, defaultClaudeBin)), or(*home, envOrDefault(envBridgeDir, "/claude-sub"))
+		b, d := or(*bin, envOrDefault(envBridgeBin, defaultClaudeBin)), or(*home, claudeHomeOrDefault())
 		v = checkClaudeCLI(b, d)
 		liveRun = func() []string {
 			return liveClaude(ctx, b, d, or(*model, "claude-haiku-5-5"), or(*toolModel, "claude-haiku-5-5"))

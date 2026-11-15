@@ -27,7 +27,7 @@ import (
 const (
 	envBridge      = "EZLLM_CLAUDE_BRIDGE"            // "on" enables the surface
 	envBridgeBin   = "EZLLM_CLAUDE_BIN"               // official CLI binary (mounted)
-	envBridgeDir   = "EZLLM_CLAUDE_CONFIG_DIR"        // subscription login directory
+	envBridgeDir   = "EZLLM_CLAUDE_HOME"              // subscription login directory (the CLI's CLAUDE_CONFIG_DIR)
 	envBridgeAddr  = "EZLLM_CLAUDE_BRIDGE_ADDR"       // default 127.0.0.1:8790
 	envBridgeToken = "EZLLM_CLAUDE_BRIDGE_TOKEN_FILE" // shared secret for the account key
 )
@@ -71,7 +71,10 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 	if err != nil {
 		return nil, fmt.Errorf("claude bridge: %s=%q does not resolve to the official Claude Code CLI: %w", envBridgeBin, bin, err)
 	}
-	dir := envOrDefault(envBridgeDir, "/claude-sub")
+	dir, err := claudeHome(os.Getenv)
+	if err != nil {
+		return nil, err
+	}
 	addr := strings.TrimSpace(os.Getenv(envBridgeAddr))
 	if addr == "" {
 		addr = "127.0.0.1:8790"
@@ -224,4 +227,29 @@ func claudeBridgeToken(path string) (string, error) {
 		return "", fmt.Errorf("claude bridge: cannot write %s: %w", path, err)
 	}
 	return token, nil
+}
+
+// envClaudeConfigDirRetired is the pre-1.9.0 name of EZLLM_CLAUDE_HOME.
+const envClaudeConfigDirRetired = "EZLLM_CLAUDE_CONFIG_DIR"
+
+// claudeHome is the bridge's login directory, EZLLM_CLAUDE_HOME like every
+// other bridge's *_HOME. The retired name is refused, not read: silently
+// ignoring it would point the bridge at a different login.
+func claudeHome(get func(string) string) (string, error) {
+	if strings.TrimSpace(get(envClaudeConfigDirRetired)) != "" {
+		return "", fmt.Errorf("claude bridge: %s was renamed to %s in 1.9.0", envClaudeConfigDirRetired, envBridgeDir)
+	}
+	if v := strings.TrimSpace(get(envBridgeDir)); v != "" {
+		return v, nil
+	}
+	return "/claude-sub", nil
+}
+
+// claudeHomeOrDefault is claudeHome for bridge-check, where a refused name is
+// reported by the boot, not the gate.
+func claudeHomeOrDefault() string {
+	if h, err := claudeHome(os.Getenv); err == nil {
+		return h
+	}
+	return "/claude-sub"
 }

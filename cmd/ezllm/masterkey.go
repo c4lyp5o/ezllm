@@ -76,3 +76,24 @@ func loadOrCreateMasterKey(path string) (string, bool, error) {
 	}
 	return secret, true, nil
 }
+
+// defaultMasterKeyPath is <data_dir>/ezllm-master.key. Before 2.0.0 the default
+// was ~/.hermes/secrets/ezllm-master.key (<data_dir>/.hermes/... without a usable
+// home). A key left at a legacy path refuses the boot instead of being replaced:
+// a freshly generated key would make every stored provider key unreadable.
+func defaultMasterKeyPath(dataDir, home string) (string, error) {
+	path := filepath.Join(dataDir, "ezllm-master.key")
+	if _, err := os.Stat(path); err == nil {
+		return path, nil
+	}
+	legacy := []string{filepath.Join(dataDir, ".hermes", "secrets", "ezllm-master.key")}
+	if home != "" && home != "/" {
+		legacy = append([]string{filepath.Join(home, ".hermes", "secrets", "ezllm-master.key")}, legacy...)
+	}
+	for _, old := range legacy {
+		if _, err := os.Stat(old); err == nil {
+			return "", fmt.Errorf("found the master key at its pre-2.0.0 default %s; move it to %s (or set EZLLM_MASTER_KEY_FILE=%s)", old, path, old)
+		}
+	}
+	return path, nil
+}

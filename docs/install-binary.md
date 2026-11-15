@@ -166,7 +166,7 @@ data_dir: ./data              # relative to the working directory
 | Path | What | Notes |
 |---|---|---|
 | `<data_dir>/ezllm.sqlite` (+ `-wal`, `-shm`) | ledger, accounts, combos, tokens | WAL mode; copy all three sidecars together, never a bare `cp` |
-| `EZLLM_MASTER_KEY_FILE` | AES key for provider keys at rest | default `~/.hermes/secrets/ezllm-master.key` (`%USERPROFILE%\.hermes\secrets\…` on Windows), created on first boot |
+| `EZLLM_MASTER_KEY_FILE` | AES key for provider keys at rest | default `<data_dir>/ezllm-master.key`, created on first boot (before 2.0.0: `~/.hermes/secrets/ezllm-master.key`; move it, see [master-key-runbook.md](master-key-runbook.md)) |
 | stdout | the whole log | one line per record; `EZLLM_LOG_FORMAT=json` for a collector |
 
 **Always set `EZLLM_MASTER_KEY_FILE` explicitly** and keep it beside the

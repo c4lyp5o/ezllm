@@ -126,13 +126,10 @@ func run() error {
 	if masterSecret == "" {
 		masterPath := strings.TrimSpace(os.Getenv("EZLLM_MASTER_KEY_FILE"))
 		if masterPath == "" {
-			home, herr := os.UserHomeDir()
-			if herr != nil || home == "" || home == "/" {
-				// Containers often have no writable home; keep the key with the
-				// data volume so it is backed up with the DB.
-				home = cfg.DataDir
+			home, _ := os.UserHomeDir()
+			if masterPath, err = defaultMasterKeyPath(cfg.DataDir, home); err != nil {
+				return fmt.Errorf("master key: %w", err)
 			}
-			masterPath = filepath.Join(home, ".hermes", "secrets", "ezllm-master.key")
 		}
 		var created bool
 		masterSecret, created, err = loadOrCreateMasterKey(masterPath)

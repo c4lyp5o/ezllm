@@ -41,6 +41,9 @@ Antigravity caches are `EZLLM_<BRIDGE>_BRIDGE_CACHE`. The Codex sandbox is alway
 writable (`EZLLM_CODEX_SANDBOX` removed), and Codex client tools always require
 Landlock (`EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK` removed). Every bridge runs one CLI process at a
 time by default (`*_BRIDGE_CONCURRENCY`, was 2). Retired names fail the boot.
+The master key defaults to `<data_dir>/ezllm-master.key` (was
+`~/.hermes/secrets/ezllm-master.key`); a key at the old path refuses the boot
+until moved.
 
 Release review fixes: request-limit defaults no longer block startup when only
 `global_inflight` is set; VS Code path tokens stay masked in access logs;

@@ -70,6 +70,9 @@ ran in production before release; security records cite them by those numbers.
   client tools always require Landlock.
 - `EZLLM_CLAUDE_BRIDGE_CONCURRENCY` is new, and every bridge's concurrency now
   defaults to 1 CLI process (was 2; Claude's was fixed at 2).
+- The master key defaults to `<data_dir>/ezllm-master.key` instead of
+  `~/.hermes/secrets/ezllm-master.key`. A key left at the old path refuses the boot
+  until it is moved; ezllm never generates a replacement over it.
 - Retired names (`EZLLM_CLAUDE_CONFIG_DIR`, `EZLLM_CODEX_SANDBOX`,
   `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK`, both
   `*_SESSION_CACHE`) fail the boot with a message naming the replacement.

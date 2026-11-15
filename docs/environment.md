@@ -73,7 +73,7 @@ provider key unreadable. See [master-key-runbook.md](master-key-runbook.md).
 | Variable | Default | What it does |
 |---|---|---|
 | `EZLLM_MASTER_KEY` | unset | Master key for at-rest encryption of provider keys. Wins over the file. |
-| `EZLLM_MASTER_KEY_FILE` | `~/.hermes/secrets/ezllm-master.key` (data dir when there is no usable home); compose: `/data/ezllm-master.key` | Master key file; generated on first boot. Do not change it on an existing install without moving the key. |
+| `EZLLM_MASTER_KEY_FILE` | `<data_dir>/ezllm-master.key` | Master key file; generated on first boot. Before 2.0.0 the default was `~/.hermes/secrets/ezllm-master.key`; a key found there refuses the boot until it is moved (see [master-key-runbook.md](master-key-runbook.md)). Do not change it on an existing install without moving the key. |
 | `EZLLM_DASHBOARD_PASSWORD` | unset | First dashboard password (at least 12 characters), used only while setup is pending. Never overwrites a password already set. |
 | `EZLLM_DASHBOARD_PASSWORD_FILE` | unset | Same, read from a file (Docker/compose secrets); one trailing newline is trimmed. The plain variable wins. |
 

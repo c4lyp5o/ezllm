@@ -361,7 +361,7 @@ export default function Chat() {
           display: `${accounts[index].namespace} / ${m.display ?? m.id}`,
         })));
         const failed = accounts.filter((_, index) => results[index] === null);
-        if (failed.length) setCatalogError(`Could not load models for ${failed.map(a => a.name).join(', ')}.${failed.length < accounts.length ? ' Other providers remain available.' : ''}`);
+        if (failed.length) setCatalogError(`Could not load models for ${failed.map(a => a.name).join(', ')}.${failed.length < accounts.length ? ' Other providers still work.' : ''}`);
         setCatalog(flat);
         const stored = readStored(KEY_MODEL, '');
         const preferred = stored && flat.some(m => m.id === stored) ? stored : flat[0]?.id ?? '';
@@ -410,11 +410,11 @@ export default function Chat() {
     let total = pending.reduce((a, p) => a + p.size, 0);
     for (const f of list) {
       if (f.size > MAX_FILE_BYTES) {
-        setError(`${f.name} is ${humanBytes(f.size)} — the per-file cap is ${humanBytes(MAX_FILE_BYTES)}.`);
+        setError(`${f.name} is ${humanBytes(f.size)}. Files can be up to ${humanBytes(MAX_FILE_BYTES)}.`);
         continue;
       }
       if (total + f.size > MAX_ATTACH_BYTES) {
-        setError(`${f.name} would push the payload past ${humanBytes(MAX_ATTACH_BYTES)}. Send the rest separately.`);
+        setError(`Adding ${f.name} would go over the ${humanBytes(MAX_ATTACH_BYTES)} limit. Send the rest in another message.`);
         continue;
       }
       try {
@@ -603,7 +603,7 @@ export default function Chat() {
   }, [input]);
   const onDrop = (e: DragEvent) => { e.preventDefault(); setDragging(false); void addFiles(e.dataTransfer.files); };
 
-  const exportCols = () => columns.map((c, i) => ({ label: `Column ${i + 1} — ${c.model || 'no model'}`, model: c.model, messages: c.messages }));
+  const exportCols = () => columns.map((c, i) => ({ label: `Column ${i + 1}: ${c.model || 'no model'}`, model: c.model, messages: c.messages }));
   const stamp = () => new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
   const hasMessages = columns.some((c) => c.messages.length > 0);
 
@@ -697,7 +697,7 @@ export default function Chat() {
                 disabled={!systemDirty} className={cx(btn.base, btn.ghost, '!h-8 !px-3 !text-[13px] disabled:opacity-45')}>
                 Reset to default
               </button>
-              <span className="text-[12px] text-mute">{system.trim() ? `${nfmt(system.trim().length)} chars` : 'empty — no system message will be sent'}</span>
+              <span className="text-[12px] text-mute">{system.trim() ? `${nfmt(system.trim().length)} chars` : 'empty, so no system message is sent'}</span>
             </div>
           </motion.div>
         )}
@@ -708,7 +708,7 @@ export default function Chat() {
             className="shrink-0 overflow-hidden rounded-xl border border-line bg-surface px-4 py-3">
             <div className="flex flex-wrap items-baseline justify-between gap-3">
               <SectionLabel>Request parameters</SectionLabel>
-              <span className="text-[12px] text-mute">shared by every column; a column can override them · empty = the provider&rsquo;s default</span>
+              <span className="text-[12px] text-mute">every column uses these unless it sets its own · leave empty for the provider&rsquo;s default</span>
             </div>
             <div className="mt-2">
               <ParamFields idPrefix="sp" value={params} errors={sharedErrors}
@@ -748,7 +748,7 @@ export default function Chat() {
                     disabled={loading || c.busy} loadingText={loading ? 'Loading models…' : 'No synced models'} />
                 </div>
                 {columns.length > 1 && (
-                  <label className="flex shrink-0 items-center gap-1.5 text-[12px] text-mute" title="Off: sends skip this column and leave its conversation untouched">
+                  <label className="flex shrink-0 items-center gap-1.5 text-[12px] text-mute" title="Off: new messages skip this column and its conversation stays as it is">
                     <Toggle checked={c.include} onChange={(v) => patchColumn(c.id, (x) => ({ ...x, include: v }))} label={`Include column ${idx + 1} in sends`} />
                     send
                   </label>
@@ -829,7 +829,7 @@ export default function Chat() {
           placeholder={pending.length > 0 ? 'Add a note about the attachments (optional)…' : 'Message every selected model…  (paste or drop images and files)'}
           rows={2} aria-label="Message"
           className={cx(inputCls, 'w-full resize-none font-sans leading-relaxed')} />
-        {paramProblems && <p role="alert" className="mt-1 text-[12px] text-bad">A request parameter is out of range — fix it under Parameters before sending.</p>}
+        {paramProblems && <p role="alert" className="mt-1 text-[12px] text-bad">One of the parameters is out of range. Fix it under Parameters, then send.</p>}
         <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
             <input ref={fileRef} type="file" multiple className="hidden"
@@ -852,7 +852,7 @@ export default function Chat() {
 
       <ConfirmModal open={confirmClear != null}
         title={confirmClear === 'all' ? 'Clear every conversation?' : 'Clear this conversation?'}
-        confirmLabel="Clear" body="The messages are removed from this page. This cannot be undone."
+        confirmLabel="Clear" body="The messages are removed from this page. You can't undo this."
         onClose={() => setConfirmClear(null)} onConfirm={doClear} />
     </div>
   );

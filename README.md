@@ -307,7 +307,7 @@ environment or `config.yaml`.
   returns only `status` and `version`.
 - Keys carry roles: `infer` calls models, `metrics` reads `GET /metrics`
   (Prometheus, see [docs/metrics.md](docs/metrics.md)) and `admin` manages the
-  gateway. Each is a separate permission; admin does not imply infer.
+  gateway. Each role opens only its own endpoints, and none implies another.
 - The dashboard cookie is `HttpOnly` and `SameSite=Strict`, and cookie-based
   writes from another origin are refused.
 - API keys are stored as SHA-256 hashes and dashboard passwords with bcrypt.

@@ -38,8 +38,8 @@ func TestMetricsAuth(t *testing.T) {
 		{"", http.StatusUnauthorized},
 		{"wrong-token-wrong-token", http.StatusUnauthorized},
 		{"tok-infer", http.StatusForbidden}, // an inference key cannot read spend
+		{"tok-admin", http.StatusForbidden}, // each role opens one surface
 		{testMetricsToken, http.StatusOK},
-		{"tok-admin", http.StatusOK},
 	} {
 		code, hdr, body := h.do("GET", "/metrics", c.token, "")
 		if code != c.want {
@@ -54,23 +54,23 @@ func TestMetricsAuth(t *testing.T) {
 	}
 }
 
-// The dashboard session reads metrics without a key.
-func TestMetricsDashboardSession(t *testing.T) {
+// The dashboard session is the admin surface; it does not read /metrics.
+func TestMetricsRefuseTheDashboardSession(t *testing.T) {
 	h := newHarness(t, chatUpstream)
 	setupDashboard(t, h, "metrics-test-password")
 	sess, err := h.db.DashboardLogin(context.Background(), "metrics-test-password")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code, _, _ := h.do("GET", "/metrics", sess, ""); code != http.StatusOK {
-		t.Fatalf("dashboard session (bearer): %d", code)
+	if code, _, _ := h.do("GET", "/metrics", sess, ""); code != http.StatusUnauthorized {
+		t.Fatalf("dashboard session (bearer): %d, want 401", code)
 	}
 	req := httptest.NewRequest("GET", "/metrics", nil)
 	req.AddCookie(&http.Cookie{Name: "ezllm_session", Value: sess})
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("dashboard session (cookie): %d", rec.Code)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("dashboard session (cookie): %d, want 401", rec.Code)
 	}
 }
 

@@ -125,26 +125,15 @@ func histOf(fam map[latKey]*histogram, k latKey) *histogram {
 	return h
 }
 
-// handleMetrics serves the scrape to a key with the metrics or admin role, or
-// to the dashboard session. A metrics key reads only this route: it cannot
-// call models (infer) or reach /admin.
+// handleMetrics serves the scrape to a key with the metrics role and nobody
+// else: each role opens exactly one surface (infer: /v1, metrics: /metrics,
+// admin: /admin), so an admin key or the dashboard session gets no scrape.
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if s.metrics == nil {
 		http.NotFound(w, r)
 		return
 	}
-	serve := func(w http.ResponseWriter, _ *http.Request) { s.writeMetrics(w) }
-	if tok := bearerToken(r); tok != "" && (s.db == nil || !s.db.DashboardSession(r.Context(), tok)) {
-		s.authed(func(w http.ResponseWriter, r *http.Request) {
-			if hasRole(r, "admin") {
-				serve(w, r)
-				return
-			}
-			s.needRole("metrics", serve)(w, r)
-		})(w, r)
-		return
-	}
-	s.admin(serve)(w, r) // the dashboard session (bearer or cookie)
+	s.authed(s.needRole("metrics", func(w http.ResponseWriter, _ *http.Request) { s.writeMetrics(w) }))(w, r)
 }
 
 func (s *Server) writeMetrics(w http.ResponseWriter) {

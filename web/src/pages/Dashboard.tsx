@@ -111,12 +111,12 @@ function HealthPills({ o, children }: { o: Overview; children?: ReactNode }) {
           happened and its tokens are not counted anywhere. */}
       {h.dropped_rows > 0 && (
         <Chip tone="warn"
-          title="ledger rows shed under write load — the calls happened, their accounting did not land">
+          title="calls that weren't recorded because the database was too busy. They still went through.">
           {nfmt(h.dropped_rows)} ledger rows dropped
         </Chip>
       )}
       {(h.lost_rows ?? 0) > 0 && (
-        <Chip tone="warn" title="Ledger writes failed after retry; usage and budgets omit these calls. Check server logs and storage.">
+        <Chip tone="warn" title="These calls couldn't be saved, even after a retry, so usage and budgets leave them out. Check the server logs and disk.">
           {nfmt(h.lost_rows ?? 0)} ledger rows lost
         </Chip>
       )}
@@ -124,7 +124,7 @@ function HealthPills({ o, children }: { o: Overview; children?: ReactNode }) {
           and token budgets did not count it, so they read low by this much. */}
       {(h.unmetered_rows ?? 0) > 0 && (
         <Chip tone="warn"
-          title="ledger rows the usage meter failed to count — model caps and token budgets under-count by these calls">
+          title="calls the usage counter missed, so model caps and budgets are low by this many">
           {nfmt(h.unmetered_rows ?? 0)} rows unmetered
         </Chip>
       )}
@@ -207,7 +207,7 @@ function Breakdown({ label, rows, emptyHint, link }: { label: string; rows: Usag
 // honest counterpart for everything else on the page, which is polled.
 function PulseChip({ perMinute, connected }: { perMinute: number; connected: boolean }) {
   return connected ? (
-    <Chip tone="neutral" title="requests committed in the last 60 seconds, from the live stream">
+    <Chip tone="neutral" title="requests in the last 60 seconds">
       <span className="relative flex h-1.5 w-1.5">
         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-ok opacity-60" />
         <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-ok" />
@@ -215,7 +215,7 @@ function PulseChip({ perMinute, connected }: { perMinute: number; connected: boo
       <span className="tnum">{nfmt(perMinute)}</span> calls/min
     </Chip>
   ) : (
-    <Chip tone="warn" title="the live stream is not delivering; the page still refreshes by polling">
+    <Chip tone="warn" title="live updates aren't arriving, so the page refreshes on a timer instead">
       live feed reconnecting
     </Chip>
   );
@@ -226,7 +226,7 @@ function Freshness({ at, failed, busy, onRefresh }: { at: number | null; failed:
   useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t); }, []);
   return (
     <span className={cx('flex items-center gap-2 text-[12px]', failed ? 'text-warn' : 'text-mute')}
-      title={failed ? 'The last refresh failed; showing the previous figures.' : 'The overview refreshes every 15 seconds, the breakdowns every 60.'}>
+      title={failed ? 'The last refresh failed. These are the previous numbers.' : 'The overview refreshes every 15 seconds, the breakdowns every 60.'}>
       {failed ? 'refresh failed · last ok ' : 'updated '}
       <span className="tnum">{at ? relTime(new Date(at).toISOString()) : '–'}</span>
       <button type="button" onClick={onRefresh} disabled={busy} aria-label="Refresh now" title="Refresh now"
@@ -374,7 +374,7 @@ function LatencyCard({ rows }: { rows: UsageRow[] }) {
       <Panel label={<SectionLabel>Latency · p50 time to first token</SectionLabel>}>
         <EmptyState
           title="No streaming calls measured yet"
-          hint="Time to first token is available for streaming requests only. Non-streaming calls show “–”." />
+          hint={'Time to first token only applies to streamed requests. Others show "–".'} />
       </Panel>
     );
   }
@@ -488,7 +488,7 @@ function RecentCalls({ o }: { o: Overview }) {
       aside={(
         <span className="flex items-center gap-2 text-[12px] text-mute">
           {paused ? (
-            <span className="text-warn" title="Rows are held while you read; move the pointer away and collapse any open row to resume.">paused</span>
+            <span className="text-warn" title="Updates pause while you read. Move the pointer away and close any open row to resume.">paused</span>
           ) : (
             <span className="relative flex h-1.5 w-1.5">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-ok opacity-60" />
@@ -501,7 +501,7 @@ function RecentCalls({ o }: { o: Overview }) {
       bodyClass="p-0">
       {live.length === 0 ? (
         <EmptyState title="No calls yet."
-          hint="Requests routed through a combo appear here. This table refreshes every few seconds." />
+          hint="Requests that go through a combo show up here. The table refreshes every few seconds." />
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-5 py-2.5">
@@ -509,7 +509,7 @@ function RecentCalls({ o }: { o: Overview }) {
               options={[
                 { key: 'all', label: `All ${count('all')}` },
                 { key: 'errors', label: `Errors ${count('errors')}`, title: 'status 400 and above' },
-                { key: 'failover', label: `Failed over ${count('failover')}`, title: 'served after one or more hops were skipped or failed' },
+                { key: 'failover', label: `Failed over ${count('failover')}`, title: 'answered after one or more providers were skipped or failed' },
                 { key: 'translated', label: `Translated ${count('translated')}`, title: 'the hop spoke a different wire than the client' },
               ]}
               value={filter} onChange={setFilter} />
@@ -520,7 +520,7 @@ function RecentCalls({ o }: { o: Overview }) {
           </div>
           {rows.length === 0 ? (
             <EmptyState title="No recent call matches."
-              hint="Search and filters apply to the rows shown here. Use Requests to search the full ledger." />
+              hint="Search and filters only cover the rows shown here. Use Requests to search everything." />
           ) : (
         <div className="overflow-x-auto" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
           <table className="w-full min-w-[860px] text-[13px]">
@@ -528,11 +528,11 @@ function RecentCalls({ o }: { o: Overview }) {
               <tr className="border-b border-line text-left text-[11px] text-mute">
                 <th className="px-5 py-2.5 font-medium">time</th>
                 <th className="px-3 py-2.5 font-medium">client</th>
-                <th className="px-3 py-2.5 font-medium" title="the served model, with the surface it rode and who served it (provider · combo) parked underneath">model</th>
+                <th className="px-3 py-2.5 font-medium" title="the model that answered, with the API used and the provider and combo below it">model</th>
                 <th className="px-3 py-2.5 text-right font-medium">status</th>
-                <th className="px-3 py-2.5 text-right font-medium" title="time to first token on top, total duration below — ttft is only meaningful on a stream">duration</th>
+                <th className="px-3 py-2.5 text-right font-medium" title="time to first token on top, total time below. Time to first token only applies to streams.">duration</th>
                 <th className="px-3 py-2.5 text-right font-medium" title="tokens in ↑ / tokens out ↓">tokens ↑↓</th>
-                <th className="px-5 py-2.5 text-right font-medium" title="profile applied; saved = tokens a shipped rewrite removed; held = what a REJECTED rewrite would have saved (tuning data)">compression</th>
+                <th className="px-5 py-2.5 text-right font-medium" title="compression profile used. Saved is what compression removed. Held is what it would have removed if the change hadn't been rejected.">compression</th>
               </tr>
             </thead>
             <tbody className="font-mono tnum">
@@ -577,7 +577,7 @@ function RecentCalls({ o }: { o: Overview }) {
                           title={cursor
                             ? cursor.hop
                               ? `block_round_robin: dispatch ${r.block_pos} of ${cursor.block_size}; ${cursor.hop} owns the current block (${cursor.remaining} left)${cursor.reason ? ` — this block started: ${cursor.reason}` : ''}`
-                              : `block_round_robin: dispatch ${r.block_pos} of ${cursor.block_size}; no live block yet (${cursor.reason || 'cold start'} — nothing has dispatched on this combo since the last restart)`
+                              : `block_round_robin: dispatch ${r.block_pos} of ${cursor.block_size}; no live block yet (${cursor.reason || 'cold start'}: this combo hasn't sent anything since the last restart)`
                             : `block_round_robin: dispatch ${r.block_pos} of its block`}>
                           ▮ {r.block_pos}{cursor ? `/${cursor.block_size}` : ''}
                         </div>
@@ -593,7 +593,7 @@ function RecentCalls({ o }: { o: Overview }) {
                           in-tokens are the vendor's INCLUSIVE total. */}
                       {r.translated && (
                         <div className="mt-0.5 text-[11px] text-accent"
-                          title="translated hop: this hop's wire differs from the client's surface (anthropic client -> chat-only hop, or a hop curated for /v1/responses) — and the answer was converted back. Tokens are recorded in ezllm's own convention like any other row.">
+                          title="translated: the provider uses a different API from the client (for example an Anthropic client sent to a chat-only provider), so ezllm converted the request and the answer. Tokens are counted the same way as any other request.">
                           ⇄ translated
                         </div>
                       )}
@@ -633,11 +633,11 @@ function RecentCalls({ o }: { o: Overview }) {
                           so they stay a greyed sub-line of the in figure. */}
                       <div className="text-dim"
                         title={`tokens in ${nfmt(r.tin)} (↑, prompt tokens not served from cache) · tokens out ${nfmt(r.tout)} (↓, completion)`}>
-                        <span title="tokens in — prompt tokens NOT served from cache">↑{nfmt(r.tin)}</span>{' '}
-                        <span className="text-mute" title="tokens out — completion">↓{nfmt(r.tout)}</span>
+                        <span title="tokens in (prompt tokens not read from cache)">↑{nfmt(r.tin)}</span>{' '}
+                        <span className="text-mute" title="tokens out (completion)">↓{nfmt(r.tout)}</span>
                       </div>
                       {(r.cread ?? 0) > 0 && (
-                        <div className="mt-0.5 text-[11px] text-mute" title="prompt tokens served from the cache — billed at the cache price, not part of tokens in">
+                        <div className="mt-0.5 text-[11px] text-mute" title="prompt tokens read from cache. They're billed at the cache price and not counted in tokens in.">
                           {nfmt(r.cread ?? 0)} cached
                         </div>
                       )}
@@ -667,7 +667,7 @@ function RecentCalls({ o }: { o: Overview }) {
                               )}
                               {!r.applied && (r.saved_notional ?? 0) > 0 && (
                                 <span className="text-warn"
-                                  title="held: a rewrite was rejected by the ratio floor — this is what it would have saved">
+                                  title="held: compression would have saved this much, but the saving was below the minimum ratio">
                                   {' '}held {formatTokens(r.saved_notional ?? 0)}
                                 </span>
                               )}
@@ -892,7 +892,7 @@ export default function Dashboard() {
         <PulseChip perMinute={perMinute} connected={connected} />
         <Freshness at={okAt} failed={!!err} busy={refreshing} onRefresh={() => void refreshNow()} />
       </HealthPills>
-      {reportsStale && <p role="alert" className="rounded-lg border border-warn/30 bg-warn-dim p-3 text-sm text-ink">Some usage reports could not refresh. Their figures may be unavailable or out of date; check the connection. <button type="button" className="underline" onClick={() => void loadSlow()}>Retry</button></p>}
+      {reportsStale && <p role="alert" className="rounded-lg border border-warn/30 bg-warn-dim p-3 text-sm text-ink">Some usage reports didn't refresh, so their numbers may be missing or out of date. Check your connection. <button type="button" className="underline" onClick={() => void loadSlow()}>Retry</button></p>}
 
       <AttentionStrip o={o} />
 
@@ -939,7 +939,7 @@ export default function Dashboard() {
         ) : undefined}>
         {series.length === 0 ? (
           <EmptyState title="No traffic in the last 7 days."
-            hint="Requests routed through a combo in this period will appear below." />
+            hint="Requests that go through a combo in this period will show up below." />
         ) : (
           <div className="h-56">
             <ResponsiveContainer width="100%" height="100%">
@@ -975,7 +975,7 @@ export default function Dashboard() {
         </StaggerItem>
         <StaggerItem>
           <Breakdown label="Tokens by API key" rows={byKey}
-            emptyHint={`No keyed calls in the last ${win} — unkeyed traffic reports as “(none)”.`} />
+            emptyHint={`No calls with an API key in the last ${win}. Calls without one show as "(none)".`} />
         </StaggerItem>
       </Stagger>
 
@@ -1024,7 +1024,7 @@ export default function Dashboard() {
               It comes from the 24h overview whatever the range, so it names
               its window. */}
           <div className="mt-5 flex items-baseline justify-between">
-            <span className="text-[13px] font-semibold text-ink">Calls by client wire · last 24 hours</span>
+            <span className="text-[13px] font-semibold text-ink">Calls by API · last 24 hours</span>
             <span className="tnum text-[12px] text-mute">{nfmt(bySurface.reduce((a, s) => a + s.calls, 0))} calls</span>
           </div>
           <div className="mt-3">

@@ -36,7 +36,7 @@ try {
   check('browser preferences persist', await page.getByLabel('Default analytics range', { exact: true }).inputValue() === '7d');
   await page.getByLabel('Usage timezone', { exact: true }).fill('Asia/Kuala_Lumpur');
   check('timezone impact acknowledgement required', await page.getByRole('button', { name: 'Save changes', exact: true }).isDisabled());
-  await page.getByLabel('I understand this changes report days', { exact: false }).check();
+  await page.getByLabel('I understand this changes where report days', { exact: false }).check();
   await page.getByRole('button', { name: 'Save changes', exact: true }).click();
   await page.getByRole('status').filter({ hasText: 'Settings saved.' }).waitFor();
   await page.getByRole('button', { name: 'Gateway', exact: true }).click();

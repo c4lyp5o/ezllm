@@ -50,7 +50,7 @@ const NAV: NavItem[] = [
   { to: '/rules', label: 'Rules', hint: 'quotas · windows' },
   { to: '/compression', label: 'Compression', hint: 'profiles · engines' },
   { to: '/connect', label: 'Connect', hint: 'routes · API keys' },
-  { to: '/neighbourhood', label: 'Neighbourhood', hint: 'your providers as a living city' },
+  { to: '/neighbourhood', label: 'Neighbourhood', hint: 'your providers drawn as a city' },
   { to: '/settings', label: 'Settings', hint: 'instance administration' },
 ];
 
@@ -121,12 +121,23 @@ function useServerVersion(): string {
 // cross-origin link out of the control plane, and without rel="noreferrer"
 // the destination receives the dashboard's own URL as the referrer.
 const REPO_URL = 'https://github.com/c4lyp5o/ezllm';
-const PROFILE_URL = 'https://github.com/c4lyp5o';
 
+// The GitHub mark shared by the ez* apps' footers.
 function GitHubIcon({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 16 16" className={cx('h-3.5 w-3.5', className)} fill="currentColor" aria-hidden focusable="false">
-      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-2.91-.88-2.91-2.79 0-.55.2-1.02.51-1.38-.05-.13-.22-.65.05-1.35 0 0 .61-.19 2 .74a5.4 5.4 0 0 1 1.4-.19c.48 0 .96.06 1.41.19 1.38-.93 1.99-.74 1.99-.74.27.7.1 1.22.05 1.35.32.36.51.83.51 1.38 0 1.92-1.14 2.59-2.92 2.79.3.26.56.76.56 1.53 0 1.11-.01 2-.01 2.27 0 .21.15.46.55.38A7.99 7.99 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+    <svg viewBox="0 0 24 24" className={cx('h-4 w-4', className)} fill="currentColor" aria-hidden focusable="false">
+      <path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.18-3.09-.12-.29-.51-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.18 1.83 1.18 3.09 0 4.41-2.69 5.38-5.25 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z" />
+    </svg>
+  );
+}
+
+function LogOutIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={cx('h-4 w-4', className)} fill="none" stroke="currentColor" strokeWidth="1.8"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden focusable="false">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <path d="m16 17 5-5-5-5" />
+      <path d="M21 12H9" />
     </svg>
   );
 }
@@ -243,7 +254,7 @@ function SetupForm({ onDone, onAlreadySet }: { onDone: () => void; onAlreadySet:
     <>
       <h1 className="mt-6 text-[20px] font-semibold">Set the dashboard password</h1>
       <p className="mt-2 text-[13px] text-mute">
-        First boot. Enter the setup code printed in the ezllm server log, then choose a password.
+        This is the first start. Enter the setup code from the ezllm server log, then pick a password.
       </p>
       <form onSubmit={submit} className="mt-6">
         <Field id="setup-code" label="Setup code" autoFocus autoComplete="one-time-code" placeholder="XXXX-XXXX"
@@ -277,7 +288,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         <span className="text-[15px] font-semibold tracking-tight">ezllm</span>
         {version && (
           <a href={REPO_URL} target="_blank" rel="noreferrer noopener"
-            aria-label={`ezllm ${version} — source on GitHub`} title="source on GitHub"
+            aria-label={`ezllm ${version}, source on GitHub (opens in a new tab)`} title="Source on GitHub"
             className="ml-auto text-[12px] text-mute transition-colors hover:text-ink">
             {version}
           </a>
@@ -307,22 +318,21 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         })}
       </nav>
       </LayoutGroup>
-      <div className="space-y-1 border-t border-line px-3 py-3">
+      <div className="grid grid-cols-3 border-t border-line px-3 py-2">
+        <a href={REPO_URL} target="_blank" rel="noreferrer noopener"
+          aria-label="ezllm source on GitHub (opens in a new tab)" title="Source on GitHub"
+          className="flex h-9 items-center justify-center rounded text-mute transition-colors hover:bg-hover hover:text-ink">
+          <GitHubIcon />
+        </a>
         <ThemeToggle theme={theme} onChange={changeTheme} />
-        <div className="flex items-center px-2.5 py-1">
-          <a href={PROFILE_URL} target="_blank" rel="noreferrer noopener"
-            aria-label="GitHub profile (c4lyp5o)" title="github.com/c4lyp5o"
-            className="flex items-center gap-2 rounded p-1.5 text-mute transition-colors hover:bg-hover hover:text-ink">
-            <GitHubIcon />
-          </a>
-          <button
-            type="button"
-            className="ml-auto rounded px-2.5 py-1.5 text-[13px] text-mute transition-colors hover:bg-bad-dim hover:text-bad"
-            onClick={() => { void logout().finally(() => { onNavigate?.(); window.location.reload(); }); }}
-          >
-            Log out
-          </button>
-        </div>
+        <button
+          type="button"
+          aria-label="Log out" title="Log out"
+          className="flex h-9 items-center justify-center rounded text-mute transition-colors hover:bg-bad-dim hover:text-bad"
+          onClick={() => { void logout().finally(() => { onNavigate?.(); window.location.reload(); }); }}
+        >
+          <LogOutIcon />
+        </button>
       </div>
     </div>
   );
@@ -338,10 +348,10 @@ const PAGE_HEADERS: Record<string, { title: string; sub: string }> = {
   '/chat': { title: 'Chat', sub: 'Send a message through any routed model.' },
   '/combos': { title: 'Combos', sub: 'Ordered routing chains with failover.' },
   '/rules': { title: 'Rules', sub: 'Token caps and allowed-use windows per model.' },
-  '/compression': { title: 'Compression', sub: 'Profiles, engines and what they save.' },
-  '/connect': { title: 'Connect', sub: 'Point clients at this gateway and issue API keys.' },
-  '/neighbourhood': { title: 'Neighbourhood', sub: 'Every provider is a building; the busier it is, the brighter it burns.' },
-  '/settings': { title: 'Settings', sub: 'Preferences, security, backups and gateway policy.' },
+  '/compression': { title: 'Compression', sub: 'Compression profiles and how much they save.' },
+  '/connect': { title: 'Connect', sub: 'API keys, and how to point your apps at ezllm.' },
+  '/neighbourhood': { title: 'Neighbourhood', sub: 'Each provider is a building. Busier providers glow brighter.' },
+  '/settings': { title: 'Settings', sub: 'Preferences, security, backups and request limits.' },
 };
 
 export default function App() {

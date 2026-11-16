@@ -87,26 +87,22 @@ export function expiryReadout(date: string, now = Date.now()): string {
   if (!date) return 'Never expires.';
   const end = Date.parse(`${date}T23:59:59`);
   if (Number.isNaN(end)) return '';
-  if (end < now) return 'That date has passed: the key would be expired at once.';
+  if (end < now) return 'That date has already passed, so the key would expire immediately.';
   const today = new Date(now); today.setHours(0, 0, 0, 0);
   const d = Math.round((Date.parse(`${date}T00:00:00`) - today.getTime()) / DAY);
   return d <= 0 ? 'Expires at the end of today.' : `Expires in ${d} day${d === 1 ? '' : 's'}.`;
 }
 
 // ── create-form validation ──────────────────────────────────────────────────
-// Each role is a separate permission; none implies another (server:
-// store.TokenRoles). A key holds any non-empty combination.
+// Each role opens one surface and nothing else (server: store.TokenRoles).
+// Listed in the order the form shows them.
 export type Role = 'infer' | 'metrics' | 'admin';
 export const ROLES: { key: Role; label: string; hint: string }[] = [
-  { key: 'infer', label: 'Inference', hint: 'Call models on /v1 (OpenAI and Anthropic APIs). For tools and apps.' },
-  { key: 'metrics', label: 'Metrics', hint: 'Read GET /metrics for Prometheus or an OpenTelemetry Collector. Nothing else.' },
-  { key: 'admin', label: 'Admin', hint: 'Manage the gateway through /admin: providers, provider keys and other keys.' },
+  { key: 'admin', label: 'Admin', hint: 'Manage ezllm through /admin: providers, their keys, and other API keys.' },
+  { key: 'infer', label: 'Inference', hint: 'Call models on /v1 with the OpenAI or Anthropic API.' },
+  { key: 'metrics', label: 'Metrics', hint: 'Read /metrics from Prometheus or an OpenTelemetry Collector.' },
 ];
-/** Admin includes metrics on the server (it can already read /admin/usage);
- *  infer stays separate because it spends. What the key can do, for display. */
-export const effectiveRoles = (roles: readonly string[]): Role[] =>
-  sortRoles(roles.includes('admin') ? [...roles, 'metrics'] : roles);
-/** Roles in server order, so a draft compares equal to what the API returns. */
+/** Roles in a fixed order, so a draft compares equal to what the API returns. */
 export const sortRoles = (roles: readonly string[]): Role[] => ROLES.map((r) => r.key).filter((k) => roles.includes(k));
 
 export type KeyDraft = { name: string; roles: Role[]; models: string; expiry: string; cap: number; capWindow: string };
@@ -115,8 +111,8 @@ export type KeyErrors = { name?: string; cap?: string; expiry?: string; roles?: 
 export function validateKey(d: KeyDraft, others: string[]): KeyErrors {
   const e: KeyErrors = {};
   const name = d.name.trim();
-  if (!name) e.name = 'Give the key a name. It is how this key appears in the ledger.';
-  else if (others.some((n) => n.toLowerCase() === name.toLowerCase())) e.name = `A key called "${others.find((n) => n.toLowerCase() === name.toLowerCase())}" already exists. Creating it again would replace that key's secret and break whatever uses it.`;
+  if (!name) e.name = 'Give the key a name. This is how it shows up in your usage.';
+  else if (others.some((n) => n.toLowerCase() === name.toLowerCase())) e.name = `A key called "${others.find((n) => n.toLowerCase() === name.toLowerCase())}" already exists. Creating it again would replace its secret and break anything that uses it.`;
   if (!Number.isInteger(d.cap) || d.cap < 0) e.cap = 'A whole number of tokens, 0 or more.';
   if (d.expiry && Date.parse(`${d.expiry}T23:59:59`) < Date.now()) e.expiry = 'That date has passed.';
   if (d.roles.length === 0) e.roles = 'Pick at least one role.';

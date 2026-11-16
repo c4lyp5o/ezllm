@@ -24,15 +24,15 @@ export type ProfileDraft = {
 type EngineOption = { key: string; label: string; initial: string; values?: readonly string[]; words: (v: string) => string };
 export const ENGINE_INFO: Record<string, { label: string; note: string; option?: EngineOption }> = {
   session_dedup: { label: 'Session dedup', note: 'Drops exact duplicate system, user and assistant turns.' },
-  rtk: { label: 'RTK', note: 'Filters noisy CLI/tool output; errors and failures are retained.', option: { key: 'keep_lines', label: 'Keep lines', initial: '6', words: (v) => `keeps ${v} lines` } },
-  headroom: { label: 'Headroom', note: 'Lossless columnar compaction for homogeneous JSON tool payloads.', option: { key: 'min_rows', label: 'Minimum rows', initial: '4', words: (v) => `from ${v} rows` } },
-  lite: { label: 'Lite', note: 'Whitespace cleanup only; words and code fences remain unchanged.', option: { key: 'blank_lines', label: 'Blank lines', initial: '1', words: (v) => `${v} blank ${v === '1' ? 'line' : 'lines'} kept` } },
-  ansi: { label: 'ANSI cleanup', note: 'Strips terminal escape codes and collapses carriage-return progress lines to what the terminal showed (log/search output only).' },
-  fold: { label: 'Fold repeats', note: 'Collapses runs of exactly identical log lines into one line plus a count (log/search output only).', option: { key: 'min_repeat', label: 'Minimum run', initial: '3', words: (v) => `runs of ${v}+` } },
-  jsonmin: { label: 'JSON minify', note: 'Removes insignificant whitespace from pretty-printed JSON tool output; every key, number and escape stays byte-identical. Never file reads.' },
-  tool_ref: { label: 'Tool reference', note: 'A tool result byte-identical to an earlier one becomes a reference to it; the earlier copy stays. Every tool. Place after the other tool-output stages.', option: { key: 'min_bytes', label: 'Minimum bytes', initial: '200', words: (v) => `from ${v} bytes` } },
-  blobs: { label: 'Blobs', note: 'Long base64 runs and data: URIs in tool output become a marker with their length and hash. Never file reads.', option: { key: 'min_bytes', label: 'Minimum bytes', initial: '1024', words: (v) => `from ${v} bytes` } },
-  caveman: { label: 'Caveman', note: 'Deterministic prose condensation with protected spans and safety gates.', option: { key: 'intensity', label: 'Intensity', initial: 'lite', values: ['lite', 'standard'], words: (v) => v } },
+  rtk: { label: 'RTK', note: 'Cuts noise from command and tool output. Errors and failures are kept.', option: { key: 'keep_lines', label: 'Keep lines', initial: '6', words: (v) => `keeps ${v} lines` } },
+  headroom: { label: 'Headroom', note: 'Packs JSON tool results with repeated fields into a smaller table. Nothing is lost.', option: { key: 'min_rows', label: 'Minimum rows', initial: '4', words: (v) => `from ${v} rows` } },
+  lite: { label: 'Lite', note: 'Only tidies whitespace. Words and code blocks don\'t change.', option: { key: 'blank_lines', label: 'Blank lines', initial: '1', words: (v) => `${v} blank ${v === '1' ? 'line' : 'lines'} kept` } },
+  ansi: { label: 'ANSI cleanup', note: 'Removes terminal color codes and reduces progress bars to their final line. Log and search output only.' },
+  fold: { label: 'Fold repeats', note: 'Replaces repeated identical log lines with one line and a count. Log and search output only.', option: { key: 'min_repeat', label: 'Minimum run', initial: '3', words: (v) => `runs of ${v}+` } },
+  jsonmin: { label: 'JSON minify', note: 'Removes extra whitespace from formatted JSON tool output. The data stays exactly the same. Doesn\'t touch file reads.' },
+  tool_ref: { label: 'Tool reference', note: 'If a tool result is identical to an earlier one, it\'s replaced with a pointer to the first copy. Works for every tool. Put it after the other tool output stages.', option: { key: 'min_bytes', label: 'Minimum bytes', initial: '200', words: (v) => `from ${v} bytes` } },
+  blobs: { label: 'Blobs', note: 'Replaces long base64 strings and data: URIs in tool output with a short marker showing their length and hash. Doesn\'t touch file reads.', option: { key: 'min_bytes', label: 'Minimum bytes', initial: '1024', words: (v) => `from ${v} bytes` } },
+  caveman: { label: 'Caveman', note: 'Shortens normal text with fixed rules. Code, quotes and other protected parts are left alone.', option: { key: 'intensity', label: 'Intensity', initial: 'lite', values: ['lite', 'standard'], words: (v) => v } },
 };
 export const ENGINE_IDS = Object.keys(ENGINE_INFO);
 export const stageLabel = (id: string) => ENGINE_INFO[id]?.label ?? id;
@@ -111,9 +111,9 @@ export type DraftErrors = { name?: string; trigger?: string; ratio?: string; sta
 export function validateDraft(d: ProfileDraft, others: string[]): DraftErrors {
   const e: DraftErrors = { stage: {} };
   const name = d.name.trim();
-  if (!name) e.name = 'Give the profile a name: combos and the x-ezllm-compression header pick it by name.';
+  if (!name) e.name = 'Give the profile a name. Combos and the x-ezllm-compression header refer to it by name.';
   else if (others.some((n) => n.toLowerCase() === name.toLowerCase())) e.name = `A profile called "${others.find((n) => n.toLowerCase() === name.toLowerCase())}" already exists.`;
-  else if (name.toLowerCase() === 'off') e.name = '"off" is reserved: it switches compression off in the x-ezllm-compression header.';
+  else if (name.toLowerCase() === 'off') e.name = 'You can\'t use "off". It\'s how the x-ezllm-compression header turns compression off.';
   if (!Number.isInteger(d.auto_trigger_tokens) || d.auto_trigger_tokens < 0) e.trigger = 'A whole number of tokens, 0 or more.';
   if (!(d.min_compress_ratio >= 0.05 && d.min_compress_ratio <= 0.95)) e.ratio = 'Between 5% and 95%.';
   if (d.stages.length === 0) e.stages = 'Add at least one stage.';
@@ -121,7 +121,7 @@ export function validateDraft(d: ProfileDraft, others: string[]): DraftErrors {
     const info = ENGINE_INFO[s.engine];
     if (s.engine === 'caveman' && !['lite', 'standard'].includes(s.option.trim())) e.stage[s.uid] = 'Intensity must be lite or standard.';
     else if (NUMERIC_ENGINES.includes(s.engine) && (!/^\d+$/.test(s.option.trim()))) e.stage[s.uid] = `${info?.option?.label ?? 'Option'} must be a whole number, 0 or more.`;
-    else if (s.engine === 'rtk' && s.toolClasses?.trim() && parseToolClasses(s.toolClasses) === null) e.stage[s.uid] = 'Tool classes must read name=log, name=search or name=preserve, comma-separated.';
+    else if (s.engine === 'rtk' && s.toolClasses?.trim() && parseToolClasses(s.toolClasses) === null) e.stage[s.uid] = 'Write tool types as name=log, name=search or name=preserve, separated by commas.';
   }
   return e;
 }
@@ -136,12 +136,12 @@ export function pipelineAdvice(stages: { engine: string }[]): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const s of stages) {
-    if (seen.has(s.engine) && !out.some((x) => x.includes(stageLabel(s.engine)))) out.push(`${stageLabel(s.engine)} appears more than once. A second pass over the same text rarely finds more.`);
+    if (seen.has(s.engine) && !out.some((x) => x.includes(stageLabel(s.engine)))) out.push(`${stageLabel(s.engine)} is listed more than once. Running it twice rarely saves more.`);
     seen.add(s.engine);
   }
   const ref = stages.findIndex((s) => s.engine === 'tool_ref');
   if (ref >= 0 && stages.some((s, i) => i > ref && TOOL_OUTPUT_ENGINES.includes(s.engine))) {
-    out.push('Tool reference works best last: later stages change a result after it was compared with the earlier ones.');
+    out.push('Put tool reference last. Stages after it change results after they\'ve already been compared.');
   }
   return out;
 }
@@ -180,9 +180,9 @@ export const copyName = (name: string, taken: string[]): string => {
 // ── starting points ─────────────────────────────────────────────────────────
 export type Preset = { key: string; label: string; hint: string; name: string; stages: { engine: string; option?: string }[]; fresh_tool_output?: 'keep' | 'compress' };
 export const PRESETS: Preset[] = [
-  { key: 'safe', label: 'Safe default', hint: 'Drops exact duplicate turns and tidies whitespace. Words never change.', name: 'safe-default', stages: [{ engine: 'session_dedup' }, { engine: 'lite' }] },
-  { key: 'agent', label: 'Agent tool output', hint: 'For coding agents: cleans, folds and trims noisy tool results, and references repeats.', name: 'agent-output', stages: [{ engine: 'ansi' }, { engine: 'fold' }, { engine: 'rtk' }, { engine: 'jsonmin' }, { engine: 'blobs' }, { engine: 'tool_ref' }] },
-  { key: 'prose', label: 'Prose condensation', hint: 'Also condenses prose. The only preset that rewrites wording.', name: 'prose-condense', stages: [{ engine: 'session_dedup' }, { engine: 'lite' }, { engine: 'caveman', option: 'standard' }] },
+  { key: 'safe', label: 'Safe default', hint: 'Removes repeated messages and tidies whitespace. Words don\'t change.', name: 'safe-default', stages: [{ engine: 'session_dedup' }, { engine: 'lite' }] },
+  { key: 'agent', label: 'Agent tool output', hint: 'For coding agents. Cleans up and trims noisy tool results and replaces repeats with pointers.', name: 'agent-output', stages: [{ engine: 'ansi' }, { engine: 'fold' }, { engine: 'rtk' }, { engine: 'jsonmin' }, { engine: 'blobs' }, { engine: 'tool_ref' }] },
+  { key: 'prose', label: 'Prose condensation', hint: 'Also shortens normal text. This is the only preset that changes wording.', name: 'prose-condense', stages: [{ engine: 'session_dedup' }, { engine: 'lite' }, { engine: 'caveman', option: 'standard' }] },
 ];
 export function draftFromPreset(p: Preset, current: ProfileDraft): ProfileDraft {
   return {

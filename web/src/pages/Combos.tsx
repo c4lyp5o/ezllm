@@ -27,7 +27,7 @@ const STRATEGY_LABEL: Record<string, string> = {
 };
 const RANGES: RangeKey[] = ['24h', '7d', '30d', '365d'];
 
-const errText = (e: unknown) => (e instanceof ApiError ? `${e.detail.message}${e.detail.hint ? ` — ${e.detail.hint}` : ''}` : e instanceof Error ? e.message : String(e));
+const errText = (e: unknown) => (e instanceof ApiError ? `${e.detail.message}${e.detail.hint ? `. ${e.detail.hint}` : ''}` : e instanceof Error ? e.message : String(e));
 
 // base_url is the GROUPING KEY: there is no `provider` column, and the upstream
 // endpoint is the provider in practice — two Groq accounts both point at
@@ -198,14 +198,14 @@ function HopsEditor({ hops, setHops, accounts, strategy, catalogs, ensure, error
                 {h.enabled ? 'On' : 'Off'}
               </label>
               {models && (
-                <label className="flex items-center gap-1.5" title="type a model id instead of picking from the provider's catalog">
+                <label className="flex items-center gap-1.5" title="type a model ID instead of picking from the provider's list">
                   <input type="checkbox" checked={custom} onChange={(e) => set(i, { custom: e.target.checked })} />
                   Type the model id
                 </label>
               )}
               {strategy === 'block_round_robin' && (
                 <label className="flex items-center gap-1.5"
-                  title="Hold the block while this hop keeps succeeding; release it on a hop-attributable failure (429, 5xx, transport error, failed stream). A 4xx is the request's fault and keeps the hold.">
+                  title="Keep sending requests to this hop while it succeeds. Move on when it fails because of the provider (429, 5xx, connection error or a broken stream). Other 4xx errors are the request's fault, so it stays.">
                   <input type="checkbox" checked={h.hold_until_failure === true}
                     onChange={(e) => set(i, { hold_until_failure: e.target.checked })} />
                   Hold until it fails
@@ -318,11 +318,11 @@ function FreePool({ d, setD, accounts }: {
       <div className="overflow-hidden rounded-lg border border-line">
         <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line bg-raised/40 px-4 py-3">
           <span className="text-[13px] font-semibold">Pool · {d.hops.length.toLocaleString()} model{d.hops.length === 1 ? '' : 's'}</span>
-          <span className="text-[12px] text-mute">Order follows the strategy. Switch a model off to keep it out.</span>
+          <span className="text-[12px] text-mute">The order depends on the strategy. Switch a model off to leave it out.</span>
         </div>
         {d.hops.length === 0 ? (
           <p className="px-4 py-4 text-[13px] text-mute">
-            Nothing yet. The pool is filled from your providers' catalogs when you save, and again whenever a catalog changes.
+            Nothing yet. ezllm fills this from your providers' model lists when you save, and updates it when a list changes.
           </p>
         ) : (
           <div className="max-h-64 divide-y divide-line overflow-y-auto">
@@ -492,7 +492,7 @@ function ComboModal({ target, accounts, profiles, combos, catalogs, ensure, onCl
           <Segmented<string> label="Strategy" value={d.strategy} onChange={(s) => setD((p) => ({ ...p, strategy: s }))}
             options={STRATEGIES.map((s) => ({ key: s, label: STRATEGY_LABEL[s], title: s }))} />
           <p className="mt-2 text-[13px] leading-snug text-mute">
-            <Mono>{d.strategy}</Mono> — {STRATEGY_HINTS[d.strategy]}
+            <Mono>{d.strategy}</Mono>: {STRATEGY_HINTS[d.strategy]}
           </p>
           {/* The strategy's own fields COLLAPSE in: picking a strategy changes
               how much the form asks for, and a height animation shows the new
@@ -512,23 +512,23 @@ function ComboModal({ target, accounts, profiles, combos, catalogs, ensure, onCl
                 <label className="text-[13px] font-medium" htmlFor="cb-block">Block size</label>
                 <input id="cb-block" type="number" min={1} max={1000} className={cx(inputCls, '!w-28 py-1.5 font-mono text-[13px] tabular-nums', errors.block && 'border-bad/60')}
                   value={d.block_size} onChange={(e) => setD((p) => ({ ...p, block_size: Number(e.target.value) || 1 }))} />
-                <span className="text-[12px] text-mute">requests per hop before the rotation moves on. Every hop shares this size.</span>
+                <span className="text-[12px] text-mute">requests go to each hop before moving to the next. Every hop uses the same number.</span>
                 {errors.block && <span className="text-[12px] text-bad">{errors.block}</span>}
               </div>
               {tight.length > 0 && (
                 <p className="mt-2 text-[12px] leading-snug text-warn">
-                  Block size {d.block_size} exceeds the request budget of{' '}
-                  {tight.map((a) => `${a.name} (${a.rate_limit} per ${a.rate_window})`).join(', ')}. Those hops will drop out
-                  mid-block and the rotation will advance early. Set the block size to the smallest hop budget, or raise the budget.
+                  A block of {d.block_size} is more than the request limit of{' '}
+                  {tight.map((a) => `${a.name} (${a.rate_limit} per ${a.rate_window})`).join(', ')}. Those hops will run out partway
+                  through a block and the rotation will move on early. Set the block size to the smallest limit, or raise the limit.
                 </p>
               )}
               <details className="mt-2 text-[12px] text-mute">
                 <summary className="cursor-pointer select-none text-dim hover:text-ink">Why blocks?</summary>
                 <p className="mt-1.5 leading-snug">
-                  Each account caches your prompt prefix, so a run of consecutive requests to the same account keeps that
-                  cache warm: call <Mono>k</Mono> reads the prefix call <Mono>k-1</Mono> just sent, and the marginal cost
-                  collapses. Rotating on every request throws that away, because the next hop has never seen the prefix and
-                  pays a full cold read. Load is still split evenly, in blocks instead of alternating.
+                  Providers cache the start of your prompt. When several requests in a row go to the same account, each one
+                  can reuse what the one before it cached (call <Mono>k</Mono> reads what call <Mono>k-1</Mono> sent), which costs
+                  much less. Switching account on every request loses that, because the next account hasn't seen the prompt
+                  and charges full price for it. The load is still shared evenly, just in blocks.
                 </p>
               </details>
             </div>
@@ -539,7 +539,7 @@ function ComboModal({ target, accounts, profiles, combos, catalogs, ensure, onCl
           <div className="min-w-0 flex-1">
             <div className="text-[13px] font-semibold">Fill with free models</div>
             <p className="mt-0.5 text-[12px] leading-snug text-mute">
-              Hops come from every free model your providers list, and stay in sync as catalogs change.
+              Hops come from every free model your providers offer, and update when their model lists change.
             </p>
           </div>
           <Toggle checked={d.auto_free} onChange={(v) => setD((p) => ({ ...p, auto_free: v }))} label="fill with free models" />
@@ -622,7 +622,7 @@ function TestComboModal({ target, onClose, onResult }: {
   return (
     <Modal open={target != null} onClose={onClose} wide busy={running}
       title={combo ? `Test ${combo.name}` : 'Test combo'}
-      subtitle="Sends one request per hop. These requests are not recorded in the ledger."
+      subtitle="Sends one request to each hop. These requests aren't added to your usage."
       footer={(close) => <>
         <span className="mr-auto flex items-center gap-2 text-[13px] text-mute">
           Surface
@@ -662,7 +662,7 @@ function TestComboModal({ target, onClose, onResult }: {
                   </Chip>
                 )}
                 {h.status === 0 && <Chip tone="bad">not dialed</Chip>}
-                {h.parked && <Chip tone="warn" title="the probe parked this hop exactly as a production 429 would">parked {h.cooldown_s}s</Chip>}
+                {h.parked && <Chip tone="warn" title="the test paused this hop, the same as a real 429 would">parked {h.cooldown_s}s</Chip>}
                 <span className="ml-auto flex items-center gap-3">
                   <span className="font-mono text-[12px] text-mute">{h.ms} ms</span>
                   <button type="button" disabled={running} className="text-[12px] text-mute hover:text-ink disabled:opacity-50"
@@ -680,9 +680,9 @@ function TestComboModal({ target, onClose, onResult }: {
             </div>
           ))}
           <p className="pt-1 text-[12px] leading-relaxed text-mute">
-            Probes run through the real dispatcher: a hop that earns a parkable failure stays parked, because
-            it failed for real. No eligibility, capability or pin filtering. Disabled and skipped hops are
-            probed too, which is how you learn why the router avoids them.
+            Tests go through the normal request path, so a hop that fails for real stays paused. Rules,
+            capabilities and pins are ignored here, and disabled or skipped hops are tested too, so you can
+            see why requests avoid them.
           </p>
         </div>
       )}
@@ -699,7 +699,7 @@ function FreeSummary({ combo, accounts }: { combo: Combo; accounts: Account[] })
   if (live.length === 0) {
     return (
       <div className="mt-3 border-t border-line pt-3 text-[13px] text-mute">
-        No free models yet. Add a provider and its free models appear here on their own. Requests to this combo fail until there is one.
+        No free models yet. Add a provider and its free models show up here by themselves. Requests to this combo fail until there's at least one.
       </div>
     );
   }
@@ -766,9 +766,9 @@ function ComboCard({ c, accounts, health, stat, statsReady, range, cursor, test,
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <CopyName name={c.name} />
         <Chip title={STRATEGY_HINTS[c.strategy]}><span className="font-mono">{c.strategy}</span></Chip>
-        {c.auto_free && <Chip tone="accent" title="hops are derived from your providers' free models and kept in sync">Auto</Chip>}
+        {c.auto_free && <Chip tone="accent" title="hops come from your providers' free models and update by themselves">Auto</Chip>}
         {!!c.compression_profile_id && (
-          <Link to={`/compression?edit=${c.compression_profile_id}`} title="compression profile applied to requests routed through this combo. Click to edit it">
+          <Link to={`/compression?edit=${c.compression_profile_id}`} title="compression profile used for requests through this combo. Click to edit it.">
             <Chip tone="accent"><span className="font-mono">{profileName ?? `profile #${c.compression_profile_id}`}</span></Chip>
           </Link>
         )}
@@ -839,7 +839,7 @@ function ComboCard({ c, accounts, health, stat, statsReady, range, cursor, test,
                   <span className={h.enabled ? 'text-ink' : 'text-mute'}>{h.model_id}</span>
                   {h.hold_until_failure && (
                     <span className="ml-1.5 rounded border border-accent/40 px-1 text-[11px] text-accent"
-                      title="holds the block while it succeeds; releases on a hop-attributable failure">hold</span>
+                      title="stays on this hop while it succeeds and moves on when the provider fails">hold</span>
                   )}
                   {here && cursor && (
                     <span className="ml-1.5 rounded border border-accent/40 px-1 text-[11px] text-accent"
@@ -1054,7 +1054,7 @@ export default function Combos() {
       ) : combos.length === 0 ? (
         <div className="rounded-xl border border-line bg-surface px-6 py-14 text-center">
           <p className="text-[14px] font-medium">No combos yet</p>
-          <p className="mt-1 text-[13px] text-mute">A combo routes requests through its hops using the selected strategy. Clients use the combo name as the model ID.</p>
+          <p className="mt-1 text-[13px] text-mute">A combo sends each request to one of its hops, picked by its strategy. Apps use the combo's name as the model ID.</p>
           <button type="button" className={cx(btn.base, btn.primary, 'mt-5')} onClick={openNew}>＋ Create your first combo</button>
         </div>
       ) : shown.length === 0 ? (

@@ -70,13 +70,13 @@ function PreviewPanel({ profile, profileId, blocked }: {
           options={[{ key: 'tool_output', label: 'Tool output' }, { key: 'prompt', label: 'Prompt' }]} />
         {kind === 'tool_output' && (
           <label className="flex items-center gap-2 text-[12px] text-mute"
-            title="The tool's name decides how RTK treats the text: terminal and bash output is filtered, read_file is kept whole.">
+            title="The tool's name decides how RTK handles the text. Terminal and bash output gets filtered, read_file is kept whole.">
             Tool
             <input aria-label="Tool name" className={cx(inputCls, '!w-36 py-1 font-mono text-[12px]')} value={tool} spellCheck={false}
               onChange={(e) => setTool(e.target.value)} />
           </label>
         )}
-        <label className="flex items-center gap-2 text-[12px] text-mute" title="Skip the minimum-saving and size floors to see what the engines alone can do.">
+        <label className="flex items-center gap-2 text-[12px] text-mute" title="Ignore the minimum saving and size limits to see what the engines can do on their own.">
           <input type="checkbox" checked={ignoreFloors} onChange={(e) => setIgnoreFloors(e.target.checked)} />
           Ignore the minimum saving
         </label>
@@ -192,7 +192,7 @@ function ProfileModal({ target, profiles, onClose, onSaved }: {
   return (
     <Modal open={open} onClose={onClose} wide busy={busy} dirty={dirty} onSubmit={() => void submit()}
       title={editing ? `Edit ${editing.name}` : template ? `Duplicate ${template.name}` : 'New profile'}
-      subtitle="An ordered pipeline: each stage receives the previous stage’s output"
+      subtitle="Stages run in order. Each one works on the previous one's output."
       footer={(close) => <>
         {showAll && hasErrors(errors) && <span className="mr-auto text-[12px] text-bad">Fix the fields marked in red to save.</span>}
         <button type="button" className={cx(btn.base, btn.ghost)} onClick={close}>Cancel</button>
@@ -215,7 +215,7 @@ function ProfileModal({ target, profiles, onClose, onSaved }: {
                 </button>
               ))}
             </div>
-            <p className="mt-1.5 text-[12px] text-mute">Starting points to adjust, not recommendations for your traffic. Try the result on a sample below.</p>
+            <p className="mt-1.5 text-[12px] text-mute">Starting points you can adjust. Try one on a sample below.</p>
           </div>
         )}
 
@@ -251,10 +251,10 @@ function ProfileModal({ target, profiles, onClose, onSaved }: {
             <div className="space-y-3">
               <label className="flex items-start gap-2.5 text-[13px] text-dim">
                 <input type="checkbox" className="mt-1" checked={d.exempt_last_turn} onChange={(e) => update('exempt_last_turn', e.target.checked)} />
-                <span>Leave the final turn alone<span className="block text-[12px] text-mute">What you just sent is never rewritten.</span></span>
+                <span>Leave the final turn alone<span className="block text-[12px] text-mute">Your latest message is never changed.</span></span>
               </label>
               <div>
-                <span className={labelCls} title="keep: a tool result arriving as the last message ships whole. compress: tool-output engines trim it on its first send; it then stays frozen. A last message with any prose is always exempt.">Newest tool result</span>
+                <span className={labelCls} title="Keep: a tool result in the last message is sent as is. Compress: it's trimmed the first time it's sent and stays that way after. A last message with any normal text is never changed.">Newest tool result</span>
                 <Segmented<'keep' | 'compress'> size="sm" label="Newest tool result" value={d.fresh_tool_output} onChange={(v) => update('fresh_tool_output', v)}
                   options={[{ key: 'keep', label: 'Send whole' }, { key: 'compress', label: 'Trim on first send' }]} />
               </div>
@@ -303,7 +303,7 @@ function ProfileModal({ target, profiles, onClose, onSaved }: {
                           )}
                           {stage.engine === 'rtk' && <>
                             <label className={cx(labelCls, 'mt-2')} htmlFor={`cp-classes-${stage.uid}`}
-                              title="Name your app's tools: log and search output is head/tail filtered, preserve is never touched. Unlisted tools use the built-in table; unknown tools are preserved.">Tool classes (name=log|search|preserve)</label>
+                              title="List your app's tools. For log and search, ezllm keeps the start and end of the output. Preserve means it's left alone. Tools you don't list use the built-in defaults, and unknown tools are left alone.">Tool classes (name=log|search|preserve)</label>
                             <input id={`cp-classes-${stage.uid}`} className={cx(inputCls, 'font-mono')} placeholder="terminal=log, web_extract=preserve"
                               value={stage.toolClasses ?? ''} onChange={(e) => updateStage(stage.uid, { toolClasses: e.target.value })} />
                           </>}
@@ -482,7 +482,7 @@ export default function Compression() {
         <div>
           <SectionLabel>Compression profiles</SectionLabel>
           <p className="mt-1 text-[13px] text-mute" aria-live="polite">
-            {profiles === null ? 'Loading profiles…' : total === 0 ? 'Shorten what is sent upstream, without changing what it means.' : (
+            {profiles === null ? 'Loading profiles…' : total === 0 ? 'Make requests shorter before they go to the provider, without changing their meaning.' : (
               <>
                 <span className="text-ink">{nfmt(total)}</span> profile{total === 1 ? '' : 's'} · {nfmt(enabledN)} enabled
                 {unattachedN > 0 && <> · <span className="text-warn">{nfmt(unattachedN)} not used by any combo</span></>}
@@ -517,7 +517,7 @@ export default function Compression() {
       {profiles === null ? null : profiles.length === 0 ? (
         <div className="rounded-xl border border-line bg-surface px-6 py-12 text-center">
           <p className="text-[14px] font-medium">No profiles yet</p>
-          <p className="mx-auto mt-1 max-w-md text-[13px] text-mute">A profile is an ordered list of stages that shorten requests before they go upstream. Create one, then attach it to a combo.</p>
+          <p className="mx-auto mt-1 max-w-md text-[13px] text-mute">A profile is a list of stages that shorten requests before they go to the provider. Create one, then add it to a combo.</p>
           <button type="button" className={cx(btn.base, btn.primary, 'mt-5')} onClick={openNew}>＋ Create your first profile</button>
         </div>
       ) : (
@@ -556,7 +556,7 @@ export default function Compression() {
                   <p className="mt-2 text-[12px] leading-snug text-mute">{settingsWords(p)}</p>
                   <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px]">
                     {users.length === 0
-                      ? <span className="text-warn">Not used by any combo, so it does nothing until one is set to use it. A request can still pick it with the header.</span>
+                      ? <span className="text-warn">No combo uses this yet, so it does nothing for now. A request can still ask for it with the header.</span>
                       : <>
                         <span className="text-mute">Used by</span>
                         {users.map((c) => <Link key={c.id} to={`/combos?edit=${c.id}`} className="rounded-md border border-line px-2 py-0.5 font-mono text-dim hover:border-line-strong hover:text-ink">{c.name}</Link>)}
@@ -596,7 +596,7 @@ export default function Compression() {
         ) : !hasSavings ? (
           <EmptyState
             title={`No savings recorded in the last ${rangeWords(range)}.`}
-            hint="Either no combo uses a profile yet, or every stage declined because the saving was too small. A stage that declines is not a failure." />
+            hint="Either no combo uses a profile yet, or each saving was too small to apply. That's normal." />
         ) : (
           <div className="space-y-4">
             <div className={cx('grid gap-3', showHitRate || showHeld ? 'sm:grid-cols-2 lg:grid-cols-3' : 'sm:grid-cols-2')}>
@@ -606,17 +606,17 @@ export default function Compression() {
                   <div className="mt-1 font-mono text-[20px] font-semibold text-ok tnum">{formatTokens(rewritten)}</div>
                   {delta && <div className={cx('mt-0.5 text-[12px]', delta.tone ?? 'text-mute')}>{delta.text}</div>}
                   <p className="mt-1 text-[12px] leading-relaxed text-mute">
-                    Tokens removed from {nfmt(appliedCalls)} call{appliedCalls === 1 ? '' : 's'} that went out shorter than they arrived.
+                    Tokens removed across {nfmt(appliedCalls)} compressed call{appliedCalls === 1 ? '' : 's'}.
                   </p>
                 </StaggerItem>
                 {showHitRate && (
                   <StaggerItem className="rounded-lg border border-line bg-raised/40 px-4 py-3">
-                    <SectionLabel>Rewrites that shipped</SectionLabel>
+                    <SectionLabel>Compressed calls</SectionLabel>
                     <div className="mt-1 font-mono text-[20px] font-semibold text-ink tnum">
                       {Math.round((appliedCalls / Math.max(1, rewritesDecided)) * 100)}%
                     </div>
                     <p className="mt-1 text-[12px] leading-relaxed text-mute">
-                      {nfmt(appliedCalls)} of {nfmt(rewritesDecided)} shipped; {nfmt(declinedCalls)} were declined for saving too little. Nothing is claimed as saved for those.
+                      {nfmt(appliedCalls)} of {nfmt(rewritesDecided)} were compressed. The other {nfmt(declinedCalls)} would have saved too little, so they were sent unchanged and don't count as savings.
                     </p>
                   </StaggerItem>
                 )}
@@ -625,7 +625,7 @@ export default function Compression() {
                     <SectionLabel>Held back</SectionLabel>
                     <div className="mt-1 font-mono text-[20px] font-semibold text-warn tnum">{formatTokens(heldNotional)}</div>
                     <p className="mt-1 text-[12px] leading-relaxed text-mute">
-                      What the {nfmt(declinedCalls)} declined rewrites would have saved. Shown on the live feed as “held”, never counted as savings.
+                      What the {nfmt(declinedCalls)} calls sent unchanged would have saved. The live feed shows this as "held". It isn't counted as savings.
                     </p>
                   </StaggerItem>
                 )}
@@ -645,9 +645,9 @@ export default function Compression() {
               emptyLabel={`No savings recorded in the last ${rangeWords(range)}.`} />
             {declinedCalls > 0 && (
               <p className="border-t border-line pt-3 text-[12px] leading-relaxed text-mute">
-                {nfmt(declinedCalls)} calls carried a rewrite that was declined, usually because it saved less than the
-                profile’s minimum. The original shipped instead of breaking a cached prefix. The {formatTokens(heldNotional)}
-                {' '}above is that unclaimed saving, not a loss.
+                {nfmt(declinedCalls)} calls were sent unchanged, usually because compressing them would have saved less
+                than the profile's minimum, and sending the original keeps the provider's cache valid. The {formatTokens(heldNotional)}
+                {' '}above is what they could have saved. Nothing was lost.
               </p>
             )}
           </div>
@@ -669,7 +669,7 @@ export default function Compression() {
       <section className="rounded-xl border border-line bg-surface px-5 py-4 sm:px-6">
         <SectionLabel>Using a profile</SectionLabel>
         <ul className="mt-2 space-y-1.5 text-[13px] text-dim">
-          <li>A combo applies its profile to every request routed through it. Set that when you edit the combo.</li>
+          <li>A combo uses its profile for every request that goes through it. You set it when editing the combo.</li>
           <li className="flex flex-wrap items-center gap-2">
             One request can pick a profile, or switch compression off, with the header
             <Mono>x-ezllm-compression: &lt;profile-name|off&gt;</Mono>
@@ -687,14 +687,14 @@ export default function Compression() {
       <ProfileModal target={editor} profiles={profiles ?? []} onClose={() => setEditor(CLOSED)}
         onSaved={(name, created) => { setEditor(CLOSED); setNotice(created ? `Created ${name}.` : `Saved ${name}.`); reload(); }} />
       <Modal open={trying != null} onClose={() => setTrying(null)} wide title={trying ? `Try ${trying.name}` : 'Try a profile'}
-        subtitle="Runs the real engines on what you paste. Nothing is saved, sent upstream or recorded"
+        subtitle="Runs compression on whatever you paste. Nothing is saved, sent to a provider or recorded"
         footer={(close) => <button type="button" className={cx(btn.base, btn.ghost)} onClick={close}>Close</button>}>
         {trying && <PreviewPanel profileId={trying.id} />}
       </Modal>
       <ConfirmModal
         open={pendingDelete != null}
         title={pendingDelete ? `Delete compression profile “${pendingDelete.name}”?` : 'Delete profile?'}
-        body="No combo uses it. Requests that name it in the x-ezllm-compression header will stop compressing."
+        body="No combo uses it. Requests that ask for it in the x-ezllm-compression header won't be compressed anymore."
         busy={deleting}
         onClose={() => setPendingDelete(null)}
         onConfirm={() => { if (pendingDelete) void remove(pendingDelete); }} />

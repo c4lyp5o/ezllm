@@ -10,16 +10,16 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   untouched and counters match the ledger; `BenchmarkMetricsObserve` measures
   about 255 ns per row with zero allocations. Labels are bounded to surface,
   provider account, upstream model and status, and each family stops at 2,000
-  series (`model="_other"` beyond). Read with a `metrics`-role key, an admin key
-  or the dashboard session. Design: `docs/metrics.md`.
+  series (`model="_other"` beyond). Read only with a `metrics`-role key. Design: `docs/metrics.md`.
 - **Roles:** client keys take any non-empty set of `infer`, `metrics` and
   `admin` (`store.NormalizeRoles`). Inference routes, including `/v1/messages`
   through `x-api-key` and the VS Code alias, now require `infer`
   (`Server.inferAuthed`); before, any valid key could call models. Schema v36
-  grants `infer` to admin-only keys so existing keys keep working. The Connect
-  page picks roles with checkboxes (admin shows metrics as included and ticks
-  inference, which can be unticked), edits them from Policy, and has a
-  Prometheus section.
+  grants `infer` to admin-only keys so existing keys keep working. Each role
+  opens one surface and none implies another. The Connect page picks roles with
+  independent checkboxes, edits them from Policy, and has a Prometheus section.
+- **Dashboard:** the sidebar footer is three icon buttons (source on GitHub,
+  theme, log out), and the interface text was rewritten in plainer language.
 - **Bridge updater:** the Codex native-history gate turn is judged by recall of
   the earlier codename instead of `pong` (it refused every release since the
   check was added, including 0.167.1 and 0.167.2). An undated channel

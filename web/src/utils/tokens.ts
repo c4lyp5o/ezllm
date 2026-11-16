@@ -94,7 +94,7 @@ export async function testKey(plaintext: string, roles: readonly string[] = ['in
     try {
       const res = await fetch(path, { headers: { Authorization: `Bearer ${plaintext}` }, credentials: 'omit', cache: 'no-store' });
       return res.ok
-        ? { ok: true, status: res.status, models: 0, message: path === '/metrics' ? 'The key works and can read metrics.' : 'The key works on the admin API.' }
+        ? { ok: true, status: res.status, models: 0, message: path === '/metrics' ? 'The key works. It can read metrics.' : 'The key works. It can use the admin API.' }
         : { ok: false, status: res.status, models: 0, message: res.status === 401 || res.status === 403 ? 'The gateway rejected this key.' : `The gateway answered ${res.status}.` };
     } catch {
       return { ok: false, status: 0, models: 0, message: 'Could not reach the gateway.' };
@@ -105,7 +105,7 @@ export async function testKey(plaintext: string, roles: readonly string[] = ['in
     if (!res.ok) return { ok: false, status: res.status, models: 0, message: res.status === 401 || res.status === 403 ? 'The gateway rejected this key.' : `The gateway answered ${res.status}.` };
     const body = await res.json().catch(() => ({}));
     const n = Array.isArray(body?.data) ? body.data.length : 0;
-    return { ok: true, status: res.status, models: n, message: `The key works and can see ${n.toLocaleString('en-US')} model${n === 1 ? '' : 's'}.` };
+    return { ok: true, status: res.status, models: n, message: `The key works. It can see ${n.toLocaleString('en-US')} model${n === 1 ? '' : 's'}.` };
   } catch {
     return { ok: false, status: 0, models: 0, message: 'Could not reach the gateway.' };
   }

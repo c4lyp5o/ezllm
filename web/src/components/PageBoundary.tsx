@@ -28,7 +28,7 @@ export class PageBoundary extends Component<Props, State> {
     if (!this.state.failed) return this.props.children;
     return (
       <div className="flex flex-col items-start gap-3 py-16 text-[13px]" role="alert">
-        <p className="text-ink">This page could not load. The dashboard may have been updated since you opened it.</p>
+        <p className="text-ink">This page didn't load. The dashboard may have been updated since you opened it.</p>
         <button type="button" className={cx(btn.base, btn.primary)} onClick={() => window.location.reload()}>
           Reload
         </button>

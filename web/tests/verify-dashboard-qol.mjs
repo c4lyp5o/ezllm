@@ -51,7 +51,7 @@ try {
   await page.getByText('Needs attention').waitFor();
   const strip = page.getByRole('region', { name: 'Needs attention' });
   const text = await strip.innerText();
-  check('attention: all-keys-disabled account is flagged', /Dead end: every key is disabled/.test(text), text);
+  check('attention: all-keys-disabled account is flagged', /Dead end: all keys are disabled/.test(text), text);
   check('attention: error rate over the last 15 minutes', /2 of 7 calls in the last 15 minutes failed \(29%\)/.test(text), text);
   check('attention: repeated failover is flagged', /main failed over 3 times/.test(text), text);
   check('attention deep-links to the provider', (await strip.getByRole('link', { name: 'Open provider' }).getAttribute('href')) === '/providers?open=2');

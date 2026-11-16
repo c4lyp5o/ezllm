@@ -19,30 +19,26 @@ export default function ThemeToggle({ theme, onChange }: { theme: Theme; onChang
       type="button"
       role="switch"
       aria-checked={theme === 'dark'}
-      aria-label={`Theme: ${theme}. Switch to ${next} mode`}
+      aria-label={`Dark mode is ${theme === 'dark' ? 'on' : 'off'}. Switch to ${next} mode`}
       title={`Switch to ${next} mode`}
       onClick={() => onChange(next)}
-      className="group flex w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-left transition-colors hover:bg-hover"
+      className="flex h-9 w-full items-center justify-center rounded text-mute transition-colors hover:bg-hover hover:text-ink"
     >
       <span className="relative flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
         {/* Sun and moon cross-fade and swap scale rather than popping, so the
             icon change reads as the same control moving between states. */}
-        <svg viewBox="0 0 24 24" className={cx('absolute h-3.5 w-3.5 transition-all duration-200',
+        <svg viewBox="0 0 24 24" className={cx('absolute h-4 w-4 transition-all duration-200',
           theme === 'dark' ? 'scale-100 opacity-100' : 'scale-75 opacity-0')}
           fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
           <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
         </svg>
-        <svg viewBox="0 0 24 24" className={cx('absolute h-3.5 w-3.5 transition-all duration-200',
+        <svg viewBox="0 0 24 24" className={cx('absolute h-4 w-4 transition-all duration-200',
           theme === 'light' ? 'scale-100 opacity-100' : 'scale-75 opacity-0')}
           fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
           <circle cx="12" cy="12" r="4" />
           <path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19" />
         </svg>
       </span>
-      <span className="text-[12px] text-mute transition-colors group-hover:text-ink">
-        {theme === 'dark' ? 'Dark' : 'Light'} mode
-      </span>
-      <span className="ml-auto text-[11px] text-mute/70">switch to {next}</span>
     </button>
   );
 }

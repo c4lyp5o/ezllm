@@ -24,9 +24,9 @@ Antigravity CLI updates. Schema v36.
   admission, ledger health, bridge CLI versions and Go runtime gauges. Counters
   are fed from committed ledger batches, so requests do no metrics work. Read it
   with a key that has the new `metrics` role. See `docs/metrics.md`.
-- **Key roles are checkboxes:** Inference, Metrics and Admin, each a separate
-  permission, chosen at creation and editable from Policy. Admin includes
-  metrics; it does not include inference. The Connect page shows the metrics URL
+- **Key roles are checkboxes:** Admin, Inference and Metrics, chosen at creation
+  and editable from Policy. Each role opens exactly one surface (`/admin`, `/v1`,
+  `/metrics`) and none implies another. The Connect page shows the metrics URL
   and a `prometheus.yml` job.
 - **Security fix: inference needs the `infer` role.** Before, any valid key could
   call models, including admin-only keys. Every `/v1/*` route and the VS Code

@@ -10,8 +10,8 @@ fails closed; a token with no row still has no policy).
 Every route except `/healthz`, the dashboard's static files and the sign-in/setup endpoints
 (`GET|POST /admin/setup`, `POST /admin/login`, `POST /admin/logout`) needs credentials: a client
 token (`Authorization: Bearer …` or `x-api-key`) on `/v1/*`; on `/admin/*` an admin token or the
-dashboard session (bearer or the `ezllm_session` cookie); on `/metrics` a token with the `metrics` or
-`admin` role, or the dashboard session. Inference routes (every `/v1/*` route and the VS Code
+dashboard session (bearer or the `ezllm_session` cookie); on `/metrics` a token with the `metrics`
+role and nothing else (not an admin token, not the dashboard session). Inference routes (every `/v1/*` route and the VS Code
 alias) need a token with the `infer` role: any other valid token gets `403 forbidden`
 "infer role required" (v2.1.0; before, any valid token could call models).
 
@@ -39,7 +39,7 @@ Errors are OpenAI-shaped: `{"error":{"type":"...","message":"...","code":422}}`.
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/healthz` | no auth; **liveness + release version** — `{"status":"ok","version":"2.1.0"}` after a DB ping (503 `{"status":"down","version":"…"}` if the ping fails). Version is the only extra field; no counts/paths/uptime. |
-| GET | `/metrics` | Prometheus text exposition (v2.1.0). A token with the `metrics` or `admin` role, or the dashboard session; an infer-only token → 403. Counters come from committed ledger rows, so a request does no metrics work. Names, labels and auth: [metrics.md](metrics.md). |
+| GET | `/metrics` | Prometheus text exposition (v2.1.0). A token with the `metrics` role only; any other token → 403, the dashboard session → 401. Counters come from committed ledger rows, so a request does no metrics work. Names, labels and auth: [metrics.md](metrics.md). |
 | GET | `/v1/models?protocol=` | `openai` (default) / `anthropic` shape; ids are `<namespace>/<model>`, plus one bare id per **enabled** combo |
 | POST | `/v1/chat/completions` | OpenAI stream + non-stream |
 | POST | `/v1/messages` | Anthropic (`x-api-key` or Bearer) |
@@ -664,8 +664,8 @@ response shape is unchanged. `EZLLM_COMBO_AUTOPROBE=off` disables it.
 // PATCH → {"enabled":false} | {"roles":["infer","admin"]} | {"cap_tokens":100000,"cap_window":"daily"} | {"allowed_models":"deepseek/*,openai/gpt-5*"} | {"expires_at":"2026-11-01"}
 ```
 `roles` is a non-empty subset of `infer|metrics|admin`, each a separate permission:
-`infer` calls models on `/v1/*`, `metrics` reads `GET /metrics`, `admin` reaches `/admin/*` (and
-`/metrics`). Admin does not imply infer. Roles come back deduplicated in that order; an unknown
+`infer` calls models on `/v1/*`, `metrics` reads `GET /metrics`, `admin` reaches `/admin/*`. No role
+implies another: an admin key that should also call models or scrape needs `infer` or `metrics` too. Roles come back deduplicated in that order; an unknown
 role or an empty list is `400`. Schema v36 added `infer` to every key that had `admin` without it,
 because those keys could call models before 2.1.0.
 `cap_tokens` is a real per-key token budget (`0` = unlimited); `cap_window` is

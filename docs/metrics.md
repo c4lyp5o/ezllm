@@ -34,9 +34,9 @@ Collector's Prometheus receiver. Added in v2.1.0. Code: `internal/server/metrics
 
 Create a key with the **Metrics** role on the dashboard's Connect page (or
 `POST /admin/tokens` with `"roles":["metrics"]`). A metrics key reads only
-`/metrics`: it gets 403 on inference routes and on `/admin`. A key with the
-`admin` role and the dashboard session can also read the endpoint. An
-infer-only key gets 403. The Connect page shows the scrape URL and a
+`/metrics`: it gets 403 on inference routes and on `/admin`. Only the
+`metrics` role opens `/metrics`: an admin or infer key gets 403 and the
+dashboard session gets 401. The Connect page shows the scrape URL and a
 paste-ready `prometheus.yml` job.
 
 Store the key in a file and point `credentials_file` at it:

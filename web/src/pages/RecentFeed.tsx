@@ -105,7 +105,7 @@ export default function RecentFeed() {
         </span>
         {dropped > 0 && (
           <span className="text-[12px] text-warn">
-            {dropped} row{dropped === 1 ? '' : 's'} shed under load
+            {dropped} row{dropped === 1 ? '' : 's'} skipped because the feed was busy
           </span>
         )}
       </div>
@@ -149,7 +149,7 @@ export default function RecentFeed() {
                               c.applied
                                 ? `compressed by ${c.compression}`
                                 : c.savedNotional > 0
-                                  ? `asked ${c.compression}: ${formatTokens(c.savedNotional)} tokens were compressible but below the profile's minimum ratio — the rewrite was rejected rather than break the cached prefix`
+                                  ? `asked ${c.compression}: ${formatTokens(c.savedNotional)} tokens could have been compressed, but that's below the profile's minimum ratio, so the request was sent unchanged to keep the provider's cache valid`
                                   : `asked ${c.compression}, no change`
                             }
                             className={cx(
@@ -193,9 +193,9 @@ export default function RecentFeed() {
                       ) : (
                       <span className="font-mono tabular-nums text-mute w-28 shrink-0 text-right"
                         title={`tokens in ${formatTokens(c.tin)} (↑, prompt with cache inside) · tokens out ${formatTokens(c.tout)} (↓, completion)`}>
-                        <span title="tokens in — prompt, cache counted inside">↑{formatTokens(c.tin)}</span>
+                        <span title="tokens in (prompt, including cached tokens)">↑{formatTokens(c.tin)}</span>
                         {' '}
-                        <span title="tokens out — completion">↓{formatTokens(c.tout)}</span>
+                        <span title="tokens out (completion)">↓{formatTokens(c.tout)}</span>
                         {c.saved > 0 && (
                           <span className="text-ok" title="tokens saved by compression">
                             {' '}

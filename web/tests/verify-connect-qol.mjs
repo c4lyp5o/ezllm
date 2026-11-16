@@ -91,19 +91,20 @@ try {
   // create
   await page.getByRole('button', { name: /Create key/ }).first().click();
   await dialog().getByLabel('Name', { exact: true }).fill('Hermes');
-  check('a taken name is refused, case-insensitively, with the consequence', (await dialog().getByText(/already exists. Creating it again would replace that key/).count()) === 1);
+  check('a taken name is refused, case-insensitively, with the consequence', (await dialog().getByText(/already exists. Creating it again would replace its secret/).count()) === 1);
   calls.length = 0;
   await dialog().getByLabel('Name', { exact: true }).press('Enter');
   await page.waitForTimeout(250);
   check('Enter on an invalid form creates nothing', last(/^POST/).length === 0, calls);
   await dialog().getByLabel('Name', { exact: true }).fill('laptop');
-  await dialog().getByRole('button', { name: 'Full admin' }).click();
-  check('admin role shows its warning', (await dialog().getByText(/Keep it for yourself, never for a tool/).count()) === 1);
-  await dialog().getByRole('button', { name: 'Inference only' }).click();
+  await dialog().getByRole('checkbox', { name: /Admin/ }).check();
+  check('admin role shows its warning', (await dialog().getByText(/Keep it for yourself/).count()) === 1);
+  check('ticking admin ticks nothing else', !(await dialog().getByRole('checkbox', { name: /Metrics/ }).isChecked()));
+  await dialog().getByRole('checkbox', { name: /Admin/ }).uncheck();
   await dialog().getByLabel('Allowed models', { exact: false }).first().fill('deep*');
-  check('a glob that cannot cross / says it matches nothing', (await dialog().getByText(/Matches none of the 4 models routable right now/).count()) === 1);
+  check('a glob that cannot cross / says it matches nothing', (await dialog().getByText(/Doesn't match any of the 4 models available right now/).count()) === 1);
   await dialog().locator('#tk-models').fill('deepseek/*');
-  check('the allowlist readout counts matches', (await dialog().getByText(/Matches 2 of 4 routable models/).count()) === 1);
+  check('the allowlist readout counts matches', (await dialog().getByText(/Matches 2 of 4 available models/).count()) === 1);
   await dialog().getByRole('button', { name: '90 days', exact: true }).click();
   check('an expiry preset fills the date and reads it back', (await dialog().getByLabel('Expiry date').inputValue()).length === 10 && (await dialog().getByText(/Expires in 90 days/).count()) === 1);
   await dialog().getByRole('button', { name: '1,000,000', exact: true }).click();
@@ -120,7 +121,7 @@ try {
   await panel.getByRole('button', { name: 'curl' }).click();
   check('the curl tab carries the key too', (await panel.getByText(/Authorization: Bearer ez-secret-123/).count()) === 1);
   await panel.getByRole('button', { name: 'Test this key' }).click();
-  await panel.getByText('The key works and can see 2 models.').waitFor();
+  await panel.getByText('The key works. It can see 2 models.').waitFor();
   check('Test this key calls /v1/models with only that key', v1Auth.at(-1) === 'Bearer ez-secret-123', v1Auth);
   await page.keyboard.press('Escape');
   check('Escape does not dismiss the one-time secret', (await panel.count()) === 1);
@@ -165,7 +166,7 @@ try {
   check('?new=1 opens the create form', true);
   await page.keyboard.press('Escape');
   await page.goto(`${t.base}/connect?policy=4`);
-  await dialog().getByText('Key policy — spent').waitFor();
+  await dialog().getByText('Key policy: spent').waitFor();
   check('?policy= opens that key’s policy', true);
   await page.keyboard.press('Escape');
 

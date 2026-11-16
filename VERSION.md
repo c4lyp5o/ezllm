@@ -28,6 +28,9 @@ Antigravity CLI updates. Schema v36.
   and editable from Policy. Each role opens exactly one surface (`/admin`, `/v1`,
   `/metrics`) and none implies another. The Connect page shows the metrics URL
   and a `prometheus.yml` job.
+- **Dashboard:** the sidebar footer is three labelled icon buttons (source on
+  GitHub, theme, log out), and the interface text was rewritten in plainer
+  language.
 - **Security fix: inference needs the `infer` role.** Before, any valid key could
   call models, including admin-only keys. Every `/v1/*` route and the VS Code
   alias now answer 403 "infer role required" to a key without it. Schema v36

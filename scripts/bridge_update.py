@@ -187,6 +187,18 @@ def soak_start(release, first_seen):
     return dt.datetime.fromisoformat(first_seen)
 
 
+def pending_since(first_seen, version, current):
+    """The soak clock for an undated release. agy's manifest names only its
+    newest build, and agy ships faster than soak_days: a per-build clock was
+    reset by every release, so no build ever finished soaking (1.4.12 held
+    from 1.5.0 to 1.5.9). There the clock is how long an update has been
+    pending: the earliest sighting of any version newer than current."""
+    times = [dt.datetime.fromisoformat(t) for v, t in first_seen.items()
+             if VERSION_RE.match(v) and (not current or vtuple(v) > vtuple(current))]
+    times.append(dt.datetime.fromisoformat(first_seen[version]))
+    return min(times).isoformat(timespec="seconds")
+
+
 def pick_candidate(release, current, bcfg, blocked, first_seen, soak_days, at):
     """(version or None, reason) — the release to try now, or why not."""
     v = release["version"]
@@ -622,7 +634,10 @@ def run(args):
         # The newest release that is ready; the reason reported is the newest's.
         rel, v, why = releases[0], None, ""
         for r in releases:
-            seen = state["first_seen"].setdefault(name, {}).setdefault(r["version"], at.isoformat(timespec="seconds"))
+            sightings = state["first_seen"].setdefault(name, {})
+            seen = sightings.setdefault(r["version"], at.isoformat(timespec="seconds"))
+            if not r.get("published"):
+                seen = pending_since(sightings, r["version"], cur)
             rv, rwhy = pick_candidate(r, cur, cfg["bridges"][name], state["blocked"].get(name, {}), seen, cfg["soak_days"], at)
             retry_at = state["retry_after"].get(name, {}).get(r["version"])
             if rv and retry_at and at < dt.datetime.fromisoformat(retry_at):

@@ -179,6 +179,32 @@ func TestJudgeTurn(t *testing.T) {
 	}
 }
 
+// The native-history turn answers with the recalled codename, never "pong":
+// judging it as a plain turn held back every Codex release (0.167.2).
+func TestJudgeNativeHistory(t *testing.T) {
+	const fact = "history_fact_42"
+	for _, c := range []struct {
+		name, text string
+		err        error
+		out        int64
+		says       string
+	}{
+		{name: "recalled", text: "history_fact_42", out: 5},
+		{name: "recalled in a sentence", text: "The codename is history_fact_42.", out: 9},
+		{name: "not recalled", text: "pong", out: 2, says: "prior user fact not recalled"},
+		{name: "no usage", text: fact, says: "no output tokens"},
+		{name: "native error", err: errors.New("rate limited"), says: "rate limited"},
+	} {
+		p := strings.Join(judgeNativeHistory(c.err, c.text, c.out, fact), "; ")
+		if (p == "") != (c.says == "") || !strings.Contains(p, c.says) {
+			t.Errorf("%s: verdict %q, want %q", c.name, p, c.says)
+		}
+		if c.text != "" && strings.Contains(p, c.text) {
+			t.Errorf("%s: the model's text leaked into the verdict: %q", c.name, p)
+		}
+	}
+}
+
 // --live spends quota, so it runs only on a CLI that passed every static check;
 // on one that did, a CLI that cannot answer a turn is refused.
 func TestBridgeCheckLiveRunsOnlyAfterStaticPasses(t *testing.T) {

@@ -426,6 +426,23 @@ func judgeTurn(turn string, err error, text string, outputTokens int64, wantTool
 	return ""
 }
 
+// judgeNativeHistory is the verdict for the native-history turn. The prompt asks
+// for the earlier codename, not "pong", so judgeTurn's plain-turn text check
+// does not apply: the answer must carry the fact, with usage.
+func judgeNativeHistory(err error, text string, outputTokens int64, fact string) []string {
+	if err != nil {
+		return []string{judgeLive("native history", err)}
+	}
+	var problems []string
+	if outputTokens <= 0 {
+		problems = append(problems, "live native history: no output tokens reported")
+	}
+	if !strings.Contains(text, fact) {
+		problems = append(problems, "live native history: prior user fact not recalled")
+	}
+	return problems
+}
+
 func appendIf(problems []string, p string) []string {
 	if p != "" {
 		problems = append(problems, p)
@@ -514,10 +531,7 @@ func liveCodex(ctx context.Context, bin, home string, pre codexbridge.Preflight,
 			problems = append(problems, "live native history: cannot construct proof")
 		} else {
 			historyRes, historyErr := r.Run(ctx, historyReq, nil)
-			problems = appendIf(problems, judgeTurn("native history", historyErr, historyRes.Text, historyRes.Usage.OutputTokens, "", ""))
-			if historyErr == nil && !strings.Contains(historyRes.Text, fact) {
-				problems = append(problems, "live native history: prior user fact not recalled")
-			}
+			problems = append(problems, judgeNativeHistory(historyErr, historyRes.Text, historyRes.Usage.OutputTokens, fact)...)
 		}
 	}
 	if retryableBridgeProblems(problems) {

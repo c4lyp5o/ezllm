@@ -11,7 +11,15 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v2.1.0**
+**Current: v2.1.1**
+
+## v2.1.1 — 2026-11-16
+
+- **Fix: the Copilot bridge id is `copilot-sub`.** It was `github-copilot`, the
+  name of the provider retired on 2026-11-05, so Settings and `/admin/bridges`
+  listed it apart from its `copilot-sub` preset, namespace and login folder.
+  Every bridge id now matches its preset key. `GET /admin/bridges` returns the
+  new id; nothing stored in the database changes.
 
 ## v2.1.0 — 2026-11-16
 

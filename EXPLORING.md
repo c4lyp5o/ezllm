@@ -677,7 +677,7 @@ can see the failure you are trying to prevent.**
   batch). `QualifiedVersion` lives here.
 - `internal/provider/copilotbridge.go` — `KindCopilotBridge` (`copilot-bridge`), an adapter
   embedding `*openAICompatible`: the wire is shared, the identity is its own.
-- `internal/server/bridges.go` — registry entry id `github-copilot` (label "GitHub
+- `internal/server/bridges.go` — registry entry id `copilot-sub` (label "GitHub
   Copilot", kind `copilot-bridge`); `web/src/pages/Providers.tsx` — the "GitHub Copilot
   (bridge)" preset, which replaced the device-flow panel.
 

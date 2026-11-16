@@ -243,7 +243,7 @@ export async function postKeyTestStream<T>(
 // how to turn one on. A key add names `bridge` instead of api_key and the
 // server supplies the shared secret — it never reaches the browser.
 export type Bridge = {
-  id: 'claude-sub' | 'chatgpt-sub' | 'antigravity-sub' | 'github-copilot';
+  id: 'claude-sub' | 'chatgpt-sub' | 'antigravity-sub' | 'copilot-sub';
   label: string;
   kind: string;
   base_url: string;

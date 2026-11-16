@@ -38,7 +38,7 @@ Errors are OpenAI-shaped: `{"error":{"type":"...","message":"...","code":422}}`.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/healthz` | no auth; **liveness + release version** — `{"status":"ok","version":"2.1.0"}` after a DB ping (503 `{"status":"down","version":"…"}` if the ping fails). Version is the only extra field; no counts/paths/uptime. |
+| GET | `/healthz` | no auth; **liveness + release version** — `{"status":"ok","version":"2.1.1"}` after a DB ping (503 `{"status":"down","version":"…"}` if the ping fails). Version is the only extra field; no counts/paths/uptime. |
 | GET | `/metrics` | Prometheus text exposition (v2.1.0). A token with the `metrics` role only; any other token → 403, the dashboard session → 401. Counters come from committed ledger rows, so a request does no metrics work. Names, labels and auth: [metrics.md](metrics.md). |
 | GET | `/v1/models?protocol=` | `openai` (default) / `anthropic` shape; ids are `<namespace>/<model>`, plus one bare id per **enabled** combo |
 | POST | `/v1/chat/completions` | OpenAI stream + non-stream |
@@ -341,7 +341,8 @@ Add `?force=true` to delete anyway (cascades: keys, models, quota rows).
 // or, for a running subscription bridge (see GET /admin/bridges): the server supplies the key
 { "label":"primary", "bridge":"claude-sub" }
 ```
-Bridge ids are `claude-sub`, `chatgpt-sub`, `antigravity-sub` and `github-copilot` — the
+Bridge ids are `claude-sub`, `chatgpt-sub`, `antigravity-sub` and `copilot-sub` (each the key of
+its provider preset; the Copilot bridge was `github-copilot` before 2.1.1) — the
 last one belongs to the `copilot-bridge` kind (the Copilot CLI), whose base URL
 is `http://127.0.0.1:8793/v1` and whose credential is the CLI's own login, so
 there is no key to paste at all.

@@ -2,6 +2,12 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
+## v2.1.1 — Copilot bridge id
+
+- The Copilot bridge's registry id is `copilot-sub` (was `github-copilot`, the
+  retired provider's name), matching its preset key like the other bridges.
+  `TestBridgeIDsMatchTheirPresets` pins all four ids.
+
 ## v2.1.0 — Prometheus metrics and bridge updater fixes
 
 - **Metrics:** `GET /metrics` serves Prometheus text exposition, hand-written

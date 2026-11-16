@@ -36,6 +36,24 @@ func TestBridgesListsBothOffByDefault(t *testing.T) {
 	}
 }
 
+// Each bridge id is its provider preset's key (claude-sub, chatgpt-sub, …). The
+// Copilot bridge was "github-copilot", the retired OAuth provider's name, so the
+// dashboard listed it apart from its copilot-sub preset and login.
+func TestBridgeIDsMatchTheirPresets(t *testing.T) {
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
+	var ids []string
+	for _, b := range h.server.bridges.list {
+		ids = append(ids, b.ID)
+	}
+	if got, want := strings.Join(ids, ","), "claude-sub,chatgpt-sub,antigravity-sub,copilot-sub"; got != want {
+		t.Fatalf("bridge ids = %s, want %s", got, want)
+	}
+	h.server.EnableBridge("copilot-sub", "127.0.0.1:8793", bridgeSecret, "", nil)
+	if _, resp := jsonDo(t, h, "GET", "/admin/bridges", "tok-admin", nil); !strings.Contains(resp, `"id":"copilot-sub"`) || strings.Contains(resp, "github-copilot") {
+		t.Fatalf("copilot bridge not listed as copilot-sub: %s", resp)
+	}
+}
+
 // bridgeUpstream is a fake bridge that only answers the shared secret.
 func bridgeUpstream(authed *atomic.Int64) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

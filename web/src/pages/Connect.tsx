@@ -23,9 +23,9 @@ import {
   type KeyTest, type TokenCreated, type TokenInfo, type V1Model,
 } from '../utils/tokens';
 import {
-  EXPIRY_PRESETS, RECIPES, allowedModels, curlRequest, expiryReadout, expiryTime, hasKeyErrors, keyState, presetDate, recipe,
-  splitPatterns, validateKey,
-  type KeyDraft, type RecipeKey,
+  EXPIRY_PRESETS, RECIPES, ROLES, allowedModels, curlRequest, expiryReadout, expiryTime, hasKeyErrors, keyState, metricsCurl, presetDate,
+  prometheusScrape, recipe, sortRoles, splitPatterns, validateKey,
+  type KeyDraft, type RecipeKey, type Role,
 } from '../utils/connect';
 
 const WINDOWS = ['5h', 'daily', 'weekly', 'monthly'] as const;
@@ -136,8 +136,51 @@ function ExpiryField({ value, onChange, error }: { value: string; onChange: (v: 
   );
 }
 
+// ── roles ───────────────────────────────────────────────────────────────────
+// One checkbox per permission. Admin includes metrics on the server, so the
+// metrics box shows checked and locked under admin; infer stays separate (it
+// spends), but ticking admin ticks it too as a starting point.
+function RoleField({ value, onChange, error }: { value: Role[]; onChange: (r: Role[]) => void; error?: string }) {
+  const admin = value.includes('admin');
+  const toggle = (k: Role, on: boolean) => {
+    let next = on ? [...value, k] : value.filter((r) => r !== k);
+    if (k === 'admin' && on && !value.includes('infer')) next = [...next, 'infer'];
+    if (k === 'admin') next = next.filter((r) => r !== 'metrics'); // implied; keep the stored set minimal
+    onChange(sortRoles(next));
+  };
+  return (
+    <fieldset>
+      <legend className={labelCls}>Roles</legend>
+      <div className="space-y-2">
+        {ROLES.map((r) => {
+          const implied = r.key === 'metrics' && admin;
+          const checked = implied || value.includes(r.key);
+          return (
+            <label key={r.key} className={cx('flex items-start gap-2.5 rounded-lg border px-3 py-2', checked ? 'border-accent/40 bg-accent-dim/40' : 'border-line', implied ? 'cursor-default opacity-80' : 'cursor-pointer')}>
+              <input type="checkbox" className="mt-0.5 accent-[var(--color-accent)]" checked={checked} disabled={implied}
+                onChange={(e) => toggle(r.key, e.target.checked)} />
+              <span className="min-w-0">
+                <span className="text-[13px] font-medium text-ink">{r.label}</span>
+                {implied && <span className="ml-2 text-[11px] text-mute">included in admin</span>}
+                <span className="block text-[12px] leading-snug text-mute">{r.hint}</span>
+              </span>
+            </label>
+          );
+        })}
+      </div>
+      {error && <p className="mt-1.5 text-[12px] text-bad">{error}</p>}
+      {admin && (
+        <p className="mt-2 rounded-lg border border-warn/30 bg-warn-dim p-2.5 text-[13px] leading-relaxed text-warn">
+          Admin can add providers, read provider keys and mint other keys. Keep it for yourself, never for a tool.
+          {value.includes('infer') ? ' Untick Inference for an operations key that must never call models.' : ' This key cannot call models.'}
+        </p>
+      )}
+    </fieldset>
+  );
+}
+
 // ── create ──────────────────────────────────────────────────────────────────
-const EMPTY_KEY: KeyDraft = { name: '', role: 'infer', models: '', expiry: '', cap: 0, capWindow: 'monthly' };
+const EMPTY_KEY: KeyDraft = { name: '', roles: ['infer'], models: '', expiry: '', cap: 0, capWindow: 'monthly' };
 
 function CreateKeyModal({ open, names, ids, onClose, onCreated }: {
   open: boolean; names: string[]; ids: string[]; onClose: () => void; onCreated: (t: TokenCreated, note?: string) => void;
@@ -157,11 +200,13 @@ function CreateKeyModal({ open, names, ids, onClose, onCreated }: {
     if (hasKeyErrors(errors)) { setShowAll(true); return; }
     setBusy(true); setErr('');
     try {
-      const t = await createToken(d.name.trim(), d.role, { allowed_models: d.models.trim(), expires_at: d.expiry });
+      // Model allowlist and budget only mean something for an inference key.
+      const infer = d.roles.includes('infer');
+      const t = await createToken(d.name.trim(), d.roles, { allowed_models: infer ? d.models.trim() : '', expires_at: d.expiry });
       let note: string | undefined;
       // The create call takes no budget, so it is a second call. The key exists
       // either way: a failure here is reported next to the key, not hidden.
-      if (d.cap > 0) {
+      if (infer && d.cap > 0) {
         try { await patchToken(t.id, { cap_tokens: d.cap, cap_window: d.capWindow }); }
         catch (e) { note = `The key was created, but its budget was not saved (${errText(e, 'unknown error')}). Set it from Policy.`; }
       }
@@ -185,31 +230,26 @@ function CreateKeyModal({ open, names, ids, onClose, onCreated }: {
           {nameShown ? <p className="mt-1 text-[12px] text-bad">{errors.name}</p> : <p className="mt-1 text-[12px] text-mute">Usage is counted by this name. Use one per app or machine.</p>}
         </div>
 
-        <div>
-          <span className={labelCls}>Role</span>
-          <Segmented<'infer' | 'admin'> label="Role" value={d.role} onChange={(r) => set({ role: r })}
-            options={[{ key: 'infer', label: 'Inference only' }, { key: 'admin', label: 'Full admin' }]} />
-          {d.role === 'infer'
-            ? <p className="mt-1.5 text-[12px] text-mute">Can call models on /v1. Use this for tools and apps.</p>
-            : <p className="mt-1.5 rounded-lg border border-warn/30 bg-warn-dim p-2.5 text-[13px] leading-relaxed text-warn">
-              Full admin can also add providers, read provider keys and mint other keys. Keep it for yourself, never for a tool.
-            </p>}
-        </div>
+        <RoleField value={d.roles} onChange={(roles) => set({ roles })} error={showAll ? errors.roles : undefined} />
 
-        <div>
-          <label className={labelCls} htmlFor="tk-models">Allowed models <span className="text-mute">(optional)</span></label>
-          <AllowlistField id="tk-models" value={d.models} onChange={(v) => set({ models: v })} ids={ids} />
-        </div>
+        {d.roles.includes('infer') && (
+          <div>
+            <label className={labelCls} htmlFor="tk-models">Allowed models <span className="text-mute">(optional)</span></label>
+            <AllowlistField id="tk-models" value={d.models} onChange={(v) => set({ models: v })} ids={ids} />
+          </div>
+        )}
 
         <div>
           <span className={labelCls}>Expires <span className="text-mute">(optional)</span></span>
           <ExpiryField value={d.expiry} onChange={(v) => set({ expiry: v })} error={errors.expiry} />
         </div>
 
-        <div>
-          <span className={labelCls}>Budget <span className="text-mute">(optional)</span></span>
-          <CapField cap={d.cap} window={d.capWindow} onCap={(n) => set({ cap: n })} onWindow={(w) => set({ capWindow: w })} error={errors.cap} />
-        </div>
+        {d.roles.includes('infer') && (
+          <div>
+            <span className={labelCls}>Budget <span className="text-mute">(optional)</span></span>
+            <CapField cap={d.cap} window={d.capWindow} onCap={(n) => set({ cap: n })} onWindow={(w) => set({ capWindow: w })} error={errors.cap} />
+          </div>
+        )}
 
         {err && <div role="alert" className="rounded-lg border border-bad/30 bg-bad-dim px-4 py-3 text-[13px] text-bad">{err}</div>}
       </div>
@@ -218,13 +258,24 @@ function CreateKeyModal({ open, names, ids, onClose, onCreated }: {
 }
 
 // ── show once ───────────────────────────────────────────────────────────────
+type FreshTab = 'env-openai' | 'env-anthropic' | 'curl' | 'metrics-curl' | 'prometheus';
+
 function FreshKey({ fresh, base, sample, note, onDone }: { fresh: TokenCreated; base: string; sample: string; note?: string; onDone: () => void }) {
-  const [tab, setTab] = useState<'env-openai' | 'env-anthropic' | 'curl'>('env-openai');
+  const infer = fresh.roles.includes('infer');
+  const metrics = fresh.roles.includes('metrics') || fresh.roles.includes('admin');
+  const tabs: { key: FreshTab; label: string }[] = [
+    ...(infer ? [{ key: 'env-openai' as const, label: 'OpenAI env' }, { key: 'env-anthropic' as const, label: 'Anthropic env' }, { key: 'curl' as const, label: 'curl' }] : []),
+    ...(metrics ? [{ key: 'prometheus' as const, label: 'Prometheus' }, { key: 'metrics-curl' as const, label: 'Metrics curl' }] : []),
+  ];
+  const [tab, setTab] = useState<FreshTab>(tabs[0]?.key ?? 'env-openai');
   const [test, setTest] = useState<KeyTest | null>(null);
   const [testing, setTesting] = useState(false);
   const model = sample || '<model-id>';
-  const text = tab === 'curl' ? curlRequest(base, model, fresh.plaintext) : recipe(tab, base, fresh.plaintext, model);
-  const run = async () => { setTesting(true); setTest(await testKey(fresh.plaintext)); setTesting(false); };
+  const text = tab === 'curl' ? curlRequest(base, model, fresh.plaintext)
+    : tab === 'metrics-curl' ? metricsCurl(base, fresh.plaintext)
+      : tab === 'prometheus' ? prometheusScrape(base)
+        : recipe(tab, base, fresh.plaintext, model);
+  const run = async () => { setTesting(true); setTest(await testKey(fresh.plaintext, fresh.roles)); setTesting(false); };
   return (
     // Deliberately NOT <Modal>: backdrop clicks and Escape would dismiss a
     // one-time secret. The only way out is the button below.
@@ -245,20 +296,20 @@ function FreshKey({ fresh, base, sample, note, onDone }: { fresh: TokenCreated; 
         </div>
         {note && <p role="alert" className="mt-3 rounded-lg border border-warn/30 bg-warn-dim p-2.5 text-[13px] leading-relaxed text-warn">{note}</p>}
         <div className="mt-3 space-y-2">
-          <FieldRow label="Base URL" value={base} />
-          <FieldRow label="Role" value={fresh.roles.join(' · ')} mono={false} />
+          {infer && <FieldRow label="Base URL" value={base} />}
+          {metrics && <FieldRow label="Metrics" value={`${base}/metrics`} />}
+          <FieldRow label="Roles" value={fresh.roles.join(' · ')} mono={false} />
           {fresh.roles.includes('admin') && (
             <p className="rounded-lg border border-warn/30 bg-warn-dim p-2.5 text-[13px] leading-relaxed text-warn">
               This key has admin role: it can add providers, read provider keys and mint other keys. For an
-              app that only needs models, create an <span className="text-ink">infer</span> key instead.
+              app that only needs models, create an <span className="text-ink">Inference</span> key instead.
             </p>
           )}
         </div>
 
         <div className="mt-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <Segmented<'env-openai' | 'env-anthropic' | 'curl'> size="sm" label="Paste-ready" value={tab} onChange={setTab}
-              options={[{ key: 'env-openai', label: 'OpenAI env' }, { key: 'env-anthropic', label: 'Anthropic env' }, { key: 'curl', label: 'curl' }]} />
+            {tabs.length > 0 && <Segmented<FreshTab> size="sm" label="Paste-ready" value={tab} onChange={setTab} options={tabs} />}
             <CopyButton text={text} label="Copy snippet" />
           </div>
           <pre className="mt-2 max-h-40 overflow-auto rounded-lg border border-line bg-bg px-3 py-2 font-mono text-[12px] leading-relaxed text-dim">{text}</pre>
@@ -287,20 +338,26 @@ function PolicyModal({ target, ids, onClose, onSaved }: {
   const [window, setWindow] = useState('monthly');
   const [models, setModels] = useState('');
   const [expiry, setExpiry] = useState('');
+  const [roles, setRoles] = useState<Role[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   useEffect(() => {
     if (!target) return;
     setCap(target.cap_tokens); setWindow(target.cap_window || 'monthly'); setModels(target.allowed_models || ''); setExpiry(expiryDate(target));
+    setRoles(sortRoles(target.roles));
     setBusy(false); setErr('');
   }, [target]);
-  const dirty = !!target && (cap !== target.cap_tokens || window !== (target.cap_window || 'monthly') || models.trim() !== (target.allowed_models || '').trim() || expiry !== expiryDate(target));
+  const rolesChanged = !!target && roles.join(',') !== sortRoles(target.roles).join(',');
+  const dirty = !!target && (rolesChanged || cap !== target.cap_tokens || window !== (target.cap_window || 'monthly') || models.trim() !== (target.allowed_models || '').trim() || expiry !== expiryDate(target));
+  const infer = roles.includes('infer');
 
   const save = async () => {
     if (!target || busy) return;
+    if (roles.length === 0) { setErr('Pick at least one role.'); return; }
     setBusy(true); setErr('');
     try {
       const updated = await patchToken(target.id, {
+        ...(rolesChanged ? { roles } : {}),
         cap_tokens: cap, cap_window: window, allowed_models: models.trim(),
         // The picker shows only the date; resending an untouched one would be
         // re-read as end of the server's local day and move the deadline.
@@ -312,21 +369,25 @@ function PolicyModal({ target, ids, onClose, onSaved }: {
 
   return (
     <Modal open={target != null} onClose={onClose} busy={busy} dirty={dirty} onSubmit={() => void save()}
-      title={`Key policy — ${target?.name ?? ''}`} subtitle="Budget, model allowlist and expiry for this key"
+      title={`Key policy — ${target?.name ?? ''}`} subtitle="Roles, budget, model allowlist and expiry for this key"
       footer={(close) => <>
         <button type="button" className={cx(btn.base, btn.ghost)} onClick={close}>Cancel</button>
         <button type="submit" disabled={busy || !dirty} className={cx(btn.base, btn.primary)}>{busy ? <Spinner /> : null} Save</button>
       </>}>
       <div className="space-y-6">
-        <div>
-          <span className={labelCls}>Token budget</span>
-          <CapField cap={cap} window={window} onCap={setCap} onWindow={setWindow} />
-          <p className="mt-1.5 text-[12px] leading-snug text-mute">Counted from the key’s real ledger spend (tokens in + out) inside the window. A spent key answers 429 until the window rolls; max_tokens is reserved before dispatch.</p>
-        </div>
-        <div>
-          <label className={labelCls} htmlFor="pol-models">Allowed models <span className="text-mute">(empty = all)</span></label>
-          <AllowlistField id="pol-models" value={models} onChange={setModels} ids={ids} />
-        </div>
+        <RoleField value={roles} onChange={setRoles} error={roles.length === 0 ? 'Pick at least one role.' : undefined} />
+        {rolesChanged && <p className="-mt-3 text-[12px] text-mute">A role change applies to the key’s next request. Clients using a removed role get 403.</p>}
+        {infer && <>
+          <div>
+            <span className={labelCls}>Token budget</span>
+            <CapField cap={cap} window={window} onCap={setCap} onWindow={setWindow} />
+            <p className="mt-1.5 text-[12px] leading-snug text-mute">Counted from the key’s real ledger spend (tokens in + out) inside the window. A spent key answers 429 until the window rolls; max_tokens is reserved before dispatch.</p>
+          </div>
+          <div>
+            <label className={labelCls} htmlFor="pol-models">Allowed models <span className="text-mute">(empty = all)</span></label>
+            <AllowlistField id="pol-models" value={models} onChange={setModels} ids={ids} />
+          </div>
+        </>}
         <div>
           <span className={labelCls}>Expires <span className="text-mute">(empty = never)</span></span>
           <ExpiryField value={expiry} onChange={setExpiry} />
@@ -641,10 +702,33 @@ export default function Connect() {
         <p className="mt-2 text-[12px] text-mute">{CORS_NOTE}</p>
       </section>
 
+      {/* ── Monitor ────────────────────────────────────────────────── */}
+      <section>
+        <SectionLabel>Monitor with Prometheus</SectionLabel>
+        <div className="mt-3 rounded-xl border border-line bg-surface px-4 py-4 [&>*]:min-w-0">
+          <FieldRow label="Metrics" value={`${base}/metrics`} />
+          <p className="mt-2 text-[12px] text-mute">
+            Requests, tokens, latency and time-to-first-token histograms, in-flight load and bridge versions in Prometheus format.
+            Scrape it with a key that has the <span className="text-ink">Metrics</span> role: that key can read metrics and nothing else.
+            An OpenTelemetry Collector scrapes it the same way with its Prometheus receiver.
+          </p>
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <span className="text-[12px] text-mute">prometheus.yml</span>
+            <CopyButton text={prometheusScrape(base)} label="Copy snippet" />
+          </div>
+          <pre className="mt-1.5 overflow-x-auto rounded-lg border border-line bg-bg px-3 py-2 font-mono text-[12px] leading-relaxed text-dim">{prometheusScrape(base)}</pre>
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <span className="text-[12px] text-mute">Check it by hand</span>
+            <CopyButton text={metricsCurl(base)} label="Copy command" />
+          </div>
+          <pre className="mt-1.5 overflow-x-auto rounded-lg border border-line bg-bg px-3 py-2 font-mono text-[12px] leading-relaxed text-dim">{metricsCurl(base)}</pre>
+        </div>
+      </section>
+
       <section>
         <SectionLabel>Try a first request</SectionLabel>
         {sampleModel ? <div className="mt-3 rounded-xl border border-line bg-surface p-4">
-          <p className="text-sm text-dim">Create an inference-only key above, then replace YOUR_EZLLM_KEY in this command. It sends a short request to {sampleModel} and may use provider quota. Availability and surface pins can still affect the result.</p>
+          <p className="text-sm text-dim">Create a key with the Inference role above, then replace YOUR_EZLLM_KEY in this command. It sends a short request to {sampleModel} and may use provider quota. Availability and surface pins can still affect the result.</p>
           <pre className="mt-3 overflow-x-auto rounded-lg border border-line bg-bg p-3 text-xs">{curlRequest(base, sampleModel)}</pre>
           <div className="mt-2 flex justify-end"><CopyButton text={curlRequest(base, sampleModel)} label="Copy request" /></div>
         </div> : <p className="mt-3 text-sm text-dim">Add and validate a provider first; a request example appears when a model is available.</p>}

@@ -305,8 +305,9 @@ environment or `config.yaml`.
   outside the database; back it up with the database.
 - `GET /healthz` is the only route that returns data without credentials, and it
   returns only `status` and `version`.
-- `GET /metrics` (Prometheus) is off until you set `EZLLM_METRICS_TOKEN`; that
-  secret only reads metrics. See [docs/metrics.md](docs/metrics.md).
+- Keys carry roles: `infer` calls models, `metrics` reads `GET /metrics`
+  (Prometheus, see [docs/metrics.md](docs/metrics.md)) and `admin` manages the
+  gateway. Each is a separate permission; admin does not imply infer.
 - The dashboard cookie is `HttpOnly` and `SameSite=Strict`, and cookie-based
   writes from another origin are refused.
 - API keys are stored as SHA-256 hashes and dashboard passwords with bcrypt.

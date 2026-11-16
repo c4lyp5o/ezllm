@@ -1,7 +1,6 @@
 package server
 
 import (
-	"crypto/subtle"
 	"fmt"
 	"io"
 	"math"
@@ -58,7 +57,6 @@ func (h *histogram) add(seconds float64) {
 }
 
 type metricsCollector struct {
-	token   string // scrape secret; compared in constant time
 	started time.Time
 
 	mu       sync.Mutex
@@ -68,8 +66,8 @@ type metricsCollector struct {
 	ttft     map[latKey]*histogram
 }
 
-func newMetricsCollector(token string, started time.Time) *metricsCollector {
-	return &metricsCollector{token: token, started: started,
+func newMetricsCollector(started time.Time) *metricsCollector {
+	return &metricsCollector{started: started,
 		requests: map[reqKey]uint64{}, tokens: map[modelKey]*tokenCounts{},
 		duration: map[latKey]*histogram{}, ttft: map[latKey]*histogram{}}
 }
@@ -127,19 +125,26 @@ func histOf(fam map[latKey]*histogram, k latKey) *histogram {
 	return h
 }
 
-// handleMetrics serves the scrape. Off (404) unless a scrape token is
-// configured; the token or an admin session/token is accepted.
+// handleMetrics serves the scrape to a key with the metrics or admin role, or
+// to the dashboard session. A metrics key reads only this route: it cannot
+// call models (infer) or reach /admin.
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
-	m := s.metrics
-	if m == nil {
+	if s.metrics == nil {
 		http.NotFound(w, r)
 		return
 	}
-	if tok := bearerToken(r); tok != "" && subtle.ConstantTimeCompare([]byte(tok), []byte(m.token)) == 1 {
-		s.writeMetrics(w)
+	serve := func(w http.ResponseWriter, _ *http.Request) { s.writeMetrics(w) }
+	if tok := bearerToken(r); tok != "" && (s.db == nil || !s.db.DashboardSession(r.Context(), tok)) {
+		s.authed(func(w http.ResponseWriter, r *http.Request) {
+			if hasRole(r, "admin") {
+				serve(w, r)
+				return
+			}
+			s.needRole("metrics", serve)(w, r)
+		})(w, r)
 		return
 	}
-	s.admin(func(w http.ResponseWriter, _ *http.Request) { s.writeMetrics(w) })(w, r)
+	s.admin(serve)(w, r) // the dashboard session (bearer or cookie)
 }
 
 func (s *Server) writeMetrics(w http.ResponseWriter) {

@@ -7,7 +7,7 @@ import (
 
 // vscodeAuthed extracts the token from /api/v1/vscode/{token}/... and runs
 // the same gate as bearer auth (authenticate): identity, expiry and the
-// per-key budget.
+// per-key budget, then the infer role like every inference route.
 func (s *Server) vscodeAuthed(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := strings.TrimSpace(r.PathValue("token"))
@@ -16,7 +16,7 @@ func (s *Server) vscodeAuthed(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		if r, ok := s.authenticate(w, r, token); ok {
-			next(w, r)
+			s.needRole("infer", next)(w, r)
 		}
 	}
 }

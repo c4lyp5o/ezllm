@@ -1,9 +1,11 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -11,28 +13,24 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/store"
 )
 
-const testMetricsToken = "scrape-secret-0123456789"
+// withMetricsKey adds a key that holds only the metrics role.
+func withMetricsKey(t *testing.T, h *harness) {
+	t.Helper()
+	if err := h.db.UpsertClientToken(context.Background(), "prometheus", testMetricsToken, "metrics"); err != nil {
+		t.Fatal(err)
+	}
+}
 
-func withMetrics(o *Options) { o.MetricsToken = testMetricsToken }
+const testMetricsToken = "tok-metrics"
 
 func chatUpstream(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(`{"id":"x","choices":[{"message":{"content":"OK"}}],"usage":{"prompt_tokens":2044,"completion_tokens":72,"total_tokens":2116,"prompt_tokens_details":{"cached_tokens":1792},"completion_tokens_details":{"reasoning_tokens":28}}}`))
 }
 
-// Off unless configured: no endpoint, and the ledger is not observed.
-func TestMetricsOffWithoutToken(t *testing.T) {
-	h := newHarness(t, chatUpstream)
-	if code, _, _ := h.do("GET", "/metrics", "tok-admin", ""); code != http.StatusNotFound {
-		t.Fatalf("/metrics without a scrape token = %d, want 404", code)
-	}
-	if h.server.metrics != nil {
-		t.Fatal("collector built without a scrape token")
-	}
-}
-
 func TestMetricsAuth(t *testing.T) {
-	h := newHarness(t, chatUpstream, withMetrics)
+	h := newHarness(t, chatUpstream)
+	withMetricsKey(t, h)
 	for _, c := range []struct {
 		token string
 		want  int
@@ -56,10 +54,51 @@ func TestMetricsAuth(t *testing.T) {
 	}
 }
 
+// The dashboard session reads metrics without a key.
+func TestMetricsDashboardSession(t *testing.T) {
+	h := newHarness(t, chatUpstream)
+	setupDashboard(t, h, "metrics-test-password")
+	sess, err := h.db.DashboardLogin(context.Background(), "metrics-test-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, _, _ := h.do("GET", "/metrics", sess, ""); code != http.StatusOK {
+		t.Fatalf("dashboard session (bearer): %d", code)
+	}
+	req := httptest.NewRequest("GET", "/metrics", nil)
+	req.AddCookie(&http.Cookie{Name: "ezllm_session", Value: sess})
+	rec := httptest.NewRecorder()
+	h.handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("dashboard session (cookie): %d", rec.Code)
+	}
+}
+
+// A metrics key reads /metrics and nothing else.
+func TestMetricsKeyCannotInferOrAdmin(t *testing.T) {
+	h := newHarness(t, chatUpstream)
+	withMetricsKey(t, h)
+	for _, p := range []struct{ m, path, body string }{
+		{"POST", "/v1/chat/completions", `{"model":"up/gpt-6-luna","messages":[{"role":"user","content":"hi"}]}`},
+		{"GET", "/v1/models", ""},
+		{"GET", "/api/v1/vscode/" + testMetricsToken + "/models", ""},
+		{"GET", "/admin/health", ""},
+	} {
+		tok := testMetricsToken
+		if strings.HasPrefix(p.path, "/api/v1/vscode/") {
+			tok = ""
+		}
+		if code, _, _ := h.do(p.m, p.path, tok, p.body); code != http.StatusForbidden {
+			t.Errorf("metrics key on %s %s: %d, want 403", p.m, p.path, code)
+		}
+	}
+}
+
 // A real request reaches the scrape through the ledger, with the normalized
 // accounting the ledger stored (cached tokens split out of prompt_tokens).
 func TestMetricsCountCommittedRequests(t *testing.T) {
-	h := newHarness(t, chatUpstream, withMetrics)
+	h := newHarness(t, chatUpstream)
+	withMetricsKey(t, h)
 	for range 2 {
 		if code, _, body := h.do("POST", "/v1/chat/completions", "tok-infer", `{"model":"up/gpt-6-luna","messages":[{"role":"user","content":"hi"}]}`); code != 200 {
 			t.Fatalf("chat: %d %s", code, body)
@@ -94,7 +133,8 @@ func TestMetricsCountCommittedRequests(t *testing.T) {
 
 // Scrapes race the ledger goroutine's observer; -race must stay quiet.
 func TestMetricsScrapeDuringLedgerWrites(t *testing.T) {
-	h := newHarness(t, chatUpstream, withMetrics)
+	h := newHarness(t, chatUpstream)
+	withMetricsKey(t, h)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -118,7 +158,7 @@ func TestMetricsScrapeDuringLedgerWrites(t *testing.T) {
 }
 
 func TestMetricsHistogramBuckets(t *testing.T) {
-	m := newMetricsCollector(testMetricsToken, time.Now())
+	m := newMetricsCollector(time.Now())
 	ms := func(v int64) *int64 { return &v }
 	m.observe([]store.Call{
 		{Surface: store.SurfaceChat, Account: "a", Model: "m", Status: 200, Totalms: ms(80), TTFTms: ms(40)},
@@ -147,7 +187,7 @@ func TestMetricsHistogramBuckets(t *testing.T) {
 // A caller cycling model names on refused requests must not grow the scrape
 // without bound.
 func TestMetricsCardinalityCap(t *testing.T) {
-	m := newMetricsCollector(testMetricsToken, time.Now())
+	m := newMetricsCollector(time.Now())
 	rows := make([]store.Call, metricsSeriesCap+50)
 	for i := range rows {
 		rows[i] = store.Call{Surface: store.SurfaceChat, Account: "a", Model: fmt.Sprintf("junk-%d", i), Status: 404}
@@ -178,7 +218,7 @@ func TestMetricLabelsEscape(t *testing.T) {
 
 // The observer runs on the ledger goroutine; keep its per-row cost visible.
 func BenchmarkMetricsObserve(b *testing.B) {
-	m := newMetricsCollector(testMetricsToken, time.Now())
+	m := newMetricsCollector(time.Now())
 	ms := int64(1200)
 	rows := make([]store.Call, 64)
 	for i := range rows {

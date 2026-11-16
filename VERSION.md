@@ -15,15 +15,25 @@ file in the same commit, or the test fails.
 
 ## v2.1.0 — 2026-11-16
 
-Adds Prometheus metrics and fixes two bridge-updater faults that held back
-Codex and Antigravity CLI updates. No schema change; no breaking change.
+Adds Prometheus metrics and per-role API keys, enforces the `infer` role on
+inference, and fixes two bridge-updater faults that held back Codex and
+Antigravity CLI updates. Schema v36.
 
 - **`GET /metrics`** (Prometheus text format): requests, tokens, compression
   savings, request-duration and time-to-first-token histograms, in-flight
   admission, ledger health, bridge CLI versions and Go runtime gauges. Counters
-  are fed from committed ledger batches, so requests do no metrics work. Off
-  until `EZLLM_METRICS_TOKEN` or `EZLLM_METRICS_TOKEN_FILE` is set; that secret
-  reads only `/metrics`. See `docs/metrics.md`.
+  are fed from committed ledger batches, so requests do no metrics work. Read it
+  with a key that has the new `metrics` role. See `docs/metrics.md`.
+- **Key roles are checkboxes:** Inference, Metrics and Admin, each a separate
+  permission, chosen at creation and editable from Policy. Admin includes
+  metrics; it does not include inference. The Connect page shows the metrics URL
+  and a `prometheus.yml` job.
+- **Security fix: inference needs the `infer` role.** Before, any valid key could
+  call models, including admin-only keys. Every `/v1/*` route and the VS Code
+  alias now answer 403 "infer role required" to a key without it. Schema v36
+  adds `infer` to every existing key that had `admin` without it, so no current
+  key loses access. **Behaviour change for API callers:** a key created through
+  `POST /admin/tokens` with `"roles":["admin"]` can no longer call models.
 - **Fix: the Codex native-history gate never passed.** It judged a correct
   recall of the earlier codename as "did not follow the prompt" because it
   looked for `pong`. It held back Codex 0.167.1 and 0.167.2; clear their

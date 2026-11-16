@@ -13,8 +13,8 @@ Collector's Prometheus receiver. Added in v2.1.0. Code: `internal/server/metrics
   the observer at about 255 ns per row with zero allocations (4 vCPU, 2026-11-16).
 - **Never drops a batch.** `ObserveLedger` is synchronous, unlike
   `SubscribeLedger`, which drops batches for a slow consumer.
-- **Off by default.** Without a scrape token the route answers 404 and the
-  ledger is not observed, so an install that does not scrape pays nothing.
+- **Always collecting, key-gated reads.** The observer costs about 255 ns per
+  committed row off the request path, so it always runs; reading needs a key.
 - **No dependency.** The exposition format is written by hand. No Prometheus
   client library and no OpenTelemetry SDK; the binary does not grow.
 - **No stop-the-world on scrape.** Runtime gauges come from `runtime/metrics`,
@@ -30,19 +30,16 @@ Collector's Prometheus receiver. Added in v2.1.0. Code: `internal/server/metrics
 - **Not OTLP.** Push export, traces and OTel logs are out of scope. An OTel
   pipeline scrapes this endpoint with the Collector's Prometheus receiver.
 
-## Enable and authenticate
+## Authenticate
 
-Set a scrape secret of at least 16 characters, either directly or by file:
+Create a key with the **Metrics** role on the dashboard's Connect page (or
+`POST /admin/tokens` with `"roles":["metrics"]`). A metrics key reads only
+`/metrics`: it gets 403 on inference routes and on `/admin`. A key with the
+`admin` role and the dashboard session can also read the endpoint. An
+infer-only key gets 403. The Connect page shows the scrape URL and a
+paste-ready `prometheus.yml` job.
 
-| Variable | Meaning |
-|---|---|
-| `EZLLM_METRICS_TOKEN` | Scrape secret. Turns `/metrics` on. |
-| `EZLLM_METRICS_TOKEN_FILE` | File whose first line is the secret; used when `EZLLM_METRICS_TOKEN` is unset. |
-
-A scrape authenticates with `Authorization: Bearer <secret>`. The secret works
-only on `/metrics`: it is not a client token and cannot run inference or reach
-the admin API. An admin client token or a dashboard session can also read the
-endpoint. An inference-only client token gets 403.
+Store the key in a file and point `credentials_file` at it:
 
 ```yaml
 # prometheus.yml
@@ -50,7 +47,7 @@ scrape_configs:
   - job_name: ezllm
     scrape_interval: 30s
     authorization:
-      credentials_file: /etc/prometheus/ezllm-metrics.token
+      credentials_file: /etc/prometheus/ezllm-metrics.key
     static_configs:
       - targets: ["ezllm.internal:20129"]
 ```

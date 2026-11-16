@@ -127,10 +127,6 @@ func run() error {
 	if err := translationFromEnv(&cfg.Translation, os.Getenv); err != nil {
 		return err
 	}
-	metricsTok, err := metricsToken(os.Getenv, os.ReadFile)
-	if err != nil {
-		return err
-	}
 	// ── master key (at-rest encryption of provider keys) ────────────────
 	masterSecret := strings.TrimSpace(os.Getenv("EZLLM_MASTER_KEY"))
 	if masterSecret == "" {
@@ -344,7 +340,6 @@ func run() error {
 		Settings:   operator, Backups: backups,
 		Auth: db, Resolver: resolver, Dispatcher: dispatcher, DB: db,
 		Registry: registry, Log: log, Rules: ruleEngine,
-		MetricsToken:  metricsTok,
 		MaxBodyMiB:    cfg.MaxBodyMiB,
 		RequestLimits: server.RequestLimits{GlobalInflight: cfg.RequestLimits.GlobalInflight, PerClientInflight: cfg.RequestLimits.PerClientInflight, BodyMemoryMiB: cfg.RequestLimits.BodyMemoryMiB},
 		CORSOrigins:   nil,

@@ -5,6 +5,7 @@
 // irreversible hash, so there is no way back to it afterwards — the UI must show
 // it once and never again (admin.go:handleTokens).
 import { del, get, patch, post, type UsageRow } from './api';
+import type { Role } from './connect';
 
 // Mirrors store.TokenSummary (admin.go). NOTE: roles is an ARRAY — writing a
 // single string here renders a 404 blank chip, not an error.
@@ -28,7 +29,7 @@ export interface TokenCreated extends TokenInfo {
 
 export type TokenPatch = {
   name?: string; enabled?: boolean; cap_tokens?: number; cap_window?: string;
-  allowed_models?: string; expires_at?: string;
+  allowed_models?: string; expires_at?: string; roles?: Role[];
 };
 
 export interface V1Model {
@@ -44,12 +45,12 @@ export const listTokens = () => get<TokenInfo[]>('/admin/tokens');
 
 export const createToken = async (
   name: string,
-  role: 'admin' | 'infer' = 'infer',
+  roles: Role[] = ['infer'],
   extra: { allowed_models?: string; expires_at?: string } = {},
 ): Promise<TokenCreated> => {
   const body = await post<{ token: TokenInfo; plaintext: string }>('/admin/tokens', {
     name,
-    roles: [role],
+    roles,
     ...extra,
   });
   return { ...body.token, plaintext: body.plaintext };
@@ -86,7 +87,19 @@ function isoDaysAgo(days: number): string {
 /** Proves a freshly minted key works: asks /v1/models with ONLY that key (the
  *  dashboard cookie is not sent) and reports what it can see. */
 export type KeyTest = { ok: boolean; status: number; models: number; message: string };
-export async function testKey(plaintext: string): Promise<KeyTest> {
+export async function testKey(plaintext: string, roles: readonly string[] = ['infer']): Promise<KeyTest> {
+  // Test what the key is for: a metrics-only key gets 403 on /v1/models by design.
+  if (!roles.includes('infer')) {
+    const path = roles.includes('metrics') ? '/metrics' : '/admin/health';
+    try {
+      const res = await fetch(path, { headers: { Authorization: `Bearer ${plaintext}` }, credentials: 'omit', cache: 'no-store' });
+      return res.ok
+        ? { ok: true, status: res.status, models: 0, message: path === '/metrics' ? 'The key works and can read metrics.' : 'The key works on the admin API.' }
+        : { ok: false, status: res.status, models: 0, message: res.status === 401 || res.status === 403 ? 'The gateway rejected this key.' : `The gateway answered ${res.status}.` };
+    } catch {
+      return { ok: false, status: 0, models: 0, message: 'Could not reach the gateway.' };
+    }
+  }
   try {
     const res = await fetch('/v1/models', { headers: { Authorization: `Bearer ${plaintext}` }, credentials: 'omit', cache: 'no-store' });
     if (!res.ok) return { ok: false, status: res.status, models: 0, message: res.status === 401 || res.status === 403 ? 'The gateway rejected this key.' : `The gateway answered ${res.status}.` };

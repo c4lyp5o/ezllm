@@ -87,26 +87,55 @@ export function expiryReadout(date: string, now = Date.now()): string {
   if (!date) return 'Never expires.';
   const end = Date.parse(`${date}T23:59:59`);
   if (Number.isNaN(end)) return '';
-  if (end < now) return 'That date has passed: the key would be expired at once.';
+  if (end < now) return 'That date has already passed, so the key would expire immediately.';
   const today = new Date(now); today.setHours(0, 0, 0, 0);
   const d = Math.round((Date.parse(`${date}T00:00:00`) - today.getTime()) / DAY);
   return d <= 0 ? 'Expires at the end of today.' : `Expires in ${d} day${d === 1 ? '' : 's'}.`;
 }
 
 // ── create-form validation ──────────────────────────────────────────────────
-export type KeyDraft = { name: string; role: 'infer' | 'admin'; models: string; expiry: string; cap: number; capWindow: string };
-export type KeyErrors = { name?: string; cap?: string; expiry?: string };
+// Each role opens one surface and nothing else (server: store.TokenRoles).
+// Listed in the order the form shows them.
+export type Role = 'infer' | 'metrics' | 'admin';
+export const ROLES: { key: Role; label: string; hint: string }[] = [
+  { key: 'admin', label: 'Admin', hint: 'Manage ezllm through /admin: providers, their keys, and other API keys.' },
+  { key: 'infer', label: 'Inference', hint: 'Call models on /v1 with the OpenAI or Anthropic API.' },
+  { key: 'metrics', label: 'Metrics', hint: 'Read /metrics from Prometheus or an OpenTelemetry Collector.' },
+];
+/** Roles in a fixed order, so a draft compares equal to what the API returns. */
+export const sortRoles = (roles: readonly string[]): Role[] => ROLES.map((r) => r.key).filter((k) => roles.includes(k));
+
+export type KeyDraft = { name: string; roles: Role[]; models: string; expiry: string; cap: number; capWindow: string };
+export type KeyErrors = { name?: string; cap?: string; expiry?: string; roles?: string };
 
 export function validateKey(d: KeyDraft, others: string[]): KeyErrors {
   const e: KeyErrors = {};
   const name = d.name.trim();
-  if (!name) e.name = 'Give the key a name. It is how this key appears in the ledger.';
-  else if (others.some((n) => n.toLowerCase() === name.toLowerCase())) e.name = `A key called "${others.find((n) => n.toLowerCase() === name.toLowerCase())}" already exists. Creating it again would replace that key's secret and break whatever uses it.`;
+  if (!name) e.name = 'Give the key a name. This is how it shows up in your usage.';
+  else if (others.some((n) => n.toLowerCase() === name.toLowerCase())) e.name = `A key called "${others.find((n) => n.toLowerCase() === name.toLowerCase())}" already exists. Creating it again would replace its secret and break anything that uses it.`;
   if (!Number.isInteger(d.cap) || d.cap < 0) e.cap = 'A whole number of tokens, 0 or more.';
   if (d.expiry && Date.parse(`${d.expiry}T23:59:59`) < Date.now()) e.expiry = 'That date has passed.';
+  if (d.roles.length === 0) e.roles = 'Pick at least one role.';
   return e;
 }
-export const hasKeyErrors = (e: KeyErrors) => !!(e.name || e.cap || e.expiry);
+export const hasKeyErrors = (e: KeyErrors) => !!(e.name || e.cap || e.expiry || e.roles);
+
+// ── metrics ─────────────────────────────────────────────────────────────────
+/** A prometheus.yml job for this gateway. The key goes in a file, not the YAML. */
+export function prometheusScrape(base: string): string {
+  const u = new URL(base);
+  return [
+    'scrape_configs:',
+    '  - job_name: ezllm',
+    '    scrape_interval: 30s',
+    `    scheme: ${u.protocol.replace(':', '')}`,
+    '    authorization:',
+    '      credentials_file: /etc/prometheus/ezllm-metrics.key  # the metrics key, one line',
+    '    static_configs:',
+    `      - targets: ["${u.host}"]`,
+  ].join('\n');
+}
+export const metricsCurl = (base: string, key = 'YOUR_METRICS_KEY') => `curl -s ${base}/metrics -H "Authorization: Bearer ${key}"`;
 
 // ── recipes ─────────────────────────────────────────────────────────────────
 export type RecipeKey = 'env-openai' | 'env-anthropic' | 'claude' | 'python' | 'node';

@@ -36,10 +36,10 @@ const PROMPT_DEFAULTS: Record<ServiceSurface, string> = {
 };
 // Tests that generate media can spend real quota: confirmed before each send.
 const PAID_TESTS: Partial<Record<ServiceSurface, string>> = {
-  images_gen: 'Image generation tests can use provider quota or incur a charge. Send one small test image request?',
-  images_edit: 'Image edit tests can use provider quota or incur a charge. Send one small test edit of a 1×1 image?',
-  videos_gen: 'Video generation tests can use provider quota or incur a charge. Send one short test request?',
-  music_gen: 'Music generation tests can use provider quota or incur a charge. Send one short test request?',
+  images_gen: 'Testing image generation can use your provider quota or cost money. Send one small test request?',
+  images_edit: 'Testing image edits can use your provider quota or cost money. Send one small edit of a 1×1 image?',
+  videos_gen: 'Testing video generation can use your provider quota or cost money. Send one short test request?',
+  music_gen: 'Testing music generation can use your provider quota or cost money. Send one short test request?',
 };
 const PROMPT_LABELS: Record<ServiceSurface, string> = {
   embeddings: 'Test text',
@@ -115,7 +115,7 @@ function OutcomeLine({ o }: { o: TestOutcome }) {
     <p className={cx('rounded-lg border px-3 py-2 text-[13px]',
       o.dispatched ? (o.ok ? 'border-ok/30 bg-ok-dim text-ok' : 'border-bad/30 bg-bad-dim text-bad') : 'border-warn/30 bg-warn-dim text-warn')}>
       {!o.dispatched
-        ? 'Test did not reach the provider — nothing was recorded as tested.'
+        ? 'The test didn\'t reach the provider, so nothing was marked as tested.'
         : o.ok ? 'Endpoint test succeeded' : `Endpoint test failed (HTTP ${o.status})`}
       {' · '}<span className="font-mono">{o.model}</span>{' · '}{o.ms} ms{o.detail ? ` · ${o.detail}` : ''}
     </p>
@@ -161,7 +161,7 @@ function ServiceCardView({
     const rank = (m: CatalogModel) => (probeByModel.get(m.id)?.ok ? 0 : probeByModel.has(m.id) ? 2 : 1);
     return [...models].sort((a, b) => rank(a) - rank(b)).map((m) => {
       const p = probeByModel.get(m.id);
-      return { value: m.id, label: `${m.display}${p ? (p.ok ? ' — verified' : ' — last test failed') : ''}` };
+      return { value: m.id, label: `${m.display}${p ? (p.ok ? ' (tested)' : ' (last test failed)') : ''}` };
     });
   }, [models, probeByModel]);
   const verified = useMemo(() => card.probes.filter((p) => p.ok), [card.probes]);
@@ -240,7 +240,7 @@ function ServiceCardView({
               <p className="mt-1.5 text-[12px] leading-relaxed text-mute">
                 {mode === 'off' && <>Requests must include their own <code className="font-mono text-dim">model</code>. This is the default setting.</>}
                 {mode === 'manual' && 'Use the model chosen here when a request omits one.'}
-                {mode === 'auto' && 'Use the model that most recently passed a real test for this endpoint.'}
+                {mode === 'auto' && 'Use the model that most recently passed a test on this endpoint.'}
               </p>
             </div>
 
@@ -250,14 +250,14 @@ function ServiceCardView({
                   <label className={labelCls} htmlFor={`model-${card.surface}`}>Default model for {card.endpoint}</label>
                   {models.length === 0 && !loadingModels ? (
                     <div className="rounded-lg border border-line bg-raised px-3 py-2.5 text-[13px] text-mute">
-                      No synced models yet. Open Providers, sync a provider’s catalog, then come back here.
+                      No models yet. Go to Providers, sync a provider's models, then come back.
                     </div>
                   ) : (
                     <Combobox id={`model-${card.surface}`} label={`Default model for ${card.endpoint}`} idPrefix={`service-${card.surface}`} options={options} value={target}
                       onChange={setTarget} loadingText={loadingModels ? 'Loading provider models…' : 'No synced models'}
                       disabled={options.length === 0 && loadingModels} placeholder="Search provider models…" />
                   )}
-                  {target && !selectedIsListed && !loadingModels && <p className="mt-1 text-[12px] text-warn">The saved model is not in the catalog of enabled providers.</p>}
+                  {target && !selectedIsListed && !loadingModels && <p className="mt-1 text-[12px] text-warn">The saved model isn't offered by any enabled provider.</p>}
                   {verified.length > 0 && <p className="mt-1.5 text-[12px] text-mute">Models already verified here are listed first.</p>}
                 </>
               )}
@@ -269,7 +269,7 @@ function ServiceCardView({
                     {' · '}<span className="tnum">{verified.length}</span> verified model{verified.length === 1 ? '' : 's'}
                   </p>
                   <p className="mt-1 text-[12px] leading-relaxed text-mute">
-                    Auto uses only models that passed a real test for this exact endpoint. Chat compatibility checks do not count.
+                    Auto only picks models that passed a test on this endpoint. Passing a chat test doesn't count.
                   </p>
                   {verified.length > 0 && (
                     <details className="mt-2">
@@ -292,7 +292,7 @@ function ServiceCardView({
             <div className="flex flex-wrap items-center gap-2 md:col-span-2 xl:col-span-1 xl:flex-col xl:items-stretch xl:pt-[22px]">
               {(mode === 'manual' || (mode === 'auto' && card.mode === 'auto')) && (
                 <button type="button" disabled={!testModel || testing || busy || busyElsewhere || (mode === 'manual' && loadingModels)}
-                  title={mode === 'auto' && !card.resolved_target ? 'Auto has no pick yet — test a model under Manual first.' : undefined}
+                  title={mode === 'auto' && !card.resolved_target ? 'Auto hasn\'t picked anything yet. Test a model under Manual first.' : undefined}
                   onClick={() => (paid ? setConfirmPaid(true) : void doTest())}
                   className={cx(btn.base, btn.ghost)}>
                   {testing ? <><Spinner /> Testing…</> : mode === 'manual' ? 'Test endpoint' : 'Test the pick'}
@@ -316,7 +316,7 @@ function ServiceCardView({
                 <label className={labelCls} htmlFor={`prompt-${card.surface}`}>{PROMPT_LABELS[card.surface]}</label>
                 {card.surface === 'audio_stt' ? (
                   <p className="text-[12px] leading-relaxed text-mute">
-                    This endpoint tests a file upload, not text — the test always sends a fixed 0.2 s silent WAV.
+                    This endpoint takes a file. The test sends a 0.2 second silent WAV.
                   </p>
                 ) : (
                   <>
@@ -324,7 +324,7 @@ function ServiceCardView({
                       onChange={(e) => setPrompt(e.target.value)} placeholder={PROMPT_DEFAULTS[card.surface]}
                       disabled={testing || busy} className={cx(inputCls, 'font-mono')} />
                     <p className="mt-1 text-[11px] leading-relaxed text-mute">
-                      Sent verbatim in the test request; empty = the default. Not saved — only the model default persists.
+                      Sent as is in the test request. Leave empty for the default. This isn't saved, only the model choice is.
                     </p>
                   </>
                 )}
@@ -342,7 +342,7 @@ function ServiceCardView({
             {card.verdict && (
               <span title={new Date(card.verdict.tested_at).toLocaleString()}>
                 {' · '}{card.verdict.ok ? 'passed' : 'failed'} {relTime(card.verdict.tested_at)}
-                {!card.verdict.ok && card.verdict.detail ? ` — ${card.verdict.detail}` : ''}
+                {!card.verdict.ok && card.verdict.detail ? `: ${card.verdict.detail}` : ''}
               </span>
             )}
             {!card.verdict && card.resolved_target && ' · never tested'}
@@ -542,9 +542,9 @@ export default function Services() {
         <details className="mt-2">
           <summary className="cursor-pointer text-[12px] text-dim hover:text-ink">How defaults work</summary>
           <p className="mt-2 max-w-3xl text-[12px] leading-relaxed text-mute">
-            Each setting is a default for its endpoint only. If nothing is configured, the endpoint stays available but returns a clear{' '}
-            <code className="font-mono text-dim">service_not_configured</code> error instead of sending a blind upstream request.
-            Chat protocol checks do not verify image, audio, or embedding support — only a real test of that endpoint does.
+            Each setting only applies to its own endpoint. If you don't set one, the endpoint still works but answers with a{' '}
+            <code className="font-mono text-dim">service_not_configured</code> error rather than guessing which provider to use.
+            A chat test doesn't show whether images, audio or embeddings work. Only a test on that endpoint does.
           </p>
         </details>
       </div>
@@ -584,7 +584,7 @@ export default function Services() {
 
       <ConfirmModal open={confirmBulk} tone="primary" confirmLabel={`Run ${planned.length} tests`}
         title="Include paid tests?"
-        body={`${paidPlanned.map((c) => c.label).join(', ')} will send real generation requests that can use provider quota or incur a charge.`}
+        body={`${paidPlanned.map((c) => c.label).join(', ')} will send real requests that can use your provider quota or cost money.`}
         onClose={() => setConfirmBulk(false)} onConfirm={() => void runBulk()} />
     </div>
   );

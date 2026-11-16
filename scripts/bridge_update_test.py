@@ -73,6 +73,21 @@ class Candidate(unittest.TestCase):
         self.assertIsNone(self.pick(rel=rel, current="1.4.7", when="2026-11-02T03:00")[0])
         self.assertEqual(self.pick(rel=rel, current="1.4.7", when="2026-11-03T03:00")[0], "1.4.11")
 
+    def test_a_dateless_channel_soaks_from_when_an_update_became_pending(self):
+        # agy shipped 1.5.0..1.5.9 about daily: each sighting restarted a
+        # per-build clock, so 1.4.12 was never replaced. The clock is the
+        # oldest pending sighting; versions at or below current do not count.
+        seen = {"1.4.11": "2026-10-31T01:38:20+08:00", "1.4.12": "2026-10-31T06:03:17+08:00",
+                "1.5.0": "2026-11-04T14:01:17+08:00", "1.5.8": "2026-11-13T13:02:48+08:00",
+                "1.5.9": "2026-11-14T14:03:48+08:00"}
+        since = bu.pending_since(seen, "1.5.9", "1.4.12")
+        self.assertEqual(since, "2026-11-04T14:01:17+08:00")
+        rel = {"version": "1.5.9", "published": None}
+        self.assertEqual(self.pick(rel=rel, current="1.4.12", seen=since, when="2026-11-16T03:00"), ("1.5.9", ""))
+        # Once current catches up, the next build soaks from its own sighting.
+        seen["1.5.10"] = "2026-11-17T09:00:00+08:00"
+        self.assertEqual(bu.pending_since(seen, "1.5.10", "1.5.9"), "2026-11-17T09:00:00+08:00")
+
     def test_not_newer_held_and_blocked_are_refused(self):
         self.assertEqual(self.pick(current="2.1.308"), (None, "up_to_date"))
         self.assertEqual(self.pick(current="2.1.310"), (None, "up_to_date"))
@@ -273,6 +288,19 @@ class Run(Home):
              mock.patch.object(bu, "gate", lambda n, d, i, c: gated.append(d.name) or {"ok": False, "problems": ["x"]}):
             self.go()
         self.assertEqual(gated, ["0.165.0"])
+
+    def test_a_dateless_channel_releasing_faster_than_the_soak_still_updates(self):
+        # Production 2026-11-16: agy's manifest showed only the newest build,
+        # first seen two days ago, while updates had been pending since 11-04.
+        self.state.write_text(json.dumps({"first_seen": {"agy": {
+            "1.4.7": "2026-10-20T00:00:00+08:00", "1.5.0": "2026-11-04T14:01:17+08:00",
+            "1.5.9": "2026-11-14T14:03:48+08:00"}}}))
+        gated = []
+        with mock.patch.object(bu, "discover", lambda n, b: [{"version": "1.5.9", "published": None}]), \
+             mock.patch.object(bu, "now", lambda: at("2026-11-16T03:00")), \
+             mock.patch.object(bu, "gate", lambda n, d, i, c: gated.append(d.name) or {"ok": False, "problems": ["x"]}):
+            self.go()
+        self.assertEqual(gated, ["1.5.9"])
 
     def test_dry_run_gates_but_never_promotes(self):
         info = bu.inspect("ezllm")

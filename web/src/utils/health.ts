@@ -14,7 +14,7 @@ export function accountIssues(a: Account, now = Date.now()): Issue[] {
   const out: Issue[] = [];
   const keys = a.keys ?? [];
   if (keys.length > 0 && keys.every((k) => !k.enabled)) {
-    out.push({ id: `keys-${a.id}`, tone: 'bad', text: `${a.name}: every key is disabled, so it cannot serve`, fix: 'open' });
+    out.push({ id: `keys-${a.id}`, tone: 'bad', text: `${a.name}: all keys are disabled, so it can't take requests`, fix: 'open' });
   } else {
     const failing = keys.filter((k) => k.enabled && k.last_test_ok === false).length;
     if (failing > 0) {

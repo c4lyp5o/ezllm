@@ -57,7 +57,7 @@ try {
   check('stages read in words, not JSON', (await card('agent-output').getByText('RTK · keeps 6 lines, 1 tool class').count()) === 1 && (await card('agent-output').getByText('Tool reference · from 200 bytes').count()) === 1);
   check('settings read as a sentence', (await card('agent-output').getByText(/Keeps a rewrite only if it saves at least 5% · leaves the final turn alone · trims a fresh tool result on its first send · starts above 2,000 tokens\./).count()) === 1);
   check('the combos using a profile are linked', (await card('agent-output').getByRole('link', { name: 'daily' }).getAttribute('href')) === '/combos?edit=5');
-  check('an unused profile says it does nothing', (await card('idle').getByText(/Not used by any combo/).count()) === 1);
+  check('an unused profile says it does nothing', (await card('idle').getByText(/No combo uses this yet/).count()) === 1);
   check('the old JSON dump is gone', (await page.getByText('"keep_lines"').count()) === 0);
 
   // savings
@@ -120,16 +120,16 @@ try {
   check('a preset fills the name and the pipeline', (await dialog().getByLabel('Profile name').inputValue()) === 'agent-output' && (await dialog().getByLabel('Engine').count()) === 6);
   check('the taken name is refused with the reason', (await dialog().getByText(/already exists/).count()) === 1);
   await dialog().getByLabel('Profile name').fill('off');
-  check('the reserved name is refused', (await dialog().getByText(/"off" is reserved/).count()) === 1);
+  check('the reserved name is refused', (await dialog().getByText(/You can.t use "off"/).count()) === 1);
   await dialog().getByLabel('Profile name').fill('mine');
-  check('each stage says what its engine does', (await dialog().getByText(/Collapses runs of exactly identical log lines/).count()) >= 1);
-  check('tool reference before other tool-output stages is flagged', (await dialog().getByText(/Tool reference works best last/).count()) === 0, 'preset order is already last');
+  check('each stage says what its engine does', (await dialog().getByText(/Replaces repeated identical log lines/).count()) >= 1);
+  check('tool reference before other tool-output stages is flagged', (await dialog().getByText(/Put tool reference last/).count()) === 0, 'preset order is already last');
   await dialog().getByRole('button', { name: 'Move stage 6 up' }).click();
-  check('moving tool reference up triggers the advice', (await dialog().getByText(/Tool reference works best last/).count()) === 1);
+  check('moving tool reference up triggers the advice', (await dialog().getByText(/Put tool reference last/).count()) === 1);
   await dialog().getByRole('button', { name: 'Move stage 5 down' }).click();
   await dialog().getByRole('button', { name: /Add stage/ }).click();
   await dialog().getByRole('button', { name: 'Duplicate', exact: true }).first().click();
-  check('a repeated engine is flagged', (await dialog().getByText(/appears more than once/).count()) >= 1);
+  check('a repeated engine is flagged', (await dialog().getByText(/is listed more than once/).count()) >= 1);
   await dialog().getByLabel('Keep lines').fill('abc');
   check('a bad option is refused inline', (await dialog().getByText('Keep lines must be a whole number, 0 or more.').count()) === 1);
   calls.length = 0;

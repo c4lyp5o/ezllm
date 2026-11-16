@@ -320,8 +320,8 @@ export default function Stats() {
           <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
             <div>
               <p className="text-[13px] leading-relaxed text-dim">
-                The range totals above are the whole ledger view. Pick a dimension
-                under <span className="text-ink">Split by</span> to break it down.
+                The totals above cover everything in this range. Pick an option
+                under <span className="text-ink">Split by</span> to break them down.
               </p>
               <div className="mt-5">
                 <SectionLabel>Token composition</SectionLabel>
@@ -363,8 +363,7 @@ export default function Stats() {
                 </>
               ) : (
                 <p className="mt-2.5 text-[13px] leading-relaxed text-mute">
-                  Fewer than two calendar days of traffic in this window, so there is no trend to draw.
-                  The ledger's finest time bucket is the day.
+                  There's less than two days of traffic in this range, so there's no trend to show yet.
                 </p>
               )}
             </div>
@@ -378,11 +377,11 @@ export default function Stats() {
             // Rows exist for this split — the combo filter removed them all.
             <EmptyState
               title="No combo-routed calls in this window."
-              hint="Every excluded row is a DIRECT model call (an alias holding '/', or no alias at all) — combos and direct routes can't share a name, so nothing was hidden by accident. Split by account or surface to see the direct traffic." />
+              hint="The calls left out went straight to a model rather than through a combo. Split by account or API to see them." />
           ) : (
             <EmptyState
               title={`No calls in the last ${RANGE_LABEL[range]}.`}
-              hint="No matching ledger entries for this period. Widen the range or route a request through a combo." />
+              hint="No calls in this period. Widen the range, or send a request through a combo." />
           )}
         </Panel>
       )}
@@ -401,7 +400,7 @@ export default function Stats() {
                 <div className="flex h-full items-center justify-center px-6">
                   <p className="max-w-sm text-center text-[13px] leading-relaxed text-mute">
                     {FOCUS_LABEL[focus]} measured 0 across every {SPLIT_LABEL[split].toLowerCase()} group in this
-                    window — nothing to plot. Switch the Focus, or widen the range.
+                    range, so there's nothing to show. Change the Focus or widen the range.
                   </p>
                 </div>
               ) : (
@@ -441,8 +440,7 @@ export default function Stats() {
             </div>
             {isTime && (
               <p className="mt-2 text-[12px] text-mute">
-                One bucket per calendar day — the ledger's finest time grouping. A 24h
-                range therefore shows one or two points; that is the data, not a rendering gap.
+                Usage is grouped by day, so a 24-hour range only shows one or two points.
               </p>
             )}
           </Panel>
@@ -492,7 +490,7 @@ export default function Stats() {
                       ] as [SortCol, string, string, 'left' | 'right', string | undefined][]).map(([col, label, pad, align, title]) => (
                         <th key={col} className={cx(pad, 'py-2.5 font-medium', align === 'right' && 'text-right')}
                           aria-sort={sort?.col === col ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                          <button type="button" onClick={() => sortBy(col)} title={title ? `${title} — click to sort` : 'click to sort'}
+                          <button type="button" onClick={() => sortBy(col)} title={title ? `${title}. Click to sort.` : 'Click to sort'}
                             className={cx('hover:text-ink', sort?.col === col && 'text-ink')}>
                             {label}{sort?.col === col ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
                           </button>
@@ -507,7 +505,7 @@ export default function Stats() {
                       return (
                       <tr key={r.k} className="border-b border-line/50 transition-colors last:border-0 hover:bg-wash">
                         <td className="max-w-[240px] truncate px-5 py-2 font-sans text-ink" title={r.k}>
-                          {to ? <Link to={to} className="underline-offset-2 hover:underline" title={`${r.k} — open in Requests`}>{r.k}</Link> : r.k}
+                          {to ? <Link to={to} className="underline-offset-2 hover:underline" title={`Open ${r.k} in Requests`}>{r.k}</Link> : r.k}
                         </td>
                         <td className="px-3 py-2 text-right text-ink">{nfmt(r.calls)}</td>
                         <td className="px-3 py-2 text-right text-dim">{formatTokens(r.tin)}</td>

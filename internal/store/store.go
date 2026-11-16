@@ -27,7 +27,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 35
+const schemaVersion = 36
 
 // Stream-outcome vocabulary (schema v34, docs/hop-health-design.md). Stored in
 // calls.stream_outcome; an empty value means the request was not a stream.
@@ -54,6 +54,8 @@ type DB struct {
 	// committed-batch fan-out for live consumers (see events.go)
 	sinkMu sync.Mutex
 	subs   []chan []Call
+	// observer sees every committed batch synchronously (see ObserveLedger).
+	observer atomic.Pointer[func([]Call)]
 
 	// ledger batching
 	callCh             chan ledgerItem
@@ -396,12 +398,27 @@ func (d *DB) migrate() error {
 				return err
 			}
 		}
+		if cur < 36 {
+			if err := d.grantInferToAdminTokens(context.Background()); err != nil {
+				return fmt.Errorf("store: migrate token roles: %w", err)
+			}
+		}
 
 		if _, err := d.w.Exec(`INSERT INTO schema_version(version) VALUES(?)`, schemaVersion); err != nil {
 			return fmt.Errorf("store: stamp version: %w", err)
 		}
 	}
 	return nil
+}
+
+// grantInferToAdminTokens (v36): before 2.1.0 inference checked only that a
+// token existed, so an admin-only token could call models. Inference now needs
+// the infer role; adding it to those tokens keeps every existing key working.
+// Operators can remove it afterwards.
+func (d *DB) grantInferToAdminTokens(ctx context.Context) error {
+	_, err := d.w.ExecContext(ctx, `UPDATE client_tokens SET roles = 'infer,' || roles
+		WHERE (',' || roles || ',') LIKE '%,admin,%' AND (',' || roles || ',') NOT LIKE '%,infer,%'`)
+	return err
 }
 
 // renameWireOpenAIToChat (v30) renames the chat-completions wire from "openai"

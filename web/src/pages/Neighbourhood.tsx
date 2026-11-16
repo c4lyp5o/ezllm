@@ -245,7 +245,7 @@ export default function Neighbourhood() {
         {!unknown && stormy > 0 && <span className="text-bad"><strong className="tnum font-medium">{stormy}</strong> stormy</span>}
         <span className="font-mono text-ink">{unknown ? 'Usage unavailable' : `${formatTokens(total)} tokens / min`}</span>
         {!unknown && totalCalls > 0 && <span className={cx(totalErrors > 0 && totalErrors / totalCalls >= 0.1 && 'text-bad')}><strong className="tnum font-medium text-ink">{pct(totalErrors, totalCalls)}</strong> of calls failed</span>}
-        <span className="flex items-center gap-1.5" title={connected ? 'Reading the live ledger feed' : 'Live feed not connected — figures still update every 10 s'}>
+        <span className="flex items-center gap-1.5" title={connected ? 'Reading the live ledger feed' : 'Live updates aren\'t connected. Numbers still refresh every 10 seconds.'}>
           <span className="nbhd-live-dot" data-live={connected ? 'true' : 'false'} aria-hidden />
           <span className="tnum font-mono text-ink">{formatTokens(perMinute)}</span><span>requests / min (live)</span>
           {!connected && <span className="text-warn">· live feed off</span>}
@@ -276,7 +276,7 @@ export default function Neighbourhood() {
       </div>
     </div>
     {stale && <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warn/30 bg-warn-dim px-4 py-3 text-xs text-warn">
-      <span>{unknown ? 'Usage could not be loaded. Buildings are shown without activity figures.' : 'Last update failed — showing the latest available city.'}</span>
+      <span>{unknown ? 'Usage didn\'t load, so the buildings have no activity numbers.' : 'The last update failed. This is the most recent city.'}</span>
       <button className="min-h-10 px-2 font-medium underline underline-offset-4" onClick={retry}>Try again</button>
     </div>}
     <div className="nbhd-stage" ref={stage}>
@@ -385,7 +385,7 @@ export default function Neighbourhood() {
           {ranked.length === 0 && <tr><td colSpan={9} className="px-4 py-6 text-center text-mute">No building matches. <button type="button" className="underline" onClick={() => { setQuery(''); setFilter('all'); }}>Clear search and filter</button></td></tr>}</tbody>
         </table>
       </div>
-      <p className="px-4 pb-3 pt-2 text-xs text-mute">{unknown ? 'Activity figures will appear when usage is available.' : `Full glow is ${formatTokens(ref)} tokens per minute right now.`}</p>
+      <p className="px-4 pb-3 pt-2 text-xs text-mute">{unknown ? 'Activity numbers will show up once usage loads.' : `A fully lit building means ${formatTokens(ref)} tokens per minute right now.`}</p>
     </div>
   </div>;
 }

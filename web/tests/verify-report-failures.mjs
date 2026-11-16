@@ -14,12 +14,12 @@ const page = await t.page(async (route, url) => {
   return false;
 });
 await page.goto(t.base);
-await page.getByText(/Some usage reports could not refresh/).waitFor();
-check('dashboard shows unavailable reports', await page.getByText(/Some usage reports could not refresh/).count() === 1);
+await page.getByText(/Some usage reports didn.t refresh/).waitFor();
+check('dashboard shows unavailable reports', await page.getByText(/Some usage reports didn.t refresh/).count() === 1);
 fail = false;
 await page.getByRole('button', { name: 'Retry' }).click();
-await page.getByText(/Some usage reports could not refresh/).waitFor({ state: 'detached' });
-check('dashboard clears warning on recovery', await page.getByText(/Some usage reports could not refresh/).count() === 0);
+await page.getByText(/Some usage reports didn.t refresh/).waitFor({ state: 'detached' });
+check('dashboard clears warning on recovery', await page.getByText(/Some usage reports didn.t refresh/).count() === 0);
 fail = true;
 await page.goto(`${t.base}/connect`);
 await page.getByText(/Some key usage could not be loaded/).waitFor();

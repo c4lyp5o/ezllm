@@ -62,7 +62,7 @@ function PasswordSettings() {
       </section>
       <div className="flex items-start gap-3 rounded-xl border border-warn/30 bg-warn-dim p-4">
         <Chip tone="warn">Security</Chip>
-        <p className="text-xs leading-relaxed text-mute">This password guards provider keys and client tokens, and there is no second factor. Keep it long and unique — the strength bar should read Good or Strong — especially if the dashboard is reachable beyond a trusted network.</p>
+        <p className="text-xs leading-relaxed text-mute">This password protects your provider keys and API keys, and there's no second factor. Make it long and unique, aiming for Good or Strong on the bar, especially if the dashboard can be reached from outside your own network.</p>
       </div>
     </div>
   );
@@ -74,20 +74,20 @@ const TABS: Tab[] = ['General', 'Security', 'Backup & Recovery', 'Gateway', 'Not
 const TAB_SLUG: Record<Tab, string> = { General: 'general', Security: 'security', 'Backup & Recovery': 'backup', Gateway: 'gateway', Notifications: 'notifications', System: 'system' };
 const tabFromSlug = (slug: string | null): Tab => TABS.find((t) => TAB_SLUG[t] === slug) ?? 'General';
 const DETAILS: Record<string, [string, string]> = {
-  usage_timezone: ['Usage timezone', 'IANA name, for example Asia/Kuala_Lumpur. Reports and rules set to “Instance timezone” follow this value. Explicit rule timezones and existing client-token budgets retain their own boundaries.'],
-  translation_enabled: ['Protocol translation', 'Allow proven cross-protocol routes. Surface pins still apply.'],
-  automatic_probing: ['Automatic probing', 'Probe untested combo hops and newly discovered free models.'],
+  usage_timezone: ['Usage timezone', 'An IANA name, for example Asia/Kuala_Lumpur. Reports, and rules set to "Instance timezone", use this. Rules with their own timezone keep it.'],
+  translation_enabled: ['Protocol translation', 'Let requests go to a model on a different API when testing showed it works. Pins still apply.'],
+  automatic_probing: ['Automatic probing', 'Test new combo hops and newly found free models automatically.'],
   catalog_interval: ['Catalog refresh interval', 'Duration of at least 1m, for example 12h.'],
   price_refresh: ['Automatic price refresh', 'Refresh after startup and daily at 03:00 in the instance timezone.'],
-  retries: ['Retries per hop', '0–9 retries for transient failures. Zero disables same-hop retries.'],
-  attempt_budget: ['Total request attempt budget', '0–64 attempts across all hops and retries. Zero means unlimited.'],
-  dispatch_deadline: ['Dispatch deadline', 'At least 1s, or leave empty for unlimited. Bounds selection and retry waits; active streams continue.'],
-  cooldown_429: ['Rate-limit cooldown', 'Fallback duration when a provider does not supply Retry-After.'],
+  retries: ['Retries per hop', 'How many times to retry a temporary failure on the same provider, from 0 to 9. Set 0 to turn retries off.'],
+  attempt_budget: ['Total request attempt budget', 'Total attempts across all providers and retries, from 0 to 64. Set 0 for no limit.'],
+  dispatch_deadline: ['Dispatch deadline', 'At least 1s, or leave empty for no limit. This limits the time spent picking a provider and waiting to retry. Streams already running aren\'t cut off.'],
+  cooldown_429: ['Rate-limit cooldown', 'How long to wait when a provider doesn\'t send Retry-After.'],
   cooldown_5xx: ['Server-error cooldown', 'Duration before a failed endpoint is eligible again.'],
-  cooldown_strikes: ['Failures before cooldown', 'Positive failure count. Existing cooldown expiry times are preserved.'],
-  backup_enabled: ['Scheduled backups', 'Requires a mounted backup directory and a separate encryption secret configured on the host.'],
-  backup_hour: ['Daily backup hour', '0–23, in the instance timezone.'],
-  backup_keep: ['Verified backups to keep', '1–365. Older completed backups are removed only after a new backup verifies successfully.'],
+  cooldown_strikes: ['Failures before cooldown', 'Number of failures, 1 or more. Cooldowns already running keep their end times.'],
+  backup_enabled: ['Scheduled backups', 'Needs a backup folder mounted on the host and a separate encryption secret.'],
+  backup_hour: ['Daily backup hour', 'Hour of the day, from 0 to 23, in the instance timezone.'],
+  backup_keep: ['Verified backups to keep', 'From 1 to 365. Old backups are only deleted after a new one has been checked.'],
   notify_free_models_added: ['Free models added', 'New free models discovered in a provider catalog.'],
   notify_free_models_removed: ['Free models removed', 'Free models removed from a provider catalog.'],
   notify_free_model_broken: ['Broken free models', 'Free models that fail every protocol probe.'],
@@ -95,10 +95,10 @@ const DETAILS: Record<string, [string, string]> = {
   notify_client_budget_reached: ['Client budget reached', 'A client token has exhausted its budget.'],
   notify_price_refresh_failed: ['Price refresh failures', 'The price catalog could not be refreshed.'],
   notify_backup_failed: ['Backup failures', 'A backup did not complete or verification failed.'],
-  notify_bridge_updated: ['Bridge CLI updated', 'The bridge updater promoted a new CLI release and proved it.'],
-  notify_bridge_update_blocked: ['Bridge CLI release held back', 'A new CLI release failed the update gate; the bridge kept its current release.'],
-  notify_bridge_rolled_back: ['Bridge CLI rolled back', 'A promoted CLI release failed its proof and the bridge went back to the previous one.'],
-  notify_stream_truncation: ['Answers cut mid-stream', 'A provider hop ended more than 1% of its streams early (24 hours, at least 20 streams judged).'],
+  notify_bridge_updated: ['Bridge CLI updated', 'The bridge updater installed a new CLI version and it passed its checks.'],
+  notify_bridge_update_blocked: ['Bridge CLI release held back', 'A new CLI version failed its checks, so the bridge kept the current one.'],
+  notify_bridge_rolled_back: ['Bridge CLI rolled back', 'A new CLI version failed after it was installed, so the bridge went back to the previous one.'],
+  notify_stream_truncation: ['Answers cut mid-stream', 'A provider cut off more than 1% of its streamed answers in the last 24 hours (out of at least 20).'],
 };
 const GROUPS: Partial<Record<Tab, string[]>> = {
   General: ['usage_timezone'],
@@ -116,7 +116,7 @@ function BrowserPreferences() {
   useEffect(() => subscribePreferences(() => { themeState(readTheme()); motionState(readMotion()); rangeState(readRange()); }), []);
   return <section className={panel}>
     <SectionLabel>This browser</SectionLabel>
-    <p className="mt-2 text-sm text-mute">Display preferences apply to this browser. They do not change gateway behavior.</p>
+    <p className="mt-2 text-sm text-mute">These only change how this browser shows things.</p>
     <div className="mt-5 grid gap-4 sm:grid-cols-3">
       <div className="text-sm"><label htmlFor="pref-theme">Theme</label><select id="pref-theme" className={cx(inputCls, 'mt-2')} value={theme} onChange={e => { setTheme(e.target.value as 'dark' | 'light'); themeState(readTheme()); }}><option value="dark">Dark</option><option value="light">Light</option></select></div>
       <div className="text-sm"><label htmlFor="pref-motion">Motion</label><select id="pref-motion" className={cx(inputCls, 'mt-2')} value={motion} onChange={e => { savePreference('ezllm.motion', e.target.value); motionState(readMotion()); }}><option value="system">Follow system</option><option value="reduce">Reduce motion</option></select></div>
@@ -148,7 +148,7 @@ function SettingsGroup({ tab, view, updated, onDirty }: { tab: Tab; view: Settin
   };
   return <form className={panel} onSubmit={submit}>
     <SectionLabel>{tab === 'General' ? 'Instance defaults' : tab}</SectionLabel>
-    <p className="mt-2 text-sm text-mute">Saved changes apply to new requests immediately. Environment and flag overrides are managed on the host.</p>
+    <p className="mt-2 text-sm text-mute">Saved changes apply to new requests straight away. Settings fixed by environment variables or flags have to be changed on the host.</p>
     <fieldset disabled={busy} className="mt-5 space-y-5">
       {keys.map(key => {
         const field = view.fields[key]; if (!field) return null;
@@ -164,11 +164,11 @@ function SettingsGroup({ tab, view, updated, onDirty }: { tab: Tab; view: Settin
             ? <input id={`setting-${key}`} aria-describedby={`hint-${key}`} className="mt-3 h-4 w-4" type="checkbox" disabled={!field.editable} checked={!!value} onChange={e => { setDraft(d => ({ ...d, [key]: e.target.checked })); setSaved(false); }} />
             : <input id={`setting-${key}`} aria-describedby={`hint-${key}`} className={cx(inputCls, 'mt-2 max-w-sm', problems[key] && 'border-bad/60')} aria-invalid={!!problems[key]} type={typeof field.value === 'number' ? 'number' : 'text'} disabled={!field.editable} value={String(value)} onChange={e => { setDraft(d => ({ ...d, [key]: typeof field.value === 'number' ? Number(e.target.value) : e.target.value })); setSaved(false); }} />}
           {problems[key] && <p className="mt-1 text-xs text-bad" role="alert">{problems[key]}</p>}
-          {draft[key] === null && <p className="mt-1 text-xs text-warn">Deployment/default value will be restored when saved.</p>}
+          {draft[key] === null && <p className="mt-1 text-xs text-warn">Saving puts back the default value.</p>}
           {!field.editable && <p className="mt-1 text-xs text-mute">Managed by {field.source}; change the deployment override to unlock this control.</p>}
         </div>;
       })}
-      {timezoneChanged && <label className="flex items-start gap-2 text-sm text-warn"><input type="checkbox" checked={acknowledged} onChange={e => acknowledge(e.target.checked)} />I understand this changes report days and inherited rule boundaries, and may change available daily budget immediately.</label>}
+      {timezoneChanged && <label className="flex items-start gap-2 text-sm text-warn"><input type="checkbox" checked={acknowledged} onChange={e => acknowledge(e.target.checked)} />I understand this changes where report days and rule windows start and end, and can change today's remaining budgets.</label>}
       {error && <p role="alert" className="text-sm text-bad">{error} Reload Settings if another operator changed it.</p>}
       {saved && <p role="status" className="text-sm text-good">Settings saved.</p>}
       <div className="flex flex-wrap items-center gap-3">
@@ -195,11 +195,11 @@ function Sessions() {
     } catch (e) { setError(errorMessage(e)); } finally { setBusy(false); setPending(null); }
   };
   const what = pending?.session ? (pending.session.current ? 'this browser' : 'this session') : 'every dashboard session, including this browser';
-  return <section className={panel}><SectionLabel>Active sessions</SectionLabel><p className="mt-2 text-sm text-mute">Your browser supplies these descriptions. Older sessions may not have one.</p>
+  return <section className={panel}><SectionLabel>Active sessions</SectionLabel><p className="mt-2 text-sm text-mute">These descriptions come from your browser. Older sessions might not have one.</p>
     <ul className="mt-4 space-y-3">{rows.map(s => <li key={s.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-3"><div className="min-w-0"><p className="break-words text-sm">{s.current && <Chip tone="accent" className="mr-2">This browser</Chip>}{s.browser || 'Browser description unavailable'}</p><p className="mt-1 text-xs text-mute" title={`Created ${new Date(s.created_at).toLocaleString()}`}>Created {relTime(s.created_at)} · expires {new Date(s.expires_at).toLocaleString()}</p></div><button className={cx(btn.base, btn.ghost)} disabled={busy} onClick={() => setPending({ session: s })}>Sign out</button></li>)}</ul>
     {error && <p role="alert" className="mt-3 text-sm text-bad">{error}</p>}<button className={cx(btn.base, btn.ghost, 'mt-4')} disabled={busy || !rows.length} onClick={() => setPending({})}>Sign out all devices</button>
     <ConfirmModal open={pending != null} title={`Sign out ${what}?`} confirmLabel="Sign out" busy={busy}
-      body={pending?.session && !pending.session.current ? 'That session is signed out at once. This browser stays signed in.' : 'You will be sent to the sign-in page and will need your password to come back.'}
+      body={pending?.session && !pending.session.current ? 'That session is signed out right away. You stay signed in here.' : 'You\'ll go back to the sign-in page and need your password to get in again.'}
       onClose={() => setPending(null)} onConfirm={() => void revoke(pending?.session)} />
   </section>;
 }
@@ -223,15 +223,15 @@ function Backups() {
     return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', refresh); };
   }, []);
   const run = async () => { setBusy(true); setError(''); try { await runBackup(); await load(); } catch (e) { setError(errorMessage(e)); } finally { setBusy(false); } };
-  return <><section className={panel}><SectionLabel>Exports</SectionLabel><p className="mt-2 text-sm text-mute">Exports contain configuration and optional usage history, with no provider credentials. They require a separate database and master-key backup for full recovery. A completed export ends with a successful completion manifest.</p><div className="mt-4 flex flex-wrap gap-3"><a className={cx(btn.base, btn.ghost)} href="/admin/export" download>Export configuration</a><a className={cx(btn.base, btn.ghost)} href="/admin/export?include_ledger=true" download>Export with ledger</a></div></section>
-    <section className={panel}><SectionLabel>Encrypted backups</SectionLabel><p className="mt-2 text-sm text-mute">Each backup contains a verified database snapshot and its active master key, encrypted with a separate backup secret. Keep that secret separately. Configure EZLLM_BACKUP_DIR and EZLLM_BACKUP_SECRET_FILE on the host; vendor CLI logins and deployment configuration need separate backups.</p>
+  return <><section className={panel}><SectionLabel>Exports</SectionLabel><p className="mt-2 text-sm text-mute">An export has your configuration and, if you choose, usage history. It doesn't include provider credentials, so a full restore also needs a database and master key backup.</p><div className="mt-4 flex flex-wrap gap-3"><a className={cx(btn.base, btn.ghost)} href="/admin/export" download>Export configuration</a><a className={cx(btn.base, btn.ghost)} href="/admin/export?include_ledger=true" download>Export with ledger</a></div></section>
+    <section className={panel}><SectionLabel>Encrypted backups</SectionLabel><p className="mt-2 text-sm text-mute">Each backup has a checked copy of the database and its master key, encrypted with a separate backup secret. Store that secret somewhere else. Set EZLLM_BACKUP_DIR and EZLLM_BACKUP_SECRET_FILE on the host. CLI logins and your deployment files need their own backups.</p>
       <p className="mt-4 text-sm">{status?.running ? 'Backup running…' : status?.ready ? 'Backup storage configured' : 'Backup storage is not configured'}</p>
       {status?.error && <p role="alert" className="mt-2 text-sm text-bad">{status.error}</p>}
       {status?.last_outcome && <p className="mt-1 text-xs text-mute">Last job: {status.last_outcome} {status.last_finished && new Date(status.last_finished).toLocaleString()}</p>}
       <button className={cx(btn.base, btn.primary, 'mt-4')} disabled={!status?.ready || status.running || busy} onClick={() => void run()}>{busy || status?.running ? 'Backing up…' : 'Back up now'}</button>
       {error && <p role="alert" className="mt-3 text-sm text-bad">{error}</p>}
       <ul className="mt-4 space-y-2">{status?.backups.map(b => <li key={b.id} className="flex flex-wrap justify-between gap-2 text-xs"><span>{new Date(b.created_at).toLocaleString()} · {(b.bytes / 1048576).toFixed(2)} MiB</span><Chip tone="good">Verified</Chip></li>)}</ul>
-      <p className="mt-5 text-xs text-mute">Recovery is offline into a new directory. Verify with <code>ezllm backup-verify --archive BACKUP --secret-file SECRET</code>, then restore with <code>ezllm backup-restore --archive BACKUP --secret-file SECRET --output NEW_DIRECTORY</code>. Restored dashboard sessions are revoked.</p>
+      <p className="mt-5 text-xs text-mute">To restore, stop ezllm and restore into a new folder. Check the backup with <code>ezllm backup-verify --archive BACKUP --secret-file SECRET</code>, then restore with <code>ezllm backup-restore --archive BACKUP --secret-file SECRET --output NEW_DIRECTORY</code>. Restored dashboard sessions are revoked.</p>
     </section></>;
 }
 function System() {
@@ -243,7 +243,7 @@ function System() {
     {info.deployment && <dl className="mt-5 grid grid-cols-2 gap-3 text-sm"><dt>Listen address</dt><dd className="break-words">{info.deployment.listen_address} · {info.deployment.listen_source}</dd><dt>Storage</dt><dd>{info.deployment.storage}</dd><dt>Master-key source</dt><dd>{info.deployment.master_key_source}</dd><dt>Trusted proxy entries</dt><dd>{info.deployment.trusted_proxy_count}</dd></dl>}
     <div className="mt-5 space-y-2">{info.bridges.map(b => { const u = b.update && bridgeUpdateText(b.update); return <div key={b.id} className="text-sm"><p className="flex justify-between gap-3"><span>{b.id}</span><span>{b.enabled ? 'Ready' : 'Off'}</span></p>{u && <p className={cx('text-xs', UPDATE_TONE[u.tone])}>CLI updates: {u.text}</p>}</div>; })}</div>
     <div className="mt-5 space-y-2">{Object.entries(info.jobs).map(([name, j]) => <div key={name} className="text-sm"><p>{name}: {j.running ? 'Running' : 'Idle'}</p><p className="text-xs text-mute">Last success: {j.last_success ? new Date(j.last_success).toLocaleString() : 'No recorded success'} · last failure: {j.last_failure ? new Date(j.last_failure).toLocaleString() : 'None recorded'}</p></div>)}</div>
-    <p className="mt-5 text-xs text-mute">Network binding, data storage, trusted proxies, master-key source, bridge paths and backup paths are deployment-managed.</p>
+    <p className="mt-5 text-xs text-mute">The listen address, data folder, trusted proxies, master key, bridge paths and backup paths are set where ezllm is deployed.</p>
     <a className={cx(btn.base, btn.ghost, 'mt-4')} href="/admin/settings/diagnostics?download=true" download>Download sanitized diagnostics</a>
   </>}</section>;
 }
@@ -275,10 +275,10 @@ export default function Settings() {
     {view && <SettingsGroup key={tab} tab={tab} view={view} updated={setView} onDirty={setDirty} />}
     {tab === 'Security' && <><PasswordSettings /><Sessions /></>}
     {tab === 'Backup & Recovery' && <Backups />}
-    {tab === 'Notifications' && <><p className="text-xs text-mute">Preferences affect future notifications in this instance’s dashboard bell and its push channels. Existing history is retained.</p><PushChannels /></>}
+    {tab === 'Notifications' && <><p className="text-xs text-mute">These apply to new notifications in the bell and your push channels. Past notifications stay.</p><PushChannels /></>}
     {tab === 'System' && <><System />{view && <section className={panel}><SectionLabel>Effective configuration</SectionLabel><div className="mt-4 overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr><th className="py-2">Setting</th><th>Effective value</th><th>Source</th></tr></thead><tbody>{Object.entries(view.fields).map(([k, f]) => <tr key={k} className="border-t border-line"><td className="py-2 pr-3">{DETAILS[k]?.[0] ?? k}</td><td className="pr-3">{String(f.value) || 'Unlimited'}</td><td>{f.source}</td></tr>)}</tbody></table></div></section>}</>}
     <ConfirmModal open={pendingTab != null} tone="primary" confirmLabel="Discard changes" title="Discard unsaved changes?"
-      body="You have changes on this tab that are not saved. Leaving it throws them away."
+      body="You have unsaved changes on this tab. They'll be lost if you leave."
       onClose={() => setPendingTab(null)} onConfirm={() => { if (pendingTab) goTab(pendingTab); }} />
   </div>;
 }

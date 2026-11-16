@@ -15,7 +15,7 @@ const KINDS: ChannelKind[] = ['ntfy', 'discord', 'telegram', 'webhook'];
 // Each field as the operator reads it: label, placeholder, help.
 const FIELD: Record<string, { label: string; placeholder: string; help: string }> = {
   server: { label: 'Server', placeholder: 'https://ntfy.sh', help: 'Leave blank for ntfy.sh, or name your own ntfy server.' },
-  topic: { label: 'Topic', placeholder: 'ezllm-alerts-7f3k', help: 'Subscribe to this topic in the ntfy app. On ntfy.sh anyone who knows the topic can read it: pick one that is hard to guess, or use an access token.' },
+  topic: { label: 'Topic', placeholder: 'ezllm-alerts-7f3k', help: 'Subscribe to this topic in the ntfy app. On ntfy.sh, anyone who knows the topic can read it, so pick one that\'s hard to guess or use an access token.' },
   token: { label: 'Access token', placeholder: 'tk_…', help: 'Optional: for a topic protected on the server.' },
   webhook_url: { label: 'Webhook URL', placeholder: 'https://discord.com/api/webhooks/…', help: 'Server Settings → Integrations → Webhooks → Copy Webhook URL.' },
   chat_id: { label: 'Chat id', placeholder: '-1001234567890 or @your_channel', help: 'The chat, group or channel the bot posts to. The bot must be a member.' },
@@ -25,8 +25,8 @@ const FIELD: Record<string, { label: string; placeholder: string; help: string }
 };
 
 const SEVERITY_READOUT: Record<Severity, string> = {
-  info: 'Every bell event: information, warnings and errors.',
-  warn: 'Warnings and errors (a held-back release, a failed backup). Information stays on the bell.',
+  info: 'Everything that shows in the bell: info, warnings and errors.',
+  warn: 'Warnings and errors, like a blocked update or a failed backup. Info only shows in the bell.',
   error: 'Errors only (a rollback, a failed backup).',
 };
 
@@ -133,8 +133,8 @@ function ChannelEditor({ view, target, open, onClose, onSaved }: {
 
   return (
     <Modal open={open} onClose={onClose} busy={busy !== ''} dirty={dirty} onSubmit={() => void save()}
-      title={target ? `Edit push channel — ${target.name}` : 'Add a push channel'}
-      subtitle="Events at or above the selected severity are sent to this channel."
+      title={target ? `Edit push channel: ${target.name}` : 'Add a push channel'}
+      subtitle="Sends events at this level or higher to this channel."
       footer={(close) => <>
         {showAll && Object.keys(errors).length > 0 && <span className="mr-auto text-[12px] text-bad">Fix the fields marked in red.</span>}
         <button type="button" disabled={busy !== ''} className={cx(btn.base, btn.ghost)} onClick={() => void sendTest()}>{busy === 'test' ? <Spinner /> : null}Send test</button>
@@ -218,7 +218,7 @@ export default function PushChannels() {
   // A response of the wrong shape is an error in this panel, never a crash
   // of the Settings page around it.
   const load = () => listChannels().then((v) => {
-    if (!v || !Array.isArray(v.channels) || !v.kinds) throw new Error('Push channels could not be loaded: the server answered in an unexpected shape.');
+    if (!v || !Array.isArray(v.channels) || !v.kinds) throw new Error('Push channels didn\'t load because the server sent back something unexpected.');
     setView(v); setError('');
   }).catch((e) => setError(e instanceof Error ? e.message : 'Push channels could not be loaded.'));
   useEffect(() => { void load(); }, []);
@@ -239,7 +239,7 @@ export default function PushChannels() {
           title={view && view.channels.length >= view.max ? `At most ${view.max} channels` : undefined} onClick={() => setAdding(true)}>Add channel</button>
       </div>
       <p className="mt-2 text-[13px] text-mute">
-        Send bell events to your phone or a chat as they happen: ntfy, Discord, Telegram or any webhook. The toggles above still decide which events exist.
+        Get bell notifications on your phone or in a chat as they happen, through ntfy, Discord, Telegram or a webhook. The switches above still decide which events you get.
       </p>
       {error && <p role="alert" className="mt-3 text-[13px] text-bad">{error}</p>}
       {view && view.channels.length > 0 && (
@@ -253,7 +253,7 @@ export default function PushChannels() {
           <button type="button" className="text-mute hover:text-ink" aria-label="Dismiss" onClick={() => setNotice('')}>✕</button>
         </div>
       )}
-      {view && view.channels.length === 0 && <p className="mt-4 text-[13px] text-dim">No push channels yet. The bell in the dashboard still shows every event.</p>}
+      {view && view.channels.length === 0 && <p className="mt-4 text-[13px] text-dim">No push channels yet. You'll still see everything in the bell.</p>}
       {view && view.channels.length > 0 && (
         <ul className="mt-3 divide-y divide-line">
           {view.channels.map((c) => {
@@ -269,7 +269,7 @@ export default function PushChannels() {
                   <Toggle checked={c.enabled} disabled={rowBusy === c.id} label={c.enabled ? 'On' : 'Off'}
                     onChange={(enabled) => void act(c, async () => { await updateChannel(c.id, { enabled }); return `${c.name} is ${enabled ? 'on' : 'off'}.`; })} />
                   <button type="button" className={cx(btn.base, btn.ghost)} disabled={rowBusy === c.id}
-                    onClick={() => void act(c, async () => { const r = await testChannel({ id: c.id }); return r.ok ? `Test sent to ${c.name}.` : `The test to ${c.name} did not arrive: ${r.error}`; })}>
+                    onClick={() => void act(c, async () => { const r = await testChannel({ id: c.id }); return r.ok ? `Test sent to ${c.name}.` : `The test to ${c.name} didn't arrive: ${r.error}`; })}>
                     {rowBusy === c.id ? <Spinner /> : null}Send test
                   </button>
                   <button type="button" className={cx(btn.base, btn.ghost)} onClick={() => setEditing(c)}>Edit</button>
@@ -283,10 +283,10 @@ export default function PushChannels() {
       {view && (
         <ChannelEditor view={view} open={adding || editing != null} target={editing}
           onClose={() => { setAdding(false); setEditing(null); }}
-          onSaved={(c, created) => { setAdding(false); setEditing(null); setNotice(created ? `Added ${c.name}. Send a test to check it reaches you.` : `Saved ${c.name}.`); void load(); }} />
+          onSaved={(c, created) => { setAdding(false); setEditing(null); setNotice(created ? `Added ${c.name}. Send a test to make sure it reaches you.` : `Saved ${c.name}.`); void load(); }} />
       )}
       <ConfirmModal open={deleting != null} title={`Delete ${deleting?.name ?? 'this channel'}?`} busy={rowBusy === deleting?.id}
-        body="Events will no longer be sent to this channel. Its saved secrets will also be deleted."
+        body="Nothing more will be sent to this channel, and its saved secrets will be deleted."
         onClose={() => setDeleting(null)}
         onConfirm={() => { const c = deleting; if (!c) return; void act(c, async () => { await deleteChannel(c.id); return `Deleted ${c.name}.`; }).then(() => setDeleting(null)); }} />
     </section>

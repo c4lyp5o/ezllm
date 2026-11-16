@@ -54,6 +54,8 @@ type DB struct {
 	// committed-batch fan-out for live consumers (see events.go)
 	sinkMu sync.Mutex
 	subs   []chan []Call
+	// observer sees every committed batch synchronously (see ObserveLedger).
+	observer atomic.Pointer[func([]Call)]
 
 	// ledger batching
 	callCh             chan ledgerItem

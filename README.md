@@ -305,6 +305,8 @@ environment or `config.yaml`.
   outside the database; back it up with the database.
 - `GET /healthz` is the only route that returns data without credentials, and it
   returns only `status` and `version`.
+- `GET /metrics` (Prometheus) is off until you set `EZLLM_METRICS_TOKEN`; that
+  secret only reads metrics. See [docs/metrics.md](docs/metrics.md).
 - The dashboard cookie is `HttpOnly` and `SameSite=Strict`, and cookie-based
   writes from another origin are refused.
 - API keys are stored as SHA-256 hashes and dashboard passwords with bcrypt.
@@ -345,6 +347,7 @@ transport in `internal/bridgeutil` ([design](docs/shared-bridge-transport-design
 | [docs/install-binary.md](docs/install-binary.md) | Installing a released binary: platforms, checksums, service units, upgrades |
 | [docs/API.md](docs/API.md) | Public and admin API reference |
 | [docs/environment.md](docs/environment.md) | Every environment variable and its default |
+| [docs/metrics.md](docs/metrics.md) | Prometheus `/metrics`: enabling, auth, metric names, example queries |
 | [docs/settings-runbook.md](docs/settings-runbook.md) | Dashboard settings, timezones, sessions and diagnostics |
 | [docs/recovery-runbook.md](docs/recovery-runbook.md) | Encrypted backups, restore and upgrades |
 | [docs/master-key-runbook.md](docs/master-key-runbook.md) | Key encryption: paths, backup, rotation |

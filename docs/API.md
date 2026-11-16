@@ -10,7 +10,8 @@ fails closed; a token with no row still has no policy).
 Every route except `/healthz`, the dashboard's static files and the sign-in/setup endpoints
 (`GET|POST /admin/setup`, `POST /admin/login`, `POST /admin/logout`) needs credentials: a client
 token (`Authorization: Bearer …` or `x-api-key`) on `/v1/*`; on `/admin/*` an admin token or the
-dashboard session (bearer or the `ezllm_session` cookie).
+dashboard session (bearer or the `ezllm_session` cookie); on `/metrics` the scrape secret, an admin
+token or the dashboard session.
 
 **Sign-in and setup limits.** Failed guesses and in-flight attempts share a
 per-source limit of five: failures count for 15 minutes and in-flight attempts
@@ -35,7 +36,8 @@ Errors are OpenAI-shaped: `{"error":{"type":"...","message":"...","code":422}}`.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/healthz` | no auth; **liveness + release version** — `{"status":"ok","version":"2.0.0"}` after a DB ping (503 `{"status":"down","version":"…"}` if the ping fails). Version is the only extra field; no counts/paths/uptime. |
+| GET | `/healthz` | no auth; **liveness + release version** — `{"status":"ok","version":"2.1.0"}` after a DB ping (503 `{"status":"down","version":"…"}` if the ping fails). Version is the only extra field; no counts/paths/uptime. |
+| GET | `/metrics` | Prometheus text exposition (v2.1.0). 404 unless `EZLLM_METRICS_TOKEN[_FILE]` is set; bearer scrape secret, admin token or dashboard session; inference-only token → 403. Counters come from committed ledger rows, so a request does no metrics work. Names, labels and auth: [metrics.md](metrics.md). |
 | GET | `/v1/models?protocol=` | `openai` (default) / `anthropic` shape; ids are `<namespace>/<model>`, plus one bare id per **enabled** combo |
 | POST | `/v1/chat/completions` | OpenAI stream + non-stream |
 | POST | `/v1/messages` | Anthropic (`x-api-key` or Bearer) |

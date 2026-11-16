@@ -59,6 +59,25 @@ func (d *DB) SubscribeLedger(buf int) (<-chan []Call, func()) {
 	}
 }
 
+// ObserveLedger registers fn to see every committed ledger batch, in order,
+// exactly once. Unlike SubscribeLedger it never drops a batch: fn runs on the
+// ledger goroutine, so it must be fast and must not retain rows (the batch
+// buffer is reused). A nil fn removes the observer. Metrics counters use it so
+// a scrape counts what the ledger committed, with no work on the request path.
+func (d *DB) ObserveLedger(fn func([]Call)) {
+	if fn == nil {
+		d.observer.Store(nil)
+		return
+	}
+	d.observer.Store(&fn)
+}
+
+func (d *DB) observe(rows []Call) {
+	if fn := d.observer.Load(); fn != nil && len(rows) > 0 {
+		(*fn)(rows)
+	}
+}
+
 func (d *DB) publish(rows []Call) {
 	// Barrier flushes commit nothing; publishing an empty batch would show up
 	// downstream as a phantom "no-op" event.

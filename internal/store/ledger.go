@@ -392,6 +392,7 @@ func (d *DB) ledgerLoop(batchSize int, batchWait time.Duration) {
 			slog.Error("ledger flush failed after retry; rows discarded",
 				"rows", len(buf), "err", err, "lost_total", lostRows.Load())
 		} else {
+			d.observe(buf)
 			// Copy under the loop's lock (buf is reused after this tick), then
 			// hand the snapshot to live consumers.
 			d.publish(slices.Clone(buf))

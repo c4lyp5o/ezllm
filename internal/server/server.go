@@ -104,11 +104,13 @@ type Server struct {
 	mux           *http.ServeMux
 	// bridges lists the subscription bridges for the Add Provider dialog
 	// (bridges.go); main.go marks the running ones via EnableBridge.
-	bridges     *bridgeRegistry
-	push        *pusher // external push channels for bell events (push.go)
-	started     time.Time
-	maxBody     int64
-	admission   *admission
+	bridges   *bridgeRegistry
+	push      *pusher // external push channels for bell events (push.go)
+	started   time.Time
+	maxBody   int64
+	admission *admission
+	// metrics is nil unless a scrape token is configured (metrics.go).
+	metrics     *metricsCollector
 	web         fs.FS // dashboard source: the embedded dist/
 	corsOrigins []string
 	// usageTZ is the default zone for group_by=day. Never nil: UTC unless
@@ -208,6 +210,9 @@ type Options struct {
 	// SessionMemo overrides the committed-prefix ledger (tests inject a clock
 	// and small limits); nil builds the default.
 	SessionMemo *compress.SessionMemo
+	// MetricsToken turns on GET /metrics (EZLLM_METRICS_TOKEN[_FILE]). Empty
+	// leaves the endpoint off and the ledger unobserved.
+	MetricsToken string
 }
 
 // usageTZOrDefault resolves the day-bucketing zone. Empty or whitespace means
@@ -248,6 +253,10 @@ func New(opts Options) *Server {
 		setupCode:      opts.SetupCode,
 		trustedProxies: opts.TrustedProxies,
 		sessMemo:       opts.SessionMemo,
+	}
+	if opts.MetricsToken != "" && opts.DB != nil {
+		s.metrics = newMetricsCollector(opts.MetricsToken, s.started)
+		opts.DB.ObserveLedger(s.metrics.observe)
 	}
 	// A server without a tester cannot run the key test; default one so the
 	// admin routes fail loudly at construction rather than nil-panic per request.
@@ -299,6 +308,7 @@ func New(opts Options) *Server {
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
+	s.mux.HandleFunc("GET /metrics", s.handleMetrics)
 	s.mux.HandleFunc("POST /admin/login", s.handleDashboardLogin)
 	s.mux.HandleFunc("POST /admin/logout", s.handleLogout)
 	// First-boot setup: public, one-shot, gated by the boot-log setup code.

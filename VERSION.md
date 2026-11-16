@@ -11,7 +11,27 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v2.0.0**
+**Current: v2.1.0**
+
+## v2.1.0 — 2026-11-16
+
+Adds Prometheus metrics and fixes two bridge-updater faults that held back
+Codex and Antigravity CLI updates. No schema change; no breaking change.
+
+- **`GET /metrics`** (Prometheus text format): requests, tokens, compression
+  savings, request-duration and time-to-first-token histograms, in-flight
+  admission, ledger health, bridge CLI versions and Go runtime gauges. Counters
+  are fed from committed ledger batches, so requests do no metrics work. Off
+  until `EZLLM_METRICS_TOKEN` or `EZLLM_METRICS_TOKEN_FILE` is set; that secret
+  reads only `/metrics`. See `docs/metrics.md`.
+- **Fix: the Codex native-history gate never passed.** It judged a correct
+  recall of the earlier codename as "did not follow the prompt" because it
+  looked for `pong`. It held back Codex 0.167.1 and 0.167.2; clear their
+  `blocked` entries in the updater state after deploying.
+- **Fix: Antigravity CLI updates starved.** Its manifest lists only the newest
+  build, and a per-build soak restarted with every release, so 1.4.12 was never
+  replaced. The soak for an undated channel now counts from the first sighting of
+  any version newer than the current one.
 
 ## v2.0.0 — 2026-11-15
 

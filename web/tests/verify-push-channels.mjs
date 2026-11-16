@@ -62,7 +62,7 @@ try {
   await dialog.getByText(/Test sent\. Check ntfy/).waitFor();
   check('draft test sends the draft, unsaved', sent.test.length === 1 && sent.test[0].id === undefined && sent.test[0].config.topic === 'ezllm-alerts' && sent.create.length === 0);
   await dialog.getByRole('button', { name: 'Add channel', exact: true }).click();
-  await page.getByText('Added My phone. Send a test to check it reaches you.').waitFor();
+  await page.getByText('Added My phone. Send a test to make sure it reaches you.').waitFor();
   await dialog.waitFor({ state: 'detached' });
   const created = sent.create[0];
   check('create body', created.kind === 'ntfy' && created.name === 'My phone' && created.min_severity === 'warn' && created.enabled === true &&
@@ -95,7 +95,7 @@ try {
   // Row actions: a failing test says why; the toggle and delete do what they say.
   testFails = true;
   await hookRow.getByRole('button', { name: 'Send test', exact: true }).click();
-  await page.getByText('The test to Ops hook did not arrive: the channel answered 502').waitFor();
+  await page.getByText("The test to Ops hook didn't arrive: the channel answered 502").waitFor();
   check('row test names the saved channel only', JSON.stringify(sent.test.at(-1)) === '{"id":7}');
   await hookRow.getByRole('switch').click();
   await page.getByText('Ops hook is off.').waitFor();

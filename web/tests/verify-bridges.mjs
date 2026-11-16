@@ -48,7 +48,7 @@ await page.getByText("Bridge running at").waitFor();
 check("antigravity bridge lists its plan's models", (await page.locator("text=gemini-3.8-flash-low, claude-sonnet-4-6").count()) === 1);
 check("disabled client tools have actionable guidance", (await page.getByText(/Client tool calls are unavailable/).count()) === 1);
 check("running bridge links its runbook", (await page.locator('a[href$="docs/agy-bridge-runbook.md"]').count()) >= 1);
-check("antigravity login is not misread as logged out", (await page.locator("text=does not report a login").count()) === 0);
+check("antigravity login is not misread as logged out", (await page.locator("text=isn't logged in").count()) === 0);
 await page.keyboard.press("Escape");
 await page.getByRole("button", { name: /Add provider/ }).click();
 

@@ -104,11 +104,13 @@ type Server struct {
 	mux           *http.ServeMux
 	// bridges lists the subscription bridges for the Add Provider dialog
 	// (bridges.go); main.go marks the running ones via EnableBridge.
-	bridges     *bridgeRegistry
-	push        *pusher // external push channels for bell events (push.go)
-	started     time.Time
-	maxBody     int64
-	admission   *admission
+	bridges   *bridgeRegistry
+	push      *pusher // external push channels for bell events (push.go)
+	started   time.Time
+	maxBody   int64
+	admission *admission
+	// metrics is nil unless a scrape token is configured (metrics.go).
+	metrics     *metricsCollector
 	web         fs.FS // dashboard source: the embedded dist/
 	corsOrigins []string
 	// usageTZ is the default zone for group_by=day. Never nil: UTC unless
@@ -249,6 +251,10 @@ func New(opts Options) *Server {
 		trustedProxies: opts.TrustedProxies,
 		sessMemo:       opts.SessionMemo,
 	}
+	if opts.DB != nil {
+		s.metrics = newMetricsCollector(s.started)
+		opts.DB.ObserveLedger(s.metrics.observe)
+	}
 	// A server without a tester cannot run the key test; default one so the
 	// admin routes fail loudly at construction rather than nil-panic per request.
 	if s.tester == nil && opts.Registry != nil && opts.DB != nil {
@@ -299,29 +305,30 @@ func New(opts Options) *Server {
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
+	s.mux.HandleFunc("GET /metrics", s.handleMetrics)
 	s.mux.HandleFunc("POST /admin/login", s.handleDashboardLogin)
 	s.mux.HandleFunc("POST /admin/logout", s.handleLogout)
 	// First-boot setup: public, one-shot, gated by the boot-log setup code.
 	s.mux.HandleFunc("GET /admin/setup", s.handleSetupStatus)
 	s.mux.HandleFunc("POST /admin/setup", s.handleSetup)
-	s.mux.HandleFunc("GET /v1/models", s.authed(s.handleModels))
+	s.mux.HandleFunc("GET /v1/models", s.inferAuthed(s.handleModels))
 	// Public price catalog (infer token): current/historical rates per
 	// account+model, versioned by effective_from.
-	s.mux.HandleFunc("GET /v1/prices", s.authed(s.handleCurrentPrices))
-	s.mux.HandleFunc("POST /v1/chat/completions", s.authed(s.inference(provider.SurfaceChat)))
-	s.mux.HandleFunc("POST /v1/messages", s.authed(s.inference(provider.SurfaceAnthropic)))
-	s.mux.HandleFunc("POST /v1/responses", s.authed(s.inference(provider.SurfaceResponses)))
+	s.mux.HandleFunc("GET /v1/prices", s.inferAuthed(s.handleCurrentPrices))
+	s.mux.HandleFunc("POST /v1/chat/completions", s.inferAuthed(s.inference(provider.SurfaceChat)))
+	s.mux.HandleFunc("POST /v1/messages", s.inferAuthed(s.inference(provider.SurfaceAnthropic)))
+	s.mux.HandleFunc("POST /v1/responses", s.inferAuthed(s.inference(provider.SurfaceResponses)))
 
 	// Phase 1: New inference endpoints
-	s.mux.HandleFunc("POST /v1/embeddings", s.authed(s.inference(provider.SurfaceEmbeddings)))
-	s.mux.HandleFunc("POST /v1/images/generations", s.authed(s.inference(provider.SurfaceImagesGen)))
-	s.mux.HandleFunc("POST /v1/audio/speech", s.authed(s.inference(provider.SurfaceAudioTTS)))
-	s.mux.HandleFunc("POST /v1/audio/transcriptions", s.authed(s.inference(provider.SurfaceAudioSTT)))
-	s.mux.HandleFunc("POST /v1/images/edits", s.authed(s.inference(provider.SurfaceImagesEdit)))
-	s.mux.HandleFunc("POST /v1/moderations", s.authed(s.inference(provider.SurfaceModeration)))
-	s.mux.HandleFunc("POST /v1/rerank", s.authed(s.inference(provider.SurfaceRerank)))
-	s.mux.HandleFunc("POST /v1/videos/generations", s.authed(s.inference(provider.SurfaceVideosGen)))
-	s.mux.HandleFunc("POST /v1/music/generations", s.authed(s.inference(provider.SurfaceMusicGen)))
+	s.mux.HandleFunc("POST /v1/embeddings", s.inferAuthed(s.inference(provider.SurfaceEmbeddings)))
+	s.mux.HandleFunc("POST /v1/images/generations", s.inferAuthed(s.inference(provider.SurfaceImagesGen)))
+	s.mux.HandleFunc("POST /v1/audio/speech", s.inferAuthed(s.inference(provider.SurfaceAudioTTS)))
+	s.mux.HandleFunc("POST /v1/audio/transcriptions", s.inferAuthed(s.inference(provider.SurfaceAudioSTT)))
+	s.mux.HandleFunc("POST /v1/images/edits", s.inferAuthed(s.inference(provider.SurfaceImagesEdit)))
+	s.mux.HandleFunc("POST /v1/moderations", s.inferAuthed(s.inference(provider.SurfaceModeration)))
+	s.mux.HandleFunc("POST /v1/rerank", s.inferAuthed(s.inference(provider.SurfaceRerank)))
+	s.mux.HandleFunc("POST /v1/videos/generations", s.inferAuthed(s.inference(provider.SurfaceVideosGen)))
+	s.mux.HandleFunc("POST /v1/music/generations", s.inferAuthed(s.inference(provider.SurfaceMusicGen)))
 
 	// VS Code / Headerless tokenized aliases (OmniRoute compatibility)
 	s.mux.HandleFunc("GET /api/v1/vscode/{token}/", s.vscodeAuthed(s.handleModels))
@@ -1358,6 +1365,27 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, token stri
 		info.client = name
 	}
 	return r.WithContext(ctx), true
+}
+
+// inferAuthed gates the inference surface: a valid token with the infer role.
+// Before 2.1.0 any valid token could call models; a metrics-only or admin-only
+// key now cannot.
+func (s *Server) inferAuthed(next http.HandlerFunc) http.HandlerFunc {
+	return s.authed(s.needRole("infer", next))
+}
+
+// needRole runs after authentication and refuses a token without role (403).
+func (s *Server) needRole(role string, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !hasRole(r, role) {
+			if s.log.Enabled(r.Context(), slog.LevelDebug) {
+				s.log.Debug("role refused", "why", "client token lacks the "+role+" role", "path", logRequestPath(r))
+			}
+			writeErr(w, http.StatusForbidden, "forbidden", role+" role required")
+			return
+		}
+		next(w, r)
+	}
 }
 
 type rolesKey struct{}

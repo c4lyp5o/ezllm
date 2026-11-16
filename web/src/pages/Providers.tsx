@@ -155,7 +155,7 @@ const PROVIDER_PRESETS: Record<string, {
   // time (docs/claude-web-runbook.md, docs/gemini-web-runbook.md).
   'claude-web': {
     label: 'Claude.ai (web)', kind: 'claude-web', baseURL: 'internal://claudeweb',
-    keyHint: 'claude.ai sessionKey cookie, pasted as sessionKey=sk-ant-… (runbook: DevTools → Cookies → claude.ai)',
+    keyHint: 'Your claude.ai sessionKey cookie, pasted as sessionKey=sk-ant-… (find it in DevTools → Cookies → claude.ai)',
   },
   'opencode-go': { label: 'OpenCode Go', kind: 'opencode-go', baseURL: 'https://opencode.ai/zen/go/v1', sessionHeader: true },
   'xiaomi-mimo-token-plan': { label: 'Xiaomi MiMo token plan', kind: 'openai-compatible', baseURL: 'https://token-plan-sgp.xiaomimimo.com/v1' },
@@ -175,13 +175,13 @@ const PROVIDER_PRESETS: Record<string, {
   // adapter. It ignores credentials, but ezllm stores a key per account.
   'ollama-local': {
     label: 'Ollama (local)', kind: 'openai-compatible', baseURL: 'http://localhost:11434/v1',
-    keyHint: 'Any non-empty value (e.g. ollama) — local Ollama ignores the key',
+    keyHint: 'Any value works (for example ollama). A local Ollama ignores the key.',
   },
   'gemini': { label: 'Google AI Studio', kind: 'gemini-openai', baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai' },
   'gemini-web': {
     label: 'Google Gemini (web)', kind: 'gemini-web', baseURL: 'internal://geminiweb',
     multilineKey: true,
-    keyHint: 'Paste the WHOLE cookie header (all cookies, semicolon-separated) — we keep __Secure-1PSID and __Secure-1PSIDTS. Two lines work too. Use a TEST Google account only.',
+    keyHint: 'Paste the whole cookie header (all cookies, separated by semicolons). ezllm keeps __Secure-1PSID and __Secure-1PSIDTS. Two lines also work. Only use a test Google account.',
   },
   'openai': { label: 'OpenAI Platform', kind: 'openai-compatible', baseURL: 'https://api.openai.com/v1' },
   // NVIDIA NIM — standard OpenAI-compatible chat, model ids are bare
@@ -237,24 +237,24 @@ type Extra = { label: string; placeholder: string; help: string; expiry?: boolea
 const EXTRAS = {
   tokenrouter: {
     label: 'Management key', placeholder: 'Paste the TokenRouter management key',
-    help: 'Used only to read the wallet balance — stored encrypted, never sent upstream.',
+    help: 'Only used to read your wallet balance. It\'s stored encrypted and never sent to the model provider.',
   },
   console: {
     label: 'Console session cookie', placeholder: 'Paste the Cookie header from a platform.claude.com request',
-    help: 'Used only to read your prepaid credit balance — stored encrypted, sent only to platform.claude.com. Paste the whole Cookie header (DevTools → Network → request headers): we need its sessionKey and lastActiveOrg. It expires with your web session; paste a fresh one when the quota shows an error.',
+    help: 'Only used to read your prepaid credit balance. It\'s stored encrypted and only sent to platform.claude.com. Paste the whole Cookie header (DevTools → Network → request headers). ezllm needs its sessionKey and lastActiveOrg. It expires when your web session does, so paste a new one if the quota shows an error.',
   },
   openai: {
     label: 'Platform session token', placeholder: 'Paste the sess-… bearer token from platform.openai.com',
-    help: 'Used only to read your credit balance — stored encrypted, sent only to api.openai.com. Copy it from the Authorization header of a platform.openai.com request (DevTools → Network). It expires with your web session; paste a fresh one when the quota shows an error.',
+    help: 'Only used to read your credit balance. It\'s stored encrypted and only sent to api.openai.com. Copy it from the Authorization header of a platform.openai.com request (DevTools → Network). It expires when your web session does, so paste a new one if the quota shows an error.',
   },
   commandcode: {
     label: 'Session cookie', placeholder: 'Paste the __Secure-commandcode_prod_.session_token value',
-    help: 'Used only to read your usage page’s limits — stored encrypted, sent only to api.commandcode.ai. It expires with your web session; paste a fresh one when the quota shows an error. Paste the whole Cookie header (DevTools → Network → request headers) to also see how many days are left.',
+    help: 'Only used to read the limits on your usage page. It\'s stored encrypted and only sent to api.commandcode.ai. It expires when your web session does, so paste a new one if the quota shows an error. Paste the whole Cookie header (DevTools → Network → request headers) to also see how many days you have left.',
     expiry: true,
   },
   claudeSub: {
     label: 'Claude.ai session cookie', placeholder: 'Paste the Cookie header from a claude.ai request',
-    help: 'Used only to read your plan’s 5-hour and weekly windows live — stored encrypted, sent only to claude.ai. Paste the whole Cookie header (DevTools → Network → request headers): we need its sessionKey and lastActiveOrg, and the cf_clearance/__cf_bm cookies get past Cloudflare. Without it the quota panel shows the bridge’s last-observed reading instead of a live one.',
+    help: 'Only used to read your plan\'s 5-hour and weekly limits as they change. It\'s stored encrypted and only sent to claude.ai. Paste the whole Cookie header (DevTools → Network → request headers). ezllm needs its sessionKey and lastActiveOrg, and the cf_clearance and __cf_bm cookies get it past Cloudflare. Without it, the quota panel shows the last reading the bridge saw.',
   },
 } satisfies Record<string, Extra>;
 
@@ -288,7 +288,7 @@ function ExtraCredentialField({ extra, id, value, onChange, edit, isSet, expires
         {extra.label} <span className="text-mute">{edit ? '(optional, rotates the stored value)' : '(optional)'}</span>
       </label>
       <SecretInput id={id} value={value} onChange={onChange}
-        placeholder={edit && isSet ? '•••• (set — paste to replace)' : extra.placeholder} />
+        placeholder={edit && isSet ? '•••• (saved, paste a new one to replace it)' : extra.placeholder} />
       <p className="mt-1 text-[12px] text-mute">{extra.help}</p>
       {edit && extra.expiry && <CookieExpiry at={expiresAt} />}
     </div>
@@ -344,12 +344,12 @@ function KeyManager({ account, onChanged, onBusy, onDirty }: {
       if (form.replace) {
         try {
           await del(`/admin/accounts/${account.id}/keys/${form.replace.id}`);
-          setNote({ tone: 'ok', text: `Key replaced — the new key passed its test and “${form.replace.label}” was removed.` });
+          setNote({ tone: 'ok', text: `Key replaced. The new key passed its test and "${form.replace.label}" was removed.` });
         } catch (e) {
-          setNote({ tone: 'warn', text: `The new key passed its test and is saved, but removing the old key “${form.replace.label}” failed (${e instanceof Error ? e.message : String(e)}). Delete it from the provider card.` });
+          setNote({ tone: 'warn', text: `The new key passed its test and was saved, but the old key "${form.replace.label}" couldn't be removed (${e instanceof Error ? e.message : String(e)}). Delete it from the provider card.` });
         }
       } else {
-        setNote({ tone: 'ok', text: 'Key added — it passed its test.' });
+        setNote({ tone: 'ok', text: 'Key added. It passed its test.' });
       }
       setForm(null); setSecret(''); setSteps(null);
       onChanged();
@@ -367,7 +367,7 @@ function KeyManager({ account, onChanged, onBusy, onDirty }: {
         {!form && <button type="button" className={cx(btn.base, btn.ghost, '!h-7 !px-3 !text-[12px]')} onClick={() => begin(null)}>Add key</button>}
       </div>
       {account.keys.length === 0 ? (
-        <p className="mt-2 text-[13px] text-mute">This provider has no key, so it cannot serve. Add one below.</p>
+        <p className="mt-2 text-[13px] text-mute">This provider has no key yet, so it can't handle requests. Add one below.</p>
       ) : (
         <ul className="mt-2 divide-y divide-line/60">
           {account.keys.map((k) => (
@@ -401,7 +401,7 @@ function KeyManager({ account, onChanged, onBusy, onDirty }: {
           </div>
           {bridgeID ? (
             <p className="text-[13px] text-dim">
-              This provider rides a subscription bridge, which supplies its own key. {verb === 'Replace' ? 'Replacing' : 'Adding'} re-links the bridge&rsquo;s current key — there is nothing to paste.
+              This provider uses a subscription bridge, which has its own key. {verb === 'Replace' ? 'Replacing' : 'Adding'} links the bridge&rsquo;s current key again, so there&rsquo;s nothing to paste.
             </p>
           ) : (
             <div>
@@ -448,7 +448,7 @@ function CookieExpiry({ at }: { at?: string }) {
   if (!at) return null;
   const days = Math.ceil((new Date(at).getTime() - Date.now()) / 86_400_000);
   if (Number.isNaN(days)) return null;
-  const text = days < 0 ? 'Cookie expired — paste a fresh one' : days === 0 ? 'Cookie expires today' : `Cookie expires in ${days} ${days === 1 ? 'day' : 'days'}`;
+  const text = days < 0 ? 'Cookie expired. Paste a new one.' : days === 0 ? 'Cookie expires today' : `Cookie expires in ${days} ${days === 1 ? 'day' : 'days'}`;
   return <p className={cx('mt-1 text-[12px]', days <= 1 ? 'text-warn' : 'text-mute')}>{text} (as of when it was pasted).</p>;
 }
 
@@ -515,7 +515,7 @@ function QuotaBars({ quota }: { quota: NonNullable<Account['quota']> }) {
 // 216px column. The full bars live behind the Quota button.
 function QuotaSummary({ quota }: { quota: Account['quota'] }) {
   if (!quota || quota.kind === 'none' || quota.kind === 'unknown') {
-    return <span className="text-[13px] text-mute" title="no quota read — this provider has not reported usage">–</span>;
+    return <span className="text-[13px] text-mute" title="no quota yet: this provider hasn't reported usage">–</span>;
   }
   const pcts: Array<[string, number]> = [];
   if (quota.percent_rolling != null) pcts.push(['Rolling', quota.percent_rolling]);
@@ -616,22 +616,22 @@ const BRIDGE_SIGN_IN: Record<string, { login: string[]; check: string; note: str
   'claude-sub': {
     login: ['CLAUDE_CONFIG_DIR=~/.claude-sub ~/.local/share/claude-bridge/current/claude auth login'],
     check: 'CLAUDE_CONFIG_DIR=~/.claude-sub ~/.local/share/claude-bridge/current/claude auth status',
-    note: 'Opens a browser sign-in for the account with the Claude plan.',
+    note: 'Opens a browser so you can sign in with the account that has the Claude plan.',
   },
   'chatgpt-sub': {
     login: ['CODEX_HOME=~/.codex-sub ~/.local/share/codex-bridge/current/bin/codex login --device-auth'],
     check: 'CODEX_HOME=~/.codex-sub ~/.local/share/codex-bridge/current/bin/codex login status',
-    note: 'Prints a URL and a code: open the URL, enter the code and approve with the ChatGPT account.',
+    note: 'Prints a URL and a code. Open the URL, enter the code and approve it with your ChatGPT account.',
   },
   'antigravity-sub': {
     login: ['mkdir -p ~/.agy-sub && chmod 700 ~/.agy-sub', 'env -u DBUS_SESSION_BUS_ADDRESS HOME=$HOME/.agy-sub ~/.local/share/agy-bridge/current/agy'],
     check: 'ls ~/.agy-sub/.gemini/antigravity-cli/antigravity-oauth-token',
-    note: 'Opens the interactive CLI: sign in, send one prompt, then type /exit. Unsetting D-Bus saves the login to a file the container can read.',
+    note: 'Opens the CLI. Sign in, send one prompt, then type /exit. Unsetting D-Bus makes it save the login to a file the container can read.',
   },
   'github-copilot': {
     login: ['env -u DBUS_SESSION_BUS_ADDRESS COPILOT_HOME=~/.copilot-sub ~/.local/share/copilot-bridge/current/copilot login --device-code'],
     check: 'ls ~/.copilot-sub/config.json',
-    note: 'Prints a URL and a code: open the URL, enter the code and approve with the GitHub account that has Copilot.',
+    note: 'Prints a URL and a code. Open the URL, enter the code and approve it with the GitHub account that has Copilot.',
   },
 };
 
@@ -683,7 +683,7 @@ function BridgePanel({ bridge, loading }: { bridge: Bridge | null; loading: bool
     return (
       <div className="space-y-2 rounded-lg border border-ok/40 bg-ok-dim/40 px-4 py-3">
         <p className="flex flex-wrap items-center gap-2 text-[13px] text-ok">
-          <span className="size-1.5 rounded-full bg-ok" /> Bridge running at <Mono>{bridge.base_url}</Mono> — no key needed
+          <span className="size-1.5 rounded-full bg-ok" /> Bridge running at <Mono>{bridge.base_url}</Mono>. No key needed.
         </p>
         {facts.length > 0 && (
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 text-[12px]">
@@ -694,10 +694,10 @@ function BridgePanel({ bridge, loading }: { bridge: Bridge | null; loading: bool
         )}
         {bridge.update && <BridgeUpdateNote update={bridge.update} />}
         {toolsDisabled && <p className="text-[12px] text-warn">Client tool calls are unavailable on this bridge. See {runbook} for the reason and options.</p>}
-        {loggedOut && <p className="text-[12px] text-warn">The CLI does not report a login — the key test will fail until you log in again ({runbook}).</p>}
+        {loggedOut && <p className="text-[12px] text-warn">The CLI isn't logged in, so the key test will fail until you log in again ({runbook}).</p>}
         {loggedOut && <SignInCommands id={bridge.id} />}
         <p className="text-[12px] text-mute">Status was recorded at startup. Setup and troubleshooting: {runbook}</p>
-        <p className="text-[12px] text-mute">Save &amp; validate uses the bridge&apos;s own key. Cap the account under Rules before agents use it.</p>
+        <p className="text-[12px] text-mute">Save &amp; validate uses the bridge&apos;s own key. Set a cap under Rules before you let agents use it.</p>
       </div>
     );
   }
@@ -810,7 +810,7 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
 
   return (
     <Modal open={open} onClose={onClose} wide title="Add provider"
-      subtitle="Add the provider and validate its API key before the key is saved."
+      subtitle="Adds the provider and tests its API key before saving it."
       busy={busy} dirty={dirty} onSubmit={() => { if (valid) void saveAndValidate(); }}
       footer={(close) => (
         <>
@@ -871,9 +871,9 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
                 setD((p) => ({ ...p, accountId, base_url: presetAccountID(accountId) }));
               }} />
             <p className="mt-1 text-[12px] text-mute">
-              The account ID is part of the endpoint. It composes
-              <Mono> /accounts/&lt;account_id&gt;/ai/v1</Mono> — Workers AI serves
-              chat, responses and anthropic messages under that prefix.
+              The account ID goes into the endpoint as
+              <Mono> /accounts/&lt;account_id&gt;/ai/v1</Mono>. Workers AI serves
+              chat, responses and Anthropic messages under that path.
             </p>
             {d.accountId && (
               <div className="mt-2 rounded-lg border border-line bg-raised/60 px-3.5 py-2.5 text-[13px] text-dim">
@@ -888,10 +888,10 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
               placeholder={isAnthropicKind ? 'https://api.anthropic.com' : d.preset === 'ollama-local' ? 'http://localhost:11434/v1' : 'https://api.provider.com/v1'} spellCheck={false}
               onChange={(e) => set('base_url', e.target.value.trim())} />
             <p className="mt-1 text-[12px] text-mute">{d.preset === 'ollama-local'
-              ? 'Where Ollama listens — change the host for a remote machine. Keep the /v1 suffix.'
+              ? 'Where Ollama is running. Change the host if it\'s on another machine, and keep /v1 on the end.'
               : isAnthropicKind
-              ? 'Required for compatibility providers. Enter the host only — /v1 paths are added automatically.'
-              : 'Required for compatibility providers. Use the base URL ending at the API version, e.g. /v1.'}</p>
+              ? 'Required for compatible providers. Enter just the host. ezllm adds the /v1 paths.'
+              : 'Required for compatible providers. Use the base URL up to the API version, for example /v1.'}</p>
           </div>
         ) : isKnownEndpoint(d.base_url) ? null : (
           <div className="rounded-lg border border-line bg-raised/60 px-3.5 py-2.5 text-[13px] text-dim">
@@ -927,7 +927,7 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
           <div className="rounded-lg border border-line bg-raised/60 px-4 py-3">
             <SectionLabel className="mb-2">Validation</SectionLabel>
             <StepList steps={result?.steps ?? liveSteps} running={busy} />
-            {result?.ok && <p className="mt-2 font-mono text-[12px] text-ok">✓ Key validated and stored.</p>}
+            {result?.ok && <p className="mt-2 font-mono text-[12px] text-ok">✓ Key tested and saved.</p>}
           </div>
           <ErrBox e={err} onDismiss={() => setErr(null)} />
         </div>
@@ -1015,7 +1015,7 @@ function EditAccountModal({ account, initialTab = 'settings', onClose, onSaved }
 
   return (
     <Modal open onClose={onClose} title={`Edit ${account.name}`}
-      subtitle="Save provider settings here. To validate and save keys, use the Keys tab."
+      subtitle="Save the provider's settings here. Test and save keys in the Keys tab."
       busy={busy} dirty={fieldsDirty || keyDirty} onSubmit={() => void save()}
       footer={(close) => <>
         <button type="button" className={cx(btn.base, btn.ghost)} onClick={close} disabled={busy}>
@@ -1072,7 +1072,7 @@ function EditAccountModal({ account, initialTab = 'settings', onClose, onSaved }
           <label className={labelCls} htmlFor="ea-url">Base URL</label>
           {isKnownEndpoint(account.base_url) ? (
             <div id="ea-url" className="rounded-lg border border-line bg-raised/60 px-3.5 py-2.5 font-mono text-[13px] text-dim">
-              {baseUrl} <span className="font-sans text-mute">— known endpoint, fixed</span>
+              {baseUrl} <span className="font-sans text-mute">(fixed for this provider)</span>
             </div>
           ) : (
             <input id="ea-url" className={cx(inputCls, 'font-mono')} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value.trim())} />
@@ -1090,9 +1090,9 @@ function EditAccountModal({ account, initialTab = 'settings', onClose, onSaved }
         <div className="rounded-lg border border-line bg-raised/60 p-4">
           <SectionLabel>Request budget (provider-wide)</SectionLabel>
           <p className="mt-1 text-[12px] text-mute">
-            The provider's own request ceiling, stated its way. It applies to the credential, so every
-            model routed through this provider shares it. A spent provider is skipped and the combo fails
-            over — the provider is never asked a request it has already refused. Leave 0 for unlimited.
+            The provider's own request limit, written the way the provider states it. It applies to the key, so
+            every model on this provider shares it. Once it's used up, combos skip this provider and move on,
+            so ezllm never sends it a request it would refuse. Leave 0 for no limit.
           </p>
           <div className="mt-3 grid gap-4 sm:grid-cols-2">
             <div>
@@ -1111,8 +1111,8 @@ function EditAccountModal({ account, initialTab = 'settings', onClose, onSaved }
           </div>
           {rateN > 0 ? (
             <p className="mt-2 text-[12px] text-accent">
-              {rateN} request{rateN === 1 ? '' : 's'} per {rateWindow} — a combo with another hop
-              will fail over instead of failing.
+              {rateN} request{rateN === 1 ? '' : 's'} per {rateWindow}. A combo with another hop
+              will move on to it instead of failing.
             </p>
           ) : null}
         </div>
@@ -1225,7 +1225,7 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
           // probing=0 with only_untested:false means the id is NOT in the
           // provider's live catalog — the server's generic note would blame
           // verdicts, which cannot be the cause here.
-          setSweepNote(`${m.id} is no longer in the provider's live catalog — sync to refresh the list`);
+          setSweepNote(`${m.id} isn't in the provider's model list anymore. Sync to refresh it.`);
         }
         loadModels();
       })
@@ -1238,7 +1238,7 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
 
   if (err) return <div className="border-t border-line px-5 py-4 text-[13px] text-bad">{err}</div>;
   if (!models) return <div className="border-t border-line px-5 py-4"><Skeleton className="h-3.5 w-40" /><Skeleton className="mt-2 h-3.5 w-56" /></div>;
-  if (models.length === 0) return <div className="border-t border-line px-5 py-4 text-[13px] text-mute">No models synced — run “Sync models”.</div>;
+  if (models.length === 0) return <div className="border-t border-line px-5 py-4 text-[13px] text-mute">No models yet. Click "Sync models".</div>;
 
   const applyPin = (model: string, pin: string, force: boolean) => {
     setPinErr(null);
@@ -1291,7 +1291,7 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
           {running ? (
             <BusyButton busy={sweepBusy} className="w-[132px]" onClick={stopTestAll}>Stop</BusyButton>
           ) : (
-            <span title="re-tests EVERY model (including proven ones) on all three surfaces — one tiny request each; Stop cancels what has not run">
+            <span title="Tests every model again, including ones that already passed, on all three APIs. Each test is one tiny request. Stop cancels the ones that haven't run yet.">
               <BusyButton busy={sweepBusy} disabled={models.length === 0} className="w-[132px]" onClick={startTestAll}>Test all models</BusyButton>
             </span>
           )}
@@ -1377,8 +1377,8 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
                     disabled={running || sweepBusy || m.source === 'curated'}
                     onClick={() => testOne(m)}>
                     <span title={m.source === 'curated'
-                      ? 'this verdict is operator-curated — probes never overwrite it; release it first to re-test'
-                      : 'one tiny request for THIS model on all three surfaces — tests the wire, not the tool-dialect'}>Test</span>
+                      ? 'You set this result by hand, so tests won\'t change it. Release it first if you want to test again.'
+                      : 'Sends one tiny request to this model on each of the three APIs. It checks the API works, not how the model handles tools.'}>Test</span>
                   </BusyButton>
                 </td>
               </tr>
@@ -1392,7 +1392,7 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
         <ConfirmModal
           open
           title={`Pin ${pendingForce.model} to ${pendingForce.pin}?`}
-          body={`The probe has not confirmed ${pendingForce.model} on ${pendingForce.pin}. Pinning it anyway can make every request 400 if the upstream rejects that surface.`}
+          body={`Testing hasn't confirmed ${pendingForce.model} works on ${pendingForce.pin}. If the provider doesn't support it, every request will fail with a 400.`}
           confirmLabel="Pin anyway"
           onConfirm={() => applyPin(pendingForce.model, pendingForce.pin, true)}
           onClose={() => setPendingForce(null)}
@@ -1462,7 +1462,7 @@ function PricingModal({ account, onClose }: { account: Account; onClose: () => v
     const nums = RATE_FIELDS.map((f) => form[f.key]);
     if (!form.model || !form.effective_from) { setErr('Pick a model and an effective date.'); return; }
     if (nums.some((v) => v.trim() === '' || Number.isNaN(Number(v)) || Number(v) < 0)) {
-      setErr('All four rates are required, as non-negative numbers in USD per 1M tokens. Use 0 for a rate that is genuinely free.');
+      setErr('Fill in all four rates in USD per million tokens. Use 0 for anything that\'s free.');
       return;
     }
     setBusy(true); setErr(null);
@@ -1497,8 +1497,8 @@ function PricingModal({ account, onClose }: { account: Account; onClose: () => v
 
   return (
     <>
-    <Modal open onClose={onClose} wide title={`Pricing — ${account.name}`}
-      subtitle="USD per 1M tokens, versioned by date · a call is priced by the rate effective on its day"
+    <Modal open onClose={onClose} wide title={`Pricing: ${account.name}`}
+      subtitle="USD per million tokens. Each call uses the rate that applied on its date."
       busy={busy} dirty={dirty} onSubmit={() => void setRate()}
       footer={(close) => (
         <>
@@ -1515,7 +1515,7 @@ function PricingModal({ account, onClose }: { account: Account; onClose: () => v
           {rows === null ? (
             <div className="mt-2 space-y-2"><Skeleton className="h-3.5 w-40" /><Skeleton className="h-3.5 w-56" /></div>
           ) : sorted.length === 0 ? (
-            <p className="mt-2 text-[13px] text-mute">No rates yet — every call from this provider is UNPRICED, and counts as $0, until you add one.</p>
+            <p className="mt-2 text-[13px] text-mute">No rates yet. Until you add one, calls to this provider count as $0.</p>
           ) : (
             <div className="mt-2 max-h-64 overflow-auto rounded-lg border border-line">
               <table className="w-full min-w-[640px] text-[13px]">
@@ -1589,12 +1589,12 @@ function PricingModal({ account, onClose }: { account: Account; onClose: () => v
             <input id="pr-note" className={inputCls} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
           </div>
           {existing && <p className="mt-3 text-[12px] text-warn">A rate for this model on {form.effective_from} exists and will be overwritten. Pick a later date to keep the old one for earlier calls.</p>}
-          {!models.length && <p className="mt-3 text-[12px] text-mute">Sync this provider&rsquo;s models first — a rate can only name a model the catalog knows.</p>}
+          {!models.length && <p className="mt-3 text-[12px] text-mute">Sync this provider&rsquo;s models first. You can only set rates for models ezllm knows about.</p>}
         </div>
       </div>
     </Modal>
     <ConfirmModal open={removing != null} title="Delete this rate?" confirmLabel="Delete" busy={busy}
-      body={removing ? `${removing.model_id}, effective from ${removing.effective_from}. Calls from that date on fall back to the previous rate, or to unpriced ($0) if there is none.` : ''}
+      body={removing ? `${removing.model_id}, from ${removing.effective_from}. Calls from that date will use the previous rate instead, or $0 if there isn't one.` : ''}
       onClose={() => setRemoving(null)} onConfirm={() => { if (removing) void remove(removing); }} />
     </>
   );
@@ -1628,7 +1628,7 @@ function ClaudeUsageExtras({ raw }: { raw: string }) {
     <div className="space-y-1.5">
       {liveErr && (
         <p className="text-[12px] text-warn">
-          Live claude.ai read failed ({liveErr}) — showing the bridge&apos;s last observed reading. Paste a fresh cookie to restore it.
+          Couldn&apos;t read claude.ai ({liveErr}), so this is the bridge&apos;s last reading. Paste a new cookie to fix it.
         </p>
       )}
       {source && !liveErr && <p className="text-[12px] text-mute">source: {source}</p>}
@@ -1672,8 +1672,8 @@ function QuotaModal({ account, onClose, onRead }: { account: Account; onClose: (
   const caps = (rules ?? []).filter((r) => r.cap_tokens > 0);
 
   return (
-    <Modal open onClose={onClose} title={`Quota — ${account.name}`}
-      subtitle="live provider quota read · caps come from Rules"
+    <Modal open onClose={onClose} title={`Quota: ${account.name}`}
+      subtitle="quota from the provider · caps are set in Rules"
       footer={(
         <>
           <button type="button" className={cx(btn.base, btn.ghost)} onClick={onClose}>Close</button>
@@ -1688,7 +1688,7 @@ function QuotaModal({ account, onClose, onRead }: { account: Account; onClose: (
           <SectionLabel>Usage</SectionLabel>
           {busy && !live && <Skeleton className="mt-2 h-3.5 w-56" />}
           {!busy && live?.kind === 'none' && (
-            <p className="mt-2 text-[13px] text-mute">This provider does not offer quota information for this key.</p>
+            <p className="mt-2 text-[13px] text-mute">This provider doesn't report quota for this key.</p>
           )}
           {live && live.kind !== 'none' && (
             <div className="mt-2 space-y-3">
@@ -1719,12 +1719,12 @@ function QuotaModal({ account, onClose, onRead }: { account: Account; onClose: (
             <p className="mt-2 text-[13px] text-dim">
               <span className="font-mono tabular-nums text-ink">{account.rate_limit}</span> requests per{' '}
               <span className="font-mono text-ink">{account.rate_window}</span>
-              <span className="text-mute"> — shared by every model on this account; a spent account is skipped and the combo fails over.</span>
+              <span className="text-mute">. Every model on this account shares it. When it runs out, combos skip this account and move to the next one.</span>
             </p>
           ) : (
             <p className="mt-2 text-[13px] text-mute">
-              Unlimited — no request ceiling is set for this account. Set one under Edit &amp; keys if the
-              provider enforces its own rate limit.
+              No request limit is set for this account. If the provider has its own rate limit, set it under
+              Edit &amp; keys.
             </p>
           )}
         </div>
@@ -1733,7 +1733,7 @@ function QuotaModal({ account, onClose, onRead }: { account: Account; onClose: (
           {rulesError && <p role="alert" className="mt-2 text-[13px] text-warn">Could not load account caps. <button type="button" className="underline" onClick={() => setRulesAttempt(n => n + 1)}>Retry caps</button></p>}
           {rules === null && !rulesError && <Skeleton className="mt-2 h-3.5 w-48" />}
           {rules !== null && caps.length === 0 && (
-            <p className="mt-2 text-[13px] text-mute">No caps set for this account — add one under <span className="text-ink">Rules</span>.</p>
+            <p className="mt-2 text-[13px] text-mute">No caps set for this account. You can add one under <span className="text-ink">Rules</span>.</p>
           )}
           {caps.length > 0 && (
             <table className="mt-2 w-full text-[13px]">
@@ -1785,8 +1785,8 @@ function AccountCard({ a, open, onToggle, intent, onIntentDone, issues, onChange
   // snapshot or kind "none" both mean the quota read is not available.
   const quotaExposed = a.quota != null && a.quota.kind !== 'none';
   const quotaHint = a.quota == null
-    ? 'quota not available — run Test key to check'
-    : a.quota.kind === 'none' ? 'quota not available — this provider exposes no usage endpoint' : 'live provider quota read';
+    ? 'no quota yet. Click Test key to check.'
+    : a.quota.kind === 'none' ? 'no quota: this provider doesn\'t share usage' : 'live provider quota read';
 
   useEffect(() => {
     if (!intent) return;
@@ -1817,7 +1817,7 @@ function AccountCard({ a, open, onToggle, intent, onIntentDone, issues, onChange
     for (const k of a.keys) {
       try { await post(`/admin/accounts/${a.id}/keys/${k.id}/retest`, {}); } catch { failed++; }
     }
-    if (failed > 0) throw new Error(`${failed} of ${a.keys.length} ${a.keys.length === 1 ? 'key' : 'keys'} failed the test — the reason is under each key.`);
+    if (failed > 0) throw new Error(`${failed} of ${a.keys.length} ${a.keys.length === 1 ? 'key' : 'keys'} failed the test. The reason is shown under each key.`);
   };
 
   const removeAccount = async () => {
@@ -1878,8 +1878,8 @@ function AccountCard({ a, open, onToggle, intent, onIntentDone, issues, onChange
           <button type="button" disabled={quotaBusy}
             aria-label={`refresh quota for ${a.name}`}
             title={a.quota?.read_at
-              ? `read ${relTime(a.quota.read_at)}${stale(a.quota) ? ' — stale, refresh from the provider\u2019s usage endpoint' : ''}`
-              : 'refresh quota from the provider\u2019s usage endpoint'}
+              ? `read ${relTime(a.quota.read_at)}${stale(a.quota) ? ' (out of date, refresh to check again)' : ''}`
+              : 'Refresh quota from the provider'}
             className={cx('grid h-6 w-6 flex-none place-items-center rounded-md text-[13px] leading-none transition-colors disabled:opacity-40',
               stale(a.quota) ? 'text-accent hover:bg-accent-dim' : 'text-mute hover:bg-hover hover:text-ink')}
             onClick={onReloadQuota}>
@@ -1908,7 +1908,7 @@ function AccountCard({ a, open, onToggle, intent, onIntentDone, issues, onChange
             <span title="Set per-model USD rates for cost analysis">
               <BusyButton onClick={() => setPricingOpen(true)}>Pricing</BusyButton>
             </span>
-            <span title="Provider settings, and add or replace its API keys">
+            <span title="Provider settings and API keys">
               <BusyButton onClick={() => { setEditTab('settings'); setEditing(true); }}>Edit &amp; keys</BusyButton>
             </span>
             <label className="flex items-center gap-2 text-[13px] text-dim" title={a.enabled ? 'Routing may use this provider' : 'Disabled: routing skips this provider'}>
@@ -1982,8 +1982,8 @@ function AccountCard({ a, open, onToggle, intent, onIntentDone, issues, onChange
             open={confirm != null}
             title={confirm?.kind === 'key' ? `Delete key ${confirm.label}?` : `Delete provider ${a.name}?`}
             body={confirm?.kind === 'key'
-              ? 'This key is removed immediately. The provider stays, and routes using it will fail until you add a key.'
-              : 'This removes the provider and all its keys. Combos that use it will lose that hop.'}
+              ? 'The key is removed right away. The provider stays, but requests to it will fail until you add another key.'
+              : 'This removes the provider and all its keys. Any combo that uses it will lose that hop.'}
             busy={menuBusy != null}
             onClose={() => setConfirm(null)}
             onConfirm={() => {
@@ -2117,7 +2117,7 @@ export default function Providers() {
       ) : accounts.length === 0 ? (
         <div className="rounded-xl border border-line bg-surface px-6 py-14 text-center">
           <p className="text-[14px] font-medium">No providers yet</p>
-          <p className="mt-1 text-[13px] text-mute">Add your first one — name it, drop in an API key, and the 7-step test runs automatically.</p>
+          <p className="mt-1 text-[13px] text-mute">Add your first one. Give it a name and an API key, and ezllm tests it for you.</p>
           <button type="button" className={cx(btn.base, btn.primary, 'mt-5')} onClick={() => setAddOpen(true)}>＋ Add your first provider</button>
         </div>
       ) : shown.length === 0 ? (

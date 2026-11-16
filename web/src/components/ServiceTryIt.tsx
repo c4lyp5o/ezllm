@@ -195,7 +195,7 @@ export function ServiceTryIt({ surface, model }: { surface: ServiceSurface; mode
 
       {(surface === 'videos_gen' || surface === 'music_gen') && (
         <p className="text-[11px] leading-relaxed text-mute">
-          There is no common upstream format for this service: only the prompt is sent, and if the provider answers with a job to check later, the response is shown as it came.
+          Providers don't share a format for this, so only the prompt is sent. If the provider replies with a job to check later, you'll see its reply as is.
         </p>
       )}
 
@@ -237,7 +237,7 @@ export function ServiceTryIt({ surface, model }: { surface: ServiceSurface; mode
       </Collapse>
     </form>
     <ConfirmModal open={confirming} title={`Send a real request to ${model}?`} confirmLabel="Send request" tone="primary"
-      body="This goes through the real pipeline and may spend provider quota. The result is shown here and not stored."
+      body="This is a real request and may use provider quota. The result shows here and isn't saved."
       onClose={() => setConfirming(false)} onConfirm={() => void run()} />
     </>
   );

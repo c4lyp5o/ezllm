@@ -223,7 +223,7 @@ CREATE TABLE IF NOT EXISTS client_tokens (
   id          INTEGER PRIMARY KEY,
   name        TEXT NOT NULL UNIQUE,              -- 'hermes', 'claude-code'
   token_hash  TEXT NOT NULL UNIQUE,              -- sha256 hex; plaintext never stored
-  roles       TEXT NOT NULL DEFAULT 'infer',     -- csv: infer,admin
+  roles       TEXT NOT NULL DEFAULT 'infer',     -- csv of infer,metrics,admin (v36: each a separate permission)
   enabled     INTEGER NOT NULL DEFAULT 1,
   cap_window  TEXT NOT NULL DEFAULT 'monthly',
   cap_tokens  INTEGER NOT NULL DEFAULT 0,        -- 0 = unlimited

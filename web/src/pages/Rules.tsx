@@ -62,9 +62,9 @@ async function runRuleSteps(steps: RuleStep[]) {
     try { await steps[i].run(); } catch (e) {
       const list = (xs: RuleStep[]) => xs.map((s) => s.model).join(', ');
       const done = steps.slice(0, i), rest = steps.slice(i + 1);
-      throw new Error(`${steps[i].model}: ${errText(e)}`
-        + (done.length ? ` — already changed: ${list(done)}` : '')
-        + (rest.length ? ` — not attempted: ${list(rest)}` : ''));
+      throw new Error(`${steps[i].model}: ${errText(e).replace(/\.?$/, '.')}`
+        + (done.length ? ` Already changed: ${list(done)}.` : '')
+        + (rest.length ? ` Not tried: ${list(rest)}.` : ''));
     }
   }
 }
@@ -513,8 +513,8 @@ export default function Rules() {
         <div>
           <SectionLabel>Model rules</SectionLabel>
           <p className="mt-1 max-w-2xl text-[13px] text-mute">
-            Limit when and how much a model can be used: cap the tokens it may spend, or only allow it at certain hours.
-            When a combo hop is outside its rule the router skips it and tries the next one. If nothing is allowed,
+            Limit how much a model can be used, or when. You can cap its tokens or only allow it at certain hours.
+            If a combo hop is outside its rule, ezllm skips it and tries the next one. If nothing is allowed,
             the request is refused with <span className="font-mono text-dim">429 rule_refusal</span>.
           </p>
         </div>
@@ -560,7 +560,7 @@ export default function Rules() {
       ) : rules.length === 0 ? (
         <div className="rounded-xl border border-line bg-surface px-6 py-12 text-center">
           <p className="text-[14px] font-medium">No rules yet</p>
-          <p className="mx-auto mt-1 max-w-md text-[13px] text-mute">Add one to cap how much a model can spend, or to keep it to daytime (or night-time) hours.</p>
+          <p className="mx-auto mt-1 max-w-md text-[13px] text-mute">Add one to cap a model's tokens, or to only allow it during the day or at night.</p>
           <button type="button" className={cx(btn.base, btn.primary, 'mt-5')} onClick={openNew}>+ Create your first rule</button>
         </div>
       ) : shown.length === 0 ? (
@@ -635,7 +635,7 @@ export default function Rules() {
       <ConfirmModal
         open={fan != null} tone="primary" confirmLabel="Continue"
         title={`Change ${fan ? nfmt(fan.count) : ''} rules?`}
-        body="Each rule is its own request, so this makes one call per rule. If one fails, the earlier ones stay changed and the error says which."
+        body="This changes each rule one at a time. If one fails, the ones before it stay changed, and the error tells you which."
         onClose={() => { fan?.resolve(false); setFan(null); }}
         onConfirm={() => { fan?.resolve(true); setFan(null); }} />
       <ConfirmModal

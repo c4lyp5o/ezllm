@@ -377,8 +377,8 @@ export default function Requests() {
                   ) : (
                   <td className="px-4 py-2 text-right font-mono tabular-nums"
                     title={`tokens in ${nfmt(r.tin)} (↑) · tokens out ${nfmt(r.tout)} (↓)`}>
-                    <span title="tokens in — prompt, cache counted inside">↑{nfmt(r.tin)}</span>{' '}
-                    <span className="text-mute" title="tokens out — completion">↓{nfmt(r.tout)}</span>
+                    <span title="tokens in (prompt, including cached tokens)">↑{nfmt(r.tin)}</span>{' '}
+                    <span className="text-mute" title="tokens out (completion)">↓{nfmt(r.tout)}</span>
                   </td>
                   )}
                   <td className="px-4 py-2 text-right font-mono tabular-nums text-mute">{nfmt(r.cread ?? 0)}</td>

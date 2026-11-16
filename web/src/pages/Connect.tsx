@@ -23,9 +23,9 @@ import {
   type KeyTest, type TokenCreated, type TokenInfo, type V1Model,
 } from '../utils/tokens';
 import {
-  EXPIRY_PRESETS, RECIPES, allowedModels, curlRequest, expiryReadout, expiryTime, hasKeyErrors, keyState, presetDate, recipe,
-  splitPatterns, validateKey,
-  type KeyDraft, type RecipeKey,
+  EXPIRY_PRESETS, RECIPES, ROLES, allowedModels, curlRequest, expiryReadout, expiryTime, hasKeyErrors, keyState, metricsCurl, presetDate,
+  prometheusScrape, recipe, sortRoles, splitPatterns, validateKey,
+  type KeyDraft, type RecipeKey, type Role,
 } from '../utils/connect';
 
 const WINDOWS = ['5h', 'daily', 'weekly', 'monthly'] as const;
@@ -37,9 +37,9 @@ const CAP_QUICK = [100_000, 1_000_000, 10_000_000];
 // telling users to "set the env var to make it work" would be backwards.
 const CORS_NOTE = (
   <>
-    Browser preflights are allowed on <code className="font-mono text-dim">/v1/*</code> out of
-    the box. Set <code className="font-mono text-dim">EZLLM_CORS_ORIGINS</code> to a
-    comma-separated allowlist to restrict it.
+    Browsers can call <code className="font-mono text-dim">/v1/*</code> from any site by default. To limit
+    that, set <code className="font-mono text-dim">EZLLM_CORS_ORIGINS</code> to a comma-separated list of
+    allowed origins.
   </>
 );
 
@@ -78,12 +78,12 @@ function AllowlistField({ id, value, onChange, ids }: { id: string; value: strin
       )}
       <p className="mt-1.5 text-[12px] leading-snug text-mute" aria-live="polite">
         {patterns.length === 0
-          ? <>No limit: the key can call every model{ids.length > 0 && <> ({nfmt(ids.length)} routable now)</>}.</>
+          ? <>No limit, so the key can call any model{ids.length > 0 && <> ({nfmt(ids.length)} available now)</>}.</>
           : ids.length === 0
-            ? 'Comma-separated ids or globs. They are checked before a combo is expanded.'
+            ? 'Separate model IDs or patterns with commas. They\'re checked before a combo is expanded.'
             : matched.length === 0
-              ? <span className="text-warn">Matches none of the {nfmt(ids.length)} models routable right now. Check the spelling: a glob’s * does not cross a “/”.</span>
-              : <>Matches {nfmt(matched.length)} of {nfmt(ids.length)} routable models: <span className="font-mono text-dim">{matched.slice(0, 5).join(', ')}{matched.length > 5 ? `, and ${nfmt(matched.length - 5)} more` : ''}</span></>}
+              ? <span className="text-warn">Doesn't match any of the {nfmt(ids.length)} models available right now. Check the spelling. A * doesn't match across a "/".</span>
+              : <>Matches {nfmt(matched.length)} of {nfmt(ids.length)} available models: <span className="font-mono text-dim">{matched.slice(0, 5).join(', ')}{matched.length > 5 ? `, and ${nfmt(matched.length - 5)} more` : ''}</span></>}
       </p>
     </div>
   );
@@ -110,7 +110,7 @@ function CapField({ cap, window, onCap, onWindow, error }: { cap: number; window
             options={WINDOWS.map((w) => ({ key: w, label: WINDOW_LABEL[w] }))} />
           <span className="font-mono text-[12px] text-dim">{nfmt(cap)} tokens per {window === '5h' ? '5 hours' : window === 'daily' ? 'day' : window === 'weekly' ? 'week' : 'month'}</span>
         </div>
-      ) : <p className="mt-1.5 text-[12px] text-mute">0 means no budget: the key can spend without limit.</p>}
+      ) : <p className="mt-1.5 text-[12px] text-mute">Leave at 0 for no limit.</p>}
     </div>
   );
 }
@@ -136,8 +136,41 @@ function ExpiryField({ value, onChange, error }: { value: string; onChange: (v: 
   );
 }
 
+// ── roles ───────────────────────────────────────────────────────────────────
+// One checkbox per role. Each role opens one surface, so nothing is ticked or
+// implied for you: an admin key that should also call models needs Inference.
+function RoleField({ value, onChange, error }: { value: Role[]; onChange: (r: Role[]) => void; error?: string }) {
+  const toggle = (k: Role, on: boolean) => onChange(sortRoles(on ? [...value, k] : value.filter((r) => r !== k)));
+  return (
+    <fieldset>
+      <legend className={labelCls}>Roles</legend>
+      <div className="space-y-2">
+        {ROLES.map((r) => {
+          const checked = value.includes(r.key);
+          return (
+            <label key={r.key} className={cx('flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2', checked ? 'border-accent/40 bg-accent-dim/40' : 'border-line')}>
+              <input type="checkbox" className="mt-0.5 accent-[var(--color-accent)]" checked={checked}
+                aria-describedby={`role-${r.key}-hint`} onChange={(e) => toggle(r.key, e.target.checked)} />
+              <span className="min-w-0">
+                <span className="text-[13px] font-medium text-ink">{r.label}</span>
+                <span id={`role-${r.key}-hint`} className="block text-[12px] leading-snug text-mute">{r.hint}</span>
+              </span>
+            </label>
+          );
+        })}
+      </div>
+      {error && <p className="mt-1.5 text-[12px] text-bad" role="alert">{error}</p>}
+      {value.includes('admin') && (
+        <p className="mt-2 rounded-lg border border-warn/30 bg-warn-dim p-2.5 text-[13px] leading-relaxed text-warn">
+          An admin key can add providers, read their keys and create new API keys. Keep it for yourself and don't give it to a tool.
+        </p>
+      )}
+    </fieldset>
+  );
+}
+
 // ── create ──────────────────────────────────────────────────────────────────
-const EMPTY_KEY: KeyDraft = { name: '', role: 'infer', models: '', expiry: '', cap: 0, capWindow: 'monthly' };
+const EMPTY_KEY: KeyDraft = { name: '', roles: ['infer'], models: '', expiry: '', cap: 0, capWindow: 'monthly' };
 
 function CreateKeyModal({ open, names, ids, onClose, onCreated }: {
   open: boolean; names: string[]; ids: string[]; onClose: () => void; onCreated: (t: TokenCreated, note?: string) => void;
@@ -157,13 +190,15 @@ function CreateKeyModal({ open, names, ids, onClose, onCreated }: {
     if (hasKeyErrors(errors)) { setShowAll(true); return; }
     setBusy(true); setErr('');
     try {
-      const t = await createToken(d.name.trim(), d.role, { allowed_models: d.models.trim(), expires_at: d.expiry });
+      // Model allowlist and budget only mean something for an inference key.
+      const infer = d.roles.includes('infer');
+      const t = await createToken(d.name.trim(), d.roles, { allowed_models: infer ? d.models.trim() : '', expires_at: d.expiry });
       let note: string | undefined;
       // The create call takes no budget, so it is a second call. The key exists
       // either way: a failure here is reported next to the key, not hidden.
-      if (d.cap > 0) {
+      if (infer && d.cap > 0) {
         try { await patchToken(t.id, { cap_tokens: d.cap, cap_window: d.capWindow }); }
-        catch (e) { note = `The key was created, but its budget was not saved (${errText(e, 'unknown error')}). Set it from Policy.`; }
+        catch (e) { note = `The key was created, but its budget wasn't saved (${errText(e, 'unknown error')}). You can set it from Policy.`; }
       }
       onCreated(t, note);
     } catch (e) { setErr(errText(e, 'create failed')); } finally { setBusy(false); }
@@ -171,7 +206,7 @@ function CreateKeyModal({ open, names, ids, onClose, onCreated }: {
 
   return (
     <Modal open={open} onClose={onClose} wide busy={busy} dirty={dirty} onSubmit={() => void submit()}
-      title="Create an API key" subtitle="The key is shown once, right after you create it"
+      title="Create an API key" subtitle="You'll see the key once, right after you create it"
       footer={(close) => <>
         {showAll && hasKeyErrors(errors) && <span className="mr-auto text-[12px] text-bad">Fix the fields marked in red to create the key.</span>}
         <button type="button" className={cx(btn.base, btn.ghost)} onClick={close}>Cancel</button>
@@ -182,34 +217,29 @@ function CreateKeyModal({ open, names, ids, onClose, onCreated }: {
           <label className={labelCls} htmlFor="tk-name">Name</label>
           <input id="tk-name" className={cx(inputCls, nameShown && 'border-bad/60')} value={d.name} placeholder="hermes-laptop" spellCheck={false}
             aria-invalid={!!nameShown} onChange={(e) => set({ name: e.target.value })} />
-          {nameShown ? <p className="mt-1 text-[12px] text-bad">{errors.name}</p> : <p className="mt-1 text-[12px] text-mute">Usage is counted by this name. Use one per app or machine.</p>}
+          {nameShown ? <p className="mt-1 text-[12px] text-bad">{errors.name}</p> : <p className="mt-1 text-[12px] text-mute">Usage is tracked under this name. Use one key per app or machine.</p>}
         </div>
 
-        <div>
-          <span className={labelCls}>Role</span>
-          <Segmented<'infer' | 'admin'> label="Role" value={d.role} onChange={(r) => set({ role: r })}
-            options={[{ key: 'infer', label: 'Inference only' }, { key: 'admin', label: 'Full admin' }]} />
-          {d.role === 'infer'
-            ? <p className="mt-1.5 text-[12px] text-mute">Can call models on /v1. Use this for tools and apps.</p>
-            : <p className="mt-1.5 rounded-lg border border-warn/30 bg-warn-dim p-2.5 text-[13px] leading-relaxed text-warn">
-              Full admin can also add providers, read provider keys and mint other keys. Keep it for yourself, never for a tool.
-            </p>}
-        </div>
+        <RoleField value={d.roles} onChange={(roles) => set({ roles })} error={showAll ? errors.roles : undefined} />
 
-        <div>
-          <label className={labelCls} htmlFor="tk-models">Allowed models <span className="text-mute">(optional)</span></label>
-          <AllowlistField id="tk-models" value={d.models} onChange={(v) => set({ models: v })} ids={ids} />
-        </div>
+        {d.roles.includes('infer') && (
+          <div>
+            <label className={labelCls} htmlFor="tk-models">Allowed models <span className="text-mute">(optional)</span></label>
+            <AllowlistField id="tk-models" value={d.models} onChange={(v) => set({ models: v })} ids={ids} />
+          </div>
+        )}
 
         <div>
           <span className={labelCls}>Expires <span className="text-mute">(optional)</span></span>
           <ExpiryField value={d.expiry} onChange={(v) => set({ expiry: v })} error={errors.expiry} />
         </div>
 
-        <div>
-          <span className={labelCls}>Budget <span className="text-mute">(optional)</span></span>
-          <CapField cap={d.cap} window={d.capWindow} onCap={(n) => set({ cap: n })} onWindow={(w) => set({ capWindow: w })} error={errors.cap} />
-        </div>
+        {d.roles.includes('infer') && (
+          <div>
+            <span className={labelCls}>Budget <span className="text-mute">(optional)</span></span>
+            <CapField cap={d.cap} window={d.capWindow} onCap={(n) => set({ cap: n })} onWindow={(w) => set({ capWindow: w })} error={errors.cap} />
+          </div>
+        )}
 
         {err && <div role="alert" className="rounded-lg border border-bad/30 bg-bad-dim px-4 py-3 text-[13px] text-bad">{err}</div>}
       </div>
@@ -218,13 +248,24 @@ function CreateKeyModal({ open, names, ids, onClose, onCreated }: {
 }
 
 // ── show once ───────────────────────────────────────────────────────────────
+type FreshTab = 'env-openai' | 'env-anthropic' | 'curl' | 'metrics-curl' | 'prometheus';
+
 function FreshKey({ fresh, base, sample, note, onDone }: { fresh: TokenCreated; base: string; sample: string; note?: string; onDone: () => void }) {
-  const [tab, setTab] = useState<'env-openai' | 'env-anthropic' | 'curl'>('env-openai');
+  const infer = fresh.roles.includes('infer');
+  const metrics = fresh.roles.includes('metrics');
+  const tabs: { key: FreshTab; label: string }[] = [
+    ...(infer ? [{ key: 'env-openai' as const, label: 'OpenAI env' }, { key: 'env-anthropic' as const, label: 'Anthropic env' }, { key: 'curl' as const, label: 'curl' }] : []),
+    ...(metrics ? [{ key: 'prometheus' as const, label: 'Prometheus' }, { key: 'metrics-curl' as const, label: 'Metrics curl' }] : []),
+  ];
+  const [tab, setTab] = useState<FreshTab>(tabs[0]?.key ?? 'env-openai');
   const [test, setTest] = useState<KeyTest | null>(null);
   const [testing, setTesting] = useState(false);
   const model = sample || '<model-id>';
-  const text = tab === 'curl' ? curlRequest(base, model, fresh.plaintext) : recipe(tab, base, fresh.plaintext, model);
-  const run = async () => { setTesting(true); setTest(await testKey(fresh.plaintext)); setTesting(false); };
+  const text = tab === 'curl' ? curlRequest(base, model, fresh.plaintext)
+    : tab === 'metrics-curl' ? metricsCurl(base, fresh.plaintext)
+      : tab === 'prometheus' ? prometheusScrape(base)
+        : recipe(tab, base, fresh.plaintext, model);
+  const run = async () => { setTesting(true); setTest(await testKey(fresh.plaintext, fresh.roles)); setTesting(false); };
   return (
     // Deliberately NOT <Modal>: backdrop clicks and Escape would dismiss a
     // one-time secret. The only way out is the button below.
@@ -237,7 +278,7 @@ function FreshKey({ fresh, base, sample, note, onDone }: { fresh: TokenCreated; 
         className="my-auto w-full max-w-lg rounded-2xl border border-accent/40 bg-surface p-6 shadow-2xl">
         <div className="text-[16px] font-semibold">Copy this key now</div>
         <p className="mt-1.5 text-[13px] text-dim">
-          ezllm stores only a hash, so this is the <span className="text-ink">only time</span> it can be shown. If you close this without saving it, create a new key.
+          ezllm only keeps a hash of the key, so this is the <span className="text-ink">only time</span> you'll see it. If you lose it, create a new one.
         </p>
         <div className="mt-4 flex items-center gap-2 rounded-lg border border-line bg-bg px-3 py-2.5">
           <code className="min-w-0 flex-1 break-all font-mono text-[13px] text-accent">{fresh.plaintext}</code>
@@ -245,20 +286,20 @@ function FreshKey({ fresh, base, sample, note, onDone }: { fresh: TokenCreated; 
         </div>
         {note && <p role="alert" className="mt-3 rounded-lg border border-warn/30 bg-warn-dim p-2.5 text-[13px] leading-relaxed text-warn">{note}</p>}
         <div className="mt-3 space-y-2">
-          <FieldRow label="Base URL" value={base} />
-          <FieldRow label="Role" value={fresh.roles.join(' · ')} mono={false} />
+          {infer && <FieldRow label="Base URL" value={base} />}
+          {metrics && <FieldRow label="Metrics" value={`${base}/metrics`} />}
+          <FieldRow label="Roles" value={fresh.roles.join(' · ')} mono={false} />
           {fresh.roles.includes('admin') && (
             <p className="rounded-lg border border-warn/30 bg-warn-dim p-2.5 text-[13px] leading-relaxed text-warn">
-              This key has admin role: it can add providers, read provider keys and mint other keys. For an
-              app that only needs models, create an <span className="text-ink">infer</span> key instead.
+              This is an admin key. It can add providers, read their keys and create other API keys. If an app only
+              needs models, give it an <span className="text-ink">Inference</span> key instead.
             </p>
           )}
         </div>
 
         <div className="mt-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <Segmented<'env-openai' | 'env-anthropic' | 'curl'> size="sm" label="Paste-ready" value={tab} onChange={setTab}
-              options={[{ key: 'env-openai', label: 'OpenAI env' }, { key: 'env-anthropic', label: 'Anthropic env' }, { key: 'curl', label: 'curl' }]} />
+            {tabs.length > 0 && <Segmented<FreshTab> size="sm" label="Paste-ready" value={tab} onChange={setTab} options={tabs} />}
             <CopyButton text={text} label="Copy snippet" />
           </div>
           <pre className="mt-2 max-h-40 overflow-auto rounded-lg border border-line bg-bg px-3 py-2 font-mono text-[12px] leading-relaxed text-dim">{text}</pre>
@@ -287,20 +328,26 @@ function PolicyModal({ target, ids, onClose, onSaved }: {
   const [window, setWindow] = useState('monthly');
   const [models, setModels] = useState('');
   const [expiry, setExpiry] = useState('');
+  const [roles, setRoles] = useState<Role[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   useEffect(() => {
     if (!target) return;
     setCap(target.cap_tokens); setWindow(target.cap_window || 'monthly'); setModels(target.allowed_models || ''); setExpiry(expiryDate(target));
+    setRoles(sortRoles(target.roles));
     setBusy(false); setErr('');
   }, [target]);
-  const dirty = !!target && (cap !== target.cap_tokens || window !== (target.cap_window || 'monthly') || models.trim() !== (target.allowed_models || '').trim() || expiry !== expiryDate(target));
+  const rolesChanged = !!target && roles.join(',') !== sortRoles(target.roles).join(',');
+  const dirty = !!target && (rolesChanged || cap !== target.cap_tokens || window !== (target.cap_window || 'monthly') || models.trim() !== (target.allowed_models || '').trim() || expiry !== expiryDate(target));
+  const infer = roles.includes('infer');
 
   const save = async () => {
     if (!target || busy) return;
+    if (roles.length === 0) { setErr('Pick at least one role.'); return; }
     setBusy(true); setErr('');
     try {
       const updated = await patchToken(target.id, {
+        ...(rolesChanged ? { roles } : {}),
         cap_tokens: cap, cap_window: window, allowed_models: models.trim(),
         // The picker shows only the date; resending an untouched one would be
         // re-read as end of the server's local day and move the deadline.
@@ -312,21 +359,25 @@ function PolicyModal({ target, ids, onClose, onSaved }: {
 
   return (
     <Modal open={target != null} onClose={onClose} busy={busy} dirty={dirty} onSubmit={() => void save()}
-      title={`Key policy — ${target?.name ?? ''}`} subtitle="Budget, model allowlist and expiry for this key"
+      title={`Key policy: ${target?.name ?? ''}`} subtitle="Roles, budget, model allowlist and expiry for this key"
       footer={(close) => <>
         <button type="button" className={cx(btn.base, btn.ghost)} onClick={close}>Cancel</button>
         <button type="submit" disabled={busy || !dirty} className={cx(btn.base, btn.primary)}>{busy ? <Spinner /> : null} Save</button>
       </>}>
       <div className="space-y-6">
-        <div>
-          <span className={labelCls}>Token budget</span>
-          <CapField cap={cap} window={window} onCap={setCap} onWindow={setWindow} />
-          <p className="mt-1.5 text-[12px] leading-snug text-mute">Counted from the key’s real ledger spend (tokens in + out) inside the window. A spent key answers 429 until the window rolls; max_tokens is reserved before dispatch.</p>
-        </div>
-        <div>
-          <label className={labelCls} htmlFor="pol-models">Allowed models <span className="text-mute">(empty = all)</span></label>
-          <AllowlistField id="pol-models" value={models} onChange={setModels} ids={ids} />
-        </div>
+        <RoleField value={roles} onChange={setRoles} error={roles.length === 0 ? 'Pick at least one role.' : undefined} />
+        {rolesChanged && <p className="-mt-3 text-[12px] text-mute">Role changes apply from the key's next request. Anything that relies on a removed role will get a 403.</p>}
+        {infer && <>
+          <div>
+            <span className={labelCls}>Token budget</span>
+            <CapField cap={cap} window={window} onCap={setCap} onWindow={setWindow} />
+            <p className="mt-1.5 text-[12px] leading-snug text-mute">Counts the key's input and output tokens in the current window. Once the budget is used up, requests get a 429 until the next window starts. Each request's max_tokens is reserved up front.</p>
+          </div>
+          <div>
+            <label className={labelCls} htmlFor="pol-models">Allowed models <span className="text-mute">(empty = all)</span></label>
+            <AllowlistField id="pol-models" value={models} onChange={setModels} ids={ids} />
+          </div>
+        </>}
         <div>
           <span className={labelCls}>Expires <span className="text-mute">(empty = never)</span></span>
           <ExpiryField value={expiry} onChange={setExpiry} />
@@ -345,10 +396,10 @@ function ModelsBrowser({ models }: { models: V1Model[] }) {
   return (
     <details className="rounded-xl border border-line bg-surface px-4 py-3">
       <summary className="cursor-pointer select-none text-[13px] font-semibold">
-        Models you can call <span className="font-normal text-mute">· {nfmt(models.length)} routable right now</span>
+        Models you can call <span className="font-normal text-mute">· {nfmt(models.length)} available now</span>
       </summary>
       {models.length === 0 ? (
-        <p className="mt-3 text-[13px] text-mute">No models are available yet. Add and validate a provider, or create a combo.</p>
+        <p className="mt-3 text-[13px] text-mute">No models yet. Add a provider and test its key, or create a combo.</p>
       ) : (
         <div className="mt-3 space-y-2">
           <input aria-label="Search models" type="search" className={cx(inputCls, 'max-w-sm py-1.5')} placeholder={`Search ${nfmt(models.length)} models…`} value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -357,7 +408,7 @@ function ModelsBrowser({ models }: { models: V1Model[] }) {
               <li key={m.id} className="flex items-center gap-3 px-3 py-1.5">
                 <span className="min-w-0 flex-1 truncate font-mono text-[12px]">{m.id}</span>
                 <span className="text-[11px] text-mute">{m.id.includes('/') ? 'direct' : 'combo'}</span>
-                {m.protocol?.chat === false && <span className="text-[11px] text-warn" title="the gateway has probed this model and it does not do chat">no chat</span>}
+                {m.protocol?.chat === false && <span className="text-[11px] text-warn" title="ezllm tested this model and it doesn't support chat">no chat</span>}
                 <CopyButton text={m.id} label="Copy" />
               </li>
             ))}
@@ -481,7 +532,7 @@ export default function Connect() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="max-w-2xl text-[13px] text-dim">
-            Point Hermes, Claude Code or any OpenAI/Anthropic-style client at this gateway. One port, two protocols.
+            Connect Hermes, Claude Code or any app that speaks the OpenAI or Anthropic API. Both use the same address.
           </p>
           <p className="mt-1.5 text-[13px] text-mute" aria-live="polite">
             {tokens === null ? 'Loading keys…' : list.length === 0 ? 'No keys yet.' : (
@@ -497,7 +548,7 @@ export default function Connect() {
         <button type="button" className={cx(btn.base, btn.primary)} onClick={() => setCreating(true)}>＋ Create key</button>
       </div>
 
-      {usageStale && <p role="alert" className="rounded-lg border border-warn/30 bg-warn-dim p-3 text-sm text-ink">Some key usage could not be loaded. Figures may be unavailable or out of date. <button type="button" className="underline" onClick={() => void reload()}>Retry</button></p>}
+      {usageStale && <p role="alert" className="rounded-lg border border-warn/30 bg-warn-dim p-3 text-sm text-ink">Some usage numbers didn't load, so they may be missing or out of date. <button type="button" className="underline" onClick={() => void reload()}>Retry</button></p>}
       {err && (
         <div role="alert" className="flex items-start justify-between gap-3 rounded-lg border border-[rgba(248,113,113,0.3)] bg-bad-dim px-4 py-3 text-[13px] text-bad">
           <span>{err}</span>
@@ -519,7 +570,7 @@ export default function Connect() {
         ) : list.length === 0 ? (
           <div className="mt-3 rounded-xl border border-line bg-surface px-6 py-10 text-center">
             <p className="text-[14px] font-medium">No keys yet</p>
-            <p className="mx-auto mt-1 max-w-md text-[13px] text-mute">A key lets one app or machine call this gateway. Create one per client so usage and budgets stay separate.</p>
+            <p className="mx-auto mt-1 max-w-md text-[13px] text-mute">Each app or machine gets its own key, so you can see its usage and set its budget separately.</p>
             <button type="button" className={cx(btn.base, btn.primary, 'mt-5')} onClick={() => setCreating(true)}>＋ Create your first key</button>
           </div>
         ) : (
@@ -616,7 +667,7 @@ export default function Connect() {
             <FieldRow label="Anthropic" value={base} />
           </div>
           <p className="mt-2 text-[12px] text-mute">
-            OpenAI clients take the base with <code className="font-mono text-dim">/v1</code>. Anthropic clients add <code className="font-mono text-dim">/v1/messages</code> themselves, so their base is the bare address. Mixing them up is the most common mistake.
+            OpenAI clients need the address with <code className="font-mono text-dim">/v1</code> on the end. Anthropic clients add <code className="font-mono text-dim">/v1/messages</code> themselves, so give them the plain address. Mixing these up is the usual reason a client can't connect.
           </p>
 
           <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2">
@@ -641,13 +692,36 @@ export default function Connect() {
         <p className="mt-2 text-[12px] text-mute">{CORS_NOTE}</p>
       </section>
 
+      {/* ── Monitor ────────────────────────────────────────────────── */}
+      <section>
+        <SectionLabel>Monitor with Prometheus</SectionLabel>
+        <div className="mt-3 rounded-xl border border-line bg-surface px-4 py-4 [&>*]:min-w-0">
+          <FieldRow label="Metrics" value={`${base}/metrics`} />
+          <p className="mt-2 text-[12px] text-mute">
+            Request counts, tokens, latency, time to first token, current load and bridge versions, in Prometheus format.
+            Use a key with the <span className="text-ink">Metrics</span> role. That key can read metrics and nothing else.
+            An OpenTelemetry Collector can read it too, using its Prometheus receiver.
+          </p>
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <span className="text-[12px] text-mute">prometheus.yml</span>
+            <CopyButton text={prometheusScrape(base)} label="Copy snippet" />
+          </div>
+          <pre className="mt-1.5 overflow-x-auto rounded-lg border border-line bg-bg px-3 py-2 font-mono text-[12px] leading-relaxed text-dim">{prometheusScrape(base)}</pre>
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <span className="text-[12px] text-mute">Test it from a terminal</span>
+            <CopyButton text={metricsCurl(base)} label="Copy command" />
+          </div>
+          <pre className="mt-1.5 overflow-x-auto rounded-lg border border-line bg-bg px-3 py-2 font-mono text-[12px] leading-relaxed text-dim">{metricsCurl(base)}</pre>
+        </div>
+      </section>
+
       <section>
         <SectionLabel>Try a first request</SectionLabel>
         {sampleModel ? <div className="mt-3 rounded-xl border border-line bg-surface p-4">
-          <p className="text-sm text-dim">Create an inference-only key above, then replace YOUR_EZLLM_KEY in this command. It sends a short request to {sampleModel} and may use provider quota. Availability and surface pins can still affect the result.</p>
+          <p className="text-sm text-dim">Create a key with the Inference role above and put it in place of YOUR_EZLLM_KEY. This sends a short request to {sampleModel}, which may use some of your provider quota.</p>
           <pre className="mt-3 overflow-x-auto rounded-lg border border-line bg-bg p-3 text-xs">{curlRequest(base, sampleModel)}</pre>
           <div className="mt-2 flex justify-end"><CopyButton text={curlRequest(base, sampleModel)} label="Copy request" /></div>
-        </div> : <p className="mt-3 text-sm text-dim">Add and validate a provider first; a request example appears when a model is available.</p>}
+        </div> : <p className="mt-3 text-sm text-dim">Add a provider and test its key first. An example request shows up here once a model is available.</p>}
       </section>
 
       <ModelsBrowser models={models} />
@@ -662,7 +736,7 @@ export default function Connect() {
         title={pendingRevoke ? `Revoke "${pendingRevoke.name}"?` : 'Revoke token?'}
         body={pendingRevoke && (() => {
           const calls = usageFor(pendingRevoke.name)?.calls ?? 0;
-          return <>Clients using this key fail immediately, and it cannot be un-revoked.{calls > 0 && <> It made {nfmt(calls)} request{calls === 1 ? '' : 's'} in the last 30 days, so something is using it.</>} To stop it without losing it, disable it instead.</>;
+          return <>Anything using this key stops working right away, and you can't undo this.{calls > 0 && <> It made {nfmt(calls)} request{calls === 1 ? '' : 's'} in the last 30 days, so something still uses it.</>} If you only want to pause it, disable it instead.</>;
         })()}
         confirmLabel="Revoke"
         busy={pendingRevoke != null && busyId === pendingRevoke.id}

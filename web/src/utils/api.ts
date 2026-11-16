@@ -135,7 +135,7 @@ export async function apiFetch<T = unknown>(path: string, init: RequestInit = {}
   try {
     res = await fetch(path, { ...init, headers, body: body === undefined ? init.body : payload, credentials: 'include' });
   } catch {
-    throw new ApiError({ status: 0, type: 'network', message: 'upstream unreachable — is ezllm running?' });
+    throw new ApiError({ status: 0, type: 'network', message: 'Can\'t reach ezllm. Is it running?' });
   }
   const text = await res.text();
   let parsed: unknown;
@@ -186,7 +186,7 @@ export async function postKeyTestStream<T>(
       body: JSON.stringify(body),
     });
   } catch {
-    throw new ApiError({ status: 0, type: 'network', message: 'upstream unreachable — is ezllm running?' });
+    throw new ApiError({ status: 0, type: 'network', message: 'Can\'t reach ezllm. Is it running?' });
   }
   const contentType = res.headers.get('Content-Type') ?? '';
   const ndjson = contentType.includes('x-ndjson');
@@ -457,7 +457,7 @@ export function isZeroTokenStep(r: FeedRow): boolean {
   return r.status >= 200 && r.status < 300 && !r.tin && !r.tout && !r.cread && !r.cwrite;
 }
 export const ZERO_TOKEN_STEP_HINT =
-  'No tokens were recorded for this request. On subscription bridges this is usually a tool step (the model\'s script made its next tool call without new model work) or usage that was reported on a later request of the same turn.';
+  'No tokens were recorded for this request. With subscription bridges this is usually a tool step that needed no new model work, or usage that was counted on a later request in the same turn.';
 export function normalizeFeedRow(raw: any): FeedRow {
   return {
     ts: String(raw.ts ?? ''), client: String(raw.client ?? ''),
@@ -544,13 +544,13 @@ export const SPLIT_LABEL: Record<SplitKey, string> = {
 /** One-line "what am I looking at" per split, shown under the toggle. */
 export const SPLIT_HINT: Record<SplitKey, string> = {
   global: 'one row for the whole range',
-  day: 'traffic over time — the only time bucketing the ledger supports',
-  account: 'which upstream the calls actually landed on',
-  model: 'which model the traffic resolved to',
+  day: 'traffic per day',
+  account: 'which provider account handled the calls',
+  model: 'which model answered',
   client: 'which application sent it (the x-ezllm-client header)',
-  alias: 'which combo a request named, vs a direct model call',
+  alias: 'which combo was used, or a direct model call',
   key: 'which API key was used',
-  surface: 'chat vs anthropic vs responses endpoint',
+  surface: 'which API: chat, Anthropic messages or responses',
 };
 
 // group_by the endpoint needs for a given split (null = totals only).
@@ -588,10 +588,10 @@ export const FOCUS_LABEL: Record<FocusKey, string> = {
 };
 
 export const FOCUS_HINT: Record<FocusKey, string> = {
-  tokens: 'in vs out — raw volume',
+  tokens: 'tokens in and out',
   cache: 'prompt-cache reads and writes',
-  savings: 'tokens compression removed (plus context budget when a stage ships it)',
-  reasoning: 'tokens the model spent thinking (billed, never seen)',
+  savings: 'tokens removed by compression',
+  reasoning: 'tokens the model used for thinking (billed but not shown)',
   latency: 'p50 time to first token per group',
   errors: 'calls that came back 4xx/5xx',
 };
@@ -747,7 +747,7 @@ export async function generateService(
     });
   } catch (e) {
     if (signal?.aborted) throw e;
-    throw new ApiError({ status: 0, type: 'network', message: 'upstream unreachable — is ezllm running?' });
+    throw new ApiError({ status: 0, type: 'network', message: 'Can\'t reach ezllm. Is it running?' });
   }
   const contentType = res.headers.get('Content-Type') ?? '';
   if (!res.ok) {
@@ -929,7 +929,7 @@ export async function chatStream(
     });
   } catch (e) {
     if (signal?.aborted) throw e;
-    throw new ApiError({ status: 0, type: 'network', message: 'upstream unreachable — is ezllm running?' });
+    throw new ApiError({ status: 0, type: 'network', message: 'Can\'t reach ezllm. Is it running?' });
   }
   if (!res.ok || !res.body) {
     const text = await res.text().catch(() => '');
@@ -1102,10 +1102,10 @@ export const STEPS = ['format', 'catalog', 'auth', 'quota', 'inference', 'protoc
 export const KINDS = ['opencode-go', 'openai-compatible', 'anthropic-compatible', 'gemini-openai'] as const;
 
 export const STRATEGY_HINTS: Record<string, string> = {
-  failover: 'try hops in order until one works',
-  block_round_robin: 'keep one hop for N requests, then move to the next — keeps that account’s prompt cache warm; needs N <= the hop’s request budget',
-  true_round_robin: 'a dice roll per request — perfectly even in expectation and stateless, but no cache reuse and it will streak',
-  sticky_last_good: 'stay on the last working hop, and release it after sticky_idle_s of quiet',
+  failover: 'try each hop in order until one works',
+  block_round_robin: 'send N requests to one hop, then move to the next. This keeps each account\'s prompt cache in use. N can\'t be more than the hop\'s request limit.',
+  true_round_robin: 'pick a hop at random for each request. It evens out over time, but the prompt cache isn\'t reused and the same hop can come up several times in a row.',
+  sticky_last_good: 'stay on the last hop that worked, and start over after sticky_idle_s seconds with no requests',
   least_used: 'send each request to the hop with the least recent traffic',
 };
 

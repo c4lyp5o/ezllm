@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -1412,16 +1413,42 @@ type TokenInput struct {
 	ExpiresAt     string   `json:"expires_at"`
 }
 
+// TokenRoles are the client-token roles, each a separate permission (none
+// implies another): infer calls models on /v1, metrics reads GET /metrics,
+// admin manages the gateway through /admin.
+var TokenRoles = []string{"infer", "metrics", "admin"}
+
+// NormalizeRoles validates roles and returns them deduplicated in TokenRoles
+// order. A token needs at least one role.
+func NormalizeRoles(roles []string) ([]string, error) {
+	seen := map[string]bool{}
+	for _, r := range roles {
+		r = strings.TrimSpace(r)
+		if !slices.Contains(TokenRoles, r) {
+			return nil, fmt.Errorf("role %q must be one of %s", r, strings.Join(TokenRoles, ", "))
+		}
+		seen[r] = true
+	}
+	out := make([]string, 0, len(seen))
+	for _, r := range TokenRoles {
+		if seen[r] {
+			out = append(out, r)
+		}
+	}
+	if len(out) == 0 {
+		return nil, errors.New("a key needs at least one role")
+	}
+	return out, nil
+}
+
 // ValidateToken checks roles before writing.
 func (in TokenInput) Validate() error {
 	if strings.TrimSpace(in.Name) == "" {
 		return errors.New("name is required")
 	}
-	for _, r := range in.Roles {
-		switch r {
-		case "infer", "admin":
-		default:
-			return fmt.Errorf("role %q must be infer|admin", r)
+	if len(in.Roles) > 0 {
+		if _, err := NormalizeRoles(in.Roles); err != nil {
+			return err
 		}
 	}
 	if _, err := normalizeExpiry(in.ExpiresAt, time.UTC); err != nil { // validation: the zone cannot make it fail
@@ -1460,9 +1487,11 @@ func (d *DB) UpsertToken(ctx context.Context, in TokenInput) (id int64, plaintex
 			return 0, "", err
 		}
 	}
-	roles := in.Roles
-	if len(roles) == 0 {
-		roles = []string{"infer"}
+	roles := []string{"infer"}
+	if len(in.Roles) > 0 {
+		if roles, err = NormalizeRoles(in.Roles); err != nil {
+			return 0, "", err
+		}
 	}
 	expires, err := normalizeExpiry(in.ExpiresAt, d.usageLocation())
 	if err != nil {
@@ -1512,16 +1541,13 @@ func (d *DB) UpdateToken(ctx context.Context, id int64, enabled *bool, roles []s
 				return err
 			}
 		}
-		if len(roles) > 0 {
-			for _, r := range roles {
-				switch r {
-				case "infer", "admin":
-				default:
-					return fmt.Errorf("role %q must be infer|admin", r)
-				}
+		if roles != nil {
+			norm, err := NormalizeRoles(roles)
+			if err != nil {
+				return err
 			}
 			if _, err := tx.ExecContext(ctx,
-				`UPDATE client_tokens SET roles=? WHERE id=?`, strings.Join(roles, ","), id); err != nil {
+				`UPDATE client_tokens SET roles=? WHERE id=?`, strings.Join(norm, ","), id); err != nil {
 				return err
 			}
 		}

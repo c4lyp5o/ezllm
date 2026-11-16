@@ -716,6 +716,20 @@ while the SAME model on `opencode-go` was 0/754.
 - No routing action yet, deliberately: the park rule is justified by THIS
   measurement, not by a plausible number (the M2 lesson).
 
+### v2.1.0 — Prometheus metrics, per-role keys, updater fixes ✅ (2026-11-16; design `docs/metrics.md`)
+
+- `internal/server/metrics.go` — `GET /metrics`, hand-written Prometheus text. Counters and
+  latency histograms are fed by `store.ObserveLedger` (`events.go`), which the ledger goroutine
+  calls with each committed batch, so the request path does no metrics work. Gauges (in-flight,
+  bridge CLIs, runtime) are read at scrape time. Each family stops at `metricsSeriesCap` series.
+- Roles: `store.NormalizeRoles` validates `infer|metrics|admin`; `Server.needRole` refuses a
+  token without the route's role (403, debug log names the path). Schema v36
+  (`grantInferToAdminTokens`) added `infer` to admin-only keys, which could call models before.
+- Bridge updater: `cmd/ezllm/bridgecheck.go` `judgeNativeHistory` judges the Codex history turn
+  by recall; `scripts/bridge_update.py` `pending_since` stops undated channels (agy) starving.
+- Dashboard: Connect picks roles with independent checkboxes and shows a Prometheus job; the
+  sidebar footer is three icon buttons; interface text was rewritten in plain language.
+
 ### v2.0.0 — bridge caching, Codex fidelity, security remediation ✅ (2026-11-14; runbooks `docs/codex-bridge-runbook.md`, `docs/bridge-update-runbook.md`; audit `docs/security-audit-2026-11-14.md`)
 
 - `internal/codexbridge/cache.go` `borrowTemplate` / `forkTemplate` — empty
@@ -783,6 +797,10 @@ These are the "if it's broken here, the project failed" spots — each must be v
 6. **Graceful shutdown** — SIGTERM finishes in-flight streams (bounded), then closes the DB.
 7. **Loopback by default** — binds `127.0.0.1` unless `EZLLM_ADDR` says otherwise; token gate on
    `/admin/*` with nothing rendered pre-auth.
+8. **One role, one surface** — `infer` opens `/v1/*` (and the VS Code alias) through
+   `Server.inferAuthed`, `metrics` opens `/metrics` through `handleMetrics`, `admin` opens
+   `/admin/*` through `Server.admin`. No role implies another; a new route picks exactly one gate.
+   `roles_test.go` `TestInferenceNeedsTheInferRole` lists every inference route.
 
 ## 6. Key facts you'll need while exploring (provider facts measured 2026-10-06 … 10)
 

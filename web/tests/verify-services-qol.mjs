@@ -68,7 +68,7 @@ try {
   const emb = section('Embeddings');
   await emb.getByLabel(/Default model for/).click();
   const first = await page.getByRole('listbox').getByRole('option').first().innerText();
-  check('picker leads with verified models and says so', /Model A.*verified/.test(first) && (await page.getByText(/last test failed/).count()) >= 1, first);
+  check('picker leads with verified models and says so', /Model A.*\(tested\)/.test(first) && (await page.getByText(/last test failed/).count()) >= 1, first);
   await page.keyboard.press('Escape');
 
   // Auto: test the pick (paid -> styled confirm first)
@@ -99,7 +99,7 @@ try {
   check('bulk tests each configured service in turn, skipping paid', tests.length === 2 && tests.every((c) => !/images_gen/.test(c)), tests);
   await page.getByRole('switch', { name: 'include paid tests' }).click();
   await page.getByRole('button', { name: /Test all configured \(3\)/ }).click();
-  await page.getByRole('dialog').getByText(/Image generation will send real generation requests/).waitFor();
+  await page.getByRole('dialog').getByText(/Image generation will send real requests/).waitFor();
   check('including paid tests asks first, naming them', true);
   await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
 

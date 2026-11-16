@@ -11,7 +11,40 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v2.0.0**
+**Current: v2.1.0**
+
+## v2.1.0 — 2026-11-16
+
+Adds Prometheus metrics and per-role API keys, enforces the `infer` role on
+inference, and fixes two bridge-updater faults that held back Codex and
+Antigravity CLI updates. Schema v36.
+
+- **`GET /metrics`** (Prometheus text format): requests, tokens, compression
+  savings, request-duration and time-to-first-token histograms, in-flight
+  admission, ledger health, bridge CLI versions and Go runtime gauges. Counters
+  are fed from committed ledger batches, so requests do no metrics work. Read it
+  with a key that has the new `metrics` role. See `docs/metrics.md`.
+- **Key roles are checkboxes:** Admin, Inference and Metrics, chosen at creation
+  and editable from Policy. Each role opens exactly one surface (`/admin`, `/v1`,
+  `/metrics`) and none implies another. The Connect page shows the metrics URL
+  and a `prometheus.yml` job.
+- **Dashboard:** the sidebar footer is three labelled icon buttons (source on
+  GitHub, theme, log out), and the interface text was rewritten in plainer
+  language.
+- **Security fix: inference needs the `infer` role.** Before, any valid key could
+  call models, including admin-only keys. Every `/v1/*` route and the VS Code
+  alias now answer 403 "infer role required" to a key without it. Schema v36
+  adds `infer` to every existing key that had `admin` without it, so no current
+  key loses access. **Behaviour change for API callers:** a key created through
+  `POST /admin/tokens` with `"roles":["admin"]` can no longer call models.
+- **Fix: the Codex native-history gate never passed.** It judged a correct
+  recall of the earlier codename as "did not follow the prompt" because it
+  looked for `pong`. It held back Codex 0.167.1 and 0.167.2; clear their
+  `blocked` entries in the updater state after deploying.
+- **Fix: Antigravity CLI updates starved.** Its manifest lists only the newest
+  build, and a per-build soak restarted with every release, so 1.4.12 was never
+  replaced. The soak for an undated channel now counts from the first sighting of
+  any version newer than the current one.
 
 ## v2.0.0 — 2026-11-15
 

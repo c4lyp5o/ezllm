@@ -1355,7 +1355,7 @@ export default function CityScene({
         type="button"
         className="nbhd-reroll"
         onClick={onReroll}
-        title="Grow a different arrangement of the same providers"
+        title="Rearrange the same providers"
       >
         <span aria-hidden>⟳</span> New city
       </button>

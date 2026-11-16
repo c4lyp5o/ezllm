@@ -161,7 +161,7 @@ export default function Economics() {
     const raw = minInput.trim();
     const parsed = raw === '' ? undefined : Number(raw);
     if (parsed !== undefined && (!Number.isSafeInteger(parsed) || parsed < 0)) {
-      setError('Minimum input tokens must be a non-negative whole number.'); return;
+      setError('Minimum input tokens must be a whole number, 0 or more.'); return;
     }
     setError('');
     if (parsed === appliedMin) void load(); else setAppliedMin(parsed);
@@ -200,7 +200,7 @@ export default function Economics() {
           </label>
           <button type="submit" className={cx(btn.base, btn.primary)}>Analyze</button>
           <span className="text-[12px] text-mute">
-            Sorted largest first. Use Requests for full bounds and per-row inspection.
+            Largest first. Use Requests to see every call in detail.
           </span>
         </div>
       </form>
@@ -234,7 +234,7 @@ export default function Economics() {
             <StaggerItem>
               <Metric label="Compression saved" value={formatTokens(saved)}
                 tone={saved > 0 ? 'text-ok' : undefined}
-                note={`${saved > 0 ? pctWhole(saved, before) : '0%'} approx. reduction (shipped rewrites)`} />
+                note={`${saved > 0 ? pctWhole(saved, before) : '0%'} less, roughly (from compression)`} />
             </StaggerItem>
           </Stagger>
 
@@ -302,16 +302,16 @@ export default function Economics() {
                 tone={reasoning > 0 ? 'text-warn' : undefined}
                 note={`${pct(reasoning, output)} of tokens out`} />
               <p className="mt-3 text-[13px] leading-relaxed text-dim">
-                Reasoning tokens are billed as output and never rendered in the reply. This is the single
-                number that explains an invoice the call count does not: a short answer from a thinking
-                model can cost more than a long answer from a fast one.
+                Reasoning tokens are billed as output but don't appear in the reply. They're often why a bill is
+                higher than the number of calls suggests. A short answer from a thinking model can cost more than a
+                long answer from a fast one.
               </p>
               <div className="mt-4 border-t border-line pt-4">
                 <Metric label="Estimated pre-optimization" value={formatTokens(before)}
-                  note="approx. — what would have shipped without ezllm" />
+                  note="roughly what would have been sent without ezllm" />
                 <p className="mt-3 text-[13px] leading-relaxed text-dim">
-                  Tokens in plus everything compression removed before forwarding:
-                  the prompt your clients sent, as they sent it.
+                  Tokens in plus everything compression removed. This is the size of the prompts your apps
+                  actually sent.
                 </p>
               </div>
             </Panel>
@@ -323,8 +323,8 @@ export default function Economics() {
             aside={
               <>
                 {appliedMin !== undefined && (
-                  <span className="text-[12px] text-warn" title="The min-input filter scopes the token view above; the spend rows are the whole range.">
-                    min-input filter: tokens only — spend is the whole range
+                  <span className="text-[12px] text-warn" title="The minimum input filter only applies to the tokens above. Spending covers the whole date range.">
+                    minimum input applies to tokens only, not spending
                   </span>
                 )}
                 {costTotals && costTotals.unpriced_calls > 0 ? (
@@ -340,13 +340,13 @@ export default function Economics() {
               <p role="alert" className="text-sm text-warn">Could not load the cost report. <button type="button" className="underline" onClick={() => void load()}>Retry cost report</button></p>
             ) : costRows.length === 0 ? (
               <EmptyState title="No priced traffic yet"
-                hint="Cost is computed from the rates entered under Providers → account → Pricing. Until a rate exists for an account+model, those calls cost 0." />
+                hint="Cost uses the rates you entered under Providers → account → Pricing. Calls to a model with no rate count as $0." />
             ) : (
               <div className="space-y-5">
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <Metric label="Spend" value={usd(costTotals?.usd ?? 0)} note={`${nfmt(costTotals?.calls ?? 0)} calls`} />
                   <Metric label="Per day" value={usd(perDay)}
-                    note={`${usd(perDay * 30)} over 30 days at this rate${costTotals && costTotals.unpriced_calls > 0 ? ' (a floor: unpriced calls count $0)' : ''}`} />
+                    note={`${usd(perDay * 30)} over 30 days at this rate${costTotals && costTotals.unpriced_calls > 0 ? ' (at least: calls with no rate count as $0)' : ''}`} />
                   <Metric label="Priced" value={nfmt((costTotals?.calls ?? 0) - (costTotals?.unpriced_calls ?? 0))}
                     note="calls with a rate effective on their date" />
                   <Metric label="Unpriced" value={nfmt(costTotals?.unpriced_calls ?? 0)}
@@ -449,9 +449,8 @@ export default function Economics() {
                       </table>
                     </div>
                     <p className="mt-2 text-[12px] leading-relaxed text-mute">
-                      * rows with unpriced calls cost 0 until a rate exists for that account+model on that
-                      date. Rates are versioned by effective_from, so changing a price does not
-                      retroactively rewrite what past calls cost.
+                      * Calls with no rate for that model on that date count as $0. Rates are dated, so changing a
+                      price later doesn't change what past calls cost.
                     </p>
                   </div>
                 </div>
@@ -464,7 +463,7 @@ export default function Economics() {
             bodyClass="p-0">
             {rows.length === 0 ? (
               <EmptyState title="No matching calls in this range"
-                hint="Adjust the minimum input or widen the date range to see calls here." />
+                hint="Lower the minimum input or widen the date range to see calls here." />
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[1000px] text-[13px]">
@@ -476,7 +475,7 @@ export default function Economics() {
                       <th className="px-3 py-2.5 text-right font-medium">Actual in</th>
                       <th className="px-3 py-2.5 text-right font-medium">Compression</th>
                       <th className="px-3 py-2.5 text-right font-medium">Out</th>
-                      <th className="px-3 py-2.5 text-right font-medium" title="tokens the model spent thinking — billed as output, never shown">Reasoning</th>
+                      <th className="px-3 py-2.5 text-right font-medium" title="tokens the model used for thinking. They're billed as output but not shown.">Reasoning</th>
                       <th className="px-3 py-2.5 text-right font-medium">Status</th>
                       <th className="px-5 py-2.5 text-right font-medium"><span className="sr-only">Open</span></th>
                     </tr>

@@ -10,7 +10,7 @@ Design history: `SPEC-bridge-update.md`.
 | Control | Default | Behavior |
 |---|---|---|
 | `window` | `02:00-05:00` | Host-local promotion window; checked again after gating |
-| `soak_days` | `3` | From publication, or first sighting when a channel has no date |
+| `soak_days` | `3` | From publication; on a channel with no dates (agy), from the first sighting of any version newer than current |
 | `retry_hours` | `6` | Backoff after operational failures, rollback or a stage/gate exception |
 | `keep` | `3` | Newest version folders retained; current and previous remain protected; minimum 2 |
 | `bridges.NAME.enabled` | true for Claude/Codex/agy; false for Copilot | Explicit enrollment |

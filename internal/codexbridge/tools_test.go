@@ -107,14 +107,21 @@ func TestSequentialToolCallsStopTwice(t *testing.T) {
 	if err != nil || len(res.ToolCalls) != 1 || res.ToolCalls[0].ID != "call-a" {
 		t.Fatalf("first stop calls=%+v err=%v", res.ToolCalls, err)
 	}
+	firstUsage := res.Usage
 	follow := weatherRequest()
 	follow.ToolResults = map[string]string{"call-a": "31C"}
 	res, err = r.Run(context.Background(), follow, nil)
+	if res.Usage != (Usage{}) {
+		t.Fatalf("script-only continuation double-counted usage: %+v", res.Usage)
+	}
 	if err != nil || len(res.ToolCalls) != 1 || res.ToolCalls[0].ID != "call-b" {
 		t.Fatalf("second stop calls=%+v err=%v", res.ToolCalls, err)
 	}
 	follow.ToolResults = map[string]string{"call-a": "31C", "call-b": "18C"}
 	res, err = r.Run(context.Background(), follow, nil)
+	if firstUsage.InputTokens+res.Usage.InputTokens != 9000 || firstUsage.OutputTokens+res.Usage.OutputTokens != 40 {
+		t.Fatalf("segment usage lost or duplicated: first=%+v final=%+v", firstUsage, res.Usage)
+	}
 	if err != nil || res.Text != "KL 31C then Paris 18C" || spawnCount(t, home) != 1 {
 		t.Fatalf("text=%q err=%v spawns=%d", res.Text, err, spawnCount(t, home))
 	}

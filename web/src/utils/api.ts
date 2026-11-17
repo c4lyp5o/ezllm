@@ -453,7 +453,7 @@ const num = (v: unknown): number => (typeof v === 'number' ? v : 0);
  *  as the server's hide_empty filter. On subscription bridges these are
  *  code-mode tool steps (a script's next tool call, no model work) or steps
  *  whose usage arrived on a later request of the same turn. Never an error. */
-export function isZeroTokenStep(r: FeedRow): boolean {
+export function isZeroTokenStep(r: { status: number; tin: number; tout: number; cread?: number; cwrite?: number }): boolean {
   return r.status >= 200 && r.status < 300 && !r.tin && !r.tout && !r.cread && !r.cwrite;
 }
 export const ZERO_TOKEN_STEP_HINT =

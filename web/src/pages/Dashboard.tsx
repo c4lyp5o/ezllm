@@ -24,7 +24,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type React
 import { Link } from 'react-router-dom';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import {
-  get, usage, usageHours, RANGE_HOURS, RANGE_LABEL,
+  get, usage, usageHours, RANGE_HOURS, RANGE_LABEL, isZeroTokenStep, ZERO_TOKEN_STEP_HINT,
   type Overview, type RangeKey, type RecentCall, type UsageRow,
 } from '../utils/api';
 import { useLiveCalls } from '../utils/live';
@@ -636,6 +636,9 @@ function RecentCalls({ o }: { o: Overview }) {
                         <span title="tokens in (prompt tokens not read from cache)">↑{nfmt(r.tin)}</span>{' '}
                         <span className="text-mute" title="tokens out (completion)">↓{nfmt(r.tout)}</span>
                       </div>
+                      {isZeroTokenStep(r) && (
+                        <span title={ZERO_TOKEN_STEP_HINT} className="mt-0.5 inline-block rounded border border-line px-1.5 py-0.5 font-sans text-[11px] text-mute">no tokens</span>
+                      )}
                       {(r.cread ?? 0) > 0 && (
                         <div className="mt-0.5 text-[11px] text-mute" title="prompt tokens read from cache. They're billed at the cache price and not counted in tokens in.">
                           {nfmt(r.cread ?? 0)} cached

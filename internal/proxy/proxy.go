@@ -1054,8 +1054,8 @@ func prepareHopBodyWire(body []byte, rt Route, doc *jsonbody.BodyDoc) ([]byte, e
 	if isGeminiNativeAudio(rt, rt.Surface) {
 		return geminiAudioRequest(body, rt.Surface)
 	}
-	// Cloudflare MeloTTS takes {"prompt": text}, not the OpenAI
-	// {"model","input","voice"} envelope.
+	// Cloudflare uses native TTS payloads: Deepgram Aura takes "text",
+	// while MeloTTS takes "prompt", not the OpenAI input envelope.
 	if rt.Surface == provider.SurfaceAudioTTS && isCloudflare(rt) {
 		var in struct {
 			Input string `json:"input"`
@@ -1068,7 +1068,11 @@ func prepareHopBodyWire(body []byte, rt Route, doc *jsonbody.BodyDoc) ([]byte, e
 		if text == "" {
 			text = in.Text
 		}
-		return json.Marshal(map[string]any{"prompt": text})
+		field := "prompt"
+		if strings.HasPrefix(rt.Model, "@cf/deepgram/aura-") {
+			field = "text"
+		}
+		return json.Marshal(map[string]any{field: text})
 	}
 	// Cloudflare flux-2 models require a multipart body (prompt as a form
 	// field) rather than the JSON envelope. Build it here so the proxy's

@@ -29,13 +29,14 @@ type Model struct {
 
 // Server exposes OpenAI Chat Completions over the CLI. Only ezllm dials it.
 type Server struct {
-	Runner  Executor
-	Token   string
-	Version string
-	Models  []Model
-	Info    map[string]any
-	Logf    func(format string, args ...any)
-	Now     func() time.Time
+	Runner       Executor
+	Token        string
+	Version      string
+	Models       []Model
+	ModelCatalog *ModelCatalog
+	Info         map[string]any
+	Logf         func(format string, args ...any)
+	Now          func() time.Time
 
 	// Models is the curated seed. Ids the CLI reports for this login are
 	// learned on top of it (learn) and listed AFTER the seed, so the first
@@ -80,9 +81,16 @@ func (s *Server) hasLocked(id string) bool {
 
 // catalog is the seed followed by the learned ids.
 func (s *Server) catalog() []Model {
+	out := append([]Model(nil), s.Models...)
+	if s.ModelCatalog != nil {
+		var live bool
+		out, live = s.ModelCatalog.Get(context.Background(), out)
+		if live {
+			return out
+		}
+	}
 	s.lmu.Lock()
 	defer s.lmu.Unlock()
-	out := append([]Model(nil), s.Models...)
 	for _, id := range s.learned {
 		out = append(out, Model{ID: id, Object: "model", OwnedBy: "copilot-cli"})
 	}
@@ -114,8 +122,12 @@ func (s *Server) Handler() http.Handler {
 		for k, v := range s.Info {
 			info[k] = v
 		}
-		if l := s.catalog(); len(l) > len(s.Models) {
-			info["learned_models"] = l[len(s.Models):]
+		s.lmu.Lock()
+		info["learned_models"] = append([]string(nil), s.learned...)
+		s.lmu.Unlock()
+		if s.ModelCatalog != nil {
+			models, live := s.ModelCatalog.Get(context.Background(), s.Models)
+			info["model_catalog"] = map[string]any{"live": live, "count": len(models)}
 		}
 		if st, ok := s.Runner.(interface{ Stats() map[string]any }); ok {
 			info["runtime"] = st.Stats()
@@ -142,9 +154,12 @@ func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *Server) knownModel(id string) bool {
-	s.lmu.Lock()
-	defer s.lmu.Unlock()
-	return s.hasLocked(id)
+	for _, m := range s.catalog() {
+		if m.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) chat(w http.ResponseWriter, r *http.Request) {

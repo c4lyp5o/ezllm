@@ -230,12 +230,13 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 		log.Warn("copilot bridge: channel unavailable: plain chat uses -p, client tools are refused", "err", err)
 	}
 	srv := &copilotbridge.Server{
-		Runner:  runner,
-		Token:   token,
-		Version: server.Version,
-		Models:  models,
-		Info:    info,
-		Logf:    printfLogger(log),
+		Runner:       runner,
+		Token:        token,
+		Version:      server.Version,
+		Models:       models,
+		ModelCatalog: &copilotbridge.ModelCatalog{Fetch: runner.ListModels},
+		Info:         info,
+		Logf:         printfLogger(log),
 	}
 	if report != nil {
 		report("copilot-sub", addr, token, bridgeUpdateFile(bin), info)

@@ -12,6 +12,11 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   into `internal/bridgeutil`, replacing identical copies in the Claude, Codex
   and Antigravity bridges. No wire or behaviour change; `TestKillGroupReachesGrandchild`
   and `TestOpenAIErrorEnvelopeShape` pin them.
+- **Shared chunk encoder:** Codex, Copilot and Antigravity write their
+  OpenAI chunk streams through `bridgeutil.ChatChunks`; event bytes are
+  unchanged (`TestChatChunksWireBytes`). Copilot streams now send
+  `X-Accel-Buffering: no`, so a reverse proxy no longer buffers them, and drop
+  the redundant `Connection: keep-alive`.
 
 ## v2.1.0 — Prometheus metrics and bridge updater fixes
 

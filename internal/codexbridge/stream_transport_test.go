@@ -26,12 +26,12 @@ func TestStreamWriteFailurePropagatesAndIsSticky(t *testing.T) {
 	w := &failingWriter{ResponseRecorder: httptest.NewRecorder()}
 	transport := bridgeutil.NewStream(context.Background(), w, bridgeutil.StreamWriteStall)
 	defer transport.Close()
-	sw := &sseWriter{w: w, id: "id", model: "m", transport: transport}
+	sw := newSSEWriter(w, transport, "id", 0, "m")
 	if err := sw.delta(Delta{Content: "hello"}); err == nil {
 		t.Fatal("broken client write was swallowed")
 	}
 	before := w.writes
-	sw.done()
+	sw.Done()
 	if w.writes != before {
 		t.Fatalf("wrote %d more times after the stream failed", w.writes-before)
 	}

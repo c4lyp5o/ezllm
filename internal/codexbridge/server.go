@@ -246,32 +246,31 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 
 	transport := bridgeutil.NewStream(r.Context(), w, bridgeutil.StreamWriteStall)
 	defer transport.Close()
-	sw := &sseWriter{w: w, id: id, created: created, model: req.Model, transport: transport}
+	sw := newSSEWriter(w, transport, id, created, req.Model)
 	res, err := s.Runner.Run(r.Context(), req, sw.delta)
 	if err != nil {
-		if !sw.started {
+		if !sw.Started() {
 			// Nothing reached the client yet: the failure keeps its real status.
 			s.writeErr(w, err)
 			return
 		}
 		ne := asNative(err)
-		sw.event(json.RawMessage(bridgeutil.OpenAIErrorEnvelope(ne.Type, ne.Message, ne.Code)))
-		sw.done()
+		sw.Event(json.RawMessage(bridgeutil.OpenAIErrorEnvelope(ne.Type, ne.Message, ne.Code)))
+		sw.Done()
 		s.logf("codex-bridge: stream failed: %s", err)
 		return
 	}
-	sw.begin()
+	sw.Begin()
 	if len(res.ToolCalls) > 0 {
-		sw.chunk(map[string]any{"tool_calls": openAIToolCalls(res.ToolCalls, true)}, "")
-		sw.chunk(map[string]any{}, "tool_calls")
+		sw.Chunk(map[string]any{"tool_calls": openAIToolCalls(res.ToolCalls, true)}, "")
+		sw.Chunk(map[string]any{}, "tool_calls")
 	} else {
-		sw.chunk(map[string]any{}, "stop")
+		sw.Chunk(map[string]any{}, "stop")
 	}
 	if req.IncludeUsage {
-		sw.event(map[string]any{"id": id, "object": "chat.completion.chunk", "created": created,
-			"model": req.Model, "choices": []any{}, "usage": openAIUsage(res.Usage)})
+		sw.Usage(openAIUsage(res.Usage))
 	}
-	sw.done()
+	sw.Done()
 }
 
 // openAIToolCalls renders calls as OpenAI tool_calls (indexed in a stream).
@@ -300,60 +299,23 @@ func openAIUsage(u Usage) map[string]any {
 	}
 }
 
-// sseWriter emits chat.completion.chunk events. Headers are written on the
-// first delta, so a failure before any output still gets its real status.
-type sseWriter struct {
-	w       http.ResponseWriter
-	id      string
-	created int64
-	model   string
-	started bool
-	// transport owns write deadlines, flushing and cancellation
-	// (internal/bridgeutil, shared with the Claude and Antigravity bridges).
-	transport *bridgeutil.Stream
+// sseWriter streams chat chunks through the shared encoder. Headers are
+// written on the first delta, so a failure before any output still gets its
+// real status.
+type sseWriter struct{ *bridgeutil.ChatChunks }
+
+func newSSEWriter(w http.ResponseWriter, transport *bridgeutil.Stream, id string, created int64, model string) sseWriter {
+	c := bridgeutil.NewChatChunks(w, transport, id, created, model)
+	c.RoleChunk = true
+	return sseWriter{c}
 }
 
-func (s *sseWriter) begin() {
-	if s.started {
-		return
-	}
-	s.started = true
-	h := s.w.Header()
-	h.Set("Content-Type", "text/event-stream")
-	h.Set("Cache-Control", "no-cache")
-	h.Set("X-Accel-Buffering", "no")
-	s.w.WriteHeader(http.StatusOK)
-	s.chunk(map[string]any{"role": "assistant", "content": ""}, "")
-}
-
-func (s *sseWriter) event(v any) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	_, err = s.transport.Write([]byte("data: " + string(b) + "\n\n"))
-	return err
-}
-
-func (s *sseWriter) chunk(delta map[string]any, finish string) error {
-	choice := map[string]any{"index": 0, "delta": delta, "finish_reason": nil}
-	if finish != "" {
-		choice["finish_reason"] = finish
-	}
-	return s.event(map[string]any{"id": s.id, "object": "chat.completion.chunk",
-		"created": s.created, "model": s.model, "choices": []any{choice}})
-}
-
-func (s *sseWriter) delta(d Delta) error {
-	s.begin()
+func (s sseWriter) delta(d Delta) error {
+	s.Begin()
 	if d.Reasoning != "" {
-		return s.chunk(map[string]any{"reasoning_content": d.Reasoning}, "")
+		return s.Chunk(map[string]any{"reasoning_content": d.Reasoning}, "")
 	}
-	return s.chunk(map[string]any{"content": d.Content}, "")
-}
-
-func (s *sseWriter) done() {
-	_, _ = s.transport.Write([]byte("data: [DONE]\n\n"))
+	return s.Chunk(map[string]any{"content": d.Content}, "")
 }
 
 func asNative(err error) *NativeError {

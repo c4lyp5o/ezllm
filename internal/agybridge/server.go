@@ -140,27 +140,26 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 
 	transport := bridgeutil.NewStream(r.Context(), w, bridgeutil.StreamWriteStall)
 	defer transport.Close()
-	sw := &sseWriter{w: w, id: id, created: created, model: req.Model, transport: transport}
+	sw := newSSEWriter(w, transport, id, created, req.Model)
 	res, err := s.Runner.Run(r.Context(), req, sw.delta)
 	if err != nil {
-		if !sw.started {
+		if !sw.Started() {
 			// Nothing reached the client yet: the failure keeps its real status.
 			s.writeRunErr(w, err, res.Usage)
 			return
 		}
 		ne := asNative(err)
-		sw.event(json.RawMessage(bridgeutil.OpenAIErrorEnvelope(ne.Type, ne.Message, ne.Code)))
-		sw.done()
+		sw.Event(json.RawMessage(bridgeutil.OpenAIErrorEnvelope(ne.Type, ne.Message, ne.Code)))
+		sw.Done()
 		s.logf("agy-bridge: stream failed: %s", err)
 		return
 	}
-	sw.begin()
-	sw.chunk(map[string]any{}, "stop")
+	sw.Begin()
+	sw.Chunk(map[string]any{}, "stop")
 	if req.IncludeUsage {
-		sw.event(map[string]any{"id": id, "object": "chat.completion.chunk", "created": created,
-			"model": req.Model, "choices": []any{}, "usage": openAIUsage(res.Usage)})
+		sw.Usage(openAIUsage(res.Usage))
 	}
-	sw.done()
+	sw.Done()
 }
 
 // openAIUsage maps the result envelope to OpenAI usage. Thinking tokens are
@@ -176,53 +175,19 @@ func openAIUsage(u Usage) map[string]any {
 }
 
 // sseWriter owns OpenAI event encoding and header timing. Transport is shared.
-type sseWriter struct {
-	w         http.ResponseWriter
-	id        string
-	created   int64
-	model     string
-	started   bool
-	transport *bridgeutil.Stream
+// sseWriter streams chat chunks through the shared encoder. Headers are
+// written on the first delta, so a failure before any output keeps its status.
+type sseWriter struct{ *bridgeutil.ChatChunks }
+
+func newSSEWriter(w http.ResponseWriter, transport *bridgeutil.Stream, id string, created int64, model string) sseWriter {
+	c := bridgeutil.NewChatChunks(w, transport, id, created, model)
+	c.RoleChunk = true
+	return sseWriter{c}
 }
 
-func (s *sseWriter) begin() {
-	if s.started {
-		return
-	}
-	s.started = true
-	h := s.w.Header()
-	h.Set("Content-Type", "text/event-stream")
-	h.Set("Cache-Control", "no-cache")
-	h.Set("X-Accel-Buffering", "no")
-	s.w.WriteHeader(http.StatusOK)
-	s.chunk(map[string]any{"role": "assistant", "content": ""}, "")
-}
-
-func (s *sseWriter) event(v any) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	_, err = s.transport.Write([]byte("data: " + string(b) + "\n\n"))
-	return err
-}
-
-func (s *sseWriter) chunk(delta map[string]any, finish string) error {
-	choice := map[string]any{"index": 0, "delta": delta, "finish_reason": nil}
-	if finish != "" {
-		choice["finish_reason"] = finish
-	}
-	return s.event(map[string]any{"id": s.id, "object": "chat.completion.chunk",
-		"created": s.created, "model": s.model, "choices": []any{choice}})
-}
-
-func (s *sseWriter) delta(text string) error {
-	s.begin()
-	return s.chunk(map[string]any{"content": text}, "")
-}
-
-func (s *sseWriter) done() {
-	_, _ = s.transport.Write([]byte("data: [DONE]\n\n"))
+func (s sseWriter) delta(text string) error {
+	s.Begin()
+	return s.Chunk(map[string]any{"content": text}, "")
 }
 
 func asNative(err error) *NativeError {
@@ -308,8 +273,8 @@ func (s *Server) adaptedChat(w http.ResponseWriter, r *http.Request, req Request
 	}
 	transport := bridgeutil.NewStream(r.Context(), w, bridgeutil.StreamWriteStall)
 	defer transport.Close()
-	sw := &sseWriter{w: w, id: id, created: created, model: req.Model, transport: transport}
-	sw.begin()
+	sw := newSSEWriter(w, transport, id, created, req.Model)
+	sw.Begin()
 	delta := map[string]any{"content": text}
 	if len(calls) > 0 {
 		indexed := make([]map[string]any, 0, len(calls))
@@ -318,16 +283,16 @@ func (s *Server) adaptedChat(w http.ResponseWriter, r *http.Request, req Request
 		}
 		delta = map[string]any{"tool_calls": indexed}
 	}
-	if sw.chunk(delta, "") != nil {
+	if sw.Chunk(delta, "") != nil {
 		return
 	}
-	if sw.chunk(map[string]any{}, finish) != nil {
+	if sw.Chunk(map[string]any{}, finish) != nil {
 		return
 	}
 	if req.IncludeUsage {
-		if sw.event(map[string]any{"id": id, "object": "chat.completion.chunk", "created": created, "model": req.Model, "choices": []any{}, "usage": openAIUsage(res.Usage)}) != nil {
+		if sw.Usage(openAIUsage(res.Usage)) != nil {
 			return
 		}
 	}
-	sw.done()
+	sw.Done()
 }

@@ -727,6 +727,11 @@ while the SAME model on `opencode-go` was 0/754.
   Codex and Antigravity. Claude keeps its Anthropic envelope
   (`claudebridge/errors.go` `ErrorEnvelope`) and Copilot its `"param": null`
   variant (`copilotbridge/bridge.go` `ErrorEnvelope`); wire bytes are unchanged.
+- `internal/bridgeutil/chatchunks.go` `ChatChunks` encodes the OpenAI chunk
+  stream (headers, chunks, usage chunk, `[DONE]`) for Codex, Copilot and
+  Antigravity. Each adapter's `sseWriter` is now a thin wrapper that keeps its
+  own `delta` and decides when `Begin` runs. Copilot now sends
+  `X-Accel-Buffering: no`.
 
 ### v2.1.0 — Prometheus metrics, per-role keys, updater fixes ✅ (2026-11-16; design `docs/metrics.md`)
 

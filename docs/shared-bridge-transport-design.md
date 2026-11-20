@@ -90,21 +90,22 @@ Copilot streamed `gpt-6-luna` text with usage and a `get_weather` tool call with
 |---|---|---|
 | `bridgeutil` `SetProcessGroup` / `KillGroup` (`proc_unix.go`, `proc_windows.go`) | Claude, Codex (app-server and exec fallback), Antigravity | Copilot does not start CLIs in a process group. |
 | `bridgeutil` `OpenAIErrorEnvelope` (`errors.go`) | Codex, Antigravity | Claude keeps its Anthropic envelope (`"type":"error"`, derived default code); Copilot keeps its `"param": null` variant. |
+| `bridgeutil` `ChatChunks` (`chatchunks.go`): SSE headers, `chat.completion.chunk` encoding, usage chunk, `[DONE]` | Codex, Copilot, Antigravity | When headers go out, what a delta carries (Codex adds `reasoning_content`), the opening role chunk (`RoleChunk`: Codex and Antigravity yes, Copilot no) and finish/usage ordering stay in each adapter. Claude streams Anthropic events. |
 
-Both were byte-identical copies, so the move changes no wire output or process
-behavior. `TestKillGroupReachesGrandchild` proves a grandchild of the CLI dies
+The process and envelope helpers were byte-identical copies, so moving them
+changes no wire output or process behavior. `ChatChunks` keeps each bridge's
+event bytes (`TestChatChunksWireBytes` pins them) with two header changes for
+Copilot: it now sends `X-Accel-Buffering: no` like the others
+(`TestStreamDisablesProxyBuffering`), and it no longer sends
+`Connection: keep-alive`, which Go's server handles itself. `TestKillGroupReachesGrandchild` proves a grandchild of the CLI dies
 with the group (it fails when the group kill is removed);
 `TestOpenAIErrorEnvelopeShape` pins the envelope bytes.
 
 ## Remaining candidates
 
-Not yet shared, in the order they were proposed:
+Not yet shared:
 
-1. The OpenAI chat-chunk SSE encoder (`sseWriter` in Codex, Copilot and
-   Antigravity). The copies have drifted: Copilot omits
-   `X-Accel-Buffering: no`; Antigravity opens with an empty assistant-role
-   chunk; Codex also streams reasoning deltas. Header timing stays per adapter.
-2. Admission (`MaxConcurrent` slots, all four bridges) and auth (`authed`, all
+1. Admission (`MaxConcurrent` slots, all four bridges) and auth (`authed`, all
    four). Only Copilot bounds its queue (`queue_full`, queue counts on
    `/status`). The 401 differs: Claude and Codex return
    `authentication_error`, Copilot and Antigravity `invalid_request_error`, and

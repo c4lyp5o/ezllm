@@ -253,54 +253,53 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 
 	transport := bridgeutil.NewStream(r.Context(), w, bridgeutil.StreamWriteStall)
 	defer transport.Close()
-	sw := &sseWriter{w: w, id: id, created: created, model: model, transport: transport}
+	sw := newSSEWriter(w, transport, id, created, model)
 	toolsSent := false
 	res, err := run(sw.delta, func(batch Result) error {
-		sw.model = servedModel(model, batch)
-		sw.begin()
+		sw.Model = servedModel(model, batch)
+		sw.Begin()
 		if !sw.sent && batch.Text != "" {
 			if err := sw.delta(batch.Text); err != nil {
 				return err
 			}
 		}
-		if err := sw.chunk(map[string]any{"tool_calls": openAIToolCalls(batch.ToolCalls, true)}, ""); err != nil {
+		if err := sw.Chunk(map[string]any{"tool_calls": openAIToolCalls(batch.ToolCalls, true)}, ""); err != nil {
 			return err
 		}
 		toolsSent = true
 		return nil
 	})
 	if err != nil {
-		if !sw.started {
+		if !sw.Started() {
 			s.writeErr(w, err)
 			return
 		}
 		ne := asEnvelope(err)
-		sw.event(json.RawMessage(ErrorEnvelope(ne.Type, ne.Message, ne.Code)))
-		sw.done()
+		sw.Event(json.RawMessage(ErrorEnvelope(ne.Type, ne.Message, ne.Code)))
+		sw.Done()
 		s.logf("copilot-bridge: stream failed: %s", err)
 		return
 	}
 	s.learn(res.AvailableModels)
-	sw.model = servedModel(model, res)
-	sw.begin()
+	sw.Model = servedModel(model, res)
+	sw.Begin()
 	if !sw.sent && res.Text != "" {
 		// The CLI sent only a final assistant.message (no deltas): without this
 		// the client would get a 200 stream with an empty answer.
-		sw.chunk(map[string]any{"content": res.Text}, "")
+		sw.Chunk(map[string]any{"content": res.Text}, "")
 	}
 	if len(res.ToolCalls) > 0 {
 		if !toolsSent {
-			sw.chunk(map[string]any{"tool_calls": openAIToolCalls(res.ToolCalls, true)}, "")
+			sw.Chunk(map[string]any{"tool_calls": openAIToolCalls(res.ToolCalls, true)}, "")
 		}
-		sw.chunk(map[string]any{}, "tool_calls")
+		sw.Chunk(map[string]any{}, "tool_calls")
 	} else {
-		sw.chunk(map[string]any{}, "stop")
+		sw.Chunk(map[string]any{}, "stop")
 	}
 	if req.IncludeUsage {
-		sw.event(map[string]any{"id": id, "object": "chat.completion.chunk", "created": created,
-			"model": sw.model, "choices": []any{}, "usage": openAIUsage(res.Usage)})
+		sw.Usage(openAIUsage(res.Usage))
 	}
-	sw.done()
+	sw.Done()
 }
 
 // openAIToolCalls renders calls on the wire. A stream delta carries an index per
@@ -386,64 +385,24 @@ func (s *Server) writeErr(w http.ResponseWriter, err error) {
 // ── SSE ─────────────────────────────────────────────────────────────────────
 
 type sseWriter struct {
-	w       http.ResponseWriter
-	id      string
-	created int64
-	model   string
-	started bool
-	sent    bool // at least one content delta reached the client
-	// transport owns write deadlines, flushing and cancellation
-	// (internal/bridgeutil, shared with the other bridges). A failed write is
-	// sticky: no later event or [DONE] reaches the client.
-	transport *bridgeutil.Stream
+	*bridgeutil.ChatChunks
+	sent bool // at least one content delta reached the client
 }
 
-func (s *sseWriter) begin() {
-	if s.started {
-		return
-	}
-	s.started = true
-	s.w.Header().Set("Content-Type", "text/event-stream")
-	s.w.Header().Set("Cache-Control", "no-cache")
-	s.w.Header().Set("Connection", "keep-alive")
-	s.w.WriteHeader(http.StatusOK)
-	_ = s.transport.Flush()
-}
-
-func (s *sseWriter) event(v any) error {
-	var b []byte
-	switch t := v.(type) {
-	case json.RawMessage:
-		b = t
-	default:
-		b, _ = json.Marshal(t)
-	}
-	_, err := s.transport.Write([]byte("data: " + string(b) + "\n\n"))
-	return err
-}
-
-func (s *sseWriter) chunk(delta map[string]any, finish string) error {
-	var fr any
-	if finish != "" {
-		fr = finish
-	}
-	return s.event(map[string]any{
-		"id": s.id, "object": "chat.completion.chunk", "created": s.created, "model": s.model,
-		"choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": fr}},
-	})
+// newSSEWriter streams chat chunks through the shared encoder (transport and
+// framing in internal/bridgeutil). A failed write is sticky: no later event or
+// [DONE] reaches the client.
+func newSSEWriter(w http.ResponseWriter, transport *bridgeutil.Stream, id string, created int64, model string) *sseWriter {
+	return &sseWriter{ChatChunks: bridgeutil.NewChatChunks(w, transport, id, created, model)}
 }
 
 func (s *sseWriter) delta(text string) error {
 	if text == "" {
 		return nil
 	}
-	s.begin()
+	s.Begin()
 	s.sent = true
-	return s.chunk(map[string]any{"content": text}, "")
-}
-
-func (s *sseWriter) done() {
-	_, _ = s.transport.Write([]byte("data: [DONE]\n\n"))
+	return s.Chunk(map[string]any{"content": text}, "")
 }
 
 // ── envelopes ───────────────────────────────────────────────────────────────

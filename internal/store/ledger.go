@@ -113,7 +113,10 @@ type Call struct {
 	MsgCount  int    // messages posted upstream
 	ToolCount int    // tools in the action space
 	SessionID string // operator grouping key from X-Ezllm-Session
-	ReqBytes  int    // exact body bytes posted upstream
+	// TurnID groups the requests of one agent loop (schema v37, server
+	// turnOf); '' when the body had no conversation.
+	TurnID   string
+	ReqBytes int // exact body bytes posted upstream
 
 	// ReservationID is the client-budget reservation this row's usage
 	// replaces (not persisted). The flush deletes it in the transaction that
@@ -483,8 +486,8 @@ INSERT INTO calls (
   compression_profile, compression_applied, prompt_tokens_pre, tokens_saved, compression_ms,
   compression_rules_fired, context_tokens_pre, context_tokens_saved,
   compression_saved_notional, prefix_sha, msg_count, tool_count, session_id, req_bytes, block_pos, translated, err,
-  compression_version, compression_stages, shadow_tokens_saved, stream_outcome, slot_wait_ms
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+  compression_version, compression_stages, shadow_tokens_saved, stream_outcome, slot_wait_ms, turn_id
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
@@ -510,7 +513,7 @@ INSERT INTO calls (
 			c.CompressionProfile, boolInt(c.CompressionApplied), c.PromptTokensPre, c.TokensSaved, c.CompressionMs,
 			c.CompressionRulesFired, c.ContextTokensPre, c.ContextTokensSaved,
 			c.TokensSavedNotional, c.PrefixSHA, c.MsgCount, c.ToolCount, c.SessionID, c.ReqBytes, c.BlockPos, boolInt(c.Translated), c.Err,
-			c.CompressionVersion, c.CompressionStages, c.ShadowTokensSaved, c.StreamOutcome, c.SlotWaitms,
+			c.CompressionVersion, c.CompressionStages, c.ShadowTokensSaved, c.StreamOutcome, c.SlotWaitms, c.TurnID,
 		)
 		if err != nil {
 			return fmt.Errorf("insert call: %w", err)
@@ -963,7 +966,7 @@ SELECT ts, client, COALESCE(ip,''), surface, alias, account, COALESCE(provider_k
        COALESCE(compression_saved_notional,0), COALESCE(prefix_sha,''), msg_count, tool_count,
        COALESCE(session_id,''), req_bytes, COALESCE(block_pos,0), COALESCE(translated,0), COALESCE(err,''),
        COALESCE(compression_version,''), COALESCE(compression_stages,''), COALESCE(shadow_tokens_saved,0),
-       COALESCE(stream_outcome,''), slot_wait_ms
+       COALESCE(stream_outcome,''), slot_wait_ms, COALESCE(turn_id,'')
 FROM calls ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -984,7 +987,7 @@ FROM calls ORDER BY id DESC LIMIT ?`, limit)
 			&c.CompressionRulesFired, &c.ContextTokensPre, &c.ContextTokensSaved,
 			&c.TokensSavedNotional, &c.PrefixSHA, &c.MsgCount, &c.ToolCount,
 			&c.SessionID, &c.ReqBytes, &c.BlockPos, &translated, &c.Err, &c.CompressionVersion,
-			&c.CompressionStages, &c.ShadowTokensSaved, &c.StreamOutcome, &slotWait); err != nil {
+			&c.CompressionStages, &c.ShadowTokensSaved, &c.StreamOutcome, &slotWait, &c.TurnID); err != nil {
 			return nil, err
 		}
 		if t, err := time.Parse("2006-01-02T15:04:05.000Z", ts); err == nil {

@@ -333,6 +333,9 @@ func (d *DB) migrate() error {
 		if err := d.alterCallsSlotWait(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate calls slot wait: %w", err)
 		}
+		if err := d.alterCallsTurnID(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate calls turn id: %w", err)
+		}
 		if err := d.alterAccountMaxContext(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate accounts max context: %w", err)
 		}
@@ -606,6 +609,19 @@ func (d *DB) alterCallsSlotWait(ctx context.Context) error {
 		return err
 	}
 	_, err = d.w.ExecContext(ctx, `ALTER TABLE calls ADD COLUMN slot_wait_ms INTEGER`)
+	return err
+}
+
+// alterCallsTurnID adds calls.turn_id (v37). Older rows stay ” (unknown).
+func (d *DB) alterCallsTurnID(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "calls")
+	if err != nil || !exists {
+		return err
+	}
+	if ok, err := hasColumn(ctx, d.w, "calls", "turn_id"); err != nil || ok {
+		return err
+	}
+	_, err = d.w.ExecContext(ctx, `ALTER TABLE calls ADD COLUMN turn_id TEXT NOT NULL DEFAULT ''`)
 	return err
 }
 

@@ -38,7 +38,7 @@ func TestSlotWaitRoundTrip(t *testing.T) {
 	}
 }
 
-// v36 databases gain the column; old rows stay NULL (never measured).
+// v36 databases gain slot_wait_ms and turn_id; old rows stay NULL / "" (never measured).
 func TestSlotWaitMigrationFromV36(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "old.sqlite")
@@ -50,8 +50,10 @@ func TestSlotWaitMigrationFromV36(t *testing.T) {
 	if err := db.Flush(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.w.ExecContext(ctx, "ALTER TABLE calls DROP COLUMN slot_wait_ms"); err != nil {
-		t.Fatalf("drop column: %v", err)
+	for _, col := range []string{"slot_wait_ms", "turn_id"} {
+		if _, err := db.w.ExecContext(ctx, "ALTER TABLE calls DROP COLUMN "+col); err != nil {
+			t.Fatalf("drop %s: %v", col, err)
+		}
 	}
 	if _, err := db.w.ExecContext(ctx, `UPDATE schema_version SET version = 36`); err != nil {
 		t.Fatal(err)
@@ -71,7 +73,7 @@ func TestSlotWaitMigrationFromV36(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 1 || rows[0].Client != "keeper" || rows[0].SlotWaitms != nil {
-		t.Fatalf("rows = %+v, want the old row with NULL slot wait", rows)
+	if len(rows) != 1 || rows[0].Client != "keeper" || rows[0].SlotWaitms != nil || rows[0].TurnID != "" {
+		t.Fatalf("rows = %+v, want the old row with NULL slot wait and no turn id", rows)
 	}
 }

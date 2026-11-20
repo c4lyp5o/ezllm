@@ -748,6 +748,11 @@ while the SAME model on `opencode-go` was 0/754.
   it. `server/bridges.go` `SetBridgeRuntime` gives `/admin/bridges` a live
   `runtime`, and `settings.go` `admissionView` allowlists the counters for
   diagnostics (Settings → System `BridgeLoad`).
+- Turns: `server/shape.go` `turnOf` hashes the first message plus the newest
+  human message (`isHumanMessage` skips tool results) before compression;
+  `server.go` stores it as `calls.turn_id` (`alterCallsTurnID`, v37).
+  `store/turns.go` `TurnLengths` groups by `(client, turn_id)` per model for
+  `GET /admin/turns` (`server/turns.go`) and the Stats `TurnLengths` panel.
 
 ### v2.1.0 — Prometheus metrics, per-role keys, updater fixes ✅ (2026-11-16; design `docs/metrics.md`)
 

@@ -350,6 +350,7 @@ func (s *Server) routes() {
 	// ── M3 admin API (docs/API.md) ──
 	s.mux.HandleFunc("GET /admin/health", s.admin(s.handleAdminHealth))
 	s.mux.HandleFunc("GET /admin/usage", s.admin(s.handleUsage))
+	s.mux.HandleFunc("GET /admin/turns", s.admin(s.handleTurns))
 	s.mux.HandleFunc("GET /admin/overview", s.admin(s.handleOverview))
 	// Tool-usage learning stats + the pruning prize rollup (docs/tool-pruning-design.md).
 	// The same routable catalog /v1/models serves, behind the dashboard
@@ -798,6 +799,9 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 		// same compressed body, because hops only swap `model`. The shared
 		// doc is threaded through so the pipeline reuses the one decode
 		// (older code parsed the body again here).
+		// The turn key reads the client's own conversation: compression may
+		// rewrite history, which must not split one agent loop into two.
+		turn := turnOf(doc, surface)
 		body, compRes := s.applyCompression(r, requested, body, doc)
 		// A shipped rewrite produces NEW bytes, so the shared decode no
 		// longer describes them: re-open on that path only (compression
@@ -822,7 +826,7 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			TS: start, Client: client, IP: cip, Surface: store2surface(surface),
 			// v8 research capture: request shape + operator session key.
 			PrefixSHA: sh.PrefixSHA, MsgCount: sh.MsgCount, ToolCount: sh.ToolCount,
-			SessionID: sessionOf(r), ReqBytes: sh.ReqBytes,
+			SessionID: sessionOf(r), ReqBytes: sh.ReqBytes, TurnID: turn,
 			ReservationID: reservation,
 		}
 		reservation = 0 // handed to the ledger row

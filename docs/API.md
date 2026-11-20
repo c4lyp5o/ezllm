@@ -614,6 +614,34 @@ and never passes to the client. The dashboard tail shows a non-zero value as
 "queued" under the total; the requests explorer shows it in the row detail.
 The live SSE feed carries it as `slot_wait_ms` when set.
 
+### `GET /admin/turns` → `200` (v2.1.1, schema v37)
+Requests per agent-loop turn, per account and model, over `from`/`to` (RFC 3339, `[from, to)`,
+default the last 7 days, same span cap as `/admin/usage`). Admin role.
+
+A turn is one message from a person plus every request the model made before it answered: its
+tool calls and their results. The gateway stamps each ledger row with `calls.turn_id`, a hash of
+the conversation's first message and the position and content of the newest human message, taken
+from the client's body before compression. Chat `tool` messages, Anthropic `user` messages made
+only of `tool_result` blocks and Responses `function_call_output` items are not human, so they
+stay in the same turn. Bodies with no conversation get no turn id; rows written before v37 have
+none and are not counted. A client that compacts its history in the middle of a loop starts a new
+turn there. Turns group by `(client, turn_id)`; a turn that failed over counts once under each
+model it used.
+
+The response is `from`, `to`, `long_turn` (the request count from which a turn counts as long,
+20) and `rows`, sorted by turns:
+
+| Field | Meaning |
+|---|---|
+| `account`, `model` | the hop that served the requests |
+| `turns`, `requests` | turns seen and the requests in them |
+| `median`, `p75`, `p90`, `max` | requests per turn |
+| `single_share` | share of turns answered in one request (no tool calls) |
+| `long_share` | share of turns with `long_turn` requests or more |
+
+A model that hands control back early (the 2026-11 terra finding) shows a low median and a small
+`long_share` next to a model doing the same work. The Stats page shows this table.
+
 ### `GET /admin/accounts/{id}/quota` → `200`
 Live `ReadQuota` → classified shape + `raw`. Provider-by-provider oracles and
 the classification rules: [quota-oracles-design.md](quota-oracles-design.md). `{"kind":"none"}` when the provider has no endpoint

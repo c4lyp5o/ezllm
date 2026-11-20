@@ -635,6 +635,18 @@ function rangeFrom(range: RangeKey): string {
   return new Date(Date.now() - RANGE_HOURS[range] * 3600_000).toISOString();
 }
 
+/** GET /admin/turns: requests per agent-loop turn, per account and model
+ *  (schema v37 calls.turn_id). A model that hands control back after a few
+ *  steps shows a low median and a small long-turn share. */
+export type TurnRow = {
+  account: string; model: string; turns: number; requests: number;
+  median: number; p75: number; p90: number; max: number;
+  single_share: number; long_share: number;
+};
+export type TurnsResp = { from: string; to: string; long_turn: number; rows: TurnRow[] };
+export const turns = (range: RangeKey) =>
+  get<TurnsResp>(`/admin/turns?${new URLSearchParams({ from: rangeFrom(range) }).toString()}`);
+
 /** /admin/usage for a split + range. One request, one view — never two. */
 export function usage(split: SplitKey, range: RangeKey): Promise<UsageResp> {
   const params = new URLSearchParams({ from: rangeFrom(range) });

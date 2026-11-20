@@ -43,6 +43,11 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 - **Queue-full warning:** a bridge that refuses with `queue_full` logs one
   `WARN` per 10 s naming the bridge, its limits and the refusals since the
   last line.
+- **Requests per turn (schema v37):** every ledger row carries `turn_id`,
+  the agent loop it belongs to (one human message plus the tool calls after
+  it), derived from the client's body so clients need no session header.
+  `GET /admin/turns` and a Stats panel show requests per turn by model, so a
+  model that stops early shows up in the data instead of needing a replay.
 - **Cleanup:** the bridge token file, HTTP startup, stderr tail buffer, raw
   JSON writer and id helper are one shared copy each (`cmd/ezllm`
   `bridgeTokenFromFile`/`serveBridge`, `bridgeutil` `util.go`); unused code

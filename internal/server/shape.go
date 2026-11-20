@@ -29,7 +29,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"hash"
 	"net/http"
+	"strconv"
 	"sync"
 
 	"github.com/c4lyp5o/ezllm/internal/jsonbody"
@@ -161,6 +163,88 @@ func captureShapeDoc(doc *jsonbody.BodyDoc, surface provider.Surface) shape {
 	sum := h.Sum(nil)
 	s.PrefixSHA = hex.EncodeToString(sum[:8]) // 16 hex chars: ample for grouping
 	return s
+}
+
+// turnOf derives the ledger's turn key (calls.turn_id, schema v37): every
+// request of one agent loop — a person's message followed by the model's tool
+// calls and their results — shares it, and the next message a person sends
+// starts a new one. Requests per turn is how far a model works before it hands
+// control back, which is the signal for a model that stops early
+// (docs/API.md, GET /admin/turns).
+//
+// The key hashes the conversation's first message, the index of the newest
+// human message and that message's content. Tool results are not human: a
+// chat `tool` role never is, and an Anthropic `user` message made only of
+// tool_result blocks is an agent step. Run it on the CLIENT's body (before
+// compression rewrites history). A client that compacts history mid-loop
+// starts a new key; one-shot bodies with no conversation get "".
+func turnOf(doc *jsonbody.BodyDoc, surface provider.Surface) string {
+	if n := len(doc.Bytes()); n == 0 || n > maxShapeBody || doc.Err() != nil {
+		return ""
+	}
+	root := doc.Map()
+	if root == nil {
+		return ""
+	}
+	key := "messages"
+	if surface == provider.SurfaceResponses {
+		key = "input"
+	}
+	msgs, ok := root[key].([]any)
+	if !ok || len(msgs) == 0 {
+		return ""
+	}
+	last := -1
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if isHumanMessage(msgs[i]) {
+			last = i
+			break
+		}
+	}
+	if last < 0 {
+		return ""
+	}
+	h := sha256.New()
+	writeCanon(h, msgs[0])
+	h.Write([]byte("\x00" + strconv.Itoa(last) + "\x00"))
+	writeCanon(h, msgs[last])
+	return hex.EncodeToString(h.Sum(nil)[:8])
+}
+
+// isHumanMessage reports a message a person wrote, as opposed to a tool result
+// the agent loop fed back.
+func isHumanMessage(v any) bool {
+	m, ok := v.(map[string]any)
+	if !ok || m["role"] != "user" {
+		return false
+	}
+	if t, ok := m["type"].(string); ok && t != "message" { // Responses items
+		return false
+	}
+	blocks, ok := m["content"].([]any)
+	if !ok {
+		return true // plain string content
+	}
+	for _, b := range blocks {
+		if bm, _ := b.(map[string]any); bm == nil || bm["type"] != "tool_result" {
+			return true
+		}
+	}
+	return false // only tool_result blocks: an agent step
+}
+
+// writeCanon streams v's canonical JSON into h (falling back to json.Marshal).
+func writeCanon(h hash.Hash, v any) {
+	e := canonEncoders.Get().(*canonEncoder)
+	e.w = h
+	ok := e.encode(v)
+	e.w, e.buf = nil, e.buf[:0]
+	canonEncoders.Put(e)
+	if !ok {
+		if b, err := json.Marshal(v); err == nil {
+			h.Write(b)
+		}
+	}
 }
 
 // canonEncoders pools the encoders (and their chunk buffers) that feed the

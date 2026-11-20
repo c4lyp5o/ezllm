@@ -7,6 +7,11 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 - The Copilot bridge's registry id is `copilot-sub` (was `github-copilot`, the
   retired provider's name), matching its preset key like the other bridges.
   `TestBridgeIDsMatchTheirPresets` pins all four ids.
+- **Shared bridge helpers:** process-group start/kill (`SetProcessGroup`,
+  `KillGroup`) and the OpenAI error envelope (`OpenAIErrorEnvelope`) moved
+  into `internal/bridgeutil`, replacing identical copies in the Claude, Codex
+  and Antigravity bridges. No wire or behaviour change; `TestKillGroupReachesGrandchild`
+  and `TestOpenAIErrorEnvelopeShape` pin them.
 
 ## v2.1.0 — Prometheus metrics and bridge updater fixes
 

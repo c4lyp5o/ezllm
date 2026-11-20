@@ -69,7 +69,7 @@ func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if s.Token == "" || subtle.ConstantTimeCompare([]byte(got), []byte(s.Token)) != 1 {
-			writeRaw(w, http.StatusUnauthorized, ErrorEnvelope("invalid_request_error", "agy-bridge: missing or wrong bearer token", "unauthorized"))
+			writeRaw(w, http.StatusUnauthorized, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", "agy-bridge: missing or wrong bearer token", "unauthorized"))
 			return
 		}
 		next(w, r)
@@ -88,11 +88,11 @@ func (s *Server) knownModel(id string) bool {
 func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
 	if err != nil {
-		writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", "agy-bridge: cannot read request body: "+err.Error(), "invalid_request"))
+		writeRaw(w, http.StatusBadRequest, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", "agy-bridge: cannot read request body: "+err.Error(), "invalid_request"))
 		return
 	}
 	if len(body) > maxBodyBytes {
-		writeRaw(w, http.StatusRequestEntityTooLarge, ErrorEnvelope("invalid_request_error", "agy-bridge: request body too large", "invalid_request"))
+		writeRaw(w, http.StatusRequestEntityTooLarge, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", "agy-bridge: request body too large", "invalid_request"))
 		return
 	}
 	req, err := parseRequest(body, s.ExperimentalTools)
@@ -102,7 +102,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		if errors.As(err, &u) {
 			code = u.Code
 		}
-		writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", err.Error(), code))
+		writeRaw(w, http.StatusBadRequest, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", err.Error(), code))
 		return
 	}
 	// Refused before a spawn: an unknown model costs a ~3s CLI start to learn.
@@ -111,7 +111,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		for _, m := range s.Models {
 			ids = append(ids, m.ID)
 		}
-		writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error",
+		writeRaw(w, http.StatusBadRequest, bridgeutil.OpenAIErrorEnvelope("invalid_request_error",
 			"agy-bridge: model "+req.Model+" is not on this login's plan (have: "+strings.Join(ids, ", ")+")", "unknown_model"))
 		return
 	}
@@ -149,7 +149,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		ne := asNative(err)
-		sw.event(json.RawMessage(ErrorEnvelope(ne.Type, ne.Message, ne.Code)))
+		sw.event(json.RawMessage(bridgeutil.OpenAIErrorEnvelope(ne.Type, ne.Message, ne.Code)))
 		sw.done()
 		s.logf("agy-bridge: stream failed: %s", err)
 		return
@@ -235,7 +235,7 @@ func asNative(err error) *NativeError {
 
 func (s *Server) writeErr(w http.ResponseWriter, err error) {
 	ne := asNative(err)
-	writeRaw(w, ne.Status, ErrorEnvelope(ne.Type, ne.Message, ne.Code))
+	writeRaw(w, ne.Status, bridgeutil.OpenAIErrorEnvelope(ne.Type, ne.Message, ne.Code))
 }
 
 // writeRunErr is writeErr for a failure after native may have generated. A
@@ -261,7 +261,7 @@ func (s *Server) writeRunErr(w http.ResponseWriter, err error, usage Usage) {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	b, err := json.Marshal(v)
 	if err != nil {
-		writeRaw(w, http.StatusInternalServerError, ErrorEnvelope("api_error", "agy-bridge: encode failure", "encode"))
+		writeRaw(w, http.StatusInternalServerError, bridgeutil.OpenAIErrorEnvelope("api_error", "agy-bridge: encode failure", "encode"))
 		return
 	}
 	writeRaw(w, status, b)

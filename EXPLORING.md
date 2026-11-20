@@ -716,6 +716,18 @@ while the SAME model on `opencode-go` was 0/754.
 - No routing action yet, deliberately: the park rule is justified by THIS
   measurement, not by a plausible number (the M2 lesson).
 
+### v2.1.1 — Copilot bridge id, shared bridge helpers
+
+- `internal/bridgeutil/proc_unix.go` `SetProcessGroup` / `KillGroup` (Windows
+  stubs in `proc_windows.go`) start a bridge CLI in its own process group and
+  kill the whole group on cancel. Claude, Codex (app-server and exec fallback)
+  and Antigravity call them; the per-package copies are gone. Copilot does not
+  use process groups and is unchanged.
+- `internal/bridgeutil/errors.go` `OpenAIErrorEnvelope` is the error body for
+  Codex and Antigravity. Claude keeps its Anthropic envelope
+  (`claudebridge/errors.go` `ErrorEnvelope`) and Copilot its `"param": null`
+  variant (`copilotbridge/bridge.go` `ErrorEnvelope`); wire bytes are unchanged.
+
 ### v2.1.0 — Prometheus metrics, per-role keys, updater fixes ✅ (2026-11-16; design `docs/metrics.md`)
 
 - `internal/server/metrics.go` — `GET /metrics`, hand-written Prometheus text. Counters and

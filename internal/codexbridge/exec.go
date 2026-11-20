@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 )
 
 // The exec channel is the fallback (operator decision §4.1): `codex exec
@@ -82,7 +84,7 @@ func (r *Runner) runExec(ctx context.Context, req Request, sink func(Delta) erro
 	cmd.Dir = cwd
 	cmd.Env = childEnv(home, r.CodexHome)
 	cmd.Stdin = strings.NewReader(strings.Join(prompt, "\n\n"))
-	setProcessGroup(cmd)
+	bridgeutil.SetProcessGroup(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return Result{}, err
@@ -102,9 +104,9 @@ func (r *Runner) runExec(ctx context.Context, req Request, sink func(Delta) erro
 			tb.add(sc.Text())
 		}
 	}()
-	stop := context.AfterFunc(ctx, func() { killGroup(cmd) })
+	stop := context.AfterFunc(ctx, func() { bridgeutil.KillGroup(cmd) })
 	defer stop()
-	defer func() { killGroup(cmd); _ = cmd.Wait() }()
+	defer func() { bridgeutil.KillGroup(cmd); _ = cmd.Wait() }()
 
 	var (
 		res     Result

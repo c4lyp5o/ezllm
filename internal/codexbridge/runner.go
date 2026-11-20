@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 )
 
 // LockdownFeatures are the Codex features switched off for every child. With
@@ -219,7 +221,7 @@ func (r *Runner) spawn(ctx context.Context, opts spawnOpts, onNotify func(string
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = c.cwd
 	cmd.Env = env
-	setProcessGroup(cmd)
+	bridgeutil.SetProcessGroup(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		os.RemoveAll(tmp)
@@ -276,7 +278,7 @@ func (c *child) close() {
 		if c.stdin != nil {
 			_ = c.stdin.Close()
 		}
-		killGroup(c.cmd)
+		bridgeutil.KillGroup(c.cmd)
 		if c.cmd != nil && c.cmd.Process != nil {
 			_ = c.cmd.Wait()
 		}

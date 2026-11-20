@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 )
 
 // NativeError is a failure the CLI reported, already mapped to an HTTP status so
@@ -127,7 +129,7 @@ func (r *Runner) Run(ctx context.Context, req Request, alias string, sink func(F
 	cmd := exec.Command(r.Bin, argv...)
 	cmd.Dir = tmp
 	cmd.Env = r.childEnv(tmp, req.MaxTokens)
-	setProcessGroup(cmd)
+	bridgeutil.SetProcessGroup(cmd)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -150,7 +152,7 @@ func (r *Runner) Run(ctx context.Context, req Request, alias string, sink func(F
 	// per failed request. waited avoids a second Wait after the clean path.
 	waited := false
 	defer func() {
-		killGroup(cmd)
+		bridgeutil.KillGroup(cmd)
 		if !waited {
 			_ = cmd.Wait()
 		}

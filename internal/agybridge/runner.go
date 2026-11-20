@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 )
 
 // Usage is the result envelope's usage block. Measured shape (headless docs,
@@ -174,7 +176,7 @@ func (r *Runner) run(runCtx context.Context, req Request, delta func(string) err
 	cmd := exec.Command(r.Bin, args...)
 	cmd.Dir = work
 	cmd.Env = childEnv(r.Home)
-	setProcessGroup(cmd)
+	bridgeutil.SetProcessGroup(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return Result{}, err
@@ -193,7 +195,7 @@ func (r *Runner) run(runCtx context.Context, req Request, delta func(string) err
 	}
 	waited := false
 	defer func() {
-		killGroup(cmd)
+		bridgeutil.KillGroup(cmd)
 		if !waited {
 			_ = cmd.Wait()
 		}
@@ -217,7 +219,7 @@ func (r *Runner) run(runCtx context.Context, req Request, delta func(string) err
 	stopStdin := context.AfterFunc(runCtx, func() {
 		_ = stdin.Close()
 		// Also unblock a native process that emitted a result but has not exited.
-		killGroup(cmd)
+		bridgeutil.KillGroup(cmd)
 	})
 	defer stopStdin()
 	msg, _ := json.Marshal(map[string]any{"event": "user", "message": map[string]any{"content": req.Prompt}})

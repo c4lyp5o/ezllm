@@ -84,7 +84,32 @@ runs, vet and a static build, plus live acceptance: Codex `TestLiveHTTPSurface`
 Copilot streamed `gpt-6-luna` text with usage and a `get_weather` tool call with
 `finish_reason: tool_calls`, usage and `[DONE]`, through the branch's bridge.
 
-The next scope is transport reuse, not a universal bridge lifecycle. Shared
-authentication mechanics, admission primitives and timing helpers remain later
-candidates after equivalent behavior is established. Process pools, sessions,
-CLI environments, sandboxing and provider accounting stay adapter-owned.
+## Shared helpers beyond the stream (v2.1.1)
+
+| Helper | Users | Not shared |
+|---|---|---|
+| `bridgeutil` `SetProcessGroup` / `KillGroup` (`proc_unix.go`, `proc_windows.go`) | Claude, Codex (app-server and exec fallback), Antigravity | Copilot does not start CLIs in a process group. |
+| `bridgeutil` `OpenAIErrorEnvelope` (`errors.go`) | Codex, Antigravity | Claude keeps its Anthropic envelope (`"type":"error"`, derived default code); Copilot keeps its `"param": null` variant. |
+
+Both were byte-identical copies, so the move changes no wire output or process
+behavior. `TestKillGroupReachesGrandchild` proves a grandchild of the CLI dies
+with the group (it fails when the group kill is removed);
+`TestOpenAIErrorEnvelopeShape` pins the envelope bytes.
+
+## Remaining candidates
+
+Not yet shared, in the order they were proposed:
+
+1. The OpenAI chat-chunk SSE encoder (`sseWriter` in Codex, Copilot and
+   Antigravity). The copies have drifted: Copilot omits
+   `X-Accel-Buffering: no`; Antigravity opens with an empty assistant-role
+   chunk; Codex also streams reasoning deltas. Header timing stays per adapter.
+2. Admission (`MaxConcurrent` slots, all four bridges) and auth (`authed`, all
+   four). Only Copilot bounds its queue (`queue_full`, queue counts on
+   `/status`). The 401 differs: Claude and Codex return
+   `authentication_error`, Copilot and Antigravity `invalid_request_error`, and
+   only Claude accepts `x-api-key`. Sharing either changes what clients see, so
+   they belong in a minor release.
+
+Process pools, sessions, CLI environments, sandboxing and provider accounting
+stay adapter-owned; there is still no universal bridge lifecycle.

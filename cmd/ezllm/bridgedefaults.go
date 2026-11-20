@@ -34,12 +34,17 @@ func bridgeConcurrency(get func(string) string, env, label string) (int, error) 
 	return n, nil
 }
 
-// bridgeQueue reads a bridge's *_BRIDGE_QUEUE: how many requests may wait for
-// a CLI slot before the bridge answers 429 queue_full. Same positive-integer
-// rule as bridgeConcurrency; the default is bridgeutil.DefaultMaxQueue.
-func bridgeQueue(get func(string) string, env, label string) (int, error) {
-	if strings.TrimSpace(get(env)) == "" {
+// envBridgeQueue is the one queue size every subscription bridge uses.
+const envBridgeQueue = "EZLLM_BRIDGE_QUEUE"
+
+// bridgeQueue reads EZLLM_BRIDGE_QUEUE: how many requests may wait for a CLI
+// slot before a bridge answers 429 queue_full. One value for all bridges: the
+// right size follows the clients' burst and the shared runner timeout, not the
+// bridge (concurrency stays per bridge). Same positive-integer rule as
+// bridgeConcurrency; the default is bridgeutil.DefaultMaxQueue.
+func bridgeQueue(get func(string) string, label string) (int, error) {
+	if strings.TrimSpace(get(envBridgeQueue)) == "" {
 		return bridgeutil.DefaultMaxQueue, nil
 	}
-	return bridgeConcurrency(get, env, label)
+	return bridgeConcurrency(get, envBridgeQueue, label)
 }

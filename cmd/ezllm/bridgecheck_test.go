@@ -398,3 +398,29 @@ func TestCodexCacheNoteNamesTheDefaultFallback(t *testing.T) {
 		t.Fatalf("off note = %q, want none", note)
 	}
 }
+
+// One queue size for every bridge: EZLLM_BRIDGE_QUEUE, default 8, positive
+// integers only (a typo fails the boot rather than falling back).
+func TestBridgeQueueIsOneSharedSetting(t *testing.T) {
+	get := func(v string) func(string) string {
+		return func(k string) string {
+			if k == envBridgeQueue {
+				return v
+			}
+			return ""
+		}
+	}
+	for _, label := range []string{"claude", "codex", "agy", "copilot"} {
+		if n, err := bridgeQueue(get(""), label); err != nil || n != 8 {
+			t.Fatalf("%s default = %d %v, want 8", label, n, err)
+		}
+		if n, err := bridgeQueue(get(" 12 "), label); err != nil || n != 12 {
+			t.Fatalf("%s override = %d %v, want 12", label, n, err)
+		}
+		for _, bad := range []string{"0", "-1", "x"} {
+			if _, err := bridgeQueue(get(bad), label); err == nil {
+				t.Errorf("%s accepted %q", label, bad)
+			}
+		}
+	}
+}

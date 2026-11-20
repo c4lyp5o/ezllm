@@ -735,7 +735,8 @@ while the SAME model on `opencode-go` was 0/754.
 - `internal/bridgeutil/admission.go` `Slots` (`Acquire`, `Hold`, `Stats`) is
   every bridge's admission gate: slots plus a bounded queue, 429 `queue_full`
   past it. Each runner's `slots` builds it from `MaxConcurrent`/`MaxQueue`
-  (`cmd/ezllm/bridgedefaults.go` `bridgeQueue` reads `EZLLM_*_BRIDGE_QUEUE`);
+  (`cmd/ezllm/bridgedefaults.go` `bridgeQueue` reads the one shared
+  `EZLLM_BRIDGE_QUEUE`; `retiredenv.go` refuses `EZLLM_COPILOT_BRIDGE_QUEUE`);
   `AdmissionStats` feeds `/status` `runtime`. `Authorized` is the shared
   token check behind each server's `authed`.
 

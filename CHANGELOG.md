@@ -19,11 +19,14 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   the redundant `Connection: keep-alive`.
 - **Shared admission (behaviour change):** all four bridges admit through
   `bridgeutil.Slots`. Claude, Codex and Antigravity now bound their wait
-  queue like Copilot: past `EZLLM_{CLAUDE,CODEX,AGY}_BRIDGE_QUEUE` waiting
-  requests (default 8) they answer 429 `queue_full` with `Retry-After: 5`
+  queue like Copilot: past `EZLLM_BRIDGE_QUEUE` waiting requests
+  (default 8) they answer 429 `queue_full` with `Retry-After: 5`
   instead of holding the request until the 300 s timeout; the router parks the
   hop briefly and fails over. Every `/status` reports the same `runtime`
   admission counters.
+- **One queue setting (breaking for a renamed variable):** `EZLLM_BRIDGE_QUEUE`
+  sizes every bridge's wait queue. `EZLLM_COPILOT_BRIDGE_QUEUE` is retired and
+  fails the boot, naming its replacement; rename it in compose before upgrading.
 - **Shared auth (behaviour change):** one constant-time token check
   (`bridgeutil.Authorized`). Codex's 401 type is now `invalid_request_error`
   like the other OpenAI-shaped bridges; Claude keeps `authentication_error`

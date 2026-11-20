@@ -31,11 +31,11 @@ const (
 	envCopilotBridgeAddr   = "EZLLM_COPILOT_BRIDGE_ADDR"        // default 127.0.0.1:8793
 	envCopilotBridgeToken  = "EZLLM_COPILOT_BRIDGE_TOKEN_FILE"  // shared secret for the account key
 	envCopilotConcurrency  = "EZLLM_COPILOT_BRIDGE_CONCURRENCY" // concurrent CLI children (default 1)
-	envCopilotQueue        = "EZLLM_COPILOT_BRIDGE_QUEUE"       // requests allowed to wait for a slot (default 8)
 	envCopilotTimeout      = "EZLLM_COPILOT_BRIDGE_TIMEOUT"     // per-turn limit, a Go duration (default 300s)
 )
 
-// copilotLimits reads the three runner knobs. A malformed value fails the boot:
+// copilotLimits reads the runner knobs; the queue is the shared
+// EZLLM_BRIDGE_QUEUE (bridgeQueue). A malformed value fails the boot:
 // a typo that silently fell back to the default would look like a working
 // override.
 func copilotLimits(get func(string) string) (concurrency, queue int, timeout time.Duration, err error) {
@@ -43,7 +43,7 @@ func copilotLimits(get func(string) string) (concurrency, queue int, timeout tim
 	if concurrency, err = bridgeConcurrency(get, envCopilotConcurrency, "copilot"); err != nil {
 		return 0, 0, 0, err
 	}
-	if queue, err = bridgeQueue(get, envCopilotQueue, "copilot"); err != nil {
+	if queue, err = bridgeQueue(get, "copilot"); err != nil {
 		return 0, 0, 0, err
 	}
 	if v := strings.TrimSpace(get(envCopilotTimeout)); v != "" {

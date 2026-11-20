@@ -31,7 +31,6 @@ const (
 	envAgyAddr         = "EZLLM_AGY_BRIDGE_ADDR"       // default 127.0.0.1:8792
 	envAgyToken        = "EZLLM_AGY_BRIDGE_TOKEN_FILE" // shared secret for the account key
 	envAgyConcurrency  = "EZLLM_AGY_BRIDGE_CONCURRENCY"
-	envAgyQueue        = "EZLLM_AGY_BRIDGE_QUEUE" // requests allowed to wait for a slot (default 8)
 	envAgyTools        = "EZLLM_AGY_EXPERIMENTAL_TOOLS"
 	envAgySessionCache = "EZLLM_AGY_BRIDGE_CACHE"
 )
@@ -63,7 +62,7 @@ func startAgyBridge(ctx context.Context, log *slog.Logger, report bridgeReport) 
 	if err != nil {
 		return nil, err
 	}
-	queue, err := bridgeQueue(os.Getenv, envAgyQueue, "agy")
+	queue, err := bridgeQueue(os.Getenv, "agy")
 	if err != nil {
 		return nil, err
 	}

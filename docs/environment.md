@@ -85,6 +85,12 @@ provider key unreadable. See [master-key-runbook.md](master-key-runbook.md).
 | `EZLLM_COMBO_AUTOPROBE` | saved setting → YAML `automatic_probing` → on | An explicit value locks the dashboard control. `off` disables automatic combo-hop and free-model probes; manual probes remain available. |
 | `EZLLM_PRICE_REFRESH` | saved setting → YAML `price_refresh` → on | An explicit value locks the dashboard control. `off` stops scheduled price refresh (boot + daily); manual refresh remains available. See [pricing-runbook.md](pricing-runbook.md). |
 
+## All subscription bridges
+
+| Variable | Default | What it does |
+|---|---|---|
+| `EZLLM_BRIDGE_QUEUE` | `8` | Requests allowed to wait for a CLI slot, applied to each bridge (Claude, Codex, Antigravity, Copilot) separately. Past it that bridge answers 429 `queue_full` with `Retry-After: 5`, and the router parks the hop and fails over. A positive integer, anything else fails the boot. One value for all bridges: the right size follows the clients' burst and the shared 300 s runner timeout, while concurrency stays per bridge. Added in 2.1.1, replacing `EZLLM_COPILOT_BRIDGE_QUEUE` (the old name now fails the boot); before 2.1.1 the other bridges had no queue bound and a request waited for a slot until the runner timeout. |
+
 ## Claude subscription bridge
 
 Setup and operation: [claude-bridge-runbook.md](claude-bridge-runbook.md).
@@ -95,7 +101,6 @@ Setup and operation: [claude-bridge-runbook.md](claude-bridge-runbook.md).
 | `EZLLM_CLAUDE_BIN` | `/opt/claude-bridge/current/claude` | Official Claude Code CLI binary inside the container: the updater-managed bridge root mounted at `/opt/claude-bridge`. Before 2.0.0 the default was `/opt/claude/claude`. |
 | `EZLLM_CLAUDE_HOME` | `/claude-sub` | Subscription login directory inside the container (compose mounts it here); passed to the CLI as `CLAUDE_CONFIG_DIR`. Named `EZLLM_CLAUDE_CONFIG_DIR` before 2.0.0; the old name now fails the boot. |
 | `EZLLM_CLAUDE_BRIDGE_CONCURRENCY` | `1` | Concurrent Claude CLI processes; a positive integer, anything else fails the boot. Every bridge defaults to 1 (before 2.0.0: 2, and fixed for Claude). |
-| `EZLLM_CLAUDE_BRIDGE_QUEUE` | `8` | Requests allowed to wait for a slot; past it the bridge answers 429 `queue_full` with `Retry-After: 5` (the router parks the hop and fails over). A positive integer, anything else fails the boot. Before 2.1.1 a Claude request waited for a slot until the runner timeout. |
 | `EZLLM_CLAUDE_BRIDGE_ADDR` | `127.0.0.1:8790` | Bridge listen address; non-loopback addresses are refused. |
 | `EZLLM_CLAUDE_BRIDGE_TOKEN_FILE` | `/data/claude-bridge.token` | Shared secret for the account key; generated (0600) when missing. |
 | `USER`, `LOGNAME` | unset | Both must be set when the bridge is on (the CLI's login check reads process identity). |
@@ -113,7 +118,6 @@ Setup, platform requirements and the lockdown: [codex-bridge-runbook.md](codex-b
 | `EZLLM_CODEX_BRIDGE_ADDR` | `127.0.0.1:8791` | Bridge listen address; non-loopback addresses are refused. |
 | `EZLLM_CODEX_BRIDGE_TOKEN_FILE` | `/data/codex-bridge.token` | Shared secret for the account key; generated (0600) when missing. |
 | `EZLLM_CODEX_BRIDGE_CONCURRENCY` | `1` | Concurrent Codex children; a positive integer, anything else fails the boot. |
-| `EZLLM_CODEX_BRIDGE_QUEUE` | `8` | Requests allowed to wait for a slot; past it the bridge answers 429 `queue_full` with `Retry-After: 5` (the router parks the hop and fails over). A positive integer, anything else fails the boot. Before 2.1.1 a Codex request waited for a slot until the runner timeout. |
 | `EZLLM_CODEX_BRIDGE_CACHE` | on where supported | Unset, empty-template forks are used whenever the CLI supports them; otherwise the original path is used and `/status` reports why. `on` requires support; `off` opts out. `auto` was removed in 2.0.0 and, like any other value, fails startup. No idle CLI workers; bounded native parent retention and cleanup. Set before startup; recreate containers to change. |
 
 ## Antigravity (Google subscription) bridge
@@ -128,7 +132,6 @@ Setup and the login that must avoid the desktop keyring: [agy-bridge-runbook.md]
 | `EZLLM_AGY_BRIDGE_ADDR` | `127.0.0.1:8792` | Bridge listen address; non-loopback addresses are refused. |
 | `EZLLM_AGY_BRIDGE_TOKEN_FILE` | `/data/agy-bridge.token` | Shared secret for the account key; generated (0600) when missing. |
 | `EZLLM_AGY_BRIDGE_CONCURRENCY` | `1` | Concurrent `agy` children (~207 MB each); a positive integer, anything else fails the boot. |
-| `EZLLM_AGY_BRIDGE_QUEUE` | `8` | Requests allowed to wait for a slot; past it the bridge answers 429 `queue_full` with `Retry-After: 5` (the router parks the hop and fails over). A positive integer, anything else fails the boot. Before 2.1.1 an Antigravity request waited for a slot until the runner timeout. |
 | `EZLLM_AGY_EXPERIMENTAL_TOOLS` | off | `on` enables the structured-output caller-tool adapter. Requires CLI `--json-schema`. The calling harness executes tools; no ACP/MCP or persistent process. See the Antigravity runbook for limitations. |
 | `EZLLM_AGY_BRIDGE_CACHE` | on when tools are on | Named `EZLLM_AGY_BRIDGE_SESSION_CACHE` before 2.0.0 (the old name fails the boot). Exact-history conversation resume for tool-adapter requests. Unset, it is on whenever experimental tools are on and the CLI supports `--conversation`; an explicit `on` without either fails the boot; `off` disables it. Before 2.0.0 it was opt-in. Retains bounded metadata/private workspaces, no idle CLI processes. Complete caller tool-result groups can resume. Restart to change. |
 
@@ -147,7 +150,6 @@ CLI's own, so there is no client id to configure. Runbook:
 | `EZLLM_COPILOT_BIN` | `/opt/copilot-bridge/current/copilot` | The GitHub Copilot CLI binary: the updater-managed bridge root mounted at `/opt/copilot-bridge`. Before 2.0.0 the default was `/opt/copilot/copilot`. |
 | `EZLLM_COPILOT_HOME` | `/copilot-sub` | `COPILOT_HOME` for the CLI — the bridge's dedicated login directory, mounted from `~/.copilot-sub` (read-write; the CLI writes session state). Before 2.0.0 the default was `/copilot-home`. |
 | `EZLLM_COPILOT_BRIDGE_CONCURRENCY` | `1` | Concurrent Copilot CLI children; a positive integer, anything else fails the boot. |
-| `EZLLM_COPILOT_BRIDGE_QUEUE` | `8` | Requests allowed to wait for a slot; past it the bridge answers 429 `queue_full` with `Retry-After: 5`. |
 | `EZLLM_COPILOT_BRIDGE_TIMEOUT` | `300s` | Per-turn limit, a Go duration of at least `1s`. |
 | `EZLLM_COPILOT_BRIDGE_ADDR` | `127.0.0.1:8793` | Listen address; non-loopback is refused. |
 | `EZLLM_COPILOT_BRIDGE_TOKEN_FILE` | `/data/copilot-bridge.token` | Shared secret for the account key; generated (0600) when missing. Before 2.0.0 there was no default and boot refused without a path. |

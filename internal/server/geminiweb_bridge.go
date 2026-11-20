@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -418,9 +419,13 @@ func (b *geminiWebBridge) resolve(r *http.Request) (*geminiwebClientEntry, func(
 	if err != nil {
 		return nil, nil, err
 	}
+	key, err := base64.StdEncoding.DecodeString(r.Header.Get(provider.GeminiWebKeyHeader))
+	if err != nil {
+		return nil, nil, errors.New("gemini-web bridge: malformed credential header")
+	}
 	lock := b.lockFor(acct.ID)
 	lock.Lock()
-	entry, err := b.clientFor(r.Context(), acct.ID, r.Header.Get(provider.GeminiWebKeyHeader))
+	entry, err := b.clientFor(r.Context(), acct.ID, string(key))
 	if err != nil {
 		lock.Unlock()
 		return nil, nil, err

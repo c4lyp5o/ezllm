@@ -53,6 +53,12 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   Responses step (`previous_response_id`, tool outputs only) joins the turn of
   the response it continues, and failed requests (status 400 and up) are not
   counted.
+- **gemini-web survives cookie rotation:** a rotated credential is two lines
+  (`__Secure-1PSID`, `__Secure-1PSIDTS`), and the proxy stamped it raw into
+  `X-Ezllm-Gemini-Web-Key`, which Go rejects for the newline. Every request
+  after the first rotation (the first request rotates) failed, which looked
+  like a session expiring in minutes. The header is now base64; the bridge
+  decodes it (`TestGeminiWebStreamAfterCookieRotation`).
 - **Copilot model catalog off the request path:** the live `models.list`
   catalog refreshes in the background (every 10 minutes, 1 minute after a
   failure) and is warmed at boot. Requests read the last good list and never

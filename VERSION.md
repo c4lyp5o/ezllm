@@ -32,6 +32,11 @@ and `GET /admin/turns` shows requests per turn by model. Schema v37.
   requests per turn.
 - **Fix: the Copilot bridge id is `copilot-sub`** (was `github-copilot`, the
   retired provider's name). `GET /admin/bridges` returns the new id.
+- **Fix: a gemini-web login no longer "expires" minutes after first use.**
+  The first request rotates the cookie and saves it as two lines; the next
+  request put that into a header, which Go refuses for a newline, so every
+  request after the first rotation failed. The credential header is now
+  base64.
 - **Fix: the Copilot model catalog refreshes in the background**, so a slow or
   hung CLI no longer stalls every request once a minute.
 - **Fix:** Cloudflare Deepgram Aura TTS gets `text`, not `prompt`; zero-token

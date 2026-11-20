@@ -38,7 +38,7 @@ Errors are OpenAI-shaped: `{"error":{"type":"...","message":"...","code":422}}`.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/healthz` | no auth; **liveness + release version** — `{"status":"ok","version":"2.1.1"}` after a DB ping (503 `{"status":"down","version":"…"}` if the ping fails). Version is the only extra field; no counts/paths/uptime. |
+| GET | `/healthz` | no auth; **liveness + release version** — `{"status":"ok","version":"2.2.0"}` after a DB ping (503 `{"status":"down","version":"…"}` if the ping fails). Version is the only extra field; no counts/paths/uptime. |
 | GET | `/metrics` | Prometheus text exposition (v2.1.0). A token with the `metrics` role only; any other token → 403, the dashboard session → 401. Counters come from committed ledger rows, so a request does no metrics work. Names, labels and auth: [metrics.md](metrics.md). |
 | GET | `/v1/models?protocol=` | `openai` (default) / `anthropic` shape; ids are `<namespace>/<model>`, plus one bare id per **enabled** combo |
 | POST | `/v1/chat/completions` | OpenAI stream + non-stream |
@@ -342,7 +342,7 @@ Add `?force=true` to delete anyway (cascades: keys, models, quota rows).
 { "label":"primary", "bridge":"claude-sub" }
 ```
 Bridge ids are `claude-sub`, `chatgpt-sub`, `antigravity-sub` and `copilot-sub` (each the key of
-its provider preset; the Copilot bridge was `github-copilot` before 2.1.1) — the
+its provider preset; the Copilot bridge was `github-copilot` before 2.2.0) — the
 last one belongs to the `copilot-bridge` kind (the Copilot CLI), whose base URL
 is `http://127.0.0.1:8793/v1` and whose credential is the CLI's own login, so
 there is no key to paste at all.
@@ -422,7 +422,7 @@ once the updater has run:
 | `candidate` | the release the report is about |
 | `detail` | the updater's reason (gate problems, proof summary, what it waits for) |
 
-`runtime` (v2.1.1) is the running bridge's live admission picture, read from the bridge on
+`runtime` (v2.2.0) is the running bridge's live admission picture, read from the bridge on
 every call (not at boot): `in_flight`, `queued`, `max_concurrent`, `max_queue`, `served` and
 `rejected_queue_full` (requests refused with 429 `queue_full` since start). The Copilot bridge
 adds its outcome, stage-timing and pool counters. Absent while the bridge is off.
@@ -614,19 +614,23 @@ and never passes to the client. The dashboard tail shows a non-zero value as
 "queued" under the total; the requests explorer shows it in the row detail.
 The live SSE feed carries it as `slot_wait_ms` when set.
 
-### `GET /admin/turns` → `200` (v2.1.1, schema v37)
+### `GET /admin/turns` → `200` (v2.2.0, schema v37)
 Requests per agent-loop turn, per account and model, over `from`/`to` (RFC 3339, `[from, to)`,
 default the last 7 days, same span cap as `/admin/usage`). Admin role.
 
 A turn is one message from a person plus every request the model made before it answered: its
 tool calls and their results. The gateway stamps each ledger row with `calls.turn_id`, a hash of
 the conversation's first message and the position and content of the newest human message, taken
-from the client's body before compression. Chat `tool` messages, Anthropic `user` messages made
-only of `tool_result` blocks and Responses `function_call_output` items are not human, so they
-stay in the same turn. Bodies with no conversation get no turn id; rows written before v37 have
-none and are not counted. A client that compacts its history in the middle of a loop starts a new
-turn there. Turns group by `(client, turn_id)`; a turn that failed over counts once under each
-model it used.
+from the client's body before compression. Chat `tool` messages, Anthropic `user` messages
+carrying any `tool_result` block (even with text blocks beside it, as Claude Code sends) and
+Responses `function_call_output` items are not human, so they stay in the same turn. A stateful
+Responses step (`previous_response_id` with tool outputs only) joins the turn of the response it
+names; the gateway remembers the last 4096 native response ids per process, so a continuation of
+a translated hop, or one after a restart, gets no turn id. Bodies with no conversation get no turn
+id; rows written before v37 have none and are not counted. Failed requests (status 400 and up)
+are not counted: a refusal or the client's retry after one is not the model working. A client
+that compacts its history in the middle of a loop starts a new turn there. Turns group by
+`(client, turn_id)`; a turn that failed over counts once under each model it used.
 
 The response is `from`, `to`, `long_turn` (the request count from which a turn counts as long,
 20) and `rows`, sorted by turns:
@@ -1053,7 +1057,7 @@ JSON object, with unknown envelope/setting fields rejected.
 | `GET /admin/settings/sessions` | Active sessions with opaque `id`, `created_at`, `expires_at`, `browser`, and `current`. IDs are independent of authentication tokens/digests. |
 | `DELETE /admin/settings/sessions/{id}` | Revoke one dashboard session; 204, including an unknown/already-revoked ID. |
 | `POST /admin/settings/sessions/revoke-all` | Revoke every dashboard session; 204. Client API tokens are unaffected. |
-| `GET /admin/settings/diagnostics` | Allowlisted `version`, `uptime_seconds`, `database_bytes`, `bridges` (each `id`, `enabled` and, from v1.6.0, the updater's `update` verdict: `result`, `checked_at`, `current`, `candidate` — never its free-text `detail`; from v2.1.1 a running bridge's `admission` counters `in_flight`, `queued`, `max_concurrent`, `max_queue`, `served`, `rejected_queue_full` and nothing else from its runtime), `jobs`, effective `settings`, safe deployment metadata (listen address/source, storage kind, master-key source and trusted proxy count), and configured backup status. `download=true` sets an attachment filename. No filesystem paths, credentials or request content. |
+| `GET /admin/settings/diagnostics` | Allowlisted `version`, `uptime_seconds`, `database_bytes`, `bridges` (each `id`, `enabled` and, from v1.6.0, the updater's `update` verdict: `result`, `checked_at`, `current`, `candidate` — never its free-text `detail`; from v2.2.0 a running bridge's `admission` counters `in_flight`, `queued`, `max_concurrent`, `max_queue`, `served`, `rejected_queue_full` and nothing else from its runtime), `jobs`, effective `settings`, safe deployment metadata (listen address/source, storage kind, master-key source and trusted proxy count), and configured backup status. `download=true` sets an attachment filename. No filesystem paths, credentials or request content. |
 | `GET /admin/backups` | `ready`, `running`, `last_outcome`, optional `last_finished`, optional sanitized `error` for inventory failures, and `backups`. `ready` describes configuration/inventory readiness; each run separately checks writability. Completed records have `id`, `created_at`, `bytes`, and `verified`. An unconfigured instance returns an empty list and `ready=false`. |
 | `POST /admin/backups` | Start a manual job; 202 with status `running`. Returns 409 if storage is unavailable, a job is already running, or shutdown has begun. Poll the GET route for completion. |
 

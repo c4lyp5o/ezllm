@@ -174,8 +174,8 @@ func captureShapeDoc(doc *jsonbody.BodyDoc, surface provider.Surface) shape {
 //
 // The key hashes the conversation's first message, the index of the newest
 // human message and that message's content. Tool results are not human: a
-// chat `tool` role never is, and an Anthropic `user` message made only of
-// tool_result blocks is an agent step. Run it on the CLIENT's body (before
+// chat `tool` role never is, and an Anthropic `user` message carrying any
+// tool_result block is an agent step, even with text blocks beside it. Run it on the CLIENT's body (before
 // compression rewrites history). A client that compacts history mid-loop
 // starts a new key; one-shot bodies with no conversation get "".
 func turnOf(doc *jsonbody.BodyDoc, surface provider.Surface) string {
@@ -226,11 +226,14 @@ func isHumanMessage(v any) bool {
 		return true // plain string content
 	}
 	for _, b := range blocks {
-		if bm, _ := b.(map[string]any); bm == nil || bm["type"] != "tool_result" {
-			return true
+		if bm, _ := b.(map[string]any); bm != nil && bm["type"] == "tool_result" {
+			// Any tool result makes it an agent step: Claude Code appends text
+			// blocks (system reminders) beside its tool results, and those are
+			// not a person speaking.
+			return false
 		}
 	}
-	return false // only tool_result blocks: an agent step
+	return true
 }
 
 // writeCanon streams v's canonical JSON into h (falling back to json.Marshal).

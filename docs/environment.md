@@ -89,7 +89,7 @@ provider key unreadable. See [master-key-runbook.md](master-key-runbook.md).
 
 | Variable | Default | What it does |
 |---|---|---|
-| `EZLLM_BRIDGE_QUEUE` | `8` | Requests allowed to wait for a CLI slot, applied to each bridge (Claude, Codex, Antigravity, Copilot) separately. Past it that bridge answers 429 `queue_full` with `Retry-After: 5`, and the router parks the hop and fails over. A positive integer, anything else fails the boot. One value for all bridges: the right size follows the clients' burst and the shared 300 s runner timeout, while concurrency stays per bridge. Added in 2.1.1, replacing `EZLLM_COPILOT_BRIDGE_QUEUE` (the old name now fails the boot); before 2.1.1 the other bridges had no queue bound and a request waited for a slot until the runner timeout. |
+| `EZLLM_BRIDGE_QUEUE` | `8` | Requests allowed to wait for a CLI slot, applied to each bridge (Claude, Codex, Antigravity, Copilot) separately. Past it that bridge answers 429 `queue_full` with `Retry-After: 5`, and the router parks the hop and fails over. A positive integer, anything else fails the boot. One value for all bridges: the right size follows the clients' burst and the shared 300 s runner timeout, while concurrency stays per bridge. Added in 2.2.0, replacing `EZLLM_COPILOT_BRIDGE_QUEUE` (the old name now fails the boot); before 2.2.0 the other bridges had no queue bound and a request waited for a slot until the runner timeout. |
 
 ## Claude subscription bridge
 

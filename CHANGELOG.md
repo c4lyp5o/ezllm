@@ -2,7 +2,7 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
-## v2.1.1 — Copilot bridge id
+## v2.2.0 — shared bridge admission, requests per turn
 
 - The Copilot bridge's registry id is `copilot-sub` (was `github-copilot`, the
   retired provider's name), matching its preset key like the other bridges.
@@ -48,6 +48,15 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   it), derived from the client's body so clients need no session header.
   `GET /admin/turns` and a Stats panel show requests per turn by model, so a
   model that stops early shows up in the data instead of needing a replay.
+  An Anthropic `user` message carrying any `tool_result` block is an agent
+  step even with text beside it (Claude Code's system reminders), a stateful
+  Responses step (`previous_response_id`, tool outputs only) joins the turn of
+  the response it continues, and failed requests (status 400 and up) are not
+  counted.
+- **Copilot model catalog off the request path:** the live `models.list`
+  catalog refreshes in the background (every 10 minutes, 1 minute after a
+  failure) and is warmed at boot. Requests read the last good list and never
+  wait for a refresh, so a slow or hung CLI no longer stalls the bridge.
 - **Cleanup:** the bridge token file, HTTP startup, stderr tail buffer, raw
   JSON writer and id helper are one shared copy each (`cmd/ezllm`
   `bridgeTokenFromFile`/`serveBridge`, `bridgeutil` `util.go`); unused code

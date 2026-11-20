@@ -72,6 +72,7 @@ type DeploymentInfo struct {
 }
 
 type Server struct {
+	turnChain    turnChain // response id -> turn, for stateful Responses loops
 	deployment   DeploymentInfo
 	settings     *settings.Manager
 	settingsWake chan struct{}
@@ -802,6 +803,11 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 		// The turn key reads the client's own conversation: compression may
 		// rewrite history, which must not split one agent loop into two.
 		turn := turnOf(doc, surface)
+		if turn == "" && surface == provider.SurfaceResponses {
+			// A stateful step (previous_response_id, tool outputs only) carries
+			// no human message: it joins the turn of the response it continues.
+			turn = s.turnChain.lookup(client, previousResponseID(doc))
+		}
 		body, compRes := s.applyCompression(r, requested, body, doc)
 		// A shipped rewrite produces NEW bytes, so the shared decode no
 		// longer describes them: re-open on that path only (compression

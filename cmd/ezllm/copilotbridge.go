@@ -221,12 +221,16 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 		info["client_tools"] = "refused with chat_tools_unsupported, so the router fails over: " + err.Error()
 		log.Warn("copilot bridge: channel unavailable: plain chat uses -p, client tools are refused", "err", err)
 	}
+	// The live catalog refreshes in the background; warm it now so the first
+	// request finds it loaded.
+	liveCatalog := &copilotbridge.ModelCatalog{Fetch: runner.ListModels}
+	liveCatalog.Warm()
 	srv := &copilotbridge.Server{
 		Runner:       runner,
 		Token:        token,
 		Version:      server.Version,
 		Models:       models,
-		ModelCatalog: &copilotbridge.ModelCatalog{Fetch: runner.ListModels},
+		ModelCatalog: liveCatalog,
 		Info:         info,
 		Logf:         printfLogger(log),
 	}

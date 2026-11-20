@@ -84,7 +84,7 @@ runs, vet and a static build, plus live acceptance: Codex `TestLiveHTTPSurface`
 Copilot streamed `gpt-6-luna` text with usage and a `get_weather` tool call with
 `finish_reason: tool_calls`, usage and `[DONE]`, through the branch's bridge.
 
-## Shared helpers beyond the stream (v2.1.1)
+## Shared helpers beyond the stream (v2.2.0)
 
 | Helper | Users | Not shared |
 |---|---|---|
@@ -105,7 +105,7 @@ Copilot: it now sends `X-Accel-Buffering: no` like the others
 with the group (it fails when the group kill is removed);
 `TestOpenAIErrorEnvelopeShape` pins the envelope bytes.
 
-## Admission and auth changes (v2.1.1)
+## Admission and auth changes (v2.2.0)
 
 These change what clients see, deliberately, so every bridge behaves alike:
 

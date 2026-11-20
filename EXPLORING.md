@@ -716,7 +716,7 @@ while the SAME model on `opencode-go` was 0/754.
 - No routing action yet, deliberately: the park rule is justified by THIS
   measurement, not by a plausible number (the M2 lesson).
 
-### v2.1.1 — Copilot bridge id, shared bridge helpers
+### v2.2.0 — shared bridge admission, requests per turn, shared bridge helpers
 
 - `internal/bridgeutil/proc_unix.go` `SetProcessGroup` / `KillGroup` (Windows
   stubs in `proc_windows.go`) start a bridge CLI in its own process group and
@@ -751,8 +751,14 @@ while the SAME model on `opencode-go` was 0/754.
 - Turns: `server/shape.go` `turnOf` hashes the first message plus the newest
   human message (`isHumanMessage` skips tool results) before compression;
   `server.go` stores it as `calls.turn_id` (`alterCallsTurnID`, v37).
-  `store/turns.go` `TurnLengths` groups by `(client, turn_id)` per model for
-  `GET /admin/turns` (`server/turns.go`) and the Stats `TurnLengths` panel.
+  Stateful Responses steps chain through `server/turns.go` `turnChain`, fed
+  by `proxy.Result.ResponseID` (the `UsageTapper` reads `response.created`).
+  `store/turns.go` `TurnLengths` groups successful rows by `(client, turn_id)`
+  per model for `GET /admin/turns` (`server/turns.go`) and the Stats
+  `TurnLengths` panel.
+- Copilot catalog: `copilotbridge/catalog.go` `ModelCatalog` refreshes
+  `models.list` in the background (`Warm` at boot); `Get` never waits on a
+  refresh after the first fetch.
 
 ### v2.1.0 — Prometheus metrics, per-role keys, updater fixes ✅ (2026-11-16; design `docs/metrics.md`)
 

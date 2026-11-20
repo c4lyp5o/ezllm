@@ -3,8 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -46,6 +49,82 @@ func TestTurnKeyIgnoresAnthropicToolResults(t *testing.T) {
 		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"a b"}]}]}`
 	if a, b := turnFor(t, ask, provider.SurfaceAnthropic), turnFor(t, step, provider.SurfaceAnthropic); a == "" || a != b {
 		t.Fatalf("tool_result opened a turn: %q vs %q", a, b)
+	}
+}
+
+// Claude Code sends its tool results with text blocks beside them (system
+// reminders). Those are still agent steps, not a person speaking.
+func TestTurnKeyIgnoresToolResultsWithText(t *testing.T) {
+	ask := `{"model":"m","messages":[{"role":"user","content":[{"type":"text","text":"go"}]}]}`
+	step := `{"model":"m","messages":[{"role":"user","content":[{"type":"text","text":"go"}]},` +
+		`{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"r","input":{}}]},` +
+		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"x"},{"type":"text","text":"<system-reminder>todo</system-reminder>"}]}]}`
+	if a, b := turnFor(t, ask, provider.SurfaceAnthropic), turnFor(t, step, provider.SurfaceAnthropic); a == "" || a != b {
+		t.Fatalf("tool_result with text opened a turn: %q vs %q", a, b)
+	}
+}
+
+func TestTurnChainScopesAndEvicts(t *testing.T) {
+	var c turnChain
+	c.remember("hermes", "resp_1", "turnA")
+	if got := c.lookup("hermes", "resp_1"); got != "turnA" {
+		t.Fatalf("lookup = %q", got)
+	}
+	if got := c.lookup("other", "resp_1"); got != "" {
+		t.Fatalf("another client joined the turn: %q", got)
+	}
+	for i := 0; i < turnChainSize; i++ {
+		c.remember("hermes", fmt.Sprintf("r%d", i), "t")
+	}
+	if got := c.lookup("hermes", "resp_1"); got != "" {
+		t.Fatalf("oldest id survived eviction: %q", got)
+	}
+	if len(c.turns) != turnChainSize {
+		t.Fatalf("map size = %d, want %d", len(c.turns), turnChainSize)
+	}
+}
+
+// A stateful Responses loop sends previous_response_id and only tool outputs,
+// with no human message. Each step joins the turn of the response it
+// continues, through both a streamed and a plain reply.
+func TestTurnKeyFollowsStatefulResponses(t *testing.T) {
+	var n atomic.Int32
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {
+		id := fmt.Sprintf("resp_%d", n.Add(1))
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), `"stream":true`) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprintf(w, "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":%q}}\n\n"+
+				"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":%q,\"usage\":{\"input_tokens\":3,\"output_tokens\":1}}}\n\n", id, id)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"id":%q,"object":"response","usage":{"input_tokens":3,"output_tokens":1}}`, id)
+	})
+	steps := []string{
+		`{"model":"up/gpt-6-luna","input":[{"role":"user","content":"task one"}]}`,
+		`{"model":"up/gpt-6-luna","stream":true,"previous_response_id":"resp_1","input":[{"type":"function_call_output","call_id":"c1","output":"r"}]}`,
+		`{"model":"up/gpt-6-luna","previous_response_id":"resp_2","input":[{"type":"function_call_output","call_id":"c2","output":"r"}]}`,
+		`{"model":"up/gpt-6-luna","previous_response_id":"resp_unknown","input":[{"type":"function_call_output","call_id":"c3","output":"r"}]}`,
+	}
+	for _, b := range steps {
+		if code, _, body := h.do("POST", "/v1/responses", "tok-infer", b); code != 200 {
+			t.Fatalf("responses = %d %s", code, body)
+		}
+	}
+	if err := h.db.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := h.db.RecentCalls(context.Background(), 4) // newest first
+	if len(rows) != 4 {
+		t.Fatalf("rows = %d", len(rows))
+	}
+	open := rows[3].TurnID
+	if open == "" || rows[2].TurnID != open || rows[1].TurnID != open {
+		t.Fatalf("stateful loop split: %q %q %q", open, rows[2].TurnID, rows[1].TurnID)
+	}
+	if rows[0].TurnID != "" {
+		t.Fatalf("unknown previous_response_id got turn %q", rows[0].TurnID)
 	}
 }
 

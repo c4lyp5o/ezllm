@@ -29,12 +29,14 @@ type TurnLength struct {
 const LongTurn = 20
 
 // TurnLengths reads [from, to). Rows without a turn_id (pre-v37, or bodies
-// with no conversation) are left out. A turn that failed over between models
+// with no conversation) are left out, and so are failed requests (status
+// 400 and up): a refusal or a client's retry after one is not the model
+// working, and counting it would make a turn look longer than it was. A turn that failed over between models
 // counts once under each model it used.
 func (d *DB) TurnLengths(ctx context.Context, from, to time.Time) ([]TurnLength, error) {
 	rows, err := d.r.QueryContext(ctx, `
 SELECT account, model, COUNT(*) FROM calls
-WHERE ts >= ? AND ts < ? AND turn_id <> ''
+WHERE ts >= ? AND ts < ? AND turn_id <> '' AND status < 400
 GROUP BY client, turn_id, account, model`,
 		from.UTC().Format("2006-01-02T15:04:05.000Z"), to.UTC().Format("2006-01-02T15:04:05.000Z"))
 	if err != nil {

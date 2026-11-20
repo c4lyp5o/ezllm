@@ -179,6 +179,9 @@ func (s *Server) finishDispatch(w http.ResponseWriter, r *http.Request, call sto
 	call.TTFTms, call.Totalms, call.SlotWaitms = res.TTFTms, res.Totalms, res.SlotWaitms
 	call.EndpointID, call.UpstreamModel = res.EndpointID, res.UpstreamModel
 	applyUsage(&call, res.Usage)
+	if res.ResponseID != "" && call.TurnID != "" {
+		s.turnChain.remember(call.Client, res.ResponseID, call.TurnID)
+	}
 	if ferr != nil {
 		call.Err = ferr.Error()
 	} else if res.Err != "" {

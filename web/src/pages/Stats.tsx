@@ -571,11 +571,11 @@ function TurnLengths({ range }: { range: RangeKey }) {
       <Panel label={<SectionLabel>Requests per turn · {RANGE_LABEL[range]}</SectionLabel>} bodyClass="p-0">
         <p className="px-5 pt-3 text-[12px] text-mute">
           A turn is one message from a person plus every tool call the model made before it answered. Low numbers next to
-          a model that should be doing long tasks mean it stops early. Counted from the 2.1.1 upgrade on.
+          a model that should be doing long tasks mean it stops early. Counted from the 2.2.0 upgrade on.
         </p>
         {err && <p role="alert" className="px-5 py-3 text-[13px] text-bad">{err}</p>}
         {data && data.rows.length === 0 && (
-          <div className="px-5 py-4"><EmptyState title="No turns recorded yet" hint="Turns are counted for requests made after the 2.1.1 upgrade." /></div>
+          <div className="px-5 py-4"><EmptyState title="No turns recorded yet" hint="Turns are counted for requests made after the 2.2.0 upgrade." /></div>
         )}
         {data && data.rows.length > 0 && (
           <div className="overflow-x-auto">

@@ -36,6 +36,10 @@ func TestTurnLengthsGroupsByClientAndTurn(t *testing.T) {
 	rec("hermes", "", "sol", now)  // no key: not counted
 	rec("hermes", "t3", "terra", now)
 	rec("hermes", "t9", "sol", now.Add(-48*time.Hour)) // outside the window
+	// Failed requests are not work: a 429 and its retry must not lengthen t2,
+	// and a turn made only of failures is not a turn.
+	db.RecordCall(Call{TS: now, Client: "hermes", Account: "acc", Model: "sol", Status: 429, TurnID: "t2"})
+	db.RecordCall(Call{TS: now, Client: "hermes", Account: "acc", Model: "sol", Status: 502, TurnID: "t5"})
 	if err := db.Flush(); err != nil {
 		t.Fatal(err)
 	}

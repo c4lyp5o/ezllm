@@ -17,7 +17,7 @@ var retiredEnv = map[string]string{
 	"EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK":  "removed in 2.0.0: Codex client tools require Landlock",
 	"EZLLM_TRANSLATION_UNIVERSAL_ENABLED": "renamed to EZLLM_TRANSLATION_ENABLED in 2.0.0",
 	"EZLLM_WEB_DIR":                       "removed in 2.0.0: the dashboard is always the one built into the binary",
-	"EZLLM_COPILOT_BRIDGE_QUEUE":          "replaced by EZLLM_BRIDGE_QUEUE (one queue size for every bridge) in 2.1.1",
+	"EZLLM_COPILOT_BRIDGE_QUEUE":          "replaced by EZLLM_BRIDGE_QUEUE (one queue size for every bridge) in 2.2.0",
 }
 
 func checkRetiredEnv(get func(string) string) error {

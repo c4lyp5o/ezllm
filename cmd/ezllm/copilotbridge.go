@@ -2,14 +2,10 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -237,47 +233,9 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 	if report != nil {
 		report("copilot-sub", addr, token, bridgeUpdateFile(bin), info, runner.Stats)
 	}
-	httpSrv := &http.Server{Addr: addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
-	go func() {
-		log.Info("copilot bridge listening", "addr", addr, "cli", cliVersion, "release", release, "home", home)
-		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error("copilot bridge serve", "err", err)
-		}
-	}()
+	log.Info("copilot bridge listening", "addr", addr, "cli", cliVersion, "release", release, "home", home)
+	httpSrv := serveBridge(log, "copilot", addr, srv.Handler())
 	return func() { shutdownBridgeHTTP(httpSrv); runner.Close() }, nil
-}
-
-// bridgeTokenFromFile mints (once) and reads the loopback shared secret, 0600.
-// The account key ezllm stores is this value; nothing else authenticates the
-// bridge surface.
-func bridgeTokenFromFile(path, label string) (string, error) {
-	path = bridgeTokenPath(path, label)
-	if b, err := os.ReadFile(path); err == nil {
-		if t := strings.TrimSpace(string(b)); t != "" {
-			return t, nil
-		}
-	}
-	buf := make([]byte, 24)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("%s bridge: mint token: %w", label, err)
-	}
-	token := hex.EncodeToString(buf)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return "", fmt.Errorf("%s bridge: token dir: %w", label, err)
-	}
-	if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
-		return "", fmt.Errorf("%s bridge: write token: %w", label, err)
-	}
-	return token, nil
-}
-
-// bridgeTokenPath defaults an unset path to /data/<label>-bridge.token, on the
-// data volume like the other bridges' tokens, so it is backed up with the ledger.
-func bridgeTokenPath(path, label string) string {
-	if path == "" {
-		return "/data/" + label + "-bridge.token"
-	}
-	return path
 }
 
 // copilotHome is the bridge's own login directory. Like every subscription

@@ -2,12 +2,9 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
@@ -83,7 +80,7 @@ func startAgyBridge(ctx context.Context, log *slog.Logger, report bridgeReport) 
 	if experimentalTools {
 		clientTools = "experimental (structured output; caller executes)"
 	}
-	token, err := agyBridgeToken(strings.TrimSpace(os.Getenv(envAgyToken)))
+	token, err := bridgeTokenFromFile(strings.TrimSpace(os.Getenv(envAgyToken)), "agy")
 	if err != nil {
 		return nil, err
 	}
@@ -120,13 +117,8 @@ func startAgyBridge(ctx context.Context, log *slog.Logger, report bridgeReport) 
 	if report != nil {
 		report("antigravity-sub", addr, token, bridgeUpdateFile(bin), srv.Info, runner.AdmissionStats)
 	}
-	httpSrv := &http.Server{Addr: addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
-	go func() {
-		log.Info("agy bridge listening", "addr", addr, "cli", pre.Version, "release", qualified, "models", len(pre.Models))
-		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error("agy bridge serve", "err", err)
-		}
-	}()
+	log.Info("agy bridge listening", "addr", addr, "cli", pre.Version, "release", qualified, "models", len(pre.Models))
+	httpSrv := serveBridge(log, "agy", addr, srv.Handler())
 	return func() { shutdownBridgeHTTP(httpSrv); runner.Close() }, nil
 }
 
@@ -142,26 +134,6 @@ func assertAgyLoopback(addr string) error {
 		return nil
 	}
 	return fmt.Errorf("agy bridge: %s=%q must be loopback (127.0.0.1): this surface holds the subscription login", envAgyAddr, addr)
-}
-
-// agyBridgeToken returns the shared secret the account key carries. The
-// default lives on the data volume so it is backed up with the ledger.
-func agyBridgeToken(path string) (string, error) {
-	if path == "" {
-		path = "/data/agy-bridge.token"
-	}
-	if b, err := os.ReadFile(path); err == nil && strings.TrimSpace(string(b)) != "" {
-		return strings.TrimSpace(string(b)), nil
-	}
-	raw := make([]byte, 24)
-	if _, err := rand.Read(raw); err != nil {
-		return "", fmt.Errorf("agy bridge: cannot generate token: %w", err)
-	}
-	token := hex.EncodeToString(raw)
-	if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
-		return "", fmt.Errorf("agy bridge: cannot write %s: %w", path, err)
-	}
-	return token, nil
 }
 
 // agySessionCache is on by default wherever it can work: with the tool adapter

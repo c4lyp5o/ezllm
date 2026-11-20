@@ -64,7 +64,7 @@ func (s *Server) logf(format string, args ...any) {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSONBytes(w, http.StatusOK, mustJSON(map[string]any{"status": "ok", "version": s.Version}))
+		bridgeutil.WriteJSONBytes(w, http.StatusOK, mustJSON(map[string]any{"status": "ok", "version": s.Version}))
 	})
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, _ *http.Request) {
 		info := make(map[string]any, len(s.Info)+1)
@@ -74,7 +74,7 @@ func (s *Server) Handler() http.Handler {
 		if a, ok := s.Runner.(interface{ AdmissionStats() map[string]any }); ok {
 			info["runtime"] = a.AdmissionStats()
 		}
-		writeJSONBytes(w, http.StatusOK, mustJSON(info))
+		bridgeutil.WriteJSONBytes(w, http.StatusOK, mustJSON(info))
 	})
 	mux.HandleFunc("GET /v1/models", s.authed(s.listModels))
 	mux.HandleFunc("GET /v1/usage", s.authed(s.usage))
@@ -87,7 +87,7 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !bridgeutil.Authorized(r, s.Token, true) {
-			writeJSONBytes(w, http.StatusUnauthorized,
+			bridgeutil.WriteJSONBytes(w, http.StatusUnauthorized,
 				ErrorEnvelope("authentication_error", "claude-bridge: missing or wrong x-api-key", "unauthorized"))
 			return
 		}
@@ -100,7 +100,7 @@ func (s *Server) listModels(w http.ResponseWriter, _ *http.Request) {
 	if models == nil {
 		models = DefaultCatalog()
 	}
-	writeJSONBytes(w, http.StatusOK, mustJSON(map[string]any{"data": models, "has_more": false}))
+	bridgeutil.WriteJSONBytes(w, http.StatusOK, mustJSON(map[string]any{"data": models, "has_more": false}))
 }
 
 // usage serves the plan's 5h and weekly windows for the provider card. 404
@@ -109,21 +109,21 @@ func (s *Server) listModels(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) usage(w http.ResponseWriter, _ *http.Request) {
 	body, ok := s.Limits.UsageBody()
 	if !ok {
-		writeJSONBytes(w, http.StatusNotFound, ErrorEnvelope("not_found_error",
+		bridgeutil.WriteJSONBytes(w, http.StatusNotFound, ErrorEnvelope("not_found_error",
 			"claude-bridge: no plan-limit reading yet; the CLI reports one with every call", "no_reading"))
 		return
 	}
-	writeJSONBytes(w, http.StatusOK, body)
+	bridgeutil.WriteJSONBytes(w, http.StatusOK, body)
 }
 
 func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
 	if err != nil {
-		writeJSONBytes(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", "claude-bridge: cannot read request body: "+err.Error(), "invalid_request"))
+		bridgeutil.WriteJSONBytes(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", "claude-bridge: cannot read request body: "+err.Error(), "invalid_request"))
 		return
 	}
 	if len(body) > maxBodyBytes {
-		writeJSONBytes(w, http.StatusRequestEntityTooLarge, ErrorEnvelope("invalid_request_error", "claude-bridge: request body too large", "invalid_request"))
+		bridgeutil.WriteJSONBytes(w, http.StatusRequestEntityTooLarge, ErrorEnvelope("invalid_request_error", "claude-bridge: request body too large", "invalid_request"))
 		return
 	}
 	req, err := ParseRequest(body)
@@ -134,12 +134,12 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 			code = "chat_tools_unsupported"
 			_ = u
 		}
-		writeJSONBytes(w, status, ErrorEnvelope("invalid_request_error", err.Error(), code))
+		bridgeutil.WriteJSONBytes(w, status, ErrorEnvelope("invalid_request_error", err.Error(), code))
 		return
 	}
 	alias, err := ModelAlias(req.Model)
 	if err != nil {
-		writeJSONBytes(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", err.Error(), "unknown_model"))
+		bridgeutil.WriteJSONBytes(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", err.Error(), "unknown_model"))
 		return
 	}
 
@@ -154,7 +154,7 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 		s.writeRunError(w, res, err)
 		return
 	}
-	writeJSONBytes(w, http.StatusOK, mustJSON(sw.Message(req.Model)))
+	bridgeutil.WriteJSONBytes(w, http.StatusOK, mustJSON(sw.Message(req.Model)))
 }
 
 func (s *Server) stream(w http.ResponseWriter, r *http.Request, req Request, alias string) {
@@ -203,19 +203,13 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request, req Request, ali
 func (s *Server) writeRunError(w http.ResponseWriter, _ Result, err error) {
 	ne, ok := err.(*NativeError)
 	if !ok {
-		writeJSONBytes(w, http.StatusBadGateway, ErrorEnvelope("api_error", err.Error(), "native_error"))
+		bridgeutil.WriteJSONBytes(w, http.StatusBadGateway, ErrorEnvelope("api_error", err.Error(), "native_error"))
 		return
 	}
 	if ne.Code == "queue_full" {
 		w.Header().Set("Retry-After", bridgeutil.QueueFullRetryAfter)
 	}
-	writeJSONBytes(w, ne.Status, ErrorEnvelope(ne.Type, ne.Message, ne.Code))
-}
-
-func writeJSONBytes(w http.ResponseWriter, status int, body []byte) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_, _ = w.Write(body)
+	bridgeutil.WriteJSONBytes(w, ne.Status, ErrorEnvelope(ne.Type, ne.Message, ne.Code))
 }
 
 func mustJSON(v any) []byte {

@@ -1,8 +1,6 @@
 package agybridge
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -76,7 +74,7 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !bridgeutil.Authorized(r, s.Token, false) {
-			writeRaw(w, http.StatusUnauthorized, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", "agy-bridge: missing or wrong bearer token", "unauthorized"))
+			bridgeutil.WriteJSONBytes(w, http.StatusUnauthorized, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", "agy-bridge: missing or wrong bearer token", "unauthorized"))
 			return
 		}
 		next(bridgeutil.TrackSlotWait(w, r))
@@ -95,11 +93,11 @@ func (s *Server) knownModel(id string) bool {
 func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
 	if err != nil {
-		writeRaw(w, http.StatusBadRequest, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", "agy-bridge: cannot read request body: "+err.Error(), "invalid_request"))
+		bridgeutil.WriteJSONBytes(w, http.StatusBadRequest, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", "agy-bridge: cannot read request body: "+err.Error(), "invalid_request"))
 		return
 	}
 	if len(body) > maxBodyBytes {
-		writeRaw(w, http.StatusRequestEntityTooLarge, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", "agy-bridge: request body too large", "invalid_request"))
+		bridgeutil.WriteJSONBytes(w, http.StatusRequestEntityTooLarge, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", "agy-bridge: request body too large", "invalid_request"))
 		return
 	}
 	req, err := parseRequest(body, s.ExperimentalTools)
@@ -109,7 +107,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		if errors.As(err, &u) {
 			code = u.Code
 		}
-		writeRaw(w, http.StatusBadRequest, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", err.Error(), code))
+		bridgeutil.WriteJSONBytes(w, http.StatusBadRequest, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", err.Error(), code))
 		return
 	}
 	// Refused before a spawn: an unknown model costs a ~3s CLI start to learn.
@@ -118,7 +116,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		for _, m := range s.Models {
 			ids = append(ids, m.ID)
 		}
-		writeRaw(w, http.StatusBadRequest, bridgeutil.OpenAIErrorEnvelope("invalid_request_error",
+		bridgeutil.WriteJSONBytes(w, http.StatusBadRequest, bridgeutil.OpenAIErrorEnvelope("invalid_request_error",
 			"agy-bridge: model "+req.Model+" is not on this login's plan (have: "+strings.Join(ids, ", ")+")", "unknown_model"))
 		return
 	}
@@ -128,7 +126,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := "chatcmpl-" + randomHex(12)
+	id := "chatcmpl-" + bridgeutil.RandomHex(12)
 	created := s.now().Unix()
 	if !req.Stream {
 		res, err := s.Runner.Run(r.Context(), req, nil)
@@ -210,7 +208,7 @@ func (s *Server) writeErr(w http.ResponseWriter, err error) {
 	if ne.Code == "queue_full" {
 		w.Header().Set("Retry-After", bridgeutil.QueueFullRetryAfter)
 	}
-	writeRaw(w, ne.Status, bridgeutil.OpenAIErrorEnvelope(ne.Type, ne.Message, ne.Code))
+	bridgeutil.WriteJSONBytes(w, ne.Status, bridgeutil.OpenAIErrorEnvelope(ne.Type, ne.Message, ne.Code))
 }
 
 // writeRunErr is writeErr for a failure after native may have generated. A
@@ -230,28 +228,16 @@ func (s *Server) writeRunErr(w http.ResponseWriter, err error, usage Usage) {
 		s.writeErr(w, err)
 		return
 	}
-	writeRaw(w, ne.Status, body)
+	bridgeutil.WriteJSONBytes(w, ne.Status, body)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	b, err := json.Marshal(v)
 	if err != nil {
-		writeRaw(w, http.StatusInternalServerError, bridgeutil.OpenAIErrorEnvelope("api_error", "agy-bridge: encode failure", "encode"))
+		bridgeutil.WriteJSONBytes(w, http.StatusInternalServerError, bridgeutil.OpenAIErrorEnvelope("api_error", "agy-bridge: encode failure", "encode"))
 		return
 	}
-	writeRaw(w, status, b)
-}
-
-func writeRaw(w http.ResponseWriter, status int, body []byte) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_, _ = w.Write(body)
-}
-
-func randomHex(n int) string {
-	b := make([]byte, n)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
+	bridgeutil.WriteJSONBytes(w, status, b)
 }
 
 // adaptedChat buffers only this turn's envelope. Tool execution belongs to the
@@ -268,7 +254,7 @@ func (s *Server) adaptedChat(w http.ResponseWriter, r *http.Request, req Request
 		s.writeRunErr(w, err, res.Usage)
 		return
 	}
-	id, created := "chatcmpl-"+randomHex(12), s.now().Unix()
+	id, created := "chatcmpl-"+bridgeutil.RandomHex(12), s.now().Unix()
 	finish := "stop"
 	message := map[string]any{"role": "assistant", "content": text}
 	if len(calls) > 0 {

@@ -2,8 +2,6 @@ package codexbridge
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -97,7 +95,7 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !bridgeutil.Authorized(r, s.Token, false) {
-			writeRaw(w, http.StatusUnauthorized,
+			bridgeutil.WriteJSONBytes(w, http.StatusUnauthorized,
 				bridgeutil.OpenAIErrorEnvelope("invalid_request_error", "codex-bridge: missing or wrong bearer token", "unauthorized"))
 			return
 		}
@@ -152,11 +150,11 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 	}
 	body, ok := UsageBody(rl, s.now())
 	if !ok {
-		writeRaw(w, http.StatusNotFound, bridgeutil.OpenAIErrorEnvelope("not_found_error",
+		bridgeutil.WriteJSONBytes(w, http.StatusNotFound, bridgeutil.OpenAIErrorEnvelope("not_found_error",
 			"codex-bridge: the login reported no plan window", "no_reading"))
 		return
 	}
-	writeRaw(w, http.StatusOK, body)
+	bridgeutil.WriteJSONBytes(w, http.StatusOK, body)
 }
 
 // validate checks model and effort against the catalog before anything is
@@ -186,11 +184,11 @@ func (s *Server) validate(ctx context.Context, req Request) error {
 func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
 	if err != nil {
-		writeRaw(w, http.StatusBadRequest, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", "codex-bridge: cannot read request body: "+err.Error(), "invalid_request"))
+		bridgeutil.WriteJSONBytes(w, http.StatusBadRequest, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", "codex-bridge: cannot read request body: "+err.Error(), "invalid_request"))
 		return
 	}
 	if len(body) > maxBodyBytes {
-		writeRaw(w, http.StatusRequestEntityTooLarge, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", "codex-bridge: request body too large", "invalid_request"))
+		bridgeutil.WriteJSONBytes(w, http.StatusRequestEntityTooLarge, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", "codex-bridge: request body too large", "invalid_request"))
 		return
 	}
 	req, err := ParseRequest(body)
@@ -200,18 +198,18 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		if errors.As(err, &u) {
 			code = u.Code
 		}
-		writeRaw(w, http.StatusBadRequest, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", err.Error(), code))
+		bridgeutil.WriteJSONBytes(w, http.StatusBadRequest, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", err.Error(), code))
 		return
 	}
 	if len(req.Tools) > 0 && s.ToolsOff != "" {
-		writeRaw(w, http.StatusBadRequest, bridgeutil.OpenAIErrorEnvelope("invalid_request_error",
+		bridgeutil.WriteJSONBytes(w, http.StatusBadRequest, bridgeutil.OpenAIErrorEnvelope("invalid_request_error",
 			"client tools are disabled on this host: "+s.ToolsOff+". See docs/codex-bridge-runbook.md#platform-requirements--read-this-first",
 			"chat_tools_unsupported"))
 		return
 	}
 	req.CallerID = strings.TrimSpace(r.Header.Get(provider.BridgeCallerHeader))
 	if len(req.CallerID) > 128 || (s.RequireCaller && len(req.Tools) > 0 && req.CallerID == "") {
-		writeRaw(w, http.StatusForbidden, bridgeutil.OpenAIErrorEnvelope("permission_error", "codex-bridge: authenticated caller identity required; use the gateway", "caller_identity_required"))
+		bridgeutil.WriteJSONBytes(w, http.StatusForbidden, bridgeutil.OpenAIErrorEnvelope("permission_error", "codex-bridge: authenticated caller identity required; use the gateway", "caller_identity_required"))
 		return
 	}
 	if err := s.validate(r.Context(), req); err != nil {
@@ -219,7 +217,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := "chatcmpl-" + randomHex(12)
+	id := "chatcmpl-" + bridgeutil.RandomHex(12)
 	created := s.now().Unix()
 	if !req.Stream {
 		res, err := s.Runner.Run(r.Context(), req, nil)
@@ -334,26 +332,14 @@ func (s *Server) writeErr(w http.ResponseWriter, err error) {
 	if ne.Code == "queue_full" {
 		w.Header().Set("Retry-After", bridgeutil.QueueFullRetryAfter)
 	}
-	writeRaw(w, ne.Status, bridgeutil.OpenAIErrorEnvelope(ne.Type, ne.Message, ne.Code))
+	bridgeutil.WriteJSONBytes(w, ne.Status, bridgeutil.OpenAIErrorEnvelope(ne.Type, ne.Message, ne.Code))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	b, err := json.Marshal(v)
 	if err != nil {
-		writeRaw(w, http.StatusInternalServerError, bridgeutil.OpenAIErrorEnvelope("api_error", "codex-bridge: encode failure", "encode"))
+		bridgeutil.WriteJSONBytes(w, http.StatusInternalServerError, bridgeutil.OpenAIErrorEnvelope("api_error", "codex-bridge: encode failure", "encode"))
 		return
 	}
-	writeRaw(w, status, b)
-}
-
-func writeRaw(w http.ResponseWriter, status int, body []byte) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_, _ = w.Write(body)
-}
-
-func randomHex(n int) string {
-	b := make([]byte, n)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
+	bridgeutil.WriteJSONBytes(w, status, b)
 }

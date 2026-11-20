@@ -210,14 +210,14 @@ func (r *Runner) run(runCtx context.Context, req Request, delta func(string) err
 	done := make(chan struct{})
 	defer close(done)
 
-	var stderrTail tailBuffer
+	var stderrTail bridgeutil.TailBuffer
 	stderrDone := make(chan struct{})
 	go func() {
 		defer close(stderrDone)
 		sc := bufio.NewScanner(stderr)
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for sc.Scan() {
-			stderrTail.add(sc.Text())
+			stderrTail.Add(sc.Text())
 		}
 	}()
 
@@ -347,7 +347,7 @@ func (r *Runner) run(runCtx context.Context, req Request, delta func(string) err
 	if out.Status != "SUCCESS" {
 		m := out.Error
 		if m == "" {
-			m = stderrTail.tail()
+			m = stderrTail.Tail()
 		}
 		return res, mapError(out.Status, m)
 	}
@@ -363,8 +363,8 @@ func (r *Runner) run(runCtx context.Context, req Request, delta func(string) err
 	return res, nil
 }
 
-func (r *Runner) stderrNote(t *tailBuffer) string {
-	if s := t.tail(); s != "" {
+func (r *Runner) stderrNote(t *bridgeutil.TailBuffer) string {
+	if s := t.Tail(); s != "" {
 		return " — " + urlPattern.ReplaceAllString(s, "[link withheld]")
 	}
 	return ""
@@ -381,27 +381,6 @@ func deadlineErr(err error) error {
 		return &NativeError{Status: 502, Type: "api_error", Code: "native_closed", Message: "agy-bridge: the CLI closed its output"}
 	}
 	return err
-}
-
-// tailBuffer keeps the last lines of the child's stderr — diagnosis, not noise.
-type tailBuffer struct {
-	mu    sync.Mutex
-	lines []string
-}
-
-func (t *tailBuffer) add(line string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.lines = append(t.lines, line)
-	if len(t.lines) > 40 {
-		t.lines = t.lines[len(t.lines)-40:]
-	}
-}
-
-func (t *tailBuffer) tail() string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return strings.Join(t.lines, " | ")
 }
 
 // AdmissionStats is the slot and queue picture each bridge's /status serves

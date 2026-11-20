@@ -1426,7 +1426,7 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 				io.Closer
 			}{translated, resp.Body}
 		}
-		// streamCopy writes the header before its first byte, so the status
+		// streamCopyTracked writes the header before its first byte, so the status
 		// is committed the moment it returns — regardless of a copy error.
 		res.Committed = true
 		ttft, usage, first, copyErr := d.streamCopyTracked(ctx, w, resp, rt.Surface, tapConvention(rt, cross), start, !cross && resp.StatusCode < 400)
@@ -2194,7 +2194,7 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 	return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: policy.AttemptBudget, LearnedReasoning: result.LearnedReasoning}, errors.New("proxy: all combo endpoints are in five-minute cooldown")
 }
 
-// streamCopy copies SSE upstream->client with a Flush per chunk, observing
+// streamCopyTracked copies SSE upstream->client with a Flush per chunk, observing
 // usage events without altering a single byte. Returns (ttft, usage, err) where
 // err is non-nil when the stream was truncated — the caller records it, since
 // the 200 status has already been sent and cannot be changed.
@@ -2208,10 +2208,9 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 // The third return is the first non-terminal SSE data payload. A streamed
 // error response carries its reason in there, and the ledger's err column is
 // blank for streams unless the caller is handed it.
-func (d *Dispatcher) streamCopy(ctx context.Context, w http.ResponseWriter, resp *http.Response, surface provider.Surface, conv provider.UsageConvention, start time.Time) (time.Duration, *store.Usage, []byte, error) {
-	return d.streamCopyTracked(ctx, w, resp, surface, conv, start, false)
-}
-
+//
+// requireTerminal treats a stream that ends without its terminal event as
+// truncated (native streams whose wire defines one).
 func (d *Dispatcher) streamCopyTracked(ctx context.Context, w http.ResponseWriter, resp *http.Response, surface provider.Surface, conv provider.UsageConvention, start time.Time, requireTerminal bool) (time.Duration, *store.Usage, []byte, error) {
 	var ttft time.Duration
 	var firstEvent bool

@@ -128,7 +128,7 @@ func BenchmarkStreamCopy(b *testing.B) {
 					b.ResetTimer()
 					c.run(b, newDiscardWriter, func(w *discardWriter) {
 						resp := streamResponse(payload, frag.read)
-						_, _, _, err := d.streamCopy(context.Background(), w, resp, provider.SurfaceChat, provider.UsageConventionAuto, time.Now())
+						_, _, _, err := d.streamCopyTracked(context.Background(), w, resp, provider.SurfaceChat, provider.UsageConventionAuto, time.Now(), false)
 						if err != nil {
 							b.Error(err)
 						}

@@ -2,11 +2,8 @@ package copilotbridge
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"regexp"
@@ -144,7 +141,7 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !bridgeutil.Authorized(r, s.Token, false) {
-			writeRaw(w, http.StatusUnauthorized, ErrorEnvelope("invalid_request_error",
+			bridgeutil.WriteJSONBytes(w, http.StatusUnauthorized, ErrorEnvelope("invalid_request_error",
 				"copilot-bridge: missing or wrong bearer token", "unauthorized"))
 			return
 		}
@@ -164,12 +161,12 @@ func (s *Server) knownModel(id string) bool {
 func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
 	if err != nil {
-		writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error",
+		bridgeutil.WriteJSONBytes(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error",
 			"copilot-bridge: cannot read request body", "invalid_request"))
 		return
 	}
 	if len(body) > maxBodyBytes {
-		writeRaw(w, http.StatusRequestEntityTooLarge, ErrorEnvelope("invalid_request_error",
+		bridgeutil.WriteJSONBytes(w, http.StatusRequestEntityTooLarge, ErrorEnvelope("invalid_request_error",
 			"copilot-bridge: request body too large", "invalid_request"))
 		return
 	}
@@ -180,7 +177,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		if errors.As(err, &u) {
 			code = u.Code
 		}
-		writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", err.Error(), code))
+		bridgeutil.WriteJSONBytes(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", err.Error(), code))
 		return
 	}
 	// Refused before a spawn: learning "not available" from the CLI costs a
@@ -188,12 +185,12 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	// 403 the CLI's own refusal maps to (writeErr), so the router treats both
 	// alike: the model is unavailable, the hop is not unhealthy.
 	if req.Model != "" && req.Model != "auto" && !s.knownModel(req.Model) {
-		writeRaw(w, http.StatusForbidden, ErrorEnvelope("permission_error",
+		bridgeutil.WriteJSONBytes(w, http.StatusForbidden, ErrorEnvelope("permission_error",
 			"copilot-bridge: model "+req.Model+" is not available on this Copilot login (GET /v1/models lists what is)", "model_not_in_plan"))
 		return
 	}
 
-	id := "chatcmpl-" + randomHex(12)
+	id := "chatcmpl-" + bridgeutil.RandomHex(12)
 	created := s.now().Unix()
 	model := req.Model
 	if model == "" {
@@ -352,33 +349,33 @@ func (s *Server) writeErr(w http.ResponseWriter, err error) {
 	if errors.As(err, &f) {
 		switch f.Code {
 		case "vision_unsupported", "invalid_image":
-			writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", f.Msg, f.Code))
+			bridgeutil.WriteJSONBytes(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", f.Msg, f.Code))
 			return
 		case "chat_tools_unsupported":
 			// Refused before anything billable: the router fails over on this
 			// code without parking the hop (proxy.go refusesTools).
-			writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", f.Msg, f.Code))
+			bridgeutil.WriteJSONBytes(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", f.Msg, f.Code))
 			return
 		case "not_logged_in":
-			writeRaw(w, http.StatusUnauthorized, ErrorEnvelope("authentication_error", f.Msg, f.Code))
+			bridgeutil.WriteJSONBytes(w, http.StatusUnauthorized, ErrorEnvelope("authentication_error", f.Msg, f.Code))
 			return
 		case "quota_exhausted":
-			writeRaw(w, http.StatusTooManyRequests, ErrorEnvelope("rate_limit_error", f.Msg, f.Code))
+			bridgeutil.WriteJSONBytes(w, http.StatusTooManyRequests, ErrorEnvelope("rate_limit_error", f.Msg, f.Code))
 			return
 		case "queue_full":
 			w.Header().Set("Retry-After", bridgeutil.QueueFullRetryAfter)
-			writeRaw(w, http.StatusTooManyRequests, ErrorEnvelope("rate_limit_error", f.Msg, f.Code))
+			bridgeutil.WriteJSONBytes(w, http.StatusTooManyRequests, ErrorEnvelope("rate_limit_error", f.Msg, f.Code))
 			return
 		case "model_not_in_plan":
-			writeRaw(w, http.StatusForbidden, ErrorEnvelope("permission_error", f.Msg, f.Code))
+			bridgeutil.WriteJSONBytes(w, http.StatusForbidden, ErrorEnvelope("permission_error", f.Msg, f.Code))
 			return
 		}
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		writeRaw(w, http.StatusGatewayTimeout, ErrorEnvelope("timeout_error", "copilot-bridge: the CLI did not finish in time", "timeout"))
+		bridgeutil.WriteJSONBytes(w, http.StatusGatewayTimeout, ErrorEnvelope("timeout_error", "copilot-bridge: the CLI did not finish in time", "timeout"))
 		return
 	}
-	writeRaw(w, http.StatusBadGateway, ErrorEnvelope("api_error", "copilot-bridge: "+err.Error(), "cli_failed"))
+	bridgeutil.WriteJSONBytes(w, http.StatusBadGateway, ErrorEnvelope("api_error", "copilot-bridge: "+err.Error(), "cli_failed"))
 }
 
 // ── SSE ─────────────────────────────────────────────────────────────────────
@@ -435,20 +432,6 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeRaw(w http.ResponseWriter, status int, body []byte) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_, _ = w.Write(body)
-}
-
-func randomHex(n int) string {
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(b)
 }
 
 // Known output or usage forbids a second generation even if a refusal was

@@ -3,6 +3,7 @@ package codexbridge
 import (
 	"context"
 	"encoding/json"
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 	"time"
 )
 
@@ -64,9 +65,9 @@ func (r *Runner) park(c *child, st *turnState, res Result) {
 	for i := range calls {
 		original := calls[i].ID
 		if r.idParked(original) {
-			alias := "call_" + randomHex(16)
+			alias := "call_" + bridgeutil.RandomHex(16)
 			for r.idParked(alias) {
-				alias = "call_" + randomHex(16)
+				alias = "call_" + bridgeutil.RandomHex(16)
 			}
 			rpcID := st.replyTo[original]
 			delete(st.replyTo, original)

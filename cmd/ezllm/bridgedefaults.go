@@ -1,7 +1,11 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -47,4 +51,38 @@ func bridgeQueue(get func(string) string, label string) (int, error) {
 		return bridgeutil.DefaultMaxQueue, nil
 	}
 	return bridgeConcurrency(get, envBridgeQueue, label)
+}
+
+// bridgeTokenFromFile mints (once) and reads a bridge's loopback shared secret,
+// 0600. Every bridge uses it; label names the default file.
+// The account key ezllm stores is this value; nothing else authenticates the
+// bridge surface.
+func bridgeTokenFromFile(path, label string) (string, error) {
+	path = bridgeTokenPath(path, label)
+	if b, err := os.ReadFile(path); err == nil {
+		if t := strings.TrimSpace(string(b)); t != "" {
+			return t, nil
+		}
+	}
+	buf := make([]byte, 24)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("%s bridge: mint token: %w", label, err)
+	}
+	token := hex.EncodeToString(buf)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", fmt.Errorf("%s bridge: token dir: %w", label, err)
+	}
+	if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
+		return "", fmt.Errorf("%s bridge: write token: %w", label, err)
+	}
+	return token, nil
+}
+
+// bridgeTokenPath defaults an unset path to /data/<label>-bridge.token, on the
+// data volume like the other bridges' tokens, so it is backed up with the ledger.
+func bridgeTokenPath(path, label string) string {
+	if path == "" {
+		return "/data/" + label + "-bridge.token"
+	}
+	return path
 }

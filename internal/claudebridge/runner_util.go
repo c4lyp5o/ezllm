@@ -3,10 +3,10 @@ package claudebridge
 import (
 	"context"
 	"encoding/json"
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 func writeJSON(path string, v any) error {
@@ -15,32 +15,6 @@ func writeJSON(path string, v any) error {
 		return err
 	}
 	return os.WriteFile(path, b, 0o600)
-}
-
-// tailBuffer keeps the last lines of native's stderr — diagnosis, not noise. A
-// gateway-only failure that vanishes into /dev/null is undiagnosable later.
-type tailBuffer struct {
-	mu    sync.Mutex
-	lines []string
-	max   int
-}
-
-func (t *tailBuffer) add(line string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.max == 0 {
-		t.max = 40
-	}
-	t.lines = append(t.lines, line)
-	if len(t.lines) > t.max {
-		t.lines = t.lines[len(t.lines)-t.max:]
-	}
-}
-
-func (t *tailBuffer) tail() string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return strings.Join(t.lines, " | ")
 }
 
 // firstText renders an assistant message's text blocks for error reports.
@@ -63,13 +37,13 @@ func firstText(raw json.RawMessage) string {
 	return strings.Join(parts, "\n")
 }
 
-func (r *Runner) deadlineErr(err error, tb *tailBuffer, at int) error {
+func (r *Runner) deadlineErr(err error, tb *bridgeutil.TailBuffer, at int) error {
 	if err == context.DeadlineExceeded || err == context.Canceled {
 		return &NativeError{Status: 504, Type: "api_error", Code: "timeout",
 			Message: "claude-bridge: native run did not finish in time"}
 	}
 	msg := "claude-bridge: native output ended unexpectedly after " + strconv.Itoa(at) + " frames: " + err.Error()
-	if tail := tb.tail(); tail != "" {
+	if tail := tb.Tail(); tail != "" {
 		msg += " | stderr: " + tail
 	}
 	return &NativeError{Status: 502, Type: "api_error", Code: "native_closed", Message: msg}

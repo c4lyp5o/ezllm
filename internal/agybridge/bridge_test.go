@@ -154,11 +154,11 @@ func TestMapError(t *testing.T) {
 }
 
 func TestParseRequestBuildsTranscript(t *testing.T) {
-	req, err := ParseRequest([]byte(`{"model":"m","reasoning_effort":"minimal","messages":[
+	req, err := parseRequest([]byte(`{"model":"m","reasoning_effort":"minimal","messages":[
 		{"role":"system","content":"Be terse."},
 		{"role":"user","content":"hi"},
 		{"role":"assistant","content":[{"type":"text","text":"hello"}]},
-		{"role":"user","content":"again"}]}`))
+		{"role":"user","content":"again"}]}`), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestParseRequestBuildsTranscript(t *testing.T) {
 	if req.Prompt != want || req.Effort != "low" {
 		t.Fatalf("prompt %q effort %q", req.Prompt, req.Effort)
 	}
-	lone, _ := ParseRequest([]byte(`{"model":"m","messages":[{"role":"user","content":"just this"}]}`))
+	lone, _ := parseRequest([]byte(`{"model":"m","messages":[{"role":"user","content":"just this"}]}`), false)
 	if lone.Prompt != "just this" {
 		t.Fatalf("a lone message is reframed: %q", lone.Prompt)
 	}
@@ -181,7 +181,7 @@ func TestParseRequestRefusals(t *testing.T) {
 		"last asst": `{"model":"m","messages":[{"role":"user","content":"x"},{"role":"assistant","content":"y"}]}`,
 		"no model":  `{"messages":[{"role":"user","content":"x"}]}`,
 	} {
-		if _, err := ParseRequest([]byte(body)); err == nil {
+		if _, err := parseRequest([]byte(body), false); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}

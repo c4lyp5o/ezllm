@@ -3,6 +3,7 @@ package agybridge
 import (
 	"context"
 	"encoding/json"
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 	"io"
 	"net/http/httptest"
 	"os"
@@ -18,7 +19,7 @@ const lookupRequest = `{"model":"gemini-3.8-flash-low",` + lookupTools + `,"mess
 const lookupEnvelope = `{"content":null,"tool_calls":[{"name":"lookup","arguments":{"key":"x"}}]}`
 
 func TestExperimentalToolsOptInAndTranscript(t *testing.T) {
-	if _, err := ParseRequest([]byte(lookupRequest)); err == nil {
+	if _, err := parseRequest([]byte(lookupRequest), false); err == nil {
 		t.Fatal("default accepted tools")
 	}
 	req, err := parseRequest([]byte(lookupRequest), true)
@@ -40,7 +41,7 @@ func TestExperimentalToolsOptInAndTranscript(t *testing.T) {
 	}
 	// Opt-in alone must leave ordinary chat byte-identical.
 	plain := []byte(`{"model":"m","messages":[{"role":"user","content":"hello"}]}`)
-	a, _ := ParseRequest(plain)
+	a, _ := parseRequest(plain, false)
 	b, _ := parseRequest(plain, true)
 	if a.Prompt != b.Prompt || b.Adapter != nil {
 		t.Fatal("ordinary chat changed")
@@ -198,7 +199,7 @@ func TestLiveExperimentalToolRoundTrip(t *testing.T) {
 		t.Fatalf("attempted %d native tools", res.ToolSteps)
 	}
 	t.Logf("call=%s args=%s usage=%+v", calls[0].Function.Name, calls[0].Function.Arguments, res.Usage)
-	nonce := "caller_nonce_" + randomHex(8)
+	nonce := "caller_nonce_" + bridgeutil.RandomHex(8)
 	var original map[string]json.RawMessage
 	_ = json.Unmarshal([]byte(lookupRequest), &original)
 	follow, _ := json.Marshal(map[string]any{"model": model, "tools": original["tools"], "tool_choice": "none", "messages": []any{
@@ -440,7 +441,7 @@ func TestAdapterAllowsOnlyStructuredOutputFinish(t *testing.T) {
 func TestDefaultTextRequestsKeepChoiceHintsCompatible(t *testing.T) {
 	for _, choice := range []string{"auto", "none"} {
 		body := `{"model":"m","tools":[],"tool_choice":"` + choice + `","messages":[{"role":"user","content":"plain chat"}]}`
-		req, err := ParseRequest([]byte(body))
+		req, err := parseRequest([]byte(body), false)
 		if err != nil || req.Adapter != nil || req.Prompt != "plain chat" {
 			t.Fatalf("choice=%s prompt=%q err=%v", choice, req.Prompt, err)
 		}

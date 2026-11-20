@@ -89,7 +89,7 @@ func (r *Runner) runExec(ctx context.Context, req Request, sink func(Delta) erro
 	if err != nil {
 		return Result{}, err
 	}
-	tb := &tailBuffer{}
+	tb := &bridgeutil.TailBuffer{}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return Result{}, err
@@ -101,7 +101,7 @@ func (r *Runner) runExec(ctx context.Context, req Request, sink func(Delta) erro
 	go func() {
 		sc := bufio.NewScanner(stderr)
 		for sc.Scan() {
-			tb.add(sc.Text())
+			tb.Add(sc.Text())
 		}
 	}()
 	stop := context.AfterFunc(ctx, func() { bridgeutil.KillGroup(cmd) })
@@ -183,7 +183,7 @@ func (r *Runner) runExec(ctx context.Context, req Request, sink func(Delta) erro
 	}
 	if !done {
 		msg := "codex-bridge: exec output ended before the turn completed"
-		if tail := tb.tail(); tail != "" {
+		if tail := tb.Tail(); tail != "" {
 			msg += " | stderr: " + tail
 		}
 		return Result{}, &NativeError{Status: 502, Type: "api_error", Code: "native_closed", Message: msg}

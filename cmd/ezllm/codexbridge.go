@@ -2,12 +2,9 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
@@ -109,7 +106,7 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 		return nil, err
 	}
 	cache := pre.Cache.Enabled
-	token, err := codexBridgeToken(strings.TrimSpace(os.Getenv(envCodexToken)))
+	token, err := bridgeTokenFromFile(strings.TrimSpace(os.Getenv(envCodexToken)), "codex")
 	if err != nil {
 		return nil, err
 	}
@@ -164,18 +161,13 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 	if report != nil {
 		report("chatgpt-sub", addr, token, bridgeUpdateFile(bin), srv.Info, runner.AdmissionStats)
 	}
-	httpSrv := &http.Server{Addr: addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
-	go func() {
-		if pre.Channel == codexbridge.ChannelExec {
-			log.Warn("codex bridge on the exec fallback: no streaming deltas, no catalog, no plan windows",
-				"missing", strings.Join(pre.MissingRPCs, ","))
-		}
-		log.Info("codex bridge listening", "addr", addr, "cli", pre.Version, "release", qualified, "login", pre.Login,
-			"channel", pre.Channel, "landlock", tools.landlock, "client_tools", tools.status)
-		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error("codex bridge serve", "err", err)
-		}
-	}()
+	if pre.Channel == codexbridge.ChannelExec {
+		log.Warn("codex bridge on the exec fallback: no streaming deltas, no catalog, no plan windows",
+			"missing", strings.Join(pre.MissingRPCs, ","))
+	}
+	log.Info("codex bridge listening", "addr", addr, "cli", pre.Version, "release", qualified, "login", pre.Login,
+		"channel", pre.Channel, "landlock", tools.landlock, "client_tools", tools.status)
+	httpSrv := serveBridge(log, "codex", addr, srv.Handler())
 	// main calls stop after the gateway drain (its handlers proxy here):
 	// drain this surface, then reap the parked tool turns that outlive any
 	// HTTP request by design.
@@ -204,24 +196,4 @@ func assertCodexLoopback(addr string) error {
 		return nil
 	}
 	return fmt.Errorf("codex bridge: %s=%q must be loopback (127.0.0.1): this surface holds the subscription login", envCodexAddr, addr)
-}
-
-// codexBridgeToken returns the shared secret the account key carries. The
-// default lives on the data volume so it is backed up with the ledger.
-func codexBridgeToken(path string) (string, error) {
-	if path == "" {
-		path = "/data/codex-bridge.token"
-	}
-	if b, err := os.ReadFile(path); err == nil && strings.TrimSpace(string(b)) != "" {
-		return strings.TrimSpace(string(b)), nil
-	}
-	raw := make([]byte, 24)
-	if _, err := rand.Read(raw); err != nil {
-		return "", fmt.Errorf("codex bridge: cannot generate token: %w", err)
-	}
-	token := hex.EncodeToString(raw)
-	if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
-		return "", fmt.Errorf("codex bridge: cannot write %s: %w", path, err)
-	}
-	return token, nil
 }

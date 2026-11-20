@@ -67,13 +67,10 @@ func present(raw json.RawMessage) bool {
 	return s != "" && s != "null" && s != "[]"
 }
 
-// ParseRequest validates the default text-only surface. The HTTP server may
-// explicitly opt into parseRequest's experimental structured-output adapter.
-// Images and unsupported tool shapes are refused rather than dropped.
-func ParseRequest(body []byte) (Request, error) {
-	return parseRequest(body, false)
-}
-
+// parseRequest validates a chat body. Without enableTools it is the default
+// text-only surface; the HTTP server may opt into the experimental
+// structured-output adapter. Images and unsupported tool shapes are refused
+// rather than dropped.
 func parseRequest(body []byte, enableTools bool) (Request, error) {
 	var cr chatRequest
 	if err := json.Unmarshal(body, &cr); err != nil {

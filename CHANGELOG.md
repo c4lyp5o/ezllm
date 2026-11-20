@@ -43,6 +43,12 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 - **Queue-full warning:** a bridge that refuses with `queue_full` logs one
   `WARN` per 10 s naming the bridge, its limits and the refusals since the
   last line.
+- **Cleanup:** the bridge token file, HTTP startup, stderr tail buffer, raw
+  JSON writer and id helper are one shared copy each (`cmd/ezllm`
+  `bridgeTokenFromFile`/`serveBridge`, `bridgeutil` `util.go`); unused code
+  went (`withPooledChannel`, `landlockSupported`) and three test-only wrappers
+  were removed with their tests pointed at the production entry points. No
+  behaviour change; token files keep their paths.
 
 ## v2.1.0 — Prometheus metrics and bridge updater fixes
 

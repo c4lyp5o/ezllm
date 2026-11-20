@@ -171,12 +171,12 @@ func (r *Runner) Run(ctx context.Context, req Request, alias string, sink func(F
 	done := make(chan struct{})
 	defer close(done)
 
-	var stderrTail tailBuffer
+	var stderrTail bridgeutil.TailBuffer
 	go func() {
 		sc := bufio.NewScanner(stderr)
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for sc.Scan() {
-			stderrTail.add(sc.Text())
+			stderrTail.Add(sc.Text())
 		}
 	}()
 

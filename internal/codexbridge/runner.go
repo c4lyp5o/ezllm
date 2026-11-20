@@ -161,7 +161,7 @@ type child struct {
 	conn     *rpcConn
 	tmp      string
 	cwd      string
-	stderr   *tailBuffer
+	stderr   *bridgeutil.TailBuffer
 	readDone chan struct{}
 	once     sync.Once
 	lease    *templateLease
@@ -204,7 +204,7 @@ func (r *Runner) spawn(ctx context.Context, opts spawnOpts, onNotify func(string
 	if err != nil {
 		return nil, fmt.Errorf("codex-bridge: cannot create work dir: %w", err)
 	}
-	c := &child{keepWork: opts.workRoot != "", tmp: tmp, cwd: filepath.Join(tmp, "cwd"), stderr: &tailBuffer{}, readDone: make(chan struct{})}
+	c := &child{keepWork: opts.workRoot != "", tmp: tmp, cwd: filepath.Join(tmp, "cwd"), stderr: &bridgeutil.TailBuffer{}, readDone: make(chan struct{})}
 	home, tmpdir := filepath.Join(tmp, "home"), filepath.Join(tmp, "tmp")
 	for _, d := range []string{c.cwd, home, tmpdir} {
 		if err := os.Mkdir(d, 0o700); err != nil {
@@ -250,7 +250,7 @@ func (r *Runner) spawn(ctx context.Context, opts spawnOpts, onNotify func(string
 	go func() {
 		sc := bufio.NewScanner(stderr)
 		for sc.Scan() {
-			c.stderr.add(sc.Text())
+			c.stderr.Add(sc.Text())
 		}
 	}()
 	go func() {
@@ -309,7 +309,7 @@ func (r *Runner) childErr(ctx context.Context, c *child, step string, err error)
 			Message: "codex-bridge: the Codex CLI did not finish in time (" + step + ")"}
 	}
 	msg := "codex-bridge: " + step + " failed: " + err.Error()
-	if tail := c.stderr.tail(); tail != "" {
+	if tail := c.stderr.Tail(); tail != "" {
 		msg += " | stderr: " + tail
 	}
 	return &NativeError{Status: 502, Type: "api_error", Code: "native_closed", Message: msg, BeforeInference: step == "initialize" || step == "initialized" || step == "thread/start"}

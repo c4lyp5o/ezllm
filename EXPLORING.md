@@ -55,14 +55,14 @@ go run ./cmd/m2verify    # acceptance checker: prints PASS/FAIL per invariant
 ```
 
 **Expect:** `ttft_ms` noticeably smaller than `total_ms` (that gap = streaming working; if they're
-equal, something is buffering — go read `streamCopy` in `internal/proxy/proxy.go` and find out why).
+equal, something is buffering — go read `streamCopyTracked` in `internal/proxy/proxy.go` and find out why).
 
 ## 3. Reading order (per milestone)
 
 | # | Read first | Then | Ask yourself |
 |---|-----------|------|--------------|
 | M1 | `cmd/ezllm/main.go` → `internal/config` → `internal/server` | `config.example.yaml` | Where would I add a fourth account? (config seeds; the DB is runtime truth) |
-| M2 | `internal/proxy/proxy.go` (`Forward` → `streamCopy` → `UsageTapper.Observe`) → `internal/store/ledger.go` (`NormalizeUsageWith`) | `git show` of M2 | How do native streaming and translated streaming differ? |
+| M2 | `internal/proxy/proxy.go` (`Forward` → `streamCopyTracked` → `UsageTapper.Observe`) → `internal/store/ledger.go` (`NormalizeUsageWith`) | `git show` of M2 | How do native streaming and translated streaming differ? |
 | M3 | `internal/registration` + `internal/provider/adapters.go` + admin handlers in `internal/server` | `docs/API.md` | Can I trace an account from DB row → adapter → first upstream byte? |
 | M4 | `internal/router` (hops → strategies → key pick/cooldown) + `internal/rules` | `go test -short ./internal/router ./internal/rules` | What happens on 429 with 1 key left? (answer must be in a test) |
 | M5 | `internal/compress` (engines + stage pipeline) + `internal/server/compression.go` | `docs/compression-design.md` | Where is "never touch final turn / tool results" enforced, and where does fail-open live? |
@@ -142,7 +142,7 @@ one function. Then `store.NormalizeUsageWith` (`ledger.go`) for the accounting r
 - `internal/proxy/proxy.go` `SwapModel` — `map[string]any` round-trip with `UseNumber()`;
   only `model` changes, all 16 observed provider fields survive, big ints don't become floats.
   Rejects `null` explicitly (assigning into a nil map panics — a client could have crashed us).
-- `internal/proxy/proxy.go` `streamCopy` — scanner + `Flush()` per line, re-emitting the `\n`
+- `internal/proxy/proxy.go` `streamCopyTracked` — scanner + `Flush()` per line, re-emitting the `\n`
   the scanner strips so forwarding stays byte-exact. Over-long lines fall back to a raw `io.Copy`.
 - `internal/proxy/proxy.go` `UsageTapper` (`Observe`) — **merges** usage across events
   rather than taking the first hit. Two live-only bugs hid here: Anthropic's `message_start` has

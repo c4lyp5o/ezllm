@@ -2,12 +2,9 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -85,7 +82,7 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 	cliVersion, drift := claudeCLICheck(resolved)
 	release := releaseState(bin, claudeVersion(cliVersion), claudeQualifiedVersion)
 	login, plan := claudeLoginCheck(resolved, dir)
-	token, err := claudeBridgeToken(strings.TrimSpace(os.Getenv(envBridgeToken)))
+	token, err := bridgeTokenFromFile(strings.TrimSpace(os.Getenv(envBridgeToken)), "claude")
 	if err != nil {
 		return nil, err
 	}
@@ -128,13 +125,8 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 	if report != nil {
 		report("claude-sub", addr, token, bridgeUpdateFile(bin), srv.Info, runner.AdmissionStats)
 	}
-	httpSrv := &http.Server{Addr: addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
-	go func() {
-		log.Info("claude bridge listening", "addr", addr, "cli", cliVersion, "release", release, "login", login, "plan", plan, "flags_drift", drift)
-		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error("claude bridge serve", "err", err)
-		}
-	}()
+	log.Info("claude bridge listening", "addr", addr, "cli", cliVersion, "release", release, "login", login, "plan", plan, "flags_drift", drift)
+	httpSrv := serveBridge(log, "claude", addr, srv.Handler())
 	return func() { shutdownBridgeHTTP(httpSrv) }, nil
 }
 
@@ -215,27 +207,6 @@ func claudeLoginCheck(bin, dir string) (state, plan string) {
 		}
 	}
 	return state, plan
-}
-
-// claudeBridgeToken returns the shared secret the account key carries. Like the
-// master key, the default lives on the data volume so it is backed up with the
-// ledger and survives a container rebuild.
-func claudeBridgeToken(path string) (string, error) {
-	if path == "" {
-		path = "/data/claude-bridge.token"
-	}
-	if b, err := os.ReadFile(path); err == nil && strings.TrimSpace(string(b)) != "" {
-		return strings.TrimSpace(string(b)), nil
-	}
-	raw := make([]byte, 24)
-	if _, err := rand.Read(raw); err != nil {
-		return "", fmt.Errorf("claude bridge: cannot generate token: %w", err)
-	}
-	token := hex.EncodeToString(raw)
-	if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
-		return "", fmt.Errorf("claude bridge: cannot write %s: %w", path, err)
-	}
-	return token, nil
 }
 
 // claudeHome is the bridge's login directory, EZLLM_CLAUDE_HOME like every

@@ -4,9 +4,12 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 )
 
 // DefaultMaxQueue is how many requests may wait for a CLI slot when the
@@ -30,6 +33,39 @@ type Slots struct {
 	maxQueue int
 
 	inflight, queued, served, rejected atomic.Int64
+
+	name     string       // bridge label for the refusal warning
+	log      *slog.Logger // nil = slog.Default()
+	lastWarn atomic.Int64 // unix nanos of the last refusal warning
+	quiet    atomic.Int64 // refusals since that warning
+}
+
+// rejectWarnEvery bounds the refusal warning to one line per window, so a
+// burst of refused requests cannot flood stdout; the line counts the rest.
+const rejectWarnEvery = 10 * time.Second
+
+// Named sets the bridge label the refusal warning carries.
+func (s *Slots) Named(name string) *Slots {
+	s.name = name
+	return s
+}
+
+// warnRejected logs that the bridge is turning requests away. Saturation is
+// otherwise visible only to the client (429 queue_full) and in /status.
+func (s *Slots) warnRejected() {
+	now := time.Now().UnixNano()
+	last := s.lastWarn.Load()
+	if (last != 0 && now-last < int64(rejectWarnEvery)) || !s.lastWarn.CompareAndSwap(last, now) {
+		s.quiet.Add(1)
+		return
+	}
+	log := s.log
+	if log == nil {
+		log = slog.Default()
+	}
+	log.Warn("bridge queue full; refusing requests with 429 queue_full",
+		"bridge", s.name, "max_concurrent", cap(s.sem), "max_queue", s.maxQueue,
+		"rejected_total", s.rejected.Load(), "refused_since_last_warning", s.quiet.Swap(0))
 }
 
 // NewSlots builds the gate; non-positive values take the defaults (1 slot,
@@ -51,12 +87,17 @@ func (s *Slots) Acquire(ctx context.Context) (release func(), err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if sw := slotWaitFrom(ctx); sw != nil {
+		start := time.Now()
+		defer func() { sw.add(time.Since(start)) }()
+	}
 	select {
 	case s.sem <- struct{}{}:
 	default:
 		if int(s.queued.Add(1)) > s.maxQueue {
 			s.queued.Add(-1)
 			s.rejected.Add(1)
+			s.warnRejected()
 			return nil, ErrQueueFull
 		}
 		select {
@@ -129,3 +170,68 @@ func (s *Slots) Hold(ctx context.Context) (release func(), err error) {
 
 // Queued is how many requests are waiting for a slot right now.
 func (s *Slots) Queued() int64 { return s.queued.Load() }
+
+// SlotWaitHeader carries how long the request waited for a CLI slot, in whole
+// milliseconds, from a bridge to the proxy, which records it in the ledger
+// (calls.slot_wait_ms). Without it total_ms mixes queueing with CLI work.
+const SlotWaitHeader = "X-Ezllm-Slot-Wait-Ms"
+
+type slotWaitKey struct{}
+
+// SlotWait accumulates the time one HTTP request spent in Acquire (a request
+// that acquires twice, such as a fallback turn, reports the sum).
+type SlotWait struct {
+	ns       atomic.Int64
+	acquired atomic.Bool
+}
+
+func (w *SlotWait) add(d time.Duration) {
+	w.ns.Add(int64(d))
+	w.acquired.Store(true)
+}
+
+// Waited reports the total wait and whether Acquire ran at all.
+func (w *SlotWait) Waited() (time.Duration, bool) {
+	return time.Duration(w.ns.Load()), w.acquired.Load()
+}
+
+func slotWaitFrom(ctx context.Context) *SlotWait {
+	sw, _ := ctx.Value(slotWaitKey{}).(*SlotWait)
+	return sw
+}
+
+// TrackSlotWait makes Acquire calls under r's context record their wait, and
+// returns a writer that sends SlotWaitHeader with the response headers. The
+// slot is always taken before the first header is written (streams delay
+// their headers until the first delta), so the value is final when it is sent.
+// Requests that never ask for a slot (models, status) carry no header.
+func TrackSlotWait(w http.ResponseWriter, r *http.Request) (http.ResponseWriter, *http.Request) {
+	sw := &SlotWait{}
+	return &slotWaitWriter{ResponseWriter: w, sw: sw}, r.WithContext(context.WithValue(r.Context(), slotWaitKey{}, sw))
+}
+
+type slotWaitWriter struct {
+	http.ResponseWriter
+	sw    *SlotWait
+	wrote bool
+}
+
+func (w *slotWaitWriter) WriteHeader(code int) {
+	if !w.wrote {
+		w.wrote = true
+		if d, ok := w.sw.Waited(); ok {
+			w.Header().Set(SlotWaitHeader, strconv.FormatInt(d.Milliseconds(), 10))
+		}
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *slotWaitWriter) Write(b []byte) (int, error) {
+	if !w.wrote {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+// Unwrap lets http.ResponseController reach Flush and SetWriteDeadline.
+func (w *slotWaitWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }

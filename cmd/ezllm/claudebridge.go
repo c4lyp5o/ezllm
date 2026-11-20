@@ -56,9 +56,10 @@ var claudeRequiredFlags = []string{
 }
 
 // bridgeReport tells the dashboard a bridge is running (server.EnableBridge):
-// its address, the secret its account key carries, and its boot status. Nil
-// in tests that only exercise the boot checks.
-type bridgeReport func(id, addr, token, updateFile string, info map[string]any)
+// its address, the secret its account key carries, its boot status, and a
+// live admission snapshot (in flight, queued, refused) read on each
+// /admin/bridges call. Nil in tests that only exercise the boot checks.
+type bridgeReport func(id, addr, token, updateFile string, info map[string]any, runtime func() map[string]any)
 
 // startClaudeBridge brings up the loopback surface when enabled. Enabling it
 // without a usable CLI or login is a boot failure, not a silent no-op: this
@@ -97,15 +98,16 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 		return nil, err
 	}
 
+	runner := &claudebridge.Runner{
+		Bin:           resolved,
+		ConfigDir:     dir,
+		Timeout:       300 * time.Second,
+		MaxConcurrent: concurrency,
+		MaxQueue:      queue,
+		Logf:          log.Info,
+	}
 	srv := &claudebridge.Server{
-		Runner: &claudebridge.Runner{
-			Bin:           resolved,
-			ConfigDir:     dir,
-			Timeout:       300 * time.Second,
-			MaxConcurrent: concurrency,
-			MaxQueue:      queue,
-			Logf:          log.Info,
-		},
+		Runner:  runner,
 		Token:   token,
 		Version: server.Version,
 		Info: map[string]any{
@@ -124,7 +126,7 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 	}
 
 	if report != nil {
-		report("claude-sub", addr, token, bridgeUpdateFile(bin), srv.Info)
+		report("claude-sub", addr, token, bridgeUpdateFile(bin), srv.Info, runner.AdmissionStats)
 	}
 	httpSrv := &http.Server{Addr: addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	go func() {

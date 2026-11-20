@@ -76,6 +76,7 @@ function RowDetail({ r }: { r: FeedRow }) {
     ['provider · combo', [r.account, r.alias].filter(Boolean).join(' · ') || '–'],
     ['caller address', r.ip || '–'],
     ['stream', r.stream ? `yes · first token ${r.ttft_ms ?? '–'} ms` : 'no'],
+    ...(r.slotWaitMs != null ? [['bridge slot wait', `${nfmt(r.slotWaitMs)} ms (part of the total)`] as [string, string]] : []),
     ['compression', r.compression ? `${r.compression}${r.applied ? ' (applied)' : ' (no change)'}` : '–'],
   ];
   return (

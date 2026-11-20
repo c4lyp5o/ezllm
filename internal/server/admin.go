@@ -359,7 +359,7 @@ const callsCols = `ts, client, COALESCE(ip, '') AS ip, surface, alias, account, 
        COALESCE(session_id, ''), msg_count, tool_count, req_bytes,
        COALESCE(block_pos, 0),
        COALESCE(translated, 0),
-       COALESCE(err, '')`
+       COALESCE(err, ''), slot_wait_ms`
 
 // scanCalls maps rows projected with callsCols into the row shape the
 // dashboard and the requests explorer share.
@@ -368,7 +368,7 @@ func scanCalls(rows *sql.Rows) ([]map[string]any, error) {
 	for rows.Next() {
 		var ts, client, ip, surface, alias, account, model string
 		var status int
-		var ttft, total, tin, tout, cread, cwrite, reasoning any
+		var ttft, total, tin, tout, cread, cwrite, reasoning, slotWait any
 		var saved, applied, rulesFired, contextPre, contextSaved int
 		var notional, msgCount, toolCount, reqBytes, blockPos int
 		var translated int
@@ -376,14 +376,17 @@ func scanCalls(rows *sql.Rows) ([]map[string]any, error) {
 		if err := rows.Scan(&ts, &client, &ip, &surface, &alias, &account, &model, &status,
 			&ttft, &total, &tin, &tout, &cread, &cwrite, &reasoning,
 			&saved, &profile, &applied, &rulesFired, &contextPre, &contextSaved,
-			&notional, &prefixSHA, &sessionID, &msgCount, &toolCount, &reqBytes, &blockPos, &translated, &errText); err != nil {
+			&notional, &prefixSHA, &sessionID, &msgCount, &toolCount, &reqBytes, &blockPos, &translated, &errText, &slotWait); err != nil {
 			return nil, err
 		}
 		out = append(out, map[string]any{
 			"ts": ts, "client": client, "ip": ip, "surface": surface, "alias": alias,
 			"account": account, "model": model, "status": status,
 			"ttft_ms": ttft, "total_ms": total,
-			"tin": tin, "tout": tout, "cread": cread, "cwrite": cwrite,
+			// subscription-bridge wait for a CLI slot, inside total_ms (v37);
+			// null for other upstreams and for rows written before v37.
+			"slot_wait_ms": slotWait,
+			"tin":          tin, "tout": tout, "cread": cread, "cwrite": cwrite,
 			"reasoning": reasoning,
 			// saved = tokens that ACTUALLY shipped shorter; saved_notional =
 			// what a rejected rewrite would have saved (tuning data, never in

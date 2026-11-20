@@ -91,7 +91,7 @@ func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 				ErrorEnvelope("authentication_error", "claude-bridge: missing or wrong x-api-key", "unauthorized"))
 			return
 		}
-		next(w, r)
+		next(bridgeutil.TrackSlotWait(w, r))
 	}
 }
 

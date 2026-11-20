@@ -235,7 +235,7 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 		Logf:         printfLogger(log),
 	}
 	if report != nil {
-		report("copilot-sub", addr, token, bridgeUpdateFile(bin), info)
+		report("copilot-sub", addr, token, bridgeUpdateFile(bin), info, runner.Stats)
 	}
 	httpSrv := &http.Server{Addr: addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	go func() {

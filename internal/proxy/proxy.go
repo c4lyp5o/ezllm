@@ -19,6 +19,7 @@ import (
 	"net"
 	"net/http"
 	"net/textproto"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,6 +28,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 	"github.com/c4lyp5o/ezllm/internal/jsonbody"
 	"github.com/c4lyp5o/ezllm/internal/provider"
 	"github.com/c4lyp5o/ezllm/internal/ratelimit"
@@ -278,10 +280,13 @@ type LearnedReasoning struct {
 
 // Result reports the outcome of one request.
 type Result struct {
-	Status        int
-	Stream        bool
-	TTFTms        *int64
-	Totalms       *int64
+	Status  int
+	Stream  bool
+	TTFTms  *int64
+	Totalms *int64
+	// SlotWaitms is how long a subscription bridge queued the request for a
+	// CLI slot (part of Totalms); nil for every other upstream.
+	SlotWaitms    *int64
 	Usage         *store.Usage
 	EndpointID    string
 	UpstreamModel string
@@ -1281,8 +1286,29 @@ func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, bod
 		Stream:        stream,
 		EndpointID:    resp.Header.Get("x-opencode-endpoint-id"),
 		UpstreamModel: resp.Header.Get("x-opencode-upstream-model-id"),
+		SlotWaitms:    bridgeSlotWait(upReq.URL, resp.Header),
 	}
 	return resp, res, start, nil
+}
+
+// bridgeSlotWait reads how long a subscription bridge held the request in its
+// slot queue (bridgeutil.SlotWaitHeader). Only a loopback upstream is trusted:
+// the bridges are in-process, and a remote provider's header must not write
+// into the ledger.
+func bridgeSlotWait(u *url.URL, h http.Header) *int64 {
+	v := h.Get(bridgeutil.SlotWaitHeader)
+	if v == "" || u == nil {
+		return nil
+	}
+	host := u.Hostname()
+	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		return nil
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n < 0 {
+		return nil
+	}
+	return &n
 }
 
 // gatewayFault answers the client with a 502 of ezllm's own making (body
@@ -2450,7 +2476,8 @@ func containsFold(names []string, k string) bool {
 func copyResponseHeaders(w http.ResponseWriter, resp *http.Response) {
 	for k, vs := range resp.Header {
 		canonical := http.CanonicalHeaderKey(k)
-		if hopByHop[canonical] || canonical == "Set-Cookie" || canonical == "Set-Cookie2" || canonical == "Clear-Site-Data" {
+		if hopByHop[canonical] || canonical == "Set-Cookie" || canonical == "Set-Cookie2" || canonical == "Clear-Site-Data" ||
+			canonical == bridgeutil.SlotWaitHeader {
 			continue
 		}
 		for _, v := range vs {

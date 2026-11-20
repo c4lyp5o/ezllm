@@ -31,6 +31,18 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   (`bridgeutil.Authorized`). Codex's 401 type is now `invalid_request_error`
   like the other OpenAI-shaped bridges; Claude keeps `authentication_error`
   and `x-api-key`.
+- **Bridge slot wait in the ledger (schema v37):** `calls.slot_wait_ms`
+  records how long a bridge request waited for a CLI slot, which `total_ms`
+  used to hide. Bridges send it in `X-Ezllm-Slot-Wait-Ms`; the proxy trusts it
+  only from loopback and strips it from client responses. Older rows stay
+  NULL. The dashboard shows it as "queued" under the total and in the
+  request detail.
+- **Bridge load on the dashboard:** `GET /admin/bridges` carries each running
+  bridge's live `runtime`, and Settings → System shows running / waiting /
+  served / refused per bridge (diagnostics carries only those counters).
+- **Queue-full warning:** a bridge that refuses with `queue_full` logs one
+  `WARN` per 10 s naming the bridge, its limits and the refusals since the
+  last line.
 
 ## v2.1.0 — Prometheus metrics and bridge updater fixes
 

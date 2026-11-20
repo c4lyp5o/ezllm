@@ -79,7 +79,7 @@ func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 			writeRaw(w, http.StatusUnauthorized, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", "agy-bridge: missing or wrong bearer token", "unauthorized"))
 			return
 		}
-		next(w, r)
+		next(bridgeutil.TrackSlotWait(w, r))
 	}
 }
 

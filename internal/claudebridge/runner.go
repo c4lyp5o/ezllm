@@ -63,7 +63,7 @@ func (r *Runner) slots() *bridgeutil.Slots {
 		if n <= 0 {
 			n = 2
 		}
-		r.adm = bridgeutil.NewSlots(n, r.MaxQueue)
+		r.adm = bridgeutil.NewSlots(n, r.MaxQueue).Named("claude")
 	})
 	return r.adm
 }

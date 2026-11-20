@@ -124,6 +124,14 @@ Tests: `bridgeutil` `TestSlotsBoundTheQueueAndCount`,
 `TestAuthorized`; per bridge `TestRunnerRefusesWhenTheQueueIsFull` (429,
 `Retry-After`, immediate) and Codex `TestRefusalUsesOpenAIErrorType`.
 
+Observability added in the same release: `Slots` records each request's wait
+for a slot (`TrackSlotWait`, header `X-Ezllm-Slot-Wait-Ms`, ledger column
+`calls.slot_wait_ms`) and logs a throttled `WARN` when it refuses; the live
+counters reach the dashboard through `/admin/bridges` `runtime`. Tests:
+`TestTrackSlotWait*`, per bridge `TestAuthedReportsTheSlotWait`,
+`TestForwardRecordsBridgeSlotWait`, `TestSlotWaitMigrationFromV36`,
+`TestQueueFullWarnsOncePerWindow`, `TestBridgesServeLiveRuntime`.
+
 Nothing else is planned for sharing. Process pools, sessions, CLI environments,
 sandboxing and provider accounting stay adapter-owned; there is still no
 universal bridge lifecycle.

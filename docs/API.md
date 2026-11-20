@@ -422,6 +422,11 @@ once the updater has run:
 | `candidate` | the release the report is about |
 | `detail` | the updater's reason (gate problems, proof summary, what it waits for) |
 
+`runtime` (v2.1.1) is the running bridge's live admission picture, read from the bridge on
+every call (not at boot): `in_flight`, `queued`, `max_concurrent`, `max_queue`, `served` and
+`rejected_queue_full` (requests refused with 429 `queue_full` since start). The Copilot bridge
+adds its outcome, stage-timing and pool counters. Absent while the bridge is off.
+
 `cli_release` in `status` (all three bridges as of v1.6.0) is `qualified` for the version the
 build was measured on or one the updater recorded in `qualified.json`, else `unqualified (…)`.
 ```jsonc
@@ -598,6 +603,16 @@ for every call).
 Attribution for traffic mapping, not authentication: a direct connection can
 claim any value, so it must never gate anything. The dashboard shows it under
 the request's timestamp.
+
+### Requests projection — v37 field
+`slot_wait_ms` — how long a subscription bridge held the request waiting for a
+free CLI slot, in milliseconds. It is part of `total_ms`, so `total_ms -
+slot_wait_ms` is the CLI's own time. `null` for every other provider and for
+rows written before v37 (never backfilled). The bridge reports it in an
+internal response header that the proxy trusts only from a loopback upstream
+and never passes to the client. The dashboard tail shows a non-zero value as
+"queued" under the total; the requests explorer shows it in the row detail.
+The live SSE feed carries it as `slot_wait_ms` when set.
 
 ### `GET /admin/accounts/{id}/quota` → `200`
 Live `ReadQuota` → classified shape + `raw`. Provider-by-provider oracles and
@@ -1010,7 +1025,7 @@ JSON object, with unknown envelope/setting fields rejected.
 | `GET /admin/settings/sessions` | Active sessions with opaque `id`, `created_at`, `expires_at`, `browser`, and `current`. IDs are independent of authentication tokens/digests. |
 | `DELETE /admin/settings/sessions/{id}` | Revoke one dashboard session; 204, including an unknown/already-revoked ID. |
 | `POST /admin/settings/sessions/revoke-all` | Revoke every dashboard session; 204. Client API tokens are unaffected. |
-| `GET /admin/settings/diagnostics` | Allowlisted `version`, `uptime_seconds`, `database_bytes`, `bridges` (each `id`, `enabled` and, from v1.6.0, the updater's `update` verdict: `result`, `checked_at`, `current`, `candidate` — never its free-text `detail`), `jobs`, effective `settings`, safe deployment metadata (listen address/source, storage kind, master-key source and trusted proxy count), and configured backup status. `download=true` sets an attachment filename. No filesystem paths, credentials or request content. |
+| `GET /admin/settings/diagnostics` | Allowlisted `version`, `uptime_seconds`, `database_bytes`, `bridges` (each `id`, `enabled` and, from v1.6.0, the updater's `update` verdict: `result`, `checked_at`, `current`, `candidate` — never its free-text `detail`; from v2.1.1 a running bridge's `admission` counters `in_flight`, `queued`, `max_concurrent`, `max_queue`, `served`, `rejected_queue_full` and nothing else from its runtime), `jobs`, effective `settings`, safe deployment metadata (listen address/source, storage kind, master-key source and trusted proxy count), and configured backup status. `download=true` sets an attachment filename. No filesystem paths, credentials or request content. |
 | `GET /admin/backups` | `ready`, `running`, `last_outcome`, optional `last_finished`, optional sanitized `error` for inventory failures, and `backups`. `ready` describes configuration/inventory readiness; each run separately checks writability. Completed records have `id`, `created_at`, `bytes`, and `verified`. An unconfigured instance returns an empty list and `ready=false`. |
 | `POST /admin/backups` | Start a manual job; 202 with status `running`. Returns 409 if storage is unavailable, a job is already running, or shutdown has begun. Poll the GET route for completion. |
 

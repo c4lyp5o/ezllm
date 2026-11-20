@@ -101,7 +101,7 @@ func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 				bridgeutil.OpenAIErrorEnvelope("invalid_request_error", "codex-bridge: missing or wrong bearer token", "unauthorized"))
 			return
 		}
-		next(w, r)
+		next(bridgeutil.TrackSlotWait(w, r))
 	}
 }
 

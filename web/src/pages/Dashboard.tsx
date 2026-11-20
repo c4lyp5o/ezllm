@@ -625,6 +625,12 @@ function RecentCalls({ o }: { o: Overview }) {
                         <span className="text-[11px] text-mute">total </span>
                         {fmtDuration(r.total_ms)}
                       </div>
+                      {(r.slot_wait_ms ?? 0) > 0 && (
+                        <div className="mt-0.5 text-warn" title="Time this request waited for a free CLI slot on the subscription bridge. It is part of the total.">
+                          <span className="text-[11px]">queued </span>
+                          {fmtDuration(r.slot_wait_ms)}
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-right">
                       {/* ONE tokens cell, in ↑ first and out ↓ second — the

@@ -739,6 +739,15 @@ while the SAME model on `opencode-go` was 0/754.
   `EZLLM_BRIDGE_QUEUE`; `retiredenv.go` refuses `EZLLM_COPILOT_BRIDGE_QUEUE`);
   `AdmissionStats` feeds `/status` `runtime`. `Authorized` is the shared
   token check behind each server's `authed`.
+- Slot wait: each `authed` wraps the request with `bridgeutil.TrackSlotWait`,
+  so `Slots.Acquire` adds its wait to a context recorder and the response
+  carries `X-Ezllm-Slot-Wait-Ms`. `proxy.go` `bridgeSlotWait` reads it from
+  loopback upstreams only into `Result.SlotWaitms`; `dispatch.go` copies it
+  to `calls.slot_wait_ms` (schema v37, `store.go` `alterCallsSlotWait`).
+- `Slots.warnRejected` logs the throttled queue-full `WARN`; `Named` labels
+  it. `server/bridges.go` `SetBridgeRuntime` gives `/admin/bridges` a live
+  `runtime`, and `settings.go` `admissionView` allowlists the counters for
+  diagnostics (Settings → System `BridgeLoad`).
 
 ### v2.1.0 — Prometheus metrics, per-role keys, updater fixes ✅ (2026-11-16; design `docs/metrics.md`)
 

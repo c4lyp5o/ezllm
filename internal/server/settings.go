@@ -57,12 +57,31 @@ func (s *Server) automaticProbing() bool {
 	}
 	return s.comboAutoProbe
 }
+
+// admissionKeys are the bridge runtime counters diagnostics may carry. The
+// Copilot runtime also holds pool and timing detail, which stays on /status.
+var admissionKeys = []string{"in_flight", "queued", "max_concurrent", "max_queue", "served", "rejected_queue_full"}
+
+func admissionView(rt map[string]any) map[string]any {
+	out := make(map[string]any, len(admissionKeys))
+	for _, k := range admissionKeys {
+		if v, ok := rt[k]; ok {
+			out[k] = v
+		}
+	}
+	return out
+}
+
 func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 	// Deliberately build an allowlist, never serialize process config or bridge Status.
 	bridges := []map[string]any{}
+	live := map[int]func() map[string]any{}
 	s.bridges.mu.RLock()
 	for _, b := range s.bridges.list {
 		row := map[string]any{"id": b.ID, "enabled": b.Enabled}
+		if b.Enabled && b.runtimeFn != nil {
+			live[len(bridges)] = b.runtimeFn
+		}
 		if u := b.Update; u != nil {
 			// The updater's verdict and versions only: its detail can carry
 			// upstream error text, which stays on the admin bridge card.
@@ -71,6 +90,9 @@ func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 		bridges = append(bridges, row)
 	}
 	s.bridges.mu.RUnlock()
+	for i, fn := range live { // outside the lock: a runtime read may take the runner's own
+		bridges[i]["admission"] = admissionView(fn())
+	}
 	var size int64
 	if s.db != nil {
 		if info, err := os.Stat(s.db.Path()); err == nil {

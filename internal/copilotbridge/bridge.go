@@ -148,7 +148,7 @@ func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 				"copilot-bridge: missing or wrong bearer token", "unauthorized"))
 			return
 		}
-		next(w, r)
+		next(bridgeutil.TrackSlotWait(w, r))
 	}
 }
 

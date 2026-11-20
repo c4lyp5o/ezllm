@@ -178,3 +178,40 @@ func TestBridgeOffKeyTestNamesTheFix(t *testing.T) {
 		t.Fatalf("failure does not name the fix: %s", resp)
 	}
 }
+
+// A running bridge's card shows its live admission numbers, read on every
+// request (not the boot snapshot); an off bridge carries none.
+func TestBridgesServeLiveRuntime(t *testing.T) {
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
+	var queued atomic.Int64
+	h.server.EnableBridge("claude-sub", "127.0.0.1:8790", bridgeSecret, "", nil)
+	h.server.SetBridgeRuntime("claude-sub", func() map[string]any {
+		return map[string]any{"in_flight": 1, "queued": queued.Load(), "max_queue": 8, "rejected_queue_full": 0}
+	})
+	h.server.SetBridgeRuntime("chatgpt-sub", func() map[string]any { return map[string]any{"queued": 99} })
+	queued.Store(3)
+	_, resp := jsonDo(t, h, "GET", "/admin/bridges", "tok-admin", nil)
+	if !strings.Contains(resp, `"runtime":{"in_flight":1,"max_queue":8,"queued":3,"rejected_queue_full":0}`) {
+		t.Fatalf("claude-sub runtime missing or stale: %s", resp)
+	}
+	if strings.Contains(resp, `"queued":99`) {
+		t.Fatalf("an off bridge served runtime: %s", resp)
+	}
+}
+
+// Diagnostics carries only the admission counters: the Copilot runtime's pool
+// and timing detail stays on the bridge's own /status.
+func TestDiagnosticsCarryOnlyAdmissionCounters(t *testing.T) {
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
+	h.server.EnableBridge("copilot-sub", "127.0.0.1:8793", bridgeSecret, "", nil)
+	h.server.SetBridgeRuntime("copilot-sub", func() map[string]any {
+		return map[string]any{"in_flight": 0, "queued": 2, "max_queue": 8, "rejected_queue_full": 5, "pool": map[string]any{"warm": 1}}
+	})
+	code, _, body := h.do("GET", "/admin/settings/diagnostics", "tok-admin", "")
+	if code != http.StatusOK || !strings.Contains(body, `"admission":{"in_flight":0,"max_queue":8,"queued":2,"rejected_queue_full":5}`) {
+		t.Fatalf("diagnostics = %d %s", code, body)
+	}
+	if strings.Contains(body, `"pool"`) {
+		t.Fatalf("diagnostics leaked runtime detail: %s", body)
+	}
+}

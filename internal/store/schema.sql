@@ -252,6 +252,7 @@ CREATE TABLE IF NOT EXISTS calls (
   stream         INTEGER NOT NULL DEFAULT 0,
   ttft_ms        INTEGER,
   total_ms       INTEGER,
+  slot_wait_ms   INTEGER,                        -- v37: subscription-bridge wait for a CLI slot (inside total_ms); NULL = not a bridge
   tokens_in           INTEGER NOT NULL DEFAULT 0,
   tokens_out          INTEGER NOT NULL DEFAULT 0,
   tokens_cached_read  INTEGER NOT NULL DEFAULT 0,

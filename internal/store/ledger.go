@@ -94,7 +94,10 @@ type Call struct {
 	// StreamOutcomeCompleted/Truncated/Failed/ClientGone, or "" for a
 	// non-stream request. Written from the dispatcher's own verdict; the err
 	// column stays prose and is never parsed for this again.
-	StreamOutcome   string
+	StreamOutcome string
+	// SlotWaitms is how long a subscription bridge queued the request for a
+	// CLI slot (schema v37); it is part of Totalms. nil for other upstreams.
+	SlotWaitms      *int64
 	PromptTokensPre int64
 	TokensSaved     int64
 	// TokensSavedNotional is what compression WOULD have saved on a request it
@@ -480,8 +483,8 @@ INSERT INTO calls (
   compression_profile, compression_applied, prompt_tokens_pre, tokens_saved, compression_ms,
   compression_rules_fired, context_tokens_pre, context_tokens_saved,
   compression_saved_notional, prefix_sha, msg_count, tool_count, session_id, req_bytes, block_pos, translated, err,
-  compression_version, compression_stages, shadow_tokens_saved, stream_outcome
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+  compression_version, compression_stages, shadow_tokens_saved, stream_outcome, slot_wait_ms
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
@@ -507,7 +510,7 @@ INSERT INTO calls (
 			c.CompressionProfile, boolInt(c.CompressionApplied), c.PromptTokensPre, c.TokensSaved, c.CompressionMs,
 			c.CompressionRulesFired, c.ContextTokensPre, c.ContextTokensSaved,
 			c.TokensSavedNotional, c.PrefixSHA, c.MsgCount, c.ToolCount, c.SessionID, c.ReqBytes, c.BlockPos, boolInt(c.Translated), c.Err,
-			c.CompressionVersion, c.CompressionStages, c.ShadowTokensSaved, c.StreamOutcome,
+			c.CompressionVersion, c.CompressionStages, c.ShadowTokensSaved, c.StreamOutcome, c.SlotWaitms,
 		)
 		if err != nil {
 			return fmt.Errorf("insert call: %w", err)
@@ -960,7 +963,7 @@ SELECT ts, client, COALESCE(ip,''), surface, alias, account, COALESCE(provider_k
        COALESCE(compression_saved_notional,0), COALESCE(prefix_sha,''), msg_count, tool_count,
        COALESCE(session_id,''), req_bytes, COALESCE(block_pos,0), COALESCE(translated,0), COALESCE(err,''),
        COALESCE(compression_version,''), COALESCE(compression_stages,''), COALESCE(shadow_tokens_saved,0),
-       COALESCE(stream_outcome,'')
+       COALESCE(stream_outcome,''), slot_wait_ms
 FROM calls ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -970,7 +973,7 @@ FROM calls ORDER BY id DESC LIMIT ?`, limit)
 	for rows.Next() {
 		var c Call
 		var ts string
-		var ttft, total, cms sql.NullInt64
+		var ttft, total, cms, slotWait sql.NullInt64
 		var applied int
 		var translated int
 		if err := rows.Scan(&ts, &c.Client, &c.IP, &c.Surface, &c.Alias, &c.Account, &c.KeyID, &c.KeyHint, &c.Model,
@@ -981,13 +984,13 @@ FROM calls ORDER BY id DESC LIMIT ?`, limit)
 			&c.CompressionRulesFired, &c.ContextTokensPre, &c.ContextTokensSaved,
 			&c.TokensSavedNotional, &c.PrefixSHA, &c.MsgCount, &c.ToolCount,
 			&c.SessionID, &c.ReqBytes, &c.BlockPos, &translated, &c.Err, &c.CompressionVersion,
-			&c.CompressionStages, &c.ShadowTokensSaved, &c.StreamOutcome); err != nil {
+			&c.CompressionStages, &c.ShadowTokensSaved, &c.StreamOutcome, &slotWait); err != nil {
 			return nil, err
 		}
 		if t, err := time.Parse("2006-01-02T15:04:05.000Z", ts); err == nil {
 			c.TS = t
 		}
-		c.TTFTms, c.Totalms = ttftPtr(ttft), ttftPtr(total)
+		c.TTFTms, c.Totalms, c.SlotWaitms = ttftPtr(ttft), ttftPtr(total), ttftPtr(slotWait)
 		c.CompressionApplied = applied == 1
 		c.Translated = translated == 1
 		c.CompressionMs = ttftPtr(cms)

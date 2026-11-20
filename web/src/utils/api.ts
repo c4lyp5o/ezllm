@@ -253,6 +253,7 @@ export type Bridge = {
   runbook: string;
   status?: Record<string, unknown>;
   update?: BridgeUpdate;
+  runtime?: BridgeAdmission & Record<string, unknown>;
 };
 // The host updater's latest report on a bridge's CLI (update-status.json,
 // read once a minute; docs/bridge-update-runbook.md).
@@ -263,6 +264,11 @@ export type BridgeUpdate = {
   previous?: string;
   candidate?: string;
   detail?: string;
+};
+// A running bridge's live admission counters (bridgeutil.Slots.Stats).
+export type BridgeAdmission = {
+  in_flight?: number; queued?: number; max_concurrent?: number; max_queue?: number;
+  served?: number; rejected_queue_full?: number;
 };
 export const listBridges = () => get<Bridge[]>('/admin/bridges');
 
@@ -409,6 +415,9 @@ export type RecentCall = {
    *  available. Attribution only — a direct connection can claim any value. */
   ip?: string;
   status: number; ttft_ms: number; total_ms: number; tin: number; tout: number; cread: number;
+  /** Subscription-bridge wait for a CLI slot, inside total_ms (schema v37).
+   *  null for other providers and for older rows. */
+  slot_wait_ms?: number | null;
   saved: number; compression: string; applied: boolean; contextPre?: number; contextSaved?: number;
   // alias = the combo name (or "ns/model" for a direct route); err = the
   // verbatim ledger err column, with the leading `[<cause>]` marker when the
@@ -434,6 +443,8 @@ export type FeedRow = {
   /** Caller address (see RecentCall.ip). */
   ip?: string;
   status: number; stream?: boolean; ttft_ms?: number; total_ms?: number;
+  /** Subscription-bridge wait for a CLI slot, inside total_ms (schema v37). */
+  slotWaitMs?: number;
   tin: number; tout: number; cread?: number; cwrite?: number; reasoning?: number; saved: number;
   /** What a REJECTED rewrite would have saved. Non-zero while `applied` is
    *  false is the proof the pipeline ran and declined (usually the minimum
@@ -466,6 +477,7 @@ export function normalizeFeedRow(raw: any): FeedRow {
     status: num(raw.status), stream: raw.stream ? true : undefined,
     ttft_ms: raw.ttft_ms == null ? undefined : num(raw.ttft_ms),
     total_ms: raw.total_ms == null ? undefined : num(raw.total_ms),
+    slotWaitMs: raw.slot_wait_ms == null ? undefined : num(raw.slot_wait_ms),
     tin: num(raw.tin ?? raw.tokens_in), tout: num(raw.tout ?? raw.tokens_out),
     cread: num(raw.cread ?? raw.tokens_cached_read),
     cwrite: num(raw.cwrite ?? raw.tokens_cached_write),
@@ -1131,7 +1143,7 @@ export type SettingField = { value: string | boolean | number; source: string; e
 export type SettingsView = { revision: number; fields: Record<string, SettingField> };
 export type DashboardSession = { id: string; created_at: string; expires_at: string; browser: string; current: boolean };
 export type BackupStatus = { error?: string; ready: boolean; running: boolean; last_outcome: string; last_finished?: string; backups: { id: string; created_at: string; bytes: number; verified: boolean }[] };
-export type SystemDiagnostics = { deployment?: { listen_address: string; listen_source: string; storage: string; master_key_source: string; trusted_proxy_count: number }; version: string; uptime_seconds: number; database_bytes: number; bridges: { id: string; enabled: boolean; update?: Pick<BridgeUpdate, 'result' | 'checked_at' | 'current' | 'candidate'> }[]; jobs: Record<string, { running: boolean; last_success?: string; last_failure?: string }> };
+export type SystemDiagnostics = { deployment?: { listen_address: string; listen_source: string; storage: string; master_key_source: string; trusted_proxy_count: number }; version: string; uptime_seconds: number; database_bytes: number; bridges: { id: string; enabled: boolean; update?: Pick<BridgeUpdate, 'result' | 'checked_at' | 'current' | 'candidate'>; admission?: BridgeAdmission }[]; jobs: Record<string, { running: boolean; last_success?: string; last_failure?: string }> };
 export const getSettings = () => get<SettingsView>('/admin/settings');
 export const saveSettings = (revision: number, values: Record<string, unknown>) => patch<SettingsView>('/admin/settings', { revision, values });
 export const getDashboardSessions = () => get<DashboardSession[]>('/admin/settings/sessions');

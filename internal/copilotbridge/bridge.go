@@ -3,7 +3,6 @@ package copilotbridge
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -11,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -141,10 +139,11 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
+// authed admits only the bridge token (bridgeutil.Authorized, constant-time).
+// a refusal is a 401 in this bridge's own error shape.
 func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if s.Token == "" || subtle.ConstantTimeCompare([]byte(got), []byte(s.Token)) != 1 {
+		if !bridgeutil.Authorized(r, s.Token, false) {
 			writeRaw(w, http.StatusUnauthorized, ErrorEnvelope("invalid_request_error",
 				"copilot-bridge: missing or wrong bearer token", "unauthorized"))
 			return
@@ -367,7 +366,7 @@ func (s *Server) writeErr(w http.ResponseWriter, err error) {
 			writeRaw(w, http.StatusTooManyRequests, ErrorEnvelope("rate_limit_error", f.Msg, f.Code))
 			return
 		case "queue_full":
-			w.Header().Set("Retry-After", "5")
+			w.Header().Set("Retry-After", bridgeutil.QueueFullRetryAfter)
 			writeRaw(w, http.StatusTooManyRequests, ErrorEnvelope("rate_limit_error", f.Msg, f.Code))
 			return
 		case "model_not_in_plan":

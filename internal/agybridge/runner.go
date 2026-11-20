@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -52,6 +53,7 @@ type Runner struct {
 	Home          string // HOME for the child: holds .gemini/antigravity-cli/antigravity-oauth-token
 	Timeout       time.Duration
 	MaxConcurrent int
+	MaxQueue      int // requests allowed to wait for a slot (bridgeutil.DefaultMaxQueue when 0)
 	Logf          func(format string, args ...any)
 	// SessionCache keeps bounded metadata and workspaces, never idle processes.
 	SessionCache     bool
@@ -61,7 +63,7 @@ type Runner struct {
 	cacheClosed      bool
 	cacheHits        uint64
 
-	sem  chan struct{}
+	adm  *bridgeutil.Slots
 	once sync.Once
 }
 
@@ -71,15 +73,17 @@ func (r *Runner) logf(format string, args ...any) {
 	}
 }
 
-func (r *Runner) slots() chan struct{} {
+// slots is the shared admission gate (internal/bridgeutil): MaxConcurrent CLI
+// turns plus a bounded wait queue of MaxQueue.
+func (r *Runner) slots() *bridgeutil.Slots {
 	r.once.Do(func() {
 		n := r.MaxConcurrent
 		if n <= 0 {
 			n = 2
 		}
-		r.sem = make(chan struct{}, n)
+		r.adm = bridgeutil.NewSlots(n, r.MaxQueue)
 	})
-	return r.sem
+	return r.adm
 }
 
 // argv is the headless invocation. No --dangerously-skip-permissions: shell
@@ -135,13 +139,16 @@ func (r *Runner) Run(ctx context.Context, req Request, delta func(string) error)
 		runCtx, cancel = context.WithTimeout(ctx, r.Timeout)
 		defer cancel()
 	}
-	select {
-	case r.slots() <- struct{}{}:
-		defer func() { <-r.slots() }()
-	case <-runCtx.Done():
+	release, err := r.slots().Acquire(runCtx)
+	if errors.Is(err, bridgeutil.ErrQueueFull) {
+		return Result{}, &NativeError{Status: 429, Type: "rate_limit_error", Code: "queue_full",
+			Message: "agy-bridge: " + err.Error()}
+	}
+	if err != nil {
 		return Result{}, &NativeError{Status: 504, Type: "api_error", Code: "timeout",
 			Message: "agy-bridge: timed out waiting for a free slot"}
 	}
+	defer release()
 
 	if r.SessionCache && req.Adapter != nil {
 		return r.runCached(runCtx, req, delta)
@@ -396,3 +403,7 @@ func (t *tailBuffer) tail() string {
 	defer t.mu.Unlock()
 	return strings.Join(t.lines, " | ")
 }
+
+// AdmissionStats is the slot and queue picture each bridge's /status serves
+// under "runtime" (bridgeutil.Slots.Stats).
+func (r *Runner) AdmissionStats() map[string]any { return r.slots().Stats() }

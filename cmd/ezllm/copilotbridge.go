@@ -43,12 +43,8 @@ func copilotLimits(get func(string) string) (concurrency, queue int, timeout tim
 	if concurrency, err = bridgeConcurrency(get, envCopilotConcurrency, "copilot"); err != nil {
 		return 0, 0, 0, err
 	}
-	// The queue shares the positive-integer rule; only its default differs.
-	queue = 8
-	if strings.TrimSpace(get(envCopilotQueue)) != "" {
-		if queue, err = bridgeConcurrency(get, envCopilotQueue, "copilot"); err != nil {
-			return 0, 0, 0, err
-		}
+	if queue, err = bridgeQueue(get, envCopilotQueue, "copilot"); err != nil {
+		return 0, 0, 0, err
 	}
 	if v := strings.TrimSpace(get(envCopilotTimeout)); v != "" {
 		d, perr := time.ParseDuration(v)

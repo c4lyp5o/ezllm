@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 )
 
 // Default CLI binaries: the updater-managed layout (scripts/bridge_update.py
@@ -30,4 +32,14 @@ func bridgeConcurrency(get func(string) string, env, label string) (int, error) 
 		return 0, fmt.Errorf("%s bridge: %s=%q must be a positive integer", label, env, v)
 	}
 	return n, nil
+}
+
+// bridgeQueue reads a bridge's *_BRIDGE_QUEUE: how many requests may wait for
+// a CLI slot before the bridge answers 429 queue_full. Same positive-integer
+// rule as bridgeConcurrency; the default is bridgeutil.DefaultMaxQueue.
+func bridgeQueue(get func(string) string, env, label string) (int, error) {
+	if strings.TrimSpace(get(env)) == "" {
+		return bridgeutil.DefaultMaxQueue, nil
+	}
+	return bridgeConcurrency(get, env, label)
 }

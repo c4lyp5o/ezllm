@@ -31,6 +31,7 @@ const (
 	envCodexAddr        = "EZLLM_CODEX_BRIDGE_ADDR"       // default 127.0.0.1:8791
 	envCodexToken       = "EZLLM_CODEX_BRIDGE_TOKEN_FILE" // shared secret for the account key
 	envCodexConcurrency = "EZLLM_CODEX_BRIDGE_CONCURRENCY"
+	envCodexQueue       = "EZLLM_CODEX_BRIDGE_QUEUE" // requests allowed to wait for a slot (default 8)
 )
 
 // codexTools decides client tools for this host (decision §4.7): with Landlock
@@ -99,6 +100,10 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 	if err != nil {
 		return nil, err
 	}
+	queue, err := bridgeQueue(os.Getenv, envCodexQueue, "codex")
+	if err != nil {
+		return nil, err
+	}
 
 	pre, err := codexbridge.RunPreflight(ctx, resolved, home)
 	if err != nil {
@@ -123,6 +128,7 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 		CodexHome:     home,
 		Timeout:       300 * time.Second,
 		MaxConcurrent: concurrency,
+		MaxQueue:      queue,
 		Version:       server.Version,
 		Logf:          log.Info,
 		Channel:       pre.Channel,
@@ -145,6 +151,7 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 			"lockdown":        "verified at boot",
 			"channel":         channelInfo(pre),
 			"concurrency":     concurrency,
+			"queue":           queue,
 			"landlock":        tools.landlock,
 			"client_tools":    tools.status,
 			"cache_selection": pre.Cache,

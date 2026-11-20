@@ -111,7 +111,7 @@ func (r *Runner) borrowTemplate(req Request) *templateLease {
 		cache.mu.Unlock()
 		return next
 	}
-	limit := cap(r.slots()) + r.maxParked()
+	limit := r.slots().Cap() + r.maxParked()
 	if cache.count >= limit {
 		cache.mu.Unlock()
 		return nil
@@ -151,7 +151,7 @@ func (l *templateLease) release() {
 		for _, entries := range cache.idle {
 			idleCount += len(entries)
 		}
-		if idleCount < cap(r.slots()) && l.good.Load() && scrubOK && l.id != "" && !cache.closed && time.Since(l.created) < templateAge && l.uses < 100 {
+		if idleCount < r.slots().Cap() && l.good.Load() && scrubOK && l.id != "" && !cache.closed && time.Since(l.created) < templateAge && l.uses < 100 {
 			if cache.idle == nil {
 				cache.idle = make(map[[32]byte][]*templateLease)
 			}
@@ -218,12 +218,11 @@ func (r *Runner) deleteTemplate(l *templateLease) {
 		if !ok {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
-			select {
-			case r.slots() <- struct{}{}:
-				defer func() { <-r.slots() }()
-			case <-ctx.Done():
+			release, err := r.slots().Hold(ctx)
+			if err != nil {
 				return
 			}
+			defer release()
 			c, err := r.spawn(ctx, spawnOpts{experimental: true}, nil, declineRequests)
 			if err == nil {
 				// A fresh process has no subscription to this persisted parent.

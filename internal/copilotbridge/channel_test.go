@@ -538,8 +538,17 @@ func TestRunChannelDeathMidTurnIsClassifiedFromStderr(t *testing.T) {
 func TestRunChannelSharesTheSlots(t *testing.T) {
 	r := &Runner{Bin: stubCLI(t, `sleep 60`), Timeout: 300 * time.Millisecond, MaxConcurrent: 1, MaxQueue: 1}
 	r.init()
-	r.sem <- struct{}{} // the only slot is busy
-	r.queued.Store(1)   // and the queue is full
+	release, err := r.adm.Acquire(context.Background()) // the only slot is busy
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	waitCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _, _ = r.adm.Acquire(waitCtx) }() // and the queue is full
+	for r.adm.Queued() == 0 {
+		time.Sleep(time.Millisecond)
+	}
 	if _, err := r.RunChannel(context.Background(), channelTurn(), nil); failureCode(err) != "queue_full" {
 		t.Errorf("err = %v", err)
 	}

@@ -31,6 +31,7 @@ const (
 	envAgyAddr         = "EZLLM_AGY_BRIDGE_ADDR"       // default 127.0.0.1:8792
 	envAgyToken        = "EZLLM_AGY_BRIDGE_TOKEN_FILE" // shared secret for the account key
 	envAgyConcurrency  = "EZLLM_AGY_BRIDGE_CONCURRENCY"
+	envAgyQueue        = "EZLLM_AGY_BRIDGE_QUEUE" // requests allowed to wait for a slot (default 8)
 	envAgyTools        = "EZLLM_AGY_EXPERIMENTAL_TOOLS"
 	envAgySessionCache = "EZLLM_AGY_BRIDGE_CACHE"
 )
@@ -62,6 +63,10 @@ func startAgyBridge(ctx context.Context, log *slog.Logger, report bridgeReport) 
 	if err != nil {
 		return nil, err
 	}
+	queue, err := bridgeQueue(os.Getenv, envAgyQueue, "agy")
+	if err != nil {
+		return nil, err
+	}
 
 	pre, err := agybridge.RunPreflight(ctx, resolved, home)
 	if err != nil {
@@ -89,7 +94,7 @@ func startAgyBridge(ctx context.Context, log *slog.Logger, report bridgeReport) 
 		ids = append(ids, m.ID)
 	}
 
-	runner := &agybridge.Runner{Bin: resolved, Home: home, Timeout: 300 * time.Second, MaxConcurrent: concurrency, Logf: log.Info, SessionCache: sessionCache}
+	runner := &agybridge.Runner{Bin: resolved, Home: home, Timeout: 300 * time.Second, MaxConcurrent: concurrency, MaxQueue: queue, Logf: log.Info, SessionCache: sessionCache}
 	srv := &agybridge.Server{
 		ExperimentalTools: experimentalTools,
 		Runner:            runner,
@@ -106,6 +111,7 @@ func startAgyBridge(ctx context.Context, log *slog.Logger, report bridgeReport) 
 			"login":         "logged in (token file; models listed at boot)",
 			"models":        strings.Join(ids, ", "),
 			"concurrency":   concurrency,
+			"queue":         queue,
 			"client_tools":  clientTools,
 			"session_cache": sessionCache,
 		},

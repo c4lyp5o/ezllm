@@ -732,6 +732,12 @@ while the SAME model on `opencode-go` was 0/754.
   Antigravity. Each adapter's `sseWriter` is now a thin wrapper that keeps its
   own `delta` and decides when `Begin` runs. Copilot now sends
   `X-Accel-Buffering: no`.
+- `internal/bridgeutil/admission.go` `Slots` (`Acquire`, `Hold`, `Stats`) is
+  every bridge's admission gate: slots plus a bounded queue, 429 `queue_full`
+  past it. Each runner's `slots` builds it from `MaxConcurrent`/`MaxQueue`
+  (`cmd/ezllm/bridgedefaults.go` `bridgeQueue` reads `EZLLM_*_BRIDGE_QUEUE`);
+  `AdmissionStats` feeds `/status` `runtime`. `Authorized` is the shared
+  token check behind each server's `authed`.
 
 ### v2.1.0 — Prometheus metrics, per-role keys, updater fixes ✅ (2026-11-16; design `docs/metrics.md`)
 

@@ -70,6 +70,7 @@ type Runner struct {
 	CodexHome     string
 	Timeout       time.Duration
 	MaxConcurrent int
+	MaxQueue      int // requests allowed to wait for a slot (bridgeutil.DefaultMaxQueue when 0)
 	Version       string
 	Logf          func(format string, args ...any)
 	// Channel is ChannelAppServer (default) or ChannelExec, the fallback boot
@@ -89,7 +90,7 @@ type Runner struct {
 	NativeHistory bool
 	cache         templateCache
 
-	sem  chan struct{}
+	adm  *bridgeutil.Slots
 	once sync.Once
 
 	pmu    sync.Mutex
@@ -133,15 +134,17 @@ func (r *Runner) logf(format string, args ...any) {
 	}
 }
 
-func (r *Runner) slots() chan struct{} {
+// slots is the shared admission gate (internal/bridgeutil): MaxConcurrent CLI
+// turns plus a bounded wait queue of MaxQueue.
+func (r *Runner) slots() *bridgeutil.Slots {
 	r.once.Do(func() {
 		n := r.MaxConcurrent
 		if n <= 0 {
 			n = 2
 		}
-		r.sem = make(chan struct{}, n)
+		r.adm = bridgeutil.NewSlots(n, r.MaxQueue)
 	})
-	return r.sem
+	return r.adm
 }
 
 func (r *Runner) timeout() time.Duration {
@@ -627,13 +630,16 @@ func (r *Runner) Run(ctx context.Context, req Request, sink func(Delta) error) (
 	// stuck slots.
 	ctx, cancel := context.WithTimeout(ctx, r.timeout())
 	defer cancel()
-	select {
-	case r.slots() <- struct{}{}:
-		defer func() { <-r.slots() }()
-	case <-ctx.Done():
+	release, err := r.slots().Acquire(ctx)
+	if errors.Is(err, bridgeutil.ErrQueueFull) {
+		return Result{}, &NativeError{Status: 429, Type: "rate_limit_error", Code: "queue_full",
+			Message: "codex-bridge: " + err.Error()}
+	}
+	if err != nil {
 		return Result{}, &NativeError{Status: 504, Type: "api_error", Code: "timeout",
 			Message: "codex-bridge: timed out waiting for a free slot"}
 	}
+	defer release()
 
 	if len(req.ToolResults) > 0 {
 		pt, takeErr := r.takeParked(req)
@@ -802,3 +808,7 @@ func (r *Runner) startErr(ctx context.Context, c *child, step string, err error)
 	}
 	return r.childErr(ctx, c, step, err)
 }
+
+// AdmissionStats is the slot and queue picture each bridge's /status serves
+// under "runtime" (bridgeutil.Slots.Stats).
+func (r *Runner) AdmissionStats() map[string]any { return r.slots().Stats() }

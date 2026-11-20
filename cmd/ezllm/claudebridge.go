@@ -31,6 +31,7 @@ const (
 	envBridgeAddr        = "EZLLM_CLAUDE_BRIDGE_ADDR"        // default 127.0.0.1:8790
 	envBridgeToken       = "EZLLM_CLAUDE_BRIDGE_TOKEN_FILE"  // shared secret for the account key
 	envClaudeConcurrency = "EZLLM_CLAUDE_BRIDGE_CONCURRENCY" // concurrent CLI processes (default 1)
+	envClaudeQueue       = "EZLLM_CLAUDE_BRIDGE_QUEUE"       // requests allowed to wait for a slot (default 8)
 )
 
 // claudeQualifiedVersion is the CLI release the bridge's measurements and live
@@ -92,6 +93,10 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 	if err != nil {
 		return nil, err
 	}
+	queue, err := bridgeQueue(os.Getenv, envClaudeQueue, "claude")
+	if err != nil {
+		return nil, err
+	}
 
 	srv := &claudebridge.Server{
 		Runner: &claudebridge.Runner{
@@ -99,6 +104,7 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 			ConfigDir:     dir,
 			Timeout:       300 * time.Second,
 			MaxConcurrent: concurrency,
+			MaxQueue:      queue,
 			Logf:          log.Info,
 		},
 		Token:   token,

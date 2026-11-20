@@ -2,11 +2,9 @@ package claudebridge
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
@@ -69,7 +67,14 @@ func (s *Server) Handler() http.Handler {
 		writeJSONBytes(w, http.StatusOK, mustJSON(map[string]any{"status": "ok", "version": s.Version}))
 	})
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSONBytes(w, http.StatusOK, mustJSON(s.Info))
+		info := make(map[string]any, len(s.Info)+1)
+		for k, v := range s.Info {
+			info[k] = v
+		}
+		if a, ok := s.Runner.(interface{ AdmissionStats() map[string]any }); ok {
+			info["runtime"] = a.AdmissionStats()
+		}
+		writeJSONBytes(w, http.StatusOK, mustJSON(info))
 	})
 	mux.HandleFunc("GET /v1/models", s.authed(s.listModels))
 	mux.HandleFunc("GET /v1/usage", s.authed(s.usage))
@@ -77,13 +82,11 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
+// authed admits only the bridge token (bridgeutil.Authorized, constant-time).
+// Anthropic clients send x-api-key; a refusal is a 401 in this bridge's own error shape.
 func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		got := r.Header.Get("x-api-key")
-		if got == "" {
-			got = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		}
-		if s.Token == "" || subtle.ConstantTimeCompare([]byte(got), []byte(s.Token)) != 1 {
+		if !bridgeutil.Authorized(r, s.Token, true) {
 			writeJSONBytes(w, http.StatusUnauthorized,
 				ErrorEnvelope("authentication_error", "claude-bridge: missing or wrong x-api-key", "unauthorized"))
 			return
@@ -202,6 +205,9 @@ func (s *Server) writeRunError(w http.ResponseWriter, _ Result, err error) {
 	if !ok {
 		writeJSONBytes(w, http.StatusBadGateway, ErrorEnvelope("api_error", err.Error(), "native_error"))
 		return
+	}
+	if ne.Code == "queue_full" {
+		w.Header().Set("Retry-After", bridgeutil.QueueFullRetryAfter)
 	}
 	writeJSONBytes(w, ne.Status, ErrorEnvelope(ne.Type, ne.Message, ne.Code))
 }

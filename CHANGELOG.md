@@ -17,6 +17,17 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   unchanged (`TestChatChunksWireBytes`). Copilot streams now send
   `X-Accel-Buffering: no`, so a reverse proxy no longer buffers them, and drop
   the redundant `Connection: keep-alive`.
+- **Shared admission (behaviour change):** all four bridges admit through
+  `bridgeutil.Slots`. Claude, Codex and Antigravity now bound their wait
+  queue like Copilot: past `EZLLM_{CLAUDE,CODEX,AGY}_BRIDGE_QUEUE` waiting
+  requests (default 8) they answer 429 `queue_full` with `Retry-After: 5`
+  instead of holding the request until the 300 s timeout; the router parks the
+  hop briefly and fails over. Every `/status` reports the same `runtime`
+  admission counters.
+- **Shared auth (behaviour change):** one constant-time token check
+  (`bridgeutil.Authorized`). Codex's 401 type is now `invalid_request_error`
+  like the other OpenAI-shaped bridges; Claude keeps `authentication_error`
+  and `x-api-key`.
 
 ## v2.1.0 — Prometheus metrics and bridge updater fixes
 

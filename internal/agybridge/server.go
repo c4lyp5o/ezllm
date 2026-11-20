@@ -2,7 +2,6 @@ package agybridge
 
 import (
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -53,8 +52,15 @@ func (s *Server) Handler() http.Handler {
 		for k, v := range s.Info {
 			info[k] = v
 		}
+		runtime := map[string]any{}
+		if a, ok := s.Runner.(interface{ AdmissionStats() map[string]any }); ok {
+			runtime = a.AdmissionStats()
+		}
 		if cache, ok := s.Runner.(interface{ CacheStats() map[string]any }); ok {
-			info["runtime"] = map[string]any{"conversation_cache": cache.CacheStats()}
+			runtime["conversation_cache"] = cache.CacheStats()
+		}
+		if len(runtime) > 0 {
+			info["runtime"] = runtime
 		}
 		writeJSON(w, http.StatusOK, info)
 	})
@@ -65,10 +71,11 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
+// authed admits only the bridge token (bridgeutil.Authorized, constant-time).
+// a refusal is a 401 in this bridge's own error shape.
 func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if s.Token == "" || subtle.ConstantTimeCompare([]byte(got), []byte(s.Token)) != 1 {
+		if !bridgeutil.Authorized(r, s.Token, false) {
 			writeRaw(w, http.StatusUnauthorized, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", "agy-bridge: missing or wrong bearer token", "unauthorized"))
 			return
 		}
@@ -200,6 +207,9 @@ func asNative(err error) *NativeError {
 
 func (s *Server) writeErr(w http.ResponseWriter, err error) {
 	ne := asNative(err)
+	if ne.Code == "queue_full" {
+		w.Header().Set("Retry-After", bridgeutil.QueueFullRetryAfter)
+	}
 	writeRaw(w, ne.Status, bridgeutil.OpenAIErrorEnvelope(ne.Type, ne.Message, ne.Code))
 }
 

@@ -91,6 +91,8 @@ Copilot streamed `gpt-6-luna` text with usage and a `get_weather` tool call with
 | `bridgeutil` `SetProcessGroup` / `KillGroup` (`proc_unix.go`, `proc_windows.go`) | Claude, Codex (app-server and exec fallback), Antigravity | Copilot does not start CLIs in a process group. |
 | `bridgeutil` `OpenAIErrorEnvelope` (`errors.go`) | Codex, Antigravity | Claude keeps its Anthropic envelope (`"type":"error"`, derived default code); Copilot keeps its `"param": null` variant. |
 | `bridgeutil` `ChatChunks` (`chatchunks.go`): SSE headers, `chat.completion.chunk` encoding, usage chunk, `[DONE]` | Codex, Copilot, Antigravity | When headers go out, what a delta carries (Codex adds `reasoning_content`), the opening role chunk (`RoleChunk`: Codex and Antigravity yes, Copilot no) and finish/usage ordering stay in each adapter. Claude streams Anthropic events. |
+| `bridgeutil` `Slots` (`admission.go`): `MaxConcurrent` slots, a bounded wait queue (`DefaultMaxQueue` 8), `/status` counters | All four | Each bridge maps `ErrQueueFull` to its own 429 `queue_full` (`Retry-After: 5`) and a slot-wait timeout to its existing 504. Codex's template cleanup uses `Hold`, which ignores the queue bound and counters. |
+| `bridgeutil` `Authorized` (`admission.go`): constant-time bridge-token check | All four | The refusal body: Claude 401 `authentication_error` (Anthropic) and accepts `x-api-key`; Codex, Copilot and Antigravity 401 `invalid_request_error` (OpenAI). |
 
 The process and envelope helpers were byte-identical copies, so moving them
 changes no wire output or process behavior. `ChatChunks` keeps each bridge's
@@ -101,16 +103,26 @@ Copilot: it now sends `X-Accel-Buffering: no` like the others
 with the group (it fails when the group kill is removed);
 `TestOpenAIErrorEnvelopeShape` pins the envelope bytes.
 
-## Remaining candidates
+## Admission and auth changes (v2.1.1)
 
-Not yet shared:
+These change what clients see, deliberately, so every bridge behaves alike:
 
-1. Admission (`MaxConcurrent` slots, all four bridges) and auth (`authed`, all
-   four). Only Copilot bounds its queue (`queue_full`, queue counts on
-   `/status`). The 401 differs: Claude and Codex return
-   `authentication_error`, Copilot and Antigravity `invalid_request_error`, and
-   only Claude accepts `x-api-key`. Sharing either changes what clients see, so
-   they belong in a minor release.
+- Claude, Codex and Antigravity used to let a request wait for a slot until the
+  runner timeout (504). They now bound the wait queue like Copilot did: past
+  `EZLLM_<BRIDGE>_BRIDGE_QUEUE` waiting requests (default 8) they answer 429
+  `queue_full` with `Retry-After: 5`, and the router parks the hop for 5 s and
+  fails over (`proxy.go` `hopOutcome`; a sole hop is not parked).
+- Every bridge's `/status` reports `runtime` with `in_flight`, `queued`,
+  `max_queue`, `max_concurrent`, `served` and `rejected_queue_full`
+  (Antigravity keeps `conversation_cache` inside `runtime`).
+- Codex's 401 type changed from `authentication_error` to
+  `invalid_request_error`, matching OpenAI and the other OpenAI-shaped bridges.
 
-Process pools, sessions, CLI environments, sandboxing and provider accounting
-stay adapter-owned; there is still no universal bridge lifecycle.
+Tests: `bridgeutil` `TestSlotsBoundTheQueueAndCount`,
+`TestSlotsQueuedCallerLeavesOnCancel`, `TestSlotsDefaultsAndHold`,
+`TestAuthorized`; per bridge `TestRunnerRefusesWhenTheQueueIsFull` (429,
+`Retry-After`, immediate) and Codex `TestRefusalUsesOpenAIErrorType`.
+
+Nothing else is planned for sharing. Process pools, sessions, CLI environments,
+sandboxing and provider accounting stay adapter-owned; there is still no
+universal bridge lifecycle.

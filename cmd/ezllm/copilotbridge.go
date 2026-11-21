@@ -2,14 +2,10 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -31,11 +27,11 @@ const (
 	envCopilotBridgeAddr   = "EZLLM_COPILOT_BRIDGE_ADDR"        // default 127.0.0.1:8793
 	envCopilotBridgeToken  = "EZLLM_COPILOT_BRIDGE_TOKEN_FILE"  // shared secret for the account key
 	envCopilotConcurrency  = "EZLLM_COPILOT_BRIDGE_CONCURRENCY" // concurrent CLI children (default 1)
-	envCopilotQueue        = "EZLLM_COPILOT_BRIDGE_QUEUE"       // requests allowed to wait for a slot (default 8)
 	envCopilotTimeout      = "EZLLM_COPILOT_BRIDGE_TIMEOUT"     // per-turn limit, a Go duration (default 300s)
 )
 
-// copilotLimits reads the three runner knobs. A malformed value fails the boot:
+// copilotLimits reads the runner knobs; the queue is the shared
+// EZLLM_BRIDGE_QUEUE (bridgeQueue). A malformed value fails the boot:
 // a typo that silently fell back to the default would look like a working
 // override.
 func copilotLimits(get func(string) string) (concurrency, queue int, timeout time.Duration, err error) {
@@ -43,12 +39,8 @@ func copilotLimits(get func(string) string) (concurrency, queue int, timeout tim
 	if concurrency, err = bridgeConcurrency(get, envCopilotConcurrency, "copilot"); err != nil {
 		return 0, 0, 0, err
 	}
-	// The queue shares the positive-integer rule; only its default differs.
-	queue = 8
-	if strings.TrimSpace(get(envCopilotQueue)) != "" {
-		if queue, err = bridgeConcurrency(get, envCopilotQueue, "copilot"); err != nil {
-			return 0, 0, 0, err
-		}
+	if queue, err = bridgeQueue(get, "copilot"); err != nil {
+		return 0, 0, 0, err
 	}
 	if v := strings.TrimSpace(get(envCopilotTimeout)); v != "" {
 		d, perr := time.ParseDuration(v)
@@ -229,58 +221,25 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 		info["client_tools"] = "refused with chat_tools_unsupported, so the router fails over: " + err.Error()
 		log.Warn("copilot bridge: channel unavailable: plain chat uses -p, client tools are refused", "err", err)
 	}
+	// The live catalog refreshes in the background; warm it now so the first
+	// request finds it loaded.
+	liveCatalog := &copilotbridge.ModelCatalog{Fetch: runner.ListModels}
+	liveCatalog.Warm()
 	srv := &copilotbridge.Server{
-		Runner:  runner,
-		Token:   token,
-		Version: server.Version,
-		Models:  models,
-		Info:    info,
-		Logf:    printfLogger(log),
+		Runner:       runner,
+		Token:        token,
+		Version:      server.Version,
+		Models:       models,
+		ModelCatalog: liveCatalog,
+		Info:         info,
+		Logf:         printfLogger(log),
 	}
 	if report != nil {
-		report("github-copilot", addr, token, bridgeUpdateFile(bin), info)
+		report("copilot-sub", addr, token, bridgeUpdateFile(bin), info, runner.Stats)
 	}
-	httpSrv := &http.Server{Addr: addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
-	go func() {
-		log.Info("copilot bridge listening", "addr", addr, "cli", cliVersion, "release", release, "home", home)
-		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error("copilot bridge serve", "err", err)
-		}
-	}()
+	log.Info("copilot bridge listening", "addr", addr, "cli", cliVersion, "release", release, "home", home)
+	httpSrv := serveBridge(log, "copilot", addr, srv.Handler())
 	return func() { shutdownBridgeHTTP(httpSrv); runner.Close() }, nil
-}
-
-// bridgeTokenFromFile mints (once) and reads the loopback shared secret, 0600.
-// The account key ezllm stores is this value; nothing else authenticates the
-// bridge surface.
-func bridgeTokenFromFile(path, label string) (string, error) {
-	path = bridgeTokenPath(path, label)
-	if b, err := os.ReadFile(path); err == nil {
-		if t := strings.TrimSpace(string(b)); t != "" {
-			return t, nil
-		}
-	}
-	buf := make([]byte, 24)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("%s bridge: mint token: %w", label, err)
-	}
-	token := hex.EncodeToString(buf)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return "", fmt.Errorf("%s bridge: token dir: %w", label, err)
-	}
-	if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
-		return "", fmt.Errorf("%s bridge: write token: %w", label, err)
-	}
-	return token, nil
-}
-
-// bridgeTokenPath defaults an unset path to /data/<label>-bridge.token, on the
-// data volume like the other bridges' tokens, so it is backed up with the ledger.
-func bridgeTokenPath(path, label string) string {
-	if path == "" {
-		return "/data/" + label + "-bridge.token"
-	}
-	return path
 }
 
 // copilotHome is the bridge's own login directory. Like every subscription

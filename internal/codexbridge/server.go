@@ -2,9 +2,6 @@ package codexbridge
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -82,6 +79,9 @@ func (s *Server) Handler() http.Handler {
 		if p, ok := s.Runner.(interface{ CacheStats() CacheStats }); ok {
 			info["fork_cache"] = p.CacheStats()
 		}
+		if a, ok := s.Runner.(interface{ AdmissionStats() map[string]any }); ok {
+			info["runtime"] = a.AdmissionStats()
+		}
 		writeJSON(w, http.StatusOK, info)
 	})
 	mux.HandleFunc("GET /v1/models", s.authed(s.listModels))
@@ -90,15 +90,16 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
+// authed admits only the bridge token (bridgeutil.Authorized, constant-time).
+// a refusal is a 401 in this bridge's own error shape.
 func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if s.Token == "" || subtle.ConstantTimeCompare([]byte(got), []byte(s.Token)) != 1 {
-			writeRaw(w, http.StatusUnauthorized,
-				ErrorEnvelope("authentication_error", "codex-bridge: missing or wrong bearer token", "unauthorized"))
+		if !bridgeutil.Authorized(r, s.Token, false) {
+			bridgeutil.WriteJSONBytes(w, http.StatusUnauthorized,
+				bridgeutil.OpenAIErrorEnvelope("invalid_request_error", "codex-bridge: missing or wrong bearer token", "unauthorized"))
 			return
 		}
-		next(w, r)
+		next(bridgeutil.TrackSlotWait(w, r))
 	}
 }
 
@@ -149,11 +150,11 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 	}
 	body, ok := UsageBody(rl, s.now())
 	if !ok {
-		writeRaw(w, http.StatusNotFound, ErrorEnvelope("not_found_error",
+		bridgeutil.WriteJSONBytes(w, http.StatusNotFound, bridgeutil.OpenAIErrorEnvelope("not_found_error",
 			"codex-bridge: the login reported no plan window", "no_reading"))
 		return
 	}
-	writeRaw(w, http.StatusOK, body)
+	bridgeutil.WriteJSONBytes(w, http.StatusOK, body)
 }
 
 // validate checks model and effort against the catalog before anything is
@@ -183,11 +184,11 @@ func (s *Server) validate(ctx context.Context, req Request) error {
 func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
 	if err != nil {
-		writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", "codex-bridge: cannot read request body: "+err.Error(), "invalid_request"))
+		bridgeutil.WriteJSONBytes(w, http.StatusBadRequest, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", "codex-bridge: cannot read request body: "+err.Error(), "invalid_request"))
 		return
 	}
 	if len(body) > maxBodyBytes {
-		writeRaw(w, http.StatusRequestEntityTooLarge, ErrorEnvelope("invalid_request_error", "codex-bridge: request body too large", "invalid_request"))
+		bridgeutil.WriteJSONBytes(w, http.StatusRequestEntityTooLarge, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", "codex-bridge: request body too large", "invalid_request"))
 		return
 	}
 	req, err := ParseRequest(body)
@@ -197,18 +198,18 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		if errors.As(err, &u) {
 			code = u.Code
 		}
-		writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", err.Error(), code))
+		bridgeutil.WriteJSONBytes(w, http.StatusBadRequest, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", err.Error(), code))
 		return
 	}
 	if len(req.Tools) > 0 && s.ToolsOff != "" {
-		writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error",
+		bridgeutil.WriteJSONBytes(w, http.StatusBadRequest, bridgeutil.OpenAIErrorEnvelope("invalid_request_error",
 			"client tools are disabled on this host: "+s.ToolsOff+". See docs/codex-bridge-runbook.md#platform-requirements--read-this-first",
 			"chat_tools_unsupported"))
 		return
 	}
 	req.CallerID = strings.TrimSpace(r.Header.Get(provider.BridgeCallerHeader))
 	if len(req.CallerID) > 128 || (s.RequireCaller && len(req.Tools) > 0 && req.CallerID == "") {
-		writeRaw(w, http.StatusForbidden, ErrorEnvelope("permission_error", "codex-bridge: authenticated caller identity required; use the gateway", "caller_identity_required"))
+		bridgeutil.WriteJSONBytes(w, http.StatusForbidden, bridgeutil.OpenAIErrorEnvelope("permission_error", "codex-bridge: authenticated caller identity required; use the gateway", "caller_identity_required"))
 		return
 	}
 	if err := s.validate(r.Context(), req); err != nil {
@@ -216,7 +217,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := "chatcmpl-" + randomHex(12)
+	id := "chatcmpl-" + bridgeutil.RandomHex(12)
 	created := s.now().Unix()
 	if !req.Stream {
 		res, err := s.Runner.Run(r.Context(), req, nil)
@@ -246,32 +247,31 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 
 	transport := bridgeutil.NewStream(r.Context(), w, bridgeutil.StreamWriteStall)
 	defer transport.Close()
-	sw := &sseWriter{w: w, id: id, created: created, model: req.Model, transport: transport}
+	sw := newSSEWriter(w, transport, id, created, req.Model)
 	res, err := s.Runner.Run(r.Context(), req, sw.delta)
 	if err != nil {
-		if !sw.started {
+		if !sw.Started() {
 			// Nothing reached the client yet: the failure keeps its real status.
 			s.writeErr(w, err)
 			return
 		}
 		ne := asNative(err)
-		sw.event(json.RawMessage(ErrorEnvelope(ne.Type, ne.Message, ne.Code)))
-		sw.done()
+		sw.Event(json.RawMessage(bridgeutil.OpenAIErrorEnvelope(ne.Type, ne.Message, ne.Code)))
+		sw.Done()
 		s.logf("codex-bridge: stream failed: %s", err)
 		return
 	}
-	sw.begin()
+	sw.Begin()
 	if len(res.ToolCalls) > 0 {
-		sw.chunk(map[string]any{"tool_calls": openAIToolCalls(res.ToolCalls, true)}, "")
-		sw.chunk(map[string]any{}, "tool_calls")
+		sw.Chunk(map[string]any{"tool_calls": openAIToolCalls(res.ToolCalls, true)}, "")
+		sw.Chunk(map[string]any{}, "tool_calls")
 	} else {
-		sw.chunk(map[string]any{}, "stop")
+		sw.Chunk(map[string]any{}, "stop")
 	}
 	if req.IncludeUsage {
-		sw.event(map[string]any{"id": id, "object": "chat.completion.chunk", "created": created,
-			"model": req.Model, "choices": []any{}, "usage": openAIUsage(res.Usage)})
+		sw.Usage(openAIUsage(res.Usage))
 	}
-	sw.done()
+	sw.Done()
 }
 
 // openAIToolCalls renders calls as OpenAI tool_calls (indexed in a stream).
@@ -300,60 +300,23 @@ func openAIUsage(u Usage) map[string]any {
 	}
 }
 
-// sseWriter emits chat.completion.chunk events. Headers are written on the
-// first delta, so a failure before any output still gets its real status.
-type sseWriter struct {
-	w       http.ResponseWriter
-	id      string
-	created int64
-	model   string
-	started bool
-	// transport owns write deadlines, flushing and cancellation
-	// (internal/bridgeutil, shared with the Claude and Antigravity bridges).
-	transport *bridgeutil.Stream
+// sseWriter streams chat chunks through the shared encoder. Headers are
+// written on the first delta, so a failure before any output still gets its
+// real status.
+type sseWriter struct{ *bridgeutil.ChatChunks }
+
+func newSSEWriter(w http.ResponseWriter, transport *bridgeutil.Stream, id string, created int64, model string) sseWriter {
+	c := bridgeutil.NewChatChunks(w, transport, id, created, model)
+	c.RoleChunk = true
+	return sseWriter{c}
 }
 
-func (s *sseWriter) begin() {
-	if s.started {
-		return
-	}
-	s.started = true
-	h := s.w.Header()
-	h.Set("Content-Type", "text/event-stream")
-	h.Set("Cache-Control", "no-cache")
-	h.Set("X-Accel-Buffering", "no")
-	s.w.WriteHeader(http.StatusOK)
-	s.chunk(map[string]any{"role": "assistant", "content": ""}, "")
-}
-
-func (s *sseWriter) event(v any) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	_, err = s.transport.Write([]byte("data: " + string(b) + "\n\n"))
-	return err
-}
-
-func (s *sseWriter) chunk(delta map[string]any, finish string) error {
-	choice := map[string]any{"index": 0, "delta": delta, "finish_reason": nil}
-	if finish != "" {
-		choice["finish_reason"] = finish
-	}
-	return s.event(map[string]any{"id": s.id, "object": "chat.completion.chunk",
-		"created": s.created, "model": s.model, "choices": []any{choice}})
-}
-
-func (s *sseWriter) delta(d Delta) error {
-	s.begin()
+func (s sseWriter) delta(d Delta) error {
+	s.Begin()
 	if d.Reasoning != "" {
-		return s.chunk(map[string]any{"reasoning_content": d.Reasoning}, "")
+		return s.Chunk(map[string]any{"reasoning_content": d.Reasoning}, "")
 	}
-	return s.chunk(map[string]any{"content": d.Content}, "")
-}
-
-func (s *sseWriter) done() {
-	_, _ = s.transport.Write([]byte("data: [DONE]\n\n"))
+	return s.Chunk(map[string]any{"content": d.Content}, "")
 }
 
 func asNative(err error) *NativeError {
@@ -366,26 +329,17 @@ func asNative(err error) *NativeError {
 
 func (s *Server) writeErr(w http.ResponseWriter, err error) {
 	ne := asNative(err)
-	writeRaw(w, ne.Status, ErrorEnvelope(ne.Type, ne.Message, ne.Code))
+	if ne.Code == "queue_full" {
+		w.Header().Set("Retry-After", bridgeutil.QueueFullRetryAfter)
+	}
+	bridgeutil.WriteJSONBytes(w, ne.Status, bridgeutil.OpenAIErrorEnvelope(ne.Type, ne.Message, ne.Code))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	b, err := json.Marshal(v)
 	if err != nil {
-		writeRaw(w, http.StatusInternalServerError, ErrorEnvelope("api_error", "codex-bridge: encode failure", "encode"))
+		bridgeutil.WriteJSONBytes(w, http.StatusInternalServerError, bridgeutil.OpenAIErrorEnvelope("api_error", "codex-bridge: encode failure", "encode"))
 		return
 	}
-	writeRaw(w, status, b)
-}
-
-func writeRaw(w http.ResponseWriter, status int, body []byte) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_, _ = w.Write(body)
-}
-
-func randomHex(n int) string {
-	b := make([]byte, n)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
+	bridgeutil.WriteJSONBytes(w, status, b)
 }

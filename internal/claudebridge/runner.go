@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 )
 
 // NativeError is a failure the CLI reported, already mapped to an HTTP status so
@@ -33,9 +36,10 @@ type Runner struct {
 	ConfigDir     string
 	Timeout       time.Duration
 	MaxConcurrent int
+	MaxQueue      int // requests allowed to wait for a slot (bridgeutil.DefaultMaxQueue when 0)
 	Logf          func(format string, args ...any)
 
-	sem  chan struct{}
+	adm  *bridgeutil.Slots
 	once sync.Once
 }
 
@@ -51,15 +55,17 @@ type Result struct {
 	ErrorCode   string
 }
 
-func (r *Runner) slots() chan struct{} {
+// slots is the shared admission gate (internal/bridgeutil): MaxConcurrent CLI
+// turns plus a bounded wait queue of MaxQueue.
+func (r *Runner) slots() *bridgeutil.Slots {
 	r.once.Do(func() {
 		n := r.MaxConcurrent
 		if n <= 0 {
 			n = 2
 		}
-		r.sem = make(chan struct{}, n)
+		r.adm = bridgeutil.NewSlots(n, r.MaxQueue).Named("claude")
 	})
-	return r.sem
+	return r.adm
 }
 
 // Run executes one request: spawn, replay, generate once, translate frames to sink.
@@ -73,13 +79,16 @@ func (r *Runner) Run(ctx context.Context, req Request, alias string, sink func(F
 		runCtx, cancel = context.WithTimeout(ctx, r.Timeout)
 		defer cancel()
 	}
-	select {
-	case r.slots() <- struct{}{}:
-		defer func() { <-r.slots() }()
-	case <-runCtx.Done():
+	release, err := r.slots().Acquire(runCtx)
+	if errors.Is(err, bridgeutil.ErrQueueFull) {
+		return Result{}, &NativeError{Status: 429, Type: "rate_limit_error", Code: "queue_full",
+			Message: "claude-bridge: " + err.Error()}
+	}
+	if err != nil {
 		return Result{}, &NativeError{Status: 504, Type: "api_error", Code: "timeout",
 			Message: "claude-bridge: timed out waiting for a free slot"}
 	}
+	defer release()
 
 	system, err := SystemText(req.System)
 	if err != nil {
@@ -127,7 +136,7 @@ func (r *Runner) Run(ctx context.Context, req Request, alias string, sink func(F
 	cmd := exec.Command(r.Bin, argv...)
 	cmd.Dir = tmp
 	cmd.Env = r.childEnv(tmp, req.MaxTokens)
-	setProcessGroup(cmd)
+	bridgeutil.SetProcessGroup(cmd)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -150,7 +159,7 @@ func (r *Runner) Run(ctx context.Context, req Request, alias string, sink func(F
 	// per failed request. waited avoids a second Wait after the clean path.
 	waited := false
 	defer func() {
-		killGroup(cmd)
+		bridgeutil.KillGroup(cmd)
 		if !waited {
 			_ = cmd.Wait()
 		}
@@ -162,12 +171,12 @@ func (r *Runner) Run(ctx context.Context, req Request, alias string, sink func(F
 	done := make(chan struct{})
 	defer close(done)
 
-	var stderrTail tailBuffer
+	var stderrTail bridgeutil.TailBuffer
 	go func() {
 		sc := bufio.NewScanner(stderr)
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for sc.Scan() {
-			stderrTail.add(sc.Text())
+			stderrTail.Add(sc.Text())
 		}
 	}()
 
@@ -297,3 +306,7 @@ func (r *Runner) Run(ctx context.Context, req Request, alias string, sink func(F
 	}
 	return res, nil
 }
+
+// AdmissionStats is the slot and queue picture each bridge's /status serves
+// under "runtime" (bridgeutil.Slots.Stats).
+func (r *Runner) AdmissionStats() map[string]any { return r.slots().Stats() }

@@ -107,8 +107,11 @@ func TestCancelReapsTheChildWhileTheSinkIsStuck(t *testing.T) {
 // as long as the slots stayed taken.
 func TestRunnerTimeoutCoversTheSlotWait(t *testing.T) {
 	r := &Runner{Bin: os.Args[0], Timeout: 100 * time.Millisecond, MaxConcurrent: 1}
-	r.slots() <- struct{}{} // the only slot, held elsewhere
-	defer func() { <-r.slots() }()
+	release, aerr := r.slots().Acquire(context.Background()) // the only slot, held elsewhere
+	if aerr != nil {
+		t.Fatal(aerr)
+	}
+	defer release()
 	start := time.Now()
 	_, err := r.Run(context.Background(), simpleRequest(), nil)
 	var ne *NativeError

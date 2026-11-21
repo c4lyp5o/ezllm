@@ -1,9 +1,6 @@
 package agybridge
 
 import (
-	"crypto/rand"
-	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -53,8 +50,15 @@ func (s *Server) Handler() http.Handler {
 		for k, v := range s.Info {
 			info[k] = v
 		}
+		runtime := map[string]any{}
+		if a, ok := s.Runner.(interface{ AdmissionStats() map[string]any }); ok {
+			runtime = a.AdmissionStats()
+		}
 		if cache, ok := s.Runner.(interface{ CacheStats() map[string]any }); ok {
-			info["runtime"] = map[string]any{"conversation_cache": cache.CacheStats()}
+			runtime["conversation_cache"] = cache.CacheStats()
+		}
+		if len(runtime) > 0 {
+			info["runtime"] = runtime
 		}
 		writeJSON(w, http.StatusOK, info)
 	})
@@ -65,14 +69,15 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
+// authed admits only the bridge token (bridgeutil.Authorized, constant-time).
+// a refusal is a 401 in this bridge's own error shape.
 func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if s.Token == "" || subtle.ConstantTimeCompare([]byte(got), []byte(s.Token)) != 1 {
-			writeRaw(w, http.StatusUnauthorized, ErrorEnvelope("invalid_request_error", "agy-bridge: missing or wrong bearer token", "unauthorized"))
+		if !bridgeutil.Authorized(r, s.Token, false) {
+			bridgeutil.WriteJSONBytes(w, http.StatusUnauthorized, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", "agy-bridge: missing or wrong bearer token", "unauthorized"))
 			return
 		}
-		next(w, r)
+		next(bridgeutil.TrackSlotWait(w, r))
 	}
 }
 
@@ -88,11 +93,11 @@ func (s *Server) knownModel(id string) bool {
 func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
 	if err != nil {
-		writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", "agy-bridge: cannot read request body: "+err.Error(), "invalid_request"))
+		bridgeutil.WriteJSONBytes(w, http.StatusBadRequest, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", "agy-bridge: cannot read request body: "+err.Error(), "invalid_request"))
 		return
 	}
 	if len(body) > maxBodyBytes {
-		writeRaw(w, http.StatusRequestEntityTooLarge, ErrorEnvelope("invalid_request_error", "agy-bridge: request body too large", "invalid_request"))
+		bridgeutil.WriteJSONBytes(w, http.StatusRequestEntityTooLarge, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", "agy-bridge: request body too large", "invalid_request"))
 		return
 	}
 	req, err := parseRequest(body, s.ExperimentalTools)
@@ -102,7 +107,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		if errors.As(err, &u) {
 			code = u.Code
 		}
-		writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", err.Error(), code))
+		bridgeutil.WriteJSONBytes(w, http.StatusBadRequest, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", err.Error(), code))
 		return
 	}
 	// Refused before a spawn: an unknown model costs a ~3s CLI start to learn.
@@ -111,7 +116,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		for _, m := range s.Models {
 			ids = append(ids, m.ID)
 		}
-		writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error",
+		bridgeutil.WriteJSONBytes(w, http.StatusBadRequest, bridgeutil.OpenAIErrorEnvelope("invalid_request_error",
 			"agy-bridge: model "+req.Model+" is not on this login's plan (have: "+strings.Join(ids, ", ")+")", "unknown_model"))
 		return
 	}
@@ -121,7 +126,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := "chatcmpl-" + randomHex(12)
+	id := "chatcmpl-" + bridgeutil.RandomHex(12)
 	created := s.now().Unix()
 	if !req.Stream {
 		res, err := s.Runner.Run(r.Context(), req, nil)
@@ -140,27 +145,26 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 
 	transport := bridgeutil.NewStream(r.Context(), w, bridgeutil.StreamWriteStall)
 	defer transport.Close()
-	sw := &sseWriter{w: w, id: id, created: created, model: req.Model, transport: transport}
+	sw := newSSEWriter(w, transport, id, created, req.Model)
 	res, err := s.Runner.Run(r.Context(), req, sw.delta)
 	if err != nil {
-		if !sw.started {
+		if !sw.Started() {
 			// Nothing reached the client yet: the failure keeps its real status.
 			s.writeRunErr(w, err, res.Usage)
 			return
 		}
 		ne := asNative(err)
-		sw.event(json.RawMessage(ErrorEnvelope(ne.Type, ne.Message, ne.Code)))
-		sw.done()
+		sw.Event(json.RawMessage(bridgeutil.OpenAIErrorEnvelope(ne.Type, ne.Message, ne.Code)))
+		sw.Done()
 		s.logf("agy-bridge: stream failed: %s", err)
 		return
 	}
-	sw.begin()
-	sw.chunk(map[string]any{}, "stop")
+	sw.Begin()
+	sw.Chunk(map[string]any{}, "stop")
 	if req.IncludeUsage {
-		sw.event(map[string]any{"id": id, "object": "chat.completion.chunk", "created": created,
-			"model": req.Model, "choices": []any{}, "usage": openAIUsage(res.Usage)})
+		sw.Usage(openAIUsage(res.Usage))
 	}
-	sw.done()
+	sw.Done()
 }
 
 // openAIUsage maps the result envelope to OpenAI usage. Thinking tokens are
@@ -176,53 +180,19 @@ func openAIUsage(u Usage) map[string]any {
 }
 
 // sseWriter owns OpenAI event encoding and header timing. Transport is shared.
-type sseWriter struct {
-	w         http.ResponseWriter
-	id        string
-	created   int64
-	model     string
-	started   bool
-	transport *bridgeutil.Stream
+// sseWriter streams chat chunks through the shared encoder. Headers are
+// written on the first delta, so a failure before any output keeps its status.
+type sseWriter struct{ *bridgeutil.ChatChunks }
+
+func newSSEWriter(w http.ResponseWriter, transport *bridgeutil.Stream, id string, created int64, model string) sseWriter {
+	c := bridgeutil.NewChatChunks(w, transport, id, created, model)
+	c.RoleChunk = true
+	return sseWriter{c}
 }
 
-func (s *sseWriter) begin() {
-	if s.started {
-		return
-	}
-	s.started = true
-	h := s.w.Header()
-	h.Set("Content-Type", "text/event-stream")
-	h.Set("Cache-Control", "no-cache")
-	h.Set("X-Accel-Buffering", "no")
-	s.w.WriteHeader(http.StatusOK)
-	s.chunk(map[string]any{"role": "assistant", "content": ""}, "")
-}
-
-func (s *sseWriter) event(v any) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	_, err = s.transport.Write([]byte("data: " + string(b) + "\n\n"))
-	return err
-}
-
-func (s *sseWriter) chunk(delta map[string]any, finish string) error {
-	choice := map[string]any{"index": 0, "delta": delta, "finish_reason": nil}
-	if finish != "" {
-		choice["finish_reason"] = finish
-	}
-	return s.event(map[string]any{"id": s.id, "object": "chat.completion.chunk",
-		"created": s.created, "model": s.model, "choices": []any{choice}})
-}
-
-func (s *sseWriter) delta(text string) error {
-	s.begin()
-	return s.chunk(map[string]any{"content": text}, "")
-}
-
-func (s *sseWriter) done() {
-	_, _ = s.transport.Write([]byte("data: [DONE]\n\n"))
+func (s sseWriter) delta(text string) error {
+	s.Begin()
+	return s.Chunk(map[string]any{"content": text}, "")
 }
 
 func asNative(err error) *NativeError {
@@ -235,7 +205,10 @@ func asNative(err error) *NativeError {
 
 func (s *Server) writeErr(w http.ResponseWriter, err error) {
 	ne := asNative(err)
-	writeRaw(w, ne.Status, ErrorEnvelope(ne.Type, ne.Message, ne.Code))
+	if ne.Code == "queue_full" {
+		w.Header().Set("Retry-After", bridgeutil.QueueFullRetryAfter)
+	}
+	bridgeutil.WriteJSONBytes(w, ne.Status, bridgeutil.OpenAIErrorEnvelope(ne.Type, ne.Message, ne.Code))
 }
 
 // writeRunErr is writeErr for a failure after native may have generated. A
@@ -255,28 +228,16 @@ func (s *Server) writeRunErr(w http.ResponseWriter, err error, usage Usage) {
 		s.writeErr(w, err)
 		return
 	}
-	writeRaw(w, ne.Status, body)
+	bridgeutil.WriteJSONBytes(w, ne.Status, body)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	b, err := json.Marshal(v)
 	if err != nil {
-		writeRaw(w, http.StatusInternalServerError, ErrorEnvelope("api_error", "agy-bridge: encode failure", "encode"))
+		bridgeutil.WriteJSONBytes(w, http.StatusInternalServerError, bridgeutil.OpenAIErrorEnvelope("api_error", "agy-bridge: encode failure", "encode"))
 		return
 	}
-	writeRaw(w, status, b)
-}
-
-func writeRaw(w http.ResponseWriter, status int, body []byte) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_, _ = w.Write(body)
-}
-
-func randomHex(n int) string {
-	b := make([]byte, n)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
+	bridgeutil.WriteJSONBytes(w, status, b)
 }
 
 // adaptedChat buffers only this turn's envelope. Tool execution belongs to the
@@ -293,7 +254,7 @@ func (s *Server) adaptedChat(w http.ResponseWriter, r *http.Request, req Request
 		s.writeRunErr(w, err, res.Usage)
 		return
 	}
-	id, created := "chatcmpl-"+randomHex(12), s.now().Unix()
+	id, created := "chatcmpl-"+bridgeutil.RandomHex(12), s.now().Unix()
 	finish := "stop"
 	message := map[string]any{"role": "assistant", "content": text}
 	if len(calls) > 0 {
@@ -308,8 +269,8 @@ func (s *Server) adaptedChat(w http.ResponseWriter, r *http.Request, req Request
 	}
 	transport := bridgeutil.NewStream(r.Context(), w, bridgeutil.StreamWriteStall)
 	defer transport.Close()
-	sw := &sseWriter{w: w, id: id, created: created, model: req.Model, transport: transport}
-	sw.begin()
+	sw := newSSEWriter(w, transport, id, created, req.Model)
+	sw.Begin()
 	delta := map[string]any{"content": text}
 	if len(calls) > 0 {
 		indexed := make([]map[string]any, 0, len(calls))
@@ -318,16 +279,16 @@ func (s *Server) adaptedChat(w http.ResponseWriter, r *http.Request, req Request
 		}
 		delta = map[string]any{"tool_calls": indexed}
 	}
-	if sw.chunk(delta, "") != nil {
+	if sw.Chunk(delta, "") != nil {
 		return
 	}
-	if sw.chunk(map[string]any{}, finish) != nil {
+	if sw.Chunk(map[string]any{}, finish) != nil {
 		return
 	}
 	if req.IncludeUsage {
-		if sw.event(map[string]any{"id": id, "object": "chat.completion.chunk", "created": created, "model": req.Model, "choices": []any{}, "usage": openAIUsage(res.Usage)}) != nil {
+		if sw.Usage(openAIUsage(res.Usage)) != nil {
 			return
 		}
 	}
-	sw.done()
+	sw.Done()
 }

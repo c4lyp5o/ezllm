@@ -176,9 +176,12 @@ func (s *Server) finishDispatch(w http.ResponseWriter, r *http.Request, call sto
 	call.KeyID, call.KeyHint, call.Model = served.KeyID, served.KeyHint, served.Model
 	call.Status, call.Stream = status, res.Stream
 	call.StreamOutcome = streamOutcomeLabel(res, clientGone)
-	call.TTFTms, call.Totalms = res.TTFTms, res.Totalms
+	call.TTFTms, call.Totalms, call.SlotWaitms = res.TTFTms, res.Totalms, res.SlotWaitms
 	call.EndpointID, call.UpstreamModel = res.EndpointID, res.UpstreamModel
 	applyUsage(&call, res.Usage)
+	if res.ResponseID != "" && call.TurnID != "" {
+		s.turnChain.remember(call.Client, res.ResponseID, call.TurnID)
+	}
 	if ferr != nil {
 		call.Err = ferr.Error()
 	} else if res.Err != "" {

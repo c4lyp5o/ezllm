@@ -60,6 +60,19 @@ func (l *requestLifetime) drain(srv *http.Server, drain, abort time.Duration, lo
 	}
 }
 
+// serveBridge starts a bridge's loopback HTTP surface in the background. The
+// caller logs its own "listening" facts first; a serve failure is logged here.
+// Stop it with shutdownBridgeHTTP.
+func serveBridge(log *slog.Logger, name, addr string, h http.Handler) *http.Server {
+	srv := &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Error(name+" bridge serve", "err", err)
+		}
+	}()
+	return srv
+}
+
 // shutdownBridgeHTTP drains a loopback bridge surface, then force-closes what
 // is left: closing a connection cancels its request context, which ends the
 // CLI child bound to that request.

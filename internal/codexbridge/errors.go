@@ -70,9 +70,3 @@ func MapTurnError(t turnError) *NativeError {
 	}
 	return &NativeError{Status: 502, Type: "api_error", Code: "native_error", Message: msg}
 }
-
-// ErrorEnvelope is the OpenAI wire error shape.
-func ErrorEnvelope(errType, message, code string) []byte {
-	b, _ := json.Marshal(map[string]any{"error": map[string]any{"type": errType, "message": message, "code": code}})
-	return b
-}

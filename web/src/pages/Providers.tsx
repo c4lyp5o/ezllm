@@ -147,7 +147,7 @@ const PROVIDER_PRESETS: Record<string, {
   // The CLI bridge is its own provider kind, listed under GitHub Copilot.
   'copilot-sub': {
     label: 'GitHub Copilot (bridge)', kind: 'copilot-bridge', baseURL: 'http://127.0.0.1:8793/v1',
-    bridge: 'github-copilot',
+    bridge: 'copilot-sub',
   },
   'claude-platform': { label: 'Claude Platform', kind: 'anthropic-compatible', baseURL: 'https://api.anthropic.com' },
   // Web-protocol providers: no API key — credentials are browser sessions.
@@ -628,7 +628,7 @@ const BRIDGE_SIGN_IN: Record<string, { login: string[]; check: string; note: str
     check: 'ls ~/.agy-sub/.gemini/antigravity-cli/antigravity-oauth-token',
     note: 'Opens the CLI. Sign in, send one prompt, then type /exit. Unsetting D-Bus makes it save the login to a file the container can read.',
   },
-  'github-copilot': {
+  'copilot-sub': {
     login: ['env -u DBUS_SESSION_BUS_ADDRESS COPILOT_HOME=~/.copilot-sub ~/.local/share/copilot-bridge/current/copilot login --device-code'],
     check: 'ls ~/.copilot-sub/config.json',
     note: 'Prints a URL and a code. Open the URL, enter the code and approve it with the GitHub account that has Copilot.',

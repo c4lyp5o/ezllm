@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 	"io"
 	"strings"
 )
@@ -308,7 +309,7 @@ func (a *toolAdapter) decode(res Result) (string, []ToolCall, error) {
 		if json.Compact(&compact, c.Arguments) != nil {
 			return bad()
 		}
-		call := ToolCall{ID: "call_" + randomHex(12), Type: "function"}
+		call := ToolCall{ID: "call_" + bridgeutil.RandomHex(12), Type: "function"}
 		call.Function.Name = c.Name
 		call.Function.Arguments = compact.String()
 		out = append(out, call)

@@ -2,6 +2,81 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
+## v2.2.0 — shared bridge admission, requests per turn
+
+- **Review fixes:** Claude streaming commits headers only with its first visible
+  event, preserving HTTP 429 and `Retry-After` on queue refusal and recording
+  slot wait. Turn keys include the conversation prefix, surface, optional session
+  and stateful Responses parent so unrelated histories do not merge in Stats.
+  `cache_control` markers are left out of the key, so a moving cache breakpoint
+  no longer splits one Claude Code turn in two.
+
+- The Copilot bridge's registry id is `copilot-sub` (was `github-copilot`, the
+  retired provider's name), matching its preset key like the other bridges.
+  `TestBridgeIDsMatchTheirPresets` pins all four ids.
+- **Shared bridge helpers:** process-group start/kill (`SetProcessGroup`,
+  `KillGroup`) and the OpenAI error envelope (`OpenAIErrorEnvelope`) moved
+  into `internal/bridgeutil`, replacing identical copies in the Claude, Codex
+  and Antigravity bridges. No wire or behaviour change; `TestKillGroupReachesGrandchild`
+  and `TestOpenAIErrorEnvelopeShape` pin them.
+- **Shared chunk encoder:** Codex, Copilot and Antigravity write their
+  OpenAI chunk streams through `bridgeutil.ChatChunks`; event bytes are
+  unchanged (`TestChatChunksWireBytes`). Copilot streams now send
+  `X-Accel-Buffering: no`, so a reverse proxy no longer buffers them, and drop
+  the redundant `Connection: keep-alive`.
+- **Shared admission (behaviour change):** all four bridges admit through
+  `bridgeutil.Slots`. Claude, Codex and Antigravity now bound their wait
+  queue like Copilot: past `EZLLM_BRIDGE_QUEUE` waiting requests
+  (default 8) they answer 429 `queue_full` with `Retry-After: 5`
+  instead of holding the request until the 300 s timeout; the router parks the
+  hop briefly and fails over. Every `/status` reports the same `runtime`
+  admission counters.
+- **One queue setting (breaking for a renamed variable):** `EZLLM_BRIDGE_QUEUE`
+  sizes every bridge's wait queue. `EZLLM_COPILOT_BRIDGE_QUEUE` is retired and
+  fails the boot, naming its replacement; rename it in compose before upgrading.
+- **Shared auth (behaviour change):** one constant-time token check
+  (`bridgeutil.Authorized`). Codex's 401 type is now `invalid_request_error`
+  like the other OpenAI-shaped bridges; Claude keeps `authentication_error`
+  and `x-api-key`.
+- **Bridge slot wait in the ledger (schema v37):** `calls.slot_wait_ms`
+  records how long a bridge request waited for a CLI slot, which `total_ms`
+  used to hide. Bridges send it in `X-Ezllm-Slot-Wait-Ms`; the proxy trusts it
+  only from loopback and strips it from client responses. Older rows stay
+  NULL. The dashboard shows it as "queued" under the total and in the
+  request detail.
+- **Bridge load on the dashboard:** `GET /admin/bridges` carries each running
+  bridge's live `runtime`, and Settings → System shows running / waiting /
+  served / refused per bridge (diagnostics carries only those counters).
+- **Queue-full warning:** a bridge that refuses with `queue_full` logs one
+  `WARN` per 10 s naming the bridge, its limits and the refusals since the
+  last line.
+- **Requests per turn (schema v37):** every ledger row carries `turn_id`,
+  the agent loop it belongs to (one human message plus the tool calls after
+  it), derived from the client's body so clients need no session header.
+  `GET /admin/turns` and a Stats panel show requests per turn by model, so a
+  model that stops early shows up in the data instead of needing a replay.
+  An Anthropic `user` message carrying any `tool_result` block is an agent
+  step even with text beside it (Claude Code's system reminders), a stateful
+  Responses step (`previous_response_id`, tool outputs only) joins the turn of
+  the response it continues, and failed requests (status 400 and up) are not
+  counted.
+- **gemini-web survives cookie rotation:** a rotated credential is two lines
+  (`__Secure-1PSID`, `__Secure-1PSIDTS`), and the proxy stamped it raw into
+  `X-Ezllm-Gemini-Web-Key`, which Go rejects for the newline. Every request
+  after the first rotation (the first request rotates) failed, which looked
+  like a session expiring in minutes. The header is now base64; the bridge
+  decodes it (`TestGeminiWebStreamAfterCookieRotation`).
+- **Copilot model catalog off the request path:** the live `models.list`
+  catalog refreshes in the background (every 10 minutes, 1 minute after a
+  failure) and is warmed at boot. Requests read the last good list and never
+  wait for a refresh, so a slow or hung CLI no longer stalls the bridge.
+- **Cleanup:** the bridge token file, HTTP startup, stderr tail buffer, raw
+  JSON writer and id helper are one shared copy each (`cmd/ezllm`
+  `bridgeTokenFromFile`/`serveBridge`, `bridgeutil` `util.go`); unused code
+  went (`withPooledChannel`, `landlockSupported`) and three test-only wrappers
+  were removed with their tests pointed at the production entry points. No
+  behaviour change; token files keep their paths.
+
 ## v2.1.0 — Prometheus metrics and bridge updater fixes
 
 - **Metrics:** `GET /metrics` serves Prometheus text exposition, hand-written

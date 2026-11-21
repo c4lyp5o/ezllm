@@ -152,7 +152,7 @@ func (r *Runner) takeConversation(state *cacheRequest) (*cachedConversation, str
 	return selected, prompt, nil
 }
 func (r *Runner) rememberConversation(entry *cachedConversation) bool {
-	limit := cap(r.slots())
+	limit := r.slots().Cap()
 	ttl := r.CacheIdleTimeout
 	if ttl <= 0 {
 		ttl = time.Minute

@@ -3,7 +3,6 @@ package codexbridge
 import (
 	"os"
 	"strings"
-	"sync"
 )
 
 // childEnv is the process environment for one Codex child. It is an ALLOWLIST
@@ -31,25 +30,4 @@ var childEnvPass = map[string]bool{
 	"SSL_CERT_FILE": true, "SSL_CERT_DIR": true,
 	"HTTP_PROXY": true, "HTTPS_PROXY": true, "NO_PROXY": true, "ALL_PROXY": true,
 	"http_proxy": true, "https_proxy": true, "no_proxy": true, "all_proxy": true,
-}
-
-// tailBuffer keeps the last lines of the child's stderr — diagnosis, not noise.
-type tailBuffer struct {
-	mu    sync.Mutex
-	lines []string
-}
-
-func (t *tailBuffer) add(line string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.lines = append(t.lines, line)
-	if len(t.lines) > 40 {
-		t.lines = t.lines[len(t.lines)-40:]
-	}
-}
-
-func (t *tailBuffer) tail() string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return strings.Join(t.lines, " | ")
 }

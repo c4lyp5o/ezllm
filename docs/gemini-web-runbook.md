@@ -48,6 +48,11 @@ honest posture: what breaks, how it breaks, and what the operator does.
   If saving a rotated cookie fails, a warning appears in the server log. Check
   database availability and storage; the bridge retries persistence on a later
   request. Temporary validation credentials do not overwrite a stored key.
+- **Take the cookies from a private window and close it.** A browser left
+  open on the same session keeps rotating `__Secure-1PSIDTS` alongside the
+  bridge, and Google can end a session rotated from two places. Before 2.2.0
+  a login also failed a few minutes after first use for an unrelated reason
+  (the rotated two-line cookie could not travel in a header); upgrade first.
 - **Catalogs re-sync** from the same zero-quota call; the bridge caches for
   30 minutes.
 - **Usage limit (1037)** surfaces as 429 with the upstream code preserved in

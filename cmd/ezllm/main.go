@@ -360,20 +360,24 @@ func run() error {
 	// Bell events to the push channels in Settings → Notifications.
 	srv.StartPush(ctx)
 
+	report := func(id, addr, token, updateFile string, info map[string]any, runtime func() map[string]any) {
+		srv.EnableBridge(id, addr, token, updateFile, info)
+		srv.SetBridgeRuntime(id, runtime)
+	}
 	// Claude subscription surface: loopback-only, off unless EZLLM_CLAUDE_BRIDGE=on.
 	// Enabling it without a usable CLI or login fails the boot loudly.
-	stopClaude, err := startClaudeBridge(ctx, log, srv.EnableBridge)
+	stopClaude, err := startClaudeBridge(ctx, log, report)
 	if err != nil {
 		return err
 	}
 	// ChatGPT subscription surface: loopback-only, off unless EZLLM_CODEX_BRIDGE=on.
-	stopCodex, err := startCodexBridge(ctx, log, srv.EnableBridge)
+	stopCodex, err := startCodexBridge(ctx, log, report)
 	if err != nil {
 		stopClaude()
 		return err
 	}
 	// Antigravity subscription surface: loopback-only, off unless EZLLM_AGY_BRIDGE=on.
-	stopAgy, err := startAgyBridge(ctx, log, srv.EnableBridge)
+	stopAgy, err := startAgyBridge(ctx, log, report)
 	if err != nil {
 		stopCodex()
 		stopClaude()
@@ -382,7 +386,7 @@ func run() error {
 	// GitHub Copilot subscription surface: loopback-only, off unless
 	// EZLLM_COPILOT_BRIDGE=on. This replaces the OAuth/device-flow provider —
 	// the CLI's own login is the credential, ezllm never mints a session.
-	stopCopilot, err := startCopilotBridge(ctx, log, srv.EnableBridge)
+	stopCopilot, err := startCopilotBridge(ctx, log, report)
 	if err != nil {
 		stopAgy()
 		stopCodex()

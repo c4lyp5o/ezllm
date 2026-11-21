@@ -2,12 +2,9 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -56,9 +53,10 @@ var claudeRequiredFlags = []string{
 }
 
 // bridgeReport tells the dashboard a bridge is running (server.EnableBridge):
-// its address, the secret its account key carries, and its boot status. Nil
-// in tests that only exercise the boot checks.
-type bridgeReport func(id, addr, token, updateFile string, info map[string]any)
+// its address, the secret its account key carries, its boot status, and a
+// live admission snapshot (in flight, queued, refused) read on each
+// /admin/bridges call. Nil in tests that only exercise the boot checks.
+type bridgeReport func(id, addr, token, updateFile string, info map[string]any, runtime func() map[string]any)
 
 // startClaudeBridge brings up the loopback surface when enabled. Enabling it
 // without a usable CLI or login is a boot failure, not a silent no-op: this
@@ -84,7 +82,7 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 	cliVersion, drift := claudeCLICheck(resolved)
 	release := releaseState(bin, claudeVersion(cliVersion), claudeQualifiedVersion)
 	login, plan := claudeLoginCheck(resolved, dir)
-	token, err := claudeBridgeToken(strings.TrimSpace(os.Getenv(envBridgeToken)))
+	token, err := bridgeTokenFromFile(strings.TrimSpace(os.Getenv(envBridgeToken)), "claude")
 	if err != nil {
 		return nil, err
 	}
@@ -92,15 +90,21 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 	if err != nil {
 		return nil, err
 	}
+	queue, err := bridgeQueue(os.Getenv, "claude")
+	if err != nil {
+		return nil, err
+	}
 
+	runner := &claudebridge.Runner{
+		Bin:           resolved,
+		ConfigDir:     dir,
+		Timeout:       300 * time.Second,
+		MaxConcurrent: concurrency,
+		MaxQueue:      queue,
+		Logf:          log.Info,
+	}
 	srv := &claudebridge.Server{
-		Runner: &claudebridge.Runner{
-			Bin:           resolved,
-			ConfigDir:     dir,
-			Timeout:       300 * time.Second,
-			MaxConcurrent: concurrency,
-			Logf:          log.Info,
-		},
+		Runner:  runner,
 		Token:   token,
 		Version: server.Version,
 		Info: map[string]any{
@@ -119,15 +123,10 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 	}
 
 	if report != nil {
-		report("claude-sub", addr, token, bridgeUpdateFile(bin), srv.Info)
+		report("claude-sub", addr, token, bridgeUpdateFile(bin), srv.Info, runner.AdmissionStats)
 	}
-	httpSrv := &http.Server{Addr: addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
-	go func() {
-		log.Info("claude bridge listening", "addr", addr, "cli", cliVersion, "release", release, "login", login, "plan", plan, "flags_drift", drift)
-		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error("claude bridge serve", "err", err)
-		}
-	}()
+	log.Info("claude bridge listening", "addr", addr, "cli", cliVersion, "release", release, "login", login, "plan", plan, "flags_drift", drift)
+	httpSrv := serveBridge(log, "claude", addr, srv.Handler())
 	return func() { shutdownBridgeHTTP(httpSrv) }, nil
 }
 
@@ -208,27 +207,6 @@ func claudeLoginCheck(bin, dir string) (state, plan string) {
 		}
 	}
 	return state, plan
-}
-
-// claudeBridgeToken returns the shared secret the account key carries. Like the
-// master key, the default lives on the data volume so it is backed up with the
-// ledger and survives a container rebuild.
-func claudeBridgeToken(path string) (string, error) {
-	if path == "" {
-		path = "/data/claude-bridge.token"
-	}
-	if b, err := os.ReadFile(path); err == nil && strings.TrimSpace(string(b)) != "" {
-		return strings.TrimSpace(string(b)), nil
-	}
-	raw := make([]byte, 24)
-	if _, err := rand.Read(raw); err != nil {
-		return "", fmt.Errorf("claude bridge: cannot generate token: %w", err)
-	}
-	token := hex.EncodeToString(raw)
-	if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
-		return "", fmt.Errorf("claude bridge: cannot write %s: %w", path, err)
-	}
-	return token, nil
 }
 
 // claudeHome is the bridge's login directory, EZLLM_CLAUDE_HOME like every

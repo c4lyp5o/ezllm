@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 	"strings"
 )
 
@@ -39,7 +40,7 @@ func liveTools(ctx context.Context, ex Executor, model, followupChoice string) e
 	if first.Usage.InputTokens+first.Usage.CacheRead <= 0 || first.Usage.OutputTokens <= 0 {
 		return errors.New("tool turn reported no usage")
 	}
-	nonce := "bridge_probe_" + randomHex(12)
+	nonce := "bridge_probe_" + bridgeutil.RandomHex(12)
 	messages = append(messages, map[string]any{"role": "assistant", "content": nil, "tool_calls": calls}, map[string]any{"role": "tool", "tool_call_id": calls[0].ID, "content": nonce})
 	second, a, err := run(followupChoice)
 	if err != nil {

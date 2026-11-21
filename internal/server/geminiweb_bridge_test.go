@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -52,6 +54,9 @@ func bridgeMockUpstream(t *testing.T, statusCode int, genFrames string) *httptes
 				}
 			}
 			fmt.Fprintf(w, ")]}'\n%d\n%s", units+1, part)
+		case strings.Contains(r.URL.Path, "RotateCookies"):
+			http.SetCookie(w, &http.Cookie{Name: "__Secure-1PSIDTS", Value: "fresh-ts"})
+			fmt.Fprint(w, "[]")
 		case strings.Contains(r.URL.Path, "StreamGenerate"):
 			w.Header().Set("Content-Type", "text/event-stream")
 			fmt.Fprint(w, genFrames)
@@ -189,6 +194,54 @@ func TestBridgeChatStream(t *testing.T) {
 	if !strings.Contains(body, `"content":"Hel"`) || !strings.Contains(body, `"content":"lo "`) ||
 		!strings.Contains(body, `"content":"world"`) {
 		t.Errorf("delta tails missing: %s", body)
+	}
+}
+
+func TestGeminiWebStreamAfterCookieRotation(t *testing.T) {
+	frames := genFrame("Hel", false, "") + genFrame("Hello", true, "cid-1")
+	b, id, up := newBridgeFixture(t, frames)
+	var rotations atomic.Int32
+	b.rotate = func(ctx context.Context, c *geminiweb.Client) (string, error) {
+		rotations.Add(1)
+		return c.WithRotationURL(up.URL + "/RotateCookies").Rotate(ctx)
+	}
+	t.Cleanup(func() { b.db.Close() })
+	srv := httptest.NewServer(http.HandlerFunc(b.handleChatCompletions))
+	defer srv.Close()
+	adapter := provider.NewGeminiWeb(srv.URL+geminiWebBridgePrefix, srv.Client())
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	b.now = func() time.Time { return now }
+	for i := 0; i < 3; i++ {
+		if i == 2 {
+			now = now.Add(2 * geminiWebRotateEvery)
+		}
+		key, err := b.db.PickKey(context.Background(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i > 0 && !strings.Contains(key.Plaintext, "\n__Secure-1PSIDTS=fresh-ts") {
+			t.Fatal("rotated multiline credential was not persisted")
+		}
+		req := httptest.NewRequest(http.MethodPost, "/chat/completions", strings.NewReader(
+			`{"model":"gemini-pro","messages":[{"role":"user","content":"hi"}],"stream":true}`))
+		req.RequestURI = ""
+		if err := adapter.PrepareRequest(req.Context(), req, provider.Account{ID: id, Kind: provider.KindGeminiWeb}, key.Plaintext, provider.SurfaceChat); err != nil {
+			t.Fatal(err)
+		}
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil || resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "text/event-stream" ||
+			!bytes.Contains(body, []byte(`"content":"Hel"`)) || !bytes.Contains(body, []byte(`"content":"lo"`)) ||
+			!bytes.Contains(body, []byte(`"finish_reason":"stop"`)) || !bytes.Contains(body, []byte("data: [DONE]")) {
+			t.Fatalf("stream %d incomplete: status %d, read error %v", i, resp.StatusCode, err)
+		}
+	}
+	if got := rotations.Load(); got != 2 {
+		t.Fatalf("rotation attempts = %d, want 2", got)
 	}
 }
 
@@ -380,6 +433,9 @@ func TestBridgeRotateRevertsOnBadInit(t *testing.T) {
 	}
 	db.AddKey(context.Background(), id, "primary", "__Secure-1PSID=abc\n__Secure-1PSIDTS=def")
 	b := newGeminiWebBridge(db, up.URL)
+	b.rotate = func(ctx context.Context, c *geminiweb.Client) (string, error) {
+		return c.WithRotationURL(up.URL + "/RotateCookies").Rotate(ctx)
+	}
 	// Force a rotation on the first call.
 	b.now = func() time.Time { return time.Unix(0, 0).Add(20 * time.Minute) }
 

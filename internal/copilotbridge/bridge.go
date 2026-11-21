@@ -2,16 +2,11 @@ package copilotbridge
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -29,13 +24,14 @@ type Model struct {
 
 // Server exposes OpenAI Chat Completions over the CLI. Only ezllm dials it.
 type Server struct {
-	Runner  Executor
-	Token   string
-	Version string
-	Models  []Model
-	Info    map[string]any
-	Logf    func(format string, args ...any)
-	Now     func() time.Time
+	Runner       Executor
+	Token        string
+	Version      string
+	Models       []Model
+	ModelCatalog *ModelCatalog
+	Info         map[string]any
+	Logf         func(format string, args ...any)
+	Now          func() time.Time
 
 	// Models is the curated seed. Ids the CLI reports for this login are
 	// learned on top of it (learn) and listed AFTER the seed, so the first
@@ -80,9 +76,16 @@ func (s *Server) hasLocked(id string) bool {
 
 // catalog is the seed followed by the learned ids.
 func (s *Server) catalog() []Model {
+	out := append([]Model(nil), s.Models...)
+	if s.ModelCatalog != nil {
+		var live bool
+		out, live = s.ModelCatalog.Get(context.Background(), out)
+		if live {
+			return out
+		}
+	}
 	s.lmu.Lock()
 	defer s.lmu.Unlock()
-	out := append([]Model(nil), s.Models...)
 	for _, id := range s.learned {
 		out = append(out, Model{ID: id, Object: "model", OwnedBy: "copilot-cli"})
 	}
@@ -114,8 +117,12 @@ func (s *Server) Handler() http.Handler {
 		for k, v := range s.Info {
 			info[k] = v
 		}
-		if l := s.catalog(); len(l) > len(s.Models) {
-			info["learned_models"] = l[len(s.Models):]
+		s.lmu.Lock()
+		info["learned_models"] = append([]string(nil), s.learned...)
+		s.lmu.Unlock()
+		if s.ModelCatalog != nil {
+			models, live := s.ModelCatalog.Get(context.Background(), s.Models)
+			info["model_catalog"] = map[string]any{"live": live, "count": len(models)}
 		}
 		if st, ok := s.Runner.(interface{ Stats() map[string]any }); ok {
 			info["runtime"] = st.Stats()
@@ -129,33 +136,37 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
+// authed admits only the bridge token (bridgeutil.Authorized, constant-time).
+// a refusal is a 401 in this bridge's own error shape.
 func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if s.Token == "" || subtle.ConstantTimeCompare([]byte(got), []byte(s.Token)) != 1 {
-			writeRaw(w, http.StatusUnauthorized, ErrorEnvelope("invalid_request_error",
+		if !bridgeutil.Authorized(r, s.Token, false) {
+			bridgeutil.WriteJSONBytes(w, http.StatusUnauthorized, ErrorEnvelope("invalid_request_error",
 				"copilot-bridge: missing or wrong bearer token", "unauthorized"))
 			return
 		}
-		next(w, r)
+		next(bridgeutil.TrackSlotWait(w, r))
 	}
 }
 
 func (s *Server) knownModel(id string) bool {
-	s.lmu.Lock()
-	defer s.lmu.Unlock()
-	return s.hasLocked(id)
+	for _, m := range s.catalog() {
+		if m.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
 	if err != nil {
-		writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error",
+		bridgeutil.WriteJSONBytes(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error",
 			"copilot-bridge: cannot read request body", "invalid_request"))
 		return
 	}
 	if len(body) > maxBodyBytes {
-		writeRaw(w, http.StatusRequestEntityTooLarge, ErrorEnvelope("invalid_request_error",
+		bridgeutil.WriteJSONBytes(w, http.StatusRequestEntityTooLarge, ErrorEnvelope("invalid_request_error",
 			"copilot-bridge: request body too large", "invalid_request"))
 		return
 	}
@@ -166,7 +177,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		if errors.As(err, &u) {
 			code = u.Code
 		}
-		writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", err.Error(), code))
+		bridgeutil.WriteJSONBytes(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", err.Error(), code))
 		return
 	}
 	// Refused before a spawn: learning "not available" from the CLI costs a
@@ -174,12 +185,12 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	// 403 the CLI's own refusal maps to (writeErr), so the router treats both
 	// alike: the model is unavailable, the hop is not unhealthy.
 	if req.Model != "" && req.Model != "auto" && !s.knownModel(req.Model) {
-		writeRaw(w, http.StatusForbidden, ErrorEnvelope("permission_error",
+		bridgeutil.WriteJSONBytes(w, http.StatusForbidden, ErrorEnvelope("permission_error",
 			"copilot-bridge: model "+req.Model+" is not available on this Copilot login (GET /v1/models lists what is)", "model_not_in_plan"))
 		return
 	}
 
-	id := "chatcmpl-" + randomHex(12)
+	id := "chatcmpl-" + bridgeutil.RandomHex(12)
 	created := s.now().Unix()
 	model := req.Model
 	if model == "" {
@@ -238,54 +249,53 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 
 	transport := bridgeutil.NewStream(r.Context(), w, bridgeutil.StreamWriteStall)
 	defer transport.Close()
-	sw := &sseWriter{w: w, id: id, created: created, model: model, transport: transport}
+	sw := newSSEWriter(w, transport, id, created, model)
 	toolsSent := false
 	res, err := run(sw.delta, func(batch Result) error {
-		sw.model = servedModel(model, batch)
-		sw.begin()
+		sw.Model = servedModel(model, batch)
+		sw.Begin()
 		if !sw.sent && batch.Text != "" {
 			if err := sw.delta(batch.Text); err != nil {
 				return err
 			}
 		}
-		if err := sw.chunk(map[string]any{"tool_calls": openAIToolCalls(batch.ToolCalls, true)}, ""); err != nil {
+		if err := sw.Chunk(map[string]any{"tool_calls": openAIToolCalls(batch.ToolCalls, true)}, ""); err != nil {
 			return err
 		}
 		toolsSent = true
 		return nil
 	})
 	if err != nil {
-		if !sw.started {
+		if !sw.Started() {
 			s.writeErr(w, err)
 			return
 		}
 		ne := asEnvelope(err)
-		sw.event(json.RawMessage(ErrorEnvelope(ne.Type, ne.Message, ne.Code)))
-		sw.done()
+		sw.Event(json.RawMessage(ErrorEnvelope(ne.Type, ne.Message, ne.Code)))
+		sw.Done()
 		s.logf("copilot-bridge: stream failed: %s", err)
 		return
 	}
 	s.learn(res.AvailableModels)
-	sw.model = servedModel(model, res)
-	sw.begin()
+	sw.Model = servedModel(model, res)
+	sw.Begin()
 	if !sw.sent && res.Text != "" {
 		// The CLI sent only a final assistant.message (no deltas): without this
 		// the client would get a 200 stream with an empty answer.
-		sw.chunk(map[string]any{"content": res.Text}, "")
+		sw.Chunk(map[string]any{"content": res.Text}, "")
 	}
 	if len(res.ToolCalls) > 0 {
 		if !toolsSent {
-			sw.chunk(map[string]any{"tool_calls": openAIToolCalls(res.ToolCalls, true)}, "")
+			sw.Chunk(map[string]any{"tool_calls": openAIToolCalls(res.ToolCalls, true)}, "")
 		}
-		sw.chunk(map[string]any{}, "tool_calls")
+		sw.Chunk(map[string]any{}, "tool_calls")
 	} else {
-		sw.chunk(map[string]any{}, "stop")
+		sw.Chunk(map[string]any{}, "stop")
 	}
 	if req.IncludeUsage {
-		sw.event(map[string]any{"id": id, "object": "chat.completion.chunk", "created": created,
-			"model": sw.model, "choices": []any{}, "usage": openAIUsage(res.Usage)})
+		sw.Usage(openAIUsage(res.Usage))
 	}
-	sw.done()
+	sw.Done()
 }
 
 // openAIToolCalls renders calls on the wire. A stream delta carries an index per
@@ -339,96 +349,56 @@ func (s *Server) writeErr(w http.ResponseWriter, err error) {
 	if errors.As(err, &f) {
 		switch f.Code {
 		case "vision_unsupported", "invalid_image":
-			writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", f.Msg, f.Code))
+			bridgeutil.WriteJSONBytes(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", f.Msg, f.Code))
 			return
 		case "chat_tools_unsupported":
 			// Refused before anything billable: the router fails over on this
 			// code without parking the hop (proxy.go refusesTools).
-			writeRaw(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", f.Msg, f.Code))
+			bridgeutil.WriteJSONBytes(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", f.Msg, f.Code))
 			return
 		case "not_logged_in":
-			writeRaw(w, http.StatusUnauthorized, ErrorEnvelope("authentication_error", f.Msg, f.Code))
+			bridgeutil.WriteJSONBytes(w, http.StatusUnauthorized, ErrorEnvelope("authentication_error", f.Msg, f.Code))
 			return
 		case "quota_exhausted":
-			writeRaw(w, http.StatusTooManyRequests, ErrorEnvelope("rate_limit_error", f.Msg, f.Code))
+			bridgeutil.WriteJSONBytes(w, http.StatusTooManyRequests, ErrorEnvelope("rate_limit_error", f.Msg, f.Code))
 			return
 		case "queue_full":
-			w.Header().Set("Retry-After", "5")
-			writeRaw(w, http.StatusTooManyRequests, ErrorEnvelope("rate_limit_error", f.Msg, f.Code))
+			w.Header().Set("Retry-After", bridgeutil.QueueFullRetryAfter)
+			bridgeutil.WriteJSONBytes(w, http.StatusTooManyRequests, ErrorEnvelope("rate_limit_error", f.Msg, f.Code))
 			return
 		case "model_not_in_plan":
-			writeRaw(w, http.StatusForbidden, ErrorEnvelope("permission_error", f.Msg, f.Code))
+			bridgeutil.WriteJSONBytes(w, http.StatusForbidden, ErrorEnvelope("permission_error", f.Msg, f.Code))
 			return
 		}
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		writeRaw(w, http.StatusGatewayTimeout, ErrorEnvelope("timeout_error", "copilot-bridge: the CLI did not finish in time", "timeout"))
+		bridgeutil.WriteJSONBytes(w, http.StatusGatewayTimeout, ErrorEnvelope("timeout_error", "copilot-bridge: the CLI did not finish in time", "timeout"))
 		return
 	}
-	writeRaw(w, http.StatusBadGateway, ErrorEnvelope("api_error", "copilot-bridge: "+err.Error(), "cli_failed"))
+	bridgeutil.WriteJSONBytes(w, http.StatusBadGateway, ErrorEnvelope("api_error", "copilot-bridge: "+err.Error(), "cli_failed"))
 }
 
 // ── SSE ─────────────────────────────────────────────────────────────────────
 
 type sseWriter struct {
-	w       http.ResponseWriter
-	id      string
-	created int64
-	model   string
-	started bool
-	sent    bool // at least one content delta reached the client
-	// transport owns write deadlines, flushing and cancellation
-	// (internal/bridgeutil, shared with the other bridges). A failed write is
-	// sticky: no later event or [DONE] reaches the client.
-	transport *bridgeutil.Stream
+	*bridgeutil.ChatChunks
+	sent bool // at least one content delta reached the client
 }
 
-func (s *sseWriter) begin() {
-	if s.started {
-		return
-	}
-	s.started = true
-	s.w.Header().Set("Content-Type", "text/event-stream")
-	s.w.Header().Set("Cache-Control", "no-cache")
-	s.w.Header().Set("Connection", "keep-alive")
-	s.w.WriteHeader(http.StatusOK)
-	_ = s.transport.Flush()
-}
-
-func (s *sseWriter) event(v any) error {
-	var b []byte
-	switch t := v.(type) {
-	case json.RawMessage:
-		b = t
-	default:
-		b, _ = json.Marshal(t)
-	}
-	_, err := s.transport.Write([]byte("data: " + string(b) + "\n\n"))
-	return err
-}
-
-func (s *sseWriter) chunk(delta map[string]any, finish string) error {
-	var fr any
-	if finish != "" {
-		fr = finish
-	}
-	return s.event(map[string]any{
-		"id": s.id, "object": "chat.completion.chunk", "created": s.created, "model": s.model,
-		"choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": fr}},
-	})
+// newSSEWriter streams chat chunks through the shared encoder (transport and
+// framing in internal/bridgeutil). A failed write is sticky: no later event or
+// [DONE] reaches the client.
+func newSSEWriter(w http.ResponseWriter, transport *bridgeutil.Stream, id string, created int64, model string) *sseWriter {
+	return &sseWriter{ChatChunks: bridgeutil.NewChatChunks(w, transport, id, created, model)}
 }
 
 func (s *sseWriter) delta(text string) error {
 	if text == "" {
 		return nil
 	}
-	s.begin()
+	s.Begin()
 	s.sent = true
-	return s.chunk(map[string]any{"content": text}, "")
-}
-
-func (s *sseWriter) done() {
-	_, _ = s.transport.Write([]byte("data: [DONE]\n\n"))
+	return s.Chunk(map[string]any{"content": text}, "")
 }
 
 // ── envelopes ───────────────────────────────────────────────────────────────
@@ -462,20 +432,6 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeRaw(w http.ResponseWriter, status int, body []byte) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_, _ = w.Write(body)
-}
-
-func randomHex(n int) string {
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(b)
 }
 
 // Known output or usage forbids a second generation even if a refusal was

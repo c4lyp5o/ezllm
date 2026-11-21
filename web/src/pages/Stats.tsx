@@ -22,9 +22,9 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area,
 } from 'recharts';
 import {
-  usage, usageHours, RANGE_HOURS, FOCUS_HINT, FOCUS_LABEL, SPLIT_HINT, SPLIT_LABEL,
+  usage, usageHours, turns, RANGE_HOURS, FOCUS_HINT, FOCUS_LABEL, SPLIT_HINT, SPLIT_LABEL,
   focusFormat, focusValue, RANGE_LABEL,
-  type FocusKey, type RangeKey, type SplitKey, type UsageResp, type UsageRow,
+  type FocusKey, type RangeKey, type SplitKey, type TurnsResp, type UsageResp, type UsageRow,
 } from '../utils/api';
 import {
   ChartTooltip, BarList, CompositionBar, Panel, Sparkline, StatCard, VIZ, axisProps,
@@ -539,9 +539,78 @@ export default function Stats() {
         </>
       )}
 
+      <TurnLengths range={range} />
+
       <Reveal>
         <RecentFeed />
       </Reveal>
     </div>
+  );
+}
+
+// Fewer turns than this and the numbers say little; the row is dimmed.
+const FEW_TURNS = 5;
+
+// TurnLengths: how many requests each agent-loop turn took, per model. A turn
+// is everything between two messages a person sends (tool calls and their
+// results included), so a model that stops early — hands back "still
+// unfinished" after a few steps — shows a low median and few long turns.
+// Turns come from calls.turn_id (v37); older rows are not counted.
+function TurnLengths({ range }: { range: RangeKey }) {
+  const [data, setData] = useState<TurnsResp | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    setErr(null);
+    turns(range).then((d) => { if (live) setData(d); }).catch((e) => { if (live) setErr(e instanceof Error ? e.message : String(e)); });
+    return () => { live = false; };
+  }, [range]);
+  const share = (v: number) => `${Math.round(v * 100)}%`;
+  return (
+    <Reveal>
+      <Panel label={<SectionLabel>Requests per turn · {RANGE_LABEL[range]}</SectionLabel>} bodyClass="p-0">
+        <p className="px-5 pt-3 text-[12px] text-mute">
+          A turn is one message from a person plus every tool call the model made before it answered. Low numbers next to
+          a model that should be doing long tasks mean it stops early. Counted from the 2.2.0 upgrade on.
+        </p>
+        {err && <p role="alert" className="px-5 py-3 text-[13px] text-bad">{err}</p>}
+        {data && data.rows.length === 0 && (
+          <div className="px-5 py-4"><EmptyState title="No turns recorded yet" hint="Turns are counted for requests made after the 2.2.0 upgrade." /></div>
+        )}
+        {data && data.rows.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="mt-2 w-full min-w-[760px] text-[13px]">
+              <thead>
+                <tr className="border-b border-line text-left text-[11px] text-mute">
+                  <th className="px-5 py-2.5 font-medium">model</th>
+                  <th className="px-3 py-2.5 font-medium">provider</th>
+                  <th className="px-3 py-2.5 text-right font-medium">turns</th>
+                  <th className="px-3 py-2.5 text-right font-medium" title="half of the turns took this many requests or fewer">median</th>
+                  <th className="px-3 py-2.5 text-right font-medium" title="nine in ten turns took this many requests or fewer">p90</th>
+                  <th className="px-3 py-2.5 text-right font-medium">longest</th>
+                  <th className="px-3 py-2.5 text-right font-medium" title="turns answered in one request, with no tool calls">one request</th>
+                  <th className="px-5 py-2.5 text-right font-medium" title={`turns that ran ${data.long_turn} requests or more`}>{data.long_turn}+ requests</th>
+                </tr>
+              </thead>
+              <tbody className="font-mono tnum">
+                {data.rows.map((r) => (
+                  <tr key={`${r.account}|${r.model}`} title={r.turns < FEW_TURNS ? 'Too few turns to judge' : undefined}
+                    className={cx('border-b border-line/50 last:border-0 hover:bg-wash', r.turns < FEW_TURNS && 'opacity-60')}>
+                    <td className="max-w-[260px] truncate px-5 py-2 font-sans text-ink" title={r.model}>{r.model}</td>
+                    <td className="max-w-[180px] truncate px-3 py-2 font-sans text-dim" title={r.account}>{r.account}</td>
+                    <td className="px-3 py-2 text-right text-ink">{nfmt(r.turns)}</td>
+                    <td className="px-3 py-2 text-right text-ink">{nfmt(r.median)}</td>
+                    <td className="px-3 py-2 text-right text-dim">{nfmt(r.p90)}</td>
+                    <td className="px-3 py-2 text-right text-dim">{nfmt(r.max)}</td>
+                    <td className="px-3 py-2 text-right text-dim">{share(r.single_share)}</td>
+                    <td className="px-5 py-2 text-right text-dim">{share(r.long_share)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
+    </Reveal>
   );
 }

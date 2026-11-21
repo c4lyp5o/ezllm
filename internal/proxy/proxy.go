@@ -19,6 +19,7 @@ import (
 	"net"
 	"net/http"
 	"net/textproto"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,6 +28,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 	"github.com/c4lyp5o/ezllm/internal/jsonbody"
 	"github.com/c4lyp5o/ezllm/internal/provider"
 	"github.com/c4lyp5o/ezllm/internal/ratelimit"
@@ -71,6 +73,9 @@ type UsageTapper struct {
 	event     []byte
 	skipEvent bool
 	terminal  bool
+	// responseID is the Responses wire's response id (response.created), so
+	// a later request naming it as previous_response_id joins the same turn.
+	responseID string
 }
 
 // NewUsageTapperFor builds a tapper that normalizes with the account's
@@ -117,7 +122,10 @@ func (t *UsageTapper) Observe(line []byte) {
 func (t *UsageTapper) observePayload(line []byte) {
 	if t.surface != provider.SurfaceChat {
 		var event struct {
-			Type string `json:"type"`
+			Type     string `json:"type"`
+			Response struct {
+				ID string `json:"id"`
+			} `json:"response"`
 		}
 		if json.Unmarshal(bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:"))), &event) == nil {
 			switch t.surface {
@@ -125,6 +133,9 @@ func (t *UsageTapper) observePayload(line []byte) {
 				t.terminal = t.terminal || event.Type == "message_stop"
 			case provider.SurfaceResponses:
 				t.terminal = t.terminal || event.Type == "response.completed" || event.Type == "response.incomplete" || event.Type == "response.failed"
+				if t.responseID == "" && event.Response.ID != "" {
+					t.responseID = event.Response.ID
+				}
 			}
 		}
 	}
@@ -278,10 +289,16 @@ type LearnedReasoning struct {
 
 // Result reports the outcome of one request.
 type Result struct {
-	Status        int
-	Stream        bool
-	TTFTms        *int64
-	Totalms       *int64
+	Status  int
+	Stream  bool
+	TTFTms  *int64
+	Totalms *int64
+	// SlotWaitms is how long a subscription bridge queued the request for a
+	// CLI slot (part of Totalms); nil for every other upstream.
+	SlotWaitms *int64
+	// ResponseID is the native Responses wire's response id (empty for other
+	// wires and translated hops); the server chains stateful turns with it.
+	ResponseID    string
 	Usage         *store.Usage
 	EndpointID    string
 	UpstreamModel string
@@ -1054,8 +1071,8 @@ func prepareHopBodyWire(body []byte, rt Route, doc *jsonbody.BodyDoc) ([]byte, e
 	if isGeminiNativeAudio(rt, rt.Surface) {
 		return geminiAudioRequest(body, rt.Surface)
 	}
-	// Cloudflare MeloTTS takes {"prompt": text}, not the OpenAI
-	// {"model","input","voice"} envelope.
+	// Cloudflare uses native TTS payloads: Deepgram Aura takes "text",
+	// while MeloTTS takes "prompt", not the OpenAI input envelope.
 	if rt.Surface == provider.SurfaceAudioTTS && isCloudflare(rt) {
 		var in struct {
 			Input string `json:"input"`
@@ -1068,7 +1085,11 @@ func prepareHopBodyWire(body []byte, rt Route, doc *jsonbody.BodyDoc) ([]byte, e
 		if text == "" {
 			text = in.Text
 		}
-		return json.Marshal(map[string]any{"prompt": text})
+		field := "prompt"
+		if strings.HasPrefix(rt.Model, "@cf/deepgram/aura-") {
+			field = "text"
+		}
+		return json.Marshal(map[string]any{field: text})
 	}
 	// Cloudflare flux-2 models require a multipart body (prompt as a form
 	// field) rather than the JSON envelope. Build it here so the proxy's
@@ -1277,8 +1298,29 @@ func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, bod
 		Stream:        stream,
 		EndpointID:    resp.Header.Get("x-opencode-endpoint-id"),
 		UpstreamModel: resp.Header.Get("x-opencode-upstream-model-id"),
+		SlotWaitms:    bridgeSlotWait(upReq.URL, resp.Header),
 	}
 	return resp, res, start, nil
+}
+
+// bridgeSlotWait reads how long a subscription bridge held the request in its
+// slot queue (bridgeutil.SlotWaitHeader). Only a loopback upstream is trusted:
+// the bridges are in-process, and a remote provider's header must not write
+// into the ledger.
+func bridgeSlotWait(u *url.URL, h http.Header) *int64 {
+	v := h.Get(bridgeutil.SlotWaitHeader)
+	if v == "" || u == nil {
+		return nil
+	}
+	host := u.Hostname()
+	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		return nil
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n < 0 {
+		return nil
+	}
+	return &n
 }
 
 // gatewayFault answers the client with a 502 of ezllm's own making (body
@@ -1396,15 +1438,18 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 				io.Closer
 			}{translated, resp.Body}
 		}
-		// streamCopy writes the header before its first byte, so the status
+		// streamCopyTracked writes the header before its first byte, so the status
 		// is committed the moment it returns — regardless of a copy error.
 		res.Committed = true
-		ttft, usage, first, copyErr := d.streamCopyTracked(ctx, w, resp, rt.Surface, tapConvention(rt, cross), start, !cross && resp.StatusCode < 400)
+		ttft, tap, first, copyErr := d.streamCopyTap(ctx, w, resp, rt.Surface, tapConvention(rt, cross), start, !cross && resp.StatusCode < 400)
 		res.TTFTms = msAtLeastOne(ttft)
 		if sourceTap != nil {
 			res.Usage = sourceTap.Usage()
-		} else if usage != nil {
+		} else if usage := tap.Usage(); usage != nil {
 			res.Usage = usage
+		}
+		if !cross {
+			res.ResponseID = tap.responseID
 		}
 		if copyErr != nil {
 			// The client has already received a 200 + partial stream, so we
@@ -1474,6 +1519,9 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 		}
 		// Accounting belongs to the source wire, even if client conversion fails.
 		res.Usage = tapJSONUsage(raw, rt.EffectiveWire(), rt.Account.UsageConvention)
+		if !cross && rt.Surface == provider.SurfaceResponses && res.Status < 400 {
+			res.ResponseID = responsesBodyID(raw)
+		}
 		// A translated hop re-encodes every byte the client sees into its own
 		// shape. The err-column snippet is captured from the upstream's OWN
 		// words before any re-shaping. The codec produces the translated
@@ -2164,7 +2212,7 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 	return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: policy.AttemptBudget, LearnedReasoning: result.LearnedReasoning}, errors.New("proxy: all combo endpoints are in five-minute cooldown")
 }
 
-// streamCopy copies SSE upstream->client with a Flush per chunk, observing
+// streamCopyTracked copies SSE upstream->client with a Flush per chunk, observing
 // usage events without altering a single byte. Returns (ttft, usage, err) where
 // err is non-nil when the stream was truncated — the caller records it, since
 // the 200 status has already been sent and cannot be changed.
@@ -2178,11 +2226,17 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 // The third return is the first non-terminal SSE data payload. A streamed
 // error response carries its reason in there, and the ledger's err column is
 // blank for streams unless the caller is handed it.
-func (d *Dispatcher) streamCopy(ctx context.Context, w http.ResponseWriter, resp *http.Response, surface provider.Surface, conv provider.UsageConvention, start time.Time) (time.Duration, *store.Usage, []byte, error) {
-	return d.streamCopyTracked(ctx, w, resp, surface, conv, start, false)
+//
+// requireTerminal treats a stream that ends without its terminal event as
+// truncated (native streams whose wire defines one).
+func (d *Dispatcher) streamCopyTracked(ctx context.Context, w http.ResponseWriter, resp *http.Response, surface provider.Surface, conv provider.UsageConvention, start time.Time, requireTerminal bool) (time.Duration, *store.Usage, []byte, error) {
+	ttft, tap, first, err := d.streamCopyTap(ctx, w, resp, surface, conv, start, requireTerminal)
+	return ttft, tap.Usage(), first, err
 }
 
-func (d *Dispatcher) streamCopyTracked(ctx context.Context, w http.ResponseWriter, resp *http.Response, surface provider.Surface, conv provider.UsageConvention, start time.Time, requireTerminal bool) (time.Duration, *store.Usage, []byte, error) {
+// streamCopyTap is streamCopyTracked returning the tapper itself, for callers
+// that read more than usage from it (the Responses id).
+func (d *Dispatcher) streamCopyTap(ctx context.Context, w http.ResponseWriter, resp *http.Response, surface provider.Surface, conv provider.UsageConvention, start time.Time, requireTerminal bool) (time.Duration, *UsageTapper, []byte, error) {
 	var ttft time.Duration
 	var firstEvent bool
 	var firstPayload []byte
@@ -2213,7 +2267,7 @@ func (d *Dispatcher) streamCopyTracked(ctx context.Context, w http.ResponseWrite
 		piece, rerr := br.ReadSlice('\n')
 		if len(piece) > 0 {
 			if _, err := w.Write(piece); err != nil {
-				return ttft, tapper.Usage(), firstPayload, fmt.Errorf("client write: %w", err)
+				return ttft, tapper, firstPayload, fmt.Errorf("client write: %w", err)
 			}
 			complete := rerr == nil || rerr == io.EOF
 			line := piece
@@ -2272,16 +2326,16 @@ func (d *Dispatcher) streamCopyTracked(ctx context.Context, w http.ResponseWrite
 		}
 		if rerr == io.EOF {
 			if requireTerminal && !tapper.terminal {
-				return ttft, tapper.Usage(), firstPayload, errors.New("upstream stream ended without a terminal event")
+				return ttft, tapper, firstPayload, errors.New("upstream stream ended without a terminal event")
 			}
-			return ttft, tapper.Usage(), firstPayload, nil
+			return ttft, tapper, firstPayload, nil
 		}
 		// The upstream died mid-stream. The 200 is already committed, so the
 		// only honest signal left is a terminal SSE error frame in the
 		// client's dialect — otherwise the client is left with a silent EOF.
 		writeStreamErrorFrame(w, surface, "upstream connection lost")
 		flush()
-		return ttft, tapper.Usage(), firstPayload, fmt.Errorf("upstream read: %w", rerr)
+		return ttft, tapper, firstPayload, fmt.Errorf("upstream read: %w", rerr)
 	}
 }
 
@@ -2354,6 +2408,17 @@ func sseUsageRaw(line []byte, surface provider.Surface) map[string]any {
 		}
 	}
 	return nil
+}
+
+// responsesBodyID reads a complete Responses body's id ("" when absent).
+func responsesBodyID(raw []byte) string {
+	var body struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(raw, &body) != nil {
+		return ""
+	}
+	return body.ID
 }
 
 // tapJSONUsage extracts usage from a complete (non-streamed) JSON body.
@@ -2446,7 +2511,8 @@ func containsFold(names []string, k string) bool {
 func copyResponseHeaders(w http.ResponseWriter, resp *http.Response) {
 	for k, vs := range resp.Header {
 		canonical := http.CanonicalHeaderKey(k)
-		if hopByHop[canonical] || canonical == "Set-Cookie" || canonical == "Set-Cookie2" || canonical == "Clear-Site-Data" {
+		if hopByHop[canonical] || canonical == "Set-Cookie" || canonical == "Set-Cookie2" || canonical == "Clear-Site-Data" ||
+			canonical == bridgeutil.SlotWaitHeader {
 			continue
 		}
 		for _, v := range vs {

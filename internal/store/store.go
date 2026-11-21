@@ -27,7 +27,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 36
+const schemaVersion = 37
 
 // Stream-outcome vocabulary (schema v34, docs/hop-health-design.md). Stored in
 // calls.stream_outcome; an empty value means the request was not a stream.
@@ -330,6 +330,12 @@ func (d *DB) migrate() error {
 		if err := d.alterCallsStreamOutcome(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate calls stream outcome: %w", err)
 		}
+		if err := d.alterCallsSlotWait(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate calls slot wait: %w", err)
+		}
+		if err := d.alterCallsTurnID(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate calls turn id: %w", err)
+		}
 		if err := d.alterAccountMaxContext(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate accounts max context: %w", err)
 		}
@@ -589,6 +595,33 @@ func (d *DB) alterCallsIP(ctx context.Context) error {
 		return err
 	}
 	_, err = d.w.ExecContext(ctx, `ALTER TABLE calls ADD COLUMN ip TEXT NOT NULL DEFAULT ''`)
+	return err
+}
+
+// alterCallsSlotWait adds calls.slot_wait_ms (v37). Older rows stay NULL: the
+// wait was never measured, and 0 would claim it was.
+func (d *DB) alterCallsSlotWait(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "calls")
+	if err != nil || !exists {
+		return err
+	}
+	if ok, err := hasColumn(ctx, d.w, "calls", "slot_wait_ms"); err != nil || ok {
+		return err
+	}
+	_, err = d.w.ExecContext(ctx, `ALTER TABLE calls ADD COLUMN slot_wait_ms INTEGER`)
+	return err
+}
+
+// alterCallsTurnID adds calls.turn_id (v37). Older rows stay ” (unknown).
+func (d *DB) alterCallsTurnID(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "calls")
+	if err != nil || !exists {
+		return err
+	}
+	if ok, err := hasColumn(ctx, d.w, "calls", "turn_id"); err != nil || ok {
+		return err
+	}
+	_, err = d.w.ExecContext(ctx, `ALTER TABLE calls ADD COLUMN turn_id TEXT NOT NULL DEFAULT ''`)
 	return err
 }
 

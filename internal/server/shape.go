@@ -29,6 +29,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"hash"
 	"net/http"
 	"sync"
 
@@ -161,6 +162,95 @@ func captureShapeDoc(doc *jsonbody.BodyDoc, surface provider.Surface) shape {
 	sum := h.Sum(nil)
 	s.PrefixSHA = hex.EncodeToString(sum[:8]) // 16 hex chars: ample for grouping
 	return s
+}
+
+// turnOf derives the ledger's turn key (calls.turn_id, schema v37): every
+// request of one agent loop — a person's message followed by the model's tool
+// calls and their results — shares it, and the next message a person sends
+// starts a new one. Requests per turn is how far a model works before it hands
+// control back, which is the signal for a model that stops early
+// (docs/API.md, GET /admin/turns).
+//
+// The key hashes the immutable conversation prefix through the newest human
+// message, scoped by surface and the caller's session when supplied. Responses
+// requests also include previous_response_id to distinguish stateful histories.
+// Tool results are not human: a chat tool role never is, and an Anthropic user
+// message carrying any tool_result block is an agent step. Run it on the
+// client's body before compression. Compaction starts a new key; bodies without
+// a human message return "" so stateful tool steps can use turnChain.
+func turnOf(doc *jsonbody.BodyDoc, surface provider.Surface, session string) string {
+	if n := len(doc.Bytes()); n == 0 || n > maxShapeBody || doc.Err() != nil {
+		return ""
+	}
+	root := doc.Map()
+	if root == nil {
+		return ""
+	}
+	key := "messages"
+	if surface == provider.SurfaceResponses {
+		key = "input"
+	}
+	msgs, ok := root[key].([]any)
+	if !ok || len(msgs) == 0 {
+		return ""
+	}
+	last := -1
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if isHumanMessage(msgs[i]) {
+			last = i
+			break
+		}
+	}
+	if last < 0 {
+		return ""
+	}
+	h := sha256.New()
+	previous := ""
+	if surface == provider.SurfaceResponses {
+		previous = previousResponseID(doc)
+	}
+	writeCanon(h, []any{string(surface), session, previous, msgs[:last+1]})
+	return hex.EncodeToString(h.Sum(nil)[:8])
+}
+
+// isHumanMessage reports a message a person wrote, as opposed to a tool result
+// the agent loop fed back.
+func isHumanMessage(v any) bool {
+	m, ok := v.(map[string]any)
+	if !ok || m["role"] != "user" {
+		return false
+	}
+	if t, ok := m["type"].(string); ok && t != "message" { // Responses items
+		return false
+	}
+	blocks, ok := m["content"].([]any)
+	if !ok {
+		return true // plain string content
+	}
+	for _, b := range blocks {
+		if bm, _ := b.(map[string]any); bm != nil && bm["type"] == "tool_result" {
+			// Any tool result makes it an agent step: Claude Code appends text
+			// blocks (system reminders) beside its tool results, and those are
+			// not a person speaking.
+			return false
+		}
+	}
+	return true
+}
+
+// writeCanon streams v's canonical JSON into h without its cache_control keys
+// (turn keys only; the json.Marshal fallback never runs on decoded bodies).
+func writeCanon(h hash.Hash, v any) {
+	e := canonEncoders.Get().(*canonEncoder)
+	e.w, e.skipCacheControl = h, true
+	ok := e.encode(v)
+	e.w, e.buf, e.skipCacheControl = nil, e.buf[:0], false
+	canonEncoders.Put(e)
+	if !ok {
+		if b, err := json.Marshal(v); err == nil {
+			h.Write(b)
+		}
+	}
 }
 
 // canonEncoders pools the encoders (and their chunk buffers) that feed the

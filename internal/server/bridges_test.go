@@ -36,6 +36,24 @@ func TestBridgesListsBothOffByDefault(t *testing.T) {
 	}
 }
 
+// Each bridge id is its provider preset's key (claude-sub, chatgpt-sub, …). The
+// Copilot bridge was "github-copilot", the retired OAuth provider's name, so the
+// dashboard listed it apart from its copilot-sub preset and login.
+func TestBridgeIDsMatchTheirPresets(t *testing.T) {
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
+	var ids []string
+	for _, b := range h.server.bridges.list {
+		ids = append(ids, b.ID)
+	}
+	if got, want := strings.Join(ids, ","), "claude-sub,chatgpt-sub,antigravity-sub,copilot-sub"; got != want {
+		t.Fatalf("bridge ids = %s, want %s", got, want)
+	}
+	h.server.EnableBridge("copilot-sub", "127.0.0.1:8793", bridgeSecret, "", nil)
+	if _, resp := jsonDo(t, h, "GET", "/admin/bridges", "tok-admin", nil); !strings.Contains(resp, `"id":"copilot-sub"`) || strings.Contains(resp, "github-copilot") {
+		t.Fatalf("copilot bridge not listed as copilot-sub: %s", resp)
+	}
+}
+
 // bridgeUpstream is a fake bridge that only answers the shared secret.
 func bridgeUpstream(authed *atomic.Int64) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -158,5 +176,42 @@ func TestBridgeOffKeyTestNamesTheFix(t *testing.T) {
 	}
 	if !strings.Contains(resp, "EZLLM_CODEX_BRIDGE=on") || !strings.Contains(resp, "codex-bridge-runbook") {
 		t.Fatalf("failure does not name the fix: %s", resp)
+	}
+}
+
+// A running bridge's card shows its live admission numbers, read on every
+// request (not the boot snapshot); an off bridge carries none.
+func TestBridgesServeLiveRuntime(t *testing.T) {
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
+	var queued atomic.Int64
+	h.server.EnableBridge("claude-sub", "127.0.0.1:8790", bridgeSecret, "", nil)
+	h.server.SetBridgeRuntime("claude-sub", func() map[string]any {
+		return map[string]any{"in_flight": 1, "queued": queued.Load(), "max_queue": 8, "rejected_queue_full": 0}
+	})
+	h.server.SetBridgeRuntime("chatgpt-sub", func() map[string]any { return map[string]any{"queued": 99} })
+	queued.Store(3)
+	_, resp := jsonDo(t, h, "GET", "/admin/bridges", "tok-admin", nil)
+	if !strings.Contains(resp, `"runtime":{"in_flight":1,"max_queue":8,"queued":3,"rejected_queue_full":0}`) {
+		t.Fatalf("claude-sub runtime missing or stale: %s", resp)
+	}
+	if strings.Contains(resp, `"queued":99`) {
+		t.Fatalf("an off bridge served runtime: %s", resp)
+	}
+}
+
+// Diagnostics carries only the admission counters: the Copilot runtime's pool
+// and timing detail stays on the bridge's own /status.
+func TestDiagnosticsCarryOnlyAdmissionCounters(t *testing.T) {
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
+	h.server.EnableBridge("copilot-sub", "127.0.0.1:8793", bridgeSecret, "", nil)
+	h.server.SetBridgeRuntime("copilot-sub", func() map[string]any {
+		return map[string]any{"in_flight": 0, "queued": 2, "max_queue": 8, "rejected_queue_full": 5, "pool": map[string]any{"warm": 1}}
+	})
+	code, _, body := h.do("GET", "/admin/settings/diagnostics", "tok-admin", "")
+	if code != http.StatusOK || !strings.Contains(body, `"admission":{"in_flight":0,"max_queue":8,"queued":2,"rejected_queue_full":5}`) {
+		t.Fatalf("diagnostics = %d %s", code, body)
+	}
+	if strings.Contains(body, `"pool"`) {
+		t.Fatalf("diagnostics leaked runtime detail: %s", body)
 	}
 }

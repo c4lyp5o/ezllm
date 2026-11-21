@@ -200,6 +200,3 @@ func landlockDie(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "codex-bridge landlock: "+format+"\n", args...)
 	os.Exit(126)
 }
-
-// landlockSupported is true on builds that can confine the child.
-const landlockSupported = true

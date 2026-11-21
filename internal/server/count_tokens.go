@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"sync/atomic"
+	"unicode/utf8"
 
-	"github.com/c4lyp5o/ezllm/internal/compress"
 	"github.com/c4lyp5o/ezllm/internal/jsonbody"
 	"github.com/c4lyp5o/ezllm/internal/provider"
 )
@@ -71,8 +71,11 @@ func (s *Server) countTokens(w http.ResponseWriter, r *http.Request) {
 }
 
 // estimatePromptTokens sizes what the model would read: system, messages and
-// tool definitions, as JSON. The JSON punctuation makes it lean high, which is
-// the safe side for a client deciding when to compact its context.
+// tool definitions, as JSON. It must lean high, the safe side for a client
+// deciding when to compact its context. compress.EstimateTokens (4 characters
+// per token) is too low here: Anthropic counted 25,636 tokens for 60,000
+// characters of Markdown and 4,329 for a 10 KB Go file (claude-sonnet-5-5,
+// 2026-11-21), about 2.35 characters per token, so this uses 2.
 func estimatePromptTokens(m map[string]any) int64 {
 	prompt := map[string]any{}
 	for _, k := range []string{"system", "messages", "tools", "tool_choice"} {
@@ -84,5 +87,8 @@ func estimatePromptTokens(m map[string]any) int64 {
 	if err != nil {
 		return 1
 	}
-	return compress.EstimateTokens(string(raw))
+	return int64(utf8.RuneCount(raw)/estimateCharsPerToken) + 1
 }
+
+// estimateCharsPerToken is the estimate's characters per token (see above).
+const estimateCharsPerToken = 2

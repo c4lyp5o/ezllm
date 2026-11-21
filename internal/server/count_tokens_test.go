@@ -121,3 +121,16 @@ func TestCountTokensRefusesBadRequests(t *testing.T) {
 		t.Fatal("unknown model counted")
 	}
 }
+
+// TestCountTokensEstimateLeansHigh: the fallback must not undercount, or a
+// client compacts too late. Anthropic measured about 2.35 characters per token
+// on prose and code; the old 4-per-token estimate came out ~40% low.
+func TestCountTokensEstimateLeansHigh(t *testing.T) {
+	text := strings.Repeat("The bridge answers count_tokens with an estimate. ", 200) // 10,000 chars
+	got := estimatePromptTokens(map[string]any{
+		"messages": []any{map[string]any{"role": "user", "content": text}},
+	})
+	if floor := int64(len(text) * 100 / 235); got < floor {
+		t.Fatalf("estimate %d is below the measured Anthropic density floor %d", got, floor)
+	}
+}

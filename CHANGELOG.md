@@ -8,8 +8,8 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   calls instead of 404. `proxy/count_tokens.go` `CountTokens` asks up to three
   candidate hops on the Anthropic wire (skipping parked ones) and returns the
   first `input_tokens`; a miss never cools a hop down. Otherwise
-  `server/count_tokens.go` estimates over system, messages and tools with
-  `compress.EstimateTokens`. `X-Ezllm-Token-Count` and
+  `server/count_tokens.go` estimates over system, messages and tools at 2
+  characters per token, above the ~2.35 Anthropic measured, so it leans high. `X-Ezllm-Token-Count` and
   `ezllm_count_tokens_total{source}` show how often each path answers.
 - **Per-key spend cap (schema v38):** `client_tokens.cap_usd`, enforced in
   `authenticate` by `server/spend_cap.go` `admitSpend`. Spend is

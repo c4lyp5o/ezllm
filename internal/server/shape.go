@@ -238,12 +238,13 @@ func isHumanMessage(v any) bool {
 	return true
 }
 
-// writeCanon streams v's canonical JSON into h (falling back to json.Marshal).
+// writeCanon streams v's canonical JSON into h without its cache_control keys
+// (turn keys only; the json.Marshal fallback never runs on decoded bodies).
 func writeCanon(h hash.Hash, v any) {
 	e := canonEncoders.Get().(*canonEncoder)
-	e.w = h
+	e.w, e.skipCacheControl = h, true
 	ok := e.encode(v)
-	e.w, e.buf = nil, e.buf[:0]
+	e.w, e.buf, e.skipCacheControl = nil, e.buf[:0], false
 	canonEncoders.Put(e)
 	if !ok {
 		if b, err := json.Marshal(v); err == nil {

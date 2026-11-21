@@ -19,6 +19,11 @@ import (
 type canonEncoder struct {
 	w   io.Writer
 	buf []byte
+	// skipCacheControl drops every "cache_control" key. Turn keys set it:
+	// Anthropic clients move their cache breakpoint to the newest message on
+	// every request, which must not split one turn. Shape hashes leave it off
+	// (they stay byte-identical to json.Marshal).
+	skipCacheControl bool
 }
 
 const canonChunk = 32 << 10
@@ -72,6 +77,9 @@ func (e *canonEncoder) value(v any) bool {
 	case map[string]any:
 		keys := make([]string, 0, len(x))
 		for k := range x {
+			if e.skipCacheControl && k == "cache_control" {
+				continue
+			}
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)

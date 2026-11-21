@@ -622,7 +622,9 @@ A turn is one message from a person plus every request the model made before it 
 tool calls and their results. The gateway stamps each ledger row with `calls.turn_id`, a hash of
 the conversation prefix through the newest human message, taken from the client's body before
 compression and scoped by API surface and `X-Ezllm-Session` when supplied. A new human message
-in a stateful Responses request also includes `previous_response_id` in its key. Chat `tool` messages, Anthropic `user` messages
+in a stateful Responses request also includes `previous_response_id` in its key. `cache_control`
+markers are left out, since Anthropic clients move them to the newest message on every request.
+Chat `tool` messages, Anthropic `user` messages
 carrying any `tool_result` block (even with text blocks beside it, as Claude Code sends) and
 Responses `function_call_output` items are not human, so they stay in the same turn. A stateful
 Responses step (`previous_response_id` with tool outputs only) joins the turn of the response it

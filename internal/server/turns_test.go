@@ -211,3 +211,19 @@ func TestTurnKeySeparatesStatefulHumanTurns(t *testing.T) {
 		t.Fatalf("different stateful histories share turn: %q vs %q", a, b)
 	}
 }
+
+// Claude Code moves its cache breakpoint to the newest message on every
+// request: the human message carries cache_control on the first step and loses
+// it once tool results follow. The marker must not split the turn.
+func TestTurnKeyIgnoresMovingCacheControl(t *testing.T) {
+	step1 := `{"messages":[{"role":"user","content":[{"type":"text","text":"fix it","cache_control":{"type":"ephemeral"}}]}]}`
+	step2 := `{"messages":[{"role":"user","content":[{"type":"text","text":"fix it"}]},{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"x","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok","cache_control":{"type":"ephemeral"}}]}]}`
+	a, b := turnFor(t, step1, provider.SurfaceAnthropic), turnFor(t, step2, provider.SurfaceAnthropic)
+	if a == "" || a != b {
+		t.Fatalf("cache breakpoint split one turn: %q vs %q", a, b)
+	}
+	next := `{"messages":[{"role":"user","content":[{"type":"text","text":"fix it"}]},{"role":"assistant","content":"done"},{"role":"user","content":[{"type":"text","text":"now B","cache_control":{"type":"ephemeral"}}]}]}`
+	if c := turnFor(t, next, provider.SurfaceAnthropic); c == a {
+		t.Fatal("next human message kept the old turn")
+	}
+}

@@ -8,6 +8,8 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   event, preserving HTTP 429 and `Retry-After` on queue refusal and recording
   slot wait. Turn keys include the conversation prefix, surface, optional session
   and stateful Responses parent so unrelated histories do not merge in Stats.
+  `cache_control` markers are left out of the key, so a moving cache breakpoint
+  no longer splits one Claude Code turn in two.
 
 - The Copilot bridge's registry id is `copilot-sub` (was `github-copilot`, the
   retired provider's name), matching its preset key like the other bridges.

@@ -718,6 +718,17 @@ while the SAME model on `opencode-go` was 0/754.
 
 ### v2.2.0 — shared bridge admission, requests per turn, shared bridge helpers
 
+- `server/count_tokens.go` `countTokens` serves `POST /v1/messages/count_tokens`:
+  resolve like Messages, then `proxy/count_tokens.go` `CountTokens` asks up to
+  three hops whose `EffectiveWire` is Anthropic (`parked` skips cooled hops;
+  misses never record a cooldown). Fallback `estimatePromptTokens` counts
+  `estimateCharsPerToken` (2) characters per token, deliberately high. `countTokensServed` feeds
+  `ezllm_count_tokens_total`.
+- `server/spend_cap.go` `admitSpend` runs in `authenticate` after the token
+  budget; `store/client_budget.go` `ClientSpendStatus` prices the window with
+  the cost report's rules. `Server.spendCache` holds answers for
+  `spendCacheTTL`; `handleToken` calls `forgetSpend` after a PATCH. Column
+  `client_tokens.cap_usd` (v38, `store.go` `alterClientTokenCapUSD`).
 - `internal/bridgeutil/proc_unix.go` `SetProcessGroup` / `KillGroup` (Windows
   stubs in `proc_windows.go`) start a bridge CLI in its own process group and
   kill the whole group on cancel. Claude, Codex (app-server and exec fallback)

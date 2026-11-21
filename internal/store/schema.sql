@@ -227,6 +227,7 @@ CREATE TABLE IF NOT EXISTS client_tokens (
   enabled     INTEGER NOT NULL DEFAULT 1,
   cap_window  TEXT NOT NULL DEFAULT 'monthly',
   cap_tokens  INTEGER NOT NULL DEFAULT 0,        -- 0 = unlimited
+  cap_usd     REAL NOT NULL DEFAULT 0,           -- v38: priced spend cap per cap_window; 0 = unlimited
   allowed_models TEXT NOT NULL DEFAULT '',      -- CSV globs; '' = every model
   expires_at  TEXT NOT NULL DEFAULT '',          -- RFC3339 UTC; '' = never
   compression_profile_id INTEGER REFERENCES compression_profiles(id),

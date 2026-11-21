@@ -27,7 +27,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 37
+const schemaVersion = 38
 
 // Stream-outcome vocabulary (schema v34, docs/hop-health-design.md). Stored in
 // calls.stream_outcome; an empty value means the request was not a stream.
@@ -336,6 +336,9 @@ func (d *DB) migrate() error {
 		if err := d.alterCallsTurnID(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate calls turn id: %w", err)
 		}
+		if err := d.alterClientTokenCapUSD(context.Background()); err != nil {
+			return fmt.Errorf("store: migrate client token spend cap: %w", err)
+		}
 		if err := d.alterAccountMaxContext(context.Background()); err != nil {
 			return fmt.Errorf("store: migrate accounts max context: %w", err)
 		}
@@ -622,6 +625,20 @@ func (d *DB) alterCallsTurnID(ctx context.Context) error {
 		return err
 	}
 	_, err = d.w.ExecContext(ctx, `ALTER TABLE calls ADD COLUMN turn_id TEXT NOT NULL DEFAULT ''`)
+	return err
+}
+
+// alterClientTokenCapUSD adds client_tokens.cap_usd (v38). 0 = no spend cap,
+// so every existing key keeps its behaviour.
+func (d *DB) alterClientTokenCapUSD(ctx context.Context) error {
+	exists, err := hasTable(ctx, d.w, "client_tokens")
+	if err != nil || !exists {
+		return err
+	}
+	if ok, err := hasColumn(ctx, d.w, "client_tokens", "cap_usd"); err != nil || ok {
+		return err
+	}
+	_, err = d.w.ExecContext(ctx, `ALTER TABLE client_tokens ADD COLUMN cap_usd REAL NOT NULL DEFAULT 0`)
 	return err
 }
 

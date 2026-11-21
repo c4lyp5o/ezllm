@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -169,5 +170,73 @@ func TestBudgetRefusalLogsOncePerWindow(t *testing.T) {
 	}
 	if n := strings.Count(sink.String(), "client budget reached"); n != 1 {
 		t.Fatalf("budget line logged %d times, want exactly 1:\n%s", n, sink.String())
+	}
+}
+
+// The spend cap refuses with 429, logs its Info line once per window, and a
+// raised cap applies on the next request instead of after the spend cache.
+func TestSpendCapRefusesAndLogsOncePerWindow(t *testing.T) {
+	h, sink := harnessWithLog(t, slog.LevelInfo, okUpstream)
+	ctx := context.Background()
+	id, err := h.db.AddClientToken(ctx, "spender", "spender-token", "infer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	acct, err := h.db.AccountByNamespace(ctx, "up")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.db.SetPrice(ctx, store.Price{AccountID: acct.ID, ModelID: "gpt-6-luna", EffectiveFrom: "2020-01-01",
+		Currency: "USD", PriceIn: 1, PriceOut: 1}); err != nil {
+		t.Fatal(err)
+	}
+	h.db.RecordCall(store.Call{TS: time.Now().UTC(), Client: "spender", AccountID: acct.ID, Account: "up",
+		Model: "gpt-6-luna", Status: 200, TokensIn: 2_000_000}) // $2
+	if err := h.db.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, body := h.do("PATCH", fmt.Sprintf("/admin/tokens/%d", id), "tok-admin", `{"cap_usd":-1}`); code != 400 {
+		t.Fatalf("negative cap = %d %s", code, body)
+	}
+	if code, _, body := h.do("PATCH", fmt.Sprintf("/admin/tokens/%d", id), "tok-admin", `{"cap_usd":1.5,"cap_window":"daily"}`); code != 200 || !strings.Contains(body, `"cap_usd":1.5`) {
+		t.Fatalf("set cap = %d %s", code, body)
+	}
+	for i := 0; i < 3; i++ {
+		code, _, body := h.do("POST", "/v1/chat/completions", "spender-token", `{"model":"up/gpt-6-luna","messages":[]}`)
+		if code != http.StatusTooManyRequests || !strings.Contains(body, "spend cap reached") {
+			t.Fatalf("attempt %d: want 429 spend cap, got %d %s", i, code, body)
+		}
+	}
+	if n := strings.Count(sink.String(), "client spend cap reached"); n != 1 {
+		t.Fatalf("spend line logged %d times, want exactly 1:\n%s", n, sink.String())
+	}
+	if code, _, _ := h.do("PATCH", fmt.Sprintf("/admin/tokens/%d", id), "tok-admin", `{"cap_usd":10}`); code != 200 {
+		t.Fatalf("raise cap = %d", code)
+	}
+	if code, _, body := h.do("POST", "/v1/chat/completions", "spender-token", `{"model":"up/gpt-6-luna","messages":[]}`); code == http.StatusTooManyRequests {
+		t.Fatalf("raised cap still refused: %s", body)
+	}
+}
+
+// Below Info the spend line is filtered out.
+func TestSpendCapLineFilteredBelowInfo(t *testing.T) {
+	h, sink := harnessWithLog(t, slog.LevelWarn, okUpstream)
+	ctx := context.Background()
+	id, err := h.db.AddClientToken(ctx, "spender", "spender-token", "infer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	acct, _ := h.db.AccountByNamespace(ctx, "up")
+	_ = h.db.SetPrice(ctx, store.Price{AccountID: acct.ID, ModelID: "gpt-6-luna", EffectiveFrom: "2020-01-01", Currency: "USD", PriceIn: 1})
+	h.db.RecordCall(store.Call{TS: time.Now().UTC(), Client: "spender", AccountID: acct.ID, Account: "up", Model: "gpt-6-luna", Status: 200, TokensIn: 2_000_000})
+	_ = h.db.Flush()
+	if err := h.db.SetTokenCapUSD(ctx, id, 1); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, _ := h.do("POST", "/v1/chat/completions", "spender-token", `{"model":"up/gpt-6-luna","messages":[]}`); code != http.StatusTooManyRequests {
+		t.Fatalf("want 429, got %d", code)
+	}
+	if strings.Contains(sink.String(), "client spend cap reached") {
+		t.Fatalf("Info line emitted at Warn:\n%s", sink.String())
 	}
 }

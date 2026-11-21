@@ -325,6 +325,7 @@ function PolicyModal({ target, ids, onClose, onSaved }: {
   target: TokenInfo | null; ids: string[]; onClose: () => void; onSaved: (t: TokenInfo) => void;
 }) {
   const [cap, setCap] = useState(0);
+  const [usd, setUsd] = useState('');
   const [window, setWindow] = useState('monthly');
   const [models, setModels] = useState('');
   const [expiry, setExpiry] = useState('');
@@ -333,22 +334,26 @@ function PolicyModal({ target, ids, onClose, onSaved }: {
   const [err, setErr] = useState('');
   useEffect(() => {
     if (!target) return;
-    setCap(target.cap_tokens); setWindow(target.cap_window || 'monthly'); setModels(target.allowed_models || ''); setExpiry(expiryDate(target));
+    setCap(target.cap_tokens); setUsd(target.cap_usd > 0 ? target.cap_usd.toFixed(2) : ''); setWindow(target.cap_window || 'monthly'); setModels(target.allowed_models || ''); setExpiry(expiryDate(target));
     setRoles(sortRoles(target.roles));
     setBusy(false); setErr('');
   }, [target]);
   const rolesChanged = !!target && roles.join(',') !== sortRoles(target.roles).join(',');
-  const dirty = !!target && (rolesChanged || cap !== target.cap_tokens || window !== (target.cap_window || 'monthly') || models.trim() !== (target.allowed_models || '').trim() || expiry !== expiryDate(target));
+  // Empty means no spend cap (0). Anything else must be a dollar amount.
+  const usdValue = usd.trim() === '' ? 0 : Number(usd);
+  const usdError = !Number.isFinite(usdValue) || usdValue < 0 ? 'A dollar amount, 0 or more.' : undefined;
+  const dirty = !!target && (rolesChanged || cap !== target.cap_tokens || usdValue !== (target.cap_usd || 0) || window !== (target.cap_window || 'monthly') || models.trim() !== (target.allowed_models || '').trim() || expiry !== expiryDate(target));
   const infer = roles.includes('infer');
 
   const save = async () => {
     if (!target || busy) return;
     if (roles.length === 0) { setErr('Pick at least one role.'); return; }
+    if (usdError) { setErr(usdError); return; }
     setBusy(true); setErr('');
     try {
       const updated = await patchToken(target.id, {
         ...(rolesChanged ? { roles } : {}),
-        cap_tokens: cap, cap_window: window, allowed_models: models.trim(),
+        cap_tokens: cap, cap_usd: usdValue, cap_window: window, allowed_models: models.trim(),
         // The picker shows only the date; resending an untouched one would be
         // re-read as end of the server's local day and move the deadline.
         ...(expiry !== expiryDate(target) ? { expires_at: expiry } : {}),
@@ -372,6 +377,13 @@ function PolicyModal({ target, ids, onClose, onSaved }: {
             <span className={labelCls}>Token budget</span>
             <CapField cap={cap} window={window} onCap={setCap} onWindow={setWindow} />
             <p className="mt-1.5 text-[12px] leading-snug text-mute">Counts the key's input and output tokens in the current window. Once the budget is used up, requests get a 429 until the next window starts. Each request's max_tokens is reserved up front.</p>
+          </div>
+          <div>
+            <label className={labelCls} htmlFor="pol-usd">Spend cap (USD) <span className="text-mute">(empty = none)</span></label>
+            <input id="pol-usd" inputMode="decimal" className={cx(inputCls, 'max-w-[10rem] font-mono text-[13px]')} placeholder="25.00"
+              value={usd} onChange={(e) => setUsd(e.target.value)} aria-invalid={usdError ? true : undefined} />
+            {usdError && <p className="mt-1 text-[12px] text-bad">{usdError}</p>}
+            <p className="mt-1.5 text-[12px] leading-snug text-mute">Uses the same window as the token budget. Spend comes from your model prices, so calls to unpriced models and subscription bridges count as $0.00. Checked every 15 seconds, so a busy key can go slightly over before it gets a 429.</p>
           </div>
           <div>
             <label className={labelCls} htmlFor="pol-models">Allowed models <span className="text-mute">(empty = all)</span></label>
@@ -643,6 +655,7 @@ export default function Connect() {
                                 </span>
                               </>
                             ) : <span className="text-mute">Budget unlimited</span>}
+                            {t.cap_usd > 0 && <span className="mt-1 block text-mute">Spend cap ${t.cap_usd.toFixed(2)} · {t.cap_window || 'monthly'}</span>}
                           </span>
                         </div>
                       </div>

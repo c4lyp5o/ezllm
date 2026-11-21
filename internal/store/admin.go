@@ -1365,6 +1365,7 @@ type TokenSummary struct {
 	Enabled       bool     `json:"enabled"`
 	CapWindow     string   `json:"cap_window"`
 	CapTokens     int64    `json:"cap_tokens"`
+	CapUSD        float64  `json:"cap_usd"` // priced spend per cap_window; 0 = unlimited
 	AllowedModels string   `json:"allowed_models"`
 	ExpiresAt     string   `json:"expires_at"`
 	LastUsedAt    *string  `json:"last_used_at"`
@@ -1374,7 +1375,7 @@ type TokenSummary struct {
 // ListTokens returns all client tokens (hints only).
 func (d *DB) ListTokens(ctx context.Context) ([]TokenSummary, error) {
 	rows, err := d.r.QueryContext(ctx, `
-SELECT id, name, token_hash, roles, enabled, cap_window, cap_tokens,
+SELECT id, name, token_hash, roles, enabled, cap_window, cap_tokens, cap_usd,
        allowed_models, expires_at,
        -- no last_used_at column: derive from the ledger (calls.client is the
        -- token name, set by ClientByToken). No hot-path write needed.
@@ -1391,7 +1392,7 @@ FROM client_tokens ORDER BY id`)
 		var hash, roles string
 		var lastUsed sql.NullString
 		if err := rows.Scan(&t.ID, &t.Name, &hash, &roles, &t.Enabled,
-			&t.CapWindow, &t.CapTokens, &t.AllowedModels, &t.ExpiresAt, &lastUsed, &t.CreatedAt); err != nil {
+			&t.CapWindow, &t.CapTokens, &t.CapUSD, &t.AllowedModels, &t.ExpiresAt, &lastUsed, &t.CreatedAt); err != nil {
 			return nil, err
 		}
 		t.Roles = splitCSV(roles)

@@ -17,7 +17,8 @@ file in the same commit, or the test fails.
 
 Every subscription bridge now shares one admission gate and bounds its queue,
 the ledger records bridge slot wait and the agent-loop turn of each request,
-and `GET /admin/turns` shows requests per turn by model. Schema v37.
+`GET /admin/turns` shows requests per turn by model, `POST /v1/messages/count_tokens`
+answers token counts, and keys can carry a dollar cap. Schema v38.
 
 - **Breaking (env):** `EZLLM_COPILOT_BRIDGE_QUEUE` is retired and fails the
   boot; `EZLLM_BRIDGE_QUEUE` (default 8) sizes every bridge's wait queue.
@@ -30,6 +31,17 @@ and `GET /admin/turns` shows requests per turn by model. Schema v37.
   Claude Code's tool results with reminders and stateful Responses steps stay
   in their turn). `GET /admin/turns` and a Stats panel count successful
   requests per turn.
+- **New: `POST /v1/messages/count_tokens`.** Claude Code calls it for
+  context accounting. The model resolves like a Messages request; the first
+  hop on the Anthropic wire that has the endpoint answers, and everything else
+  (bridges, translated hops, gateways without it) gets a local estimate. The
+  `X-Ezllm-Token-Count` header says which (`upstream` or `estimate`), and
+  `ezllm_count_tokens_total{source}` counts both. No ledger row, no budget.
+- **New: per-key spend cap (schema v38).** `client_tokens.cap_usd` caps a
+  key's priced spend in its `cap_window`; `0` = none. A key at its cap gets
+  `429` before any upstream call, and the "budget reached" notification fires
+  once per window. Spend comes from model prices, so unpriced calls count as
+  $0. Set it in the key policy dialog or with `PATCH /admin/tokens/{id}`.
 - **Fix: the Copilot bridge id is `copilot-sub`** (was `github-copilot`, the
   retired provider's name). `GET /admin/bridges` returns the new id.
 - **Fix: a gemini-web login no longer "expires" minutes after first use.**

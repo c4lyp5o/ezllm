@@ -17,6 +17,7 @@ export interface TokenInfo {
   enabled: boolean;
   cap_window: string;
   cap_tokens: number;
+  cap_usd: number;
   allowed_models: string;
   expires_at: string;
   last_used_at?: string | null;
@@ -28,7 +29,7 @@ export interface TokenCreated extends TokenInfo {
 }
 
 export type TokenPatch = {
-  name?: string; enabled?: boolean; cap_tokens?: number; cap_window?: string;
+  name?: string; enabled?: boolean; cap_tokens?: number; cap_usd?: number; cap_window?: string;
   allowed_models?: string; expires_at?: string; roles?: Role[];
 };
 

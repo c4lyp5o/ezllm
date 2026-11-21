@@ -31,7 +31,6 @@ import (
 	"encoding/json"
 	"hash"
 	"net/http"
-	"strconv"
 	"sync"
 
 	"github.com/c4lyp5o/ezllm/internal/jsonbody"
@@ -172,13 +171,14 @@ func captureShapeDoc(doc *jsonbody.BodyDoc, surface provider.Surface) shape {
 // control back, which is the signal for a model that stops early
 // (docs/API.md, GET /admin/turns).
 //
-// The key hashes the conversation's first message, the index of the newest
-// human message and that message's content. Tool results are not human: a
-// chat `tool` role never is, and an Anthropic `user` message carrying any
-// tool_result block is an agent step, even with text blocks beside it. Run it on the CLIENT's body (before
-// compression rewrites history). A client that compacts history mid-loop
-// starts a new key; one-shot bodies with no conversation get "".
-func turnOf(doc *jsonbody.BodyDoc, surface provider.Surface) string {
+// The key hashes the immutable conversation prefix through the newest human
+// message, scoped by surface and the caller's session when supplied. Responses
+// requests also include previous_response_id to distinguish stateful histories.
+// Tool results are not human: a chat tool role never is, and an Anthropic user
+// message carrying any tool_result block is an agent step. Run it on the
+// client's body before compression. Compaction starts a new key; bodies without
+// a human message return "" so stateful tool steps can use turnChain.
+func turnOf(doc *jsonbody.BodyDoc, surface provider.Surface, session string) string {
 	if n := len(doc.Bytes()); n == 0 || n > maxShapeBody || doc.Err() != nil {
 		return ""
 	}
@@ -205,9 +205,11 @@ func turnOf(doc *jsonbody.BodyDoc, surface provider.Surface) string {
 		return ""
 	}
 	h := sha256.New()
-	writeCanon(h, msgs[0])
-	h.Write([]byte("\x00" + strconv.Itoa(last) + "\x00"))
-	writeCanon(h, msgs[last])
+	previous := ""
+	if surface == provider.SurfaceResponses {
+		previous = previousResponseID(doc)
+	}
+	writeCanon(h, []any{string(surface), session, previous, msgs[:last+1]})
 	return hex.EncodeToString(h.Sum(nil)[:8])
 }
 

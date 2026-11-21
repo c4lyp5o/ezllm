@@ -18,7 +18,7 @@ import (
 
 func turnFor(t *testing.T, body string, surface provider.Surface) string {
 	t.Helper()
-	return turnOf(jsonbody.Open([]byte(body)), surface)
+	return turnOf(jsonbody.Open([]byte(body)), surface, "")
 }
 
 // One agent loop keeps its key while tool calls and results pile up; the next
@@ -185,5 +185,29 @@ func TestTurnsEndpointCountsRequestsPerTurn(t *testing.T) {
 	}
 	if code, _, body := h.do("GET", "/admin/turns?from="+time.Now().Add(time.Hour).UTC().Format(time.RFC3339), "tok-admin", ""); code != 400 || !strings.Contains(body, "after") {
 		t.Fatalf("bad window = %d %s", code, body)
+	}
+}
+
+func TestTurnKeySeparatesConversationHistories(t *testing.T) {
+	body := func(task string) string {
+		return fmt.Sprintf(`{"messages":[{"role":"system","content":"be useful"},{"role":"user","content":%q},{"role":"assistant","content":"done"},{"role":"user","content":"continue"}]}`, task)
+	}
+	a, b := turnFor(t, body("fix A"), provider.SurfaceChat), turnFor(t, body("fix B"), provider.SurfaceChat)
+	if a == "" || a == b {
+		t.Fatalf("different histories share turn: %q vs %q", a, b)
+	}
+	doc := jsonbody.Open([]byte(body("fix A")))
+	if turnOf(doc, provider.SurfaceChat, "session-a") == turnOf(doc, provider.SurfaceChat, "session-b") {
+		t.Fatal("different sessions share turn")
+	}
+}
+
+func TestTurnKeySeparatesStatefulHumanTurns(t *testing.T) {
+	body := func(previous string) string {
+		return fmt.Sprintf(`{"previous_response_id":%q,"input":[{"role":"user","content":"continue"}]}`, previous)
+	}
+	a, b := turnFor(t, body("resp_a"), provider.SurfaceResponses), turnFor(t, body("resp_b"), provider.SurfaceResponses)
+	if a == "" || a == b {
+		t.Fatalf("different stateful histories share turn: %q vs %q", a, b)
 	}
 }

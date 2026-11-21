@@ -802,7 +802,7 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 		// (older code parsed the body again here).
 		// The turn key reads the client's own conversation: compression may
 		// rewrite history, which must not split one agent loop into two.
-		turn := turnOf(doc, surface)
+		turn := turnOf(doc, surface, sessionOf(r))
 		if turn == "" && surface == provider.SurfaceResponses {
 			// A stateful step (previous_response_id, tool outputs only) carries
 			// no human message: it joins the turn of the response it continues.

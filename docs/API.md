@@ -620,8 +620,9 @@ default the last 7 days, same span cap as `/admin/usage`). Admin role.
 
 A turn is one message from a person plus every request the model made before it answered: its
 tool calls and their results. The gateway stamps each ledger row with `calls.turn_id`, a hash of
-the conversation's first message and the position and content of the newest human message, taken
-from the client's body before compression. Chat `tool` messages, Anthropic `user` messages
+the conversation prefix through the newest human message, taken from the client's body before
+compression and scoped by API surface and `X-Ezllm-Session` when supplied. A new human message
+in a stateful Responses request also includes `previous_response_id` in its key. Chat `tool` messages, Anthropic `user` messages
 carrying any `tool_result` block (even with text blocks beside it, as Claude Code sends) and
 Responses `function_call_output` items are not human, so they stay in the same turn. A stateful
 Responses step (`previous_response_id` with tool outputs only) joins the turn of the response it

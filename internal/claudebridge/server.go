@@ -160,14 +160,8 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 func (s *Server) stream(w http.ResponseWriter, r *http.Request, req Request, alias string) {
 	transport := bridgeutil.NewStream(r.Context(), w, bridgeutil.StreamWriteStall)
 	defer transport.Close()
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-	if err := transport.Flush(); err != nil {
-		return
-	}
-	sw := &StreamWriter{W: transport}
+	out := &streamResponse{w: w, transport: transport}
+	sw := &StreamWriter{W: out}
 	res, err := s.Runner.Run(r.Context(), req, alias, sw.Handle)
 	s.Limits.Observe(res.RateLimit, time.Now())
 	if err != nil && sw.stopped {
@@ -181,6 +175,10 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request, req Request, ali
 		}
 		return
 	}
+	if err != nil && !out.started {
+		s.writeRunError(w, res, err)
+		return
+	}
 	if err != nil {
 		// The stream is already open: the failure travels as an Anthropic error
 		// event, with the CLI's own words, never as a silent truncation.
@@ -191,13 +189,32 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request, req Request, ali
 			_ = status
 		}
 		payload := ErrorEnvelope(errType, err.Error(), code)
-		_, _ = transport.Write([]byte("event: error\ndata: " + string(payload) + "\n\n"))
+		_, _ = out.Write([]byte("event: error\ndata: " + string(payload) + "\n\n"))
 		s.logf("claude-bridge: stream failed: %s", err)
 		return
 	}
 	if err := sw.Finish(); err != nil {
 		s.logf("claude-bridge: stream finish failed: %s", err)
 	}
+}
+
+// streamResponse delays HTTP commitment until the first visible event, after
+// admission has completed. Early failures retain their status and retry headers.
+type streamResponse struct {
+	w         http.ResponseWriter
+	transport *bridgeutil.Stream
+	started   bool
+}
+
+func (s *streamResponse) Write(b []byte) (int, error) {
+	if !s.started {
+		s.started = true
+		s.w.Header().Set("Content-Type", "text/event-stream")
+		s.w.Header().Set("Cache-Control", "no-cache")
+		s.w.Header().Set("X-Accel-Buffering", "no")
+		s.w.WriteHeader(http.StatusOK)
+	}
+	return s.transport.Write(b)
 }
 
 func (s *Server) writeRunError(w http.ResponseWriter, _ Result, err error) {

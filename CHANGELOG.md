@@ -2,7 +2,7 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
-## v2.3.0 — token counting, per-key spend caps
+## v2.2.0 — shared bridge admission, requests per turn, token counting, spend caps
 
 - **`POST /v1/messages/count_tokens`** answers Claude Code's token-count
   calls instead of 404. `proxy/count_tokens.go` `CountTokens` asks up to three
@@ -18,8 +18,6 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   day before the price lookup). The answer is cached for 15 seconds per key, and a
   `PATCH` drops the cache so a new cap applies at once. The dashboard's key
   policy dialog has the field.
-
-## v2.2.0 — shared bridge admission, requests per turn
 
 - **Review fixes:** Claude streaming commits headers only with its first visible
   event, preserving HTTP 429 and `Retry-After` on queue refusal and recording

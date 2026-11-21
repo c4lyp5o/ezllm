@@ -38,12 +38,12 @@ Errors are OpenAI-shaped: `{"error":{"type":"...","message":"...","code":422}}`.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/healthz` | no auth; **liveness + release version** — `{"status":"ok","version":"2.3.0"}` after a DB ping (503 `{"status":"down","version":"…"}` if the ping fails). Version is the only extra field; no counts/paths/uptime. |
+| GET | `/healthz` | no auth; **liveness + release version** — `{"status":"ok","version":"2.2.0"}` after a DB ping (503 `{"status":"down","version":"…"}` if the ping fails). Version is the only extra field; no counts/paths/uptime. |
 | GET | `/metrics` | Prometheus text exposition (v2.1.0). A token with the `metrics` role only; any other token → 403, the dashboard session → 401. Counters come from committed ledger rows, so a request does no metrics work. Names, labels and auth: [metrics.md](metrics.md). |
 | GET | `/v1/models?protocol=` | `openai` (default) / `anthropic` shape; ids are `<namespace>/<model>`, plus one bare id per **enabled** combo |
 | POST | `/v1/chat/completions` | OpenAI stream + non-stream |
 | POST | `/v1/messages` | Anthropic (`x-api-key` or Bearer) |
-| POST | `/v1/messages/count_tokens` | Anthropic token count → `{"input_tokens":N}` (v2.3.0). The model resolves like `/v1/messages`; up to three candidate hops on the Anthropic wire are asked in order (parked hops skipped, failures never park a hop). When none answers (bridges, translated hops, gateways without the endpoint) the gateway estimates over `system`, `messages`, `tools` and `tool_choice` (about 4 characters per token over the JSON, so it leans high). `X-Ezllm-Token-Count: upstream\|estimate` says which. Same auth and model allowlist as `/v1/messages`; no ledger row, no budget. |
+| POST | `/v1/messages/count_tokens` | Anthropic token count → `{"input_tokens":N}` (v2.2.0). The model resolves like `/v1/messages`; up to three candidate hops on the Anthropic wire are asked in order (parked hops skipped, failures never park a hop). When none answers (bridges, translated hops, gateways without the endpoint) the gateway estimates over `system`, `messages`, `tools` and `tool_choice` (about 4 characters per token over the JSON, so it leans high). `X-Ezllm-Token-Count: upstream\|estimate` says which. Same auth and model allowlist as `/v1/messages`; no ledger row, no budget. |
 | POST | `/v1/responses` | OpenAI Responses |
 | POST | `/v1/embeddings`, `/v1/images/generations`, `/v1/audio/speech`, `/v1/audio/transcriptions` | Service surfaces (M10); transcriptions is multipart |
 | POST | `/v1/images/edits` | OpenAI image edit/inpaint — **multipart** (`model` form field swapped per hop) |
@@ -725,7 +725,7 @@ because those keys could call models before 2.1.0.
 calendar bucket, metered in the ledger transaction. A spent key returns `429`
 with `limit`, `used`, and `window` before any upstream call. A cap set after the
 key already spent tokens backfills that bucket from the ledger once.
-`cap_usd` (v2.3.0, schema v38) caps the key's priced spend in the same
+`cap_usd` (v2.2.0, schema v38) caps the key's priced spend in the same
 `cap_window`; `0` = none, and a negative or non-numeric value is `400`. Spend is
 derived from the ledger and `model_prices` the way `GET /admin/cost` derives
 it, so calls with no USD price (subscription bridges, unpriced models) count as

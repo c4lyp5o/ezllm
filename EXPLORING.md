@@ -716,6 +716,20 @@ while the SAME model on `opencode-go` was 0/754.
 - No routing action yet, deliberately: the park rule is justified by THIS
   measurement, not by a plausible number (the M2 lesson).
 
+### v2.3.0 — token counting, per-key spend caps
+
+- `server/count_tokens.go` `countTokens` serves `POST /v1/messages/count_tokens`:
+  resolve like Messages, then `proxy/count_tokens.go` `CountTokens` asks up to
+  three hops whose `EffectiveWire` is Anthropic (`parked` skips cooled hops;
+  misses never record a cooldown). Fallback `estimatePromptTokens` uses
+  `compress.EstimateTokens`. `countTokensServed` feeds
+  `ezllm_count_tokens_total`.
+- `server/spend_cap.go` `admitSpend` runs in `authenticate` after the token
+  budget; `store/client_budget.go` `ClientSpendStatus` prices the window with
+  the cost report's rules. `Server.spendCache` holds answers for
+  `spendCacheTTL`; `handleToken` calls `forgetSpend` after a PATCH. Column
+  `client_tokens.cap_usd` (v38, `store.go` `alterClientTokenCapUSD`).
+
 ### v2.2.0 — shared bridge admission, requests per turn, shared bridge helpers
 
 - `internal/bridgeutil/proc_unix.go` `SetProcessGroup` / `KillGroup` (Windows

@@ -11,7 +11,23 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v2.2.0**
+**Current: v2.3.0**
+
+## v2.3.0 — 2026-11-21
+
+Anthropic token counting and per-key dollar caps. Schema v38.
+
+- **New: `POST /v1/messages/count_tokens`.** Claude Code calls it for
+  context accounting. The model resolves like a Messages request; the first
+  hop on the Anthropic wire that has the endpoint answers, and everything else
+  (bridges, translated hops, gateways without it) gets a local estimate. The
+  `X-Ezllm-Token-Count` header says which (`upstream` or `estimate`), and
+  `ezllm_count_tokens_total{source}` counts both. No ledger row, no budget.
+- **New: per-key spend cap (schema v38).** `client_tokens.cap_usd` caps a
+  key's priced spend in its `cap_window`; `0` = none. A key at its cap gets
+  `429` before any upstream call, and the "budget reached" notification fires
+  once per window. Spend comes from model prices, so unpriced calls count as
+  $0. Set it in the key policy dialog or with `PATCH /admin/tokens/{id}`.
 
 ## v2.2.0 — 2026-11-20
 

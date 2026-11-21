@@ -73,6 +73,7 @@ type DeploymentInfo struct {
 
 type Server struct {
 	turnChain    turnChain // response id -> turn, for stateful Responses loops
+	spendCache   sync.Map  // client name -> spendEntry (spend_cap.go)
 	deployment   DeploymentInfo
 	settings     *settings.Manager
 	settingsWake chan struct{}
@@ -318,6 +319,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/prices", s.inferAuthed(s.handleCurrentPrices))
 	s.mux.HandleFunc("POST /v1/chat/completions", s.inferAuthed(s.inference(provider.SurfaceChat)))
 	s.mux.HandleFunc("POST /v1/messages", s.inferAuthed(s.inference(provider.SurfaceAnthropic)))
+	s.mux.HandleFunc("POST /v1/messages/count_tokens", s.inferAuthed(s.countTokens))
 	s.mux.HandleFunc("POST /v1/responses", s.inferAuthed(s.inference(provider.SurfaceResponses)))
 
 	// Phase 1: New inference endpoints
@@ -1365,6 +1367,9 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, token stri
 		} else if !errors.Is(berr, store.ErrNotFound) {
 			slog.Warn("client budget check failed", "client", name, "err", berr)
 			writeErr(w, http.StatusServiceUnavailable, "budget_unavailable", "usage meter unavailable")
+			return r, false
+		}
+		if !s.admitSpend(w, r, name) {
 			return r, false
 		}
 	}

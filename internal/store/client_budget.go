@@ -13,6 +13,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"path"
 	"strings"
 	"time"
@@ -371,4 +372,85 @@ func (d *DB) meterClientsInTx(ctx context.Context, tx *sql.Tx, rows []Call) erro
 		return err
 	}
 	return bumpClientCounters(ctx, tx, groupForClientCounter(rows, windows, d.usageLocation()))
+}
+
+// ValidCapUSD reports whether v is a usable spend cap: finite and >= 0.
+func ValidCapUSD(v float64) bool {
+	return v >= 0 && !math.IsInf(v, 0) && !math.IsNaN(v)
+}
+
+// SetTokenCapUSD sets a client token's spend cap (0 = unlimited). The cap
+// shares cap_window with the token cap.
+func (d *DB) SetTokenCapUSD(ctx context.Context, id int64, usd float64) error {
+	if !ValidCapUSD(usd) {
+		return errors.New("cap_usd must be a number >= 0")
+	}
+	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE client_tokens SET cap_usd=? WHERE id=?`, usd, id)
+		return err
+	})
+}
+
+// ClientSpend is a token's spend cap and its priced spend in the current
+// window.
+type ClientSpend struct {
+	Limit  float64 `json:"limit"` // USD; 0 = unlimited
+	Spent  float64 `json:"spent"` // USD, priced calls only
+	Window string  `json:"window"`
+	Bucket string  `json:"bucket"`
+}
+
+// ClientSpendStatus reads the token's spend cap and, when one is set, what it
+// has spent in the current cap_window. Spend is derived from the ledger and
+// model_prices exactly as CostReport derives it: calls with no USD price row
+// (subscription bridges, unpriced models) cost nothing here, the same honesty
+// rule the cost report follows. Calls are grouped by (account, model, day)
+// before the price lookup, so the correlated subqueries run per group, not
+// per call. ErrNotFound means the token row is gone.
+func (d *DB) ClientSpendStatus(ctx context.Context, name string) (ClientSpend, error) {
+	var limit float64
+	var window string
+	err := d.r.QueryRowContext(ctx,
+		`SELECT cap_usd, COALESCE(NULLIF(cap_window,''), 'monthly')
+		   FROM client_tokens WHERE name = ? AND enabled = 1`, name).Scan(&limit, &window)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ClientSpend{}, ErrNotFound
+	}
+	if err != nil {
+		return ClientSpend{}, fmt.Errorf("client spend cap: %w", err)
+	}
+	if limit <= 0 {
+		return ClientSpend{Window: window}, nil
+	}
+	now := time.Now()
+	start, end := BucketRange(now, window, d.usageLocation())
+	var spent float64
+	err = d.r.QueryRowContext(ctx, `
+WITH g AS (
+  SELECT account_id, model, date(ts) AS day,
+         SUM(tokens_in) AS ti, SUM(tokens_out) AS tout,
+         SUM(tokens_cached_read) AS cr, SUM(tokens_cached_write) AS cw
+    FROM calls
+   WHERE client = ? AND ts >= ? AND ts < ? AND account_id IS NOT NULL
+   GROUP BY account_id, model, day
+), p AS (
+  SELECT g.*,
+    (SELECT p.price_in FROM model_prices p WHERE p.account_id = g.account_id AND p.model_id = g.model
+        AND p.effective_from <= g.day AND UPPER(TRIM(p.currency)) = 'USD' ORDER BY p.effective_from DESC LIMIT 1) AS pin,
+    (SELECT p.price_out FROM model_prices p WHERE p.account_id = g.account_id AND p.model_id = g.model
+        AND p.effective_from <= g.day AND UPPER(TRIM(p.currency)) = 'USD' ORDER BY p.effective_from DESC LIMIT 1) AS pout,
+    (SELECT p.price_cache_read FROM model_prices p WHERE p.account_id = g.account_id AND p.model_id = g.model
+        AND p.effective_from <= g.day AND UPPER(TRIM(p.currency)) = 'USD' ORDER BY p.effective_from DESC LIMIT 1) AS pcr,
+    (SELECT p.price_cache_write FROM model_prices p WHERE p.account_id = g.account_id AND p.model_id = g.model
+        AND p.effective_from <= g.day AND UPPER(TRIM(p.currency)) = 'USD' ORDER BY p.effective_from DESC LIMIT 1) AS pcw
+  FROM g
+)
+SELECT COALESCE(SUM(CASE WHEN pin IS NOT NULL THEN
+         ti*pin + tout*COALESCE(pout,0) + cr*COALESCE(pcr,0) + cw*COALESCE(pcw,0) ELSE 0 END), 0) / 1e6
+  FROM p`,
+		name, start.UTC().Format("2006-01-02T15:04:05.000Z"), end.UTC().Format("2006-01-02T15:04:05.000Z")).Scan(&spent)
+	if err != nil {
+		return ClientSpend{}, fmt.Errorf("client spend: %w", err)
+	}
+	return ClientSpend{Limit: limit, Spent: spent, Window: window, Bucket: CountBucket(now, window, d.usageLocation())}, nil
 }

@@ -2019,6 +2019,7 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 			Enabled       *bool    `json:"enabled"`
 			Roles         []string `json:"roles"`
 			CapTokens     *int64   `json:"cap_tokens"`
+			CapUSD        *float64 `json:"cap_usd"`
 			CapWindow     string   `json:"cap_window"`
 			AllowedModels *string  `json:"allowed_models"`
 			ExpiresAt     *string  `json:"expires_at"`
@@ -2026,14 +2027,27 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 		if !decodeBody(w, r, &body) {
 			return
 		}
+		// Checked before any write, so a bad cap_usd never half-applies the patch.
+		if body.CapUSD != nil && !store.ValidCapUSD(*body.CapUSD) {
+			writeErr(w, http.StatusBadRequest, "invalid_request_error", "cap_usd must be a number >= 0")
+			return
+		}
 		if err := s.db.UpdateToken(r.Context(), id, body.Enabled, body.Roles,
 			body.CapTokens, body.CapWindow, body.AllowedModels, body.ExpiresAt); err != nil {
 			s.writeStoreErr(w, err)
 			return
 		}
+		if body.CapUSD != nil {
+			if err := s.db.SetTokenCapUSD(r.Context(), id, *body.CapUSD); err != nil {
+				s.writeStoreErr(w, err)
+				return
+			}
+		}
 		tokens, _ := s.db.ListTokens(r.Context())
 		for _, t := range tokens {
 			if t.ID == id {
+				// The cap or its window may have changed: re-read spend next time.
+				s.forgetSpend(t.Name)
 				writeJSON(w, http.StatusOK, t)
 				return
 			}

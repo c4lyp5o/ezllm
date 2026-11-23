@@ -66,6 +66,7 @@ For an OpenTelemetry Collector, use the same block under
 | `ezllm_time_to_first_token_seconds` | histogram | `surface`, `account` | Time to first streamed token |
 | `ezllm_inflight_requests` | gauge | | Inference requests admitted now |
 | `ezllm_inflight_limit` | gauge | | Configured global in-flight limit |
+| `ezllm_count_tokens_total` | counter | `source` | `POST /v1/messages/count_tokens` answers; `source` is `upstream` (an Anthropic-wire hop answered) or `estimate` (v2.2.0) |
 | `ezllm_ledger_lost_rows_total` | counter | | Rows discarded after a failed flush and retry |
 | `ezllm_ledger_dropped_rows_total` | counter | | Rows dropped because the ledger queue was full |
 | `ezllm_ledger_unmetered_rows_total` | counter | | Committed rows the usage meter did not count |

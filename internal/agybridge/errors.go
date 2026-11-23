@@ -1,7 +1,6 @@
 package agybridge
 
 import (
-	"encoding/json"
 	"regexp"
 	"strings"
 )
@@ -48,10 +47,4 @@ func mapError(status, msg string) *NativeError {
 		return &NativeError{Status: 400, Type: "invalid_request_error", Code: "unknown_model", Message: text}
 	}
 	return &NativeError{Status: 502, Type: "api_error", Code: "native_error", Message: text}
-}
-
-// ErrorEnvelope is the OpenAI wire error shape.
-func ErrorEnvelope(errType, message, code string) []byte {
-	b, _ := json.Marshal(map[string]any{"error": map[string]any{"type": errType, "message": message, "code": code}})
-	return b
 }

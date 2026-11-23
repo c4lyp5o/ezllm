@@ -38,11 +38,12 @@ Errors are OpenAI-shaped: `{"error":{"type":"...","message":"...","code":422}}`.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/healthz` | no auth; **liveness + release version** — `{"status":"ok","version":"2.1.0"}` after a DB ping (503 `{"status":"down","version":"…"}` if the ping fails). Version is the only extra field; no counts/paths/uptime. |
+| GET | `/healthz` | no auth; **liveness + release version** — `{"status":"ok","version":"2.2.0"}` after a DB ping (503 `{"status":"down","version":"…"}` if the ping fails). Version is the only extra field; no counts/paths/uptime. |
 | GET | `/metrics` | Prometheus text exposition (v2.1.0). A token with the `metrics` role only; any other token → 403, the dashboard session → 401. Counters come from committed ledger rows, so a request does no metrics work. Names, labels and auth: [metrics.md](metrics.md). |
 | GET | `/v1/models?protocol=` | `openai` (default) / `anthropic` shape; ids are `<namespace>/<model>`, plus one bare id per **enabled** combo |
 | POST | `/v1/chat/completions` | OpenAI stream + non-stream |
 | POST | `/v1/messages` | Anthropic (`x-api-key` or Bearer) |
+| POST | `/v1/messages/count_tokens` | Anthropic token count → `{"input_tokens":N}` (v2.2.0). The model resolves like `/v1/messages`; up to three candidate hops on the Anthropic wire are asked in order (parked hops skipped, failures never park a hop). When none answers (bridges, translated hops, gateways without the endpoint) the gateway estimates over `system`, `messages`, `tools` and `tool_choice` (2 characters per token over the JSON; Anthropic measured about 2.35 on Sonnet 5.5, so the estimate runs about 15–20% high on purpose). `X-Ezllm-Token-Count: upstream\|estimate` says which. Same auth and model allowlist as `/v1/messages`; no ledger row, no budget. |
 | POST | `/v1/responses` | OpenAI Responses |
 | POST | `/v1/embeddings`, `/v1/images/generations`, `/v1/audio/speech`, `/v1/audio/transcriptions` | Service surfaces (M10); transcriptions is multipart |
 | POST | `/v1/images/edits` | OpenAI image edit/inpaint — **multipart** (`model` form field swapped per hop) |
@@ -341,7 +342,8 @@ Add `?force=true` to delete anyway (cascades: keys, models, quota rows).
 // or, for a running subscription bridge (see GET /admin/bridges): the server supplies the key
 { "label":"primary", "bridge":"claude-sub" }
 ```
-Bridge ids are `claude-sub`, `chatgpt-sub`, `antigravity-sub` and `github-copilot` — the
+Bridge ids are `claude-sub`, `chatgpt-sub`, `antigravity-sub` and `copilot-sub` (each the key of
+its provider preset; the Copilot bridge was `github-copilot` before 2.2.0) — the
 last one belongs to the `copilot-bridge` kind (the Copilot CLI), whose base URL
 is `http://127.0.0.1:8793/v1` and whose credential is the CLI's own login, so
 there is no key to paste at all.
@@ -420,6 +422,11 @@ once the updater has run:
 | `previous` | the release it ran before an `updated` or `rolled_back` |
 | `candidate` | the release the report is about |
 | `detail` | the updater's reason (gate problems, proof summary, what it waits for) |
+
+`runtime` (v2.2.0) is the running bridge's live admission picture, read from the bridge on
+every call (not at boot): `in_flight`, `queued`, `max_concurrent`, `max_queue`, `served` and
+`rejected_queue_full` (requests refused with 429 `queue_full` since start). The Copilot bridge
+adds its outcome, stage-timing and pool counters. Absent while the bridge is off.
 
 `cli_release` in `status` (all three bridges as of v1.6.0) is `qualified` for the version the
 build was measured on or one the updater recorded in `qualified.json`, else `unqualified (…)`.
@@ -598,6 +605,51 @@ Attribution for traffic mapping, not authentication: a direct connection can
 claim any value, so it must never gate anything. The dashboard shows it under
 the request's timestamp.
 
+### Requests projection — v37 field
+`slot_wait_ms` — how long a subscription bridge held the request waiting for a
+free CLI slot, in milliseconds. It is part of `total_ms`, so `total_ms -
+slot_wait_ms` is the CLI's own time. `null` for every other provider and for
+rows written before v37 (never backfilled). The bridge reports it in an
+internal response header that the proxy trusts only from a loopback upstream
+and never passes to the client. The dashboard tail shows a non-zero value as
+"queued" under the total; the requests explorer shows it in the row detail.
+The live SSE feed carries it as `slot_wait_ms` when set.
+
+### `GET /admin/turns` → `200` (v2.2.0, schema v37)
+Requests per agent-loop turn, per account and model, over `from`/`to` (RFC 3339, `[from, to)`,
+default the last 7 days, same span cap as `/admin/usage`). Admin role.
+
+A turn is one message from a person plus every request the model made before it answered: its
+tool calls and their results. The gateway stamps each ledger row with `calls.turn_id`, a hash of
+the conversation prefix through the newest human message, taken from the client's body before
+compression and scoped by API surface and `X-Ezllm-Session` when supplied. A new human message
+in a stateful Responses request also includes `previous_response_id` in its key. `cache_control`
+markers are left out, since Anthropic clients move them to the newest message on every request.
+Chat `tool` messages, Anthropic `user` messages
+carrying any `tool_result` block (even with text blocks beside it, as Claude Code sends) and
+Responses `function_call_output` items are not human, so they stay in the same turn. A stateful
+Responses step (`previous_response_id` with tool outputs only) joins the turn of the response it
+names; the gateway remembers the last 4096 native response ids per process, so a continuation of
+a translated hop, or one after a restart, gets no turn id. Bodies with no conversation get no turn
+id; rows written before v37 have none and are not counted. Failed requests (status 400 and up)
+are not counted: a refusal or the client's retry after one is not the model working. A client
+that compacts its history in the middle of a loop starts a new turn there. Turns group by
+`(client, turn_id)`; a turn that failed over counts once under each model it used.
+
+The response is `from`, `to`, `long_turn` (the request count from which a turn counts as long,
+20) and `rows`, sorted by turns:
+
+| Field | Meaning |
+|---|---|
+| `account`, `model` | the hop that served the requests |
+| `turns`, `requests` | turns seen and the requests in them |
+| `median`, `p75`, `p90`, `max` | requests per turn |
+| `single_share` | share of turns answered in one request (no tool calls) |
+| `long_share` | share of turns with `long_turn` requests or more |
+
+A model that hands control back early (the 2026-11 terra finding) shows a low median and a small
+`long_share` next to a model doing the same work. The Stats page shows this table.
+
 ### `GET /admin/accounts/{id}/quota` → `200`
 Live `ReadQuota` → classified shape + `raw`. Provider-by-provider oracles and
 the classification rules: [quota-oracles-design.md](quota-oracles-design.md). `{"kind":"none"}` when the provider has no endpoint
@@ -660,8 +712,8 @@ response shape is unchanged. `EZLLM_COMBO_AUTOPROBE=off` disables it.
 ```jsonc
 // POST  → 201 (token plaintext returned EXACTLY ONCE, never again)
 { "name":"hermes","roles":["infer"],"token":"ezllm_…" }   // token optional; generated if absent
-// GET   → [{"id":4,"name":"hermes","hint":"ezllm…a91f","roles":["infer"],"enabled":true,"cap_window":"monthly","cap_tokens":0,"allowed_models":"","expires_at":"","last_used_at":"…"}]
-// PATCH → {"enabled":false} | {"roles":["infer","admin"]} | {"cap_tokens":100000,"cap_window":"daily"} | {"allowed_models":"deepseek/*,openai/gpt-5*"} | {"expires_at":"2026-11-01"}
+// GET   → [{"id":4,"name":"hermes","hint":"ezllm…a91f","roles":["infer"],"enabled":true,"cap_window":"monthly","cap_tokens":0,"cap_usd":0,"allowed_models":"","expires_at":"","last_used_at":"…"}]
+// PATCH → {"enabled":false} | {"roles":["infer","admin"]} | {"cap_tokens":100000,"cap_window":"daily"} | {"cap_usd":25} | {"allowed_models":"deepseek/*,openai/gpt-5*"} | {"expires_at":"2026-11-01"}
 ```
 `roles` is a non-empty subset of `infer|metrics|admin`, each a separate permission:
 `infer` calls models on `/v1/*`, `metrics` reads `GET /metrics`, `admin` reaches `/admin/*`. No role
@@ -673,6 +725,15 @@ because those keys could call models before 2.1.0.
 calendar bucket, metered in the ledger transaction. A spent key returns `429`
 with `limit`, `used`, and `window` before any upstream call. A cap set after the
 key already spent tokens backfills that bucket from the ledger once.
+`cap_usd` (v2.2.0, schema v38) caps the key's priced spend in the same
+`cap_window`; `0` = none, and a negative or non-numeric value is `400`. Spend is
+derived from the ledger and `model_prices` the way `GET /admin/cost` derives
+it, so calls with no USD price (subscription bridges, unpriced models) count as
+$0. A key at its cap gets `429 rate_limited` with `limit_usd`, `spent_usd` and
+`window` before any upstream call, and the `client_budget_reached`
+notification fires once per window. Spend is re-read at most every 15 seconds
+per key, so a busy key can overshoot by what it spends in that time plus
+requests already in flight. A `PATCH` applies a new cap on the next request.
 `allowed_models` is a comma-separated list of exact ids or globs (`deepseek/*`);
 empty = every model. It is checked against the requested id before a combo is
 expanded, and a disallowed model answers `403 model_not_allowed`.
@@ -1009,7 +1070,7 @@ JSON object, with unknown envelope/setting fields rejected.
 | `GET /admin/settings/sessions` | Active sessions with opaque `id`, `created_at`, `expires_at`, `browser`, and `current`. IDs are independent of authentication tokens/digests. |
 | `DELETE /admin/settings/sessions/{id}` | Revoke one dashboard session; 204, including an unknown/already-revoked ID. |
 | `POST /admin/settings/sessions/revoke-all` | Revoke every dashboard session; 204. Client API tokens are unaffected. |
-| `GET /admin/settings/diagnostics` | Allowlisted `version`, `uptime_seconds`, `database_bytes`, `bridges` (each `id`, `enabled` and, from v1.6.0, the updater's `update` verdict: `result`, `checked_at`, `current`, `candidate` — never its free-text `detail`), `jobs`, effective `settings`, safe deployment metadata (listen address/source, storage kind, master-key source and trusted proxy count), and configured backup status. `download=true` sets an attachment filename. No filesystem paths, credentials or request content. |
+| `GET /admin/settings/diagnostics` | Allowlisted `version`, `uptime_seconds`, `database_bytes`, `bridges` (each `id`, `enabled` and, from v1.6.0, the updater's `update` verdict: `result`, `checked_at`, `current`, `candidate` — never its free-text `detail`; from v2.2.0 a running bridge's `admission` counters `in_flight`, `queued`, `max_concurrent`, `max_queue`, `served`, `rejected_queue_full` and nothing else from its runtime), `jobs`, effective `settings`, safe deployment metadata (listen address/source, storage kind, master-key source and trusted proxy count), and configured backup status. `download=true` sets an attachment filename. No filesystem paths, credentials or request content. |
 | `GET /admin/backups` | `ready`, `running`, `last_outcome`, optional `last_finished`, optional sanitized `error` for inventory failures, and `backups`. `ready` describes configuration/inventory readiness; each run separately checks writability. Completed records have `id`, `created_at`, `bytes`, and `verified`. An unconfigured instance returns an empty list and `ready=false`. |
 | `POST /admin/backups` | Start a manual job; 202 with status `running`. Returns 409 if storage is unavailable, a job is already running, or shutdown has begun. Poll the GET route for completion. |
 

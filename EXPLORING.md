@@ -55,14 +55,14 @@ go run ./cmd/m2verify    # acceptance checker: prints PASS/FAIL per invariant
 ```
 
 **Expect:** `ttft_ms` noticeably smaller than `total_ms` (that gap = streaming working; if they're
-equal, something is buffering — go read `streamCopy` in `internal/proxy/proxy.go` and find out why).
+equal, something is buffering — go read `streamCopyTracked` in `internal/proxy/proxy.go` and find out why).
 
 ## 3. Reading order (per milestone)
 
 | # | Read first | Then | Ask yourself |
 |---|-----------|------|--------------|
 | M1 | `cmd/ezllm/main.go` → `internal/config` → `internal/server` | `config.example.yaml` | Where would I add a fourth account? (config seeds; the DB is runtime truth) |
-| M2 | `internal/proxy/proxy.go` (`Forward` → `streamCopy` → `UsageTapper.Observe`) → `internal/store/ledger.go` (`NormalizeUsageWith`) | `git show` of M2 | How do native streaming and translated streaming differ? |
+| M2 | `internal/proxy/proxy.go` (`Forward` → `streamCopyTracked` → `UsageTapper.Observe`) → `internal/store/ledger.go` (`NormalizeUsageWith`) | `git show` of M2 | How do native streaming and translated streaming differ? |
 | M3 | `internal/registration` + `internal/provider/adapters.go` + admin handlers in `internal/server` | `docs/API.md` | Can I trace an account from DB row → adapter → first upstream byte? |
 | M4 | `internal/router` (hops → strategies → key pick/cooldown) + `internal/rules` | `go test -short ./internal/router ./internal/rules` | What happens on 429 with 1 key left? (answer must be in a test) |
 | M5 | `internal/compress` (engines + stage pipeline) + `internal/server/compression.go` | `docs/compression-design.md` | Where is "never touch final turn / tool results" enforced, and where does fail-open live? |
@@ -142,7 +142,7 @@ one function. Then `store.NormalizeUsageWith` (`ledger.go`) for the accounting r
 - `internal/proxy/proxy.go` `SwapModel` — `map[string]any` round-trip with `UseNumber()`;
   only `model` changes, all 16 observed provider fields survive, big ints don't become floats.
   Rejects `null` explicitly (assigning into a nil map panics — a client could have crashed us).
-- `internal/proxy/proxy.go` `streamCopy` — scanner + `Flush()` per line, re-emitting the `\n`
+- `internal/proxy/proxy.go` `streamCopyTracked` — scanner + `Flush()` per line, re-emitting the `\n`
   the scanner strips so forwarding stays byte-exact. Over-long lines fall back to a raw `io.Copy`.
 - `internal/proxy/proxy.go` `UsageTapper` (`Observe`) — **merges** usage across events
   rather than taking the first hit. Two live-only bugs hid here: Anthropic's `message_start` has
@@ -677,7 +677,7 @@ can see the failure you are trying to prevent.**
   batch). `QualifiedVersion` lives here.
 - `internal/provider/copilotbridge.go` — `KindCopilotBridge` (`copilot-bridge`), an adapter
   embedding `*openAICompatible`: the wire is shared, the identity is its own.
-- `internal/server/bridges.go` — registry entry id `github-copilot` (label "GitHub
+- `internal/server/bridges.go` — registry entry id `copilot-sub` (label "GitHub
   Copilot", kind `copilot-bridge`); `web/src/pages/Providers.tsx` — the "GitHub Copilot
   (bridge)" preset, which replaced the device-flow panel.
 
@@ -715,6 +715,61 @@ while the SAME model on `opencode-go` was 0/754.
   attention names the hop, zero console errors, 390px zero overflow.
 - No routing action yet, deliberately: the park rule is justified by THIS
   measurement, not by a plausible number (the M2 lesson).
+
+### v2.2.0 — shared bridge admission, requests per turn, shared bridge helpers
+
+- `server/count_tokens.go` `countTokens` serves `POST /v1/messages/count_tokens`:
+  resolve like Messages, then `proxy/count_tokens.go` `CountTokens` asks up to
+  three hops whose `EffectiveWire` is Anthropic (`parked` skips cooled hops;
+  misses never record a cooldown). Fallback `estimatePromptTokens` counts
+  `estimateCharsPerToken` (2) characters per token, deliberately high. `countTokensServed` feeds
+  `ezllm_count_tokens_total`.
+- `server/spend_cap.go` `admitSpend` runs in `authenticate` after the token
+  budget; `store/client_budget.go` `ClientSpendStatus` prices the window with
+  the cost report's rules. `Server.spendCache` holds answers for
+  `spendCacheTTL`; `handleToken` calls `forgetSpend` after a PATCH. Column
+  `client_tokens.cap_usd` (v38, `store.go` `alterClientTokenCapUSD`).
+- `internal/bridgeutil/proc_unix.go` `SetProcessGroup` / `KillGroup` (Windows
+  stubs in `proc_windows.go`) start a bridge CLI in its own process group and
+  kill the whole group on cancel. Claude, Codex (app-server and exec fallback)
+  and Antigravity call them; the per-package copies are gone. Copilot does not
+  use process groups and is unchanged.
+- `internal/bridgeutil/errors.go` `OpenAIErrorEnvelope` is the error body for
+  Codex and Antigravity. Claude keeps its Anthropic envelope
+  (`claudebridge/errors.go` `ErrorEnvelope`) and Copilot its `"param": null`
+  variant (`copilotbridge/bridge.go` `ErrorEnvelope`); wire bytes are unchanged.
+- `internal/bridgeutil/chatchunks.go` `ChatChunks` encodes the OpenAI chunk
+  stream (headers, chunks, usage chunk, `[DONE]`) for Codex, Copilot and
+  Antigravity. Each adapter's `sseWriter` is now a thin wrapper that keeps its
+  own `delta` and decides when `Begin` runs. Copilot now sends
+  `X-Accel-Buffering: no`.
+- `internal/bridgeutil/admission.go` `Slots` (`Acquire`, `Hold`, `Stats`) is
+  every bridge's admission gate: slots plus a bounded queue, 429 `queue_full`
+  past it. Each runner's `slots` builds it from `MaxConcurrent`/`MaxQueue`
+  (`cmd/ezllm/bridgedefaults.go` `bridgeQueue` reads the one shared
+  `EZLLM_BRIDGE_QUEUE`; `retiredenv.go` refuses `EZLLM_COPILOT_BRIDGE_QUEUE`);
+  `AdmissionStats` feeds `/status` `runtime`. `Authorized` is the shared
+  token check behind each server's `authed`.
+- Slot wait: each `authed` wraps the request with `bridgeutil.TrackSlotWait`,
+  so `Slots.Acquire` adds its wait to a context recorder and the response
+  carries `X-Ezllm-Slot-Wait-Ms`. `proxy.go` `bridgeSlotWait` reads it from
+  loopback upstreams only into `Result.SlotWaitms`; `dispatch.go` copies it
+  to `calls.slot_wait_ms` (schema v37, `store.go` `alterCallsSlotWait`).
+- `Slots.warnRejected` logs the throttled queue-full `WARN`; `Named` labels
+  it. `server/bridges.go` `SetBridgeRuntime` gives `/admin/bridges` a live
+  `runtime`, and `settings.go` `admissionView` allowlists the counters for
+  diagnostics (Settings → System `BridgeLoad`).
+- Turns: `server/shape.go` `turnOf` hashes the first message plus the newest
+  human message (`isHumanMessage` skips tool results) before compression;
+  `server.go` stores it as `calls.turn_id` (`alterCallsTurnID`, v37).
+  Stateful Responses steps chain through `server/turns.go` `turnChain`, fed
+  by `proxy.Result.ResponseID` (the `UsageTapper` reads `response.created`).
+  `store/turns.go` `TurnLengths` groups successful rows by `(client, turn_id)`
+  per model for `GET /admin/turns` (`server/turns.go`) and the Stats
+  `TurnLengths` panel.
+- Copilot catalog: `copilotbridge/catalog.go` `ModelCatalog` refreshes
+  `models.list` in the background (`Warm` at boot); `Get` never waits on a
+  refresh after the first fetch.
 
 ### v2.1.0 — Prometheus metrics, per-role keys, updater fixes ✅ (2026-11-16; design `docs/metrics.md`)
 

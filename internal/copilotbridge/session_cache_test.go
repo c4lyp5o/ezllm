@@ -182,11 +182,11 @@ func TestSessionCacheToolBatchIsAccountedAndNeverRetained(t *testing.T) {
 func TestSessionCacheSelectsMatchingIdleWorker(t *testing.T) {
 	r, _ := poolRig(t, "cache-pick")
 	r.SessionCache = true
-	first, err := r.takeWorker()
+	first, err := r.takeWorkerFor(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := r.takeWorker()
+	second, err := r.takeWorkerFor(nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -84,7 +84,56 @@ runs, vet and a static build, plus live acceptance: Codex `TestLiveHTTPSurface`
 Copilot streamed `gpt-6-luna` text with usage and a `get_weather` tool call with
 `finish_reason: tool_calls`, usage and `[DONE]`, through the branch's bridge.
 
-The next scope is transport reuse, not a universal bridge lifecycle. Shared
-authentication mechanics, admission primitives and timing helpers remain later
-candidates after equivalent behavior is established. Process pools, sessions,
-CLI environments, sandboxing and provider accounting stay adapter-owned.
+## Shared helpers beyond the stream (v2.2.0)
+
+| Helper | Users | Not shared |
+|---|---|---|
+| `bridgeutil` `SetProcessGroup` / `KillGroup` (`proc_unix.go`, `proc_windows.go`) | Claude, Codex (app-server and exec fallback), Antigravity | Copilot does not start CLIs in a process group. |
+| `bridgeutil` `OpenAIErrorEnvelope` (`errors.go`) | Codex, Antigravity | Claude keeps its Anthropic envelope (`"type":"error"`, derived default code); Copilot keeps its `"param": null` variant. |
+| `bridgeutil` `ChatChunks` (`chatchunks.go`): SSE headers, `chat.completion.chunk` encoding, usage chunk, `[DONE]` | Codex, Copilot, Antigravity | When headers go out, what a delta carries (Codex adds `reasoning_content`), the opening role chunk (`RoleChunk`: Codex and Antigravity yes, Copilot no) and finish/usage ordering stay in each adapter. Claude streams Anthropic events. |
+| `bridgeutil` `Slots` (`admission.go`): `MaxConcurrent` slots, a bounded wait queue (`DefaultMaxQueue` 8), `/status` counters | All four | Each bridge maps `ErrQueueFull` to its own 429 `queue_full` (`Retry-After: 5`) and a slot-wait timeout to its existing 504. Codex's template cleanup uses `Hold`, which ignores the queue bound and counters. |
+| `bridgeutil` `Authorized` (`admission.go`): constant-time bridge-token check | All four | The refusal body: Claude 401 `authentication_error` (Anthropic) and accepts `x-api-key`; Codex, Copilot and Antigravity 401 `invalid_request_error` (OpenAI). |
+| `bridgeutil` `TailBuffer`, `WriteJSONBytes`, `RandomHex` (`util.go`): stderr tail for error reports, raw JSON response, ids | Tail: Claude, Codex, Antigravity (Copilot keeps its own stderr capture); the others where each bridge used them | Each bridge's `writeJSON` (encode-failure envelope) stays local. |
+| `cmd/ezllm` `bridgeTokenFromFile`, `serveBridge` | All four | Each bridge logs its own "listening" facts before `serveBridge`. |
+
+The process and envelope helpers were byte-identical copies, so moving them
+changes no wire output or process behavior. `ChatChunks` keeps each bridge's
+event bytes (`TestChatChunksWireBytes` pins them) with two header changes for
+Copilot: it now sends `X-Accel-Buffering: no` like the others
+(`TestStreamDisablesProxyBuffering`), and it no longer sends
+`Connection: keep-alive`, which Go's server handles itself. `TestKillGroupReachesGrandchild` proves a grandchild of the CLI dies
+with the group (it fails when the group kill is removed);
+`TestOpenAIErrorEnvelopeShape` pins the envelope bytes.
+
+## Admission and auth changes (v2.2.0)
+
+These change what clients see, deliberately, so every bridge behaves alike:
+
+- Claude, Codex and Antigravity used to let a request wait for a slot until the
+  runner timeout (504). They now bound the wait queue like Copilot did: past
+  `EZLLM_BRIDGE_QUEUE` waiting requests (one setting for every bridge,
+  default 8; it replaces `EZLLM_COPILOT_BRIDGE_QUEUE`) they answer 429
+  `queue_full` with `Retry-After: 5`, and the router parks the hop for 5 s and
+  fails over (`proxy.go` `hopOutcome`; a sole hop is not parked).
+- Every bridge's `/status` reports `runtime` with `in_flight`, `queued`,
+  `max_queue`, `max_concurrent`, `served` and `rejected_queue_full`
+  (Antigravity keeps `conversation_cache` inside `runtime`).
+- Codex's 401 type changed from `authentication_error` to
+  `invalid_request_error`, matching OpenAI and the other OpenAI-shaped bridges.
+
+Tests: `bridgeutil` `TestSlotsBoundTheQueueAndCount`,
+`TestSlotsQueuedCallerLeavesOnCancel`, `TestSlotsDefaultsAndHold`,
+`TestAuthorized`; per bridge `TestRunnerRefusesWhenTheQueueIsFull` (429,
+`Retry-After`, immediate) and Codex `TestRefusalUsesOpenAIErrorType`.
+
+Observability added in the same release: `Slots` records each request's wait
+for a slot (`TrackSlotWait`, header `X-Ezllm-Slot-Wait-Ms`, ledger column
+`calls.slot_wait_ms`) and logs a throttled `WARN` when it refuses; the live
+counters reach the dashboard through `/admin/bridges` `runtime`. Tests:
+`TestTrackSlotWait*`, per bridge `TestAuthedReportsTheSlotWait`,
+`TestForwardRecordsBridgeSlotWait`, `TestSlotWaitMigrationFromV36`,
+`TestQueueFullWarnsOncePerWindow`, `TestBridgesServeLiveRuntime`.
+
+Nothing else is planned for sharing. Process pools, sessions, CLI environments,
+sandboxing and provider accounting stay adapter-owned; there is still no
+universal bridge lifecycle.

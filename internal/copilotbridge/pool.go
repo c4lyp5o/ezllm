@@ -92,7 +92,6 @@ func (r *Runner) freshWorker(w *channelWorker) bool {
 		return true
 	}
 }
-func (r *Runner) takeWorker() (*channelWorker, error) { return r.takeWorkerFor(nil) }
 func (w *channelWorker) stopIdle() {
 	if w.conn != nil && w.conn.completed != nil {
 		w.conn.deleteSession(w.conn.session)
@@ -187,9 +186,6 @@ func (r *Runner) retireWorker(w *channelWorker) {
 	}
 	r.poolMu.Unlock()
 	w.stop()
-}
-func (r *Runner) withPooledChannel(ctx context.Context, f func(*rpcConn) error) error {
-	return r.withPooledTurn(ctx, nil, f)
 }
 func (r *Runner) withPooledTurn(ctx context.Context, turn *ChannelTurn, f func(*rpcConn) error) error {
 	w, err := r.takeWorkerFor(turn)

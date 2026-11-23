@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 )
 
 // Usage is the result envelope's usage block. Measured shape (headless docs,
@@ -50,6 +53,7 @@ type Runner struct {
 	Home          string // HOME for the child: holds .gemini/antigravity-cli/antigravity-oauth-token
 	Timeout       time.Duration
 	MaxConcurrent int
+	MaxQueue      int // requests allowed to wait for a slot (bridgeutil.DefaultMaxQueue when 0)
 	Logf          func(format string, args ...any)
 	// SessionCache keeps bounded metadata and workspaces, never idle processes.
 	SessionCache     bool
@@ -59,7 +63,7 @@ type Runner struct {
 	cacheClosed      bool
 	cacheHits        uint64
 
-	sem  chan struct{}
+	adm  *bridgeutil.Slots
 	once sync.Once
 }
 
@@ -69,15 +73,17 @@ func (r *Runner) logf(format string, args ...any) {
 	}
 }
 
-func (r *Runner) slots() chan struct{} {
+// slots is the shared admission gate (internal/bridgeutil): MaxConcurrent CLI
+// turns plus a bounded wait queue of MaxQueue.
+func (r *Runner) slots() *bridgeutil.Slots {
 	r.once.Do(func() {
 		n := r.MaxConcurrent
 		if n <= 0 {
 			n = 2
 		}
-		r.sem = make(chan struct{}, n)
+		r.adm = bridgeutil.NewSlots(n, r.MaxQueue).Named("antigravity")
 	})
-	return r.sem
+	return r.adm
 }
 
 // argv is the headless invocation. No --dangerously-skip-permissions: shell
@@ -133,13 +139,16 @@ func (r *Runner) Run(ctx context.Context, req Request, delta func(string) error)
 		runCtx, cancel = context.WithTimeout(ctx, r.Timeout)
 		defer cancel()
 	}
-	select {
-	case r.slots() <- struct{}{}:
-		defer func() { <-r.slots() }()
-	case <-runCtx.Done():
+	release, err := r.slots().Acquire(runCtx)
+	if errors.Is(err, bridgeutil.ErrQueueFull) {
+		return Result{}, &NativeError{Status: 429, Type: "rate_limit_error", Code: "queue_full",
+			Message: "agy-bridge: " + err.Error()}
+	}
+	if err != nil {
 		return Result{}, &NativeError{Status: 504, Type: "api_error", Code: "timeout",
 			Message: "agy-bridge: timed out waiting for a free slot"}
 	}
+	defer release()
 
 	if r.SessionCache && req.Adapter != nil {
 		return r.runCached(runCtx, req, delta)
@@ -174,7 +183,7 @@ func (r *Runner) run(runCtx context.Context, req Request, delta func(string) err
 	cmd := exec.Command(r.Bin, args...)
 	cmd.Dir = work
 	cmd.Env = childEnv(r.Home)
-	setProcessGroup(cmd)
+	bridgeutil.SetProcessGroup(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return Result{}, err
@@ -193,7 +202,7 @@ func (r *Runner) run(runCtx context.Context, req Request, delta func(string) err
 	}
 	waited := false
 	defer func() {
-		killGroup(cmd)
+		bridgeutil.KillGroup(cmd)
 		if !waited {
 			_ = cmd.Wait()
 		}
@@ -201,14 +210,14 @@ func (r *Runner) run(runCtx context.Context, req Request, delta func(string) err
 	done := make(chan struct{})
 	defer close(done)
 
-	var stderrTail tailBuffer
+	var stderrTail bridgeutil.TailBuffer
 	stderrDone := make(chan struct{})
 	go func() {
 		defer close(stderrDone)
 		sc := bufio.NewScanner(stderr)
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for sc.Scan() {
-			stderrTail.add(sc.Text())
+			stderrTail.Add(sc.Text())
 		}
 	}()
 
@@ -217,7 +226,7 @@ func (r *Runner) run(runCtx context.Context, req Request, delta func(string) err
 	stopStdin := context.AfterFunc(runCtx, func() {
 		_ = stdin.Close()
 		// Also unblock a native process that emitted a result but has not exited.
-		killGroup(cmd)
+		bridgeutil.KillGroup(cmd)
 	})
 	defer stopStdin()
 	msg, _ := json.Marshal(map[string]any{"event": "user", "message": map[string]any{"content": req.Prompt}})
@@ -338,7 +347,7 @@ func (r *Runner) run(runCtx context.Context, req Request, delta func(string) err
 	if out.Status != "SUCCESS" {
 		m := out.Error
 		if m == "" {
-			m = stderrTail.tail()
+			m = stderrTail.Tail()
 		}
 		return res, mapError(out.Status, m)
 	}
@@ -354,8 +363,8 @@ func (r *Runner) run(runCtx context.Context, req Request, delta func(string) err
 	return res, nil
 }
 
-func (r *Runner) stderrNote(t *tailBuffer) string {
-	if s := t.tail(); s != "" {
+func (r *Runner) stderrNote(t *bridgeutil.TailBuffer) string {
+	if s := t.Tail(); s != "" {
 		return " — " + urlPattern.ReplaceAllString(s, "[link withheld]")
 	}
 	return ""
@@ -374,23 +383,6 @@ func deadlineErr(err error) error {
 	return err
 }
 
-// tailBuffer keeps the last lines of the child's stderr — diagnosis, not noise.
-type tailBuffer struct {
-	mu    sync.Mutex
-	lines []string
-}
-
-func (t *tailBuffer) add(line string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.lines = append(t.lines, line)
-	if len(t.lines) > 40 {
-		t.lines = t.lines[len(t.lines)-40:]
-	}
-}
-
-func (t *tailBuffer) tail() string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return strings.Join(t.lines, " | ")
-}
+// AdmissionStats is the slot and queue picture each bridge's /status serves
+// under "runtime" (bridgeutil.Slots.Stats).
+func (r *Runner) AdmissionStats() map[string]any { return r.slots().Stats() }

@@ -42,7 +42,12 @@ type Bridge struct {
 	// once a minute. Nil when the bridge is not on the updater layout or the
 	// updater has not run.
 	Update *BridgeUpdate `json:"update,omitempty"`
-	token  string
+	// Runtime is the bridge's live admission picture (in_flight, queued,
+	// max_concurrent, max_queue, served, rejected_queue_full), read from the
+	// running bridge on every request. Absent when the bridge is off.
+	Runtime   map[string]any `json:"runtime,omitempty"`
+	runtimeFn func() map[string]any
+	token     string
 	// updateFile is where Update is read from; raised is the checked_at of
 	// the last report already turned into a bell event (or seen at boot).
 	updateFile string
@@ -87,7 +92,7 @@ func newBridgeRegistry() *bridgeRegistry {
 			// Replaces the retired OAuth/device-flow provider: the CLI's own
 			// login is the credential. Its usage is the CLI's measured split
 			// (inclusive prompt + cache details), so the openai convention fits.
-			ID: "github-copilot", Label: "GitHub Copilot", Kind: "copilot-bridge",
+			ID: "copilot-sub", Label: "GitHub Copilot", Kind: "copilot-bridge",
 			BaseURL: "http://127.0.0.1:8793/v1", UsageConvention: "openai",
 			Env: "EZLLM_COPILOT_BRIDGE", Runbook: "docs/copilot-bridge-runbook.md",
 		},
@@ -116,6 +121,17 @@ func (s *Server) EnableBridge(id, addr, token, updateFile string, status map[str
 		b.token = token
 		b.updateFile = updateFile
 		b.Status = status
+	}
+}
+
+// SetBridgeRuntime registers the live admission snapshot of a running bridge.
+func (s *Server) SetBridgeRuntime(id string, fn func() map[string]any) {
+	s.bridges.mu.Lock()
+	defer s.bridges.mu.Unlock()
+	for i := range s.bridges.list {
+		if s.bridges.list[i].ID == id {
+			s.bridges.list[i].runtimeFn = fn
+		}
 	}
 }
 
@@ -235,6 +251,11 @@ func (s *Server) handleBridges(w http.ResponseWriter, r *http.Request) {
 	out := make([]Bridge, len(s.bridges.list))
 	copy(out, s.bridges.list)
 	s.bridges.mu.RUnlock()
+	for i := range out {
+		if out[i].Enabled && out[i].runtimeFn != nil {
+			out[i].Runtime = out[i].runtimeFn()
+		}
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 

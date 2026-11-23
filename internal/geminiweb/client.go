@@ -160,6 +160,12 @@ func (c *Client) WithBase(base string) *Client {
 	return c
 }
 
+// WithRotationURL overrides the cookie rotation endpoint for local tests.
+func (c *Client) WithRotationURL(endpoint string) *Client {
+	c.rotateURL = endpoint
+	return c
+}
+
 // Init loads the app page and scrapes the session tokens. ErrNoAccessToken
 // means the cookies did not authenticate (expired / wrong flavor) — the
 // caller's key-test path maps it to a credential failure.

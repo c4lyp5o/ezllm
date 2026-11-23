@@ -210,6 +210,9 @@ func (s *Server) writeGauges(b *strings.Builder) {
 		metricSample(b, "ezllm_inflight_limit", "", float64(limit))
 	}
 
+	metricFamily(b, "ezllm_count_tokens_total", "counter", "POST /v1/messages/count_tokens answers, by source: an upstream Anthropic hop or the local estimate.")
+	metricSample(b, "ezllm_count_tokens_total", metricLabels("source", "upstream"), float64(countTokensServed.upstream.Load()))
+	metricSample(b, "ezllm_count_tokens_total", metricLabels("source", "estimate"), float64(countTokensServed.estimate.Load()))
 	metricFamily(b, "ezllm_ledger_lost_rows_total", "counter", "Ledger rows discarded after a failed flush and retry.")
 	metricSample(b, "ezllm_ledger_lost_rows_total", "", float64(store.LostRows()))
 	metricFamily(b, "ezllm_ledger_dropped_rows_total", "counter", "Ledger rows dropped because the write queue was full.")

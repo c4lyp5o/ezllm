@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -86,7 +87,8 @@ func (a *geminiWebAdapter) PrepareRequest(_ context.Context, req *http.Request, 
 	req.Header.Set(GeminiWebAccountHeader, strconv.FormatInt(acct.ID, 10))
 	req.Header.Set(BridgeSecretHeader, BridgeSecret())
 	if key != "" {
-		req.Header.Set(GeminiWebKeyHeader, key)
+		// Rotated credentials can contain newlines, which HTTP headers reject.
+		req.Header.Set(GeminiWebKeyHeader, base64.StdEncoding.EncodeToString([]byte(key)))
 	}
 	return nil
 }

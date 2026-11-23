@@ -124,8 +124,13 @@ func TestGeminiWebPrepareRequestRewrite(t *testing.T) {
 	if req.Header.Get(GeminiWebAccountHeader) != "42" {
 		t.Errorf("account header = %q", req.Header.Get(GeminiWebAccountHeader))
 	}
-	if !strings.Contains(req.Header.Get(GeminiWebKeyHeader), "__Secure-1PSID=x") {
-		t.Errorf("key header = %q", req.Header.Get(GeminiWebKeyHeader))
+	resp, err := bridge.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("bridge status = %d", resp.StatusCode)
 	}
 }
 

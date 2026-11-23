@@ -15,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 )
 
 // Usage is what the CLI's own accounting reported for one turn.
@@ -72,7 +74,7 @@ type Runner struct {
 	Home          string // COPILOT_HOME: holds the CLI's own login
 	Timeout       time.Duration
 	MaxConcurrent int
-	// MaxQueue caps requests WAITING for a slot (default 8). Past it Run fails
+	// MaxQueue caps requests WAITING for a slot (default bridgeutil.DefaultMaxQueue). Past it Run fails
 	// at once with queue_full instead of parking the caller until its context
 	// ends: a 2-slot bridge with a 300 s timeout would otherwise hold sockets
 	// for minutes behind a stall.
@@ -90,17 +92,14 @@ type Runner struct {
 	closed          bool
 	Logf            func(format string, args ...any)
 
-	sem  chan struct{}
+	adm  *bridgeutil.Slots // shared admission gate (internal/bridgeutil)
 	once sync.Once
 
-	inflight, queued, served, rejected  atomic.Int64
 	firstByteNS, firstByteN, lastByteNS atomic.Int64
 	mu                                  sync.Mutex
 	outcomes                            map[string]int64
 	stages                              map[string]stageTiming
 }
-
-const defaultMaxQueue = 8
 
 // Stats is the runtime picture /status serves: pressure (in flight, queued,
 // rejected), what turns ended as, and how long the CLI takes to say anything.
@@ -123,26 +122,13 @@ func (r *Runner) Stats() map[string]any {
 	if n := r.firstByteN.Load(); n > 0 {
 		avg = r.firstByteNS.Load() / n / int64(time.Millisecond)
 	}
-	return map[string]any{
-		"in_flight":           r.inflight.Load(),
-		"queued":              r.queued.Load(),
-		"max_queue":           r.maxQueue(),
-		"max_concurrent":      cap(r.sem),
-		"served":              r.served.Load(),
-		"rejected_queue_full": r.rejected.Load(),
-		"outcomes":            oc,
-		"stage_timings":       stages,
-		"pool":                pool,
-		"first_byte_ms_avg":   avg,
-		"first_byte_ms_last":  r.lastByteNS.Load() / int64(time.Millisecond),
-	}
-}
-
-func (r *Runner) maxQueue() int {
-	if r.MaxQueue > 0 {
-		return r.MaxQueue
-	}
-	return defaultMaxQueue
+	stats := r.adm.Stats() // in_flight, queued, max_queue, max_concurrent, served, rejected_queue_full
+	stats["outcomes"] = oc
+	stats["stage_timings"] = stages
+	stats["pool"] = pool
+	stats["first_byte_ms_avg"] = avg
+	stats["first_byte_ms_last"] = r.lastByteNS.Load() / int64(time.Millisecond)
+	return stats
 }
 
 func (r *Runner) record(err error) {
@@ -195,7 +181,7 @@ func (r *Runner) init() {
 		if n <= 0 {
 			n = 2
 		}
-		r.sem = make(chan struct{}, n)
+		r.adm = bridgeutil.NewSlots(n, r.MaxQueue).Named("copilot")
 	})
 }
 
@@ -212,35 +198,20 @@ func (r *Runner) slotted(ctx context.Context, turn func() (Result, error)) (Resu
 		return Result{}, err
 	}
 	waitStart := time.Now()
-	select {
-	case r.sem <- struct{}{}:
-	default:
-		if int(r.queued.Add(1)) > r.maxQueue() {
-			r.queued.Add(-1)
-			r.rejected.Add(1)
-			err := &Failure{Code: "queue_full", Msg: "copilot bridge: every CLI slot is busy and the queue is full; retry shortly"}
-			r.record(err)
-			return Result{}, err
-		}
-		select {
-		case r.sem <- struct{}{}:
-			r.queued.Add(-1)
-		case <-ctx.Done():
-			r.queued.Add(-1)
-			r.record(ctx.Err())
-			return Result{}, ctx.Err()
-		}
+	release, err := r.adm.Acquire(ctx)
+	if errors.Is(err, bridgeutil.ErrQueueFull) {
+		err = &Failure{Code: "queue_full", Msg: "copilot bridge: " + err.Error()}
 	}
+	if err != nil {
+		r.record(err)
+		return Result{}, err
+	}
+	defer release()
 	if err := r.accepting(ctx); err != nil {
-		<-r.sem
 		return Result{}, err
 	}
 	r.observeStage("queue", time.Since(waitStart))
-	defer func() { <-r.sem }()
-	r.inflight.Add(1)
-	defer r.inflight.Add(-1)
 	res, err := turn()
-	r.served.Add(1)
 	r.record(err)
 	return res, err
 }

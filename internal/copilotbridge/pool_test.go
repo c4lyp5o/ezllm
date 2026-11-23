@@ -407,7 +407,7 @@ func TestPoolAgeLimitAndCloseUnblocksActiveAndQueued(t *testing.T) {
 			}
 		}
 		go func() { _, err := r.RunChannel(context.Background(), plainPoolTurn(), nil); results <- err }()
-		for r.queued.Load() == 0 {
+		for r.adm.Queued() == 0 {
 			select {
 			case <-deadline:
 				t.Fatal("request not queued")

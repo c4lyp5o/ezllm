@@ -41,14 +41,14 @@ func TestCodexBridgeRefusesANonLoopbackBind(t *testing.T) {
 
 func TestCodexBridgeTokenPersists(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "codex-bridge.token")
-	first, err := codexBridgeToken(path)
+	first, err := bridgeTokenFromFile(path, "codex")
 	if err != nil || len(first) != 48 {
 		t.Fatalf("token = %q err = %v", first, err)
 	}
 	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
 		t.Fatalf("token file mode = %v, want 0600", fi.Mode().Perm())
 	}
-	if again, _ := codexBridgeToken(path); again != first {
+	if again, _ := bridgeTokenFromFile(path, "codex"); again != first {
 		t.Fatal("a second boot generated a new token: the account key would break on restart")
 	}
 }

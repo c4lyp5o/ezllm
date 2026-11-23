@@ -11,7 +11,51 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v2.1.0**
+**Current: v2.2.0**
+
+## v2.2.0 — 2026-11-20
+
+Every subscription bridge now shares one admission gate and bounds its queue,
+the ledger records bridge slot wait and the agent-loop turn of each request,
+`GET /admin/turns` shows requests per turn by model, `POST /v1/messages/count_tokens`
+answers token counts, and keys can carry a dollar cap. Schema v38.
+
+- **Breaking (env):** `EZLLM_COPILOT_BRIDGE_QUEUE` is retired and fails the
+  boot; `EZLLM_BRIDGE_QUEUE` (default 8) sizes every bridge's wait queue.
+- **Behaviour change:** Claude, Codex and Antigravity answer 429 `queue_full`
+  with `Retry-After: 5` past the queue instead of holding the request until
+  the 300 s timeout; the router parks the hop and fails over. Codex's 401 type
+  is now `invalid_request_error`.
+- **Ledger (schema v37):** `calls.slot_wait_ms` (bridge wait for a CLI slot)
+  and `calls.turn_id` (the agent loop a request belongs to; tool steps,
+  Claude Code's tool results with reminders and stateful Responses steps stay
+  in their turn). `GET /admin/turns` and a Stats panel count successful
+  requests per turn.
+- **New: `POST /v1/messages/count_tokens`.** Claude Code calls it for
+  context accounting. The model resolves like a Messages request; the first
+  hop on the Anthropic wire that has the endpoint answers, and everything else
+  (bridges, translated hops, gateways without it) gets a local estimate. The
+  `X-Ezllm-Token-Count` header says which (`upstream` or `estimate`), and
+  `ezllm_count_tokens_total{source}` counts both. No ledger row, no budget.
+- **New: per-key spend cap (schema v38).** `client_tokens.cap_usd` caps a
+  key's priced spend in its `cap_window`; `0` = none. A key at its cap gets
+  `429` before any upstream call, and the "budget reached" notification fires
+  once per window. Spend comes from model prices, so unpriced calls count as
+  $0. Set it in the key policy dialog or with `PATCH /admin/tokens/{id}`.
+- **Fix: the Copilot bridge id is `copilot-sub`** (was `github-copilot`, the
+  retired provider's name). `GET /admin/bridges` returns the new id.
+- **Fix: a gemini-web login no longer "expires" minutes after first use.**
+  The first request rotates the cookie and saves it as two lines; the next
+  request put that into a header, which Go refuses for a newline, so every
+  request after the first rotation failed. The credential header is now
+  base64.
+- **Fix: the Copilot model catalog refreshes in the background**, so a slow or
+  hung CLI no longer stalls every request once a minute.
+- **Fix:** Cloudflare Deepgram Aura TTS gets `text`, not `prompt`; zero-token
+  steps are labelled in the dashboard tokens column; Copilot models come from
+  the CLI's live catalog.
+- Bridge load (running / waiting / served / refused) on Settings → System and
+  in `/admin/bridges` `runtime`; one throttled `WARN` per 10 s on `queue_full`.
 
 ## v2.1.0 — 2026-11-16
 

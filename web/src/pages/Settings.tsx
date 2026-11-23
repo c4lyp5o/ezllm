@@ -1,4 +1,4 @@
-import { getSettings, saveSettings, getDashboardSessions, revokeDashboardSession, revokeAllDashboardSessions, getBackupStatus, runBackup, getDiagnostics, type SettingsView, type DashboardSession, type BackupStatus, type SystemDiagnostics } from '../utils/api';
+import { getSettings, saveSettings, getDashboardSessions, revokeDashboardSession, revokeAllDashboardSessions, getBackupStatus, runBackup, getDiagnostics, type SettingsView, type DashboardSession, type BackupStatus, type SystemDiagnostics, type BridgeAdmission } from '../utils/api';
 import { readTheme, setTheme } from '../utils/theme';
 import { readMotion, readRange, savePreference, subscribePreferences } from '../utils/preferences';
 import { useEffect, useRef, useState } from 'react';
@@ -234,6 +234,16 @@ function Backups() {
       <p className="mt-5 text-xs text-mute">To restore, stop ezllm and restore into a new folder. Check the backup with <code>ezllm backup-verify --archive BACKUP --secret-file SECRET</code>, then restore with <code>ezllm backup-restore --archive BACKUP --secret-file SECRET --output NEW_DIRECTORY</code>. Restored dashboard sessions are revoked.</p>
     </section></>;
 }
+// A running bridge's live load: what is running, what waits, what was refused
+// (429 queue_full) since start. Refusals mean the bridge needs more
+// concurrency (EZLLM_<BRIDGE>_BRIDGE_CONCURRENCY), not a deeper queue.
+function BridgeLoad({ a }: { a: BridgeAdmission }) {
+  const n = (v?: number) => (v ?? 0).toLocaleString();
+  const refused = a.rejected_queue_full ?? 0;
+  return <p className={cx('text-xs', refused > 0 ? 'text-warn' : 'text-mute')}>
+    {n(a.in_flight)} of {n(a.max_concurrent)} running · {n(a.queued)} of {n(a.max_queue)} waiting · {n(a.served)} served · {n(refused)} refused because the queue was full
+  </p>;
+}
 function System() {
   const [info, setInfo] = useState<SystemDiagnostics | null>(null);
   const [error, setError] = useState('');
@@ -241,7 +251,7 @@ function System() {
   return <section className={panel}><SectionLabel>System</SectionLabel>{error && <p role="alert" className="mt-3 text-bad">{error}</p>}{info && <>
     <dl className="mt-4 grid grid-cols-2 gap-3 text-sm"><dt>Version</dt><dd className="flex min-w-0 flex-wrap items-center gap-2 break-all">{info.version}<CopyButton text={info.version} label="Copy" /></dd><dt>Uptime</dt><dd title={`${Math.floor(info.uptime_seconds / 60)} minutes`}>{fmtUptime(info.uptime_seconds)}</dd><dt>Database</dt><dd>{(info.database_bytes / 1048576).toFixed(2)} MiB</dd></dl>
     {info.deployment && <dl className="mt-5 grid grid-cols-2 gap-3 text-sm"><dt>Listen address</dt><dd className="break-words">{info.deployment.listen_address} · {info.deployment.listen_source}</dd><dt>Storage</dt><dd>{info.deployment.storage}</dd><dt>Master-key source</dt><dd>{info.deployment.master_key_source}</dd><dt>Trusted proxy entries</dt><dd>{info.deployment.trusted_proxy_count}</dd></dl>}
-    <div className="mt-5 space-y-2">{info.bridges.map(b => { const u = b.update && bridgeUpdateText(b.update); return <div key={b.id} className="text-sm"><p className="flex justify-between gap-3"><span>{b.id}</span><span>{b.enabled ? 'Ready' : 'Off'}</span></p>{u && <p className={cx('text-xs', UPDATE_TONE[u.tone])}>CLI updates: {u.text}</p>}</div>; })}</div>
+    <div className="mt-5 space-y-2">{info.bridges.map(b => { const u = b.update && bridgeUpdateText(b.update); return <div key={b.id} className="text-sm"><p className="flex justify-between gap-3"><span>{b.id}</span><span>{b.enabled ? 'Ready' : 'Off'}</span></p>{u && <p className={cx('text-xs', UPDATE_TONE[u.tone])}>CLI updates: {u.text}</p>}{b.admission && <BridgeLoad a={b.admission} />}</div>; })}</div>
     <div className="mt-5 space-y-2">{Object.entries(info.jobs).map(([name, j]) => <div key={name} className="text-sm"><p>{name}: {j.running ? 'Running' : 'Idle'}</p><p className="text-xs text-mute">Last success: {j.last_success ? new Date(j.last_success).toLocaleString() : 'No recorded success'} · last failure: {j.last_failure ? new Date(j.last_failure).toLocaleString() : 'None recorded'}</p></div>)}</div>
     <p className="mt-5 text-xs text-mute">The listen address, data folder, trusted proxies, master key, bridge paths and backup paths are set where ezllm is deployed.</p>
     <a className={cx(btn.base, btn.ghost, 'mt-4')} href="/admin/settings/diagnostics?download=true" download>Download sanitized diagnostics</a>

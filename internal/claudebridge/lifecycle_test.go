@@ -69,8 +69,11 @@ func TestCancelUnblocksAWedgedReplayWrite(t *testing.T) {
 // as the slots stayed taken.
 func TestRunnerTimeoutCoversTheSlotWait(t *testing.T) {
 	r := &Runner{Bin: "/nonexistent", Timeout: 100 * time.Millisecond, MaxConcurrent: 1}
-	r.slots() <- struct{}{} // the only slot, held elsewhere
-	defer func() { <-r.slots() }()
+	release, err := r.slots().Acquire(context.Background()) // the only slot, held elsewhere
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
 	req := Request{Model: "claude-sonnet", MaxTokens: 16,
 		Messages: []Message{{Role: "user", Content: json.RawMessage(`"hi"`)}}}
 	done := make(chan error, 1)

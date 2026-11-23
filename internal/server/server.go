@@ -72,6 +72,8 @@ type DeploymentInfo struct {
 }
 
 type Server struct {
+	turnChain    turnChain // response id -> turn, for stateful Responses loops
+	spendCache   sync.Map  // client name -> spendEntry (spend_cap.go)
 	deployment   DeploymentInfo
 	settings     *settings.Manager
 	settingsWake chan struct{}
@@ -317,6 +319,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/prices", s.inferAuthed(s.handleCurrentPrices))
 	s.mux.HandleFunc("POST /v1/chat/completions", s.inferAuthed(s.inference(provider.SurfaceChat)))
 	s.mux.HandleFunc("POST /v1/messages", s.inferAuthed(s.inference(provider.SurfaceAnthropic)))
+	s.mux.HandleFunc("POST /v1/messages/count_tokens", s.inferAuthed(s.countTokens))
 	s.mux.HandleFunc("POST /v1/responses", s.inferAuthed(s.inference(provider.SurfaceResponses)))
 
 	// Phase 1: New inference endpoints
@@ -350,6 +353,7 @@ func (s *Server) routes() {
 	// ── M3 admin API (docs/API.md) ──
 	s.mux.HandleFunc("GET /admin/health", s.admin(s.handleAdminHealth))
 	s.mux.HandleFunc("GET /admin/usage", s.admin(s.handleUsage))
+	s.mux.HandleFunc("GET /admin/turns", s.admin(s.handleTurns))
 	s.mux.HandleFunc("GET /admin/overview", s.admin(s.handleOverview))
 	// Tool-usage learning stats + the pruning prize rollup (docs/tool-pruning-design.md).
 	// The same routable catalog /v1/models serves, behind the dashboard
@@ -798,6 +802,14 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 		// same compressed body, because hops only swap `model`. The shared
 		// doc is threaded through so the pipeline reuses the one decode
 		// (older code parsed the body again here).
+		// The turn key reads the client's own conversation: compression may
+		// rewrite history, which must not split one agent loop into two.
+		turn := turnOf(doc, surface, sessionOf(r))
+		if turn == "" && surface == provider.SurfaceResponses {
+			// A stateful step (previous_response_id, tool outputs only) carries
+			// no human message: it joins the turn of the response it continues.
+			turn = s.turnChain.lookup(client, previousResponseID(doc))
+		}
 		body, compRes := s.applyCompression(r, requested, body, doc)
 		// A shipped rewrite produces NEW bytes, so the shared decode no
 		// longer describes them: re-open on that path only (compression
@@ -822,7 +834,7 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 			TS: start, Client: client, IP: cip, Surface: store2surface(surface),
 			// v8 research capture: request shape + operator session key.
 			PrefixSHA: sh.PrefixSHA, MsgCount: sh.MsgCount, ToolCount: sh.ToolCount,
-			SessionID: sessionOf(r), ReqBytes: sh.ReqBytes,
+			SessionID: sessionOf(r), ReqBytes: sh.ReqBytes, TurnID: turn,
 			ReservationID: reservation,
 		}
 		reservation = 0 // handed to the ledger row
@@ -1355,6 +1367,9 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, token stri
 		} else if !errors.Is(berr, store.ErrNotFound) {
 			slog.Warn("client budget check failed", "client", name, "err", berr)
 			writeErr(w, http.StatusServiceUnavailable, "budget_unavailable", "usage meter unavailable")
+			return r, false
+		}
+		if !s.admitSpend(w, r, name) {
 			return r, false
 		}
 	}

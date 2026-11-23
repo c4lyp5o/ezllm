@@ -15,7 +15,7 @@ const call = (minsAgo, o = {}) => ({
   compression: '', applied: false, alias: 'main', ...o,
 });
 const recent = [
-  call(1), call(2), call(3, { status: 502, err: 'upstream 502 [bad_gateway]: {"error":{"message":"boom"}}' }),
+  call(1, { tin: 0, tout: 0 }), call(2, { tin: 0, tout: 0, cread: 100 }), call(3, { tin: 0, tout: 0, status: 502, err: 'upstream 502 [bad_gateway]: {"error":{"message":"boom"}}' }),
   call(4, { status: 429, err: 'upstream 429 [rate_limited]: slow down' }),
   call(5, { err: 'failover: mock/a: 503; failover: mock/b: timeout' }),
   call(6, { err: 'failover: mock/a: 503' }), call(7, { err: 'failover: mock/a: 503' }),
@@ -80,6 +80,10 @@ try {
 
   // Recent calls: filter chips and search narrow the shown rows.
   const body = page.locator('tbody').last();
+  check('zero-token success gets badge, cached-only and error rows do not', (await body.getByText('no tokens', { exact: true }).count()) === 1);
+  const badge = body.getByText('no tokens', { exact: true });
+  check('no tokens badge is in tokens column', await badge.evaluate(el => el.closest('td').cellIndex === 5));
+  await body.screenshot({ path: '/home/calypso/.hermes/cache/scratch/ezllm-zero-token-tokens-column.png' });
   await page.getByRole('button', { name: /^Errors 2/ }).click();
   check('errors filter keeps only status>=400', (await body.locator('tr').count()) === 2);
   await page.getByRole('button', { name: /^Failed over 3/ }).click();

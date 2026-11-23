@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 )
 
 // LockdownFeatures are the Codex features switched off for every child. With
@@ -68,6 +70,7 @@ type Runner struct {
 	CodexHome     string
 	Timeout       time.Duration
 	MaxConcurrent int
+	MaxQueue      int // requests allowed to wait for a slot (bridgeutil.DefaultMaxQueue when 0)
 	Version       string
 	Logf          func(format string, args ...any)
 	// Channel is ChannelAppServer (default) or ChannelExec, the fallback boot
@@ -87,7 +90,7 @@ type Runner struct {
 	NativeHistory bool
 	cache         templateCache
 
-	sem  chan struct{}
+	adm  *bridgeutil.Slots
 	once sync.Once
 
 	pmu    sync.Mutex
@@ -131,15 +134,17 @@ func (r *Runner) logf(format string, args ...any) {
 	}
 }
 
-func (r *Runner) slots() chan struct{} {
+// slots is the shared admission gate (internal/bridgeutil): MaxConcurrent CLI
+// turns plus a bounded wait queue of MaxQueue.
+func (r *Runner) slots() *bridgeutil.Slots {
 	r.once.Do(func() {
 		n := r.MaxConcurrent
 		if n <= 0 {
 			n = 2
 		}
-		r.sem = make(chan struct{}, n)
+		r.adm = bridgeutil.NewSlots(n, r.MaxQueue).Named("codex")
 	})
-	return r.sem
+	return r.adm
 }
 
 func (r *Runner) timeout() time.Duration {
@@ -156,7 +161,7 @@ type child struct {
 	conn     *rpcConn
 	tmp      string
 	cwd      string
-	stderr   *tailBuffer
+	stderr   *bridgeutil.TailBuffer
 	readDone chan struct{}
 	once     sync.Once
 	lease    *templateLease
@@ -199,7 +204,7 @@ func (r *Runner) spawn(ctx context.Context, opts spawnOpts, onNotify func(string
 	if err != nil {
 		return nil, fmt.Errorf("codex-bridge: cannot create work dir: %w", err)
 	}
-	c := &child{keepWork: opts.workRoot != "", tmp: tmp, cwd: filepath.Join(tmp, "cwd"), stderr: &tailBuffer{}, readDone: make(chan struct{})}
+	c := &child{keepWork: opts.workRoot != "", tmp: tmp, cwd: filepath.Join(tmp, "cwd"), stderr: &bridgeutil.TailBuffer{}, readDone: make(chan struct{})}
 	home, tmpdir := filepath.Join(tmp, "home"), filepath.Join(tmp, "tmp")
 	for _, d := range []string{c.cwd, home, tmpdir} {
 		if err := os.Mkdir(d, 0o700); err != nil {
@@ -219,7 +224,7 @@ func (r *Runner) spawn(ctx context.Context, opts spawnOpts, onNotify func(string
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = c.cwd
 	cmd.Env = env
-	setProcessGroup(cmd)
+	bridgeutil.SetProcessGroup(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		os.RemoveAll(tmp)
@@ -245,7 +250,7 @@ func (r *Runner) spawn(ctx context.Context, opts spawnOpts, onNotify func(string
 	go func() {
 		sc := bufio.NewScanner(stderr)
 		for sc.Scan() {
-			c.stderr.add(sc.Text())
+			c.stderr.Add(sc.Text())
 		}
 	}()
 	go func() {
@@ -276,7 +281,7 @@ func (c *child) close() {
 		if c.stdin != nil {
 			_ = c.stdin.Close()
 		}
-		killGroup(c.cmd)
+		bridgeutil.KillGroup(c.cmd)
 		if c.cmd != nil && c.cmd.Process != nil {
 			_ = c.cmd.Wait()
 		}
@@ -304,7 +309,7 @@ func (r *Runner) childErr(ctx context.Context, c *child, step string, err error)
 			Message: "codex-bridge: the Codex CLI did not finish in time (" + step + ")"}
 	}
 	msg := "codex-bridge: " + step + " failed: " + err.Error()
-	if tail := c.stderr.tail(); tail != "" {
+	if tail := c.stderr.Tail(); tail != "" {
 		msg += " | stderr: " + tail
 	}
 	return &NativeError{Status: 502, Type: "api_error", Code: "native_closed", Message: msg, BeforeInference: step == "initialize" || step == "initialized" || step == "thread/start"}
@@ -625,13 +630,16 @@ func (r *Runner) Run(ctx context.Context, req Request, sink func(Delta) error) (
 	// stuck slots.
 	ctx, cancel := context.WithTimeout(ctx, r.timeout())
 	defer cancel()
-	select {
-	case r.slots() <- struct{}{}:
-		defer func() { <-r.slots() }()
-	case <-ctx.Done():
+	release, err := r.slots().Acquire(ctx)
+	if errors.Is(err, bridgeutil.ErrQueueFull) {
+		return Result{}, &NativeError{Status: 429, Type: "rate_limit_error", Code: "queue_full",
+			Message: "codex-bridge: " + err.Error()}
+	}
+	if err != nil {
 		return Result{}, &NativeError{Status: 504, Type: "api_error", Code: "timeout",
 			Message: "codex-bridge: timed out waiting for a free slot"}
 	}
+	defer release()
 
 	if len(req.ToolResults) > 0 {
 		pt, takeErr := r.takeParked(req)
@@ -800,3 +808,7 @@ func (r *Runner) startErr(ctx context.Context, c *child, step string, err error)
 	}
 	return r.childErr(ctx, c, step, err)
 }
+
+// AdmissionStats is the slot and queue picture each bridge's /status serves
+// under "runtime" (bridgeutil.Slots.Stats).
+func (r *Runner) AdmissionStats() map[string]any { return r.slots().Stats() }

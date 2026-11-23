@@ -263,10 +263,9 @@ func TestBridgeCheckCopilotRoutesAndFailsClosed(t *testing.T) {
 
 func TestBridgeCheckReportsConfiguredPolicy(t *testing.T) {
 	t.Setenv("EZLLM_CODEX_SANDBOX", "writable")
-	t.Setenv("EZLLM_AGY_EXPERIMENTAL_TOOLS", "on")
 	t.Setenv("EZLLM_COPILOT_BRIDGE_WARM_POOL", "on")
 	for _, tc := range []struct{ name, key, want string }{
-		{"codex", "sandbox", "workspace-write"}, {"codex", "history", "native-if-supported-v1"}, {"agy", "caller_tools", "structured-output"}, {"copilot", "warm_pool", "on"},
+		{"codex", "sandbox", "workspace-write"}, {"codex", "history", "native-if-supported-v1"}, {"agy", "caller_tools", "off"}, {"copilot", "warm_pool", "on"},
 	} {
 		v, err := checkJSON(t, tc.name, "--bin", filepath.Join(t.TempDir(), "missing"))
 		if !errors.Is(err, errBridgeCheckFailed) || v.Policy[tc.key] != tc.want {
@@ -294,8 +293,9 @@ func TestBridgeOperationalFailuresAreRetryableButCompatibilityFailuresAreNot(t *
 	}
 }
 
-func TestAgyGateRequiresSchemaFlagWhenExperimentalToolsEnabled(t *testing.T) {
-	t.Setenv("EZLLM_AGY_EXPERIMENTAL_TOOLS", "on")
+// Caller tools are on by default, so a CLI without --json-schema cannot qualify
+// and the reported policy follows what the CLI supports.
+func TestAgyGateRequiresSchemaFlagForDefaultCallerTools(t *testing.T) {
 	home := t.TempDir()
 	dir := filepath.Join(home, ".gemini", "antigravity-cli")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -318,17 +318,16 @@ esac
 `)
 		v, err := checkJSON(t, "agy", "--bin", bin, "--home", home)
 		if schema {
-			if err != nil || !v.OK {
+			if err != nil || !v.OK || v.Policy["caller_tools"] != "structured-output" {
 				t.Fatalf("capable CLI refused: %+v %v", v, err)
 			}
-		} else if !errors.Is(err, errBridgeCheckFailed) || v.OK {
+		} else if !errors.Is(err, errBridgeCheckFailed) || v.OK || v.Policy["caller_tools"] != "off" {
 			t.Fatalf("schema-less CLI qualified: %+v %v", v, err)
 		}
 	}
 }
 
 func TestAgyCacheGateRequiresConversationFlag(t *testing.T) {
-	t.Setenv(envAgyTools, "on")
 	t.Setenv(envAgySessionCache, "on")
 	home := t.TempDir()
 	dir := filepath.Join(home, ".gemini", "antigravity-cli")

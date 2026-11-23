@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -315,6 +316,11 @@ func Restore(ctx context.Context, path, secret, dest string) error {
 	return syncDir(dest)
 }
 func syncDir(path string) error {
+	// Windows does not support flushing a directory via os.File.Sync.
+	// Backup files themselves are still synced before publication.
+	if runtime.GOOS == "windows" {
+		return nil
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -323,4 +329,12 @@ func syncDir(path string) error {
 	return f.Sync()
 }
 
-func sqliteURI(path string) string { u := url.URL{Scheme: "file", Path: path}; return u.String() }
+func sqliteURI(path string) string {
+	path = filepath.ToSlash(path)
+	// A Windows drive letter belongs in the URI path, not the authority.
+	if len(path) >= 3 && path[1] == ':' && path[2] == '/' {
+		path = "/" + path
+	}
+	u := url.URL{Scheme: "file", Path: path}
+	return u.String()
+}

@@ -102,6 +102,21 @@ plan, send one prompt, then `/exit`.
 - **`HOME=~/.agy-sub`** keeps this login apart from any personal `agy` use, as
   `~/.claude-sub` and `~/.codex-sub` do for the other bridges.
 
+### CLI will not start vs. login failed
+
+If `env` reports `No such file or directory`, the example staged path is
+missing and sign-in never started. The `env -S` hint is not the fix. In WSL,
+run `command -v agy` to locate the native CLI. If it lives at `~/.local/bin/agy`,
+use it for sign-in:
+
+```bash
+env -u DBUS_SESSION_BUS_ADDRESS HOME="$HOME/.agy-sub" "$HOME/.local/bin/agy"
+test -s "$HOME/.agy-sub/.gemini/antigravity-cli/antigravity-oauth-token"
+```
+
+If the file is missing after sign-in, check that you used the isolated `HOME`
+and unset D-Bus. For deployment, still stage and gate the pinned binary.
+
 ## Eligibility
 
 A fresh personal account can fail every turn with

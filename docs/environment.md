@@ -132,8 +132,8 @@ Setup and the login that must avoid the desktop keyring: [agy-bridge-runbook.md]
 | `EZLLM_AGY_BRIDGE_ADDR` | `127.0.0.1:8792` | Bridge listen address; non-loopback addresses are refused. |
 | `EZLLM_AGY_BRIDGE_TOKEN_FILE` | `/data/agy-bridge.token` | Shared secret for the account key; generated (0600) when missing. |
 | `EZLLM_AGY_BRIDGE_CONCURRENCY` | `1` | Concurrent `agy` children (~207 MB each); a positive integer, anything else fails the boot. |
-| `EZLLM_AGY_EXPERIMENTAL_TOOLS` | off | `on` enables the structured-output caller-tool adapter. Requires CLI `--json-schema`. The calling harness executes tools; no ACP/MCP or persistent process. See the Antigravity runbook for limitations. |
-| `EZLLM_AGY_BRIDGE_CACHE` | on when tools are on | Named `EZLLM_AGY_BRIDGE_SESSION_CACHE` before 2.0.0 (the old name fails the boot). Exact-history conversation resume for tool-adapter requests. Unset, it is on whenever experimental tools are on and the CLI supports `--conversation`; an explicit `on` without either fails the boot; `off` disables it. Before 2.0.0 it was opt-in. Retains bounded metadata/private workspaces, no idle CLI processes. Complete caller tool-result groups can resume. Restart to change. |
+| `EZLLM_AGY_EXPERIMENTAL_TOOLS` | — | Retired after 2.2.0 (setting it fails the boot). Caller tools are on whenever the CLI offers `--json-schema`; an older CLI boots text-only with a warning. |
+| `EZLLM_AGY_BRIDGE_CACHE` | on when the CLI supports it | Named `EZLLM_AGY_BRIDGE_SESSION_CACHE` before 2.0.0 (the old name fails the boot). Exact-history conversation resume for tool-adapter requests. Unset, it is on whenever the CLI supports both `--json-schema` (caller tools) and `--conversation`; an explicit `on` without either fails the boot; `off` disables it. Before 2.0.0 it was opt-in. Retains bounded metadata/private workspaces, no idle CLI processes. Complete caller tool-result groups can resume. Restart to change. |
 
 ## GitHub Copilot subscription bridge
 

@@ -107,7 +107,8 @@ return `400 vision_unsupported`, and advertised model-limit refusals return
 See [the Copilot runbook](copilot-bridge-runbook.md) for tested limits and
 behavior. Antigravity continues to reject image input.
 
-AGY tool-adapter conversation caching is an operator opt-in. Clients continue
+AGY tool-adapter conversation caching is on by default wherever the CLI
+supports it (`EZLLM_AGY_BRIDGE_CACHE=off` disables it). Clients continue
 sending full history, including assistant call IDs and complete tool-result
 groups; no native session field is added. Usage is per request, with native
 cold input plus cache reads converted to inclusive OpenAI prompt totals. See
@@ -118,9 +119,10 @@ runbook. Clients keep sending full history; no session ID or new request field
 is required. Usage remains per request, including cache-write and reasoning
 breakdowns. Images and active tool-result continuations use fresh sessions.
 
-### Antigravity experimental caller tools
+### Antigravity caller tools
 
-With `EZLLM_AGY_EXPERIMENTAL_TOOLS=on`, the Antigravity bridge accepts OpenAI
+On by default, with no setting: whenever the installed CLI supports
+`--json-schema`, the Antigravity bridge accepts OpenAI
 function `tools`, assistant `tool_calls` and matching `tool` messages. It uses
 the CLI's structured-output mode rather than native client-tool registration.
 Tools execute in the calling harness. Every request starts a fresh process and
@@ -144,12 +146,12 @@ content or tool-call delta, the finish event, optional usage and `[DONE]`;
 raw envelope text is never streamed. The envelope limit is 1 MiB and the call
 limit is 16 per turn. Invalid output or a reported native agent tool step other than the CLI's
 structured-output `finish` submission returns `502 invalid_tool_output` before response commitment, allowing existing
-retry/failover policy to apply. With the option off, client tools remain
-`400 chat_tools_unsupported`.
+retry/failover policy to apply. On a CLI without `--json-schema`, client tools
+remain `400 chat_tools_unsupported`.
 
-This is experimental model-mediated tool selection. It does not add ACP, MCP,
-a sidecar or retained sessions; model compliance can vary. See the
-[Antigravity runbook](agy-bridge-runbook.md#experimental-caller-tools).
+This is model-mediated tool selection. It does not add ACP, MCP, a sidecar or
+retained sessions; model compliance can vary. See the
+[Antigravity runbook](agy-bridge-runbook.md#caller-tools).
 
 ## M3 — accounts, keys, models, quota
 

@@ -4,16 +4,16 @@ Operating the Google Antigravity subscription surface (agy-bridge). Decisions
 live in `antigravity-subscription-design.md`; this is the how.
 
 **Status:** text chat and streaming, with usage, against the Antigravity CLI
-1.4.7. An opt-in experimental structured-output adapter supports caller tools
-on CLIs with `--json-schema`; see [caller tools](#experimental-caller-tools).
+1.4.7. A structured-output adapter supports caller tools by default on CLIs
+with `--json-schema`; see [caller tools](#caller-tools).
 Images and plan windows are not offered. Linux only.
 
 ## Quick setup
 
 Start with a working ezllm installation and dashboard ([quick start](../README.md#quick-start)).
 This guide uses Docker Compose in a Linux environment and a separate Google login.
-By default this bridge is text-only. Caller tools require an explicit experimental
-opt-in; image input remains unsupported.
+Caller tools are on by default when the CLI supports `--json-schema`;
+image input remains unsupported.
 Validation and test requests use subscription quota. Each step links to details below.
 
 1. **Install the official CLI on the host** and pin a copy of the binary
@@ -167,13 +167,16 @@ and refuses anything looser:
 The agent's tool steps are counted and logged per turn
 (`agy-bridge: turn attempted N agent tool step(s)`); they never reach the client.
 
-## Experimental caller tools
+## Caller tools
 
-Set `EZLLM_AGY_EXPERIMENTAL_TOOLS=on` in the ezllm service environment, rebuild
-with this version, and recreate the container. Boot requires `--json-schema`
-in the mounted CLI's help. The bridge `/status` field `client_tools` reports
-`experimental (structured output; caller executes)` when enabled. No new
-process type, listener, dependency or service is installed.
+On by default: there is no setting. Boot turns the adapter on when the mounted
+CLI's help lists `--json-schema`; the bridge `/status` field `client_tools`
+reports `on (structured output; caller executes)`. An older CLI without the
+flag still boots, text-only, with a warning in the log and `client_tools: off`.
+`ezllm bridge-check agy` fails such a CLI, so the updater will not promote a
+release that drops the flag. The former opt-in `EZLLM_AGY_EXPERIMENTAL_TOOLS`
+is retired: setting it fails the boot. No new process type, listener,
+dependency or service is installed.
 
 The bridge supplies tool definitions and conversation history as JSON in a
 prompt and passes an output schema through a private temporary file. It
@@ -205,14 +208,14 @@ select caller tools instead of using its built-ins. The CLI's `finish` tool
 may submit structured output; every other reported native tool step fails the
 adapter turn. The submitted output still has to pass validation. This is a detection guard, not a native tools-off
 switch: existing headless lockdown and the empty workspace remain necessary.
-Model compliance is not guaranteed. Keep this option off for workloads that
-need proven native function calling.
+Model compliance is not guaranteed. Route workloads that need proven native
+function calling to another provider.
 
 Run the two-turn live proof (uses subscription quota) against your pinned CLI:
 
 ```bash
 EZLLM_AGY_LIVE=1 EZLLM_AGY_BIN=/path/to/pinned/agy \
-  go test -short ./internal/agybridge -run '^TestLiveExperimentalToolRoundTrip$' -count=1 -v
+  go test -short ./internal/agybridge -run '^TestLiveCallerToolRoundTrip$' -count=1 -v
 ```
 
 It requests a harmless lookup call, simulates the result in the caller, and
@@ -221,9 +224,9 @@ filesystem or shell tools. Use `EZLLM_AGY_MODEL` to test another model.
 
 ## Limits
 
-- **Text input only.** Image parts are always refused. Without the experimental
-  option, client tools and tool messages are also refused with 400, never
-  dropped. The adapter serializes tool definitions and history into text;
+- **Text input only.** Image parts are always refused. On a CLI without
+  `--json-schema`, client tools and tool messages are also refused with 400,
+  never dropped. The adapter serializes tool definitions and history into text;
   it does not change the CLI's stream-json input protocol.
 - **History is flattened.** `agy` has no system-prompt flag and no history
   replay, so system messages and earlier turns travel inside the one prompt as
@@ -242,11 +245,11 @@ filesystem or shell tools. Use `EZLLM_AGY_MODEL` to test another model.
 
 ## Conversation cache
 
-On by default since 2.0.0 whenever the tool adapter is on
-(`EZLLM_AGY_EXPERIMENTAL_TOOLS=on`) and the CLI supports `--conversation`. Set
+On by default whenever the CLI supports both `--json-schema` (caller tools)
+and `--conversation`. Set
 `EZLLM_AGY_BRIDGE_CACHE=off` to disable it; an explicit `on` without
 the adapter or `--conversation` fails startup. It applies to
-experimental tool-adapter requests, including completed caller tool-result
+tool-adapter requests, including completed caller tool-result
 groups. Plain text-only requests stay fresh. Clients continue sending full
 history; they provide no native conversation ID.
 

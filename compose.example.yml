@@ -120,9 +120,8 @@ services:
       # EZLLM_AGY_BRIDGE_ADDR: 127.0.0.1:8792
       # EZLLM_AGY_BRIDGE_TOKEN_FILE: /data/agy-bridge.token
       # EZLLM_AGY_BRIDGE_CONCURRENCY: "1"
-      # Experimental caller tools via structured output; CLI needs --json-schema.
-      # EZLLM_AGY_EXPERIMENTAL_TOOLS: "on"
-      # Conversation resume is on by default wherever tools are on (v2.0.0+).
+      # Caller tools are on whenever the CLI supports --json-schema; there is
+      # nothing to set. Conversation resume is on by default wherever tools are.
       # EZLLM_AGY_BRIDGE_CACHE: "off"
 
     volumes:

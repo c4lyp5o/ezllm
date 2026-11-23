@@ -273,7 +273,8 @@ rather than a new updater service.
   requires a matching version, successful live tier and requested policy.
 - `bridgecheck.go` `runBridgeCheck` reports effective policy and operational
   retryability. `liveCodex` carries the sandbox mode and proves continuation;
-  `liveAgy` calls `agybridge.LiveTools` when the experimental adapter is enabled;
+  `liveAgy` calls `agybridge.LiveTools` whenever the CLI offers `--json-schema`
+  (caller tools are on by default);
   `liveCopilot` uses the configured warm pool and closes it after qualification.
 - `run` rechecks the window and production configuration before promotion.
   A durable pending journal precedes symlink changes. A batch commits only after

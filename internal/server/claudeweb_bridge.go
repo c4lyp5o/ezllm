@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -172,14 +171,8 @@ func (b *claudeWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.R
 		writeErr(w, http.StatusUnauthorized, "authentication_error", err.Error())
 		return
 	}
-	// Serialize generation per account: the cached client owns mutable
-	// conversation state and is not safe for concurrent use.
-	lock := b.lockFor(acctID)
-	lock.Lock()
-	defer lock.Unlock()
-	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid_request_error", "cannot read body")
+	body, ok := readWebBridgeBody(w, r)
+	if !ok {
 		return
 	}
 	var req struct {
@@ -208,6 +201,11 @@ func (b *claudeWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.R
 			"claude-web does not support structured output (response_format)")
 		return
 	}
+	// Serialize generation per account: the cached client owns mutable
+	// conversation state and is not safe for concurrent use.
+	lock := b.lockFor(acctID)
+	lock.Lock()
+	defer lock.Unlock()
 	// No model gate: the web protocol has no discovery and ids pass through
 	// (design doc). The bootstrap catalog seeds ROUTING; what the account can
 	// actually serve is revealed by the upstream answer.

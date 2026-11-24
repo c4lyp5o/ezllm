@@ -174,7 +174,7 @@ func TestBridgeOffKeyTestNamesTheFix(t *testing.T) {
 	if code < 400 {
 		t.Fatalf("key test against a dead bridge = %d %s, want a failure", code, resp)
 	}
-	if !strings.Contains(resp, "EZLLM_CODEX_BRIDGE=on") || !strings.Contains(resp, "codex-bridge-runbook") {
+	if !strings.Contains(resp, "EZLLM_CODEX_BRIDGE=on") || !strings.Contains(resp, "docs/bridges/codex.md") {
 		t.Fatalf("failure does not name the fix: %s", resp)
 	}
 }

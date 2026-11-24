@@ -10,7 +10,7 @@ exception**, and it is double-gated so it can never happen by accident:
    dashboard control; changing it requires restarting the process. Settings
    changes apply to newly admitted requests without restarting. The effective
    startup state is logged as `translation enabled=true|false`; the Settings API
-   reports the current value and source. Since 2026-10-22 this is the one switch
+   reports the current value and source. This is the one switch
    for automatic pairwise and universal-matrix wire selection.
 2. **Proven capability** — the hop's probed/curated `proto_*` facts must say
    `proto_chat = true` AND `proto_anthropic` false-or-NULL. Both flags are
@@ -119,9 +119,7 @@ Caveats, learned live (see the ezllm skill):
   routing). To aim it: `POST /admin/accounts/{id}/sync` with
   `{"models":["<id>",…],"max_models":N}` — the scope applies to the **sweep
   only**; the catalog refresh always writes the full fetched catalog (handing
-  the filtered list to `UpsertModels` used to delete every unnamed row —
-  command-code 87→3 in prod, fixed 2026-10-12). The deployed binary predates
-  `max_models` and rejects unknown body fields.
+  the filtered list to `UpsertModels` would delete every unnamed row).
 - **A 429/timeout mid-sweep means UNKNOWN, never unsupported** — the sweep will
   not silently mark a working model incompatible.
 - An account whose group blocks a surface (403 "this group does not allow")
@@ -186,8 +184,7 @@ Settings or through the deployment fallbacks described above.
 The former matrix switch's YAML key, `translation.universal_enabled`, is
 **deprecated** and logs a warning at boot. It still participates in deployment
 fallback resolution: explicit false in config disables translation when no
-saved/environment value overrides it. Its environment alias,
-`EZLLM_TRANSLATION_UNIVERSAL_ENABLED`, was removed in 2.0.0 and now fails the boot.
+saved/environment value overrides it.
 A wrong-typed value still fails boot naming the field.
 
 **Usage convention on a Messages destination:** `auto` (the default) reads the upstream's

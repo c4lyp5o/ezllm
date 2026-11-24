@@ -96,6 +96,9 @@ jobs:
         with:
           context: .
           push: true
+          # The dashboard's doc links open the docs of this version.
+          build-args: |
+            DOCS_REF=${{ github.ref == 'refs/heads/development' && 'development' || format('v{0}', needs.version.outputs.version) }}
           # No emulation: the builder stage cross-compiles and the runtime stage
           # only copies.
           platforms: linux/amd64,linux/arm64

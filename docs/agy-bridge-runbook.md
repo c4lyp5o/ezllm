@@ -1,35 +1,13 @@
 # Antigravity subscription runbook
 
-Operating the Google Antigravity subscription surface (agy-bridge). Decisions
-live in `antigravity-subscription-design.md`; this is the how.
+How the Antigravity bridge behaves, its limits and its lockdown. **To turn it on,
+follow [Turn on Google Antigravity](bridges/antigravity.md).** Design:
+`antigravity-subscription-design.md`.
 
 **Status:** text chat and streaming, with usage, against compatible Antigravity
 CLI releases. Caller tools are on by default when the CLI supports
 `--json-schema`; see [caller tools](#caller-tools).
 Images and plan windows are not offered. Linux only.
-
-## Quick setup
-
-Start with a working ezllm installation and dashboard ([quick start](../README.md#quick-start)).
-This guide uses Docker Compose in a Linux environment and a separate Google login.
-Caller tools are on by default when the CLI supports `--json-schema`;
-image input remains unsupported.
-Validation and test requests use subscription quota. Each step links to details below.
-New to this? Follow [Turn on a bridge](bridge-setup.md#google-antigravity) instead.
-
-1. **Install the official CLI on the host** and pin a copy of the binary
-   ([prerequisites](#prerequisites)).
-2. **Log in to a separate folder, with D-Bus unset**, so the login is a file the
-   container can read, not an entry in your desktop keyring
-   ([log in](#log-in)).
-3. **Clear Google's eligibility check** for that account if the first prompt
-   asks you to ([eligibility](#eligibility)).
-4. **Turn it on** in `compose.yml`: uncomment the two Antigravity mounts, set
-   `EZLLM_AGY_BRIDGE: "on"`, then `docker compose up -d` ([enable](#enable)).
-5. **Add the account** in the dashboard: Providers → Add provider →
-   **Google Antigravity** → Save & validate key. The dialog shows
-   whether the bridge is running and which models the plan has; there is no key
-   to paste. Cap it under Rules before agents use it.
 
 ## What it is
 
@@ -46,81 +24,26 @@ reads it at boot and serves it at `/v1/models`. Measured on a personal plan
 (1.4.7): `gemini-3.8-flash-high|medium|low`, `claude-sonnet-4-6`,
 `claude-opus-4-6-thinking`, `gpt-oss-120b-medium`.
 
-## Prerequisites
+## CLI releases
 
-```bash
-# official installer: SHA-512-verified download to ~/.local/bin/agy
-curl -fsSL https://antigravity.google/cli/install.sh | bash
-agy --version                                   # check this before choosing a path
+`agy` updates itself in place in the background, even from `--version`. Keep the version
+folder read-only, as the setup page does, so the bridge moves to a new release only when
+you copy one and move the `current` link.
 
-# pin a copy outside the self-updating path, with a relative `current` link
-VERSION=$(agy --version)
-mkdir -p "$HOME/.local/share/agy-bridge/$VERSION"
-cp ~/.local/bin/agy "$HOME/.local/share/agy-bridge/$VERSION/agy"
-chmod a-w "$HOME/.local/share/agy-bridge/$VERSION"
-ln -sfn "$VERSION" "$HOME/.local/share/agy-bridge/current"
-```
+`ezllm bridge-check agy` runs the boot checks against a staged CLI and exits non-zero
+on any problem. `--json` prints the verdict (`ok`, `version`, `release`, `live`,
+`problems`) for the [updater](bridge-update-runbook.md). `--live` then drives real turns
+through the bridge (plan quota, the shared login), only when every static check passed.
+A version the updater proved is listed in `qualified.json` in the bridge directory, and
+boot reports it qualified; any other version still boots and is reported `unqualified`.
 
-`agy` updates itself in place in the background. Mounting `~/.local/bin/agy`
-would let an update change the CLI under a running bridge; the pinned copy is
-mounted read-only. Make its folder read-only on the host too
-(`chmod a-w ~/.local/share/agy-bridge/VERSION`): running the pinned copy on the
-host — even `--version` — lets agy rewrite it in place, renaming the original
-to `agy.<n>.old` (measured 2026-10-30, 1.4.7 → 1.4.11). The running container
-keeps the original until the next recreate, which then boots the new release
-unannounced. With the copy read-only, the bridge only moves to a new release when you copy one
-and move the `current` link. There is no hardcoded qualified release. Compatible versions can boot, and `/status`
-reports it as `unqualified` until the live proof ([verify](#verify)) has been
-re-run and recorded in `qualified.json`.
+## The login
 
-**Gate a release before promoting it.** `ezllm bridge-check agy` runs the boot
-checks against a staged CLI and exits non-zero on any problem. At boot, an
-enabled bridge that cannot start stops ezllm. `--json` prints the verdict
-(`ok`, `version`, `release`, `live`, `problems`) for the bridge updater
-(`SPEC-bridge-update.md`). `--live` then drives real turns through the bridge
-(plan quota, the shared login) — only when every static check passed. A version the updater proved is listed in
-`qualified.json` in the bridge directory (next to the version folders, up to two
-levels above the binary); boot then reports it qualified.
-
-The binary is ~228 MB, dynamically linked against glibc; the ezllm image
-(distroless cc-debian12) carries glibc and libstdc++.
-
-## Log in
-
-```bash
-mkdir -p ~/.agy-sub && chmod 700 ~/.agy-sub
-env -u DBUS_SESSION_BUS_ADDRESS HOME="$HOME/.agy-sub" "$HOME/.local/share/agy-bridge/current/agy"
-```
-
-Run the command in a real
-terminal (SSH is fine; it prints a URL and asks for the code). If the CLI
-itself fails to launch, check the pinned path, permissions and runtime
-libraries before troubleshooting the login. A failed `--help` probe is a
-startup failure, not evidence of missing flags or expired credentials.
-Pick a theme, trust the folder, sign in with the Google account that has the
-plan, send one prompt, then `/exit`.
-
-- **D-Bus unset is load-bearing.** On a desktop host `agy` stores the token in
-  the Secret Service keyring, which the container cannot reach. With no session
-  bus it writes `~/.agy-sub/.gemini/antigravity-cli/antigravity-oauth-token`
-  (0600) instead — the file the bridge checks at boot.
-- **`HOME=~/.agy-sub`** keeps this login apart from any personal `agy` use, as
-  `~/.claude-sub` and `~/.codex-sub` do for the other bridges.
-
-### CLI will not start vs. login failed
-
-If `env` reports `No such file or directory`, the example staged path is
-missing and sign-in never started. The `env -S` hint is not the fix. In WSL,
-run `command -v agy` to locate the native CLI. If it lives at `~/.local/bin/agy`,
-use it for sign-in:
-
-```bash
-env -u DBUS_SESSION_BUS_ADDRESS HOME="$HOME/.agy-sub" "$HOME/.local/bin/agy"
-test -s "$HOME/.agy-sub/.gemini/antigravity-cli/antigravity-oauth-token"
-```
-
-If the file is missing after sign-in, check that you used the isolated `HOME`
-and unset D-Bus. For deployment, still stage and gate the pinned binary.
+The login must be a file the container can read:
+`~/.agy-sub/.gemini/antigravity-cli/antigravity-oauth-token` (0600), which the bridge
+checks at boot. That is why the setup page unsets D-Bus: with a session bus `agy` stores
+the token in the desktop keyring instead. `HOME=~/.agy-sub` keeps this login apart from
+your own `agy`.
 
 ## Eligibility
 
@@ -130,33 +53,13 @@ Verify your account to continue.` — on every model, while `agy models` still
 works. The CLI prints a one-time accounts.google.com link; open it signed in to
 the same account and complete the verification. The bridge maps this to
 **403 `account_ineligible`** and withholds the link (it is a sign-in
-continuation), so run the login command above again to see it.
+continuation), so run the [sign-in command](bridges/antigravity.md#3-sign-in) again to see it.
 
 If Google still refuses after verifying, the account itself is out of scope
 (region, age, or a Workspace domain that turned Antigravity off); use another
 personal account.
 
-## Enable
-
-In `compose.yml`, under the ezllm service, add these entries to the existing
-`environment` and `volumes` sections. Replace `/home/you` with your actual host
-path. The default `EZLLM_AGY_BIN` is `/opt/agy-bridge/current/agy`, the link made
-above. The Compose service
-user must be able to execute the CLI and read and write the login directory:
-
-```yaml
-    environment:
-      EZLLM_AGY_BRIDGE: "on"
-    volumes:
-      - /home/you/.local/share/agy-bridge:/opt/agy-bridge:ro
-      - /home/you/.agy-sub:/agy-sub
-```
-
-The login directory is read-write: `agy` refreshes its token and keeps state
-there. `docker compose up -d`, then `docker logs ezllm` shows
-a line such as `agy bridge listening addr=127.0.0.1:8792 cli=1.5.15 release=unqualified models=6`.
-`unqualified` means a live proof is not recorded for this version, not that the
-bridge failed to start.
+## Boot checks
 
 ezllm does not start, by design, when the bridge is on and the binary is missing, a
 required flag is gone, the token file is absent, `settings.json` loosens the tool policy
@@ -194,12 +97,10 @@ The agent's tool steps are counted and logged per turn
 
 On by default: there is no setting. Boot turns the adapter on when the mounted
 CLI's help lists `--json-schema`; the bridge `/status` field `client_tools`
-reports `on (structured output; caller executes)`. An older CLI without the
+reports `on (structured output; caller executes)`. A CLI without the
 flag still boots, text-only, with a warning in the log and `client_tools: off`.
 `ezllm bridge-check agy` fails such a CLI, so the updater will not promote a
-release that drops the flag. The former opt-in `EZLLM_AGY_EXPERIMENTAL_TOOLS`
-is retired: setting it fails the boot. No new process type, listener,
-dependency or service is installed.
+release that drops the flag.
 
 The bridge supplies tool definitions and conversation history as JSON in a
 prompt and passes an output schema through a private temporary file. It
@@ -300,7 +201,6 @@ This is a token measurement, not a quota-credit reduction percentage.
 
 Native AGY input excludes cache reads. The bridge adds them for standard OpenAI
 prompt totals and subtracts resumed cumulative counters for per-request usage.
-Historical cached-input ledger rows under the previous mapping are unchanged.
 Qualification in cache mode requires a separate caller-result resume proof,
 adding two small CLI turns to the normal live gate. No internal repair call is
 made after a failed resume. Set the flag to `off` and restart for stateless replay.
@@ -324,12 +224,3 @@ For an end-to-end check, use the gateway's [model-list command](../README.md#2-f
 then send a short text prompt to a model from this account. The dashboard preset
 shows bridge status; `docker compose logs ezllm` shows startup failures. The
 internal listener is loopback-only, and the distroless image has no shell or curl.
-
-## Shared transport status
-
-Antigravity uses `internal/bridgeutil` for streaming byte writes, flushing,
-write deadlines and cancellation cleanup as of v1.8.0. Its event format,
-authentication, accounting and CLI lifecycle remain provider-specific.
-
-Claude and Antigravity are migrated; Codex and Copilot still need expansion.
-See [shared transport status and remaining work](shared-bridge-transport-design.md).

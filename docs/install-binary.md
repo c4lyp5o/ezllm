@@ -45,7 +45,7 @@ prerequisites are configured. See the individual bridge runbooks in the README.
 ### Linux and macOS
 
 ```bash
-VER=1.3.3                    # or any tag from the releases page
+VER=2.2.0                    # or any tag from the releases page
 OS=$(uname -s | tr 'A-Z' 'a-z')
 case "$(uname -m)" in
   x86_64) ARCH=amd64 ;;
@@ -77,7 +77,7 @@ capability is needed.
 ### Windows (PowerShell)
 
 ```powershell
-$Ver  = "1.3.3"
+$Ver  = "2.2.0"
 $Name = "ezllm_v${Ver}_windows_amd64"
 $Base = "https://github.com/c4lyp5o/ezllm/releases/download/v$Ver"
 
@@ -106,8 +106,7 @@ under emulation on ARM64 Windows.
 The executable carries **no Authenticode signature** (the release pipeline has no
 signing key), which is what triggers SmartScreen on a browser download;
 `Unblock-File` clears the mark-of-the-web. Execution does not require a
-signature on Windows the way it does on Apple Silicon — a verified run of
-v1.3.2 reports `SignatureStatus: NotSigned` and starts normally.
+signature on Windows the way it does on Apple Silicon.
 
 ## 2. `config.yaml` is mandatory
 
@@ -141,18 +140,9 @@ account is cosmetic until then, not a cost or security problem. That is also why
 the boot log warns `model sync failed at boot … err="store: not found"` once per
 entry: the account exists, no credential does, so there is no catalog to sync.
 
-The example that ships with **v1.3.2 and earlier** has two entries uncommented,
-so those installs start with two keyless accounts:
-
-| name | namespace | kind |
-|---|---|---|
-| `opencode-main` | `opengo` | `opencode-go` |
-| `ssn-gpt` | `super-ssn` | `openai-compatible` |
-
-Newer versions ship both commented out: nothing is seeded and a fresh instance
-starts empty (verified — healthy, zero accounts). Either way, an empty map is
-valid, and a config entry you delete later does **not** delete the account —
-remove those in the dashboard.
+The shipped example has both entries commented out, so a fresh instance starts empty.
+An empty map is valid, and a config entry you delete later does **not** delete the
+account — remove those in the dashboard.
 
 The two settings a new install usually changes:
 
@@ -166,12 +156,11 @@ data_dir: ./data              # relative to the working directory
 | Path | What | Notes |
 |---|---|---|
 | `<data_dir>/ezllm.sqlite` (+ `-wal`, `-shm`) | ledger, accounts, combos, tokens | WAL mode; copy all three sidecars together, never a bare `cp` |
-| `EZLLM_MASTER_KEY_FILE` | AES key for provider keys at rest | default `<data_dir>/ezllm-master.key`, created on first boot (before 2.0.0: `~/.hermes/secrets/ezllm-master.key`; move it, see [master-key-runbook.md](master-key-runbook.md)) |
+| `EZLLM_MASTER_KEY_FILE` | AES key for provider keys at rest | default `<data_dir>/ezllm-master.key`, created on first boot |
 | stdout | the whole log | one line per record; `EZLLM_LOG_FORMAT=json` for a collector |
 
 **Always set `EZLLM_MASTER_KEY_FILE` explicitly** and keep it beside the
-database. The default path is home-global, so a second instance silently shares
-the first one's key, and a backup of `data/` alone leaves the keys unreadable.
+database.
 Losing the key is unrecoverable: [master-key-runbook.md](master-key-runbook.md).
 On Windows the key file's 0600 mode is not meaningful — put it in a directory
 whose ACL limits it to the account that runs the gateway.
@@ -464,12 +453,12 @@ curl -s localhost:20129/healthz           # expect the new version string
 
 ```powershell
 Stop-ScheduledTask ezllm
-Copy-Item .\ezllm_v1.4.0_windows_amd64\ezllm.exe C:\ezllm\bin\ezllm.exe -Force
+Copy-Item .\ezllm_v2.2.0_windows_amd64\ezllm.exe C:\ezllm\bin\ezllm.exe -Force
 Start-ScheduledTask ezllm
 curl.exe -s localhost:20129/healthz
 ```
 
-Schema migrations run at boot and are one-way per release. Roll back with the
+What changes between versions: [upgrading](upgrading.md). Schema migrations run at boot and are one-way per release. Roll back with the
 previous binary **and** the backup taken before the upgrade: an old binary
 refuses a newer schema. Rehearse a migration before a production upgrade by
 booting the new binary against a **copy** of the data directory

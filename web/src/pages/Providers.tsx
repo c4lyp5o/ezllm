@@ -592,7 +592,6 @@ function IconButton({ label, tone, busy, disabled, onClick, children }: {
   );
 }
 
-const REPO_DOCS = 'https://github.com/c4lyp5o/ezllm/blob/master/';
 const statusText = (v: unknown) => (typeof v === 'string' && v.trim() ? v : null);
 
 // BridgeUpdateNote is the host updater's latest report on this bridge's CLI:
@@ -660,11 +659,13 @@ function SignInCommands({ id }: { id: string }) {
 function BridgePanel({ bridge, loading }: { bridge: Bridge | null; loading: boolean }) {
   if (loading) return <div className="flex items-center gap-2 text-[13px] text-mute"><Spinner /> Checking the bridge…</div>;
   if (!bridge) return null;
-  const runbook = (
-    <a className="text-ink underline underline-offset-2" href={REPO_DOCS + bridge.runbook} target="_blank" rel="noreferrer">
-      {bridge.runbook}
+  const doc = (path: string) => (
+    <a className="text-ink underline underline-offset-2" href={bridge.docs + path} target="_blank" rel="noreferrer">
+      {path}
     </a>
   );
+  const runbook = doc(bridge.runbook);
+  const setup = doc(bridge.setup);
   if (bridge.enabled) {
     const s = bridge.status ?? {};
     const facts = ([
@@ -694,9 +695,9 @@ function BridgePanel({ bridge, loading }: { bridge: Bridge | null; loading: bool
         )}
         {bridge.update && <BridgeUpdateNote update={bridge.update} />}
         {toolsDisabled && <p className="text-[12px] text-warn">Client tool calls are unavailable on this bridge. See {runbook} for the reason and options.</p>}
-        {loggedOut && <p className="text-[12px] text-warn">The CLI isn't logged in, so the key test will fail until you log in again ({runbook}).</p>}
+        {loggedOut && <p className="text-[12px] text-warn">The CLI isn't logged in, so the key test will fail until you log in again ({setup}).</p>}
         {loggedOut && <SignInCommands id={bridge.id} />}
-        <p className="text-[12px] text-mute">Status was recorded at startup. Setup and troubleshooting: {runbook}</p>
+        <p className="text-[12px] text-mute">Status was recorded at startup. Setup: {setup} · reference: {runbook}</p>
         <p className="text-[12px] text-mute">Save &amp; validate uses the bridge&apos;s own key. Set a cap under Rules before you let agents use it.</p>
       </div>
     );
@@ -705,13 +706,13 @@ function BridgePanel({ bridge, loading }: { bridge: Bridge | null; loading: bool
     <div className="space-y-2 rounded-lg border border-warn/40 bg-warn-dim/40 px-4 py-3 text-[13px]">
       <p className="flex items-center gap-2 text-warn"><span className="size-1.5 rounded-full bg-warn" /> This bridge is not running on this server</p>
       <ol className="list-decimal space-y-1 pl-5 text-dim">
-        <li>On the host, install the official CLI and sign it in to its own folder:
+        <li>On the host, install the official CLI, copy it into the bridge folder (see the step-by-step page) and sign it in to its own folder:
           <div className="mt-1.5"><SignInCommands id={bridge.id} /></div>
         </li>
         <li>In <Mono>compose.yml</Mono>, uncomment the bridge&apos;s two mounts and set <Mono>{bridge.env}: &quot;on&quot;</Mono>.</li>
         <li>Run <Mono>docker compose up -d</Mono>, then reopen this dialog. If ezllm does not start, check <Mono>docker compose logs ezllm</Mono>.</li>
       </ol>
-      <p className="text-[12px] text-mute">Step-by-step: {runbook}</p>
+      <p className="text-[12px] text-mute">Step-by-step: {setup}</p>
     </div>
   );
 }

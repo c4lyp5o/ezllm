@@ -1,33 +1,12 @@
 # Codex subscription runbook
 
-Operating the ChatGPT subscription surface (codex-bridge). Decisions live in
-`codex-subscription-design.md`; this is the how.
+How the ChatGPT (Codex) bridge behaves, its limits and its caps. **To turn it on,
+follow [Turn on ChatGPT (Codex)](bridges/codex.md).** Design:
+`codex-subscription-design.md`.
 
 The bridge supports text, streaming, images, reasoning effort and summaries,
 structured output, plan windows, and client tools with continuation. Read the [platform requirements](#platform-requirements--read-this-first)
 before you rely on tools.
-
-## Quick setup
-
-Start with a working ezllm installation and dashboard ([quick start](../README.md#quick-start)).
-This guide uses Docker Compose with a Linux environment, a ChatGPT subscription,
-and an isolated Codex login. Validation and test requests use subscription quota.
-Each step links to more detail below. New to this? Follow
-[Turn on a bridge](bridge-setup.md#chatgpt-codex) instead.
-
-1. **Check the host** supports client tools — Linux with Landlock
-   ([platform requirements](#platform-requirements--read-this-first)). Without it
-   the bridge still answers, but tool calls are refused.
-2. **Install the official Codex CLI on the host** and pin a copy of the **whole
-   release directory** ([prerequisites](#prerequisites)).
-3. **Log in to a separate folder** — never your everyday `~/.codex`:
-   `CODEX_HOME=~/.codex-sub ~/.local/share/codex-bridge/current/bin/codex login --device-auth`.
-4. **Turn it on** in `compose.yml`: uncomment the two Codex mounts, set
-   `EZLLM_CODEX_BRIDGE: "on"`, then `docker compose up -d` ([enable](#enable)).
-5. **Add the account** in the dashboard: Providers → Add provider →
-   **ChatGPT Plus/Pro** → Save & validate key. The dialog shows whether the bridge
-   is running; there is no key to paste. Cap it under Rules before agents use it
-   ([wire it in](#wire-it-into-ezllm)).
 
 ## What it is
 
@@ -128,17 +107,13 @@ has Landlock — route it to another account, or fix the host.
 
 ### No override
 
-There is no way to enable client tools without Landlock. Before 2.0.0
-`EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK=on` did, relying on Codex's read-only policy
-alone; with the sandbox always writable that would leave nothing confining the
-child, so the setting was removed and setting it now fails the boot.
+There is no way to enable client tools without Landlock: nothing else would confine
+the child, whose sandbox is always writable.
 
 ### Writable request workspace
 
 Every Codex child runs Codex's `workspace-write` policy for its private
-per-request working directory. Before 2.0.0 this was opt-in through
-`EZLLM_CODEX_SANDBOX=writable` and read-only by default; read-only crippled
-Codex, so the setting was removed and setting it now fails the boot. The child
+per-request working directory. The child
 uses `approvalPolicy=never`, also pinned as `approval_policy="never"`
 in CLI startup configuration: this headless bridge
 has no approval UI and declines approval RPCs, so `on-request` cannot provide a
@@ -155,7 +130,7 @@ tool failures and approval requirements still apply. This is instruction
 steering, not a guarantee of model behavior or a grant of filesystem access.
 Recreate the container after changing the environment.
 
-From v2.0.0, caller-tool guidance also treats environment checks, repository
+Caller-tool guidance also treats environment checks, repository
 inspection, plans and progress reports as intermediate steps of an implementation
 request. Codex is instructed to continue authorized implementation and appropriate
 verification, stopping for completion, a user pause or a concrete blocker needing
@@ -208,80 +183,23 @@ subsequent requests retain affinity. Restarting the service also clears parked
 tool turns and in-memory templates, so deploy between active tasks where possible.
 The caller's full history remains available for fresh replay after a restart.
 
-## Prerequisites
+## CLI releases
 
-- **The official CLI release, pinned by path** (qualified: **0.163.0**, the
-  standalone musl build). Install it with the official installer
-  (`curl -fsSL https://chatgpt.com/codex/install.sh | sh`), or take a release from the
-  [Codex releases page](https://github.com/openai/codex/releases). Pin a **copy of the
-  whole release directory** outside `~/.codex/packages/`, which the CLI's updater
-  manages and whose `current` link is an absolute path that does not exist in the
-  container. The directory matters: `bin/` holds the CLI **and**
-  `codex-code-mode-host`, the runtime client tools need — copy only the CLI and tools
-  stay off (`/status` → `client_tools: disabled (code-mode host missing)`). An npm
-  install's `codex` is a Node.js script, which the container cannot run.
+Pin a **copy of the whole release directory**, as the setup page does. `bin/` holds the
+CLI **and** `codex-code-mode-host`, the runtime client tools need: copy only the CLI and
+tools stay off (`/status` → `client_tools: disabled (code-mode host missing)`). The
+bridge starts the CLI with `--disable in_app_updates`, so a running bridge never updates
+itself.
 
-  ```sh
-  REL=$(readlink -f ~/.codex/packages/standalone/current)
-  V=$("$REL/bin/codex" --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-  mkdir -p ~/.local/share/codex-bridge
-  cp -a "$REL" ~/.local/share/codex-bridge/"$V"
-  ln -sfn "$V" ~/.local/share/codex-bridge/current   # relative: the container follows it
-  ls ~/.local/share/codex-bridge/current/bin         # codex and codex-code-mode-host
-  ```
+`ezllm bridge-check codex` runs the boot checks against a staged CLI and exits non-zero
+on any problem, stricter than boot, which reports the exec fallback or a missing code-mode host and
+keeps serving. `--json` prints the verdict (`ok`, `version`, `release`, `live`,
+`problems`) for the [updater](bridge-update-runbook.md). `--live` then drives real turns
+through the bridge (plan quota, the shared login), only when every static check passed.
+A version the updater proved is listed in `qualified.json` in the bridge directory, and
+boot reports it qualified; any other version still boots and is reported `unqualified`.
 
-  The bridge also starts the CLI with `--disable in_app_updates`, so a running
-  bridge never updates itself. A different version still boots — the lockdown and
-  protocol checks below guard it — but `/status` reports it `unqualified` until the
-  live proof has been re-run against it and recorded in `qualified.json`.
-- **An isolated ChatGPT login**, never the interactive `~/.codex`:
-
-  ```sh
-  mkdir -p ~/.codex-sub && chmod 700 ~/.codex-sub
-  CODEX_HOME=~/.codex-sub ~/.local/share/codex-bridge/current/bin/codex login --device-auth
-  CODEX_HOME=~/.codex-sub ~/.local/share/codex-bridge/current/bin/codex login status   # → Logged in using ChatGPT
-  ```
-
-  Do not copy `~/.codex/auth.json` across: two copies of one refresh token log
-  each other out when either refreshes.
-
-### CLI will not start vs. login failed
-
-If `codex` is not found, sign-in never started. In WSL, use
-`command -v codex` and `codex --version` to check the native CLI. If the
-container cannot find a staged binary, check its mount rather than logging
-in again. If the CLI starts but reports no login, repeat device sign-in and
-check status with `CODEX_HOME=~/.codex-sub` for both commands.
-
-**Gate a release before promoting it.** `ezllm bridge-check codex` runs the boot
-checks against a staged CLI and exits non-zero on any problem — stricter than
-boot, which reports the exec fallback or a missing code-mode host and keeps serving. `--json` prints the verdict
-(`ok`, `version`, `release`, `live`, `problems`) for the bridge updater
-(`SPEC-bridge-update.md`). `--live` then drives real turns through the bridge
-(plan quota, the shared login) — only when every static check passed. A version the updater proved is listed in
-`qualified.json` in the bridge directory (next to the version folders, up to two
-levels above the binary); boot then reports it qualified.
-
-## Enable
-
-In your `compose.yml` (from `compose.example.yml`): uncomment the two Codex
-mounts (the bridge root read-only at `/opt/codex-bridge`, the login read-write
-at `/codex-sub`), set `EZLLM_CODEX_BRIDGE: "on"`, and recreate the container.
-Replace `/home/you` below with your actual home folder; keep the existing `environment` and `volumes` entries for ezllm's data and config.
-The Compose service user must be able to execute the CLI and read and write the
-login directory.
-
-```yaml
-    environment:
-      EZLLM_CODEX_BRIDGE: "on"
-    volumes:
-      - /home/you/.local/share/codex-bridge:/opt/codex-bridge:ro
-      - /home/you/.codex-sub:/codex-sub
-```
-
-```bash
-docker compose up -d
-```
+## Boot checks
 
 Boot fails loudly — the process does not start — when:
 
@@ -293,26 +211,13 @@ Boot fails loudly — the process does not start — when:
 - `EZLLM_CODEX_BRIDGE_ADDR` is not loopback (default `127.0.0.1:8791`);
 - the host is not Linux.
 
-| variable | default | meaning |
-| --- | --- | --- |
-| `EZLLM_CODEX_BRIDGE` | `off` | `on` starts the surface |
-| `EZLLM_CODEX_BIN` | `/opt/codex-bridge/current/bin/codex` | the CLI inside the mounted bridge root |
-| `EZLLM_CODEX_HOME` | `/codex-sub` | the mounted login (`CODEX_HOME`) |
-| `EZLLM_CODEX_BRIDGE_ADDR` | `127.0.0.1:8791` | loopback listener |
-| `EZLLM_CODEX_BRIDGE_TOKEN_FILE` | `/data/codex-bridge.token` | shared secret, generated on first boot |
-| `EZLLM_CODEX_BRIDGE_CONCURRENCY` | `1` | CLI children at once (a turn parked on tool calls holds none) |
-| `EZLLM_CODEX_BRIDGE_CACHE` | unset (on where supported) | Empty-template forks whenever supported; report the fallback reason otherwise. `on` requires support; `off` opts out. |
-
-```sh
-docker logs ezllm | grep -i "codex bridge"   # cli version, release, login, channel
-```
+Every setting: [environment.md](environment.md).
 
 ## Wire it into ezllm
 
-1. **Account** (dashboard → Providers → Add provider → **ChatGPT Plus/Pro**). The preset fills in everything below, shows the bridge's CLI
+1. **Account** (dashboard → Providers → Add provider → **ChatGPT Plus/Pro (bridge)**). The preset fills in everything below, shows the bridge's CLI
    version, login and tool state, and supplies the key itself — Save & validate key
-   is the whole step. If it says the bridge is not running, go back to
-   [Enable](#enable). By hand (API or an older dashboard):
+   is the whole step. By hand (API):
    - kind `openai-compatible`
    - base URL `http://127.0.0.1:8791/v1`
    - key: `cat data/codex-bridge.token` (on the host; gitignored)
@@ -447,21 +352,11 @@ change, nothing else is touched.
 - **"The bridge won't start on macOS / Windows."** It is a Linux feature; run
   ezllm in a Linux container.
 
-## Shared transport status
-
-Codex still uses its own streaming transport. **Migration to the shared
-`internal/bridgeutil` transport remains outstanding.** The current bridge
-continues operating independently; no shared lifecycle migration has shipped.
-
-Claude and Antigravity are migrated; Codex and Copilot still need expansion.
-See [shared transport status and remaining work](shared-bridge-transport-design.md).
-
-
 ## Conversation history
 
-From v2.0.0, startup automatically selects native structured history when the
+Startup automatically selects native structured history when the
 CLI advertises `thread/inject_items`; `/status.native_history` reports the
-selection. No additional environment flag is required. Older CLIs and exec
+selection. CLIs without it and exec
 keep text-transcript replay. Incomplete historical tool groups also use legacy
 replay before inference. A native injection error fails before inference;
 it does not spend a second model request to repair history.
@@ -485,7 +380,7 @@ that it fixes every long-session persistence failure. See the
 
 ## Prompt-cache affinity
 
-Caching is on by default (v2.0.0+); `EZLLM_CODEX_BRIDGE_CACHE=off` opts out.
+Caching is on by default; `EZLLM_CODEX_BRIDGE_CACHE=off` opts out.
 Boot validates experimental `thread/fork`, `thread/resume`,
 `thread/inject_items` and `thread/delete` support and enables empty-template
 forks when available. Otherwise the default uses the original path and reports
@@ -523,8 +418,7 @@ The updater copies the setting into qualification and requires an
 caller-tool continuation; unsupported auto mode reports its fallback reason. Changing the setting requires requalification. Measured results
 and design: [empty-template cache](codex-empty-template-cache-design.md).
 
-
-## Caller ownership of pending tools (v2.0.0+)
+## Caller ownership of pending tools
 
 Gateway authentication derives an opaque identity per client key or dashboard
 session. The proxy strips externally supplied `X-Ezllm-Caller` values and stamps

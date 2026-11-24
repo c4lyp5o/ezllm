@@ -17,6 +17,8 @@
 # runtime stage below has no RUN step, so it needs no emulation either.
 FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS builder
 ARG TARGETARCH
+# The git ref the dashboard's doc links open (internal/server/version.go DocsRef).
+ARG DOCS_REF=master
 WORKDIR /src
 
 # go.sum is the cache key: unchanged deps do not re-download.
@@ -28,7 +30,7 @@ COPY . .
 # -trimpath: no local paths in the binary (reproducible + nothing to leak).
 # -s -w: drop the symbol/DWARF tables (smaller; symbols live in releases).
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -trimpath \
-      -ldflags="-s -w" \
+      -ldflags="-s -w -X github.com/c4lyp5o/ezllm/internal/server.DocsRef=$DOCS_REF" \
       -o /out/ezllm ./cmd/ezllm
 
 # Confirm the binary really is static — a non-static build silently reintroduces

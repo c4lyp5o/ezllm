@@ -25,11 +25,16 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   CLI also supports `--conversation`. `bridge-check agy` now fails a CLI without
   `--json-schema` and always runs the caller-tool live proof.
 
-- **Bridge setup guide.** `docs/bridge-setup.md` has one recipe per plan, a checker
-  and what each error means, for Docker Compose and for `docker run`. The Claude and
-  Codex guides staged the CLI where ezllm does not look (`claude-VERSION`,
-  `/opt/codex`); both now match the defaults. A bridge whose CLI is missing names the
-  guide when it stops the boot.
+- **Bridge setup guide.** `docs/bridges/` has one page per plan, for Docker Compose and
+  for `docker run`, and one troubleshooting page with a checker; `docs/bridge-setup.md`
+  is the index. The Claude and Codex guides staged the CLI where ezllm does not look
+  (`claude-VERSION`, `/opt/codex`). A bridge whose CLI is missing names the guide when it
+  stops the boot.
+- **Docs for one version.** User docs describe the version they ship with; what to
+  change when coming from an older one is in `docs/upgrading.md`. The bridge runbooks are
+  reference only, without setup steps. The dashboard's bridge links open the docs of the
+  running version (release tag, or `development`); `GET /admin/bridges` gains `setup` and
+  `docs`, and its 409 names the setup page.
 
 ## v2.2.0 — shared bridge admission, requests per turn, token counting, spend caps
 

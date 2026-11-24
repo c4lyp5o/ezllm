@@ -7,12 +7,12 @@ import { start, json, check, finish } from "./mockdash.mjs";
 
 const bridges = [
   { id: "claude-sub", label: "Claude Pro/Max", kind: "anthropic-compatible", base_url: "http://127.0.0.1:8790/v1",
-    usage_convention: "anthropic", enabled: true, env: "EZLLM_CLAUDE_BRIDGE", runbook: "docs/claude-bridge-runbook.md",
+    usage_convention: "anthropic", enabled: true, env: "EZLLM_CLAUDE_BRIDGE", setup: "docs/bridges/claude.md", runbook: "docs/claude-bridge-runbook.md", docs: "https://github.com/c4lyp5o/ezllm/blob/v9.9.9/",
     status: { cli_version: "2.1.306 (Claude Code)", login: "logged-in", subscription: "Subscription: max" } },
   { id: "chatgpt-sub", label: "ChatGPT Plus/Pro", kind: "openai-compatible", base_url: "http://127.0.0.1:8791/v1",
-    usage_convention: "auto", enabled: false, env: "EZLLM_CODEX_BRIDGE", runbook: "docs/codex-bridge-runbook.md" },
+    usage_convention: "auto", enabled: false, env: "EZLLM_CODEX_BRIDGE", setup: "docs/bridges/codex.md", runbook: "docs/codex-bridge-runbook.md", docs: "https://github.com/c4lyp5o/ezllm/blob/v9.9.9/" },
   { id: "antigravity-sub", label: "Google Antigravity", kind: "openai-compatible", base_url: "http://127.0.0.1:8792/v1",
-    usage_convention: "auto", enabled: true, env: "EZLLM_AGY_BRIDGE", runbook: "docs/agy-bridge-runbook.md",
+    usage_convention: "auto", enabled: true, env: "EZLLM_AGY_BRIDGE", setup: "docs/bridges/antigravity.md", runbook: "docs/agy-bridge-runbook.md", docs: "https://github.com/c4lyp5o/ezllm/blob/v9.9.9/",
     // the Info map cmd/ezllm/agybridge.go reports
     status: { cli_version: "1.4.7", login: "logged in (token file; models listed at boot)",
       models: "gemini-3.8-flash-low, claude-sonnet-4-6", client_tools: "disabled (text chat only)" } },
@@ -57,7 +57,7 @@ await page.getByText("This bridge is not running").waitFor();
 const off = await page.locator("text=EZLLM_CODEX_BRIDGE").count();
 check("off bridge names the variable that turns it on", off > 0);
 check("off bridge explains where to find startup errors", (await page.getByText(/docker compose logs ezllm/).count()) === 1);
-check("off bridge links its runbook", (await page.locator('a[href$="docs/codex-bridge-runbook.md"]').count()) === 1);
+check("off bridge links its setup page for this version", (await page.locator('a[href="https://github.com/c4lyp5o/ezllm/blob/v9.9.9/docs/bridges/codex.md"]').count()) === 1);
 check("save disabled while the bridge is off", await page.getByRole("button", { name: /Save & validate/ }).isDisabled());
 
 // Fresh dialog for the running bridge so the name prefill applies.

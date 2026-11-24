@@ -19,8 +19,7 @@ import (
 // live "running / off" state, and names `bridge` on the key add so the server
 // fills in the shared secret itself — nobody has to cat a token file on the
 // host. The token never leaves the process: it is not in any response.
-// Runbooks: docs/claude-bridge-runbook.md, docs/codex-bridge-runbook.md,
-// docs/agy-bridge-runbook.md.
+// Setup pages: docs/bridges/; reference: docs/*-bridge-runbook.md.
 
 // Bridge is one loopback subscription surface.
 type Bridge struct {
@@ -33,7 +32,9 @@ type Bridge struct {
 	UsageConvention string `json:"usage_convention"`
 	Enabled         bool   `json:"enabled"`
 	Env             string `json:"env"`     // the variable that turns it on
-	Runbook         string `json:"runbook"` // setup steps, repo-relative
+	Setup           string `json:"setup"`   // turn-it-on page, repo-relative
+	Runbook         string `json:"runbook"` // reference page, repo-relative
+	Docs            string `json:"docs"`    // base URL of both, for this build's version
 	// Status is the bridge's own /status snapshot from boot (CLI version,
 	// login, plan …). Empty when the bridge is off.
 	Status map[string]any `json:"status,omitempty"`
@@ -72,21 +73,21 @@ type bridgeRegistry struct {
 }
 
 func newBridgeRegistry() *bridgeRegistry {
-	return &bridgeRegistry{list: []Bridge{
+	list := []Bridge{
 		{
 			ID: "claude-sub", Label: "Claude Pro/Max", Kind: "anthropic-compatible",
 			BaseURL: "http://127.0.0.1:8790/v1", UsageConvention: "anthropic",
-			Env: "EZLLM_CLAUDE_BRIDGE", Runbook: "docs/claude-bridge-runbook.md",
+			Env: "EZLLM_CLAUDE_BRIDGE", Setup: "docs/bridges/claude.md", Runbook: "docs/claude-bridge-runbook.md",
 		},
 		{
 			ID: "chatgpt-sub", Label: "ChatGPT Plus/Pro", Kind: "openai-compatible",
 			BaseURL: "http://127.0.0.1:8791/v1", UsageConvention: "auto",
-			Env: "EZLLM_CODEX_BRIDGE", Runbook: "docs/codex-bridge-runbook.md",
+			Env: "EZLLM_CODEX_BRIDGE", Setup: "docs/bridges/codex.md", Runbook: "docs/codex-bridge-runbook.md",
 		},
 		{
 			ID: "antigravity-sub", Label: "Google Antigravity", Kind: "openai-compatible",
 			BaseURL: "http://127.0.0.1:8792/v1", UsageConvention: "auto",
-			Env: "EZLLM_AGY_BRIDGE", Runbook: "docs/agy-bridge-runbook.md",
+			Env: "EZLLM_AGY_BRIDGE", Setup: "docs/bridges/antigravity.md", Runbook: "docs/agy-bridge-runbook.md",
 		},
 		{
 			// Replaces the retired OAuth/device-flow provider: the CLI's own
@@ -94,9 +95,13 @@ func newBridgeRegistry() *bridgeRegistry {
 			// (inclusive prompt + cache details), so the openai convention fits.
 			ID: "copilot-sub", Label: "GitHub Copilot", Kind: "copilot-bridge",
 			BaseURL: "http://127.0.0.1:8793/v1", UsageConvention: "openai",
-			Env: "EZLLM_COPILOT_BRIDGE", Runbook: "docs/copilot-bridge-runbook.md",
+			Env: "EZLLM_COPILOT_BRIDGE", Setup: "docs/bridges/copilot.md", Runbook: "docs/copilot-bridge-runbook.md",
 		},
-	}}
+	}
+	for i := range list {
+		list[i].Docs = docsBase()
+	}
+	return &bridgeRegistry{list: list}
 }
 
 // EnableBridge records a running bridge: its listener address, the shared
@@ -268,7 +273,7 @@ func (s *Server) bridgeToken(id, kind, baseURL string) (string, int, string) {
 		return "", http.StatusBadRequest, "unknown bridge " + id
 	}
 	if !b.Enabled || b.token == "" {
-		return "", http.StatusConflict, b.Label + " is not running: set " + b.Env + "=on, mount the CLI and login, and restart (" + b.Runbook + ")"
+		return "", http.StatusConflict, b.Label + " is not running: set " + b.Env + "=on, mount the CLI and login, and restart (" + b.Setup + ")"
 	}
 	got, _ := s.bridgeForURL(baseURL)
 	if kind != b.Kind || got.ID != b.ID {
@@ -288,5 +293,5 @@ func (s *Server) explainBridgeFailure(baseURL string, test *registration.TestRes
 	if test.Fail == nil {
 		test.Fail = &registration.Failure{Step: "unknown", Message: "key test failed"}
 	}
-	test.Fail.Hint = b.Label + " is not running: set " + b.Env + "=on, mount the CLI and login, and restart (" + b.Runbook + ")."
+	test.Fail.Hint = b.Label + " is not running: set " + b.Env + "=on, mount the CLI and login, and restart (" + b.Setup + ")."
 }

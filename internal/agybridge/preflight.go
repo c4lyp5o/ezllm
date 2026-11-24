@@ -71,7 +71,7 @@ func RunPreflight(ctx context.Context, bin, home string) (Preflight, error) {
 		}
 	}
 	if _, err := os.Stat(TokenPath(home)); err != nil {
-		return p, fmt.Errorf("agy bridge: no Antigravity login at %s: log in once on the host with DBUS unset and HOME pointed at the mounted login directory (docs/agy-bridge-runbook.md)", TokenPath(home))
+		return p, fmt.Errorf("agy bridge: no Antigravity login at %s: log in once on the host with DBUS unset and HOME pointed at the mounted login directory (docs/bridges/antigravity.md)", TokenPath(home))
 	}
 	if err := CheckSettings(home); err != nil {
 		return p, err

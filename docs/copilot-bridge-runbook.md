@@ -15,6 +15,49 @@ tools or images cannot take that fallback. Prompts and native image blobs travel
 on stdin, not argv.
 
 
+## Install the CLI (first time)
+
+The container runs a CLI from the host: `~/.local/share/copilot-bridge` holds one
+folder per version and a `current` link, mounted at `/opt/copilot-bridge`. Create
+it before turning the bridge on. Run this on the Docker host as the user the
+container runs as (on arm64, use `copilot-linux-arm64.tar.gz`):
+
+```sh
+V=1.0.112
+ASSET=copilot-linux-x64.tar.gz
+URL="https://github.com/github/copilot-cli/releases/download/v$V"
+ROOT=~/.local/share/copilot-bridge
+mkdir -p "$ROOT/$V" ~/.copilot-sub && chmod 700 ~/.copilot-sub
+cd "$(mktemp -d)"
+curl -fLO "$URL/$ASSET" && curl -fLO "$URL/SHA256SUMS.txt" &&
+  sha256sum -c --ignore-missing SHA256SUMS.txt &&
+  tar xzf "$ASSET" -C "$ROOT/$V" &&
+  ln -sfn "$V" "$ROOT/current"
+```
+
+Keep the link relative, as above: an absolute host path does not exist inside
+the container. Stay on 1.0.112: releases 1.0.113 and 1.0.114 speak headless
+protocol 4, this bridge speaks 3, and they start but refuse client tools. Then
+[sign in](#enabling-it), add the mounts below and recreate the container.
+
+`bridge_update.py --init` does not do this: it only converts an older mount of a
+running container.
+
+### `does not resolve to the official Copilot CLI`
+
+`EZLLM_COPILOT_BRIDGE` is `on` but the container has no CLI at
+`EZLLM_COPILOT_BIN`, so ezllm does not start. If you do not use Copilot, set the
+bridge to `"off"`. Otherwise check, on the host:
+
+```sh
+ls -la ~/.local/share/copilot-bridge/           # current -> 1.0.112, not a / path
+ls -la ~/.local/share/copilot-bridge/current/   # an executable `copilot`
+```
+
+An empty folder usually means Docker created it because the mount's source was
+missing. If both look right, the `volumes:` line is missing or names another
+path; fix it and run `docker compose up -d --force-recreate ezllm`.
+
 ## Enabling it
 
 | Env | Meaning |

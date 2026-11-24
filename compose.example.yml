@@ -142,8 +142,9 @@ services:
       # refreshes its token there). Each *_BIN default is already the
       # `current` path (/opt/<name>-bridge/current/...), so no override is
       # needed.
-      # `python3 scripts/bridge_update.py --init` creates the layout from
-      # pinned copies. A bind mount whose source is missing makes Docker
+      # `python3 scripts/bridge_update.py --init` converts older pinned mounts of
+      # a running container to this layout; it does not install a CLI. For a
+      # first install follow the bridge's runbook in docs/. A bind mount whose source is missing makes Docker
       # create an empty directory, so uncomment these only when both exist.
       #
       # Claude: <root>/<version>/claude, a copy outside the CLI's own versions
@@ -156,6 +157,7 @@ services:
       # - /path/to/.codex-sub:/codex-sub
       # Copilot: the managed updater root (replaces the standalone binary
       # mount) and the dedicated login made with COPILOT_HOME=~/.copilot-sub.
+      # First install: docs/copilot-bridge-runbook.md "Install the CLI".
       # - /path/to/.local/share/copilot-bridge:/opt/copilot-bridge:ro
       # - /path/to/.copilot-sub:/copilot-sub
       # Antigravity: <root>/<version>/agy (agy rewrites itself in place when

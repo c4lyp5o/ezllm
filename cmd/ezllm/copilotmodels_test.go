@@ -1,6 +1,9 @@
 package main
 
 import (
+	"errors"
+	"io/fs"
+	"log/slog"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -78,5 +81,20 @@ func TestCopilotLiveModelsReportsLaunchFailure(t *testing.T) {
 	models, err := copilotLiveModels(filepath.Join(t.TempDir(), "missing-copilot"))
 	if err == nil || len(models) != 0 {
 		t.Fatalf("want launch error and no models, got %v, %v", models, err)
+	}
+}
+
+// A first-time operator sees only this line: it must say how to get unstuck.
+func TestCopilotBridgeMissingCLINamesTheFix(t *testing.T) {
+	t.Setenv(envCopilotBridge, "on")
+	t.Setenv(envCopilotBin, filepath.Join(t.TempDir(), "current", "copilot"))
+	_, err := startCopilotBridge(t.Context(), slog.Default(), nil)
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("want the missing file as the cause, got %v", err)
+	}
+	for _, want := range []string{"docs/copilot-bridge-runbook.md", envCopilotBridge + "=off"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error does not mention %q: %v", want, err)
+		}
 	}
 }

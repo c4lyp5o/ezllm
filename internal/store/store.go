@@ -29,7 +29,7 @@ var schemaSQL string
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
 const schemaVersion = 38
 
-// Stream-outcome vocabulary (schema v34, docs/hop-health-design.md). Stored in
+// Stream-outcome vocabulary (schema v34, docs/design/hop-health-design.md). Stored in
 // calls.stream_outcome; an empty value means the request was not a stream.
 // These live here
 // rather than in proxy so the ledger owns its own vocabulary and a store test
@@ -1068,7 +1068,7 @@ func (d *DB) alterCallsContextTokens(ctx context.Context) error {
 // dropCallsToolPrune (v35) removes the v33 tool-pruning column. The feature was
 // rejected and deleted on 2026-11-05 and nothing reads or writes the column;
 // the experiment's measurements were exported to
-// docs/tool-prune-shadow-results.json before the drop. A no-op once applied and
+// docs/design/tool-prune-shadow-results.json before the drop. A no-op once applied and
 // on databases that never had it.
 func (d *DB) dropCallsToolPrune(ctx context.Context) error {
 	exists, err := hasTable(ctx, d.w, "calls")
@@ -1092,7 +1092,7 @@ func (d *DB) dropCallsToolPrune(ctx context.Context) error {
 }
 
 // alterCallsStreamOutcome adds the hop-health outcome column (v34,
-// docs/hop-health-design.md) on databases created before it. Same guard as the
+// docs/design/hop-health-design.md) on databases created before it. Same guard as the
 // other ADD COLUMNs: not idempotent, and a fresh database already carries it from
 // schema.sql. TEXT with an empty default keeps every historical row honest —
 // "this row predates the recording", never a guessed verdict.

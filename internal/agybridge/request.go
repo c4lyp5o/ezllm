@@ -9,7 +9,7 @@ import (
 // Request is one OpenAI Chat Completions call, reduced to what one headless
 // `agy -p` turn takes: a single prompt. agy has no system-prompt flag and no
 // history replay, so system text and prior turns travel inside the prompt as a
-// deterministic transcript (docs/antigravity-subscription-design.md §3).
+// deterministic transcript (docs/design/antigravity-subscription-design.md §3).
 type Request struct {
 	Model             string
 	Stream            bool

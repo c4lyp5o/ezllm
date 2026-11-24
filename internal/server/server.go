@@ -718,7 +718,7 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 		liftDeadline()
 		lease.shrink(int64(len(body)))
 
-		// Single-parse dispatch (docs/single-parse-dispatch-design.md): one
+		// Single-parse dispatch (docs/design/single-parse-dispatch-design.md): one
 		// decode of the client body serves model extraction, compression,
 		// shape capture and every hop's model swap. Decode problems are not
 		// checked here — each consumer keeps its own documented decision
@@ -1073,7 +1073,7 @@ func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
 	if s.dispatcher != nil {
 		cooldowns = s.dispatcher.Cooldowns()
 	}
-	// Stream outcomes per hop (docs/hop-health-design.md). A hop that returns
+	// Stream outcomes per hop (docs/design/hop-health-design.md). A hop that returns
 	// 200 and then dies mid-body is healthy by every other number on this
 	// endpoint; this is the one that shows it. Window is operator-selectable
 	// because "why did last night break" and "is this hop degrading" want

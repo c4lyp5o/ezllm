@@ -1,6 +1,6 @@
 # Anthropic → OpenAI translation — design record (2026-10-12)
 
-> **Superseded in part by `docs/universal-wire-design.md` (2026-10-13).** Every client surface
+> **Superseded in part by `docs/design/universal-wire-design.md` (2026-10-13).** Every client surface
 > now reaches every proven wire through surface-neutral codecs, translated hops are ordinary
 > combo members (no longer a tail after native hops), and one switch, `translation.enabled`
 > (default **on**), gates it all (`translation.universal_enabled` is a deprecated alias). This

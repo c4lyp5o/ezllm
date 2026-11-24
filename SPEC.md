@@ -5,7 +5,7 @@ subsequent releases. Deployment and operator-specific completion are not establi
 by this document; verify the live instance. (The plan and checklist that accompanied it
 were removed in v2.0.0 and remain in git history.)
 The requirements and commands below record the original plan, not current status.
-**Parent design:** [docs/claude-subscription-design.md](docs/claude-subscription-design.md) §6 (M2)
+**Parent design:** [docs/design/claude-subscription-design.md](docs/design/claude-subscription-design.md) §6 (M2)
 
 ## Objective
 
@@ -82,7 +82,7 @@ internal/claudebridge/mcp.go        B only: inert stdio MCP server + name aliasi
 internal/claudebridge/*_test.go     in-package tests (fake CLI fixtures, no real spawn)
 cmd/ezllm/claudebridge.go           /status capability string ("tools": ...)
 tests/prove_claude_bridge.py        live proof: refusal check → tool round-trip
-docs/claude-subscription-design.md  §6 M2 → SHIPPED, record of the A/B decision
+docs/design/claude-subscription-design.md  §6 M2 → SHIPPED, record of the A/B decision
 docs/claude-bridge-runbook.md       remove the chat_tools_unsupported entry, add tool notes
 CHANGELOG.md, VERSION.md, internal/server/version.go   0.0.21 → 0.0.22, same commit
 ```

@@ -11,7 +11,7 @@ import (
 //
 // Neither CLI path can replay history as real turns, so prior turns are flattened
 // into a deterministic transcript (the agy rule,
-// docs/antigravity-subscription-design.md §3). `-p` also has no system-prompt flag,
+// docs/design/antigravity-subscription-design.md §3). `-p` also has no system-prompt flag,
 // so its Prompt carries the system text too.
 type Request struct {
 	Model        string

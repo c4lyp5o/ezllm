@@ -9,7 +9,7 @@ import (
 // ChatToResponses translates an OpenAI chat-completions request body into an
 // OpenAI Responses API request body.
 //
-// Determinism is the contract (see docs/responses-wire-design.md): ordered
+// Determinism is the contract (see docs/design/responses-wire-design.md): ordered
 // structs with fixed field order, the input slice is never mutated, tool
 // arguments pass through verbatim as strings. Unknown fields are dropped
 // silently — forward compatibility, same as the anthropic→openai path.

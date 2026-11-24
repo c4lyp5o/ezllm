@@ -3,7 +3,7 @@
 `scripts/bridge_update.py` maintains pinned official CLI releases for Claude,
 Codex, Antigravity and optionally Copilot. It uses the existing host timer and
 stdlib Python; no new daemon, sidecar or dashboard write endpoint is required.
-Design history: `SPEC-bridge-update.md`.
+Design history: `docs/design/SPEC-bridge-update.md`.
 
 ## Policy
 

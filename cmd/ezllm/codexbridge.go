@@ -20,7 +20,7 @@ import (
 // a LOOPBACK-ONLY listener, dialled by an ordinary `openai-compatible` account,
 // while the official Codex CLI — bind-mounted from the host — stays the only
 // thing that talks to the subscription. Decisions:
-// docs/codex-subscription-design.md; operation: docs/codex-bridge-runbook.md.
+// docs/design/codex-subscription-design.md; operation: docs/codex-bridge-runbook.md.
 const (
 	envCodexBridge      = "EZLLM_CODEX_BRIDGE"            // "on" enables the surface
 	envCodexBin         = "EZLLM_CODEX_BIN"               // official CLI binary (updater layout: /opt/codex-bridge/current/bin/codex)

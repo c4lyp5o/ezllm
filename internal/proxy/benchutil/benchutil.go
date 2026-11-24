@@ -2,7 +2,7 @@
 // upstream that ezllm's benchmarks, latency-percentile harness and lifecycle
 // tests (cancellation, slow consumer, retained memory) drive the real request
 // path against. Nothing in the production binary imports it — it exists so that
-// every measurement in docs/perf-baseline-m1.md is reproducible against one
+// every measurement in docs/design/perf-baseline-m1.md is reproducible against one
 // upstream implementation instead of a per-package ad-hoc stub.
 //
 // It is a normal package rather than a `_test.go` file for one Go reason: a

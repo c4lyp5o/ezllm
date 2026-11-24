@@ -7,7 +7,7 @@ package compress
 // URL, an identifier or a quoted string — it can only ever touch the words
 // between them.
 //
-// The design contract (docs/compression-design.md §caveman):
+// The design contract (docs/design/compression-design.md §caveman):
 //   - fenced regions are atomic and untouched (splitUnits groups them)
 //   - inline spans are replaced by placeholders that no rule pattern matches
 //   - after rewriting, every span must still be present, in order (the

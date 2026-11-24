@@ -6,7 +6,7 @@ import (
 )
 
 // Byte-entry conveniences for TESTS: production rides the request's shared
-// single-parse decode (docs/single-parse-dispatch-design.md) through the
+// single-parse decode (docs/design/single-parse-dispatch-design.md) through the
 // *Doc forms directly, so nothing in the request path needs these. They stay
 // here because the shape/hashing tests read better in byte form.
 

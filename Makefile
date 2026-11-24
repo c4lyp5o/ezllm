@@ -76,7 +76,7 @@ check:
 verify:
 	$(GO) run ./cmd/m2verify
 
-# Phase-separated benchmarks (see docs/perf-baseline-m1.md). Every one runs
+# Phase-separated benchmarks (see docs/design/perf-baseline-m1.md). Every one runs
 # with -benchmem; -run XXX keeps the tests out of the run.
 bench:
 	$(GO) test ./internal/proxy/... ./internal/server/... -run XXX -bench . -benchmem -count=1

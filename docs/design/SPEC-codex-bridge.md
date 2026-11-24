@@ -2,8 +2,8 @@
 
 **Status:** shipped in v1.1.0 (stages 1–3, design §2.13–2.14; merged in PR #2) and deployed — the `chatgpt-sub` account serves production traffic
 **Scope:** Codex only. Gemini CLI is deferred: it needs Node, which conflicts with
-locked decision #3 in `docs/claude-subscription-design.md`. `geminiweb` already covers that path.
-**Pattern:** the claude-bridge (`internal/claudebridge`, `docs/claude-subscription-design.md`).
+locked decision #3 in `docs/design/claude-subscription-design.md`. `geminiweb` already covers that path.
+**Pattern:** the claude-bridge (`internal/claudebridge`, `docs/design/claude-subscription-design.md`).
 That doc is binding for anything this spec doesn't override.
 
 ## Objective
@@ -29,7 +29,7 @@ in a combo, `internal/router/router.go:753`).
 
 ### Build plan (operator-approved 2026-10-23; supersedes the original M1/M2)
 
-M0 is done: `docs/codex-subscription-design.md` §2 (measurements) and §4 (decisions).
+M0 is done: `docs/design/codex-subscription-design.md` §2 (measurements) and §4 (decisions).
 The target is **full function**; stages are build order, each shippable and tested.
 
 **Stage 1 — transport (text, images, effort).**
@@ -95,7 +95,7 @@ internal/codexbridge/          → the bridge: server.go (surface), runner.go (s
 internal/codexbridge/testdata/ → redacted native event captures from M0 (*.jsonl)
 cmd/ezllm/codexbridge.go       → env config, boot checks, loopback listener (mirrors claudebridge.go)
 Dockerfile                     → EZLLM_CODEX_BIN=/opt/codex/codex, EZLLM_CODEX_HOME=/codex-sub
-docs/codex-subscription-design.md → decisions + M0 measured baseline
+docs/design/codex-subscription-design.md → decisions + M0 measured baseline
 docs/codex-bridge-runbook.md   → mounts, login, pinning, account/combo/Rules setup
 tests/prove_codex_bridge.py    → live proof (not part of go test)
 ```
@@ -155,7 +155,7 @@ Wire errors are OpenAI-shaped: `{"error":{"type","message","code"}}`. Tabs, gofm
 
 ## Success Criteria
 
-1. M0: done — `docs/codex-subscription-design.md` §2 answers all 11 spike questions with
+1. M0: done — `docs/design/codex-subscription-design.md` §2 answers all 11 spike questions with
    measured numbers; the operator's decisions are in §4.
 2. Each stage: every item in the build plan has a unit or live check, the live proof is green,
    and CI `test.yml` is green on the branch.
@@ -167,5 +167,5 @@ Wire errors are OpenAI-shaped: `{"error":{"type","message","code"}}`. Tabs, gofm
 ## Open Questions
 
 All five were answered by the operator on 2026-10-23 — see
-`docs/codex-subscription-design.md` §4 (history: flattened transcript, not the Codex Cloud
+`docs/design/codex-subscription-design.md` §4 (history: flattened transcript, not the Codex Cloud
 field; surface: Chat Completions; caps: Rules only; models: all; install: standalone, pinned copy).

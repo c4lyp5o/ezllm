@@ -19,7 +19,7 @@ import (
 // on a LOOPBACK-ONLY listener, dialled by an ordinary `openai-compatible`
 // account, while the official Antigravity CLI (`agy`) — bind-mounted from the
 // host — stays the only thing that talks to the Google subscription.
-// Decisions: docs/antigravity-subscription-design.md; operation:
+// Decisions: docs/design/antigravity-subscription-design.md; operation:
 // docs/agy-bridge-runbook.md.
 const (
 	envAgyBridge       = "EZLLM_AGY_BRIDGE"            // "on" enables the surface

@@ -10,7 +10,7 @@ import (
 
 // Request is the subset of an Anthropic Messages request this hop honours. Anything
 // else arrives as Unsupported and is refused before a process is spawned (see
-// docs/claude-subscription-design.md).
+// docs/design/claude-subscription-design.md).
 //
 // Tools and ToolChoice stay raw: they reach upstream through the extra body
 // exactly as the client sent them, and native never runs them (it is spawned

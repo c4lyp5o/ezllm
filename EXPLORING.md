@@ -4,7 +4,7 @@
 > to verify, and per-milestone file landmarks (§4). Landmarks name a file and a symbol, never a
 > line number: grep the symbol. Keep a milestone's landmarks current as its code evolves.
 >
-> **Decisions live elsewhere:** `docs/*-design.md` and `docs/*-runbook.md` hold the design
+> **Decisions live elsewhere:** `docs/design/` and `docs/*-runbook.md` hold the design
 > records; this file is navigation only.
 
 ---
@@ -65,7 +65,7 @@ equal, something is buffering — go read `streamCopyTracked` in `internal/proxy
 | M2 | `internal/proxy/proxy.go` (`Forward` → `streamCopyTracked` → `UsageTapper.Observe`) → `internal/store/ledger.go` (`NormalizeUsageWith`) | `git show` of M2 | How do native streaming and translated streaming differ? |
 | M3 | `internal/registration` + `internal/provider/adapters.go` + admin handlers in `internal/server` | `docs/API.md` | Can I trace an account from DB row → adapter → first upstream byte? |
 | M4 | `internal/router` (hops → strategies → key pick/cooldown) + `internal/rules` | `go test -short ./internal/router ./internal/rules` | What happens on 429 with 1 key left? (answer must be in a test) |
-| M5 | `internal/compress` (engines + stage pipeline) + `internal/server/compression.go` | `docs/compression-design.md` | Where is "never touch final turn / tool results" enforced, and where does fail-open live? |
+| M5 | `internal/compress` (engines + stage pipeline) + `internal/server/compression.go` | `docs/design/compression-design.md` | Where is "never touch final turn / tool results" enforced, and where does fail-open live? |
 | M6 | `internal/store/ledger.go` (`UsageReport`) → `/admin/usage` · `/admin/requests` · `/admin/stream` + `web/src` | `docs/API.md` + a dashboard login | Can I kill -9 it and restart without corrupting the ledger? Does the dashboard render anything pre-auth? (it must not) |
 | M7 | `internal/compress/rtk.go`, `caveman.go` + `internal/rules` windows/caps | `tests/prove_*.py` (live proofs) | After compression, do ledger rows still carry faithful pre/saved token counts? |
 | M8 | `internal/router/router.go` `checkPin` + `internal/server/admin.go` `handleSetModelPin` | `internal/router/pin_test.go`, `internal/server/pinsurface_test.go` | Where does a refusal stop the request — before or after the upstream dial? Does every switch that renders a typed router error have a case for `ErrPinned`? |
@@ -276,7 +276,7 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
   (`curl https://llm.calypso.dedyn.io/ | grep assets/index-`) + grep one marker string.
 
 ### Universal wire matrix (M0–M5) ✅ (2026-10-13, shipped)
-- `docs/universal-wire-design.md` — the architecture; runbook section at the end of
+- `docs/design/universal-wire-design.md` — the architecture; runbook section at the end of
   `docs/translation-runbook.md`.
 - `internal/translate/` — `ir.go` (RequestIR) + `codec_{chat,messages,responses}.go` (one codec
   per surface), `response_ir.go`/`response_codec.go` (ResponseIR, usage convention, errors),
@@ -300,7 +300,7 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
   them like native hops, and a translated success/failure feeds the strategy the same way.
   Earlier revisions parked them outside the strategy ordering; do not reintroduce that tail.
 
-### M10 — single-parse dispatch (OPT-1) ✅ (2026-10-15, measured; design `docs/single-parse-dispatch-design.md`)
+### M10 — single-parse dispatch (OPT-1) ✅ (2026-10-15, measured; design `docs/design/single-parse-dispatch-design.md`)
 - **The problem was 5 full JSON decodes per request**: `extractModel`
   (`server.go`), `IsStream` (`proxy.go`, per attempt), `SwapModel`
   (`proxy.go`, per hop), `compress.Apply`, `captureShape` (`shape.go`). The fix: `internal/jsonbody/jsonbody.go`
@@ -342,7 +342,7 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
   (n=1000, channel-sync + 5 s failure guards): client→upstream cancel p95
   **63 µs** vs the spec's 20 ms. The §18 row is a certificate now.
 
-### M12 — gemini-web provider ✅ (2026-10-16, code complete, mock-proven; design `docs/gemini-web-design.md`, runbook `docs/gemini-web-runbook.md`)
+### M12 — gemini-web provider ✅ (2026-10-16, code complete, mock-proven; design `docs/design/gemini-web-design.md`, runbook `docs/gemini-web-runbook.md`)
 - `internal/geminiweb/` — the ported protocol: `frame.go` (wrb.fr frames;
   caught the units-rescan desync), `client.go` (cookie auth + init scrape +
   rotation), `rpc.go` (GET_USER_STATUS = zero-quota oracle + catalog),
@@ -366,7 +366,7 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
 > dashboard login panel. Do not go looking for them. Replaced by M16 (Copilot subscription bridge);
 > the original design and policy records were removed in v2.0.0 and remain in git history.
 
-### M14 — claude-web provider ✅ (2026-10-16; design `docs/claude-web-design.md`, runbook `docs/claude-web-runbook.md`)
+### M14 — claude-web provider ✅ (2026-10-16; design `docs/design/claude-web-design.md`, runbook `docs/claude-web-runbook.md`)
 - `internal/claudeweb/` — the ported protocol. `tlsclient.go` (uTLS
   Chrome-146 via `HelloChrome_Auto` behind an injectable Fetcher — Go's
   native TLS dies at claude.ai's Cloudflare; the REAL handshake runs green
@@ -409,7 +409,7 @@ executable Go probe). Five slices, all local, all gates-green:
   committed (exempt tail never froze); verbatim forms needed freezing too.
 Caveman: please_could_you_tell_me no longer eats the question word (the
 engine forbids capture re-emission, so the word left the pattern);
-drop_there_seems_to_be removed. docs/compression-design.md carries the full
+drop_there_seems_to_be removed. docs/design/compression-design.md carries the full
 corrections section.
 
 ### v1.1 — subscription bridges ✅ (2026-10-23; runbooks `docs/claude-bridge-runbook.md`, `docs/codex-bridge-runbook.md`)
@@ -442,7 +442,7 @@ corrections section.
 - Reasoning effort is a per-model vocabulary: `provider.ParseReasoningRule` reads it out of the
   refusal, `ReasoningRule.Clamp` maps a value onto it, `models.reasoning_vocab` /
   `reasoning_required` (schema v29) keep it, and `proxy.prepareHopBody` applies it per hop
-  without re-encoding an accepted value. Design: `docs/reasoning-effort-design.md`.
+  without re-encoding an accepted value. Design: `docs/design/reasoning-effort-design.md`.
 - `deniesModelAccess` (`internal/proxy/proxy.go`) parks a hop on a 401/403 whose body names model
   access — body-matched, `hasAlternate`-gated, so a bare 403 still changes no state.
 - Console logging has a written contract: `docs/logging.md` (levels, what is never logged, the
@@ -450,7 +450,7 @@ corrections section.
   failover trail from `reqInfo`; refusals before dispatch are visible at `debug`;
   `EZLLM_LOG_FORMAT=json` opts into one object per line.
 
-### v1.3.0 — Antigravity subscription bridge ✅ (2026-10-26; design `docs/antigravity-subscription-design.md`, runbook `docs/agy-bridge-runbook.md`)
+### v1.3.0 — Antigravity subscription bridge ✅ (2026-10-26; design `docs/design/antigravity-subscription-design.md`, runbook `docs/agy-bridge-runbook.md`)
 - `internal/agybridge/` — Google Antigravity plan behind a loopback OpenAI surface:
   `runner.go` `Run` spawns `agy --print=` headless per request in a fresh empty workspace,
   kills a turn whose `init` reports a loose permission mode; `preflight.go` `RunPreflight`
@@ -494,7 +494,7 @@ corrections section.
   coverage is in `web/tests/verify-railway.mjs`, `verify-neighbourhood.mjs`,
   `verify-neighbourhood-polish.mjs` and `shot-city.mjs`.
 
-### v1.6.0 — bridge CLI auto-update and push channels ✅ (2026-10-31; runbook `docs/bridge-update-runbook.md`, spec `SPEC-bridge-update.md`)
+### v1.6.0 — bridge CLI auto-update and push channels ✅ (2026-10-31; runbook `docs/bridge-update-runbook.md`, spec `docs/design/SPEC-bridge-update.md`)
 
 Three layers, read in this order. **The gate:** `cmd/ezllm/bridgecheck.go`
 `runBridgeCheck` (the boot checks, stricter: drift refuses) and `--live`
@@ -614,7 +614,7 @@ examples of a class of bug rather than as history.
   `proxy.refusesHistory` treats "this model needs the reasoning of every earlier
   turn" as a hop fact (fail over, no park, cause `reasoning_echo_required`).
 
-`docs/reasoning-effort-design.md` carries the amendment that explains how the first
+`docs/design/reasoning-effort-design.md` carries the amendment that explains how the first
 one shipped, because "documented but in a function the linker removed" is a failure
 mode this codebase has now hit twice.
 
@@ -652,7 +652,7 @@ the columns it wrote stay in the ledger as history. The reasoning is worth
 keeping: **measure before building the hot path, and check that your instrument
 can see the failure you are trying to prevent.**
 
-### M16 — GitHub Copilot subscription bridge ✅ (2026-11-05; design `docs/copilot-cli-bridge-design.md`, runbook `docs/copilot-bridge-runbook.md`)
+### M16 — GitHub Copilot subscription bridge ✅ (2026-11-05; design `docs/design/copilot-cli-bridge-design.md`, runbook `docs/copilot-bridge-runbook.md`)
 - `internal/copilotbridge/channel.go` — the path every turn takes: one
   `copilot --headless --stdio` child per request by default (opt-in warm reuse in
   `pool.go` with a fresh session per request), LSP-framed JSON-RPC, single-threaded
@@ -681,7 +681,7 @@ can see the failure you are trying to prevent.**
   Copilot", kind `copilot-bridge`); `web/src/pages/Providers.tsx` — the "GitHub Copilot
   (bridge)" preset, which replaced the device-flow panel.
 
-### M15 — hop stream health ✅ (2026-11-05; design `docs/hop-health-design.md`)
+### M15 — hop stream health ✅ (2026-11-05; design `docs/design/hop-health-design.md`)
 
 A hop that sends `200` and then dies mid-body was healthy by every number the
 product had: it committed, it wrote a ledger row, its account stayed enabled.
@@ -785,7 +785,7 @@ while the SAME model on `opencode-go` was 0/754.
 - Dashboard: Connect picks roles with independent checkboxes and shows a Prometheus job; the
   sidebar footer is three icon buttons; interface text was rewritten in plain language.
 
-### v2.0.0 — bridge caching, Codex fidelity, security remediation ✅ (2026-11-14; runbooks `docs/codex-bridge-runbook.md`, `docs/bridge-update-runbook.md`; audit `docs/security-audit-2026-11-14.md`)
+### v2.0.0 — bridge caching, Codex fidelity, security remediation ✅ (2026-11-14; runbooks `docs/codex-bridge-runbook.md`, `docs/bridge-update-runbook.md`; audit `docs/design/security-audit-2026-11-14.md`)
 
 - `internal/codexbridge/cache.go` `borrowTemplate` / `forkTemplate` — empty
   persisted parent threads forked per request for prompt-cache affinity across
@@ -824,7 +824,7 @@ while the SAME model on `opencode-go` was 0/754.
   outstanding, one bridge per change. Keep Codex RPC/sandbox/tool-turn lifecycle
   and Copilot channel/early-tool/usage/warm-pool behavior adapter-owned.
 - Scope, baseline results and migration acceptance live in
-  [the shared transport design](docs/shared-bridge-transport-design.md).
+  [the shared transport design](docs/design/shared-bridge-transport-design.md).
 
 ## 5. Invariants to check while reading (review checklist)
 
@@ -915,7 +915,7 @@ These are the "if it's broken here, the project failed" spots — each must be v
   evidence. Trim catalogs source-side instead. Full verdict + re-open conditions:
   `CHANGELOG.md` § "removed: tool pruning".
 - Silent translation — every surface can reach every wire since the universal wire matrix
-  (`docs/universal-wire-design.md`), but only onto hops a probe sweep PROVED, with native
+  (`docs/design/universal-wire-design.md`), but only onto hops a probe sweep PROVED, with native
   passthrough preferred, and the surface pin still refuses instead of rerouting.
 - No multi-node / Postgres — single-writer SQLite, one home box.
 - No guessing on quota: quotas come from provider usage endpoints (or, for Command Code, its

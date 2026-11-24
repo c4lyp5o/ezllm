@@ -35,6 +35,8 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   reference only, without setup steps. The dashboard's bridge links open the docs of the
   running version (release tag, or `development`); `GET /admin/bridges` gains `setup` and
   `docs`, and its 409 names the setup page.
+- **Design records moved** to `docs/design/` (with the two bridge specs from the root), so
+  `docs/` holds only what someone running ezllm needs.
 
 ## v2.2.0 — shared bridge admission, requests per turn, token counting, spend caps
 
@@ -175,7 +177,7 @@ ran in production before release; security records cite them by those numbers.
   "upstream attempts" notes only when a request retried. Schema v35 drops
   `calls.tool_prune_shadow_tokens` from the shelved tool-pruning experiment;
   its 2,875 measurements (11,850,055 shadow tokens, Oct 31 to Nov 4) were
-  exported to `docs/tool-prune-shadow-results.json` first. The migration runs
+  exported to `docs/design/tool-prune-shadow-results.json` first. The migration runs
   once on startup and rewrites the `calls` table.
 - **Request explorer:** `/admin/requests` adds `summary.empty_steps` and a
   `hide_empty` filter; the dashboard shows a "no tokens" badge for zero-token
@@ -362,7 +364,7 @@ ran in production before release; security records cite them by those numbers.
   on the wire and Claude terminal thinking details; recorded counters exercise
   the ledger usage tap without additional vendor calls.
 - Records the Hermes-only historical findings and remaining measurement limits
-  in `docs/bridge-token-usage-audit.md`. No new runtime dependency is added.
+  in `docs/design/bridge-token-usage-audit.md`. No new runtime dependency is added.
 
 ### Bridge updater reliability and coverage (pre-release 1.10.0)
 
@@ -529,7 +531,7 @@ ran in production before release; security records cite them by those numbers.
 - **In its place:** the `copilot-bridge` kind over the GitHub Copilot CLI
   (1.0.105), a fourth member of the claude/codex/agy bridge family. No key to
   paste: the credential is the CLI's own login. Design
-  `docs/copilot-cli-bridge-design.md`, runbook `docs/copilot-bridge-runbook.md`.
+  `docs/design/copilot-cli-bridge-design.md`, runbook `docs/copilot-bridge-runbook.md`.
 - **Accounting is exact for the first time on this provider:** the CLI's
   `session.usage_checkpoint` gives inclusive prompt tokens with a cached slice;
   verified end-to-end through the gateway (bridge 13,971 inclusive / 9,420
@@ -646,7 +648,7 @@ ran in production before release; security records cite them by those numbers.
 - `calls.stream_outcome` records how a STREAM ended — `completed`, `truncated`,
   `failed`, `client_gone`, empty for a non-stream request — so a hop that
   returns `200` and then dies mid-body is a fact in the ledger instead of prose
-  in `err` (`docs/hop-health-design.md`). Precedence: `client_gone` first (a
+  in `err` (`docs/design/hop-health-design.md`). Precedence: `client_gone` first (a
   caller hanging up is never a hop fault; that artefact once made 442 complete
   calls read as failures), then a translated stream's frame-level `failed`.
 - **Fixed the reason this mattered:** the proxy set `StreamOutcome` only for
@@ -711,7 +713,7 @@ ran in production before release; security records cite them by those numbers.
 
 - `ezllm bridge-check {claude|codex|agy} [--bin] [--home] [--json]` runs a
   bridge's boot checks against a staged CLI and refuses on any problem, the
-  first milestone of unattended CLI updates (`SPEC-bridge-update.md`).
+  first milestone of unattended CLI updates (`docs/design/SPEC-bridge-update.md`).
 - Bridges read `qualified.json` from the bridge directory: a version the
   updater proved reports qualified. Claude's bridge status gains `cli_release`.
 - `--live` adds real turns through the bridge's runner (plain, plus a client
@@ -1153,7 +1155,7 @@ existing account names and routing identifiers remain unchanged.
   policy fails the boot. Google's "account not eligible" refusal becomes 403
   `account_ineligible` with its sign-in link withheld. Dashboard preset
   **Antigravity subscription (bridge)** lists the plan's models. Decisions:
-  `docs/antigravity-subscription-design.md`; setup: `docs/agy-bridge-runbook.md`.
+  `docs/design/antigravity-subscription-design.md`; setup: `docs/agy-bridge-runbook.md`.
 - **Subscription bridges in one click.** Add provider has a preset per bridge (**Claude
   subscription**, **ChatGPT subscription**, **Antigravity subscription**). Each shows
   whether its bridge is running (CLI version, login, plan or tool state) or the
@@ -1289,7 +1291,7 @@ existing account names and routing identifiers remain unchanged.
   `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK=on`. Structured output, reasoning summaries
   as `reasoning_content`, all models including hidden ones, and a `codex exec`
   fallback when the app-server lacks a required method
-  (`docs/codex-bridge-runbook.md`, `docs/codex-subscription-design.md`).
+  (`docs/codex-bridge-runbook.md`, `docs/design/codex-subscription-design.md`).
 - **Plan windows on the provider card.** The Claude bridge serves the CLI's 5h/7d
   `rate_limit_event` on `/v1/usage`, the Codex bridge serves `account/rateLimits/read`
   in the same shape; ezllm reads it for loopback accounts.
@@ -1340,7 +1342,7 @@ existing account names and routing identifiers remain unchanged.
   blanket refusal answered every agent message with a 400. Client `tools` and
   `tool_choice` now travel in `CLAUDE_CODE_EXTRA_BODY`; upstream sees exactly the
   client's tools and the `tool_use` blocks come back under their names
-  (`docs/claude-subscription-design.md` §2.1, §6).
+  (`docs/design/claude-subscription-design.md` §2.1, §6).
 - **Measured, not assumed (CLI 2.1.306).** A live spike replaced the planned inert
   MCP server: one generation per call, a `write_file` sentinel never written, and
   Hermes's real 57-tool list cached normally (24,112 tokens written once, then read
@@ -1365,7 +1367,7 @@ existing account names and routing identifiers remain unchanged.
   account is a host-verified Workers AI account (`api.cloudflare.com`,
   `/ai/v1`); the other classes are data only — a chat combo cannot serve an
   embedding or an image model, and catalogs do not advertise capability
-  (`docs/services-design.md`).
+  (`docs/design/services-design.md`).
 - **Five more service endpoints.** `/v1/images/edits` (multipart, shares the
   STT handler), `/v1/moderations`, `/v1/rerank`, `/v1/videos/generations`,
   `/v1/music/generations` — routed, ledgered under their own surface,
@@ -1473,7 +1475,7 @@ host — against a subscription login, and ezllm dials it as an ordinary
 `anthropic-compatible` account. The CLI stays the only thing that speaks to the
 subscription — the credential never leaves its own login store — which is the
 whole point: no OAuth-bearer reuse, no client impersonation
-(`docs/claude-subscription-design.md`, locked decision 1).
+(`docs/design/claude-subscription-design.md`, locked decision 1).
 
 - **Request path.** The client's Messages body is handed to native through
   `CLAUDE_CODE_EXTRA_BODY` (the mechanism the official Hermes plugin documents),
@@ -1590,7 +1592,7 @@ see `VERSION.md`):
 ## 2026-10-16 — M14 claude-web provider: claude.ai web protocol ✅
 Claude.ai's web app (sessionKey cookie + SSE completion) as a provider,
 ported from omniroute's production implementation (design:
-`docs/claude-web-design.md`, runbook: `docs/claude-web-runbook.md`).
+`docs/design/claude-web-design.md`, runbook: `docs/claude-web-runbook.md`).
 - `internal/claudeweb/tlsclient.go` — uTLS Chrome-146 impersonation
   (`HelloChrome_Auto`, h2 dialer) behind an injectable Fetcher (tests run
   plain HTTP; one test runs the REAL profile against a local h2 TLS server).
@@ -1663,7 +1665,7 @@ against real GitHub succeeds.
 ## 2026-10-16 — M12 gemini-web provider: cookie auth, oracle, streaming, bridge ✅
 The full Gemini **web** protocol as a router provider, ported slot-for-slot
 from the reverse-engineered reference (digest: `~/workspace/gemini-web-api-protocol-digest.md`,
-design: `docs/gemini-web-design.md`, runbook: `docs/gemini-web-runbook.md`).
+design: `docs/design/gemini-web-design.md`, runbook: `docs/gemini-web-runbook.md`).
 Unofficial surface; risk posture accepted by Calypso: cookie material = live
 account access, test accounts, no fallback, typed refusals.
 - `internal/geminiweb/` — protocol package:
@@ -1744,7 +1746,7 @@ account access, test accounts, no fallback, typed refusals.
   got heavier (the one shared parse is a full map decode where the old
   single-field struct decode skipped the messages array) — the request-level
   metric is the one that counts. All numbers + the two bite proofs in
-  `docs/single-parse-dispatch-design.md`.
+  `docs/design/single-parse-dispatch-design.md`.
 - `prefix_sha` now sees JSON number literals verbatim (`1e10` and
   `10000000000` hash differently, big ids keep exact digits) instead of
   collapsing through float64 — correct for a cache-BREAK detector; documented.

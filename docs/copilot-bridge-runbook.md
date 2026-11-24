@@ -3,7 +3,7 @@
 How the Copilot bridge behaves, its limits and its costs. **To turn it on, follow
 [Turn on GitHub Copilot](bridges/copilot.md).** The official Copilot CLI runs behind a
 loopback listener; ezllm never speaks Copilot's private API and never mints a session
-token. Design: `docs/copilot-cli-bridge-design.md`.
+token. Design: `docs/design/copilot-cli-bridge-design.md`.
 
 ## What runs
 
@@ -196,7 +196,7 @@ Streamed tool batches are flushed before accounting cleanup. Usage and stream
 completion still follow cleanup, so clients that wait for `[DONE]` before
 executing tools retain that wait. Do not shorten the accounting timeout based
 on first-response latency alone. Measured examples and limitations are in
-[copilot-latency-diagnostics.md](copilot-latency-diagnostics.md).
+[copilot-latency-diagnostics.md](design/copilot-latency-diagnostics.md).
 
 ## Warm CLI processes
 
@@ -252,7 +252,7 @@ hits. Setting the cache flag back to `off` and restarting restores fresh session
 while retaining process pooling. Run CLI qualification in the same configured
 mode; cache mode adds one small call to its live gate.
 
-See [the cache design and measured evidence](copilot-completed-session-cache-design.md)
+See [the cache design and measured evidence](design/copilot-completed-session-cache-design.md)
 for matching, accounting, lifecycle and experiment limits.
 
 ## Image input

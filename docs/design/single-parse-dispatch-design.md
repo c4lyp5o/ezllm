@@ -2,7 +2,7 @@
 
 Status: **implemented 2026-10-15**, measured results below. Locked DECISIONS
 follow the results section.
-Supersedes: nothing (additive). Companion to `docs/perf-baseline-m1.md` §6,
+Supersedes: nothing (additive). Companion to `docs/design/perf-baseline-m1.md` §6,
 which recommended exactly this work.
 
 ## Problem (measured, M1)

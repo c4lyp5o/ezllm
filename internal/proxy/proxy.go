@@ -898,7 +898,7 @@ func SwapModel(body []byte, newModel string) ([]byte, string, error) {
 	}
 	old, _ := m["model"].(string)
 	// The same splice-or-re-marshal choice jsonbody.WithModel makes: both
-	// paths must emit identical bytes (docs/single-parse-dispatch-design.md).
+	// paths must emit identical bytes (docs/design/single-parse-dispatch-design.md).
 	if out, ok := jsonbody.SpliceModel(body, newModel); ok {
 		return out, old, nil
 	}

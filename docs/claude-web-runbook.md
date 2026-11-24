@@ -2,7 +2,7 @@
 
 Claude.ai's **web** protocol as a provider (sessionKey cookie, SSE
 completion). Ported from omniroute's production implementation; design:
-`docs/claude-web-design.md`; the stale community digest
+`docs/design/claude-web-design.md`; the stale community digest
 (`~/workspace/claude-ai-re-client-protocol-digest.md`, last verified
 2026-04-25) is cross-reference only.
 

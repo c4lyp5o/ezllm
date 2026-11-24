@@ -305,4 +305,4 @@ assumption: no historical rows/counters are rewritten on a timezone change.
 Changing the instance timezone can immediately alter inherited remaining budget.
 Client-token reservations and their existing server-local boundaries are separate
 from this model-rule setting. Current operational behavior is documented in
-[settings-runbook.md](settings-runbook.md).
+[settings-runbook.md](../settings-runbook.md).

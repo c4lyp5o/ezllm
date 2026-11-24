@@ -1,4 +1,4 @@
-// Dashboard check for the hop stream-health card (docs/hop-health-design.md).
+// Dashboard check for the hop stream-health card (docs/design/hop-health-design.md).
 // Asserts the card renders the server's numbers, the attention item fires for a
 // hop over 1%, and the page still has no mobile overflow.
 //

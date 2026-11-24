@@ -15,7 +15,7 @@ import (
 // Determinism is the same contract as the other two translators: fixed struct
 // order, tool arguments passed through as strings, the input slice never
 // mutated — byte-stable bodies are what keeps an upstream prefix cache warm.
-// Contract table: docs/responses-wire-design.md (anthropic leg).
+// Contract table: docs/design/responses-wire-design.md (anthropic leg).
 //
 // Dropped by design (locked decisions, same as the anthropic→chat leg):
 // stop_sequences, metadata, thinking / redacted_thinking (Q4), cache_control,

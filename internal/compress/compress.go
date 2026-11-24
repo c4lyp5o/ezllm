@@ -1,11 +1,11 @@
 // Package compress implements ezllm's compression contract (rev4 plan §4.2,
-// docs/compression-design.md): deterministic, pure-Go prompt compression.
+// docs/design/compression-design.md): deterministic, pure-Go prompt compression.
 // It is LOSSY and cannot help unconditionally — the contract's job is to
 // make that visible: every skip path returns the ORIGINAL body bytes
 // (fail-open means byte-identical passthrough, never a re-marshal), only a
 // shipped rewrite counts as Applied savings, and a rejected rewrite books
 // its would-have-saved into Notional. What the engines discard is gone —
-// see docs/compression-design.md and the per-engine scope notes.
+// see docs/design/compression-design.md and the per-engine scope notes.
 package compress
 
 import (
@@ -130,7 +130,7 @@ func EstimateTokens(s string) int64 {
 
 // ApplyWithSession runs the profile's pipeline over a request body. body is
 // returned unchanged on every skip/fail path. doc is the request's single-parse
-// decode (docs/single-parse-dispatch-design.md): when non-nil its map(root)
+// decode (docs/design/single-parse-dispatch-design.md): when non-nil its map(root)
 // replaces the internal decode — same UseNumber settings, same fail-open
 // decisions — so the body is not parsed a second time. doc must be the decode
 // of `body`; a nil doc decodes internally as before.

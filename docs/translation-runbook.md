@@ -24,7 +24,7 @@ The client keeps speaking Anthropic (`/v1/messages`, e.g. Claude Code); the hop
 is dialed on its native OpenAI `/chat/completions` path with a translated body.
 Responses — streaming and not — are translated back into Anthropic shapes.
 Ledger rows stay on the **client's** surface (`anthropic`) with the **upstream's**
-model. Design and wire contracts: `docs/translation-design.md`.
+model. Design and wire contracts: `docs/design/translation-design.md`.
 
 ## Ledger attribution (schema v12)
 
@@ -173,7 +173,7 @@ are no longer selected. Curated `responses_models` overrides remain independent.
 
 ## Universal wire matrix (2026-10-13) — the three NEW cells
 
-Design: `docs/universal-wire-design.md`. Adds **chat→messages**, **responses→chat** and
+Design: `docs/design/universal-wire-design.md`. Adds **chat→messages**, **responses→chat** and
 **responses→messages** through the strict codecs, plus the fixed fallback ordering for any
 client whose native wire a hop provably cannot serve.
 
@@ -214,7 +214,7 @@ the curated `responses_models` list keeps working independently.
 
 ## Responses-wire hops (chat client → /v1/responses hop)
 
-Separate companion feature (`docs/responses-wire-design.md`): some models'
+Separate companion feature (`docs/design/responses-wire-design.md`): some models'
 **chat** path refuses tools+reasoning (tokenrouter `gpt-6.1-sol`) while their
 Responses path handles both. The curated list is the opt-in, and each entry is
 a **regex matched fully against `<namespace>/<model_id>`**:

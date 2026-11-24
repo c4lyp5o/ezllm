@@ -18,7 +18,7 @@ compression, a SQLite usage ledger, and an embedded operator dashboard
    per-milestone landmarks).
 2. Run `make test-short` before work. This is the local functional gate; CI
    separately runs formatting, vet, the full suite, cross-builds and web build.
-3. Design decisions live in `docs/*-design.md` and `docs/*-runbook.md`;
+3. Design decisions live in `docs/design/`, operation in `docs/*-runbook.md`;
    milestone narrative in `CHANGELOG.md`; dated version bumps in
    `VERSION.md`. Don't restate them from memory — open the doc.
 
@@ -96,7 +96,7 @@ internal/agybridge/     Antigravity subscription surface (loopback-only): headle
 web/                React+Vite dashboard; web/tests/ = Playwright drivers
 tests/              Python live-proof scripts (not part of go test)
 scripts/            operator utilities: backup_sqlite.py (online backup), ezllm-mac.sh (macOS installer + launchd agent), bridge_update.py (bridge CLI auto-update + systemd units)
-docs/               design records + runbooks (decisions, not status)
+docs/               user docs: setup, runbooks, API; docs/design/ = design records (decisions, not status)
 ```
 
 ## Conventions

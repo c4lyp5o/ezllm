@@ -1,7 +1,7 @@
 // Package claudeweb implements Claude.ai's WEB protocol for ezllm, ported
 // from omniroute's production implementation (claude-web.ts +
 // claudeTlsClient.ts, extracted from the image 2026-10-16; design:
-// docs/claude-web-design.md, cross-ref: the stale community digest
+// docs/design/claude-web-design.md, cross-ref: the stale community digest
 // ~/workspace/claude-ai-re-client-protocol-digest.md).
 //
 // M14 scope: sessionKey cookie auth, organization discovery, one upstream

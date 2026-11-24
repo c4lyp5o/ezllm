@@ -98,7 +98,7 @@ conversation-fidelity, CLI updater and security-audit work that ran in
 production as pre-release builds 1.8.2 and 1.9.0–1.14.3. The security audit,
 remediation and rollout records name those builds by their pre-release numbers.
 Schema v35: drops `calls.tool_prune_shadow_tokens` from the shelved tool-pruning
-experiment (its 2,875 measurements are in `docs/tool-prune-shadow-results.json`).
+experiment (its 2,875 measurements are in `docs/design/tool-prune-shadow-results.json`).
 New environment settings: `EZLLM_CODEX_BRIDGE_CACHE`, `EZLLM_AGY_BRIDGE_CACHE`,
 `EZLLM_COPILOT_BRIDGE_CACHE`, `EZLLM_AGY_EXPERIMENTAL_TOOLS` and
 `EZLLM_CLAUDE_BRIDGE_CONCURRENCY` (see `docs/environment.md`).
@@ -248,7 +248,7 @@ Claude and Antigravity share bounded streaming writes, flushing and cancellation
 through `internal/bridgeutil`. Provider event formats, auth, usage and process
 lifecycles stay local. Claude gains stalled-client write protection.
 Codex and Copilot transport migration remains outstanding; see
-[the shared transport design](docs/shared-bridge-transport-design.md).
+[the shared transport design](docs/design/shared-bridge-transport-design.md).
 
 Adds opt-in Copilot CLI process reuse with a fresh session per request. Enable
 with `EZLLM_COPILOT_BRIDGE_WARM_POOL=on`; the default remains cold processes.
@@ -295,7 +295,7 @@ Migration of an existing database is a manual three-step in the deploy window
 
 ## v1.6.0 — 2026-10-31
 
-The first step toward unattended bridge CLI updates (`SPEC-bridge-update.md`
+The first step toward unattended bridge CLI updates (`docs/design/SPEC-bridge-update.md`
 M1). MINOR: a new subcommand and a new status field; no config or schema
 change; no migration.
 
@@ -1239,7 +1239,7 @@ Performance baseline and the single-parse dispatch.
   cancellation / slow-consumer / retained-memory tests (no leak: ~1.3–2 KB/req).
 - **M10 single-parse dispatch**: one JSON decode per request through
   extractModel → Apply → captureShape → prepareHopBody (−25% e2e non-stream,
-  −26% stream at 1 MiB; design `docs/single-parse-dispatch-design.md`).
+  −26% stream at 1 MiB; design `docs/design/single-parse-dispatch-design.md`).
 - **Providers**: capacity-shaped generation failure passes with a proven key,
   sweep registry can no longer wedge, real NDJSON step chain, transient
   probe-status badge, drawer retest-all + live status.

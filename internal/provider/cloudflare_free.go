@@ -7,7 +7,7 @@ import "strings"
 // "Free" here is Cloudflare's account-level free tier, which carries no marker
 // in the model id — hence a table, not IsFreeModelID's suffix rule. The task
 // label is kept verbatim: catalogs do not advertise per-service capability
-// (docs/services-design.md), so this is the only place the class is known.
+// (docs/design/services-design.md), so this is the only place the class is known.
 const cloudflareFreeRaw = `
 	@cf/pipecat-ai/smart-turn-v2|Dumb Pipe
 	@cf/openai/gpt-oss-120b|Text Generation

@@ -205,7 +205,7 @@ func (s *Server) finishDispatch(w http.ResponseWriter, r *http.Request, call sto
 }
 
 // streamOutcomeLabel classifies a delivered stream for the ledger (schema v34,
-// docs/hop-health-design.md).
+// docs/design/hop-health-design.md).
 //
 // The precedence is the whole point of the column. A CALLER that hung up says
 // nothing about the hop — that artefact once made 442 complete calls look like

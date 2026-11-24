@@ -1,12 +1,12 @@
 # Responses-Wire Hop Translation (chat client → /v1/responses hop)
 
-> **2026-10-13:** the universal wire matrix (`docs/universal-wire-design.md`) supersedes this
+> **2026-10-13:** the universal wire matrix (`docs/design/universal-wire-design.md`) supersedes this
 > doc's exclusions: a Responses hop no longer needs this curated list to be selected (proven
 > capability + the fallback chains suffice), and three more cross-wire cells exist. The matrix
 > is on whenever `translation.enabled` is (the default; the old `translation.universal_enabled`
 > switch is a deprecated alias). This doc remains the record of the chat→Responses codec.
 
-> Companion to `docs/translation-design.md` (anthropic→openai). Same rules:
+> Companion to `docs/design/translation-design.md` (anthropic→openai). Same rules:
 > golden fixtures are the spec, byte-determinism is the invariant, the
 > operator decides which hops ride the override.
 

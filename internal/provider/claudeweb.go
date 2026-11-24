@@ -11,7 +11,7 @@ import (
 )
 
 // KindClaudeWeb is Claude.ai's WEB protocol (sessionKey cookie, SSE
-// completion) — see internal/claudeweb and docs/claude-web-design.md.
+// completion) — see internal/claudeweb and docs/design/claude-web-design.md.
 // Accounts carry the sentinel base "internal://claudeweb"; the adapter
 // rewrites requests to the in-process bridge, which owns the
 // TLS-fingerprinted transport, org discovery and SSE parsing.

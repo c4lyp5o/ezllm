@@ -548,32 +548,101 @@ class Reliability(Run):
         self.assertEqual(self.status()["result"], "rolled_back")
 
 
-    def test_batch_is_rolled_back_together_when_one_bridge_fails(self):
+    def two_bridges(self, verdicts):
+        """agy 1.4.7 -> 1.4.11 and codex 0.167.0 -> 0.168.0, both ready. verdicts
+        maps a bridge to its post-promotion result; the run moves codex, then agy."""
         self.cfg.write_text(json.dumps({"bridges": {"claude": {"enabled": False}, "copilot": {"enabled": False}}}))
         root = self.root("codex")
         for v in ("0.167.0", "0.168.0"):
             (root / v / "bin").mkdir(parents=True)
             (root / v / "bin/codex").write_bytes(b"fixture")
         bu.swap_current(root, "0.167.0")
-        info = bu.inspect("ezllm")
-        info["Mounts"].append({"Source": str(root), "Destination": "/opt/codex-bridge"})
+        bu.inspect("ezllm")["Mounts"].append({"Source": str(root), "Destination": "/opt/codex-bridge"})
+        self.seen = []
         def release(name, cfg):
             return [{"version": "0.168.0" if name == "codex" else "1.4.11", "published": "2026-10-20T00:00:00Z"}]
         def check(name, info, live=True, **kw):
-            if name == "codex" and live:
-                return {"ok": False, "problems": ["tool protocol changed"], "retryable": False}
+            if live:
+                self.seen.append((name, bu.current_version(root), bu.current_version(self.root_)))
+                if isinstance(verdict := verdicts.get(name), Exception):
+                    raise verdict
+                return verdict or {"ok": True}
             return {"ok": True}
-        with mock.patch.object(bu, "discover", side_effect=release), mock.patch.object(bu, "gate", return_value={"ok": True}), mock.patch.object(bu, "prod_check", side_effect=check):
-            self.assertEqual(self.go(), 0)
-        self.assertEqual(bu.current_version(root), "0.167.0")
-        self.assertEqual(bu.current_version(self.root_), "1.4.7")
-        self.assertFalse((root / "qualified.json").exists())
-        self.assertFalse((self.root_ / "qualified.json").exists())
-        state = json.loads(self.state.read_text())
-        self.assertNotIn("pending", state)
-        self.assertIn("0.168.0", state["blocked"]["codex"])
-        self.assertNotIn("agy", state["blocked"])
+        for target, value in {"discover": release, "gate": mock.Mock(return_value={"ok": True}), "prod_check": check}.items():
+            p = mock.patch.object(bu, target, value)
+            p.start()
+            self.addCleanup(p.stop)
+        return root
+
+    def test_one_failing_bridge_leaves_the_others_updated(self):
+        for bad in ({"ok": False, "problems": ["the turn timed out"], "retryable": True},
+                    {"ok": False, "problems": ["tool protocol changed"], "retryable": False}, TimeoutError()):
+            for failing in ("codex", "agy"):
+                with self.subTest(failing=failing, bad=str(bad)):
+                    self.doCleanups()
+                    self.setUp()
+                    codex = self.two_bridges({failing: bad})
+                    self.assertEqual(self.go(), 0)
+                    self.assertEqual(bu.current_version(codex), "0.167.0" if failing == "codex" else "0.168.0")
+                    self.assertEqual(bu.current_version(self.root_), "1.4.7" if failing == "agy" else "1.4.11")
+                    state = json.loads(self.state.read_text())
+                    good, good_root, good_v = ("agy", self.root_, "1.4.11") if failing == "codex" else ("codex", codex, "0.168.0")
+                    bad_root, bad_v = (codex, "0.168.0") if failing == "codex" else (self.root_, "1.4.11")
+                    self.assertNotIn("pending", state)
+                    self.assertEqual(list(state["promoted_at"]), [good])
+                    self.assertNotIn(good, state["retry_after"])
+                    self.assertNotIn(good, state["blocked"])
+                    self.assertIn(bad_v, state["retry_after"][failing])
+                    compat = isinstance(bad, dict) and not bad["retryable"]
+                    self.assertEqual(bad_v in state["blocked"].get(failing, {}), compat)
+                    self.assertEqual(json.loads((good_root / "update-status.json").read_text())["result"], "updated")
+                    self.assertEqual(json.loads((bad_root / "update-status.json").read_text())["result"], "rolled_back")
+                    self.assertIn(good_v, json.loads((good_root / "qualified.json").read_text())["versions"])
+                    self.assertFalse((bad_root / "qualified.json").exists())
+                    # one restart for the good bridge, promote + restore for the bad one
+                    self.assertEqual(bu.restart_and_wait.call_count, 3)
+
+    def test_each_bridge_is_proven_before_the_next_one_moves(self):
+        codex = self.two_bridges({})
+        self.assertEqual(self.go(), 0)
+        self.assertEqual(self.seen, [("codex", "0.168.0", "1.4.7"), ("agy", "0.168.0", "1.4.11")])
+        self.assertEqual(sorted(json.loads(self.state.read_text())["promoted_at"]), ["agy", "codex"])
         self.assertEqual(bu.restart_and_wait.call_count, 2)
+
+    def test_an_incomplete_rollback_stops_the_remaining_bridges(self):
+        self.two_bridges({})
+        with mock.patch.object(bu, "restart_and_wait", return_value=False), mock.patch.object(bu, "notify_fallback", mock.Mock()):
+            self.assertEqual(self.go(), 2)
+        self.assertEqual(list(json.loads(self.state.read_text())["pending"]), ["codex"])
+        self.assertEqual(bu.current_version(self.root_), "1.4.7")
+        self.assertIn("codex rollback is incomplete", self.status()["detail"])
+        self.assertEqual(self.seen, [])
+
+    def test_the_window_and_container_are_rechecked_before_every_bridge(self):
+        for what in ("window", "container"):
+            with self.subTest(what):
+                self.doCleanups()
+                self.setUp()
+                codex = self.two_bridges({})
+                old = bu.inspect("ezllm")
+                moved = {**old, "Id": "replacement"}
+                restarted = []
+                bu.restart_and_wait.side_effect = lambda *a: restarted.append(1) or True
+                clock = (lambda: at("2026-10-31T05:30") if restarted and what == "window" else at("2026-10-31T03:00"))
+                look = (lambda c: moved if restarted and what == "container" else old)
+                with mock.patch.object(bu, "now", clock), mock.patch.object(bu, "inspect", look):
+                    self.assertEqual(self.go(), 0)
+                self.assertEqual(bu.current_version(codex), "0.168.0")
+                self.assertEqual(bu.current_version(self.root_), "1.4.7")
+                self.assertIn("window closed" if what == "window" else "production changed", self.status()["detail"])
+                self.assertEqual(bu.restart_and_wait.call_count, 1)
+
+    def test_a_report_failure_after_commit_does_not_stop_the_next_bridge(self):
+        codex = self.two_bridges({})
+        with mock.patch.object(bu, "prune", side_effect=OSError("disk")):
+            self.assertEqual(self.go(), 0)
+        self.assertEqual((bu.current_version(codex), bu.current_version(self.root_)), ("0.168.0", "1.4.11"))
+        self.assertNotIn("pending", json.loads(self.state.read_text()))
 
     def test_recovery_never_restarts_a_replaced_container(self):
         state = json.loads(self.state.read_text())

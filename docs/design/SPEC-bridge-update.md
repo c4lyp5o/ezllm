@@ -294,3 +294,15 @@ Qualification records remain version records and now include the policy used by
 the successful proof. They are not a claim that all models, images, long-context
 requests or client harnesses were tested. The gateway proof remains optional
 when no script/token is configured, and its absence is explicit in the report.
+
+## 9. Revision: one transaction per bridge (2026-11-25)
+
+This replaces the shared restart in section 4.4 and the batch rule in section 8.
+Each bridge that passed its gate is promoted on its own: journal, swap, restart,
+proof, then commit or restore (`bridge_update.py` `promote`). A failed proof
+restores only that bridge. `run` rechecks the window and the production container
+before each one and stops only when a restore is incomplete.
+
+The batch saved restarts, but one bridge's operational timeout withdrew every
+other bridge's proven update. The cost is one restart per updated bridge, and two
+for a bridge that is restored.

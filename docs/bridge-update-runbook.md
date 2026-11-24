@@ -45,20 +45,23 @@ operator holds are never removed automatically.
 4. Require a matching bridge/version, successful process exit, live-tier verdict
    and configured policy. Recheck the window and production container identity,
    image, environment, network and mounts before changing any symlink.
-5. Persist and fsync a recovery journal in the existing updater state file.
-   Swap the batch's relative `current` symlinks, then restart ezllm once with a
-   30-second graceful stop and wait for health.
-6. Prove every promoted bridge in the running container, followed by its
-   gateway proof script when both the script and proof token exist. Only after
-   every proof passes are qualification records and promotion times committed.
-7. If any proof fails or raises, restore the **whole batch**, restart once and
-   statically check every restored bridge. Do not mark successful siblings
-   updated while another member of the batch is rolling back.
+5. Update **one bridge at a time**. Recheck the window and the container, persist
+   and fsync a recovery journal for that bridge in the updater state file, swap
+   its relative `current` symlink, restart ezllm with a 30-second graceful stop
+   and wait for health.
+6. Prove that bridge in the running container, followed by its gateway proof
+   script when both the script and proof token exist. Only after its proof passes
+   are its qualification record and promotion time committed.
+7. If its proof fails or raises, restore **that bridge only**, restart and
+   statically check it. The other bridges keep their updates, and the next one
+   still gets its turn. A night with several updates has one restart per bridge,
+   plus one for each bridge that is restored.
 8. Clear the recovery journal only after a successful commit or verified
    rollback. An interrupted run recovers before discovery on its next invocation
    and does not attempt another promotion in that run. An incomplete rollback
-   retains the journal and exits 2. Recovery refuses to restart a container that
-   has been replaced since the transaction began.
+   retains the journal, leaves the remaining bridges alone and exits 2. Recovery
+   refuses to restart a container that has been replaced since the transaction
+   began.
 
 Version folders used by current or previous releases are not pruned. A failure
 while writing metadata after a symlink change is handled by the same rollback

@@ -136,6 +136,8 @@ post-1.0 work.
 
 ## Documentation discipline
 
+How user docs read is in [AGENTS.md](AGENTS.md#writing-docs), for people and agents.
+
 Docs are claims about code — verify before writing:
 
 - Cite code by file and symbol (`proxy.go` `Forward`), not `file.go:NN`:

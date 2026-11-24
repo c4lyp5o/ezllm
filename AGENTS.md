@@ -113,6 +113,17 @@ docs/               user docs: setup, runbooks, API; docs/design/ = design recor
   (`{"error":{"type","message","code"}}`); refusals that name their reason
   (rules → 429, pin → 400 pinned_surface) are deliberate — keep them.
 
+## Writing docs
+
+User docs are easy, straightforward and for everyone. The models, for every ez app, are [README.md](README.md), [docs/bridges/](docs/bridges) and [docs/bridges/troubleshooting.md](docs/bridges/troubleshooting.md). Open one and match it.
+
+- **Structure**: one page or section, one job, titled with the task ("Turn on ChatGPT"). What you need, then numbered steps that start with a verb, then what success looks like ("You should see …"), then links for "Not working?" and "How it works". When setups differ, let the reader pick one up front and skip the rest. Troubleshooting is a table: *the log says* / *do this*.
+- **Tone**: talk to "you" in plain words. Explain a term the first time. Say what a step costs or changes. State a warning as a fact with its reason, right where it matters. No hype, jokes or apologies.
+- **Cadence**: short sentences, one idea each; paragraphs of one to three lines. Say what a block does, then show the block. Each block is one action that pastes whole, with no comments inside. Cut any sentence that does not help with the next step.
+- **Scope**: describe the current version only. Reasons, limits and measurements go in the runbooks, decisions in `docs/design/`, upgrade steps in [docs/upgrading.md](docs/upgrading.md).
+- **Examples** use neutral names (`acme`, `my-app`, `example.com`, `/home/you`), never anyone's real setup.
+- **Before it ships**: run every command as printed; match UI labels and log lines word for word; check that links resolve.
+
 ## Docs hygiene
 
 - Cite code as `file.go` plus the symbol (`proxy.go` `Forward`), not a line

@@ -61,3 +61,14 @@ func TestNativeCleanEOFCutMarksDispatchTruncated(t *testing.T) {
 		t.Fatalf("stream outcome = %q, want truncated", res.StreamOutcome)
 	}
 }
+
+func TestNativeStreamDiagnosticSkipsSSEMetadata(t *testing.T) {
+	const payload = `{"type":"error","error":{"message":"upstream unavailable"}}`
+	const stream = ": keepalive\n\nevent: error\nid: 1\ndata: " + payload + "\n\n"
+	resp := &http.Response{StatusCode: http.StatusOK, Body: httpBody(stream)}
+	rec := httptest.NewRecorder()
+	_, _, first, err := newDispatcher().streamCopyTracked(context.Background(), rec, resp, provider.SurfaceAnthropic, provider.UsageConventionAuto, time.Now(), false)
+	if err != nil || string(first) != payload || rec.Body.String() != stream {
+		t.Fatalf("first payload = %q, forwarded = %q, error = %v", first, rec.Body.String(), err)
+	}
+}

@@ -317,6 +317,7 @@ func TestRequestsRejectsBadParams(t *testing.T) {
 	seedCalls(t, h)
 	for _, q := range []string{
 		"?min_tin=abc", "?min_tin=-1", "?max_tout=-5",
+		"?min_tin=2&max_tin=1", "?min_tout=2&max_tout=1",
 		"?sort=hax", "?limit=0", "?limit=501",
 		"?from=yesterday", "?to=soon",
 	} {

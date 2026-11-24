@@ -9,6 +9,9 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   names the release, and the bell rings once per version. On by default;
   `update_check` in Settings or `EZLLM_UPDATE_CHECK=off` turns it off. New
   `GET /admin/update`; `/healthz` is unchanged.
+- **Bridge updates one CLI at a time.** The updater swaps, restarts, proves and, if
+  needed, restores each bridge on its own. A failure in one no longer undoes the
+  others. Expect one restart per updated bridge instead of one shared restart.
 - **ez standard CI.** `publish.yml` replaces `docker-publish.yml` and `release.yml`:
   pushes to `development` publish `:development` and `:sha-<commit>`, `master`
   publishes `:latest`, `:X.Y.Z` and `:sha-<commit>`, and a tag publishes `:X.Y.Z` and

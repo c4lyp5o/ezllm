@@ -120,14 +120,14 @@ func copilotCatalog(live []string) []string {
 
 // copilotLiveModels runs `copilot help config` (a local help page: no network,
 // no premium request) and parses the documented model ids.
-func copilotLiveModels(bin string) []string {
+func copilotLiveModels(bin string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, bin, "help", "config").Output()
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("copilot help config: %w", err)
 	}
-	return parseHelpConfigModels(string(out))
+	return parseHelpConfigModels(string(out)), nil
 }
 
 // printfLogger adapts a slog logger to the bridge's printf-style Logf. Passing
@@ -179,7 +179,11 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 		return nil, err
 	}
 
-	catalog := copilotCatalog(copilotLiveModels(resolved))
+	liveModels, catalogErr := copilotLiveModels(resolved)
+	if catalogErr != nil {
+		log.Warn("copilot CLI catalog unavailable; using built-in models", "err", catalogErr)
+	}
+	catalog := copilotCatalog(liveModels)
 	models := make([]copilotbridge.Model, 0, len(catalog))
 	for _, id := range catalog {
 		models = append(models, copilotbridge.Model{ID: id, Object: "model", OwnedBy: "copilot-cli"})

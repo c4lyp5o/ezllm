@@ -62,6 +62,9 @@ func topKeys(body []byte) (map[string]json.RawMessage, error) {
 	if err := json.Unmarshal(body, &top); err != nil {
 		return nil, fmt.Errorf("unmarshal request: %w", err)
 	}
+	if top == nil {
+		return nil, fmt.Errorf("unmarshal request: expected a JSON object")
+	}
 	return top, nil
 }
 

@@ -3,6 +3,7 @@ package codexbridge
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"time"
 )
@@ -41,7 +42,8 @@ func (r *Runner) Models(ctx context.Context) ([]Model, error) {
 	var out []Model
 	err := r.Session(ctx, func(ctx context.Context, c *rpcConn) error {
 		cursor := ""
-		for page := 0; page < 20; page++ {
+		const maxPages = 20
+		for page := 0; page < maxPages; page++ {
 			params := map[string]any{"includeHidden": true}
 			if cursor != "" {
 				params["cursor"] = cursor
@@ -79,9 +81,12 @@ func (r *Runner) Models(ctx context.Context) ([]Model, error) {
 			}
 			cursor = *resp.NextCursor
 		}
-		return nil
+		return fmt.Errorf("codex model catalog did not finish within %d pages", maxPages)
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // RateLimits reads the plan windows. It costs a child start (~0.2s) and no

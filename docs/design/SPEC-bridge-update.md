@@ -306,3 +306,8 @@ before each one and stops only when a restore is incomplete.
 The batch saved restarts, but one bridge's operational timeout withdrew every
 other bridge's proven update. The cost is one restart per updated bridge, and two
 for a bridge that is restored.
+
+An operational failure after promotion is proven once more after two minutes
+(`RETEST_SECONDS`) before the bridge is restored. The case that led to it was a
+provider with no capacity for about two minutes. Compatibility failures and
+exceptions restore at once.

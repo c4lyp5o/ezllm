@@ -37,6 +37,8 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   `docs`, and its 409 names the setup page.
 - **Design records moved** to `docs/design/` (with the two bridge specs from the root), so
   `docs/` holds only what someone running ezllm needs.
+- **macOS installer.** `scripts/ezllm-mac.sh install` gets the latest release instead of
+  1.3.2; `EZLLM_VERSION` still chooses one.
 - **Neutral names.** Docs, examples, test fixtures and comments no longer name the
   maintainers' own accounts, hosts, clients or paths. `scripts/ezllm-mac.sh` defaults
   `EZLLM_USAGE_TZ` to UTC, and the live proof scripts default to `http://127.0.0.1:20129`,

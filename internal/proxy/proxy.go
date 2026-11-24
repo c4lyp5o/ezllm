@@ -2234,6 +2234,8 @@ func (d *Dispatcher) streamCopyTracked(ctx context.Context, w http.ResponseWrite
 	return ttft, tap.Usage(), first, err
 }
 
+var sseReaders = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, 64*1024) }}
+
 // streamCopyTap is streamCopyTracked returning the tapper itself, for callers
 // that read more than usage from it (the Responses id).
 func (d *Dispatcher) streamCopyTap(ctx context.Context, w http.ResponseWriter, resp *http.Response, surface provider.Surface, conv provider.UsageConvention, start time.Time, requireTerminal bool) (time.Duration, *UsageTapper, []byte, error) {
@@ -2256,7 +2258,12 @@ func (d *Dispatcher) streamCopyTap(ctx context.Context, w http.ResponseWriter, r
 	// than the buffer arrives in pieces: every piece is forwarded at once,
 	// and only lines that fit (maxScanToken) are tapped — the usage chunk
 	// after a giant content line is still read.
-	br := bufio.NewReaderSize(resp.Body, 64*1024)
+	br := sseReaders.Get().(*bufio.Reader)
+	br.Reset(resp.Body)
+	defer func() {
+		br.Reset(nil) // Do not retain the upstream response between streams.
+		sseReaders.Put(br)
+	}()
 	// Read-only usage tap. Merges across events: Anthropic's message_start
 	// carries the input/cache breakdown while message_delta carries the final
 	// output totals, so taking only the first hit would record out=0.

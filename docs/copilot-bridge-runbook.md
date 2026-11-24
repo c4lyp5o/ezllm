@@ -23,7 +23,7 @@ it before turning the bridge on. Run this on the Docker host as the user the
 container runs as (on arm64, use `copilot-linux-arm64.tar.gz`):
 
 ```sh
-V=1.0.112
+V=1.0.114      # ezllm v2.2.0 or earlier: use V=1.0.112
 ASSET=copilot-linux-x64.tar.gz
 URL="https://github.com/github/copilot-cli/releases/download/v$V"
 ROOT=~/.local/share/copilot-bridge
@@ -36,8 +36,10 @@ curl -fLO "$URL/$ASSET" && curl -fLO "$URL/SHA256SUMS.txt" &&
 ```
 
 Keep the link relative, as above: an absolute host path does not exist inside
-the container. Stay on 1.0.112: releases 1.0.113 and 1.0.114 speak headless
-protocol 4, this bridge speaks 3, and they start but refuse client tools. Then
+the container. The bridge speaks headless protocols 3 and 4 and was proven live
+on 1.0.112 (protocol 3) and 1.0.114 (protocol 4). **On ezllm v2.2.0 or earlier,
+use `V=1.0.112`**: those speak protocol 3 only, so 1.0.113 and newer start but
+refuse client tools. Run `bridge-check` before using any other release. Then
 [sign in](#enabling-it), add the mounts below and recreate the container.
 
 `bridge_update.py --init` does not do this: it only converts an older mount of a
@@ -50,7 +52,7 @@ running container.
 bridge to `"off"`. Otherwise check, on the host:
 
 ```sh
-ls -la ~/.local/share/copilot-bridge/           # current -> 1.0.112, not a / path
+ls -la ~/.local/share/copilot-bridge/           # current -> a version folder, not a / path
 ls -la ~/.local/share/copilot-bridge/current/   # an executable `copilot`
 ```
 
@@ -206,8 +208,11 @@ request time:
     400 `chat_tools_unsupported` before anything is billed, so the router fails over
     with no cooldown. A tool the CLI cannot register gets the same 400. `/status`
     reports the boot check and the log has `copilot bridge: channel unavailable`.
-    After a CLI update that causes this, re-measure the channel and update `channelProtocolVersion`
-    (`internal/copilotbridge/channel.go`).
+    Protocols 3 and 4 are supported. Protocol 4 (CLI 1.0.113 and newer) groups the
+    `session.create` options, including the tool allowlist, so a new protocol is a
+    request-shape change to re-measure, not only a number: see `channelProtocolVersion`
+    and `nestSessionConfig` (`internal/copilotbridge/channel.go`) and the SDK's
+    [breaking changes](https://github.com/microsoft/copilot-sdk/blob/main/docs/v2-breaking-changes.md).
 - Output token limits are refused so another hop can enforce them. No
   `response_format`, `n>1`, logprobs, or `reasoning_effort` mapping.
 - History is FLATTENED into one prompt. The caller's system text replaces the
@@ -266,7 +271,7 @@ ezllm bridge-check copilot --live --json     # what promotion requires
 Two tiers, like the other bridges:
 
 - **Static (free, no request):** the binary resolves, `--version` reports, and the
-  undocumented `--headless --stdio` channel answers at protocol **3** and accepts
+  undocumented `--headless --stdio` channel answers at protocol **3 or 4** and accepts
   a `session.create`. That last part is the point of the check: `--headless` is
   not in `copilot --help`, so a release can move it without any version number
   moving.

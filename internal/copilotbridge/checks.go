@@ -27,7 +27,7 @@ import (
 // The channel is the fragile part and the reason this exists at all:
 // `--headless --stdio` is NOT in `copilot --help`, so a release can change it
 // without any version number moving. `ping` reports the protocol version, which
-// this package pins.
+// this package bounds.
 
 // QualifiedVersion is the CLI release this package's fixtures and live proof
 // were taken on. A different version still serves; it is reported unqualified
@@ -41,9 +41,11 @@ type Preflight struct {
 }
 
 // CLIVersion reads `copilot --version` ("GitHub Copilot CLI 1.0.105.") and
-// returns the version token, or "unknown" when the binary cannot be asked.
+// returns the version token, or "unknown" when the binary cannot be asked. Without
+// --no-auto-update a CLI hands over to the newest release unpacked in its cache,
+// so after a rollback it would report a version that turns do not run.
 func CLIVersion(bin string) string {
-	out, err := exec.Command(bin, "--version").Output()
+	out, err := exec.Command(bin, "--version", "--no-auto-update").Output()
 	if err != nil {
 		return "unknown"
 	}
@@ -70,27 +72,28 @@ func RunPreflight(ctx context.Context, bin, home string) (Preflight, error) {
 	r := &Runner{Bin: resolved, Home: home, Timeout: probeTimeout}
 	// One child covers both: the handshake proves the undocumented channel is
 	// still there and at our protocol, and a created session proves the login.
-	if err := r.probeChannel(ctx); err != nil {
+	if p.ProtocolVersion, err = r.probeChannel(ctx); err != nil {
 		return p, fmt.Errorf("the headless channel: %w", err)
 	}
-	p.ProtocolVersion = channelProtocolVersion
 	return p, nil
 }
 
 // probeChannel handshakes the channel and creates (then deletes) a session
 // without sending a prompt. Nothing billable happens, and it proves the CLI will
 // accept a session — NOT that the login works (see the package comment above).
-func (r *Runner) probeChannel(ctx context.Context) error {
+// It returns the protocol the CLI speaks.
+func (r *Runner) probeChannel(ctx context.Context) (protocol int, err error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*probeTimeout)
 	defer cancel()
-	return r.withChannel(ctx, func(c *rpcConn) error {
+	err = r.withChannel(ctx, func(c *rpcConn) error {
 		if err := c.ping(); err != nil {
 			return err
 		}
+		protocol = c.protocol
 		var created struct {
 			SessionID string `json:"sessionId"`
 		}
-		if err := c.call("session.create", sessionConfig(ChannelTurn{Model: "auto"}), &created); err != nil {
+		if err := c.call("session.create", c.createParams(ChannelTurn{Model: "auto"}), &created); err != nil {
 			// A create refusal is still worth typing: a channel at the right
 			// protocol that refuses every session is not a usable release.
 			return classifyCreate(err)
@@ -100,6 +103,7 @@ func (r *Runner) probeChannel(ctx context.Context) error {
 		}
 		return nil
 	})
+	return protocol, err
 }
 
 // Live prompts. Small on purpose: the check judges shape, not prose.
@@ -200,7 +204,7 @@ func LiveSessionCache(ctx context.Context, r *Runner, model string) error {
 		return errors.New("completed-session cache is not enabled")
 	}
 	if model == "" || model == "auto" {
-		model = "gpt-6-luna"
+		model = "gemini-4-hydrogen" // continuation needs a named model
 	}
 	messages := []map[string]any{{"role": "user", "content": livePlainPrompt}}
 	send := func() (Result, error) {

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -594,5 +595,101 @@ func TestSendRefusalCannotAuthorizeFallback(t *testing.T) {
 	}
 	if !f.called("session.send") {
 		t.Fatal("send path not exercised")
+	}
+}
+
+// Both protocols must put the allowlist where that CLI reads it: it is what hides
+// the CLI's own shell and file tools. The whole root is pinned for protocol 4, so
+// an option added to sessionConfig without a place in nestSessionConfig fails here.
+func TestSessionCreateFollowsTheProtocol(t *testing.T) {
+	for _, tc := range []struct {
+		protocol int
+		turn     ChannelTurn
+		allowed  string
+	}{
+		{3, channelTurn(), `["get_weather","get_time"]`},
+		{3, ChannelTurn{Model: "m", Prompt: "User: hi"}, `[]`},
+		{4, channelTurn(), `["get_weather","get_time"]`},
+		{4, ChannelTurn{Model: "m", Prompt: "User: hi"}, `[]`},
+	} {
+		f := &fakeCLI{protocol: tc.protocol, events: []string{`{"type":"assistant.message","data":{"content":"x"}}`, evIdle}}
+		if _, err := f.drive(t, tc.turn, nil); err != nil {
+			t.Fatalf("protocol %d: %v", tc.protocol, err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(f.params["session.create"], &got); err != nil {
+			t.Fatal(err)
+		}
+		at := func(path ...string) string {
+			var v any = got
+			for _, k := range path {
+				m, ok := v.(map[string]any)
+				if !ok {
+					return "missing"
+				}
+				if v, ok = m[k]; !ok {
+					return "missing"
+				}
+			}
+			b, _ := json.Marshal(v)
+			return string(b)
+		}
+		want := [][2]string{
+			{at("availableTools"), tc.allowed},
+			{at("requestPermission"), "false"},
+			{at("requestUserInput"), "false"},
+			{at("streaming"), "true"},
+			{at("mcpServers"), "{}"},
+			{at("infiniteSessions", "enabled"), "false"},
+		}
+		defs := got["tools"]
+		if tc.protocol == 4 {
+			want = [][2]string{
+				{at("tools", "availableTools"), tc.allowed},
+				{at("permissions", "request"), "false"},
+				{at("interaction", "requestUserInput"), "false"},
+				{at("events", "streaming"), "true"},
+				{at("mcp", "servers"), "{}"},
+				{at("state", "infiniteSessions", "enabled"), "false"},
+			}
+			tools, _ := got["tools"].(map[string]any)
+			defs = tools["definitions"]
+			roots := make([]string, 0, len(got))
+			for k := range got {
+				roots = append(roots, k)
+			}
+			slices.Sort(roots)
+			if fmt.Sprint(roots) != "[events interaction mcp model permissions state systemMessage tools]" {
+				t.Errorf("protocol 4 root = %v", roots)
+			}
+		}
+		for _, w := range want {
+			if w[0] != w[1] {
+				t.Errorf("protocol %d: sent %s, want %s in %s", tc.protocol, w[0], w[1], f.params["session.create"])
+			}
+		}
+		if list, ok := defs.([]any); !ok || len(list) != len(tc.turn.Tools) {
+			t.Errorf("protocol %d: tool definitions = %v", tc.protocol, defs)
+		}
+	}
+}
+
+// A tool batch reads the same on both protocols.
+func TestToolBatchOnEveryProtocol(t *testing.T) {
+	for p := channelProtocolOldest; p <= channelProtocolVersion; p++ {
+		f := &fakeCLI{protocol: p, events: []string{evBatch}, aborted: []string{evIdle}}
+		res, err := f.drive(t, channelTurn(), nil)
+		if err != nil || len(res.ToolCalls) != 2 || res.ToolCalls[0].ID != "call_a" || !f.called("session.abort") {
+			t.Errorf("protocol %d: res = %+v, err = %v", p, res, err)
+		}
+	}
+}
+
+func TestProtocolsOutsideTheMeasuredRangeAreRefused(t *testing.T) {
+	for _, p := range []int{channelProtocolOldest - 1, channelProtocolVersion + 1} {
+		f := &fakeCLI{protocol: p}
+		if _, err := f.drive(t, channelTurn(), nil); failureCode(err) != "chat_tools_unsupported" || f.called("session.create") {
+			t.Errorf("protocol %d: err = %v", p, err)
+		}
 	}
 }

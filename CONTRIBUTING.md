@@ -11,6 +11,11 @@ make test-short   # local functional gate, before every commit
 make test-quiet   # test-short pinned to two cores at low priority, one package at a time
 ```
 
+If `make` is unavailable (for example, on a minimal Ubuntu WSL installation),
+run `go test -short -count=1 ./...` from the repository root with the Linux Go
+toolchain on `PATH`. If WSL resolves a provider CLI to a Windows shim, use a
+Linux-only `PATH` for the local suite; verify live providers separately.
+
 Run Go tests with `-short` on this machine, including focused package tests.
 Do not run `make check`, `make test`, `make test-race`, or `make perf` locally.
 CI separately runs the full suite. Run `go vet ./...` and `make build` as
@@ -26,7 +31,19 @@ appropriate for code changes.
   is committed on purpose — `cmd/ezllm` embeds it via `go:embed`, so a UI
   change that doesn't rebuild `dist` simply never ships. CI type-checks and
   builds and compares the committed bundle with fresh output, normalizing Vite
-  hash suffixes — rebuild locally before committing.
+  hash suffixes — rebuild locally before committing. To run the same Chromium
+  regressions locally, use the following from `web/`:
+
+  ```sh
+  npm ci
+  npm run build
+  npx playwright install --with-deps chromium
+  for phase in 1 2 3; do node "tests/verify-frontend-p${phase}.mjs" || exit 1; done
+  ```
+
+  On Windows, install Chromium without `--with-deps` and run the three scripts
+  individually. On WSL, a missing Chromium shared library (such as
+  `libnspr4.so`) is a browser setup failure, not a dashboard assertion failure.
 - **Version bumps:** `internal/server/version.go` and the `Current:` line in
   `VERSION.md` move **together** in one commit. `version_test.go` fails
   otherwise, and `GET /healthz` serves whatever the constant says.

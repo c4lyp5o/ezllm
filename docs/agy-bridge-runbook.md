@@ -3,8 +3,8 @@
 Operating the Google Antigravity subscription surface (agy-bridge). Decisions
 live in `antigravity-subscription-design.md`; this is the how.
 
-**Status:** text chat and streaming, with usage, against the Antigravity CLI
-1.4.7. An opt-in experimental structured-output adapter supports caller tools
+**Status:** text chat and streaming, with usage, against compatible Antigravity CLI
+releases. An opt-in experimental structured-output adapter supports caller tools
 on CLIs with `--json-schema`; see [caller tools](#experimental-caller-tools).
 Images and plan windows are not offered. Linux only.
 
@@ -72,8 +72,8 @@ reports it as `unqualified` until the live proof ([verify](#verify)) has been
 re-run and recorded in `qualified.json`.
 
 **Gate a release before promoting it.** `ezllm bridge-check agy` runs the boot
-checks against a staged CLI and exits non-zero on any problem — stricter than
-boot, which reports an empty model list and keeps serving. `--json` prints the verdict
+checks against a staged CLI and exits non-zero on any problem. The gateway can
+keep serving without a bridge that failed to start. `--json` prints the verdict
 (`ok`, `version`, `release`, `live`, `problems`) for the bridge updater
 (`SPEC-bridge-update.md`). `--live` then drives real turns through the bridge
 (plan quota, the shared login) — only when every static check passed. A version the updater proved is listed in
@@ -87,11 +87,14 @@ The binary is ~228 MB, dynamically linked against glibc; the ezllm image
 
 ```bash
 mkdir -p ~/.agy-sub && chmod 700 ~/.agy-sub
-env -u DBUS_SESSION_BUS_ADDRESS HOME=$HOME/.agy-sub ~/.local/share/agy-bridge/1.4.7/agy
+env -u DBUS_SESSION_BUS_ADDRESS HOME="$HOME/.agy-sub" "$HOME/.local/share/agy-bridge/$VERSION/agy"
 ```
 
-If you used a version other than 1.4.7 above, replace `1.4.7` in the command
-with that version. Run it in a real terminal (SSH is fine; it prints a URL and asks for the code).
+Set `VERSION` as in [prerequisites](#prerequisites). Run the command in a real
+terminal (SSH is fine; it prints a URL and asks for the code). If the CLI
+itself fails to launch, check the pinned path, permissions and runtime
+libraries before troubleshooting the login. A failed `--help` probe is a
+startup failure, not evidence of missing flags or expired credentials.
 Pick a theme, trust the folder, sign in with the Google account that has the
 plan, send one prompt, then `/exit`.
 
@@ -120,12 +123,15 @@ personal account.
 
 In `compose.yml`, under the ezllm service, add these entries to the existing
 `environment` and `volumes` sections. Replace `/home/you` with your actual host
-path; the default `EZLLM_AGY_BIN` is `/opt/agy-bridge/current/agy`. The Compose service user must be able to execute the
-CLI and read and write the login directory:
+path. For manual setup, point `EZLLM_AGY_BIN` at the version folder you copied
+above, replacing the example version below. With the bridge updater, omit
+this override to use its `/opt/agy-bridge/current/agy` path. The Compose service
+user must be able to execute the CLI and read and write the login directory:
 
 ```yaml
     environment:
       EZLLM_AGY_BRIDGE: "on"
+      EZLLM_AGY_BIN: /opt/agy-bridge/1.5.15/agy # example manual pin
     volumes:
       - /home/you/.local/share/agy-bridge:/opt/agy-bridge:ro
       - /home/you/.agy-sub:/agy-sub
@@ -133,9 +139,11 @@ CLI and read and write the login directory:
 
 The login directory is read-write: `agy` refreshes its token and keeps state
 there. `docker compose up -d`, then `docker logs ezllm` shows
-`agy bridge listening addr=127.0.0.1:8792 cli=1.4.7 release=qualified models=6`.
+a line such as `agy bridge listening addr=127.0.0.1:8792 cli=1.5.15 release=unqualified models=6`.
+`unqualified` means a live proof is not recorded for this version, not that the
+bridge failed to start.
 
-Boot fails, by design, when the binary is missing, a required flag is gone, the
+The bridge does not start when the binary is missing, a required flag is gone, the
 token file is absent, `settings.json` loosens the tool policy
 ([lockdown](#lockdown)), or `agy models` fails. Every message names its fix.
 All variables: [environment.md](environment.md#antigravity-google-subscription-bridge).

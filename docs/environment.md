@@ -173,7 +173,7 @@ directory and bridge mount paths are written into your `compose.yml` directly
 | `EZLLM_CODEX_LIVE` | `1` runs the Codex bridge live tests against the real CLI and login (`go test -short ./internal/codexbridge/ -run Live -v`). |
 | `EZLLM_CODEX_LIVE_BIN`, `EZLLM_CODEX_LIVE_HOME` | The CLI and `CODEX_HOME` those live tests use; default `codex` on `PATH` and `~/.codex-sub`. |
 | `EZLLM_AGY_LIVE` | `1` runs the Antigravity bridge live tests against the real CLI and login (`go test -short ./internal/agybridge/ -run Live -v`); a turn spends plan quota. |
-| `EZLLM_AGY_BIN`, `EZLLM_AGY_HOME`, `EZLLM_AGY_MODEL` | The CLI, login directory and model those live tests use. On the host, unlike the container defaults above, they default to `~/.local/share/agy-bridge/1.4.7/agy`, `~/.agy-sub` and `gemini-3.8-flash-low`. |
+| `EZLLM_AGY_BIN`, `EZLLM_AGY_HOME`, `EZLLM_AGY_MODEL` | The CLI, login directory and model those live tests use. On the host, unlike the container defaults above, they default to `agy` on `PATH`, `~/.agy-sub` and `gemini-3.8-flash-low`. |
 | `EZLLM_REHEARSE_DB` | Path to a **copy** of the production database; runs the store rehearsal test (`go test -short ./internal/store/ -run Rehearse -v`). |
 
 ## Operator settings and encrypted backups

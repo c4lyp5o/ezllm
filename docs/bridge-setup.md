@@ -8,12 +8,18 @@ to bottom. You do not need the others.
 
 ## Before you start
 
-- You are on **Linux**, and ezllm already runs with **Docker Compose**
+- You are on **Linux**, and ezllm already runs in Docker
   ([quick start](../README.md#quick-start)).
 - Run every command on that computer, as **yourself, not root**.
-- In `compose.yml`, change `/home/you` to your home folder. `echo $HOME` prints it.
-- `id -u` and `id -g` should both print `1000`. If not, put your numbers in a file
-  named `.env` next to `compose.yml`: one line `UID=1001`, one line `GID=1001`.
+
+Which way did you start ezllm?
+
+- **Docker Compose** (you have a `compose.yml`): do all five parts of your recipe.
+  - In `compose.yml`, change `/home/you` to your home folder. `echo $HOME` prints it.
+  - `id -u` and `id -g` should both print `1000`. If not, put your numbers in a file
+    named `.env` next to `compose.yml`: one line `UID=1001`, one line `GID=1001`.
+- **`docker run`** (no `compose.yml`): do parts 1 to 3 of your recipe, then
+  [start with docker run](#start-with-docker-run) instead of parts 4 and 5.
 
 ## How it works
 
@@ -39,6 +45,7 @@ flowchart LR
 ```
 
 Every recipe is the same five parts: **install, copy, sign in, compose.yml, start.**
+With `docker run`, one command does the last two.
 
 ---
 
@@ -70,7 +77,8 @@ ln -sfn "$V" "$DIR/current"
 CLAUDE_CONFIG_DIR=~/.claude-sub ~/.local/share/claude-bridge/current/claude auth login
 ```
 
-**4. compose.yml.** Find this line and change `"off"` to `"on"`. If it is not there,
+**4. compose.yml.** (Using `docker run`? [Go here instead](#start-with-docker-run).)
+Find this line and change `"off"` to `"on"`. If it is not there,
 add it under `environment:`. Never have it twice.
 
 ```yaml
@@ -130,7 +138,8 @@ ln -sfn "$V" "$DIR/current"
 CODEX_HOME=~/.codex-sub ~/.local/share/codex-bridge/current/bin/codex login --device-auth
 ```
 
-**4. compose.yml.** Find this line and change `"off"` to `"on"`. If it is not there,
+**4. compose.yml.** (Using `docker run`? [Go here instead](#start-with-docker-run).)
+Find this line and change `"off"` to `"on"`. If it is not there,
 add it under `environment:`. Never have it twice.
 
 ```yaml
@@ -161,10 +170,11 @@ You should see `codex bridge listening`. Now
 **1 and 2. Install and copy**, in one block. It downloads the CLI straight into the
 bridge folder and leaves any Copilot you already use alone. 1.0.112 works with every
 ezllm version. On an ezllm newer than v2.2.0 you can write `V=1.0.114`.
+On an ARM computer, write `ASSET=copilot-linux-arm64.tar.gz`.
 
 ```sh
 V=1.0.112
-ASSET=copilot-linux-x64.tar.gz      # on ARM: copilot-linux-arm64.tar.gz
+ASSET=copilot-linux-x64.tar.gz
 URL="https://github.com/github/copilot-cli/releases/download/v$V"
 DIR=~/.local/share/copilot-bridge
 mkdir -p "$DIR/$V" ~/.copilot-sub && chmod 700 ~/.copilot-sub
@@ -183,7 +193,8 @@ env -u DBUS_SESSION_BUS_ADDRESS COPILOT_HOME=~/.copilot-sub \
   ~/.local/share/copilot-bridge/current/copilot login --device-code
 ```
 
-**4. compose.yml.** Find this line and change `"off"` to `"on"`. If it is not there,
+**4. compose.yml.** (Using `docker run`? [Go here instead](#start-with-docker-run).)
+Find this line and change `"off"` to `"on"`. If it is not there,
 add it under `environment:`. Never have it twice.
 
 ```yaml
@@ -243,7 +254,8 @@ ln -sfn "$V" "$DIR/current"
 env -u DBUS_SESSION_BUS_ADDRESS HOME=$HOME/.agy-sub ~/.local/share/agy-bridge/current/agy
 ```
 
-**4. compose.yml.** Find this line and change `"off"` to `"on"`. If it is not there,
+**4. compose.yml.** (Using `docker run`? [Go here instead](#start-with-docker-run).)
+Find this line and change `"off"` to `"on"`. If it is not there,
 add it under `environment:`. Never have it twice.
 
 ```yaml
@@ -269,6 +281,106 @@ You should see `agy bridge listening`. Now
 
 ---
 
+## Start with docker run
+
+Only if you do not use Docker Compose. A running container cannot be changed, so you
+stop it and start a new one. Your settings, keys and history live in the `data`
+folder, so the new one has them all.
+
+**1. Go to your ezllm folder**, the one with `config.yaml` and `data` in it. Stay in
+this terminal until the end. If yours is not `~/ezllm`, change the first line.
+
+```sh
+cd ~/ezllm
+ls -d config.yaml data
+```
+
+**2. Start an empty list**
+
+```sh
+BRIDGES=()
+```
+
+**3. Paste the block for each plan you want on.** Include the ones that were already
+on, or they will be off.
+
+Claude:
+
+```sh
+BRIDGES+=(
+  -e EZLLM_CLAUDE_BRIDGE=on -e USER="$(whoami)" -e LOGNAME="$(whoami)"
+  -v "$HOME/.local/share/claude-bridge:/opt/claude-bridge:ro"
+  -v "$HOME/.claude-sub:/claude-sub"
+)
+```
+
+ChatGPT (Codex):
+
+```sh
+BRIDGES+=(
+  -e EZLLM_CODEX_BRIDGE=on
+  -v "$HOME/.local/share/codex-bridge:/opt/codex-bridge:ro"
+  -v "$HOME/.codex-sub:/codex-sub"
+)
+```
+
+GitHub Copilot:
+
+```sh
+BRIDGES+=(
+  -e EZLLM_COPILOT_BRIDGE=on -e XDG_CACHE_HOME=/data/copilot-cache
+  -v "$HOME/.local/share/copilot-bridge:/opt/copilot-bridge:ro"
+  -v "$HOME/.copilot-sub:/copilot-sub"
+)
+```
+
+Google Antigravity:
+
+```sh
+BRIDGES+=(
+  -e EZLLM_AGY_BRIDGE=on
+  -v "$HOME/.local/share/agy-bridge:/opt/agy-bridge:ro"
+  -v "$HOME/.agy-sub:/agy-sub"
+)
+```
+
+**4. Set the old container aside**
+
+```sh
+docker stop ezllm
+docker rename ezllm ezllm-old
+```
+
+**5. Start the new one.** If you started ezllm with extra options of your own, add
+them here too.
+
+```sh
+docker run -d --name ezllm --user "$(id -u):$(id -g)" \
+  -p 127.0.0.1:20129:20129 -v "$(pwd)/data:/data" \
+  -v "$(pwd)/config.yaml:/app/config.yaml:ro" \
+  -e EZLLM_MASTER_KEY_FILE=/data/ezllm-master.key \
+  "${BRIDGES[@]}" \
+  ghcr.io/c4lyp5o/ezllm:latest
+sleep 10
+docker logs ezllm 2>&1 | grep -i "bridge"
+```
+
+You should see `bridge listening` once for each plan, `login=logged-in` for Claude,
+and **no** line saying `channel unavailable` for Copilot.
+
+- **It worked?** Remove the old one with `docker rm ezllm-old`, then
+  [add it in the dashboard](#add-it-in-the-dashboard).
+- **It did not?** Read the reason with `docker logs ezllm` and find it
+  [below](#it-did-not-work). To go back to how it was:
+
+  ```sh
+  docker rm -f ezllm
+  docker rename ezllm-old ezllm
+  docker start ezllm
+  ```
+
+---
+
 ## Add it in the dashboard
 
 Open the dashboard → **Providers** → **Add provider** → pick your plan → **Save &
@@ -280,18 +392,26 @@ test of that exact CLI version.
 
 ## It did not work
 
-**A bridge that cannot start stops all of ezllm.** To get ezllm back, set that
-bridge to `"off"` in `compose.yml` and run `docker compose up -d`. Then read the
-reason with `docker compose logs ezllm` and find it here:
+**A bridge that cannot start stops all of ezllm.** First read the reason:
+`docker logs ezllm`. Then get ezllm back:
+
+- **Docker Compose:** set that bridge to `"off"` in `compose.yml` and run
+  `docker compose up -d`.
+- **`docker run`:** go back to the old container, as shown at the end of
+  [start with docker run](#start-with-docker-run).
+
+Find the reason here:
 
 | The log says | Do this |
 |---|---|
 | `no such file or directory` | Run the checker below |
 | `no ChatGPT login` or `no Antigravity login` | Redo **Sign in** |
 | `login=logged-out` (Claude) | Redo **Sign in** |
-| `is not a directory — mount the CLI's login home there` | Add the second `volumes:` line |
+| `is not a directory — mount the CLI's login home there` | Add the second `volumes:` line (`docker run`: the second `-v`) |
 | `mapping key … already defined` | That line is in `compose.yml` twice. Keep one |
-| `Permission denied` | Set `UID` and `GID` ([before you start](#before-you-start)) |
+| `Permission denied` | Set `UID` and `GID` ([before you start](#before-you-start)). With `docker run`: keep the `--user` part |
+| `The container name "/ezllm" is already in use` | Part 4 of [start with docker run](#start-with-docker-run) was skipped |
+| `The container name "/ezllm-old" is already in use` | An old one is left over. If ezllm works, `docker rm ezllm-old` and repeat |
 | `channel unavailable` (Copilot) | Use `V=1.0.112` and redo **Install and copy** |
 
 **The checker.** Paste it on the computer that runs Docker. It only looks.
@@ -310,17 +430,18 @@ done
 ```
 
 - `OK` for your bridge, and ezllm still says `no such file or directory`? Then the
-  `volumes:` line is missing or misspelled, or your `compose.yml` sets an
-  `EZLLM_…_BIN`: remove it, the default is right.
+  `volumes:` line (`docker run`: the `-v` line) is missing or misspelled, or you set
+  an `EZLLM_…_BIN`: remove it, the default is right.
 - `BAD`? Redo the part it names.
 - Is the folder empty and owned by root? Docker made it because the path in
-  `volumes:` did not exist. Delete it and redo **Copy**.
+  `volumes:` or `-v` did not exist. Delete it and redo **Copy**.
 
 ## Later
 
 - **Update a CLI:** run its installer and **Copy** again, then
-  `docker compose restart ezllm`. Or let the [updater](bridge-update-runbook.md) do it.
-- **Turn a bridge off:** set it to `"off"` and run `docker compose up -d`.
+  `docker restart ezllm`. Or let the [updater](bridge-update-runbook.md) do it.
+- **Turn a bridge off:** set it to `"off"` and run `docker compose up -d`. With
+  `docker run`, start again without its block.
 - **Everything else:** [Claude](claude-bridge-runbook.md) ·
   [Codex](codex-bridge-runbook.md) · [Copilot](copilot-bridge-runbook.md) ·
   [Antigravity](agy-bridge-runbook.md) · [all settings](environment.md)

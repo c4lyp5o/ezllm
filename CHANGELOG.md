@@ -21,7 +21,7 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   `--json-schema` and always runs the caller-tool live proof.
 
 - **Bridge setup guide.** `docs/bridge-setup.md` has one recipe per plan, a checker
-  and what each error means. The Claude and
+  and what each error means, for Docker Compose and for `docker run`. The Claude and
   Codex guides staged the CLI where ezllm does not look (`claude-VERSION`,
   `/opt/codex`); both now match the defaults. A bridge whose CLI is missing names the
   guide when it stops the boot.

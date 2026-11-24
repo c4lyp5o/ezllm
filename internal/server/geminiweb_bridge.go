@@ -329,7 +329,7 @@ func (b *geminiWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.R
 	}
 
 	chatID := "chatcmpl-gw-" + geminiweb.NewUUID()[:13]
-	opts := geminiweb.GenerateOptions{Model: &model, Prompt: flattenMessages(req.Messages)}
+	opts := geminiweb.GenerateOptions{Model: &model, Prompt: flattenWebBridgeMessages(req.Messages)}
 
 	if !req.Stream {
 		res, err := entry.client.Generate(r.Context(), opts, func(geminiweb.Delta) {})
@@ -338,7 +338,7 @@ func (b *geminiWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.R
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(openAIChatResponse(chatID, model.Name, res.Text))
+		_ = json.NewEncoder(w).Encode(webBridgeChatResponse(chatID, model.Name, res.Text))
 		return
 	}
 
@@ -466,57 +466,4 @@ func mapUpstreamStatus(err error) int {
 		return http.StatusUnauthorized
 	}
 	return http.StatusBadGateway
-}
-
-// flattenMessages joins OpenAI messages into one prompt (the web protocol
-// has no message array — a documented simplification, see the design doc).
-// System messages are dropped: they carry the client's persona/memory
-// (SOUL.md/MEMORY.md/USER.md) which must never reach a web provider.
-func flattenMessages(msgs []struct {
-	Role    string `json:"role"`
-	Content any    `json:"content"`
-}) string {
-	var parts []string
-	for _, m := range msgs {
-		if m.Role == "system" {
-			continue // stealth: never forward persona/memory to web providers
-		}
-		if text := contentToText(m.Content); text != "" {
-			parts = append(parts, text)
-		}
-	}
-	return strings.Join(parts, "\n\n")
-}
-
-func contentToText(c any) string {
-	switch v := c.(type) {
-	case string:
-		return v
-	case []any:
-		var sb strings.Builder
-		for _, p := range v {
-			if part, ok := p.(map[string]any); ok {
-				if t, ok := part["text"].(string); ok {
-					sb.WriteString(t)
-					sb.WriteString("\n")
-				}
-			}
-		}
-		return strings.TrimSpace(sb.String())
-	}
-	return ""
-}
-
-func openAIChatResponse(id, model, text string) map[string]any {
-	return map[string]any{
-		"id":      id,
-		"object":  "chat.completion",
-		"created": time.Now().Unix(),
-		"model":   model,
-		"choices": []any{map[string]any{
-			"index":         0,
-			"message":       map[string]any{"role": "assistant", "content": text},
-			"finish_reason": "stop",
-		}},
-	}
 }

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -209,7 +208,7 @@ func (b *claudeWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.R
 	// No model gate: the web protocol has no discovery and ids pass through
 	// (design doc). The bootstrap catalog seeds ROUTING; what the account can
 	// actually serve is revealed by the upstream answer.
-	opts := claudeweb.GenerateOptions{Model: req.Model, Prompt: claudeWebFlatten(req.Messages)}
+	opts := claudeweb.GenerateOptions{Model: req.Model, Prompt: flattenWebBridgeMessages(req.Messages)}
 	if tools, ok := req.Tools.([]any); ok {
 		opts.Tools = tools
 	}
@@ -223,7 +222,7 @@ func (b *claudeWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.R
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(claudeWebChatResponse(chatID, req.Model, res.Text))
+		_ = json.NewEncoder(w).Encode(webBridgeChatResponse(chatID, req.Model, res.Text))
 		return
 	}
 
@@ -279,50 +278,5 @@ func claudeWebStatus(err error) int {
 		return http.StatusTooManyRequests
 	default:
 		return http.StatusBadGateway
-	}
-}
-
-func claudeWebFlatten(msgs []struct {
-	Role    string `json:"role"`
-	Content any    `json:"content"`
-}) string {
-	var parts []string
-	for _, m := range msgs {
-		if m.Role == "system" {
-			continue // stealth: never forward persona/memory to web providers
-		}
-		if t := claudeWebContentText(m.Content); t != "" {
-			parts = append(parts, t)
-		}
-	}
-	return strings.Join(parts, "\n\n")
-}
-
-func claudeWebContentText(c any) string {
-	switch v := c.(type) {
-	case string:
-		return v
-	case []any:
-		var sb strings.Builder
-		for _, p := range v {
-			if part, ok := p.(map[string]any); ok {
-				if t, ok := part["text"].(string); ok {
-					sb.WriteString(t)
-					sb.WriteString("\n")
-				}
-			}
-		}
-		return strings.TrimSpace(sb.String())
-	}
-	return ""
-}
-
-func claudeWebChatResponse(id, model, text string) map[string]any {
-	return map[string]any{
-		"id": id, "object": "chat.completion", "created": time.Now().Unix(), "model": model,
-		"choices": []any{map[string]any{
-			"index": 0, "message": map[string]any{"role": "assistant", "content": text},
-			"finish_reason": "stop",
-		}},
 	}
 }

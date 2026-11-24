@@ -189,3 +189,19 @@ func TestStreamCloseJoinsCancellationBeforeClearingDeadline(t *testing.T) {
 		}
 	}
 }
+
+func TestStreamCloseIsIdempotent(t *testing.T) {
+	w := newBlockedWriter()
+	s := NewStream(context.Background(), w, time.Second)
+	s.Close()
+	done := make(chan struct{})
+	go func() {
+		s.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("second close blocked")
+	}
+}

@@ -1,8 +1,9 @@
 // Exercise applied filters, bounded catalog loading, and shared fetch options.
 import { start, json, account, models, requestsBody, check, finish } from './mockdash.mjs';
 import { build } from 'esbuild';
+import { fileURLToPath } from 'node:url';
 
-const compiled = await build({ entryPoints: [new URL('../src/utils/api.ts', import.meta.url).pathname], bundle: true, format: 'esm', platform: 'node', write: false });
+const compiled = await build({ entryPoints: [fileURLToPath(new URL('../src/utils/api.ts', import.meta.url))], bundle: true, format: 'esm', platform: 'node', write: false });
 const { apiFetch } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
 const originalFetch = globalThis.fetch;
 let request;
@@ -44,7 +45,7 @@ try {
   check('Analyze applies the complete filter once', queries.length === initial + 1 && queries.at(-1) === '12345', queries);
   await input.fill('-1');
   await page.getByRole('button', { name: 'Analyze' }).click();
-  check('invalid filter is explained without a request', await page.getByText('Minimum input tokens must be a non-negative whole number.').count() === 1 && queries.length === initial + 1);
+  check('invalid filter is explained without a request', await page.getByText('Minimum input tokens must be a whole number, 0 or more.').count() === 1 && queries.length === initial + 1);
 
   await page.goto(`${t.base}/chat`);
   await page.getByText(/Could not load models for Provider 2/).waitFor();

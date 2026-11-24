@@ -218,6 +218,7 @@ class Run(Home):
                             "inspect": lambda c: info, "stage": lambda n, r, root: root / r["version"],
                             "knows_bridge_check": lambda cmd: True, "restart_and_wait": mock.Mock(return_value=True),
                             "proof_script": lambda n, c, r: (True, "no proof script or token"),
+                            "RETEST_SECONDS": 0,
                             "now": lambda: at("2026-10-31T03:00")}.items():
             p = mock.patch.object(bu, name, value)
             p.start()
@@ -601,6 +602,58 @@ class Reliability(Run):
                     self.assertFalse((bad_root / "qualified.json").exists())
                     # one restart for the good bridge, promote + restore for the bad one
                     self.assertEqual(bu.restart_and_wait.call_count, 3)
+
+    def retested(self, *verdicts, proofs=(True,)):
+        """One agy promotion whose live checks answer verdicts in turn (static
+        rollback checks always pass). Returns the live checks made and the waits."""
+        answers, scripts = iter(verdicts), iter(proofs)
+        made, waits = [], []
+        def check(name, info, live=True, **kw):
+            if not live:
+                return {"ok": True}
+            made.append(bu.current_version(self.root_))
+            return next(answers)
+        with mock.patch.object(bu, "gate", return_value={"ok": True}), mock.patch.object(bu, "prod_check", side_effect=check), \
+             mock.patch.object(bu, "proof_script", lambda *a: (next(scripts), "script")), \
+             mock.patch.object(bu, "RETEST_SECONDS", 120), mock.patch.object(bu.time, "sleep", waits.append):
+            self.assertEqual(self.go(), 0)
+        return made, waits
+
+    BUSY = {"ok": False, "problems": ["live conversation cache: agy-bridge: the turn timed out"], "retryable": True}
+
+    def test_a_temporary_failure_is_tested_once_more_and_kept(self):
+        made, waits = self.retested(self.BUSY, {"ok": True, "policy": {"caller_tools": "structured-output"}})
+        self.assertEqual((made, waits), (["1.4.11", "1.4.11"], [120]))
+        self.assertEqual(bu.current_version(self.root_), "1.4.11")
+        self.assertEqual(self.status()["result"], "updated")
+        rec = json.loads((self.root_ / "qualified.json").read_text())["versions"]["1.4.11"]
+        self.assertEqual(rec["policy"], {"caller_tools": "structured-output"})
+        state = json.loads(self.state.read_text())
+        self.assertNotIn("1.4.11", state["retry_after"].get("agy", {}))
+        bu.restart_and_wait.assert_called_once()
+
+    def test_a_second_temporary_failure_rolls_back_without_a_third_try(self):
+        made, waits = self.retested(self.BUSY, self.BUSY)
+        self.assertEqual((len(made), waits), (2, [120]))
+        self.assertEqual(bu.current_version(self.root_), "1.4.7")
+        state = json.loads(self.state.read_text())
+        self.assertIn("1.4.11", state["retry_after"]["agy"])
+        self.assertNotIn("agy", state["blocked"])
+
+    def test_the_retest_can_find_a_compatibility_failure(self):
+        self.retested(self.BUSY, {"ok": False, "problems": ["tool protocol changed"], "retryable": False})
+        self.assertEqual(bu.current_version(self.root_), "1.4.7")
+        self.assertIn("1.4.11", json.loads(self.state.read_text())["blocked"]["agy"])
+
+    def test_a_compatibility_failure_is_not_retested(self):
+        made, waits = self.retested({"ok": False, "problems": ["tool protocol changed"], "retryable": False})
+        self.assertEqual((len(made), waits), (1, []))
+        self.assertEqual(bu.current_version(self.root_), "1.4.7")
+
+    def test_a_failed_gateway_proof_is_tested_once_more(self):
+        made, waits = self.retested({"ok": True}, {"ok": True}, proofs=(False, True))
+        self.assertEqual((len(made), waits), (2, [120]))
+        self.assertEqual(bu.current_version(self.root_), "1.4.11")
 
     def test_each_bridge_is_proven_before_the_next_one_moves(self):
         codex = self.two_bridges({})

@@ -205,7 +205,8 @@ token budgets under-count by them. The live feed's `snapshot` event carries the 
   "keys":[ {"id":9,"label":"primary","hint":"sk…5E5i","enabled":true,
              "last_test_at":"…","last_test_ok":true,"last_test_detail":"200 · 36 models · auth ok · quota=percent"} ],
   "quota": { "kind":"percent", "percent_rolling":0, "percent_weekly":7, "percent_monthly":12,
-              "balance":null, "unit":null, "resets_at":"…", "read_at":"…" },   // latest snapshot, null if none
+              "balance":null, "unit":null, "resets_at":"…", "read_at":"…" },   // latest snapshot, null if none;
+              // "groups":[{"name","percent","resets_at"}] when the provider limits models in groups
   "models_count":36,
   "protocol_support": {"chat":36,"anthropic":12,"responses":5,"untested":0}
 }
@@ -666,6 +667,8 @@ sessionKey cookie (org id from `lastActiveOrg`, validated as a bare UUID) and re
 Command Code reads `GET api.commandcode.ai/internal/billing/credits` with the cookie (never the
 inference key) and reports `percent` shape: 5h window, weekly window, monthly grant spent. An
 expired cookie answers `401`/`403` → `502`, so the last good snapshot is kept.
+The Antigravity bridge reports `percent` shape with one weekly limit per group of models: the
+account's `percent_weekly` is the fullest group, and `quota.groups` on the account lists each one.
 `401`/`429`/`5xx` stay errors (`502`, retryable), so a transient fault never records `none`.
 
 ## M3 — combos, tokens, export

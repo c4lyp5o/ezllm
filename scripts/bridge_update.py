@@ -54,6 +54,10 @@ DEFAULT_CONFIG = {
     },
 }
 
+# The wait before a promoted release that failed for an operational reason is
+# proven a second time.
+RETEST_SECONDS = 120
+
 # Per bridge: the host directories, where the bridge root and login appear in
 # the container, and the binary's path inside a version folder.
 BRIDGES = {
@@ -730,6 +734,19 @@ def production_changed(cfg, info):
     return (fresh.get("Id"), fresh.get("Image"), fresh["Config"], fresh["Mounts"], fresh.get("HostConfig", {}).get("NetworkMode")) != (info.get("Id"), info.get("Image"), info["Config"], info["Mounts"], info.get("HostConfig", {}).get("NetworkMode"))
 
 
+def prove(name, v, cfg, info, repo):
+    """The live check in the running container, then the gateway proof script."""
+    verdict = prod_check(name, info, bcfg=cfg["bridges"][name])
+    if not verdict.get("ok"):
+        return verdict, ""
+    if verdict.get("version", v) != v:
+        raise RuntimeError("post-promotion proof reported the wrong version")
+    ok, proof = proof_script(name, cfg, repo)
+    if not ok:
+        return {"problems": [proof], "retryable": True}, proof
+    return verdict, proof
+
+
 def promote(name, root, cur, v, cfg, info, state, state_path, repo):
     """Swap, restart, prove and commit one bridge, or restore its previous
     version. False only when that restore did not complete."""
@@ -742,16 +759,14 @@ def promote(name, root, cur, v, cfg, info, state, state_path, repo):
         phase = "promotion restart"
         if not restart_and_wait(cfg, info):
             raise RuntimeError("ezllm did not come back healthy after promotion")
-        phase = "post-promotion check " + name
-        verdict = prod_check(name, info, bcfg=cfg["bridges"][name])
-        if verdict.get("ok"):
-            if verdict.get("version", v) != v:
-                raise RuntimeError("post-promotion proof reported the wrong version")
-            policy = verdict.get("policy", {})
-            phase = "gateway proof " + name
-            ok, proof = proof_script(name, cfg, repo)
-            if not ok:
-                verdict = {"problems": [proof], "retryable": True}
+        phase = "post-promotion proof " + name
+        verdict, proof = prove(name, v, cfg, info, repo)
+        if not verdict.get("ok") and operational_failure(verdict):
+            # A provider out of capacity or a slow turn says nothing about the
+            # release, and withdrawing it costs a night: ask once more first.
+            log(f"{name}: {v} proof failed for now, testing once more in {RETEST_SECONDS}s: " + "; ".join(verdict.get("problems", []))[:200])
+            time.sleep(RETEST_SECONDS)
+            verdict, proof = prove(name, v, cfg, info, repo)
         if not verdict.get("ok"):
             reason = "; ".join(verdict.get("problems", []))[:300]
             if operational_failure(verdict):
@@ -761,7 +776,7 @@ def promote(name, root, cur, v, cfg, info, state, state_path, repo):
             write_json_atomic(state_path, state)
             return rollback_pending(cfg, info, state, state_path, "post-promotion proof failed: " + reason)
         phase = "qualification record " + name
-        record_qualified(root, v, "live", proof, policy=policy)
+        record_qualified(root, v, "live", proof, policy=verdict.get("policy", {}))
         committed = json.loads(json.dumps(state))
         committed["promoted_at"][name] = now().isoformat(timespec="seconds")
         del committed["pending"]

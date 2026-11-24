@@ -85,3 +85,21 @@ func TestReadQuotaReadsTheCodexBridgeWindows(t *testing.T) {
 		t.Fatalf("auth=%q quota=%+v", gotAuth, q)
 	}
 }
+
+// The agy bridge reports one window for the account and every group by name.
+func TestQuotaGroups(t *testing.T) {
+	const body = `{"usage":{"weekly":{"percent":10.56,"resetsAt":"2026-12-01T02:30:00Z"}},"groups":[{"name":"Gemini Models","window":"weekly","percent":10.56,"resets_at":"2026-12-01T02:30:00Z"},{"name":"Claude and GPT models","window":"weekly","percent":0}]}`
+	q := ClassifyQuota(body)
+	if q.Kind != QuotaPercent || q.PercentWeekly == nil || *q.PercentWeekly != 10.56 || q.PercentRolling != nil || q.Raw != body {
+		t.Fatalf("quota = %+v", q)
+	}
+	got := QuotaGroups(q.Raw)
+	if len(got) != 2 || got[0] != (QuotaGroup{"Gemini Models", 10.56, "2026-12-01T02:30:00Z"}) || got[1] != (QuotaGroup{"Claude and GPT models", 0, ""}) {
+		t.Fatalf("groups = %+v", got)
+	}
+	for _, raw := range []string{"", "not json", `{"usage":{"weekly":{"percent":3}}}`, `{"groups":"x"}`, `{"groups":[]}`, `{"groups":[{"name":"","percent":1},{"name":"unknown"}]}`} {
+		if got := QuotaGroups(raw); len(got) != 0 {
+			t.Errorf("QuotaGroups(%q) = %+v, want none", raw, got)
+		}
+	}
+}

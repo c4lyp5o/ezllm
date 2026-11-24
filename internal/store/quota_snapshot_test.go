@@ -80,6 +80,24 @@ func TestQuotaSnapshotCountersRoundTrip(t *testing.T) {
 		t.Errorf("summary requests_today = %v, want 9", accs[0].Quota.RequestsToday)
 	}
 
+	// Named groups come out of the raw body, and only for the newest read.
+	if accs[0].Quota.Groups != nil {
+		t.Errorf("groups = %+v, want none for a body without them", accs[0].Quota.Groups)
+	}
+	weekly := 10.56
+	if err := db.InsertQuotaSnapshot(ctx, keyID, provider.Quota{
+		Kind: provider.QuotaPercent, PercentWeekly: &weekly,
+		Raw: `{"usage":{"weekly":{"percent":10.56}},"groups":[{"name":"A","percent":10.56},{"name":"B","percent":0}]}`,
+	}, true, ""); err != nil {
+		t.Fatal(err)
+	}
+	if accs, err = db.ListAccounts(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if g := accs[0].Quota.Groups; len(g) != 2 || g[0].Name != "A" || g[0].Percent != 10.56 || g[1].Name != "B" || g[1].Percent != 0 {
+		t.Errorf("groups = %+v, want A and B", g)
+	}
+
 	// A provider whose read carries NO counters must READ BACK AS ABSENT
 	// (NULL), not as a fabricated zero.
 	if err := db.InsertQuotaSnapshot(ctx, keyID, provider.Quota{

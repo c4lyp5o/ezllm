@@ -3,7 +3,7 @@
 Version history for ezllm. From v1.0.0 the scheme is semantic versioning:
 MAJOR for a breaking change to the API, config or data, MINOR for a feature,
 PATCH for fixes. A release is a git tag `vX.Y.Z` that matches this file
-(`release.yml` and `docker-publish.yml` refuse a tag that does not). Before
+(`publish.yml` refuses a tag that does not). Before
 1.0.0 the scheme was one version per change date (`v0.0.1` … `v0.0.21`).
 
 The current version is served by `GET /healthz` (`version` field), shown in the

@@ -46,3 +46,6 @@ docs/
 # local tooling: proof scripts and screenshot harnesses are dev-only
 scripts/
 web/*.mjs
+
+# scripts/release-assets.sh output
+/release-assets/

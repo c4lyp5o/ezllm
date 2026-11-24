@@ -1,6 +1,6 @@
 # Running the released binary
 
-`release.yml` publishes a standalone binary for every `v*` tag. This is the
+`publish.yml` publishes a standalone binary for every `v*` tag. This is the
 path for a host without Docker and without a Go toolchain: no libc, no
 runtime, no package manager. The dashboard SPA is embedded in the binary.
 

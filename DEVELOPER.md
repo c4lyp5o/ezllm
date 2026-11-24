@@ -1,4 +1,4 @@
-# Contributing to ezllm
+# ezllm developer guide
 
 Thanks for working on ezllm. This file holds the workflow, the conventions,
 and — importantly — the **known issues and standing gotchas** that bite
@@ -146,26 +146,37 @@ Docs are claims about code — verify before writing:
   dated version bumps go in `VERSION.md`; design decisions go in `docs/`.
   README stays the front door: what it is, how to run it, where things live.
 
-## Releasing
+## Branches and releases
 
-Both publishers are gated by `test.yml`: a red suite never produces an image or
-an asset.
+The ez standard: `development` is the integration branch (branch from it, open
+every PR against it) and `master` is released code, which only `development`
+merges into. CI is two workflows: `test.yml` (PRs) and `publish.yml` (runs
+`test.yml`, then publishes), so a red suite never produces an image or an asset.
+
+| Push | Publishes |
+|---|---|
+| `development` | `:development`, `:sha-<commit>` |
+| `master` | `:latest`, `:X.Y.Z`, `:sha-<commit>` |
+| tag `vX.Y.Z` | `:X.Y.Z`, `:vX.Y.Z` and the GitHub Release |
+
+Images are `ghcr.io/c4lyp5o/ezllm`, amd64 and arm64, cross-compiled in the builder
+stage. **`:latest` is master-only:** tagging an old commit cannot roll it back. A
+`:development` image can carry a newer database schema than the last release, which
+the release then refuses to open: try it on its own data directory, or back up first.
 
 1. **Bump the version in one commit.** `internal/server/version.go` and the
    `Current:` line of `VERSION.md` move together; `version_test.go` enforces the
-   pairing and `/healthz` serves the constant.
-2. **Tag, then push the tag** — `git tag vX.Y.Z && git push --tags`. Each
-   publisher runs a `version` job first and **fails** if the tag does not equal
-   the constant in `version.go` (a prerelease suffix such as `-rc1` is allowed).
-3. **`release.yml`** builds the five standalone binaries — linux amd64/arm64,
-   darwin amd64/arm64, windows amd64 — packs each with `config.example.yaml` and
-   `README.md`, writes `SHA256SUMS`, and attaches them to the GitHub release
-   with generated notes. Everything is `CGO_ENABLED=0`, so the cross-compile
-   needs no toolchain; nothing is signed (no Authenticode, no notarization).
-4. **`docker-publish.yml`** builds the multi-arch image (amd64 + arm64,
-   cross-compiled in the builder stage — never emulated) and pushes it to GHCR.
-   **`:latest` is master-only:** a tag build publishes just its version tag, so
-   tagging an old commit cannot roll `latest` backwards.
+   pairing and `/healthz` serves the constant. Give the release a
+   `## vX.Y.Z — …` section in `CHANGELOG.md`: it becomes the release notes.
+2. **Merge `development` into `master`**, by PR.
+3. **Tag, then push the tag** — `git tag vX.Y.Z && git push --tags`. The run
+   **fails** first if the tag does not equal the constant in `version.go` (a
+   prerelease suffix such as `-rc1` is allowed).
+4. `scripts/release-assets.sh` builds the five standalone binaries — linux
+   amd64/arm64, darwin amd64/arm64, windows amd64 — packs each with
+   `config.example.yaml` and `README.md`, and writes `SHA256SUMS`. Everything is
+   `CGO_ENABLED=0`, so the cross-compile needs no toolchain; nothing is signed (no
+   Authenticode, no notarization).
 5. **Verify what shipped, from outside.** The release lists five assets plus
    `SHA256SUMS`, and the running deployment reports the new version at
    `/healthz`. A schema bump additionally needs the rehearsal in

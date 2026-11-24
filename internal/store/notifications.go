@@ -22,6 +22,7 @@ const (
 	NoteBridgeUpdateBlocked  = "bridge_update_blocked"
 	NoteBridgeRolledBack     = "bridge_rolled_back"
 	NoteStreamTruncation     = "stream_truncation"
+	NoteUpdateAvailable      = "update_available"
 )
 
 // Notification is one bell entry.
@@ -47,6 +48,9 @@ type NotificationInput struct {
 	Body     string
 	Data     any
 	DedupKey string
+	// Once drops a repeat of DedupKey even after it was read, for as long as the
+	// row is kept: an event that stays true is said once, not on every check.
+	Once bool
 }
 
 // notificationKeep bounds the table: read rows older than this go, and the
@@ -68,7 +72,7 @@ func (d *DB) Notify(ctx context.Context, in NotificationInput) error {
 type NotifyResult int
 
 const (
-	NotifyMuted   NotifyResult = iota // its kind is switched off in Settings
+	NotifyMuted   NotifyResult = iota // its kind is switched off in Settings, or a Once event was already said
 	NotifyCreated                     // a new row
 	NotifyFolded                      // counted into an unread row with its DedupKey
 )
@@ -100,6 +104,16 @@ func (d *DB) NotifyOutcome(ctx context.Context, in NotificationInput) (NotifyRes
 	result := NotifyCreated
 	err := d.WithWriteTx(ctx, func(tx *sql.Tx) error {
 		result = NotifyCreated
+		if in.Once && in.DedupKey != "" {
+			var said bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM notifications WHERE dedup_key=?)`, in.DedupKey).Scan(&said); err != nil {
+				return err
+			}
+			if said {
+				result = NotifyMuted
+				return nil
+			}
+		}
 		if in.DedupKey != "" {
 			res, err := tx.ExecContext(ctx, `
 UPDATE notifications SET title=?, body=?, data=?, severity=?, count=count+1,

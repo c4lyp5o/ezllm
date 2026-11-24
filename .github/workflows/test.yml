@@ -86,6 +86,7 @@ jobs:
           node tests/verify-frontend-p1.mjs
           node tests/verify-frontend-p2.mjs
           node tests/verify-frontend-p3.mjs
+          node tests/verify-update.mjs
 
   docker:
     name: Docker image (build, boot, healthy)

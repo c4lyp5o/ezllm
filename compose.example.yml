@@ -54,6 +54,7 @@ services:
       # EZLLM_TRANSLATION_ENABLED: "true"
       # EZLLM_COMBO_AUTOPROBE: "on"
       # EZLLM_PRICE_REFRESH: "on"
+      # EZLLM_UPDATE_CHECK: "off"   # no daily check for a newer ezllm release
 
       # ── optional encrypted backups ── docs/recovery-runbook.md
       # These require the two optional mounts below. Scheduling stays off

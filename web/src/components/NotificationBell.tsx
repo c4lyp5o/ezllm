@@ -19,6 +19,7 @@ const ROUTE: Record<string, string> = {
   client_budget_reached: '/connect',
   price_refresh_failed: '/economics',
  backup_failed: '/settings',
+  update_available: '/settings?tab=system',
 };
 
 // Status colour only where it means something (house rule): warn/error get

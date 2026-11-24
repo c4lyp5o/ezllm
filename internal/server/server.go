@@ -136,6 +136,8 @@ type Server struct {
 	// priceRefreshOn: StartPriceRefresh ran (EZLLM_PRICE_REFRESH not off),
 	// so pricing new models is wanted. Never set in unit tests: no network.
 	priceRefreshOn atomic.Bool
+	// release is the last release check (update_check.go).
+	release releaseCheck
 	// bg owns detached background work (background.go).
 	bg *background
 	// reports shares dashboard usage reports across callers (reportcache.go).
@@ -346,6 +348,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /admin/settings/sessions/{id}", s.admin(s.handleRevokeSession))
 	s.mux.HandleFunc("POST /admin/settings/sessions/revoke-all", s.admin(s.handleRevokeAllSessions))
 	s.mux.HandleFunc("GET /admin/settings/diagnostics", s.admin(s.handleDiagnostics))
+	s.mux.HandleFunc("GET /admin/update", s.admin(s.handleUpdate))
 	s.mux.HandleFunc("GET /admin/backups", s.admin(s.handleBackups))
 	s.mux.HandleFunc("POST /admin/backups", s.admin(s.handleRunBackup))
 	s.mux.HandleFunc("POST /admin/settings/password", s.admin(s.handleDashboardPassword))

@@ -1,4 +1,5 @@
-import { getSettings, saveSettings, getDashboardSessions, revokeDashboardSession, revokeAllDashboardSessions, getBackupStatus, runBackup, getDiagnostics, type SettingsView, type DashboardSession, type BackupStatus, type SystemDiagnostics, type BridgeAdmission } from '../utils/api';
+import { UpdateArrow } from '../ez/UpdateArrow';
+import { getSettings, saveSettings, getDashboardSessions, revokeDashboardSession, revokeAllDashboardSessions, getBackupStatus, runBackup, getDiagnostics, getUpdate, type SettingsView, type DashboardSession, type BackupStatus, type SystemDiagnostics, type UpdateStatus, type BridgeAdmission } from '../utils/api';
 import { readTheme, setTheme } from '../utils/theme';
 import { readMotion, readRange, savePreference, subscribePreferences } from '../utils/preferences';
 import { useEffect, useRef, useState } from 'react';
@@ -78,6 +79,7 @@ const DETAILS: Record<string, [string, string]> = {
   translation_enabled: ['Protocol translation', 'Let requests go to a model on a different API when testing showed it works. Pins still apply.'],
   automatic_probing: ['Automatic probing', 'Test new combo hops and newly found free models automatically.'],
   catalog_interval: ['Catalog refresh interval', 'Duration of at least 1m, for example 12h.'],
+  update_check: ['Check for new ezllm releases', 'Ask GitHub once a day for the latest release and say when there is a newer one. Nothing is sent about this instance and nothing is installed.'],
   price_refresh: ['Automatic price refresh', 'Refresh after startup and daily at 03:00 in the instance timezone.'],
   retries: ['Retries per hop', 'How many times to retry a temporary failure on the same provider, from 0 to 9. Set 0 to turn retries off.'],
   attempt_budget: ['Total request attempt budget', 'Total attempts across all providers and retries, from 0 to 64. Set 0 for no limit.'],
@@ -99,9 +101,10 @@ const DETAILS: Record<string, [string, string]> = {
   notify_bridge_update_blocked: ['Bridge CLI release held back', 'A new CLI version failed its checks, so the bridge kept the current one.'],
   notify_bridge_rolled_back: ['Bridge CLI rolled back', 'A new CLI version failed after it was installed, so the bridge went back to the previous one.'],
   notify_stream_truncation: ['Answers cut mid-stream', 'A provider cut off more than 1% of its streamed answers in the last 24 hours (out of at least 20).'],
+  notify_update_available: ['New ezllm release', 'A newer ezllm release is available.'],
 };
 const GROUPS: Partial<Record<Tab, string[]>> = {
-  General: ['usage_timezone'],
+  General: ['usage_timezone', 'update_check'],
   Gateway: ['translation_enabled', 'automatic_probing', 'catalog_interval', 'price_refresh', 'retries', 'attempt_budget', 'dispatch_deadline', 'cooldown_429', 'cooldown_5xx', 'cooldown_strikes'],
   'Backup & Recovery': ['backup_enabled', 'backup_hour', 'backup_keep'],
   Notifications: Object.keys(DETAILS).filter(k => k.startsWith('notify_')),
@@ -244,12 +247,21 @@ function BridgeLoad({ a }: { a: BridgeAdmission }) {
     {n(a.in_flight)} of {n(a.max_concurrent)} running · {n(a.queued)} of {n(a.max_queue)} waiting · {n(a.served)} served · {n(refused)} refused because the queue was full
   </p>;
 }
+// Same pill as eziarr's System tab. With the check off it stays a plain link.
+function UpdatePill({ u }: { u: UpdateStatus }) {
+  return <a href={u.url || 'https://github.com/c4lyp5o/ezllm/releases'} target="_blank" rel="noreferrer noopener"
+    title={u.checked_at ? `Checked ${new Date(u.checked_at).toLocaleString()}` : undefined}
+    className={cx('inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs transition-colors', u.available ? 'bg-warn-dim text-warn' : 'text-mute hover:bg-raised hover:text-ink')}>
+    {u.available ? `v${u.latest} available` : u.latest ? 'Up to date' : 'Releases'}<UpdateArrow />
+  </a>;
+}
 function System() {
   const [info, setInfo] = useState<SystemDiagnostics | null>(null);
   const [error, setError] = useState('');
-  useEffect(() => { getDiagnostics().then(setInfo).catch(e => setError(errorMessage(e))); }, []);
+  const [update, setUpdate] = useState<UpdateStatus | null>(null);
+  useEffect(() => { getDiagnostics().then(setInfo).catch(e => setError(errorMessage(e))); getUpdate().then(setUpdate).catch(() => undefined); }, []);
   return <section className={panel}><SectionLabel>System</SectionLabel>{error && <p role="alert" className="mt-3 text-bad">{error}</p>}{info && <>
-    <dl className="mt-4 grid grid-cols-2 gap-3 text-sm"><dt>Version</dt><dd className="flex min-w-0 flex-wrap items-center gap-2 break-all">{info.version}<CopyButton text={info.version} label="Copy" /></dd><dt>Uptime</dt><dd title={`${Math.floor(info.uptime_seconds / 60)} minutes`}>{fmtUptime(info.uptime_seconds)}</dd><dt>Database</dt><dd>{(info.database_bytes / 1048576).toFixed(2)} MiB</dd></dl>
+    <dl className="mt-4 grid grid-cols-2 gap-3 text-sm"><dt>Version</dt><dd className="flex min-w-0 flex-wrap items-center gap-2 break-all">{info.version}<CopyButton text={info.version} label="Copy" />{update && <UpdatePill u={update} />}</dd><dt>Uptime</dt><dd title={`${Math.floor(info.uptime_seconds / 60)} minutes`}>{fmtUptime(info.uptime_seconds)}</dd><dt>Database</dt><dd>{(info.database_bytes / 1048576).toFixed(2)} MiB</dd></dl>
     {info.deployment && <dl className="mt-5 grid grid-cols-2 gap-3 text-sm"><dt>Listen address</dt><dd className="break-words">{info.deployment.listen_address} · {info.deployment.listen_source}</dd><dt>Storage</dt><dd>{info.deployment.storage}</dd><dt>Master-key source</dt><dd>{info.deployment.master_key_source}</dd><dt>Trusted proxy entries</dt><dd>{info.deployment.trusted_proxy_count}</dd></dl>}
     <div className="mt-5 space-y-2">{info.bridges.map(b => { const u = b.update && bridgeUpdateText(b.update); return <div key={b.id} className="text-sm"><p className="flex justify-between gap-3"><span>{b.id}</span><span>{b.enabled ? 'Ready' : 'Off'}</span></p>{u && <p className={cx('text-xs', UPDATE_TONE[u.tone])}>CLI updates: {u.text}</p>}{b.admission && <BridgeLoad a={b.admission} />}</div>; })}</div>
     <div className="mt-5 space-y-2">{Object.entries(info.jobs).map(([name, j]) => <div key={name} className="text-sm"><p>{name}: {j.running ? 'Running' : 'Idle'}</p><p className="text-xs text-mute">Last success: {j.last_success ? new Date(j.last_success).toLocaleString() : 'No recorded success'} · last failure: {j.last_failure ? new Date(j.last_failure).toLocaleString() : 'None recorded'}</p></div>)}</div>

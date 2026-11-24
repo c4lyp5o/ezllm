@@ -1163,4 +1163,6 @@ export const revokeDashboardSession = (id: string) => del(`/admin/settings/sessi
 export const revokeAllDashboardSessions = () => post('/admin/settings/sessions/revoke-all');
 export const getBackupStatus = () => get<BackupStatus>('/admin/backups');
 export const runBackup = () => post('/admin/backups');
+export type UpdateStatus = { enabled: boolean; current: string; latest: string; available: boolean; url: string; checked_at: string };
+export const getUpdate = () => get<UpdateStatus>('/admin/update');
 export const getDiagnostics = () => get<SystemDiagnostics>('/admin/settings/diagnostics');

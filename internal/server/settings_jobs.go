@@ -121,6 +121,7 @@ func (s *Server) StartSettingsJobs(ctx context.Context) {
 		previous := s.settings.Current()
 		catalog := time.Now().Add(30 * time.Second)
 		price := time.Now().Add(45 * time.Second)
+		update := time.Now().Add(updateCheckBoot)
 		backup := nextDaily(previous.BackupHour, previous.Location())
 		for {
 			p := s.settings.Current()
@@ -134,6 +135,9 @@ func (s *Server) StartSettingsJobs(ctx context.Context) {
 			if p.BackupEnabled != previous.BackupEnabled || p.BackupHour != previous.BackupHour || p.UsageTZ != previous.UsageTZ {
 				backup = nextDaily(p.BackupHour, p.Location())
 			}
+			if p.UpdateCheck && !previous.UpdateCheck {
+				update = now // switched on: answer now, not tomorrow
+			}
 			previous = p
 			next := catalog
 			if p.PriceRefresh && price.Before(next) {
@@ -141,6 +145,9 @@ func (s *Server) StartSettingsJobs(ctx context.Context) {
 			}
 			if p.BackupEnabled && backup.Before(next) {
 				next = backup
+			}
+			if p.UpdateCheck && update.Before(next) {
+				next = update
 			}
 			timer := time.NewTimer(time.Until(next))
 			select {
@@ -167,6 +174,10 @@ func (s *Server) StartSettingsJobs(ctx context.Context) {
 					return err == nil
 				})
 				price = nextDaily(3, p.Location())
+			}
+			if p.UpdateCheck && !update.After(now) {
+				s.runJob("updates", s.checkForUpdate)
+				update = now.Add(updateCheckEvery)
 			}
 			if p.BackupEnabled && !backup.After(now) {
 				if err := s.startBackup(); err != nil && !errors.Is(err, backuplib.ErrBusy) {

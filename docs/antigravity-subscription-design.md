@@ -76,8 +76,8 @@ Findings that shape the build:
    printed at boot; an unknown model is refused before a spawn (a refusal that
    would otherwise cost a ~3 s CLI start).
 8. **Pinned binary.** compose mounts a copy outside the self-updating path,
-   read-only; the login directory is read-write. `QualifiedVersion` marks other
-   releases `unqualified` in `/status`.
+   read-only; the login directory is read-write. `/status` reports a release
+   `unqualified` until a live proof is recorded for it.
 9. **Concurrency 2 by default**, from the measured RSS.
 
 ## 4. Measured on the first eligible turns (2026-10-26, CLI 1.4.7)

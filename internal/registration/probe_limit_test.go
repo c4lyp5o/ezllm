@@ -11,11 +11,12 @@ import (
 )
 
 func TestDoProbeResponseLimit(t *testing.T) {
-	const limit = 1 << 20
+	const limit = 8 << 20
 	for _, tc := range []struct {
 		name string
 		size int
 	}{
+		{"large catalog", (1 << 20) + 1}, // an auth oracle can be a whole /models list
 		{"at limit", limit},
 		{"over limit", limit + 1},
 	} {
@@ -39,8 +40,8 @@ func TestDoProbeResponseLimit(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), "exceeds") || body != nil {
 					t.Fatalf("oversized response: body length = %d, error = %v", len(body), err)
 				}
-			} else if err != nil || len(body) != limit {
-				t.Fatalf("at limit: body length = %d, error = %v", len(body), err)
+			} else if err != nil || len(body) != tc.size {
+				t.Fatalf("within limit: body length = %d, error = %v", len(body), err)
 			}
 		})
 	}

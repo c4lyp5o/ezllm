@@ -2300,11 +2300,10 @@ func (d *Dispatcher) streamCopyTap(ctx context.Context, w http.ResponseWriter, r
 					}
 					// Remember the first real payload so the caller can
 					// quote it in the ledger. SSE metadata and [DONE]
-					// cannot carry an error envelope.
-					if firstPayload == nil {
-						p, isData := bytes.CutPrefix(line, []byte("data:"))
-						p = bytes.TrimSpace(p)
-						if isData && len(p) > 0 && !bytes.Equal(p, []byte("[DONE]")) {
+					// cannot carry an error envelope; a bare line can, from
+					// a gateway that labels a plain error body as SSE.
+					if firstPayload == nil && !isSSEMetadata(line) {
+						if p := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:"))); len(p) > 0 && !bytes.Equal(p, []byte("[DONE]")) {
 							firstPayload = append([]byte(nil), p...)
 						}
 					}
@@ -2566,6 +2565,18 @@ func streamErrCause(existing string, status int, first []byte) string {
 		}
 	}
 	return existing
+}
+
+// isSSEMetadata reports an SSE comment or a field other than data.
+func isSSEMetadata(line []byte) bool {
+	field, _, _ := bytes.Cut(line, []byte(":"))
+	switch string(field) {
+	case "": // a blank line or a ":" comment
+		return true
+	case "event", "id", "retry":
+		return true
+	}
+	return false
 }
 
 func sseHasErrorEnvelope(payload []byte) bool {

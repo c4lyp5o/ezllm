@@ -21,9 +21,9 @@ notification channel.
   `agybridge.RunPreflight`) need a restart to re-run.
 - Today each mount names a version (`compose.example.yml`), so a bump is a
   compose edit plus a recreate.
-- `codexbridge.QualifiedVersion` and `agybridge.QualifiedVersion` are compile-time
-  constants; any other version boots as `unqualified`. Claude has no qualified
-  notion.
+- `codexbridge.QualifiedVersion` is a compile-time constant; any other version
+  boots as `unqualified` until the updater records a live proof. Antigravity has
+  no such constant: its state comes only from the recorded proof.
 - The CLIs' own updaters must stay off for the running bridge: Claude's deletes
   old versions (2.1.299 lost 2026-10-21), agy updates in place, Codex runs with
   `--disable in_app_updates`.

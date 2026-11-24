@@ -84,6 +84,7 @@ provider key unreadable. See [master-key-runbook.md](master-key-runbook.md).
 | `EZLLM_TRANSLATION_ENABLED` | saved setting → YAML → on | The one switch for wire-protocol translation (pairwise translators and the universal matrix). `false` turns it off without a rebuild. Non-boolean values fail the boot. See [translation-runbook.md](translation-runbook.md). |
 | `EZLLM_COMBO_AUTOPROBE` | saved setting → YAML `automatic_probing` → on | An explicit value locks the dashboard control. `off` disables automatic combo-hop and free-model probes; manual probes remain available. |
 | `EZLLM_PRICE_REFRESH` | saved setting → YAML `price_refresh` → on | An explicit value locks the dashboard control. `off` stops scheduled price refresh (boot + daily); manual refresh remains available. See [pricing-runbook.md](pricing-runbook.md). |
+| `EZLLM_UPDATE_CHECK` | saved setting → on | An explicit value locks the dashboard control. `off` stops the daily check of GitHub's latest ezllm release (boot + daily). The request carries nothing about this instance, and nothing is installed. |
 
 ## All subscription bridges
 

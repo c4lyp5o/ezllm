@@ -1,11 +1,13 @@
 import { subscribePreferences } from './utils/preferences';
+import type { UpdateStatus } from './utils/api';
 // App shell: token unlock gate → sidebar layout → routes.
 // Nothing renders or fetches before the unlock screen hands back a token.
 import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react';
 import { Brand } from './ez/Brand';
-import { GateError, completeSetup, dashboardLogin, getSetupStatus, isUnlocked, logout, markUnlocked } from './utils/api';
+import { UpdateArrow } from './ez/UpdateArrow';
+import { GateError, completeSetup, dashboardLogin, getSetupStatus, getUpdate, isUnlocked, logout, markUnlocked } from './utils/api';
 import { DUR, SelectionLine, spring } from './components/motion';
 import RailwayBackground from './components/RailwayBackground';
 import PasswordStrength from './components/PasswordStrength';
@@ -111,6 +113,21 @@ function useServerVersion(): string {
     return () => { alive = false; };
   }, []);
   return version;
+}
+
+// A newer release, when the server's daily check found one. Re-read hourly so a
+// tab left open learns about it; a failed read keeps what is shown.
+const UPDATE_POLL_MS = 3_600_000;
+function useUpdate(): UpdateStatus | null {
+  const [update, setUpdate] = useState<UpdateStatus | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const read = () => getUpdate().then((u) => { if (alive) setUpdate(u); }).catch(() => undefined);
+    read();
+    const t = setInterval(read, UPDATE_POLL_MS);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+  return update?.available ? update : null;
 }
 
 // Where the source lives. Opened in a new tab with an explicit rel: this is a
@@ -271,6 +288,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const [theme, setThemeState] = useState<Theme>(() => readTheme());
  useEffect(() => subscribePreferences(() => setThemeState(readTheme())), []);
   const version = useServerVersion();
+  const update = useUpdate();
 
   const changeTheme = useCallback((t: Theme) => { setThemeState(t); setTheme(t); }, []);
 
@@ -279,10 +297,14 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       <div className="flex items-center gap-2.5 px-5 pb-6 pt-5">
         <Brand name="ezllm" />
         {version && (
-          <a href={REPO_URL} target="_blank" rel="noreferrer noopener"
-            aria-label={`ezllm ${version}, source on GitHub (opens in a new tab)`} title="Source on GitHub"
-            className="ml-auto text-[12px] text-mute transition-colors hover:text-ink">
+          <a href={update ? update.url : REPO_URL} target="_blank" rel="noreferrer noopener"
+            aria-label={update ? `ezllm ${version}, v${update.latest} available, release notes (opens in a new tab)`
+              : `ezllm ${version}, source on GitHub (opens in a new tab)`}
+            title={update ? `v${update.latest} available` : 'Source on GitHub'}
+            className={cx('ml-auto text-[12px] transition-colors', update
+              ? 'inline-flex items-center gap-1 rounded bg-warn-dim px-2 py-0.5 text-warn hover:text-ink' : 'text-mute hover:text-ink')}>
             {version}
+            {update && <UpdateArrow />}
           </a>
         )}
       </div>

@@ -883,6 +883,7 @@ newest update first. `POST …/read` takes `{"ids":[…]}` or `{"all":true}` →
 | `bridge_update_blocked` | warn | a CLI release failed the update gate; the bridge keeps its release (v1.6.0) |
 | `bridge_rolled_back` | error | a promoted CLI release failed its proof and was reverted (v1.6.0) |
 | `stream_truncation` | warn | a hop ended >1% of its streams early over 24h, with at least 20 judged streams; one folded line per hop, checked every 15 minutes |
+| `update_available` | info | the release check found a newer ezllm release; once per version, read or not, while the entry is kept |
 
 The three bridge events are raised once per updater report, and only for reports written while
 this process runs: the updater writes its outcome after the restart it causes.
@@ -1073,6 +1074,7 @@ JSON object, with unknown envelope/setting fields rejected.
 | `DELETE /admin/settings/sessions/{id}` | Revoke one dashboard session; 204, including an unknown/already-revoked ID. |
 | `POST /admin/settings/sessions/revoke-all` | Revoke every dashboard session; 204. Client API tokens are unaffected. |
 | `GET /admin/settings/diagnostics` | Allowlisted `version`, `uptime_seconds`, `database_bytes`, `bridges` (each `id`, `enabled` and, from v1.6.0, the updater's `update` verdict: `result`, `checked_at`, `current`, `candidate` — never its free-text `detail`; from v2.2.0 a running bridge's `admission` counters `in_flight`, `queued`, `max_concurrent`, `max_queue`, `served`, `rejected_queue_full` and nothing else from its runtime), `jobs`, effective `settings`, safe deployment metadata (listen address/source, storage kind, master-key source and trusted proxy count), and configured backup status. `download=true` sets an attachment filename. No filesystem paths, credentials or request content. |
+| `GET /admin/update` | The release check's last answer; never starts one. `enabled`, `current`, `latest`, `available`, `url` (the release notes page) and `checked_at`. With the check off, or before it has answered, `latest`, `url` and `checked_at` are empty and `available` is false. |
 | `GET /admin/backups` | `ready`, `running`, `last_outcome`, optional `last_finished`, optional sanitized `error` for inventory failures, and `backups`. `ready` describes configuration/inventory readiness; each run separately checks writability. Completed records have `id`, `created_at`, `bytes`, and `verified`. An unconfigured instance returns an empty list and `ready=false`. |
 | `POST /admin/backups` | Start a manual job; 202 with status `running`. Returns 409 if storage is unavailable, a job is already running, or shutdown has begun. Poll the GET route for completion. |
 
@@ -1082,6 +1084,7 @@ JSON object, with unknown envelope/setting fields rejected.
 |---|---|
 | `usage_timezone` | Nonempty resolvable IANA zone; default UTC. |
 | `translation_enabled`, `automatic_probing`, `price_refresh` | Boolean. Existing environment switches override saved values. |
+| `update_check` | Boolean, default true. Daily check of GitHub's latest ezllm release. `EZLLM_UPDATE_CHECK` overrides it. |
 | `catalog_interval` | Duration, at least 1 minute. Default 12h. |
 | `retries` | Integer 0–9; 0 disables same-hop retry. Default 3. |
 | `attempt_budget` | Integer 0–64; 0 means unlimited. Default 8. |
@@ -1091,7 +1094,7 @@ JSON object, with unknown envelope/setting fields rejected.
 | `backup_enabled` | Boolean, default false. Enabling requires configured writable storage and a separate backup encryption secret. |
 | `backup_hour` | Integer 0–23, instance timezone; default 3. |
 | `backup_keep` | Integer 1–365, default 7; counts completed verified backups. |
-| `notify_free_models_added`, `notify_free_models_removed`, `notify_free_model_broken`, `notify_catalog_refresh_failed`, `notify_client_budget_reached`, `notify_price_refresh_failed`, `notify_backup_failed`, `notify_bridge_updated`, `notify_bridge_update_blocked`, `notify_bridge_rolled_back`, `notify_stream_truncation` | Boolean, all default true. Apply to future dashboard bell events and so to push channels. |
+| `notify_free_models_added`, `notify_free_models_removed`, `notify_free_model_broken`, `notify_catalog_refresh_failed`, `notify_client_budget_reached`, `notify_price_refresh_failed`, `notify_backup_failed`, `notify_bridge_updated`, `notify_bridge_update_blocked`, `notify_bridge_rolled_back`, `notify_stream_truncation`, `notify_update_available` | Boolean, all default true. Apply to future dashboard bell events and so to push channels. |
 
 Duration settings retain the limits of their existing YAML counterparts.
 `apply` is `immediate` for operator values; changing a deployment override still

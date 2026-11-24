@@ -53,6 +53,10 @@ func operatorSettings(ctx context.Context, db *store.DB, c *config.Config) (*set
 		v.PriceRefresh = raw != "off"
 		sources["price_refresh"] = "environment"
 	}
+	if raw := os.Getenv("EZLLM_UPDATE_CHECK"); raw != "" {
+		v.UpdateCheck = raw != "off"
+		sources["update_check"] = "environment"
+	}
 	if raw := os.Getenv("EZLLM_COMBO_AUTOPROBE"); raw != "" {
 		v.AutoProbe = raw != "off"
 		sources["automatic_probing"] = "environment"

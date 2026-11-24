@@ -18,6 +18,7 @@ type Values struct {
 	AutoProbe        bool   `json:"automatic_probing"`
 	CatalogInterval  string `json:"catalog_interval"`
 	PriceRefresh     bool   `json:"price_refresh"`
+	UpdateCheck      bool   `json:"update_check"`
 	Retries          int    `json:"retries"`
 	AttemptBudget    int    `json:"attempt_budget"`
 	DispatchDeadline string `json:"dispatch_deadline"`
@@ -38,10 +39,11 @@ type Values struct {
 	NotifyBridgeHeld bool   `json:"notify_bridge_update_blocked"`
 	NotifyBridgeBack bool   `json:"notify_bridge_rolled_back"`
 	NotifyStreamCut  bool   `json:"notify_stream_truncation"`
+	NotifyUpdate     bool   `json:"notify_update_available"`
 }
 
 func Defaults() Values {
-	return Values{UsageTZ: "UTC", Translation: true, AutoProbe: true, CatalogInterval: "12h", PriceRefresh: true, Retries: 3, AttemptBudget: 8, Cooldown429: "60s", Cooldown5xx: "60s", CooldownStrikes: 3, BackupHour: 3, BackupKeep: 7, NotifyAdded: true, NotifyRemoved: true, NotifyBroken: true, NotifyCatalog: true, NotifyBudget: true, NotifyPrices: true, NotifyBackup: true, NotifyBridgeUp: true, NotifyBridgeHeld: true, NotifyBridgeBack: true, NotifyStreamCut: true}
+	return Values{UsageTZ: "UTC", Translation: true, AutoProbe: true, CatalogInterval: "12h", PriceRefresh: true, UpdateCheck: true, Retries: 3, AttemptBudget: 8, Cooldown429: "60s", Cooldown5xx: "60s", CooldownStrikes: 3, BackupHour: 3, BackupKeep: 7, NotifyAdded: true, NotifyRemoved: true, NotifyBroken: true, NotifyCatalog: true, NotifyBudget: true, NotifyPrices: true, NotifyBackup: true, NotifyBridgeUp: true, NotifyBridgeHeld: true, NotifyBridgeBack: true, NotifyStreamCut: true, NotifyUpdate: true}
 }
 func (v Values) Validate() error {
 	if _, err := time.LoadLocation(v.UsageTZ); err != nil || v.UsageTZ == "" {
@@ -112,6 +114,8 @@ func (v Values) Notify(kind string) bool {
 		return v.NotifyBridgeBack
 	case "stream_truncation":
 		return v.NotifyStreamCut
+	case "update_available":
+		return v.NotifyUpdate
 	}
 	return true
 }

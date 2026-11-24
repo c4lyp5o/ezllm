@@ -39,6 +39,7 @@ appropriate for code changes.
   npm run build
   npx playwright install --with-deps chromium
   for phase in 1 2 3; do node "tests/verify-frontend-p${phase}.mjs" || exit 1; done
+  node tests/verify-update.mjs
   ```
 
   On Windows, install Chromium without `--with-deps` and run the three scripts

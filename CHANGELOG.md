@@ -4,6 +4,11 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## Unreleased
 
+- **ez standard CI.** `publish.yml` replaces `docker-publish.yml` and `release.yml`:
+  pushes to `development` publish `:development` and `:sha-<commit>`, `master`
+  publishes `:latest`, `:X.Y.Z` and `:sha-<commit>`, and a tag publishes `:X.Y.Z` and
+  `:vX.Y.Z` with the release binaries and this file's section as the notes. CI also
+  builds and boots the image. `CONTRIBUTING.md` is now `DEVELOPER.md`.
 - **Copilot CLI 1.0.113 and newer.** The Copilot bridge speaks headless protocol 4
   as well as 3: it sends `session.create` in the shape the connected CLI documents
   and still refuses any other protocol. Proven live on 1.0.112 and 1.0.114. The

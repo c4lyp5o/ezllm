@@ -70,7 +70,7 @@ python3 tests/prove_claude_bridge.py
 gofmt -l . && go vet ./...
 ```
 
-`make check` is **not** run locally (see CONTRIBUTING.md § Memory and the shared-box rule).
+`make check` is **not** run locally (see DEVELOPER.md § Memory and the shared-box rule).
 
 ## Project Structure
 

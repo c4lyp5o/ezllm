@@ -47,6 +47,15 @@ compression, a SQLite usage ledger, and an embedded operator dashboard
 - **No weakened tests.** A new fix ships with a test that fails without it;
   existing assertions are never relaxed to make a failure pass.
 
+## Branches and CI
+
+- The ez standard: `development` is the integration branch (every PR targets it),
+  `master` is released code. Merging to `development` publishes `:development` to
+  GHCR; only `master` moves `:latest` (DEVELOPER.md § Branches and releases).
+- No commits, pushes, merges, tags, releases or deploys without the owner's OK.
+- App names are lowercase (`ezllm`). The dashboard's brand row is
+  `web/src/ez/Brand.tsx`, with the shared ez icon.
+
 ## Memory constraint (important on this box)
 
 The full suite peaks at **~4.21 GiB RSS** (`TestLatencyPercentiles`). In a
@@ -58,7 +67,7 @@ make test-short    # functional suite, ~0.18 GiB peak, skips perf harnesses
 ```
 
 CI runs the full suite separately. Details and measured numbers:
-CONTRIBUTING.md § Memory.
+DEVELOPER.md § Memory.
 
 ## Layout map
 

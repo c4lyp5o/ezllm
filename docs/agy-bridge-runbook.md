@@ -72,8 +72,8 @@ reports it as `unqualified` until the live proof ([verify](#verify)) has been
 re-run and recorded in `qualified.json`.
 
 **Gate a release before promoting it.** `ezllm bridge-check agy` runs the boot
-checks against a staged CLI and exits non-zero on any problem. The gateway can
-keep serving without a bridge that failed to start. `--json` prints the verdict
+checks against a staged CLI and exits non-zero on any problem. At boot, an
+enabled bridge that cannot start stops ezllm. `--json` prints the verdict
 (`ok`, `version`, `release`, `live`, `problems`) for the bridge updater
 (`SPEC-bridge-update.md`). `--live` then drives real turns through the bridge
 (plan quota, the shared login) — only when every static check passed. A version the updater proved is listed in
@@ -158,8 +158,8 @@ a line such as `agy bridge listening addr=127.0.0.1:8792 cli=1.5.15 release=unqu
 `unqualified` means a live proof is not recorded for this version, not that the
 bridge failed to start.
 
-The bridge does not start when the binary is missing, a required flag is gone, the
-token file is absent, `settings.json` loosens the tool policy
+ezllm does not start, by design, when the bridge is on and the binary is missing, a
+required flag is gone, the token file is absent, `settings.json` loosens the tool policy
 ([lockdown](#lockdown)), or `agy models` fails. Every message names its fix.
 All variables: [environment.md](environment.md#antigravity-google-subscription-bridge).
 

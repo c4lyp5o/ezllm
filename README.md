@@ -324,7 +324,7 @@ The full suite includes performance tests that need several GiB of memory; CI
 runs it. Always use `-short` locally.
 
 - `cmd/`, `internal/`: Go source. Tests live next to the code they test
-  ([CONTRIBUTING.md](CONTRIBUTING.md) explains why).
+  ([DEVELOPER.md](DEVELOPER.md) explains why).
 - `web/`: the React dashboard. `web/dist/` is committed and embedded in the
   binary, so rebuild and commit it with every web change; CI checks it matches.
 - `tests/`: live proof scripts (Python) run against a real instance.
@@ -333,9 +333,9 @@ runs it. Always use `-short` locally.
   code tour.
 
 CI runs [test.yml](.github/workflows/test.yml) before
-[docker-publish.yml](.github/workflows/docker-publish.yml) and
-[release.yml](.github/workflows/release.yml), so a failing suite never produces
-an image or release. All four subscription bridges share one streaming
+[publish.yml](.github/workflows/publish.yml) publishes anything, so a failing suite
+never produces an image or release. Pushes to `development` publish
+`ghcr.io/c4lyp5o/ezllm:development`; `:latest` follows `master`. All four subscription bridges share one streaming
 transport in `internal/bridgeutil` ([design](docs/shared-bridge-transport-design.md)).
 
 ## Documentation
@@ -359,7 +359,7 @@ transport in `internal/bridgeutil` ([design](docs/shared-bridge-transport-design
 | [VERSION.md](VERSION.md) | Release history |
 | [CHANGELOG.md](CHANGELOG.md) | Detailed change history |
 | [EXPLORING.md](EXPLORING.md) | Code tour: reading order, invariants, landmarks |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Workflow and conventions |
+| [DEVELOPER.md](DEVELOPER.md) | Workflow, conventions, branches and releases |
 | [AGENTS.md](AGENTS.md) | Rules for AI agents and maintainers |
 | [docs/](docs/) | All design records and runbooks |
 

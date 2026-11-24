@@ -4,6 +4,7 @@ import { subscribePreferences } from './utils/preferences';
 import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react';
+import { Brand } from './ez/Brand';
 import { GateError, completeSetup, dashboardLogin, getSetupStatus, isUnlocked, logout, markUnlocked } from './utils/api';
 import { DUR, SelectionLine, spring } from './components/motion';
 import RailwayBackground from './components/RailwayBackground';
@@ -97,11 +98,6 @@ const ANALYTICS_TABS = [
 
 const isAnalytics = (path: string) => (ANALYTICS_ROUTES as readonly string[]).some((p) => path === p || path.startsWith(`${p}/`));
 
-const LOGO = (
-  // The shared ez mark (same image as the favicon and the ezconv app icon).
-  <img src="/icons/icon-192.png" alt="ezllm" width={20} height={20} className="h-5 w-5 rounded-[4px]" />
-);
-
 // The version beside the wordmark is the RUNNING server's, read from the
 // public /healthz (the one source of truth: the Go constant it serves). A
 // placeholder constant here once said v0.1.0 while the server was 0.0.19.
@@ -179,10 +175,7 @@ function Unlock({ onUnlock }: { onUnlock: () => void }) {
       style={{ background: '#05070d' }}>
       <RailwayBackground />
       <div className="relative w-full max-w-sm rounded-xl border border-line bg-surface p-8">
-        <div className="flex items-center gap-2.5">
-          {LOGO}
-          <span className="text-[15px] font-semibold tracking-tight">ezllm</span>
-        </div>
+        <Brand name="ezllm" />
         {mode === 'loading' && <div className="mt-6 flex justify-center"><Spinner /></div>}
         {mode === 'setup' && <SetupForm onDone={done} onAlreadySet={() => setMode('login')} />}
         {mode === 'login' && <SignInForm onDone={done} onSetupRequired={() => setMode('setup')} />}
@@ -284,8 +277,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2.5 px-5 pb-6 pt-5">
-        {LOGO}
-        <span className="text-[15px] font-semibold tracking-tight">ezllm</span>
+        <Brand name="ezllm" />
         {version && (
           <a href={REPO_URL} target="_blank" rel="noreferrer noopener"
             aria-label={`ezllm ${version}, source on GitHub (opens in a new tab)`} title="Source on GitHub"
@@ -391,8 +383,7 @@ export default function App() {
             <path d="M3 5.5h14M3 10h14M3 14.5h14" />
           </svg>
         </button>
-        {LOGO}
-        <span className="text-[14px] font-semibold tracking-tight">ezllm</span>
+        <Brand name="ezllm" />
         <div className="ml-auto">{!desktop && <NotificationBell />}</div>
       </header>
 

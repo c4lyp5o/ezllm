@@ -32,9 +32,14 @@ import (
 // is a typed refusal: plain chat falls back to `-p`, and a request with tools is
 // refused so the router fails over at no cost (bridge.go chat).
 
-// channelProtocolVersion is the channel version this file was measured against
-// (CLI 1.0.105, 2026-11-05).
-const channelProtocolVersion = 3
+// The channel versions this file speaks: 3 was measured on CLI 1.0.105
+// (2026-11-05) and 1.0.112, 4 on CLI 1.0.114 (2026-11-24). Protocol 4 groups the
+// session.create options (nestSessionConfig); the calls and events a turn uses
+// are otherwise the same.
+const (
+	channelProtocolOldest  = 3
+	channelProtocolVersion = 4 // newest
+)
 
 const (
 	maxRPCMessage  = 64 << 20
@@ -100,6 +105,7 @@ type rpcConn struct {
 	idleSeen, usageSeen bool
 	cacheEnabled        bool
 	completed           *completedSession
+	protocol            int // what the last ping reported
 }
 
 type rpcMessage struct {
@@ -291,9 +297,10 @@ func (c *rpcConn) ping() error {
 	if err := c.call("ping", map[string]any{"message": "ezllm"}, &pong); err != nil {
 		return toolsRefused("the CLI's headless channel did not answer", err)
 	}
-	if pong.ProtocolVersion != channelProtocolVersion {
-		return toolsRefused(fmt.Sprintf("the CLI's headless channel speaks protocol %d, this bridge speaks %d", pong.ProtocolVersion, channelProtocolVersion), nil)
+	if pong.ProtocolVersion < channelProtocolOldest || pong.ProtocolVersion > channelProtocolVersion {
+		return toolsRefused(fmt.Sprintf("the CLI's headless channel speaks protocol %d, this bridge speaks %d to %d", pong.ProtocolVersion, channelProtocolOldest, channelProtocolVersion), nil)
 	}
+	c.protocol = pong.ProtocolVersion
 	return nil
 }
 
@@ -301,7 +308,7 @@ func toolsRefused(why string, cause error) error {
 	return &Failure{Code: "chat_tools_unsupported", Msg: "copilot bridge: client tools are unavailable: " + why, Cause: cause, BeforeInference: true}
 }
 
-// sessionConfig builds session.create. availableTools is an allowlist, so the
+// sessionConfig builds session.create as protocol 3 takes it. availableTools is an allowlist, so the
 // CLI's own shell and file tools are invisible, and nothing the caller did not
 // declare can run on this box. It must be present even when empty: measured on
 // CLI 1.0.105, [] shows the model 0 tools but leaving it out shows 18, including
@@ -350,6 +357,47 @@ func sessionConfig(turn ChannelTurn) map[string]any {
 		cfg["model"] = turn.Model
 	}
 	return cfg
+}
+
+// createParams is session.create in the shape the connected CLI documents.
+func (c *rpcConn) createParams(turn ChannelTurn) map[string]any {
+	cfg := sessionConfig(turn)
+	if c.protocol >= 4 {
+		return nestSessionConfig(cfg)
+	}
+	return cfg
+}
+
+// nestSessionConfig regroups the options for protocol 4 (copilot-sdk
+// docs/v2-breaking-changes.md, "Restructured lifecycle RPC payloads"). CLI 1.0.114
+// still honours the flat shape, but that is undocumented, and an availableTools
+// the CLI ignored would show the model the CLI's own shell. An option without a
+// documented place here stays at the root, as model and systemMessage do.
+func nestSessionConfig(flat map[string]any) map[string]any {
+	groups := map[string][2]string{
+		"tools":             {"tools", "definitions"},
+		"availableTools":    {"tools", "availableTools"},
+		"streaming":         {"events", "streaming"},
+		"mcpServers":        {"mcp", "servers"},
+		"infiniteSessions":  {"state", "infiniteSessions"},
+		"requestPermission": {"permissions", "request"},
+		"requestUserInput":  {"interaction", "requestUserInput"},
+	}
+	out := map[string]any{}
+	for k, v := range flat {
+		to, ok := groups[k]
+		if !ok {
+			out[k] = v
+			continue
+		}
+		group, _ := out[to[0]].(map[string]any)
+		if group == nil {
+			group = map[string]any{}
+			out[to[0]] = group
+		}
+		group[to[1]] = v
+	}
+	return out
 }
 
 // classifyCreate types a session.create refusal. Both cases cost nothing because
@@ -421,7 +469,7 @@ func driveTurn(c *rpcConn, turn ChannelTurn, delta func(string) error, onFirst f
 		}
 	}
 	if !reused {
-		if err := c.call("session.create", sessionConfig(turn), &created); err != nil {
+		if err := c.call("session.create", c.createParams(turn), &created); err != nil {
 			return res, classifyCreate(err)
 		}
 		if created.SessionID == "" || (c.strict && c.retired[created.SessionID]) {

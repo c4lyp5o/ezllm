@@ -4,6 +4,10 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## Unreleased
 
+- **Copilot CLI 1.0.113 and newer.** The Copilot bridge speaks headless protocol 4
+  as well as 3: it sends `session.create` in the shape the connected CLI documents
+  and still refuses any other protocol. Proven live on 1.0.112 and 1.0.114. The
+  session-cache gate uses `gemini-4-hydrogen` unless `--model` names another.
 - **Antigravity caller tools on by default.** The structured-output adapter
   turns on at boot whenever the CLI offers `--json-schema` (`cmd/ezllm/agybridge.go`);
   a CLI without it boots text-only with a warning. `EZLLM_AGY_EXPERIMENTAL_TOOLS`

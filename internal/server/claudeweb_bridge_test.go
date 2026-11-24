@@ -361,3 +361,23 @@ func TestClaudeWebBridgeFreshConversationPerRequest(t *testing.T) {
 		}
 	}
 }
+
+func TestClaudeWebBridgeRejectsOversizedBodyBeforeAccountLock(t *testing.T) {
+	b, accountID, _ := claudeWebFixture(t, &claudeWebMock{})
+	lock := b.lockFor(accountID)
+	lock.Lock()
+	defer lock.Unlock()
+	status := make(chan int, 1)
+	go func() {
+		body := strings.Repeat(" ", (4<<20)+1)
+		status <- claudeWebReq(t, b, http.MethodPost, claudeWebBridgePrefix+"/chat/completions", body, accountID).Code
+	}()
+	select {
+	case code := <-status:
+		if code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("status = %d, want 413", code)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("oversized request waited for the account lock")
+	}
+}

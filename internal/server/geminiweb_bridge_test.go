@@ -583,3 +583,23 @@ func TestBridgeRotationPersistenceFailureBacksOff(t *testing.T) {
 		t.Fatalf("rotate called %d times after a failed save, want 1", calls)
 	}
 }
+
+func TestGeminiWebBridgeRejectsOversizedBodyBeforeAccountLock(t *testing.T) {
+	b, accountID, _ := newBridgeFixture(t, "")
+	lock := b.lockFor(accountID)
+	lock.Lock()
+	defer lock.Unlock()
+	status := make(chan int, 1)
+	go func() {
+		body := strings.Repeat(" ", (4<<20)+1)
+		status <- bridgeReq(t, b, http.MethodPost, geminiWebBridgePrefix+"/chat/completions", body, accountID).Code
+	}()
+	select {
+	case code := <-status:
+		if code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("status = %d, want 413", code)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("oversized request waited for the account lock")
+	}
+}

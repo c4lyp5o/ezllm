@@ -28,6 +28,8 @@ ln -sfn "$V" "$DIR/current"
 
 ## 3. Sign in
 
+Opens a browser so you can sign in with the account that has the Claude plan.
+
 ```sh
 CLAUDE_CONFIG_DIR=~/.claude-sub ~/.local/share/claude-bridge/current/claude auth login
 ```

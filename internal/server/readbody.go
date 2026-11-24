@@ -26,7 +26,11 @@ func readBody(r *http.Request, max int64) (body []byte, tooLarge bool, err error
 		}
 		var probe [1]byte
 		n, err := r.Body.Read(probe[:])
-		if n == 0 && (err == io.EOF || err == nil) {
+		// An empty read without an error is not EOF.
+		for n == 0 && err == nil {
+			n, err = r.Body.Read(probe[:])
+		}
+		if n == 0 && err == io.EOF {
 			return body, false, nil
 		}
 		if err != nil && err != io.EOF {

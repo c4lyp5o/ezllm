@@ -123,7 +123,7 @@ func copilotCatalog(live []string) []string {
 func copilotLiveModels(bin string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, bin, "help", "config").Output()
+	out, err := exec.CommandContext(ctx, bin, "--no-auto-update", "help", "config").Output()
 	if err != nil {
 		return nil, fmt.Errorf("copilot help config: %w", err)
 	}

@@ -41,9 +41,11 @@ type Preflight struct {
 }
 
 // CLIVersion reads `copilot --version` ("GitHub Copilot CLI 1.0.105.") and
-// returns the version token, or "unknown" when the binary cannot be asked.
+// returns the version token, or "unknown" when the binary cannot be asked. Without
+// --no-auto-update a CLI hands over to the newest release unpacked in its cache,
+// so after a rollback it would report a version that turns do not run.
 func CLIVersion(bin string) string {
-	out, err := exec.Command(bin, "--version").Output()
+	out, err := exec.Command(bin, "--version", "--no-auto-update").Output()
 	if err != nil {
 		return "unknown"
 	}

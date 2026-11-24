@@ -200,3 +200,11 @@ func TestLiveToolsRefusesPlainAnswerWithoutPanicking(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// A CLI hands over to the newest unpacked release unless told not to.
+func TestCLIVersionReportsThisBinary(t *testing.T) {
+	bin := stubCLI(t, `case "$*" in *--no-auto-update*) echo "GitHub Copilot CLI 1.0.112.";; *) echo "GitHub Copilot CLI 1.0.114.";; esac`)
+	if got := CLIVersion(bin); got != "1.0.112" {
+		t.Fatalf("version = %q, want the binary's own 1.0.112", got)
+	}
+}

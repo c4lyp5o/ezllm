@@ -348,7 +348,7 @@ example [v2.2.0](https://github.com/c4lyp5o/ezllm/tree/v2.2.0), or see
 | [DEVELOPER.md](DEVELOPER.md) | Workflow, conventions, branches and releases |
 | [AGENTS.md](AGENTS.md) | Rules for AI agents and maintainers |
 | [docs/](docs/) | Every user doc |
-| [docs/design/](docs/design/README.md) | Design records, specs, audits and measurements (not needed to run ezllm) |
+| [docs/design/](docs/design/README.md) | Design records, specs and measurements (not needed to run ezllm) |
 
 ## License
 

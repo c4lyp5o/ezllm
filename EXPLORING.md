@@ -784,7 +784,7 @@ while the SAME model on `opencode-go` was 0/754.
 - Dashboard: Connect picks roles with independent checkboxes and shows a Prometheus job; the
   sidebar footer is three icon buttons; interface text was rewritten in plain language.
 
-### v2.0.0 — bridge caching, Codex fidelity, security remediation ✅ (2026-11-14; runbooks `docs/codex-bridge-runbook.md`, `docs/bridge-update-runbook.md`; audit `docs/design/security-audit-2026-11-14.md`)
+### v2.0.0 — bridge caching, Codex fidelity, security remediation ✅ (2026-11-14; runbooks `docs/codex-bridge-runbook.md`, `docs/bridge-update-runbook.md`)
 
 - `internal/codexbridge/cache.go` `borrowTemplate` / `forkTemplate` — empty
   persisted parent threads forked per request for prompt-cache affinity across

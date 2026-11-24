@@ -95,10 +95,9 @@ Antigravity CLI updates. Schema v36.
 First release after v1.8.1, and a major version because the bridge environment
 settings changed incompatibly (see Breaking below). It consolidates the bridge caching, Codex
 conversation-fidelity, CLI updater and security-audit work that ran in
-production as pre-release builds 1.8.2 and 1.9.0–1.14.3. The security audit,
-remediation and rollout records name those builds by their pre-release numbers.
+production as pre-release builds 1.8.2 and 1.9.0–1.14.3.
 Schema v35: drops `calls.tool_prune_shadow_tokens` from the shelved tool-pruning
-experiment (its 2,875 measurements are in `docs/design/tool-prune-shadow-results.json`).
+experiment.
 New environment settings: `EZLLM_CODEX_BRIDGE_CACHE`, `EZLLM_AGY_BRIDGE_CACHE`,
 `EZLLM_COPILOT_BRIDGE_CACHE`, `EZLLM_AGY_EXPERIMENTAL_TOOLS` and
 `EZLLM_CLAUDE_BRIDGE_CONCURRENCY` (see `docs/environment.md`).

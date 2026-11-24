@@ -40,7 +40,8 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 - **Neutral names.** Docs, examples, test fixtures and comments no longer name the
   maintainers' own accounts, hosts, clients or paths. `scripts/ezllm-mac.sh` defaults
   `EZLLM_USAGE_TZ` to UTC, and the live proof scripts default to `http://127.0.0.1:20129`,
-  with token files under `~/.config/ezllm/`.
+  with token files under `~/.config/ezllm/`. The exported request records and the
+  security audit reports are no longer in the repo.
 
 ## v2.2.0 — shared bridge admission, requests per turn, token counting, spend caps
 
@@ -181,7 +182,7 @@ ran in production before release; security records cite them by those numbers.
   "upstream attempts" notes only when a request retried. Schema v35 drops
   `calls.tool_prune_shadow_tokens` from the shelved tool-pruning experiment;
   its 2,875 measurements (11,850,055 shadow tokens, Oct 31 to Nov 4) were
-  exported to `docs/design/tool-prune-shadow-results.json` first. The migration runs
+  exported first. The migration runs
   once on startup and rewrites the `calls` table.
 - **Request explorer:** `/admin/requests` adds `summary.empty_steps` and a
   `hide_empty` filter; the dashboard shows a "no tokens" badge for zero-token
@@ -286,7 +287,7 @@ ran in production before release; security records cite them by those numbers.
   bind HTTP to localhost; private deployment files are excluded from image builds.
 - Replaces the audit's vulnerable-behavior probes with permanent rejection,
   redaction, cleanup and continuation regressions. Runtime rollout is separate
-  from the source fixes; see the dated remediation notes.
+  from the source fixes.
 
 ### Automatic Codex caching and noninteractive CLI defaults (pre-release 1.14.0)
 

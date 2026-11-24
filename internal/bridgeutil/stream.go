@@ -25,6 +25,7 @@ type Stream struct {
 	cancelled bool
 	stop      func() bool
 	done      chan struct{}
+	closeOnce sync.Once
 	err       error
 }
 
@@ -97,8 +98,10 @@ func (s *Stream) Flush() error {
 // Close must run after the handler's final write. Join cancellation before
 // clearing the deadline, so its callback cannot modify a reused connection.
 func (s *Stream) Close() {
-	if !s.stop() {
-		<-s.done
-	}
-	_ = s.rc.SetWriteDeadline(time.Time{})
+	s.closeOnce.Do(func() {
+		if !s.stop() {
+			<-s.done
+		}
+		_ = s.rc.SetWriteDeadline(time.Time{})
+	})
 }

@@ -12,7 +12,7 @@
 #   ./scripts/ezllm-mac.sh uninstall    unload + remove the plist (add --purge for data)
 #
 # Overridable environment (all optional):
-#   EZLLM_VERSION   release to install            (default 1.3.2)
+#   EZLLM_VERSION   release to install            (default: the latest)
 #   EZLLM_PREFIX    install root                  (default ~/ezllm)
 #   EZLLM_ADDR      listen address                (default 127.0.0.1:20129)
 #   EZLLM_USAGE_TZ  the one timezone: reports, budgets, schedules, logs (default UTC)
@@ -21,8 +21,7 @@
 #   EZLLM_TARBALL   local tarball, skips the download and its checksum
 set -euo pipefail
 
-VERSION="${EZLLM_VERSION:-1.3.2}"; VERSION="${VERSION#v}"   # accept 1.3.2 or v1.3.2
-TAG="v${VERSION}"
+REPO="https://github.com/c4lyp5o/ezllm"
 PREFIX="${EZLLM_PREFIX:-$HOME/ezllm}"
 LABEL="com.ezllm.gateway"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
@@ -31,7 +30,6 @@ CONF="$PREFIX/config.yaml"
 LOGS="$PREFIX/logs"
 ADDR="${EZLLM_ADDR:-127.0.0.1:20129}"
 TZNAME="${EZLLM_USAGE_TZ:-UTC}"
-HOST="https://github.com/c4lyp5o/ezllm/releases/download/${TAG}"
 TMP=""   # set in install_bin; the EXIT trap must see it at top level
 
 # ADDR is what we BIND; 0.0.0.0 and :: are not connectable hosts, so health
@@ -70,10 +68,32 @@ sha256_of() { # file -> 64-hex digest
 
 # ---------------------------------------------------------------- install
 
+# The release to install, as X.Y.Z: EZLLM_VERSION (with or without the v), the
+# local tarball's own name, or whatever GitHub's latest-release page redirects to.
+resolve_version() {
+    local v="${EZLLM_VERSION:-}" url
+    if [ -z "$v" ] && [ -n "${EZLLM_TARBALL:-}" ]; then
+        v=$(basename "$EZLLM_TARBALL" | sed -n 's/^ezllm_v\(.*\)_darwin_.*$/\1/p')
+        [ -n "$v" ] || die "cannot read a version from $EZLLM_TARBALL: set EZLLM_VERSION"
+    elif [ -z "$v" ]; then
+        url=$(curl -fsSLI --retry 3 -o /dev/null -w '%{url_effective}' "$REPO/releases/latest") \
+            || die "cannot look up the latest release: set EZLLM_VERSION, for example 2.2.0"
+        v="${url##*/}"
+    fi
+    v="${v#v}"
+    case "$v" in
+        [0-9]*.[0-9]*.[0-9]*) printf '%s' "$v" ;;
+        *) die "not a release version: '$v' (set EZLLM_VERSION, for example 2.2.0)" ;;
+    esac
+}
+
 install_bin() {
-    local arch name tarball want got
+    local arch name tarball want got VERSION TAG HOST
+    VERSION=$(resolve_version) || exit 1
+    TAG="v${VERSION}"
+    HOST="$REPO/releases/download/${TAG}"
     arch=$(detect_arch)
-    # Release assets carry the git tag, so the name has the "v": ezllm_v1.3.2_…
+    # Release assets carry the git tag, so the name has the "v": ezllm_v2.2.0_…
     name="ezllm_${TAG}_darwin_${arch}"
     tarball="${name}.tar.gz"
 

@@ -345,9 +345,12 @@ and the agent:
 ./scripts/ezllm-mac.sh status      # launchd state, health, last log lines
 ```
 
-It also takes `stop`, `restart`, `logs`, and `uninstall [--purge]`. Override
-`EZLLM_VERSION`, `EZLLM_PREFIX`, `EZLLM_ADDR`, `EZLLM_USAGE_TZ` or
-`EZLLM_LOG_LEVEL` from the environment.
+`install` gets the latest release. To choose one, set `EZLLM_VERSION`, for example
+`EZLLM_VERSION=2.2.0`. To update, back up first ([section 7](#7-upgrade-and-roll-back)),
+then `stop`, `install` and `start`.
+
+It also takes `restart`, `logs`, and `uninstall [--purge]`. Override `EZLLM_PREFIX`,
+`EZLLM_ADDR`, `EZLLM_USAGE_TZ` or `EZLLM_LOG_LEVEL` from the environment.
 
 macOS specifics:
 

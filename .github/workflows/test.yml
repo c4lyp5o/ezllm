@@ -53,6 +53,9 @@ jobs:
           GOGC: "50"
         run: go test -count=1 -timeout 15m ./...
 
+      - name: 🍎 macOS installer
+        run: python3 -m unittest scripts/ezllm_mac_test.py
+
       # Every release target (scripts/release-assets.sh) must compile, so an
       # OS-specific API breaks the gate, not the release job after a tag (v1.0.0's
       # first run failed on windows: syscall.Setpgid).

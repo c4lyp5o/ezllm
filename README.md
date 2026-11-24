@@ -126,26 +126,26 @@ If something fails:
 
 A bridge lets ezllm send requests through a vendor's official CLI, signed in to
 your subscription. Each bridge is optional and off by default. Finish the
-dashboard setup first, then follow **[Turn on a bridge](docs/bridge-setup.md)**: one
-recipe per plan, with a checker and what to do when it does not start.
+dashboard setup first, then follow the page for your plan. Not working?
+[Troubleshooting](docs/bridges/troubleshooting.md).
 
-| Plan | Recipe | Reference | Notes |
+| Plan | Turn it on | Reference | Notes |
 |---|---|---|---|
-| Claude Pro/Max | [Turn on](docs/bridge-setup.md#claude) | [Claude bridge](docs/claude-bridge-runbook.md) | |
-| ChatGPT Plus/Pro | [Turn on](docs/bridge-setup.md#chatgpt-codex) | [Codex bridge](docs/codex-bridge-runbook.md) | Linux. Client tools need Landlock. |
-| GitHub Copilot | [Turn on](docs/bridge-setup.md#github-copilot) | [Copilot bridge](docs/copilot-bridge-runbook.md) | Client tools, and PNG/JPEG images with a vision-capable model. |
-| Google Antigravity | [Turn on](docs/bridge-setup.md#google-antigravity) | [Antigravity bridge](docs/agy-bridge-runbook.md) | Linux. Text and client tools; no image input. |
+| Claude Pro/Max | [Turn on](docs/bridges/claude.md) | [Claude bridge](docs/claude-bridge-runbook.md) | |
+| ChatGPT Plus/Pro | [Turn on](docs/bridges/codex.md) | [Codex bridge](docs/codex-bridge-runbook.md) | Linux. Client tools need Landlock. |
+| GitHub Copilot | [Turn on](docs/bridges/copilot.md) | [Copilot bridge](docs/copilot-bridge-runbook.md) | Client tools, and PNG/JPEG images with a vision-capable model. |
+| Google Antigravity | [Turn on](docs/bridges/antigravity.md) | [Antigravity bridge](docs/agy-bridge-runbook.md) | Linux. Text and client tools; no image input. |
 
 Each bridge signs in to its own folder (`~/.claude-sub`, `~/.codex-sub`,
 `~/.copilot-sub`, `~/.agy-sub`), never your everyday one, so signing out of your own
 CLI does not break it. If a bridge is on but something it needs is missing, ezllm
-refuses to start and says why in `docker compose logs ezllm`. Requests through a
+refuses to start and says why in `docker logs ezllm`. Requests through a
 bridge, including key tests, use your plan's quota.
 
 ### Recommended cache settings
 
 Prompt caching makes long conversations cheaper and faster, and uses less of
-your plan. From 2.0.0 every bridge caches by default, so there is nothing to
+your plan. Every bridge caches by default, so there is nothing to
 set: Codex uses its prompt cache whenever the CLI supports it, Copilot keeps
 workers warm and reuses finished conversations, and Antigravity resumes
 conversations (its caller-tool adapter, which the cache rides on, is on by
@@ -319,6 +319,10 @@ transport in `internal/bridgeutil` ([design](docs/shared-bridge-transport-design
 
 ## Documentation
 
+The docs describe the version they ship with. Running another one? Open its tag, for
+example [v2.2.0](https://github.com/c4lyp5o/ezllm/tree/v2.2.0), or see
+[upgrading](docs/upgrading.md).
+
 | Document | Contents |
 |---|---|
 | [docs/install-binary.md](docs/install-binary.md) | Installing a released binary: platforms, checksums, service units, upgrades |
@@ -329,7 +333,8 @@ transport in `internal/bridgeutil` ([design](docs/shared-bridge-transport-design
 | [docs/recovery-runbook.md](docs/recovery-runbook.md) | Encrypted backups, restore and upgrades |
 | [docs/master-key-runbook.md](docs/master-key-runbook.md) | Key encryption: paths, backup, rotation |
 | [docs/pricing-runbook.md](docs/pricing-runbook.md) | Model price catalog: refresh, import, query |
-| [docs/bridge-setup.md](docs/bridge-setup.md) | Turning on a bridge: one recipe per plan, with a checker |
+| [docs/bridge-setup.md](docs/bridge-setup.md) | Turning on a bridge: one page per plan, and troubleshooting |
+| [docs/upgrading.md](docs/upgrading.md) | What to change when you come from an older version |
 | [docs/claude-bridge-runbook.md](docs/claude-bridge-runbook.md) | Claude subscription bridge |
 | [docs/codex-bridge-runbook.md](docs/codex-bridge-runbook.md) | ChatGPT subscription bridge, including model choice for long tool tasks |
 | [docs/copilot-bridge-runbook.md](docs/copilot-bridge-runbook.md) | GitHub Copilot subscription bridge |

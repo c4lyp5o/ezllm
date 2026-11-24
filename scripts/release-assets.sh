@@ -13,7 +13,7 @@ for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; d
 	exe=ezllm
 	[ "$os" = windows ] && exe=ezllm.exe
 	echo "--- $target"
-	CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags="-s -w" -o "$out/$name/$exe" ./cmd/ezllm
+	CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags="-s -w -X github.com/c4lyp5o/ezllm/internal/server.DocsRef=$version" -o "$out/$name/$exe" ./cmd/ezllm
 	cp config.example.yaml README.md "$out/$name/"
 	if [ "$os" = windows ]; then
 		# python3 -m zipfile: no zip(1) dependency.

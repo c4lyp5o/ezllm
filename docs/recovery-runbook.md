@@ -5,6 +5,7 @@ the old binary/image and the verified pair until the upgraded instance passes
 health, account access, and representative routing checks. A newer database
 schema is not necessarily readable by the old binary; rollback uses the old
 binary with the pre-upgrade database/key pair in a separate stopped instance.
+What to change per version: [upgrading](upgrading.md).
 
 ## Interrupted legacy combo rebuild
 

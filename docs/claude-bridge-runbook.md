@@ -1,28 +1,7 @@
 # Claude subscription runbook
 
-Operating the Claude subscription surface. Decisions live in
-`claude-subscription-design.md`; this is the how.
-
-## Quick setup
-
-Start with a working ezllm installation and dashboard ([quick start](../README.md#quick-start)).
-This guide uses Docker Compose on a Linux host. You need a Claude subscription,
-the official CLI, and a separate login for the bridge. Validation and test
-requests use subscription quota. Each step links to more detail below. New to this?
-Follow [Turn on a bridge](bridge-setup.md#claude) instead.
-
-1. **Install the CLI on the host** and pin a copy outside the updater's folder
-   ([prerequisites](#prerequisites)):
-   `curl -fsSL https://claude.ai/install.sh | bash`, then copy the version file.
-2. **Log in to a separate folder** — never your everyday `~/.claude`:
-   `CLAUDE_CONFIG_DIR=~/.claude-sub ~/.local/share/claude-bridge/current/claude auth login`.
-3. **Turn it on** in `compose.yml`: uncomment the two Claude mounts, set `USER`
-   and `LOGNAME` to the login's owner, set `EZLLM_CLAUDE_BRIDGE: "on"`, then
-   `docker compose up -d` ([enable](#enable)).
-4. **Add the account** in the dashboard: Providers → Add provider →
-   **Claude Pro/Max** → Save & validate key. The dialog shows whether the bridge
-   is running; there is no key to paste ([wire it in](#wire-it-into-ezllm)).
-5. **Cap it** under Rules before any agent uses it ([drain cap](#wire-it-into-ezllm)).
+How the Claude bridge behaves, its limits and its caps. **To turn it on, follow
+[Turn on Claude](bridges/claude.md).** Design: `claude-subscription-design.md`.
 
 ## What it is
 
@@ -32,85 +11,30 @@ Claude Code CLI** against a Claude subscription login. ezllm sees it as a plain
 `anthropic-compatible` account. The CLI is the only thing that talks to Anthropic —
 nothing else ever holds the subscription credential. One container, no sidecar.
 
-## Prerequisites
+## Boot and CLI releases
 
-- The official CLI binary, pinned by path (qualified: **2.1.306**). Install it on
-  the host with the official installer (`curl -fsSL https://claude.ai/install.sh | bash`),
-  then pin a copy as `~/.local/share/claude-bridge/VERSION/claude` with a `current` link. Pin a **copy**, never
-  a file under `~/.local/share/claude/versions/`: the CLI's auto-updater deletes old
-  versions there, and a deleted file under a live bind mount keeps working only
-  until the next container recreate, which then fails the boot (2.1.299 was lost
-  this way, 2026-10-21).
+With the bridge on, a missing CLI or an unusable login directory **fails the boot
+loudly**: this process would otherwise look healthy while every subscription request
+fails. The bind is loopback-enforced. The account's shared secret generates itself into
+`data/claude-bridge.token` (0600) on first boot.
 
-  ```sh
-  CLI=$(readlink -f "$(command -v claude)")
-  V=$("$CLI" --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-  mkdir -p ~/.local/share/claude-bridge/"$V"
-  cp "$CLI" ~/.local/share/claude-bridge/"$V"/claude
-  ln -sfn "$V" ~/.local/share/claude-bridge/current   # relative: the container follows it
-  ```
-- A subscription login in its own config dir, never the interactive one:
+Run a pinned **copy** of the CLI, as the setup page does, never a file under
+`~/.local/share/claude/versions/`: the CLI's auto-updater deletes old versions there, and
+the next container recreate then fails the boot.
 
-  ```sh
-  CLAUDE_CONFIG_DIR=~/.claude-sub ~/.local/share/claude-bridge/current/claude auth login
-  CLAUDE_CONFIG_DIR=~/.claude-sub ~/.local/share/claude-bridge/current/claude auth status   # loggedIn + subscriptionType
-  ```
-
-- Nothing else: the account's shared secret **auto-generates** into
-  `./data/claude-bridge.token` (0600) on first boot and lives on the data volume,
-  so it is backed up with the ledger.
-
-## Enable
-
-In your `compose.yml` (from `compose.example.yml`): uncomment the two Claude
-mounts (the bridge root read-only at `/opt/claude-bridge`, the login read-write at
-`/claude-sub`), set `USER`/`LOGNAME` to the login's owner (the CLI's login check
-reads process identity), and set `EZLLM_CLAUDE_BRIDGE: "on"`. The default `EZLLM_CLAUDE_BIN` is
-`/opt/claude-bridge/current/claude`, the layout made above. Replace `/home/you`
-and the login name below with your actual host values; keep the existing
-`environment` and `volumes` entries for ezllm's data and config.
-
-```yaml
-    environment:
-      EZLLM_CLAUDE_BRIDGE: "on"
-      USER: your-login
-      LOGNAME: your-login
-    volumes:
-      - /home/you/.local/share/claude-bridge:/opt/claude-bridge:ro
-      - /home/you/.claude-sub:/claude-sub
-```
-
-The Compose service user must be able to execute the copied CLI and read and
-write the login directory.
-
-```sh
-docker compose up -d
-docker logs ezllm | grep -i "claude bridge"   # cli version + release + login + plan + flag drift
-```
-
-On a host without a CLI + login, set `EZLLM_CLAUDE_BRIDGE=off`. Enabling it without
-either **fails the boot loudly** — this process would otherwise look healthy while
-every subscription request fails. The bind is loopback-enforced: a non-loopback
-address is refused.
-
-A CLI other than 2.1.306 boots and serves; `cli_release` reports it
-`unqualified` until the live proof has been re-run and recorded in `qualified.json`.
-
-**Gate a release before promoting it.** `ezllm bridge-check claude` runs the boot
-checks against a staged CLI and exits non-zero on any problem — stricter than
-boot, which reports flag drift and keeps serving. `--json` prints the verdict
-(`ok`, `version`, `release`, `live`, `problems`) for the bridge updater
-(`SPEC-bridge-update.md`). `--live` then drives real turns through the bridge
-(plan quota, the shared login) — only when every static check passed. A version the updater proved is listed in
-`qualified.json` in the bridge directory (next to the version folders, up to two
-levels above the binary); boot then reports it qualified.
+`ezllm bridge-check claude` runs the boot checks against a staged CLI and exits non-zero
+on any problem, stricter than boot, which reports flag drift and keeps serving. `--json` prints the verdict (`ok`, `version`, `release`, `live`,
+`problems`) for the [updater](bridge-update-runbook.md). `--live` then drives real turns
+through the bridge (plan quota, the shared login), only when every static check passed.
+A version the updater proved is listed in `qualified.json` in the bridge directory, and
+boot reports it qualified; any other version still boots and is reported `unqualified`.
 
 ## Wire it into ezllm
 
-1. **Account** (dashboard → Providers → Add provider → **Claude Pro/Max**).
+1. **Account** (dashboard → Providers → Add provider → **Claude Pro/Max (bridge)**).
    The preset fills in everything below, shows the bridge's CLI version, login
-   and plan, and supplies the key itself — Save & validate key is the whole step. If it says the bridge is not running, go back to [Enable](#enable).
-   By hand (API or an older dashboard):
+   and plan, and supplies the key itself — Save & validate key is the whole step.
+   By hand (API):
    - kind `anthropic-compatible`
    - base URL `http://127.0.0.1:8790/v1`
    - key: `cat data/claude-bridge.token` (on the host; the file is gitignored)
@@ -137,7 +61,7 @@ levels above the binary); boot then reports it qualified.
    stays out of agent combos; its cap of 1 is a backstop, since one call still
    passes per block.
 
-## Tools (M2)
+## Tools
 
 Client tools pass through to upstream unchanged and come back as `tool_use` under
 their own names; nothing runs inside the bridge or the CLI. The client executes its
@@ -206,12 +130,3 @@ shape the Providers page already draws — **rolling** = the 5-hour window,
 `EZLLM_CLAUDE_BRIDGE=off` and recreate the container, then disable the account (or
 delete the combo) in the dashboard. No schema, no other provider, and no client
 configuration is affected.
-
-## Shared transport status
-
-Claude uses `internal/bridgeutil` for streaming byte writes, flushing,
-write deadlines and cancellation cleanup as of v1.8.0. Its event format,
-authentication, accounting and CLI lifecycle remain provider-specific.
-
-Claude and Antigravity are migrated; Codex and Copilot still need expansion.
-See [shared transport status and remaining work](shared-bridge-transport-design.md).

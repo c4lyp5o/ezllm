@@ -1,139 +1,32 @@
 # GitHub Copilot subscription bridge — runbook
 
-Replaces the retired OAuth/device-flow provider. The official Copilot CLI runs
-behind a loopback listener; ezllm never speaks Copilot's private API and never
-mints a session token. Design: `docs/copilot-cli-bridge-design.md`.
+How the Copilot bridge behaves, its limits and its costs. **To turn it on, follow
+[Turn on GitHub Copilot](bridges/copilot.md).** The official Copilot CLI runs behind a
+loopback listener; ezllm never speaks Copilot's private API and never mints a session
+token. Design: `docs/copilot-cli-bridge-design.md`.
 
 ## What runs
 
 `internal/copilotbridge` serves `/healthz`, `/status`, `/v1/models` and
 `/v1/chat/completions` on `127.0.0.1:8793` (loopback only, bearer-gated with the
 bridge token). Requests use `copilot --headless --stdio` with a fresh session.
-Since 2.0.0 the warm pool is on by default and reuses only successfully
+The warm pool is on by default and reuses only successfully
 cleaned-up processes. Plain text can fall back to `copilot -p`; requests carrying
 tools or images cannot take that fallback. Prompts and native image blobs travel
 on stdin, not argv.
 
+## Boot and CLI cache
 
-## Install the CLI (first time)
+Boot fails loudly if the CLI is missing or `EZLLM_COPILOT_HOME` is not a directory: a
+bridge that started without a login would look healthy while every request 401s. Every
+setting: [environment.md](environment.md).
 
-New to this? Follow [Turn on a bridge](bridge-setup.md#github-copilot) instead.
+The CLI unpacks a ~236 MB package into its cache on first run. The setup page points
+`XDG_CACHE_HOME` at `/data/copilot-cache` so that survives restarts; without it the
+bridge uses a temp dir and unpacks again every time.
 
-The container runs a CLI from the host: `~/.local/share/copilot-bridge` holds one
-folder per version and a `current` link, mounted at `/opt/copilot-bridge`. Create
-it before turning the bridge on. Run this on the Docker host as the user the
-container runs as (on arm64, use `copilot-linux-arm64.tar.gz`):
-
-```sh
-V=1.0.114      # ezllm v2.2.0 or earlier: use V=1.0.112
-ASSET=copilot-linux-x64.tar.gz
-URL="https://github.com/github/copilot-cli/releases/download/v$V"
-ROOT=~/.local/share/copilot-bridge
-mkdir -p "$ROOT/$V" ~/.copilot-sub && chmod 700 ~/.copilot-sub
-cd "$(mktemp -d)"
-curl -fLO "$URL/$ASSET" && curl -fLO "$URL/SHA256SUMS.txt" &&
-  sha256sum -c --ignore-missing SHA256SUMS.txt &&
-  tar xzf "$ASSET" -C "$ROOT/$V" &&
-  ln -sfn "$V" "$ROOT/current"
-```
-
-Keep the link relative, as above: an absolute host path does not exist inside
-the container. The bridge speaks headless protocols 3 and 4 and was proven live
-on 1.0.112 (protocol 3) and 1.0.114 (protocol 4). **On ezllm v2.2.0 or earlier,
-use `V=1.0.112`**: those speak protocol 3 only, so 1.0.113 and newer start but
-refuse client tools. Run `bridge-check` before using any other release. Then
-[sign in](#enabling-it), add the mounts below and recreate the container.
-
-`bridge_update.py --init` does not do this: it only converts an older mount of a
-running container.
-
-### `does not resolve to the official Copilot CLI`
-
-`EZLLM_COPILOT_BRIDGE` is `on` but the container has no CLI at
-`EZLLM_COPILOT_BIN`, so ezllm does not start. If you do not use Copilot, set the
-bridge to `"off"`. Otherwise check, on the host:
-
-```sh
-ls -la ~/.local/share/copilot-bridge/           # current -> a version folder, not a / path
-ls -la ~/.local/share/copilot-bridge/current/   # an executable `copilot`
-```
-
-An empty folder usually means Docker created it because the mount's source was
-missing. If both look right, the `volumes:` line is missing or names another
-path; fix it and run `docker compose up -d --force-recreate ezllm`.
-
-## Enabling it
-
-| Env | Meaning |
-|---|---|
-| `EZLLM_COPILOT_BRIDGE=on` | starts the surface |
-| `EZLLM_COPILOT_BIN` | CLI binary (default `/opt/copilot-bridge/current/copilot`) |
-| `EZLLM_COPILOT_HOME` | the bridge's own login directory (default `/copilot-sub`) |
-| `EZLLM_COPILOT_BRIDGE_ADDR` | default `127.0.0.1:8793`, must be loopback |
-| `EZLLM_COPILOT_BRIDGE_TOKEN_FILE` | shared secret (default `/data/copilot-bridge.token`); minted 0600 on first boot |
-
-Compose sketch:
-
-```yaml
-    environment:
-      EZLLM_COPILOT_BRIDGE: "on"
-      EZLLM_COPILOT_HOME: /copilot-sub
-      EZLLM_COPILOT_BRIDGE_ADDR: 127.0.0.1:8793
-    volumes:
-      - /home/<user>/.local/share/copilot-bridge:/opt/copilot-bridge:ro  # bridge root
-      - /home/<user>/.copilot-sub:/copilot-sub   # the login (read-write: the CLI
-                                              # writes session state)
-      - ./data:/data
-```
-
-**Image base.** The CLI links `libstdc++`/`libgcc_s`, so the image runs on
-`distroless/cc-debian12`, not `base`. On `base` the bridge boots with
-`cli=unknown` and every turn fails with "error while loading shared libraries".
-
-**Cache directory.** The CLI unpacks a ~236 MB bundled package into its cache on
-first run, and a container uid has no home (`HOME=/`), so it fails with
-`EACCES: mkdir '/.cache'`. The bridge defaults the child's `XDG_CACHE_HOME` to a
-temp dir; set `XDG_CACHE_HOME: /data/copilot-cache` in compose so the unpack
-survives restarts.
-
-**Login.** Sign the bridge in to its own folder, `~/.copilot-sub`, never your
-everyday `~/.copilot` — the same `*-sub` layout as the Claude, Codex and
-Antigravity bridges. A personal `~/.copilot` also carries your sessions,
-plugins and IDE links, and signing out there would break the bridge. Run this
-once on the host, with the same CLI binary the bridge mounts:
-
-```sh
-env -u DBUS_SESSION_BUS_ADDRESS COPILOT_HOME=~/.copilot-sub \
-  ~/.local/share/copilot-bridge/current/copilot login --device-code
-ls ~/.copilot-sub/config.json   # the stored login the container reads
-```
-
-Use the host path of the binary the bridge mounts. It prints a
-URL and a code; open the URL, enter the code and approve with the GitHub account
-that has the Copilot plan. Unsetting D-Bus matters on a desktop host: with a
-keyring available the CLI stores the token there, where the container cannot
-reach it; without one it writes `config.json` in `COPILOT_HOME`.
-
-### CLI will not start vs. login failed
-
-If `env` reports `No such file or directory`, the example staged path is
-missing and sign-in never started. In WSL, run `type -a copilot` and use
-the absolute path to the native Linux CLI, not the Windows VS Code shim
-under `/mnt/c`. If installed with NVM, run from a shell with NVM loaded.
-Keep `COPILOT_HOME` set and D-Bus unset when retrying. A nonempty
-`config.json` confirms the file exists, not that live requests work. For
-deployment, use the binary the bridge mounts.
-
-Boot fails loudly if `EZLLM_COPILOT_HOME` is not a directory — a bridge that
-started without a login would look healthy while every request 401s.
-
-**Upgrading from before 2.0.0.** The default login directory changed from
-`/copilot-home` to `/copilot-sub`, and there is no fallback. Log in to
-`~/.copilot-sub` as above, change the mount to `~/.copilot-sub:/copilot-sub`,
-set `EZLLM_COPILOT_HOME: /copilot-sub` (or remove the variable to use the
-default) and recreate the container (`docker compose up -d --no-build`). A
-deployment that still mounts `/copilot-home` without setting the variable
-refuses to start, naming the missing directory.
+The bridge speaks headless protocols 3 and 4, proven live on CLI 1.0.112 and 1.0.114.
+Run [`bridge-check`](#gates-and-updates) before using any other release.
 
 ## Adding the provider
 
@@ -141,31 +34,6 @@ Providers → Add provider → **GitHub Copilot (bridge)**. No key to paste: the
 server resolves the bridge token on the key-add call (`kind: copilot-bridge`,
 base `http://127.0.0.1:8793/v1`). If the bridge is off, the add answers 409
 naming the env var.
-
-## Migrating a database that still carries an OAuth account
-
-A pre-retirement database keeps its `kind: github-copilot` account, and nothing
-stops the router from booting with it — measured on 2026-11-05 with the shipped
-binary and a planted row:
-
-- **Boot: UP.** No refusal, no warning; the account still appears in
-  `/admin/accounts` with `enabled: true`, so the dashboard looks healthy.
-- **Every request through it fails**, and this is the only signal:
-  `502 provider: unknown kind "github-copilot" (want one of [opencode-go
-  openai-compatible anthropic-compatible gemini-openai gemini-web claude-web
-  copilot-bridge])`.
-
-So the migration is not optional and it is not automatic — the old account is a
-trap that looks fine until traffic arrives. In the deploy window:
-
-1. Providers → Add provider → **GitHub Copilot (bridge)**, namespace `copilot`,
-   then Save & validate (no key to paste; the bridge must be running).
-2. Point every combo/hop that named the old account at the new one. A combo
-   referencing a dead account keeps failing even after the new one exists.
-3. Disable (or delete) the `github-copilot` account so it stops looking usable.
-4. Drive one real turn through the new hop and check `/admin/requests`: the hop
-   must show `copilot-bridge` and a usage row with a cached split. Then drive
-   one turn from a tool-using client: `/status` `client_tools` must say `native`.
 
 ## Models
 
@@ -292,14 +160,8 @@ environment (`env -i`, no session stores) the same call answers
 {"bridge":"copilot","ok":true,"version":"1.0.105","release":"qualified","live":true,"problems":[]}
 ```
 
-**Optional managed updates.** The host updater now supports Copilot through
-stable, digest-verified official releases and the same gate/promotion/recovery
-flow as the other bridges. It is disabled in updater defaults until you migrate
-the legacy standalone binary mount to `/opt/copilot-bridge` and point
-`EZLLM_COPILOT_BIN` at `/opt/copilot-bridge/current/copilot`. Initialization copies
-the existing binary without replacing it. Follow the
-[bridge update runbook](bridge-update-runbook.md) before enabling it.
-The live gate honors warm-pool mode and closes its workers when finished.
+**Managed updates.** The [updater](bridge-update-runbook.md) supports Copilot and is
+off for it by default; set `bridges.copilot.enabled` to turn it on. The live gate honors warm-pool mode and closes its workers when finished.
 
 **Version-sensitive:** a release that renames `session.usage_checkpoint` records
 usage as unknown (zeros). Parser fixtures in `internal/copilotbridge/bridge_test.go`
@@ -338,7 +200,7 @@ on first-response latency alone. Measured examples and limitations are in
 
 ## Warm CLI processes
 
-Process reuse is on by default since 2.0.0. Set
+Process reuse is on by default. Set
 `EZLLM_COPILOT_BRIDGE_WARM_POOL=off` and restart to go back to one process per
 request. Accepted enabled values are `on`, `true`, `1`, or unset; disabled
 values are `off`, `false`, `0`. Invalid values fail startup.
@@ -366,7 +228,7 @@ are still cold, and model processing time is unaffected by process reuse.
 
 ## Completed-conversation cache
 
-On by default since 2.0.0: unset, `EZLLM_COPILOT_BRIDGE_CACHE` follows
+On by default: unset, `EZLLM_COPILOT_BRIDGE_CACHE` follows
 the warm pool. Set it to `off` to disable it; an explicit `on` with the warm
 pool off fails startup.
 A matching request must supply the unchanged prior messages and assistant answer,
@@ -392,15 +254,6 @@ mode; cache mode adds one small call to its live gate.
 
 See [the cache design and measured evidence](copilot-completed-session-cache-design.md)
 for matching, accounting, lifecycle and experiment limits.
-
-## Shared transport status
-
-Copilot still uses its own streaming transport. **Migration to the shared
-`internal/bridgeutil` transport remains outstanding.** The current bridge
-continues operating independently; no shared lifecycle migration has shipped.
-
-Claude and Antigravity are migrated; Codex and Copilot still need expansion.
-See [shared transport status and remaining work](shared-bridge-transport-design.md).
 
 ## Image input
 

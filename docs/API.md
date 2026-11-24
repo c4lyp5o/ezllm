@@ -13,7 +13,7 @@ token (`Authorization: Bearer …` or `x-api-key`) on `/v1/*`; on `/admin/*` an 
 dashboard session (bearer or the `ezllm_session` cookie); on `/metrics` a token with the `metrics`
 role and nothing else (not an admin token, not the dashboard session). Inference routes (every `/v1/*` route and the VS Code
 alias) need a token with the `infer` role: any other valid token gets `403 forbidden`
-"infer role required" (v2.1.0; before, any valid token could call models).
+"infer role required".
 
 **Sign-in and setup limits.** Failed guesses and in-flight attempts share a
 per-source limit of five: failures count for 15 minutes and in-flight attempts
@@ -39,11 +39,11 @@ Errors are OpenAI-shaped: `{"error":{"type":"...","message":"...","code":422}}`.
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/healthz` | no auth; **liveness + release version** — `{"status":"ok","version":"2.2.0"}` after a DB ping (503 `{"status":"down","version":"…"}` if the ping fails). Version is the only extra field; no counts/paths/uptime. |
-| GET | `/metrics` | Prometheus text exposition (v2.1.0). A token with the `metrics` role only; any other token → 403, the dashboard session → 401. Counters come from committed ledger rows, so a request does no metrics work. Names, labels and auth: [metrics.md](metrics.md). |
+| GET | `/metrics` | Prometheus text exposition. A token with the `metrics` role only; any other token → 403, the dashboard session → 401. Counters come from committed ledger rows, so a request does no metrics work. Names, labels and auth: [metrics.md](metrics.md). |
 | GET | `/v1/models?protocol=` | `openai` (default) / `anthropic` shape; ids are `<namespace>/<model>`, plus one bare id per **enabled** combo |
 | POST | `/v1/chat/completions` | OpenAI stream + non-stream |
 | POST | `/v1/messages` | Anthropic (`x-api-key` or Bearer) |
-| POST | `/v1/messages/count_tokens` | Anthropic token count → `{"input_tokens":N}` (v2.2.0). The model resolves like `/v1/messages`; up to three candidate hops on the Anthropic wire are asked in order (parked hops skipped, failures never park a hop). When none answers (bridges, translated hops, gateways without the endpoint) the gateway estimates over `system`, `messages`, `tools` and `tool_choice` (2 characters per token over the JSON; Anthropic measured about 2.35 on Sonnet 5.5, so the estimate runs about 15–20% high on purpose). `X-Ezllm-Token-Count: upstream\|estimate` says which. Same auth and model allowlist as `/v1/messages`; no ledger row, no budget. |
+| POST | `/v1/messages/count_tokens` | Anthropic token count → `{"input_tokens":N}`. The model resolves like `/v1/messages`; up to three candidate hops on the Anthropic wire are asked in order (parked hops skipped, failures never park a hop). When none answers (bridges, translated hops, gateways without the endpoint) the gateway estimates over `system`, `messages`, `tools` and `tool_choice` (2 characters per token over the JSON; Anthropic measured about 2.35 on Sonnet 5.5, so the estimate runs about 15–20% high on purpose). `X-Ezllm-Token-Count: upstream\|estimate` says which. Same auth and model allowlist as `/v1/messages`; no ledger row, no budget. |
 | POST | `/v1/responses` | OpenAI Responses |
 | POST | `/v1/embeddings`, `/v1/images/generations`, `/v1/audio/speech`, `/v1/audio/transcriptions` | Service surfaces (M10); transcriptions is multipart |
 | POST | `/v1/images/edits` | OpenAI image edit/inpaint — **multipart** (`model` form field swapped per hop) |
@@ -81,10 +81,7 @@ did not have a fault. A caller still reading receives
 
 **Precedence over a parked fallback.** When the last hop answers a failover status, that response is
 held so it can be committed if nothing else serves. A cancellation that arrives afterwards **discards
-it** and returns `499`. A hop's error must never be reported as the reason a cancelled call ended —
-before v1.3.3 that path committed the parked response and returned a nil error, so the ledger recorded
-a `503` against the hop instead of the caller leaving, and whether it happened depended on whether the
-hop's transport or its already-written response won the race.
+it** and returns `499`. A hop's error must never be reported as the reason a cancelled call ended.
 
 `/v1/models` rows: namespaced ids carry the upstream's `owned_by` and, once probed, a `protocol`
 map. A combo row is bare (`owned_by: "ezllm"`) and adds a non-standard `combo` key —
@@ -173,7 +170,6 @@ A fresh database is seeded with an empty, enabled `ezllm-auto-free` combo (`true
 **Combo PATCH semantics:** omitted fields keep their stored value; `compression_profile_id: null` clears the binding. `context_size` is required positive integer when supplied, defaults to 200000 on creation, and is emitted only on combo rows.
 
 **Combo failover cooldown:** transport failures/timeouts and upstream 5xx responses cool only that account endpoint for 5 minutes. Model-specific 401/403/404/429 responses remain failover-able but do not mark the endpoint dead. A 401/403 whose body names model access (`access to model denied`, `model access denied`, `does not have access to`, `no access to model`) parks only that model on that endpoint for the same 5 minutes, and only when another candidate exists. After expiry exactly one half-open probe is admitted; if every candidate is cooling down, no upstream request is sent. When all attempted hops returned an upstream failover response, the last permitted response is returned rather than issuing another call.
-
 
 Dashboard payload. One call so the first paint is a single round trip. (Admin-gated — this is
 where the detail that `/healthz` no longer leaks lives.)
@@ -345,7 +341,7 @@ Add `?force=true` to delete anyway (cascades: keys, models, quota rows).
 { "label":"primary", "bridge":"claude-sub" }
 ```
 Bridge ids are `claude-sub`, `chatgpt-sub`, `antigravity-sub` and `copilot-sub` (each the key of
-its provider preset; the Copilot bridge was `github-copilot` before 2.2.0) — the
+its provider preset) — the
 last one belongs to the `copilot-bridge` kind (the Copilot CLI), whose base URL
 is `http://127.0.0.1:8793/v1` and whose credential is the CLI's own login, so
 there is no key to paste at all.
@@ -394,8 +390,7 @@ carries the status the one-shot path would have used in its `status` field (and 
 inside — identical bytes, single source: `keyTestError`). Clients that do not send the header get
 the historical one-shot JSON unchanged. Clients must not assume a status line for streamed
 failures — branch on the terminal line's `type`.
-**`format` no longer inspects the key.** Since 2026-10-10 all shape checks (empty, whitespace,
-min/max length, `sk-` prefix) were removed — providers change key formats and the upstream probe
+**`format` does not inspect the key** — providers change key formats and the upstream probe
 is the real validator; the step still fails here for an unregistered `kind`. The `format` step
 name is kept stable — the UI maps it to a chip and the 422 body names it.
 A **public `/models`** (Command Code returns 200 with no auth) proves nothing: the catalog step
@@ -409,9 +404,11 @@ Retries set to 3 after the initial call per hop. When all four total attempts fa
 The subscription bridges this build knows, whether each is running in this process, and how to
 turn one on. The dashboard's Add provider dialog reads it for the bridge presets. `status` is
 the bridge's own boot report (its loopback `/status`), present only while it runs. The shared
-secret is never in the response — a key add names `bridge` instead.
+secret is never in the response — a key add names `bridge` instead. `setup` (turn-it-on page) and
+`runbook` (reference) are repo paths; `docs` is the base URL that opens them at the version of this
+build.
 
-`update` (v1.6.0) is the host bridge updater's latest report on the bridge's CLI, re-read once a
+`update` is the host bridge updater's latest report on the bridge's CLI, re-read once a
 minute from `update-status.json` in the bridge root ([bridge update runbook](bridge-update-runbook.md)).
 It is present only for a running bridge on the updater layout (its binary under `<root>/current/`)
 once the updater has run:
@@ -425,28 +422,31 @@ once the updater has run:
 | `candidate` | the release the report is about |
 | `detail` | the updater's reason (gate problems, proof summary, what it waits for) |
 
-`runtime` (v2.2.0) is the running bridge's live admission picture, read from the bridge on
+`runtime` is the running bridge's live admission picture, read from the bridge on
 every call (not at boot): `in_flight`, `queued`, `max_concurrent`, `max_queue`, `served` and
 `rejected_queue_full` (requests refused with 429 `queue_full` since start). The Copilot bridge
 adds its outcome, stage-timing and pool counters. Absent while the bridge is off.
 
-`cli_release` in `status` (all three bridges as of v1.6.0) is `qualified` for the version the
+`cli_release` in `status` is `qualified` for the version the
 build was measured on or one the updater recorded in `qualified.json`, else `unqualified (…)`.
 ```jsonc
 [{"id":"claude-sub","label":"Claude Pro/Max","kind":"anthropic-compatible",
   "base_url":"http://127.0.0.1:8790/v1","usage_convention":"anthropic","enabled":true,
-  "env":"EZLLM_CLAUDE_BRIDGE","runbook":"docs/claude-bridge-runbook.md",
+  "env":"EZLLM_CLAUDE_BRIDGE","setup":"docs/bridges/claude.md","runbook":"docs/claude-bridge-runbook.md",
+  "docs":"https://github.com/c4lyp5o/ezllm/blob/v2.2.0/",
   "status":{"cli_version":"2.1.306 (Claude Code)","login":"logged-in","status":"ok","subscription":"Subscription: max"}},
  {"id":"chatgpt-sub","label":"ChatGPT Plus/Pro","kind":"openai-compatible",
   "base_url":"http://127.0.0.1:8791/v1","usage_convention":"auto","enabled":false,
-  "env":"EZLLM_CODEX_BRIDGE","runbook":"docs/codex-bridge-runbook.md"},
+  "env":"EZLLM_CODEX_BRIDGE","setup":"docs/bridges/codex.md","runbook":"docs/codex-bridge-runbook.md",
+  "docs":"https://github.com/c4lyp5o/ezllm/blob/v2.2.0/"},
  {"id":"antigravity-sub","label":"Google Antigravity","kind":"openai-compatible",
   "base_url":"http://127.0.0.1:8792/v1","usage_convention":"auto","enabled":false,
-  "env":"EZLLM_AGY_BRIDGE","runbook":"docs/agy-bridge-runbook.md"}]
+  "env":"EZLLM_AGY_BRIDGE","setup":"docs/bridges/antigravity.md","runbook":"docs/agy-bridge-runbook.md",
+  "docs":"https://github.com/c4lyp5o/ezllm/blob/v2.2.0/"}]
 ```
 Refusal while a bridge is off (`POST …/keys` with `"bridge":"chatgpt-sub"`):
 ```jsonc
-{"error":{"code":409,"message":"ChatGPT Plus/Pro is not running: set EZLLM_CODEX_BRIDGE=on, mount the CLI and login, and restart (docs/codex-bridge-runbook.md)","type":"invalid_request_error"}}
+{"error":{"code":409,"message":"ChatGPT Plus/Pro is not running: set EZLLM_CODEX_BRIDGE=on, mount the CLI and login, and restart (docs/bridges/codex.md)","type":"invalid_request_error"}}
 ```
 
 ### `POST /admin/accounts/{id}/keys/{keyId}/retest` → `200` | `404` | `422`
@@ -617,7 +617,7 @@ and never passes to the client. The dashboard tail shows a non-zero value as
 "queued" under the total; the requests explorer shows it in the row detail.
 The live SSE feed carries it as `slot_wait_ms` when set.
 
-### `GET /admin/turns` → `200` (v2.2.0, schema v37)
+### `GET /admin/turns` → `200`
 Requests per agent-loop turn, per account and model, over `from`/`to` (RFC 3339, `[from, to)`,
 default the last 7 days, same span cap as `/admin/usage`). Admin role.
 
@@ -720,14 +720,13 @@ response shape is unchanged. `EZLLM_COMBO_AUTOPROBE=off` disables it.
 `roles` is a non-empty subset of `infer|metrics|admin`, each a separate permission:
 `infer` calls models on `/v1/*`, `metrics` reads `GET /metrics`, `admin` reaches `/admin/*`. No role
 implies another: an admin key that should also call models or scrape needs `infer` or `metrics` too. Roles come back deduplicated in that order; an unknown
-role or an empty list is `400`. Schema v36 added `infer` to every key that had `admin` without it,
-because those keys could call models before 2.1.0.
+role or an empty list is `400`.
 `cap_tokens` is a real per-key token budget (`0` = unlimited); `cap_window` is
 `5h|daily|weekly|monthly`. Usage is `tokens_in + tokens_out` in the current
 calendar bucket, metered in the ledger transaction. A spent key returns `429`
 with `limit`, `used`, and `window` before any upstream call. A cap set after the
 key already spent tokens backfills that bucket from the ledger once.
-`cap_usd` (v2.2.0, schema v38) caps the key's priced spend in the same
+`cap_usd` caps the key's priced spend in the same
 `cap_window`; `0` = none, and a negative or non-numeric value is `400`. Spend is
 derived from the ledger and `model_prices` the way `GET /admin/cost` derives
 it, so calls with no USD price (subscription bridges, unpriced models) count as
@@ -879,9 +878,9 @@ newest update first. `POST …/read` takes `{"ids":[…]}` or `{"all":true}` →
 | `catalog_refresh_failed` | warn | the periodic refresh cannot list an account (repeats fold) |
 | `client_budget_reached` | warn | a client token hits its cap (once per window) |
 | `price_refresh_failed` | warn | the daily price refresh fails (repeats fold) |
-| `bridge_updated` | info | the bridge updater promoted a CLI release and proved it (v1.6.0) |
-| `bridge_update_blocked` | warn | a CLI release failed the update gate; the bridge keeps its release (v1.6.0) |
-| `bridge_rolled_back` | error | a promoted CLI release failed its proof and was reverted (v1.6.0) |
+| `bridge_updated` | info | the bridge updater promoted a CLI release and proved it |
+| `bridge_update_blocked` | warn | a CLI release failed the update gate; the bridge keeps its release |
+| `bridge_rolled_back` | error | a promoted CLI release failed its proof and was reverted |
 | `stream_truncation` | warn | a hop ended >1% of its streams early over 24h, with at least 20 judged streams; one folded line per hop, checked every 15 minutes |
 | `update_available` | info | the release check found a newer ezllm release; once per version, read or not, while the entry is kept |
 
@@ -945,7 +944,7 @@ the dashboard session lists what the gateway can route without holding a bearer 
 ## M10 — service defaults (schema v15)
 
 The non-chat surfaces (`/v1/embeddings`, `/v1/images/generations`,
-`/v1/audio/speech`, `/v1/audio/transcriptions`, and since v0.0.21 `/v1/images/edits`,
+`/v1/audio/speech`, `/v1/audio/transcriptions`, and `/v1/images/edits`,
 `/v1/moderations`, `/v1/rerank`, `/v1/videos/generations`, `/v1/music/generations`) get
 per-endpoint default models,
 backed by `service_bindings` + `service_probes`. The default applies **only when a
@@ -1073,7 +1072,7 @@ JSON object, with unknown envelope/setting fields rejected.
 | `GET /admin/settings/sessions` | Active sessions with opaque `id`, `created_at`, `expires_at`, `browser`, and `current`. IDs are independent of authentication tokens/digests. |
 | `DELETE /admin/settings/sessions/{id}` | Revoke one dashboard session; 204, including an unknown/already-revoked ID. |
 | `POST /admin/settings/sessions/revoke-all` | Revoke every dashboard session; 204. Client API tokens are unaffected. |
-| `GET /admin/settings/diagnostics` | Allowlisted `version`, `uptime_seconds`, `database_bytes`, `bridges` (each `id`, `enabled` and, from v1.6.0, the updater's `update` verdict: `result`, `checked_at`, `current`, `candidate` — never its free-text `detail`; from v2.2.0 a running bridge's `admission` counters `in_flight`, `queued`, `max_concurrent`, `max_queue`, `served`, `rejected_queue_full` and nothing else from its runtime), `jobs`, effective `settings`, safe deployment metadata (listen address/source, storage kind, master-key source and trusted proxy count), and configured backup status. `download=true` sets an attachment filename. No filesystem paths, credentials or request content. |
+| `GET /admin/settings/diagnostics` | Allowlisted `version`, `uptime_seconds`, `database_bytes`, `bridges` (each `id`, `enabled` and the updater's `update` verdict: `result`, `checked_at`, `current`, `candidate` — never its free-text `detail`; a running bridge's `admission` counters `in_flight`, `queued`, `max_concurrent`, `max_queue`, `served`, `rejected_queue_full` and nothing else from its runtime), `jobs`, effective `settings`, safe deployment metadata (listen address/source, storage kind, master-key source and trusted proxy count), and configured backup status. `download=true` sets an attachment filename. No filesystem paths, credentials or request content. |
 | `GET /admin/update` | The release check's last answer; never starts one. `enabled`, `current`, `latest`, `available`, `url` (the release notes page) and `checked_at`. With the check off, or before it has answered, `latest`, `url` and `checked_at` are empty and `available` is false. |
 | `GET /admin/backups` | `ready`, `running`, `last_outcome`, optional `last_finished`, optional sanitized `error` for inventory failures, and `backups`. `ready` describes configuration/inventory readiness; each run separately checks writability. Completed records have `id`, `created_at`, `bytes`, and `verified`. An unconfigured instance returns an empty list and `ready=false`. |
 | `POST /admin/backups` | Start a manual job; 202 with status `running`. Returns 409 if storage is unavailable, a job is already running, or shutdown has begun. Poll the GET route for completion. |
@@ -1108,7 +1107,7 @@ version 31.
 Model-rule `win_tz` additionally accepts `instance`, now the default for new
 rules. Existing empty timezone rows migrate to UTC; explicit zones are preserved.
 Inherited rule usage reads committed ledger timestamps in the admitted timezone's
-calendar range. Client-token budgets and date-only expiries use the same usage timezone (2.0.0+; before that, the server-local `TZ`).
+calendar range. Client-token budgets and date-only expiries use the same usage timezone.
 
 Configuration exports retain format version 1 and add `settings`, containing
 saved non-secret operator overrides. Existing export fields and streamed completion

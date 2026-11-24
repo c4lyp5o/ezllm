@@ -106,7 +106,7 @@ New environment settings: `EZLLM_CODEX_BRIDGE_CACHE`, `EZLLM_AGY_BRIDGE_CACHE`,
 **Breaking:** the Copilot bridge's default login directory is now `/copilot-sub`
 (was `/copilot-home`), matching the other bridges' dedicated `*-sub` logins. Log in
 with `COPILOT_HOME=~/.copilot-sub`, mount it at `/copilot-sub` and recreate the
-container; see `docs/copilot-bridge-runbook.md`.
+container; see `docs/upgrading.md`.
 
 **Breaking:** bridge `*_BIN` defaults moved to the updater layout
 (`/opt/<bridge>-bridge/current/...`); a compose mounting a single binary at the
@@ -291,7 +291,7 @@ a mismatch plain chat falls back to `-p`, and a request with tools answers
 
 Migration of an existing database is a manual three-step in the deploy window
 (add the CLI provider, re-point combos/hops, disable the old account); see
-`docs/copilot-bridge-runbook.md` § Migrating.
+`docs/upgrading.md`.
 
 ## v1.6.0 — 2026-10-31
 

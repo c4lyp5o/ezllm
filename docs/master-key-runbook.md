@@ -13,12 +13,8 @@ AES-256-GCM. The master key is never stored in the database.
 If none exists, ezllm generates 32 random bytes, writes the file mode 0600, and
 uses it.
 
-**Upgrading from before 2.0.0.** The old default was
-`~/.hermes/secrets/ezllm-master.key` (or `<data_dir>/.hermes/secrets/...` without a
-usable home). If ezllm finds a key there and none at the new path, it refuses to
-start and names both paths, rather than generating a new key that would make
-every stored provider key unreadable. Move the file to `<data_dir>/ezllm-master.key`
-(keep mode 0600), or set `EZLLM_MASTER_KEY_FILE` to the old path. The Docker compose file defaults to `/data/ezllm-master.key` so the
+A key left at an older default path refuses the boot: [upgrading](upgrading.md). The
+Docker compose file defaults to `/data/ezllm-master.key` so the
 key lives on the data volume and is backed up with the SQLite ledger.
 
 ## Backup (do this with every DB backup)

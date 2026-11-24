@@ -107,9 +107,9 @@ a synthetic result. Answers, tool arguments and result values are not printed.
 
 ## Install or migrate
 
-1. Deploy an ezllm build with the revised gates (v2.0.0 or later). Keep the
-   current CLI versions while doing so.
-2. Initialize any missing roots from the running container's legacy mounts:
+1. Bridges set up with [Turn on a bridge](bridge-setup.md) already use the layout
+   below: skip to step 3. For a bridge that mounts a single CLI file, initialize
+   the missing root from the running container's mount:
 
    ```sh
    python3 scripts/bridge_update.py --init
@@ -119,7 +119,7 @@ a synthetic result. Answers, tool arguments and result values are not printed.
    Initialization copies the legacy release without replacing the original
    binary or changing production's mount. For a standalone Copilot mount,
    the CLI version is read with `--no-auto-update --version` inside production.
-3. Set the binary paths and mount the roots in the host-owned `compose.yml`:
+2. Set the binary paths and mount the roots in the host-owned `compose.yml`:
 
    ```yaml
    environment:
@@ -137,14 +137,14 @@ a synthetic result. Answers, tool arguments and result values are not printed.
    Keep the login mounts and their existing bridge home settings. Recreate the
    service after editing mounts. Promotion is refused until the corresponding
    root is mounted at its managed location.
-4. Copy `scripts/bridge-update.example.json` to
+3. Copy `scripts/bridge-update.example.json` to
    `~/.config/ezllm/bridge-update.json` and adjust it. Copilot is disabled by
    default; set `bridges.copilot.enabled` true after its mount migration.
    Optional `model` and `tool_model` values should name models your plan serves.
-5. For gateway proofs, store a suitably scoped client token in
+4. For gateway proofs, store a suitably scoped client token in
    `~/.config/ezllm/proof.token` with mode 0600. Without it the in-container live
    checks are the proof; the status says the gateway script was skipped.
-6. Install or refresh the existing user unit and timer:
+5. Install or refresh the existing user unit and timer:
 
    ```sh
    mkdir -p ~/.config/systemd/user
@@ -200,21 +200,3 @@ formats, policy validation, environment isolation, promotion transactions,
 timeouts, backoff and interrupted recovery. Go tests exercise the gates and tool
 replay helpers without real subscription calls. Live checks are explicit and
 consume quota.
-
-### Supervised gate validation — 2026-11-14
-
-The rebuilt gate was run directly against existing CLI copies and logins:
-
-| CLI | Version | Exercised policy | Result |
-|---|---|---|---|
-| Claude | 2.1.311 | Plain turn and caller tool selection | passed |
-| Codex | 0.167.0 | `workspace-write`, plain turn, caller call and continuation | passed |
-| Antigravity | 1.4.12 | Structured-output caller tools, plain turn and result replay | passed |
-| Copilot | 1.0.105 | Warm pool on, plain turn, caller tools and replay | passed |
-
-These runs did not promote releases, change production mounts or install units.
-Promotion/rollback failure paths were tested with Docker/network stubbed, not
-through deliberate production outages. The checked-out host script is what the
-installed timer invokes; it will use source changes on subsequent runs. The
-running ezllm image must be refreshed to supply the new policy-aware gate, and
-Copilot remains unenrolled until its root mount and updater config are migrated.

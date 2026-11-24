@@ -37,9 +37,7 @@ not the winning stream. Existing cooldown expiry times are preserved.
 latest release. A newer one highlights the version in the sidebar, shows in System
 and rings the bell once per version. Nothing about this instance is sent and
 nothing is installed. Turn it off under General, or with `EZLLM_UPDATE_CHECK=off`.
-Switching it on asks straight away. Older builds refuse settings they do not know:
-Reset `update_check` and `notify_update_available` before rolling back past the
-release that added them.
+Switching it on asks straight away.
 
 Catalog refresh interval and price-refresh switches reschedule future work.
 Already-running jobs may finish; scheduled jobs do not overlap another scheduled

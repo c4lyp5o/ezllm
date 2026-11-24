@@ -250,7 +250,9 @@ export type Bridge = {
   usage_convention: string;
   enabled: boolean;
   env: string;
+  setup: string;
   runbook: string;
+  docs: string;
   status?: Record<string, unknown>;
   update?: BridgeUpdate;
   runtime?: BridgeAdmission & Record<string, unknown>;

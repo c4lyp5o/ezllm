@@ -90,25 +90,6 @@ export function HeaderAside({ children }: { children: ReactNode }) {
   return el ? createPortal(children, el) : null;
 }
 
-export function ProtocolChip({ state, label }: { state: 'yes' | 'no' | 'unknown'; label: string }) {
-  const s = state === 'yes'
-    ? <span className="text-ok">✓</span>
-    : state === 'no'
-      ? <span className="text-bad line-through decoration-bad">✕</span>
-      : <span className="text-warn">?</span>;
-  return (
-    <Chip title={`${label}: ${state === 'unknown' ? 'untested' : state === 'yes' ? 'supported' : 'not supported'}`}
-      tone={state === 'yes' ? 'ok' : state === 'no' ? 'bad' : 'warn'}>
-      {s} <span className="font-mono">{label}</span>
-    </Chip>
-  );
-}
-
-export function StaleBadge({ stale }: { stale: boolean }) {
-  if (!stale) return null;
-  return <Chip tone="warn">stale</Chip>;
-}
-
 // ── skeleton shimmers ───────────────────────────────────────────────────
 
 export function Skeleton({ className }: { className?: string }) {
@@ -624,10 +605,6 @@ export function Spinner({ className }: { className?: string }) {
 }
 
 // ── misc ────────────────────────────────────────────────────────────────
-
-export function Kbd({ children }: { children: ReactNode }) {
-  return <kbd className="rounded border border-line bg-raised px-1.5 py-0.5 font-mono text-[11px] text-mute">{children}</kbd>;
-}
 
 export function relTime(iso: string | null | undefined): string {
   if (!iso) return '–';

@@ -2,6 +2,7 @@ package main
 
 import (
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -59,7 +60,10 @@ func TestParseHelpConfigAgainstTheRealCLI(t *testing.T) {
 	if err != nil {
 		t.Skip("copilot CLI not installed")
 	}
-	live := copilotLiveModels(bin)
+	live, err := copilotLiveModels(bin)
+	if err != nil {
+		t.Fatalf("Copilot CLI at %q could not read its help page: %v", bin, err)
+	}
 	if len(live) < 10 {
 		t.Fatalf("parsed %d ids from the real `help config` (%v): the page changed shape", len(live), live)
 	}
@@ -67,5 +71,12 @@ func TestParseHelpConfigAgainstTheRealCLI(t *testing.T) {
 		if id == "default" || id == "long_context" {
 			t.Errorf("context-tier value %q leaked into the model list", id)
 		}
+	}
+}
+
+func TestCopilotLiveModelsReportsLaunchFailure(t *testing.T) {
+	models, err := copilotLiveModels(filepath.Join(t.TempDir(), "missing-copilot"))
+	if err == nil || len(models) != 0 {
+		t.Fatalf("want launch error and no models, got %v, %v", models, err)
 	}
 }

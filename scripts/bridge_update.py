@@ -73,7 +73,7 @@ GATE_ENV = ["USER", "LOGNAME", "TZ", "SSL_CERT_FILE", "SSL_CERT_DIR",
             "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY",
             "http_proxy", "https_proxy", "no_proxy", "all_proxy",
             "EZLLM_CODEX_BRIDGE_CACHE",
-            "EZLLM_AGY_EXPERIMENTAL_TOOLS", "EZLLM_AGY_BRIDGE_CACHE", "EZLLM_COPILOT_BRIDGE_WARM_POOL",
+            "EZLLM_AGY_BRIDGE_CACHE", "EZLLM_COPILOT_BRIDGE_WARM_POOL",
             "EZLLM_COPILOT_BRIDGE_CACHE"]
 
 CLAUDE_BASE = "https://downloads.claude.ai/claude-code-releases"
@@ -421,9 +421,8 @@ def gate_policy(name, info):
     # Caches are on by default (2.0.0): unset follows the prerequisite flag, so
     # a candidate that would silently lose its cache is not promoted.
     if name == "agy":
-        tools = env.get("EZLLM_AGY_EXPERIMENTAL_TOOLS", "").strip().lower() == "on"
-        policy = {"caller_tools": "structured-output" if tools else "off"}
-        if switch(env.get("EZLLM_AGY_BRIDGE_CACHE", ""), tools):
+        policy = {"caller_tools": "structured-output"}
+        if switch(env.get("EZLLM_AGY_BRIDGE_CACHE", ""), True):
             policy["session_cache"] = "conversation-resume"
         return policy
     if name == "copilot":

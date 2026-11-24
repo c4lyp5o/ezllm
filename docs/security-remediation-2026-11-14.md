@@ -176,5 +176,7 @@ input/output usage on comparable conversations, and check tool-result handling.
 The shared [README settings](../README.md#recommended-cache-settings) describe how to
 apply these flags. To opt out, set the corresponding cache flags to `off`; set
 `EZLLM_AGY_EXPERIMENTAL_TOOLS=off` too if disabling the AGY adapter. Recreate the
-container after environment changes. A private pre-trial Compose copy is retained
+container after environment changes. (Since the release after 2.2.0 the AGY
+adapter is on by default and `EZLLM_AGY_EXPERIMENTAL_TOOLS` is retired; remove it
+from the environment, as setting it fails the boot.) A private pre-trial Compose copy is retained
 under the ignored local backup directory.

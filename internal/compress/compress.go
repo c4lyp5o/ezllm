@@ -10,8 +10,6 @@ package compress
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -687,39 +685,6 @@ func textPieces(content any) []string {
 		return out
 	}
 	return nil
-}
-
-// hashContent builds the dedup key for droppable content, or "" when the
-// content shape is not safe to hash-and-drop.
-func hashContent(role string, content any) string {
-	var s string
-	switch c := content.(type) {
-	case string:
-		s = c
-	case []any:
-		// Only arrays of pure {"type":"text"} blocks are droppable.
-		var b strings.Builder
-		for _, blk := range c {
-			bm, ok := blk.(map[string]any)
-			if !ok {
-				return ""
-			}
-			if t, _ := bm["type"].(string); t != "text" {
-				return ""
-			}
-			ts, ok := bm["text"].(string)
-			if !ok {
-				return ""
-			}
-			b.WriteString(ts)
-			b.WriteByte(0)
-		}
-		s = b.String()
-	default:
-		return ""
-	}
-	sum := sha256.Sum256([]byte(role + "\x00" + s))
-	return hex.EncodeToString(sum[:])
 }
 
 func mustMarshal(v any) []byte {

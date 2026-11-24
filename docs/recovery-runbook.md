@@ -97,7 +97,11 @@ restored secret: it still takes precedence over the file. Start the same or a
 compatible newer binary on a separate port.
 Confirm account access and ledger history before switching traffic. Password and
 client tokens are recovered from the database; browser sessions must log in again.
-The original archive is unchanged.
+The original archive is unchanged. Restore syncs the restored files before
+publishing them, and syncs the destination and parent directories on platforms
+that support it (not Windows). If restore exits with an error, do not start a
+gateway from the output even if the directory exists: publishing can fail
+partway through. Investigate the error and retry into a different unused directory.
 
 Deployment YAML/environment, bridge CLI binaries, vendor login directories and
 the backup encryption secret are not in the archive; preserve them separately.

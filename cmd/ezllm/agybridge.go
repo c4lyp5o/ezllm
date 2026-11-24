@@ -28,7 +28,6 @@ const (
 	envAgyAddr         = "EZLLM_AGY_BRIDGE_ADDR"       // default 127.0.0.1:8792
 	envAgyToken        = "EZLLM_AGY_BRIDGE_TOKEN_FILE" // shared secret for the account key
 	envAgyConcurrency  = "EZLLM_AGY_BRIDGE_CONCURRENCY"
-	envAgyTools        = "EZLLM_AGY_EXPERIMENTAL_TOOLS"
 	envAgySessionCache = "EZLLM_AGY_BRIDGE_CACHE"
 )
 
@@ -68,23 +67,23 @@ func startAgyBridge(ctx context.Context, log *slog.Logger, report bridgeReport) 
 	if err != nil {
 		return nil, err
 	}
-	experimentalTools := strings.EqualFold(strings.TrimSpace(os.Getenv(envAgyTools)), "on")
-	if experimentalTools && !pre.StructuredOutput {
-		return nil, fmt.Errorf("agy bridge: %s=on requires a CLI with --json-schema", envAgyTools)
-	}
-	sessionCache, err := agySessionCache(os.Getenv, experimentalTools, pre.ConversationResume)
+	// Caller tools are on wherever the CLI can carry them; an older CLI without
+	// --json-schema still serves text chat rather than failing the boot.
+	callerTools := pre.StructuredOutput
+	sessionCache, err := agySessionCache(os.Getenv, callerTools, pre.ConversationResume)
 	if err != nil {
 		return nil, err
 	}
-	clientTools := "disabled (text chat only)"
-	if experimentalTools {
-		clientTools = "experimental (structured output; caller executes)"
+	clientTools := "on (structured output; caller executes)"
+	if !callerTools {
+		clientTools = "off (CLI lacks --json-schema; text chat only)"
+		log.Warn("agy bridge: CLI lacks --json-schema; client tools are off (text chat only)", "cli", pre.Version)
 	}
 	token, err := bridgeTokenFromFile(strings.TrimSpace(os.Getenv(envAgyToken)), "agy")
 	if err != nil {
 		return nil, err
 	}
-	qualified := releaseState(bin, pre.Version, agybridge.QualifiedVersion)
+	qualified := releaseState(bin, pre.Version, "")
 	ids := make([]string, 0, len(pre.Models))
 	for _, m := range pre.Models {
 		ids = append(ids, m.ID)
@@ -92,11 +91,11 @@ func startAgyBridge(ctx context.Context, log *slog.Logger, report bridgeReport) 
 
 	runner := &agybridge.Runner{Bin: resolved, Home: home, Timeout: 300 * time.Second, MaxConcurrent: concurrency, MaxQueue: queue, Logf: log.Info, SessionCache: sessionCache}
 	srv := &agybridge.Server{
-		ExperimentalTools: experimentalTools,
-		Runner:            runner,
-		Token:             token,
-		Version:           server.Version,
-		Models:            pre.Models,
+		CallerTools: callerTools,
+		Runner:      runner,
+		Token:       token,
+		Version:     server.Version,
+		Models:      pre.Models,
 		Info: map[string]any{
 			"status":        "ok",
 			"version":       server.Version,
@@ -136,8 +135,8 @@ func assertAgyLoopback(addr string) error {
 	return fmt.Errorf("agy bridge: %s=%q must be loopback (127.0.0.1): this surface holds the subscription login", envAgyAddr, addr)
 }
 
-// agySessionCache is on by default wherever it can work: with the tool adapter
-// on and a CLI that resumes conversations. An explicit "on" that cannot work
+// agySessionCache is on by default wherever it can work: a CLI that carries
+// caller tools (--json-schema) and resumes conversations (--conversation). An explicit "on" that cannot work
 // fails the boot instead of silently serving uncached.
 func agySessionCache(get func(string) string, tools, resume bool) (bool, error) {
 	switch strings.ToLower(strings.TrimSpace(get(envAgySessionCache))) {
@@ -150,7 +149,7 @@ func agySessionCache(get func(string) string, tools, resume bool) (bool, error) 
 		return false, fmt.Errorf("agy bridge: %s must be on or off", envAgySessionCache)
 	}
 	if !tools {
-		return false, fmt.Errorf("agy bridge: %s requires %s=on", envAgySessionCache, envAgyTools)
+		return false, fmt.Errorf("agy bridge: %s=on requires --json-schema (caller tools)", envAgySessionCache)
 	}
 	if !resume {
 		return false, fmt.Errorf("agy bridge: %s=on requires --conversation", envAgySessionCache)

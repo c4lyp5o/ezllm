@@ -411,8 +411,8 @@ func (t *Tester) authGate(
 	)
 	// Attempt up to 3× on 429/5xx/timeout. 401/403 stop immediately — on
 	// these providers 403 means bad credentials, not "slow down", so backing
-	// off would only delay the user's error message. An HTTP status is not a
-	// Go error (doProbe errs only on transport), so the STATUS decides.
+	// off would only delay the user's error message. An HTTP status alone is not a
+	// Go error, so the status decides whether to retry.
 	for attempt := 0; attempt < 3; attempt++ {
 		var ores httpResult
 		ores, authErr = probe(ctx, t, pace, defaultStepTimeout,
@@ -1055,6 +1055,10 @@ type bodyOverride struct{ body string }
 
 func withBody(b string) *bodyOverride { return &bodyOverride{body: b} }
 
+// maxProbeBody matches the catalog reader's cap (provider getJSONStatus): some auth
+// oracles ARE the catalog, and a large one must not fail a good key.
+const maxProbeBody = 8 << 20
+
 // doProbe performs one HTTP probe with the adapter's auth semantics: Bearer vs
 // x-api-key, per-request session ids, custom headers — all in one place.
 // The adapter is a parameter, not a package global: Tester is shared across
@@ -1110,9 +1114,12 @@ func doProbe(
 		return 0, nil, &probeError{status: 0, raw: err.Error()}
 	}
 	defer resp.Body.Close()
-	b, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	b, err := io.ReadAll(io.LimitReader(resp.Body, maxProbeBody+1))
 	if err != nil {
 		return resp.StatusCode, nil, err
+	}
+	if len(b) > maxProbeBody {
+		return resp.StatusCode, nil, fmt.Errorf("probe response exceeds %d bytes", maxProbeBody)
 	}
 	return resp.StatusCode, b, nil
 }

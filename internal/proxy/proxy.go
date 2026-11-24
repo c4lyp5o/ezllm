@@ -2234,6 +2234,8 @@ func (d *Dispatcher) streamCopyTracked(ctx context.Context, w http.ResponseWrite
 	return ttft, tap.Usage(), first, err
 }
 
+var sseReaders = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, 64*1024) }}
+
 // streamCopyTap is streamCopyTracked returning the tapper itself, for callers
 // that read more than usage from it (the Responses id).
 func (d *Dispatcher) streamCopyTap(ctx context.Context, w http.ResponseWriter, resp *http.Response, surface provider.Surface, conv provider.UsageConvention, start time.Time, requireTerminal bool) (time.Duration, *UsageTapper, []byte, error) {
@@ -2256,7 +2258,12 @@ func (d *Dispatcher) streamCopyTap(ctx context.Context, w http.ResponseWriter, r
 	// than the buffer arrives in pieces: every piece is forwarded at once,
 	// and only lines that fit (maxScanToken) are tapped — the usage chunk
 	// after a giant content line is still read.
-	br := bufio.NewReaderSize(resp.Body, 64*1024)
+	br := sseReaders.Get().(*bufio.Reader)
+	br.Reset(resp.Body)
+	defer func() {
+		br.Reset(nil) // Do not retain the upstream response between streams.
+		sseReaders.Put(br)
+	}()
 	// Read-only usage tap. Merges across events: Anthropic's message_start
 	// carries the input/cache breakdown while message_delta carries the final
 	// output totals, so taking only the first hit would record out=0.
@@ -2292,10 +2299,11 @@ func (d *Dispatcher) streamCopyTap(ctx context.Context, w http.ResponseWriter, r
 						firstEvent = true
 					}
 					// Remember the first real payload so the caller can
-					// quote it in the ledger. Comments and [DONE] are
-					// skipped: neither can carry an error envelope.
-					if firstPayload == nil {
-						if p := bytes.TrimSpace(bytes.TrimPrefix(bytes.TrimSpace(line), []byte("data:"))); len(p) > 0 && p[0] != ':' && !bytes.Equal(p, []byte("[DONE]")) {
+					// quote it in the ledger. SSE metadata and [DONE]
+					// cannot carry an error envelope; a bare line can, from
+					// a gateway that labels a plain error body as SSE.
+					if firstPayload == nil && !isSSEMetadata(line) {
+						if p := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:"))); len(p) > 0 && !bytes.Equal(p, []byte("[DONE]")) {
 							firstPayload = append([]byte(nil), p...)
 						}
 					}
@@ -2557,6 +2565,18 @@ func streamErrCause(existing string, status int, first []byte) string {
 		}
 	}
 	return existing
+}
+
+// isSSEMetadata reports an SSE comment or a field other than data.
+func isSSEMetadata(line []byte) bool {
+	field, _, _ := bytes.Cut(line, []byte(":"))
+	switch string(field) {
+	case "": // a blank line or a ":" comment
+		return true
+	case "event", "id", "retry":
+		return true
+	}
+	return false
 }
 
 func sseHasErrorEnvelope(payload []byte) bool {

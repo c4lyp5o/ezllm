@@ -88,3 +88,22 @@ func TestSystemDedupStillFiresAndUserTurnsSurvive(t *testing.T) {
 		t.Errorf("non-message fields lost: %v", root)
 	}
 }
+
+func TestSystemDedupPreservesDistinctMessageShapes(t *testing.T) {
+	for name, pair := range map[string][2]string{
+		"message names":    {`{"role":"system","name":"one","content":"same"}`, `{"role":"system","name":"two","content":"same"}`},
+		"cache marker":     {`{"role":"system","content":[{"type":"text","text":"same"}]}`, `{"role":"system","content":[{"type":"text","text":"same","cache_control":{"type":"ephemeral"}}]}`},
+		"block boundaries": {`{"role":"system","content":[{"type":"text","text":"a\u0000b"}]}`, `{"role":"system","content":[{"type":"text","text":"a"},{"type":"text","text":"b"}]}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var msgs []any
+			if err := json.Unmarshal([]byte("["+pair[0]+","+pair[1]+","+pair[1]+"]"), &msgs); err != nil {
+				t.Fatal(err)
+			}
+			got := sessionDedup(msgs)
+			if got[0] == nil || got[1] == nil || got[2] != nil {
+				t.Fatalf("only the exact repeat should be dropped: %v", got)
+			}
+		})
+	}
+}

@@ -93,3 +93,12 @@ jobs:
           npm run build -- --emptyOutDir --outDir "$RUNNER_TEMP/ezllm-web-dist"  # tsc + Vite
           node tests/check-dist.test.mjs
           node scripts/check-dist.mjs dist "$RUNNER_TEMP/ezllm-web-dist"
+
+      - name: Dashboard browser regressions
+        working-directory: web
+        timeout-minutes: 10
+        run: |
+          npx playwright install --with-deps chromium
+          node tests/verify-frontend-p1.mjs
+          node tests/verify-frontend-p2.mjs
+          node tests/verify-frontend-p3.mjs

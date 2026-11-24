@@ -408,3 +408,18 @@ func TestEncodersAreDeterministic(t *testing.T) {
 }
 
 func intPtr(i int) *int { return &i }
+
+func TestRequestCodecsRejectNullObject(t *testing.T) {
+	for name, decode := range map[string]func([]byte) (*RequestIR, error){
+		"chat":      DecodeChatRequest,
+		"messages":  DecodeMessagesRequest,
+		"responses": DecodeResponsesRequest,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := decode([]byte("null"))
+			if err == nil || !strings.Contains(err.Error(), "expected a JSON object") {
+				t.Fatalf("expected request-object error, got %v", err)
+			}
+		})
+	}
+}

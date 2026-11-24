@@ -18,9 +18,9 @@ const lookupTools = `"tools":[{"type":"function","function":{"name":"lookup","de
 const lookupRequest = `{"model":"gemini-3.8-flash-low",` + lookupTools + `,"messages":[{"role":"user","content":"look up x"}]}`
 const lookupEnvelope = `{"content":null,"tool_calls":[{"name":"lookup","arguments":{"key":"x"}}]}`
 
-func TestExperimentalToolsOptInAndTranscript(t *testing.T) {
+func TestCallerToolsAdapterAndTranscript(t *testing.T) {
 	if _, err := parseRequest([]byte(lookupRequest), false); err == nil {
-		t.Fatal("default accepted tools")
+		t.Fatal("tool-less surface accepted tools")
 	}
 	req, err := parseRequest([]byte(lookupRequest), true)
 	if err != nil {
@@ -39,7 +39,7 @@ func TestExperimentalToolsOptInAndTranscript(t *testing.T) {
 			t.Fatalf("transcript lost %s", want)
 		}
 	}
-	// Opt-in alone must leave ordinary chat byte-identical.
+	// Enabling tools must leave ordinary chat byte-identical.
 	plain := []byte(`{"model":"m","messages":[{"role":"user","content":"hello"}]}`)
 	a, _ := parseRequest(plain, false)
 	b, _ := parseRequest(plain, true)
@@ -48,7 +48,7 @@ func TestExperimentalToolsOptInAndTranscript(t *testing.T) {
 	}
 }
 
-func TestExperimentalToolsRejectMalformedRequests(t *testing.T) {
+func TestCallerToolsRejectMalformedRequests(t *testing.T) {
 	for name, body := range map[string]string{
 		"duplicate names":   `{"model":"m","tools":[{"type":"function","function":{"name":"f"}},{"type":"function","function":{"name":"f"}}],"messages":[{"role":"user","content":"x"}]}`,
 		"wrong schema":      `{"model":"m","tools":[{"type":"function","function":{"name":"f","parameters":{"type":"array"}}}],"messages":[{"role":"user","content":"x"}]}`,
@@ -117,7 +117,7 @@ func TestAdapterHTTPBothSurfacesAndNoEnvelopeLeak(t *testing.T) {
 				raw = "not an envelope"
 			}
 			ex := &fakeExec{res: Result{Text: raw, Usage: Usage{InputTokens: 100, OutputTokens: 20}}}
-			s := httptest.NewServer((&Server{Runner: ex, Token: "tok", Models: ParseModels(measuredModels), ExperimentalTools: true}).Handler())
+			s := httptest.NewServer((&Server{Runner: ex, Token: "tok", Models: ParseModels(measuredModels), CallerTools: true}).Handler())
 			body := strings.TrimSuffix(lookupRequest, "}") + `,"stream":` + strconv.FormatBool(stream) + `,"stream_options":{"include_usage":true}}`
 			resp := post(t, s.URL, "tok", body)
 			data, _ := io.ReadAll(resp.Body)
@@ -174,7 +174,7 @@ func TestAdapterRunnerSchemaFileAndTerminalStructuredOutput(t *testing.T) {
 
 // Two real turns, no native filesystem execution: the caller provides a fake
 // lookup result. This proves the CLI can select a tool and consume its result.
-func TestLiveExperimentalToolRoundTrip(t *testing.T) {
+func TestLiveCallerToolRoundTrip(t *testing.T) {
 	bin, home := liveCLI(t)
 	model := os.Getenv("EZLLM_AGY_MODEL")
 	if model == "" {
@@ -251,9 +251,11 @@ func TestAdapterRefusesNativeToolsAndSupportsNestedSteps(t *testing.T) {
 	}
 }
 
+// A CLI without --json-schema boots with CallerTools off: tools are refused
+// before anything is spawned.
 func TestAdapterHTTPDisabledDoesNotSpawn(t *testing.T) {
 	ex := &fakeExec{}
-	srv := newTestServer(ex)
+	srv := httptest.NewServer((&Server{Runner: ex, Token: "tok", Models: ParseModels(measuredModels)}).Handler())
 	defer srv.Close()
 	resp := post(t, srv.URL, "tok", lookupRequest)
 	defer resp.Body.Close()
@@ -384,7 +386,7 @@ func assertCallerToolWire(t *testing.T, data []byte, stream bool) {
 func TestAdapterHTTPFinalAnswer(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		ex := &fakeExec{res: Result{StructuredOutput: json.RawMessage(`{"content":"caller result consumed","tool_calls":[]}`)}}
-		srv := httptest.NewServer((&Server{Runner: ex, Token: "tok", Models: ParseModels(measuredModels), ExperimentalTools: true}).Handler())
+		srv := httptest.NewServer((&Server{Runner: ex, Token: "tok", Models: ParseModels(measuredModels), CallerTools: true}).Handler())
 		body := strings.TrimSuffix(lookupRequest, "}") + `,"stream":` + strconv.FormatBool(stream) + `}`
 		resp := post(t, srv.URL, "tok", body)
 		data, err := io.ReadAll(resp.Body)
@@ -445,5 +447,17 @@ func TestDefaultTextRequestsKeepChoiceHintsCompatible(t *testing.T) {
 		if err != nil || req.Adapter != nil || req.Prompt != "plain chat" {
 			t.Fatalf("choice=%s prompt=%q err=%v", choice, req.Prompt, err)
 		}
+	}
+}
+
+func TestPreflightReportsHelpCommandFailure(t *testing.T) {
+	bin, _ := fakeAgy(t, "fixture failures", 0)
+	script := "#!/bin/sh\ncase \"$1\" in\n--version) echo 1.4.7;;\n--help) exit 7;;\nesac\n"
+	if err := os.WriteFile(bin, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := RunPreflight(context.Background(), bin, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "--help failed") {
+		t.Fatalf("want help command failure, got %v", err)
 	}
 }

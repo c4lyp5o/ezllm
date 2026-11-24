@@ -213,7 +213,7 @@ func (f *fakeExec) Run(_ context.Context, req Request, delta func(string) error)
 }
 
 func newTestServer(ex Executor) *httptest.Server {
-	s := &Server{Runner: ex, Token: "tok", Version: "test", Models: ParseModels(measuredModels),
+	s := &Server{Runner: ex, Token: "tok", Version: "test", Models: ParseModels(measuredModels), CallerTools: true,
 		Now: func() time.Time { return time.Unix(1700000000, 0) }}
 	return httptest.NewServer(s.Handler())
 }

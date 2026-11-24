@@ -8,6 +8,42 @@ import (
 	"testing"
 )
 
+// pauseAfterPrefixReader briefly makes no progress after the declared prefix.
+type pauseAfterPrefixReader struct {
+	reader *strings.Reader
+	calls  int
+}
+
+func (r *pauseAfterPrefixReader) Read(p []byte) (int, error) {
+	r.calls++
+	if r.calls == 2 {
+		return 0, nil
+	}
+	return r.reader.Read(p)
+}
+
+func TestReadBodyDoesNotTreatEmptyReadAsEOF(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		max      int64
+		want     string
+		tooLarge bool
+	}{
+		{"within cap", 6, "abcdef", false},
+		{"exceeds cap", 5, "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+			r.Body = io.NopCloser(&pauseAfterPrefixReader{reader: strings.NewReader("abcdef")})
+			r.ContentLength = 3
+			got, tooLarge, err := readBody(r, tc.max)
+			if err != nil || tooLarge != tc.tooLarge || string(got) != tc.want {
+				t.Fatalf("got (%q, %v, %v), want (%q, %v, nil)", got, tooLarge, err, tc.want, tc.tooLarge)
+			}
+		})
+	}
+}
+
 func TestReadBody(t *testing.T) {
 	const max = 64
 	for _, tc := range []struct {

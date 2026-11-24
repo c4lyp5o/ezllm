@@ -2,6 +2,15 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
+## Unreleased
+
+- **Antigravity caller tools on by default.** The structured-output adapter
+  turns on at boot whenever the CLI offers `--json-schema` (`cmd/ezllm/agybridge.go`);
+  a CLI without it boots text-only with a warning. `EZLLM_AGY_EXPERIMENTAL_TOOLS`
+  is retired and fails the boot. The conversation cache follows, on wherever the
+  CLI also supports `--conversation`. `bridge-check agy` now fails a CLI without
+  `--json-schema` and always runs the caller-tool live proof.
+
 ## v2.2.0 — shared bridge admission, requests per turn, token counting, spend caps
 
 - **`POST /v1/messages/count_tokens`** answers Claude Code's token-count

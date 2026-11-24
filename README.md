@@ -3,8 +3,8 @@
 ezllm is a self-hosted LLM gateway. It is one Go binary that sits between your
 apps and your model providers. Your apps talk to a single endpoint using the
 OpenAI or Anthropic API, and ezllm routes each request to the right provider
-account, retries or fails over when a provider has trouble, and records every
-request's token usage and cost. It ships with a web dashboard for setup and
+account, retries or fails over when a provider has trouble, and tracks
+request token usage and cost. It ships with a web dashboard for setup and
 monitoring.
 
 [![Tests](https://github.com/c4lyp5o/ezllm/actions/workflows/test.yml/badge.svg)](https://github.com/c4lyp5o/ezllm/actions/workflows/test.yml)
@@ -133,7 +133,7 @@ dashboard setup first, then follow the guide for your account:
 | Claude Pro/Max | [Claude bridge](docs/claude-bridge-runbook.md) | Install Claude Code and sign in with a separate CLI profile. |
 | ChatGPT Plus/Pro | [Codex bridge](docs/codex-bridge-runbook.md) | Linux. Client tools need Landlock for the default protection. |
 | GitHub Copilot | [Copilot bridge](docs/copilot-bridge-runbook.md) | Sign in to the official `copilot` CLI on the host. Supports client tools and PNG/JPEG images with a vision-capable model. |
-| Google Antigravity | [Antigravity bridge](docs/agy-bridge-runbook.md) | Linux. Text chat by default; caller tools are experimental. No image input. |
+| Google Antigravity | [Antigravity bridge](docs/agy-bridge-runbook.md) | Linux. Text chat and caller tools (on by default where the CLI supports `--json-schema`). No image input. |
 
 The guides use Docker Compose and cover installing the CLI, signing in, the
 mounts and the dashboard preset. If a bridge is enabled but something it needs
@@ -169,15 +169,8 @@ Prompt caching makes long conversations cheaper and faster, and uses less of
 your plan. From 2.0.0 every bridge caches by default, so there is nothing to
 set: Codex uses its prompt cache whenever the CLI supports it, Copilot keeps
 workers warm and reuses finished conversations, and Antigravity resumes
-conversations. Claude Code caches on its own.
-
-The one extra for Antigravity: its cache works only with the experimental tool
-adapter, which stays off until you turn it on:
-
-```yaml
-environment:
-  EZLLM_AGY_EXPERIMENTAL_TOOLS: "on"
-```
+conversations (its caller-tool adapter, which the cache rides on, is on by
+default too). Claude Code caches on its own.
 
 To turn a cache off, set `EZLLM_CODEX_BRIDGE_CACHE`,
 `EZLLM_COPILOT_BRIDGE_CACHE` (or `EZLLM_COPILOT_BRIDGE_WARM_POOL`) or
@@ -204,8 +197,7 @@ A few things worth knowing:
 Details and limits: [Codex](docs/codex-empty-template-cache-design.md),
 [Copilot](docs/copilot-completed-session-cache-design.md),
 [Antigravity](docs/agy-conversation-cache-design.md). The Antigravity tool
-adapter is experimental; read its [limitations](docs/agy-bridge-runbook.md)
-first.
+adapter is model-mediated; read its [limitations](docs/agy-bridge-runbook.md#caller-tools).
 
 ## How routing works
 
@@ -265,9 +257,14 @@ added together:
 | `/v1/messages` | excluded from `input_tokens` | yes |
 | `/v1/responses` | included in `input_tokens` | yes |
 
-ezllm stores every request as `tokens_in`, `tokens_out`, `tokens_cached_read`,
+For recorded requests, ezllm stores usage as `tokens_in`, `tokens_out`, `tokens_cached_read`,
 `tokens_cached_write` and `reasoning_tokens` in one consistent form, plus the
 provider's original usage JSON.
+
+The usage ledger is best-effort: it keeps database writes off the response
+path and can lose rows if its queue fills or SQLite writes fail after retry.
+Monitor dropped and lost rows in admin health. Do not treat this ledger as
+an authoritative billing record or a hard spend guarantee.
 
 ## Dashboard
 

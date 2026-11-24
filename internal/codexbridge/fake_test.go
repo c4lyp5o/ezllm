@@ -129,6 +129,10 @@ func fakeAppServer(home string) {
 				select {} // a wedged CLI: alive, never reads stdin again
 			}
 		case "model/list":
+			if mode == "catalog_never_ends" {
+				reply(map[string]any{"data": []any{map[string]any{"id": "partial"}}, "nextCursor": "more"})
+				continue
+			}
 			reply(map[string]any{"data": []any{
 				map[string]any{"id": "gpt-6.1-sol", "displayName": "GPT-6.1 Sol", "hidden": false, "isDefault": true,
 					"defaultReasoningEffort": "low", "supportedReasoningEfforts": []any{
@@ -287,4 +291,12 @@ func fakeExecCLI(home string) {
 	fmt.Println(`{"type":"item.completed","item":{"id":"item_r","type":"reasoning","text":"**Greeting** in French"}}`)
 	fmt.Println(`{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"Bonjour !"}}`)
 	fmt.Println(`{"type":"turn.completed","usage":{"input_tokens":2999,"cached_input_tokens":2176,"cache_write_input_tokens":0,"output_tokens":6,"reasoning_output_tokens":0}}`)
+}
+
+func TestModelsRejectIncompleteCatalog(t *testing.T) {
+	r, _ := fakeRunner(t, "catalog_never_ends")
+	models, err := r.Models(t.Context())
+	if err == nil || len(models) != 0 {
+		t.Fatalf("expected an error and no partial catalog, got %d rows: %v", len(models), err)
+	}
 }

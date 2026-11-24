@@ -82,7 +82,7 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 	bin := envOrDefault(envCodexBin, defaultCodexBin)
 	resolved, err := exec.LookPath(bin)
 	if err != nil {
-		return nil, fmt.Errorf("codex bridge: %s=%q does not resolve to the official Codex CLI: %w", envCodexBin, bin, err)
+		return nil, missingCLI("codex", envCodexBin, bin, "Codex", envCodexBridge, err)
 	}
 	home := envOrDefault(envCodexHome, "/codex-sub")
 	addr := strings.TrimSpace(os.Getenv(envCodexAddr))

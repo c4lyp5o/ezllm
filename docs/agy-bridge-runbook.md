@@ -15,6 +15,7 @@ This guide uses Docker Compose in a Linux environment and a separate Google logi
 Caller tools are on by default when the CLI supports `--json-schema`;
 image input remains unsupported.
 Validation and test requests use subscription quota. Each step links to details below.
+New to this? Follow [Turn on a bridge](bridge-setup.md#google-antigravity) instead.
 
 1. **Install the official CLI on the host** and pin a copy of the binary
    ([prerequisites](#prerequisites)).
@@ -52,11 +53,12 @@ reads it at boot and serves it at `/v1/models`. Measured on a personal plan
 curl -fsSL https://antigravity.google/cli/install.sh | bash
 agy --version                                   # check this before choosing a path
 
-# pin a copy outside the self-updating path; compose mounts THIS file
-# Set VERSION to the installed version reported above.
-VERSION=1.5.15 # example; use your installed version
+# pin a copy outside the self-updating path, with a relative `current` link
+VERSION=$(agy --version)
 mkdir -p "$HOME/.local/share/agy-bridge/$VERSION"
 cp ~/.local/bin/agy "$HOME/.local/share/agy-bridge/$VERSION/agy"
+chmod a-w "$HOME/.local/share/agy-bridge/$VERSION"
+ln -sfn "$VERSION" "$HOME/.local/share/agy-bridge/current"
 ```
 
 `agy` updates itself in place in the background. Mounting `~/.local/bin/agy`
@@ -66,8 +68,8 @@ mounted read-only. Make its folder read-only on the host too
 host — even `--version` — lets agy rewrite it in place, renaming the original
 to `agy.<n>.old` (measured 2026-10-30, 1.4.7 → 1.4.11). The running container
 keeps the original until the next recreate, which then boots the new release
-unannounced. With the copy read-only, so the bridge only moves to a new release when you copy one
-and change the mount. There is no hardcoded qualified release. Compatible versions can boot, and `/status`
+unannounced. With the copy read-only, the bridge only moves to a new release when you copy one
+and move the `current` link. There is no hardcoded qualified release. Compatible versions can boot, and `/status`
 reports it as `unqualified` until the live proof ([verify](#verify)) has been
 re-run and recorded in `qualified.json`.
 
@@ -87,10 +89,10 @@ The binary is ~228 MB, dynamically linked against glibc; the ezllm image
 
 ```bash
 mkdir -p ~/.agy-sub && chmod 700 ~/.agy-sub
-env -u DBUS_SESSION_BUS_ADDRESS HOME="$HOME/.agy-sub" "$HOME/.local/share/agy-bridge/$VERSION/agy"
+env -u DBUS_SESSION_BUS_ADDRESS HOME="$HOME/.agy-sub" "$HOME/.local/share/agy-bridge/current/agy"
 ```
 
-Set `VERSION` as in [prerequisites](#prerequisites). Run the command in a real
+Run the command in a real
 terminal (SSH is fine; it prints a URL and asks for the code). If the CLI
 itself fails to launch, check the pinned path, permissions and runtime
 libraries before troubleshooting the login. A failed `--help` probe is a
@@ -138,15 +140,13 @@ personal account.
 
 In `compose.yml`, under the ezllm service, add these entries to the existing
 `environment` and `volumes` sections. Replace `/home/you` with your actual host
-path. For manual setup, point `EZLLM_AGY_BIN` at the version folder you copied
-above, replacing the example version below. With the bridge updater, omit
-this override to use its `/opt/agy-bridge/current/agy` path. The Compose service
+path. The default `EZLLM_AGY_BIN` is `/opt/agy-bridge/current/agy`, the link made
+above. The Compose service
 user must be able to execute the CLI and read and write the login directory:
 
 ```yaml
     environment:
       EZLLM_AGY_BRIDGE: "on"
-      EZLLM_AGY_BIN: /opt/agy-bridge/1.5.15/agy # example manual pin
     volumes:
       - /home/you/.local/share/agy-bridge:/opt/agy-bridge:ro
       - /home/you/.agy-sub:/agy-sub

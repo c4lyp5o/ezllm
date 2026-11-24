@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"log/slog"
@@ -85,16 +86,28 @@ func TestCopilotLiveModelsReportsLaunchFailure(t *testing.T) {
 }
 
 // A first-time operator sees only this line: it must say how to get unstuck.
-func TestCopilotBridgeMissingCLINamesTheFix(t *testing.T) {
-	t.Setenv(envCopilotBridge, "on")
-	t.Setenv(envCopilotBin, filepath.Join(t.TempDir(), "current", "copilot"))
-	_, err := startCopilotBridge(t.Context(), slog.Default(), nil)
-	if !errors.Is(err, fs.ErrNotExist) {
-		t.Fatalf("want the missing file as the cause, got %v", err)
-	}
-	for _, want := range []string{"docs/copilot-bridge-runbook.md", envCopilotBridge + "=off"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error does not mention %q: %v", want, err)
-		}
+func TestMissingBridgeCLINamesTheFix(t *testing.T) {
+	for _, tc := range []struct {
+		name, sw, bin string
+		start         func(context.Context, *slog.Logger, bridgeReport) (func(), error)
+	}{
+		{"claude", envBridge, envBridgeBin, startClaudeBridge},
+		{"codex", envCodexBridge, envCodexBin, startCodexBridge},
+		{"agy", envAgyBridge, envAgyBin, startAgyBridge},
+		{"copilot", envCopilotBridge, envCopilotBin, startCopilotBridge},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(tc.sw, "on")
+			t.Setenv(tc.bin, filepath.Join(t.TempDir(), "current", tc.name))
+			_, err := tc.start(t.Context(), slog.Default(), nil)
+			if !errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("want the missing file as the cause, got %v", err)
+			}
+			for _, want := range []string{"docs/bridge-setup.md", tc.sw + "=off"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error does not mention %q: %v", want, err)
+				}
+			}
+		})
 	}
 }

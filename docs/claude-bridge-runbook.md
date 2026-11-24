@@ -8,13 +8,14 @@ Operating the Claude subscription surface. Decisions live in
 Start with a working ezllm installation and dashboard ([quick start](../README.md#quick-start)).
 This guide uses Docker Compose on a Linux host. You need a Claude subscription,
 the official CLI, and a separate login for the bridge. Validation and test
-requests use subscription quota. Each step links to more detail below.
+requests use subscription quota. Each step links to more detail below. New to this?
+Follow [Turn on a bridge](bridge-setup.md#claude) instead.
 
 1. **Install the CLI on the host** and pin a copy outside the updater's folder
    ([prerequisites](#prerequisites)):
    `curl -fsSL https://claude.ai/install.sh | bash`, then copy the version file.
 2. **Log in to a separate folder** — never your everyday `~/.claude`:
-   `CLAUDE_CONFIG_DIR=~/.claude-sub claude auth login`.
+   `CLAUDE_CONFIG_DIR=~/.claude-sub ~/.local/share/claude-bridge/current/claude auth login`.
 3. **Turn it on** in `compose.yml`: uncomment the two Claude mounts, set `USER`
    and `LOGNAME` to the login's owner, set `EZLLM_CLAUDE_BRIDGE: "on"`, then
    `docker compose up -d` ([enable](#enable)).
@@ -35,24 +36,24 @@ nothing else ever holds the subscription credential. One container, no sidecar.
 
 - The official CLI binary, pinned by path (qualified: **2.1.306**). Install it on
   the host with the official installer (`curl -fsSL https://claude.ai/install.sh | bash`),
-  then pin a copy such as `~/.local/share/claude-bridge/claude-2.1.306`. Pin a **copy**, never
+  then pin a copy as `~/.local/share/claude-bridge/VERSION/claude` with a `current` link. Pin a **copy**, never
   a file under `~/.local/share/claude/versions/`: the CLI's auto-updater deletes old
   versions there, and a deleted file under a live bind mount keeps working only
   until the next container recreate, which then fails the boot (2.1.299 was lost
   this way, 2026-10-21).
 
   ```sh
-  mkdir -p ~/.local/share/claude-bridge
-  # Replace VERSION with the installed version shown by claude --version.
-  VERSION=2.1.306
-  cp "$HOME/.local/share/claude/versions/$VERSION" "$HOME/.local/share/claude-bridge/claude-$VERSION"
-  # Point the compose mount at the copied file.
+  CLI=$(readlink -f "$(command -v claude)")
+  V=$("$CLI" --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+  mkdir -p ~/.local/share/claude-bridge/"$V"
+  cp "$CLI" ~/.local/share/claude-bridge/"$V"/claude
+  ln -sfn "$V" ~/.local/share/claude-bridge/current   # relative: the container follows it
   ```
 - A subscription login in its own config dir, never the interactive one:
 
   ```sh
-  CLAUDE_CONFIG_DIR=~/.claude-sub claude auth login
-  CLAUDE_CONFIG_DIR=~/.claude-sub claude auth status   # loggedIn + subscriptionType
+  CLAUDE_CONFIG_DIR=~/.claude-sub ~/.local/share/claude-bridge/current/claude auth login
+  CLAUDE_CONFIG_DIR=~/.claude-sub ~/.local/share/claude-bridge/current/claude auth status   # loggedIn + subscriptionType
   ```
 
 - Nothing else: the account's shared secret **auto-generates** into
@@ -65,8 +66,7 @@ In your `compose.yml` (from `compose.example.yml`): uncomment the two Claude
 mounts (the bridge root read-only at `/opt/claude-bridge`, the login read-write at
 `/claude-sub`), set `USER`/`LOGNAME` to the login's owner (the CLI's login check
 reads process identity), and set `EZLLM_CLAUDE_BRIDGE: "on"`. The default `EZLLM_CLAUDE_BIN` is
-`/opt/claude-bridge/current/claude`, the layout `scripts/bridge_update.py --init`
-creates. Replace `/home/you`
+`/opt/claude-bridge/current/claude`, the layout made above. Replace `/home/you`
 and the login name below with your actual host values; keep the existing
 `environment` and `volumes` entries for ezllm's data and config.
 

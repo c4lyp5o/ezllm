@@ -25,6 +25,12 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   CLI also supports `--conversation`. `bridge-check agy` now fails a CLI without
   `--json-schema` and always runs the caller-tool live proof.
 
+- **Bridge setup guide.** `docs/bridge-setup.md` has one recipe per plan, a checker
+  and what each error means, for Docker Compose and for `docker run`. The Claude and
+  Codex guides staged the CLI where ezllm does not look (`claude-VERSION`,
+  `/opt/codex`); both now match the defaults. A bridge whose CLI is missing names the
+  guide when it stops the boot.
+
 ## v2.2.0 — shared bridge admission, requests per turn, token counting, spend caps
 
 - **`POST /v1/messages/count_tokens`** answers Claude Code's token-count

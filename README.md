@@ -126,42 +126,21 @@ If something fails:
 
 A bridge lets ezllm send requests through a vendor's official CLI, signed in to
 your subscription. Each bridge is optional and off by default. Finish the
-dashboard setup first, then follow the guide for your account:
+dashboard setup first, then follow **[Turn on a bridge](docs/bridge-setup.md)**: one
+recipe per plan, with a checker and what to do when it does not start.
 
-| Account | Guide | Notes |
-|---|---|---|
-| Claude Pro/Max | [Claude bridge](docs/claude-bridge-runbook.md) | Install Claude Code and sign in with a separate CLI profile. |
-| ChatGPT Plus/Pro | [Codex bridge](docs/codex-bridge-runbook.md) | Linux. Client tools need Landlock for the default protection. |
-| GitHub Copilot | [Copilot bridge](docs/copilot-bridge-runbook.md) | Sign in to the official `copilot` CLI on the host. Supports client tools and PNG/JPEG images with a vision-capable model. |
-| Google Antigravity | [Antigravity bridge](docs/agy-bridge-runbook.md) | Linux. Text chat and caller tools (on by default where the CLI supports `--json-schema`). No image input. |
+| Plan | Recipe | Reference | Notes |
+|---|---|---|---|
+| Claude Pro/Max | [Turn on](docs/bridge-setup.md#claude) | [Claude bridge](docs/claude-bridge-runbook.md) | |
+| ChatGPT Plus/Pro | [Turn on](docs/bridge-setup.md#chatgpt-codex) | [Codex bridge](docs/codex-bridge-runbook.md) | Linux. Client tools need Landlock. |
+| GitHub Copilot | [Turn on](docs/bridge-setup.md#github-copilot) | [Copilot bridge](docs/copilot-bridge-runbook.md) | Client tools, and PNG/JPEG images with a vision-capable model. |
+| Google Antigravity | [Turn on](docs/bridge-setup.md#google-antigravity) | [Antigravity bridge](docs/agy-bridge-runbook.md) | Linux. Text and client tools; no image input. |
 
-The guides use Docker Compose and cover installing the CLI, signing in, the
-mounts and the dashboard preset. If a bridge is enabled but something it needs
-is missing, ezllm refuses to start and says why in `docker compose logs ezllm`.
-Requests through a bridge, including key tests, use your plan's quota.
-
-### Sign in to a bridge
-
-Every bridge signs in to its own folder named `~/.<bridge>-sub`, never the
-folder your everyday CLI uses. That keeps the bridge's login, sessions and
-settings separate from yours, so signing out of your own CLI never breaks the
-bridge. Run the login once on the host, using the same binary the bridge runs.
-The paths below are the bridge updater's layout; replace them with your binary's
-path if you pinned it elsewhere.
-
-| Bridge | Sign in | Check |
-|---|---|---|
-| Claude | `CLAUDE_CONFIG_DIR=~/.claude-sub ~/.local/share/claude-bridge/current/claude auth login` | `CLAUDE_CONFIG_DIR=~/.claude-sub ~/.local/share/claude-bridge/current/claude auth status` |
-| Codex | `CODEX_HOME=~/.codex-sub ~/.local/share/codex-bridge/current/bin/codex login --device-auth` | `CODEX_HOME=~/.codex-sub ~/.local/share/codex-bridge/current/bin/codex login status` |
-| Copilot | `env -u DBUS_SESSION_BUS_ADDRESS COPILOT_HOME=~/.copilot-sub ~/.local/share/copilot-bridge/current/copilot login --device-code` | `ls ~/.copilot-sub/config.json` |
-| Antigravity | `mkdir -p ~/.agy-sub && chmod 700 ~/.agy-sub`, then `env -u DBUS_SESSION_BUS_ADDRESS HOME=$HOME/.agy-sub ~/.local/share/agy-bridge/current/agy` | `ls ~/.agy-sub/.gemini/antigravity-cli/antigravity-oauth-token` |
-
-Codex and Copilot print a URL and a code to enter in your browser. Antigravity
-opens its interactive CLI: sign in, send one prompt, then type `/exit`. Unsetting
-`DBUS_SESSION_BUS_ADDRESS` makes Copilot and Antigravity save the login to a file
-the container can read instead of your desktop keyring. Then mount the folder
-read-write at `/<bridge>-sub` in `compose.yml` (for example
-`~/.copilot-sub:/copilot-sub`), as each guide shows.
+Each bridge signs in to its own folder (`~/.claude-sub`, `~/.codex-sub`,
+`~/.copilot-sub`, `~/.agy-sub`), never your everyday one, so signing out of your own
+CLI does not break it. If a bridge is on but something it needs is missing, ezllm
+refuses to start and says why in `docker compose logs ezllm`. Requests through a
+bridge, including key tests, use your plan's quota.
 
 ### Recommended cache settings
 
@@ -350,6 +329,7 @@ transport in `internal/bridgeutil` ([design](docs/shared-bridge-transport-design
 | [docs/recovery-runbook.md](docs/recovery-runbook.md) | Encrypted backups, restore and upgrades |
 | [docs/master-key-runbook.md](docs/master-key-runbook.md) | Key encryption: paths, backup, rotation |
 | [docs/pricing-runbook.md](docs/pricing-runbook.md) | Model price catalog: refresh, import, query |
+| [docs/bridge-setup.md](docs/bridge-setup.md) | Turning on a bridge: one recipe per plan, with a checker |
 | [docs/claude-bridge-runbook.md](docs/claude-bridge-runbook.md) | Claude subscription bridge |
 | [docs/codex-bridge-runbook.md](docs/codex-bridge-runbook.md) | ChatGPT subscription bridge, including model choice for long tool tasks |
 | [docs/copilot-bridge-runbook.md](docs/copilot-bridge-runbook.md) | GitHub Copilot subscription bridge |

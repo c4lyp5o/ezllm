@@ -12,7 +12,8 @@ before you rely on tools.
 Start with a working ezllm installation and dashboard ([quick start](../README.md#quick-start)).
 This guide uses Docker Compose with a Linux environment, a ChatGPT subscription,
 and an isolated Codex login. Validation and test requests use subscription quota.
-Each step links to more detail below.
+Each step links to more detail below. New to this? Follow
+[Turn on a bridge](bridge-setup.md#chatgpt-codex) instead.
 
 1. **Check the host** supports client tools — Linux with Landlock
    ([platform requirements](#platform-requirements--read-this-first)). Without it
@@ -20,7 +21,7 @@ Each step links to more detail below.
 2. **Install the official Codex CLI on the host** and pin a copy of the **whole
    release directory** ([prerequisites](#prerequisites)).
 3. **Log in to a separate folder** — never your everyday `~/.codex`:
-   `CODEX_HOME=~/.codex-sub codex login --device-auth`.
+   `CODEX_HOME=~/.codex-sub ~/.local/share/codex-bridge/current/bin/codex login --device-auth`.
 4. **Turn it on** in `compose.yml`: uncomment the two Codex mounts, set
    `EZLLM_CODEX_BRIDGE: "on"`, then `docker compose up -d` ([enable](#enable)).
 5. **Add the account** in the dashboard: Providers → Add provider →
@@ -210,25 +211,25 @@ The caller's full history remains available for fresh replay after a restart.
 ## Prerequisites
 
 - **The official CLI release, pinned by path** (qualified: **0.163.0**, the
-  standalone musl build). Obtain the official release from the
-  [Codex releases page](https://github.com/openai/codex/releases) and inspect
-  the extracted files before copying. Pin a **copy of the whole release directory** outside
-  `~/.codex/packages/`, which the CLI's updater manages. The directory matters:
-  `bin/` holds the CLI **and** `codex-code-mode-host`, the runtime client tools
-  need — copy only the CLI and tools stay off (`/status` → `client_tools:
-  disabled (code-mode host missing)`).
+  standalone musl build). Install it with the official installer
+  (`curl -fsSL https://chatgpt.com/codex/install.sh | sh`), or take a release from the
+  [Codex releases page](https://github.com/openai/codex/releases). Pin a **copy of the
+  whole release directory** outside `~/.codex/packages/`, which the CLI's updater
+  manages and whose `current` link is an absolute path that does not exist in the
+  container. The directory matters: `bin/` holds the CLI **and**
+  `codex-code-mode-host`, the runtime client tools need — copy only the CLI and tools
+  stay off (`/status` → `client_tools: disabled (code-mode host missing)`). An npm
+  install's `codex` is a Node.js script, which the container cannot run.
 
   ```sh
-  # Find the standalone release directory installed on your host. It must
-  # contain bin/codex and bin/codex-code-mode-host; an npm wrapper is not it.
-  # Replace /path/to/release with that directory before running these commands.
+  REL=$(readlink -f ~/.codex/packages/standalone/current)
+  V=$("$REL/bin/codex" --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
   mkdir -p ~/.local/share/codex-bridge
-  cp -a /path/to/release ~/.local/share/codex-bridge/0.163.0
-  ls ~/.local/share/codex-bridge/0.163.0/bin    # codex and codex-code-mode-host
+  cp -a "$REL" ~/.local/share/codex-bridge/"$V"
+  ln -sfn "$V" ~/.local/share/codex-bridge/current   # relative: the container follows it
+  ls ~/.local/share/codex-bridge/current/bin         # codex and codex-code-mode-host
   ```
 
-  The `0.163.0` directory name above is an example for the qualified release;
-  check the copied binary version and use a matching path for other releases.
   The bridge also starts the CLI with `--disable in_app_updates`, so a running
   bridge never updates itself. A different version still boots — the lockdown and
   protocol checks below guard it — but `/status` reports it `unqualified` until the
@@ -237,8 +238,8 @@ The caller's full history remains available for fresh replay after a restart.
 
   ```sh
   mkdir -p ~/.codex-sub && chmod 700 ~/.codex-sub
-  CODEX_HOME=~/.codex-sub codex login --device-auth
-  CODEX_HOME=~/.codex-sub codex login status      # → Logged in using ChatGPT
+  CODEX_HOME=~/.codex-sub ~/.local/share/codex-bridge/current/bin/codex login --device-auth
+  CODEX_HOME=~/.codex-sub ~/.local/share/codex-bridge/current/bin/codex login status   # → Logged in using ChatGPT
   ```
 
   Do not copy `~/.codex/auth.json` across: two copies of one refresh token log
@@ -264,10 +265,9 @@ levels above the binary); boot then reports it qualified.
 ## Enable
 
 In your `compose.yml` (from `compose.example.yml`): uncomment the two Codex
-mounts (the release directory read-only at `/opt/codex`, the login read-write
+mounts (the bridge root read-only at `/opt/codex-bridge`, the login read-write
 at `/codex-sub`), set `EZLLM_CODEX_BRIDGE: "on"`, and recreate the container.
-Replace `/home/you` and the release path below with your actual host paths; keep
-the existing `environment` and `volumes` entries for ezllm's data and config.
+Replace `/home/you` below with your actual home folder; keep the existing `environment` and `volumes` entries for ezllm's data and config.
 The Compose service user must be able to execute the CLI and read and write the
 login directory.
 
@@ -275,7 +275,7 @@ login directory.
     environment:
       EZLLM_CODEX_BRIDGE: "on"
     volumes:
-      - /home/you/.local/share/codex-bridge/0.163.0:/opt/codex:ro
+      - /home/you/.local/share/codex-bridge:/opt/codex-bridge:ro
       - /home/you/.codex-sub:/codex-sub
 ```
 

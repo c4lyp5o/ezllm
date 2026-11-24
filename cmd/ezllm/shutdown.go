@@ -46,6 +46,7 @@ func (l *requestLifetime) drain(srv *http.Server, drain, abort time.Duration, lo
 	defer cancel()
 	err := srv.Shutdown(ctx)
 	if err == nil {
+		l.cancel()
 		return
 	}
 	log.Error("http shutdown: drain budget exceeded; cancelling in-flight requests", "err", err)

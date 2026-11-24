@@ -49,3 +49,12 @@ func TestDrainWaitsForCancelledHandlers(t *testing.T) {
 		t.Fatal("drain returned while the handler was still running; its ledger row would hit a closed store")
 	}
 }
+
+func TestGracefulDrainCancelsServerLifetime(t *testing.T) {
+	reqs := newRequestLifetime()
+	t.Cleanup(reqs.cancel)
+	reqs.drain(&http.Server{}, time.Second, time.Second, slog.Default())
+	if reqs.ctx.Err() == nil {
+		t.Fatal("graceful drain left the server lifetime active")
+	}
+}

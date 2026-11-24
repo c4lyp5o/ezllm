@@ -2292,10 +2292,12 @@ func (d *Dispatcher) streamCopyTap(ctx context.Context, w http.ResponseWriter, r
 						firstEvent = true
 					}
 					// Remember the first real payload so the caller can
-					// quote it in the ledger. Comments and [DONE] are
-					// skipped: neither can carry an error envelope.
+					// quote it in the ledger. SSE metadata and [DONE]
+					// cannot carry an error envelope.
 					if firstPayload == nil {
-						if p := bytes.TrimSpace(bytes.TrimPrefix(bytes.TrimSpace(line), []byte("data:"))); len(p) > 0 && p[0] != ':' && !bytes.Equal(p, []byte("[DONE]")) {
+						p, isData := bytes.CutPrefix(line, []byte("data:"))
+						p = bytes.TrimSpace(p)
+						if isData && len(p) > 0 && !bytes.Equal(p, []byte("[DONE]")) {
 							firstPayload = append([]byte(nil), p...)
 						}
 					}

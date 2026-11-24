@@ -43,12 +43,6 @@ export const axisProps = {
   axisLine: false,
 } as const;
 
-export const axisPropsCompact = {
-  tick: { fill: v('--color-viz-axis'), fontSize: 11, fontFamily: 'var(--font-sans)' },
-  tickLine: false,
-  axisLine: false,
-} as const;
-
 export const cursorFill = { fill: v('--color-viz-crosshair') } as const;
 
 export const tooltipBox: CSSProperties = {
@@ -298,9 +292,4 @@ export function StatCard({
       {footer && <div className="mt-2 border-t border-line pt-2.5">{footer}</div>}
     </div>
   );
-}
-
-// Label + value in the same compact shape the panels use, for card footers.
-export function StatLabel({ children }: { children: ReactNode }) {
-  return <div className="text-[12px] text-mute">{children}</div>;
 }

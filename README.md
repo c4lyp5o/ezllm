@@ -3,8 +3,8 @@
 ezllm is a self-hosted LLM gateway. It is one Go binary that sits between your
 apps and your model providers. Your apps talk to a single endpoint using the
 OpenAI or Anthropic API, and ezllm routes each request to the right provider
-account, retries or fails over when a provider has trouble, and records every
-request's token usage and cost. It ships with a web dashboard for setup and
+account, retries or fails over when a provider has trouble, and tracks
+request token usage and cost. It ships with a web dashboard for setup and
 monitoring.
 
 [![Tests](https://github.com/c4lyp5o/ezllm/actions/workflows/test.yml/badge.svg)](https://github.com/c4lyp5o/ezllm/actions/workflows/test.yml)
@@ -265,9 +265,14 @@ added together:
 | `/v1/messages` | excluded from `input_tokens` | yes |
 | `/v1/responses` | included in `input_tokens` | yes |
 
-ezllm stores every request as `tokens_in`, `tokens_out`, `tokens_cached_read`,
+For recorded requests, ezllm stores usage as `tokens_in`, `tokens_out`, `tokens_cached_read`,
 `tokens_cached_write` and `reasoning_tokens` in one consistent form, plus the
 provider's original usage JSON.
+
+The usage ledger is best-effort: it keeps database writes off the response
+path and can lose rows if its queue fills or SQLite writes fail after retry.
+Monitor dropped and lost rows in admin health. Do not treat this ledger as
+an authoritative billing record or a hard spend guarantee.
 
 ## Dashboard
 

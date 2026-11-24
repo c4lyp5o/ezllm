@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -302,19 +303,33 @@ func Restore(ctx context.Context, path, secret, dest string) error {
 	if closeErr != nil {
 		return closeErr
 	}
+	files := []string{"ezllm.sqlite", "ezllm-master.key", "manifest.json", "RECOVERY.txt"}
+	for _, name := range files {
+		if err = syncFile(filepath.Join(stage, name)); err != nil {
+			return fmt.Errorf("sync restored %s: %w", name, err)
+		}
+	}
 	// Rename into a newly reserved destination prevents accidentally replacing an
 	// existing empty directory created concurrently by another process.
 	if err = os.Mkdir(dest, 0700); err != nil {
 		return err
 	}
-	for _, name := range []string{"ezllm.sqlite", "ezllm-master.key", "manifest.json", "RECOVERY.txt"} {
+	for _, name := range files {
 		if err = os.Rename(filepath.Join(stage, name), filepath.Join(dest, name)); err != nil {
 			return fmt.Errorf("restore incomplete: %w", err)
 		}
 	}
-	return syncDir(dest)
+	if err = syncDir(dest); err != nil {
+		return err
+	}
+	return syncDir(parent)
 }
 func syncDir(path string) error {
+	// Windows does not support flushing a directory via os.File.Sync.
+	// Backup files themselves are still synced before publication.
+	if runtime.GOOS == "windows" {
+		return nil
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -323,4 +338,12 @@ func syncDir(path string) error {
 	return f.Sync()
 }
 
-func sqliteURI(path string) string { u := url.URL{Scheme: "file", Path: path}; return u.String() }
+func sqliteURI(path string) string {
+	path = filepath.ToSlash(path)
+	// A Windows drive letter belongs in the URI path, not the authority.
+	if len(path) >= 3 && path[1] == ':' && path[2] == '/' {
+		path = "/" + path
+	}
+	u := url.URL{Scheme: "file", Path: path}
+	return u.String()
+}

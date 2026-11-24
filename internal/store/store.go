@@ -1067,8 +1067,7 @@ func (d *DB) alterCallsContextTokens(ctx context.Context) error {
 
 // dropCallsToolPrune (v35) removes the v33 tool-pruning column. The feature was
 // rejected and deleted on 2026-11-05 and nothing reads or writes the column;
-// the experiment's measurements were exported to
-// docs/design/tool-prune-shadow-results.json before the drop. A no-op once applied and
+// the experiment's measurements were exported before the drop. A no-op once applied and
 // on databases that never had it.
 func (d *DB) dropCallsToolPrune(ctx context.Context) error {
 	exists, err := hasTable(ctx, d.w, "calls")

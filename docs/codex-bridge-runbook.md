@@ -88,7 +88,7 @@ namespace, and the distroless container has no shell or curl:
 
 The request is refused **before** Codex starts, so it costs no plan quota. Plain
 text requests on the same account keep working. An agent that needs tools
-(Hermes, Claude Code, any tool-using client) cannot use this hop until the host
+(Claude Code, any tool-using client) cannot use this hop until the host
 has Landlock — route it to another account, or fix the host.
 
 ### Fixing a host without Landlock
@@ -122,8 +122,7 @@ usable escalation path. Operations outside the workspace still fail.
 Writable mode does not enable Codex's native shell, grant access to the client's
 workspace, or remove the outer Landlock domain. Client tools execute in the
 calling application. Their filesystem permissions are independent of the Codex
-child's sandbox: for Hermes, use its tools to resolve `~/workspace` on the
-Hermes machine and perform authorized writes there. The bridge adds this
+child's sandbox: the client's tools read and write on the client's own machine. The bridge adds this
 context to tool-bearing requests so the model attempts caller tools instead of
 inferring a caller-side denial from its local sandbox. Actual caller
 tool failures and approval requirements still apply. This is instruction
@@ -139,7 +138,7 @@ automatic continuation loop. No additional environment flag is required.
 
 ### Model choice for long caller-tool tasks
 
-Measured 2026-11-14 by replaying one stalled Hermes turn (same 78-message
+Measured 2026-11-14 by replaying one stalled agent turn (same 78-message
 history, tools and prompt) through this bridge on the ChatGPT subscription:
 
 - `gpt-6.1-terra` ended after 4–9 requests and reported the task unfinished in
@@ -164,7 +163,7 @@ script continues to its next call without new model work. Those requests are
 successful but record no tokens, and each costs one 250 ms tool-batch window.
 The dashboard labels them "no tokens" and Analytics → Requests can hide them
 (`hide_empty`). Measured 2026-11-14: about 65% of `gpt-6.1-sol` requests in a
-long Hermes task were such steps.
+long agent task were such steps.
 
 Usage for the model call that wrote the script arrives only after the script's
 tool calls finish (measured event order: tool calls, then
@@ -308,7 +307,7 @@ then send a short prompt to an available model through the dashboard or your cli
 Requests consume subscription quota.
 
 The optional repository proof makes several calls and requires an inference key.
-Set the URL explicitly: the script otherwise defaults to a specific remote server.
+The script defaults to `http://127.0.0.1:20129`.
 Replace the model ID with one from your account, and run only against a test
 instance you control:
 
@@ -392,7 +391,7 @@ happens before inference, never as a second model call to repair a failed turn.
 Each independent request launches a new CLI, resumes a matching empty template,
 and forks a separate ephemeral prediction thread with the caller's complete
 history. Templates retain model, instructions, tools and scratch paths, never
-caller dialogue or child answers. Caller tools still execute in Hermes or the
+caller dialogue or child answers. Caller tools still execute in the
 calling harness. A pending native tool turn keeps its existing process until
 its caller supplies results; completed turns return only their empty template.
 
@@ -440,4 +439,4 @@ alias rather than overwriting an existing parked conversation.
 
 Empty cache templates still contain configuration only and can share affinity
 across callers; caller identity is never sent in model instructions or input.
-Native approval policy remains `never`, and caller tools still execute in Hermes.
+Native approval policy remains `never`, and caller tools still execute in the caller.

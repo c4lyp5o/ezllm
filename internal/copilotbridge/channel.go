@@ -310,7 +310,7 @@ func toolsRefused(why string, cause error) error {
 
 // sessionConfig builds session.create as protocol 3 takes it. availableTools is an allowlist, so the
 // CLI's own shell and file tools are invisible, and nothing the caller did not
-// declare can run on this box. It must be present even when empty: measured on
+// declare can run on the ezllm host. It must be present even when empty: measured on
 // CLI 1.0.105, [] shows the model 0 tools but leaving it out shows 18, including
 // bash and apply_patch. overridesBuiltInTool keeps a caller's tool that shares a
 // built-in's name (bash, view) routed to the caller.

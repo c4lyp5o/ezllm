@@ -21,7 +21,7 @@ from typing import Any
 
 BASE = os.environ.get('EZLLM_BASE', 'http://127.0.0.1:20199')
 TOK = open(os.environ.get('EZLLM_TOKEN_FILE',
-          os.path.expanduser('~/.hermes/secrets/ezllm-admin.token'))).read().strip()
+          os.path.expanduser('~/.config/ezllm/ezllm-admin.token'))).read().strip()
 
 
 def get(path) -> tuple[int, Any]:

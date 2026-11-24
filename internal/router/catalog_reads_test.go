@@ -92,7 +92,7 @@ func TestWireSelectionReadsThePinOnce(t *testing.T) {
 	f.yesProto = map[string]bool{"1/gpt-6-luna/responses": true}
 	c := &countingCatalog{fakeCatalog: f}
 	r := New(c).WithTranslation(true).WithUniversal(true)
-	routes, err := r.ResolveCandidates(context.Background(), "opengo/gpt-6-luna", provider.SurfaceAnthropic, "t")
+	routes, err := r.ResolveCandidates(context.Background(), "demo/gpt-6-luna", provider.SurfaceAnthropic, "t")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func (brokenSnapshotCatalog) CatalogSnapshot(context.Context) (*store.CatalogSna
 // the live catalog, whose own errors keep their fail-closed meaning.
 func TestUnreadableSnapshotFallsBackToLiveCatalog(t *testing.T) {
 	c := brokenSnapshotCatalog{&countingCatalog{fakeCatalog: newFake()}}
-	routes, err := New(c).ResolveCandidates(context.Background(), "opengo/gpt-6-luna", provider.SurfaceChat, "t")
+	routes, err := New(c).ResolveCandidates(context.Background(), "demo/gpt-6-luna", provider.SurfaceChat, "t")
 	if err != nil || len(routes) != 1 {
 		t.Fatalf("routes = %d, err = %v; want 1 via the live catalog", len(routes), err)
 	}

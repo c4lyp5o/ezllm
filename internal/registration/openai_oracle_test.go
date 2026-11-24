@@ -2,7 +2,7 @@ package registration
 
 // Regression: adding api.openai.com/v1 with a VALID key failed with
 // "could not reach the credential endpoint". Root cause: the openai-compatible
-// auth oracle was GET /usage (an ssn-gpt-specific path). OpenAI answers
+// auth oracle was GET /usage (an initech-gpt-specific path). OpenAI answers
 // /v1/usage with 400 "Missing required parameter: 'date'" even for a good key,
 // and 400 is not an auth reject for this adapter, so the gate fell through to
 // the default branch. Fake below mirrors the live OpenAI responses recorded

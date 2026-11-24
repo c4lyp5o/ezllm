@@ -82,7 +82,7 @@ func TestServiceEndpointsForwardEndToEnd(t *testing.T) {
 	if err := db.SetModelProto(ctx, id, "svc-model", provider.SurfaceChat, &no); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.UpsertClientToken(ctx, "hermes", "tok-infer", "infer"); err != nil {
+	if err := db.UpsertClientToken(ctx, "my-app", "tok-infer", "infer"); err != nil {
 		t.Fatal(err)
 	}
 	client := &http.Client{Timeout: 5 * time.Second}

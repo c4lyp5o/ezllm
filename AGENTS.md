@@ -33,7 +33,7 @@ compression, a SQLite usage ledger, and an embedded operator dashboard
   RSS, and will OOM-kill or hang the shell — an agent hit this on 2026-10-23
   and lost six minutes to a package run that `-short` finishes in 106 s.
   Always use `go test -short …` or `make test-short` locally; do not run
-  `make check`, `make test`, `make test-race`, or `make perf` on this machine.
+  `make check`, `make test`, `make test-race`, or `make perf` locally.
 - **Version discipline:** bump `internal/server/version.go` and the
   `Current:` line of `VERSION.md` in the same commit. `version_test.go`
   enforces the pairing; `GET /healthz` serves the constant.
@@ -56,10 +56,10 @@ compression, a SQLite usage ledger, and an embedded operator dashboard
 - App names are lowercase (`ezllm`). The dashboard's brand row is
   `web/src/ez/Brand.tsx`, with the shared ez icon.
 
-## Memory constraint (important on this box)
+## Memory constraint
 
 The full suite peaks at **~4.21 GiB RSS** (`TestLatencyPercentiles`). In a
-4 GiB cgroup — e.g. a Hermes worker scope — that is an OOM kill regardless of
+4 GiB cgroup that is an OOM kill regardless of
 free machine RAM or `GOMEMLIMIT` (soft limit, doesn't cap RSS). Use:
 
 ```bash

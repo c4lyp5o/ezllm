@@ -1,4 +1,4 @@
-# EXPLORING ezllm — Calypso's codebase tour notes
+# EXPLORING ezllm — codebase tour
 
 > **How to use this file:** it's your map for reading ezllm's code — reading order, invariants
 > to verify, and per-milestone file landmarks (§4). Landmarks name a file and a symbol, never a
@@ -12,7 +12,7 @@
 ## 1. 60-second mental model
 
 ```
-client (Claude Code / Hermes / curl / anything OpenAI- or Anthropic-speaking)
+client (Claude Code / curl / anything OpenAI- or Anthropic-speaking)
    │  /v1/chat/completions · /v1/messages · /v1/responses   (bearer or x-api-key = client token)
    ▼
 ┌──────────────────────── ezllm (Go, 127.0.0.1:20129) ──────────────────────┐
@@ -42,13 +42,13 @@ protocols; compression and per-hop reasoning rules can also change requests.
 cd ~/workspace/ezllm
 make build && make run          # or: go run ./cmd/ezllm -config config.yaml
 curl -s localhost:20129/healthz
-curl -s localhost:20129/v1/models -H "Authorization: Bearer $EZLLM_TOKEN_HERMES" | python3 -m json.tool
+curl -s localhost:20129/v1/models -H "Authorization: Bearer $EZLLM_TOKEN" | python3 -m json.tool
 # real call (streaming, watch it print incrementally):
 curl -N localhost:20129/v1/chat/completions \
-  -H "Authorization: Bearer $EZLLM_TOKEN_HERMES" -H "Content-Type: application/json" \
-  -d '{"model":"opengo/qwen3.8-flash","messages":[{"role":"user","content":"count 1-5"}],"stream":true}'
+  -H "Authorization: Bearer $EZLLM_TOKEN" -H "Content-Type: application/json" \
+  -d '{"model":"opencode/qwen3.8-flash","messages":[{"role":"user","content":"count 1-5"}],"stream":true}'
 go run ./cmd/m2verify    # acceptance checker: prints PASS/FAIL per invariant
-# raw SQL equivalent (note: no sqlite3 CLI on this box — use `go run ./cmd/m2verify`):
+# raw SQL equivalent (note: without the sqlite3 CLI, use `go run ./cmd/m2verify`):
 #   SELECT ts,client,surface,account,model,status,ttft_ms,total_ms,
 #          tokens_in,tokens_out,tokens_cached_read,tokens_cached_write
 #   FROM calls ORDER BY id DESC LIMIT 5;
@@ -98,7 +98,7 @@ names the pre-fix call sites.)*
   buggy in the first cut (log showed `client=""`); fixed + re-verified.
 - `statusWriter` — records status/bytes, **`Flush()` forwarded** (the M2 SSE dependency lives
   here, not in the proxy).
-- **Live-verified:** healthz 200 · models 200 w/ token (`client=hermes` in log) · 401 w/o ·
+- **Live-verified:** healthz 200 · models 200 w/ token (client name in log) · 401 w/o ·
   chat 501 stub · bind `127.0.0.1` only · SIGTERM → exit 0 · 0 secrets in log.
 - **M1 invariants proven:** #1 no-secrets-in-logs (grep: 0 hits) · #6 graceful shutdown ·
   #7 loopback default. (#2 SSE, #3 passthrough, #4 retry policy, #5 ledger async = M2/M4)
@@ -157,13 +157,13 @@ one function. Then `store.NormalizeUsageWith` (`ledger.go`) for the accounting r
 - `cmd/m2verify/main.go` — acceptance checker that queries the live DB and prints PASS/FAIL per
   invariant. Run `go run ./cmd/m2verify` after any live soak.
 
-**Live-verified 2026-10-06** (opencode-go 36 models + ssn-gpt 11 models synced at boot, 0 warnings):
+**Live-verified 2026-10-06** (opencode-go 36 models + initech-gpt 11 models synced at boot, 0 warnings):
 - `/v1/chat/completions` → 200, and streamed: **TTFB 1.28s vs total 4.08s** = unbuffered
 - `/v1/messages` with `x-api-key` → 200 **tool use** (`stop_reason: tool_use`, real `tool_use` block)
 - `/v1/responses` → 200 `status: completed` with full usage incl. `cache_write_tokens`
-- `super-ssn/gpt-6.1-sol` → 200 (second provider, second adapter kind)
+- `initech/gpt-6.1-sol` → 200 (second provider, second adapter kind)
 - Cached repeat: raw `prompt=2496 cached=2048` → ledger **`tokens_in=448 + cached_read=2048`** ✅
-- Bare `gpt-6-luna` → 404 listing **both** `opengo/` and `super-ssn/` ✅
+- Bare `gpt-6-luna` → 404 listing **both** `demo/` and `initech/` ✅
 - Keys at rest (at M2): **plaintext** (`key_plain`) — the crypto path was implemented +
   test-covered but unwired until `81359d4`; hints only;
   `dropped_rows=0`; `CGO_ENABLED=0` static build ✅
@@ -235,8 +235,7 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
   browser origins; regression-tested — commit `8c832ef`); SPA clears session only on our
   numeric-code 401, provider 401s surface inline (commit `358cda3`).
 - Deployment: `ghcr.io/c4lyp5o/ezllm` image; compose (port 20129) from
-  `compose.example.yml`; the host's own gitignored `compose.yml` adds the Traefik labels
-  (`llm.calypso.dedyn.io`, `/admin` guard); served bundle verified against `web/dist`.
+  `compose.example.yml`; the host's own gitignored `compose.yml` adds any reverse-proxy labels; served bundle verified against `web/dist`.
 - `cmd/m2verify` remains the end-to-end acceptance checker against live traffic. Line-number
   landmarks were stale by ~400 lines in places by 2026-10-10, which is why §4 now cites
   symbols only.
@@ -273,7 +272,7 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
   the server route `POST /v1/responses` still exists).
 - **`web/dist` ships the UI.** The image build embeds it (`go:embed`, see the Dockerfile), so a `web/src`-only commit deploys the OLD interface with every test green. Rebuild
   + commit dist in the same push; after deploy verify the served hash
-  (`curl https://llm.calypso.dedyn.io/ | grep assets/index-`) + grep one marker string.
+  (`curl https://llm.example.com/ | grep assets/index-`) + grep one marker string.
 
 ### Universal wire matrix (M0–M5) ✅ (2026-10-13, shipped)
 - `docs/design/universal-wire-design.md` — the architecture; runbook section at the end of
@@ -401,7 +400,7 @@ executable Go probe). Five slices, all local, all gates-green:
   log/search filtered, both wire shapes resolved.
 - WS-B: disjoint input/output compositions (cache-read and cache-write are
   SUBSETS of input), cache-write rendered, honest labels.
-- WS-C scoped (Calypso chose the session memo over the DB epoch table):
+- WS-C scoped (the owner chose the session memo over the DB epoch table):
   internal/compress/sessionmemo.go — TTL'd, session+profile scoped commit
   ledger; committed history replays byte-identical; the ratio floor judges
   new work only. Bugs the tests caught during the build: budget's message
@@ -785,7 +784,7 @@ while the SAME model on `opencode-go` was 0/754.
 - Dashboard: Connect picks roles with independent checkboxes and shows a Prometheus job; the
   sidebar footer is three icon buttons; interface text was rewritten in plain language.
 
-### v2.0.0 — bridge caching, Codex fidelity, security remediation ✅ (2026-11-14; runbooks `docs/codex-bridge-runbook.md`, `docs/bridge-update-runbook.md`; audit `docs/design/security-audit-2026-11-14.md`)
+### v2.0.0 — bridge caching, Codex fidelity, security remediation ✅ (2026-11-14; runbooks `docs/codex-bridge-runbook.md`, `docs/bridge-update-runbook.md`)
 
 - `internal/codexbridge/cache.go` `borrowTemplate` / `forkTemplate` — empty
   persisted parent threads forked per request for prompt-cache affinity across
@@ -859,19 +858,15 @@ These are the "if it's broken here, the project failed" spots — each must be v
 
 ## 6. Key facts you'll need while exploring (provider facts measured 2026-10-06 … 10)
 
-- Go **1.27** (`go.mod`) at `~/.local/go/bin/go` (PATH wired; apt's 1.22 is shadowed fallback)
-- Keys (0600, never in repo/config): `~/.hermes/secrets/opencode-go.txt`,
-  `~/.hermes/secrets/ssn-gpt.txt`, `~/.hermes/secrets/bailian-coding-plan.txt`,
-  `~/.hermes/secrets/xiaomi-mimo-token-plan.txt`;
-  ezllm client/admin tokens: `ezllm-infer.token`, `ezllm-admin.token`;
-  field-encryption master key `ezllm-master.key` (wired since `81359d4` — see M2 landmarks)
+- Go **1.27** (`go.mod`) (a distro's older Go will not do)
+- Keys stay in 0600 files outside the repo and config; the field-encryption master key `ezllm-master.key` (wired since `81359d4` — see M2 landmarks)
 - opencode-go **requires** `x-opencode-session` for generation (+`x-opencode-request` recommended).
   Missing → `400 MissingSessionID`. **But `/v1/models` and `/v1/usage` need NO session header.**
 - ⚠️ **`GET /v1/models` on opencode-go is UNAUTHENTICATED** — it returns 200 + the full catalog for
   an empty key, `not-a-key`, even `sk-`. Never use it as a credential check. The auth oracle is
   **`GET /v1/usage`** (401 on a bad key, 200 on a good one, no session header, ~0.75 s, 0 tokens).
-  ssn-gpt's `/models` *does* 401 — **auth behaviour is per-provider, so never assume.**
-- ⚠️ Cloudflare `403 "error code: 1010"` on space.stationine.com is a **User-Agent block on
+  initech-gpt's `/models` *does* 401 — **auth behaviour is per-provider, so never assume.**
+- ⚠️ Cloudflare `403 "error code: 1010"` on api.example.com is a **User-Agent block on
   `python urllib`**, not a rate limit. Go's default UA is fine (200 everywhere), and 12 rapid curls
   were never blocked. Practical rule: **403 = bad credentials → fail fast**; retry/backoff only for
   429/5xx/timeout. Don't write probing scripts in Python against that host.
@@ -887,7 +882,7 @@ These are the "if it's broken here, the project failed" spots — each must be v
   `message_start` **+** `message_delta` (merge them — start reports `output_tokens: 0`), Responses
   on `response.completed` **or `response.incomplete`** when `max_output_tokens` truncates.
 - Quota shapes differ per provider on the *same* path: opencode-go → `percent`
-  (`{usage:{rolling,weekly,monthly}{percent,resetsAt}}`), ssn-gpt → `money`
+  (`{usage:{rolling,weekly,monthly}{percent,resetsAt}}`), initech-gpt → `money`
   (`{balance: 0.2563, unit: "USD", planName: 钱包余额, usage:{today,total}, daily_usage[], model_stats[]}`).
 - **Auth-error status is per-provider — never assume.** Measured with bogus keys (2026-10-09/10):
   Gemini `…/v1beta/openai` → `400` "Please pass a valid API key" (the only kind where 400 counts
@@ -909,7 +904,7 @@ These are the "if it's broken here, the project failed" spots — each must be v
   M2 was rejected 2026-11-04 and the code is deleted: the prize was 89.8% frozen
   counters from tools that had stopped shipping, the live dead tax was 481
   tokens/request (0.9%), and usage was derived from the *request* body only, so
-  the one client that uses tools on every call (`dis-intelligence`, reading its
+  the one client that uses tools on every call (reading its
   `tool_use` out of the *response*) read `used_sessions = 0` across all 23 tools
   — prune mode would have deleted its whole catalog on structurally blind
   evidence. Trim catalogs source-side instead. Full verdict + re-open conditions:

@@ -105,7 +105,7 @@ release that drops the flag.
 The bridge supplies tool definitions and conversation history as JSON in a
 prompt and passes an output schema through a private temporary file. It
 validates the CLI's complete envelope, then emits ordinary OpenAI tool calls.
-Hermes or another harness executes those calls using its own workspace and
+Your client executes those calls using its own workspace and
 permissions. The follow-up request must include assistant tool calls and all
 matching tool results. Each request starts a new `agy` process: nothing stays
 parked while the caller runs its tools. The tradeoff is repeated CLI startup
@@ -179,7 +179,7 @@ history; they provide no native conversation ID.
 
 A match requires unchanged prior messages, the exact previous assistant reply,
 and the same model, effort and tool policy. Only the new user message or matching
-result group is sent. Caller tool IDs remain stable, and Hermes executes the
+result group is sent. Caller tool IDs remain stable, and the caller executes the
 tools. Edited histories, changed IDs/tools/model/policy, partial results and
 identical stateless retries cannot reuse unrelated context.
 
@@ -195,7 +195,7 @@ or the CLI's own backend conversation storage.
 The loopback `/status` reports `session_cache` and
 `runtime.conversation_cache` (`enabled`, `idle`, `hits`, `closed`). A hit confirms
 native resume, not a particular vendor discount. On Gemini Flash CLI 1.4.12,
-a synthetic Hermes-shaped caller-tool result used 2,733 cold input tokens plus
+a synthetic caller-tool result used 2,733 cold input tokens plus
 15,733 cache reads, compared with 17,791 cold input tokens on the initial turn.
 This is a token measurement, not a quota-credit reduction percentage.
 

@@ -11,7 +11,7 @@ const row = (k, o = {}) => ({
 });
 const seen = { usage: [], requests: [] };
 const feed = (n, o = {}) => Array.from({ length: n }, (_, i) => ({
-  ts: new Date(Date.now() - i * 60_000).toISOString(), client: 'hermes', surface: 'chat', alias: 'main',
+  ts: new Date(Date.now() - i * 60_000).toISOString(), client: 'my-app', surface: 'chat', alias: 'main',
   account: 'Mock provider', model: 'model-a', status: i === 0 ? 500 : 200, tokens_in: 1000 - i, tokens_out: 10,
   error: i === 0 ? 'upstream 500 [server_error]: kaboom' : undefined, ...o,
 }));

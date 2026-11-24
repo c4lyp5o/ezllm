@@ -179,4 +179,4 @@ refuses — it never falls through to the model swap.
 
 Static/mock green is not provider compatibility. Live canaries (scratch instance, a real tool
 loop on each newly supported cell, then a repeated-prefix request to observe cache behaviour)
-need Calypso's approval and real token spend.
+need the owner's approval and real token spend.

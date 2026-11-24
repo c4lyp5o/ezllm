@@ -181,7 +181,7 @@ type Resolver struct {
 	// on the Responses wire for chat AND anthropic clients. Each entry is a
 	// REGEX matched against the full "<ns>/<model>" string (both ends
 	// anchored), so a plain id still matches only itself and a family pattern
-	// like `stationine/gpt-6\\.1-sol` covers the variants. Empty = inert.
+	// like `globex/gpt-6\\.1-sol` covers the variants. Empty = inert.
 	responsesModels []*regexp.Regexp
 	// universalEnabled turns on the three NEW cross-wire cells
 	// (chat→messages, responses→chat, responses→messages) and the fixed

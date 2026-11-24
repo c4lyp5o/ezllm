@@ -1736,7 +1736,7 @@ func refusesHistory(resp *http.Response) bool {
 // protocol version, or a tool cannot be registered. It describes the HOP, not the body, so a
 // hop that does support tools can serve the identical request — committing the
 // 400 instead ended the client run with three working hops left in the combo
-// (measured 2026-11-05, client maxine).
+// (measured 2026-11-05).
 //
 // Like refusesHistory it is NOT a park: the hop can serve other requests, and
 // the refusal says nothing about its availability.

@@ -20,13 +20,13 @@ func TestProtectRestoreRoundTripsByteIdentical(t *testing.T) {
 	// (span integrity, verbatim code) rests on this.
 	inputs := []string{
 		"plain prose with no protected content at all",
-		"Edit /home/calypso/workspace/ezllm/internal/compress/caveman.go and run go test ./...",
+		"Edit /home/you/workspace/ezllm/internal/compress/caveman.go and run go test ./...",
 		"See https://github.com/c4lyp5o/ezllm/pull/42 for the min_compress_ratio change.",
 		"The ExemptLastTurn field defaults to true; set \"exempt_last_turn\": false in config.",
 		"Version 1.27.1 of Go at ~/.local/go with 3,000 files and 45% coverage in 120ms.",
 		"Contact dev@example.com or hit api.local:8080 from 192.168.1.10.",
 		"Use `go vet ./...` and check snake_case_field vs camelCaseField names.",
-		"Run C:\\Users\\calypso\\bin\\tool.exe then read 'the quoted bit' verbatim.",
+		"Run C:\\Users\\you\\bin\\tool.exe then read 'the quoted bit' verbatim.",
 		"Multi\nline with a path /var/log/app.log and a number 0xDEADBEEF inside.",
 		"Malay field names stay: tarikh_lahir, no_kad_pengenalan, jumlah_hadir.",
 	}
@@ -161,7 +161,7 @@ func TestCavemanSkipsUnclosedFence(t *testing.T) {
 }
 
 func TestCavemanPreservesPathsURLsAndIdentifiers(t *testing.T) {
-	in := "I was wondering if you could basically look at /home/calypso/workspace/ezllm/internal/compress/caveman.go " +
+	in := "I was wondering if you could basically look at /home/you/workspace/ezllm/internal/compress/caveman.go " +
 		"and also check https://github.com/c4lyp5o/ezllm/issues/7 because min_compress_ratio seems very wrong."
 	msgs := []any{
 		map[string]any{"role": "user", "content": in},
@@ -173,7 +173,7 @@ func TestCavemanPreservesPathsURLsAndIdentifiers(t *testing.T) {
 	}
 	got := out[0].(map[string]any)["content"].(string)
 	for _, must := range []string{
-		"/home/calypso/workspace/ezllm/internal/compress/caveman.go",
+		"/home/you/workspace/ezllm/internal/compress/caveman.go",
 		"https://github.com/c4lyp5o/ezllm/issues/7",
 		"min_compress_ratio",
 	} {

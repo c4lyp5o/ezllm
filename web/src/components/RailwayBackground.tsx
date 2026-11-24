@@ -1,5 +1,5 @@
 // Railway-style login backdrop (docx item 15): bezier paths converging into
-// a glowing router box with data packets flowing through it — Calypso's own
+// a glowing router box with data packets flowing through it — ezllm's own
 // animation, adapted to ezllm and raised a notch:
 //   - device-pixel-ratio aware (his version was blurry on retina)
 //   - ezllm palette (sky accent + sky→violet path tints) instead of rainbow

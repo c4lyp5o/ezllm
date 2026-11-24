@@ -68,8 +68,8 @@ CREATE TABLE IF NOT EXISTS schema_version (
 --    kind selects the adapter: 'opencode-go' | 'openai-compatible' | 'anthropic-compatible'
 CREATE TABLE IF NOT EXISTS accounts (
   id          INTEGER PRIMARY KEY,
-  name        TEXT NOT NULL UNIQUE,             -- display: 'SSN GPT', 'opencode-go #1'
-  namespace   TEXT NOT NULL UNIQUE,             -- routing slug: 'super-ssn', 'opengo'
+  name        TEXT NOT NULL UNIQUE,             -- display: 'Initech GPT', 'opencode-go #1'
+  namespace   TEXT NOT NULL UNIQUE,             -- routing slug: 'acme', 'opencode'
   kind        TEXT NOT NULL,
   base_url    TEXT NOT NULL,
   enabled     INTEGER NOT NULL DEFAULT 1,
@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS provider_keys (
 CREATE INDEX IF NOT EXISTS idx_pkeys_account ON provider_keys(account_id, enabled);
 
 -- ── quota_snapshots: APPEND-ONLY. Shape varies per provider (opencode=percent,
---    ssn-gpt=money), so `kind` discriminates and `raw` keeps the verbatim JSON.
+--    initech-gpt=money), so `kind` discriminates and `raw` keeps the verbatim JSON.
 CREATE TABLE IF NOT EXISTS quota_snapshots (
   id              INTEGER PRIMARY KEY,
   provider_key_id INTEGER NOT NULL REFERENCES provider_keys(id) ON DELETE CASCADE,
@@ -221,7 +221,7 @@ CREATE INDEX IF NOT EXISTS idx_hops_combo ON combo_hops(combo_id, enabled, posit
 -- ── client_tokens: who may call us (per-agent attribution + caps) ─────────────
 CREATE TABLE IF NOT EXISTS client_tokens (
   id          INTEGER PRIMARY KEY,
-  name        TEXT NOT NULL UNIQUE,              -- 'hermes', 'claude-code'
+  name        TEXT NOT NULL UNIQUE,              -- 'my-app', 'claude-code'
   token_hash  TEXT NOT NULL UNIQUE,              -- sha256 hex; plaintext never stored
   roles       TEXT NOT NULL DEFAULT 'infer',     -- csv of infer,metrics,admin (v36: each a separate permission)
   enabled     INTEGER NOT NULL DEFAULT 1,
@@ -310,8 +310,7 @@ CREATE TABLE IF NOT EXISTS calls (
   -- their inclusive totals.
   translated     INTEGER NOT NULL DEFAULT 0,
   -- v33's tool_prune_shadow_tokens was dropped in v35 (2.0.0): the shelved
-  -- tool-pruning experiment's measurements were exported first, to
-  -- docs/design/tool-prune-shadow-results.json.
+  -- tool-pruning experiment's measurements were exported first.
   -- v34 (docs/design/hop-health-design.md): how a STREAM ended, as a first-class
   -- fact instead of prose in err. '' = not a stream; completed; truncated
   -- (upstream died after headers); failed (translated stream's late error

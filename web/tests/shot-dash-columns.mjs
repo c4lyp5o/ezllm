@@ -10,7 +10,7 @@ const BASE = process.env.EZLLM_SHOT_BASE || 'http://127.0.0.1:20199';
 // EZLLM_DASHBOARD_PASSWORD set to the same value as EZLLM_SHOT_PW.
 const PW = process.env.EZLLM_SHOT_PW;
 if (!PW) throw new Error('set EZLLM_SHOT_PW (and EZLLM_DASHBOARD_PASSWORD on the instance)');
-const shots = '/home/calypso/.hermes/cache/scratch/ezllm-verify/shots';
+const shots = process.env.SHOTS_DIR ?? 'shots';
 const ROUTES = ['/', '/stats', '/economics', '/requests', '/providers', '/combos',
   '/rules', '/compression', '/connect', '/chat', '/settings'];
 

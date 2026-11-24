@@ -15,7 +15,7 @@ func TestServicePinAdmitsItsOwnEndpoint(t *testing.T) {
 	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
 	cat.pins = map[string]string{"2/gpt-6.1-sol": "embeddings"}
 	for _, res := range []*Resolver{New(cat), universalResolver(cat)} {
-		for _, target := range []string{wireCombo, "super-ssn/gpt-6.1-sol"} {
+		for _, target := range []string{wireCombo, "initech/gpt-6.1-sol"} {
 			wire, translated, err := resolveWire(t, res, target, provider.SurfaceEmbeddings)
 			if err != nil || wire != provider.SurfaceEmbeddings || translated {
 				t.Fatalf("%s: wire=%q translated=%v err=%v; want native embeddings", target, wire, translated, err)
@@ -28,7 +28,7 @@ func TestServicePinRefusesChatWithPinnedError(t *testing.T) {
 	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
 	cat.pins = map[string]string{"2/gpt-6.1-sol": "embeddings"}
 	for _, res := range []*Resolver{New(cat), universalResolver(cat)} {
-		_, _, err := resolveWire(t, res, "super-ssn/gpt-6.1-sol", provider.SurfaceChat)
+		_, _, err := resolveWire(t, res, "initech/gpt-6.1-sol", provider.SurfaceChat)
 		var p *ErrPinned
 		if !errors.As(err, &p) || p.Pinned != "embeddings" || p.Got != "chat" {
 			t.Fatalf("err = %v, want ErrPinned{pinned embeddings, got openai}", err)
@@ -42,7 +42,7 @@ func TestChatPinRefusesServiceRequest(t *testing.T) {
 	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
 	cat.pins = map[string]string{"2/gpt-6.1-sol": "chat"}
 	for _, res := range []*Resolver{New(cat), universalResolver(cat)} {
-		wire, translated, err := resolveWire(t, res, "super-ssn/gpt-6.1-sol", provider.SurfaceRerank)
+		wire, translated, err := resolveWire(t, res, "initech/gpt-6.1-sol", provider.SurfaceRerank)
 		var p *ErrPinned
 		if !errors.As(err, &p) || p.Pinned != "chat" || p.Got != "rerank" {
 			t.Fatalf("wire=%q translated=%v err=%v; want ErrPinned{pinned openai, got rerank}", wire, translated, err)

@@ -73,7 +73,7 @@ func newHarnessWithStore(tb testing.TB, up *httptest.Server, storeOpt func(*stor
 	if err := db.UpsertModels(context.Background(), id, []provider.ModelInfo{{ID: "gpt-6-luna", OwnedBy: "up"}}); err != nil {
 		tb.Fatal(err)
 	}
-	if err := db.UpsertClientToken(context.Background(), "hermes", "tok-infer", "infer"); err != nil {
+	if err := db.UpsertClientToken(context.Background(), "my-app", "tok-infer", "infer"); err != nil {
 		tb.Fatal(err)
 	}
 	if err := db.UpsertClientToken(context.Background(), "admin", "tok-admin", "infer,admin"); err != nil {
@@ -220,8 +220,8 @@ func TestChatCompletionsRoutesAndLedgers(t *testing.T) {
 		t.Fatalf("rows=%d err=%v", len(rows), err)
 	}
 	c := rows[0]
-	if c.Client != "hermes" {
-		t.Errorf("client attribution = %q, want hermes", c.Client)
+	if c.Client != "my-app" {
+		t.Errorf("client attribution = %q, want my-app", c.Client)
 	}
 	if c.Account != "up" || c.Model != "gpt-6-luna" || c.Alias != "up/gpt-6-luna" {
 		t.Errorf("attribution wrong: acct=%q model=%q alias=%q", c.Account, c.Model, c.Alias)

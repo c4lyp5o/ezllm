@@ -127,22 +127,22 @@ func TestBudgetReachedNotifiesOnce(t *testing.T) {
 	h := newHarness(t, func(w http.ResponseWriter, r *http.Request) {})
 	ctx := context.Background()
 	bucket := store.CountBucket(time.Now(), "monthly", time.Local)
-	if _, err := h.db.Writer().ExecContext(ctx, `UPDATE client_tokens SET cap_tokens=10, cap_window='monthly' WHERE name='hermes'`); err != nil {
+	if _, err := h.db.Writer().ExecContext(ctx, `UPDATE client_tokens SET cap_tokens=10, cap_window='monthly' WHERE name='my-app'`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.db.Writer().ExecContext(ctx,
-		`INSERT INTO client_usage_counters (client, bucket, tokens, calls, updated_at) VALUES ('hermes', ?, 10, 1, '2026-01-01T00:00:00Z')`, bucket); err != nil {
+		`INSERT INTO client_usage_counters (client, bucket, tokens, calls, updated_at) VALUES ('my-app', ?, 10, 1, '2026-01-01T00:00:00Z')`, bucket); err != nil {
 		t.Fatal(err)
 	}
-	budgetNoted.Delete("hermes\x00" + bucket)
+	budgetNoted.Delete("my-app\x00" + bucket)
 	for i := 0; i < 3; i++ {
 		if code, _, _ := h.do("GET", "/v1/models", "tok-infer", ""); code != http.StatusTooManyRequests {
 			t.Fatalf("capped request = %d, want 429", code)
 		}
 	}
 	got := byKind(must(bell(t, h)), store.NoteClientBudgetReached)
-	if len(got) != 1 || got[0].Count != 1 || !strings.Contains(got[0].Title, `"hermes"`) {
-		t.Fatalf("budget notifications = %+v, want exactly one for hermes", got)
+	if len(got) != 1 || got[0].Count != 1 || !strings.Contains(got[0].Title, `"my-app"`) {
+		t.Fatalf("budget notifications = %+v, want exactly one for my-app", got)
 	}
 }
 

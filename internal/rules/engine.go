@@ -282,7 +282,7 @@ func (e *Engine) Eligible(ctx context.Context, accountID int64, modelID string) 
 }
 
 // windowDetail renders the window as a sentence for the 429 message,
-// e.g. "allowed 22:00-06:00 Asia/Kuala_Lumpur (Mon-Fri)".
+// e.g. "allowed 22:00-06:00 Europe/Berlin (Mon-Fri)".
 func (r *Rule) windowDetail() string {
 	var b strings.Builder
 	if r.Window.Start != "" && r.Window.End != "" {

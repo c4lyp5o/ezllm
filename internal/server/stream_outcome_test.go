@@ -95,7 +95,7 @@ func TestTruncatedStreamIsRecordedAsTruncated(t *testing.T) {
 	if err := db.UpsertModels(ctx, id, []provider.ModelInfo{{ID: "gpt-6-luna", OwnedBy: "flaky"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.UpsertClientToken(ctx, "hermes", "tok-infer", "infer"); err != nil {
+	if err := db.UpsertClientToken(ctx, "my-app", "tok-infer", "infer"); err != nil {
 		t.Fatal(err)
 	}
 

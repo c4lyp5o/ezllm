@@ -66,17 +66,17 @@ func TestTurnKeyIgnoresToolResultsWithText(t *testing.T) {
 
 func TestTurnChainScopesAndEvicts(t *testing.T) {
 	var c turnChain
-	c.remember("hermes", "resp_1", "turnA")
-	if got := c.lookup("hermes", "resp_1"); got != "turnA" {
+	c.remember("my-app", "resp_1", "turnA")
+	if got := c.lookup("my-app", "resp_1"); got != "turnA" {
 		t.Fatalf("lookup = %q", got)
 	}
 	if got := c.lookup("other", "resp_1"); got != "" {
 		t.Fatalf("another client joined the turn: %q", got)
 	}
 	for i := 0; i < turnChainSize; i++ {
-		c.remember("hermes", fmt.Sprintf("r%d", i), "t")
+		c.remember("my-app", fmt.Sprintf("r%d", i), "t")
 	}
-	if got := c.lookup("hermes", "resp_1"); got != "" {
+	if got := c.lookup("my-app", "resp_1"); got != "" {
 		t.Fatalf("oldest id survived eviction: %q", got)
 	}
 	if len(c.turns) != turnChainSize {

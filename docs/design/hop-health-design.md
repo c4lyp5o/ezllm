@@ -1,6 +1,6 @@
 # Hop health from stream outcomes — design
 
-Status: **implementing** (branch `melissa/hop-truncation-health`, off development
+Status: **implementing** (feature branch, off development
 7e05aad). Scope: measurement + operator visibility of streams that FINISH with a
 status but do not deliver a whole answer. Routing action (parking a hop on a
 rolling truncation rate) is deliberately a separate, knob-gated commit.

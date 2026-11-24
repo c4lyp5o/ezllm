@@ -16,7 +16,7 @@ func TestUpsertClientTokenSurvivesHashConflict(t *testing.T) {
 	db := openTest(t)
 	ctx := context.Background()
 
-	if err := db.UpsertClientToken(ctx, "hermes", "tok-alpha", "infer,admin"); err != nil {
+	if err := db.UpsertClientToken(ctx, "my-app", "tok-alpha", "infer,admin"); err != nil {
 		t.Fatal(err)
 	}
 	// Same plaintext, different config name — the boot case that used to fail.
@@ -38,7 +38,7 @@ func TestUpsertClientTokenSurvivesHashConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClientByToken: %v", err)
 	}
-	if name != "hermes" && name != "claude-code" {
+	if name != "my-app" && name != "claude-code" {
 		t.Errorf("owner = %q, want one of the seeded names", name)
 	}
 
@@ -46,12 +46,12 @@ func TestUpsertClientTokenSurvivesHashConflict(t *testing.T) {
 	if err := db.UpsertClientToken(ctx, "claude-code", "tok-alpha", "infer"); err != nil {
 		t.Fatalf("re-seed must be idempotent: %v", err)
 	}
-	if err := db.UpsertClientToken(ctx, "hermes", "tok-alpha", "infer,admin"); err != nil {
+	if err := db.UpsertClientToken(ctx, "my-app", "tok-alpha", "infer,admin"); err != nil {
 		t.Fatalf("re-seed must be idempotent: %v", err)
 	}
 
 	// Rotating one name to a NEW value keeps both tokens working.
-	if err := db.UpsertClientToken(ctx, "hermes", "tok-beta", "infer,admin"); err != nil {
+	if err := db.UpsertClientToken(ctx, "my-app", "tok-beta", "infer,admin"); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := db.ClientByToken(ctx, "tok-beta"); err != nil {

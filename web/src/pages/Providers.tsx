@@ -833,7 +833,7 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
           </div>
           <div>
             <label className={labelCls} htmlFor="ap-ns">Namespace</label>
-            <input id="ap-ns" className={cx(inputCls, 'font-mono')} value={d.namespace} placeholder="opengo" spellCheck={false}
+            <input id="ap-ns" className={cx(inputCls, 'font-mono')} value={d.namespace} placeholder="opencode" spellCheck={false}
               onChange={(e) => setD((p) => ({ ...p, namespace: slugify(e.target.value), nsTouched: true }))} />
             <p className="mt-1 text-[12px] text-mute">lowercase slug used in model ids</p>
           </div>

@@ -16,7 +16,7 @@ import (
 // rotation.
 //
 // Measured in prod: every 502 in a seven-day window (80 rows) was
-// "context canceled", 38 of them on `daily`/anthropic, and eight later requests
+// "context canceled", 38 of them on one combo's anthropic side, and eight later requests
 // were answered "all combo endpoints are in five-minute cooldown". The cause is
 // one line: classifyHopPolicy treats a canceled caller context as a transport
 // error, banks a strike on the hop, and the default threshold parks it for the

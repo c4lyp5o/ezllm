@@ -16,7 +16,7 @@ One convention across every script: a bare variable is a **value**, a
 |---|---|---|
 | `EZLLM_BASE` | gateway origin | per script, below |
 | `EZLLM_TOKEN` | client/infer token value | — |
-| `EZLLM_TOKEN_FILE` | token file (admin for the admin proofs, infer for `prove_lmeval.py`) | `~/.hermes/secrets/ezllm-admin.token` / `ezllm-infer.token` |
+| `EZLLM_TOKEN_FILE` | token file (admin for the admin proofs, infer for `prove_lmeval.py`) | `~/.config/ezllm/ezllm-admin.token` / `ezllm-infer.token` |
 | `EZLLM_ADMIN_TOKEN` / `EZLLM_ADMIN_TOKEN_FILE` | admin token value / file, where a script needs both roles | — |
 | `EZLLM_DB` | ledger to cross-check | per script |
 

@@ -49,10 +49,10 @@ func TestTranslationPartialSectionKeepsDefault(t *testing.T) {
 // naming the entry, never a silently-dropped one (the operator would be left
 // wondering why a hop still rides the chat wire).
 func TestResponsesModelsPatternsValidatedAtBoot(t *testing.T) {
-	if _, err := Load(writeTemp(t, validYAML+"\ntranslation:\n  responses_models: [\"stationine/gpt-6\\\\.1-sol\", \"vercel-ai-gateway/openai/gpt-6.1-sol.*\"]\n")); err != nil {
+	if _, err := Load(writeTemp(t, validYAML+"\ntranslation:\n  responses_models: [\"globex/gpt-6\\\\.1-sol\", \"vercel-ai-gateway/openai/gpt-6.1-sol.*\"]\n")); err != nil {
 		t.Fatalf("valid patterns rejected: %v", err)
 	}
-	_, err := Load(writeTemp(t, validYAML+"\ntranslation:\n  responses_models: [\"stationine/gpt-6.1-sol\", \"[\"]\n"))
+	_, err := Load(writeTemp(t, validYAML+"\ntranslation:\n  responses_models: [\"globex/gpt-6.1-sol\", \"[\"]\n"))
 	if err == nil {
 		t.Fatal("an uncompilable pattern must fail the boot")
 	}

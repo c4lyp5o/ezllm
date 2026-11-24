@@ -9,7 +9,7 @@ import fs from 'node:fs';
 
 const BASE = process.env.EZLLM_BASE ?? 'http://127.0.0.1:20199';
 const PASS = process.env.RIG_PASS;
-const SHOTS = process.env.SHOTS_DIR ?? `${process.env.HOME}/.hermes/cache/scratch/ezllm-verify/shots`;
+const SHOTS = process.env.SHOTS_DIR ?? `shots`;
 if (!PASS) { console.error('RIG_PASS required'); process.exit(2); }
 fs.mkdirSync(SHOTS, { recursive: true });
 

@@ -45,7 +45,7 @@ var (
 	// hhmmRE is deliberately strict: an unvalidated 'HH:MM' becomes an
 	// unparseable window the router would have to reject at request time.
 	hhmmRE = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
-	// tzRE accepts IANA names ('Asia/Kuala_Lumpur') and fixed offsets
+	// tzRE accepts IANA names ('Europe/Berlin') and fixed offsets
 	// ('+08:00'), both of which time.LoadLocation understands.
 	tzRE = regexp.MustCompile(`^(Asia/|America/|Europe/|Africa/|Australia/|Pacific/|Atlantic/|Indian/|US/|UTC|[+-][0-9]{2}:[0-9]{2})`)
 )
@@ -109,7 +109,7 @@ func ValidateModelRule(r *ModelRule) error {
 
 	if tz := strings.TrimSpace(r.WinTZ); tz != "" {
 		if tz != "instance" && !tzRE.MatchString(tz) {
-			return fmt.Errorf("win_tz %q must be an IANA zone (Asia/Kuala_Lumpur) or offset (+08:00)", tz)
+			return fmt.Errorf("win_tz %q must be an IANA zone (Europe/Berlin) or offset (+08:00)", tz)
 		}
 		r.WinTZ = tz
 	} else {

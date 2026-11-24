@@ -56,7 +56,7 @@ func TestRuleRefusal429WithNextAllowed(t *testing.T) {
 	if err := db.UpsertModels(context.Background(), acctID, []provider.ModelInfo{{ID: "nightly", OwnedBy: "up"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.UpsertClientToken(context.Background(), "hermes", "tok-infer", "infer"); err != nil {
+	if err := db.UpsertClientToken(context.Background(), "my-app", "tok-infer", "infer"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -131,7 +131,7 @@ func TestRuleRefusalCapNoNextAllowed(t *testing.T) {
 		Name: "up", Namespace: "up", Kind: provider.KindOpenAICompatible, BaseURL: up.URL, Enabled: true})
 	_, _, _ = db.AddKey(context.Background(), acctID, "primary", "sk-x")
 	_ = db.UpsertModels(context.Background(), acctID, []provider.ModelInfo{{ID: "capped", OwnedBy: "up"}})
-	_ = db.UpsertClientToken(context.Background(), "hermes", "tok-infer", "infer")
+	_ = db.UpsertClientToken(context.Background(), "my-app", "tok-infer", "infer")
 
 	elig := func(ctx context.Context, accountID int64, modelID string) error {
 		return &rules.Refusal{Requested: "up/capped", AccountID: accountID, ModelID: modelID,

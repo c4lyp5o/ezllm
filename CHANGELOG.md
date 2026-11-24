@@ -37,6 +37,11 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   `docs`, and its 409 names the setup page.
 - **Design records moved** to `docs/design/` (with the two bridge specs from the root), so
   `docs/` holds only what someone running ezllm needs.
+- **Neutral names.** Docs, examples, test fixtures and comments no longer name the
+  maintainers' own accounts, hosts, clients or paths. `scripts/ezllm-mac.sh` defaults
+  `EZLLM_USAGE_TZ` to UTC, and the live proof scripts default to `http://127.0.0.1:20129`,
+  with token files under `~/.config/ezllm/`. The exported request records and the
+  security audit reports are no longer in the repo.
 
 ## v2.2.0 — shared bridge admission, requests per turn, token counting, spend caps
 
@@ -177,7 +182,7 @@ ran in production before release; security records cite them by those numbers.
   "upstream attempts" notes only when a request retried. Schema v35 drops
   `calls.tool_prune_shadow_tokens` from the shelved tool-pruning experiment;
   its 2,875 measurements (11,850,055 shadow tokens, Oct 31 to Nov 4) were
-  exported to `docs/design/tool-prune-shadow-results.json` first. The migration runs
+  exported first. The migration runs
   once on startup and rewrites the `calls` table.
 - **Request explorer:** `/admin/requests` adds `summary.empty_steps` and a
   `hide_empty` filter; the dashboard shows a "no tokens" badge for zero-token
@@ -282,7 +287,7 @@ ran in production before release; security records cite them by those numbers.
   bind HTTP to localhost; private deployment files are excluded from image builds.
 - Replaces the audit's vulnerable-behavior probes with permanent rejection,
   redaction, cleanup and continuation regressions. Runtime rollout is separate
-  from the source fixes; see the dated remediation notes.
+  from the source fixes.
 
 ### Automatic Codex caching and noninteractive CLI defaults (pre-release 1.14.0)
 
@@ -508,7 +513,7 @@ ran in production before release; security records cite them by those numbers.
   same tool-using request: the scratch directory leaked into the tool call on
   3 of 3 runs before, 0 of 5 after. Plain chat is unchanged.
 - **The client had a stale shell directory too, and `cd ~` cannot fix it.** The
-  first failing path in the trace, `~/.hermes/cache/scratch/…/frontend`, was the
+  first failing path in the trace, `…/frontend`, was the
   client's own saved working directory, gone from disk. Its terminal wrapper
   `cd`s there BEFORE running the command, so a model that prefixed `cd ~ &&`
   (the first version of the note told it to) failed identically and gave up
@@ -618,7 +623,7 @@ ran in production before release; security records cite them by those numbers.
     days that reflect the trimmed surface, below the 2–3% trigger.
   - **Silent capability loss is what killed it, and M1 could not even see the
     usage that would have prevented it.** The top candidate by prize,
-    `dis-intelligence/official_report` (1,948 tok/req × 446 requests) is that
+    one client's report tool (1,948 tok/req × 446 requests) is that
     client's flagship tool, yet it read `used_sessions = 0`: usage is derived
     from call sites in the *request* body, and that client's only model path
     sends one user message and reads the `tool_use` block out of the *response*.
@@ -856,7 +861,7 @@ key pinned beside the data directory.
 A third trap the doc now states: the provider accounts a "fresh" install already
 shows are not auto-created by code — `seed()` upserts every entry under
 `providers:` in the bootstrap config. Copying the v1.3.2 example therefore seeded
-`opencode-main` and `ssn-gpt` as *enabled accounts with no key*, which is also
+`demo-main` and `initech-gpt` as *enabled accounts with no key*, which is also
 why the boot log warned twice about a failed model sync. `config.example.yaml`
 now ships both commented out, so a fresh instance starts with zero accounts —
 verified by booting it (healthy, 0 accounts).
@@ -937,7 +942,7 @@ line, and the consequence is disproportionate: the hop banks a strike, the
 default threshold parks it for the full five-minute cooldown, and the next real
 request is refused from a local counter. The ledger says exactly that happened —
 all 80 of the 502s in the previous seven days were `context canceled` (38 on
-`daily`/anthropic), and eight later requests were answered "all combo endpoints
+one combo/anthropic), and eight later requests were answered "all combo endpoints
 are in five-minute cooldown".
 
 A cancellation is now a third outcome, neither success nor hop failure: it banks
@@ -1302,7 +1307,7 @@ existing account names and routing identifiers remain unchanged.
   compose passes `GITHUB_COPILOT_CLI_VERSION` through.
 - **Deploy change: one compose file, yours.** `compose.yml` is no longer shipped:
   copy `compose.example.yml` (every variable with its default, bridges off, mounts
-  commented) to `compose.yml`, which is gitignored. `compose.traefik.yml` is gone;
+  commented) to `compose.yml`, which is gitignored. the reverse-proxy overlay is gone;
   proxy labels go in your copy. **Before pulling,** back up your `compose.yml`:
   git deletes a formerly tracked file on pull.
 
@@ -1666,7 +1671,7 @@ against real GitHub succeeds.
 The full Gemini **web** protocol as a router provider, ported slot-for-slot
 from the reverse-engineered reference (digest: `~/workspace/gemini-web-api-protocol-digest.md`,
 design: `docs/design/gemini-web-design.md`, runbook: `docs/gemini-web-runbook.md`).
-Unofficial surface; risk posture accepted by Calypso: cookie material = live
+Unofficial surface; risk posture accepted by the owner: cookie material = live
 account access, test accounts, no fallback, typed refusals.
 - `internal/geminiweb/` — protocol package:
   - `frame.go` — wrb.fr incremental parser (length-prefixed UTF-16-unit
@@ -1930,7 +1935,7 @@ account access, test accounts, no fallback, typed refusals.
   inline (`358cda3`).
 
 ## 2026-10-08 — Docker, dashboard polish, budget engine
-- Distroless image + home-box Traefik overlay; explicit router priorities and a dedicated
+- Distroless image + reverse-proxy overlay; explicit router priorities and a dedicated
   `/admin/login` limiter (`3f46f00`, `3155b76`).
 - `POST /admin/chat` behind the real routing path; Chat page, Token Economics, budget controls
   (`d0f8407`, `d8d0f68`).

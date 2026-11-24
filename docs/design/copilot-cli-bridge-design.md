@@ -1,6 +1,6 @@
 # GitHub Copilot subscription bridge — design
 
-Status: **SHIPPED 2026-11-05** on `melissa/copilot-cli-bridge`, off the
+Status: **SHIPPED 2026-11-05** on a feature branch, off the
 tool-pruning-drop tip. The body below is the original `-p` design: since then every
 turn runs on the CLI's headless channel, with `-p` as plain chat's fallback (§10
 second addendum). Supersedes the OAuth/device-flow provider
@@ -24,7 +24,7 @@ surface (`claudebridge`, `codexbridge`, `agybridge`). Copilot CLI now has a
 first-class headless interface, so Copilot joins that family and the OAuth
 provider is retired.
 
-## 2. Measured facts (probe 2026-11-05, this box, CLI 1.0.105)
+## 2. Measured facts (probe 2026-11-05, CLI 1.0.105)
 
 `copilot -p "Reply with exactly: ok" -s --output-format=json --no-ask-user`
 → rc=0, JSONL on stdout. What the stream carries:
@@ -122,7 +122,7 @@ A model id is only marked usable after a probe answers, which is exactly the
 
 - **M1** build the bridge, prove it against the real CLI on a loopback instance,
   add the preset + bridge card. Nothing is deleted.
-- **M2** re-point the existing Copilot account and the `maxine` hop 3 to the
+- **M2** re-point the existing Copilot account and one combo's hop 3 to the
   bridge preset; soak real traffic; compare accounting against the OAuth rows.
 - **M3** delete the OAuth surface in its own commit: `internal/githubcopilot/`
   (auth + provider + tests), `cmd/ezllm/githublogin.go`,
@@ -135,7 +135,7 @@ A model id is only marked usable after a probe answers, which is exactly the
 - **M4** docs: runbook, CHANGELOG and EXPLORING landmark. The superseded
   OAuth design and policy-evidence docs were removed in v2.0.0 (git history keeps them).
 
-## 9. Locked decisions (2026-11-05, Calypso)
+## 9. Locked decisions (2026-11-05)
 
 1. **Auth: CLI login only.** The bridge uses a dedicated `EZLLM_COPILOT_HOME`
    (default `/copilot-home`, mounted) and never reads a PAT env var. The box is
@@ -278,7 +278,7 @@ not measured, so that figure could change.
 
 - `overridesBuiltInTool` is always set, so a caller's tool that shares a built-in's
   name is unambiguously the caller's. Measured: a forced `bash` call reached the
-  caller and its command did not run on this box.
+  caller and its command did not run on the ezllm host.
 - Every turn pings first. `--headless` is undocumented and the updater can swap the
   binary under a running bridge, so a boot check alone would go stale. The ping costs
   nothing, and a failed gate is the refusal the router already fails over on.

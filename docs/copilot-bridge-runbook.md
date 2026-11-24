@@ -67,7 +67,7 @@ request time:
   fresh session. Each step of a tool loop is therefore one premium request.
   Consequences:
   - Only the caller's tools are visible. The CLI's shell and file tools are not,
-    so nothing runs on this box, and a caller's tool named `bash` goes to the caller.
+    so nothing runs on the ezllm host, and a caller's tool named `bash` goes to the caller.
   - `tool_choice` none is a plain turn with no tools visible. Named and
     `required` choices are refused so another hop can enforce them.
   - Only `function` tools. Tool names may use ASCII letters, digits, underscores
@@ -104,7 +104,7 @@ of a tool loop. On AI-credit plans the charge follows tokens and the model, and
 
 The `-p` floor of ~13–14k tokens is the CLI's agent scaffolding (≈9.4k of it its 27
 tool schemas). Later `-p` calls would read part of it from cache. Channel turns took
-11–27 s end to end on this box, and each request spawns a new child. One short reply
+11–27 s end to end when measured, and each request spawns a new child. One short reply
 measured a model call of about 1 s, so most of a short turn's time is outside the
 model.
 
@@ -233,7 +233,7 @@ the warm pool. Set it to `off` to disable it; an explicit `on` with the warm
 pool off fails startup.
 A matching request must supply the unchanged prior messages and assistant answer,
 then one new user message, with the same explicit model, system and tools.
-Hermes cache markers may move without changing the actual conversation.
+Cache markers may move without changing the actual conversation.
 Only the new user turn is sent to the retained native conversation. No new
 service or worker pool is added. Each worker retains at most one completed
 session, capped at 1 MiB of normalized history and the existing expiry limits.
@@ -241,7 +241,7 @@ session, capped at 1 MiB of normalized history and the existing expiry limits.
 Tool availability does not prevent reuse, but a newly emitted tool batch is
 accounted and deleted. Tool-result continuations, images, `auto`, edits and
 identical stateless retries take the fresh-session path. This mode does not yet
-cache an active Hermes tool loop. Failed cleanup or regressed usage counters
+cache an active tool loop. Failed cleanup or regressed usage counters
 cannot trigger another inference automatically.
 
 The loopback `/status` reports `session_cache`; watch

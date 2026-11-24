@@ -26,7 +26,7 @@ const whole = (v: unknown, lo: number, hi: number, what: string): string => {
 export function settingError(key: string, value: unknown): string {
   const text = String(value ?? '').trim();
   switch (key) {
-    case 'usage_timezone': return text && validTimezone(text) ? '' : 'Use an IANA timezone name, for example Asia/Kuala_Lumpur.';
+    case 'usage_timezone': return text && validTimezone(text) ? '' : 'Use an IANA timezone name, for example Europe/Berlin.';
     case 'catalog_interval': { const ms = parseDuration(text); return ms !== null && ms >= 60_000 ? '' : 'Use a duration of at least 1m, for example 12h.'; }
     case 'dispatch_deadline': { if (text === '') return ''; const ms = parseDuration(text); return ms !== null && ms >= 1000 ? '' : 'Use a duration of at least 1s (for example 30s), or leave it empty for no deadline.'; }
     case 'cooldown_429':

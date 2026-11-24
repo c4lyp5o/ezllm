@@ -1,4 +1,4 @@
-// Command ezllm is Calypso's lightweight LLM router.
+// Command ezllm is a lightweight LLM router.
 //
 // M2: config + SQLite store (WAL, single writer) +
 // three passthrough surfaces (OpenAI chat, Anthropic messages, OpenAI
@@ -315,7 +315,7 @@ func run() error {
 		loc, err := time.LoadLocation(usageTZ)
 		if err != nil {
 			return fmt.Errorf("EZLLM_USAGE_TZ=%q does not resolve to a time zone on this host "+
-				"(use an IANA name like Asia/Kuala_Lumpur, or unset it for UTC): %w", usageTZ, err)
+				"(use an IANA name like Europe/Berlin, or unset it for UTC): %w", usageTZ, err)
 		}
 		_ = loc
 		log.Info("usage day bucketing zone", "tz", usageTZ)

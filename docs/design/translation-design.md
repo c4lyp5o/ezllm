@@ -85,7 +85,7 @@ The hard part. Emit in this exact order (Claude Code's parser is strict):
 
 ---
 
-## Locked decisions (2026-10-12, Calypso sign-off)
+## Locked decisions (2026-10-12, owner sign-off)
 
 1. **`responses` surface: NOT translated** at the time. *Changed 2026-10-13:* the universal wire matrix translates every surface pair.
 2. **Ledger: `tokens_in` INCLUSIVE for translated rows** (anthropic convention, matches the client's other rows). The `translated` marker column shipped in schema v12 (`calls.translated`).

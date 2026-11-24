@@ -17,14 +17,14 @@ reasoning_effort` (`400: Function tools with reasoning_effort are not
 supported for gpt-6.1-sol in /v1/chat/completions`). The client keeps its wire;
 the HOP is dialed on `/v1/responses` with a translated body and the response is
 translated back. That makes sol a first-class member of any chat combo (e.g.
-`daily`) with tools AND reasoning, and a hop failure still fails over
+a combo) with tools AND reasoning, and a hop failure still fails over
 normally (the 400 class only fires upstream if the model itself misbehaves).
 
 **How a hop is marked:** the operator-curated list
 `translation.responses_models: ["<namespace>/<model_id>", …]` in config.yaml,
 gated by the same master switch `translation.enabled`. Each entry is a **regex
 matched fully against `<namespace>/<model_id>`** (both ends anchored), so a
-family pattern like `space-stationine/gpt-6\.1-sol` covers its variants while a
+family pattern like `globex/gpt-6\.1-sol` covers its variants while a
 plain id matches only itself; an uncompilable entry fails the boot by name.
 Empty list (default) = feature inert. Ledger evidence is the discovery
 mechanism: a hop whose chat calls 400 with the tools/reasoning signature is a

@@ -20,7 +20,7 @@ and data location.
 
 1. **Usage timezone** — choose it in Settings → General, or set
    **`EZLLM_USAGE_TZ`** to enforce it from the deployment. Use an IANA name
-   (`Europe/Berlin`, `America/New_York`, `Asia/Kuala_Lumpur`). It controls
+   (`Europe/Berlin`, `America/New_York`, `Asia/Singapore`). It controls
    report days, model rules set to `instance`, client-token budget days and
    date-only token expiries, daily price/backup schedules and log timestamps
    (it is the only timezone setting; `TZ` is ignored). An explicit rule

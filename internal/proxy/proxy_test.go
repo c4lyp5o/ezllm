@@ -323,8 +323,8 @@ func TestForwardStripsClientOrigin(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(string(reqBody)))
-	req.Header.Set("Origin", "https://llm.calypso.dedyn.io")
-	req.Header.Set("Referer", "https://llm.calypso.dedyn.io/chat")
+	req.Header.Set("Origin", "https://llm.example.com")
+	req.Header.Set("Referer", "https://llm.example.com/chat")
 	req.Header.Set("X-Keep", "1")
 
 	res, err := d.Forward(context.Background(), rec, req, testRoute(upstream.URL, provider.SurfaceChat), reqBody)
@@ -563,7 +563,7 @@ func TestForwardPreservesClientSessionHeader(t *testing.T) {
 	reqBody := []byte(`{"model":"resolved-model","messages":[]}`)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(string(reqBody)))
-	req.Header.Set("x-opencode-session", "ses-hermes-conv-42")
+	req.Header.Set("x-opencode-session", "ses-app-conv-42")
 	req.Header.Set("x-opencode-request", "req-from-client")
 	req.Header.Set("Authorization", "Bearer ***")
 	req.Header.Set("Cookie", "session=steal-me")
@@ -574,7 +574,7 @@ func TestForwardPreservesClientSessionHeader(t *testing.T) {
 	if gotSession == "" {
 		t.Error("no session header upstream — opencode answers 400 MissingSessionID")
 	}
-	if gotSession != "ses-hermes-conv-42" {
+	if gotSession != "ses-app-conv-42" {
 		t.Errorf("client session = %q, want it forwarded byte-identical (it is the routing/cache key)", gotSession)
 	}
 	if gotRequest != "req-from-client" {

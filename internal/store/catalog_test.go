@@ -15,8 +15,8 @@ func TestUpsertAccountReturnsUsableID(t *testing.T) {
 	db := openTest(t)
 	ctx := context.Background()
 	acct := provider.Account{
-		Name: "SSN GPT", Namespace: "super-ssn", Kind: provider.KindOpenAICompatible,
-		BaseURL: "https://space.stationine.com/v1", Enabled: true,
+		Name: "Initech GPT", Namespace: "initech", Kind: provider.KindOpenAICompatible,
+		BaseURL: "https://api.example.com/v1", Enabled: true,
 		ProbeDelay: 500 * time.Millisecond, QuotaMode: "probe",
 	}
 
@@ -40,8 +40,8 @@ func TestUpsertAccountReturnsUsableID(t *testing.T) {
 	}
 
 	// Update path (same namespace) must return the SAME id, still usable.
-	acct.BaseURL = "https://space.stationine.com/v2"
-	acct.Name = "SSN GPT renamed"
+	acct.BaseURL = "https://api.example.com/v2"
+	acct.Name = "Initech GPT renamed"
 	id2, err := db.UpsertAccount(ctx, acct)
 	if err != nil {
 		t.Fatalf("update: %v", err)
@@ -56,7 +56,7 @@ func TestUpsertAccountReturnsUsableID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AccountByID(returned id): %v", err)
 	}
-	if got.BaseURL != "https://space.stationine.com/v2" || got.Name != "SSN GPT renamed" {
+	if got.BaseURL != "https://api.example.com/v2" || got.Name != "Initech GPT renamed" {
 		t.Errorf("update did not apply: %+v", got)
 	}
 	// the key must still resolve through the same id
@@ -80,7 +80,7 @@ func TestAccountByNamespaceRoundTrip(t *testing.T) {
 	db := openTest(t)
 	ctx := context.Background()
 	in := provider.Account{
-		Name: "opencode #1", Namespace: "opengo", Kind: provider.KindOpenCodeGo,
+		Name: "opencode #1", Namespace: "demo", Kind: provider.KindOpenCodeGo,
 		BaseURL: "https://opencode.ai/zen/go/v1", Enabled: true,
 		RequiresSessionHeader: true,
 		CustomHeaders:         map[string]string{"User-Agent": "ezllm/1.0"},
@@ -92,7 +92,7 @@ func TestAccountByNamespaceRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := db.AccountByNamespace(ctx, "opengo")
+	got, err := db.AccountByNamespace(ctx, "demo")
 	if err != nil {
 		t.Fatalf("AccountByNamespace: %v", err)
 	}
@@ -174,14 +174,14 @@ func TestModelExistsSemantics(t *testing.T) {
 func TestClientTokenHashedAndResolved(t *testing.T) {
 	db := openTest(t)
 	ctx := context.Background()
-	if err := db.UpsertClientToken(ctx, "hermes", "tok-plain-123", "infer,admin"); err != nil {
+	if err := db.UpsertClientToken(ctx, "my-app", "tok-plain-123", "infer,admin"); err != nil {
 		t.Fatal(err)
 	}
 	name, roles, err := db.ClientByToken(ctx, "tok-plain-123")
 	if err != nil {
 		t.Fatalf("ClientByToken: %v", err)
 	}
-	if name != "hermes" {
+	if name != "my-app" {
 		t.Errorf("name = %q", name)
 	}
 	if len(roles) != 2 || roles[1] != "admin" {
@@ -193,14 +193,14 @@ func TestClientTokenHashedAndResolved(t *testing.T) {
 	}
 	// plaintext must not be in the file
 	var hash string
-	if err := db.Reader().QueryRow(`SELECT token_hash FROM client_tokens WHERE name='hermes'`).Scan(&hash); err != nil {
+	if err := db.Reader().QueryRow(`SELECT token_hash FROM client_tokens WHERE name='my-app'`).Scan(&hash); err != nil {
 		t.Fatal(err)
 	}
 	if hash == "tok-plain-123" || len(hash) != 64 {
 		t.Errorf("token not hashed (len %d)", len(hash))
 	}
 	// disabled tokens stop resolving
-	if _, err := db.Writer().Exec(`UPDATE client_tokens SET enabled=0 WHERE name='hermes'`); err != nil {
+	if _, err := db.Writer().Exec(`UPDATE client_tokens SET enabled=0 WHERE name='my-app'`); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := db.ClientByToken(ctx, "tok-plain-123"); err != ErrNotFound {
@@ -213,7 +213,7 @@ func TestAllNamespacesAndModelEntries(t *testing.T) {
 	db := openTest(t)
 	ctx := context.Background()
 	id, err := db.UpsertAccount(ctx, provider.Account{
-		Name: "SSN", Namespace: "super-ssn", Kind: provider.KindOpenAICompatible,
+		Name: "SSN", Namespace: "initech", Kind: provider.KindOpenAICompatible,
 		BaseURL: "https://x/v1", Enabled: true,
 	})
 	if err != nil {
@@ -226,14 +226,14 @@ func TestAllNamespacesAndModelEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ns) != 2 || ns[0] != "super-ssn/gpt-6-luna" {
+	if len(ns) != 2 || ns[0] != "initech/gpt-6-luna" {
 		t.Errorf("AllNamespaces = %v", ns)
 	}
 	entries, err := db.ListModelEntries(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 2 || entries[0].ID != "super-ssn/gpt-6-luna" {
+	if len(entries) != 2 || entries[0].ID != "initech/gpt-6-luna" {
 		t.Errorf("entries = %+v", entries)
 	}
 	// a disabled account must drop out of both

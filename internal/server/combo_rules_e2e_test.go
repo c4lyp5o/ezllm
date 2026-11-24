@@ -54,7 +54,7 @@ func TestComboAllHopsRuleRefused429(t *testing.T) {
 	if err := db.UpsertModels(context.Background(), acctID, models); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.UpsertClientToken(context.Background(), "hermes", "tok-infer", "infer"); err != nil {
+	if err := db.UpsertClientToken(context.Background(), "my-app", "tok-infer", "infer"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.UpsertCombo(context.Background(), store.Combo{

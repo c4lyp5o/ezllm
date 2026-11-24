@@ -1,7 +1,7 @@
 # Claude subscription via the official Claude Code CLI — design
 
 **Status:** signed off 2026-10-19 · M1 shipped 2026-10-19 · M2 shipped 2026-10-21
-**Author:** melissa · **Operator gate:** Calypso (pushes/deploys)
+**Operator gate:** the owner (pushes/deploys)
 
 ## 1. Goal and the hard constraint
 
@@ -32,7 +32,7 @@ reserved for later use, not part of this design.
 Environment: CLI **2.1.299**, `installMethod=native`, binary at
 `~/.local/share/claude/versions/2.1.299`, subscription login in `~/.claude-sub`
 (`authMethod=claude.ai`, `subscriptionType=pro`). All calls ran with
-`CLAUDE_CONFIG_DIR=/home/calypso/.claude-sub`, isolated from `~/.claude` (which is pointed at
+`CLAUDE_CONFIG_DIR=/home/you/.claude-sub`, isolated from `~/.claude` (which is pointed at
 ezllm). Isolation proven: **zero** `calls` rows in the live ledger for any claude client during
 the measurement window.
 
@@ -234,7 +234,7 @@ draws at the full `claude -p` rate. Agent traffic alone has been ~1,000 calls/da
 gateway.
 
 Therefore: the subscription account is reachable **only** through a dedicated combo whose
-consumers are Claude Code clients. It is never a hop in `daily`, never a default provider, never an
+consumers are Claude Code clients. It is never a hop in a default combo, never a default provider, never an
 automatic fallback. The combo's hop set is the bridge account alone, so a plan limit surfaces to
 that client as a 429 instead of silently spilling other traffic onto a capped hop. A
 `cap_window`/`cap_tokens` fuse on the account is set as a second line of defence, and the account's
@@ -302,10 +302,10 @@ is the container rollback. `claude-web` and every existing account are untouched
    runtime base is `distroless/base` because the CLI is a glibc-dynamic binary (measured).
 4. The ezllm side is a plain `anthropic-compatible` account — no new kind, surface or translation
    cell.
-5. *(Amended 2026-10-21: agent traffic such as Hermes's Max may use it, but only behind M5 Rules caps
+5. *(Amended 2026-10-21: agent traffic may use it, but only behind M5 Rules caps
    on the account — sonnet and haiku 300,000 tokens per 5h block, opus 1 — set before the agent is moved.)*
    The subscription is reachable only through a dedicated combo; never a default hop, never
-   in `daily`, never an automatic fallback.
+   in a default combo, never an automatic fallback.
 6. `claude-web` stays.
 7. Build order M1 → M2 → M3, M3 gated on measurement.
 8. M1 refused tool-bearing requests explicitly instead of dropping tools silently. M2 honours client
@@ -316,7 +316,7 @@ is the container rollback. `claude-web` and every existing account are untouched
     root at `/opt/claude-bridge` with a `current` link); `USER`/`LOGNAME` are set in the container.
 11. Boot asserts the CLI's version, flag surface and login state; a CLI upgrade means re-pointing
     the mount and re-running the live proof.
-12. Calypso is the only gate for push and deploy.
+12. The owner is the only gate for push and deploy.
 13. The CLI runs with an **allowlisted** environment (2026-10-19): identity, locale, temp dir, CA
     trust, proxy settings and the operator's `CLAUDE_CODE_*` / `DISABLE_*` tuning pass; everything
     else — `EZLLM_MASTER_KEY`, provider and cloud credentials, `ANTHROPIC_*` — stays out of a process

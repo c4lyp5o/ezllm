@@ -19,10 +19,10 @@ OAuth tokens in `auth.json`, and never impersonates the Codex client. Spawning t
 
 **Second hard constraint: nothing executes.** Codex is a coding agent with shell and
 `apply_patch` tools. The bridge must make sure it cannot run a command or write a
-file on this box under any input. This has to be *proven* with a sentinel (M2 had the
+file on the host under any input. This has to be *proven* with a sentinel (M2 had the
 `write_file` sentinel), not just assumed from flags.
 
-**Users.** The operator (Calypso) adds the account and combo. Consumers are Hermes,
+**Users.** The operator adds the account and combo. Consumers are agents,
 Claude Code and other agents routed through ezllm. Per operator decision, the account
 **may sit in fallback chains**, protected by M5 Rules caps (a capped hop is skipped
 in a combo, `internal/router/router.go:753`).
@@ -81,7 +81,7 @@ Format:      gofmt -l . (must print nothing)
 Vet:         go vet ./...
 Unit:        go test -short -count=1 ./internal/codexbridge/ ./cmd/ezllm/
 Local gate:  systemd-run --user --scope -p CPUQuota=100% -p MemoryMax=2G make test-quiet
-Full gate:   git push origin <branch> && gh workflow run test.yml --ref <branch>   (CI only — never local `make check`, this box is the load balancer)
+Full gate:   git push origin <branch> && gh workflow run test.yml --ref <branch>   (CI only — never local `make check` on a shared host)
 Build:       make build
 Live proof:  python3 tests/prove_codex_bridge.py
 Spike login: CODEX_HOME=~/.codex-sub codex login
@@ -148,7 +148,7 @@ Wire errors are OpenAI-shaped: `{"error":{"type","message","code"}}`. Tabs, gofm
   together. `npm run build` only if `web/` is touched (not planned).
 - **Ask first:** changing the runtime base image or adding Node. Any schema change.
   Refactoring shared code out of `internal/claudebridge` (this spec copies the few helpers instead).
-  Any route that would hand Codex an executable tool. Deploy/push to master (Calypso gates).
+  Any route that would hand Codex an executable tool. Deploy/push to master (the owner gates).
 - **Never:** read or forward `auth.json` tokens from Go. Bake the CLI into the image.
   Commit `auth.json`, captures with tokens/account IDs, or `config.yaml`. Add fields to
   `/healthz`. Silently drop client tools. Run local `make check`.

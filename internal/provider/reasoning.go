@@ -9,7 +9,7 @@ import (
 // own refusal enumerates, and whether reasoning can be turned off at all.
 //
 // The vocabulary is not a gateway invention. Every provider that rejected the
-// effort in Calypso's ledger listed its own options in the 400:
+// effort in the measured ledger listed its own options in the 400:
 //
 //	opencode-go   Supported values: [minimal, low, medium, high, xhigh, max]
 //	command-code  Invalid option: expected one of "off"|"low"|"medium"|"high"

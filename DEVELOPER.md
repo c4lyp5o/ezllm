@@ -16,7 +16,7 @@ run `go test -short -count=1 ./...` from the repository root with the Linux Go
 toolchain on `PATH`. If WSL resolves a provider CLI to a Windows shim, use a
 Linux-only `PATH` for the local suite; verify live providers separately.
 
-Run Go tests with `-short` on this machine, including focused package tests.
+Run Go tests with `-short` locally, including focused package tests.
 Do not run `make check`, `make test`, `make test-race`, or `make perf` locally.
 CI separately runs the full suite. Run `go vet ./...` and `make build` as
 appropriate for code changes.
@@ -100,7 +100,7 @@ Known, measured (2026-10-17):
 - `GOMEMLIMIT=3GiB / GOGC=50` (set by `make test`, same as CI) is a *soft
   heap* limit. It does **not** cap RSS; transient traffic still peaks at
   ~4.21 GiB.
-- In a **4 GiB memory cgroup** (e.g. a Hermes worker scope), that peak is an
+- In a **4 GiB memory cgroup**, that peak is an
   OOM kill: `server.test` dies at ~3.98 GiB anon-rss. The machine's free RAM
   is irrelevant — the cgroup ceiling is what kills it.
 - **Use `make test-short` locally.** It skips the percentile/retained-memory
@@ -127,7 +127,7 @@ post-1.0 work.
    before a regression gate means anything.
 4. **Older Playwright drivers need a live instance.** The `shot-*.mjs`
    drivers and `verify-feed*`, `verify-ranges`, `verify-stats` expect a
-   dashboard on port 20199, an `EZLLM_TOKEN_HERMES` token and fixed
+   dashboard on port 20199, an `EZLLM_TOKEN` token and fixed
    screenshot paths. Move them onto `mockdash.mjs` before relying on them
    elsewhere.
 5. **`docs/API.md` JSON examples are hand-curated.** Refresh them from live

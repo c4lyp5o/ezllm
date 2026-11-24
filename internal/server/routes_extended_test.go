@@ -34,7 +34,7 @@ func TestNewInferenceRoutesRegistered(t *testing.T) {
 	}
 	defer db.Close()
 
-	if err := db.UpsertClientToken(context.Background(), "hermes", "tok-infer", "infer"); err != nil {
+	if err := db.UpsertClientToken(context.Background(), "my-app", "tok-infer", "infer"); err != nil {
 		t.Fatal(err)
 	}
 

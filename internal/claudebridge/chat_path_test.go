@@ -9,11 +9,11 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/translate"
 )
 
-// The bug report's path: Hermes speaks OpenAI chat to ezllm, ezllm translates to
+// The bug report's path: an agent speaks OpenAI chat to ezllm, ezllm translates to
 // Messages for the claude-sub account, and the bridge must accept what arrives.
-// The body is Hermes's shape — tools on every turn, parallel_tool_calls=false,
+// The body is an agent's shape — tools on every turn, parallel_tool_calls=false,
 // a prior tool call and its result, and its system-plus-last-three cache markers.
-const hermesChat = `{
+const agentChat = `{
  "model":"claude-sub/claude-sonnet-5-5","stream":true,"parallel_tool_calls":false,
  "messages":[
   {"role":"system","content":[{"type":"text","text":"You are Max.","cache_control":{"type":"ephemeral"}}]},
@@ -24,14 +24,14 @@ const hermesChat = `{
  ],
  "tools":[{"type":"function","function":{"name":"terminal","description":"run","parameters":{"type":"object","properties":{"command":{"type":"string"}}}}}]}`
 
-func TestHermesChatBodyCrossesIntoTheBridge(t *testing.T) {
-	messages, err := translate.RequestUniversal([]byte(hermesChat), provider.SurfaceChat, provider.SurfaceAnthropic, "claude-sonnet-5-5")
+func TestAgentChatBodyCrossesIntoTheBridge(t *testing.T) {
+	messages, err := translate.RequestUniversal([]byte(agentChat), provider.SurfaceChat, provider.SurfaceAnthropic, "claude-sonnet-5-5")
 	if err != nil {
 		t.Fatalf("translate: %v", err)
 	}
 	req, err := ParseRequest(messages)
 	if err != nil {
-		t.Fatalf("the bridge refused a translated Hermes turn (the reported 400): %v\n%s", err, messages)
+		t.Fatalf("the bridge refused a translated agent turn (the reported 400): %v\n%s", err, messages)
 	}
 	if !strings.Contains(string(req.Tools), `"terminal"`) {
 		t.Errorf("tools lost in translation: %s", req.Tools)

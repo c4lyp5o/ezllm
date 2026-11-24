@@ -15,7 +15,7 @@ func TestPinnedDirectRouteRefusesWrongSurface(t *testing.T) {
 	cat.pins = map[string]string{"2/gpt-6-luna": "responses"}
 	r := New(cat)
 
-	_, err := r.Resolve(context.Background(), "super-ssn/gpt-6-luna", provider.SurfaceChat, "c")
+	_, err := r.Resolve(context.Background(), "initech/gpt-6-luna", provider.SurfaceChat, "c")
 	var np *ErrPinned
 	if !errors.As(err, &np) {
 		t.Fatalf("want *ErrPinned for openai call on responses-pinned model, got %v", err)
@@ -31,7 +31,7 @@ func TestPinnedDirectRouteAcceptsPinnedSurface(t *testing.T) {
 	cat.pins = map[string]string{"2/gpt-6-luna": "responses"}
 	r := New(cat)
 
-	rt, err := r.Resolve(context.Background(), "super-ssn/gpt-6-luna", provider.SurfaceResponses, "c")
+	rt, err := r.Resolve(context.Background(), "initech/gpt-6-luna", provider.SurfaceResponses, "c")
 	if err != nil {
 		t.Fatalf("pinned surface should route: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestPinnedDirectRouteAcceptsPinnedSurface(t *testing.T) {
 func TestUnpinnedModelUnaffected(t *testing.T) {
 	r := New(newFake())
 	for _, s := range []provider.Surface{provider.SurfaceChat, provider.SurfaceAnthropic, provider.SurfaceResponses} {
-		if _, err := r.Resolve(context.Background(), "super-ssn/gpt-6-luna", s, "c"); err != nil {
+		if _, err := r.Resolve(context.Background(), "initech/gpt-6-luna", s, "c"); err != nil {
 			t.Errorf("unpinned model on %v: %v", s, err)
 		}
 	}
@@ -74,7 +74,7 @@ func (f failingPinCatalog) ModelPin(_ context.Context, _ int64, _ string) (strin
 
 func TestPinLookupFailureFailsClosed(t *testing.T) {
 	r := New(failingPinCatalog{newFake()})
-	if _, err := r.Resolve(context.Background(), "super-ssn/gpt-6-luna", provider.SurfaceChat, "c"); err == nil {
+	if _, err := r.Resolve(context.Background(), "initech/gpt-6-luna", provider.SurfaceChat, "c"); err == nil {
 		t.Fatal("pin lookup error must refuse the request, got nil")
 	}
 }

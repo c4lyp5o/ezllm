@@ -223,7 +223,7 @@ a **regex matched fully against `<namespace>/<model_id>`**:
 translation:
   enabled: true
   responses_models:
-    - "space-stationine/gpt-6\\.1-sol"        # one hop, one family pattern
+    - "acme/gpt-6\\.1-sol"        # one hop, one family pattern
     - "tokenrouter/openai/gpt-6\\.1-sol"      # a plain id matches itself only
     - "vercel-ai-gateway/openai/gpt-6\\.1-sol.*"   # covers -fast variants
 ```

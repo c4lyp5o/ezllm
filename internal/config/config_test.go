@@ -23,8 +23,8 @@ listen: "127.0.0.1:20129"
 data_dir: ./data
 client_tokens:
 providers:
-  opencode-main:
-    namespace: opengo
+  demo-main:
+    namespace: demo
     kind: opencode-go
     base_url: https://opencode.ai/zen/go/v1
     keys: [{ env: P1_KEY, label: primary }]
@@ -62,13 +62,13 @@ func TestLoadValid(t *testing.T) {
 	if cfg.CooldownOn429 != 60*time.Second || cfg.CooldownOn5xx != 60*time.Second {
 		t.Errorf("derived cooldown = %v / %v, want 60s / 60s", cfg.CooldownOn429, cfg.CooldownOn5xx)
 	}
-	if ns := cfg.Namespace("opencode-main"); ns != "opengo" {
-		t.Errorf("namespace = %q, want opengo", ns)
+	if ns := cfg.Namespace("demo-main"); ns != "demo" {
+		t.Errorf("namespace = %q, want demo", ns)
 	}
-	if !cfg.Providers["opencode-main"].RequiresSession() {
+	if !cfg.Providers["demo-main"].RequiresSession() {
 		t.Error("opencode-go should default to requiring session headers")
 	}
-	if names := cfg.ProviderNames(); len(names) != 1 || names[0] != "opencode-main" {
+	if names := cfg.ProviderNames(); len(names) != 1 || names[0] != "demo-main" {
 		t.Errorf("ProviderNames = %v", names)
 	}
 }
@@ -126,7 +126,7 @@ providers:
 }
 
 func TestNamespaceAcceptsValidForms(t *testing.T) {
-	for _, ns := range []string{"opengo", "super-ssn", "a", "x_1", "abc-123_x", strings.Repeat("y", 32)} {
+	for _, ns := range []string{"demo", "initech", "a", "x_1", "abc-123_x", strings.Repeat("y", 32)} {
 		yaml := `
 providers:
   p1:

@@ -185,11 +185,11 @@ token budgets under-count by them. The live feed's `snapshot` event carries the 
                "models":1551, "combos":12, "ledger_rows":22309, "dropped_rows":0, "lost_rows":0,
                "unmetered_rows":0, "ledger_span":{"oldest":"…","newest":"…"}, "uptime_s":4115,
                "db_path":"/data/ezllm.sqlite" },
-  "usage":  [ {"k":"opengo","calls":64,"tin":1200000,"tout":84000,"cread":300000,"cwrite":21000,
+  "usage":  [ {"k":"opencode","calls":64,"tin":1200000,"tout":84000,"cread":300000,"cwrite":21000,
                 "reasoning":4000,"saved":0,"errors":1} ],          // group_by=account, last 24h
   "usage_by_surface": [ {"k":"chat","calls":50,"tin":…,"tout":…,"cread":…,"cwrite":…,"reasoning":…,"saved":…,"errors":0} ],
   "accounts": [ AccountSummary … ],
-  "recent_calls": [ {"ts":"…","client":"hermes","surface":"chat","account":"opengo",
+  "recent_calls": [ {"ts":"…","client":"my-app","surface":"chat","account":"opencode",
                       "model":"qwen3.8-flash","status":200,"ttft_ms":180,"total_ms":940,
                       "tin":120,"tout":40,"cread":0} ]            // last 20, newest first
 }
@@ -197,7 +197,7 @@ token budgets under-count by them. The live feed's `snapshot` event carries the 
 `AccountSummary`:
 ```jsonc
 {
-  "id":1, "name":"OpenCode Go", "namespace":"opengo", "kind":"opencode-go",
+  "id":1, "name":"OpenCode Go", "namespace":"opencode", "kind":"opencode-go",
   "base_url":"https://opencode.ai/zen/go/v1", "enabled":true,
   "probe_delay_ms":400, "cap_window":"monthly", "cap_tokens":0, "max_context_tokens":0,
   "usage_convention":"auto",   // schema v13: how the upstream Messages wire counts
@@ -293,8 +293,8 @@ header gives the report's age in seconds, so a dashboard number can be up to 10 
 ### `POST /admin/accounts` → `201`
 ```jsonc
 // request
-{ "name":"SSN GPT", "namespace":"super-ssn", "kind":"openai-compatible",
-  "base_url":"https://space.stationine.com/v1", "probe_delay_ms":400,
+{ "name":"Acme AI", "namespace":"acme", "kind":"openai-compatible",
+  "base_url":"https://api.example.com/v1", "probe_delay_ms":400,
   "requires_session_header":false, "custom_headers":null, "notes":"" }
 ```
 `kind` ∈ `opencode-go|openai-compatible|anthropic-compatible|gemini-openai`. `namespace`:
@@ -329,7 +329,7 @@ Absent fields keep their current values — including `usage_convention`; an inv
 `DELETE` → **`409`** when combos reference it, body lists the combos:
 ```jsonc
 {"error":{"type":"conflict","message":"account referenced by 2 combos",
-  "combos":[{"id":3,"name":"daily"},{"id":7,"name":"fallback"}]}}
+  "combos":[{"id":3,"name":"main"},{"id":7,"name":"fallback"}]}}
 ```
 Add `?force=true` to delete anyway (cascades: keys, models, quota rows).
 
@@ -672,7 +672,7 @@ expired cookie answers `401`/`403` → `502`, so the last good snapshot is kept.
 
 ### `GET|POST /admin/combos` · `GET|PATCH|DELETE /admin/combos/{id}`
 ```jsonc
-{ "name":"daily","strategy":"failover","sticky_idle_s":1800,"enabled":true,
+{ "name":"main","strategy":"failover","sticky_idle_s":1800,"enabled":true,
   "compression_profile_id":null,
   "hops":[{"account_id":1,"model_id":"gpt-6-luna","weight":1,"enabled":true,
            "hold_until_failure":false}, …] }
@@ -713,8 +713,8 @@ response shape is unchanged. `EZLLM_COMBO_AUTOPROBE=off` disables it.
 ### `GET|POST /admin/tokens` · `PATCH|DELETE /admin/tokens/{id}`
 ```jsonc
 // POST  → 201 (token plaintext returned EXACTLY ONCE, never again)
-{ "name":"hermes","roles":["infer"],"token":"ezllm_…" }   // token optional; generated if absent
-// GET   → [{"id":4,"name":"hermes","hint":"ezllm…a91f","roles":["infer"],"enabled":true,"cap_window":"monthly","cap_tokens":0,"cap_usd":0,"allowed_models":"","expires_at":"","last_used_at":"…"}]
+{ "name":"my-app","roles":["infer"],"token":"ezllm_…" }   // token optional; generated if absent
+// GET   → [{"id":4,"name":"my-app","hint":"ezllm…a91f","roles":["infer"],"enabled":true,"cap_window":"monthly","cap_tokens":0,"cap_usd":0,"allowed_models":"","expires_at":"","last_used_at":"…"}]
 // PATCH → {"enabled":false} | {"roles":["infer","admin"]} | {"cap_tokens":100000,"cap_window":"daily"} | {"cap_usd":25} | {"allowed_models":"deepseek/*,openai/gpt-5*"} | {"expires_at":"2026-11-01"}
 ```
 `roles` is a non-empty subset of `infer|metrics|admin`, each a separate permission:

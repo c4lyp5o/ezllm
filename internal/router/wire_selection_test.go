@@ -59,7 +59,7 @@ func TestCuratedResponsesHopBeatsTheCapabilityGate(t *testing.T) {
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceAnthropic)] = true
 	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceChat)] = true
 
-	r := New(cat).WithTranslation(true).WithResponsesModels([]string{`super-ssn/gpt-6\.1-sol`})
+	r := New(cat).WithTranslation(true).WithResponsesModels([]string{`initech/gpt-6\.1-sol`})
 	routes, err := r.ResolveCandidates(context.Background(), wireCombo, provider.SurfaceAnthropic, "test")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -87,7 +87,7 @@ func TestCuratedResponsesHopRefusedWhenResponsesProbedFalse(t *testing.T) {
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceResponses)] = true
 	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceChat)] = true
 
-	r := New(cat).WithTranslation(true).WithResponsesModels([]string{`super-ssn/gpt-6\.1-sol`})
+	r := New(cat).WithTranslation(true).WithResponsesModels([]string{`initech/gpt-6\.1-sol`})
 	_, err := r.ResolveCandidates(context.Background(), wireCombo, provider.SurfaceAnthropic, "test")
 	if err == nil {
 		t.Fatal("a hop whose curated destination wire is probed impossible must not become a candidate")
@@ -105,7 +105,7 @@ func TestResponsesWireHopChecksPinAgainstResponses(t *testing.T) {
 	// this perfectly consistent configuration is refused.
 	cat.pins = map[string]string{"2/gpt-6.1-sol": "responses"}
 
-	r := New(cat).WithResponsesModels([]string{`super-ssn/gpt-6\.1-sol`})
+	r := New(cat).WithResponsesModels([]string{`initech/gpt-6\.1-sol`})
 	routes, err := r.ResolveCandidates(context.Background(), wireCombo, provider.SurfaceAnthropic, "test")
 	if err != nil {
 		t.Fatalf("pin to the wire we actually dial was refused: %v", err)
@@ -122,7 +122,7 @@ func TestResponsesWireHopRefusesConflictingPin(t *testing.T) {
 	// constraint — it must refuse rather than be silently overridden.
 	cat.pins = map[string]string{"2/gpt-6.1-sol": "anthropic"}
 
-	r := New(cat).WithResponsesModels([]string{`super-ssn/gpt-6\.1-sol`})
+	r := New(cat).WithResponsesModels([]string{`initech/gpt-6\.1-sol`})
 	_, err := r.ResolveCandidates(context.Background(), wireCombo, provider.SurfaceAnthropic, "test")
 	var np *ErrPinned
 	if !errors.As(err, &np) {
@@ -143,7 +143,7 @@ func TestDirectRouteTranslatesLikeTheSameComboHop(t *testing.T) {
 	if cerr != nil {
 		t.Fatalf("combo: %v", cerr)
 	}
-	direct, derr := r.ResolveCandidates(context.Background(), "super-ssn/gpt-6.1-sol", provider.SurfaceAnthropic, "test")
+	direct, derr := r.ResolveCandidates(context.Background(), "initech/gpt-6.1-sol", provider.SurfaceAnthropic, "test")
 	if derr != nil {
 		t.Fatalf("direct: %v", derr)
 	}
@@ -157,7 +157,7 @@ func TestDirectRouteTranslatesLikeTheSameComboHop(t *testing.T) {
 	if !combo[0].Translated || !direct[0].Translated {
 		t.Errorf("translated flags: combo=%v direct=%v, want true for both", combo[0].Translated, direct[0].Translated)
 	}
-	if direct[0].Alias != "super-ssn/gpt-6.1-sol" {
+	if direct[0].Alias != "initech/gpt-6.1-sol" {
 		t.Errorf("direct alias = %q", direct[0].Alias)
 	}
 }
@@ -170,7 +170,7 @@ func TestDirectRouteRefusesProvenImpossibleWire(t *testing.T) {
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceAnthropic)] = true
 
 	r := New(cat)
-	_, err := r.ResolveCandidates(context.Background(), "super-ssn/gpt-6.1-sol", provider.SurfaceAnthropic, "test")
+	_, err := r.ResolveCandidates(context.Background(), "initech/gpt-6.1-sol", provider.SurfaceAnthropic, "test")
 	if err == nil {
 		t.Fatal("a direct route must not be created for a wire the model cannot serve")
 	}
@@ -218,7 +218,7 @@ func TestProvenNativeHopKeepsItsWireAndFlagsClear(t *testing.T) {
 
 func TestResponsesWireNeverAppliesToResponsesClients(t *testing.T) {
 	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
-	r := New(cat).WithResponsesModels([]string{`super-ssn/gpt-6\.1-sol`})
+	r := New(cat).WithResponsesModels([]string{`initech/gpt-6\.1-sol`})
 	routes, err := r.ResolveCandidates(context.Background(), wireCombo, provider.SurfaceResponses, "test")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)

@@ -520,7 +520,7 @@ func (s *Server) WrapForTest(h http.Handler) http.Handler {
 
 // ── handlers ────────────────────────────────────────────────────────────────
 
-// handleHealth is public (monitors, Traefik, the compose healthcheck), so it
+// handleHealth is public (monitors, a reverse proxy, the compose healthcheck), so it
 // reports liveness plus the release version — deliberately the ONLY extra
 // field: no DB path, counts, or uptime. Detailed stats are behind the admin
 // token at /admin/overview. The version pairing is asserted against
@@ -1153,7 +1153,7 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		l, err := time.LoadLocation(v)
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, "invalid_request_error",
-				fmt.Sprintf("tz %q does not resolve to a time zone on this host (use an IANA name like Asia/Kuala_Lumpur)", v))
+				fmt.Sprintf("tz %q does not resolve to a time zone on this host (use an IANA name like Europe/Berlin)", v))
 			return
 		}
 		loc = l

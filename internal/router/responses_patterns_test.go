@@ -22,12 +22,12 @@ func TestResponsesPatternsMatchFully(t *testing.T) {
 		{"plain id matches itself", []string{"tokenrouter/openai/gpt-6.1-sol"}, "tokenrouter", "openai/gpt-6.1-sol", true},
 		{"plain id does not match another account", []string{"tokenrouter/openai/gpt-6.1-sol"}, "vercel-ai-gateway", "openai/gpt-6.1-sol", false},
 		{"family pattern covers variants", []string{`vercel-ai-gateway/openai/gpt-6\.1-sol.*`}, "vercel-ai-gateway", "openai/gpt-6.1-sol-fast", true},
-		{"family pattern still anchored at the start", []string{`stationine/gpt-6\.1-sol`}, "not-stationine", "gpt-6.1-sol", false},
-		{"unanchored-looking entry cannot match a suffix", []string{`gpt-6\.1-sol`}, "stationine", "gpt-6.1-sol", false},
-		{"prefix pattern with wildcard namespace", []string{`.*/gpt-6\.1-sol`}, "space-stationine", "gpt-6.1-sol", true},
-		{"empty list is inert", nil, "stationine", "gpt-6.1-sol", false},
-		{"blank entry ignored", []string{"   "}, "stationine", "gpt-6.1-sol", false},
-		{"invalid regex dropped, valid one still applies", []string{"[", `space-stationine/gpt-6\.1-sol`}, "space-stationine", "gpt-6.1-sol", true},
+		{"family pattern still anchored at the start", []string{`globex/gpt-6\.1-sol`}, "not-globex", "gpt-6.1-sol", false},
+		{"unanchored-looking entry cannot match a suffix", []string{`gpt-6\.1-sol`}, "globex", "gpt-6.1-sol", false},
+		{"prefix pattern with wildcard namespace", []string{`.*/gpt-6\.1-sol`}, "globex", "gpt-6.1-sol", true},
+		{"empty list is inert", nil, "globex", "gpt-6.1-sol", false},
+		{"blank entry ignored", []string{"   "}, "globex", "gpt-6.1-sol", false},
+		{"invalid regex dropped, valid one still applies", []string{"[", `globex/gpt-6\.1-sol`}, "globex", "gpt-6.1-sol", true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

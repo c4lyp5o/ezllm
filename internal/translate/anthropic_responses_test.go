@@ -35,7 +35,7 @@ func TestAnthropicToResponsesRequest(t *testing.T) {
 	      {"type":"text","text":"and now?"}]}
 	  ]
 	}`
-	out, err := AnthropicToResponses([]byte(in), "super-ssn/gpt-6.1-sol")
+	out, err := AnthropicToResponses([]byte(in), "initech/gpt-6.1-sol")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestAnthropicToResponsesRequest(t *testing.T) {
 	if err := json.Unmarshal(out, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Model != "super-ssn/gpt-6.1-sol" || got.MaxOutputTokens != 4096 || !got.Stream {
+	if got.Model != "initech/gpt-6.1-sol" || got.MaxOutputTokens != 4096 || !got.Stream {
 		t.Fatalf("envelope = %+v", got)
 	}
 	if got.Instructions != "You are Claude Code.\nBe terse." {

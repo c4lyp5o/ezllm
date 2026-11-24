@@ -10,8 +10,8 @@ must not be represented as equivalent reductions in vendor usage.
 
 Read-only snapshot of the local usage ledger, covering
 2026-11-06T19:30:24.155Z through 2026-11-13T19:30:24.155Z (the latest recorded
-call). Hermes attribution includes both operator-confirmed client keys,
-`melissa` and `maxine`; dashboard and canary keys are excluded. Only metadata
+call). Agent attribution includes both operator-confirmed client keys;
+dashboard and canary keys are excluded. Only metadata
 and usage counters were inspected, not conversation bodies or credentials.
 No subscription inference calls were made during the initial ledger-only phase.
 The subsequent authorized live phase is recorded below. Earlier live

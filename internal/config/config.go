@@ -18,7 +18,7 @@ import (
 // DefaultListen is loopback-only unless overridden with -addr.
 const DefaultListen = "127.0.0.1:20129"
 
-// DefaultDataDir is repo-relative so Docker can bind-mount ./data (Calypso #5).
+// DefaultDataDir is repo-relative so Docker can bind-mount ./data.
 const DefaultDataDir = "data"
 
 // namespaceRE constrains account namespaces: lowercase alnum plus _ and -,
@@ -111,7 +111,7 @@ type Translation struct {
 	//
 	// Each entry is a REGEX matched FULLY against "<namespace>/<model_id>"
 	// (both ends anchored), so a plain id matches only itself and a family
-	// pattern like `stationine/gpt-6\.1-sol` covers its variants. Compile
+	// pattern like `globex/gpt-6\.1-sol` covers its variants. Compile
 	// errors are a boot failure naming the entry. Empty list (default) = the
 	// wire override is inert. This list is its own opt-in; translation.enabled
 	// gates the separate anthropic→chat leg.

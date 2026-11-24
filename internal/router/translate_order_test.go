@@ -137,7 +137,7 @@ func TestUnprovenOpenAICapabilityDropsHop(t *testing.T) {
 // still serves — a translated hop is a last resort, not decoration.
 func TestTranslatedTailServesWhenNativeGone(t *testing.T) {
 	cat, r := translatedFixture()
-	if a := cat.accounts["opengo"]; a != nil {
+	if a := cat.accounts["demo"]; a != nil {
 		a.Enabled = false
 	}
 

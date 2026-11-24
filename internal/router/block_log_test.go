@@ -81,9 +81,9 @@ func TestBlockAdvanceLoggedOncePerBlock(t *testing.T) {
 	if !strings.Contains((*lines)[1], `"reason":"block complete"`) {
 		t.Errorf("second advance reason = %s, want block complete", (*lines)[1])
 	}
-	if !strings.Contains((*lines)[1], `"hop":"super-ssn/gpt-6.1-sol"`) {
+	if !strings.Contains((*lines)[1], `"hop":"initech/gpt-6.1-sol"`) {
 		// The rotation must walk FORWARD to the next position, not restart.
-		t.Errorf("second advance hop = %s, want super-ssn/gpt-6.1-sol", (*lines)[1])
+		t.Errorf("second advance hop = %s, want initech/gpt-6.1-sol", (*lines)[1])
 	}
 
 	// The same state the log line reports must be readable by the dashboard
@@ -94,7 +94,7 @@ func TestBlockAdvanceLoggedOncePerBlock(t *testing.T) {
 	for _, c := range cursors {
 		if c.Combo == "daily" {
 			found = true
-			if c.BlockSize != 3 || (c.Hop != "super-ssn/gpt-6-luna" && c.Hop != "super-ssn/gpt-6.1-sol") {
+			if c.BlockSize != 3 || (c.Hop != "initech/gpt-6-luna" && c.Hop != "initech/gpt-6.1-sol") {
 				t.Errorf("cursor = %+v, want block_size 3 on one of the hops", c)
 			}
 		}

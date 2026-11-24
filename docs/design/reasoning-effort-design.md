@@ -1,6 +1,6 @@
 # Reasoning effort: one vocabulary per model, learned from the refusal
 
-Status: shipped on `melissa/fix-review-and-ledger` (schema v29). Not yet released.
+Status: shipped (schema v29). Not yet released.
 
 ## The defect
 

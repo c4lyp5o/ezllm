@@ -49,7 +49,7 @@ func parsePercentQuota(body string) Quota {
 	return q
 }
 
-// parseMoneyQuota parses the ssn-gpt (space.stationine.com) /usage shape:
+// parseMoneyQuota parses the initech-gpt (api.example.com) /usage shape:
 //
 //	{"balance":0.2566,"remaining":…,"unit":"USD","cost":…,"actual_cost":…,
 //	 "usage":{"today":{requests,input_tokens,output_tokens,total_tokens,cost},

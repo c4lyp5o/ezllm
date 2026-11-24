@@ -114,7 +114,7 @@ Host config `~/.config/ezllm/bridge-update.json`:
  "bridges": {"claude": {"enabled": true, "hold": []},
              "codex":  {"enabled": true, "hold": []},
              "agy":    {"enabled": true, "hold": []}},
- "compose_dir": "/home/calypso/ezllm", "service": "ezllm",
+ "compose_dir": "/home/you/ezllm", "service": "ezllm",
  "proof_token_file": "~/.config/ezllm/proof.token"}
 ```
 

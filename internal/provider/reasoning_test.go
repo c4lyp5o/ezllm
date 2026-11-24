@@ -2,7 +2,7 @@ package provider
 
 import "testing"
 
-// The three bodies below are copied verbatim from calls in Calypso's ledger
+// The three bodies below are copied verbatim from calls in the measured ledger
 // (ezllm.sqlite, 2026-10-20 .. 2026-10-23). They are the reason this file
 // exists: every one of them rejects `reasoning_effort: "none"`, and each says
 // something different about what the model WOULD accept.

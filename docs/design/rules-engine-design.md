@@ -1,9 +1,9 @@
 # ezllm — Rules Engine Design (M5)
 
-Status: approved by Calypso 2026-10-06 and shipped. Sections 1–11 preserve the
+Status: approved by the owner 2026-10-06 and shipped. Sections 1–11 preserve the
 original design decisions; the v1.4 extension in §12 supersedes the original
 timezone default and meter assumptions for inherited rules.
-Author: m3lis5a · 2026-10-06
+2026-10-06
 
 ## 1. What we're building
 
@@ -11,14 +11,14 @@ Two per-model rules, both answering the same question the resolver already asks
 in `router.go` — **"may this hop be used RIGHT NOW?"** — via the existing
 `Eligible func(ctx, accountID int64, modelID string) error` seam:
 
-1. **Usage cap** — "how much of this model can we use?" (Calypso's rough idea)
+1. **Usage cap** — "how much of this model can we use?" (the owner's rough idea)
 2. **Allowed-hours window** — "what time may this model be used?"
    (the night-discount case; omniroute has no equivalent)
 
 One combo then holds a day model + a night model and the router picks whichever
 is legal at the current hour. No separate day/night combos.
 
-## 2. Decisions already locked (Calypso, re-confirmed post-compaction)
+## 2. Decisions already locked (re-confirmed)
 
 | Decision | Answer | Consequence |
 |---|---|---|
@@ -244,7 +244,7 @@ embed/wrap `*ErrUnavailable` or be added to that switch ahead of the default.
 **Add it to the switch** (explicit beats clever here) *and* keep `ErrRule`
 self-describing so the handler can put `kind`/`next_allowed` in the body.
 
-## 9. Locked decisions (Calypso, 2026-10-06)
+## 9. Locked decisions (2026-10-06)
 
 1. **`5h` = calendar-aligned blocks.** O(1), reset-free. Documented caveat:
    headroom can be tiny immediately after a block reset — that is accepted, not

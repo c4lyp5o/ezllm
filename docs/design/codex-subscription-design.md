@@ -1,7 +1,7 @@
 # ChatGPT subscription via the official Codex CLI — design
 
 **Status:** M0 measured 2026-10-23 · decisions recorded (§4) · stages 1–3 (§2.13, §2.14) shipped in v1.1.0 and deployed
-**Operator gate:** Calypso (pushes/deploys)
+**Operator gate:** the owner (pushes/deploys)
 **Spec:** [SPEC-codex-bridge.md](SPEC-codex-bridge.md) · **Pattern:** [claude-subscription-design.md](claude-subscription-design.md)
 
 ## 1. Goal and the hard constraints
@@ -14,7 +14,7 @@ surface.
 - **No trouble:** only the official `codex` binary talks to the subscription.
   ezllm's Go process never reads, refreshes or replays `auth.json`.
 - **Nothing executes:** the model must not be able to run a command or write a
-  file on this box under any input — proven by a sentinel, not assumed from flags.
+  file on the host under any input — proven by a sentinel, not assumed from flags.
 
 ## 2. Measured baseline (live, 2026-10-23)
 

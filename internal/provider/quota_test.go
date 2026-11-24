@@ -35,7 +35,7 @@ func TestQuotaOracleHostMatrix(t *testing.T) {
 		{"host suffix refused", Account{Kind: KindOpenAICompatible, BaseURL: "https://notopenrouter.ai/api/v1"}, false, ""},
 		{"host prefix refused", Account{Kind: KindOpenAICompatible, BaseURL: "https://openrouter.ai.evil.example/api/v1"}, false, ""},
 		{"path spoof refused", Account{Kind: KindOpenAICompatible, BaseURL: "https://evil.example/api.deepseek.com/user/balance"}, false, ""},
-		{"generic provider falls through", Account{Kind: KindOpenAICompatible, BaseURL: "https://space.stationine.com/v1"}, false, ""},
+		{"generic provider falls through", Account{Kind: KindOpenAICompatible, BaseURL: "https://api.example.com/v1"}, false, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -239,7 +239,7 @@ func TestMapOracleErr(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// UA policy (Calypso's rule): ezllm's OWN requests carry agentUserAgent;
+// UA policy: ezllm's OWN requests carry agentUserAgent;
 // PrepareRequest fills it only when absent so the client's UA and operator
 // custom_headers both survive.
 // ─────────────────────────────────────────────────────────────────────────────

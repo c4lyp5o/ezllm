@@ -81,7 +81,7 @@ used only for corroboration, never as the source of truth).
   (attachments/files always empty), no artifacts/downloads, no model
   discovery (ids passed through; forward-compat by construction). Model
   switching mid-conversation starts a new conversation (web limitation).
-- **Risks (accepted per Calypso 2026-10-16)**: Cloudflare challenge possible
+- **Risks (accepted by the owner 2026-10-16)**: Cloudflare challenge possible
   (typed error + operator-visible message; browser fallback is omniroute's
   answer, ours is a clear `errCloudflareChallenge` + retry guidance), session
   expiry (typed error, operator re-exports the cookie), rate limits
@@ -121,4 +121,4 @@ used only for corroboration, never as the source of truth).
 - Payload parity: golden JSON test vs the exact port (including
   create_conversation_params on first turn and the effort map).
 - Live proof with a real account is operator-gated, same posture as
-  gemini-web: no live call until Calypso says go.
+  gemini-web: no live call until the owner says go.

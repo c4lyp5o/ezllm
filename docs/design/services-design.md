@@ -1,6 +1,6 @@
 # Services — per-service default models (design, M10)
 
-Status: **sign-off ready**. Owner: Melissa (with Calypso). Supersedes: nothing.
+Status: **sign-off ready**. Supersedes: nothing.
 Related: `docs/API.md` (contract), `web/src/pages/Chat.tsx` (combobox pattern),
 `internal/server/admin.go` `handleComboTest` (probe-through-dispatcher pattern).
 

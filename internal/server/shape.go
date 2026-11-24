@@ -258,7 +258,7 @@ func writeCanon(h hash.Hash, v any) {
 var canonEncoders = sync.Pool{New: func() any { return &canonEncoder{buf: make([]byte, 0, canonChunk+4<<10)} }}
 
 // sessionOf reads the operator's optional grouping key. A client that sends
-// X-Ezllm-Session (Hermes, Claude Code via a wrapper) turns per-session cost
+// X-Ezllm-Session (an agent, Claude Code via a wrapper) turns per-session cost
 // and cache reuse into a single GROUP BY; one that does not leaves it empty and
 // we fall back to time-window analysis. Never used for routing or auth.
 func sessionOf(r *http.Request) string {

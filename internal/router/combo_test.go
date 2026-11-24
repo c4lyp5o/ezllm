@@ -156,7 +156,7 @@ func TestUnknownComboHintsIncludeCombos(t *testing.T) {
 func TestDirectRouteSingleCandidate(t *testing.T) {
 	r := New(newFake())
 
-	routes, err := r.ResolveCandidates(context.Background(), "opengo/qwen3.8-flash", provider.SurfaceChat, "test")
+	routes, err := r.ResolveCandidates(context.Background(), "demo/qwen3.8-flash", provider.SurfaceChat, "test")
 	if err != nil {
 		t.Fatalf("direct resolve: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestDirectRouteIneligibleIsUnavailable(t *testing.T) {
 		return errors.New("daily cap spent")
 	})
 
-	_, err := r.ResolveCandidates(context.Background(), "opengo/qwen3.8-flash", provider.SurfaceChat, "test")
+	_, err := r.ResolveCandidates(context.Background(), "demo/qwen3.8-flash", provider.SurfaceChat, "test")
 	var nu *ErrUnavailable
 	if !errors.As(err, &nu) {
 		t.Fatalf("want ErrUnavailable (maps to 429), got %v", err)
@@ -262,7 +262,7 @@ func TestComboAllHopsDisabledAccountNamesCause(t *testing.T) {
 // otherwise healthy combo answers the client with the upstream's own 400/403
 // every time the rotation lands on it — live 2026-10-11, Claude Code got
 // "Model does not support this protocol" from an opencode-go hop of the
-// claude-sonnet combo, and a 403 group policy from a space-stationine hop.
+// claude-sonnet combo, and a 403 group policy from a globex hop.
 func TestComboSkipsProbedIncompatibleHop(t *testing.T) {
 	cat := withCombo(newFake(), dayNightCombo())
 	cat.noProto = map[string]bool{"1/gpt-6-luna/anthropic": true}

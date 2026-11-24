@@ -27,9 +27,9 @@ import {
 const TZS: string[] = (() => {
   try {
     const list = Intl.supportedValuesOf('timeZone');
-    return list.includes('Asia/Kuala_Lumpur') ? list : ['Asia/Kuala_Lumpur', ...list];
+    return list.includes('UTC') ? list : ['UTC', ...list];
   } catch {
-    return ['Asia/Kuala_Lumpur', 'UTC', 'Asia/Jakarta', 'Asia/Singapore'];
+    return ['UTC', 'America/New_York', 'Europe/Berlin', 'Asia/Singapore'];
   }
 })();
 

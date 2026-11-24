@@ -264,7 +264,7 @@ oversized successful provider JSON responses. No schema migration.
 
 ## v1.7.0 — 2026-11-05
 
-MINOR by Calypso's call on a pre-1.8 line. It is not a small change though, so
+MINOR by the owner's call on a pre-1.8 line. It is not a small change though, so
 read the next sentence before deploying: **the `github-copilot` provider kind no
 longer exists.** A `config.yaml` naming it is refused, and an account row still
 carrying it fails every request (`502 provider: unknown kind "github-copilot"`)
@@ -717,7 +717,7 @@ the upgrade.
 - **GitHub Copilot** presents CLI 1.0.103 (GitHub's HTTP 466 floor rejected
   1.0.81-6); `GITHUB_COPILOT_CLI_VERSION` passes through compose.
 - **Deploy change:** `compose.yml` is no longer shipped. Copy
-  `compose.example.yml` to `compose.yml` (gitignored); `compose.traefik.yml` is
+  `compose.example.yml` to `compose.yml` (gitignored); the reverse-proxy overlay is
   gone. Back up your `compose.yml` before pulling.
 
 ---
@@ -770,9 +770,9 @@ on the runner instead of emulated, so arm64 costs no QEMU time.
   carries a client token as a URL segment; the log line now shows
   `/api/v1/vscode/***/…`. A reverse proxy in front must redact it too.
 - **Fix: behind a reverse proxy, one guesser no longer locks everyone out.**
-  The sign-in/setup limiter keyed on the socket peer, which behind traefik is
-  traefik for every client. `EZLLM_TRUSTED_PROXIES` names the proxies whose
-  `X-Forwarded-For` it believes; the traefik overlay sets it.
+  The sign-in/setup limiter keyed on the socket peer, which behind a reverse proxy is
+  the proxy for every client. `EZLLM_TRUSTED_PROXIES` names the proxies whose
+  `X-Forwarded-For` it believes; the proxy overlay sets it.
 - **Fix: sign-in can no longer be used to burn CPU.** Login, setup and
   password change share four concurrent bcrypt slots; past that, `429` with
   `Retry-After`.
@@ -956,9 +956,8 @@ default, and the dashboard gets a data-terminal redesign.
 - **The image build stops pretending to be multi-arch.** The container was
   built for `linux/amd64,linux/arm64`, but the arm64 half ran the whole
   `golang:1.27-alpine` + distroless + Go toolchain under QEMU emulation on
-  an amd64 runner — 7 of the 8 minutes of every push — and no host in the
-  fleet is arm64 (calypsocloud-1, Media-Server, GAME-PC and the OVH VPS are
-  all x86_64). The image is now `linux/amd64` only, the QEMU setup step is
+  an amd64 runner — 7 of the 8 minutes of every push — and no host it ran
+  on then was arm64. The image is now `linux/amd64` only, the QEMU setup step is
   gone, and the build uses the GitHub Actions layer cache
   (`cache-from`/`cache-to: type=gha,mode=max`) so the Go module download and
   the compile are cached between pushes instead of redone from scratch every
@@ -1366,7 +1365,7 @@ Containerization, chat, and retry semantics.
   (schema v5).
 - **Web**: chat page behind the real routing path, Token Economics +
   budget-engine controls, add-provider dialog with key validation on save.
-- **Deploy**: static distroless Docker image + home-box Traefik overlay;
+- **Deploy**: static distroless Docker image + reverse-proxy overlay;
   explicit router priorities + dedicated `/admin/login` limiter; MIT license.
 - **Combos**: advertised in `/v1/models`, `enabled` honored in PATCH,
   per-combo enable toggle.

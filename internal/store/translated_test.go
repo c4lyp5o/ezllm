@@ -24,7 +24,7 @@ func TestCallTranslatedRoundTrip(t *testing.T) {
 	db.RecordCall(Call{TS: base, Client: "claude-code", Surface: SurfaceAnthropic,
 		Account: "groq", Model: "deepseek-flash", Status: 200, Translated: true,
 		TokensIn: 1000, TokensOut: 5})
-	db.RecordCall(Call{TS: base.Add(time.Second), Client: "hermes", Surface: SurfaceAnthropic,
+	db.RecordCall(Call{TS: base.Add(time.Second), Client: "my-app", Surface: SurfaceAnthropic,
 		Account: "vercel", Model: "qwen3.8", Status: 200, Translated: false})
 	if err := db.Flush(); err != nil {
 		t.Fatal(err)
@@ -65,7 +65,7 @@ func TestMigrateV11AddsTranslatedKeepsRows(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v11.sqlite")
 	seed := openAt(t, path)
 	seed.RecordCall(Call{TS: time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC),
-		Client: "hermes", Surface: SurfaceAnthropic, Account: "vercel",
+		Client: "my-app", Surface: SurfaceAnthropic, Account: "vercel",
 		Model: "qwen3.8", Status: 200})
 	if err := seed.Flush(); err != nil {
 		t.Fatal(err)

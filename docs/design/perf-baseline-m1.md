@@ -240,7 +240,7 @@ Why this one, from the measured evidence:
   second full decode+re-marshal per hop), while ingestion is 1.5 GB/s and
   streamCopy per-event cost is size-independent.
 - It is the traffic that actually hits this gateway: the dominant client
-  (Hermes agent turns) sends ~175k-token median prompts ≈ 0.7–1 MB bodies, so
+  (agent turns) sends ~175k-token median prompts ≈ 0.7–1 MB bodies, so
   this path runs at its WORST size, repeatedly.
 - Estimated saving at 1 MiB: ~2 of the 3 full parses (~3 ms CPU/request) plus
   their garbage, with a smaller but real win at 64 KiB (~0.5 ms).
@@ -260,7 +260,7 @@ evaluation per the task.
 ## 7. Blocked / not measured (declared per acceptance criteria)
 
 - **`ezllm_architecture_specification.md` does not exist** in the repo —
-  reference was `docs/*.md` + README + EXPLORING.md (agreed with Calypso), so
+  reference was `docs/*.md` + README + EXPLORING.md (agreed with the owner), so
   the spec's latency targets are N/A by definition. No spec number is claimed.
 - **No CI latency gates added** — correct per task: machine-dependent targets
   must not become CI failures without an agreed reference environment.

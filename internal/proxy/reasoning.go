@@ -16,7 +16,7 @@ import (
 // refused is ever re-encoded.
 //
 // Scope, deliberately: the top-level `reasoning_effort` string of an
-// OpenAI-shaped body. That is the field every provider in Calypso's ledger
+// OpenAI-shaped body. That is the field every provider in the measured ledger
 // rejected, and the one both the native path and the chat→responses translator
 // read. A nested `reasoning.effort` (Responses) or anthropic's `thinking` block
 // is a different vocabulary and is not touched here — guessing would be worse

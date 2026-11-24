@@ -41,8 +41,8 @@ boot reports it qualified; any other version still boots and is reported `unqual
    - `usage_convention`: `anthropic` (cache excluded from `input_tokens`, matching
      the native envelope the surface emits)
    - Sync the catalog, then **Test** — expect the `claude-haiku-5-5` probe to pass.
-2. **Combo** — one hop, this account. Never add it to `daily`, never make it an
-   automatic fallback: the plan's real limit is a shared rolling window the router
+2. **Combo** — one hop, this account. Never add it to a combo your
+   apps use by default, never make it an automatic fallback: the plan's real limit is a shared rolling window the router
    cannot observe.
 3. **Drain cap (Rules) — required before any agent uses the combo.** On the Rules
    page, for the claude-sub account:
@@ -66,7 +66,7 @@ boot reports it qualified; any other version still boots and is reported `unqual
 Client tools pass through to upstream unchanged and come back as `tool_use` under
 their own names; nothing runs inside the bridge or the CLI. The client executes its
 tools and sends `tool_result`s on the next request, as with any Messages endpoint.
-OpenAI chat clients (Hermes) work through ezllm's normal translation. Only the newest
+OpenAI chat clients work through ezllm's normal translation. Only the newest
 two `cache_control` markers survive (native spends two of upstream's four).
 
 ## Verify
@@ -76,8 +76,7 @@ and select a model from this account. Send a short prompt through the dashboard
 or your client. Requests consume subscription quota.
 
 The repository's optional live proof makes several calls and requires an inference
-key. Set the URL explicitly: the script otherwise defaults to a specific remote
-server. Replace the model ID with one from your account:
+key. The script defaults to `http://127.0.0.1:20129`. Replace the model ID with one from your account:
 
 ```sh
 EZLLM_URL=http://127.0.0.1:20129 EZLLM_TOKEN=YOUR_EZLLM_KEY \

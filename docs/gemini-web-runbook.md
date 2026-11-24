@@ -4,7 +4,7 @@ Unofficial surface. This provider drives Google Gemini's **web** protocol
 (gemini.google.com) with a Google-account cookie. Everything below is the
 honest posture: what breaks, how it breaks, and what the operator does.
 
-## Risk posture (accepted by Calypso, 2026-10-15)
+## Risk posture
 
 - **Cookie material is live account access.** `__Secure-1PSID` +
   `__Secure-1PSIDTS` together are the account (not a scoped API key). Store

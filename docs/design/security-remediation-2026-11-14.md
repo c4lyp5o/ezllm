@@ -6,7 +6,7 @@
 Follow-up to the [whole-application audit](security-audit-2026-11-14.md).
 The application fixes are implemented, tested and deployed as v1.14.1.
 Host port 20129 is bound only to localhost, as selected by the operator.
-Local and certificate-validated Traefik HTTPS health checks pass.
+Local and certificate-validated proxy HTTPS health checks pass.
 
 ## Resolution by finding
 
@@ -143,7 +143,7 @@ The previous image and a rollback Compose file are retained. Private Compose
 files and backups are excluded from the Docker build context.
 
 Post-deployment checks verified the exact v1.14.1 health response, expected image
-ID, localhost-only host publication, preserved Traefik network, unauthenticated
+ID, localhost-only host publication, preserved proxy network, unauthenticated
 401 responses on account/model endpoints, dashboard security headers, and HTTPS
 proxy health with certificate validation. No paid inference calls were used.
 The detailed runtime check is recorded in

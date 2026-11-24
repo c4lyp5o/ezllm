@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
-const base = "http://127.0.0.1:20199", token = process.env.EZLLM_TOKEN_HERMES;
+const base = "http://127.0.0.1:20199", token = process.env.EZLLM_TOKEN;
 
-if (!token) { console.error("EZLLM_TOKEN_HERMES not set"); process.exit(3); }
+if (!token) { console.error("EZLLM_TOKEN not set"); process.exit(3); }
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
 const reqs = [];

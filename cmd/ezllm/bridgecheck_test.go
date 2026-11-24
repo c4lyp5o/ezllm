@@ -94,8 +94,8 @@ func checkJSON(t *testing.T, args ...string) (bridgeVerdict, error) {
 
 // Boot reports flag drift and serves; the gate refuses to promote on it.
 func TestBridgeCheckClaudeRefusesFlagDrift(t *testing.T) {
-	t.Setenv("USER", "calypso")
-	t.Setenv("LOGNAME", "calypso")
+	t.Setenv("USER", "operator")
+	t.Setenv("LOGNAME", "operator")
 	root := t.TempDir()
 	bin := filepath.Join(root, "current", "claude")
 	login := t.TempDir()
@@ -122,8 +122,8 @@ func TestBridgeCheckClaudeRefusesFlagDrift(t *testing.T) {
 }
 
 func TestBridgeCheckClaudeRefusesAMissingLogin(t *testing.T) {
-	t.Setenv("USER", "calypso")
-	t.Setenv("LOGNAME", "calypso")
+	t.Setenv("USER", "operator")
+	t.Setenv("LOGNAME", "operator")
 	bin := filepath.Join(t.TempDir(), "claude")
 	fakeClaude(t, bin, "2.1.306", "")
 	v, err := checkJSON(t, "claude", "--bin", bin, "--home", t.TempDir())
@@ -208,8 +208,8 @@ func TestJudgeNativeHistory(t *testing.T) {
 // --live spends quota, so it runs only on a CLI that passed every static check;
 // on one that did, a CLI that cannot answer a turn is refused.
 func TestBridgeCheckLiveRunsOnlyAfterStaticPasses(t *testing.T) {
-	t.Setenv("USER", "calypso")
-	t.Setenv("LOGNAME", "calypso")
+	t.Setenv("USER", "operator")
+	t.Setenv("LOGNAME", "operator")
 	bin := filepath.Join(t.TempDir(), "claude")
 	login := t.TempDir()
 	if err := os.WriteFile(filepath.Join(login, ".credentials.json"), []byte("{}"), 0o600); err != nil {

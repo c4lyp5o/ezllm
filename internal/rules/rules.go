@@ -112,7 +112,7 @@ func (w Window) ValidateTZ() error {
 	}
 	if _, err := time.LoadLocation(tz); err != nil {
 		return fmt.Errorf("win_tz %q does not resolve to a time zone on this host "+
-			"(typo? use an IANA name like Asia/Kuala_Lumpur or an offset like +08:00): %w", tz, err)
+			"(typo? use an IANA name like Europe/Berlin or an offset like +08:00): %w", tz, err)
 	}
 	return nil
 }

@@ -25,13 +25,13 @@ import urllib.request
 
 BASE = os.environ.get('EZLLM_BASE', 'http://127.0.0.1:20199')
 TOK = open(os.environ.get('EZLLM_TOKEN_FILE',
-          os.path.expanduser('~/.hermes/secrets/ezllm-admin.token'))).read().strip()
+          os.path.expanduser('~/.config/ezllm/ezllm-admin.token'))).read().strip()
 ECHO_LOG = os.environ.get('ECHO_LOG', '/tmp/ezllm-echo.log')
 MODEL = os.environ.get('EZLLM_MODEL', 'verify/echo-mini-long')
 PROFILE = 'cavemanlite'
 
 CODE_FENCE = "```go\nfunc main() { in order to run due to the fact that x }\n```"
-PATH = "/home/calypso/workspace/ezllm/internal/compress/caveman.go"
+PATH = "/home/you/workspace/ezllm/internal/compress/caveman.go"
 URL = "https://github.com/c4lyp5o/ezllm/issues/7"
 IDENT = "min_compress_ratio"
 

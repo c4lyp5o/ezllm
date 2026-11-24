@@ -1,7 +1,7 @@
 # Quota oracles — same-key balance reads for providers without `/v1/usage`
 
 Status: IMPLEMENTED 2026-10-14 (rev 1, supersedes nothing).
-Scope approved by Calypso: "same-key batch first (DeepSeek, OpenRouter, Vercel, Ollama)".
+Scope approved by the owner: "same-key batch first (DeepSeek, OpenRouter, Vercel, Ollama)".
 
 ## Problem
 
@@ -63,7 +63,7 @@ Non-batch findings (recorded, not built):
    endpoint is "provider has no quota endpoint", the documented contract
    (`docs/API.md`). Other HTTP errors (401/429/5xx) propagate unchanged so a
    dead credential never overwrites a good snapshot with `kind=none`.
-5. **UA policy (Calypso's explicit rule)** — ezllm's OWN requests
+5. **UA policy (the owner's explicit rule)** — ezllm's OWN requests
    (`getJSONStatus`: quota, catalog, Cloudflare search) always carry
    `agentUserAgent`. `PrepareRequest` (openai-compatible, anthropic-compatible)
    sets it **only when absent**: probes/quota/catalog have no client UA → ours;
@@ -78,7 +78,7 @@ Non-batch findings (recorded, not built):
 6. **`tokens_today` / `requests_today` get wired end-to-end** — the columns
    already exist in the live schema (verified `PRAGMA table_info`), but
    `InsertQuotaSnapshot` never wrote them and no projection read them (the
-   ssn-gpt parser already fills them — they were silently dropped). Wired:
+   initech-gpt parser already fills them — they were silently dropped). Wired:
    INSERT → `LatestQuotas` → `hydrateAccount`/`QuotaSummary` → `api.ts`
    → `QuotaBars`. **No schema bump, no migration.**
 7. **UI** — `QuotaBars` gains a counts branch AFTER percent/money: plain

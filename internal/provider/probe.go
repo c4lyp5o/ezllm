@@ -12,7 +12,7 @@ import (
 //
 //  1. GET /v1/models on opencode-go is UNAUTHENTICATED. It returns 200 plus the
 //     full 36-model catalog for an empty key, "not-a-key", even "sk-". Any key
-//     test using it as the auth gate accepts garbage. (ssn-gpt's /models does
+//     test using it as the auth gate accepts garbage. (initech-gpt's /models does
 //     401 — auth behaviour is per-provider, so it must be discovered, never
 //     assumed.)
 //
@@ -79,7 +79,7 @@ var protocolErrorHints = []string{
 	"protocol",
 	"not supported for format",
 	"not supported",
-	// Live 2026-10-11: space-stationine refuses a whole group with
+	// Live 2026-10-11: globex refuses a whole group with
 	// 403 {"error":{"message":"This group does not allow /v1/messages dispatch",
 	// "type":"permission_error"}} — a capability gap with none of the words above.
 	"does not allow",

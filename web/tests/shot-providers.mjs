@@ -4,8 +4,8 @@
 import { chromium } from 'playwright';
 import { readFileSync, mkdirSync } from 'node:fs';
 
-const TOKEN = readFileSync('/home/calypso/.hermes/secrets/ezllm-admin.token', 'utf8').trim();
-const shots = '/home/calypso/.hermes/cache/scratch/ezllm-verify/shots';
+const TOKEN = readFileSync(process.env.EZLLM_TOKEN_FILE, 'utf8').trim();
+const shots = process.env.SHOTS_DIR ?? 'shots';
 mkdirSync(shots, { recursive: true });
 
 const b = await chromium.launch();

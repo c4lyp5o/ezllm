@@ -239,7 +239,7 @@ func (r *Runner) run(ctx context.Context, model, prompt string, delta func(strin
 
 	// No --allow-tool: without a permission grant the CLI cannot run its own
 	// agent tools, so a stray tool attempt is denied rather than executed
-	// against this box. That is the safe default for a chat surface.
+	// against the ezllm host. That is the safe default for a chat surface.
 	args := []string{"-s", "--output-format=json", "--no-ask-user"}
 	if model != "" && model != "auto" {
 		args = append(args, "--model", model)

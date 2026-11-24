@@ -250,7 +250,7 @@ func (t *Tester) Run(ctx context.Context, acct provider.Account, opts Options) *
 		res.addStep(Step{Step: StepCatalog, OK: true,
 			Detail: fmt.Sprintf("%d models", len(models))})
 	case isAuthErr(catErr) && !adapter.CatalogIsPublic():
-		// The catalog authenticates on this provider (ssn-gpt) and rejected
+		// The catalog authenticates on this provider (initech-gpt) and rejected
 		// us. Record it, but keep going: the oracle is the designated gate,
 		// and a scope mismatch must not reject a key that can actually infer.
 		// We keep the error so the NO-MODEL branch can quote it if nothing
@@ -1296,7 +1296,7 @@ func backoff(attempt int) time.Duration {
 //
 //	opencode/anthropic  {"type":"error","error":{"type":…,"message":…}}
 //	openai-style        {"error":{"message":…,"type":…}}
-//	ssn-gpt             {"code":…,"message":…}
+//	initech-gpt             {"code":…,"message":…}
 func upstreamErr(raw []byte) map[string]any {
 	if len(raw) == 0 {
 		return nil

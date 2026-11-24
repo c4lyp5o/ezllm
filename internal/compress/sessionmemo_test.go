@@ -340,7 +340,7 @@ func TestConversationKeyStableAcrossGrowthInEveryShape(t *testing.T) {
 		},
 	}
 	for name, mk := range shapes {
-		k1, k2 := ConversationKey("hermes", mk(nil)), ConversationKey("hermes", mk(later))
+		k1, k2 := ConversationKey("my-app", mk(nil)), ConversationKey("my-app", mk(later))
 		if k1 == "" || k1 != k2 {
 			t.Errorf("%s: key moved as the conversation grew: %q -> %q", name, k1, k2)
 		}
@@ -349,7 +349,7 @@ func TestConversationKeyStableAcrossGrowthInEveryShape(t *testing.T) {
 		}
 	}
 	other := map[string]any{"messages": []any{sys, map[string]any{"role": "user", "content": "another ask"}}}
-	if ConversationKey("hermes", other) == ConversationKey("hermes", shapes["chat"](nil)) {
+	if ConversationKey("my-app", other) == ConversationKey("my-app", shapes["chat"](nil)) {
 		t.Error("two conversations with different openings share a key")
 	}
 }

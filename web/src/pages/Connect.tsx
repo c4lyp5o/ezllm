@@ -215,7 +215,7 @@ function CreateKeyModal({ open, names, ids, onClose, onCreated }: {
       <div className="space-y-6">
         <div>
           <label className={labelCls} htmlFor="tk-name">Name</label>
-          <input id="tk-name" className={cx(inputCls, nameShown && 'border-bad/60')} value={d.name} placeholder="hermes-laptop" spellCheck={false}
+          <input id="tk-name" className={cx(inputCls, nameShown && 'border-bad/60')} value={d.name} placeholder="my-laptop" spellCheck={false}
             aria-invalid={!!nameShown} onChange={(e) => set({ name: e.target.value })} />
           {nameShown ? <p className="mt-1 text-[12px] text-bad">{errors.name}</p> : <p className="mt-1 text-[12px] text-mute">Usage is tracked under this name. Use one key per app or machine.</p>}
         </div>

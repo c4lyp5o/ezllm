@@ -52,14 +52,14 @@ func (f *fakeCatalog) ModelPin(_ context.Context, id int64, model string) (strin
 }
 
 func newFake() *fakeCatalog {
-	a1 := &provider.Account{ID: 1, Name: "opencode #1", Namespace: "opengo",
+	a1 := &provider.Account{ID: 1, Name: "opencode #1", Namespace: "demo",
 		Kind: provider.KindOpenCodeGo, BaseURL: "https://opencode.ai/zen/go/v1", Enabled: true}
-	a2 := &provider.Account{ID: 2, Name: "SSN GPT", Namespace: "super-ssn",
-		Kind: provider.KindOpenAICompatible, BaseURL: "https://space.stationine.com/v1", Enabled: true}
+	a2 := &provider.Account{ID: 2, Name: "Initech GPT", Namespace: "initech",
+		Kind: provider.KindOpenAICompatible, BaseURL: "https://api.example.com/v1", Enabled: true}
 	a3 := &provider.Account{ID: 3, Name: "disabled acct", Namespace: "off",
 		Kind: provider.KindOpenAICompatible, BaseURL: "https://x/v1", Enabled: false}
 	return &fakeCatalog{
-		accounts: map[string]*provider.Account{"opengo": a1, "super-ssn": a2, "off": a3},
+		accounts: map[string]*provider.Account{"demo": a1, "initech": a2, "off": a3},
 		keys: map[int64]store.KeyPick{
 			1: {ID: 11, Hint: "sk…cdef", Plaintext: "sk-opencode-secret"},
 			2: {ID: 22, Hint: "sk…wxyz", Plaintext: "sk-ssn-secret"},
@@ -68,8 +68,8 @@ func newFake() *fakeCatalog {
 			1: {"qwen3.8-flash": true, "gpt-6-luna": true, "omen-alpha": true},
 			2: {"gpt-6-luna": true, "gpt-6.1-sol": true},
 		},
-		namespaces: []string{"opengo/qwen3.8-flash", "opengo/gpt-6-luna", "opengo/omen-alpha",
-			"super-ssn/gpt-6-luna", "super-ssn/gpt-6.1-sol"},
+		namespaces: []string{"demo/qwen3.8-flash", "demo/gpt-6-luna", "demo/omen-alpha",
+			"initech/gpt-6-luna", "initech/gpt-6.1-sol"},
 	}
 }
 
@@ -131,16 +131,16 @@ func (f *fakeCatalog) AllNamespaces(_ context.Context) ([]string, error) {
 	return f.namespaces, nil
 }
 
-// ── namespace/model resolution (Calypso's #1: routing must be explicit) ─────
+// ── namespace/model resolution (routing must be explicit) ─────
 
 func TestResolveNamespaceModel(t *testing.T) {
 	r := New(newFake())
-	rt, err := r.Resolve(context.Background(), "super-ssn/gpt-6.1-sol", provider.SurfaceChat, "hermes")
+	rt, err := r.Resolve(context.Background(), "initech/gpt-6.1-sol", provider.SurfaceChat, "my-app")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rt.Account.Namespace != "super-ssn" {
-		t.Errorf("account = %q, want super-ssn", rt.Account.Namespace)
+	if rt.Account.Namespace != "initech" {
+		t.Errorf("account = %q, want initech", rt.Account.Namespace)
 	}
 	if rt.Model != "gpt-6.1-sol" {
 		t.Errorf("model = %q", rt.Model)
@@ -148,7 +148,7 @@ func TestResolveNamespaceModel(t *testing.T) {
 	if rt.KeyPlain != "sk-ssn-secret" {
 		t.Error("wrong key decrypted for the account")
 	}
-	if rt.Alias != "super-ssn/gpt-6.1-sol" {
+	if rt.Alias != "initech/gpt-6.1-sol" {
 		t.Errorf("alias = %q, want the requested string", rt.Alias)
 	}
 	if rt.Surface != provider.SurfaceChat {
@@ -160,11 +160,11 @@ func TestResolveNamespaceModel(t *testing.T) {
 // request — never guessed. This is the attribution guarantee.
 func TestResolveSameModelDifferentAccounts(t *testing.T) {
 	r := New(newFake())
-	a, err := r.Resolve(context.Background(), "opengo/gpt-6-luna", provider.SurfaceChat, "c")
+	a, err := r.Resolve(context.Background(), "demo/gpt-6-luna", provider.SurfaceChat, "c")
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := r.Resolve(context.Background(), "super-ssn/gpt-6-luna", provider.SurfaceChat, "c")
+	b, err := r.Resolve(context.Background(), "initech/gpt-6-luna", provider.SurfaceChat, "c")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestResolveSameModelDifferentAccounts(t *testing.T) {
 	if a.KeyID == b.KeyID {
 		t.Error("both resolved to the same key")
 	}
-	if a.Account.Namespace != "opengo" || b.Account.Namespace != "super-ssn" {
+	if a.Account.Namespace != "demo" || b.Account.Namespace != "initech" {
 		t.Errorf("namespaces = %q / %q", a.Account.Namespace, b.Account.Namespace)
 	}
 }
@@ -192,7 +192,7 @@ func TestResolveBareModelIs404WithHints(t *testing.T) {
 		t.Fatalf("err = %T %v, want *ErrNotFound", err, err)
 	}
 	joined := strings.Join(nf.Hints, ",")
-	if !strings.Contains(joined, "opengo/gpt-6-luna") || !strings.Contains(joined, "super-ssn/gpt-6-luna") {
+	if !strings.Contains(joined, "demo/gpt-6-luna") || !strings.Contains(joined, "initech/gpt-6-luna") {
 		t.Errorf("hints should list both serving namespaces, got %v", nf.Hints)
 	}
 	if !strings.Contains(err.Error(), "available:") {
@@ -232,7 +232,7 @@ func TestResolveUnknownNamespace(t *testing.T) {
 
 func TestResolveUnknownModelInKnownNamespace(t *testing.T) {
 	r := New(newFake())
-	_, err := r.Resolve(context.Background(), "opengo/does-not-exist", provider.SurfaceChat, "c")
+	_, err := r.Resolve(context.Background(), "demo/does-not-exist", provider.SurfaceChat, "c")
 	if err == nil {
 		t.Fatal("unknown model must not resolve")
 	}
@@ -256,7 +256,7 @@ func TestResolveNoUsableKey(t *testing.T) {
 	f := newFake()
 	f.pickKeyErr = store.ErrNotFound
 	r := New(f)
-	_, err := r.Resolve(context.Background(), "opengo/qwen3.8-flash", provider.SurfaceChat, "c")
+	_, err := r.Resolve(context.Background(), "demo/qwen3.8-flash", provider.SurfaceChat, "c")
 	if err == nil || !strings.Contains(err.Error(), "no usable key") {
 		t.Fatalf("want 'no usable key', got %v", err)
 	}
@@ -270,7 +270,7 @@ func TestResolveEmptyAndWhitespace(t *testing.T) {
 		}
 	}
 	// surrounding whitespace is trimmed, not rejected
-	rt, err := r.Resolve(context.Background(), "  opengo/qwen3.8-flash  ", provider.SurfaceChat, "c")
+	rt, err := r.Resolve(context.Background(), "  demo/qwen3.8-flash  ", provider.SurfaceChat, "c")
 	if err != nil {
 		t.Fatalf("trimmed model should resolve: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestResolveEmptyAndWhitespace(t *testing.T) {
 // split on the FIRST slash only.
 func TestResolveModelIDsWithDots(t *testing.T) {
 	r := New(newFake())
-	for _, req := range []string{"opengo/qwen3.8-flash", "super-ssn/gpt-6.1-sol"} {
+	for _, req := range []string{"demo/qwen3.8-flash", "initech/gpt-6.1-sol"} {
 		rt, err := r.Resolve(context.Background(), req, provider.SurfaceChat, "c")
 		if err != nil {
 			t.Fatalf("%s: %v", req, err)
@@ -297,7 +297,7 @@ func TestResolveModelIDsWithDots(t *testing.T) {
 func TestResolvePreservesSurface(t *testing.T) {
 	r := New(newFake())
 	for _, s := range []provider.Surface{provider.SurfaceChat, provider.SurfaceAnthropic, provider.SurfaceResponses} {
-		rt, err := r.Resolve(context.Background(), "opengo/qwen3.8-flash", s, "c")
+		rt, err := r.Resolve(context.Background(), "demo/qwen3.8-flash", s, "c")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -313,12 +313,12 @@ func TestSplitNamespace(t *testing.T) {
 		ns, model string
 		ok        bool
 	}{
-		{"opengo/gpt-6-luna", "opengo", "gpt-6-luna", true},
-		{"super-ssn/gpt-6.1-sol", "super-ssn", "gpt-6.1-sol", true},
+		{"demo/gpt-6-luna", "demo", "gpt-6-luna", true},
+		{"initech/gpt-6.1-sol", "initech", "gpt-6.1-sol", true},
 		{"a/b", "a", "b", true},
 		{"gpt-6-luna", "", "", false},  // no slash
 		{"/gpt-6-luna", "", "", false}, // empty namespace
-		{"opengo/", "", "", false},     // empty model
+		{"demo/", "", "", false},       // empty model
 		{"", "", "", false},
 		// first slash wins; the rest is the model
 		{"ns/a/b", "ns", "a/b", true},

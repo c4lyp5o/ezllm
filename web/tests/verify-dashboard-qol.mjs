@@ -10,7 +10,7 @@ const row = (k, o = {}) => ({
 });
 const now = Date.now();
 const call = (minsAgo, o = {}) => ({
-  ts: new Date(now - minsAgo * 60_000).toISOString(), client: 'hermes', surface: 'chat', account: 'Mock provider',
+  ts: new Date(now - minsAgo * 60_000).toISOString(), client: 'my-app', surface: 'chat', account: 'Mock provider',
   model: 'model-a', status: 200, ttft_ms: 120, total_ms: 900, tin: 100, tout: 20, cread: 0, saved: 0,
   compression: '', applied: false, alias: 'main', ...o,
 });
@@ -83,7 +83,7 @@ try {
   check('zero-token success gets badge, cached-only and error rows do not', (await body.getByText('no tokens', { exact: true }).count()) === 1);
   const badge = body.getByText('no tokens', { exact: true });
   check('no tokens badge is in tokens column', await badge.evaluate(el => el.closest('td').cellIndex === 5));
-  await body.screenshot({ path: '/home/calypso/.hermes/cache/scratch/ezllm-zero-token-tokens-column.png' });
+  await body.screenshot({ path: `${process.env.SHOTS_DIR ?? 'shots'}/zero-token-tokens-column.png` });
   await page.getByRole('button', { name: /^Errors 2/ }).click();
   check('errors filter keeps only status>=400', (await body.locator('tr').count()) === 2);
   await page.getByRole('button', { name: /^Failed over 3/ }).click();

@@ -118,7 +118,7 @@ func TestUsageEndpointSharesReportWithinTTL(t *testing.T) {
 	now := time.Now()
 	h.server.reports = newReportCache(reportTTL, func() time.Time { return now })
 	record := func() {
-		h.db.RecordCall(store.Call{TS: time.Now().UTC(), Client: "hermes", Account: "up", Model: "m", Status: 200, TokensIn: 10})
+		h.db.RecordCall(store.Call{TS: time.Now().UTC(), Client: "my-app", Account: "up", Model: "m", Status: 200, TokensIn: 10})
 		if err := h.db.Flush(); err != nil {
 			t.Fatal(err)
 		}

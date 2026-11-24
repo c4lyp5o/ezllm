@@ -548,8 +548,8 @@ function RecentCalls({ o }: { o: Overview }) {
                     <td className="whitespace-nowrap px-5 py-2 text-mute">
                       {clockTime(r.ts)}
                       {/* The caller address (ledger calls.ip, captured at
-                          request time). Public traffic arrives through traefik
-                          with a real client ip; a row from this box's own
+                          request time). Public traffic arrives through a proxy
+                          with a real client ip; a row from the host's own
                           loopback hits reads as the docker bridge peer. */}
                       {r.ip && (
                         <div className="text-[11px] text-mute/70" title={`caller address: ${r.ip}`}>{r.ip}</div>

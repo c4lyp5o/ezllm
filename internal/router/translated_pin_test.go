@@ -85,7 +85,7 @@ func TestTranslatedPinLookupFailureFailsClosed(t *testing.T) {
 	cat, _ := translatedFixture()
 	r := New(failingPinCatalog{cat}).WithTranslation(true)
 	// Remove the native hop so the failing lookup is on the translated hop.
-	cat.accounts["opengo"].Enabled = false
+	cat.accounts["demo"].Enabled = false
 	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceAnthropic, "test")
 	if err == nil || err.Error() != "model pin lookup for \"daily\": db busy" || len(routes) != 0 {
 		t.Fatalf("translated route must not bypass a pin lookup error: %v", err)

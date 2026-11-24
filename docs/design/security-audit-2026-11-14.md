@@ -126,7 +126,7 @@ history and are not the sensitive pending conversation.
 ### SEC-05 — Direct HTTP publication can bypass the TLS proxy
 
 Read-only Docker inspection showed container `ezllm` publishes port 20129 on
-**0.0.0.0** and **::**, while also using the `traefik_default` network. A localhost
+**0.0.0.0** and **::**, while also using a reverse-proxy network. A localhost
 HTTP request to that port returned `/healthz`. The application uses
 `http.Server.ListenAndServe`; TLS termination is external.
 
@@ -135,7 +135,7 @@ passwords, client credentials and prompts, bypassing the proxy's TLS and any
 proxy-only restrictions. Host firewall rules and public/remote reachability were
 not verified, so internet exposure is **not** claimed.
 
-Recommended fix: when Traefik reaches the container through its Docker network,
+Recommended fix: when a reverse proxy reaches the container through its Docker network,
 remove the host publication. If direct local access is needed, bind it explicitly
 to loopback. Verify IPv4 and IPv6 reachability rules. Preserve authenticated API
 access; this finding is about the transport boundary, not an authentication bypass.

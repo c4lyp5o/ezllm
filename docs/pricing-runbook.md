@@ -18,8 +18,8 @@ Manual refresh is always available:
 
 ```bash
 curl -s -X POST \
-  -H "Authorization: Bearer $(cat ~/.hermes/secrets/ezllm-admin.token)" \
-  'https://llm.calypso.dedyn.io/admin/prices/refresh?source=litellm'
+  -H "Authorization: Bearer $EZLLM_ADMIN_TOKEN" \
+  'http://127.0.0.1:20129/admin/prices/refresh?source=litellm'
 ```
 
 The response reports `entries` (source rows), `matched` (catalog matches
@@ -63,11 +63,11 @@ not a silently unpriced row.
 ```bash
 # current rate
 curl -s -H "Authorization: Bearer $EZLLM_INFER_TOKEN" \
-  'https://llm.calypso.dedyn.io/v1/prices?model=gpt-5-nano'
+  'http://127.0.0.1:20129/v1/prices?model=gpt-5-nano'
 
 # the rate that was effective on a date (for a historical bill)
 curl -s -H "Authorization: Bearer $EZLLM_INFER_TOKEN" \
-  'https://llm.calypso.dedyn.io/v1/prices?model=gpt-5-nano&at=2026-10-01'
+  'http://127.0.0.1:20129/v1/prices?model=gpt-5-nano&at=2026-10-01'
 ```
 
 `GET /admin/cost` then reports USD plus `unpriced_calls`; `pricing_complete`

@@ -47,7 +47,7 @@ func newCORSHarness(t *testing.T, origins []string) http.Handler {
 	if err := db.UpsertModels(context.Background(), id, []provider.ModelInfo{{ID: "gpt-6-luna", OwnedBy: "up"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.UpsertClientToken(context.Background(), "hermes", "tok-infer", "infer"); err != nil {
+	if err := db.UpsertClientToken(context.Background(), "my-app", "tok-infer", "infer"); err != nil {
 		t.Fatal(err)
 	}
 	client := &http.Client{Timeout: 30 * time.Second}

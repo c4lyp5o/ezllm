@@ -27,7 +27,7 @@ import tempfile
 import urllib.error
 import urllib.request
 
-BASE = os.environ.get("EZLLM_URL", "https://llm.calypso.dedyn.io")
+BASE = os.environ.get("EZLLM_URL", "http://127.0.0.1:20129")
 TOKEN = os.environ.get("EZLLM_TOKEN", "")
 ADMIN = os.environ.get("EZLLM_ADMIN_TOKEN", "")
 MODEL = sys.argv[1] if len(sys.argv) > 1 else "claude-sub/claude-haiku-5-5"

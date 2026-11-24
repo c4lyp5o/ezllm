@@ -1,7 +1,7 @@
 package proxy
 
 // The token convention that RIDES WITH the translated marker. This is a
-// CONSCIOUS decision (2026-10-14, Calypso's call): the synthesized anthropic
+// CONSCIOUS decision (2026-10-14): the synthesized anthropic
 // envelope now applies the Messages contract — input_tokens excludes cache and
 // the split rides in cache_read_input_tokens — so a translated hop is ledgered
 // exactly like a native one (tokens_in = cold tokens, tokens_cached_read = the

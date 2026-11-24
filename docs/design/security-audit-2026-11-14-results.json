@@ -79,7 +79,7 @@
     "read_only_rootfs": false,
     "memory_limit": 0,
     "pids_limit": null,
-    "network_mode": "traefik_default",
+    "network_mode": "reverse_proxy",
     "published_ports": {
       "20129/tcp": [
         {

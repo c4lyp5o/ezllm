@@ -26,7 +26,7 @@ func TestClassifyProbeResultCases(t *testing.T) {
 			want:   VerdictSupported,
 		},
 		{
-			// LIVE 2026-10-11: space-stationine's group refuses the whole
+			// LIVE 2026-10-11: globex's group refuses the whole
 			// surface, and the refusal carries none of the words a 400 gap
 			// carries. Read as a dead key it would abort the sweep and record
 			// nothing, leaving the gap invisible forever.

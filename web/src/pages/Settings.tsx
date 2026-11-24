@@ -75,7 +75,7 @@ const TABS: Tab[] = ['General', 'Security', 'Backup & Recovery', 'Gateway', 'Not
 const TAB_SLUG: Record<Tab, string> = { General: 'general', Security: 'security', 'Backup & Recovery': 'backup', Gateway: 'gateway', Notifications: 'notifications', System: 'system' };
 const tabFromSlug = (slug: string | null): Tab => TABS.find((t) => TAB_SLUG[t] === slug) ?? 'General';
 const DETAILS: Record<string, [string, string]> = {
-  usage_timezone: ['Usage timezone', 'An IANA name, for example Asia/Kuala_Lumpur. Reports, and rules set to "Instance timezone", use this. Rules with their own timezone keep it.'],
+  usage_timezone: ['Usage timezone', 'An IANA name, for example Europe/Berlin. Reports, and rules set to "Instance timezone", use this. Rules with their own timezone keep it.'],
   translation_enabled: ['Protocol translation', 'Let requests go to a model on a different API when testing showed it works. Pins still apply.'],
   automatic_probing: ['Automatic probing', 'Test new combo hops and newly found free models automatically.'],
   catalog_interval: ['Catalog refresh interval', 'Duration of at least 1m, for example 12h.'],

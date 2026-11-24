@@ -197,7 +197,7 @@ On a fresh instance the boot log also carries one warning per provider listed
 in `config.example.yaml`:
 
 ```
-WARN  model sync failed at boot (routing still works; sync later via admin) provider=opencode-main err="store: not found"
+WARN  model sync failed at boot (routing still works; sync later via admin) provider=opencode err="store: not found"
 ```
 
 That is expected: the bootstrap config names providers, but no account or key
@@ -260,7 +260,7 @@ ExecStart=%h/ezllm/bin/ezllm -config %h/ezllm/config.yaml
 Environment=EZLLM_ADDR=127.0.0.1:20129
 Environment=EZLLM_DATA_DIR=%h/ezllm/data
 Environment=EZLLM_MASTER_KEY_FILE=%h/ezllm/data/ezllm-master.key
-Environment=EZLLM_USAGE_TZ=Asia/Kuala_Lumpur
+Environment=EZLLM_USAGE_TZ=Europe/Berlin
 Restart=on-failure
 RestartSec=10
 
@@ -301,7 +301,7 @@ ExecStart=/opt/ezllm/bin/ezllm -config /opt/ezllm/config.yaml
 Environment=EZLLM_ADDR=0.0.0.0:20129
 Environment=EZLLM_DATA_DIR=/opt/ezllm/data
 Environment=EZLLM_MASTER_KEY_FILE=/opt/ezllm/data/ezllm-master.key
-Environment=EZLLM_USAGE_TZ=Asia/Kuala_Lumpur
+Environment=EZLLM_USAGE_TZ=Europe/Berlin
 Restart=on-failure
 RestartSec=10
 # hardening: the binary only needs its own directory
@@ -380,7 +380,7 @@ that sets the variables — `C:\ezllm\ezllm-run.cmd`:
 set EZLLM_ADDR=127.0.0.1:20129
 set EZLLM_DATA_DIR=C:\ezllm\data
 set EZLLM_MASTER_KEY_FILE=C:\ezllm\data\ezllm-master.key
-set EZLLM_USAGE_TZ=Asia/Kuala_Lumpur
+set EZLLM_USAGE_TZ=Europe/Berlin
 cd /d C:\ezllm
 "C:\ezllm\bin\ezllm.exe" -config C:\ezllm\config.yaml >> C:\ezllm\logs\ezllm.log 2>&1
 ```

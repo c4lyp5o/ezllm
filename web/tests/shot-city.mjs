@@ -7,7 +7,7 @@ import { start, json, check, finish, account } from './mockdash.mjs';
 
 const out = process.env.OUT ?? '/tmp/ezllm-city'; await mkdir(out, { recursive: true });
 const names = [
-  'Mimo Token Plan', 'Claude Platform', 'Space Stationine', 'Alibaba Token Plan', 'Tokenrouter',
+  'Mimo Token Plan', 'Claude Platform', 'Globex', 'Alibaba Token Plan', 'Tokenrouter',
   'Opencode Go', 'Ollama Cloud', 'Command Code', 'Groq', 'Deepseek',
   'Vercel AI Gateway', 'Openrouter', 'NVIDIA NIM', 'Cloudflare Workers AI', 'Google AI Studio',
   'OpenAI', 'Claude Web', 'Claude Subscription', 'ChatGPT Subscription', 'Github Copilot',

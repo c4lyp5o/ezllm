@@ -36,7 +36,7 @@ redirect stdout at deploy time and let `logrotate` handle it — not the gateway
 ## The shape of a line
 
 ```
-2026-10-24 08:01:15.254 INFO  request method=POST path=/v1/chat/completions status=200 ms=25709 bytes=31568 client=melissa account=command-code model=meta/muse-spark-1.3-contributor surface=chat alias=daily trail="opencode-go/muse-spark — 429 rate_limited"
+2026-10-24 08:01:15.254 INFO  request method=POST path=/v1/chat/completions status=200 ms=25709 bytes=31568 client=my-app account=acme model=meta/muse-spark-1.3-contributor surface=chat alias=main trail="opencode-go/muse-spark — 429 rate_limited"
 ```
 
 The access line is written by the `accessLog` middleware for **every** request,
@@ -71,7 +71,7 @@ asked for silence about startup.
 | level | what belongs there | volume |
 |---|---|---|
 | `debug` | per-hop detail an operator turns on to chase one incident: auth refusals, a clamp that matched no catalog row, stream teardown | off by default; ~1.3 µs per line when on |
-| `info` | state changes that outlive the request: boot, hop parked, clamp applied, vocabulary learned, wire recorded, budget reached, access lines | ~62/h on Calypso's box, 571 in the busiest hour |
+| `info` | state changes that outlive the request: boot, hop parked, clamp applied, vocabulary learned, wire recorded, budget reached, access lines | ~62/h on one busy instance, 571 in the busiest hour |
 | `warn` | something degraded but survived: a hop failed and failed over, a store write lost, rules did not reload | rare |
 | `error` | the gateway could not do its job: admin store error, background job still running at shutdown | rare |
 
@@ -92,7 +92,7 @@ turning on: before the logging pass, the binary contained exactly **one**
 
 ## The performance rule
 
-Measured on this box (`internal/logx`, `go test -bench`):
+Measured (`internal/logx`, `go test -bench`):
 
 | case | cost |
 |---|---|

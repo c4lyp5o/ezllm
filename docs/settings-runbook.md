@@ -56,7 +56,7 @@ wins. The dashboard requires an impact acknowledgement before a timezone change.
 Model rules with `win_tz: instance` follow the admitted request's instance timezone.
 New rules default to this mode. Explicit rule timezones remain independent;
 existing empty rule timezones are migrated to explicit UTC, preserving their old
-boundaries. Existing explicit values, including Asia/Kuala_Lumpur, are preserved.
+boundaries. Existing explicit values are preserved.
 
 Inherited rule usage is computed from committed ledger timestamps in the chosen
 calendar range. This avoids mixing counters that share a bucket name but were

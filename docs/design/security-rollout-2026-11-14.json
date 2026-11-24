@@ -15,7 +15,7 @@
     "/v1/models": 401
   },
   "networks": [
-    "traefik_default"
+    "reverse_proxy"
   ],
   "https_proxy_health": "verified with certificate validation",
   "dashboard_security_headers": "verified",

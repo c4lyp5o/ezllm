@@ -81,6 +81,6 @@ go test -short ./internal/codexbridge -run '^TestLiveCallerTaskFidelity$' -count
 Set `EZLLM_CODEX_FIDELITY_OUTPUT=<path>` to also write the run's results as JSON
 to that path; it is likewise test-only.
 Use its absence for the legacy replay comparison. The test requires Bun on PATH and spends subscription quota.
-No ezdb files, Hermes installation files or live gateway configuration are
+No client files or live gateway configuration are
 modified by the experiment. Numeric results are retained in
 [codex-conversation-fidelity-results.json](codex-conversation-fidelity-results.json).

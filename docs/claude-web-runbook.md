@@ -6,7 +6,7 @@ completion). Ported from omniroute's production implementation; design:
 (`~/workspace/claude-ai-re-client-protocol-digest.md`, last verified
 2026-04-25) is cross-reference only.
 
-## Risk posture (accepted by Calypso, 2026-10-16)
+## Risk posture
 
 - **Cookie material = live account access.** The stored `sessionKey` row is
   the account. Encrypted key store only; never chat/logs/YAML.

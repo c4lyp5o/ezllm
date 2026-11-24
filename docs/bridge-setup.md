@@ -70,15 +70,23 @@ ln -sfn "$V" "$DIR/current"
 CLAUDE_CONFIG_DIR=~/.claude-sub ~/.local/share/claude-bridge/current/claude auth login
 ```
 
-**4. compose.yml.** Add these lines to the `ezllm` service, under the `environment:`
-and `volumes:` it already has. `USER` and `LOGNAME` are your login name (`whoami`).
+**4. compose.yml.** Find this line and change `"off"` to `"on"`. If it is not there,
+add it under `environment:`. Never have it twice.
 
 ```yaml
-    environment:
       EZLLM_CLAUDE_BRIDGE: "on"
+```
+
+Under `environment:`, add (your login name; `whoami` prints it):
+
+```yaml
       USER: you
       LOGNAME: you
-    volumes:
+```
+
+Under `volumes:`, add:
+
+```yaml
       - /home/you/.local/share/claude-bridge:/opt/claude-bridge:ro
       - /home/you/.claude-sub:/claude-sub
 ```
@@ -122,13 +130,16 @@ ln -sfn "$V" "$DIR/current"
 CODEX_HOME=~/.codex-sub ~/.local/share/codex-bridge/current/bin/codex login --device-auth
 ```
 
-**4. compose.yml.** Add these lines to the `ezllm` service, under the `environment:`
-and `volumes:` it already has.
+**4. compose.yml.** Find this line and change `"off"` to `"on"`. If it is not there,
+add it under `environment:`. Never have it twice.
 
 ```yaml
-    environment:
       EZLLM_CODEX_BRIDGE: "on"
-    volumes:
+```
+
+Under `volumes:`, add:
+
+```yaml
       - /home/you/.local/share/codex-bridge:/opt/codex-bridge:ro
       - /home/you/.codex-sub:/codex-sub
 ```
@@ -172,14 +183,22 @@ env -u DBUS_SESSION_BUS_ADDRESS COPILOT_HOME=~/.copilot-sub \
   ~/.local/share/copilot-bridge/current/copilot login --device-code
 ```
 
-**4. compose.yml.** Add these lines to the `ezllm` service, under the `environment:`
-and `volumes:` it already has.
+**4. compose.yml.** Find this line and change `"off"` to `"on"`. If it is not there,
+add it under `environment:`. Never have it twice.
 
 ```yaml
-    environment:
       EZLLM_COPILOT_BRIDGE: "on"
+```
+
+Under `environment:`, add:
+
+```yaml
       XDG_CACHE_HOME: /data/copilot-cache
-    volumes:
+```
+
+Under `volumes:`, add:
+
+```yaml
       - /home/you/.local/share/copilot-bridge:/opt/copilot-bridge:ro
       - /home/you/.copilot-sub:/copilot-sub
 ```
@@ -224,13 +243,16 @@ ln -sfn "$V" "$DIR/current"
 env -u DBUS_SESSION_BUS_ADDRESS HOME=$HOME/.agy-sub ~/.local/share/agy-bridge/current/agy
 ```
 
-**4. compose.yml.** Add these lines to the `ezllm` service, under the `environment:`
-and `volumes:` it already has.
+**4. compose.yml.** Find this line and change `"off"` to `"on"`. If it is not there,
+add it under `environment:`. Never have it twice.
 
 ```yaml
-    environment:
       EZLLM_AGY_BRIDGE: "on"
-    volumes:
+```
+
+Under `volumes:`, add:
+
+```yaml
       - /home/you/.local/share/agy-bridge:/opt/agy-bridge:ro
       - /home/you/.agy-sub:/agy-sub
 ```
@@ -268,6 +290,7 @@ reason with `docker compose logs ezllm` and find it here:
 | `no ChatGPT login` or `no Antigravity login` | Redo **Sign in** |
 | `login=logged-out` (Claude) | Redo **Sign in** |
 | `is not a directory — mount the CLI's login home there` | Add the second `volumes:` line |
+| `mapping key … already defined` | That line is in `compose.yml` twice. Keep one |
 | `Permission denied` | Set `UID` and `GID` ([before you start](#before-you-start)) |
 | `channel unavailable` (Copilot) | Use `V=1.0.112` and redo **Install and copy** |
 

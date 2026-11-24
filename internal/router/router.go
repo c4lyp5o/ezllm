@@ -767,7 +767,11 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 		}
 		if ok, err := r.catalog.ModelExists(ctx, acct.ID, h.ModelID); err != nil || !ok {
 			if first == nil {
-				first = fmt.Errorf("hop %s/%s: not in that account's catalog", acct.Namespace, h.ModelID)
+				if err != nil {
+					first = fmt.Errorf("hop %s/%s: model lookup: %w", acct.Namespace, h.ModelID, err)
+				} else {
+					first = fmt.Errorf("hop %s/%s: not in that account's catalog", acct.Namespace, h.ModelID)
+				}
 			}
 			continue
 		}

@@ -66,7 +66,10 @@ func RunPreflight(ctx context.Context, bin, home string) (Preflight, error) {
 	p.Version = strings.TrimSpace(out)
 	p.Qualified = p.Version == QualifiedVersion
 
-	help, _ := run("--help")
+	help, err := run("--help")
+	if err != nil {
+		return p, fmt.Errorf("agy bridge: %s --help failed: %w", bin, err)
+	}
 	p.StructuredOutput = strings.Contains(help, "--json-schema ")
 	p.ConversationResume = strings.Contains(help, "--conversation ")
 	for _, f := range RequiredFlags {

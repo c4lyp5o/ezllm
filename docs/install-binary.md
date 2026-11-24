@@ -32,13 +32,12 @@ musl distributions alike, and on Windows with no redistributable installed.
 | Service manager | systemd (user or system unit) | launchd agent | Task Scheduler |
 | Installer script | — | `scripts/ezllm-mac.sh` | — |
 | Log target | journald / stdout | file via launchd | file via redirection |
-| Subscription bridges | supported | Codex/Antigravity refused | Codex/Antigravity refused |
+| Subscription bridges | [supported](bridge-setup.md) | not supported | not supported |
 | Code signing | not required | arm64 needs ≥ ad-hoc | not required |
 
-Codex and Antigravity bridges require Linux and refuse to start on native macOS
-or Windows. The Claude bridge requires the vendor CLI and a subscription login;
-its documented container setup uses Linux. Leave bridges off unless their
-prerequisites are configured. See the individual bridge runbooks in the README.
+Subscription bridges work with the Linux binary: [Turn on a bridge](bridge-setup.md).
+Codex and Antigravity refuse to start on native macOS or Windows; Claude and Copilot are
+untested there.
 
 ## 1. Install
 

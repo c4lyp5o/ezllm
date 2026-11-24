@@ -25,7 +25,7 @@ const (
 // missingCLI is the boot refusal when a bridge is on without its CLI. A first-time
 // operator sees only this line, so it says how to get unstuck.
 func missingCLI(bridge, binEnv, bin, cli, switchEnv string, cause error) error {
-	return fmt.Errorf("%s bridge: %s=%q does not resolve to the official %s CLI: %w — copy the CLI into the bridge folder and mount it (docs/bridge-setup.md), or set %s=off",
+	return fmt.Errorf("%s bridge: %s=%q does not resolve to the official %s CLI: %w — copy the CLI into the bridge folder (docs/bridge-setup.md), or set %s=off",
 		bridge, binEnv, bin, cli, cause, switchEnv)
 }
 

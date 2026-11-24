@@ -1,8 +1,7 @@
 # Turn on Google Antigravity
 
-You need Linux, and ezllm already running in Docker
-([quick start](../../README.md#quick-start)). Run every command on that computer, as
-**yourself, not root**.
+You need Linux, and ezllm already running ([quick start](../../README.md#quick-start)).
+Run every command on that computer, as **yourself, not root**.
 
 ## 1. Install
 
@@ -39,8 +38,11 @@ account, and send a message again.
 
 ## 4. Switch it on
 
-Pick the way you started ezllm: **[Docker Compose](#with-docker-compose)** (you have a
-`compose.yml`) or **[`docker run`](#with-docker-run)** (you do not).
+Pick the way you run ezllm:
+
+- **[Docker Compose](#with-docker-compose)**: you have a `compose.yml`.
+- **[`docker run`](#with-docker-run)**: Docker, without a `compose.yml`.
+- **[The ezllm binary](#with-the-ezllm-binary)**: no Docker.
 
 ### With Docker Compose
 
@@ -119,6 +121,39 @@ docker logs ezllm 2>&1 | grep -i "bridge"
 You should see `agy bridge listening`. If so, remove the old one with `docker rm
 ezllm-old`. If not,
 [go back to the old one](troubleshooting.md#get-ezllm-back).
+
+### With the ezllm binary
+
+This is for the [systemd user service](../install-binary.md#linux--systemd-user-unit)
+with ezllm in `~/ezllm`. If yours is elsewhere, change `%h/ezllm` (`%h` is your home
+folder). Paste it all:
+
+```sh
+mkdir -p ~/.config/systemd/user/ezllm.service.d
+cat > ~/.config/systemd/user/ezllm.service.d/agy-bridge.conf <<'EOF'
+[Service]
+Environment=EZLLM_AGY_BRIDGE=on
+Environment=EZLLM_AGY_BIN=%h/.local/share/agy-bridge/current/agy
+Environment=EZLLM_AGY_HOME=%h/.agy-sub
+Environment=EZLLM_AGY_BRIDGE_TOKEN_FILE=%h/ezllm/data/agy-bridge.token
+EOF
+systemctl --user daemon-reload
+systemctl --user restart ezllm
+sleep 10
+journalctl --user -u ezllm --since -1min | grep -i "agy bridge"
+```
+
+You should see `agy bridge listening`.
+
+Starting ezllm by hand instead? Run this first, in the same terminal, then start ezllm as
+usual.
+
+```sh
+export EZLLM_AGY_BRIDGE=on
+export EZLLM_AGY_BIN="$HOME/.local/share/agy-bridge/current/agy"
+export EZLLM_AGY_HOME="$HOME/.agy-sub"
+export EZLLM_AGY_BRIDGE_TOKEN_FILE="$HOME/ezllm/data/agy-bridge.token"
+```
 
 ## 5. Add it in the dashboard
 

@@ -1,8 +1,7 @@
 # Turn on GitHub Copilot
 
-You need Linux, and ezllm already running in Docker
-([quick start](../../README.md#quick-start)). Run every command on that computer, as
-**yourself, not root**.
+You need Linux, and ezllm already running ([quick start](../../README.md#quick-start)).
+Run every command on that computer, as **yourself, not root**.
 
 ## 1 and 2. Install and copy
 
@@ -34,8 +33,11 @@ env -u DBUS_SESSION_BUS_ADDRESS COPILOT_HOME=~/.copilot-sub \
 
 ## 4. Switch it on
 
-Pick the way you started ezllm: **[Docker Compose](#with-docker-compose)** (you have a
-`compose.yml`) or **[`docker run`](#with-docker-run)** (you do not).
+Pick the way you run ezllm:
+
+- **[Docker Compose](#with-docker-compose)**: you have a `compose.yml`.
+- **[`docker run`](#with-docker-run)**: Docker, without a `compose.yml`.
+- **[The ezllm binary](#with-the-ezllm-binary)**: no Docker.
 
 ### With Docker Compose
 
@@ -121,6 +123,41 @@ docker logs ezllm 2>&1 | grep -i "bridge"
 You should see `copilot bridge listening`, and **no** line saying `channel unavailable`.
 If so, remove the old one with `docker rm ezllm-old`. If not,
 [go back to the old one](troubleshooting.md#get-ezllm-back).
+
+### With the ezllm binary
+
+This is for the [systemd user service](../install-binary.md#linux--systemd-user-unit)
+with ezllm in `~/ezllm`. If yours is elsewhere, change `%h/ezllm` (`%h` is your home
+folder). Paste it all:
+
+```sh
+mkdir -p ~/.config/systemd/user/ezllm.service.d
+cat > ~/.config/systemd/user/ezllm.service.d/copilot-bridge.conf <<'EOF'
+[Service]
+Environment=EZLLM_COPILOT_BRIDGE=on
+Environment=EZLLM_COPILOT_BIN=%h/.local/share/copilot-bridge/current/copilot
+Environment=EZLLM_COPILOT_HOME=%h/.copilot-sub
+Environment=EZLLM_COPILOT_BRIDGE_TOKEN_FILE=%h/ezllm/data/copilot-bridge.token
+Environment=XDG_CACHE_HOME=%h/ezllm/data/copilot-cache
+EOF
+systemctl --user daemon-reload
+systemctl --user restart ezllm
+sleep 10
+journalctl --user -u ezllm --since -1min | grep -i "copilot bridge"
+```
+
+You should see `copilot bridge listening`, and **no** line saying `channel unavailable`.
+
+Starting ezllm by hand instead? Run this first, in the same terminal, then start ezllm as
+usual.
+
+```sh
+export EZLLM_COPILOT_BRIDGE=on
+export EZLLM_COPILOT_BIN="$HOME/.local/share/copilot-bridge/current/copilot"
+export EZLLM_COPILOT_HOME="$HOME/.copilot-sub"
+export EZLLM_COPILOT_BRIDGE_TOKEN_FILE="$HOME/ezllm/data/copilot-bridge.token"
+export XDG_CACHE_HOME="$HOME/ezllm/data/copilot-cache"
+```
 
 ## 5. Add it in the dashboard
 

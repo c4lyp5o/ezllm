@@ -709,8 +709,8 @@ function BridgePanel({ bridge, loading }: { bridge: Bridge | null; loading: bool
         <li>On the host, install the official CLI, copy it into the bridge folder (see the step-by-step page) and sign it in to its own folder:
           <div className="mt-1.5"><SignInCommands id={bridge.id} /></div>
         </li>
-        <li>In <Mono>compose.yml</Mono>, uncomment the bridge&apos;s two mounts and set <Mono>{bridge.env}: &quot;on&quot;</Mono>.</li>
-        <li>Run <Mono>docker compose up -d</Mono>, then reopen this dialog. If ezllm does not start, check <Mono>docker compose logs ezllm</Mono>.</li>
+        <li>Set <Mono>{bridge.env}</Mono> to <Mono>on</Mono> and give ezllm the two folders. The step-by-step page has the exact lines for Docker Compose, <Mono>docker run</Mono> and the ezllm binary.</li>
+        <li>Start ezllm again, then reopen this dialog. If ezllm does not start, check its log, for example <Mono>docker compose logs ezllm</Mono>.</li>
       </ol>
       <p className="text-[12px] text-mute">Step-by-step: {setup}</p>
     </div>

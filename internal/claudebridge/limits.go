@@ -14,9 +14,9 @@ import (
 // read without a call, so the reading is only as fresh as the last request;
 // observed_at says how fresh.
 type Limits struct {
-	mu   sync.Mutex
-	info map[string]any
-	at   time.Time
+	mu    sync.Mutex
+	usage map[string]any
+	at    time.Time
 }
 
 // Observe records one run's rate_limit_info. A run without one (an early
@@ -25,24 +25,6 @@ func (l *Limits) Observe(info map[string]any, now time.Time) {
 	if l == nil || len(info) == 0 {
 		return
 	}
-	if _, ok := info["unifiedWindows"].(map[string]any); !ok {
-		return
-	}
-	l.mu.Lock()
-	l.info, l.at = info, now.UTC()
-	l.mu.Unlock()
-}
-
-// UsageBody renders the last reading in the percent quota shape ezllm's
-// provider cards already read ({"usage":{"rolling":{percent,resetsAt},
-// "weekly":{…}}}, provider.ClassifyQuota). ok is false until a run reported one.
-func (l *Limits) UsageBody() (body []byte, ok bool) {
-	if l == nil {
-		return nil, false
-	}
-	l.mu.Lock()
-	info, at := l.info, l.at
-	l.mu.Unlock()
 	windows, _ := info["unifiedWindows"].(map[string]any)
 	usage := map[string]any{}
 	for native, shape := range map[string]string{"five_hour": "rolling", "seven_day": "weekly"} {
@@ -57,6 +39,22 @@ func (l *Limits) UsageBody() (body []byte, ok bool) {
 		}
 		usage[shape] = entry
 	}
+	if len(usage) == 0 {
+		return
+	}
+	l.mu.Lock()
+	l.usage, l.at = usage, now.UTC()
+	l.mu.Unlock()
+}
+
+// UsageBody renders the last usable reading in ezllm's percent quota shape.
+func (l *Limits) UsageBody() (body []byte, ok bool) {
+	if l == nil {
+		return nil, false
+	}
+	l.mu.Lock()
+	usage, at := l.usage, l.at
+	l.mu.Unlock()
 	if len(usage) == 0 {
 		return nil, false
 	}

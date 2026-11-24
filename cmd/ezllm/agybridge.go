@@ -92,6 +92,7 @@ func startAgyBridge(ctx context.Context, log *slog.Logger, report bridgeReport) 
 	runner := &agybridge.Runner{Bin: resolved, Home: home, Timeout: 300 * time.Second, MaxConcurrent: concurrency, MaxQueue: queue, Logf: log.Info, SessionCache: sessionCache}
 	srv := &agybridge.Server{
 		CallerTools: callerTools,
+		PlanUsage:   agybridge.SupportsPlanUsage(pre.Version),
 		Runner:      runner,
 		Token:       token,
 		Version:     server.Version,

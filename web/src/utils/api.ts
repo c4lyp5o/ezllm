@@ -381,6 +381,8 @@ export type QuotaSnapshot = {
   requests_today?: number | null;
   resets_at?: string | null;
   read_at?: string | null;
+  /** Named limits, when the provider splits its models into groups. */
+  groups?: { name: string; percent: number; resets_at?: string }[];
 };
 
 export type KeyRow = {

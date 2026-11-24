@@ -619,6 +619,16 @@ export function relTime(iso: string | null | undefined): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+/** A time still to come, as "in 6d"; one already past reads as relTime. */
+export function untilTime(iso: string | null | undefined): string {
+  const t = iso ? Date.parse(iso) : NaN;
+  const m = Math.ceil((t - Date.now()) / 60_000);
+  if (Number.isNaN(t) || m <= 0) return relTime(iso);
+  if (m < 60) return `in ${m}m`;
+  const h = Math.floor(m / 60);
+  return h < 24 ? `in ${h}h` : `in ${Math.floor(h / 24)}d`;
+}
+
 export function clockTime(iso: string): string {
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return iso;

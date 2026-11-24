@@ -23,7 +23,10 @@ export function hopState(h: Hop, acct: Account | undefined, catalog: string[] | 
     }
     const q = acct.quota;
     const worst = Math.max(q?.percent_rolling ?? 0, q?.percent_weekly ?? 0, q?.percent_monthly ?? 0);
-    if (acct.enabled && worst >= 100) issues.push({ tone: 'warn', text: `${acct.name} is out of quota` });
+    const full = (q?.groups ?? []).filter((g) => g.percent >= 100);
+    if (acct.enabled && full.length > 0 && full.length < (q?.groups?.length ?? 0)) {
+      issues.push({ tone: 'warn', text: `${acct.name} is out of quota for ${full.map((g) => g.name).join(', ')}` });
+    } else if (acct.enabled && worst >= 100) issues.push({ tone: 'warn', text: `${acct.name} is out of quota` });
     if (checkCatalog && acct.enabled && h.model_id && Array.isArray(catalog) && catalog.length > 0 && !catalog.includes(h.model_id)) {
       issues.push({ tone: 'warn', text: `${acct.name} does not list ${h.model_id}` });
     }

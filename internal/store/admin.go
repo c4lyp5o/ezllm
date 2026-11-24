@@ -92,6 +92,8 @@ type QuotaSummary struct {
 	RequestsToday  *int64   `json:"requests_today"`
 	ResetsAt       *string  `json:"resets_at"`
 	ReadAt         string   `json:"read_at"`
+	// Groups is set when the provider limits its models in named groups.
+	Groups []provider.QuotaGroup `json:"groups,omitempty"`
 }
 
 // ListAccounts returns every account with keys, latest quota and protocol
@@ -190,13 +192,13 @@ FROM provider_keys WHERE account_id=? ORDER BY id`, a.ID)
 
 	// latest quota across this account's keys (most recent read wins)
 	var q QuotaSummary
-	var qReadAt string
+	var qReadAt, qRaw string
 	var tokToday, reqToday sql.NullInt64
 	err = d.r.QueryRowContext(ctx, `
 SELECT q.kind, q.percent_rolling, q.percent_weekly, q.percent_monthly,
        q.balance, q.balance_unit, q.cost_total, q.cost_today,
        q.tokens_today, q.requests_today,
-       q.resets_at, q.read_at
+       q.resets_at, q.read_at, COALESCE(q.raw,'')
 FROM quota_snapshots q
 JOIN provider_keys k ON k.id = q.provider_key_id
 WHERE k.account_id = ?
@@ -204,9 +206,10 @@ ORDER BY q.read_at DESC, q.id DESC LIMIT 1`, a.ID).
 		Scan(&q.Kind, &q.PercentRolling, &q.PercentWeekly, &q.PercentMonthly,
 			&q.Balance, &q.Unit, &q.CostTotal, &q.CostToday,
 			&tokToday, &reqToday,
-			&q.ResetsAt, &qReadAt)
+			&q.ResetsAt, &qReadAt, &qRaw)
 	if err == nil {
 		q.ReadAt = qReadAt
+		q.Groups = provider.QuotaGroups(qRaw)
 		if tokToday.Valid {
 			v := tokToday.Int64
 			q.TokensToday = &v

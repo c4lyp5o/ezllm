@@ -9,7 +9,7 @@ import {
   type Account, type ApiErrorDetail, type Bridge, type KeyRow, type ModelRule, type ModelRow, type Price, type SweepStatus, type TestResult, type TestStep,
 } from '../utils/api';
 import { useSearchParams } from 'react-router-dom';
-import { Chip, ConfirmModal, CopyButton, Modal, SecretInput, SectionLabel, Segmented, Skeleton, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls, relTime, Mono } from '../components/ui';
+import { Chip, ConfirmModal, CopyButton, Modal, SecretInput, SectionLabel, Segmented, Skeleton, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls, relTime, untilTime, Mono } from '../components/ui';
 import { Collapse, Stagger, StaggerItem } from '../components/motion';
 import { bridgeUpdateText, fmtMoney, nfmt, UPDATE_TONE } from '../utils/lib';
 import { accountIssues, type Issue } from '../utils/health';
@@ -453,16 +453,18 @@ function CookieExpiry({ at }: { at?: string }) {
 }
 
 function QuotaBars({ quota }: { quota: NonNullable<Account['quota']> }) {
-  const rows: Array<[string, number]> = [];
-  if (quota.percent_rolling != null) rows.push(['rolling', quota.percent_rolling]);
-  if (quota.percent_weekly != null) rows.push(['weekly', quota.percent_weekly]);
-  if (quota.percent_monthly != null) rows.push(['monthly', quota.percent_monthly]);
+  const groups = quota.groups ?? [];
+  const grouped = groups.length > 0;
+  const rows: Array<[string, number]> = groups.map((g) => [g.name, g.percent]);
+  if (!grouped && quota.percent_rolling != null) rows.push(['rolling', quota.percent_rolling]);
+  if (!grouped && quota.percent_weekly != null) rows.push(['weekly', quota.percent_weekly]);
+  if (!grouped && quota.percent_monthly != null) rows.push(['monthly', quota.percent_monthly]);
   if (rows.length > 0 && rows.every(([, v]) => typeof v === 'number')) {
     return (
       <div className="space-y-1.5">
         {rows.map(([k, v]) => (
           <div key={k} className="flex items-center gap-2.5">
-            <span className="w-14 text-[11px] text-mute">{k}</span>
+            <span className={cx('text-[11px] text-mute', grouped ? 'w-36 flex-none truncate' : 'w-14')}>{k}</span>
             <div className="h-1.5 min-w-16 flex-1 overflow-hidden rounded-full bg-shade">
               {/* The bar DRAWS IN from zero: a quota reading is a live probe
                   of the provider, and a bar that springs to its width says
@@ -477,6 +479,7 @@ function QuotaBars({ quota }: { quota: NonNullable<Account['quota']> }) {
               />
             </div>
             <span className="tnum w-10 text-right font-mono text-[12px] text-dim">{Math.round(v)}%</span>
+            {grouped && <span className="w-24 flex-none text-[11px] text-mute">{groups.find((g) => g.name === k)?.resets_at ? `resets ${untilTime(groups.find((g) => g.name === k)?.resets_at)}` : ''}</span>}
           </div>
         ))}
       </div>
@@ -525,7 +528,7 @@ function QuotaSummary({ quota }: { quota: Account['quota'] }) {
     // The tightest window speaks for the provider: it is the one that refuses first.
     const [k, v] = pcts.reduce((m, r) => (r[1] > m[1] ? r : m));
     return (
-      <div className="flex items-center gap-2" title={pcts.map(([n, x]) => `${n} ${Math.round(x)}%`).join(' · ')}>
+      <div className="flex items-center gap-2" title={(quota.groups?.length ? quota.groups.map((g): [string, number] => [g.name, g.percent]) : pcts).map(([n, x]) => `${n} ${Math.round(x)}%`).join(' · ')}>
         <span className="w-14 flex-none text-[12px] text-mute">{k}</span>
         <div className="h-1 min-w-10 flex-1 overflow-hidden rounded-full bg-shade">
           <motion.div
@@ -1697,7 +1700,7 @@ function QuotaModal({ account, onClose, onRead }: { account: Account; onClose: (
                 <span className="rounded-full border border-line bg-bg px-2 py-0.5 font-mono text-[12px] text-accent">{live.kind}</span>
                 <span className="text-mute">read {live.read_at ? relTime(live.read_at) : '—'}</span>
                 {account.quota?.plan && <span className="text-dim">· {account.quota.plan}</span>}
-                {account.quota?.resets_at && <span className="text-mute">· resets {relTime(account.quota.resets_at)}</span>}
+                {account.quota?.resets_at && !account.quota.groups?.length && <span className="text-mute">· resets {untilTime(account.quota.resets_at)}</span>}
               </div>
               {/* The reading first, as the card shows it; the provider's own
                   response is evidence, one click away, not the headline. */}

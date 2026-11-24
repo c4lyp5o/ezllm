@@ -19,6 +19,38 @@ var randReader io.Reader = rand.Reader
 // jsonUnmarshal is a thin indirection so tests can share the same decode path.
 func jsonUnmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }
 
+// QuotaGroup is one named limit of a provider that splits its models into
+// groups with a limit each (Antigravity). A full group stops only its own models.
+type QuotaGroup struct {
+	Name     string  `json:"name"`
+	Percent  float64 `json:"percent"`
+	ResetsAt string  `json:"resets_at,omitempty"`
+}
+
+// QuotaGroups reads the groups out of a stored quota body; nil when it has none.
+func QuotaGroups(raw string) []QuotaGroup {
+	if !strings.Contains(raw, `"groups"`) {
+		return nil
+	}
+	var body struct {
+		Groups []struct {
+			Name     string   `json:"name"`
+			Percent  *float64 `json:"percent"`
+			ResetsAt string   `json:"resets_at"`
+		} `json:"groups"`
+	}
+	if json.Unmarshal([]byte(raw), &body) != nil {
+		return nil
+	}
+	var out []QuotaGroup
+	for _, g := range body.Groups {
+		if g.Name != "" && g.Percent != nil {
+			out = append(out, QuotaGroup{Name: g.Name, Percent: *g.Percent, ResetsAt: g.ResetsAt})
+		}
+	}
+	return out
+}
+
 // parsePercentQuota parses the opencode-go /usage shape:
 //
 //	{"usage":{"rolling":{"status","percent","resetsAt"},"weekly":{…},"monthly":{…}}}

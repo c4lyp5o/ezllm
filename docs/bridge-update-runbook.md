@@ -145,7 +145,8 @@ a synthetic result. Answers, tool arguments and result values are not printed.
 3. Copy `scripts/bridge-update.example.json` to
    `~/.config/ezllm/bridge-update.json` and adjust it. Copilot is disabled by
    default; set `bridges.copilot.enabled` true after its mount migration.
-   Optional `model` and `tool_model` values should name models your plan serves.
+   Optional `model` and `tool_model` values should name models your plan serves. The live
+   checks spend that plan's quota.
 4. For gateway proofs, store a suitably scoped client token in
    `~/.config/ezllm/proof.token` with mode 0600. Without it the in-container live
    checks are the proof; the status says the gateway script was skipped.

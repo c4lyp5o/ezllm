@@ -59,6 +59,10 @@ this first: starting ezllm again clears the log.
 Signed in, but the key test says **not eligible** (Antigravity)? Redo **Sign in**, open
 the link it prints and verify the account.
 
+Antigravity answers **the turn timed out**? Google may have no capacity for that model
+right now. Try later or use another model; the
+[runbook](../agy-bridge-runbook.md#limits) says how to check.
+
 ## The checker
 
 Paste it on the computer that runs ezllm. It only looks.

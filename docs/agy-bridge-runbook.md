@@ -7,7 +7,7 @@ follow [Turn on Google Antigravity](bridges/antigravity.md).** Design:
 **Status:** text chat and streaming, with usage, against compatible Antigravity
 CLI releases. Caller tools are on by default when the CLI supports
 `--json-schema`; see [caller tools](#caller-tools).
-Images and plan windows are not offered. Linux only.
+Images are not offered. Linux only.
 
 ## What it is
 
@@ -155,9 +155,13 @@ filesystem or shell tools. Use `EZLLM_AGY_MODEL` to test another model.
 - **History is flattened.** `agy` has no system-prompt flag and no history
   replay, so system messages and earlier turns travel inside the one prompt as
   a deterministic transcript.
-- **No plan windows.** `/usage` and `/credits` are interactive-only; the
-  provider card shows usage from the ledger, not the plan's remaining quota.
-  Quota exhaustion reaches the router as 429, so a combo moves on.
+- **Quota exhaustion** reaches the router as 429, so a combo moves on. The plan's
+  limits are on the provider card: see [Plan limits](#plan-limits-on-the-provider-card).
+- **No capacity at Google looks like a timeout.** From CLI 1.5.10 the CLI waits and
+  retries in silence when Google has no capacity for a model (measured: three 503s with
+  waits of 18, 60 and 63 s). The bridge ends the turn at 300 s with a 504, and a combo
+  moves on; the live check ends it at 120 s. The reason is in the CLI's log, under
+  `.gemini/antigravity-cli/log/` in the login folder: look for `attempt 1 failed`.
 - **One process per request.** A trivial turn takes ~4.5–6 s and ~207 MB RSS
   (measured); `EZLLM_AGY_BRIDGE_CONCURRENCY` (default 1) caps them.
 - **No token-by-token streaming.** 1.4.7 delivers the answer in one chunk at
@@ -166,6 +170,15 @@ filesystem or shell tools. Use `EZLLM_AGY_MODEL` to test another model.
   tokens on Gemini; the earlier Claude sample reported ~4k native cold input
   plus ~3.8k separate cache reads, measured on a one-word reply. Cached reads
   are separate from native input, then included in the OpenAI prompt total.
+
+## Plan limits on the provider card
+
+Press **Quota** on the account. The bridge answers `GET /v1/usage` by running
+`agy -p /usage`, which the CLI answers itself: it runs no turn and spends no quota.
+The plan has one weekly limit per group of models (Gemini, and Claude and GPT), and
+the card shows how much of each is used. A full group does not stop the other one.
+These are Google's numbers for the whole login, not ezllm's ledger. A group whose
+number the CLI leaves out is not shown. A CLI older than 1.1.11 reports nothing.
 
 ## Conversation cache
 

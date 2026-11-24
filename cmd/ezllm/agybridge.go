@@ -84,7 +84,7 @@ func startAgyBridge(ctx context.Context, log *slog.Logger, report bridgeReport) 
 	if err != nil {
 		return nil, err
 	}
-	qualified := releaseState(bin, pre.Version, agybridge.QualifiedVersion)
+	qualified := releaseState(bin, pre.Version, "")
 	ids := make([]string, 0, len(pre.Models))
 	for _, m := range pre.Models {
 		ids = append(ids, m.ID)

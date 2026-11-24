@@ -14,7 +14,7 @@ import (
 
 // Live checks against the real CLI and the operator's Antigravity login. A turn
 // spends plan quota, so they run only with EZLLM_AGY_LIVE=1, against
-// EZLLM_AGY_BIN (default ~/.local/share/agy-bridge/<qualified>/agy) and
+// EZLLM_AGY_BIN (default agy on PATH) and
 // EZLLM_AGY_HOME (default ~/.agy-sub).
 func liveCLI(t *testing.T) (bin, home string) {
 	t.Helper()
@@ -24,7 +24,7 @@ func liveCLI(t *testing.T) (bin, home string) {
 	userHome, _ := os.UserHomeDir()
 	bin = os.Getenv("EZLLM_AGY_BIN")
 	if bin == "" {
-		bin = userHome + "/.local/share/agy-bridge/" + QualifiedVersion + "/agy"
+		bin = "agy"
 	}
 	home = os.Getenv("EZLLM_AGY_HOME")
 	if home == "" {
@@ -39,7 +39,7 @@ func TestLivePreflight(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !p.Qualified || len(p.Models) == 0 {
+	if p.Version == "" || len(p.Models) == 0 {
 		t.Fatalf("preflight %+v", p)
 	}
 	t.Logf("agy %s, %d models", p.Version, len(p.Models))

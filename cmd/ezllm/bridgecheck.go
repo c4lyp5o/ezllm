@@ -69,7 +69,7 @@ func recordQualifies(bin, version string) (bool, error) {
 // releaseState is the `cli_release` a bridge reports: qualified when the
 // version is the one this build was measured on or the updater proved it.
 func releaseState(bin, version, measured string) string {
-	if version == measured {
+	if measured != "" && version == measured {
 		return "qualified"
 	}
 	ok, err := recordQualifies(bin, version)
@@ -78,6 +78,9 @@ func releaseState(bin, version, measured string) string {
 		return "unqualified (" + qualifiedFile + " unreadable: " + err.Error() + ")"
 	case ok:
 		return "qualified (live proof recorded by the updater)"
+	}
+	if measured == "" {
+		return "unqualified (no live proof recorded for this release)"
 	}
 	return "unqualified (measured on " + measured + "; re-run the live proof)"
 }
@@ -315,7 +318,7 @@ func checkAgyCLI(ctx context.Context, bin, home string) (bridgeVerdict, bool) {
 	pre, err := agybridge.RunPreflight(ctx, resolved, home)
 	v.Version = pre.Version
 	if pre.Version != "" {
-		v.Release = releaseState(bin, pre.Version, agybridge.QualifiedVersion)
+		v.Release = releaseState(bin, pre.Version, "")
 	}
 	if err != nil {
 		v.Problems = append(v.Problems, err.Error())

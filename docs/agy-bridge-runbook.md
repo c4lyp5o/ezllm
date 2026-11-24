@@ -53,8 +53,8 @@ curl -fsSL https://antigravity.google/cli/install.sh | bash
 agy --version                                   # check this before choosing a path
 
 # pin a copy outside the self-updating path; compose mounts THIS file
-# Replace VERSION with the actual installed version; 1.4.7 is qualified.
-VERSION=1.4.7
+# Set VERSION to the installed version reported above.
+VERSION=1.5.15 # example; use your installed version
 mkdir -p "$HOME/.local/share/agy-bridge/$VERSION"
 cp ~/.local/bin/agy "$HOME/.local/share/agy-bridge/$VERSION/agy"
 ```
@@ -67,7 +67,7 @@ host — even `--version` — lets agy rewrite it in place, renaming the origina
 to `agy.<n>.old` (measured 2026-10-30, 1.4.7 → 1.4.11). The running container
 keeps the original until the next recreate, which then boots the new release
 unannounced. With the copy read-only, so the bridge only moves to a new release when you copy one
-and change the mount. A release other than 1.4.7 still boots, and `/status`
+and change the mount. There is no hardcoded qualified release. Compatible versions can boot, and `/status`
 reports it as `unqualified` until the live proof ([verify](#verify)) has been
 re-run and recorded in `qualified.json`.
 
@@ -288,7 +288,7 @@ for matching, lifecycle, accounting and experiment limits.
 EZLLM_AGY_LIVE=1 go test -short -count=1 -v -run Live ./internal/agybridge
 ```
 
-`TestLivePreflight` checks the pinned binary and login; `TestLiveTurn` spends
+`TestLivePreflight` checks the selected binary and login without requiring an exact version; `TestLiveTurn` spends
 one small turn (default model `gemini-3.8-flash-low`, override with
 `EZLLM_AGY_MODEL`) and checks streaming and usage. On an account that has not
 cleared [eligibility](#eligibility) it skips, after checking the 403 and the

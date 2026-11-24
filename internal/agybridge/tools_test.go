@@ -447,3 +447,15 @@ func TestDefaultTextRequestsKeepChoiceHintsCompatible(t *testing.T) {
 		}
 	}
 }
+
+func TestPreflightReportsHelpCommandFailure(t *testing.T) {
+	bin, _ := fakeAgy(t, "fixture failures", 0)
+	script := "#!/bin/sh\ncase \"$1\" in\n--version) echo 1.4.7;;\n--help) exit 7;;\nesac\n"
+	if err := os.WriteFile(bin, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := RunPreflight(context.Background(), bin, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "--help failed") {
+		t.Fatalf("want help command failure, got %v", err)
+	}
+}

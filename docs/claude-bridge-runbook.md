@@ -9,7 +9,7 @@ Start with a working ezllm installation and dashboard ([quick start](../README.m
 This guide uses Docker Compose on a Linux host. You need a Claude subscription,
 the official CLI, and a separate login for the bridge. Validation and test
 requests use subscription quota. Each step links to more detail below. New to this?
-Follow [Turn on a bridge, step by step](bridge-setup.md) instead.
+Follow [Turn on a bridge](bridge-setup.md#claude) instead.
 
 1. **Install the CLI on the host** and pin a copy outside the updater's folder
    ([prerequisites](#prerequisites)):

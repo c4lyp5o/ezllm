@@ -13,7 +13,7 @@ Start with a working ezllm installation and dashboard ([quick start](../README.m
 This guide uses Docker Compose with a Linux environment, a ChatGPT subscription,
 and an isolated Codex login. Validation and test requests use subscription quota.
 Each step links to more detail below. New to this? Follow
-[Turn on a bridge, step by step](bridge-setup.md) instead.
+[Turn on a bridge](bridge-setup.md#chatgpt-codex) instead.
 
 1. **Check the host** supports client tools — Linux with Landlock
    ([platform requirements](#platform-requirements--read-this-first)). Without it

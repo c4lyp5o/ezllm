@@ -15,7 +15,7 @@ This guide uses Docker Compose in a Linux environment and a separate Google logi
 Caller tools are on by default when the CLI supports `--json-schema`;
 image input remains unsupported.
 Validation and test requests use subscription quota. Each step links to details below.
-New to this? Follow [Turn on a bridge, step by step](bridge-setup.md) instead.
+New to this? Follow [Turn on a bridge](bridge-setup.md#google-antigravity) instead.
 
 1. **Install the official CLI on the host** and pin a copy of the binary
    ([prerequisites](#prerequisites)).

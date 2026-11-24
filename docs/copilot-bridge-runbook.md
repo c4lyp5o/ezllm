@@ -17,6 +17,8 @@ on stdin, not argv.
 
 ## Install the CLI (first time)
 
+New to this? [Turn on a bridge, step by step](bridge-setup.md) covers every bridge.
+
 The container runs a CLI from the host: `~/.local/share/copilot-bridge` holds one
 folder per version and a `current` link, mounted at `/opt/copilot-bridge`. Create
 it before turning the bridge on. Run this on the Docker host as the user the

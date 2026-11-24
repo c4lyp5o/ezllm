@@ -22,6 +22,13 @@ const (
 	defaultCopilotBin = "/opt/copilot-bridge/current/copilot"
 )
 
+// missingCLI is the boot refusal when a bridge is on without its CLI. A first-time
+// operator sees only this line, so it says how to get unstuck.
+func missingCLI(bridge, binEnv, bin, cli, switchEnv string, cause error) error {
+	return fmt.Errorf("%s bridge: %s=%q does not resolve to the official %s CLI: %w — copy the CLI into the bridge folder and mount it (docs/bridge-setup.md), or set %s=off",
+		bridge, binEnv, bin, cli, cause, switchEnv)
+}
+
 // bridgeConcurrency reads a bridge's *_BRIDGE_CONCURRENCY: how many CLI
 // processes run at once. Every bridge defaults to 1: each slot is a full CLI
 // process, and a subscription's quota does not grow with parallelism. A

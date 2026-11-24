@@ -144,7 +144,7 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 	bin := envOrDefault(envCopilotBin, defaultCopilotBin)
 	resolved, err := exec.LookPath(bin)
 	if err != nil {
-		return nil, fmt.Errorf("copilot bridge: %s=%q does not resolve to the official Copilot CLI: %w — install the CLI and mount its folder (docs/copilot-bridge-runbook.md), or set %s=off", envCopilotBin, bin, err, envCopilotBridge)
+		return nil, missingCLI("copilot", envCopilotBin, bin, "Copilot", envCopilotBridge, err)
 	}
 	home := copilotHome(os.Getenv)
 	if st, err := os.Stat(home); err != nil || !st.IsDir() {

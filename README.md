@@ -135,6 +135,9 @@ dashboard setup first, then follow the guide for your account:
 | GitHub Copilot | [Copilot bridge](docs/copilot-bridge-runbook.md) | Sign in to the official `copilot` CLI on the host. Supports client tools and PNG/JPEG images with a vision-capable model. |
 | Google Antigravity | [Antigravity bridge](docs/agy-bridge-runbook.md) | Linux. Text chat and caller tools (on by default where the CLI supports `--json-schema`). No image input. |
 
+**First time? Follow [Turn on a bridge, step by step](docs/bridge-setup.md)**: one page
+with diagrams, a checker, and what each error means.
+
 The guides use Docker Compose and cover installing the CLI, signing in, the
 mounts and the dashboard preset. If a bridge is enabled but something it needs
 is missing, ezllm refuses to start and says why in `docker compose logs ezllm`.
@@ -146,8 +149,9 @@ Every bridge signs in to its own folder named `~/.<bridge>-sub`, never the
 folder your everyday CLI uses. That keeps the bridge's login, sessions and
 settings separate from yours, so signing out of your own CLI never breaks the
 bridge. Run the login once on the host, using the same binary the bridge runs.
-The paths below are the bridge updater's layout; replace them with your binary's
-path if you pinned it elsewhere.
+**These paths exist only after you copy the CLI into the bridge folder**
+([step 2](docs/bridge-setup.md#step-2-copy-it-into-the-bridge-folder)); before that they
+fail with "No such file or directory".
 
 | Bridge | Sign in | Check |
 |---|---|---|
@@ -350,6 +354,7 @@ transport in `internal/bridgeutil` ([design](docs/shared-bridge-transport-design
 | [docs/recovery-runbook.md](docs/recovery-runbook.md) | Encrypted backups, restore and upgrades |
 | [docs/master-key-runbook.md](docs/master-key-runbook.md) | Key encryption: paths, backup, rotation |
 | [docs/pricing-runbook.md](docs/pricing-runbook.md) | Model price catalog: refresh, import, query |
+| [docs/bridge-setup.md](docs/bridge-setup.md) | Turning on a bridge, step by step, with diagrams and a checker |
 | [docs/claude-bridge-runbook.md](docs/claude-bridge-runbook.md) | Claude subscription bridge |
 | [docs/codex-bridge-runbook.md](docs/codex-bridge-runbook.md) | ChatGPT subscription bridge, including model choice for long tool tasks |
 | [docs/copilot-bridge-runbook.md](docs/copilot-bridge-runbook.md) | GitHub Copilot subscription bridge |

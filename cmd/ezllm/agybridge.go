@@ -43,7 +43,7 @@ func startAgyBridge(ctx context.Context, log *slog.Logger, report bridgeReport) 
 	bin := envOrDefault(envAgyBin, defaultAgyBin)
 	resolved, err := exec.LookPath(bin)
 	if err != nil {
-		return nil, fmt.Errorf("agy bridge: %s=%q does not resolve to the official Antigravity CLI: %w", envAgyBin, bin, err)
+		return nil, missingCLI("agy", envAgyBin, bin, "Antigravity", envAgyBridge, err)
 	}
 	home := envOrDefault(envAgyHome, "/agy-sub")
 	addr := strings.TrimSpace(os.Getenv(envAgyAddr))

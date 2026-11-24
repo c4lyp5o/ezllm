@@ -68,7 +68,7 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 	bin := envOrDefault(envBridgeBin, defaultClaudeBin)
 	resolved, err := exec.LookPath(bin)
 	if err != nil {
-		return nil, fmt.Errorf("claude bridge: %s=%q does not resolve to the official Claude Code CLI: %w", envBridgeBin, bin, err)
+		return nil, missingCLI("claude", envBridgeBin, bin, "Claude Code", envBridge, err)
 	}
 	dir := claudeHome(os.Getenv)
 	addr := strings.TrimSpace(os.Getenv(envBridgeAddr))

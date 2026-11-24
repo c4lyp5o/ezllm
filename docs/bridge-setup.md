@@ -13,7 +13,7 @@ Not working? **[Troubleshooting](bridges/troubleshooting.md)**
 
 ## How it works
 
-ezllm runs in a container, which is a closed box: **it cannot see the CLI you
+In Docker, ezllm runs in a container, which is a closed box: **it cannot see the CLI you
 installed.** So you copy the CLI into one folder, sign in to another, and hand both
 folders to the box. Codex as the example:
 
@@ -34,10 +34,17 @@ flowchart LR
   login ==>|mount, read-write| sub
 ```
 
+Without Docker there is no box. You make the same two folders and tell ezllm where they
+are.
+
+Bridges need Linux. On macOS or Windows, run ezllm in a Linux container or VM.
+
 ## Later
 
-- **Update a CLI:** redo **Install** and **Copy**, then `docker restart ezllm`. Or let
-  the [updater](bridge-update-runbook.md) do it.
+- **Update a CLI:** redo **Install** and **Copy**, then `docker restart ezllm` (or
+  `systemctl --user restart ezllm`). In Docker, the [updater](bridge-update-runbook.md)
+  can do it for you.
 - **Turn a bridge off:** set it to `"off"` in `compose.yml` and run
-  `docker compose up -d`. With `docker run`, start again without its block.
+  `docker compose up -d`. With `docker run`, start again without its block. With the
+  ezllm binary, remove its file as [troubleshooting](bridges/troubleshooting.md#get-ezllm-back) shows.
 - **Every setting:** [environment.md](environment.md)

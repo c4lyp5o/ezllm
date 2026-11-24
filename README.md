@@ -126,12 +126,13 @@ If something fails:
 
 A bridge lets ezllm send requests through a vendor's official CLI, signed in to
 your subscription. Each bridge is optional and off by default. Finish the
-dashboard setup first, then follow the page for your plan. Not working?
+dashboard setup first, then follow the page for your plan: each covers Docker Compose,
+`docker run` and the ezllm binary, on Linux. Not working?
 [Troubleshooting](docs/bridges/troubleshooting.md).
 
 | Plan | Turn it on | Reference | Notes |
 |---|---|---|---|
-| Claude Pro/Max | [Turn on](docs/bridges/claude.md) | [Claude bridge](docs/claude-bridge-runbook.md) | |
+| Claude Pro/Max | [Turn on](docs/bridges/claude.md) | [Claude bridge](docs/claude-bridge-runbook.md) | Client tools. No server tools (web search, code execution). |
 | ChatGPT Plus/Pro | [Turn on](docs/bridges/codex.md) | [Codex bridge](docs/codex-bridge-runbook.md) | Linux. Client tools need Landlock. |
 | GitHub Copilot | [Turn on](docs/bridges/copilot.md) | [Copilot bridge](docs/copilot-bridge-runbook.md) | Client tools, and PNG/JPEG images with a vision-capable model. |
 | Google Antigravity | [Turn on](docs/bridges/antigravity.md) | [Antigravity bridge](docs/agy-bridge-runbook.md) | Linux. Text and client tools; no image input. |
@@ -139,7 +140,7 @@ dashboard setup first, then follow the page for your plan. Not working?
 Each bridge signs in to its own folder (`~/.claude-sub`, `~/.codex-sub`,
 `~/.copilot-sub`, `~/.agy-sub`), never your everyday one, so signing out of your own
 CLI does not break it. If a bridge is on but something it needs is missing, ezllm
-refuses to start and says why in `docker logs ezllm`. Requests through a
+refuses to start and says why in its log. Requests through a
 bridge, including key tests, use your plan's quota.
 
 ### Recommended cache settings

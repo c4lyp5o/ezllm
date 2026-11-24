@@ -67,9 +67,9 @@ func present(raw json.RawMessage) bool {
 	return s != "" && s != "null" && s != "[]"
 }
 
-// parseRequest validates a chat body. Without enableTools it is the default
-// text-only surface; the HTTP server may opt into the experimental
-// structured-output adapter. Images and unsupported tool shapes are refused
+// parseRequest validates a chat body. With enableTools (the default wherever the
+// CLI supports --json-schema) client tools go through the structured-output
+// adapter; without it the surface is text-only. Images and unsupported tool shapes are refused
 // rather than dropped.
 func parseRequest(body []byte, enableTools bool) (Request, error) {
 	var cr chatRequest

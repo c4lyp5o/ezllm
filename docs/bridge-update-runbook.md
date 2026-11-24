@@ -91,7 +91,7 @@ Changing policy or models warrants a fresh supervised check.
 |---|---|
 | Claude | Plain answer with usage; caller tool selection |
 | Codex | Plain answer; caller tool selection and correlated result continuation with usage, where tools are enabled; the writable workspace policy |
-| Antigravity | Plain answer; with `EZLLM_AGY_EXPERIMENTAL_TOOLS=on`, schema capability, caller selection and stateless result replay; with `EZLLM_AGY_BRIDGE_CACHE=on`, an additional exact caller-result conversation-resume proof |
+| Antigravity | Plain answer; schema capability (required: caller tools are on by default), caller selection and stateless result replay; with `EZLLM_AGY_BRIDGE_CACHE=on`, an additional exact caller-result conversation-resume proof |
 | Copilot | Plain answer, caller-tool batch and result replay, with configured `EZLLM_COPILOT_BRIDGE_WARM_POOL`; exact completed-session continuation when `EZLLM_COPILOT_BRIDGE_CACHE=on` |
 
 Gate verdicts carry `policy` and `retryable` fields. An older binary that ignores

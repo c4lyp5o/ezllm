@@ -370,7 +370,7 @@ class Gate(Home):
         self.assertIn("sha256:running-image", args)
         self.assertNotIn("mutable:tag", args)
         self.assertIn("EZLLM_CODEX_BRIDGE_CACHE=off", copied[0])
-        self.assertIn("EZLLM_AGY_EXPERIMENTAL_TOOLS=on", copied[0])
+        self.assertNotIn("EZLLM_AGY_EXPERIMENTAL_TOOLS", copied[0])
         self.assertNotIn("must-not-copy", copied[0])
         self.assertIn(str(self.home / "actual-login") + ":/codex-sub", args)
         self.assertFalse(Path(args[args.index("--env-file") + 1]).exists())
@@ -631,16 +631,25 @@ class CodexForkCachePolicy(unittest.TestCase):
 
 class AGYConversationCachePolicy(unittest.TestCase):
     def test_resume_mode_must_be_proven(self):
-        info = {"Config": {"Env": ["EZLLM_AGY_EXPERIMENTAL_TOOLS=on", "EZLLM_AGY_BRIDGE_CACHE=on"]}}
+        info = {"Config": {"Env": ["EZLLM_AGY_BRIDGE_CACHE=on"]}}
         self.assertIn("EZLLM_AGY_BRIDGE_CACHE", bu.GATE_ENV)
         self.assertEqual(bu.gate_policy("agy", info), {"caller_tools": "structured-output", "session_cache": "conversation-resume"})
         info["Config"]["Env"][-1] = "EZLLM_AGY_BRIDGE_CACHE=off"
         self.assertEqual(bu.gate_policy("agy", info), {"caller_tools": "structured-output"})
 
-    def test_resume_defaults_on_with_tools(self):
-        info = {"Config": {"Env": ["EZLLM_AGY_EXPERIMENTAL_TOOLS=on"]}}
+    def test_default_policy_requires_live_tools_and_resume(self):
+        info = {"Config": {"Env": []}}
         self.assertEqual(bu.gate_policy("agy", info), {"caller_tools": "structured-output", "session_cache": "conversation-resume"})
-        self.assertEqual(bu.gate_policy("agy", {"Config": {"Env": []}}), {"caller_tools": "off"})
+        expected = bu.gate_policy("agy", info)
+        verdict = {"bridge": "agy", "version": "1.5.15", "ok": True, "live": True,
+                   "policy": expected, "problems": []}
+        result = mock.Mock(stdout=json.dumps(verdict), returncode=0)
+        self.assertTrue(bu.checked_verdict(result, "agy", True, "1.5.15", expected)["ok"])
+        for incomplete in ({"caller_tools": "off"}, {"caller_tools": "structured-output"}):
+            verdict["policy"] = incomplete
+            result.stdout = json.dumps(verdict)
+            with self.assertRaisesRegex(ValueError, "configured bridge policy"):
+                bu.checked_verdict(result, "agy", True, "1.5.15", expected)
 
 if __name__ == "__main__":
     unittest.main()

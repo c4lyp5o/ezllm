@@ -244,6 +244,14 @@ The caller's full history remains available for fresh replay after a restart.
   Do not copy `~/.codex/auth.json` across: two copies of one refresh token log
   each other out when either refreshes.
 
+### CLI will not start vs. login failed
+
+If `codex` is not found, sign-in never started. In WSL, use
+`command -v codex` and `codex --version` to check the native CLI. If the
+container cannot find a staged binary, check its mount rather than logging
+in again. If the CLI starts but reports no login, repeat device sign-in and
+check status with `CODEX_HOME=~/.codex-sub` for both commands.
+
 **Gate a release before promoting it.** `ezllm bridge-check codex` runs the boot
 checks against a staged CLI and exits non-zero on any problem — stricter than
 boot, which reports the exec fallback or a missing code-mode host and keeps serving. `--json` prints the verdict

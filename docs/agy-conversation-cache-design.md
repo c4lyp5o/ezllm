@@ -2,6 +2,10 @@
 
 ## Decision
 
+> **Current behaviour:** caller tools are on by default wherever the CLI offers
+> `--json-schema`, and the cache defaults on wherever it also offers
+> `--conversation`. The env names below are historical.
+
 Offer bounded native conversation resume for experimental caller-tool requests.
 `EZLLM_AGY_BRIDGE_SESSION_CACHE=on` requires
 `EZLLM_AGY_EXPERIMENTAL_TOOLS=on` and CLI support for `--conversation`.

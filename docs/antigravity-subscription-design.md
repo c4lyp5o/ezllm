@@ -107,6 +107,10 @@ and per-bridge migration acceptance. Historical decisions above remain as record
 
 ## Experimental caller tools — 2026-11-14
 
+> **Superseded (after 2.2.0):** the adapter is now on by default wherever the
+> CLI offers `--json-schema`, and `EZLLM_AGY_EXPERIMENTAL_TOOLS` is retired.
+> The design below is otherwise unchanged.
+
 The original M1 text-only behavior remains the default. The optional
 `EZLLM_AGY_EXPERIMENTAL_TOOLS=on` adapter uses the CLI's `--json-schema` output
 mode and JSON-framed caller history. `tools.go` `parseAdaptedRequest` builds

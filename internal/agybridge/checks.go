@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// LiveTools proves the opt-in adapter using the same request parser, envelope
+// LiveTools proves the caller-tool adapter using the same request parser, envelope
 // validator and stateless history replay as HTTP. It executes no caller tool:
 // the gate supplies a fresh synthetic result and checks it is consumed.
 // Answers, arguments and result values are never included in errors.

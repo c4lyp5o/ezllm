@@ -67,6 +67,16 @@ that has the Copilot plan. Unsetting D-Bus matters on a desktop host: with a
 keyring available the CLI stores the token there, where the container cannot
 reach it; without one it writes `config.json` in `COPILOT_HOME`.
 
+### CLI will not start vs. login failed
+
+If `env` reports `No such file or directory`, the example staged path is
+missing and sign-in never started. In WSL, run `type -a copilot` and use
+the absolute path to the native Linux CLI, not the Windows VS Code shim
+under `/mnt/c`. If installed with NVM, run from a shell with NVM loaded.
+Keep `COPILOT_HOME` set and D-Bus unset when retrying. A nonempty
+`config.json` confirms the file exists, not that live requests work. For
+deployment, use the binary the bridge mounts.
+
 Boot fails loudly if `EZLLM_COPILOT_HOME` is not a directory — a bridge that
 started without a login would look healthy while every request 401s.
 

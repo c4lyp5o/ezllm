@@ -803,7 +803,7 @@ while the SAME model on `opencode-go` was 0/754.
 - `internal/copilotbridge/session_cache.go` and `internal/agybridge/session_cache.go`
   — opt-in exact-history conversation reuse with per-request usage deltas;
   `internal/agybridge/tools.go` `parseAdaptedRequest` — Antigravity caller tools
-  through structured output (`EZLLM_AGY_EXPERIMENTAL_TOOLS`).
+  through structured output (on whenever the CLI offers `--json-schema`).
 - `internal/server/admission.go` `newAdmission` — bounded inference admission and
   body-memory reservations; `internal/proxy/proxy.go` `copyResponseHeaders` strips
   provider `Set-Cookie`/`Set-Cookie2`/`Clear-Site-Data`.

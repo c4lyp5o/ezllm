@@ -46,14 +46,6 @@ func responsesContentBlocks(raw json.RawMessage, what string) ([]Block, error) {
 					}
 				}
 				if url == "" {
-					var alt struct {
-						ImageURL string `json:"image_url"`
-					}
-					if json.Unmarshal(p, &alt) == nil {
-						url = alt.ImageURL
-					}
-				}
-				if url == "" {
 					return nil, unsupported(what+".input_image", "missing image url")
 				}
 				blocks = append(blocks, Block{Kind: BlockImage, ImageURL: url})

@@ -1,7 +1,7 @@
 # Claude subscription runbook
 
 How the Claude bridge behaves, its limits and its caps. **To turn it on, follow
-[Turn on Claude](bridges/claude.md).** Design: `claude-subscription-design.md`.
+[Turn on Claude](bridges/claude.md).** Design: `design/claude-subscription-design.md`.
 
 ## What it is
 

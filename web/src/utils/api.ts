@@ -363,7 +363,7 @@ export type Health = {
   status: string; version: string; schema_version: number; accounts: number; provider_keys: number;
   models: number; combos: number; ledger_rows: number; dropped_rows: number;
   lost_rows?: number; unmetered_rows?: number; uptime_s: number;
-  /** Per-hop stream outcomes (docs/hop-health-design.md). Absent on an older
+  /** Per-hop stream outcomes (docs/design/hop-health-design.md). Absent on an older
    *  server, so every consumer must default it to []. */
   hop_stream_health?: HopStream[];
   stream_window_s?: number;

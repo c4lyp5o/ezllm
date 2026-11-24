@@ -7,7 +7,7 @@ import (
 )
 
 // HopStream is one hop's stream-outcome record over a window
-// (docs/hop-health-design.md). A hop that commits a 200 and then dies mid-body
+// (docs/design/hop-health-design.md). A hop that commits a 200 and then dies mid-body
 // looks healthy everywhere else: it wrote a row, it has a status, its account is
 // enabled. This is the number that shows it.
 //

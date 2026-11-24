@@ -17,7 +17,7 @@ import (
 // LOOPBACK-ONLY listener, exactly like the claude/codex/agy bridges. The CLI's
 // own login (a dedicated COPILOT_HOME) is the only credential; ezllm never
 // speaks Copilot's private API and never mints a session token — that OAuth
-// path is retired by this change (docs/copilot-cli-bridge-design.md).
+// path is retired by this change (docs/design/copilot-cli-bridge-design.md).
 const (
 	envCopilotSessionCache = "EZLLM_COPILOT_BRIDGE_CACHE"
 	envCopilotWarmPool     = "EZLLM_COPILOT_BRIDGE_WARM_POOL"   // on by default

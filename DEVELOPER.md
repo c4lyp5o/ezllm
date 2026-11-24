@@ -57,7 +57,7 @@ appropriate for code changes.
 | `tests/` | Live proof scripts (Python) — run against a real instance, not part of `go test` |
 | `web/tests/` | Playwright screenshot (`shot-*.mjs`) and check (`verify-*.mjs`) drivers |
 | `scripts/` | Operator utilities: `backup_sqlite.py` (online SQLite backup), `ezllm-mac.sh` (macOS binary installer + launchd agent) |
-| `docs/` | Design records and runbooks — decisions, not status |
+| `docs/` | User docs for the current version; `docs/design/` holds design records (decisions, not status) |
 | `EXPLORING.md` | Codebase tour: reading order, invariants, landmarks |
 | `CHANGELOG.md` | Milestone-tagged change narrative |
 | `VERSION.md` | Release history — semantic versioning |
@@ -122,7 +122,7 @@ post-1.0 work.
 2. **No `goleak` in the suite.** Goroutine-leak detection was deliberately
    out of scope for the perf work; adding it will surface real findings and
    some noise in the proxy/server packages — budget a pass for it.
-3. **No CI latency gate.** Percentile numbers exist in `docs/perf-baseline-m1.md`
+3. **No CI latency gate.** Percentile numbers exist in `docs/design/perf-baseline-m1.md`
    but nothing enforces them — a stable reference environment is needed
    before a regression gate means anything.
 4. **Older Playwright drivers need a live instance.** The `shot-*.mjs`
@@ -144,7 +144,7 @@ Docs are claims about code — verify before writing:
 - Status lines age: prefer "shipped — <what>, verified <date>" over bare
   milestone tags.
 - Milestone history goes in `CHANGELOG.md` (reverse-chronological, dated);
-  dated version bumps go in `VERSION.md`; design decisions go in `docs/`.
+  dated version bumps go in `VERSION.md`; design decisions go in `docs/design/`.
   README stays the front door: what it is, how to run it, where things live.
 
 ## Branches and releases
@@ -199,7 +199,7 @@ the release then refuses to open: try it on its own data directory, or back up f
 
 Claude and Antigravity use `internal/bridgeutil.Stream` for byte writes, flushing,
 stall deadlines and cancellation cleanup. **Codex and Copilot transport migration
-remains outstanding.** The [shared transport design](docs/shared-bridge-transport-design.md)
+remains outstanding.** The [shared transport design](docs/design/shared-bridge-transport-design.md)
 tracks each adapter's status and acceptance checks.
 
 Keep event encoding, header timing, auth/error contracts, usage, CLI isolation

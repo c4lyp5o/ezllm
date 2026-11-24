@@ -8,7 +8,7 @@ import "net/http"
 // SUBSCRIPTION whose credential lives in the CLI's own login, and an operator
 // looking at the provider list must be able to tell it apart from a generic
 // endpoint they pasted a key into. It replaces the retired OAuth/device-flow
-// provider (docs/copilot-cli-bridge-design.md).
+// provider (docs/design/copilot-cli-bridge-design.md).
 const KindCopilotBridge Kind = "copilot-bridge"
 
 // copilotBridgeAdapter is the openai-compatible WIRE under the bridge's own

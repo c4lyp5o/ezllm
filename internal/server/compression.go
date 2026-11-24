@@ -10,7 +10,7 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/store"
 )
 
-// ── compression at request time (docs/compression-design.md) ────────────────
+// ── compression at request time (docs/design/compression-design.md) ────────────────
 //
 // Resolution chain (M5 slice): x-ezllm-compression header → the combo's
 // compression_profile_id → off. Every lookup fails open: unknown name,

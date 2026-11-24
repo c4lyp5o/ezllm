@@ -1618,7 +1618,7 @@ func (d *DB) DeleteToken(ctx context.Context, id int64) error {
 // ── compression profiles ─────────────────────────────────────────────────────
 
 // CompressionProfile is a full pipeline row: stages JSON plus the safety
-// gates (docs/compression-design.md). CRUD lives in compression.go.
+// gates (docs/design/compression-design.md). CRUD lives in compression.go.
 type CompressionProfile struct {
 	ID                int64           `json:"id"`
 	Name              string          `json:"name"`

@@ -8,7 +8,7 @@ import (
 )
 
 // captureShapeDoc reads the request's single-parse decode
-// (docs/single-parse-dispatch-design.md).
+// (docs/design/single-parse-dispatch-design.md).
 
 // TestCaptureShapeDocContract asserts the observable shape contract on the
 // body corpus: what hashes, what does not, and why. An earlier version of this

@@ -9,7 +9,7 @@ import (
 )
 
 // FuzzSwapParity is the single-parse wire-fidelity moat
-// (docs/single-parse-dispatch-design.md). The invariant is PIPELINE parity,
+// (docs/design/single-parse-dispatch-design.md). The invariant is PIPELINE parity,
 // not component parity: for every body the OLD pipeline would have
 // DISPATCHED, the new path must emit byte-identical hop bodies.
 //

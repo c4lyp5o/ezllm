@@ -22,7 +22,7 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/server"
 )
 
-// Bridge CLI qualification and the bridge-check gate (SPEC-bridge-update.md
+// Bridge CLI qualification and the bridge-check gate (docs/design/SPEC-bridge-update.md
 // §4.2–4.3). The host updater runs `ezllm bridge-check` against a staged CLI
 // before it promotes it; boot runs the same checks, so the updater cannot pass
 // a release boot would reject. The gate is stricter than boot: flag drift, the

@@ -311,8 +311,8 @@ CREATE TABLE IF NOT EXISTS calls (
   translated     INTEGER NOT NULL DEFAULT 0,
   -- v33's tool_prune_shadow_tokens was dropped in v35 (2.0.0): the shelved
   -- tool-pruning experiment's measurements were exported first, to
-  -- docs/tool-prune-shadow-results.json.
-  -- v34 (docs/hop-health-design.md): how a STREAM ended, as a first-class
+  -- docs/design/tool-prune-shadow-results.json.
+  -- v34 (docs/design/hop-health-design.md): how a STREAM ended, as a first-class
   -- fact instead of prose in err. '' = not a stream; completed; truncated
   -- (upstream died after headers); failed (translated stream's late error
   -- frame); client_gone (the CALLER hung up — a complete call, never a hop

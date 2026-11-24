@@ -13,7 +13,7 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/provider"
 )
 
-// Single-parse dispatch (docs/single-parse-dispatch-design.md) swaps a hop's
+// Single-parse dispatch (docs/design/single-parse-dispatch-design.md) swaps a hop's
 // model by mutating the REQUEST's one shared decode instead of re-decoding
 // per hop. The acceptance bar is byte equality: for every body class the old
 // SwapModel handles, the doc path must emit the EXACT bytes SwapModel emits.

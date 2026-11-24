@@ -245,7 +245,7 @@ func pinSurface(pin string) (provider.Surface, bool) {
 
 // WithResponsesModels installs the curated patterns whose matching hops ride
 // the Responses wire for chat and anthropic clients (see
-// docs/responses-wire-design.md). Entries are regexes matched fully against
+// docs/design/responses-wire-design.md). Entries are regexes matched fully against
 // "<ns>/<model>"; an entry that does not compile is dropped — config.Load
 // validates the same list at boot and refuses to start on it, so this skip is
 // defensive only (tests may hand the resolver raw strings).

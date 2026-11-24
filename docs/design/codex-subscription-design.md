@@ -2,7 +2,7 @@
 
 **Status:** M0 measured 2026-10-23 · decisions recorded (§4) · stages 1–3 (§2.13, §2.14) shipped in v1.1.0 and deployed
 **Operator gate:** Calypso (pushes/deploys)
-**Spec:** [SPEC-codex-bridge.md](../SPEC-codex-bridge.md) · **Pattern:** [claude-subscription-design.md](claude-subscription-design.md)
+**Spec:** [SPEC-codex-bridge.md](SPEC-codex-bridge.md) · **Pattern:** [claude-subscription-design.md](claude-subscription-design.md)
 
 ## 1. Goal and the hard constraints
 
@@ -352,7 +352,7 @@ login present; non-loopback bind refused. Failure is fatal, not logged.
    `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK=on` is the explicit operator override
    (relies on Codex's own `apply_patch` refusal only). Non-Linux builds refuse to
    start the bridge. Operator-facing detail:
-   [codex-bridge-runbook.md](codex-bridge-runbook.md#platform-requirements--read-this-first).
+   [codex-bridge-runbook.md](../codex-bridge-runbook.md#platform-requirements--read-this-first).
 
 
 ## Shared transport update — 2026-11-11

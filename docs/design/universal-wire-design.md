@@ -48,7 +48,7 @@ restart and lock the dashboard control.
 
 `translation.universal_enabled` remains a deprecated YAML alias (its environment
 form was removed in 2.0.0), not a matrix-only control. See the
-[translation runbook](translation-runbook.md) for precedence and rollback; curated
+[translation runbook](../translation-runbook.md) for precedence and rollback; curated
 Responses-wire overrides remain a separate deployment choice. Wrong-typed YAML
 still fails startup naming the field.
 

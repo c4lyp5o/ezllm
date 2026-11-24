@@ -109,7 +109,7 @@ supports it (`EZLLM_AGY_BRIDGE_CACHE=off` disables it). Clients continue
 sending full history, including assistant call IDs and complete tool-result
 groups; no native session field is added. Usage is per request, with native
 cold input plus cache reads converted to inclusive OpenAI prompt totals. See
-[the AGY cache design](agy-conversation-cache-design.md).
+[the AGY cache design](design/agy-conversation-cache-design.md).
 
 Copilot completed-conversation reuse is an operator opt-in documented in the
 runbook. Clients keep sending full history; no session ID or new request field
@@ -303,7 +303,7 @@ header gives the report's age in seconds, so a dashboard number can be up to 10 
 accounting of the upstream **Messages** wire: `auto` = unstated (never inferred from `kind` or
 `base_url`; read as exclusive, in the ledger and on cross-wire conversions alike), `anthropic` =
 `input_tokens` EXCLUDES cache tokens, `total` = `input_tokens` INCLUDES cache tokens. See
-`docs/usage-convention-design.md`.
+`docs/design/usage-convention-design.md`.
 `management_key` (schema v19, optional) is a second credential for providers whose balance
 endpoint needs a management key (TokenRouter), a platform session token (OpenAI: the `sess-…`
 bearer from platform.openai.com), a web-session cookie (Anthropic Console: a pasted Cookie header
@@ -654,7 +654,7 @@ A model that hands control back early (the 2026-11 terra finding) shows a low me
 
 ### `GET /admin/accounts/{id}/quota` → `200`
 Live `ReadQuota` → classified shape + `raw`. Provider-by-provider oracles and
-the classification rules: [quota-oracles-design.md](quota-oracles-design.md). `{"kind":"none"}` when the provider has no endpoint
+the classification rules: [quota-oracles-design.md](design/quota-oracles-design.md). `{"kind":"none"}` when the provider has no endpoint
 (`400`/`404`/`405` on the generic `{base}/usage` → NOT an error; OpenAI answers `400` there even
 for a valid key). A TokenRouter, OpenAI, Anthropic (`api.anthropic.com`) or Command Code account without a `management_key` is `none` without a call.
 OpenAI reads `GET api.openai.com/v1/dashboard/billing/credit_grants` with the session token (the
@@ -1041,7 +1041,7 @@ mandatory model never receives one; the field is DROPPED only when a mandatory m
 names no non-disabling value at all. A model with nothing learned receives the body untouched. Facts
 merge: a refusal that names only a mandate keeps the stored list, and a mandate is never lowered.
 Only catalogued models are learned. No HTTP response field changes; design:
-docs/reasoning-effort-design.md.
+docs/design/reasoning-effort-design.md.
 
 ### Usage reported by retries and failed hops
 

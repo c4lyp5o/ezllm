@@ -21,7 +21,7 @@ import (
 // them off, the M0 sentinel ("create a file, touch a marker, curl a URL",
 // default instructions) produced no model-driven execve under strace; with
 // them on, Codex ran all three inside its own sandbox
-// (docs/codex-subscription-design.md §2.5). in_app_updates keeps the pinned
+// (docs/design/codex-subscription-design.md §2.5). in_app_updates keeps the pinned
 // binary pinned.
 var LockdownFeatures = []string{
 	"shell_tool", "unified_exec", "unified_exec_tty", "shell_snapshot",

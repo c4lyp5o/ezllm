@@ -173,9 +173,9 @@ A few things worth knowing:
 - Cached tokens show up in the usage records, but how much plan quota they save
   depends on the vendor.
 
-Details and limits: [Codex](docs/codex-empty-template-cache-design.md),
-[Copilot](docs/copilot-completed-session-cache-design.md),
-[Antigravity](docs/agy-conversation-cache-design.md). The Antigravity tool
+Details and limits: [Codex](docs/design/codex-empty-template-cache-design.md),
+[Copilot](docs/design/copilot-completed-session-cache-design.md),
+[Antigravity](docs/design/agy-conversation-cache-design.md). The Antigravity tool
 adapter is model-mediated; read its [limitations](docs/agy-bridge-runbook.md#caller-tools).
 
 ## How routing works
@@ -204,14 +204,14 @@ A combo has a plain name (such as `fallback`) and an ordered list of
 
 - **Rules** set token caps and allowed hours per account and model. A request
   that breaks a rule gets a `429` naming the rule, before anything is sent
-  upstream, so it costs nothing ([rules design](docs/rules-engine-design.md)).
+  upstream, so it costs nothing ([rules design](docs/design/rules-engine-design.md)).
 - **Surface pins** tie a model to one API (`openai`, `anthropic` or
   `responses`). Calling it through another API returns `400 pinned_surface`
   instead of silently changing the request.
 - **Translation** lets any client API reach any provider format once a probe
   has verified that hop. It is on by default; set
   `EZLLM_TRANSLATION_ENABLED=false` to turn it off
-  ([design](docs/universal-wire-design.md), [runbook](docs/translation-runbook.md)).
+  ([design](docs/design/universal-wire-design.md), [runbook](docs/translation-runbook.md)).
 
 ## Compression
 
@@ -223,7 +223,7 @@ tool-output message), tool-call arguments are never touched, tool results are
 never dropped, and if an engine fails the original request is sent. Savings are
 reported as **real** (bytes actually removed) or **notional** (a saving that was
 rejected as too small), so the numbers are never inflated. Details and
-measurements: [compression design](docs/compression-design.md).
+measurements: [compression design](docs/design/compression-design.md).
 
 ## Token accounting
 
@@ -308,14 +308,14 @@ runs it. Always use `-short` locally.
   binary, so rebuild and commit it with every web change; CI checks it matches.
 - `tests/`: live proof scripts (Python) run against a real instance.
 - `scripts/`: operator tools such as `backup_sqlite.py` and `ezllm-mac.sh`.
-- `docs/`: design records and runbooks. [EXPLORING.md](EXPLORING.md) is the
+- `docs/`: user docs; `docs/design/`: design records. [EXPLORING.md](EXPLORING.md) is the
   code tour.
 
 CI runs [test.yml](.github/workflows/test.yml) before
 [publish.yml](.github/workflows/publish.yml) publishes anything, so a failing suite
 never produces an image or release. Pushes to `development` publish
 `ghcr.io/c4lyp5o/ezllm:development`; `:latest` follows `master`. All four subscription bridges share one streaming
-transport in `internal/bridgeutil` ([design](docs/shared-bridge-transport-design.md)).
+transport in `internal/bridgeutil` ([design](docs/design/shared-bridge-transport-design.md)).
 
 ## Documentation
 
@@ -340,13 +340,14 @@ example [v2.2.0](https://github.com/c4lyp5o/ezllm/tree/v2.2.0), or see
 | [docs/copilot-bridge-runbook.md](docs/copilot-bridge-runbook.md) | GitHub Copilot subscription bridge |
 | [docs/agy-bridge-runbook.md](docs/agy-bridge-runbook.md) | Google Antigravity subscription bridge |
 | [docs/bridge-update-runbook.md](docs/bridge-update-runbook.md) | Automatic bridge CLI updates, holds and rollback |
-| [docs/bridge-token-usage-audit.md](docs/bridge-token-usage-audit.md) | Bridge token usage findings and accounting fixes |
+| [docs/design/bridge-token-usage-audit.md](docs/design/bridge-token-usage-audit.md) | Bridge token usage findings and accounting fixes |
 | [VERSION.md](VERSION.md) | Release history |
 | [CHANGELOG.md](CHANGELOG.md) | Detailed change history |
 | [EXPLORING.md](EXPLORING.md) | Code tour: reading order, invariants, landmarks |
 | [DEVELOPER.md](DEVELOPER.md) | Workflow, conventions, branches and releases |
 | [AGENTS.md](AGENTS.md) | Rules for AI agents and maintainers |
-| [docs/](docs/) | All design records and runbooks |
+| [docs/](docs/) | Every user doc |
+| [docs/design/](docs/design/README.md) | Design records, specs, audits and measurements (not needed to run ezllm) |
 
 ## License
 

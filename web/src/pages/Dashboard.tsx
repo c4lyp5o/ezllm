@@ -397,7 +397,7 @@ function LatencyCard({ rows }: { rows: UsageRow[] }) {
 
 // A hop that returns 200 and then dies mid-body is healthy by every other number
 // on this page: delivered status, a ledger row, an enabled account. This is the
-// only surface that shows it (docs/hop-health-design.md). Caller hang-ups are
+// only surface that shows it (docs/design/hop-health-design.md). Caller hang-ups are
 // excluded by the server's rate, so "cut of N" is the judged denominator.
 function CutAnswers({ o }: { o: Overview }) {
   const hops = (o.health?.hop_stream_health ?? []).filter((h) => h.truncated > 0 || h.failed > 0);

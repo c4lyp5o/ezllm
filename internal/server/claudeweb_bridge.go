@@ -16,7 +16,7 @@ import (
 
 // The claude-web bridge: loopback-internal OpenAI-wire routes the
 // claude-web adapter rewrites hops to. Behind it, internal/claudeweb drives
-// claude.ai with the Chrome TLS profile (mount: docs/claude-web-design.md).
+// claude.ai with the Chrome TLS profile (mount: docs/design/claude-web-design.md).
 //
 // Mount: POST /internal/claudeweb/v1/chat/completions, GET /internal/claudeweb/v1/models.
 // Auth: the stamped account header maps to an ENABLED claude-web account;

@@ -61,7 +61,7 @@ const maxShapeBody = 8 << 20 // 8 MiB
 // where the old byte path decoded to float64 (`1e+10`). Literal sensitivity is
 // the correct semantics for a CACHE-BREAK detector — a provider tokenizes
 // `1e10` and `10000000000` differently, so their effective prefixes differ and
-// the hash must say so. Documented in docs/single-parse-dispatch-design.md.
+// the hash must say so. Documented in docs/design/single-parse-dispatch-design.md.
 func captureShapeDoc(doc *jsonbody.BodyDoc, surface provider.Surface) shape {
 	s := shape{ReqBytes: len(doc.Bytes())}
 	if len(doc.Bytes()) == 0 || len(doc.Bytes()) > maxShapeBody {

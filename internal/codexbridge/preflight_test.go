@@ -63,7 +63,7 @@ func TestPreflightAgainstTheInstalledCLI(t *testing.T) {
 
 // A release that accepts `--disable shell_tool` but stops honouring it must
 // fail preflight end to end, not just in the parser: the bridge updater
-// promotes on this verdict (SPEC-bridge-update.md §5).
+// promotes on this verdict (docs/design/SPEC-bridge-update.md §5).
 func TestPreflightRefusesAReleaseThatIgnoresTheLockdown(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fake")

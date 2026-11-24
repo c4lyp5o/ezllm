@@ -2,7 +2,7 @@
 
 How the ChatGPT (Codex) bridge behaves, its limits and its caps. **To turn it on,
 follow [Turn on ChatGPT (Codex)](bridges/codex.md).** Design:
-`codex-subscription-design.md`.
+`design/codex-subscription-design.md`.
 
 The bridge supports text, streaming, images, reasoning effort and summaries,
 structured output, plan windows, and client tools with continuation. Read the [platform requirements](#platform-requirements--read-this-first)
@@ -41,7 +41,7 @@ Codex also exposes its own `apply_patch` (file-writing) tool inside it, and no
 the spike tried; Landlock makes that refusal a **kernel guarantee** instead of a
 promise from Codex's code. With client tools off, `exec` is disabled and
 `apply_patch` is unreachable, so the guarantee holds without Landlock.
-Measurements: `codex-subscription-design.md` §2.5 and §2.12.
+Measurements: `design/codex-subscription-design.md` §2.5 and §2.12.
 When Landlock is available, **every** Codex child runs inside it, text-only
 requests included; tools additionally switch the code-mode runtime on.
 
@@ -376,7 +376,7 @@ include caller history. Landlock and approval policy `never` remain in force.
 OpenAI documents phase preservation as relevant to early stopping. This corrects
 conversation representation, but the small live comparison does not establish
 that it fixes every long-session persistence failure. See the
-[design and measured evidence](codex-conversation-fidelity-design.md).
+[design and measured evidence](design/codex-conversation-fidelity-design.md).
 
 ## Prompt-cache affinity
 
@@ -416,7 +416,7 @@ The updater copies the setting into qualification and requires an
 `auto`, `ephemeral-forks` (explicit `on`) or `off` policy proof, plus
 `approval_policy=never`. Effective cache mode proves fresh-request reuse and
 caller-tool continuation; unsupported auto mode reports its fallback reason. Changing the setting requires requalification. Measured results
-and design: [empty-template cache](codex-empty-template-cache-design.md).
+and design: [empty-template cache](design/codex-empty-template-cache-design.md).
 
 ## Caller ownership of pending tools
 

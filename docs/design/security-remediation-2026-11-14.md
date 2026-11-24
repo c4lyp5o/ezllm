@@ -173,7 +173,7 @@ requests remain fresh. Reuse requires matching history and policy, so enabling
 these settings does not guarantee provider prompt-cache hits. Hermes continues
 to execute caller tools. During the trial, compare cache-read usage and total
 input/output usage on comparable conversations, and check tool-result handling.
-The shared [README settings](../README.md#recommended-cache-settings) describe how to
+The shared [README settings](../../README.md#recommended-cache-settings) describe how to
 apply these flags. To opt out, set the corresponding cache flags to `off`; set
 `EZLLM_AGY_EXPERIMENTAL_TOOLS=off` too if disabling the AGY adapter. Recreate the
 container after environment changes. (Since the release after 2.2.0 the AGY

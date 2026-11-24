@@ -16,7 +16,7 @@ import (
 // GET (list) shares handleProfiles; POST and the {id} routes live here.
 // Validation happens BEFORE persistence: an unknown engine in a saved
 // pipeline would fail open at request time forever, silently — better to
-// reject it at the door (docs/compression-design.md).
+// reject it at the door (docs/design/compression-design.md).
 
 // profilePayload is a partial-update DTO: nil means "not provided", so PATCH
 // overlays exactly what the client sent and POST falls back to schema
@@ -73,7 +73,7 @@ func supportedEngines() string {
 // aggressive/ultra are deliberately refused: they are pipeline COMPOSITIONS here
 // (session_dedup + rtk + headroom + caveman), not prose levels, and accepting
 // them silently would let a profile author believe a stronger rewrite was running
-// when `standard` was (docs/compression-design.md, "Intensity").
+// when `standard` was (docs/design/compression-design.md, "Intensity").
 var cavemanIntensities = map[string]bool{"lite": true, "standard": true}
 
 func validateStageOptions(i int, st compress.Stage) error {

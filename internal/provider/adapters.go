@@ -298,7 +298,7 @@ func mapUsageErr(err error) error {
 // ssn-gpt (space.stationine.com): balance/remaining in USD plus usage.today and
 // usage.total cost fields. Host-scoped oracles (DeepSeek/OpenRouter/Vercel/
 // Ollama) run first — providers whose balance lives outside {base}/usage but
-// on the SAME key (docs/quota-oracles-design.md); their endpoints were
+// on the SAME key (docs/design/quota-oracles-design.md); their endpoints were
 // live-probed 2026-10-14. Providers with no quota endpoint yield
 // ErrQuotaUnsupported, which the UI renders as "measured" (our own numbers).
 func (a *openAICompatible) ReadQuota(ctx context.Context, acct Account, key string) (Quota, error) {

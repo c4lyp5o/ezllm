@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Unattended bridge CLI updates for Claude, Codex, Antigravity and Copilot bridges.
 
-Design: SPEC-bridge-update.md §4.4. Runs on the host (systemd timer, hourly):
+Design: docs/design/SPEC-bridge-update.md §4.4. Runs on the host (systemd timer, hourly):
 
   discover  newest release per bridge on its official channel; first sightings
             are recorded so the soak can count from them (every run)

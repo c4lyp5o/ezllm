@@ -2,7 +2,7 @@
 
 > **Superseded in part (2026-10-15):** the request body is now decoded exactly
 > once per request (single-parse dispatch, `internal/jsonbody`, see
-> `docs/single-parse-dispatch-design.md`). Every number below predates that
+> `docs/design/single-parse-dispatch-design.md`). Every number below predates that
 > change; measured after-deltas live in the design doc's results section and
 > the CHANGELOG. `EXPLORING.md`'s flow map (parse sites) is updated too.
 > `file.go:NN` references below describe the code as measured on that date and

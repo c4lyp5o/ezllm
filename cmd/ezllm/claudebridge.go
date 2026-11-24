@@ -20,7 +20,7 @@ import (
 // ordinary `anthropic-compatible` account can dial it, while the official Claude
 // Code CLI — bind-mounted from the host — stays the only thing that talks to the
 // subscription. No second service, no second image, no inter-service token.
-// Decisions: docs/claude-subscription-design.md.
+// Decisions: docs/design/claude-subscription-design.md.
 const (
 	envBridge            = "EZLLM_CLAUDE_BRIDGE"             // "on" enables the surface
 	envBridgeBin         = "EZLLM_CLAUDE_BIN"                // official CLI binary (mounted)

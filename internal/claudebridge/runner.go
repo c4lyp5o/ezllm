@@ -30,7 +30,7 @@ func (e *NativeError) Error() string { return e.Message }
 
 // Runner spawns the official Claude Code CLI once per request. It is the only
 // thing in this package allowed to talk to the subscription — the credential never
-// leaves the CLI's own login store (docs/claude-subscription-design.md, decision 1).
+// leaves the CLI's own login store (docs/design/claude-subscription-design.md, decision 1).
 type Runner struct {
 	Bin           string
 	ConfigDir     string

@@ -304,7 +304,7 @@ func (b *geminiWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.R
 		return
 	}
 	// Typed refusals — the web protocol has no tool calling, no structured
-	// output, no image input (docs/gemini-web-design.md scope fences).
+	// output, no image input (docs/design/gemini-web-design.md scope fences).
 	if req.Tools != nil {
 		writeErr(w, http.StatusBadRequest, "unsupported_feature",
 			"gemini-web does not support tool calling; use a gemini-openai account for tools")

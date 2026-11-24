@@ -125,7 +125,7 @@ func ClassifyQuota(body string) Quota {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Host-scoped quota oracles — providers with no /v1/usage whose SAME inference
-// key can still read a balance endpoint. Design: docs/quota-oracles-design.md.
+// key can still read a balance endpoint. Design: docs/design/quota-oracles-design.md.
 // Every URL and parser below was live-probed 2026-10-14 with the operator's
 // own keys (zero-token GETs, UA ezllm/1.0).
 // ─────────────────────────────────────────────────────────────────────────────

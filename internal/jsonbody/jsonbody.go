@@ -8,7 +8,7 @@
 // traffic). BodyDoc is that one decode.
 //
 // Parity with the code it replaces is the contract, documented field by field
-// in docs/single-parse-dispatch-design.md:
+// in docs/design/single-parse-dispatch-design.md:
 //
 //   - Same decoder settings as SwapModel: json.Decoder + UseNumber, so large
 //     ints stay exact (no float64 mangling).

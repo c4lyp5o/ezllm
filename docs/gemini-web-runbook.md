@@ -81,7 +81,7 @@ array, no per-message roles) — fine for chat, lossy for agent scaffolding.
 ## Protocol drift
 
 The wire is reverse-engineered (see `~/workspace/gemini-web-api-protocol-digest.md`
-and `docs/gemini-web-design.md` for every ported index and endpoint). It WILL
+and `docs/design/gemini-web-design.md` for every ported index and endpoint). It WILL
 drift. When it does:
 
 1. Symptoms: `ErrNoAccessToken` on live cookies (init page shape changed) or

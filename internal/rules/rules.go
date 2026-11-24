@@ -5,7 +5,7 @@
 // func(ctx, accountID, modelID) error so routing strategies never need to know
 // WHY a hop is unavailable, only that it is.
 //
-// Design doc: docs/rules-engine-design.md (approved 2026-10-06).
+// Design doc: docs/design/rules-engine-design.md (approved 2026-10-06).
 //
 // Two invariants this package exists to keep:
 //

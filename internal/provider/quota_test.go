@@ -11,7 +11,7 @@ import (
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Host matrix for quotaOracleFor. Every URL below was live-probed 2026-10-14
-// (docs/quota-oracles-design.md) — the expected strings are that evidence.
+// (docs/design/quota-oracles-design.md) — the expected strings are that evidence.
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestQuotaOracleHostMatrix(t *testing.T) {

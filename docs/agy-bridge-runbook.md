@@ -2,7 +2,7 @@
 
 How the Antigravity bridge behaves, its limits and its lockdown. **To turn it on,
 follow [Turn on Google Antigravity](bridges/antigravity.md).** Design:
-`antigravity-subscription-design.md`.
+`design/antigravity-subscription-design.md`.
 
 **Status:** text chat and streaming, with usage, against compatible Antigravity
 CLI releases. Caller tools are on by default when the CLI supports
@@ -205,7 +205,7 @@ Qualification in cache mode requires a separate caller-result resume proof,
 adding two small CLI turns to the normal live gate. No internal repair call is
 made after a failed resume. Set the flag to `off` and restart for stateless replay.
 
-See [the cache design and captured counters](agy-conversation-cache-design.md)
+See [the cache design and captured counters](design/agy-conversation-cache-design.md)
 for matching, lifecycle, accounting and experiment limits.
 
 ## Verify

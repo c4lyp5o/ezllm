@@ -62,6 +62,8 @@ uname -r                          # needs 5.13 or newer
 cat /sys/kernel/security/lsm      # must list "landlock", e.g. lockdown,capability,landlock,yama,apparmor
 ```
 
+In WSL the second command can say `No such file` while Landlock works.
+
 Neither command proves the **container** may use it — Docker's seccomp profile
 can block the Landlock syscalls even when the kernel has them. The bridge's own
 answer is authoritative: it tries Landlock at boot and reports the result.

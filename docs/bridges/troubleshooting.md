@@ -50,7 +50,7 @@ this first: starting ezllm again clears the log.
 | `is not a directory — mount the CLI's login home there` | Add the second `volumes:` line (`docker run`: the second `-v`) |
 | `mapping key … already defined` | That line is in `compose.yml` twice. Keep one |
 | `token dir: mkdir /data: permission denied` | ezllm binary: the `…_BRIDGE_TOKEN_FILE` line is missing |
-| `is a Linux feature` | That bridge needs Linux. On macOS or Windows, run ezllm in a Linux container or VM |
+| `is a Linux feature` | That bridge needs Linux. On Windows, [use WSL](../wsl.md). On macOS, run ezllm in a Linux container or VM |
 | `Permission denied` | Compose: set `UID` and `GID`, as your plan's page says. `docker run`: keep the `--user` part |
 | `channel unavailable` (Copilot) | Your ezllm is older than this page. Update ezllm, or read the page for [your version](../../README.md#documentation) |
 | `The container name "/ezllm" is already in use` | You skipped "Set the old container aside" |

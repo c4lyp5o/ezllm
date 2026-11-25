@@ -90,6 +90,15 @@ class MacInstall(unittest.TestCase):
         self.assertEqual(self.installed(), "binary 4.5.6")
         self.assertEqual(self.urls.read_text(), "")
 
+    def test_only_the_owner_can_open_the_data_folder(self):
+        data = self.dir / "ez" / "data"
+        data.mkdir(parents=True)
+        data.chmod(0o755)  # what an older script left behind
+        self.release("9.8.7")
+        r = self.install(EZLLM_VERSION="9.8.7")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(data.stat().st_mode & 0o777, 0o700)
+
     def test_a_bad_checksum_is_refused(self):
         self.release("9.8.7")
         (self.dir / "assets" / "SHA256SUMS").write_text("0" * 64 + "  ezllm_v9.8.7_darwin_arm64.tar.gz\n")

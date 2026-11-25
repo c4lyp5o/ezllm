@@ -37,7 +37,8 @@ flowchart LR
 Without Docker there is no box. You make the same two folders and tell ezllm where they
 are.
 
-Bridges need Linux. On macOS or Windows, run ezllm in a Linux container or VM.
+The steps are for Linux. On Windows, [use WSL](wsl.md). On macOS, run ezllm in a Linux
+container or VM.
 
 ## Later
 

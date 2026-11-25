@@ -12,6 +12,8 @@ cannot run.
 curl -fsSL https://chatgpt.com/codex/install.sh | sh
 ```
 
+If it asks a question at the end, answer it before you go on.
+
 ## 2. Copy
 
 It copies the whole folder. The last line prints the version.

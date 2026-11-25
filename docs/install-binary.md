@@ -288,8 +288,8 @@ macOS Intel programs are not signed. The Apple Silicon one is signed ad hoc, not
 The downloads above use `curl`, so neither system blocks them.
 
 [Subscription bridges](bridge-setup.md) work with the Linux binary. On Windows, use
-[WSL](wsl.md). On macOS (Intel), a Copilot request worked; Claude starts but
-cannot read its login. The bridge pages have no macOS steps.
+[WSL](wsl.md). On macOS (Intel), one Claude and one Copilot request worked while
+someone was logged in to the Mac. The bridge pages have no macOS steps.
 
 ### Settings
 

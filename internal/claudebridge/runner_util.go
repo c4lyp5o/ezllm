@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -80,6 +81,27 @@ func (r *Runner) childEnv(tmp string, maxTokens int) []string {
 		env = append(env, "CLAUDE_CODE_MAX_OUTPUT_TOKENS="+strconv.Itoa(maxTokens))
 	}
 	return env
+}
+
+// linkKeychains makes the operator's macOS keychains visible in the per-request
+// HOME. The CLI keeps its login there on a Mac, and macOS finds keychains through
+// HOME (measured: without the link every run answers "Not logged in"). Only this
+// folder is linked, so the rest of the home stays out of reach. Other systems
+// keep the login in ConfigDir and need nothing. RemoveAll drops the link without
+// following it.
+func linkKeychains(goos, home, tmp string) error {
+	if goos != "darwin" || home == "" {
+		return nil
+	}
+	keychains := filepath.Join(home, "Library", "Keychains")
+	if _, err := os.Stat(keychains); err != nil {
+		return nil // no keychain: the CLI reports the missing login itself
+	}
+	library := filepath.Join(tmp, "Library")
+	if err := os.Mkdir(library, 0o700); err != nil {
+		return err
+	}
+	return os.Symlink(keychains, filepath.Join(library, "Keychains"))
 }
 
 // childEnvPass are inherited verbatim: process identity (the CLI's login check

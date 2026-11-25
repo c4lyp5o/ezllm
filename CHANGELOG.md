@@ -18,6 +18,10 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 - **Antigravity reasoning level.** The model sets it (`gemini-4-hydrogen-high`). The
   bridge ignores a client's `reasoning_effort`; a level that differed from the model's
   used to fail the turn.
+- **Binary install guide.** The README installs the Linux and macOS binary in one paste,
+  and `docs/install-binary.md` is steps first, for Linux, macOS and Windows. On Windows,
+  `Stop-ScheduledTask` left ezllm running and the task stopped after three days; both are
+  fixed in the steps.
 - **ez standard CI.** `publish.yml` replaces `docker-publish.yml` and `release.yml`:
   pushes to `development` publish `:development` and `:sha-<commit>`, `master`
   publishes `:latest`, `:X.Y.Z` and `:sha-<commit>`, and a tag publishes `:X.Y.Z` and

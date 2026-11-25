@@ -55,15 +55,16 @@ Service surfaces are never translated and have no probe column: a model's **chat
 never makes it "unsupported" on a service endpoint (only `/admin/services/{surface}/test` proves
 one).
 
-**Surface-pin refusal (every inference POST, JSON and multipart).** A pin names one surface —
-a chat wire or a service surface (`embeddings`, `rerank`, …) — and admits only that endpoint. If
-the resolved model carries a `proto_pin` and the client called a different surface, the request is refused **before any upstream dial** with
+**Surface pins (every inference POST, JSON and multipart).** A pin names one surface: a
+chat-family wire (`chat`, `anthropic`, `responses`) or a service surface (`embeddings`,
+`rerank`, …). With translation on (the default), a chat-family call to a model pinned to
+another chat-family wire is translated to that wire; if a probe disproved the pinned wire, it
+is refused with `400 wire_unsupported`. In every other case, a call on a surface other than the
+pinned one is refused **before any upstream dial** with
 `400 {"error":{"type":"pinned_surface","message":"...","pinned":"chat","requested_surface":"anthropic","code":400}}`.
-The pin never reroutes the request — native paths pass bodies through untranslated, so the
-honest answer is a refusal that names the endpoint to use instead. (Translated hops — the
-probe-gated anthropic→chat exception, `docs/translation-runbook.md` — do not bypass pins
-either.) Lookup errors fail closed (refuse), and combo
-hops pinned to another surface refuse the whole request rather than silently skipping.
+The cases are a service endpoint and a chat-family pin (or the reverse), translation off, and a
+pin that conflicts with `translation.responses_models`. Lookup errors fail closed (refuse), and
+a refused combo hop refuses the whole request rather than silently skipping.
 
 **Oversized body (every inference POST, including `/v1/audio/transcriptions`).** A request body
 larger than `max_body_mib` (default 32) is refused **before any upstream dial** with
@@ -493,7 +494,7 @@ per account: a second `POST` while one runs → `409` with the stop instruction.
    "source":"probe","note":""} ]
 ```
 `null` = untested (the UI must render three states: ✓ / ✗ / ?). `pin` is `""` (auto) or the
-pinned surface; enforced by the router (see Surface-pin refusal above). `source` = who
+pinned surface; enforced by the router (see Surface pins above). `source` = who
 last wrote the verdicts (`probe` / `curated` / absent for a legacy row); `note` is the
 operator's reason for a curation.
 

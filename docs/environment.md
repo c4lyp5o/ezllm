@@ -31,7 +31,7 @@ and data location.
    first dashboard password, at least 12 characters. Skip it and the first boot
    prints a one-time setup code to `docker logs ezllm` instead.
 3. **The subscription bridges stay off** (`EZLLM_CLAUDE_BRIDGE`,
-   `EZLLM_CODEX_BRIDGE`, `EZLLM_AGY_BRIDGE`) unless you have the vendor CLI
+   `EZLLM_CODEX_BRIDGE`, `EZLLM_COPILOT_BRIDGE`, `EZLLM_AGY_BRIDGE`) unless you have the vendor CLI
    and a subscription login on the host; turned on without them, the boot
    fails. To use one, follow [Turn on a bridge](bridge-setup.md).
 

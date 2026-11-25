@@ -14,7 +14,7 @@ import (
 // RequiredFlags are asserted against `agy --help` at boot: a release that drops
 // one would otherwise fail every request.
 var RequiredFlags = []string{
-	"--print", "--output-format", "--input-format", "--model", "--effort", "--disable-slash-commands",
+	"--print", "--output-format", "--input-format", "--model", "--disable-slash-commands",
 }
 
 // TokenPath is where agy keeps the subscription login when no keyring is

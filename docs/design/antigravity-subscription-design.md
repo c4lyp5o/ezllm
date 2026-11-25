@@ -48,7 +48,7 @@ Findings that shape the build:
    layer gives Anthropic and Responses clients the same account.
 2. **One headless process per request**:
    `agy --print= --output-format stream-json --input-format stream-json
-   --disable-slash-commands --model M [--effort E]`, prompt as one
+   --disable-slash-commands --model M`, prompt as one
    `{"event":"user",…}` line on stdin (never argv: `ps`, `ARG_MAX`), stdin
    closed so the session ends after the turn. `text_delta`s of
    `agent_response` steps stream as content; the `result` envelope is

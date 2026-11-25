@@ -104,6 +104,9 @@ return `400 vision_unsupported`, and advertised model-limit refusals return
 See [the Copilot runbook](copilot-bridge-runbook.md) for tested limits and
 behavior. Antigravity continues to reject image input.
 
+Antigravity ignores `reasoning_effort`: the model sets the level
+(`gemini-4-hydrogen-high`).
+
 AGY tool-adapter conversation caching is on by default wherever the CLI
 supports it (`EZLLM_AGY_BRIDGE_CACHE=off` disables it). Clients continue
 sending full history, including assistant call IDs and complete tool-result

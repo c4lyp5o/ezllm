@@ -24,6 +24,11 @@ reads it at boot and serves it at `/v1/models`. Measured on a personal plan
 (1.4.7): `gemini-3.8-flash-high|medium|low`, `claude-sonnet-4-6`,
 `claude-opus-4-6-thinking`, `gpt-oss-120b-medium`.
 
+The model sets the reasoning level: choose `gemini-4-hydrogen-high` for high. The bridge
+ignores a client's `reasoning_effort`, because `agy` refuses a turn whose `--effort`
+differs from the level in the model name, and any `--effort` on a Claude model
+(measured on 1.5.13 and 1.5.16).
+
 ## CLI releases
 
 `agy` updates itself in place in the background, even from `--version`. Keep the version
@@ -191,7 +196,7 @@ groups. Plain text-only requests stay fresh. Clients continue sending full
 history; they provide no native conversation ID.
 
 A match requires unchanged prior messages, the exact previous assistant reply,
-and the same model, effort and tool policy. Only the new user message or matching
+and the same model and tool policy. Only the new user message or matching
 result group is sent. Caller tool IDs remain stable, and the caller executes the
 tools. Edited histories, changed IDs/tools/model/policy, partial results and
 identical stateless retries cannot reuse unrelated context.

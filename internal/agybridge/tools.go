@@ -185,7 +185,7 @@ func parseAdaptedRequest(cr chatRequest) (Request, error) {
 	a.Schema = a.outputSchema()
 	transcriptJSON, _ := json.Marshal(transcript)
 	toolsJSON, _ := json.Marshal(a.Tools)
-	req := Request{Model: cr.Model, Stream: cr.Stream, Effort: normalizeEffort(cr.ReasoningEffort), Adapter: a}
+	req := Request{Model: cr.Model, Stream: cr.Stream, Adapter: a}
 	if cr.StreamOptions != nil {
 		req.IncludeUsage = cr.StreamOptions.IncludeUsage
 	}

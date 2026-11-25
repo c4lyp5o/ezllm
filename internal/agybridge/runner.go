@@ -95,12 +95,8 @@ func (r *Runner) slots() *bridgeutil.Slots {
 // that flag (measured, 1.4.7: exit 2, "-p took --output-format as its
 // prompt"). The prompt arrives on stdin, so the value is explicitly empty.
 func argv(req Request) []string {
-	a := []string{"--print=", "--output-format", "stream-json", "--input-format", "stream-json",
+	return []string{"--print=", "--output-format", "stream-json", "--input-format", "stream-json",
 		"--disable-slash-commands", "--model", req.Model}
-	if req.Effort != "" {
-		a = append(a, "--effort", req.Effort)
-	}
-	return a
 }
 
 // frame is one stdout NDJSON line.

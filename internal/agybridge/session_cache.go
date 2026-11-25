@@ -53,7 +53,7 @@ func cacheState(req Request) *cacheRequest {
 	if json.Unmarshal([]byte(req.Prompt[i+len(transcriptMarker):]), &history) != nil || len(history) == 0 {
 		return nil
 	}
-	config, _ := json.Marshal(map[string]any{"model": req.Model, "effort": req.Effort, "tools": req.Adapter.Tools, "choice": req.Adapter.Choice, "parallel": req.Adapter.Parallel})
+	config, _ := json.Marshal(map[string]any{"model": req.Model, "tools": req.Adapter.Tools, "choice": req.Adapter.Choice, "parallel": req.Adapter.Parallel})
 	// Parameter objects may arrive with a different JSON key order. Compare
 	// their semantic structure without rounding numeric schema values.
 	var value any

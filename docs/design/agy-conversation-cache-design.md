@@ -70,7 +70,7 @@ unaffected. Full sanitized counters and HTTP/native reconciliation are in
 ## Matching and tool ownership
 
 `session_cache.go` `cacheState` uses the adapter's normalized transcript and a
-semantic hash of model, effort, tools, choice and parallel-call policy. JSON
+semantic hash of model, tools, choice and parallel-call policy. JSON
 object key order in tool schemas is normalized without rounding numeric schema
 values. System instructions remain part of the exact historical prefix.
 Transport-only cache markers already disappear in the adapter's text parsing;

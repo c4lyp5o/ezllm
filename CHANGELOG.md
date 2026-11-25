@@ -15,6 +15,9 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   A temporary failure after the switch is tested once more before it is undone.
 - **Antigravity plan limits.** The provider card and Quota dialog show how much of each
   weekly limit is used, per group of models, read with `agy -p /usage` (no quota spent).
+- **Antigravity reasoning level.** The model sets it (`gemini-4-hydrogen-high`). The
+  bridge ignores a client's `reasoning_effort`; a level that differed from the model's
+  used to fail the turn.
 - **ez standard CI.** `publish.yml` replaces `docker-publish.yml` and `release.yml`:
   pushes to `development` publish `:development` and `:sha-<commit>`, `master`
   publishes `:latest`, `:X.Y.Z` and `:sha-<commit>`, and a tag publishes `:X.Y.Z` and

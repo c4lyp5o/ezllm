@@ -15,6 +15,8 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   A temporary failure after the switch is tested once more before it is undone.
 - **Antigravity plan limits.** The provider card and Quota dialog show how much of each
   weekly limit is used, per group of models, read with `agy -p /usage` (no quota spent).
+- **Bridges on Windows.** A guide for running ezllm in WSL (docs/wsl.md). The macOS script
+  now makes its data folder private, and the macOS update steps fetch the script again.
 - **Antigravity reasoning level.** The model sets it (`gemini-4-hydrogen-high`). The
   bridge ignores a client's `reasoning_effort`; a level that differed from the model's
   used to fail the turn.

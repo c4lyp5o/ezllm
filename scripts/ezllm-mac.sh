@@ -99,6 +99,7 @@ install_bin() {
 
     printf 'ezllm %s · darwin/%s · %s\n' "$VERSION" "$arch" "$PREFIX"
     mkdir -p "$PREFIX/bin" "$PREFIX/data" "$LOGS"
+    chmod 700 "$PREFIX/data"   # the ledger is 0644; other users on the Mac stay out
     TMP=$(mktemp -d "${TMPDIR:-/tmp}/ezllm.XXXXXX")
     trap 'rm -rf "${TMP:-}"' EXIT
     local tmp="$TMP"

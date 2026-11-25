@@ -118,7 +118,7 @@ bash ezllm-mac.sh install && bash ezllm-mac.sh start
 ```
 
 You should see `"status":"ok"`. macOS now starts ezllm each time you log in, and stops it
-when you log out.
+when you log out. ezllm does not answer while the Mac sleeps.
 
 ### 2. Sign in on macOS
 
@@ -141,8 +141,9 @@ copy holds your master key, so keep it private.
 ```sh
 cd ~/ezllm
 bash ezllm-mac.sh stop
-cp -a ~/ezllm ~/ezllm-backup-$(date +%Y%m%d-%H%M)
-bash ezllm-mac.sh install && bash ezllm-mac.sh start
+cp -a ~/ezllm ~/ezllm-backup-$(date +%Y%m%d-%H%M) &&
+  curl -fsSLO https://raw.githubusercontent.com/c4lyp5o/ezllm/master/scripts/ezllm-mac.sh &&
+  bash ezllm-mac.sh install && bash ezllm-mac.sh start
 ```
 
 You should see the new version. If not, [go back](#go-back-to-the-old-version).
@@ -261,7 +262,9 @@ together. Anything that happened since the copy is lost.
 | `Windows protected your PC` | Run `Unblock-File "$HOME\ezllm\bin\ezllm.exe"` |
 | `The process cannot access the file` (Windows) | ezllm is still running. Run `Stop-Process -Name ezllm`, then try again |
 | `StartService FAILED 1053` (Windows) | ezllm is not a Windows service. [Use Task Scheduler](#keep-it-running-on-windows) |
-| A log line that names a bridge (macOS, Windows) | Turn that bridge `off`. Codex and Antigravity run on Linux only |
+| A log line that names a bridge (macOS, Windows) | Turn that bridge `off`. Codex and Antigravity run on Linux only. On Windows, [use WSL](wsl.md) |
+| `Install Command Line Developer Tools` opens (macOS) | A bridge CLI asked for Apple's tools. ezllm does not need them: press **Cancel** |
+| ezllm stops answering after a while (macOS) | The Mac went to sleep. Wake it, or keep it awake in **System Settings** |
 
 The log says why ezllm did not start.
 
@@ -280,12 +283,13 @@ The log says why ezllm did not start.
 | Windows x86-64 | `ezllm_v<version>_windows_amd64.zip` |
 
 Each has the program, `config.example.yaml` and `README.md`. `SHA256SUMS` covers them all.
-There is no 32-bit build. Windows on ARM runs the x86-64 one. The Windows program is not
-signed, and the macOS one is signed ad hoc, not notarized. The downloads above use `curl`,
-so neither system blocks them.
+There is no 32-bit build. Windows on ARM runs the x86-64 one. The Windows and
+macOS Intel programs are not signed. The Apple Silicon one is signed ad hoc, not notarized.
+The downloads above use `curl`, so neither system blocks them.
 
-[Subscription bridges](bridge-setup.md) work with the Linux binary. Claude and Copilot are
-untested on macOS and Windows.
+[Subscription bridges](bridge-setup.md) work with the Linux binary. On Windows, use
+[WSL](wsl.md). On macOS (Intel), a Copilot request worked; Claude starts but
+cannot read its login. The bridge pages have no macOS steps.
 
 ### Settings
 

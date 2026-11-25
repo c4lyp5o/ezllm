@@ -177,8 +177,8 @@ If it fails:
 
 A bridge sends requests through a vendor's own CLI, signed in to your plan. Each one is
 optional and off until you turn it on. Finish the dashboard setup first, then follow the
-page for your plan. You need Linux; each page covers Docker Compose, `docker run` and the
-binary.
+page for your plan. You need Linux (on Windows, [use WSL](docs/wsl.md)); each page covers
+Docker Compose, `docker run` and the binary.
 
 | Plan | Turn it on | Reference | Notes |
 |---|---|---|---|
@@ -361,6 +361,7 @@ example [v2.2.0](https://github.com/c4lyp5o/ezllm/tree/v2.2.0), or see
 | Document | Contents |
 |---|---|
 | [docs/install-binary.md](docs/install-binary.md) | Installing the released binary on Linux, macOS or Windows: start, service, update, go back |
+| [docs/wsl.md](docs/wsl.md) | Bridges on Windows: ezllm in WSL |
 | [docs/API.md](docs/API.md) | Public and admin API reference |
 | [docs/environment.md](docs/environment.md) | Every environment variable and its default |
 | [docs/logging.md](docs/logging.md) | Logs: levels, format, where they go |

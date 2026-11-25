@@ -51,12 +51,14 @@ The dashboard renders the marker as a `⇄ translated` tag under the model on th
 recent-calls table, the requests explorer, and the live feed; `/admin/requests`
 and `/admin/overview` rows expose it as `translated: true`.
 
-**Pins still constrain the dispatch wire.** A translated combo hop dials
-OpenAI, so an `openai` pin is satisfied; an `anthropic` or `responses` pin
-still refuses the whole combo. Native/direct pin checks are unchanged, and
-the route retains the client's Anthropic surface for attribution. With the
-knob OFF, proven-incompatible hops are dropped before checking their pins,
-while an untested wrong-surface pinned hop still returns `400 pinned_surface`.
+**A pin names the wire.** With the knob on, a call on another chat-family API
+(`chat`, `anthropic`, `responses`) is translated to the pinned one, and the row keeps
+the client's surface. A pin to a wire the probe disproved returns `400
+wire_unsupported`. A pin between these and a service surface (`embeddings`, …) returns
+`400 pinned_surface`, and so does a pin that conflicts with
+`translation.responses_models`. With the knob OFF, proven-incompatible hops are dropped
+before checking their pins, while an untested wrong-surface pinned hop returns `400
+pinned_surface`.
 
 ## Curated capability verdicts (`PUT /admin/accounts/{id}/model-protocol`)
 

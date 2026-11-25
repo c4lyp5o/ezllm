@@ -124,7 +124,7 @@ ezllm-old`. If not,
 
 ### With the ezllm binary
 
-This is for the [systemd user service](../install-binary.md#linux--systemd-user-unit)
+This is for the [systemd user service](../install-binary.md#keep-it-running-on-linux)
 with ezllm in `~/ezllm`. If yours is elsewhere, change `%h/ezllm` (`%h` is your home
 folder). Paste it all:
 

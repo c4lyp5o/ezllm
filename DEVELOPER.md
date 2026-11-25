@@ -183,7 +183,7 @@ the release then refuses to open: try it on its own data directory, or back up f
 5. **Verify what shipped, from outside.** The release lists five assets plus
    `SHA256SUMS`, and the running deployment reports the new version at
    `/healthz`. A schema bump additionally needs the rehearsal in
-   `docs/install-binary.md` §7 (boot the new binary against a COPY of the data
+   `docs/install-binary.md#try-it-without-keeping-anything` (boot the new binary against a COPY of the data
    directory, compare counts and `schema_version`).
 
 ## Commit conventions

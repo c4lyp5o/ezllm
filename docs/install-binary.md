@@ -1,310 +1,352 @@
-# Running the released binary
+# Install the ezllm binary
 
-`publish.yml` publishes a standalone binary for every `v*` tag. This is the
-path for a host without Docker and without a Go toolchain: no libc, no
-runtime, no package manager. The dashboard SPA is embedded in the binary.
+ezllm is one file. You need no Docker, no Go and nothing else installed. Run every
+command as **yourself, not root**.
 
-For the container path see the README; for every environment variable and its
-default see [environment.md](environment.md). The Windows, Linux and macOS
-service shapes below all run the same binary — only the supervisor differs.
+Pick your system:
 
-## What a release contains
+- **[Linux](#linux)**
+- **[macOS](#macos)**
+- **[Windows](#windows)**
 
-| Platform | Asset | Archive | Binary |
-|---|---|---|---|
-| Linux x86-64 | `ezllm_v<ver>_linux_amd64.tar.gz` | tar.gz | `ezllm` |
-| Linux arm64 | `ezllm_v<ver>_linux_arm64.tar.gz` | tar.gz | `ezllm` |
-| macOS Apple Silicon | `ezllm_v<ver>_darwin_arm64.tar.gz` | tar.gz | `ezllm` |
-| macOS Intel | `ezllm_v<ver>_darwin_amd64.tar.gz` | tar.gz | `ezllm` |
-| Windows x86-64 | `ezllm_v<ver>_windows_amd64.zip` | zip | `ezllm.exe` |
+Everything goes in one folder, `ezllm` in your home folder: `bin` is the program, `data`
+is your settings, keys and history, and `config.yaml` is the configuration.
 
-Each archive holds the binary, `config.example.yaml` and `README.md`.
-`SHA256SUMS` covers every archive. Sizes are 17–18.5 MB depending on platform.
+## Linux
 
-The build is `CGO_ENABLED=0` because SQLite is pure Go (`modernc.org/sqlite`),
-so the binary has no shared-library dependencies at all: it runs on glibc and
-musl distributions alike, and on Windows with no redistributable installed.
+### 1. Install on Linux
 
-### What differs per platform
+This gets the latest release, checks it and unpacks it. It keeps a `config.yaml` you
+already have.
 
-| | Linux | macOS | Windows |
-|---|---|---|---|
-| Service manager | systemd (user or system unit) | launchd agent | Task Scheduler |
-| Installer script | — | `scripts/ezllm-mac.sh` | — |
-| Log target | journald / stdout | file via launchd | file via redirection |
-| Subscription bridges | [supported](bridge-setup.md) | not supported | not supported |
-| Code signing | not required | arm64 needs ≥ ad-hoc | not required |
-
-Subscription bridges work with the Linux binary: [Turn on a bridge](bridge-setup.md).
-Codex and Antigravity refuse to start on native macOS or Windows; Claude and Copilot are
-untested there.
-
-## 1. Install
-
-### Linux and macOS
-
-```bash
-VER=2.2.0                    # or any tag from the releases page
-OS=$(uname -s | tr 'A-Z' 'a-z')
-case "$(uname -m)" in
-  x86_64) ARCH=amd64 ;;
-  arm64|aarch64) ARCH=arm64 ;;
-  *) echo "unsupported CPU: $(uname -m)" >&2; exit 1 ;;
-esac
-BASE=https://github.com/c4lyp5o/ezllm/releases/download/v$VER
-NAME=ezllm_v${VER}_${OS}_${ARCH}
-
-curl -fsSLO "$BASE/$NAME.tar.gz"
-curl -fsSLO "$BASE/SHA256SUMS"
-# SHA256SUMS lists every platform, so verify only the archive you downloaded.
-grep " $NAME.tar.gz\$" SHA256SUMS | sha256sum -c -          # Linux
-grep " $NAME.tar.gz\$" SHA256SUMS | shasum -a 256 -c -     # macOS
-tar xzf "$NAME.tar.gz"
-
-mkdir -p ~/ezllm/bin ~/ezllm/data ~/ezllm/logs
-install -m 0755 "$NAME/ezllm" ~/ezllm/bin/ezllm
-cp "$NAME/config.example.yaml" ~/ezllm/config.yaml      # required, see below
+```sh
+VER=$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/c4lyp5o/ezllm/releases/latest | sed 's|.*/v||')
+ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
+NAME=ezllm_v${VER}_linux_$ARCH
+URL=https://github.com/c4lyp5o/ezllm/releases/download/v$VER
+mkdir -p ~/ezllm/bin ~/ezllm/data && chmod 700 ~/ezllm/data && cd ~/ezllm
+curl -fsSLO "$URL/$NAME.tar.gz" && curl -fsSLO "$URL/SHA256SUMS" &&
+  grep " $NAME.tar.gz\$" SHA256SUMS | sha256sum -c - &&
+  tar xzf "$NAME.tar.gz" &&
+  install -m 0755 "$NAME/ezllm" bin/ezllm &&
+  { [ -e config.yaml ] || cp "$NAME/config.example.yaml" config.yaml; } &&
+  rm -r "$NAME" "$NAME.tar.gz" SHA256SUMS
 ```
 
-`uname -m` reports `aarch64` on Linux arm64 and `arm64` on macOS; both take the
-`arm64` asset. On a Raspberry Pi or an ARM server use `linux_arm64`; there is no
-32-bit or armv7 build.
+You should see a line ending in `OK`.
 
-Do not run the binary as root. It binds port 20129 (above 1024), so no
-capability is needed.
+### 2. Start on Linux
 
-### Windows (PowerShell)
-
-```powershell
-$Ver  = "2.2.0"
-$Name = "ezllm_v${Ver}_windows_amd64"
-$Base = "https://github.com/c4lyp5o/ezllm/releases/download/v$Ver"
-
-$Dir = "C:\ezllm"
-New-Item -ItemType Directory -Force -Path "$Dir\bin", "$Dir\data", "$Dir\logs" | Out-Null
-
-Invoke-WebRequest "$Base/$Name.zip"   -OutFile "$Name.zip"
-Invoke-WebRequest "$Base/SHA256SUMS"  -OutFile "SHA256SUMS"
-
-# SHA256SUMS lists every platform; compare only the archive you downloaded.
-$want = (Select-String -Path .\SHA256SUMS -Pattern " $Name\.zip$").Line.Split()[0]
-$got  = (Get-FileHash ".\$Name.zip" -Algorithm SHA256).Hash.ToLower()
-if ($got -ne $want) { throw "checksum mismatch: expected $want, got $got" }
-
-Expand-Archive ".\$Name.zip" -DestinationPath . -Force
-Copy-Item ".\$Name\ezllm.exe" "$Dir\bin\ezllm.exe"
-Copy-Item ".\$Name\config.example.yaml" "$Dir\config.yaml"
-# Downloaded from the internet: this removes the mark-of-the-web so the
-# binary runs without a SmartScreen prompt.
-Unblock-File "$Dir\bin\ezllm.exe"
-```
-
-Windows has no `arm64` asset: it is x86-64 (PE32+ console) only, which also runs
-under emulation on ARM64 Windows.
-
-The executable carries **no Authenticode signature** (the release pipeline has no
-signing key), which is what triggers SmartScreen on a browser download;
-`Unblock-File` clears the mark-of-the-web. Execution does not require a
-signature on Windows the way it does on Apple Silicon.
-
-## 2. `config.yaml` is mandatory
-
-There is no config-less mode: `config.Load` reads the file and fails boot on a
-missing one.
-
-```
-ezllm: config: read config.yaml: open config.yaml: no such file or directory
-```
-
-Two flags, both optional:
-
-- **`-config <path>`** (default `config.yaml`) — resolved against the **working
-  directory**, not against the binary, so either run from the install directory
-  or pass an absolute path (`-config /home/me/ezllm/config.yaml`,
-  `-config C:\ezllm\config.yaml`).
-- **`-addr <host:port>`** — overrides `EZLLM_ADDR`, which overrides
-  `config.listen`.
-
-On Windows a YAML value with backslashes needs quoting or forward slashes
-(`data_dir: "C:/ezllm/data"`); the shipped example uses a relative `./data`,
-which resolves against the working directory the launcher sets.
-
-The shipped `config.example.yaml` is bootstrap metadata only — provider
-credentials live in SQLite and are added from the dashboard.
-
-**It seeds whatever `providers:` contains.** Every entry is upserted into SQLite
-at boot, *enabled and with no key*, so an uncommented example appears in a fresh
-instance's provider list and no model is exposed until a key is added — the
-account is cosmetic until then, not a cost or security problem. That is also why
-the boot log warns `model sync failed at boot … err="store: not found"` once per
-entry: the account exists, no credential does, so there is no catalog to sync.
-
-The shipped example has both entries commented out, so a fresh instance starts empty.
-An empty map is valid, and a config entry you delete later does **not** delete the
-account — remove those in the dashboard.
-
-The two settings a new install usually changes:
-
-```yaml
-listen: "127.0.0.1:20129"     # loopback; 0.0.0.0:20129 to reach it from the LAN
-data_dir: ./data              # relative to the working directory
-```
-
-## 3. What it writes
-
-| Path | What | Notes |
-|---|---|---|
-| `<data_dir>/ezllm.sqlite` (+ `-wal`, `-shm`) | ledger, accounts, combos, tokens | WAL mode; copy all three sidecars together, never a bare `cp` |
-| `EZLLM_MASTER_KEY_FILE` | AES key for provider keys at rest | default `<data_dir>/ezllm-master.key`, created on first boot |
-| stdout | the whole log | one line per record; `EZLLM_LOG_FORMAT=json` for a collector |
-
-**Always set `EZLLM_MASTER_KEY_FILE` explicitly** and keep it beside the
-database.
-Losing the key is unrecoverable: [master-key-runbook.md](master-key-runbook.md).
-On Windows the key file's 0600 mode is not meaningful — put it in a directory
-whose ACL limits it to the account that runs the gateway.
-
-## 4. First boot and the dashboard
-
-Linux / macOS:
-
-```bash
+```sh
 cd ~/ezllm
-EZLLM_ADDR=127.0.0.1:20129 \
-EZLLM_DATA_DIR=$PWD/data \
-EZLLM_MASTER_KEY_FILE=$PWD/data/ezllm-master.key \
-./bin/ezllm -config config.yaml
+EZLLM_MASTER_KEY_FILE=$HOME/ezllm/data/ezllm-master.key ./bin/ezllm -config config.yaml
 ```
 
-Windows (PowerShell):
+You should see a `setup code`. Open [http://127.0.0.1:20129](http://127.0.0.1:20129),
+enter the code and choose a password.
 
-```powershell
-cd C:\ezllm
-$env:EZLLM_ADDR            = "127.0.0.1:20129"
-$env:EZLLM_DATA_DIR        = "C:\ezllm\data"
-$env:EZLLM_MASTER_KEY_FILE = "C:\ezllm\data\ezllm-master.key"
-.\bin\ezllm.exe -config C:\ezllm\config.yaml
-```
+Press `Ctrl-C` to stop it. To leave it on, do the next step.
 
-The boot banner ends with `dashboard setup pending: open the dashboard and enter
-the setup code above` and prints a one-time setup code. `http://127.0.0.1:20129`
-shows only a set-password page until that code is entered. The code is re-minted
-on every restart until setup completes. To skip the page, set
-`EZLLM_DASHBOARD_PASSWORD` (≥12 characters) or `EZLLM_DASHBOARD_PASSWORD_FILE`
-before the first boot.
+### Keep it running on Linux
 
-On a fresh instance the boot log also carries one warning per provider listed
-in `config.example.yaml`:
+Stop the one you started by hand first. This makes ezllm a service that starts by itself
+and comes back after a crash:
 
-```
-WARN  model sync failed at boot (routing still works; sync later via admin) provider=opencode err="store: not found"
-```
-
-That is expected: the bootstrap config names providers, but no account or key
-exists yet, so there is no catalog to sync. It disappears once you add a key in
-the dashboard.
-
-Verify (any OS; `curl.exe` on Windows):
-
-```bash
-curl -s localhost:20129/healthz                      # {"status":"ok","version":"2.2.0"}
-curl -s -o /dev/null -w '%{http_code}\n' localhost:20129/v1/models   # 401 without a token
-```
-
-## 5. Throwaway instance (someone else's machine, or a scratch test)
-
-Do not leave a gateway with your provider keys on a borrowed machine. Run it in
-the foreground against a throwaway data directory and delete the directory
-afterwards.
-
-Linux / macOS:
-
-```bash
-D=$(mktemp -d)
-EZLLM_DATA_DIR=$D/data EZLLM_MASTER_KEY_FILE=$D/master.key \
-EZLLM_ADDR=127.0.0.1:20188 EZLLM_DASHBOARD_PASSWORD='<12+ chars>' \
-  ./bin/ezllm -config config.yaml        # Ctrl-C to stop
-rm -rf "$D"                              # removes the ledger AND the key
-```
-
-Windows (PowerShell):
-
-```powershell
-$d = Join-Path $env:TEMP ("ezllm-" + [guid]::NewGuid().ToString("N").Substring(0,8))
-$env:EZLLM_DATA_DIR        = "$d\data"
-$env:EZLLM_MASTER_KEY_FILE = "$d\master.key"
-$env:EZLLM_ADDR            = "127.0.0.1:20188"
-$env:EZLLM_DASHBOARD_PASSWORD = "<12+ chars>"
-.\bin\ezllm.exe -config C:\ezllm\config.yaml    # Ctrl-C to stop
-Remove-Item -Recurse -Force $d                  # removes the ledger AND the key
-```
-
-Nothing outside the temp directory is touched. A scratch instance must never
-point at a production data directory or the production master key.
-
-## 6. Run it as a service
-
-### Linux — systemd user unit
-
-`~/.config/systemd/user/ezllm.service`:
-
-```ini
+```sh
+mkdir -p ~/.config/systemd/user
+cat > ~/.config/systemd/user/ezllm.service <<'UNIT'
 [Unit]
 Description=ezllm gateway
-After=network-online.target
 
 [Service]
-Type=simple
 WorkingDirectory=%h/ezllm
 ExecStart=%h/ezllm/bin/ezllm -config %h/ezllm/config.yaml
-Environment=EZLLM_ADDR=127.0.0.1:20129
-Environment=EZLLM_DATA_DIR=%h/ezllm/data
 Environment=EZLLM_MASTER_KEY_FILE=%h/ezllm/data/ezllm-master.key
-Environment=EZLLM_USAGE_TZ=Europe/Berlin
 Restart=on-failure
 RestartSec=10
 
 [Install]
 WantedBy=default.target
+UNIT
+systemctl --user daemon-reload
+systemctl --user enable --now ezllm
+sleep 5
+curl -s http://127.0.0.1:20129/healthz
 ```
 
-```bash
-systemctl --user daemon-reload && systemctl --user enable --now ezllm
-systemctl --user status ezllm
-curl -s localhost:20129/healthz
+You should see `"status":"ok"`.
+
+A service of yours stops when you log out. This keeps it on:
+
+```sh
+sudo loginctl enable-linger "$USER"
 ```
 
-Two things that bite a headless box:
+Read the log with `journalctl --user -u ezllm -f`.
 
-- **A user unit stops when the last session ends.** Enable lingering so it
-  survives logout: `sudo loginctl enable-linger "$USER"`.
-- **Logs go to journald, not a file:** `journalctl --user -u ezllm -f` for the
-  live log, `journalctl --user -u ezllm --since -1h` for the last hour.
+### Update on Linux
 
-### Linux — system unit (root-owned install, dedicated user)
+Read [upgrading](upgrading.md) for what changes. Then stop ezllm and copy its folder. The
+copy holds your master key, so keep it private.
 
-For a machine where nobody logs in, install under `/opt` and run as a service
-account. `/etc/systemd/system/ezllm.service`:
+```sh
+systemctl --user stop ezllm
+cp -a ~/ezllm ~/ezllm-backup-$(date +%Y%m%d-%H%M)
+```
 
-```ini
+Do [step 1](#1-install-on-linux) again, then start it:
+
+```sh
+systemctl --user start ezllm
+sleep 5
+curl -s http://127.0.0.1:20129/healthz
+```
+
+You should see the new version. If not, [go back](#go-back-to-the-old-version).
+
+## macOS
+
+### 1. Install on macOS
+
+This gets the install script, then the latest release, and starts it. The script checks
+the download.
+
+```sh
+mkdir -p ~/ezllm && cd ~/ezllm
+curl -fsSLO https://raw.githubusercontent.com/c4lyp5o/ezllm/master/scripts/ezllm-mac.sh
+bash ezllm-mac.sh install && bash ezllm-mac.sh start
+```
+
+You should see `"status":"ok"`. macOS now starts ezllm each time you log in, and stops it
+when you log out.
+
+### 2. Sign in on macOS
+
+Get the setup code:
+
+```sh
+grep "setup code" ~/ezllm/logs/ezllm.log | tail -2
+```
+
+Open [http://127.0.0.1:20129](http://127.0.0.1:20129), enter the code and choose a
+password.
+
+Other commands: `bash ezllm-mac.sh status`, `logs`, `stop`, `restart` and `uninstall`.
+
+### Update on macOS
+
+Read [upgrading](upgrading.md) for what changes. Then stop ezllm and copy its folder. The
+copy holds your master key, so keep it private.
+
+```sh
+cd ~/ezllm
+bash ezllm-mac.sh stop
+cp -a ~/ezllm ~/ezllm-backup-$(date +%Y%m%d-%H%M)
+bash ezllm-mac.sh install && bash ezllm-mac.sh start
+```
+
+You should see the new version. If not, [go back](#go-back-to-the-old-version).
+
+## Windows
+
+You need 64-bit Windows 10 or 11.
+
+### 1. Install on Windows
+
+Open **PowerShell** and paste this. It gets the latest release, checks it and unpacks it.
+It keeps a `config.yaml` you already have.
+
+```powershell
+$Ver = (curl.exe -fsSLI -o NUL -w '%{url_effective}' https://github.com/c4lyp5o/ezllm/releases/latest) -replace '.*/v', ''
+$Name = "ezllm_v${Ver}_windows_amd64"
+$Url = "https://github.com/c4lyp5o/ezllm/releases/download/v$Ver"
+New-Item -ItemType Directory -Force "$HOME\ezllm\bin", "$HOME\ezllm\data", "$HOME\ezllm\logs" | Out-Null
+cd "$HOME\ezllm"
+curl.exe -fsSLO "$Url/$Name.zip"
+curl.exe -fsSLO "$Url/SHA256SUMS"
+$Want = (Select-String -SimpleMatch "$Name.zip" SHA256SUMS).Line.Split()[0]
+if ((Get-FileHash "$Name.zip").Hash -eq $Want) {
+  Expand-Archive "$Name.zip" . -Force
+  if (-not (Test-Path config.yaml)) { Copy-Item "$Name\config.example.yaml" config.yaml }
+  Copy-Item "$Name\ezllm.exe" bin\ezllm.exe -Force
+  if ($?) { "Installed ezllm $Ver" } else { "Not installed. Stop ezllm, then paste this again." }
+  Remove-Item -Recurse $Name, "$Name.zip", SHA256SUMS
+} else { "The checksum does not match. Nothing was installed." }
+```
+
+You should see `Installed ezllm`.
+
+### 2. Start on Windows
+
+```powershell
+cd "$HOME\ezllm"
+$env:EZLLM_MASTER_KEY_FILE = "$HOME\ezllm\data\ezllm-master.key"
+.\bin\ezllm.exe -config config.yaml
+```
+
+You should see a `setup code`. Open [http://127.0.0.1:20129](http://127.0.0.1:20129),
+enter the code and choose a password.
+
+Press `Ctrl-C` to stop it. To leave it on, do the next step.
+
+### Keep it running on Windows
+
+Stop the one you started by hand first. Open **PowerShell as administrator**, signed in as
+the same user, and paste this. It starts ezllm each time you log in.
+
+```powershell
+@'
+@echo off
+cd /d "%USERPROFILE%\ezllm"
+set "EZLLM_MASTER_KEY_FILE=%USERPROFILE%\ezllm\data\ezllm-master.key"
+bin\ezllm.exe -config config.yaml >> logs\ezllm.log 2>&1
+'@ | Set-Content -Encoding ascii "$HOME\ezllm\ezllm-run.cmd"
+$Action = New-ScheduledTaskAction -Execute "$HOME\ezllm\ezllm-run.cmd"
+$Trigger = New-ScheduledTaskTrigger -AtLogOn -User (whoami)
+$Settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+Register-ScheduledTask -TaskName ezllm -Action $Action -Trigger $Trigger -Settings $Settings -Force | Out-Null
+Start-ScheduledTask ezllm
+Start-Sleep 5
+curl.exe -s http://127.0.0.1:20129/healthz
+```
+
+You should see `"status":"ok"`. A black window opens with it. Closing that window stops
+ezllm. So does `Stop-Process -Name ezllm`.
+
+Read the log with `Get-Content "$HOME\ezllm\logs\ezllm.log" -Tail 20 -Wait`.
+
+### Update on Windows
+
+Read [upgrading](upgrading.md) for what changes. Then stop ezllm and copy its folder. The
+copy holds your master key, so keep it private.
+
+```powershell
+Stop-Process -Name ezllm
+Start-Sleep 3
+Copy-Item -Recurse "$HOME\ezllm" "$HOME\ezllm-backup-$(Get-Date -Format yyyyMMdd-HHmm)"
+```
+
+Do [step 1](#1-install-on-windows) again, then start it:
+
+```powershell
+Start-ScheduledTask ezllm
+Start-Sleep 5
+curl.exe -s http://127.0.0.1:20129/healthz
+```
+
+You should see the new version. If not, [go back](#go-back-to-the-old-version).
+
+## Go back to the old version
+
+An old ezllm cannot open data a newer one has changed, so the program and the data go back
+together. Anything that happened since the copy is lost.
+
+1. Stop ezllm: `systemctl --user stop ezllm`, `bash ezllm-mac.sh stop` or
+   `Stop-Process -Name ezllm`.
+2. Rename the `ezllm` folder to `ezllm-new`.
+3. Rename your `ezllm-backup-…` folder to `ezllm`.
+4. Start ezllm: `systemctl --user start ezllm`, `bash ezllm-mac.sh start` or
+   `Start-ScheduledTask ezllm`.
+
+## Not working?
+
+| You see | Do this |
+|---|---|
+| `read config.yaml: open config.yaml` | Start it from the `ezllm` folder |
+| `address already in use`, or `Only one usage of each socket address` | ezllm is already running, or another program has the port. Stop it, or change `listen` in `config.yaml` |
+| No setup code, and the page asks for a password | Setup is already done. Sign in with your password |
+| The service stops when you log out (Linux) | Run `sudo loginctl enable-linger "$USER"` |
+| `Killed: 9` (macOS) | The file was changed or cut short. Install it again |
+| `cannot be opened because the developer cannot be verified` (macOS) | Run `xattr -d com.apple.quarantine ~/ezllm/bin/ezllm` |
+| `Windows protected your PC` | Run `Unblock-File "$HOME\ezllm\bin\ezllm.exe"` |
+| `The process cannot access the file` (Windows) | ezllm is still running. Run `Stop-Process -Name ezllm`, then try again |
+| `StartService FAILED 1053` (Windows) | ezllm is not a Windows service. [Use Task Scheduler](#keep-it-running-on-windows) |
+| A log line that names a bridge (macOS, Windows) | Turn that bridge `off`. Codex and Antigravity run on Linux only |
+
+The log says why ezllm did not start.
+
+---
+
+## Reference
+
+### What a release has
+
+| System | File |
+|---|---|
+| Linux x86-64 | `ezllm_v<version>_linux_amd64.tar.gz` |
+| Linux arm64 | `ezllm_v<version>_linux_arm64.tar.gz` |
+| macOS Apple Silicon | `ezllm_v<version>_darwin_arm64.tar.gz` |
+| macOS Intel | `ezllm_v<version>_darwin_amd64.tar.gz` |
+| Windows x86-64 | `ezllm_v<version>_windows_amd64.zip` |
+
+Each has the program, `config.example.yaml` and `README.md`. `SHA256SUMS` covers them all.
+There is no 32-bit build. Windows on ARM runs the x86-64 one. The Windows program is not
+signed, and the macOS one is signed ad hoc, not notarized. The downloads above use `curl`,
+so neither system blocks them.
+
+[Subscription bridges](bridge-setup.md) work with the Linux binary. Claude and Copilot are
+untested on macOS and Windows.
+
+### Settings
+
+ezllm needs a `config.yaml`. `-config` names it, from the folder you are in. These change
+where ezllm listens and keeps its data:
+
+| What | `config.yaml` | Environment |
+|---|---|---|
+| Address | `listen: "127.0.0.1:20129"` | `EZLLM_ADDR`, or the `-addr` flag |
+| Data folder | `data_dir: ./data` | `EZLLM_DATA_DIR` |
+| Master key | none | `EZLLM_MASTER_KEY_FILE` |
+
+Always set `EZLLM_MASTER_KEY_FILE`, and keep the key with the data. Without it your stored
+provider keys cannot be read ([master key](master-key-runbook.md)). On Windows, use `/`
+in `config.yaml` paths. Every setting: [environment](environment.md).
+
+Each provider you uncomment in `config.yaml` is added at start, without a key. It logs
+`model sync failed at boot` until you add one. Removing it from the file later does not
+remove it from ezllm.
+
+To copy the data while ezllm is running, use an
+[online backup](recovery-runbook.md#verified-databasekey-backup). A plain copy of a running
+database can miss recent changes.
+
+### Reach it from other computers
+
+Set `listen: "0.0.0.0:20129"` in `config.yaml`, restart, and open port 20129 in your
+firewall. Use a long dashboard password: anyone who reaches the port can try to sign in.
+Put a rate limit on `/admin/login` and `/admin/setup` in your
+[reverse proxy](../README.md#configuration).
+
+macOS asks to allow the connection. On Windows, run this as administrator:
+
+```powershell
+New-NetFirewallRule -DisplayName ezllm -Direction Inbound -Protocol TCP -LocalPort 20129 -Action Allow -Profile Private
+```
+
+### A Linux server where nobody logs in
+
+This runs ezllm as its own user, from `/opt/ezllm`. Do [step 1](#1-install-on-linux) first.
+
+```sh
+sudo useradd --system --home /opt/ezllm --shell /usr/sbin/nologin ezllm
+sudo install -d -o ezllm -g ezllm /opt/ezllm /opt/ezllm/bin
+sudo install -d -m 0700 -o ezllm -g ezllm /opt/ezllm/data
+sudo install -m 0755 ~/ezllm/bin/ezllm /opt/ezllm/bin/ezllm
+sudo install -m 0644 ~/ezllm/config.yaml /opt/ezllm/config.yaml
+sudo tee /etc/systemd/system/ezllm.service >/dev/null <<'UNIT'
 [Unit]
 Description=ezllm gateway
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=simple
 User=ezllm
 Group=ezllm
 WorkingDirectory=/opt/ezllm
 ExecStart=/opt/ezllm/bin/ezllm -config /opt/ezllm/config.yaml
-Environment=EZLLM_ADDR=0.0.0.0:20129
-Environment=EZLLM_DATA_DIR=/opt/ezllm/data
 Environment=EZLLM_MASTER_KEY_FILE=/opt/ezllm/data/ezllm-master.key
-Environment=EZLLM_USAGE_TZ=Europe/Berlin
 Restart=on-failure
 RestartSec=10
-# hardening: the binary only needs its own directory
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
@@ -313,173 +355,42 @@ PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
+UNIT
+sudo systemctl daemon-reload
+sudo systemctl enable --now ezllm
+sleep 5
+curl -s http://127.0.0.1:20129/healthz
 ```
 
-```bash
-sudo useradd --system --home /opt/ezllm --shell /usr/sbin/nologin ezllm
-sudo install -d -o ezllm -g ezllm /opt/ezllm/{bin,data,logs}
-# copy the binary + config.yaml into /opt/ezllm, chown to ezllm
-sudo systemctl daemon-reload && sudo systemctl enable --now ezllm
-sudo systemctl status ezllm && journalctl -u ezllm -f
+You should see `"status":"ok"`. Read the log with `sudo journalctl -u ezllm -f`.
+
+### Try it without keeping anything
+
+This runs a second ezllm on another port, in a temporary folder. Press `Ctrl-C` when you
+are done.
+
+```sh
+D=$(mktemp -d)
+EZLLM_ADDR=127.0.0.1:20188 EZLLM_DATA_DIR=$D/data EZLLM_MASTER_KEY_FILE=$D/master.key ~/ezllm/bin/ezllm -config ~/ezllm/config.yaml
 ```
 
-Reaching it from the LAN means binding `0.0.0.0` **and** opening the port:
+Then delete it:
 
-```bash
-sudo ufw allow from 192.168.0.0/16 to any port 20129 proto tcp    # Debian/Ubuntu
-sudo firewall-cmd --permanent --add-port=20129/tcp && sudo firewall-cmd --reload   # Fedora/RHEL
+```sh
+rm -r "$D"
 ```
 
-Keep the dashboard password long. Nothing restricts `/admin` by source address
-out of the box — the same warning applies to the container path in the README:
-put a per-source rate limit on `/admin/login` and `/admin/setup` in front of it.
+To try a new version on your own data first, copy the whole `data` folder while ezllm is
+stopped, and point `EZLLM_DATA_DIR` and `EZLLM_MASTER_KEY_FILE` at the copy. Never run two
+ezllms on the same data.
 
-### macOS — launchd user agent
+### Service notes
 
-`scripts/ezllm-mac.sh` (repo root) does the install, the checksum, the layout
-and the agent:
-
-```bash
-./scripts/ezllm-mac.sh install     # ~/ezllm + ~/Library/LaunchAgents/com.ezllm.gateway.plist
-./scripts/ezllm-mac.sh start       # load and wait for /healthz
-./scripts/ezllm-mac.sh status      # launchd state, health, last log lines
-```
-
-`install` gets the latest release. To choose one, set `EZLLM_VERSION`, for example
-`EZLLM_VERSION=2.2.0`. To update, back up first ([section 7](#7-upgrade-and-roll-back)),
-then `stop`, `install` and `start`.
-
-It also takes `restart`, `logs`, and `uninstall [--purge]`. Override `EZLLM_PREFIX`,
-`EZLLM_ADDR`, `EZLLM_USAGE_TZ` or `EZLLM_LOG_LEVEL` from the environment.
-
-macOS specifics:
-
-- The arm64 build carries an **ad-hoc code signature** (Go's linker adds it), so
-  Apple Silicon executes it without further steps. An unsigned or modified copy
-  is killed instantly (`Killed: 9`); re-sign with `codesign --force --sign - ezllm`.
-- A browser download carries the quarantine bit and Gatekeeper will refuse it:
-  `xattr -d com.apple.quarantine ezllm`, or download with `curl`.
-- Binding `0.0.0.0` triggers the macOS firewall prompt — allow it.
-- A LaunchAgent runs while you are **logged in**, not at boot, and stops on
-  logout. For a headless always-on Mac use auto-login, or convert the plist into
-  a LaunchDaemon in `/Library/LaunchDaemons` (root-owned).
-- A sleeping laptop is an offline gateway.
-
-### Windows — Task Scheduler
-
-`ezllm.exe` is a **console application, not a Windows service**. Do not try
-`New-Service` or `sc create`: the Service Control Manager accepts the
-registration (the service appears, Stopped) and then refuses to start it —
-`[SC] StartService FAILED 1053: The service did not respond to the start or
-control request in a timely fashion` — because a console app never calls
-`StartServiceCtrlDispatcher`. Measured on Windows 11 / Server 2025 build 26300.
-Schedule it instead.
-
-Task Scheduler has no environment block, so launch it through a small wrapper
-that sets the variables — `C:\ezllm\ezllm-run.cmd`:
-
-```bat
-@echo off
-set EZLLM_ADDR=127.0.0.1:20129
-set EZLLM_DATA_DIR=C:\ezllm\data
-set EZLLM_MASTER_KEY_FILE=C:\ezllm\data\ezllm-master.key
-set EZLLM_USAGE_TZ=Europe/Berlin
-cd /d C:\ezllm
-"C:\ezllm\bin\ezllm.exe" -config C:\ezllm\config.yaml >> C:\ezllm\logs\ezllm.log 2>&1
-```
-
-Register it (PowerShell, run as the account that should own the data):
-
-```powershell
-$action  = New-ScheduledTaskAction -Execute 'C:\ezllm\ezllm-run.cmd'
-$trigger = New-ScheduledTaskTrigger -AtLogOn
-Register-ScheduledTask -TaskName ezllm -Action $action -Trigger $trigger `
-  -RunLevel Highest -Force
-Start-ScheduledTask -TaskName ezllm
-```
-
-```powershell
-Get-ScheduledTask ezllm | Get-ScheduledTaskInfo     # last run / last result
-Get-Content C:\ezllm\logs\ezllm.log -Tail 20 -Wait   # live log
-Stop-ScheduledTask ezllm                             # stop
-```
-
-Variants and caveats:
-
-- `-AtStartup` instead of `-AtLogOn` needs stored credentials (`-User` with a
-  password) or `-User "SYSTEM"`. Running as SYSTEM means the data directory is
-  owned by SYSTEM; that is fine for a headless box, awkward on a desktop.
-- Stopping the task terminates the process rather than asking it to shut down.
-  The ledger is SQLite WAL, so the next start recovers cleanly — but prefer
-  `Ctrl-C` in a console window when you can.
-- Reaching it from another machine means binding `0.0.0.0` **and** allowing the
-  port (only on Private networks unless you mean otherwise):
-
-  ```powershell
-  New-NetFirewallRule -DisplayName ezllm -Direction Inbound -Protocol TCP `
-    -LocalPort 20129 -Action Allow -Profile Private
-  ```
-- Windows can be configured to terminate console apps on logoff; the
-  `-AtStartup`/SYSTEM form avoids that entirely.
-- If you genuinely need a real Windows service, wrap the launcher with NSSM or
-  WinSW — that is a third-party component, not part of a release.
-
-## 7. Upgrade and roll back
-
-Take a backup first — a bare `cp` / `Copy-Item` of the SQLite file is not one
-(the WAL and shm sidecars carry committed rows). Use the online backup API
-shipped in the repo:
-
-```bash
-python3 scripts/backup_sqlite.py \
-  --db   ~/ezllm/data/ezllm.sqlite \
-  --key  ~/ezllm/data/ezllm-master.key \
-  --output ~/ezllm-backup-$(date +%Y%m%d)      # directory must not exist
-```
-
-Windows (PowerShell):
-
-```powershell
-python scripts\backup_sqlite.py --db C:\ezllm\data\ezllm.sqlite `
-  --key C:\ezllm\data\ezllm-master.key --output C:\ezllm-backup-20261027
-```
-
-Then stop, replace the binary, start:
-
-```bash
-systemctl --user stop ezllm               # or: ./ezllm-mac.sh stop
-# replace bin/ezllm with the new release binary, keep config.yaml and data/
-systemctl --user start ezllm              # migration runs on boot
-curl -s localhost:20129/healthz           # expect the new version string
-```
-
-```powershell
-Stop-ScheduledTask ezllm
-Copy-Item .\ezllm_v2.2.0_windows_amd64\ezllm.exe C:\ezllm\bin\ezllm.exe -Force
-Start-ScheduledTask ezllm
-curl.exe -s localhost:20129/healthz
-```
-
-What changes between versions: [upgrading](upgrading.md). Schema migrations run at boot and are one-way per release. Roll back with the
-previous binary **and** the backup taken before the upgrade: an old binary
-refuses a newer schema. Rehearse a migration before a production upgrade by
-booting the new binary against a **copy** of the data directory
-(`EZLLM_DATA_DIR=<copy>` on a scratch port) and comparing table counts and
-`schema_version` before and after — see
-[recovery-runbook.md](recovery-runbook.md) for the full procedure.
-
-## Troubleshooting
-
-| Symptom | Platform | Cause |
-|---|---|---|
-| `config: read config.yaml: no such file or directory` | all | run from the install dir, or pass `-config` an absolute path (quote backslash paths) |
-| `/healthz` never answers | all | check the log first: config error, port already bound, or a firewall |
-| `Killed: 9` | macOS arm64 | signature stripped by an edit/copy — `codesign --force --sign - ezllm` |
-| "cannot be opened because the developer cannot be verified" | macOS | quarantine bit — `xattr -d com.apple.quarantine ezllm` |
-| "Windows protected your PC" / SmartScreen | Windows | mark-of-the-web — `Unblock-File .\ezllm.exe` |
-| `[SC] StartService FAILED 1053: The service did not respond…` | Windows | `New-Service`/`sc create` on a console app — the SCM registers it, then cannot start it. Use Task Scheduler |
-| task registered but nothing listens | Windows | wrapper `cd /d` missing, or the task ran as an account that cannot read `config.yaml` |
-| unit dies at logout | Linux | user unit without lingering — `sudo loginctl enable-linger "$USER"` |
-| `bind: permission denied` | Linux | port < 1024; use the default 20129 or run behind a proxy |
-| boot fails naming an unresolvable timezone | all | `EZLLM_USAGE_TZ` must be a real IANA name |
-| boot fails naming a bridge | macOS / Windows | `EZLLM_*_BRIDGE=on` is Linux-only for Codex/Antigravity — keep it `off` |
+- **macOS:** a launch agent runs while you are logged in. For a Mac where nobody logs in,
+  turn the file `~/Library/LaunchAgents/com.ezllm.gateway.plist` into a launch daemon.
+- **macOS:** `EZLLM_VERSION`, `EZLLM_PREFIX`, `EZLLM_ADDR`, `EZLLM_USAGE_TZ` and
+  `EZLLM_LOG_LEVEL` change what `ezllm-mac.sh install` sets up.
+- **Windows:** Task Scheduler ends a task after three days unless told otherwise. The step
+  above turns that limit off.
+- **Windows:** stop ezllm with `Stop-Process -Name ezllm`. `Stop-ScheduledTask` ends only
+  the window around it and leaves ezllm running. The database recovers at the next start.

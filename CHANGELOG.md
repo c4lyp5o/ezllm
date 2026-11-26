@@ -4,6 +4,10 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## Unreleased
 
+- **Rule groups save in one step.** Editing, turning off or deleting a rule group is one
+  transaction, however many models it holds: every rule changes or none does. It was
+  one request per model, so a failure halfway left some rules changed. New `POST
+  /admin/model-rules/batch`.
 - **Explain a route.** **Explain** on a combo shows what a request would do right now,
   hop by hop: tried, skipped and why (turned off, disabled account, missing model, a
   rule, a park, too little context, no tools), translated or native, and whether a

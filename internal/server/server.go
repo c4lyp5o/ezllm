@@ -430,6 +430,7 @@ func (s *Server) routes() {
 
 	s.mux.HandleFunc("GET /admin/model-rules", s.admin(s.handleModelRules))
 	s.mux.HandleFunc("POST /admin/model-rules", s.admin(s.handleModelRules))
+	s.mux.HandleFunc("POST /admin/model-rules/batch", s.admin(s.handleModelRulesBatch))
 	s.mux.HandleFunc("GET /admin/model-rules/{id}", s.admin(s.handleModelRule))
 	s.mux.HandleFunc("PATCH /admin/model-rules/{id}", s.admin(s.handleModelRule))
 	s.mux.HandleFunc("DELETE /admin/model-rules/{id}", s.admin(s.handleModelRule))

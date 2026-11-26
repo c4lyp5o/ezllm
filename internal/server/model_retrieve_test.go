@@ -141,3 +141,57 @@ func TestRouteExplain(t *testing.T) {
 		t.Fatalf("unknown model must carry the error a request would get: %s", resp)
 	}
 }
+
+// A group edit is one transaction: a bad rule anywhere in the batch writes
+// nothing and names the model; a good batch saves and deletes together.
+func TestModelRulesBatch(t *testing.T) {
+	h := newHarness(t, func(http.ResponseWriter, *http.Request) {})
+	acct := seededAccount(t, h)
+	rule := func(model string, extra map[string]any) map[string]any {
+		r := map[string]any{"account_id": acct, "model_id": model, "cap_tokens": 1000, "cap_window": "daily"}
+		for k, v := range extra {
+			r[k] = v
+		}
+		return r
+	}
+	code, resp := jsonDo(t, h, "POST", "/admin/model-rules/batch", "tok-admin", map[string]any{
+		"upsert": []any{rule("a", nil), rule("b", nil), rule("c", map[string]any{"cap_window": "fortnightly"})},
+	})
+	if rules, _ := h.db.ListModelRules(t.Context(), 0); len(rules) != 0 {
+		t.Fatalf("a failed batch wrote %d rules", len(rules))
+	}
+	if code < 400 || !strings.Contains(resp, "c:") {
+		t.Fatalf("bad batch: %d %s", code, resp)
+	}
+	code, resp = jsonDo(t, h, "POST", "/admin/model-rules/batch", "tok-admin", map[string]any{"upsert": []any{rule("a", nil), rule("b", map[string]any{"enabled": false})}})
+	if code != http.StatusOK || !strings.Contains(resp, `"saved":2`) {
+		t.Fatalf("good batch: %d %s", code, resp)
+	}
+	rules, _ := h.db.ListModelRules(t.Context(), 0)
+	if len(rules) != 2 {
+		t.Fatalf("rules = %+v", rules)
+	}
+	var bID int64
+	for _, r := range rules {
+		if r.ModelID == "a" && !r.Enabled {
+			t.Fatal("an omitted enabled must mean enabled")
+		}
+		if r.ModelID == "b" {
+			bID = r.ID
+			if r.Enabled {
+				t.Fatal("enabled:false was not kept")
+			}
+		}
+	}
+	code, resp = jsonDo(t, h, "POST", "/admin/model-rules/batch", "tok-admin", map[string]any{"upsert": []any{rule("a", map[string]any{"cap_tokens": 5})}, "delete": []any{bID}})
+	if code != http.StatusOK || !strings.Contains(resp, `"deleted":1`) {
+		t.Fatalf("mixed batch: %d %s", code, resp)
+	}
+	rules, _ = h.db.ListModelRules(t.Context(), 0)
+	if len(rules) != 1 || rules[0].CapTokens != 5 {
+		t.Fatalf("after mixed batch: %+v", rules)
+	}
+	if code, _ := jsonDo(t, h, "POST", "/admin/model-rules/batch", "tok-admin", map[string]any{}); code != http.StatusBadRequest {
+		t.Fatalf("empty batch: %d", code)
+	}
+}

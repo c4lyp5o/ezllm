@@ -2623,6 +2623,46 @@ func (s *Server) handleModelRules(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleModelRulesBatch applies a group edit in one transaction:
+// {"upsert":[rule, …], "delete":[id, …]}. Each upsert is a full rule row (an
+// omitted `enabled` means enabled, as on create). All or nothing: a failure
+// changes no rule and names the model that failed.
+func (s *Server) handleModelRulesBatch(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Upsert []struct {
+			store.ModelRule
+			Enabled *bool `json:"enabled"`
+		} `json:"upsert"`
+		Delete []int64 `json:"delete"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	if len(body.Upsert)+len(body.Delete) == 0 {
+		writeErr(w, http.StatusBadRequest, "invalid_request_error", "nothing to apply: send upsert and/or delete")
+		return
+	}
+	if len(body.Upsert)+len(body.Delete) > maxRuleBatch {
+		writeErr(w, http.StatusBadRequest, "invalid_request_error", fmt.Sprintf("at most %d rules per batch", maxRuleBatch))
+		return
+	}
+	rules := make([]store.ModelRule, len(body.Upsert))
+	for i, u := range body.Upsert {
+		rules[i] = u.ModelRule
+		rules[i].Enabled = u.Enabled == nil || *u.Enabled
+	}
+	saved, deleted, err := s.db.ApplyModelRules(r.Context(), rules, body.Delete)
+	if err != nil {
+		s.writeStoreErr(w, err)
+		return
+	}
+	s.reloadRules()
+	writeJSON(w, http.StatusOK, map[string]int{"saved": saved, "deleted": deleted})
+}
+
+// maxRuleBatch bounds one group edit (a big provider has a few hundred models).
+const maxRuleBatch = 2000
+
 // handleModelRule serves GET / PATCH / DELETE for one rule by id. DELETE
 // lifts the restriction entirely (no rule = no cap, no window).
 func (s *Server) handleModelRule(w http.ResponseWriter, r *http.Request) {

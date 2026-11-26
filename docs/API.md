@@ -816,6 +816,13 @@ every hop returns `429`, not `502`.
 
 ## Compression profiles
 
+### `POST /admin/model-rules/batch` → `200`
+A group edit in one transaction: `{"upsert":[rule, …], "delete":[id, …]}` → `{"saved":N,"deleted":M}`.
+Each upsert is a full rule row (as `POST`, an omitted `enabled` means enabled) that replaces the
+rule for its `(account_id, model_id)` or creates it. Every rule saves or none does: a bad rule
+answers the usual `422` naming its model, and a missing delete id is `404`, with nothing
+changed. At most 2,000 rules per batch. The dashboard's Rules page sends its group edits here.
+
 ### `GET|POST /admin/compression-profiles` · `GET|PATCH|DELETE /admin/compression-profiles/{id}` → `200`
 `stages` is an ordered engine pipeline over `session_dedup`, `ansi`, `fold`, `rtk`, `blobs`,
 `jsonmin`, `headroom`, `tool_ref`, `lite` and `caveman`, validated against the engine registry on write (`budget` was deleted 2026-10-19 and is

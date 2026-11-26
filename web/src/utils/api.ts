@@ -1028,6 +1028,9 @@ export const createModelRule = (r: Partial<ModelRule> & { account_id: number; mo
 export const updateModelRule = (id: number, r: Partial<ModelRule>) =>
   patch<ModelRule>(`/admin/model-rules/${id}`, r);
 export const deleteModelRule = (id: number) => del(`/admin/model-rules/${id}`);
+/** A group edit in one transaction: every rule saves, or none does. */
+export const applyModelRules = (body: { upsert?: Array<Partial<ModelRule> & { account_id: number; model_id: string }>; delete?: number[] }) =>
+  post<{ saved: number; deleted: number }>('/admin/model-rules/batch', body);
 
 // Mirror of internal/rules Window.InWindow — kept byte-for-byte in spirit:
 // no window = always; half window / start==end = fail closed; overnight

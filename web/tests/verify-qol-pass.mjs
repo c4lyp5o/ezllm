@@ -9,6 +9,8 @@ let parks = [{ namespace: 'mock', model: 'model-a', until, strikes: 0, probe_act
 const deletes = [];
 const patches = [];
 const explains = [];
+const batches = [];
+const singles = [];
 const page = await t.page(async (route, url) => {
   const req = route.request();
   const p = url.pathname;
@@ -34,6 +36,13 @@ const page = await t.page(async (route, url) => {
       ] });
     return true;
   }
+  if (p === '/admin/model-rules/batch') { batches.push(req.postDataJSON()); await json(route, { saved: 3, deleted: 0 }); return true; }
+  if (p === '/admin/model-rules' && req.method() === 'GET') {
+    const r = (id, m) => ({ id, account_id: 1, model_id: m, cap_tokens: 5000, cap_window: 'daily', win_start: '', win_end: '', win_days: '', win_tz: 'UTC', enabled: true, note: 'group' });
+    await json(route, [r(1, 'model-a'), r(2, 'model-b'), r(3, 'model-c')]);
+    return true;
+  }
+  if (/^\/admin\/model-rules\/\d+$/.test(p)) { singles.push(`${req.method()} ${p}`); await json(route, {}); return true; }
   if (p === '/admin/compression-profiles') { await json(route, [{ id: 3, name: 'lean', enabled: true }]); return true; }
   if (p === '/admin/tokens' && req.method() === 'GET') {
     await json(route, [{ id: 7, name: 'my-agent', hint: 'ezllm…a91f', roles: ['infer'], enabled: true, cap_window: 'monthly', cap_tokens: 0, cap_usd: 0,
@@ -78,6 +87,13 @@ try {
   await page.waitForTimeout(300);
   check('switching the API asks again', explains.at(-1)?.surface === 'anthropic', explains);
   await page.keyboard.press('Escape');
+
+  await page.goto(`${t.base}/rules`);
+  const toggle = page.getByRole('switch', { name: /enable model-a, model-b, model-c/ });
+  await toggle.waitFor();
+  await toggle.click();
+  await page.waitForTimeout(400);
+  check('turning off a rule group is one batch request', batches.length === 1 && batches[0].upsert?.length === 3 && batches[0].upsert.every((r) => r.enabled === false) && singles.length === 0, { batches, singles });
 
   await page.goto(`${t.base}/connect?policy=7`);
   const picker = page.getByLabel('Compression profile');

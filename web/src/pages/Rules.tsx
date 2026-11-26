@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  ApiError, accountModels, createModelRule, deleteModelRule, get, modelRules, updateModelRule,
+  ApiError, accountModels, applyModelRules, get, modelRules,
   type Account, type ModelRow, type ModelRule,
 } from '../utils/api';
 import {
@@ -51,23 +51,6 @@ const errText = (e: unknown) =>
   e instanceof ApiError
     ? `${e.detail.message}${e.detail.hint ? ` — ${e.detail.hint}` : ''}`
     : e instanceof Error ? e.message : String(e);
-
-// A grouped action is one request per rule, and a failure partway leaves the
-// earlier writes stored. Runs the steps in order; on a failure the error says
-// which rules already changed, which failed and which were not tried, and the
-// caller reloads so the page shows what is actually persisted.
-type RuleStep = { model: string; run: () => Promise<unknown> };
-async function runRuleSteps(steps: RuleStep[]) {
-  for (let i = 0; i < steps.length; i++) {
-    try { await steps[i].run(); } catch (e) {
-      const list = (xs: RuleStep[]) => xs.map((s) => s.model).join(', ');
-      const done = steps.slice(0, i), rest = steps.slice(i + 1);
-      throw new Error(`${steps[i].model}: ${errText(e).replace(/\.?$/, '.')}`
-        + (done.length ? ` Already changed: ${list(done)}.` : '')
-        + (rest.length ? ` Not tried: ${list(rest)}.` : ''));
-    }
-  }
-}
 
 // Draft.model_ids is UI state; the wire is ONE model_id per rule
 // (UNIQUE(account_id, model_id)) and decodeBody runs DisallowUnknownFields, so
@@ -390,7 +373,6 @@ export default function Rules() {
   const [query, setQuery] = useState('');
   const [providerFilter, setProviderFilter] = useState(0);
   const [filter, setFilter] = useState<Filter>('all');
-  const [fan, setFan] = useState<{ count: number; resolve: (ok: boolean) => void } | null>(null);
   const [params, setParams] = useSearchParams();
 
   const load = useCallback(async () => {
@@ -436,31 +418,19 @@ export default function Rules() {
   }, [rules, accounts, groups, params, setParams]);
 
   // The editor stays open until the write succeeds, so a failure keeps the
-  // operator's work. A large fan-out asks first, in a styled confirm.
-  const askFan = (count: number) => new Promise<boolean>((resolve) => setFan({ count, resolve }));
+  // operator's work.
 
   const save = async (d: Draft, editing: RuleGroup | null) => {
     const modelIDs = [...new Set(d.model_ids.map((m) => m.trim()).filter(Boolean))];
     // Models unticked from the group being edited lose their rule.
     const dropped = editing?.rules.filter((r) => !modelIDs.includes(r.model_id)) ?? [];
-    // One request per model: honest about a large fan-out instead of hanging
-    // silently while it fires hundreds of PATCH/POST calls.
-    if (modelIDs.length + dropped.length > 20 && !(await askFan(modelIDs.length + dropped.length))) return;
+    // Each checked model is its own rule (one row per (account, model)), so
+    // multi-select also acts as apply-to-many. One transaction: every rule
+    // saves or none does, however many models the group holds.
     try {
-      // Each checked model is its own rule. A model that already has one is
-      // PATCHed with these settings instead of re-POSTed (one row per
-      // (account, model) by schema), so multi-select also acts as apply-to-many.
-      await runRuleSteps([
-        ...modelIDs.map((modelID) => ({ model: modelID, run: () => {
-          const existing = rules?.find((r) => r.account_id === d.account_id && r.model_id === modelID)?.id;
-          return existing != null ? updateModelRule(existing, wireOf(d, modelID)) : createModelRule(wireOf(d, modelID));
-        } })),
-        ...dropped.map((r) => ({ model: r.model_id, run: () => deleteModelRule(r.id) })),
-      ]);
+      await applyModelRules({ upsert: modelIDs.map((modelID) => wireOf(d, modelID)), delete: dropped.map((r) => r.id) });
     } catch (e) {
-      // Reload first: a retry then PATCHes the rules this attempt created.
-      await load();
-      throw e;
+      throw new Error(errText(e));
     }
     setEditor(CLOSED);
     setNotice(`Saved ${modelIDs.length === 1 ? `the rule for ${modelIDs[0]}` : `${nfmt(modelIDs.length)} rules`}${dropped.length ? `, removed ${nfmt(dropped.length)}` : ''}.`);
@@ -471,7 +441,7 @@ export default function Rules() {
   const setEnabled = async (g: RuleGroup, enabled: boolean) => {
     setBusy(g.key); setNotice('');
     try {
-      await runRuleSteps(g.rules.map((r) => ({ model: r.model_id, run: () => updateModelRule(r.id, { ...wireOf(draftOf(r), r.model_id), enabled }) })));
+      await applyModelRules({ upsert: g.rules.map((r) => ({ ...wireOf(draftOf(r), r.model_id), enabled })) });
       setNotice(`${enabled ? 'Enabled' : 'Disabled'} ${g.rules.length === 1 ? `the rule for ${g.rules[0].model_id}` : `${nfmt(g.rules.length)} rules`}.`);
       await load();
     }
@@ -482,7 +452,7 @@ export default function Rules() {
   const remove = async (g: RuleGroup) => {
     setBusy(g.key); setNotice('');
     try {
-      await runRuleSteps(g.rules.map((r) => ({ model: r.model_id, run: () => deleteModelRule(r.id) })));
+      await applyModelRules({ delete: g.rules.map((r) => r.id) });
       setNotice(`Deleted ${g.rules.length === 1 ? `the rule for ${g.rules[0].model_id}` : `${nfmt(g.rules.length)} rules`}.`);
       await load();
     }
@@ -632,12 +602,6 @@ export default function Rules() {
       )}
 
       <RuleModal target={editor} accounts={accounts ?? []} rules={rules ?? []} onClose={() => setEditor(CLOSED)} onSave={save} />
-      <ConfirmModal
-        open={fan != null} tone="primary" confirmLabel="Continue"
-        title={`Change ${fan ? nfmt(fan.count) : ''} rules?`}
-        body="This changes each rule one at a time. If one fails, the ones before it stay changed, and the error tells you which."
-        onClose={() => { fan?.resolve(false); setFan(null); }}
-        onConfirm={() => { fan?.resolve(true); setFan(null); }} />
       <ConfirmModal
         open={pendingDelete != null}
         title={pendingDelete

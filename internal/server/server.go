@@ -316,6 +316,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /admin/setup", s.handleSetupStatus)
 	s.mux.HandleFunc("POST /admin/setup", s.handleSetup)
 	s.mux.HandleFunc("GET /v1/models", s.inferAuthed(s.handleModels))
+	s.mux.HandleFunc("GET /v1/models/{model...}", s.inferAuthed(s.handleModel))
 	// Public price catalog (infer token): current/historical rates per
 	// account+model, versioned by effective_from.
 	s.mux.HandleFunc("GET /v1/prices", s.inferAuthed(s.handleCurrentPrices))
@@ -540,10 +541,54 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	protocol := r.URL.Query().Get("protocol")
-	entries, err := s.db.ListModelEntries(r.Context())
+	data, err := s.modelList(r.Context(), protocol)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "server_error", err.Error())
 		return
+	}
+	if protocol == "anthropic" {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"data": data, "has_more": false,
+			"first_id": edgeID(data, true), "last_id": edgeID(data, false),
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
+}
+
+// handleModel answers GET /v1/models/{model}: the one entry the list would
+// carry for that id (a "<namespace>/<model>" id or a combo name). SDKs and IDE
+// plugins read it at startup to check a configured model exists. An Anthropic
+// client (anthropic-version header, or ?protocol=anthropic) gets Anthropic's
+// shape; everyone else the OpenAI one.
+func (s *Server) handleModel(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("model")
+	protocol := r.URL.Query().Get("protocol")
+	if protocol == "" && r.Header.Get("anthropic-version") != "" {
+		protocol = "anthropic"
+	}
+	data, err := s.modelList(r.Context(), protocol)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "server_error", err.Error())
+		return
+	}
+	for _, m := range data {
+		if m["id"] == id {
+			writeJSON(w, http.StatusOK, m)
+			return
+		}
+	}
+	writeErrExtra(w, http.StatusNotFound, "invalid_request_error",
+		fmt.Sprintf("The model %q does not exist or is not routable on this gateway", id),
+		map[string]any{"code": "model_not_found"})
+}
+
+// modelList builds the routable model entries (provider models, then enabled
+// combos) in the requested protocol's shape.
+func (s *Server) modelList(ctx context.Context, protocol string) ([]map[string]any, error) {
+	entries, err := s.db.ListModelEntries(ctx)
+	if err != nil {
+		return nil, err
 	}
 	data := make([]map[string]any, 0, len(entries))
 	for _, e := range entries {
@@ -574,10 +619,9 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	// select one — the combo is invisible to that UI even though it routes.
 	// Disabled combos are omitted: the resolver refuses them, so listing one
 	// would be a lie.
-	combos, err := s.db.ListCombos(r.Context())
+	combos, err := s.db.ListCombos(ctx)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "server_error", err.Error())
-		return
+		return nil, err
 	}
 	for _, c := range combos {
 		if !c.Enabled {
@@ -602,15 +646,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			"combo":        map[string]any{"strategy": c.Strategy, "hops": hops},
 		})
 	}
-
-	if protocol == "anthropic" {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"data": data, "has_more": false,
-			"first_id": edgeID(data, true), "last_id": edgeID(data, false),
-		})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
+	return data, nil
 }
 
 // protocolMap exposes probed per-surface support so a client can tell whether a

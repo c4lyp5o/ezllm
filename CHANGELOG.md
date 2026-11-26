@@ -4,6 +4,9 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## Unreleased
 
+- **One model by id.** `GET /v1/models/{model}` returns that model's entry, so SDKs
+  and IDE plugins that check a configured model at startup no longer get a 404.
+  Anthropic clients get Anthropic's shape.
 - **Release check.** ezllm asks GitHub once a day for its latest release and says
   when a newer one is out: the sidebar version becomes a pill, Settings → System
   names the release, and the bell rings once per version. On by default;

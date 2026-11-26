@@ -15,6 +15,13 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   A temporary failure after the switch is tested once more before it is undone.
 - **Antigravity plan limits.** The provider card and Quota dialog show how much of each
   weekly limit is used, per group of models, read with `agy -p /usage` (no quota spent).
+- **Translation fixes.** A field sent as `null` is treated as left out: SDKs send unset
+  options that way, and `max_tokens`, `temperature` and `top_p` became 0, parallel tool
+  calls turned off, and `tool_choice: null` failed the request. A failed tool result
+  (`is_error`) keeps its failure, as `[tool error]`, instead of reading as empty success.
+  Images reach `responses_models` hops as `input_image` inside a user message. Text after
+  a tool call in a chat stream no longer aborts the answer. A tool-call-only assistant
+  turn sends `content: null`. Image data URIs without `;base64` are read correctly.
 - **Proxy fixes.** Client-address and browser headers (`X-Forwarded-For`, `X-Real-IP`,
   `Forwarded`, `Cf-Connecting-IP`, `Referer`, `Sec-Fetch-*`) no longer reach providers.
   An upstream error sent as a stream on a translated hop reaches the client as its own

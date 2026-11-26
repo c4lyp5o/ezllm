@@ -345,6 +345,11 @@ func EncodeChatRequest(ir *RequestIR, upstreamModel string) ([]byte, error) {
 					},
 				})
 			}
+			// A tool-call-only turn sends content null, the standard form;
+			// some strict providers refuse "" next to tool_calls.
+			if s, ok := msg.Content.(string); ok && s == "" && len(msg.ToolCalls) > 0 {
+				msg.Content = nil
+			}
 			out.Messages = append(out.Messages, msg)
 		default:
 			out.Messages = append(out.Messages, chatOutMessage{Role: t.Role, Content: chatContentFromBlocks(t.Blocks)})

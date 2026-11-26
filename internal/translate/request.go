@@ -99,7 +99,7 @@ func translateUserMessage(content any) ([]OpenAIMessage, error) {
 			msgs = append(msgs, OpenAIMessage{
 				Role:       "tool",
 				ToolCallID: blockString(block, "tool_use_id"),
-				Content:    flattenText(block["content"]),
+				Content:    markToolError(flattenText(block["content"]), block["is_error"] == true),
 			})
 			continue
 		}
@@ -201,6 +201,10 @@ func translateAssistantMessage(content any) OpenAIMessage {
 	}
 	if len(textParts) > 0 {
 		msg.Content = strings.Join(textParts, "\n")
+	} else if len(msg.ToolCalls) > 0 {
+		// The standard form of a tool-call-only turn; some strict providers
+		// refuse "content": "" next to tool_calls.
+		msg.Content = nil
 	}
 	return msg
 }

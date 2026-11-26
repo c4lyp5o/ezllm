@@ -57,6 +57,9 @@ func ChatToResponses(body []byte, upstreamModel string) ([]byte, error) {
 			if text := chatContentText(m.Content); text != "" || m.Content != nil {
 				out.Input = append(out.Input, newResponsesTextItem("user", text))
 			}
+			for _, url := range chatContentImages(m.Content) {
+				out.Input = append(out.Input, newResponsesImageItem(url))
+			}
 		case "assistant":
 			if text := chatContentText(m.Content); text != "" {
 				out.Input = append(out.Input, newResponsesTextItem("assistant", text))
@@ -139,6 +142,28 @@ func chatContentText(raw json.RawMessage) string {
 		}
 	}
 	return strings.Join(texts, "\n")
+}
+
+// chatContentImages returns the URLs of a chat message's image parts (https or
+// data: URIs). The Responses wire takes both as input_image; dropping them made
+// the model answer about an image it never saw.
+func chatContentImages(raw json.RawMessage) []string {
+	var parts []struct {
+		Type     string `json:"type"`
+		ImageURL struct {
+			URL string `json:"url"`
+		} `json:"image_url"`
+	}
+	if json.Unmarshal(raw, &parts) != nil {
+		return nil
+	}
+	var urls []string
+	for _, p := range parts {
+		if p.Type == "image_url" && p.ImageURL.URL != "" {
+			urls = append(urls, p.ImageURL.URL)
+		}
+	}
+	return urls
 }
 
 // ── chat wire decode types ─────────────────────────────────────────────────
@@ -276,10 +301,16 @@ func (i responsesInputItem) MarshalJSON() ([]byte, error) {
 			Output string `json:"output"`
 		}{"function_call_output", i.callID, i.output})
 	case itemImage:
-		return json.Marshal(struct {
+		// input_image is a content part: it goes inside a user message, not
+		// at the top level of input, which the Responses API refuses.
+		type part struct {
 			Type     string `json:"type"`
 			ImageURL string `json:"image_url"`
-		}{"input_image", i.imageURL})
+		}
+		return json.Marshal(struct {
+			Role    string `json:"role"`
+			Content []part `json:"content"`
+		}{"user", []part{{"input_image", i.imageURL}}})
 	}
 	return nil, fmt.Errorf("translate: unknown input item kind %d", i.kind)
 }

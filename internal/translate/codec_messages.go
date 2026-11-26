@@ -37,6 +37,7 @@ type messagesInBlock struct {
 	Content   json.RawMessage `json:"content"`
 	Source    json.RawMessage `json:"source"`
 	Thinking  string          `json:"thinking"`
+	IsError   bool            `json:"is_error"`
 }
 
 // DecodeMessagesRequest parses an anthropic /v1/messages body into the IR.
@@ -176,7 +177,7 @@ func messagesTurns(m messagesInMessage) ([]Turn, error) {
 				return nil, err
 			}
 			turns = append(turns, Turn{Role: RoleTool, Blocks: []Block{{
-				Kind: BlockResult, CallID: b.ToolUseID, Text: result,
+				Kind: BlockResult, CallID: b.ToolUseID, Text: markToolError(result, b.IsError),
 			}}})
 		case "tool_use":
 			pending = append(pending, Block{

@@ -65,3 +65,22 @@ func TestRetrieveOneModel(t *testing.T) {
 		t.Fatalf("anthropic shape: %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+// DELETE /admin/cooldowns needs a namespace with a model, and answers with
+// the count it cleared; GET lists the parks.
+func TestCooldownsEndpoint(t *testing.T) {
+	h := newHarness(t, func(http.ResponseWriter, *http.Request) {})
+	if code, _, body := h.do("DELETE", "/admin/cooldowns?model=m", "tok-admin", ""); code != http.StatusBadRequest {
+		t.Fatalf("model without namespace: %d %s", code, body)
+	}
+	code, _, body := h.do("DELETE", "/admin/cooldowns?namespace=up", "tok-admin", "")
+	if code != http.StatusOK || !strings.Contains(body, `"cleared":0`) {
+		t.Fatalf("clear: %d %s", code, body)
+	}
+	if code, _, body := h.do("GET", "/admin/cooldowns", "tok-admin", ""); code != http.StatusOK || !strings.Contains(body, `"cooldowns":[]`) {
+		t.Fatalf("list: %d %s", code, body)
+	}
+	if code, _, _ := h.do("DELETE", "/admin/cooldowns", "tok-infer", ""); code != http.StatusForbidden {
+		t.Fatalf("infer key: %d, want 403", code)
+	}
+}

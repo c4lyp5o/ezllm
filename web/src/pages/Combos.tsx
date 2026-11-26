@@ -18,6 +18,8 @@ import {
   PRESETS, cannotServe, comboHealth, copyName, describePlan, hasErrors, hopState, validateDraft,
   type ComboHealth, type Preset,
 } from '../utils/combos';
+import { type Cooldown, useCooldowns } from '../utils/cooldowns';
+import { ParkedPill } from '../components/Parked';
 
 // Strategies offered by the combo form — every one the backend implements.
 const STRATEGIES = ['failover', 'block_round_robin', 'true_round_robin', 'sticky_last_good', 'least_used'] as const;
@@ -741,8 +743,10 @@ function CopyName({ name }: { name: string }) {
   );
 }
 
-function ComboCard({ c, accounts, health, stat, statsReady, range, cursor, test, profileName, busy, onToggle, onEdit, onDuplicate, onDelete, onTest }: {
+function ComboCard({ c, accounts, health, stat, statsReady, range, cursor, test, profileName, busy, onToggle, onEdit, onDuplicate, onDelete, onTest, parked, onUnpark }: {
   c: Combo; accounts: Account[]; health: ComboHealth; stat: UsageRow | undefined; statsReady: boolean; range: RangeKey;
+  /** Every parked endpoint; each hop picks its own. */
+  parked: Cooldown[]; onUnpark: (namespace: string, model: string) => Promise<void>;
   cursor: BlockCursor | undefined; test: TestRecord | undefined; profileName: string | undefined; busy: boolean;
   onToggle: (v: boolean) => void; onEdit: () => void; onDuplicate: () => void; onDelete: () => void; onTest: (hop?: number) => void;
 }) {
@@ -852,6 +856,11 @@ function ComboCard({ c, accounts, health, stat, statsReady, range, cursor, test,
                     {hopOk(t) ? '✓' : '✕'}
                   </span>}
                 </button>
+                {(() => {
+                  const ns = accounts.find((a) => a.id === h.account_id)?.namespace;
+                  const mine = ns ? parked.filter((k) => k.namespace === ns && k.model === h.model_id) : [];
+                  return ns && <ParkedPill items={mine} onUnpark={() => onUnpark(ns, h.model_id)} what="this hop" />;
+                })()}
               </span>
             );
           })}
@@ -882,6 +891,7 @@ type Filter = 'all' | 'enabled' | 'disabled' | 'attention';
 
 export default function Combos() {
   const [combos, setCombos] = useState<Combo[] | null>(null);
+  const cooldowns = useCooldowns();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [profiles, setProfiles] = useState<{ id: number; name: string }[]>([]);
   const [editor, setEditor] = useState<EditorTarget>(CLOSED);
@@ -1068,6 +1078,7 @@ export default function Combos() {
                 stat={usageRows?.[c.name]} statsReady={usageRows !== null} range={range}
                 cursor={c.strategy === 'block_round_robin' ? cursors.find((k) => k.combo === c.name && !!k.hop) : undefined}
                 test={tests[c.id]} profileName={profileName(c.compression_profile_id)} busy={busyID === c.id}
+                parked={cooldowns.list} onUnpark={cooldowns.unpark}
                 onToggle={(v) => void setEnabled(c, v)}
                 onEdit={() => setEditor({ open: true, editing: c, template: null })}
                 onDuplicate={() => setEditor({ open: true, editing: null, template: c })}

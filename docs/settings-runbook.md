@@ -76,6 +76,11 @@ can sign out one, or all with **Sign out all devices**.
 | **Server-error cooldown** | How long a provider rests after server errors, and after `408` or `425` |
 | **Failures before cooldown** | How many failures start a cooldown |
 
+A provider that is cooling down shows **parked** with the time left, on its card in
+**Providers** and on the hop in **Combos**. After fixing the cause (a topped-up
+balance, a lifted limit), choose **Unpark** to send it traffic again at once. A real
+failure parks it again.
+
 In `config.yaml`, `retry.retries: 0` means the default of 3. To turn retries off, save `0`
 in Settings.
 

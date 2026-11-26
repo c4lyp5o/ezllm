@@ -17,6 +17,7 @@ try {
     export { buildBuildings } from ${JSON.stringify(join(src, 'utils/city.ts'))};
     export { looksBinary, fenceFor } from ${JSON.stringify(join(src, 'utils/chatlog.ts'))};
     export { effectiveText } from ${JSON.stringify(join(src, 'utils/settings.ts'))};
+    export { parkedFor, secondsLeft } from ${JSON.stringify(join(src, 'utils/cooldowns.ts'))};
   `);
   const out = join(dir, 'bundle.mjs');
   await build({ entryPoints: [entry], bundle: true, format: 'esm', platform: 'node', outfile: out, logLevel: 'error' });
@@ -63,5 +64,12 @@ try {
   assert.equal(m.effectiveText('translation_enabled', false), 'Off');
   assert.equal(m.effectiveText('cooldown_429', '30s'), '30s');
 
-  console.log('Dashboard logic: links, globs, key state, buildings, attachments and settings text hold.');
+  // Parked countdowns.
+  assert.equal(m.parkedFor(42), '42s');
+  assert.equal(m.parkedFor(190), '3m 10s');
+  assert.equal(m.parkedFor(3720), '1h 2m');
+  assert.equal(m.secondsLeft({ until: new Date(Date.now() + 30_500).toISOString() }), 31);
+  assert.equal(m.secondsLeft({ until: new Date(Date.now() - 5_000).toISOString() }), 0);
+
+  console.log('Dashboard logic: links, globs, key state, buildings, attachments, settings text and countdowns hold.');
 } finally { await rm(dir, { recursive: true, force: true }); }

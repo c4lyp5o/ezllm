@@ -948,6 +948,14 @@ and, when models were added and the price refresh is on, prices them right away.
 Two event types: `snapshot` (last 20 calls on connect, newest first) and `calls` (each committed
 ledger batch).
 
+### `GET|DELETE /admin/cooldowns`
+`GET` → `{"cooldowns":[{"namespace","model","until","strikes","probe_active","reason"}],"now":"…"}`:
+the endpoints parked right now (cooling, or holding a recovery probe). `DELETE` ends parks
+early and answers `{"cleared":N}`: all of them, `?namespace=acme` for one account, or
+`?namespace=acme&model=gpt-5` for one model. A `model` without a `namespace` is `400`, since
+model ids repeat across providers. The next request tries the endpoint; a real failure
+parks it again.
+
 ### `GET /admin/health` · `POST /admin/chat`
 `health` counts the same rows the dashboard headline uses; `chat` executes through the **normal
 inference path** (router → rules → compression → proxy → ledger) under an admin session — it is

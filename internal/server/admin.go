@@ -329,6 +329,24 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 // strip is the operator's "is this thing alive" answer, so reporting
 // accounts: 0 because a query errored is a lie stated in the one place where
 // the truth matters most. The caller answers 503 instead.
+// handleCooldowns lists the parked endpoints (GET) or ends parks early
+// (DELETE): all of them, ?namespace=X for one account, or ?namespace=X&model=Y
+// for one model. A model without a namespace is refused: model ids repeat
+// across providers, so it would unpark more than the operator meant.
+func (s *Server) handleCooldowns(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		writeJSON(w, http.StatusOK, map[string]any{"cooldowns": s.dispatcher.Cooldowns(), "now": time.Now().UTC()})
+		return
+	}
+	q := r.URL.Query()
+	ns, model := strings.TrimSpace(q.Get("namespace")), strings.TrimSpace(q.Get("model"))
+	if model != "" && ns == "" {
+		writeErr(w, http.StatusBadRequest, "invalid_request_error", "model needs a namespace: model ids repeat across providers")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"cleared": s.dispatcher.ClearCooldowns(ns, model)})
+}
+
 func (s *Server) healthSnapshot(ctx context.Context) (map[string]any, error) {
 	var accounts, keys, combos, models, calls int
 	var oldest, newest string

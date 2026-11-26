@@ -4,6 +4,9 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## Unreleased
 
+- **Unpark now.** Parked providers show **parked** with a live countdown on their
+  Providers card and on the Combos hop. **Unpark** sends them traffic again at once,
+  after you fix the cause. New `GET|DELETE /admin/cooldowns`.
 - **Compression per key.** A key can carry its own compression profile (Connect → key
   policy). It applies to that key's requests on every route, direct `namespace/model`
   calls included; a request's `x-ezllm-compression` header still wins, and a combo's

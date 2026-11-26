@@ -580,6 +580,30 @@ func (d *Dispatcher) Cooldowns() []Cooldown {
 	return out
 }
 
+// ClearCooldowns ends parks early: every one, every model of a namespace, or
+// one namespace and model. It is the operator's "Unpark now" after fixing the
+// cause (a topped-up balance, a lifted limit). The hop is tried on its next
+// request; a real failure parks it again. It returns how many were cleared.
+func (d *Dispatcher) ClearCooldowns(namespace, model string) int {
+	d.cooldownMu.Lock()
+	n := 0
+	for k, st := range d.cooldowns {
+		if namespace != "" && st.namespace != namespace {
+			continue
+		}
+		if model != "" && st.model != model {
+			continue
+		}
+		delete(d.cooldowns, k)
+		n++
+	}
+	d.cooldownMu.Unlock()
+	if n > 0 {
+		d.log.Info("cooldowns cleared", "namespace", namespace, "model", model, "count", n)
+	}
+	return n
+}
+
 func (d *Dispatcher) releaseProbe(rt Route) {
 	key := hopKey(rt)
 	d.cooldownMu.Lock()

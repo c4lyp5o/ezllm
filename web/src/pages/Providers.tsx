@@ -1948,7 +1948,7 @@ function AccountCard({ a, open, onToggle, intent, onIntentDone, issues, onChange
       </div>
       {parked.length > 0 && (
         <div className="-mt-1.5 px-5 pb-2.5 pl-10">
-          <ParkedPill items={parked} onUnpark={onUnpark} what={parked.length === 1 ? 'this model' : `these ${parked.length} models`} />
+          <ParkedPill items={parked} keyCount={a.keys.filter((k) => k.enabled).length} onUnpark={onUnpark} what={new Set(parked.map((c) => c.model)).size === 1 ? 'this model' : `these ${new Set(parked.map((c) => c.model)).size} models`} />
         </div>
       )}
 

@@ -11,6 +11,7 @@ const patches = [];
 const explains = [];
 const batches = [];
 const singles = [];
+let accounts = [account];
 const page = await t.page(async (route, url) => {
   const req = route.request();
   const p = url.pathname;
@@ -55,7 +56,7 @@ const page = await t.page(async (route, url) => {
       allowed_models: '', expires_at: '', created_at: '2026-11-01T00:00:00Z', compression_profile_id: 3 });
     return true;
   }
-  if (p === '/admin/accounts') { await json(route, [account]); return true; }
+  if (p === '/admin/accounts') { await json(route, accounts); return true; }
   return false;
 });
 try {
@@ -68,6 +69,23 @@ try {
   await page.waitForTimeout(300);
   check('Unpark clears the account', deletes.at(-1) === '?namespace=mock', deletes);
   check('the pill goes away once nothing is parked', await page.getByText(/parked · /).count() === 0);
+
+  // Two keys: one parked key is a key resting, not a parked provider.
+  accounts = [{ ...account, keys: [...account.keys, { id: 2, label: 'spare', hint: 'dummy2', enabled: true, last_test_ok: true }] }];
+  const keyPark = (key_id) => ({ namespace: 'mock', model: 'model-a', key_id, key_hint: `k${key_id}`, until, strikes: 0, probe_active: false, reason: '429 rate limited' });
+  parks = [keyPark(1)];
+  await page.reload();
+  await page.getByText(/1 of 2 keys parked · 1m/).first().waitFor();
+  check('one of two keys parked reads as a resting key', await page.getByText(/^parked · /).count() === 0);
+  if (shots) { await page.waitForTimeout(1200); await page.screenshot({ path: `${shots}/providers-key-parked.png`, clip: { x: 240, y: 170, width: 1200, height: 130 } }); }
+  parks = [keyPark(1), keyPark(2)];
+  await page.reload();
+  await page.getByText(/parked · 1m/).first().waitFor();
+  check('every key parked reads as parked', await page.getByText(/keys parked/).count() === 0);
+  await page.getByRole('button', { name: 'Unpark' }).first().click();
+  await page.waitForTimeout(300);
+  check('Unpark clears every key', parks.length === 0, parks);
+  accounts = [account];
 
   parks = [{ namespace: 'mock', model: 'model-a', until, strikes: 0, probe_active: false, reason: '5xx' }];
   await page.goto(`${t.base}/combos`);
@@ -97,6 +115,8 @@ try {
 
   // Ctrl+K opens the palette; typing filters; Enter goes.
   await page.goto(`${t.base}/`);
+  // The shortcut is listened for once the shell mounts: wait for it first.
+  await page.getByRole('button', { name: /Jump to/ }).first().waitFor();
   await page.keyboard.press('Control+k');
   const jump = page.getByRole('combobox', { name: 'Jump to a page or action' });
   await jump.waitFor();

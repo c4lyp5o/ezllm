@@ -4,6 +4,12 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## Unreleased
 
+- **Every key of a provider is used.** A provider with several keys now takes turns:
+  each request starts on the next key. A `429` or a refused key (`401`, `403`) parks only
+  that key for that model, and the request moves straight on to the next key. A server
+  error is not retried on the other keys. The provider shows **parked** only when every
+  key is; until then its card reads "1 of 2 keys parked". `GET /admin/cooldowns` names
+  the key, and route explain reports `key_count`.
 - **Export to CSV or JSON.** Requests downloads the rows it shows, and Token Economics
   its spend by day, provider and model. Text that could run as a spreadsheet formula is
   neutralised.

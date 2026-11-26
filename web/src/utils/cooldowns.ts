@@ -6,6 +6,8 @@ import { apiFetch, del } from './api';
 
 export type Cooldown = {
   namespace: string; model: string; until: string; strikes: number; probe_active: boolean; reason: string;
+  /** Set when the account has several keys: each key parks on its own. */
+  key_id?: number; key_hint?: string;
 };
 
 /** Seconds left on a park, from now; 0 once it has run out. */
@@ -19,6 +21,23 @@ export function parkedFor(sec: number): string {
   if (sec < 60) return `${sec}s`;
   if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}s`;
   return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
+}
+
+/** Splits parks by whether their model is parked on every key. A provider
+ *  with several keys keeps serving a model until all its keys are parked, so
+ *  only those count as parked; the rest are a key or two resting. */
+export function splitParks(items: Cooldown[], keyCount: number): { full: Cooldown[]; partial: Cooldown[] } {
+  const byModel = new Map<string, Cooldown[]>();
+  for (const c of items) {
+    const k = `${c.namespace}/${c.model}`;
+    byModel.set(k, [...(byModel.get(k) ?? []), c]);
+  }
+  const full: Cooldown[] = [];
+  const partial: Cooldown[] = [];
+  for (const group of byModel.values()) {
+    (group.length >= Math.max(keyCount, 1) ? full : partial).push(...group);
+  }
+  return { full, partial };
 }
 
 const POLL_MS = 10_000;

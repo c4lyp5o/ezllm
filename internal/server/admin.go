@@ -381,12 +381,12 @@ func (s *Server) handleRouteExplain(w http.ResponseWriter, r *http.Request) {
 	for i, h := range ex.Hops {
 		v := hopView{ExplainHop: h}
 		if h.Status == "candidate" {
-			for _, c := range parks {
-				if c.Namespace == h.Namespace && c.Model == h.Model && c.Until.After(now) {
-					until := c.Until
-					v.ParkedUntil, v.ParkReason = &until, c.Reason
-					v.Status, v.Reason = "skipped", "parked: "+c.Reason
-				}
+			if c, n, all := hopParks(h, parks, now); all {
+				until := c.Until
+				v.ParkedUntil, v.ParkReason = &until, c.Reason
+				v.Status, v.Reason = "skipped", "parked: "+c.Reason
+			} else if n > 0 {
+				v.Reason = fmt.Sprintf("%d of %d keys parked: %s", n, h.KeyCount, c.Reason)
 			}
 		}
 		if v.Status == "candidate" && in.EstTokens > 0 && h.MaxContextTokens > 0 && in.EstTokens > h.MaxContextTokens {
@@ -426,6 +426,21 @@ func (s *Server) handleRouteExplain(w http.ResponseWriter, r *http.Request) {
 		out["key"] = key
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// hopParks counts the live parks on one hop's keys. A hop with several keys is
+// parked only when every key is (until then its next key serves); all is true
+// then, and first is the park that ends soonest, when the hop frees up.
+func hopParks(h router.ExplainHop, parks []proxy.Cooldown, now time.Time) (first proxy.Cooldown, n int, all bool) {
+	for _, c := range parks {
+		if c.Namespace == h.Namespace && c.Model == h.Model && c.Until.After(now) {
+			if n == 0 || c.Until.Before(first.Until) {
+				first = c
+			}
+			n++
+		}
+	}
+	return first, n, n > 0 && n >= max(h.KeyCount, 1)
 }
 
 // handleCooldowns lists the parked endpoints (GET) or ends parks early

@@ -962,17 +962,19 @@ no rule or budget counts. Body: `model` (required), `surface` (`chat` default, `
 `{requested, kind ("combo"|"direct"), strategy, surface, usable, error, order_note?, hops:[…], key?}`.
 Each hop has `namespace`, `model`, `status` (`candidate` = would be tried, `skipped` = dropped
 and the combo carries on, `refused` = the request fails on it, as a pin does), `reason`, and for
-candidates `wire`, `translated`, `reasoning_allowed`, `parked_until`. A hop is also `skipped`
-when it is parked, when `est_tokens` exceeds the account's `max_context_tokens`, or when tools
+candidates `wire`, `translated`, `reasoning_allowed`, `key_count`, `parked_until`. A hop is also
+`skipped` when it is parked (on every key, for an account with several; until then `reason`
+says how many keys are parked), when `est_tokens` exceeds the account's `max_context_tokens`, or when tools
 are sent to gemini-web. Hops come in the combo's order; `order_note` says when the strategy
 reorders them per request. With `client`, `key` reports `model_allowed`, `budget_spent` and
 `spend_cap_reached`. `error` is what a real request would get when nothing can serve it.
 
 ### `GET|DELETE /admin/cooldowns`
-`GET` → `{"cooldowns":[{"namespace","model","until","strikes","probe_active","reason"}],"now":"…"}`:
-the endpoints parked right now (cooling, or holding a recovery probe). `DELETE` ends parks
+`GET` → `{"cooldowns":[{"namespace","model","key_id","key_hint","until","strikes","probe_active","reason"}],"now":"…"}`:
+the endpoints parked right now (cooling, or holding a recovery probe). Each key parks on its
+own, so an account with several keys can list one model once per key. `DELETE` ends parks
 early and answers `{"cleared":N}`: all of them, `?namespace=acme` for one account, or
-`?namespace=acme&model=gpt-5` for one model. A `model` without a `namespace` is `400`, since
+`?namespace=acme&model=gpt-5` for one model, on every key. A `model` without a `namespace` is `400`, since
 model ids repeat across providers. The next request tries the endpoint; a real failure
 parks it again.
 

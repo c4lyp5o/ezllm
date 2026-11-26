@@ -81,6 +81,12 @@ A provider that is cooling down shows **parked** with the time left, on its card
 balance, a lifted limit), choose **Unpark** to send it traffic again at once. A real
 failure parks it again.
 
+A provider with several keys uses all of them. Each request starts on the next key in
+turn, so traffic is spread evenly. A rate limit (`429`) or a refused key (`401`, `403`)
+parks only that key for that model, and the request moves straight on to the provider's
+next key. A server error (`5xx`) is the provider's fault, not the key's, so the other keys
+are not tried for that model. The provider shows **parked** only when every key is.
+
 In `config.yaml`, `retry.retries: 0` means the default of 3. To turn retries off, save `0`
 in Settings.
 

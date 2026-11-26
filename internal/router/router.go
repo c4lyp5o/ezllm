@@ -677,7 +677,7 @@ func (r *Resolver) resolveCandidates(ctx context.Context, requested string, surf
 	if dec.wire != surface {
 		rt.WireSurface = dec.wire
 	}
-	return []proxy.Route{rt}, nil
+	return r.expandKeys(ctx, []proxy.Route{rt}), nil
 }
 
 // resolveCombo turns a bare combo name into ordered candidates.
@@ -865,7 +865,11 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 		if dec.wire != surface {
 			route.WireSurface = dec.wire
 		}
-		ex.note(candidateHop(route))
+		if ex != nil {
+			h := candidateHop(route)
+			h.KeyCount = r.keyCount(ctx, acct.ID)
+			ex.note(h)
+		}
 		// Every candidate is a working member of the strategy: a hop whose
 		// wire we translate is ordered, held good and rotated on exactly the
 		// same terms as a native one (operator decision 2026-10-13 — a
@@ -896,6 +900,9 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 		return routes, nil
 	}
 	candidates, blockPos := orderRoutes(combo, routes)
+	// Keys expand AFTER the strategy: round-robin and block cursors stay keyed
+	// by account and model, and each hop's keys stay next to each other.
+	candidates = r.expandKeys(ctx, candidates)
 	// BlockPos rides on EVERY candidate: it tags the DISPATCH (this request's
 	// position inside its block), not a hop. Whichever route actually serves,
 	// the ledger row carries the same tag — the "N requests finished" evidence.

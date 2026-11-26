@@ -415,6 +415,9 @@ type cooldownState struct {
 	// model is the parked hop's model, so an operator can see WHICH of an
 	// account's many models is cooling rather than just the account.
 	model string
+	// keyID and keyHint name the parked key.
+	keyID   int64
+	keyHint string
 	// strikes counts CONSECUTIVE failures. Parking is deferred until it reaches
 	// maxStrikes so one transient blip does not remove a healthy hop for the
 	// whole cooldown window; a success resets it.
@@ -483,8 +486,30 @@ const (
 // few per hour. An endpoint-wide fault (transport error, 5xx) now parks each
 // model as it is tried, costing at most one extra failed attempt per model — what
 // the half-open probe would have done anyway.
+//
+// The KEY belongs in it too: providers meter each key separately, so a 429 on
+// one of an account's keys parks only that key for that model, and the
+// account's next key is the next candidate.
 func hopKey(rt Route) string {
+	return endpointKey(rt) + "|" + strconv.FormatInt(rt.KeyID, 10)
+}
+
+// endpointKey is hopKey without the key: one model on one account, whichever
+// key dials it.
+func endpointKey(rt Route) string {
 	return fmt.Sprintf("%d|%s|%s", rt.Account.ID, strings.TrimRight(rt.Account.BaseURL, "/"), rt.Model)
+}
+
+// keyScopedStatus reports whether an upstream status is about the KEY rather
+// than the model or the endpoint: a rate limit, a refused key. Only
+// these are worth trying again on the same account's next key; a 5xx or a bad
+// request would fail the same way on every key.
+func keyScopedStatus(code int) bool {
+	switch code {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests:
+		return true
+	}
+	return false
 }
 
 // acquireHop grants one request the right to try an endpoint. A cooled endpoint
@@ -518,8 +543,12 @@ func (d *Dispatcher) acquireHop(rt Route, now time.Time) (allowed, probe bool) {
 // Cooldown is one parked endpoint as an operator should see it: which account is
 // cooling, until when, why, and whether a recovery probe is in flight.
 type Cooldown struct {
-	Namespace   string    `json:"namespace"`
-	Model       string    `json:"model"`
+	Namespace string `json:"namespace"`
+	Model     string `json:"model"`
+	// KeyID and KeyHint name the parked key: an account with several keys
+	// parks them one at a time.
+	KeyID       int64     `json:"key_id,omitempty"`
+	KeyHint     string    `json:"key_hint,omitempty"`
 	Until       time.Time `json:"until"`
 	Strikes     int       `json:"strikes"`
 	ProbeActive bool      `json:"probe_active"`
@@ -563,6 +592,8 @@ func (d *Dispatcher) Cooldowns() []Cooldown {
 		out = append(out, Cooldown{
 			Namespace:   st.namespace,
 			Model:       st.model,
+			KeyID:       st.keyID,
+			KeyHint:     st.keyHint,
 			Until:       st.until,
 			Strikes:     st.strikes,
 			ProbeActive: st.probeActive,
@@ -575,7 +606,10 @@ func (d *Dispatcher) Cooldowns() []Cooldown {
 		if out[i].Namespace != out[j].Namespace {
 			return out[i].Namespace < out[j].Namespace
 		}
-		return out[i].Model < out[j].Model
+		if out[i].Model != out[j].Model {
+			return out[i].Model < out[j].Model
+		}
+		return out[i].KeyID < out[j].KeyID
 	})
 	return out
 }
@@ -765,11 +799,12 @@ func (d *Dispatcher) recordHop(rt Route, oc hopOutcome, now time.Time) {
 		st.strikes = 0
 		st.namespace = rt.Account.Namespace
 		st.model = rt.Model
+		st.keyID, st.keyHint = rt.KeyID, rt.KeyHint
 		st.reason = oc.reason
 		// Park events are rare (threshold crossings), so this stays inside the
 		// lock: it is the one line that explains an endpoint disappearing.
 		d.log.Info("hop parked",
-			"account", rt.Account.Namespace, "model", rt.Model,
+			"account", rt.Account.Namespace, "model", rt.Model, "key", rt.KeyHint,
 			"until", st.until.UTC().Format(time.RFC3339), "reason", oc.reason)
 	}
 	d.cooldowns[key] = st
@@ -1977,6 +2012,17 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 	// their declared context window, so the final error can say so instead of
 	// blaming a cooldown that never happened.
 	contextSkips := 0
+	// failedEndpoints holds, per endpointKey, why that model already failed on
+	// one of the account's keys for a reason no other key would change (a 5xx,
+	// a transport error, a bad request). Its sibling keys are skipped instead
+	// of dialed: they would fail the same way and spend the attempt budget.
+	var failedEndpoints map[string]string
+	markEndpoint := func(rt Route, why string) {
+		if failedEndpoints == nil {
+			failedEndpoints = map[string]string{}
+		}
+		failedEndpoints[endpointKey(rt)] = why
+	}
 	// Addendum #3: ONE request-wide budget across same-hop retries AND
 	// failover hops, and a selection deadline that governs only the choosing
 	// (never the winning attempt's stream).
@@ -2036,6 +2082,13 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 			break
 		}
 		rt := routes[i]
+		if why, failed := failedEndpoints[endpointKey(rt)]; failed {
+			attempts = append(attempts, Attempt{
+				Namespace: rt.Account.Namespace, Model: rt.Model,
+				Note: "not tried on another key: " + why,
+			})
+			continue
+		}
 		// Context-size filter (addendum #6): a request whose estimated token
 		// count exceeds the hop's declared context window is filtered BEFORE
 		// dispatch — no paid upstream call, no wasted round-trip. The estimate
@@ -2249,6 +2302,9 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 				Namespace: rt.Account.Namespace, Model: rt.Model,
 				Note: note,
 			})
+			if !oc.clientCancelled && !errors.Is(err, errAttemptBudgetSpent) {
+				markEndpoint(rt, note)
+			}
 			discardFallback()
 			fallbackTransportErr = err
 			continue
@@ -2274,6 +2330,9 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 			})
 		}
 		if failoverStatus(res.Status) || oc.failed {
+			if !keyScopedStatus(res.Status) {
+				markEndpoint(rt, fmt.Sprintf("upstream %d on this model", res.Status))
+			}
 			discardFallback()
 			rtCopy, resCopy, startCopy := rt, res, start
 			fallbackRoute, fallbackResp, fallbackResult, fallbackStart = &rtCopy, resp, resCopy, startCopy

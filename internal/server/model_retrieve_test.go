@@ -6,6 +6,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/proxy"
+	"github.com/c4lyp5o/ezllm/internal/router"
 )
 
 // GET /v1/models/{model} returns the entry the list carries, for a provider
@@ -193,5 +197,31 @@ func TestModelRulesBatch(t *testing.T) {
 	}
 	if code, _ := jsonDo(t, h, "POST", "/admin/model-rules/batch", "tok-admin", map[string]any{}); code != http.StatusBadRequest {
 		t.Fatalf("empty batch: %d", code)
+	}
+}
+
+// A hop with several keys counts as parked only when every key is; until
+// then explain says how many are parked and the hop stays a candidate.
+func TestHopParksNeedsEveryKey(t *testing.T) {
+	now := time.Now()
+	h := router.ExplainHop{Namespace: "acme", Model: "m", KeyCount: 2}
+	soon, later := now.Add(time.Minute), now.Add(time.Hour)
+	one := []proxy.Cooldown{{Namespace: "acme", Model: "m", KeyID: 1, Until: later, Reason: "429"}}
+	if _, n, all := hopParks(h, one, now); n != 1 || all {
+		t.Fatalf("one of two keys parked: n=%d all=%v", n, all)
+	}
+	both := append(one, proxy.Cooldown{Namespace: "acme", Model: "m", KeyID: 2, Until: soon, Reason: "429"},
+		proxy.Cooldown{Namespace: "acme", Model: "other", KeyID: 3, Until: later})
+	first, n, all := hopParks(h, both, now)
+	if n != 2 || !all || !first.Until.Equal(soon) {
+		t.Fatalf("both keys parked: n=%d all=%v first=%v, want 2 true and the sooner park", n, all, first.Until)
+	}
+	// A one-key hop (KeyCount 0 or 1) is parked by its one park.
+	if _, _, all := hopParks(router.ExplainHop{Namespace: "acme", Model: "m"}, one, now); !all {
+		t.Fatal("a one-key hop with a live park is not parked")
+	}
+	expired := []proxy.Cooldown{{Namespace: "acme", Model: "m", Until: now.Add(-time.Second)}}
+	if _, n, _ := hopParks(h, expired, now); n != 0 {
+		t.Fatal("an expired park counted")
 	}
 }

@@ -28,6 +28,9 @@ type ExplainHop struct {
 	// MaxContextTokens is the account's declared context window; 0 = none.
 	MaxContextTokens int64  `json:"max_context_tokens,omitempty"`
 	Kind             string `json:"kind,omitempty"`
+	// KeyCount is how many usable keys the account has. Each is tried in
+	// turn, and the hop counts as parked only when every key is.
+	KeyCount int `json:"key_count,omitempty"`
 }
 
 // Explanation is a dry run of one routing decision: nothing is dialed, no
@@ -96,7 +99,9 @@ func (r *Resolver) Explain(ctx context.Context, requested string, surface provid
 			ex.note(ExplainHop{Namespace: ns, Model: model, Status: "refused", Reason: err.Error()})
 		} else {
 			for _, rt := range routes {
-				ex.note(candidateHop(rt))
+				h := candidateHop(rt)
+				h.KeyCount = r.keyCount(ctx, rt.Account.ID)
+				ex.note(h)
 			}
 		}
 	}

@@ -286,3 +286,41 @@ func TestMigrateV23AddsFreshToolOutput(t *testing.T) {
 		t.Errorf("fresh_tool_output did not round-trip: %q", got.FreshToolOutput)
 	}
 }
+
+// PickKeys lists every enabled key, oldest first, live and from a snapshot;
+// PickKey stays the first of them.
+func TestPickKeysListsEveryEnabledKey(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+	id, err := db.UpsertAccount(ctx, provider.Account{Name: "acme", Namespace: "acme",
+		Kind: provider.KindOpenAICompatible, BaseURL: "https://api.example.com/v1", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []int64
+	for _, k := range []string{"sk-one", "sk-two", "sk-three"} {
+		kid, _, err := db.AddKey(ctx, id, k, k)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, kid)
+	}
+	if _, err := db.Writer().Exec(`UPDATE provider_keys SET enabled=0 WHERE id=?`, ids[1]); err != nil {
+		t.Fatal(err)
+	}
+	for name, got := range map[string]func() ([]KeyPick, error){
+		"live":     func() ([]KeyPick, error) { return db.PickKeys(ctx, id) },
+		"snapshot": func() ([]KeyPick, error) { return snap(t, db).PickKeys(ctx, id) },
+	} {
+		keys, err := got()
+		if err != nil || len(keys) != 2 || keys[0].Plaintext != "sk-one" || keys[1].Plaintext != "sk-three" {
+			t.Fatalf("%s: keys=%+v err=%v, want sk-one and sk-three", name, keys, err)
+		}
+	}
+	if k, err := db.PickKey(ctx, id); err != nil || k.ID != ids[0] {
+		t.Fatalf("PickKey = %+v %v, want the oldest key", k, err)
+	}
+	if _, err := db.PickKeys(ctx, 9999); err != ErrNotFound {
+		t.Fatalf("no keys: err=%v, want ErrNotFound", err)
+	}
+}

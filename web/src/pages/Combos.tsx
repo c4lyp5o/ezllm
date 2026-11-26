@@ -861,9 +861,10 @@ function ComboCard({ c, accounts, health, stat, statsReady, range, cursor, test,
                   </span>}
                 </button>
                 {(() => {
-                  const ns = accounts.find((a) => a.id === h.account_id)?.namespace;
+                  const acct = accounts.find((a) => a.id === h.account_id);
+                  const ns = acct?.namespace;
                   const mine = ns ? parked.filter((k) => k.namespace === ns && k.model === h.model_id) : [];
-                  return ns && <ParkedPill items={mine} onUnpark={() => onUnpark(ns, h.model_id)} what="this hop" />;
+                  return ns && <ParkedPill items={mine} keyCount={acct?.keys?.filter((k) => k.enabled).length ?? 1} onUnpark={() => onUnpark(ns, h.model_id)} what="this hop" />;
                 })()}
               </span>
             );

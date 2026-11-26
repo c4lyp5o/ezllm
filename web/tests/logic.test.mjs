@@ -17,7 +17,7 @@ try {
     export { buildBuildings } from ${JSON.stringify(join(src, 'utils/city.ts'))};
     export { looksBinary, fenceFor } from ${JSON.stringify(join(src, 'utils/chatlog.ts'))};
     export { effectiveText } from ${JSON.stringify(join(src, 'utils/settings.ts'))};
-    export { parkedFor, secondsLeft } from ${JSON.stringify(join(src, 'utils/cooldowns.ts'))};
+    export { parkedFor, secondsLeft, splitParks } from ${JSON.stringify(join(src, 'utils/cooldowns.ts'))};
     export { csvField, toCSV } from ${JSON.stringify(join(src, 'utils/export.ts'))};
     export { filterPalette, PALETTE_ITEMS } from ${JSON.stringify(join(src, 'components/CommandPalette.tsx'))};
   `);
@@ -72,6 +72,13 @@ try {
   assert.equal(m.parkedFor(3720), '1h 2m');
   assert.equal(m.secondsLeft({ until: new Date(Date.now() + 30_500).toISOString() }), 31);
   assert.equal(m.secondsLeft({ until: new Date(Date.now() - 5_000).toISOString() }), 0);
+  // A model is parked only when every key of its provider is.
+  const park = (model, key_id) => ({ namespace: 'acme', model, key_id, until: '', strikes: 0, probe_active: false, reason: '429' });
+  const split = m.splitParks([park('a', 1), park('b', 1), park('b', 2)], 2);
+  assert.deepEqual(split.full.map((c) => c.model), ['b', 'b']);
+  assert.deepEqual(split.partial.map((c) => c.model), ['a']);
+  assert.equal(m.splitParks([park('a', 1)], 1).full.length, 1);
+  assert.equal(m.splitParks([park('a', 1)], 0).full.length, 1);
 
   // CSV: quoting, and no formula injection from upstream text.
   assert.equal(m.csvField('plain'), 'plain');

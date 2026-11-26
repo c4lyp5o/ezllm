@@ -141,6 +141,8 @@ EZLLM_MASTER_KEY_FILE=$PWD/data/ezllm-master.key make run
 
 No one at the keyboard? Set `EZLLM_DASHBOARD_PASSWORD` or
 `EZLLM_DASHBOARD_PASSWORD_FILE` before the first start, and there is no setup code.
+`ezllm token create --name my-app` makes an app key from the command line and prints it
+once.
 
 The `data` folder has your settings, history and the master key that unlocks your stored
 provider keys. Keep it private. To back it up, stop ezllm and copy the whole folder, or use

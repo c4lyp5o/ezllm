@@ -70,6 +70,10 @@ func run() error {
 			return runBackupCommand(os.Args[1], os.Args[2:])
 		case "bridge-check":
 			return runBridgeCheck(os.Args[2:], os.Stdout)
+		case "rotate-master-key":
+			return runRotateMasterKey(os.Args[2:], os.Stdout)
+		case "token":
+			return runTokenCreate(os.Args[2:], os.Stdout)
 		case "help", "-h", "--help":
 			fmt.Println("usage: ezllm [flags]            start the router")
 			fmt.Println("       ezllm bridge-check NAME  gate a bridge CLI (claude|codex|agy|copilot) before promoting it")
@@ -77,6 +81,10 @@ func run() error {
 			fmt.Println("                                check an encrypted backup")
 			fmt.Println("       ezllm backup-restore --archive FILE --secret-file FILE --output NEW_DIR")
 			fmt.Println("                                restore an encrypted backup into a new folder")
+			fmt.Println("       ezllm rotate-master-key [--data-dir DIR] [--key-file FILE]")
+			fmt.Println("                                re-encrypt stored secrets under a new master key (ezllm stopped)")
+			fmt.Println("       ezllm token create --name NAME [--roles infer,metrics,admin] [--data-dir DIR]")
+			fmt.Println("                                create a client key and print it once")
 			return nil
 		}
 	}

@@ -59,13 +59,30 @@ folder, and start ezllm.
 
 ## Change the key
 
-ezllm cannot re-encrypt with a new key. A new key on the same database stops ezllm from
-starting, because it cannot read the stored keys.
+Change the key if the key file was exposed. `rotate-master-key` makes a new key,
+re-encrypts every stored secret with it in one step, and puts it in the key file. If any
+value fails, nothing changes.
 
-To change it anyway, start a new ezllm with a new data folder and a new key. Rebuild the
-setup using the [configuration export](recovery-runbook.md#export-your-configuration) as
-a guide, enter every provider key again, and keep the old instance until the new one
-works. History stays in the old database.
+1. [Back up](recovery-runbook.md) first.
+2. Stop ezllm: `docker stop ezllm`, `systemctl --user stop ezllm`, or Ctrl+C.
+3. Rotate. With the ezllm binary:
+
+   ```sh
+   ~/ezllm/bin/ezllm rotate-master-key --data-dir ~/ezllm/data
+   ```
+
+   With Docker, run it from the image ezllm runs:
+
+   ```sh
+   docker run --rm --user "$(id -u):$(id -g)" -v "$HOME/ezllm/data:/data" --entrypoint /app/ezllm \
+     "$(docker inspect -f '{{.Config.Image}}' ezllm)" rotate-master-key --data-dir /data
+   ```
+
+   You should see `master key rotated` and how many values it re-encrypted. If the key
+   lives somewhere else, add `--key-file` with its path. A key set in `EZLLM_MASTER_KEY`
+   must be moved into a file first.
+4. Start ezllm and open a provider in the dashboard to check its key still works.
+5. Delete the old key, which the command kept as `ezllm-master.key.old-<time>`.
 
 ## Not working?
 

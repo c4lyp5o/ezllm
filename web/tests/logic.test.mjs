@@ -18,6 +18,8 @@ try {
     export { looksBinary, fenceFor } from ${JSON.stringify(join(src, 'utils/chatlog.ts'))};
     export { effectiveText, settingError } from ${JSON.stringify(join(src, 'utils/settings.ts'))};
     export { summarizeImport, importWrites } from ${JSON.stringify(join(src, 'utils/import.ts'))};
+    export { startProgress, defaultTestModel, freeNamespace, isAppKey, START_PRESETS } from ${JSON.stringify(join(src, 'utils/start.ts'))};
+    export { PROVIDER_PRESETS } from ${JSON.stringify(join(src, 'utils/providers.ts'))};
     export { parkedFor, secondsLeft, splitParks } from ${JSON.stringify(join(src, 'utils/cooldowns.ts'))};
     export { csvField, toCSV } from ${JSON.stringify(join(src, 'utils/export.ts'))};
     export { filterPalette, PALETTE_ITEMS } from ${JSON.stringify(join(src, 'components/CommandPalette.tsx'))};
@@ -73,6 +75,20 @@ try {
   assert.equal(m.parkedFor(3720), '1h 2m');
   assert.equal(m.secondsLeft({ until: new Date(Date.now() + 30_500).toISOString() }), 31);
   assert.equal(m.secondsLeft({ until: new Date(Date.now() - 5_000).toISOString() }), 0);
+  // Get started: progress from the server, a sensible test model, free namespaces.
+  const app = { roles: ['infer'], enabled: true };
+  assert.deepEqual(m.startProgress([], []), { provider: false, key: false, request: false, done: 0, next: 1 });
+  assert.equal(m.startProgress([{ id: 1, namespace: 'x', enabled: true }], [{ roles: ['admin', 'infer'], enabled: true }]).next, 2);
+  assert.equal(m.startProgress([{ id: 1, namespace: 'x', enabled: true }], [app]).next, 3);
+  assert.equal(m.startProgress([{ id: 1, namespace: 'x', enabled: true }], [{ ...app, last_used_at: '2026-11-27' }]).done, 3);
+  assert.equal(m.isAppKey({ roles: ['infer'], enabled: false }), false);
+  assert.equal(m.defaultTestModel(['acme/big', 'openai/gpt-x', 'openai/gpt-y:free'], 'openai'), 'openai/gpt-y:free');
+  assert.equal(m.defaultTestModel(['acme/big', 'openai/gpt-x'], 'openai'), 'openai/gpt-x');
+  assert.equal(m.defaultTestModel(['daily', 'acme/big'], 'nope'), 'acme/big');
+  assert.equal(m.defaultTestModel([], 'openai'), '');
+  assert.equal(m.freeNamespace('openai', ['openai', 'openai-2']), 'openai-3');
+  assert.equal(m.freeNamespace('openai', []), 'openai');
+  for (const id of m.START_PRESETS) assert.ok(m.PROVIDER_PRESETS[id], `preset ${id} exists`);
   // Import plan in one line; only creates and updates write anything.
   assert.equal(m.summarizeImport({ create: 2, update: 1, unchanged: 5 }), '2 to create, 1 to update, 5 unchanged');
   assert.equal(m.summarizeImport({ skip: 1 }), '1 skipped');
@@ -112,5 +128,5 @@ try {
   assert.ok(m.filterPalette(m.PALETTE_ITEMS, 'cooldowns').some((i) => i.to === '/settings?tab=gateway'));
   assert.equal(m.filterPalette(m.PALETTE_ITEMS, '').length, m.PALETTE_ITEMS.length);
 
-  console.log('Dashboard logic: links, globs, key state, buildings, attachments, settings text, countdowns, CSV and the palette hold.');
+  console.log('Dashboard logic: links, globs, key state, buildings, attachments, settings text, countdowns, CSV, the palette and Get started hold.');
 } finally { await rm(dir, { recursive: true, force: true }); }

@@ -128,16 +128,15 @@ EZLLM_MASTER_KEY_FILE=$PWD/data/ezllm-master.key make run
 
 1. Open [http://127.0.0.1:20129](http://127.0.0.1:20129). Enter the setup code and choose a
    password. The code changes each time ezllm starts, so use the latest one:
-   `docker logs ezllm` with Docker, `~/ezllm/logs/ezllm.log` on macOS, or the terminal you
-   started it in.
-2. In **Providers**, choose **Add provider**, enter the account and its API key, then
-   **Save & validate key**. ezllm tests the key with small real requests, which your
-   provider may bill, and lists its models.
-3. In **Connect**, choose **Create key**, enter a name, leave **Inference** ticked and
-   choose **Create key**. Copy the key now: you see it once. Your apps use this key, not
+   `docker logs ezllm | grep setup` with Docker, `~/ezllm/logs/ezllm.log` on macOS, or the
+   terminal you started it in.
+2. **Get started** opens. Pick your provider, paste its API key and choose **Connect**.
+   ezllm tests the key with small real requests, which your provider may bill.
+3. Choose **Create key**. Copy the key now: you see it once. Your apps use this key, not
    your provider's.
-4. Still in **Connect**, pick a model and copy its full ID, for example
-   `myprovider/model-name`.
+4. Choose **Send a test request**.
+
+You should see the model's answer, and below it the settings to paste into your app.
 
 No one at the keyboard? Set `EZLLM_DASHBOARD_PASSWORD` or
 `EZLLM_DASHBOARD_PASSWORD_FILE` before the first start, and there is no setup code.

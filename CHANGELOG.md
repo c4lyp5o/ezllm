@@ -15,6 +15,18 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   A temporary failure after the switch is tested once more before it is undone.
 - **Antigravity plan limits.** The provider card and Quota dialog show how much of each
   weekly limit is used, per group of models, read with `agy -p /usage` (no quota spent).
+- **Provider fixes.** claude-web answers that stream longer than 60 seconds are no
+  longer cut off: the timeout now covers only the wait for the first response. A
+  claude-web answer that is a tool call fails with `chat_tools_unsupported`, so a combo
+  moves on, instead of ending as an empty answer. claude-web reads `deflate` answers,
+  releases its zstd decoders, uses the organization the browser marks active, and sends
+  `UTC` when the host has no named timezone. Probing an OpenAI reasoning model no longer
+  marks it as not speaking chat because it refused `max_tokens`. Gemini's per-minute limit
+  reads as `rate_limited`, not `quota_exhausted`. "reasoning_effort is not allowed" is no
+  longer learned as "reasoning required". A query string reaches the claude-web and
+  gemini-web bridges intact. A key test sends an account's custom headers exactly as
+  live requests do. gemini-web's request counter no longer goes negative after about
+  21,000 requests.
 - **Routing and rules fixes.** At start-up, one rule with a timezone that does not
   resolve no longer leaves every rule off: the valid ones load and the bad one is
   logged. When every combo hop is skipped and one was refused by a rule, the client

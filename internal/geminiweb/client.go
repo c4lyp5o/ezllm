@@ -50,7 +50,7 @@ type Client struct {
 	http      *http.Client
 	cookies   cookie
 	tokens    sessionTokens
-	reqID     int32  // _reqid counter, bumped per generate request
+	reqID     int64  // _reqid counter, bumped per generate request (int64: an int32 went negative after ~21,000 requests)
 	sessionID string // per-client uuid folded into the model header (reference: self._sessionid)
 }
 
@@ -58,12 +58,12 @@ type Client struct {
 // 5-digit value (not 0), and _sessionid is a fresh upper-case uuid. Google
 // correlates the model header's trailing session id with the request, and a
 // seeded reqid keeps the sequence in the range the browser sends.
-func randSessionSeed() (int32, string) {
+func randSessionSeed() (int64, string) {
 	var b [4]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		panic("geminiweb: crypto/rand unavailable: " + err.Error())
 	}
-	n := int32(b[0])<<8 | int32(b[1])
+	n := int64(b[0])<<24 | int64(b[1])<<16 | int64(b[2])<<8 | int64(b[3])
 	return 10000 + n%90000, strings.ToUpper(NewUUID())
 }
 

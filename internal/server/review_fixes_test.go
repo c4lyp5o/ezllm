@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"github.com/c4lyp5o/ezllm/internal/claudeweb"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -217,5 +218,13 @@ func TestWebBridgeDropsDeveloperAndSeesImages(t *testing.T) {
 	}}}
 	if !webBridgeHasImage(img) || webBridgeHasImage(msgs) {
 		t.Fatal("image detection is wrong")
+	}
+}
+
+// A claude-web turn that answers with a tool call is a 400 naming
+// chat_tools_unsupported, so a combo moves on to a hop that serves tools.
+func TestClaudeWebToolCallIsA400(t *testing.T) {
+	if got := claudeWebStatus(claudeweb.ErrToolCall); got != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", got)
 	}
 }

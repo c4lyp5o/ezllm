@@ -16,6 +16,7 @@ package claudeweb
 
 import (
 	"compress/gzip"
+	"compress/zlib"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -57,7 +58,7 @@ type Fetcher interface {
 // resets only its stream. Credentials ride each request's headers, never the
 // transport, so a shared connection carries no session state of its own.
 type TLSFetcher struct {
-	Timeout       time.Duration // total request timeout; 0 = none (ctx governs)
+	Timeout       time.Duration // wait for the response headers; 0 = none (ctx governs). The body is not timed.
 	chromeHelloID utls.ClientHelloID
 	rootCAs       *x509.CertPool // nil = system roots; tests pin a local CA
 
@@ -68,6 +69,10 @@ type TLSFetcher struct {
 // fetcherIdleTimeout closes a connection nothing has used for a while — in
 // particular the one held by a fetcher whose session was replaced.
 const fetcherIdleTimeout = 90 * time.Second
+
+// dialTimeout bounds the TCP connect plus the TLS handshake, so a dead host
+// fails fast even when the caller's context has no deadline.
+const dialTimeout = 20 * time.Second
 
 // Close drops the fetcher's idle connections.
 func (f *TLSFetcher) Close() {
@@ -86,6 +91,8 @@ func (f *TLSFetcher) transport() *http2.Transport {
 				if err != nil {
 					host = addr
 				}
+				ctx, cancel := context.WithTimeout(ctx, dialTimeout)
+				defer cancel()
 				raw, err := (&net.Dialer{}).DialContext(ctx, network, addr)
 				if err != nil {
 					return nil, err
@@ -120,15 +127,15 @@ func NewTLSFetcher() *TLSFetcher {
 // request. A challenge/error body is returned to the caller like omniroute's
 // transport does — classification happens above (isClaudeWebChallenge).
 func (f *TLSFetcher) Fetch(ctx context.Context, method, url string, body []byte, headers http.Header) (*Response, error) {
-	// The timeout must outlive this call: the caller reads the returned body
-	// (SSE completions stream for many seconds). Cancelling on return kills
-	// every read with "context canceled" — so tie the cancel to Body.Close
-	// instead of deferring it here.
-	var cancel context.CancelFunc
+	// Timeout covers the wait for the response headers only. A completion
+	// streams its body for minutes on long answers, and a total timer would
+	// cut it mid-sentence. The body lives as long as the caller's context; the
+	// cancel is tied to Body.Close, because cancelling on return kills every
+	// read with "context canceled".
+	ctx, cancel := context.WithCancel(ctx)
+	var headerTimer *time.Timer
 	if f.Timeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, f.Timeout)
-	} else {
-		cancel = func() {}
+		headerTimer = time.AfterFunc(f.Timeout, cancel)
 	}
 	tr := f.transport()
 	req, err := http.NewRequestWithContext(ctx, method, url, byteReader(body))
@@ -147,6 +154,13 @@ func (f *TLSFetcher) Fetch(ctx context.Context, method, url string, body []byte,
 		req.Host = req.URL.Host
 	}
 	resp, err := tr.RoundTrip(req)
+	if headerTimer != nil && !headerTimer.Stop() {
+		// The timer fired: the context is already cancelled.
+		if err == nil {
+			resp.Body.Close()
+			err = fmt.Errorf("claudeweb: no response headers within %s", f.Timeout)
+		}
+	}
 	if err != nil {
 		cancel()
 		return nil, err
@@ -174,7 +188,7 @@ func (c *cancelOnClose) Close() error {
 }
 
 // decodeBody decompresses the response according to Content-Encoding. The
-// browser header advertises gzip/br/zstd, so Cloudflare answers compressed;
+// browser header advertises gzip/deflate/br/zstd, so Cloudflare answers compressed;
 // without this the JSON body is unreadable binary (the mock tests never
 // compress, so this only bites live).
 func decodeBody(resp *http.Response) (io.ReadCloser, error) {
@@ -186,27 +200,47 @@ func decodeBody(resp *http.Response) (io.ReadCloser, error) {
 		if err != nil {
 			return nil, fmt.Errorf("claudeweb: gzip: %w", err)
 		}
-		return struct {
-			io.Reader
-			io.Closer
-		}{zr, resp.Body}, nil
+		return &decodedBody{Reader: zr, closeDecoder: zr.Close, body: resp.Body}, nil
+	case "deflate":
+		// HTTP "deflate" is the zlib format (RFC 9110).
+		zr, err := zlib.NewReader(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("claudeweb: deflate: %w", err)
+		}
+		return &decodedBody{Reader: zr, closeDecoder: zr.Close, body: resp.Body}, nil
 	case "br":
-		return struct {
-			io.Reader
-			io.Closer
-		}{brotli.NewReader(resp.Body), resp.Body}, nil
+		return &decodedBody{Reader: brotli.NewReader(resp.Body), body: resp.Body}, nil
 	case "zstd":
-		zr, err := zstd.NewReader(resp.Body)
+		// One goroutine, and Close releases it: a zstd decoder that is never
+		// closed keeps its goroutines and buffers alive.
+		zr, err := zstd.NewReader(resp.Body, zstd.WithDecoderConcurrency(1))
 		if err != nil {
 			return nil, fmt.Errorf("claudeweb: zstd: %w", err)
 		}
-		return struct {
-			io.Reader
-			io.Closer
-		}{zr, resp.Body}, nil
+		return &decodedBody{Reader: zr, closeDecoder: func() error { zr.Close(); return nil }, body: resp.Body}, nil
 	default:
 		return resp.Body, nil
 	}
+}
+
+// decodedBody reads through a decompressor and closes both the decompressor
+// and the response body.
+type decodedBody struct {
+	io.Reader
+	closeDecoder func() error // nil when the decoder holds nothing
+	body         io.Closer
+	closed       bool
+}
+
+func (d *decodedBody) Close() error {
+	if d.closed {
+		return nil
+	}
+	d.closed = true
+	if d.closeDecoder != nil {
+		_ = d.closeDecoder()
+	}
+	return d.body.Close()
 }
 
 func byteReader(b []byte) io.Reader {

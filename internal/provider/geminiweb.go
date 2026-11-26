@@ -69,10 +69,7 @@ func (a *geminiWebAdapter) PrepareRequest(_ context.Context, req *http.Request, 
 	if req.URL == nil {
 		return fmt.Errorf("gemini-web: nil request URL")
 	}
-	path := req.URL.Path
-	if raw := req.URL.RawQuery; raw != "" {
-		path += "?" + raw
-	}
+	path, query := req.URL.Path, req.URL.RawQuery
 	target, err := url.Parse(a.bridgeBase)
 	if err != nil {
 		return fmt.Errorf("gemini-web: bad bridge base %q: %w", a.bridgeBase, err)
@@ -80,6 +77,9 @@ func (a *geminiWebAdapter) PrepareRequest(_ context.Context, req *http.Request, 
 	// Keep the path the proxy resolved (/chat/completions, /models, …) and
 	// re-root it on the bridge.
 	target.Path = strings.TrimSuffix(target.Path, "/") + path
+	// The query goes in RawQuery: put in Path, its "?" is escaped to %3F
+	// and the bridge answers 404.
+	target.RawQuery = query
 	req.URL = target
 	req.Host = target.Host
 	req.Header.Del("Authorization")

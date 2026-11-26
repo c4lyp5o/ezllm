@@ -15,6 +15,12 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   A temporary failure after the switch is tested once more before it is undone.
 - **Antigravity plan limits.** The provider card and Quota dialog show how much of each
   weekly limit is used, per group of models, read with `agy -p /usage` (no quota spent).
+- **Your prices stay yours.** The daily price refresh skips a model you priced by hand
+  or by import. It used to write the snapshot's rate over yours. The refresh answer
+  counts those models in `kept`.
+- **Docs, latest version only.** User docs now describe only the current version, in
+  the task style, and say less: metrics, backups, settings, master key, prices,
+  logging, environment, translation and the web providers were rewritten.
 - **Bridges on Windows.** A guide for running ezllm in WSL (docs/wsl.md). The macOS script
   now makes its data folder private, and the macOS update steps fetch the script again.
 - **Claude on macOS.** The bridge reads the login that Claude Code keeps in the Keychain.
@@ -1688,8 +1694,7 @@ against real GitHub succeeds.
 
 ## 2026-10-16 — M12 gemini-web provider: cookie auth, oracle, streaming, bridge ✅
 The full Gemini **web** protocol as a router provider, ported slot-for-slot
-from the reverse-engineered reference (digest: `~/workspace/gemini-web-api-protocol-digest.md`,
-design: `docs/design/gemini-web-design.md`, runbook: `docs/gemini-web-runbook.md`).
+from the reverse-engineered reference (design: `docs/design/gemini-web-design.md`, runbook: `docs/gemini-web-runbook.md`).
 Unofficial surface; risk posture accepted by the owner: cookie material = live
 account access, test accounts, no fallback, typed refusals.
 - `internal/geminiweb/` — protocol package:

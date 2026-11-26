@@ -1,4 +1,4 @@
-# ezllm admin API — contract
+# ezllm API reference
 
 Status codes: `200` ok · `201` created · `400` bad request (incl. an admin JSON body over 1 MiB,
 unknown fields, or trailing data after the object) **or surface-pin refusal** ·
@@ -34,7 +34,7 @@ Errors are OpenAI-shaped: `{"error":{"type":"...","message":"...","code":422}}`.
 
 ---
 
-## Inference surface (M2, unchanged)
+## Inference
 
 | Method | Path | Notes |
 |---|---|---|
@@ -45,7 +45,7 @@ Errors are OpenAI-shaped: `{"error":{"type":"...","message":"...","code":422}}`.
 | POST | `/v1/messages` | Anthropic (`x-api-key` or Bearer) |
 | POST | `/v1/messages/count_tokens` | Anthropic token count → `{"input_tokens":N}`. The model resolves like `/v1/messages`; up to three candidate hops on the Anthropic wire are asked in order (parked hops skipped, failures never park a hop). When none answers (bridges, translated hops, gateways without the endpoint) the gateway estimates over `system`, `messages`, `tools` and `tool_choice` (2 characters per token over the JSON; Anthropic measured about 2.35 on Sonnet 5.5, so the estimate runs about 15–20% high on purpose). `X-Ezllm-Token-Count: upstream\|estimate` says which. Same auth and model allowlist as `/v1/messages`; no ledger row, no budget. |
 | POST | `/v1/responses` | OpenAI Responses |
-| POST | `/v1/embeddings`, `/v1/images/generations`, `/v1/audio/speech`, `/v1/audio/transcriptions` | Service surfaces (M10); transcriptions is multipart |
+| POST | `/v1/embeddings`, `/v1/images/generations`, `/v1/audio/speech`, `/v1/audio/transcriptions` | Service surfaces; transcriptions is multipart |
 | POST | `/v1/images/edits` | OpenAI image edit/inpaint — **multipart** (`model` form field swapped per hop) |
 | POST | `/v1/moderations` | OpenAI Moderations |
 | POST | `/v1/rerank` | Cohere/Voyage-style rerank (`query` + `documents`) |
@@ -134,7 +134,7 @@ invalid_request` before inference.
 `tool_choice` supports `auto`, `none`, `required`, or a named function object;
 `parallel_tool_calls=false` limits output to one call. Up to 128 function tools
 are accepted, with inline parameter schemas declaring `type: object`; `$ref`
-schemas, legacy `functions`, images, and a simultaneous non-text
+schemas, the old `functions` field, images, and a simultaneous non-text
 `response_format` are refused. Argument schemas are passed to the CLI for
 structured-output validation; ezllm independently checks the envelope, declared
 names, JSON object arguments, tool choice and call limits. The caller remains
@@ -154,7 +154,7 @@ This is model-mediated tool selection. It does not add ACP, MCP, a sidecar or
 retained sessions; model compliance can vary. See the
 [Antigravity runbook](agy-bridge-runbook.md#caller-tools).
 
-## M3 — accounts, keys, models, quota
+## Accounts, keys, models and quota
 
 | GET | `/admin/combos` | Lists combos with strategy, hops, compression profile, and advertised `context_size` (default 200000) |
 | POST | `/admin/combos` | Creates a combo; optional `context_size` is positive tokens, defaults to 200000 |
@@ -175,8 +175,8 @@ A fresh database is seeded with an empty, enabled `ezllm-auto-free` combo (`true
 
 **Combo failover cooldown:** transport failures/timeouts and upstream 5xx responses cool only that account endpoint for 5 minutes. Model-specific 401/403/404/429 responses remain failover-able but do not mark the endpoint dead. A 401/403 whose body names model access (`access to model denied`, `model access denied`, `does not have access to`, `no access to model`) parks only that model on that endpoint for the same 5 minutes, and only when another candidate exists. After expiry exactly one half-open probe is admitted; if every candidate is cooling down, no upstream request is sent. When all attempted hops returned an upstream failover response, the last permitted response is returned rather than issuing another call.
 
-Dashboard payload. One call so the first paint is a single round trip. (Admin-gated — this is
-where the detail that `/healthz` no longer leaks lives.)
+Dashboard payload. One call, so the first paint is a single round trip. Admin only: this
+is where the detail lives that `/healthz` never shows.
 
 Ledger health counters (process lifetime, all should stay 0): `dropped_rows` — rows shed because
 the write queue was full; `lost_rows` — rows a failed flush discarded after its retry;
@@ -185,10 +185,10 @@ token budgets under-count by them. The live feed's `snapshot` event carries the 
 `dropped`, `lost` and `unmetered`.
 ```jsonc
 {
-  "health": { "status":"ok", "version":"1.0.0", "schema_version":27, "accounts":19, "provider_keys":19,
+  "health": { "status":"ok", "version":"2.2.0", "schema_version":38, "accounts":19, "provider_keys":19,
                "models":1551, "combos":12, "ledger_rows":22309, "dropped_rows":0, "lost_rows":0,
                "unmetered_rows":0, "ledger_span":{"oldest":"…","newest":"…"}, "uptime_s":4115,
-               "db_path":"/data/ezllm.sqlite" },
+               "db_path":"/data/ezllm.sqlite", "stream_window_s":86400, "hop_stream_health":[] },
   "usage":  [ {"k":"opencode","calls":64,"tin":1200000,"tout":84000,"cread":300000,"cwrite":21000,
                 "reasoning":4000,"saved":0,"errors":1} ],          // group_by=account, last 24h
   "usage_by_surface": [ {"k":"chat","calls":50,"tin":…,"tout":…,"cread":…,"cwrite":…,"reasoning":…,"saved":…,"errors":0} ],
@@ -204,7 +204,7 @@ token budgets under-count by them. The live feed's `snapshot` event carries the 
   "id":1, "name":"OpenCode Go", "namespace":"opencode", "kind":"opencode-go",
   "base_url":"https://opencode.ai/zen/go/v1", "enabled":true,
   "probe_delay_ms":400, "cap_window":"monthly", "cap_tokens":0, "max_context_tokens":0,
-  "usage_convention":"auto",   // schema v13: how the upstream Messages wire counts
+  "usage_convention":"auto",   // how the upstream Messages wire counts
                                // input_tokens — auto|anthropic|total
   "keys":[ {"id":9,"label":"primary","hint":"sk…5E5i","enabled":true,
              "last_test_at":"…","last_test_ok":true,"last_test_detail":"200 · 36 models · auth ok · quota=percent"} ],
@@ -225,7 +225,7 @@ returned page — so the totals answer "how much lives behind this filter".
   "rows": [ RecentCall … ],   // same projection as recent_calls: tin/tout/cread/
                               // reasoning/saved/compression/applied/rules_fired
                               // (rules_fired = caveman prose rules that fired; 0 otherwise),
-                              // plus `translated` (schema v12): true when the served hop's
+                              // plus `translated`: true when the served hop's
                               // WIRE differed from the client's surface, so the bodies were
                               // translated (anthropic client -> chat-only hop, or any client
                               // onto a hop curated for /v1/responses). On such a row `tin` is
@@ -239,7 +239,7 @@ returned page — so the totals answer "how much lives behind this filter".
                // compression accounting (whole matching set):
                // applied_* = rows where a rewrite ACTUALLY shipped shorter
                //   (applied_saved is the real token total — the plain
-               //   compression_saved also sweeps legacy tokens_saved sitting
+               //   compression_saved also counts tokens_saved sitting
                //   on declined rows);
                // declined_* = rows a stage recorded a rewrite for but
                //   rejected (ratio floor / fail-open); held_notional sums
@@ -304,12 +304,12 @@ header gives the report's age in seconds, so a dashboard number can be up to 10 
 ```
 `kind` ∈ `opencode-go|openai-compatible|anthropic-compatible|gemini-openai`. `namespace`:
 `^[a-z0-9][a-z0-9._-]{0,62}$` and must not contain `/`. Unique → `409`.
-`usage_convention` (schema v13, optional; default `auto`) is the operator-declared input
+`usage_convention` (optional; default `auto`) is the operator-declared input
 accounting of the upstream **Messages** wire: `auto` = unstated (never inferred from `kind` or
 `base_url`; read as exclusive, in the ledger and on cross-wire conversions alike), `anthropic` =
 `input_tokens` EXCLUDES cache tokens, `total` = `input_tokens` INCLUDES cache tokens. See
 `docs/design/usage-convention-design.md`.
-`management_key` (schema v19, optional) is a second credential for providers whose balance
+`management_key` (optional) is a second credential for providers whose balance
 endpoint needs a management key (TokenRouter), a platform session token (OpenAI: the `sess-…`
 bearer from platform.openai.com), a web-session cookie (Anthropic Console: a pasted Cookie header
 with `sessionKey` + `lastActiveOrg`) or a web-session cookie (Command Code: the
@@ -495,13 +495,13 @@ per account: a second `POST` while one runs → `409` with the stop instruction.
 ```
 `null` = untested (the UI must render three states: ✓ / ✗ / ?). `pin` is `""` (auto) or the
 pinned surface; enforced by the router (see Surface pins above). `source` = who
-last wrote the verdicts (`probe` / `curated` / absent for a legacy row); `note` is the
+last wrote the verdicts (`probe` / `curated` / absent when neither has); `note` is the
 operator's reason for a curation.
 
 ### `PUT /admin/accounts/{id}/model-pin` → `200`
 Set or clear a model's surface pin. The model id travels **in the body** (ids can contain `/`,
 so it can never be a path segment). `pin` distinguishes three states — **absent** field → `400`
-(this endpoint always states intent), `""` → clear (back to auto), or one of `chat|anthropic|responses` (`openai` is accepted as a legacy alias).
+(this endpoint always states intent), `""` → clear (back to auto), or one of `chat|anthropic|responses` (`openai` is accepted as another name for `chat`).
 ```jsonc
 // request                                   // 200 response
 { "model":"qwen3.8-flash",                   { "model":"qwen3.8-flash",
@@ -513,7 +513,7 @@ unconfirmed_surface` unless `force:true`. A pin set with `force` on an unconfirm
 honored exactly like any other — the refusal then protects you from the mistake downstream.
 Catalog resyncs **preserve** pins (models that vanish upstream lose their pin with their row).
 
-## M9 — prices, cost, and the research columns (schema v8)
+## Prices, cost and request detail
 
 ### `GET /admin/prices` → `200` → `[Price, …]`
 ```jsonc
@@ -560,7 +560,9 @@ Fetches LiteLLM's public `model_prices_and_context_window.json`, matches entries
 **exact model-id suffix** (`gpt-5-nano` ↔ `openai/gpt-5-nano`), and upserts the given
 `effective_from` (default: today) for every enabled account whose catalog has a match.
 Rows are stamped `source="litellm"` and a note that this is a list-price snapshot, not
-a bill. `matched` is the number written; unmatched models still need manual rates.
+a bill. `matched` is the number written; unmatched models still need manual rates. A model
+with any rate from another source (set by hand or imported) is skipped and counted in
+`kept`, so the snapshot never replaces an operator's price.
 Recommended cadence: **daily** (03:00 local); provider list prices change on the order
 of weeks, and the endpoint is idempotent for the day. For a **historical backfill**,
 pass an earlier `effective_from` (for example 30 days ago) — the cost report then
@@ -594,29 +596,28 @@ means the total is a floor, not the full bill. The bill formula (see `NormalizeU
 `tokens_in` already excludes cached, so the four columns partition input cleanly):
 `usd = (in·price_in + out·price_out + cached_read·price_cache_read + cached_write·price_cache_write)/1e6`.
 
-### Requests projection — new v8 fields
-`/admin/requests` and the SSE feed now also emit, per call:
+### Request fields: context and size
+`/admin/requests` and the SSE feed emit, per call:
 `saved_notional` (what a floor-rejected rewrite *would* have saved — `saved` is only real
 shipped savings), `prefix_sha` (stable-core hash: system+tools+history minus the newest
 turn; identical for re-sends of the same context, changes on ANY core edit — the cache-
 break signal), `session_id` (from the optional `X-Ezllm-Session` client header; a pure
 grouping key, never routing), `msg_count`, `tool_count`, `req_bytes` (exact body bytes
-posted upstream, after compression). Also: `ttft_ms` is now genuinely time-to-first-token
-(measured from dispatch; before this it timed from inside the stream copy and read ~1–3ms
-for every call).
+posted upstream, after compression). `ttft_ms` is the time to the first token, measured
+from dispatch.
 
-### Requests projection — v14 fields
+### Request field: caller address
 `ip` — the caller address captured at request time (`X-Real-IP`, then the FIRST
 `X-Forwarded-For` entry, then the socket peer; empty when nothing was available).
 Attribution for traffic mapping, not authentication: a direct connection can
 claim any value, so it must never gate anything. The dashboard shows it under
 the request's timestamp.
 
-### Requests projection — v37 field
+### Request field: bridge wait
 `slot_wait_ms` — how long a subscription bridge held the request waiting for a
 free CLI slot, in milliseconds. It is part of `total_ms`, so `total_ms -
 slot_wait_ms` is the CLI's own time. `null` for every other provider and for
-rows written before v37 (never backfilled). The bridge reports it in an
+rows recorded before the field existed. The bridge reports it in an
 internal response header that the proxy trusts only from a loopback upstream
 and never passes to the client. The dashboard tail shows a non-zero value as
 "queued" under the total; the requests explorer shows it in the row detail.
@@ -675,7 +676,7 @@ The Antigravity bridge reports `percent` shape with one weekly limit per group o
 account's `percent_weekly` is the fullest group, and `quota.groups` on the account lists each one.
 `401`/`429`/`5xx` stay errors (`502`, retryable), so a transient fault never records `none`.
 
-## M3 — combos, tokens, export
+## Combos, API keys and export
 
 ### `GET|POST /admin/combos` · `GET|PATCH|DELETE /admin/combos/{id}`
 ```jsonc
@@ -695,12 +696,10 @@ is the request's fault and keeps the hold. The hop's block tag renders pinned at
 `▮ 1/N` while it holds.
 ```
 `strategy` ∈ `failover|true_round_robin|sticky_last_good|least_used|block_round_robin`.
-(`strict_round_robin` was removed 2026-10-13: zero combos used it and its
-success-driven advance is now expressed as `block_round_robin` with a held hop.)
 `POST` upserts by name (idempotent). `hops` replace the whole ordered list (positions = array order).
 `PATCH` is a partial update — only the fields you send change, `enabled` included, so the one-field
 toggle is `PATCH /admin/combos/{id}` `{"enabled":false}` (the `?enabled=true|false` query form is
-still honored). A disabled combo refuses inference with `combo "x" is disabled` and drops out of
+also accepted). A disabled combo refuses inference with `combo "x" is disabled` and drops out of
 `/v1/models`.
 
 `POST /admin/combos/{id}/test` probes every hop with one tiny real request. A body `{"surface":"chat|anthropic","hop":N}`
@@ -778,7 +777,7 @@ state, accounting/reconciliation internals, and some ledger columns. Full
 recovery uses the SQLite database plus its active master key and deployment
 configuration; see [recovery-runbook.md](recovery-runbook.md).
 
-## M3 — quota snapshots
+## Quota snapshots
 
 ### `GET /admin/quota?keys=1,2` → `200`
 Latest snapshot per key (or all keys when `keys` omitted) — the poller's read side.
@@ -786,7 +785,7 @@ Also `POST /admin/keys/{keyId}/quota` → `200` to force a live read + snapshot 
 
 ---
 
-## M4 — model rules (caps + allowed-use windows)
+## Model rules: caps and allowed hours
 
 ### `GET|POST /admin/model-rules` · `GET|PATCH|DELETE /admin/model-rules/{id}` → `200`
 One rule per `(account_id, model_id)`: a rolling **token cap** and/or an **allowed-use window**.
@@ -796,15 +795,14 @@ One rule per `(account_id, model_id)`: a rolling **token cap** and/or an **allow
 - `win_start` / `win_end` — `HH:MM` local to `win_tz`; `end < start` wraps midnight; both empty =
   always allowed; an identical pair is rejected (empty window, not all-day).
 - `win_days` — CSV of `0–6` (Sun=0), `""` = every day; `win_tz` — an explicit
-  host-resolvable timezone or `instance` (the default for new rules). Existing
-  explicit values are preserved; legacy empty values migrate to UTC.
+  host-resolvable timezone or `instance` (the default for new rules).
 - `enabled`, `note` optional.
 
 Enforcement: inside a combo, a hop whose rule says "not now" is **skipped silently** (the next
 hop serves); a direct call returns `429` naming the rule and its window; a combo refused on
 every hop returns `429`, not `502`.
 
-## M5–M7 — compression profiles
+## Compression profiles
 
 ### `GET|POST /admin/compression-profiles` · `GET|PATCH|DELETE /admin/compression-profiles/{id}` → `200`
 `stages` is an ordered engine pipeline over `session_dedup`, `ansi`, `fold`, `rtk`, `blobs`,
@@ -838,9 +836,9 @@ by the shared estimator), `saved_notional` (what a declined rewrite would have s
 `pre`/`post`/`saved`/`fired`/`cpu_ms`), `note` (why nothing shipped: a floor, `below auto_trigger_tokens`, …)
 and `after` (the sample as it would ship; the original when not applied). Validation errors are `400`.
 
-## M6 — dashboard session & live feed
+## Dashboard session and live feed
 
-### First-boot setup (schema v26): `GET /admin/setup` · `POST /admin/setup`
+### First-start setup: `GET /admin/setup` · `POST /admin/setup`
 There is no factory password. A fresh database (or one still holding the
 pre-v26 factory password) has `dashboard_auth.first_boot = 1` and no usable
 hash; the SPA shows only its set-password page until setup flips the flag.
@@ -872,7 +870,7 @@ past trusted hops) when the peer is in `EZLLM_TRUSTED_PROXIES`; a request that
 waits 2 s without one gets `429` + `Retry-After: 1`, which does not count as
 a failed attempt.
 
-### `GET /admin/notifications` · `POST /admin/notifications/read` (schema v27)
+### `GET /admin/notifications` · `POST /admin/notifications/read`
 The dashboard bell. `GET ?limit=N` (default 50, max 200) →
 `{"items":[{id, kind, severity, title, body, data, count, created_at, updated_at, read_at}], "unread": N}`,
 newest update first. `POST …/read` takes `{"ids":[…]}` or `{"all":true}` → `204`.
@@ -894,7 +892,7 @@ newest update first. `POST …/read` takes `{"ids":[…]}` or `{"all":true}` →
 The three bridge events are raised once per updater report, and only for reports written while
 this process runs: the updater writes its outcome after the restart it causes.
 
-### Push channels: `/admin/notification-channels` (schema v32)
+### Push channels: `/admin/notification-channels`
 Bell events also go to external channels. A new event is pushed to every enabled channel whose
 `min_severity` it meets (`info` < `warn` < `error`); a repeat that folds into an unread row is
 pushed again at most once a day. Delivery runs in the background: 10 s per attempt, three
@@ -948,7 +946,7 @@ the dashboard session lists what the gateway can route without holding a bearer 
 
 ---
 
-## M10 — service defaults (schema v15)
+## Service defaults
 
 The non-chat surfaces (`/v1/embeddings`, `/v1/images/generations`,
 `/v1/audio/speech`, `/v1/audio/transcriptions`, and `/v1/images/edits`,
@@ -1027,7 +1025,7 @@ Client-visible usage may expose a smaller subset. Failed client conversion
 still retains reported upstream usage. SSE accounting observes bounded source
 frames as they are consumed; native response bytes remain unchanged.
 
-### Meter recovery (schema v28)
+### Meter recovery
 
 `pending_usage_meter` records the call ID and budget reservation ID for durable
 ledger rows whose counter updates failed. The normal ledger flush or the next
@@ -1037,7 +1035,7 @@ Admission returns `503 budget_unavailable` while client-meter recovery fails;
 model rules retain their existing refusal when their meter is unavailable.
 No HTTP response field or application release version changes with this schema.
 
-### Reasoning vocabulary (schema v29)
+### Reasoning vocabulary
 
 `models.reasoning_vocab` (CSV, in the provider's order) and `models.reasoning_required` record
 what a model accepts for `reasoning_effort`, read from its own 4xx refusal during live traffic or a
@@ -1066,7 +1064,7 @@ cap), including bounded SSE events. Usage outside an unread/oversized body or
 after transport failure is not estimated. The final fallback response is
 accounted once as the delivery row, rather than as an extra discarded attempt.
 
-## Instance settings, sessions, diagnostics and backups (v1.4)
+## Instance settings, sessions, diagnostics and backups
 
 All routes in this section require admin authentication. Cookie writes retain
 same-origin enforcement. Settings writes accept at most 32 KiB and exactly one
@@ -1111,8 +1109,7 @@ masks the saved value. Settings are stored in the
 management IDs and bounded browser descriptions. These tables ship with schema
 version 31.
 
-Model-rule `win_tz` additionally accepts `instance`, now the default for new
-rules. Existing empty timezone rows migrate to UTC; explicit zones are preserved.
+Model-rule `win_tz` also accepts `instance`, the default for new rules.
 Inherited rule usage reads committed ledger timestamps in the admitted timezone's
 calendar range. Client-token budgets and date-only expiries use the same usage timezone.
 

@@ -1,7 +1,7 @@
 # Claude subscription runbook
 
 How the Claude bridge behaves, its limits and its caps. **To turn it on, follow
-[Turn on Claude](bridges/claude.md).** Design: `design/claude-subscription-design.md`.
+[Turn on Claude](bridges/claude.md).** Design: [claude-subscription-design.md](design/claude-subscription-design.md).
 
 ## What it is
 
@@ -13,9 +13,9 @@ nothing else ever holds the subscription credential. One container, no sidecar.
 
 ## Boot and CLI releases
 
-With the bridge on, a missing CLI or an unusable login directory **fails the boot
-loudly**: this process would otherwise look healthy while every subscription request
-fails. The bind is loopback-enforced. The account's shared secret generates itself into
+With the bridge on, a missing CLI **stops ezllm from starting**: it would otherwise look
+healthy while every subscription request fails. A missing login does not stop it: the
+start line says `login=logged-out` and requests answer 401. The bind is loopback-enforced. The account's shared secret generates itself into
 `data/claude-bridge.token` (0600) on first boot.
 
 Run a pinned **copy** of the CLI, as the setup page does, never a file under
@@ -126,8 +126,8 @@ shape the Providers page already draws — **rolling** = the 5-hour window,
   `/opt/claude-bridge` mount in your `compose.yml` is missing, or its `current`
   link points at nothing.
 
-## Rollback
+## Turn it off
 
-`EZLLM_CLAUDE_BRIDGE=off` and recreate the container, then disable the account (or
-delete the combo) in the dashboard. No schema, no other provider, and no client
+Set `EZLLM_CLAUDE_BRIDGE` to `off` and restart ezllm (recreate the container with
+Docker), then disable the account or delete the combo in the dashboard. No schema, no other provider, and no client
 configuration is affected.

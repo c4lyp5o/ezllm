@@ -1,115 +1,163 @@
-# Recovery and upgrades
+# Back up and restore
 
-Back up the SQLite database and its active master key before upgrading. Keep
-the old binary/image and the verified pair until the upgraded instance passes
-health, account access, and representative routing checks. A newer database
-schema is not necessarily readable by the old binary; rollback uses the old
-binary with the pre-upgrade database/key pair in a separate stopped instance.
-What to change per version: [upgrading](upgrading.md).
+The `data` folder holds everything ezllm knows: settings, history, and the master key
+that unlocks your provider keys. A backup needs the database and that key together. One
+without the other cannot be read.
 
-## Interrupted legacy combo rebuild
+Pick one:
 
-The pre-v9 combo rebuild now runs atomically on a dedicated SQLite connection.
-A failed copy or validation rolls back the rebuild and restores foreign-key
-checking. Reopening handles the two remnants left by older binaries:
+- **[Encrypted backups](#encrypted-backups)**: ezllm makes them, checks them and keeps
+  the last few, daily or when you ask.
+- **[Copy by hand](#copy-by-hand)**: stop ezllm and copy the folder.
 
-- Original legacy `combos` still present: it remains authoritative; rebuild
-  discards the partial staging copy inside the transaction.
-- Only `combos_v9` present: recover that copy and finish normalization before
-  exposing the configuration.
+## Encrypted backups
 
-If both a current-format `combos` and a staging table exist, startup refuses
-rather than choose or delete data. Stop the service, preserve the entire
-DB/key backup, and inspect both tables on a copy before reconciling. Do not
-blindly delete the staged copy: it can contain the only surviving configuration
-from an older interrupted upgrade. Retry the upgraded instance after repair.
+You need a folder on another disk or a NAS, and a **backup secret**: a separate password,
+kept in a file. The examples use `~/ezllm` for ezllm and `/mnt/backup/ezllm` for the
+backups; change both to yours.
 
-## Verified database/key backup
+### 1. Make the secret
 
-The manual Python procedure in [master-key-runbook.md](master-key-runbook.md)
-and the encrypted Settings workflow below both use SQLite's online backup API.
-Neither relies on copying a live main file or assuming WAL was checkpointed.
-For the Python format require a successful exit plus `COMPLETE.json`; for the
-encrypted format require successful verification of the `.tar.gz.age` archive.
-Their completion formats and restore procedures are different. Test restoration
-to a separate stopped instance before relying on either format, and never let a
-second gateway write the same restored data files.
-
-## Configuration exports
-
-`GET /admin/export` includes non-secret rules, prices, model capability/pin
-records, service bindings and saved instance settings as well as
-account/combo/token/profile summaries.
-The versioned file is useful for inspection and manually re-creating operator
-configuration. It is not a full database backup or a lossless restore format;
-its `database_backup_required` marker makes that limitation explicit. Keep the
-verified SQLite/key pair for full recovery and accounting history.
-
-Require the configuration export's final `completion.complete:true` marker as
-well as successful HTTP and JSON parsing. An absent/false completion marker is
-not a successful export; a false marker includes an error and emitted row count.
-Never interpret a failed ledger read as an empty ledger. The SQLite backup
-helper separately uses its `COMPLETE.json` completion file.
-
-## Automated encrypted backups
-
-Configure an absolute mounted `EZLLM_BACKUP_DIR` and a separate
-`EZLLM_BACKUP_SECRET_FILE` before starting ezllm. The secret must contain at least
-24 bytes after trimming whitespace and must differ from the active
-field-encryption master key.
-Protect this file and keep a recovery copy separately from the backup archives.
-Settings → Backup & Recovery provides manual runs, scheduling and verified status.
-Automation starts disabled; enabling defaults to daily at 03:00 in the instance
-timezone with seven verified backups retained.
-
-`backup.go` `BackupTo` uses SQLite's online backup API after a ledger flush, so
-committed WAL data is included without a Python dependency. Live traffic after
-the snapshot belongs to a later backup. Do not rotate deployment secrets during
-a backup. The archive includes the active master secret, honoring environment
-overrides; it does not rely on an ignored key file.
-
-Each `.tar.gz.age` archive contains `ezllm.sqlite`, `ezllm-master.key`,
-`manifest.json` and `RECOVERY.txt`. Before publication, ezllm decrypts a temporary
-copy, verifies the database SHA-256 and SQLite integrity, checks schema support,
-and proves the key decrypts stored provider/management credentials. Temporary
-plaintext has private directory/file permissions and is removed after the job.
-The companion JSON record marks archives verified at creation and published.
-Retention starts only after publication and removes recognized completed pairs.
-A snapshot or verification failure preserves earlier backups; cleanup errors can
-leave extra older archives. Listing an archive does not reverify its contents.
-
-Verify an archive offline:
+This makes a random secret in a file only you can read:
 
 ```sh
-ezllm backup-verify --archive /backups/ARCHIVE.tar.gz.age --secret-file /run/secrets/backup
+mkdir -p ~/ezllm-secrets && chmod 700 ~/ezllm-secrets
+openssl rand -base64 32 > ~/ezllm-secrets/backup && chmod 600 ~/ezllm-secrets/backup
 ```
 
-Restore into a new directory with the destination instance stopped:
+Keep a copy of this file somewhere other than the backups. Without it, no backup can be
+opened.
+
+### 2. Tell ezllm where they are
+
+Make the backup folder, owned by you:
 
 ```sh
-ezllm backup-restore --archive /backups/ARCHIVE.tar.gz.age --secret-file /run/secrets/backup --output /data/recovered
+sudo mkdir -p /mnt/backup/ezllm && sudo chown "$(id -u):$(id -g)" /mnt/backup/ezllm
 ```
 
-The output directory must not exist, even if empty. Restore verifies the archive
-before creating the output and revokes all restored dashboard sessions. Configure
-the recovered database location and `EZLLM_MASTER_KEY_FILE` pointing to the
-restored key. Remove any `EZLLM_MASTER_KEY` override, or set it to that same
-restored secret: it still takes precedence over the file. Start the same or a
-compatible newer binary on a separate port.
-Confirm account access and ledger history before switching traffic. Password and
-client tokens are recovered from the database; browser sessions must log in again.
-The original archive is unchanged. Restore syncs the restored files before
-publishing them, and syncs the destination and parent directories on platforms
-that support it (not Windows). If restore exits with an error, do not start a
-gateway from the output even if the directory exists: publishing can fail
-partway through. Investigate the error and retry into a different unused directory.
+Pick the way you run ezllm:
 
-Deployment YAML/environment, bridge CLI binaries, vendor login directories and
-the backup encryption secret are not in the archive; preserve them separately.
-The mounted directory may be a NAS or another disk; this feature does not upload
-to S3. A failed verification, cancellation or insufficient storage must be resolved
-before treating the latest job as successful. Keep enough destination capacity
-for the database snapshot, encrypted archive and decrypted verification copy.
-CLI verification uses a private system temporary directory; CLI restore stages
-in the output directory's parent. Automated verification stages on the configured
-backup volume.
+- **Docker Compose:** in `compose.yml`, add these under `environment:`:
+
+  ```yaml
+        EZLLM_BACKUP_DIR: /backups
+        EZLLM_BACKUP_SECRET_FILE: /run/secrets/ezllm-backup
+  ```
+
+  and these under `volumes:`. Change `/home/you` to your home folder (`echo $HOME`
+  prints it).
+
+  ```yaml
+        - /mnt/backup/ezllm:/backups
+        - /home/you/ezllm-secrets/backup:/run/secrets/ezllm-backup:ro
+  ```
+
+  Then run `docker compose up -d`.
+
+- **The ezllm binary:** set these before you start ezllm, then restart it. For the
+  systemd service, add them as `Environment=` lines like the
+  [bridge pages](bridges/claude.md#with-the-ezllm-binary) do.
+
+  ```sh
+  export EZLLM_BACKUP_DIR=/mnt/backup/ezllm
+  export EZLLM_BACKUP_SECRET_FILE="$HOME/ezllm-secrets/backup"
+  ```
+
+ezllm refuses to start if the secret file is missing. A secret shorter than 24 characters,
+or the same as the master key, leaves backups off.
+
+### 3. Turn them on
+
+1. In the dashboard, open **Settings** → **Backup & Recovery**. You should see
+   `Backup storage configured`. If it says `Backup storage is not configured`, check the
+   folder and the secret.
+2. Choose **Back up now**. The backup appears in the list when it has been checked.
+3. To back up every day, switch on **Scheduled backups**. **Daily backup hour** (in your
+   timezone) and **Verified backups to keep** start at 3 and 7. Choose **Save changes**.
+
+Each backup is checked before it is kept: ezllm opens a copy, checks the database, and
+checks that the key opens your stored provider keys. Old backups are deleted only after a
+new one passes. A failed backup rings the bell and leaves the older ones alone.
+
+### Check a backup
+
+This opens a backup and checks it, without changing anything:
+
+```sh
+~/ezllm/bin/ezllm backup-verify --archive /mnt/backup/ezllm/ARCHIVE.tar.gz.age --secret-file ~/ezllm-secrets/backup
+```
+
+`ARCHIVE` is the backup's name, such as `ezllm-20260101T030000Z-1a2b3c4d`. With Docker,
+run it from the image ezllm runs, so the versions match:
+
+```sh
+docker run --rm --user "$(id -u):$(id -g)" -v /mnt/backup/ezllm:/backups:ro \
+  -v "$HOME/ezllm-secrets/backup:/secret:ro" --entrypoint /app/ezllm \
+  "$(docker inspect -f '{{.Config.Image}}' ezllm)" backup-verify --archive /backups/ARCHIVE.tar.gz.age --secret-file /secret
+```
+
+You should see `backup verified` and the date it was made.
+
+### Restore
+
+1. Stop ezllm: `docker stop ezllm`, `systemctl --user stop ezllm`, or Ctrl+C.
+2. Restore into a new folder next to `data`. The folder must not exist yet:
+
+   ```sh
+   ~/ezllm/bin/ezllm backup-restore --archive /mnt/backup/ezllm/ARCHIVE.tar.gz.age \
+     --secret-file ~/ezllm-secrets/backup --output ~/ezllm/data-restored
+   ```
+
+   With Docker:
+
+   ```sh
+   docker run --rm --user "$(id -u):$(id -g)" -v /mnt/backup/ezllm:/backups:ro \
+     -v "$HOME/ezllm-secrets/backup:/secret:ro" -v "$HOME/ezllm:/out" --entrypoint /app/ezllm \
+     "$(docker inspect -f '{{.Config.Image}}' ezllm)" backup-restore --archive /backups/ARCHIVE.tar.gz.age \
+     --secret-file /secret --output /out/data-restored
+   ```
+
+   You should see `backup restored`. If it fails, do not use that folder: fix the error
+   and restore into another new one.
+3. Swap the folders. The old one stays as `data-old` until you are sure:
+
+   ```sh
+   cd ~/ezllm && mv data data-old && mv data-restored data
+   ```
+
+4. Start ezllm. If you set `EZLLM_MASTER_KEY`, remove it: the restored key file must be
+   the one in use.
+
+Sign in with the dashboard password from the backup. Your API keys work as before.
+
+A backup does not have `config.yaml`, `compose.yml` or your environment settings, the
+bridge CLIs and their logins, or the backup secret. Keep copies of those yourself.
+
+## Copy by hand
+
+Stop ezllm, copy the whole `data` folder, then start it again:
+
+```sh
+cd ~/ezllm && cp -a data ~/ezllm-backup-$(date +%Y%m%d-%H%M)
+```
+
+The copy holds the master key, so keep it private. To copy while ezllm runs, use
+`scripts/backup_sqlite.py` ([master key](master-key-runbook.md#back-it-up)).
+
+## Before you upgrade
+
+Back up first, and keep the old image or binary. A newer version can change the database
+so that an older one cannot open it. To go back, start the old version with the backup
+you made before the upgrade. What to change for each version: [upgrading](upgrading.md).
+
+## Export your configuration
+
+**Settings** → **Backup & Recovery** → **Export configuration** downloads your accounts,
+combos, rules, prices and settings as a readable file, without any keys. It helps you
+check or rebuild a setup by hand. It is not a backup: it cannot be restored.
+
+---
+
+**How it works:** [API.md](API.md) (`/admin/backups`, `/admin/export`) ·
+**The master key:** [master key](master-key-runbook.md)

@@ -311,7 +311,7 @@ Each provider you uncomment in `config.yaml` is added at start, without a key. I
 remove it from ezllm.
 
 To copy the data while ezllm is running, use an
-[online backup](recovery-runbook.md#verified-databasekey-backup). A plain copy of a running
+[online backup](master-key-runbook.md#back-it-up). A plain copy of a running
 database can miss recent changes.
 
 ### Reach it from other computers

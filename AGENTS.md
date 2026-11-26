@@ -137,7 +137,7 @@ User docs are easy, straightforward and for everyone. The models, for every ez a
 ## Logging
 
 The contract, the level table and the measured cost are in
-[`docs/logging.md`](docs/logging.md). The rules that must not drift:
+[`docs/design/logging-design.md`](docs/design/logging-design.md). The rules that must not drift:
 
 - **stdout only.** No log file, no rotation, no third-party logger. The
   platform captures stdout; the ledger is the durable record.

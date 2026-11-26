@@ -16,6 +16,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -89,6 +90,7 @@ type priceRefreshResult struct {
 	EffectiveFrom string `json:"effective_from"`
 	Entries       int    `json:"entries"`
 	Matched       int    `json:"matched"`
+	Kept          int    `json:"kept"`
 	Note          string `json:"note"`
 }
 
@@ -104,29 +106,27 @@ func normalizeEffective(v string, now time.Time) (string, error) {
 	return t.Format("2006-01-02"), nil
 }
 
-// refreshPrices is the single implementation behind both the admin endpoint
-// and the in-process daily scheduler. Callers validate source/effective_from
-// before calling; an empty effective_from means today (UTC).
-func (s *Server) refreshPrices(ctx context.Context, source, effective string) (priceRefreshResult, error) {
-	if source == "" {
-		source = "litellm"
-	}
-	var err error
-	effective, err = normalizeEffective(effective, time.Now())
-	if err != nil {
-		return priceRefreshResult{}, err
-	}
-	raw, err := fetchLiteLLMPrices(ctx)
-	if err != nil {
-		return priceRefreshResult{}, err
-	}
+// applyPriceSnapshot writes one snapshot's rates for every enabled account's
+// matching models, except models the operator priced: those are counted in
+// kept and left alone.
+func (s *Server) applyPriceSnapshot(ctx context.Context, raw map[string]liteLLMEntry, source, effective, fetched string) (matched, kept int, err error) {
 	bySuffix := litellmSuffixMap(raw)
 	accounts, err := s.db.ListAccounts(ctx)
 	if err != nil {
-		return priceRefreshResult{}, err
+		return 0, 0, err
 	}
-	fetched := time.Now().UTC().Format(time.RFC3339)
-	matched := 0
+	// A model with any rate this source did not write was priced by the
+	// operator (by hand or by import): the snapshot never writes over it.
+	existing, err := s.db.ListPrices(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	own := make(map[string]bool)
+	for _, p := range existing {
+		if p.Source != source {
+			own[strconv.FormatInt(p.AccountID, 10)+"\x00"+p.ModelID] = true
+		}
+	}
 	for _, a := range accounts {
 		if !a.Enabled {
 			continue
@@ -144,6 +144,10 @@ func (s *Server) refreshPrices(ctx context.Context, source, effective string) (p
 				}
 			}
 			if !ok {
+				continue
+			}
+			if own[strconv.FormatInt(a.ID, 10)+"\x00"+m.ID] {
+				kept++
 				continue
 			}
 			p := store.Price{
@@ -169,9 +173,33 @@ func (s *Server) refreshPrices(ctx context.Context, source, effective string) (p
 			matched++
 		}
 	}
+	return matched, kept, nil
+}
+
+// refreshPrices is the single implementation behind both the admin endpoint
+// and the in-process daily scheduler. Callers validate source/effective_from
+// before calling; an empty effective_from means today (UTC).
+func (s *Server) refreshPrices(ctx context.Context, source, effective string) (priceRefreshResult, error) {
+	if source == "" {
+		source = "litellm"
+	}
+	var err error
+	effective, err = normalizeEffective(effective, time.Now())
+	if err != nil {
+		return priceRefreshResult{}, err
+	}
+	raw, err := fetchLiteLLMPrices(ctx)
+	if err != nil {
+		return priceRefreshResult{}, err
+	}
+	fetched := time.Now().UTC().Format(time.RFC3339)
+	matched, kept, err := s.applyPriceSnapshot(ctx, raw, source, effective, fetched)
+	if err != nil {
+		return priceRefreshResult{}, err
+	}
 	return priceRefreshResult{
 		Source: source, FetchedAt: fetched, EffectiveFrom: effective,
-		Entries: len(raw), Matched: matched,
+		Entries: len(raw), Matched: matched, Kept: kept,
 		Note: "exact model-id suffix match; unmatched models need manual prices",
 	}, nil
 }

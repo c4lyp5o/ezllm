@@ -2,7 +2,7 @@
 
 How the ChatGPT (Codex) bridge behaves, its limits and its caps. **To turn it on,
 follow [Turn on ChatGPT (Codex)](bridges/codex.md).** Design:
-`design/codex-subscription-design.md`.
+[codex-subscription-design.md](design/codex-subscription-design.md).
 
 The bridge supports text, streaming, images, reasoning effort and summaries,
 structured output, plan windows, and client tools with continuation. Read the [platform requirements](#platform-requirements--read-this-first)
@@ -33,15 +33,13 @@ runs, but **client tools are switched off** and every request that carries
 
 ### Why
 
-In Codex 0.163.0 a client tool can only be called from inside Codex's JavaScript
-tool (`exec`), so the bridge has to leave that tool's runtime on. The runtime
-itself was measured to have no file system, network or process access — but
-Codex also exposes its own `apply_patch` (file-writing) tool inside it, and no
-0.163.0 setting removes it. Codex's read-only policy refused every `apply_patch`
-the spike tried; Landlock makes that refusal a **kernel guarantee** instead of a
-promise from Codex's code. With client tools off, `exec` is disabled and
+Codex calls a client tool only from inside its JavaScript tool (`exec`), so the bridge
+has to leave that tool's runtime on. The runtime has no file system, network or process
+access, but Codex also exposes its own `apply_patch` (file-writing) tool inside it, and no
+setting removes it. Landlock makes sure that tool cannot write outside the request's own
+folder, as a **kernel guarantee** instead of a promise from Codex's code. With client tools off, `exec` is disabled and
 `apply_patch` is unreachable, so the guarantee holds without Landlock.
-Measurements: `design/codex-subscription-design.md` §2.5 and §2.12.
+Measurements: [design](design/codex-subscription-design.md) §2.5 and §2.12.
 When Landlock is available, **every** Codex child runs inside it, text-only
 requests included; tools additionally switch the code-mode runtime on.
 
@@ -57,9 +55,12 @@ requests included; tools additionally switch the code-mode runtime on.
 
 ### Check your host
 
+The kernel must be 5.13 or newer, and the second line must list `landlock`, as in
+`lockdown,capability,landlock,yama,apparmor`:
+
 ```sh
-uname -r                          # needs 5.13 or newer
-cat /sys/kernel/security/lsm      # must list "landlock", e.g. lockdown,capability,landlock,yama,apparmor
+uname -r
+cat /sys/kernel/security/lsm
 ```
 
 In WSL the second command can say `No such file` while Landlock works.
@@ -68,8 +69,10 @@ Neither command proves the **container** may use it — Docker's seccomp profile
 can block the Landlock syscalls even when the kernel has them. The bridge's own
 answer is authoritative: it tries Landlock at boot and reports the result.
 
+Its start line has `landlock=…` and `client_tools=…`:
+
 ```sh
-docker logs ezllm | grep -i "codex bridge"    # boot line: landlock=… client_tools=…
+docker logs ezllm | grep -i "codex bridge"
 ```
 
 The dashboard preset shows bridge status. The loopback bridge `GET /status`
@@ -119,7 +122,7 @@ per-request working directory. The child
 uses `approvalPolicy=never`, also pinned as `approval_policy="never"`
 in CLI startup configuration: this headless bridge
 has no approval UI and declines approval RPCs, so `on-request` cannot provide a
-usable escalation path. Operations outside the workspace still fail.
+usable escalation path. Operations outside the workspace fail.
 
 Writable mode does not enable Codex's native shell, grant access to the client's
 workspace, or remove the outer Landlock domain. Client tools execute in the
@@ -129,7 +132,6 @@ context to tool-bearing requests so the model attempts caller tools instead of
 inferring a caller-side denial from its local sandbox. Actual caller
 tool failures and approval requirements still apply. This is instruction
 steering, not a guarantee of model behavior or a grant of filesystem access.
-Recreate the container after changing the environment.
 
 Caller-tool guidance also treats environment checks, repository
 inspection, plans and progress reports as intermediate steps of an implementation
@@ -154,8 +156,8 @@ mode and caller guidance sustained long runs with sol and astra. Terra's
 subscription default effort is `low`; the bridge forwards the client's
 `reasoning_effort` unchanged. For long autonomous caller-tool work, route to
 `gpt-6.1-sol` (or `gpt-6-astra`); longer runs consume more subscription quota.
-CLI 0.167.0 exposes caller tools only through code mode — disabling
-`code_mode_host` makes them unavailable to the model.
+Caller tools exist only through code mode: without `code_mode_host` the model cannot see
+them.
 
 ### Zero-token steps and usage attribution
 
@@ -226,15 +228,15 @@ Every setting: [environment.md](environment.md).
      surface speaks Chat Completions, whose `prompt_tokens` already include
      `prompt_tokens_details.cached_tokens`
    - Sync the catalog (every model the login serves, hidden ones included), then **Test**.
-2. **Combo / fallback chains:** allowed (operator decision). Cap the account with
-   **Rules** before agents use it — the bridge itself has no cap.
+2. **Combo / fallback chains:** allowed. Cap the account with **Rules** before agents use
+   it: the bridge itself has no cap.
 
 ## Client tools
 
 Send ordinary OpenAI `tools`. What happens behind the bridge:
 
-1. The client's function tools are declared to Codex as dynamic tools. In 0.163.0
-   the model calls them from inside its code-mode JavaScript
+1. The client's function tools are declared to Codex as dynamic tools. The model calls
+   them from inside its code-mode JavaScript
    (`await tools.get_weather({city: "KL"})`), which runs in a V8 isolate with no
    file system, network or process access, inside the Landlock domain.
 2. Each call comes back to the client as a normal `tool_calls` entry,
@@ -335,10 +337,10 @@ are for maintainers; see `internal/codexbridge/live_test.go` for their setup.
 | 502 `output_backpressure` (or a terminal stream error) | pending output exceeded 1 MiB or 4,096 deltas behind a slow consumer | drain the response promptly and check downstream buffering; the turn has ended and its child was reaped |
 | answers arrive in one chunk, `/v1/models` 404 | the bridge is on the **exec fallback** (`/status` → `channel`) | the CLI release dropped an app-server method; pin the qualified release |
 
-## Rollback
+## Turn it off
 
-Set `EZLLM_CODEX_BRIDGE=off` (or disable the account) and recreate. No schema
-change, nothing else is touched.
+Set `EZLLM_CODEX_BRIDGE` to `off` and restart ezllm (recreate the container with Docker),
+or disable the account. Nothing else is touched.
 
 ## Common confusion
 
@@ -351,14 +353,14 @@ change, nothing else is touched.
 - **"It works on my laptop but not on the server."** Different kernels or
   different container seccomp profiles. Compare `/status` on both.
 - **"The bridge won't start on macOS / Windows."** It is a Linux feature; run
-  ezllm in a Linux container.
+  ezllm in a Linux container, or [WSL](wsl.md) on Windows.
 
 ## Conversation history
 
 Startup automatically selects native structured history when the
 CLI advertises `thread/inject_items`; `/status.native_history` reports the
 selection. CLIs without it and exec
-keep text-transcript replay. Incomplete historical tool groups also use legacy
+keep text-transcript replay. Incomplete tool groups in the history also use transcript
 replay before inference. A native injection error fails before inference;
 it does not spend a second model request to repair history.
 
@@ -387,7 +389,7 @@ Boot validates experimental `thread/fork`, `thread/resume`,
 forks when available. Otherwise the default uses the original path and reports
 the reason in `/status.cache_selection` (mode `default`). `on` requires support and fails startup if unavailable;
 `off` explicitly selects the original path. Unknown values fail startup.
-The cache requires app-server; CLI 0.167.0 passed the native proof. The decision
+The cache requires app-server. The decision
 happens before inference, never as a second model call to repair a failed turn.
 
 Each independent request launches a new CLI, resumes a matching empty template,

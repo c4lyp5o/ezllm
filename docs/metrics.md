@@ -1,61 +1,46 @@
-# Prometheus metrics
+# Scrape Prometheus metrics
 
-`GET /metrics` serves Prometheus text exposition (format 0.0.4) for scraping by
-Prometheus, VictoriaMetrics, Grafana Agent/Alloy or the OpenTelemetry
-Collector's Prometheus receiver. Added in v2.1.0. Code: `internal/server/metrics.go`.
+ezllm serves Prometheus metrics at `GET /metrics`: requests, tokens, timings and ledger
+health. Prometheus, VictoriaMetrics, Grafana Alloy and the OpenTelemetry Collector can read
+them. Collecting is always on and costs nothing per request.
 
-## Decisions
+You need ezllm running and a dashboard login.
 
-- **No request-path work.** Counters and histograms are fed by
-  `store.ObserveLedger`: the ledger goroutine hands each committed batch to the
-  collector after the SQLite commit. A request does nothing extra, and a scrape
-  counts exactly what the ledger committed. `BenchmarkMetricsObserve` measures
-  the observer at about 255 ns per row with zero allocations (4 vCPU, 2026-11-16).
-- **Never drops a batch.** `ObserveLedger` is synchronous, unlike
-  `SubscribeLedger`, which drops batches for a slow consumer.
-- **Always collecting, key-gated reads.** The observer costs about 255 ns per
-  committed row off the request path, so it always runs; reading needs a key.
-- **No dependency.** The exposition format is written by hand. No Prometheus
-  client library and no OpenTelemetry SDK; the binary does not grow.
-- **No stop-the-world on scrape.** Runtime gauges come from `runtime/metrics`,
-  not `runtime.ReadMemStats`.
-- **Counters restart at zero** with the process, as Prometheus expects;
-  `rate()` and `increase()` handle the reset. Totals that must survive restarts
-  are in the ledger (`/admin/usage`, `/admin/cost`).
-- **Bounded cardinality.** Labels are the surface, the provider account, the
-  upstream model and the HTTP status. Client token names, IPs, sessions and
-  aliases are never labels. The model can be caller-supplied on a refused
-  request, so each family stops at 2,000 series; new models after that fold into
-  `model="_other"`.
-- **Not OTLP.** Push export, traces and OTel logs are out of scope. An OTel
-  pipeline scrapes this endpoint with the Collector's Prometheus receiver.
+## 1. Create a metrics key
 
-## Authenticate
+In the dashboard, open **Connect** and choose **Create key**. Enter a name. Under
+**Roles**, untick **Inference** and tick **Metrics**, then choose **Create key**. Copy the
+key now: you see it once.
 
-Create a key with the **Metrics** role on the dashboard's Connect page (or
-`POST /admin/tokens` with `"roles":["metrics"]`). A metrics key reads only
-`/metrics`: it gets 403 on inference routes and on `/admin`. Only the
-`metrics` role opens `/metrics`: an admin or infer key gets 403 and the
-dashboard session gets 401. The Connect page shows the scrape URL and a
-paste-ready `prometheus.yml` job.
+A metrics key reads only `/metrics`. Admin and inference keys get `403` there, so use
+this one.
 
-Store the key in a file and point `credentials_file` at it:
+## 2. Save the key
+
+Save the key in a file on the Prometheus machine, for example
+`/etc/prometheus/ezllm-metrics.key`. Only Prometheus should be able to read it.
+
+## 3. Add a scrape job
+
+Add this to `prometheus.yml`. Change `ezllm.example.com` to the address of your ezllm.
 
 ```yaml
-# prometheus.yml
 scrape_configs:
   - job_name: ezllm
     scrape_interval: 30s
     authorization:
       credentials_file: /etc/prometheus/ezllm-metrics.key
     static_configs:
-      - targets: ["ezllm.internal:20129"]
+      - targets: ["ezllm.example.com:20129"]
 ```
 
-For an OpenTelemetry Collector, use the same block under
-`receivers.prometheus.config.scrape_configs`.
+For the OpenTelemetry Collector, put the same block under
+`receivers.prometheus.config.scrape_configs`. **Connect** also shows the scrape address
+and this job, ready to paste. Its **Test it from a terminal** command checks the key.
 
-## Metrics
+Reload Prometheus. You should see the `ezllm` target as **UP** on its **Targets** page.
+
+## What you get
 
 | Name | Type | Labels | Meaning |
 |---|---|---|---|
@@ -66,7 +51,7 @@ For an OpenTelemetry Collector, use the same block under
 | `ezllm_time_to_first_token_seconds` | histogram | `surface`, `account` | Time to first streamed token |
 | `ezllm_inflight_requests` | gauge | | Inference requests admitted now |
 | `ezllm_inflight_limit` | gauge | | Configured global in-flight limit |
-| `ezllm_count_tokens_total` | counter | `source` | `POST /v1/messages/count_tokens` answers; `source` is `upstream` (an Anthropic-wire hop answered) or `estimate` (v2.2.0) |
+| `ezllm_count_tokens_total` | counter | `source` | `POST /v1/messages/count_tokens` answers; `source` is `upstream` (an Anthropic-wire hop answered) or `estimate` |
 | `ezllm_ledger_lost_rows_total` | counter | | Rows discarded after a failed flush and retry |
 | `ezllm_ledger_dropped_rows_total` | counter | | Rows dropped because the ledger queue was full |
 | `ezllm_ledger_unmetered_rows_total` | counter | | Committed rows the usage meter did not count |
@@ -77,13 +62,15 @@ For an OpenTelemetry Collector, use the same block under
 
 Histogram buckets (seconds): 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300.
 `account` is the provider account name; `model` is the model sent upstream.
-Cost is not exported: prices are versioned and can be re-rated after the fact,
-so `/admin/cost` stays the source of truth.
 
-## Example
+Counters start at zero when ezllm restarts; `rate()` and `increase()` allow for that.
+Totals that last across restarts, and cost, are in the dashboard's **Analytics** and in
+`/admin/usage` and `/admin/cost`.
 
-From the test harness after one chat request (HELP lines and most buckets
-trimmed):
+The number of series is capped. Past 2,000 per metric, new models are counted as
+`model="_other"`.
+
+This is what one chat request looks like (most lines left out):
 
 ```text
 # TYPE ezllm_requests_total counter
@@ -109,17 +96,31 @@ go_goroutines 22
 
 ## Useful queries
 
+Error ratio per account, over 5 minutes:
+
 ```promql
-# error ratio by account, 5 minutes
 sum by (account) (rate(ezllm_requests_total{status=~"5.."}[5m]))
   / sum by (account) (rate(ezllm_requests_total[5m]))
+```
 
-# p95 time to first token by account
+Time to first token, 95th percentile, per account:
+
+```promql
 histogram_quantile(0.95, sum by (le, account) (rate(ezllm_time_to_first_token_seconds_bucket[5m])))
+```
 
-# admission saturation
+How full the request limit is:
+
+```promql
 ezllm_inflight_requests / ezllm_inflight_limit
+```
 
-# ledger health: should stay flat
+Lost ledger rows. This should stay at zero:
+
+```promql
 increase(ezllm_ledger_lost_rows_total[1h]) + increase(ezllm_ledger_dropped_rows_total[1h])
 ```
+
+---
+
+**How it works:** [metrics decisions](design/metrics-design.md)

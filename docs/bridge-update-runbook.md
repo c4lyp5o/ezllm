@@ -1,9 +1,10 @@
-# Bridge CLI updates — operator runbook
+# Bridge CLI updates
 
-`scripts/bridge_update.py` maintains pinned official CLI releases for Claude,
-Codex, Antigravity and optionally Copilot. It uses the existing host timer and
-stdlib Python; no new daemon, sidecar or dashboard write endpoint is required.
-Design history: `docs/design/SPEC-bridge-update.md`.
+`scripts/bridge_update.py` keeps the bridge CLIs current: Claude, Codex, Antigravity and,
+if you turn it on, Copilot. It tests each new release on your own login before it
+switches, and goes back if the release fails. It runs hourly from a systemd user timer,
+with plain Python and Docker. It works with ezllm in Docker. Design:
+[SPEC-bridge-update.md](design/SPEC-bridge-update.md).
 
 ## Policy
 
@@ -18,17 +19,14 @@ Design history: `docs/design/SPEC-bridge-update.md`.
 | `bridges.NAME.model` | bridge gate default | Optional model override for the plain live check |
 | `bridges.NAME.tool_model` | bridge gate default | Optional model override for caller-tool checks |
 
-The existing twelve-hour minimum between successful promotions per bridge is
-retained. Gates and ordinary restarts run only inside the window unless a
+Each bridge switches at most once every twelve hours. Gates and ordinary restarts run only inside the window unless a
 supervised run uses `--force-window`. **Rollback/recovery is the exception:**
 it can restart outside the window solely to restore a journalled previous
 version. A dry run never promotes, rolls back or restarts; an unfinished
 transaction makes it exit 2 instead of attempting recovery.
 
 Quota, authentication and transport failures do not establish CLI
-incompatibility. They defer the candidate with backoff. Known operational
-blocks left by older updater versions migrate to backoff automatically.
-Compatibility failures remain blocked until explicitly cleared or superseded;
+incompatibility. They defer the candidate with backoff. Compatibility failures remain blocked until explicitly cleared or superseded;
 operator holds are never removed automatically.
 
 ## How a release moves
@@ -99,9 +97,8 @@ Changing policy or models warrants a fresh supervised check.
 | Antigravity | Plain answer; schema capability (required: caller tools are on by default), caller selection and stateless result replay; with `EZLLM_AGY_BRIDGE_CACHE=on`, an additional exact caller-result conversation-resume proof |
 | Copilot | Plain answer, caller-tool batch and result replay, with configured `EZLLM_COPILOT_BRIDGE_WARM_POOL`; exact completed-session continuation when `EZLLM_COPILOT_BRIDGE_CACHE=on` |
 
-Gate verdicts carry `policy` and `retryable` fields. An older binary that ignores
-a configured policy cannot qualify that policy: deploy the updated ezllm image
-before relying on these gates. `gate_binary` can mount a host-built ezllm for
+Gate verdicts carry `policy` and `retryable` fields. The running ezllm image must know
+the configured policy, or the gate refuses. `gate_binary` can mount a host-built ezllm for
 pre-deployment dry runs, but production must also provide the matching gate for
 a real post-promotion proof.
 
@@ -110,7 +107,7 @@ replace model-specific image, long-context, compression or harness acceptance
 proofs. No caller filesystem tool is executed by a tool-loop check; it supplies
 a synthetic result. Answers, tool arguments and result values are not printed.
 
-## Install or migrate
+## Install
 
 1. Bridges set up with [Turn on a bridge](bridge-setup.md) already use the layout
    below: skip to step 3. For a bridge that mounts a single CLI file, initialize
@@ -121,8 +118,8 @@ a synthetic result. Answers, tool arguments and result values are not printed.
    python3 scripts/bridge_update.py --init --bridge copilot
    ```
 
-   Initialization copies the legacy release without replacing the original
-   binary or changing production's mount. For a standalone Copilot mount,
+   Initialization copies the mounted release without replacing the original binary or
+   changing production's mount. For a standalone Copilot mount,
    the CLI version is read with `--no-auto-update --version` inside production.
 2. Set the binary paths and mount the roots in the host-owned `compose.yml`:
 
@@ -147,9 +144,10 @@ a synthetic result. Answers, tool arguments and result values are not printed.
    default; set `bridges.copilot.enabled` true after its mount migration.
    Optional `model` and `tool_model` values should name models your plan serves. The live
    checks spend that plan's quota.
-4. For gateway proofs, store a suitably scoped client token in
-   `~/.config/ezllm/proof.token` with mode 0600. Without it the in-container live
-   checks are the proof; the status says the gateway script was skipped.
+4. Optional: for the gateway proof (`tests/prove_claude_bridge.py` and
+   `tests/prove_codex_bridge.py`, through port 20129), store an inference key in
+   `~/.config/ezllm/proof.token` with mode 0600. Without it, the live checks inside the
+   container are the only proof.
 5. Install or refresh the existing user unit and timer:
 
    ```sh
@@ -160,8 +158,8 @@ a synthetic result. Answers, tool arguments and result values are not printed.
    loginctl enable-linger "$USER"
    ```
 
-   The service timeout is 90 minutes for up to four gates and post-promotion
-   proofs. An installed older unit keeps its old timeout until refreshed.
+   The service may run for 90 minutes: up to four gates and their proofs. After you
+   update ezllm, copy the unit files again, so the timeout matches.
 
 ## Supervised checks and recovery
 

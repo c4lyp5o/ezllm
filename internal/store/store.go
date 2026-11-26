@@ -27,7 +27,7 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 38
+const schemaVersion = 39
 
 // Stream-outcome vocabulary (schema v34, docs/design/hop-health-design.md). Stored in
 // calls.stream_outcome; an empty value means the request was not a stream.

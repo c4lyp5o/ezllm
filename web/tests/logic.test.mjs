@@ -79,6 +79,11 @@ try {
   assert.equal(m.summarizeImport({}), 'Nothing to import');
   assert.equal(m.importWrites({ unchanged: 4, skip: 1 }), false);
   assert.equal(m.importWrites({ update: 1 }), true);
+  // Ledger retention: 0 or at least 32 days.
+  assert.equal(m.settingError('ledger_retention_days', 0), '');
+  assert.equal(m.settingError('ledger_retention_days', 90), '');
+  assert.notEqual(m.settingError('ledger_retention_days', 7), '');
+  assert.equal(m.effectiveText('ledger_retention_days', 0), '0 (keep every call)');
   // Alert thresholds.
   assert.equal(m.settingError('alert_quota_percent', 80), '');
   assert.notEqual(m.settingError('alert_quota_percent', 0), '');

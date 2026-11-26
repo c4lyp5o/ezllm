@@ -638,18 +638,18 @@ func (d *DB) UsageReport(ctx context.Context, from, to time.Time, groupBy string
 	}
 	q := fmt.Sprintf(`
 SELECT %s AS k,
-       COUNT(*)                                   AS calls,
+       COALESCE(SUM(n),0)                         AS calls,
        COALESCE(SUM(tokens_in),0)                 AS tin,
        COALESCE(SUM(tokens_out),0)                AS tout,
        COALESCE(SUM(tokens_cached_read),0)        AS cread,
        COALESCE(SUM(tokens_cached_write),0)       AS cwrite,
        COALESCE(SUM(reasoning_tokens),0)          AS reasoning,
        COALESCE(SUM(tokens_saved),0)              AS saved,
-       COALESCE(SUM(CASE WHEN compression_applied=1 THEN tokens_saved ELSE 0 END),0) AS applied_saved,
+       COALESCE(SUM(applied_saved),0)             AS applied_saved,
        COALESCE(SUM(context_tokens_pre),0)        AS context_pre,
        COALESCE(SUM(context_tokens_saved),0)      AS context_saved,
-       COALESCE(SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END),0) AS errors
-FROM calls
+       COALESCE(SUM(errs),0)                      AS errors
+FROM usage_all
 WHERE ts >= ? AND ts < ?
 GROUP BY k
 ORDER BY calls DESC`, col)
@@ -892,6 +892,54 @@ WHERE ts >= ? AND ts < ?`, days[0].start.UTC().Format(tsFmt), days[len(days)-1].
 		}
 	}
 	if err := rs.Err(); err != nil {
+		return nil, err
+	}
+	rs.Close()
+	// Rolled-up days (ledger retention) count at noon UTC of their day. In a
+	// timezone far from UTC that can land on the neighbouring local day; the
+	// raw calls were gone, so the hour is not known any more.
+	ds, err := d.r.QueryContext(ctx, `
+SELECT day || 'T12:00:00.000Z', SUM(calls), SUM(tokens_in), SUM(tokens_out),
+       SUM(tokens_cached_read), SUM(tokens_cached_write), SUM(reasoning_tokens),
+       SUM(tokens_saved), SUM(applied_saved), SUM(context_tokens_pre), SUM(context_tokens_saved), SUM(errors)
+FROM calls_daily
+WHERE day || 'T12:00:00.000Z' >= ? AND day || 'T12:00:00.000Z' < ?
+GROUP BY day`, days[0].start.UTC().Format(tsFmt), days[len(days)-1].end.UTC().Format(tsFmt))
+	if err != nil {
+		return nil, err
+	}
+	defer ds.Close()
+	for ds.Next() {
+		var noon string
+		var u UsageRow
+		if err := ds.Scan(&noon, &u.Calls, &u.TokensIn, &u.TokensOut, &u.CachedRead, &u.CachedWrite, &u.Reasoning,
+			&u.TokensSaved, &u.AppliedSaved, &u.ContextPre, &u.ContextSaved, &u.Errors); err != nil {
+			return nil, err
+		}
+		i, _ := slices.BinarySearchFunc(edges, noon, func(edge string, t string) int {
+			if edge <= t {
+				return -1
+			}
+			return 1
+		})
+		if i >= len(days) {
+			continue
+		}
+		r := &rows[i]
+		seen[i] = true
+		r.Calls += u.Calls
+		r.TokensIn += u.TokensIn
+		r.TokensOut += u.TokensOut
+		r.CachedRead += u.CachedRead
+		r.CachedWrite += u.CachedWrite
+		r.Reasoning += u.Reasoning
+		r.TokensSaved += u.TokensSaved
+		r.AppliedSaved += u.AppliedSaved
+		r.ContextPre += u.ContextPre
+		r.ContextSaved += u.ContextSaved
+		r.Errors += u.Errors
+	}
+	if err := ds.Err(); err != nil {
 		return nil, err
 	}
 

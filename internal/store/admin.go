@@ -1488,7 +1488,8 @@ SELECT id, name, token_hash, roles, enabled, cap_window, cap_tokens, cap_usd,
        allowed_models, expires_at,
        -- no last_used_at column: derive from the ledger (calls.client is the
        -- token name, set by ClientByToken). No hot-path write needed.
-       (SELECT MAX(ts) FROM calls c WHERE c.client = client_tokens.name),
+       COALESCE((SELECT MAX(ts) FROM calls c WHERE c.client = client_tokens.name),
+                (SELECT MAX(day) || 'T12:00:00.000Z' FROM calls_daily d WHERE d.client = client_tokens.name)),
        created_at, compression_profile_id
 FROM client_tokens ORDER BY id`)
 	if err != nil {

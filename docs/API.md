@@ -186,7 +186,7 @@ token budgets under-count by them. The live feed's `snapshot` event carries the 
 `dropped`, `lost` and `unmetered`.
 ```jsonc
 {
-  "health": { "status":"ok", "version":"2.2.0", "schema_version":38, "accounts":19, "provider_keys":19,
+  "health": { "status":"ok", "version":"2.2.0", "schema_version":39, "accounts":19, "provider_keys":19,
                "models":1551, "combos":12, "ledger_rows":22309, "dropped_rows":0, "lost_rows":0,
                "unmetered_rows":0, "ledger_span":{"oldest":"…","newest":"…"}, "uptime_s":4115,
                "db_path":"/data/ezllm.sqlite", "stream_window_s":86400, "hop_stream_health":[] },
@@ -1173,6 +1173,7 @@ JSON object, with unknown envelope/setting fields rejected.
 | `alert_quota_percent` | Integer 1–100, default 80. A quota window at or over this warns, once per window. |
 | `alert_balance_below` | Number above 0, default 2, in the provider's currency. A lower balance warns, once a day. |
 | `alert_cookie_hours` | Integer 1–720, default 48. A session cookie expiring within this many hours warns, once per cookie. |
+| `ledger_retention_days` | Integer, default 0 (keep every call), else 32–3650. Calls older than this are rolled into `calls_daily` (one row per UTC day, account, key, client, alias, surface and model) and deleted, by the hourly job. Usage, cost and day reports read both, so their totals do not change; a rolled day counts at noon UTC. The median TTFT, `GET /admin/requests` and the ledger in `GET /admin/export` cover only the calls kept. Calls with a pending meter debit are kept until it is settled. |
 
 Duration settings retain the limits of their existing YAML counterparts.
 `apply` is `immediate` for operator values; changing a deployment override still

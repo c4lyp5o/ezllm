@@ -528,3 +528,49 @@ CREATE TABLE IF NOT EXISTS instance_job_health (
  last_success TEXT NOT NULL DEFAULT '',
  last_failure TEXT NOT NULL DEFAULT ''
 );
+
+-- v39 ledger retention: calls older than the operator's retention are rolled
+-- into one row per UTC day, account, key, client, alias, surface and model
+-- before they are deleted, so long-range charts and cost stay whole. Ids are
+-- 0 (not NULL) when unknown so the unique key matches.
+CREATE TABLE IF NOT EXISTS calls_daily (
+  day                  TEXT NOT NULL,
+  account_id           INTEGER NOT NULL DEFAULT 0,
+  account              TEXT NOT NULL,
+  provider_key_id      INTEGER NOT NULL DEFAULT 0,
+  key_hint             TEXT NOT NULL DEFAULT '',
+  client               TEXT NOT NULL DEFAULT '',
+  alias                TEXT NOT NULL DEFAULT '',
+  surface              TEXT NOT NULL,
+  model                TEXT NOT NULL,
+  calls                INTEGER NOT NULL DEFAULT 0,
+  errors               INTEGER NOT NULL DEFAULT 0,
+  tokens_in            INTEGER NOT NULL DEFAULT 0,
+  tokens_out           INTEGER NOT NULL DEFAULT 0,
+  tokens_cached_read   INTEGER NOT NULL DEFAULT 0,
+  tokens_cached_write  INTEGER NOT NULL DEFAULT 0,
+  reasoning_tokens     INTEGER NOT NULL DEFAULT 0,
+  tokens_saved         INTEGER NOT NULL DEFAULT 0,
+  applied_saved        INTEGER NOT NULL DEFAULT 0,
+  context_tokens_pre   INTEGER NOT NULL DEFAULT 0,
+  context_tokens_saved INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_calls_daily_key ON calls_daily(day, account_id, account, provider_key_id, key_hint, client, alias, surface, model);
+
+-- usage_all is the ledger as the reports read it: every raw call (n = 1) plus
+-- every rolled-up day (n = its call count, stamped at noon UTC so it falls in
+-- its own UTC day).
+CREATE VIEW IF NOT EXISTS usage_all AS
+SELECT ts, account_id, account, provider_key_id, key_hint, client, alias, surface, model,
+       1 AS n, CASE WHEN status >= 400 THEN 1 ELSE 0 END AS errs,
+       tokens_in, tokens_out, tokens_cached_read, tokens_cached_write, reasoning_tokens,
+       tokens_saved, CASE WHEN compression_applied = 1 THEN tokens_saved ELSE 0 END AS applied_saved,
+       context_tokens_pre, context_tokens_saved
+FROM calls
+UNION ALL
+SELECT day || 'T12:00:00.000Z', NULLIF(account_id, 0), account, NULLIF(provider_key_id, 0), key_hint, client, alias, surface, model,
+       calls, errors,
+       tokens_in, tokens_out, tokens_cached_read, tokens_cached_write, reasoning_tokens,
+       tokens_saved, applied_saved,
+       context_tokens_pre, context_tokens_saved
+FROM calls_daily;

@@ -140,6 +140,7 @@ func (s *Server) startAlerts(ctx context.Context) {
 				return
 			case <-timer.C:
 				s.checkAlerts(ctx, time.Now())
+				s.applyRetention(ctx, time.Now())
 				timer.Reset(alertEvery)
 			}
 		}
@@ -177,6 +178,24 @@ func (s *Server) checkAlerts(ctx context.Context, now time.Time) {
 		if v.NotifyQuota || v.NotifyBalance {
 			s.readQuotaForAlerts(ctx, a)
 		}
+	}
+}
+
+// applyRetention rolls calls older than the retention setting into daily
+// totals and deletes them. It runs with the hourly check; a run with nothing
+// old enough does nothing.
+func (s *Server) applyRetention(ctx context.Context, now time.Time) {
+	keep := s.settings.Current().LedgerRetentionDays
+	if keep == 0 {
+		return
+	}
+	days, rows, err := s.db.RollUpLedger(ctx, now.AddDate(0, 0, -keep))
+	if err != nil {
+		s.log.Warn("ledger retention failed", "err", err, "days_done", days)
+		return
+	}
+	if rows > 0 {
+		s.log.Info("ledger rolled up", "days", days, "calls", rows, "keep_days", keep)
 	}
 }
 

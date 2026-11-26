@@ -1,6 +1,6 @@
 // Exercises the shipped Settings UI without provider credentials.
 import { start, json, check, finish } from './mockdash.mjs';
-const defaults = { usage_timezone: 'UTC', translation_enabled: true, automatic_probing: true, catalog_interval: '12h', price_refresh: true, retries: 3, attempt_budget: 8, dispatch_deadline: '', cooldown_429: '60s', cooldown_5xx: '60s', cooldown_strikes: 3, backup_enabled: false, backup_hour: 3, backup_keep: 7, notify_free_models_added: true, notify_free_models_removed: true, notify_free_model_broken: true, notify_catalog_refresh_failed: true, notify_client_budget_reached: true, notify_price_refresh_failed: true, notify_backup_failed: true, notify_bridge_updated: true, notify_bridge_update_blocked: true, notify_bridge_rolled_back: true, notify_quota_warning: true, alert_quota_percent: 80, notify_balance_low: true, alert_balance_below: 2, notify_cookie_expiring: true, alert_cookie_hours: 48 };
+const defaults = { usage_timezone: 'UTC', translation_enabled: true, automatic_probing: true, catalog_interval: '12h', price_refresh: true, retries: 3, attempt_budget: 8, dispatch_deadline: '', cooldown_429: '60s', cooldown_5xx: '60s', cooldown_strikes: 3, backup_enabled: false, backup_hour: 3, backup_keep: 7, notify_free_models_added: true, notify_free_models_removed: true, notify_free_model_broken: true, notify_catalog_refresh_failed: true, notify_client_budget_reached: true, notify_price_refresh_failed: true, notify_backup_failed: true, notify_bridge_updated: true, notify_bridge_update_blocked: true, notify_bridge_rolled_back: true, notify_quota_warning: true, alert_quota_percent: 80, notify_balance_low: true, alert_balance_below: 2, notify_cookie_expiring: true, alert_cookie_hours: 48, ledger_retention_days: 0 };
 let revision = 0, fields = Object.fromEntries(Object.entries(defaults).map(([k, value]) => [k, { value, source: k === 'price_refresh' ? 'environment' : 'default', editable: k !== 'price_refresh', saved: false, apply: 'immediate' }]));
 let sessions = [{ id: 'session-other', browser: 'Other browser', current: false, created_at: '2026-10-26T00:00:00Z', expires_at: '2026-10-27T00:00:00Z' }];
 let backups = { ready: true, running: false, last_outcome: '', backups: [] };
@@ -79,6 +79,12 @@ try {
   await page.getByRole('button', { name: 'Back up now', exact: true }).click();
   await page.getByText('Backup running…', { exact: true }).waitFor();
   check('backup overlap disabled', await page.getByRole('button', { name: 'Backing up…', exact: true }).isDisabled());
+  await page.getByLabel('Keep every call for', { exact: true }).fill('7');
+  check('retention under 32 days is refused', await page.getByText('Use 0 to keep every call, or a whole number of days from 32 to 3650.').count() === 1);
+  await page.getByLabel('Keep every call for', { exact: true }).fill('90');
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+  await page.getByRole('status').filter({ hasText: 'Settings saved.' }).waitFor();
+  check('retention saves', fields.ledger_retention_days.value === 90);
   await page.getByLabel('Export file to import').setInputFiles({ name: 'ezllm-export.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ kind: 'configuration_export', format_version: 1 })) });
   await page.getByText('1 to create, 1 to update, 1 unchanged').waitFor();
   check('import shows the plan first, without unchanged rows', imports.length === 1 && imports[0].dry && await page.getByText('created turned off: add a key, then turn it on').count() === 1 && await page.getByText('retries', { exact: true }).count() === 0, imports);

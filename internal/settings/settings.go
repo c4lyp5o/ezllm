@@ -49,6 +49,9 @@ type Values struct {
 	AlertBalance     float64 `json:"alert_balance_below"`
 	NotifyCookie     bool    `json:"notify_cookie_expiring"`
 	AlertCookieHours int     `json:"alert_cookie_hours"`
+	// LedgerRetentionDays rolls calls older than this into daily totals and
+	// deletes them. 0 keeps every call.
+	LedgerRetentionDays int `json:"ledger_retention_days"`
 }
 
 func Defaults() Values {
@@ -97,6 +100,9 @@ func (v Values) Validate() error {
 	}
 	if v.AlertCookieHours < 1 || v.AlertCookieHours > 720 {
 		return errors.New("alert_cookie_hours must be 1–720")
+	}
+	if v.LedgerRetentionDays != 0 && (v.LedgerRetentionDays < 32 || v.LedgerRetentionDays > 3650) {
+		return errors.New("ledger_retention_days must be 0 (keep every call) or 32–3650")
 	}
 	return nil
 }

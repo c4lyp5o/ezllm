@@ -4,6 +4,10 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## Unreleased
 
+- **Ledger retention.** Settings → Backup & Recovery → **Keep every call for** caps how
+  long single calls are kept (off by default; 32 days or more). Older calls are added
+  into daily totals per provider, model, key and app, then deleted, so charts, costs and
+  token totals do not change. Database schema 39 adds the daily totals table.
 - **Import a configuration.** Settings → Backup & Recovery → **Import configuration**
   reads an export from another ezllm, lists what it would create or change, and applies
   it when you say so. Providers already here keep their keys; new ones arrive turned

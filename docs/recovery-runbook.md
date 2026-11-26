@@ -151,6 +151,16 @@ Back up first, and keep the old image or binary. A newer version can change the 
 so that an older one cannot open it. To go back, start the old version with the backup
 you made before the upgrade. What to change for each version: [upgrading](upgrading.md).
 
+## Keep the ledger small
+
+Every request adds a row to the ledger, so the database grows over time. To cap it,
+open **Settings** → **Backup & Recovery** and set **Keep every call for** to a number
+of days, 32 or more.
+
+Once an hour, ezllm adds calls older than that into daily totals per provider, model,
+key and app, then deletes them. Charts, costs and token totals stay the same. **Requests**
+then lists only the calls kept, and a daily total cannot be split back into calls.
+
 ## Export your configuration
 
 **Settings** → **Backup & Recovery** → **Export configuration** downloads your accounts,

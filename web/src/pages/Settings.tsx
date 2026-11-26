@@ -91,6 +91,7 @@ const DETAILS: Record<string, [string, string]> = {
   backup_enabled: ['Scheduled backups', 'Needs a backup folder mounted on the host and a separate encryption secret.'],
   backup_hour: ['Daily backup hour', 'Hour of the day, from 0 to 23, in the instance timezone.'],
   backup_keep: ['Verified backups to keep', 'From 1 to 365. Old backups are only deleted after a new one has been checked.'],
+  ledger_retention_days: ['Keep every call for', 'Days, 0 to keep everything, or 32 to 3650. Older calls are added into daily totals per provider, model, key and app, then deleted, so charts and costs stay the same. Requests then shows only the calls kept.'],
   notify_free_models_added: ['Free models added', 'New free models discovered in a provider catalog.'],
   notify_free_models_removed: ['Free models removed', 'Free models removed from a provider catalog.'],
   notify_free_model_broken: ['Broken free models', 'Free models that fail every protocol probe.'],
@@ -113,7 +114,7 @@ const DETAILS: Record<string, [string, string]> = {
 const GROUPS: Partial<Record<Tab, string[]>> = {
   General: ['usage_timezone', 'update_check'],
   Gateway: ['translation_enabled', 'automatic_probing', 'catalog_interval', 'price_refresh', 'retries', 'attempt_budget', 'dispatch_deadline', 'cooldown_429', 'cooldown_5xx', 'cooldown_strikes'],
-  'Backup & Recovery': ['backup_enabled', 'backup_hour', 'backup_keep'],
+  'Backup & Recovery': ['backup_enabled', 'backup_hour', 'backup_keep', 'ledger_retention_days'],
   Notifications: Object.keys(DETAILS).filter(k => k.startsWith('notify_') || k.startsWith('alert_')),
 };
 const panel = 'rounded-xl border border-line bg-surface p-5 sm:p-6';

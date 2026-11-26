@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -182,5 +183,79 @@ func TestAlertCheckLogLines(t *testing.T) {
 	h.server.checkAlerts(context.Background(), time.Now())
 	if !strings.Contains(buf.String(), `msg="alert check failed" step="prune quota reads"`) {
 		t.Fatalf("a closed database was not logged at Warn:\n%s", buf.String())
+	}
+}
+
+// Retention is off by default; with a number of days it rolls older calls up,
+// logged at Info (filtered at Warn), and a failure is a Warn.
+func TestRetentionRunsOnlyWhenSet(t *testing.T) {
+	oldCall := func(h *harness) {
+		t.Helper()
+		ts := time.Now().AddDate(0, 0, -60).UTC().Format("2006-01-02T15:04:05.000Z")
+		if _, err := h.db.Writer().Exec(`INSERT INTO calls (ts, account, surface, model, status) VALUES (?, 'up', 'chat', 'm', 200)`, ts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	withRetention := func(buf *bytes.Buffer, level slog.Level, days int) *harness {
+		return newHarness(t, func(http.ResponseWriter, *http.Request) {}, func(o *Options) {
+			m, err := settings.New(context.Background(), o.DB, settings.Defaults(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if days > 0 {
+				if _, err := m.Patch(context.Background(), 0, map[string]json.RawMessage{"ledger_retention_days": json.RawMessage(strconv.Itoa(days))}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			o.Settings = m
+			o.Log = slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: level}))
+		})
+	}
+	var buf bytes.Buffer
+	h := withRetention(&buf, slog.LevelInfo, 0)
+	oldCall(h)
+	h.server.applyRetention(context.Background(), time.Now())
+	if n := countTable(t, h, "calls"); n != 1 {
+		t.Fatalf("retention off rolled calls up: %d left", n)
+	}
+	for _, tc := range []struct {
+		level slog.Level
+		want  bool
+	}{{slog.LevelInfo, true}, {slog.LevelWarn, false}} {
+		var buf bytes.Buffer
+		h := withRetention(&buf, tc.level, 40)
+		oldCall(h)
+		h.server.applyRetention(context.Background(), time.Now())
+		if n := countTable(t, h, "calls"); n != 0 {
+			t.Fatalf("a 60-day-old call with 40 days kept: %d left", n)
+		}
+		if got := strings.Contains(buf.String(), "ledger rolled up"); got != tc.want {
+			t.Fatalf("level %v: logged=%v\n%s", tc.level, got, buf.String())
+		}
+	}
+	buf.Reset()
+	h = withRetention(&buf, slog.LevelWarn, 40)
+	_ = h.db.Close()
+	h.server.applyRetention(context.Background(), time.Now())
+	if !strings.Contains(buf.String(), "ledger retention failed") {
+		t.Fatalf("a closed database was not logged:\n%s", buf.String())
+	}
+}
+
+// Retention below a month would cut into budget windows, so it is refused.
+func TestRetentionSettingRange(t *testing.T) {
+	for _, days := range []int{1, 31, 3651} {
+		v := settings.Defaults()
+		v.LedgerRetentionDays = days
+		if v.Validate() == nil {
+			t.Errorf("%d days accepted", days)
+		}
+	}
+	for _, days := range []int{0, 32, 365} {
+		v := settings.Defaults()
+		v.LedgerRetentionDays = days
+		if err := v.Validate(); err != nil {
+			t.Errorf("%d days refused: %v", days, err)
+		}
 	}
 }

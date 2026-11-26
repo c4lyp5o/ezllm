@@ -4,6 +4,10 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## Unreleased
 
+- **Compression per key.** A key can carry its own compression profile (Connect → key
+  policy). It applies to that key's requests on every route, direct `namespace/model`
+  calls included; a request's `x-ezllm-compression` header still wins, and a combo's
+  profile applies when the key has none.
 - **One model by id.** `GET /v1/models/{model}` returns that model's entry, so SDKs
   and IDE plugins that check a configured model at startup no longer get a 404.
   Anthropic clients get Anthropic's shape.

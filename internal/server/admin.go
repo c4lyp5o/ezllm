@@ -2108,6 +2108,8 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 			CapWindow     string   `json:"cap_window"`
 			AllowedModels *string  `json:"allowed_models"`
 			ExpiresAt     *string  `json:"expires_at"`
+			// Present-and-null clears the profile; absent leaves it alone.
+			CompressionProfileRaw json.RawMessage `json:"compression_profile_id"`
 		}
 		if !decodeBody(w, r, &body) {
 			return
@@ -2117,6 +2119,21 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "invalid_request_error", "cap_usd must be a number >= 0")
 			return
 		}
+		var profileID *int64
+		if raw := bytes.TrimSpace(body.CompressionProfileRaw); len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
+			var v int64
+			if err := json.Unmarshal(raw, &v); err != nil || v < 0 {
+				writeErr(w, http.StatusBadRequest, "invalid_request_error", "compression_profile_id must be an integer or null")
+				return
+			}
+			if v > 0 {
+				if _, err := s.db.GetCompressionProfile(r.Context(), v); err != nil {
+					writeErr(w, http.StatusBadRequest, "invalid_request_error", "compression_profile_id names no profile")
+					return
+				}
+				profileID = &v
+			}
+		}
 		if err := s.db.UpdateToken(r.Context(), id, body.Enabled, body.Roles,
 			body.CapTokens, body.CapWindow, body.AllowedModels, body.ExpiresAt); err != nil {
 			s.writeStoreErr(w, err)
@@ -2124,6 +2141,12 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.CapUSD != nil {
 			if err := s.db.SetTokenCapUSD(r.Context(), id, *body.CapUSD); err != nil {
+				s.writeStoreErr(w, err)
+				return
+			}
+		}
+		if len(bytes.TrimSpace(body.CompressionProfileRaw)) > 0 {
+			if err := s.db.SetTokenCompressionProfile(r.Context(), id, profileID); err != nil {
 				s.writeStoreErr(w, err)
 				return
 			}

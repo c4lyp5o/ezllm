@@ -1455,6 +1455,9 @@ type TokenSummary struct {
 	ExpiresAt     string   `json:"expires_at"`
 	LastUsedAt    *string  `json:"last_used_at"`
 	CreatedAt     string   `json:"created_at"`
+	// CompressionProfileID: the key's own compression profile, used when the
+	// request names none (header) — even on a direct namespace/model route.
+	CompressionProfileID *int64 `json:"compression_profile_id"`
 }
 
 // ListTokens returns all client tokens (hints only).
@@ -1465,7 +1468,7 @@ SELECT id, name, token_hash, roles, enabled, cap_window, cap_tokens, cap_usd,
        -- no last_used_at column: derive from the ledger (calls.client is the
        -- token name, set by ClientByToken). No hot-path write needed.
        (SELECT MAX(ts) FROM calls c WHERE c.client = client_tokens.name),
-       created_at
+       created_at, compression_profile_id
 FROM client_tokens ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -1476,9 +1479,13 @@ FROM client_tokens ORDER BY id`)
 		var t TokenSummary
 		var hash, roles string
 		var lastUsed sql.NullString
+		var profile sql.NullInt64
 		if err := rows.Scan(&t.ID, &t.Name, &hash, &roles, &t.Enabled,
-			&t.CapWindow, &t.CapTokens, &t.CapUSD, &t.AllowedModels, &t.ExpiresAt, &lastUsed, &t.CreatedAt); err != nil {
+			&t.CapWindow, &t.CapTokens, &t.CapUSD, &t.AllowedModels, &t.ExpiresAt, &lastUsed, &t.CreatedAt, &profile); err != nil {
 			return nil, err
+		}
+		if profile.Valid && profile.Int64 > 0 {
+			t.CompressionProfileID = &profile.Int64
 		}
 		t.Roles = splitCSV(roles)
 		t.Hint = tokenHint(hash)
@@ -1684,6 +1691,43 @@ func (d *DB) UpdateToken(ctx context.Context, id int64, enabled *bool, roles []s
 		}
 		return nil
 	})
+}
+
+// SetTokenCompressionProfile sets (or with nil clears) a key's compression
+// profile. An id that names no profile is ErrNotFound.
+func (d *DB) SetTokenCompressionProfile(ctx context.Context, id int64, profileID *int64) error {
+	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		var v any
+		if profileID != nil && *profileID > 0 {
+			var n int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM compression_profiles WHERE id=?`, *profileID).Scan(&n); err != nil {
+				return err
+			}
+			if n == 0 {
+				return fmt.Errorf("%w: compression profile %d", ErrNotFound, *profileID)
+			}
+			v = *profileID
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE client_tokens SET compression_profile_id=? WHERE id=?`, v, id)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
+}
+
+// TokenCompressionProfileID returns the compression profile a key carries, or
+// 0 when it has none (or the key is gone).
+func (d *DB) TokenCompressionProfileID(ctx context.Context, name string) int64 {
+	var id sql.NullInt64
+	_ = d.r.QueryRowContext(ctx, `SELECT compression_profile_id FROM client_tokens WHERE name=?`, name).Scan(&id)
+	if id.Valid {
+		return id.Int64
+	}
+	return 0
 }
 
 // DeleteToken revokes a client token permanently.

@@ -729,7 +729,7 @@ response shape is unchanged. `EZLLM_COMBO_AUTOPROBE=off` disables it.
 { "name":"my-app","roles":["infer"],"token":"ezllm_…" }   // token optional; generated if absent
 // GET   → [{"id":4,"name":"my-app","hint":"ezllm…a91f","roles":["infer"],"enabled":true,"cap_window":"monthly","cap_tokens":0,"cap_usd":0,"allowed_models":"","expires_at":"","last_used_at":"…"}]
 //         an enabled key with a cap also carries "cap_used" (tokens) and/or "spent_usd" for its current bucket
-// PATCH → {"enabled":false} | {"roles":["infer","admin"]} | {"cap_tokens":100000,"cap_window":"daily"} | {"cap_usd":25} | {"allowed_models":"deepseek/*,openai/gpt-5*"} | {"expires_at":"2026-11-01"}
+// PATCH → {"enabled":false} | {"roles":["infer","admin"]} | {"cap_tokens":100000,"cap_window":"daily"} | {"cap_usd":25} | {"allowed_models":"deepseek/*,openai/gpt-5*"} | {"expires_at":"2026-11-01"} | {"compression_profile_id":3} (null clears; an unknown id is 400)
 ```
 `roles` is a non-empty subset of `infer|metrics|admin`, each a separate permission:
 `infer` calls models on `/v1/*`, `metrics` reads `GET /metrics`, `admin` reaches `/admin/*`. No role
@@ -832,8 +832,9 @@ table; any other value is a 400). Every engine applies to all three request shap
   tool output (a `role:"tool"` message, a user message of only `tool_result` blocks, or a
   `function_call_output` item) on its first send; it is then frozen like any shipped message. A
   last message with any prose stays exempt. `keep` leaves the newest tool result whole.
-- Selection: per-request `x-ezllm-compression` header → the combo's `compression_profile_id` →
-  off. Fail-open: an engine error passes the original request through untouched.
+- Selection: per-request `x-ezllm-compression` header → the calling key's
+  `compression_profile_id` (applies on direct `namespace/model` routes too) → the combo's
+  `compression_profile_id` → off. Fail-open: an engine error passes the original request through untouched.
 
 ### `POST /admin/compression-preview` → `200`
 Runs the real engines over a pasted sample; nothing is stored, sent upstream or ledgered. Body:

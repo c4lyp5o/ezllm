@@ -698,6 +698,8 @@ is the request's fault and keeps the hold. The hop's block tag renders pinned at
 `▮ 1/N` while it holds.
 ```
 `strategy` ∈ `failover|true_round_robin|sticky_last_good|least_used|block_round_robin`.
+`sticky_idle_s` (sticky_last_good only) is how long a quiet combo keeps its last good hop;
+`0` keeps it until that hop fails. A `PATCH` without the field keeps the stored value.
 `POST` upserts by name (idempotent). `PATCH /admin/combos/{id}` updates that combo by id, so a
 new `name` renames it; a name another combo has answers `409`. `hops` replace the whole ordered
 list (positions = array order).

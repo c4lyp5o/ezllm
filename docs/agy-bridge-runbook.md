@@ -180,6 +180,8 @@ filesystem or shell tools. Use `EZLLM_AGY_MODEL` to test another model.
 
 Press **Quota** on the account. The bridge answers `GET /v1/usage` by running
 `agy -p /usage`, which the CLI answers itself: it runs no turn and spends no quota.
+Reads run one at a time, and a reading is reused for 30 seconds, so pressing
+**Quota** again right away shows the same numbers.
 The plan has one weekly limit per group of models (Gemini, and Claude and GPT), and
 the card shows how much of each is used. A full group does not stop the other one.
 These are Google's numbers for the whole login, not ezllm's ledger. A group whose

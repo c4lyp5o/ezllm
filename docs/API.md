@@ -1148,6 +1148,10 @@ JSON object, with unknown envelope/setting fields rejected.
 | `backup_hour` | Integer 0–23, instance timezone; default 3. |
 | `backup_keep` | Integer 1–365, default 7; counts completed verified backups. |
 | `notify_free_models_added`, `notify_free_models_removed`, `notify_free_model_broken`, `notify_catalog_refresh_failed`, `notify_client_budget_reached`, `notify_price_refresh_failed`, `notify_backup_failed`, `notify_bridge_updated`, `notify_bridge_update_blocked`, `notify_bridge_rolled_back`, `notify_stream_truncation`, `notify_update_available` | Boolean, all default true. Apply to future dashboard bell events and so to push channels. |
+| `notify_quota_warning`, `notify_balance_low`, `notify_cookie_expiring` | Boolean, all default true. The early warnings: an hourly check reads each enabled provider's quota and cookie expiry. |
+| `alert_quota_percent` | Integer 1–100, default 80. A quota window at or over this warns, once per window. |
+| `alert_balance_below` | Number above 0, default 2, in the provider's currency. A lower balance warns, once a day. |
+| `alert_cookie_hours` | Integer 1–720, default 48. A session cookie expiring within this many hours warns, once per cookie. |
 
 Duration settings retain the limits of their existing YAML counterparts.
 `apply` is `immediate` for operator values; changing a deployment override still

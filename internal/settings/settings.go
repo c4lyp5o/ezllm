@@ -40,10 +40,19 @@ type Values struct {
 	NotifyBridgeBack bool   `json:"notify_bridge_rolled_back"`
 	NotifyStreamCut  bool   `json:"notify_stream_truncation"`
 	NotifyUpdate     bool   `json:"notify_update_available"`
+	// Early warnings, read by the hourly alert check: a quota window at or
+	// over AlertQuotaPct, a prepaid balance under AlertBalance, a session
+	// cookie expiring within AlertCookieHours.
+	NotifyQuota      bool    `json:"notify_quota_warning"`
+	AlertQuotaPct    int     `json:"alert_quota_percent"`
+	NotifyBalance    bool    `json:"notify_balance_low"`
+	AlertBalance     float64 `json:"alert_balance_below"`
+	NotifyCookie     bool    `json:"notify_cookie_expiring"`
+	AlertCookieHours int     `json:"alert_cookie_hours"`
 }
 
 func Defaults() Values {
-	return Values{UsageTZ: "UTC", Translation: true, AutoProbe: true, CatalogInterval: "12h", PriceRefresh: true, UpdateCheck: true, Retries: 3, AttemptBudget: 8, Cooldown429: "60s", Cooldown5xx: "60s", CooldownStrikes: 3, BackupHour: 3, BackupKeep: 7, NotifyAdded: true, NotifyRemoved: true, NotifyBroken: true, NotifyCatalog: true, NotifyBudget: true, NotifyPrices: true, NotifyBackup: true, NotifyBridgeUp: true, NotifyBridgeHeld: true, NotifyBridgeBack: true, NotifyStreamCut: true, NotifyUpdate: true}
+	return Values{UsageTZ: "UTC", Translation: true, AutoProbe: true, CatalogInterval: "12h", PriceRefresh: true, UpdateCheck: true, Retries: 3, AttemptBudget: 8, Cooldown429: "60s", Cooldown5xx: "60s", CooldownStrikes: 3, BackupHour: 3, BackupKeep: 7, NotifyAdded: true, NotifyRemoved: true, NotifyBroken: true, NotifyCatalog: true, NotifyBudget: true, NotifyPrices: true, NotifyBackup: true, NotifyBridgeUp: true, NotifyBridgeHeld: true, NotifyBridgeBack: true, NotifyStreamCut: true, NotifyUpdate: true, NotifyQuota: true, AlertQuotaPct: 80, NotifyBalance: true, AlertBalance: 2, NotifyCookie: true, AlertCookieHours: 48}
 }
 func (v Values) Validate() error {
 	if _, err := time.LoadLocation(v.UsageTZ); err != nil || v.UsageTZ == "" {
@@ -79,6 +88,15 @@ func (v Values) Validate() error {
 	}
 	if v.BackupKeep < 1 || v.BackupKeep > 365 {
 		return errors.New("backup_keep must be 1–365")
+	}
+	if v.AlertQuotaPct < 1 || v.AlertQuotaPct > 100 {
+		return errors.New("alert_quota_percent must be 1–100")
+	}
+	if v.AlertBalance <= 0 || v.AlertBalance > 1_000_000 {
+		return errors.New("alert_balance_below must be more than 0")
+	}
+	if v.AlertCookieHours < 1 || v.AlertCookieHours > 720 {
+		return errors.New("alert_cookie_hours must be 1–720")
 	}
 	return nil
 }
@@ -116,6 +134,12 @@ func (v Values) Notify(kind string) bool {
 		return v.NotifyStreamCut
 	case "update_available":
 		return v.NotifyUpdate
+	case "quota_warning":
+		return v.NotifyQuota
+	case "balance_low":
+		return v.NotifyBalance
+	case "cookie_expiring":
+		return v.NotifyCookie
 	}
 	return true
 }

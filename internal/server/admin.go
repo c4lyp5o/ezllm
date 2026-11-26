@@ -1676,9 +1676,13 @@ func (s *Server) handleAccountQuota(w http.ResponseWriter, r *http.Request) {
 	if q.Kind == "" {
 		q.Kind = provider.QuotaNone
 	}
-	if err := s.db.InsertQuotaSnapshot(r.Context(), keyID, q, err == nil, errText(err)); err != nil {
+	readOK := err == nil
+	if err := s.db.InsertQuotaSnapshot(r.Context(), keyID, q, readOK, errText(err)); err != nil {
 		s.writeStoreErr(w, err)
 		return
+	}
+	if readOK {
+		s.alertQuota(acc.ID, acc.Namespace, q)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"kind": q.Kind, "raw": q.Raw, "read_at": time.Now().UTC().Format(time.RFC3339),
@@ -2508,6 +2512,9 @@ func (s *Server) handleKeyQuota(w http.ResponseWriter, r *http.Request) {
 	if err := s.db.InsertQuotaSnapshot(r.Context(), keyID, q, qErr == nil, errText(qErr)); err != nil {
 		s.writeStoreErr(w, err)
 		return
+	}
+	if qErr == nil {
+		s.alertQuota(acc.ID, acc.Namespace, q)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"kind": q.Kind, "raw": q.Raw, "read_at": time.Now().UTC().Format(time.RFC3339),

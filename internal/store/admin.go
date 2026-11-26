@@ -1010,6 +1010,27 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 	})
 }
 
+// PruneQuotaSnapshots removes quota reads older than keep, but never a key's
+// newest read: the provider card shows it however old it is. The hourly
+// alert check reads quotas, so without this the table only grows.
+func (d *DB) PruneQuotaSnapshots(ctx context.Context, keep time.Duration) (int64, error) {
+	cutoff := time.Now().Add(-keep).UTC().Format("2006-01-02T15:04:05.000Z")
+	var n int64
+	err := d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `
+DELETE FROM quota_snapshots WHERE read_at < ? AND id NOT IN (
+  SELECT (SELECT id FROM quota_snapshots q2 WHERE q2.provider_key_id = k.provider_key_id
+          ORDER BY read_at DESC, id DESC LIMIT 1)
+  FROM (SELECT DISTINCT provider_key_id FROM quota_snapshots) k)`, cutoff)
+		if err != nil {
+			return err
+		}
+		n, _ = res.RowsAffected()
+		return nil
+	})
+	return n, err
+}
+
 // LatestQuotas returns the newest snapshot per key (the poller's read side).
 func (d *DB) LatestQuotas(ctx context.Context, keyIDs []int64) ([]map[string]any, error) {
 	q := `

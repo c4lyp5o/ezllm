@@ -41,7 +41,9 @@ Back up first: [recovery and upgrades](recovery-runbook.md).
   conversation cache.
 - **Rolling back** past the release check: Reset `update_check` and
   `notify_update_available` in Settings first; older builds refuse settings they do not
-  know.
+  know. The same goes for the early-warning settings (`notify_quota_warning`,
+  `alert_quota_percent`, `notify_balance_low`, `alert_balance_below`,
+  `notify_cookie_expiring`, `alert_cookie_hours`).
 
 ## Settings that no longer exist
 

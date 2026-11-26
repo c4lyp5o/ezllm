@@ -90,6 +90,19 @@ are not tried for that model. The provider shows **parked** only when every key 
 In `config.yaml`, `retry.retries: 0` means the default of 3. To turn retries off, save `0`
 in Settings.
 
+## Early warnings
+
+Notifications also warns you before something runs out:
+
+- **Quota nearly used**: a provider has used 80% of a quota window. Said once per window.
+- **Balance running low**: a prepaid balance is under 2 in the provider's currency. Said once a day while it stays low.
+- **Session cookie expiring**: a pasted session cookie expires within 48 hours. Said once per cookie.
+
+Each has its switch and its threshold in Settings → Notifications. ezllm reads every
+enabled provider's quota once an hour for these, the same read as the **Quota**
+button, and the provider card shows the latest reading. A provider with no quota
+page is skipped. Quota readings older than 30 days are deleted; each key keeps its newest.
+
 ## Push channels
 
 **Notifications** → **Push channels** sends bell events to ntfy, Discord, Telegram or any

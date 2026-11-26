@@ -4,6 +4,11 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## Unreleased
 
+- **Early warnings.** The bell (and your push channels) now says when a provider has
+  used 80% of a quota window, when a prepaid balance drops under 2, and when a pasted
+  session cookie expires within 48 hours. Each is said once per window, day or cookie,
+  and each has a switch and a threshold in Settings → Notifications. An hourly check
+  reads every enabled provider's quota for this; readings older than 30 days are pruned.
 - **Every key of a provider is used.** A provider with several keys now takes turns:
   each request starts on the next key. A `429` or a refused key (`401`, `403`) parks only
   that key for that model, and the request moves straight on to the next key. A server

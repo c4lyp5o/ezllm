@@ -95,6 +95,7 @@ jobs:
           node tests/verify-frontend-p3.mjs
           node tests/verify-update.mjs
           node tests/verify-qol-pass.mjs
+          node tests/verify-settings.mjs
 
   docker:
     name: Docker image (build, boot, healthy)

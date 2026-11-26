@@ -102,12 +102,18 @@ const DETAILS: Record<string, [string, string]> = {
   notify_bridge_rolled_back: ['Bridge CLI rolled back', 'A new CLI version failed after it was installed, so the bridge went back to the previous one.'],
   notify_stream_truncation: ['Answers cut mid-stream', 'A provider cut off more than 1% of its streamed answers in the last 24 hours (out of at least 20).'],
   notify_update_available: ['New ezllm release', 'A newer ezllm release is available.'],
+  notify_quota_warning: ['Quota nearly used', 'A provider has used most of a quota window. ezllm reads each provider\'s quota once an hour and warns once per window.'],
+  alert_quota_percent: ['Warn at this much of a quota', 'Percent, from 1 to 100.'],
+  notify_balance_low: ['Balance running low', 'A prepaid provider balance is below the amount here. Said once a day while it stays low.'],
+  alert_balance_below: ['Warn below this balance', 'In the provider\'s own currency, for example 2.'],
+  notify_cookie_expiring: ['Session cookie expiring', 'A pasted session cookie, used to read quota, expires soon.'],
+  alert_cookie_hours: ['Warn this many hours ahead', 'From 1 to 720.'],
 };
 const GROUPS: Partial<Record<Tab, string[]>> = {
   General: ['usage_timezone', 'update_check'],
   Gateway: ['translation_enabled', 'automatic_probing', 'catalog_interval', 'price_refresh', 'retries', 'attempt_budget', 'dispatch_deadline', 'cooldown_429', 'cooldown_5xx', 'cooldown_strikes'],
   'Backup & Recovery': ['backup_enabled', 'backup_hour', 'backup_keep'],
-  Notifications: Object.keys(DETAILS).filter(k => k.startsWith('notify_')),
+  Notifications: Object.keys(DETAILS).filter(k => k.startsWith('notify_') || k.startsWith('alert_')),
 };
 const panel = 'rounded-xl border border-line bg-surface p-5 sm:p-6';
 const errorMessage = (e: unknown) => e instanceof Error ? e.message : 'The operation could not be completed.';

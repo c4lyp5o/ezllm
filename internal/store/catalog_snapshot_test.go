@@ -324,3 +324,33 @@ func TestPickKeysListsEveryEnabledKey(t *testing.T) {
 		t.Fatalf("no keys: err=%v, want ErrNotFound", err)
 	}
 }
+
+// Pruning removes old quota reads but keeps each key's newest, however old.
+func TestPruneQuotaSnapshotsKeepsNewestPerKey(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+	id, err := db.UpsertAccount(ctx, provider.Account{Name: "acme", Namespace: "acme",
+		Kind: provider.KindOpenAICompatible, BaseURL: "https://api.example.com/v1", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	k1, _, _ := db.AddKey(ctx, id, "one", "sk-one")
+	k2, _, _ := db.AddKey(ctx, id, "two", "sk-two")
+	for _, row := range []struct {
+		key int64
+		at  string
+	}{{k1, "2026-01-01T00:00:00.000Z"}, {k1, "2026-01-02T00:00:00.000Z"}, {k1, "2099-01-01T00:00:00.000Z"}, {k2, "2026-01-03T00:00:00.000Z"}} {
+		if _, err := db.Writer().Exec(`INSERT INTO quota_snapshots (provider_key_id, kind, read_at, raw, ok) VALUES (?, 'money', ?, '{}', 1)`, row.key, row.at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err := db.PruneQuotaSnapshots(ctx, 24*time.Hour)
+	if err != nil || n != 2 {
+		t.Fatalf("pruned %d (%v), want key one's two old reads", n, err)
+	}
+	var left int
+	_ = db.Reader().QueryRow(`SELECT COUNT(*) FROM quota_snapshots WHERE provider_key_id=?`, k2).Scan(&left)
+	if left != 1 {
+		t.Fatalf("key two's only (old) read was pruned")
+	}
+}

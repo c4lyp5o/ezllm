@@ -1,6 +1,6 @@
 // Exercises the shipped Settings UI without provider credentials.
 import { start, json, check, finish } from './mockdash.mjs';
-const defaults = { usage_timezone: 'UTC', translation_enabled: true, automatic_probing: true, catalog_interval: '12h', price_refresh: true, retries: 3, attempt_budget: 8, dispatch_deadline: '', cooldown_429: '60s', cooldown_5xx: '60s', cooldown_strikes: 3, backup_enabled: false, backup_hour: 3, backup_keep: 7, notify_free_models_added: true, notify_free_models_removed: true, notify_free_model_broken: true, notify_catalog_refresh_failed: true, notify_client_budget_reached: true, notify_price_refresh_failed: true, notify_backup_failed: true, notify_bridge_updated: true, notify_bridge_update_blocked: true, notify_bridge_rolled_back: true };
+const defaults = { usage_timezone: 'UTC', translation_enabled: true, automatic_probing: true, catalog_interval: '12h', price_refresh: true, retries: 3, attempt_budget: 8, dispatch_deadline: '', cooldown_429: '60s', cooldown_5xx: '60s', cooldown_strikes: 3, backup_enabled: false, backup_hour: 3, backup_keep: 7, notify_free_models_added: true, notify_free_models_removed: true, notify_free_model_broken: true, notify_catalog_refresh_failed: true, notify_client_budget_reached: true, notify_price_refresh_failed: true, notify_backup_failed: true, notify_bridge_updated: true, notify_bridge_update_blocked: true, notify_bridge_rolled_back: true, notify_quota_warning: true, alert_quota_percent: 80, notify_balance_low: true, alert_balance_below: 2, notify_cookie_expiring: true, alert_cookie_hours: 48 };
 let revision = 0, fields = Object.fromEntries(Object.entries(defaults).map(([k, value]) => [k, { value, source: k === 'price_refresh' ? 'environment' : 'default', editable: k !== 'price_refresh', saved: false, apply: 'immediate' }]));
 let sessions = [{ id: 'session-other', browser: 'Other browser', current: false, created_at: '2026-10-26T00:00:00Z', expires_at: '2026-10-27T00:00:00Z' }];
 let backups = { ready: true, running: false, last_outcome: '', backups: [] };
@@ -70,6 +70,14 @@ try {
   check('backup overlap disabled', await page.getByRole('button', { name: 'Backing up…', exact: true }).isDisabled());
   await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Notifications', exact: true }).click();
   check('backup notification preference exposed', await page.getByLabel('Backup failures', { exact: true }).count() === 1);
+  check('early warnings have their switches', await page.getByLabel('Quota nearly used', { exact: true }).count() === 1 && await page.getByLabel('Balance running low', { exact: true }).count() === 1 && await page.getByLabel('Session cookie expiring', { exact: true }).count() === 1);
+  await page.getByLabel('Warn at this much of a quota', { exact: true }).fill('150');
+  check('a quota threshold over 100 is refused', await page.getByRole('button', { name: 'Save changes', exact: true }).isDisabled() && await page.getByText('The percent must be a whole number from 1 to 100.').count() === 1);
+  await page.getByLabel('Warn at this much of a quota', { exact: true }).fill('90');
+  await page.getByLabel('Warn below this balance', { exact: true }).fill('5.5');
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+  await page.getByRole('status').filter({ hasText: 'Settings saved.' }).waitFor();
+  check('thresholds save as numbers', fields.alert_quota_percent.value === 90 && fields.alert_balance_below.value === 5.5, { q: fields.alert_quota_percent.value, b: fields.alert_balance_below.value });
   await page.getByRole('button', { name: 'System', exact: true }).click();
   await page.getByRole('link', { name: 'Download sanitized diagnostics', exact: true }).waitFor();
   check('effective configuration visible', await page.getByText('Effective configuration', { exact: true }).count() === 1);

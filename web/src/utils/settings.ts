@@ -36,6 +36,9 @@ export function settingError(key: string, value: unknown): string {
     case 'cooldown_strikes': return whole(value, 1, 1_000_000, 'The failure count');
     case 'backup_hour': return whole(value, 0, 23, 'The hour');
     case 'backup_keep': return whole(value, 1, 365, 'The number of backups');
+    case 'alert_quota_percent': return whole(value, 1, 100, 'The percent');
+    case 'alert_cookie_hours': return whole(value, 1, 720, 'The number of hours');
+    case 'alert_balance_below': { const n = Number(value); return Number.isFinite(n) && n > 0 && n <= 1_000_000 ? '' : 'Use an amount above 0, for example 2.'; }
     default: return '';
   }
 }

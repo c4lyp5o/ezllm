@@ -306,3 +306,22 @@ func TestComboAllHopsIncompatibleNamesCause(t *testing.T) {
 		t.Errorf("error must name the capability cause, got: %v", err)
 	}
 }
+
+// A disabled first hop must not hide a rules veto on a later one: the client
+// gets 429 "try later" (ErrUnavailable), not a 502.
+func TestRulesVetoWinsOverEarlierStaticSkip(t *testing.T) {
+	c := dayNightCombo()
+	c.Hops = []store.ComboHop{{AccountID: 3, ModelID: "gpt-6-luna"}, {AccountID: 2, ModelID: "gpt-6-luna"}} // 3 is disabled
+	cat := withCombo(newFake(), c)
+	r := New(cat).WithEligibility(func(_ context.Context, accountID int64, _ string) error {
+		if accountID == 2 {
+			return errors.New("outside allowed hours")
+		}
+		return nil
+	})
+	_, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceChat, "test")
+	var nu *ErrUnavailable
+	if !errors.As(err, &nu) {
+		t.Fatalf("want ErrUnavailable (429), got %v", err)
+	}
+}

@@ -272,3 +272,21 @@ func TestSnapshotReportsLiveUsage(t *testing.T) {
 		t.Errorf("used after the window elapsed = %d, want 0", used)
 	}
 }
+
+// Snapshot's next free time comes from the oldest hit still in the window; an
+// expired hit at the front used to give a time in the past.
+func TestSnapshotIgnoresExpiredHits(t *testing.T) {
+	c := newClock()
+	l := New(c.Now)
+	l.Allow(1, 10, time.Minute)
+	c.Advance(50 * time.Second)
+	l.Allow(1, 10, time.Minute)
+	c.Advance(20 * time.Second) // the first hit has left the window
+	used, next := l.Snapshot(1, time.Minute)
+	if used != 1 {
+		t.Fatalf("used = %d, want 1", used)
+	}
+	if !next.After(c.Now()) {
+		t.Fatalf("next free %s is not in the future (now %s)", next, c.Now())
+	}
+}

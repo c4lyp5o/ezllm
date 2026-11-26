@@ -729,6 +729,10 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 		routes []proxy.Route
 
 		first error // first hop's rejection, kept as the failure to report
+		// unavailable is a rules veto (allowed hours, a cap): temporary, so
+		// it wins over static skips when no hop is left, and the client gets
+		// 429 with when to retry, not 502.
+		unavailable *ErrUnavailable
 	)
 	// Hops commonly share an account (one account, several models). Its row
 	// and its key are the same for every such hop within one resolution, so
@@ -800,8 +804,8 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 		// later"), exactly like resolveDirect's hard stop — a raw refusal
 		// would fall through errorStatus to 502 and read as a gateway fault.
 		if err := r.eligibleHere(ctx, acct.ID, h.ModelID); err != nil {
-			if first == nil {
-				first = &ErrUnavailable{
+			if unavailable == nil {
+				unavailable = &ErrUnavailable{
 					Requested: name,
 					Reason:    fmt.Sprintf("hop %s/%s: %s", acct.Namespace, h.ModelID, err.Error()),
 					cause:     err,
@@ -850,6 +854,9 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 	}
 
 	if len(routes) == 0 {
+		if unavailable != nil {
+			return nil, unavailable
+		}
 		if first != nil {
 			// A rules veto arrives pre-typed and pre-worded ("X is not
 			// available right now: hop …"); re-wrapping it would print the

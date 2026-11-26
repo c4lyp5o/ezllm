@@ -15,6 +15,11 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   A temporary failure after the switch is tested once more before it is undone.
 - **Antigravity plan limits.** The provider card and Quota dialog show how much of each
   weekly limit is used, per group of models, read with `agy -p /usage` (no quota spent).
+- **Routing and rules fixes.** At start-up, one rule with a timezone that does not
+  resolve no longer leaves every rule off: the valid ones load and the bad one is
+  logged. When every combo hop is skipped and one was refused by a rule, the client
+  gets 429 with when to retry, not 502. `next_allowed` skips days a window does not
+  allow. Accounts without a rate limit no longer take a global lock on every request.
 - **Translation fixes.** A field sent as `null` is treated as left out: SDKs send unset
   options that way, and `max_tokens`, `temperature` and `top_p` became 0, parallel tool
   calls turned off, and `tool_choice: null` failed the request. A failed tool result

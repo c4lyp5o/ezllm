@@ -228,7 +228,24 @@ func (w Window) NextAllowed(now time.Time) time.Time {
 		// Start already passed (or is now): next day at Start.
 		next = next.AddDate(0, 0, 1)
 	}
+	// The window opens only on its days (a window belongs to the day it
+	// starts on): skip the others, or a Mon-Fri window refused on Friday
+	// evening would say "try Saturday".
+	if len(w.Days) > 0 {
+		for i := 0; i < 7 && !w.allowsDay(next.Weekday()); i++ {
+			next = next.AddDate(0, 0, 1)
+		}
+	}
 	return next
+}
+
+func (w Window) allowsDay(d time.Weekday) bool {
+	for _, x := range w.Days {
+		if x == int(d) {
+			return true
+		}
+	}
+	return false
 }
 
 // bucketFor returns the meter bucket key for `now` under the rule's cap

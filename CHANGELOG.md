@@ -15,6 +15,19 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   A temporary failure after the switch is tested once more before it is undone.
 - **Antigravity plan limits.** The provider card and Quota dialog show how much of each
   weekly limit is used, per group of models, read with `agy -p /usage` (no quota spent).
+- **Compression, backup and logging fixes.** A caveman rule at standard intensity
+  wrote a literal `$1` into prompts in place of punctuation ("Hello.  World" became
+  "Hello$1 World"); the rule is removed, and the pack loader now refuses any
+  replacement with a capture reference. A message that mentions ``` mid-sentence no
+  longer turns compression off for the whole conversation: the fence check now asks
+  whether a rewrite unbalanced a message, across tool results and Responses items
+  too. The session memo keeps a conversation's opening messages when its cap is
+  reached. The rule-length gate measures the true shortest match. Progress bars
+  redrawn with an erase-line no longer leave the old bar's tail. Backups no longer
+  fail on filesystems that cannot flush a directory. Log messages escape newlines and
+  terminal escapes. Combo `sticky_idle_s: 0` ("never release on idle") can be saved
+  with PATCH. The Codex bridge logs readable lines, and a template folder it cannot
+  remove no longer costs a template slot.
 - **Faster compression and uploads.** Caveman's span protection skips patterns whose
   characters are absent: 4.3 times faster on plain prose (10.6 to 2.45 ms on 18 KB).
   Sizing the conversation between stages no longer builds a JSON copy each time, and

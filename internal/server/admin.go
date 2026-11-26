@@ -1875,6 +1875,9 @@ func (s *Server) handleCombo(w http.ResponseWriter, r *http.Request) {
 			AutoFreeInclude       *[]store.FreeInclude `json:"auto_free_include"`
 			CompressionProfileRaw json.RawMessage      `json:"compression_profile_id"`
 			ContextSizeRaw        json.RawMessage      `json:"context_size"`
+			// sticky_idle_s 0 means "never release on idle", so presence, not
+			// a zero value, decides whether the field was sent.
+			StickyIdleRaw json.RawMessage `json:"sticky_idle_s"`
 		}
 		if !decodeBody(w, r, &body) {
 			return
@@ -1903,8 +1906,14 @@ func (s *Server) handleCombo(w http.ResponseWriter, r *http.Request) {
 		if c.Strategy == "" {
 			c.Strategy = cur.Strategy
 		}
-		if c.StickyIdleS == 0 {
-			c.StickyIdleS = cur.StickyIdleS
+		c.StickyIdleS = cur.StickyIdleS
+		if raw := bytes.TrimSpace(body.StickyIdleRaw); len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
+			var v int
+			if err := json.Unmarshal(raw, &v); err != nil || v < 0 {
+				writeErr(w, http.StatusBadRequest, "invalid_request_error", "sticky_idle_s must be a whole number of seconds, 0 or more")
+				return
+			}
+			c.StickyIdleS = v
 		}
 		// Same zero-value convention as sticky_idle_s: an omitted block_size
 		// keeps the stored value. 1 is the smallest meaningful block, so nothing

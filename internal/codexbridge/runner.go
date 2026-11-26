@@ -676,7 +676,7 @@ func (r *Runner) Run(ctx context.Context, req Request, sink func(Delta) error) (
 	})
 	var ne *NativeError
 	if err != nil && !emitted && len(req.Tools) == 0 && ctx.Err() == nil && errors.As(err, &ne) && ne.Code == "native_closed" && ne.BeforeInference {
-		r.logf("codex-bridge: app-server failed before inference, retrying on exec", "err", ne.Message)
+		r.logf("codex-bridge: app-server failed before inference, retrying on exec: %s", ne.Message)
 		return r.runExec(ctx, req, sink)
 	}
 	return res, err

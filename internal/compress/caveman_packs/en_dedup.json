@@ -40,15 +40,6 @@
       "description": "A repeated filler word is filler squared."
     },
     {
-      "name": "collapse_duplicate_spaces_after_punct",
-      "pattern": "([.,;:!?])\\s{2,}",
-      "replacement": "$1 ",
-      "flags": "g",
-      "category": "dedup",
-      "minIntensity": "standard",
-      "description": "Whitespace normalisation after punctuation. NOTE: this is the only rule using a capture reference, and it re-emits exactly the punctuation it matched — no protected content can ride through it, because punctuation is never inside a protected span."
-    },
-    {
       "name": "collapse_trailing_politeness",
       "pattern": "(?:,?\\s*(?:thanks|thank you|cheers|appreciate it)(?:\\s+(?:so much|a lot|very much))?[.!]?){2,}\\s*$",
       "replacement": ", thanks.",

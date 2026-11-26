@@ -126,7 +126,7 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 		MaxConcurrent: concurrency,
 		MaxQueue:      queue,
 		Version:       server.Version,
-		Logf:          log.Info,
+		Logf:          printfLogger(log),
 		Channel:       pre.Channel,
 		Sandbox:       tools.sandbox,
 	}
@@ -155,7 +155,7 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 			"approval_policy": codexbridge.ApprovalPolicy,
 			"sandbox":         codexbridge.SandboxPolicy,
 		},
-		Logf: log.Info,
+		Logf: printfLogger(log),
 	}
 
 	if report != nil {

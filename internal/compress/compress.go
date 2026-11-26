@@ -356,7 +356,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 	// Integrity (contract rule 3): every modified text must still be
 	// structurally sound — balanced fences. JSON integrity holds by
 	// construction (rtk skips JSON whole; marshal can't produce imbalance).
-	if msg := integrityFailure(cur); msg != "" {
+	if msg := integrityFailure(newWork, cur); msg != "" {
 		res.Err = "integrity: " + msg
 		return body, res
 	}
@@ -432,8 +432,10 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 
 	// Ship the rewrite: round-trip the root map (model + every unknown
 	// field preserved — same invariant as SwapModel).
-	root[listKey] = finalMsgs
-	out, err := json.Marshal(root)
+	// withKey copies the root: it may be the request's shared decode
+	// (doc.Map), which every fail-open path must leave describing the
+	// original body.
+	out, err := json.Marshal(withKey(root, listKey, finalMsgs))
 	if err != nil {
 		res.Err = "re-marshal: " + err.Error()
 		return body, res
@@ -638,22 +640,35 @@ func runEngine(st Stage, msgs []any) ([]any, int, error) {
 
 // integrityFailure returns a non-empty reason if any text inside msgs has an
 // unbalanced code fence (rule 3). Empty string = pass.
-func integrityFailure(msgs []any) string {
-	for i, m := range msgs {
+func integrityFailure(before, after []any) string {
+	for i, m := range after {
 		if m == nil {
 			continue // a dropped repeat ships as nothing
 		}
-		mm, ok := m.(map[string]any)
-		if !ok {
+		if _, ok := m.(map[string]any); !ok {
 			return fmt.Sprintf("message %d is not an object", i)
 		}
-		for _, s := range textPieces(mm["content"]) {
-			if fences(s)%2 != 0 {
-				return fmt.Sprintf("message %d has an unclosed code fence", i)
-			}
+		// A rewrite must not unbalance a message's fences. A message that
+		// arrived with an odd count (a ``` mentioned mid-sentence) is the
+		// client's text, not damage: refusing it turned compression off for
+		// the whole conversation.
+		balancedBefore := i >= len(before) || len(before) != len(after) || fenceCount(before[i])%2 == 0
+		if balancedBefore && fenceCount(m)%2 != 0 {
+			return fmt.Sprintf("message %d has an unclosed code fence", i)
 		}
 	}
 	return ""
+}
+
+// fenceCount counts fences across every text part the engines can edit:
+// content strings and text blocks, tool results and Responses items alike.
+func fenceCount(msg any) int {
+	n := 0
+	editParts(msg, nil, func(p textPart) (string, bool) {
+		n += fences(p.text)
+		return "", false
+	})
+	return n
 }
 
 func fences(s string) int { return strings.Count(s, "```") }
@@ -667,30 +682,6 @@ func isJSONPayload(text string) bool {
 		return false
 	}
 	return json.Valid([]byte(trimmed))
-}
-
-// textPieces flattens a message content (string or text-block array) into its
-// text strings. Non-text content yields nothing.
-func textPieces(content any) []string {
-	switch c := content.(type) {
-	case string:
-		return []string{c}
-	case []any:
-		var out []string
-		for _, b := range c {
-			bm, ok := b.(map[string]any)
-			if !ok {
-				continue
-			}
-			if t, _ := bm["type"].(string); t == "text" {
-				if s, ok := bm["text"].(string); ok {
-					out = append(out, s)
-				}
-			}
-		}
-		return out
-	}
-	return nil
 }
 
 // estimateJSON is EstimateTokens(string(mustMarshal(v))) without building the

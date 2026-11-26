@@ -228,3 +228,44 @@ func TestClaudeWebToolCallIsA400(t *testing.T) {
 		t.Fatalf("status = %d, want 400", got)
 	}
 }
+
+// sticky_idle_s 0 ("never release on idle") can be set by PATCH; an omitted
+// field keeps the stored value.
+func TestComboPatchStickyIdleZero(t *testing.T) {
+	h := newHarness(t, (&fakeUpstream{models: []string{"m"}}).handler())
+	acct := seededAccount(t, h)
+	code, resp := jsonDo(t, h, "POST", "/admin/combos", "tok-admin", map[string]any{
+		"name": "sticky", "strategy": "sticky_last_good", "sticky_idle_s": 600,
+		"hops": []any{map[string]any{"account_id": acct, "model_id": "m", "weight": 1}},
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create: %d %s", code, resp)
+	}
+	id := int64(mustJSON(t, resp)["id"].(float64))
+	idle := func() int {
+		combos, err := h.db.ListCombos(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range combos {
+			if c.ID == id {
+				return c.StickyIdleS
+			}
+		}
+		t.Fatal("combo gone")
+		return -1
+	}
+	if code, resp = jsonDo(t, h, "PATCH", fmt.Sprintf("/admin/combos/%d", id), "tok-admin", map[string]any{"sticky_idle_s": 0}); code != http.StatusOK {
+		t.Fatalf("patch 0: %d %s", code, resp)
+	}
+	if got := idle(); got != 0 {
+		t.Fatalf("sticky_idle_s = %d after PATCH 0, want 0", got)
+	}
+	jsonDo(t, h, "PATCH", fmt.Sprintf("/admin/combos/%d", id), "tok-admin", map[string]any{"sticky_idle_s": 900})
+	if code, resp = jsonDo(t, h, "PATCH", fmt.Sprintf("/admin/combos/%d", id), "tok-admin", map[string]any{"name": "sticky2"}); code != http.StatusOK {
+		t.Fatalf("patch name: %d %s", code, resp)
+	}
+	if got := idle(); got != 900 {
+		t.Fatalf("sticky_idle_s = %d after a PATCH without it, want 900 kept", got)
+	}
+}

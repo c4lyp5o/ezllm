@@ -210,9 +210,9 @@ func (r *Runner) deleteTemplate(l *templateLease) {
 	go func() {
 		ok := l.id == ""
 		defer func() {
-			if os.RemoveAll(l.root) != nil {
-				ok = false
-			}
+			// A leftover local folder costs disk, not upstream state: only a
+			// thread the server still holds keeps its credit occupied.
+			_ = os.RemoveAll(l.root)
 			r.templateDeleted(ok)
 		}()
 		if !ok {

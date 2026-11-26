@@ -27,6 +27,7 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // embeddedPackFS holds the built-in English packs. Embedding them means a
@@ -172,30 +173,80 @@ func parsePacks(raw []string) ([]cavemanPack, []string) {
 	return packs, diags
 }
 
+// captureRef finds $1 / ${name} style references in a replacement.
+var captureRef = regexp.MustCompile(`\$(?:\d|\{)`)
+
+func mapValues(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for _, v := range m {
+		out = append(out, v)
+	}
+	return out
+}
+
 // minMatchLen is the shortest string the pattern can match, used only for the
 // hygiene gate. Go's regexp has no literal-length analysis, so we approximate
 // from the source: strip quantifier/alternation metacharacters and count the
 // literal remainder, flooring at 1. An approximation is fine here — the gate
 // exists to reject obviously-inflating rules, not to prove a bound.
 func minMatchLen(re *regexp.Regexp) int {
-	src := re.String()
-	src = strings.TrimPrefix(src, `(?i)`)
-	var lit strings.Builder
-	for i := 0; i < len(src); i++ {
-		c := src[i]
-		switch c {
-		case '\\':
-			i++ // escaped char counts as one literal
-			lit.WriteByte('x')
-		case '(', ')', '[', ']', '{', '}', '*', '+', '?', '|', '^', '$', '.':
-			// structural: contributes nothing guaranteed
-		default:
-			lit.WriteByte(c)
-		}
-	}
-	n := lit.Len()
-	if n < 1 {
+	parsed, err := syntax.Parse(re.String(), syntax.Perl)
+	if err != nil {
 		return 1
+	}
+	if n := minLen(parsed.Simplify()); n > 0 {
+		return n
+	}
+	return 1
+}
+
+// minLen is the fewest bytes any match of re can be: the shortest branch of
+// an alternation, one character of a class, nothing for an optional part.
+func minLen(re *syntax.Regexp) int {
+	switch re.Op {
+	case syntax.OpLiteral:
+		n := 0
+		for _, r := range re.Rune {
+			n += minRuneLen(r, re.Flags&syntax.FoldCase != 0)
+		}
+		return n
+	case syntax.OpCharClass:
+		if len(re.Rune) == 0 {
+			return 0
+		}
+		return utf8.RuneLen(re.Rune[0]) // ranges are sorted: the first is the shortest
+	case syntax.OpAnyChar, syntax.OpAnyCharNotNL:
+		return 1
+	case syntax.OpCapture, syntax.OpPlus:
+		return minLen(re.Sub[0])
+	case syntax.OpRepeat:
+		return re.Min * minLen(re.Sub[0])
+	case syntax.OpConcat:
+		n := 0
+		for _, sub := range re.Sub {
+			n += minLen(sub)
+		}
+		return n
+	case syntax.OpAlternate:
+		best := -1
+		for _, sub := range re.Sub {
+			if n := minLen(sub); best < 0 || n < best {
+				best = n
+			}
+		}
+		return max(best, 0)
+	}
+	return 0 // star, quest, anchors, word boundaries, empty match
+}
+
+// minRuneLen is the shortest UTF-8 encoding r can match: under (?i) any
+// member of its case-folding orbit.
+func minRuneLen(r rune, fold bool) int {
+	n := utf8.RuneLen(r)
+	if fold {
+		for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
+			n = min(n, utf8.RuneLen(f))
+		}
 	}
 	return n
 }
@@ -306,6 +357,13 @@ func validateRule(lang, category string, r rawRule) (cavemanRule, string, bool) 
 	repl := ""
 	if r.Replacement != nil {
 		repl = *r.Replacement
+	}
+	// replaceRule emits replacements literally, so "$1" would land in the
+	// prompt as the two characters "$1" (a shipped rule once did exactly that).
+	for _, v := range append([]string{repl}, mapValues(r.ReplacementMap)...) {
+		if captureRef.MatchString(v) {
+			return reject("replacement %q uses a capture reference, which rules cannot do", v)
+		}
 	}
 	shortest := minMatchLen(re)
 	if len(r.ReplacementMap) == 0 && len(repl) >= shortest {

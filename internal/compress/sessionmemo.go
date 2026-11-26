@@ -346,6 +346,11 @@ func (m *SessionMemo) getHashed(session, profile, h string, ord int) (shipped an
 	}
 	e.usedAt = m.now()
 	m.lru.MoveToFront(e.elem)
+	// The session's own LRU too: its cap evicts from the back, and the
+	// conversation's opening messages (read on every turn) must not go first.
+	if g := m.groups[e.group]; g != nil {
+		g.lru.MoveToFront(e.gelem)
+	}
 	return e.shipped, true
 }
 

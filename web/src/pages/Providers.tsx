@@ -2077,6 +2077,13 @@ export default function Providers() {
   const cooldowns = useCooldowns();
   const [err, setErr] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  // /providers?add=1 (the quick-jump palette) opens the Add provider form.
+  const [addParams, setAddParams] = useSearchParams();
+  useEffect(() => {
+    if (addParams.get('add') !== '1') return;
+    setAddOpen(true);
+    setAddParams((p) => { const n = new URLSearchParams(p); n.delete('add'); return n; }, { replace: true });
+  }, [addParams, setAddParams]);
   const [quotaBusy, setQuotaBusy] = useState<number | null>(null);
   const [query, setQuery] = useState('');
   const [onlyIssues, setOnlyIssues] = useState(false);

@@ -4,6 +4,9 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## Unreleased
 
+- **Quick jump.** Ctrl+K (⌘K on a Mac), or **Jump to…** in the sidebar, opens a palette
+  of every page, the Settings tabs and the common "new …" actions. Type to filter,
+  Enter to go. `/providers?add=1` opens Add provider.
 - **Rule groups save in one step.** Editing, turning off or deleting a rule group is one
   transaction, however many models it holds: every rule changes or none does. It was
   one request per model, so a failure halfway left some rules changed. New `POST

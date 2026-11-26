@@ -16,6 +16,7 @@ import { MIN_PASSWORD } from './utils/passwordStrength';
 import { readTheme, setTheme, type Theme } from './utils/theme';
 import { Spinner, btn, cx } from './components/ui';
 import ThemeToggle from './components/ThemeToggle';
+import { CommandPalette, OPEN_PALETTE } from './components/CommandPalette';
 import { PageBoundary, PageLoading } from './components/PageBoundary';
 
 // Pages load on demand: the unlock screen downloads none of them (nor the
@@ -332,6 +333,12 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         })}
       </nav>
       </LayoutGroup>
+      <div className="px-3 pb-2">
+        <button type="button" onClick={() => { onNavigate?.(); window.dispatchEvent(new Event(OPEN_PALETTE)); }}
+          className="flex w-full items-center justify-between rounded-md border border-line px-3 py-1.5 text-[12px] text-mute transition-colors hover:border-line-strong hover:text-ink">
+          <span>Jump to…</span><kbd className="font-sans text-[11px]">{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</kbd>
+        </button>
+      </div>
       <div className="grid grid-cols-3 border-t border-line px-3 py-2">
         <a href={REPO_URL} target="_blank" rel="noreferrer noopener"
           aria-label="ezllm source on GitHub (opens in a new tab)" title="Source on GitHub"
@@ -397,6 +404,7 @@ export default function App() {
 
   return (
     <div className="flex min-h-dvh">
+      <CommandPalette />
       {/* Top bar — mobile only */}
       <header className="fixed inset-x-0 top-0 z-30 flex h-12 items-center gap-3 border-b border-line bg-bg px-4 lg:hidden">
         <button type="button" aria-label="Open menu" onClick={() => setDrawer(true)}

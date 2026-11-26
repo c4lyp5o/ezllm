@@ -15,6 +15,15 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   A temporary failure after the switch is tested once more before it is undone.
 - **Antigravity plan limits.** The provider card and Quota dialog show how much of each
   weekly limit is used, per group of models, read with `agy -p /usage` (no quota spent).
+- **Store fixes.** Turning an account off in the dashboard (or any partial account
+  `PATCH`) used to wipe its custom headers, token cap, context size, quota mode and cap
+  window; it keeps them now, and a `PATCH` is validated like a new account. A rule's
+  `+08:00` timezone works; it used to drop the rule or count in UTC. Changing a rule's
+  model moves the rule. Passwords over 72 bytes get a clear 400 instead of a 500. A new
+  account never reuses a deleted one's id, and deleting an account clears its usage
+  counters. Negative upstream token counts read as 0. A management key that cannot be
+  decrypted is dropped instead of sent upstream. The web providers drop `developer`
+  messages like `system` ones and refuse images instead of ignoring them.
 - **Admin API fixes.** A rule `PATCH` changes only the fields sent; `{"enabled":false}`
   used to zero its cap and delete its allowed hours. Renaming a combo renames it instead
   of creating a second one. A price import with one bad row writes nothing.

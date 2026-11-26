@@ -15,7 +15,9 @@ func flattenWebBridgeMessages(msgs []struct {
 }) string {
 	var parts []string
 	for _, m := range msgs {
-		if m.Role == "system" {
+		// developer is the newer name for system (o-series and later clients):
+		// both carry the persona/memory, which never goes to a web provider.
+		if m.Role == "system" || m.Role == "developer" {
 			continue // stealth: never forward persona/memory to web providers
 		}
 		if text := webBridgeContentText(m.Content); text != "" {
@@ -56,4 +58,28 @@ func webBridgeChatResponse(id, model, text string) map[string]any {
 			"finish_reason": "stop",
 		}},
 	}
+}
+
+// webBridgeHasImage reports an image part in any message. The web protocols
+// take text only; dropping the image would answer a question the user did not
+// ask, so the request is refused instead (the design's scope fence).
+func webBridgeHasImage(msgs []struct {
+	Role    string `json:"role"`
+	Content any    `json:"content"`
+}) bool {
+	for _, m := range msgs {
+		parts, ok := m.Content.([]any)
+		if !ok {
+			continue
+		}
+		for _, p := range parts {
+			if part, ok := p.(map[string]any); ok {
+				switch part["type"] {
+				case "image_url", "image", "input_image":
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

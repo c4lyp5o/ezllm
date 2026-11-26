@@ -200,6 +200,11 @@ func (b *claudeWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.R
 			"claude-web does not support structured output (response_format)")
 		return
 	}
+	if webBridgeHasImage(req.Messages) {
+		writeErr(w, http.StatusBadRequest, "unsupported_feature",
+			"claude-web does not support image input")
+		return
+	}
 	// Serialize generation per account: the cached client owns mutable
 	// conversation state and is not safe for concurrent use.
 	lock := b.lockFor(acctID)

@@ -72,11 +72,7 @@ FROM accounts WHERE namespace = ?`, ns)
 			a.CustomHeaders = h
 		}
 	}
-	if d.crypto != nil && mgmtKey != "" && strings.HasPrefix(mgmtKey, cryptoPrefix) {
-		if dec, err := d.crypto.Decrypt(mgmtKey); err == nil {
-			mgmtKey = dec
-		}
-	}
+	mgmtKey = d.openManagementKey(mgmtKey)
 	a.ManagementKey = mgmtKey
 	return &a, nil
 }
@@ -88,7 +84,8 @@ SELECT id, name, namespace, kind, base_url, enabled, requires_session_header,
        COALESCE(custom_headers,''), COALESCE(probe_delay_ms,400),
        COALESCE(rate_limit,0), COALESCE(rate_window,''),
        COALESCE(usage_convention,'auto'), COALESCE(notes,''),
-       COALESCE(max_context_tokens,0), COALESCE(management_key_plain,'')
+       COALESCE(max_context_tokens,0), COALESCE(management_key_plain,''),
+       COALESCE(quota_mode,'probe'), COALESCE(cap_window,'monthly'), COALESCE(cap_tokens,0)
 FROM accounts WHERE id = ?`, id)
 	var (
 		a             provider.Account
@@ -103,7 +100,7 @@ FROM accounts WHERE id = ?`, id)
 	)
 	if err := row.Scan(&a.ID, &a.Name, &a.Namespace, &kind, &a.BaseURL, &enabled,
 		&needsSession, &customHeaders, &probeDelay, &rateLimit, &rateWindow, &a.UsageConvention,
-		&a.Notes, &a.MaxContextTokens, &mgmtKey); err != nil {
+		&a.Notes, &a.MaxContextTokens, &mgmtKey, &a.QuotaMode, &a.CapWindow, &a.CapTokens); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -124,11 +121,7 @@ FROM accounts WHERE id = ?`, id)
 			a.CustomHeaders = h
 		}
 	}
-	if d.crypto != nil && mgmtKey != "" && strings.HasPrefix(mgmtKey, cryptoPrefix) {
-		if dec, err := d.crypto.Decrypt(mgmtKey); err == nil {
-			mgmtKey = dec
-		}
-	}
+	mgmtKey = d.openManagementKey(mgmtKey)
 	a.ManagementKey = mgmtKey
 	return &a, nil
 }
@@ -818,4 +811,20 @@ func orDefault(v, def string) string {
 		return def
 	}
 	return v
+}
+
+// openManagementKey decrypts a stored management key. A value that is still
+// encrypted after this (wrong key, damaged value, or no cipher loaded) is
+// dropped: sending the ciphertext upstream as a credential would leak it and
+// could never work.
+func (d *DB) openManagementKey(stored string) string {
+	if !strings.HasPrefix(stored, cryptoPrefix) {
+		return stored
+	}
+	if d.crypto != nil {
+		if dec, err := d.crypto.Decrypt(stored); err == nil {
+			return dec
+		}
+	}
+	return ""
 }

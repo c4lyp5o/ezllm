@@ -44,7 +44,7 @@ Bridges stay off until you [turn one on](bridge-setup.md).
 |---|---|---|
 | `EZLLM_MASTER_KEY` | unset | The master key itself. Wins over the file |
 | `EZLLM_MASTER_KEY_FILE` | `ezllm-master.key` in the data folder | The master key file, made on the first start. Move the key before you change this |
-| `EZLLM_DASHBOARD_PASSWORD` | unset | The first dashboard password, at least 12 characters. Used only until setup is done; it never replaces a password already set |
+| `EZLLM_DASHBOARD_PASSWORD` | unset | The first dashboard password: 12 characters to 72 bytes. Used only until setup is done; it never replaces a password already set |
 | `EZLLM_DASHBOARD_PASSWORD_FILE` | unset | The same, from a file. One trailing newline is removed. The plain variable wins |
 
 ## Features

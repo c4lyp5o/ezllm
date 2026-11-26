@@ -329,8 +329,10 @@ Returns the `AccountSummary`.
 
 ### `GET|PATCH|DELETE /admin/accounts/{id}`
 `PATCH` accepts any subset of the create fields (namespace change allowed — it re-points routing).
-Absent fields keep their current values — including `usage_convention`; an invalid value is
-`422` naming the field and leaves the stored value untouched.
+Absent fields keep their current values — including `usage_convention`, `custom_headers`,
+`cap_tokens` and `max_context_tokens`; `{}` clears the headers and `0` a number. The merged
+account is checked like a new one: an invalid value is `422` naming the field and leaves the
+stored value untouched.
 `DELETE` → **`409`** when combos reference it, body lists the combos:
 ```jsonc
 {"error":{"type":"conflict","message":"account referenced by 2 combos",
@@ -800,7 +802,8 @@ One rule per `(account_id, model_id)`: a rolling **token cap** and/or an **allow
   host-resolvable timezone or `instance` (the default for new rules).
 - `enabled`, `note` optional.
 
-`PATCH` changes only the fields you send. The window fields move together: sending any of
+`PATCH` changes only the fields you send, by id: a new `account_id` or `model_id` moves the
+rule, and a pair another rule has answers `409`. The window fields move together: sending any of
 `win_start`, `win_end`, `win_days` replaces the whole window, and `""` clears that part.
 
 Enforcement: inside a combo, a hop whose rule says "not now" is **skipped silently** (the next

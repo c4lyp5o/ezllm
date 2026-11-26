@@ -2518,11 +2518,13 @@ func (s *Server) handleModelRule(w http.ResponseWriter, r *http.Request) {
 		if raw.Note != nil {
 			merged.Note = *raw.Note
 		}
-		newID, err := s.db.UpsertModelRule(r.Context(), merged)
-		if err != nil {
+		// By id, so a new account or model moves this rule instead of
+		// creating a second one beside it.
+		if err := s.db.UpdateModelRule(r.Context(), id, merged); err != nil {
 			s.writeStoreErr(w, err)
 			return
 		}
+		newID := id
 		s.reloadRules()
 		saved, err := s.db.GetModelRule(r.Context(), newID)
 		if err != nil {

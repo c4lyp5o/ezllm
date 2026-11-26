@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/tzloc"
 )
 
 // Clock abstracts "now" so tests inject a fixed instant instead of sleeping
@@ -86,7 +88,7 @@ func (w Window) loc() *time.Location {
 	if w.TZ == "" {
 		return time.UTC
 	}
-	if l, err := time.LoadLocation(w.TZ); err == nil {
+	if l, err := tzloc.Load(w.TZ); err == nil {
 		return l
 	}
 	return time.UTC
@@ -110,7 +112,7 @@ func (w Window) ValidateTZ() error {
 	if tz == "" || tz == "instance" {
 		return nil // empty = UTC, by design
 	}
-	if _, err := time.LoadLocation(tz); err != nil {
+	if _, err := tzloc.Load(tz); err != nil {
 		return fmt.Errorf("win_tz %q does not resolve to a time zone on this host "+
 			"(typo? use an IANA name like Europe/Berlin or an offset like +08:00): %w", tz, err)
 	}
@@ -241,7 +243,7 @@ func (r *Rule) bucketFor(now time.Time, loadLoc func(string) *time.Location) str
 			loc = l
 		}
 	} else if r.Window.TZ != "" {
-		if l, err := time.LoadLocation(r.Window.TZ); err == nil {
+		if l, err := tzloc.Load(r.Window.TZ); err == nil {
 			loc = l
 		}
 	}

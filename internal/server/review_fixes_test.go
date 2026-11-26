@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/c4lyp5o/ezllm/internal/store"
 )
 
 // Renaming a combo in the editor sends PATCH with the new name. It used to
@@ -134,5 +136,86 @@ func TestSyncReadsChunkedBodyAndRefusesUnknownSurface(t *testing.T) {
 		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "surfaces") {
 			t.Fatalf("chunked=%v: %d %s, want 400 naming surfaces", chunked, w.Code, w.Body.String())
 		}
+	}
+}
+
+// The dashboard's on/off switch sends {"enabled": false} alone. It used to wipe
+// the account's custom headers, token cap, context size, quota mode and cap
+// window. A PATCH also gets the create path's validation.
+func TestAccountPatchKeepsOmittedFields(t *testing.T) {
+	h := newHarness(t, func(http.ResponseWriter, *http.Request) {})
+	capTok, maxCtx := int64(7000), int64(128000)
+	id, err := h.db.CreateAccount(t.Context(), store.AccountInput{
+		Name: "acme", Namespace: "acme", Kind: "openai-compatible", BaseURL: "https://api.example.com/v1",
+		CustomHeaders: map[string]string{"X-Team": "a"}, CapTokens: &capTok, MaxContextTokens: &maxCtx,
+		QuotaMode: "tokens", CapWindow: "daily",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _, resp := h.do("PATCH", fmt.Sprintf("/admin/accounts/%d", id), adminTok(), `{"enabled":false}`)
+	if code != http.StatusOK {
+		t.Fatalf("patch = %d %s", code, resp)
+	}
+	a, err := h.db.AccountByID(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Enabled || a.CustomHeaders["X-Team"] != "a" || a.CapTokens != 7000 || a.MaxContextTokens != 128000 || a.QuotaMode != "tokens" || a.CapWindow != "daily" {
+		t.Fatalf("after {enabled:false}: enabled=%v headers=%v cap=%d ctx=%d quota=%q window=%q",
+			a.Enabled, a.CustomHeaders, a.CapTokens, a.MaxContextTokens, a.QuotaMode, a.CapWindow)
+	}
+	code, _, _ = h.do("PATCH", fmt.Sprintf("/admin/accounts/%d", id), adminTok(), `{"namespace":"a/b"}`)
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("namespace with '/' = %d, want 422 like create", code)
+	}
+}
+
+// Changing a rule's model moves that rule; it used to leave the old rule in
+// force and add a second one. Taking another rule's pair answers 409.
+func TestModelRulePatchMovesInPlace(t *testing.T) {
+	h := newHarness(t, func(http.ResponseWriter, *http.Request) {})
+	_, a := postRule(t, h, `{"account_id":1,"model_id":"model-a","cap_tokens":10,"cap_window":"daily","enabled":true}`)
+	postRule(t, h, `{"account_id":1,"model_id":"model-b","cap_tokens":10,"cap_window":"daily","enabled":true}`)
+	id := int64(a["id"].(float64))
+	code, _, resp := h.do("PATCH", fmt.Sprintf("/admin/model-rules/%d", id), adminTok(), `{"model_id":"model-c"}`)
+	if code != http.StatusOK {
+		t.Fatalf("move = %d %s", code, resp)
+	}
+	rules, err := h.db.ListModelRules(t.Context(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	models := map[string]int64{}
+	for _, r := range rules {
+		models[r.ModelID] = r.ID
+	}
+	if len(rules) != 2 || models["model-c"] != id {
+		t.Fatalf("rules after move = %v, want model-b and model-c (id %d)", models, id)
+	}
+	code, _, _ = h.do("PATCH", fmt.Sprintf("/admin/model-rules/%d", id), adminTok(), `{"model_id":"model-b"}`)
+	if code != http.StatusConflict {
+		t.Fatalf("taking model-b's pair = %d, want 409", code)
+	}
+}
+
+type webMsg = struct {
+	Role    string `json:"role"`
+	Content any    `json:"content"`
+}
+
+// developer messages are the newer system messages: neither reaches a web
+// provider. An image is refused, not silently dropped.
+func TestWebBridgeDropsDeveloperAndSeesImages(t *testing.T) {
+	msgs := []webMsg{{Role: "developer", Content: "secret persona"}, {Role: "user", Content: "hello"}}
+	if got := flattenWebBridgeMessages(msgs); strings.Contains(got, "secret persona") || got != "hello" {
+		t.Fatalf("prompt = %q, want only the user text", got)
+	}
+	img := []webMsg{{Role: "user", Content: []any{
+		map[string]any{"type": "text", "text": "what is this"},
+		map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,AAAA"}},
+	}}}
+	if !webBridgeHasImage(img) || webBridgeHasImage(msgs) {
+		t.Fatal("image detection is wrong")
 	}
 }

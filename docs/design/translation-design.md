@@ -18,7 +18,7 @@
 ## Why (measured, not assumed)
 
 - `step-5-preview-free` ledger history: **941 × 200 on surface `openai`, 0 successes on `anthropic` ever.** It does not speak `/v1/messages`.
-- Claude Code speaks anthropic only (`ANTHROPIC_BASE_URL` + `/v1/messages`), and a protocol-mismatch **400 is not in the failover set** (`failoverStatus` in `internal/proxy/proxy.go`), so it reaches the client raw.
+- Claude Code speaks anthropic only (`ANTHROPIC_BASE_URL` + `/v1/messages`), and a protocol-mismatch **400 is not in the failover set** (`failoverStatus` in `internal/proxy/classify.go`), so it reaches the client raw.
 - ezllm's stated invariant — "ezllm passes bodies through untranslated" — is exactly why Claude Code can never use step-5 today. **This plan changes that invariant deliberately and narrowly:** translation happens only for hops whose `proto_*` proof says the native path is impossible, and only when the operator has enabled it.
 
 ## Invariants (each has a test)
@@ -77,7 +77,7 @@ The hard part. Emit in this exact order (Claude Code's parser is strict):
 ## Design decisions
 
 - **One package, `internal/translate/`,** owns all conversion (request bodies, response bodies, SSE streams), keeping the proxy clean.
-- **Hook point: the proxy's per-hop body preparation** (`prepareHopBody` in `internal/proxy/proxy.go` today). When the hop's wire differs from the client's surface, the body is translated, the hop is dialled on its own wire, and the response is converted back. The `Result` carries the client's surface for the ledger.
+- **Hook point: the proxy's per-hop body preparation** (`prepareHopBody` in `internal/proxy/body.go` today). When the hop's wire differs from the client's surface, the body is translated, the hop is dialled on its own wire, and the response is converted back. The `Result` carries the client's surface for the ledger.
 - **Eligibility:** only a wire the probe sweep PROVED (`proto_* = true`, read through `ModelSupportsSurface` in `internal/store/catalog.go`) counts as "can serve translated"; an unprobed model is never translated. The sweep runs from the key test and the dashboard.
 - **Ordering (original):** translated hops came after every native hop. *Changed 2026-10-13:* they are ordinary combo members ordered by the strategy.
 - **Config (original):** `translation.enabled`, default off for the first deploy. *Changed:* default on; `EZLLM_TRANSLATION_ENABLED` overrides (flag > env > config > default).

@@ -114,7 +114,7 @@ These change what clients see, deliberately, so every bridge behaves alike:
   `EZLLM_BRIDGE_QUEUE` waiting requests (one setting for every bridge,
   default 8; it replaces `EZLLM_COPILOT_BRIDGE_QUEUE`) they answer 429
   `queue_full` with `Retry-After: 5`, and the router parks the hop for 5 s and
-  fails over (`proxy.go` `hopOutcome`; a sole hop is not parked).
+  fails over (`hop_health.go` `hopOutcome`; a sole hop is not parked).
 - Every bridge's `/status` reports `runtime` with `in_flight`, `queued`,
   `max_queue`, `max_concurrent`, `served` and `rejected_queue_full`
   (Antigravity keeps `conversation_cache` inside `runtime`).

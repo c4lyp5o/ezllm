@@ -353,7 +353,7 @@ func (s *Server) writeErr(w http.ResponseWriter, err error) {
 			return
 		case "chat_tools_unsupported":
 			// Refused before anything billable: the router fails over on this
-			// code without parking the hop (proxy.go refusesTools).
+			// code without parking the hop (proxy classify.go refusesTools).
 			bridgeutil.WriteJSONBytes(w, http.StatusBadRequest, ErrorEnvelope("invalid_request_error", f.Msg, f.Code))
 			return
 		case "not_logged_in":

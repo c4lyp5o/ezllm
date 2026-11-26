@@ -2,7 +2,7 @@
 
 Status: **sign-off ready**. Supersedes: nothing.
 Related: `docs/API.md` (contract), `web/src/pages/Chat.tsx` (combobox pattern),
-`internal/server/admin.go` `handleComboTest` (probe-through-dispatcher pattern).
+`internal/server/admin_combos.go` `handleComboTest` (probe-through-dispatcher pattern).
 
 ## Problem
 

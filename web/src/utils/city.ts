@@ -61,12 +61,21 @@ export function signName(name: string): string {
   return words[0].length <= 16 ? words[0] : `${words[0].slice(0, 15)}…`;
 }
 
-/** `windowMin` is the look-back `usage` was fetched for: tokens are averaged over it. */
-export function buildBuildings(accounts: Account[], usage: UsageResp | null, windowMin: number = WINDOW_MIN): Building[] {
-  const byHint = new Map((usage?.groups ?? []).map((g) => [g.k, g]));
+/** `windowMin` is the look-back `usage` was fetched for: tokens are averaged over it.
+ *  `usage` is grouped by account (the ledger records the namespace) and gives each
+ *  building its totals; `keyUsage`, grouped by key hint, splits them per key. A hint
+ *  is not unique (two accounts can both show "••••"), so a key reads its hint's row
+ *  only when no other key shares it; a single-key account's key takes the account's
+ *  totals. */
+export function buildBuildings(accounts: Account[], usage: UsageResp | null, windowMin: number = WINDOW_MIN, keyUsage: UsageResp | null = null): Building[] {
+  const byAccount = new Map((usage?.groups ?? []).map((g) => [g.k, g]));
+  const byHint = new Map((keyUsage?.groups ?? []).map((g) => [g.k, g]));
+  const hintCount = new Map<string, number>();
+  for (const a of accounts) for (const k of a.keys) hintCount.set(k.hint, (hintCount.get(k.hint) ?? 0) + 1);
   const raw = accounts.map((a) => {
+    const total = byAccount.get(a.namespace);
     const keys: CityKey[] = a.keys.map((k) => {
-      const g = byHint.get(k.hint);
+      const g = a.keys.length === 1 ? total : hintCount.get(k.hint) === 1 ? byHint.get(k.hint) : undefined;
       const enabled = a.enabled && k.enabled;
       return {
         id: String(k.id), label: k.label || k.hint, hint: k.hint, enabled,
@@ -76,9 +85,9 @@ export function buildBuildings(accounts: Account[], usage: UsageResp | null, win
       };
     });
     const enabled = a.enabled && keys.some((k) => k.enabled);
-    const tpm = keys.reduce((n, k) => n + k.tpm, 0);
-    const calls = keys.reduce((n, k) => n + k.calls, 0);
-    const errors = keys.reduce((n, k) => n + k.errors, 0);
+    const tpm = enabled && total ? (total.tin + total.tout) / windowMin : 0;
+    const calls = enabled ? total?.calls ?? 0 : 0;
+    const errors = enabled ? total?.errors ?? 0 : 0;
     return {
       id: String(a.id), name: a.name, short: signName(a.name), namespace: a.namespace,
       kind: a.kind, enabled, tpm, calls, errors, keys,

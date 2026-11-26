@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { motion } from 'motion/react';
 import {
   ApiError, AuthError, del, get, listBridges,
-  modelRules, patch, post, postKeyTestStream, setModelPin,
+  modelRules, patch, post, postKeyTestStream, releaseModelVerdict, setModelPin,
   setPrice, deletePrice, startSweep, stopSweep, sweepStatus,
   KINDS, STEPS,
   type Account, type ApiErrorDetail, type Bridge, type KeyRow, type ModelRule, type ModelRow, type Price, type SweepStatus, type TestResult, type TestStep,
@@ -258,23 +258,44 @@ const EXTRAS = {
   },
 } satisfies Record<string, Extra>;
 
+// The backend picks each reader by the base URL's host (quota.go), so these do
+// too: a provider added under its own namespace still gets its field.
+function hostnameOf(url: string): string {
+  try { return new URL(url).hostname.toLowerCase(); } catch { return ''; }
+}
+const isLoopback = (host: string) => host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]';
+
 function extraForPreset(presetID: string, baseURL: string): Extra | null {
-  if (presetID === 'tokenrouter') return EXTRAS.tokenrouter;
-  if (presetID === 'anthropic-compatible' && baseURL.includes('api.anthropic.com')) return EXTRAS.console;
-  if (presetID === 'openai') return EXTRAS.openai;
-  if (presetID === 'commandcode') return EXTRAS.commandcode;
   if (presetID === 'claude-sub') return EXTRAS.claudeSub;
-  return null;
+  if (presetID === 'commandcode') return EXTRAS.commandcode;
+  return extraForHost(hostnameOf(baseURL), presetID === 'anthropic-compatible' || presetID === 'claude-platform');
 }
 
 function extraForAccount(a: Account): Extra | null {
-  const url = a.base_url ?? '';
-  if (a.kind === 'openai-compatible' && a.namespace === 'tokenrouter') return EXTRAS.tokenrouter;
-  if (a.kind === 'anthropic-compatible' && url.includes('api.anthropic.com')) return EXTRAS.console;
-  if (a.namespace === 'claude-sub') return EXTRAS.claudeSub;
-  if (a.kind === 'openai-compatible' && a.namespace === 'openai') return EXTRAS.openai;
-  if (a.kind === 'openai-compatible' && url.includes('api.commandcode.ai')) return EXTRAS.commandcode;
+  const host = hostnameOf(a.base_url ?? "");
+  if (a.kind === 'anthropic-compatible' && isLoopback(host)) return EXTRAS.claudeSub;
+  return extraForHost(host, a.kind === 'anthropic-compatible');
+}
+
+function extraForHost(host: string, anthropic: boolean): Extra | null {
+  if (anthropic) return host === 'api.anthropic.com' ? EXTRAS.console : null;
+  if (host === 'api.tokenrouter.com') return EXTRAS.tokenrouter;
+  if (host === 'api.openai.com') return EXTRAS.openai;
+  if (host === 'api.commandcode.ai') return EXTRAS.commandcode;
   return null;
+}
+
+// parseCustomHeaders reads the advanced headers field: a JSON object whose
+// values are strings, or nothing. A clear message beats the server's 400 (or a
+// raw JSON parse error) after the wizard has started.
+function parseCustomHeaders(raw: string): Record<string, string> | null {
+  if (!raw.trim()) return null;
+  let v: unknown;
+  try { v = JSON.parse(raw); } catch { throw new Error('Custom headers must be JSON, for example {"x-team":"ops"}.'); }
+  if (!v || typeof v !== 'object' || Array.isArray(v) || Object.values(v).some((x) => typeof x !== 'string')) {
+    throw new Error('Custom headers must be a JSON object of text values, for example {"x-team":"ops"}.');
+  }
+  return v as Record<string, string>;
 }
 
 function ExtraCredentialField({ extra, id, value, onChange, edit, isSet, expiresAt }: {
@@ -752,7 +773,7 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
     setBusy(true); setErr(null); setResult(null);
     let createdAccountID: number | null = null;
     try {
-      const customHeaders = d.customHeaders.trim() ? JSON.parse(d.customHeaders) as Record<string, unknown> : null;
+      const customHeaders = parseCustomHeaders(d.customHeaders);
       const preset = PROVIDER_PRESETS[d.preset];
       const payload = {
         name: d.name.trim(), namespace: d.namespace.trim(), kind: preset.kind,
@@ -1149,6 +1170,7 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
   // The row whose per-model Test was clicked. Its button keeps the spinner
   // while that single-model sweep runs (the header line carries the clock).
   const [testingId, setTestingId] = useState<string | null>(null);
+  const [releasingId, setReleasingId] = useState<string | null>(null);
 
   const loadModels = useCallback(() => {
     get<ModelRow[]>(`/admin/accounts/${id}/models`)
@@ -1214,6 +1236,15 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
   // their button is disabled, because a probe write cannot overwrite an
   // operator-curated verdict (server-side, proven by a test) — clicking would
   // only spend quota and change nothing.
+  const releaseOne = (m: ModelRow) => {
+    setReleasingId(m.id);
+    setPinErr(null);
+    releaseModelVerdict(id, m.id)
+      .then(() => loadModels())
+      .catch((e: unknown) => setPinErr(e instanceof Error ? e.message : 'release failed'))
+      .finally(() => setReleasingId(null));
+  };
+
   const testOne = (m: ModelRow) => {
     setSweepBusy(true);
     setTestingId(m.id);
@@ -1376,14 +1407,21 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
                   </select>
                 </td>
                 <td className="text-right">
-                  <BusyButton busy={testing}
-                    className="h-7 w-[60px] px-0 text-[12px]"
-                    disabled={running || sweepBusy || m.source === 'curated'}
-                    onClick={() => testOne(m)}>
-                    <span title={m.source === 'curated'
-                      ? 'You set this result by hand, so tests won\'t change it. Release it first if you want to test again.'
-                      : 'Sends one tiny request to this model on each of the three APIs. It checks the API works, not how the model handles tools.'}>Test</span>
-                  </BusyButton>
+                  {m.source === 'curated' ? (
+                    <BusyButton busy={releasingId === m.id}
+                      className="h-7 w-[60px] px-0 text-[12px]"
+                      disabled={running || sweepBusy}
+                      onClick={() => releaseOne(m)}>
+                      <span title="You set this result by hand, so tests won't change it. Release hands it back to the tests; the result stays until the next test.">Release</span>
+                    </BusyButton>
+                  ) : (
+                    <BusyButton busy={testing}
+                      className="h-7 w-[60px] px-0 text-[12px]"
+                      disabled={running || sweepBusy}
+                      onClick={() => testOne(m)}>
+                      <span title="Sends one tiny request to this model on each of the three APIs. It checks the API works, not how the model handles tools.">Test</span>
+                    </BusyButton>
+                  )}
                 </td>
               </tr>
               );
@@ -1648,6 +1686,10 @@ function ClaudeUsageExtras({ raw }: { raw: string }) {
 
 function QuotaModal({ account, onClose, onRead }: { account: Account; onClose: () => void; onRead?: () => void }) {
   const [live, setLive] = useState<QuotaLive | null>(null);
+  // The stored reading this modal shows. It is re-read with the account right
+  // after a live read, so the bars change together with "read just now"
+  // instead of one parent reload later.
+  const [quota, setQuota] = useState(account.quota);
   const [busy, setBusy] = useState(true);
   const [err, setErr] = useState<ApiErrorDetail | null>(null);
   const [rules, setRules] = useState<ModelRule[] | null>(null);
@@ -1658,7 +1700,12 @@ function QuotaModal({ account, onClose, onRead }: { account: Account; onClose: (
     setBusy(true);
     setErr(null);
     get<QuotaLive>(`/admin/accounts/${account.id}/quota`)
-      .then((q) => { setLive(q); onRead?.(); })
+      .then(async (q) => {
+        const fresh = await get<Account>(`/admin/accounts/${account.id}`).catch(() => null);
+        if (fresh) setQuota(fresh.quota);
+        setLive(q);
+        onRead?.();
+      })
       .catch((e: unknown) => setErr({ status: 0, type: 'error', message: e instanceof Error ? e.message : 'quota read failed' }))
       .finally(() => setBusy(false));
   }, [account.id]);
@@ -1699,13 +1746,13 @@ function QuotaModal({ account, onClose, onRead }: { account: Account; onClose: (
               <div className="flex flex-wrap items-center gap-2 text-[13px]">
                 <span className="rounded-full border border-line bg-bg px-2 py-0.5 font-mono text-[12px] text-accent">{live.kind}</span>
                 <span className="text-mute">read {live.read_at ? relTime(live.read_at) : '—'}</span>
-                {account.quota?.plan && <span className="text-dim">· {account.quota.plan}</span>}
-                {account.quota?.resets_at && !account.quota.groups?.length && <span className="text-mute">· resets {untilTime(account.quota.resets_at)}</span>}
+                {quota?.plan && <span className="text-dim">· {quota.plan}</span>}
+                {quota?.resets_at && !quota.groups?.length && <span className="text-mute">· resets {untilTime(quota.resets_at)}</span>}
               </div>
               {/* The reading first, as the card shows it; the provider's own
                   response is evidence, one click away, not the headline. */}
-              {account.quota && account.quota.kind !== 'none' && account.quota.kind !== 'unknown' ? (
-                <div className="max-w-md"><QuotaBars quota={account.quota} /></div>
+              {quota && quota.kind !== 'none' && quota.kind !== 'unknown' ? (
+                <div className="max-w-md"><QuotaBars quota={quota} /></div>
               ) : null}
               <ClaudeUsageExtras raw={live.raw} />
               <details className="group">

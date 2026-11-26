@@ -39,7 +39,7 @@ function useNeighbourhood(win: number) {
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   // The usage is kept with the look-back it was fetched for: switching the
   // window must not average the old window's tokens over the new one's minutes.
-  const [usage, setUsage] = useState<{ resp: UsageResp; win: number } | null>(null);
+  const [usage, setUsage] = useState<{ resp: UsageResp; keys: UsageResp | null; win: number } | null>(null);
   const [stale, setStale] = useState(false);
   const [loading, setLoading] = useState(true);
   const [at, setAt] = useState<number | null>(null);
@@ -52,14 +52,15 @@ function useNeighbourhood(win: number) {
       if (document.hidden || inFlight) return;
       inFlight = true;
       const from = new Date(Date.now() - win * 60_000).toISOString();
-      const [a, u] = await Promise.allSettled([
+      const [a, u, k] = await Promise.allSettled([
         apiFetch<Account[]>('/admin/accounts', { method: 'GET', signal: controller.signal }),
+        apiFetch<UsageResp>(`/admin/usage?from=${encodeURIComponent(from)}&group_by=account`, { method: 'GET', signal: controller.signal }),
         apiFetch<UsageResp>(`/admin/usage?from=${encodeURIComponent(from)}&group_by=key`, { method: 'GET', signal: controller.signal }),
       ]);
       inFlight = false;
       if (!alive) return;
       if (a.status === 'fulfilled') setAccounts(a.value);
-      if (u.status === 'fulfilled') setUsage({ resp: u.value, win });
+      if (u.status === 'fulfilled') setUsage({ resp: u.value, keys: k.status === 'fulfilled' ? k.value : null, win });
       const complete = a.status === 'fulfilled' && u.status === 'fulfilled';
       setStale(!complete); setLoading(false);
       if (complete) setAt(Date.now());
@@ -70,7 +71,7 @@ function useNeighbourhood(win: number) {
     document.addEventListener('visibilitychange', onVisible);
     return () => { alive = false; controller.abort(); clearInterval(iv); document.removeEventListener('visibilitychange', onVisible); };
   }, [attempt, win]);
-  const buildings = useMemo(() => (accounts ? buildBuildings(accounts, usage?.resp ?? null, usage?.win) : null), [accounts, usage]);
+  const buildings = useMemo(() => (accounts ? buildBuildings(accounts, usage?.resp ?? null, usage?.win, usage?.keys ?? null) : null), [accounts, usage]);
   return { buildings, accounts, usageWin: usage?.win ?? win, stale, loading, at, retry: () => setAttempt((n) => n + 1) };
 }
 
@@ -302,7 +303,7 @@ export default function Neighbourhood() {
           ))}
           <p className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
             <Link className="text-accent hover:underline" to={providerLink(Number(detail.id), 'open')}>Open provider</Link>
-            <Link className="text-accent hover:underline" to={`/requests?${new URLSearchParams({ account: detail.name, range: '24h' })}`}>View requests</Link>
+            <Link className="text-accent hover:underline" to={`/requests?${new URLSearchParams({ account: detail.namespace, range: '24h' })}`}>View requests</Link>
             <Link className="text-accent hover:underline" to={providerLink(Number(detail.id), 'keys')}>Edit keys</Link>
           </p>
         </div>

@@ -58,14 +58,16 @@ export function CauseChip({ err, status }: { err?: string; status: number }) {
 
 // ── chips & badges ──────────────────────────────────────────────────────
 
-const chipTones: Record<string, string> = {
+// `satisfies`, not a Record<string, …> annotation: the keys stay literal, so a
+// tone that does not exist (tone="good") fails the type check.
+const chipTones = {
   // Pale pairs: a tint of the status with text of the same hue; no border.
   neutral: 'border-transparent bg-raised text-dim',
   accent: 'border-transparent bg-accent-dim text-accent',
   ok: 'border-transparent bg-ok-dim text-ok',
   warn: 'border-transparent bg-warn-dim text-warn',
   bad: 'border-transparent bg-bad-dim text-bad',
-};
+} satisfies Record<string, string>;
 
 export function Chip({ tone = 'neutral', children, className, title }: {
   tone?: keyof typeof chipTones; children: ReactNode; className?: string; title?: string;
@@ -392,7 +394,10 @@ export function Combobox({ options, value, onChange, disabled, loadingText, plac
   }
 
   return (
-    <div ref={wrapRef} className="relative w-full">
+    <div ref={wrapRef} className="relative w-full"
+      // Tabbing past the field closes the list. The list is focusable
+      // (tabIndex -1), so clicking or scrolling it keeps focus inside.
+      onBlur={(e) => { if (open && !wrapRef.current?.contains(e.relatedTarget as Node | null)) close(); }}>
       <input
         type="text"
         id={id}
@@ -433,6 +438,7 @@ export function Combobox({ options, value, onChange, disabled, loadingText, plac
           id={listId}
           role="listbox"
           ref={listRef}
+          tabIndex={-1}
           className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-line bg-raised shadow-lg"
         >
           {filtered.length === 0 && (

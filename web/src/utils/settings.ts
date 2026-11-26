@@ -39,3 +39,14 @@ export function settingError(key: string, value: unknown): string {
     default: return '';
   }
 }
+
+// effectiveText says what a value MEANS for its setting: 0 retries is off,
+// a 0 attempt budget and an empty deadline are no limit, a switch is On/Off.
+// "Unlimited" for every empty value read wrong for most settings.
+export function effectiveText(key: string, v: unknown): string {
+  if (typeof v === 'boolean') return v ? 'On' : 'Off';
+  if (v === 0 && key === 'retries') return '0 (off)';
+  if (v === 0 && key === 'attempt_budget') return '0 (no limit)';
+  if (v === '' || v == null) return key === 'dispatch_deadline' ? 'No limit' : '–';
+  return String(v);
+}

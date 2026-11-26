@@ -4,6 +4,7 @@
 // can't inject markup. Single newlines render as line breaks (chat habit),
 // blank lines separate paragraphs.
 import { Fragment, useState, type ReactNode } from 'react';
+import { safeHref } from '../utils/lib';
 
 // One alternation, scanned left to right: code wins over emphasis so `**x**`
 // inside backticks stays literal. Kept as a SOURCE string, not a /g RegExp:
@@ -33,7 +34,7 @@ function inline(src: string, key: string): ReactNode[] {
     } else {
       const mm = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(tok);
       const label = mm ? mm[1] : tok;
-      const href = mm ? mm[2] : '#';
+      const href = mm ? safeHref(mm[2]) : '#';
       out.push(
         <a key={k} href={href} target="_blank" rel="noreferrer noopener" className="text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent">
           {label}

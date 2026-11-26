@@ -22,6 +22,10 @@ export interface TokenInfo {
   expires_at: string;
   last_used_at?: string | null;
   created_at: string;
+  /** Tokens used in the current calendar bucket (only when cap_tokens > 0): what the cap enforces. */
+  cap_used?: number;
+  /** Priced spend in the current bucket (only when cap_usd > 0). */
+  spent_usd?: number;
 }
 
 export interface TokenCreated extends TokenInfo {

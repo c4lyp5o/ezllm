@@ -1,13 +1,16 @@
 package server
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
-	"github.com/c4lyp5o/ezllm/internal/claudeweb"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/c4lyp5o/ezllm/internal/claudeweb"
 	"github.com/c4lyp5o/ezllm/internal/store"
 )
 
@@ -267,5 +270,42 @@ func TestComboPatchStickyIdleZero(t *testing.T) {
 	}
 	if got := idle(); got != 900 {
 		t.Fatalf("sticky_idle_s = %d after a PATCH without it, want 900 kept", got)
+	}
+}
+
+// The token list carries a capped key's use in its current calendar bucket,
+// the number the cap enforces, so the dashboard's "budget spent" matches the
+// 429 a client gets.
+func TestTokenListCarriesBucketUse(t *testing.T) {
+	h := newHarness(t, func(http.ResponseWriter, *http.Request) {})
+	ctx := context.Background()
+	bucket := store.CountBucket(time.Now(), "monthly", time.Local)
+	if _, err := h.db.Writer().ExecContext(ctx,
+		`UPDATE client_tokens SET cap_tokens=100, cap_window='monthly' WHERE name='my-app'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.Writer().ExecContext(ctx,
+		`INSERT INTO client_usage_counters (client, bucket, tokens, calls, updated_at) VALUES ('my-app', ?, 42, 1, '2026-01-01T00:00:00Z')`, bucket); err != nil {
+		t.Fatal(err)
+	}
+	code, body := jsonDo(t, h, "GET", "/admin/tokens", "tok-admin", nil)
+	if code != http.StatusOK {
+		t.Fatalf("list: %d %s", code, body)
+	}
+	var list []map[string]any
+	if err := json.Unmarshal([]byte(body), &list); err != nil {
+		t.Fatal(err)
+	}
+	for _, tok := range list {
+		switch tok["name"] {
+		case "my-app":
+			if tok["cap_used"] != float64(42) {
+				t.Fatalf("my-app cap_used = %v, want 42", tok["cap_used"])
+			}
+		default:
+			if _, ok := tok["cap_used"]; ok {
+				t.Fatalf("%v has cap_used without a cap", tok["name"])
+			}
+		}
 	}
 }

@@ -115,3 +115,14 @@ export function priorFrom(
 /** /admin/usage refuses a window past 400 days, so a 2x comparison window is
  *  only available while it fits. */
 export const MAX_SPAN_H = 400 * 24;
+
+// safeHref keeps a model-written link only when it is http(s) or mailto: a
+// javascript: or data: link in an answer would run or render in the dashboard.
+export function safeHref(raw: string): string {
+  try {
+    const u = new URL(raw, window.location.href);
+    return u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'mailto:' ? raw : '#';
+  } catch {
+    return '#';
+  }
+}

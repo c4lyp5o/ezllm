@@ -2027,6 +2027,36 @@ func (s *Server) handleComboHops(w http.ResponseWriter, r *http.Request) {
 
 // ── tokens ──────────────────────────────────────────────────────────────────
 
+// tokenView is a token as the dashboard lists it: the stored policy plus what a
+// capped key has used in its current calendar bucket — the same numbers the
+// cap enforces, so "budget spent" on the page matches the 429 a client gets.
+type tokenView struct {
+	store.TokenSummary
+	CapUsed  *int64   `json:"cap_used,omitempty"`  // tokens in the current bucket; only when cap_tokens > 0
+	SpentUSD *float64 `json:"spent_usd,omitempty"` // priced spend in the current bucket; only when cap_usd > 0
+}
+
+func (s *Server) withBudgetUse(ctx context.Context, tokens []store.TokenSummary) []tokenView {
+	out := make([]tokenView, len(tokens))
+	for i, t := range tokens {
+		out[i].TokenSummary = t
+		if !t.Enabled {
+			continue
+		}
+		if t.CapTokens > 0 {
+			if b, err := s.db.ClientBudgetStatus(ctx, t.Name); err == nil {
+				out[i].CapUsed = &b.Used
+			}
+		}
+		if t.CapUSD > 0 {
+			if sp, err := s.db.ClientSpendStatus(ctx, t.Name); err == nil {
+				out[i].SpentUSD = &sp.Spent
+			}
+		}
+	}
+	return out
+}
+
 func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -2035,7 +2065,7 @@ func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
 			s.writeStoreErr(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, tokens)
+		writeJSON(w, http.StatusOK, s.withBudgetUse(r.Context(), tokens))
 	case http.MethodPost:
 		var in store.TokenInput
 		if !decodeBody(w, r, &in) {

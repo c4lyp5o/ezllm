@@ -112,7 +112,7 @@ const sortValue = (r: UsageRow, c: SortCol): number | string => {
 
 // Only these splits have a server-side Requests filter (the ledger columns
 // account and model), so only their names are links.
-const REQUEST_FILTER: Partial<Record<SplitKey, 'account' | 'model'>> = { account: 'account', model: 'model' };
+const REQUEST_FILTER: Partial<Record<SplitKey, 'account' | 'model' | 'client' | 'alias'>> = { account: 'account', model: 'model', client: 'client', alias: 'alias' };
 
 export default function Stats() {
   const [split, setSplit] = useState<SplitKey>('account');
@@ -225,7 +225,9 @@ export default function Stats() {
   }, [ranked, sort]);
   const sortBy = (col: SortCol) => setSort((cur) => (cur?.col === col ? { col, dir: cur.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: col === 'k' ? 'asc' : 'desc' }));
   const linkField = REQUEST_FILTER[split];
-  const reqLink = (k: string) => (linkField ? `/requests?${new URLSearchParams({ [linkField]: k, range })}` : undefined);
+  // '(none)' and '(direct)' are placeholders for an empty column, not values a
+  // filter can match.
+  const reqLink = (k: string) => (linkField && k !== '(none)' && k !== '(direct)' ? `/requests?${new URLSearchParams({ [linkField]: k, range })}` : undefined);
 
   return (
     <div className="space-y-5">

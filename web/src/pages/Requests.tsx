@@ -378,7 +378,7 @@ export default function Requests() {
                   ) : (
                   <td className="px-4 py-2 text-right font-mono tabular-nums"
                     title={`tokens in ${nfmt(r.tin)} (↑) · tokens out ${nfmt(r.tout)} (↓)`}>
-                    <span title="tokens in (prompt, including cached tokens)">↑{nfmt(r.tin)}</span>{' '}
+                    <span title={r.translated ? 'tokens in (prompt, including cached tokens)' : 'tokens in (prompt, not counting cached tokens: see the cache column)'}>↑{nfmt(r.tin)}</span>{' '}
                     <span className="text-mute" title="tokens out (completion)">↓{nfmt(r.tout)}</span>
                   </td>
                   )}
@@ -402,7 +402,7 @@ export default function Requests() {
                 </tr>
                 {isOpen && (
                   <tr className="border-t border-line bg-wash">
-                    <td colSpan={10} className="px-4 py-3"><RowDetail r={r} /></td>
+                    <td colSpan={11} className="px-4 py-3"><RowDetail r={r} /></td>
                   </tr>
                 )}
                 </Fragment>

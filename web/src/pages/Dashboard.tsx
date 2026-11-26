@@ -839,13 +839,15 @@ export default function Dashboard() {
       return {
         tin: sum((u) => u.tin), tout: sum((u) => u.tout), cread: sum((u) => u.cread), cwrite: sum((u) => u.cwrite),
         calls: sum((u) => u.calls), errors: sum((u) => u.errors),
-        saved: sum((u) => u.saved), contextSaved: sum((u) => u.context_saved),
+        // applied_saved: only rewrites that shipped. `saved` also counts
+        // tokens recorded on declined rows, which never left ezllm shorter.
+        saved: sum((u) => u.applied_saved ?? 0), contextSaved: sum((u) => u.context_saved),
       };
     }
     if (!whole || !fresh) return null;
     return {
       tin: whole.tin, tout: whole.tout, cread: whole.cread, cwrite: whole.cwrite,
-      calls: whole.calls, errors: whole.errors, saved: whole.saved, contextSaved: whole.context_saved,
+      calls: whole.calls, errors: whole.errors, saved: whole.applied_saved ?? 0, contextSaved: whole.context_saved,
     };
   }, [o, range, whole, fresh]);
 

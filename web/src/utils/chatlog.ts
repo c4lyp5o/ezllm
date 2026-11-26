@@ -174,3 +174,21 @@ export function toJSON(system: string, cols: ExportColumn[]): string {
     })),
   }, null, 2);
 }
+
+// A file read as text that is really binary (a PDF, an archive, audio) comes
+// back as NULs and replacement characters: sending that wastes tokens and
+// tells the model nothing.
+export function looksBinary(text: string): boolean {
+  if (text.includes('\u0000')) return true;
+  let bad = 0;
+  for (const ch of text) if (ch === '\uFFFD') bad++;
+  return text.length > 0 && bad / text.length > 0.01;
+}
+
+// fenceFor picks a fence longer than any backtick run inside the file, so a
+// file that contains its own ``` blocks stays one block.
+export function fenceFor(text: string): string {
+  let longest = 0;
+  for (const m of text.matchAll(/`+/g)) longest = Math.max(longest, m[0].length);
+  return '`'.repeat(Math.max(3, longest + 1));
+}

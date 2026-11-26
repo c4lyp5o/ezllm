@@ -82,6 +82,7 @@ jobs:
           npm ci
           npm run build -- --emptyOutDir --outDir "$RUNNER_TEMP/ezllm-web-dist"  # tsc + Vite
           node tests/check-dist.test.mjs
+          node tests/logic.test.mjs
           node scripts/check-dist.mjs dist "$RUNNER_TEMP/ezllm-web-dist"
 
       - name: Dashboard browser regressions

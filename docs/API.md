@@ -725,6 +725,7 @@ response shape is unchanged. `EZLLM_COMBO_AUTOPROBE=off` disables it.
 // POST  → 201 (token plaintext returned EXACTLY ONCE, never again)
 { "name":"my-app","roles":["infer"],"token":"ezllm_…" }   // token optional; generated if absent
 // GET   → [{"id":4,"name":"my-app","hint":"ezllm…a91f","roles":["infer"],"enabled":true,"cap_window":"monthly","cap_tokens":0,"cap_usd":0,"allowed_models":"","expires_at":"","last_used_at":"…"}]
+//         an enabled key with a cap also carries "cap_used" (tokens) and/or "spent_usd" for its current bucket
 // PATCH → {"enabled":false} | {"roles":["infer","admin"]} | {"cap_tokens":100000,"cap_window":"daily"} | {"cap_usd":25} | {"allowed_models":"deepseek/*,openai/gpt-5*"} | {"expires_at":"2026-11-01"}
 ```
 `roles` is a non-empty subset of `infer|metrics|admin`, each a separate permission:

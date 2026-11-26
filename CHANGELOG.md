@@ -15,6 +15,21 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   A temporary failure after the switch is tested once more before it is undone.
 - **Antigravity plan limits.** The provider card and Quota dialog show how much of each
   weekly limit is used, per group of models, read with `agy -p /usage` (no quota spent).
+- **Dashboard fixes.** Links in chat answers open only when they are `http`, `https`
+  or `mailto`. The chat model picker lists combos. Neighbourhood buildings take their
+  totals from their own account, so two keys with the same hint no longer double the
+  traffic, and "View requests" filters by namespace. Connect shows a capped key's use
+  in its current calendar bucket (the number the cap enforces) and counts the spend
+  cap; `GET /admin/tokens` now carries `cap_used` and `spent_usd` for capped keys. A
+  hand-set model verdict has a Release button. The Console cookie field appears for
+  Claude Platform, and credential fields follow the base URL. Savings read only
+  rewrites that shipped. Opening a link in a new tab no longer asks for the password
+  again, and the live feed stops retrying after the session ends. Other fixes: allowlist
+  globs match the server, feed rows no longer drop same-second calls, token tooltips say
+  whether cached tokens are inside, Stats links through by client and combo, every
+  notification opens its page, the model picker closes when you tab away, binary chat
+  attachments are refused, the ratio floor goes down to 0%, and undefined colours are
+  fixed.
 - **Compression, backup and logging fixes.** A caveman rule at standard intensity
   wrote a literal `$1` into prompts in place of punctuation ("Hello.  World" became
   "Hello$1 World"); the rule is removed, and the pack loader now refuses any

@@ -504,7 +504,13 @@ export default function Connect() {
 
   const usageFor = (name: string) => (usage ?? []).find((u) => u.k === name);
   const budgetUsageFor = (name: string, window: string) => (usageWindows[window] ?? []).find((u) => u.k === name);
-  const spentOf = (t: TokenInfo) => { const bu = budgetUsageFor(t.name, t.cap_window || 'monthly'); return (bu?.tin ?? 0) + (bu?.tout ?? 0); };
+  // The server's own count for the current calendar bucket when it sent one;
+  // the rolling window is only a fallback (a key without a cap).
+  const spentOf = (t: TokenInfo) => {
+    if (t.cap_used != null) return t.cap_used;
+    const bu = budgetUsageFor(t.name, t.cap_window || 'monthly');
+    return (bu?.tin ?? 0) + (bu?.tout ?? 0);
+  };
   const stateOf = (t: TokenInfo) => keyState(t, spentOf(t));
 
   const toggle = async (t: TokenInfo, enabled: boolean) => {

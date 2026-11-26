@@ -4,6 +4,11 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## Unreleased
 
+- **Explain a route.** **Explain** on a combo shows what a request would do right now,
+  hop by hop: tried, skipped and why (turned off, disabled account, missing model, a
+  rule, a park, too little context, no tools), translated or native, and whether a
+  chosen key may call it at all. Nothing is sent to a provider. New `POST
+  /admin/route-explain`.
 - **Rotate the master key, create keys from the command line.** `ezllm
   rotate-master-key` re-encrypts every stored secret under a new key in one step and
   swaps the key file, keeping the old one until you delete it; any failure changes

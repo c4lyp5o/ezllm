@@ -329,6 +329,105 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 // strip is the operator's "is this thing alive" answer, so reporting
 // accounts: 0 because a query errored is a lie stated in the one place where
 // the truth matters most. The caller answers 503 instead.
+// handleRouteExplain answers POST /admin/route-explain: a dry run of one
+// routing decision. Nothing is dialed, no strategy cursor moves, no rule or
+// budget counts. Body: {"model", "surface" (chat|anthropic|responses,
+// default chat), "client" (a key name, optional), "est_tokens", "has_tools"}.
+// The router's verdict per hop is joined with what is decided outside it:
+// cooldowns, the account's context window, tool support, and the key's
+// allowlist, token budget and spend cap.
+func (s *Server) handleRouteExplain(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Model     string `json:"model"`
+		Surface   string `json:"surface"`
+		Client    string `json:"client"`
+		EstTokens int64  `json:"est_tokens"`
+		HasTools  bool   `json:"has_tools"`
+	}
+	if !decodeBody(w, r, &in) {
+		return
+	}
+	if strings.TrimSpace(in.Model) == "" {
+		writeErr(w, http.StatusBadRequest, "invalid_request_error", "model is required")
+		return
+	}
+	surface := provider.SurfaceChat
+	switch in.Surface {
+	case "", "chat":
+	case "anthropic":
+		surface = provider.SurfaceAnthropic
+	case "responses":
+		surface = provider.SurfaceResponses
+	default:
+		writeErr(w, http.StatusBadRequest, "invalid_request_error", "surface must be chat, anthropic or responses")
+		return
+	}
+	if s.resolver == nil {
+		writeErr(w, http.StatusServiceUnavailable, "api_error", "routing is not ready")
+		return
+	}
+	ctx := r.Context()
+	ex := s.resolver.Explain(ctx, in.Model, surface)
+
+	type hopView struct {
+		router.ExplainHop
+		ParkedUntil *time.Time `json:"parked_until,omitempty"`
+		ParkReason  string     `json:"park_reason,omitempty"`
+	}
+	parks := s.dispatcher.Cooldowns()
+	now := time.Now()
+	hops := make([]hopView, len(ex.Hops))
+	usable := 0
+	for i, h := range ex.Hops {
+		v := hopView{ExplainHop: h}
+		if h.Status == "candidate" {
+			for _, c := range parks {
+				if c.Namespace == h.Namespace && c.Model == h.Model && c.Until.After(now) {
+					until := c.Until
+					v.ParkedUntil, v.ParkReason = &until, c.Reason
+					v.Status, v.Reason = "skipped", "parked: "+c.Reason
+				}
+			}
+		}
+		if v.Status == "candidate" && in.EstTokens > 0 && h.MaxContextTokens > 0 && in.EstTokens > h.MaxContextTokens {
+			v.Status, v.Reason = "skipped", fmt.Sprintf("context too small: %d tokens > the account's %d", in.EstTokens, h.MaxContextTokens)
+		}
+		if v.Status == "candidate" && in.HasTools && h.Kind == string(provider.KindGeminiWeb) {
+			v.Status, v.Reason = "skipped", "gemini-web cannot take tools"
+		}
+		if v.Status == "candidate" {
+			usable++
+		}
+		hops[i] = v
+	}
+
+	out := map[string]any{
+		"requested": ex.Requested, "kind": ex.Kind, "strategy": ex.Strategy, "surface": string(surface),
+		"hops": hops, "usable": usable, "error": ex.Error,
+	}
+	if ex.Kind == "combo" && ex.Strategy != "" && ex.Strategy != "failover" && usable > 1 {
+		out["order_note"] = "hops are listed in the combo's order; the " + ex.Strategy + " strategy picks the order for each request"
+	}
+	if name := strings.TrimSpace(in.Client); name != "" {
+		key := map[string]any{"name": name}
+		if ok, err := s.db.ClientAllowsModel(ctx, name, ex.Requested); err != nil {
+			key["error"] = "no enabled key with that name"
+		} else {
+			key["model_allowed"] = ok
+			if b, err := s.db.ClientBudgetStatus(ctx, name); err == nil && b.Limit > 0 {
+				key["budget"] = b
+				key["budget_spent"] = b.Used >= b.Limit
+			}
+			if sp, err := s.db.ClientSpendStatus(ctx, name); err == nil && sp.Limit > 0 {
+				key["spend"] = sp
+				key["spend_cap_reached"] = sp.Spent >= sp.Limit
+			}
+		}
+		out["key"] = key
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // handleCooldowns lists the parked endpoints (GET) or ends parks early
 // (DELETE): all of them, ?namespace=X for one account, or ?namespace=X&model=Y
 // for one model. A model without a namespace is refused: model ids repeat

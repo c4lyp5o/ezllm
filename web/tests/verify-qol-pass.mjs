@@ -8,6 +8,7 @@ const until = new Date(Date.now() + 90_000).toISOString();
 let parks = [{ namespace: 'mock', model: 'model-a', until, strikes: 0, probe_active: false, reason: '429 rate limited' }];
 const deletes = [];
 const patches = [];
+const explains = [];
 const page = await t.page(async (route, url) => {
   const req = route.request();
   const p = url.pathname;
@@ -22,6 +23,15 @@ const page = await t.page(async (route, url) => {
   if (p === '/admin/combos') {
     await json(route, [{ id: 1, name: 'daily', strategy: 'failover', enabled: true, context_size: 200000, compression_profile_id: null,
       hops: [{ account_id: 1, model_id: 'model-a', weight: 1, enabled: true }, { account_id: 1, model_id: 'model-b', weight: 1, enabled: true }] }]);
+    return true;
+  }
+  if (p === '/admin/route-explain') {
+    explains.push(req.postDataJSON());
+    await json(route, { requested: 'daily', kind: 'combo', strategy: 'failover', surface: 'chat', usable: 1, error: '',
+      hops: [
+        { account_id: 1, namespace: 'mock', model: 'model-a', status: 'skipped', reason: 'parked: 429 rate limited', parked_until: until },
+        { account_id: 1, namespace: 'mock', model: 'model-b', status: 'candidate', wire: 'chat' },
+      ] });
     return true;
   }
   if (p === '/admin/compression-profiles') { await json(route, [{ id: 3, name: 'lean', enabled: true }]); return true; }
@@ -58,6 +68,16 @@ try {
   await page.getByRole('button', { name: 'Unpark' }).first().click();
   await page.waitForTimeout(300);
   check('Unpark on a hop clears just that model', deletes.at(-1) === '?namespace=mock&model=model-a', deletes);
+
+  await page.getByRole('button', { name: 'Explain' }).click();
+  await page.getByText('1 hop would be tried.').waitFor();
+  check('explain lists both hops with their verdicts', await page.getByText('would be tried', { exact: true }).count() === 1 && await page.getByText('parked: 429 rate limited').count() === 1);
+  check('explain asked about the combo on the chat API', explains.at(-1)?.model === 'daily' && explains.at(-1)?.surface === 'chat', explains);
+  if (shots) { await page.waitForTimeout(1000); await page.screenshot({ path: `${shots}/combos-explain.png`, fullPage: false }); }
+  await page.getByRole('button', { name: 'Anthropic' }).click();
+  await page.waitForTimeout(300);
+  check('switching the API asks again', explains.at(-1)?.surface === 'anthropic', explains);
+  await page.keyboard.press('Escape');
 
   await page.goto(`${t.base}/connect?policy=7`);
   const picker = page.getByLabel('Compression profile');

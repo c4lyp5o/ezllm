@@ -747,8 +747,20 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 	}
 	accts := make(map[int64]acctAnswer, len(combo.Hops))
 	keys := make(map[int64]keyAnswer, len(combo.Hops))
+	ex := explainerFrom(ctx)
 	for _, h := range combo.Hops {
+		ns := fmt.Sprint(h.AccountID)
+		skip := func(status, reason string) {
+			ex.note(ExplainHop{AccountID: h.AccountID, Namespace: ns, Model: h.ModelID, Status: status, Reason: reason})
+		}
 		if h.Enabled != nil && !*h.Enabled {
+			if ex != nil {
+				// Only a traced run names the account of a hop it never tries.
+				if a, err := r.catalog.AccountByID(ctx, h.AccountID); err == nil {
+					ns = a.Namespace
+				}
+			}
+			skip("skipped", "turned off in this combo")
 			continue
 		}
 		aa, seen := accts[h.AccountID]
@@ -761,15 +773,19 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 			if first == nil {
 				first = fmt.Errorf("hop account %d/%s: %w", h.AccountID, h.ModelID, err)
 			}
+			skip("skipped", "account not found")
 			continue
 		}
+		ns = acct.Namespace
 		if !acct.Enabled {
+			skip("skipped", "account "+acct.Name+" is disabled")
 			if first == nil {
 				first = fmt.Errorf("hop %s/%s: account %q is disabled", acct.Namespace, h.ModelID, acct.Name)
 			}
 			continue
 		}
 		if ok, err := r.catalog.ModelExists(ctx, acct.ID, h.ModelID); err != nil || !ok {
+			skip("skipped", "not in the account's model list")
 			if first == nil {
 				if err != nil {
 					first = fmt.Errorf("hop %s/%s: model lookup: %w", acct.Namespace, h.ModelID, err)
@@ -788,11 +804,13 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 		if dec.refusePin != nil {
 			// A pin is a refusal, not a skip: the operator's constraint fails
 			// the whole combo, exactly as it did before.
+			skip("refused", dec.refusePin.Error())
 			return nil, dec.refusePin
 		}
 		if dec.refuse != nil {
 			// A hop with no wire left is dropped like any other unusable hop;
 			// the reason is kept for the "no usable hops" message.
+			skip("skipped", dec.refuse.Error())
 			if first == nil {
 				first = fmt.Errorf("hop %s/%s: %w", acct.Namespace, h.ModelID, dec.refuse)
 			}
@@ -804,6 +822,7 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 		// later"), exactly like resolveDirect's hard stop — a raw refusal
 		// would fall through errorStatus to 502 and read as a gateway fault.
 		if err := r.eligibleHere(ctx, acct.ID, h.ModelID); err != nil {
+			skip("skipped", "rule: "+err.Error())
 			if unavailable == nil {
 				unavailable = &ErrUnavailable{
 					Requested: name,
@@ -820,6 +839,7 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 		}
 		key, err := ka.key, ka.err
 		if err != nil {
+			skip("skipped", "no usable key")
 			if first == nil {
 				first = fmt.Errorf("hop %s/%s: no usable key: %w", acct.Namespace, h.ModelID, err)
 			}
@@ -845,6 +865,7 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 		if dec.wire != surface {
 			route.WireSurface = dec.wire
 		}
+		ex.note(candidateHop(route))
 		// Every candidate is a working member of the strategy: a hop whose
 		// wire we translate is ordered, held good and rotated on exactly the
 		// same terms as a native one (operator decision 2026-10-13 — a
@@ -868,6 +889,11 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 			return nil, fmt.Errorf("router: combo %q has no usable hops: %w", name, first)
 		}
 		return nil, fmt.Errorf("router: combo %q has no usable hops", name)
+	}
+	if explaining(ctx) {
+		// A dry run reports hops in the combo's order and moves no strategy
+		// state (round-robin and block cursors advance in orderRoutes).
+		return routes, nil
 	}
 	candidates, blockPos := orderRoutes(combo, routes)
 	// BlockPos rides on EVERY candidate: it tags the DISPATCH (this request's

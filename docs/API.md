@@ -948,6 +948,19 @@ and, when models were added and the price refresh is on, prices them right away.
 Two event types: `snapshot` (last 20 calls on connect, newest first) and `calls` (each committed
 ledger batch).
 
+### `POST /admin/route-explain` → `200`
+A dry run of one routing decision: nothing is sent to a provider, no strategy cursor moves,
+no rule or budget counts. Body: `model` (required), `surface` (`chat` default, `anthropic`,
+`responses`), `client` (a key name, optional), `est_tokens`, `has_tools`. Answers
+`{requested, kind ("combo"|"direct"), strategy, surface, usable, error, order_note?, hops:[…], key?}`.
+Each hop has `namespace`, `model`, `status` (`candidate` = would be tried, `skipped` = dropped
+and the combo carries on, `refused` = the request fails on it, as a pin does), `reason`, and for
+candidates `wire`, `translated`, `reasoning_allowed`, `parked_until`. A hop is also `skipped`
+when it is parked, when `est_tokens` exceeds the account's `max_context_tokens`, or when tools
+are sent to gemini-web. Hops come in the combo's order; `order_note` says when the strategy
+reorders them per request. With `client`, `key` reports `model_allowed`, `budget_spent` and
+`spend_cap_reached`. `error` is what a real request would get when nothing can serve it.
+
 ### `GET|DELETE /admin/cooldowns`
 `GET` → `{"cooldowns":[{"namespace","model","until","strikes","probe_active","reason"}],"now":"…"}`:
 the endpoints parked right now (cooling, or holding a recovery probe). `DELETE` ends parks

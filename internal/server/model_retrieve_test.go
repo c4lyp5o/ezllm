@@ -84,3 +84,60 @@ func TestCooldownsEndpoint(t *testing.T) {
 		t.Fatalf("infer key: %d, want 403", code)
 	}
 }
+
+// Route explain joins the router's verdict with what is decided outside it:
+// the account's context window and the key's allowlist.
+func TestRouteExplain(t *testing.T) {
+	h := newHarness(t, (&fakeUpstream{models: []string{"m"}}).handler())
+	acct := seededAccount(t, h)
+	var modelID string
+	if err := h.db.Reader().QueryRow(`SELECT model_id FROM models WHERE account_id=? LIMIT 1`, acct).Scan(&modelID); err != nil {
+		t.Fatal(err)
+	}
+	if code, resp := jsonDo(t, h, "POST", "/admin/combos", "tok-admin", map[string]any{
+		"name": "daily", "strategy": "failover",
+		"hops": []any{map[string]any{"account_id": acct, "model_id": modelID, "weight": 1}, map[string]any{"account_id": acct, "model_id": "ghost", "weight": 1}},
+	}); code != http.StatusCreated {
+		t.Fatalf("create combo: %d %s", code, resp)
+	}
+	if _, err := h.db.Writer().Exec(`UPDATE accounts SET max_context_tokens=1000 WHERE id=?`, acct); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.Writer().Exec(`UPDATE client_tokens SET allowed_models='other/*' WHERE name='my-app'`); err != nil {
+		t.Fatal(err)
+	}
+	code, resp := jsonDo(t, h, "POST", "/admin/route-explain", "tok-admin", map[string]any{"model": "daily", "client": "my-app"})
+	if code != http.StatusOK {
+		t.Fatalf("explain: %d %s", code, resp)
+	}
+	var out struct {
+		Kind string `json:"kind"`
+		Hops []struct {
+			Model, Status, Reason string
+		} `json:"hops"`
+		Key struct {
+			ModelAllowed *bool `json:"model_allowed"`
+		} `json:"key"`
+	}
+	if err := json.Unmarshal([]byte(resp), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Kind != "combo" || len(out.Hops) != 2 || out.Hops[1].Status != "skipped" || !strings.Contains(out.Hops[1].Reason, "model list") {
+		t.Fatalf("explain = %s", resp)
+	}
+	if out.Key.ModelAllowed == nil || *out.Key.ModelAllowed {
+		t.Fatalf("the key's allowlist excludes daily; got %s", resp)
+	}
+	// A 5,000-token request does not fit a 1,000-token account.
+	_, resp = jsonDo(t, h, "POST", "/admin/route-explain", "tok-admin", map[string]any{"model": "daily", "est_tokens": 5000})
+	if !strings.Contains(resp, "context too small") {
+		t.Fatalf("est_tokens over the account's window: %s", resp)
+	}
+	if code, _ := jsonDo(t, h, "POST", "/admin/route-explain", "tok-admin", map[string]any{"model": "daily", "surface": "grpc"}); code != http.StatusBadRequest {
+		t.Fatalf("bad surface: %d", code)
+	}
+	_, resp = jsonDo(t, h, "POST", "/admin/route-explain", "tok-admin", map[string]any{"model": "nope"})
+	if !strings.Contains(resp, `"error":"`) || strings.Contains(resp, `"error":""`) {
+		t.Fatalf("unknown model must carry the error a request would get: %s", resp)
+	}
+}

@@ -357,6 +357,7 @@ func (s *Server) routes() {
 	// ── M3 admin API (docs/API.md) ──
 	s.mux.HandleFunc("GET /admin/health", s.admin(s.handleAdminHealth))
 	s.mux.HandleFunc("GET /admin/cooldowns", s.admin(s.handleCooldowns))
+	s.mux.HandleFunc("POST /admin/route-explain", s.admin(s.handleRouteExplain))
 	s.mux.HandleFunc("DELETE /admin/cooldowns", s.admin(s.handleCooldowns))
 	s.mux.HandleFunc("GET /admin/usage", s.admin(s.handleUsage))
 	s.mux.HandleFunc("GET /admin/turns", s.admin(s.handleTurns))

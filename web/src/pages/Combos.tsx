@@ -20,6 +20,7 @@ import {
 } from '../utils/combos';
 import { type Cooldown, useCooldowns } from '../utils/cooldowns';
 import { ParkedPill } from '../components/Parked';
+import { RouteExplainModal } from '../components/RouteExplain';
 
 // Strategies offered by the combo form — every one the backend implements.
 const STRATEGIES = ['failover', 'block_round_robin', 'true_round_robin', 'sticky_last_good', 'least_used'] as const;
@@ -752,6 +753,7 @@ function ComboCard({ c, accounts, health, stat, statsReady, range, cursor, test,
 }) {
   const nameOf = (id: number) => accounts.find((a) => a.id === id)?.name ?? `#${id}`;
   const hops = c.hops ?? [];
+  const [explaining, setExplaining] = useState(false);
   const dead = cannotServe(c, health);
   const problems = hops
     .map((h, i) => ({ h, i, st: health.hops[i] }))
@@ -786,6 +788,8 @@ function ComboCard({ c, accounts, health, stat, statsReady, range, cursor, test,
           <span className="flex items-center gap-2">
             <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px]')}
               title="probe every hop with one tiny real request" onClick={() => onTest()}>Test</button>
+            <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px]')}
+              title="what a request would do right now, without sending one" onClick={() => setExplaining(true)}>Explain</button>
             <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px]')} onClick={onEdit}>Edit</button>
             <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px]')} title="start a new combo from this one" onClick={onDuplicate}>Duplicate</button>
             <button type="button" className={cx(btn.base, btn.danger, 'px-3 py-1.5 text-[13px]')} onClick={onDelete}>Delete</button>
@@ -865,6 +869,8 @@ function ComboCard({ c, accounts, health, stat, statsReady, range, cursor, test,
             );
           })}
       </div>}
+
+      {explaining && <RouteExplainModal model={c.name} onClose={() => setExplaining(false)} />}
 
       {problems.length > 0 && (
         <ul className="mt-2.5 space-y-0.5 text-[12px]">

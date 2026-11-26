@@ -792,7 +792,7 @@ def promote(name, root, cur, v, cfg, info, state, state_path, repo):
         return rollback_pending(cfg, info, state, state_path, phase + " interrupted: " + type(e).__name__)
 
     try:
-        status(root, name, result="updated", current=v, previous=cur, candidate=v, detail=proof)
+        status(root, name, result="updated", current=v, previous=cur, candidate=v, detail="update succeeded")
         prune(root, cfg["keep"], {current_version(root), cur})
     except OSError as e:
         # The promotion is committed; a report or cleanup error must not stop the next bridge.

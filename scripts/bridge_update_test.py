@@ -245,6 +245,7 @@ class Run(Home):
             self.assertEqual(self.go(), 0)
         self.assertEqual(bu.current_version(self.root_), "1.4.11")
         self.assertEqual((self.status()["result"], self.status()["previous"]), ("updated", "1.4.7"))
+        self.assertEqual(self.status()["detail"], "update succeeded")
         self.assertIn("1.4.11", json.loads((self.root_ / "qualified.json").read_text())["versions"])
         bu.restart_and_wait.assert_called_once()
 

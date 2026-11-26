@@ -109,11 +109,8 @@ Known, measured (2026-10-17):
 
 ## Known issues / open threads
 
-Lingering items — fix or close them deliberately, don't rediscover them:
-
-Reviewed for 1.0 (2026-10-22): none blocks the release. They concern proof,
-test tooling and docs upkeep, not a running install, and stay open as
-post-1.0 work.
+Lingering items — fix or close them deliberately, don't rediscover them. None affects a
+running install: they concern proof, test tooling and docs upkeep.
 
 1. **Cloudflare Workers AI has no live end-to-end proof.** The key-test path
    is unit-covered and the endpoint composition is implemented, but the
@@ -145,6 +142,8 @@ Docs are claims about code — verify before writing:
 - No unresolved placeholder or in-progress markers in Markdown files.
 - Status lines age: prefer "shipped — <what>, verified <date>" over bare
   milestone tags.
+- User docs describe the current version only: no "since vX", no "used to". Upgrade steps
+  go in `docs/upgrading.md`; git tags are the archive.
 - Milestone history goes in `CHANGELOG.md` (reverse-chronological, dated);
   dated version bumps go in `VERSION.md`; design decisions go in `docs/design/`.
   README stays the front door: what it is, how to run it, where things live.

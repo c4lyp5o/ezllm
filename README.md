@@ -143,8 +143,8 @@ No one at the keyboard? Set `EZLLM_DASHBOARD_PASSWORD` or
 `EZLLM_DASHBOARD_PASSWORD_FILE` before the first start, and there is no setup code.
 
 The `data` folder has your settings, history and the master key that unlocks your stored
-provider keys. Keep it private. To back it up, stop ezllm and copy the whole folder, or use an
-[online backup](docs/recovery-runbook.md#verified-databasekey-backup). Without the key,
+provider keys. Keep it private. To back it up, stop ezllm and copy the whole folder, or use
+[encrypted backups](docs/recovery-runbook.md#encrypted-backups). Without the key,
 your provider keys cannot be read ([master key](docs/master-key-runbook.md)).
 
 ### 3. Send a request
@@ -329,13 +329,14 @@ only from the environment or `config.yaml`.
 
 ## Development
 
+This runs the test suite. Always pass `-short` to `go test`: the full suite includes
+performance tests that need several GiB of memory, and CI runs those.
+
 ```bash
-make test-short  # functional test suite; always pass -short to go test
-make verify      # acceptance check against a live usage ledger
+make test-short
 ```
 
-The full suite includes performance tests that need several GiB of memory; CI
-runs it. Always use `-short` locally.
+`make verify` checks a live usage ledger.
 
 - `cmd/`, `internal/`: Go source. Tests live next to the code they test
   ([DEVELOPER.md](DEVELOPER.md) explains why).
@@ -365,12 +366,12 @@ example [v2.2.0](https://github.com/c4lyp5o/ezllm/tree/v2.2.0), or see
 | [docs/API.md](docs/API.md) | Public and admin API reference |
 | [docs/environment.md](docs/environment.md) | Every environment variable and its default |
 | [docs/logging.md](docs/logging.md) | Logs: levels, format, where they go |
-| [docs/metrics.md](docs/metrics.md) | Prometheus `/metrics`: enabling, auth, metric names, example queries |
+| [docs/metrics.md](docs/metrics.md) | Prometheus `/metrics`: the key, the scrape job, metric names, example queries |
 | [docs/settings-runbook.md](docs/settings-runbook.md) | Dashboard settings, timezones, sessions and diagnostics |
-| [docs/recovery-runbook.md](docs/recovery-runbook.md) | Encrypted backups, restore and upgrades |
-| [docs/master-key-runbook.md](docs/master-key-runbook.md) | Key encryption: paths, backup, rotation |
-| [docs/translation-runbook.md](docs/translation-runbook.md) | Translation between APIs: when it happens, how to turn it off |
-| [docs/pricing-runbook.md](docs/pricing-runbook.md) | Model price catalog: refresh, import, query |
+| [docs/recovery-runbook.md](docs/recovery-runbook.md) | Back up and restore: encrypted backups, copies, before an upgrade |
+| [docs/master-key-runbook.md](docs/master-key-runbook.md) | The master key: where it is, backing it up, moving or changing it |
+| [docs/translation-runbook.md](docs/translation-runbook.md) | Translation between APIs: when it happens, pins, how to turn it off |
+| [docs/pricing-runbook.md](docs/pricing-runbook.md) | Prices and cost: where prices come from, setting your own |
 | [docs/bridge-setup.md](docs/bridge-setup.md) | Turning on a bridge: one page per plan, and troubleshooting |
 | [docs/upgrading.md](docs/upgrading.md) | What to change when you come from an older version |
 | [docs/bridges/troubleshooting.md](docs/bridges/troubleshooting.md) | What a bridge log line means, and what to do |

@@ -57,7 +57,7 @@ Two conclusions, both measured:
   the model already accepts logs nothing — the common path stays quiet. A
   learned vocabulary is Info; a write that matched no catalog row (a combo hop,
   a retired model) is Debug, because it is routine and otherwise unexplainable.
-  See `docs/logging.md`.
+  See `docs/design/logging-design.md`.
 
 ## Where it lives
 

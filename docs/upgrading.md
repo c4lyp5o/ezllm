@@ -60,6 +60,10 @@ ezllm refuses to start while one of these is set, and names the replacement.
 | `EZLLM_AGY_EXPERIMENTAL_TOOLS` | remove it: caller tools are always on |
 | `EZLLM_WEB_DIR` | remove it: the dashboard is built in |
 
+One old `config.yaml` key still works but logs a warning at start:
+`translation.universal_enabled`. Use `translation.enabled` instead; an old
+`universal_enabled: false` still turns translation off.
+
 ## A database with the old Copilot account
 
 A database from before the Copilot bridge can hold a `github-copilot` account. ezllm
@@ -70,3 +74,14 @@ starts and shows it enabled, but **every request through it fails** with
 2. Point every combo that named the old account at the new one.
 3. Disable or delete the old account.
 4. Send one request through the new one and check it in Requests.
+
+## ezllm refuses to start: `combos rebuild: both current and staged tables exist`
+
+An upgrade of a very old database stopped halfway, and both copies of the combos table are
+left. ezllm will not pick one, because the staged copy can hold the only full set of
+combos.
+
+1. Stop ezllm and keep a copy of the whole `data` folder.
+2. On a copy of the database, compare the tables `combos` and `combos_v9`, and keep the
+   one with your combos.
+3. Start ezllm again.

@@ -2,8 +2,7 @@
 
 Status: DESIGN LOCKED 2026-10-16. Primary source: omniroute's production
 implementation (`claude-web.ts` executor + `claudeTlsClient.ts`, extracted from
-the omniroute image 2026-10-16). Cross-reference: the community digest
-`~/workspace/claude-ai-re-client-protocol-digest.md` (repo Adithyan-Defender/
+the omniroute image 2026-10-16). Cross-reference: a community protocol digest, kept outside this repository (repo Adithyan-Defender/
 claude-ai-re-client — **stale, last commit 2026-04-25, single dev, no tests**;
 used only for corroboration, never as the source of truth).
 

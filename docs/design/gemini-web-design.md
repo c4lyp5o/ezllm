@@ -1,8 +1,7 @@
 # gemini-web Provider — Design (M12)
 
 Status: implementation spec, DECISIONS locked below.
-Reference: protocol digest `~/workspace/gemini-web-api-protocol-digest.md`
-(compiled from HanaokaYuzu/Gemini-API, repo master Oct 2026, all facts
+Reference: a protocol digest kept outside this repository (compiled from HanaokaYuzu/Gemini-API, repo master Oct 2026, all facts
 file/line-cited there). Risk posture chosen by the operator: per-account
 opt-in on add, cookie rotator, test-account guidance, honest error
 surfacing, no fallback to the official API.

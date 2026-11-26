@@ -39,7 +39,7 @@ protocols; compression and per-hop reasoning rules can also change requests.
 ## 2. Quick start (run these before reading code — read after seeing it live)
 
 ```bash
-cd ~/workspace/ezllm
+cd ezllm
 make build && make run          # or: go run ./cmd/ezllm -config config.yaml
 curl -s localhost:20129/healthz
 curl -s localhost:20129/v1/models -H "Authorization: Bearer $EZLLM_TOKEN" | python3 -m json.tool
@@ -79,7 +79,7 @@ names the pre-fix call sites.)*
 ### M1 — skeleton + health ✅ (2026-10-05, verified)
 - `cmd/ezllm/main.go` `run` — flags (`-config`, `-addr`); console logging via
   `internal/logx` (`EZLLM_LOG_LEVEL`, `EZLLM_LOG_COLOR`, `EZLLM_LOG_FORMAT`;
-  `announceLogging` states the effective level at boot, see `docs/logging.md`);
+  `announceLogging` states the effective level at boot, see `docs/design/logging-design.md`);
   first-boot dashboard setup
   (`cmd/ezllm/setup.go`: env password or one-time setup code, env-only by design — it must
   work before config is read); addr precedence `-addr` > `EZLLM_ADDR` > config;
@@ -444,7 +444,7 @@ corrections section.
   without re-encoding an accepted value. Design: `docs/design/reasoning-effort-design.md`.
 - `deniesModelAccess` (`internal/proxy/proxy.go`) parks a hop on a 401/403 whose body names model
   access — body-matched, `hasAlternate`-gated, so a bare 403 still changes no state.
-- Console logging has a written contract: `docs/logging.md` (levels, what is never logged, the
+- Console logging has a written contract: `docs/design/logging-design.md` (levels, what is never logged, the
   measured cost of an argument built for a filtered line). `accessLog` carries `alias` and the
   failover trail from `reqInfo`; refusals before dispatch are visible at `debug`;
   `EZLLM_LOG_FORMAT=json` opts into one object per line.

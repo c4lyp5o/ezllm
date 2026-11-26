@@ -3,7 +3,7 @@
 How the Copilot bridge behaves, its limits and its costs. **To turn it on, follow
 [Turn on GitHub Copilot](bridges/copilot.md).** The official Copilot CLI runs behind a
 loopback listener; ezllm never speaks Copilot's private API and never mints a session
-token. Design: `docs/design/copilot-cli-bridge-design.md`.
+token. Design: [copilot-cli-bridge-design.md](design/copilot-cli-bridge-design.md).
 
 ## What runs
 
@@ -130,12 +130,17 @@ AI-credit charge in billionths of a credit.
 
 ## Gates and updates
 
-**`ezllm bridge-check copilot` exists** and is the gate to run after every
-`copilot update`:
+`ezllm bridge-check copilot` is the check to run after every CLI update. The static check
+is free:
 
+```sh
+ezllm bridge-check copilot --bin ~/.local/share/copilot-bridge/current/copilot --home ~/.copilot-sub --json
 ```
-ezllm bridge-check copilot --bin ~/.local/bin/copilot --home ~/.copilot-sub --json
-ezllm bridge-check copilot --live --json     # what promotion requires
+
+The live check, which the updater needs before it switches, spends two premium requests:
+
+```sh
+ezllm bridge-check copilot --bin ~/.local/share/copilot-bridge/current/copilot --home ~/.copilot-sub --live --json
 ```
 
 Two tiers, like the other bridges:
@@ -220,7 +225,7 @@ login changes should be followed by a restart. Shutdown drains HTTP requests
 within the existing grace period, then kills and reaps warm workers.
 
 `GET /status` exposes `runtime.pool` (`enabled`, `workers`, `idle`, `closed`) and
-`runtime.stage_timings`. Watch setup timings and memory on a small host. On this host one CLI retained approximately
+`runtime.stage_timings`. Watch setup timings and memory on a small host. On one host, one CLI retained approximately
 270–282 MiB RSS over a three-turn proof; two warm workers can therefore retain
 substantial memory. That sample does not establish a steady-state memory bound.
 The existing concurrency cap and worker expiry limit exposure. First requests
@@ -240,7 +245,7 @@ session, capped at 1 MiB of normalized history and the existing expiry limits.
 
 Tool availability does not prevent reuse, but a newly emitted tool batch is
 accounted and deleted. Tool-result continuations, images, `auto`, edits and
-identical stateless retries take the fresh-session path. This mode does not yet
+identical stateless retries take the fresh-session path. This mode does not
 cache an active tool loop. Failed cleanup or regressed usage counters
 cannot trigger another inference automatically.
 

@@ -2,7 +2,7 @@
 
 How the Antigravity bridge behaves, its limits and its lockdown. **To turn it on,
 follow [Turn on Google Antigravity](bridges/antigravity.md).** Design:
-`design/antigravity-subscription-design.md`.
+[antigravity-subscription-design.md](design/antigravity-subscription-design.md).
 
 **Status:** text chat and streaming, with usage, against compatible Antigravity
 CLI releases. Caller tools are on by default when the CLI supports
@@ -69,12 +69,12 @@ personal account.
 ezllm does not start, by design, when the bridge is on and the binary is missing, a
 required flag is gone, the token file is absent, `settings.json` loosens the tool policy
 ([lockdown](#lockdown)), or `agy models` fails. Every message names its fix.
-All variables: [environment.md](environment.md#antigravity-google-subscription-bridge).
+All variables: [environment.md](environment.md#antigravity-bridge).
 
 ## Lockdown
 
 `agy` is a coding agent with its own tools (`run_command`, `write_to_file`, …)
-and it runs **on the ezllm host**, next to `/data`. No 1.4.7 flag switches
+and it runs **on the ezllm host**, next to `/data`. No flag switches
 those tools off, so the bridge holds them to what headless mode does by default
 and refuses anything looser:
 
@@ -124,7 +124,7 @@ Schema objects with `type: object`; references are refused because embedding
 changes their resolution root. The CLI performs argument-schema validation;
 ezllm independently checks envelope structure, names, object arguments, choice
 and call limits. The harness must validate and authorize execution as usual.
-Legacy functions, images and combining tools with non-text `response_format`
+The old `functions` field, images, and tools combined with a non-text `response_format`
 are unsupported.
 
 The envelope is buffered even for streaming requests, so time to first output
@@ -162,14 +162,14 @@ filesystem or shell tools. Use `EZLLM_AGY_MODEL` to test another model.
   a deterministic transcript.
 - **Quota exhaustion** reaches the router as 429, so a combo moves on. The plan's
   limits are on the provider card: see [Plan limits](#plan-limits-on-the-provider-card).
-- **No capacity at Google looks like a timeout.** From CLI 1.5.10 the CLI waits and
+- **No capacity at Google looks like a timeout.** The CLI waits and
   retries in silence when Google has no capacity for a model (measured: three 503s with
   waits of 18, 60 and 63 s). The bridge ends the turn at 300 s with a 504, and a combo
   moves on; the live check ends it at 120 s. The reason is in the CLI's log, under
   `.gemini/antigravity-cli/log/` in the login folder: look for `attempt 1 failed`.
 - **One process per request.** A trivial turn takes ~4.5–6 s and ~207 MB RSS
   (measured); `EZLLM_AGY_BRIDGE_CONCURRENCY` (default 1) caps them.
-- **No token-by-token streaming.** 1.4.7 delivers the answer in one chunk at
+- **No token-by-token streaming.** The CLI delivers the answer in one chunk at
   the end of the turn; a streaming client gets a single content delta.
 - **Harness overhead.** Every turn carries the CLI's agent prompt: ~6.7k input
   tokens on Gemini; the earlier Claude sample reported ~4k native cold input
@@ -183,7 +183,7 @@ Press **Quota** on the account. The bridge answers `GET /v1/usage` by running
 The plan has one weekly limit per group of models (Gemini, and Claude and GPT), and
 the card shows how much of each is used. A full group does not stop the other one.
 These are Google's numbers for the whole login, not ezllm's ledger. A group whose
-number the CLI leaves out is not shown. A CLI older than 1.1.11 reports nothing.
+number the CLI leaves out is not shown.
 
 ## Conversation cache
 

@@ -65,15 +65,15 @@ func (a *claudeWebAdapter) PrepareRequest(_ context.Context, req *http.Request, 
 	if req.URL == nil {
 		return fmt.Errorf("claude-web: nil request URL")
 	}
-	path := req.URL.Path
-	if raw := req.URL.RawQuery; raw != "" {
-		path += "?" + raw
-	}
+	path, query := req.URL.Path, req.URL.RawQuery
 	target, err := url.Parse(a.bridgeBase)
 	if err != nil {
 		return fmt.Errorf("claude-web: bad bridge base %q: %w", a.bridgeBase, err)
 	}
 	target.Path = strings.TrimSuffix(target.Path, "/") + path
+	// The query goes in RawQuery: put in Path, its "?" is escaped to %3F
+	// and the bridge answers 404.
+	target.RawQuery = query
 	req.URL = target
 	req.Host = target.Host
 	req.Header.Del("Authorization")

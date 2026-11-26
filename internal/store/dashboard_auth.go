@@ -32,7 +32,13 @@ var (
 	// ErrDashboardPasswordTooShort carries the "at least 12 characters"
 	// wording the HTTP layer matches on.
 	ErrDashboardPasswordTooShort = fmt.Errorf("store: dashboard password must be at least %d characters", MinDashboardPasswordLen)
+	// ErrDashboardPasswordTooLong: bcrypt reads at most 72 bytes and refuses
+	// more. Unchecked, a long generated password was a 500 at setup.
+	ErrDashboardPasswordTooLong = fmt.Errorf("store: dashboard password must be at most %d bytes", MaxDashboardPasswordBytes)
 )
+
+// MaxDashboardPasswordBytes is bcrypt's input limit.
+const MaxDashboardPasswordBytes = 72
 
 // EnsureDashboardPassword creates the dashboard_auth row on first boot with
 // no password and first_boot=1, so the dashboard shows only its set-password
@@ -82,6 +88,9 @@ func (d *DB) DashboardFirstBoot(ctx context.Context) (bool, error) {
 func (d *DB) CompleteDashboardSetup(ctx context.Context, password string) error {
 	if len(password) < MinDashboardPasswordLen {
 		return ErrDashboardPasswordTooShort
+	}
+	if len(password) > MaxDashboardPasswordBytes {
+		return ErrDashboardPasswordTooLong
 	}
 	encoded, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -186,6 +195,9 @@ func (d *DB) ChangeDashboardPassword(ctx context.Context, currentPassword, newPa
 	}
 	if len(newPassword) < MinDashboardPasswordLen {
 		return ErrDashboardPasswordTooShort
+	}
+	if len(newPassword) > MaxDashboardPasswordBytes {
+		return ErrDashboardPasswordTooLong
 	}
 	encoded, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {

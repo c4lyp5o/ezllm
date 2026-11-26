@@ -8,7 +8,7 @@ import { ApiError, changeDashboardPassword, clearToken } from '../utils/api';
 import { Chip, ConfirmModal, CopyButton, SectionLabel, btn, cx, inputCls, relTime } from '../components/ui';
 import { bridgeUpdateText, fmtUptime, UPDATE_TONE } from '../utils/lib';
 import PushChannels from '../components/PushChannels';
-import { settingError } from '../utils/settings';
+import { effectiveText, settingError } from '../utils/settings';
 import PasswordStrength from '../components/PasswordStrength';
 import { MIN_PASSWORD } from '../utils/passwordStrength';
 
@@ -57,7 +57,7 @@ function PasswordSettings() {
             <input className={cx(inputCls, 'mt-1.5')} type="password" autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} minLength={MIN_PASSWORD} required />
           </label>
           {error && <p className="text-sm text-bad" role="alert">{error}</p>}
-          {saved && <p className="text-sm text-good" role="status">Password updated. Signing out this session…</p>}
+          {saved && <p className="text-sm text-ok" role="status">Password updated. Signing out this session…</p>}
           <button disabled={busy} className={cx(btn.base, btn.primary)} type="submit">{busy ? 'Saving…' : 'Change password'}</button>
         </form>
       </section>
@@ -173,7 +173,7 @@ function SettingsGroup({ tab, view, updated, onDirty }: { tab: Tab; view: Settin
       })}
       {timezoneChanged && <label className="flex items-start gap-2 text-sm text-warn"><input type="checkbox" checked={acknowledged} onChange={e => acknowledge(e.target.checked)} />I understand this changes where report days and rule windows start and end, and can change today's remaining budgets.</label>}
       {error && <p role="alert" className="text-sm text-bad">{error} Reload Settings if another operator changed it.</p>}
-      {saved && <p role="status" className="text-sm text-good">Settings saved.</p>}
+      {saved && <p role="status" className="text-sm text-ok">Settings saved.</p>}
       <div className="flex flex-wrap items-center gap-3">
         <button className={cx(btn.base, btn.primary)} disabled={busy || !dirty || (timezoneChanged && !acknowledged) || Object.keys(problems).length > 0}>{busy ? 'Saving…' : 'Save changes'}</button>
         {dirty && <button type="button" className={cx(btn.base, btn.ghost)} onClick={() => { setDraft({}); acknowledge(false); setError(''); }}>Discard changes</button>}
@@ -233,7 +233,7 @@ function Backups() {
       {status?.last_outcome && <p className="mt-1 text-xs text-mute">Last job: {status.last_outcome} {status.last_finished && new Date(status.last_finished).toLocaleString()}</p>}
       <button className={cx(btn.base, btn.primary, 'mt-4')} disabled={!status?.ready || status.running || busy} onClick={() => void run()}>{busy || status?.running ? 'Backing up…' : 'Back up now'}</button>
       {error && <p role="alert" className="mt-3 text-sm text-bad">{error}</p>}
-      <ul className="mt-4 space-y-2">{status?.backups.map(b => <li key={b.id} className="flex flex-wrap justify-between gap-2 text-xs"><span>{new Date(b.created_at).toLocaleString()} · {(b.bytes / 1048576).toFixed(2)} MiB</span><Chip tone="good">Verified</Chip></li>)}</ul>
+      <ul className="mt-4 space-y-2">{status?.backups.map(b => <li key={b.id} className="flex flex-wrap justify-between gap-2 text-xs"><span>{new Date(b.created_at).toLocaleString()} · {(b.bytes / 1048576).toFixed(2)} MiB</span><Chip tone="ok">Verified</Chip></li>)}</ul>
       <p className="mt-5 text-xs text-mute">To restore, stop ezllm and restore into a new folder. Check the backup with <code>ezllm backup-verify --archive BACKUP --secret-file SECRET</code>, then restore with <code>ezllm backup-restore --archive BACKUP --secret-file SECRET --output NEW_DIRECTORY</code>. Restored dashboard sessions are revoked.</p>
     </section></>;
 }
@@ -298,7 +298,7 @@ export default function Settings() {
     {tab === 'Security' && <><PasswordSettings /><Sessions /></>}
     {tab === 'Backup & Recovery' && <Backups />}
     {tab === 'Notifications' && <><p className="text-xs text-mute">These apply to new notifications in the bell and your push channels. Past notifications stay.</p><PushChannels /></>}
-    {tab === 'System' && <><System />{view && <section className={panel}><SectionLabel>Effective configuration</SectionLabel><div className="mt-4 overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr><th className="py-2">Setting</th><th>Effective value</th><th>Source</th></tr></thead><tbody>{Object.entries(view.fields).map(([k, f]) => <tr key={k} className="border-t border-line"><td className="py-2 pr-3">{DETAILS[k]?.[0] ?? k}</td><td className="pr-3">{String(f.value) || 'Unlimited'}</td><td>{f.source}</td></tr>)}</tbody></table></div></section>}</>}
+    {tab === 'System' && <><System />{view && <section className={panel}><SectionLabel>Effective configuration</SectionLabel><div className="mt-4 overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr><th className="py-2">Setting</th><th>Effective value</th><th>Source</th></tr></thead><tbody>{Object.entries(view.fields).map(([k, f]) => <tr key={k} className="border-t border-line"><td className="py-2 pr-3">{DETAILS[k]?.[0] ?? k}</td><td className="pr-3">{effectiveText(k, f.value)}</td><td>{f.source}</td></tr>)}</tbody></table></div></section>}</>}
     <ConfirmModal open={pendingTab != null} tone="primary" confirmLabel="Discard changes" title="Discard unsaved changes?"
       body="You have unsaved changes on this tab. They'll be lost if you leave."
       onClose={() => setPendingTab(null)} onConfirm={() => { if (pendingTab) goTab(pendingTab); }} />

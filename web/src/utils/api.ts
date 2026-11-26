@@ -4,9 +4,9 @@ import { fmtMs, formatTokens } from './lib';
 const UNLOCK_KEY = 'ezllm.admin.unlocked';
 
 /** The session lives in an HttpOnly cookie that JS cannot read or clear; this
- *  only drops the in-tab "unlocked" marker. */
+ *  only drops the "unlocked" marker. */
 export function clearToken(): void {
-  try { sessionStorage.removeItem(UNLOCK_KEY); } catch { /* noop */ }
+  try { localStorage.removeItem(UNLOCK_KEY); sessionStorage.removeItem(UNLOCK_KEY); } catch { /* noop */ }
 }
 
 /** Sign out: revoke the session server-side (the HttpOnly cookie cannot be
@@ -19,12 +19,16 @@ export async function logout(): Promise<void> {
   clearToken();
 }
 /** Cookie sessions are httpOnly, so JS cannot inspect them. This marker only
- *  says "this tab logged in"; the cookie is what actually authenticates. */
+ *  says "this browser logged in"; the cookie is what actually authenticates.
+ *  It lives in localStorage so a link opened in a new tab does not ask for the
+ *  password again (and mint a second session) while the cookie is still good.
+ *  A dead cookie still lands on the login page: the first 401 clears it. */
 export function isUnlocked(): boolean {
-  try { return sessionStorage.getItem(UNLOCK_KEY) === '1'; } catch { return false; }
+  // sessionStorage too: tabs unlocked before this moved, and the test drivers.
+  try { return localStorage.getItem(UNLOCK_KEY) === '1' || sessionStorage.getItem(UNLOCK_KEY) === '1'; } catch { return false; }
 }
 export function markUnlocked(): void {
-  try { sessionStorage.setItem(UNLOCK_KEY, '1'); } catch { /* noop */ }
+  try { localStorage.setItem(UNLOCK_KEY, '1'); } catch { /* noop */ }
 }
 
 /** An auth-gate failure that keeps the server's status and error type, so
@@ -616,7 +620,7 @@ export const FOCUS_HINT: Record<FocusKey, string> = {
 export function focusValue(f: FocusKey, r: UsageRow): number {
   switch (f) {
     case 'cache': return r.cread + r.cwrite;
-    case 'savings': return r.context_saved + r.saved;
+    case 'savings': return r.context_saved + (r.applied_saved ?? 0);
     case 'reasoning': return r.reasoning;
     case 'latency': return r.p50_ttft_ms;
     case 'errors': return r.errors;
@@ -852,6 +856,11 @@ export const modelRules = () => get<ModelRule[]>('/admin/model-rules');
 export const accountModels = (id: number) => get<ModelRow[]>(`/admin/accounts/${id}/models`);
 
 /** Pin a model to one surface ("" clears). force=true allows a surface the probe never confirmed. */
+/** Hands a hand-set (curated) verdict back to the tests: verdicts stay as recorded,
+ *  the curation and its note clear, and the next test may change them. */
+export const releaseModelVerdict = (accountId: number, model: string) =>
+  put(`/admin/accounts/${accountId}/model-protocol`, { model, release: true });
+
 export const setModelPin = (accountId: number, model: string, pin: string, force = false) =>
   apiFetch<{ model: string; pin: string }>(
     `/admin/accounts/${accountId}/model-pin`,

@@ -29,7 +29,10 @@ model ID is passed on too: the answer tells you if the account has it.
 
 ## What it can do
 
-- Tools, in the Anthropic shape. Text only: no images, no `response_format`.
+- Text answers. No images, no `response_format`.
+- Tools are sent to claude.ai, but a tool call cannot come back. When Claude answers with
+  one, the request fails with `chat_tools_unsupported` and a combo moves on to the next
+  hop. For agents, put a hop that serves tools after this one.
 - Each request starts a new claude.ai conversation, with the whole history flattened
   into one message. That suits chat; agents lose some structure.
 
@@ -42,6 +45,7 @@ model ID is passed on too: the answer tells you if the account has it.
 | `403 authentication_error` | The account itself is refused. Check it in a browser |
 | `429` | Rate limited. Wait, and send fewer requests at once |
 | `502 stream ended before message_stop` | claude.ai stopped mid-answer. Nothing was kept; try again |
+| `400 … chat_tools_unsupported` | Claude answered with a tool call, which this account cannot pass back. Use a combo with a hop that serves tools |
 
 ---
 

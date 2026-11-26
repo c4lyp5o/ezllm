@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/c4lyp5o/ezllm/internal/tzloc"
 )
 
 // ErrRuleNotFound is returned when a rule does not exist (distinguishes "no
@@ -46,13 +48,16 @@ var (
 	// unparseable window the router would have to reject at request time.
 	hhmmRE = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
 	// tzRE accepts IANA names ('Europe/Berlin') and fixed offsets
-	// ('+08:00'), both of which time.LoadLocation understands.
+	// ('+08:00'), both of which tzloc.Load resolves.
 	tzRE = regexp.MustCompile(`^(Asia/|America/|Europe/|Africa/|Australia/|Pacific/|Atlantic/|Indian/|US/|UTC|[+-][0-9]{2}:[0-9]{2})`)
 )
 
 // ValidateModelRule checks the invariant set once, so both the admin API and
 // config seeding fail identically. Returns a plain error suitable for a 400.
 func ValidateModelRule(r *ModelRule) error {
+	if r.AccountID <= 0 {
+		return errors.New("account_id is required")
+	}
 	if strings.TrimSpace(r.ModelID) == "" {
 		return errors.New("model_id is required")
 	}
@@ -111,6 +116,12 @@ func ValidateModelRule(r *ModelRule) error {
 		if tz != "instance" && !tzRE.MatchString(tz) {
 			return fmt.Errorf("win_tz %q must be an IANA zone (Europe/Berlin) or offset (+08:00)", tz)
 		}
+		// The regex shape-checks; only the resolver knows the zone table, so a
+		// typo like Asia/Kuala_Lumpyr is refused here instead of at every
+		// request.
+		if _, err := tzloc.Load(tz); tz != "instance" && err != nil {
+			return fmt.Errorf("win_tz %q is not a time zone: %w", tz, err)
+		}
 		r.WinTZ = tz
 	} else {
 		r.WinTZ = "instance"
@@ -157,6 +168,46 @@ func (d *DB) GetModelRule(ctx context.Context, id int64) (*ModelRule, error) {
 		return nil, ErrRuleNotFound
 	}
 	return r, err
+}
+
+// UpdateModelRule saves rule id in place, so changing its account or model
+// moves this rule instead of creating a second one (UpsertModelRule keys on
+// the pair). A pair another rule has is a conflict (409).
+func (d *DB) UpdateModelRule(ctx context.Context, id int64, in ModelRule) error {
+	if err := ValidateModelRule(&in); err != nil {
+		return err
+	}
+	nullable := func(s string) any {
+		if s == "" {
+			return nil
+		}
+		return s
+	}
+	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		var other int64
+		err := tx.QueryRowContext(ctx, `SELECT id FROM model_rules WHERE account_id=? AND model_id=? AND id<>?`,
+			in.AccountID, in.ModelID, id).Scan(&other)
+		if err == nil {
+			return &ErrConflict{What: "a rule for that account and model already exists"}
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		res, err := tx.ExecContext(ctx, `
+UPDATE model_rules SET account_id=?, model_id=?, cap_tokens=?, cap_window=?,
+  win_start=?, win_end=?, win_days=?, win_tz=?, enabled=?, note=?,
+  updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+WHERE id=?`,
+			in.AccountID, in.ModelID, in.CapTokens, in.CapWindow,
+			nullable(in.WinStart), nullable(in.WinEnd), nullable(in.WinDays), in.WinTZ, boolInt(in.Enabled), in.Note, id)
+		if err != nil {
+			return fmt.Errorf("update model rule: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrRuleNotFound
+		}
+		return nil
+	})
 }
 
 // UpsertModelRule inserts or updates the single rule for (account, model).

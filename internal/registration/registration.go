@@ -1100,13 +1100,12 @@ func doProbe(
 	if payload != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	// PrepareRequest applies the account's custom headers exactly as live
+	// traffic gets them. Adding them again here let a custom header replace
+	// the headers a bridge adapter sets, and probed with headers live
+	// requests never carry.
 	if err := adapter.PrepareRequest(ctx, req, acct, key, surfaceFor(spec.Path)); err != nil {
 		return 0, nil, err
-	}
-	for k, v := range acct.CustomHeaders {
-		if k != "" && v != "" {
-			req.Header.Set(k, v)
-		}
 	}
 
 	resp, err := client.Do(req)

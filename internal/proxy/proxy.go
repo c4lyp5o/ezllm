@@ -164,7 +164,12 @@ func (t *UsageTapper) Usage() *store.Usage {
 // and the later event's is the final cumulative count, zero included.
 func mergeUsageRaw(dst, src map[string]any) {
 	for k, v := range src {
+		// A later zero replaces only message_start's placeholder (0 or 1),
+		// never a real count an earlier event reported.
 		if k == "output_tokens" && v != nil {
+			if old, had := dst[k].(float64); had && old > 1 && isZeroUsage(v) {
+				continue
+			}
 			dst[k] = v
 			continue
 		}
@@ -446,6 +451,8 @@ const (
 	// defaultHopCooldown parks a hop whose failure carries neither an upstream
 	// Retry-After nor an operator duration (transport errors).
 	defaultHopCooldown = 5 * time.Minute
+	// maxCooldownEntries bounds the hop cooldown map; see recordHop.
+	maxCooldownEntries = 4096
 
 	// maxHonouredRetryAfter bounds an upstream-supplied Retry-After. Providers
 	// may legitimately ask for an hour; honouring that blindly would remove the
@@ -644,7 +651,7 @@ func (d *Dispatcher) classifyHopPolicy(ctx context.Context, err error, status in
 		}
 		// 408/425 are transient by definition and share the 5xx duration: the
 		// operator configured one "hop is unhealthy" number, not two.
-		if on5xx > 0 && status >= 500 {
+		if on5xx > 0 {
 			return hopOutcome{failed: true, cooldown: on5xx, reason: reason}
 		}
 		return hopOutcome{failed: true, cooldown: defaultHopCooldown, reason: reason}
@@ -709,6 +716,16 @@ func (d *Dispatcher) recordHop(rt Route, oc hopOutcome, now time.Time) {
 	}
 	if d.cooldowns == nil {
 		d.cooldowns = make(map[string]cooldownState)
+	}
+	// Entries leave only when their hop succeeds, and a model that never
+	// answers (a made-up ID on an account with no catalog yet) never does.
+	// Past the cap, sweep the ones whose park is over and that hold no probe.
+	if _, had := d.cooldowns[key]; !had && len(d.cooldowns) >= maxCooldownEntries {
+		for k, v := range d.cooldowns {
+			if !v.until.After(now) && !v.probeActive {
+				delete(d.cooldowns, k)
+			}
+		}
 	}
 	st := d.cooldowns[key]
 	st.strikes++
@@ -983,6 +1000,7 @@ func swapModelMultipart(body []byte, newModel string) ([]byte, error) {
 	// Use mime/multipart to read the parts, then rebuild with the model swapped.
 	mr := multipart.NewReader(bytes.NewReader(body), boundary)
 	var out bytes.Buffer
+	out.Grow(len(body) + len(newModel) + 256) // one allocation for the rebuilt body
 	mw := multipart.NewWriter(&out)
 	if err := mw.SetBoundary(boundary); err != nil {
 		return nil, fmt.Errorf("proxy: multipart boundary: %w", err)
@@ -996,24 +1014,23 @@ func swapModelMultipart(body []byte, newModel string) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("proxy: read multipart part: %w", err)
 		}
-		value, err := io.ReadAll(part)
-		if err != nil {
-			return nil, fmt.Errorf("proxy: read multipart part body: %w", err)
-		}
-		fieldName := part.FormName()
-		// Swap the model field; pass everything else through untouched.
-		if fieldName == "model" {
-			value = []byte(newModel)
-			swapped = true
-		}
 		// Preserve the original part header (filename, content-type).
 		h := textproto.MIMEHeader(part.Header)
 		w, err := mw.CreatePart(h)
 		if err != nil {
 			return nil, fmt.Errorf("proxy: create multipart part: %w", err)
 		}
-		if _, err := w.Write(value); err != nil {
-			return nil, fmt.Errorf("proxy: write multipart part: %w", err)
+		// Swap the model field; copy everything else straight through, so a
+		// large upload is not held a second time as a separate part buffer.
+		if part.FormName() == "model" {
+			swapped = true
+			if _, err := io.WriteString(w, newModel); err != nil {
+				return nil, fmt.Errorf("proxy: write multipart part: %w", err)
+			}
+			continue
+		}
+		if _, err := io.Copy(w, part); err != nil {
+			return nil, fmt.Errorf("proxy: read multipart part body: %w", err)
 		}
 	}
 	if !swapped {
@@ -1034,7 +1051,10 @@ func swapModelMultipart(body []byte, newModel string) ([]byte, error) {
 // isCloudflare reports whether the hop dials Cloudflare Workers AI, whose
 // image and audio models take native bodies at native paths.
 func isCloudflare(rt Route) bool {
-	return strings.Contains(rt.Account.BaseURL, "api.cloudflare.com")
+	// The host, not a substring: api.cloudflare.com in another host's path is
+	// not Cloudflare.
+	u, err := url.Parse(rt.Account.BaseURL)
+	return err == nil && strings.EqualFold(u.Hostname(), "api.cloudflare.com")
 }
 
 // prepareHopBody rewrites the client's body for one hop: a byte-stable model
@@ -1232,7 +1252,7 @@ func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, bod
 	case provider.SurfaceImagesGen, provider.SurfaceAudioTTS, provider.SurfaceAudioSTT:
 		if isCloudflare(rt) {
 			base := strings.TrimSuffix(strings.TrimSuffix(rt.Account.BaseURL, "/"), "/v1")
-			url = base + "/run/" + rt.Model
+			url = base + "/run/" + modelPath(rt.Model)
 		}
 	}
 
@@ -1411,7 +1431,11 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 	cw, cross := crossWireFor(rt)
 
 	isSSE := strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")
-	if res.Stream && isSSE {
+	// An error status takes the buffered path even when the upstream labels it
+	// a stream: some gateways answer 429 or 400 as text/event-stream, and on
+	// a translated hop the stream reader would re-shape an error body as if it
+	// were answer chunks, skipping the error re-shaping below.
+	if res.Stream && isSSE && resp.StatusCode < 400 {
 		// A translated stream wraps the body BEFORE any byte is copied: the
 		// client sees its own event shape synthesized from the upstream's, and
 		// the independent source tap retains the upstream accounting before any
@@ -1486,6 +1510,12 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 				res.Err = "translated stream " + res.StreamOutcome
 			}
 		}
+	} else if resp.StatusCode < 400 && !cross && isBinaryMedia(resp.Header.Get("Content-Type")) {
+		// Audio, video and other binary answers pass straight through as they
+		// arrive: speech starts playing before generation ends, and a large
+		// file is never held whole in memory. They carry no JSON usage to tap
+		// and nothing to translate.
+		streamBinary(w, resp, &res)
 	} else {
 		// Non-streamed: read the body once, tap usage, then write it out.
 		// The extra byte detects a body that outgrew maxBodyBytes: a
@@ -1533,6 +1563,9 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 						res.Err = upstreamErrorSnippet(res.Status, raw)
 					}
 					raw = cw.reshape(raw)
+					if isSSE {
+						w.Header().Set("Content-Type", "application/json")
+					}
 				}
 			} else {
 				terr := cw.optsErr
@@ -1568,6 +1601,58 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 	}
 	res.Totalms = msPtr(time.Since(start))
 	return res, nil
+}
+
+// isBinaryMedia reports a response body that is media, not JSON: it can be
+// passed through as it arrives.
+func isBinaryMedia(contentType string) bool {
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+	if i := strings.IndexByte(ct, ';'); i >= 0 {
+		ct = strings.TrimSpace(ct[:i])
+	}
+	return strings.HasPrefix(ct, "audio/") || strings.HasPrefix(ct, "video/") ||
+		strings.HasPrefix(ct, "image/") || ct == "application/octet-stream"
+}
+
+// binaryChunk is the pass-through read size for binary media.
+const binaryChunk = 32 << 10
+
+// streamBinary copies a successful media body to the client chunk by chunk,
+// flushing each one. The status is committed before the first byte, so a
+// failure after that is recorded in the ledger instead of changing the status.
+// TTFT stays unset: the dashboard's TTFT medians are for text answers.
+func streamBinary(w http.ResponseWriter, resp *http.Response, res *Result) {
+	res.Committed = true
+	w.WriteHeader(resp.StatusCode)
+	fl, _ := w.(http.Flusher)
+	buf := make([]byte, binaryChunk)
+	var total int64
+	for {
+		n, rerr := resp.Body.Read(buf)
+		if n > 0 {
+			total += int64(n)
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				res.Err = "client write: " + werr.Error()
+				return
+			}
+			if fl != nil {
+				fl.Flush()
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			// The client already has a 200 and part of the file.
+			res.Err = "stream truncated: " + rerr.Error()
+			res.StreamOutcome = StreamOutcomeTruncated
+			return
+		}
+	}
+	if total == 0 && resp.StatusCode == http.StatusOK {
+		res.Err = "upstream returned an empty body"
+		res.StreamOutcome = StreamOutcomeTruncated
+	}
 }
 
 // Forward sends the (already model-swapped) body upstream and copies the
@@ -1864,6 +1949,10 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 	// refusal is the first typed translation refusal: the answer when every
 	// hop was skipped and none was even cooling for a better reason.
 	var refusal error
+	// contextSkips counts hops skipped because the request is larger than
+	// their declared context window, so the final error can say so instead of
+	// blaming a cooldown that never happened.
+	contextSkips := 0
 	// Addendum #3: ONE request-wide budget across same-hop retries AND
 	// failover hops, and a selection deadline that governs only the choosing
 	// (never the winning attempt's stream).
@@ -1939,6 +2028,7 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 					Namespace: rt.Account.Namespace, Model: rt.Model,
 					Note: fmt.Sprintf("context too small: estimated %d > max %d", reqEst, rt.Account.MaxContextTokens),
 				})
+				contextSkips++
 				continue
 			}
 		}
@@ -2209,7 +2299,14 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 	if refusal != nil {
 		return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: policy.AttemptBudget, LearnedReasoning: result.LearnedReasoning}, refusal
 	}
-	return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: policy.AttemptBudget, LearnedReasoning: result.LearnedReasoning}, errors.New("proxy: all combo endpoints are in five-minute cooldown")
+	final := errors.New("proxy: all combo endpoints are in five-minute cooldown")
+	switch {
+	case contextSkips == len(routes):
+		final = errors.New("proxy: the request is larger than every endpoint's context window (max_context_tokens)")
+	case contextSkips > 0:
+		final = errors.New("proxy: no endpoint can take the request: each is cooling down or has a context window smaller than it")
+	}
+	return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: policy.AttemptBudget, LearnedReasoning: result.LearnedReasoning}, final
 }
 
 // streamCopyTracked copies SSE upstream->client with a Flush per chunk, observing
@@ -2352,6 +2449,10 @@ func (d *Dispatcher) streamCopyTap(ctx context.Context, w http.ResponseWriter, r
 // mid-stream, so the client gets an explicit error instead of a silent EOF.
 func writeStreamErrorFrame(w io.Writer, surface provider.Surface, msg string) {
 	m, _ := json.Marshal(msg)
+	// The upstream can die mid-line. A blank line first ends whatever partial
+	// event was written, so the error frame is parsed on its own; between
+	// complete events it is an empty line, which SSE ignores.
+	io.WriteString(w, "\n\n")
 	switch surface {
 	case provider.SurfaceAnthropic:
 		fmt.Fprintf(w, "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":%s}}\n\n", m)
@@ -2490,6 +2591,23 @@ var stripAlways = map[string]bool{
 	// but a value it sends is still never repeated to any upstream.
 	"X-Ezllm-Bridge-Secret":     true,
 	provider.BridgeCallerHeader: true,
+	// The client's address and the browser's page, as a reverse proxy or the
+	// browser added them: they describe the hop to ezllm. Forwarded, they
+	// told a provider the caller's real or internal IP and the dashboard URL,
+	// and a stale X-Forwarded-For can trip a provider's proxy-spoofing block.
+	"X-Forwarded-For":   true,
+	"X-Forwarded-Host":  true,
+	"X-Forwarded-Proto": true,
+	"X-Forwarded-Port":  true,
+	"X-Real-Ip":         true,
+	"Forwarded":         true,
+	"Cf-Connecting-Ip":  true,
+	"True-Client-Ip":    true,
+	"Referer":           true,
+	"Sec-Fetch-Site":    true,
+	"Sec-Fetch-Mode":    true,
+	"Sec-Fetch-Dest":    true,
+	"Sec-Fetch-User":    true,
 }
 
 // copyClientHeaders copies src's headers onto dst minus stripAlways and the
@@ -2684,4 +2802,22 @@ func (d *Dispatcher) requestPolicy(ctx context.Context) settings.Values {
 		p.DispatchDeadline = d.dispatchDeadline.String()
 	}
 	return p
+}
+
+// modelPath makes a model ID safe to place in a URL path. Its slashes stay
+// (Cloudflare's @cf/vendor/model and Gemini's models/name use them), but each
+// segment is escaped and a "." or ".." segment is encoded, so an ID such as
+// "../x?y" cannot climb the provider's path or add a query while the
+// account's key is attached.
+func modelPath(model string) string {
+	segs := strings.Split(model, "/")
+	for i, s := range segs {
+		switch s {
+		case ".", "..":
+			segs[i] = strings.ReplaceAll(s, ".", "%2E")
+		default:
+			segs[i] = url.PathEscape(s)
+		}
+	}
+	return strings.Join(segs, "/")
 }

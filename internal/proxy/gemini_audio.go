@@ -31,7 +31,7 @@ func isGeminiNativeAudio(rt Route, surface provider.Surface) bool {
 
 func geminiAudioURL(rt Route) string {
 	base := strings.TrimSuffix(strings.TrimSuffix(rt.Account.BaseURL, "/"), "/openai")
-	return base + "/" + rt.Model + ":generateContent"
+	return base + "/" + modelPath(rt.Model) + ":generateContent"
 }
 
 // geminiAudioRequest translates the OpenAI audio body into native
@@ -82,9 +82,14 @@ func geminiAudioRequest(body []byte, surface provider.Surface) ([]byte, error) {
 		}
 		if part.FileName() != "" {
 			fileName = part.FileName()
-			audio, err = io.ReadAll(io.LimitReader(part, maxBodyBytes))
+			// One byte over the cap tells "too big" from "exactly the cap": a
+			// cut file would be transcribed as if it were the whole recording.
+			audio, err = io.ReadAll(io.LimitReader(part, maxBodyBytes+1))
 			if err != nil {
 				return nil, fmt.Errorf("gemini stt body: %w", err)
+			}
+			if len(audio) > maxBodyBytes {
+				return nil, fmt.Errorf("gemini stt body: audio file is over %d MiB", maxBodyBytes>>20)
 			}
 			if ct := part.Header.Get("Content-Type"); ct != "" && ct != "application/octet-stream" {
 				contentType = ct
@@ -120,11 +125,16 @@ func geminiAudioResponse(resp *http.Response, surface provider.Surface) error {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil
 	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes+1))
 	if err != nil {
 		return err
 	}
 	_ = resp.Body.Close()
+	// A cut response would fail to parse and reach the client as broken
+	// native JSON with 200: refuse it instead.
+	if len(raw) > maxBodyBytes {
+		return fmt.Errorf("gemini audio response is over %d MiB", maxBodyBytes>>20)
+	}
 	var env struct {
 		Candidates []struct {
 			Content struct {

@@ -222,7 +222,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	defer release()
 	if err := s.db.CompleteDashboardSetup(r.Context(), in.Password); err != nil {
 		switch {
-		case errors.Is(err, store.ErrDashboardPasswordTooShort):
+		case errors.Is(err, store.ErrDashboardPasswordTooShort), errors.Is(err, store.ErrDashboardPasswordTooLong):
 			writeErr(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 		case errors.Is(err, store.ErrDashboardSetupDone):
 			writeErr(w, http.StatusConflict, "setup_complete", "the dashboard password is already set; sign in instead")
@@ -353,7 +353,7 @@ func (s *Server) handleDashboardPassword(w http.ResponseWriter, r *http.Request)
 			writeErr(w, http.StatusUnauthorized, "invalid_request_error", "current password is incorrect")
 			return
 		}
-		if errors.Is(err, store.ErrDashboardPasswordTooShort) {
+		if errors.Is(err, store.ErrDashboardPasswordTooShort) || errors.Is(err, store.ErrDashboardPasswordTooLong) {
 			writeErr(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 			return
 		}

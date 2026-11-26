@@ -17,8 +17,11 @@ import { SlideRow } from '../components/motion';
 // normalizeFeedRow), so the renderer reads the ledger names: tin/tout/saved.
 const CAP = 60;
 
+// No row id rides the stream, so the key is everything that tells two calls
+// apart. Two zero-token tool steps to one model in the same second used to
+// share a key, and the second was silently dropped.
 const rowKey = (c: FeedRow) =>
-  `${c.ts}|${c.model}|${c.tin}|${c.tout}|${c.status}`;
+  [c.ts, c.client, c.account, c.surface, c.alias ?? '', c.model, c.ip ?? '', c.tin, c.tout, c.status, c.ttft_ms ?? '', c.total_ms ?? ''].join('|');
 
 function timeAgo(ts: string): string {
   const ms = Date.now() - new Date(ts).getTime();
@@ -110,7 +113,7 @@ export default function RecentFeed() {
         )}
       </div>
 
-      <div className="rounded-xl border border-line bg-card/60 overflow-hidden">
+      <div className="rounded-xl border border-line bg-surface overflow-hidden">
         {rows.length === 0 ? (
           <p className="px-4 py-6 text-sm text-mute">
             Waiting for the first request…
@@ -192,8 +195,8 @@ export default function RecentFeed() {
                       </span>
                       ) : (
                       <span className="font-mono tabular-nums text-mute w-28 shrink-0 text-right"
-                        title={`tokens in ${formatTokens(c.tin)} (↑, prompt with cache inside) · tokens out ${formatTokens(c.tout)} (↓, completion)`}>
-                        <span title="tokens in (prompt, including cached tokens)">↑{formatTokens(c.tin)}</span>
+                        title={`tokens in ${formatTokens(c.tin)} (↑, prompt${c.translated ? ' with cache inside' : ' without cached tokens'}) · tokens out ${formatTokens(c.tout)} (↓, completion)`}>
+                        <span title={c.translated ? 'tokens in (prompt, including cached tokens)' : 'tokens in (prompt, not counting cached tokens)'}>↑{formatTokens(c.tin)}</span>
                         {' '}
                         <span title="tokens out (completion)">↓{formatTokens(c.tout)}</span>
                         {c.saved > 0 && (

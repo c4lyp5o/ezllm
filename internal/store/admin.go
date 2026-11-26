@@ -498,6 +498,26 @@ func (d *DB) UpdateAccount(ctx context.Context, id int64, in AccountInput) error
 	if in.ManagementKey == "" {
 		in.ManagementKey = cur.ManagementKey
 	}
+	// nil = left out of the PATCH: keep. An empty map or an explicit 0 clears.
+	// These were not carried over, so turning an account off in the dashboard
+	// wiped its custom headers, token cap and context size.
+	if in.CustomHeaders == nil {
+		in.CustomHeaders = cur.CustomHeaders
+	}
+	if in.CapTokens == nil {
+		v := cur.CapTokens
+		in.CapTokens = &v
+	}
+	if in.MaxContextTokens == nil {
+		v := cur.MaxContextTokens
+		in.MaxContextTokens = &v
+	}
+	// The same rules as creating an account: a PATCH must not write a
+	// namespace with '/' or a sentinel kind's base URL that the create path
+	// refuses.
+	if err := ValidateAccountInput(in); err != nil {
+		return err
+	}
 	kind, err := provider.ParseKind(in.Kind)
 	if err != nil {
 		return err
@@ -578,13 +598,25 @@ func (d *DB) writeAccount(ctx context.Context, id int64, in AccountInput, kind p
 	var newID int64
 	err = d.WithWriteTx(ctx, func(tx *sql.Tx) error {
 		if id == 0 {
+			// A new account never takes an id an old one used: SQLite reuses
+			// the highest rowid after a delete, and the ledger, usage counters
+			// and rate history still key on it, so the new account would
+			// inherit the deleted one's usage.
+			var next int64
+			if err := tx.QueryRowContext(ctx, `
+SELECT COALESCE(MAX(m), 0) + 1 FROM (
+  SELECT MAX(id) AS m FROM accounts
+  UNION ALL SELECT MAX(account_id) FROM calls
+  UNION ALL SELECT MAX(account_id) FROM usage_counters)`).Scan(&next); err != nil {
+				return err
+			}
 			res, err := tx.ExecContext(ctx, `
-INSERT INTO accounts (name, namespace, kind, base_url, enabled, requires_session_header,
+INSERT INTO accounts (id, name, namespace, kind, base_url, enabled, requires_session_header,
                       quota_mode, custom_headers, probe_delay_ms, cap_window, cap_tokens,
                       rate_limit, rate_window, notes, usage_convention, max_context_tokens,
                       management_key_plain)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-				in.Name, in.Namespace, string(kind), in.BaseURL, enabled, requires,
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+				next, in.Name, in.Namespace, string(kind), in.BaseURL, enabled, requires,
 				quotaMode, ch, probe, capWindow, capTokens, rateLimit, rateWindow, in.Notes,
 				parsedUsage, maxCtx, mgmtKey)
 			if err != nil {
@@ -652,6 +684,11 @@ WHERE h.account_id = ? GROUP BY c.id, c.name`, id)
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM models WHERE account_id=?`, id); err != nil {
+			return err
+		}
+		// Usage counters key on the id and have no foreign key: without this
+		// they outlive the account.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM usage_counters WHERE account_id=?`, id); err != nil {
 			return err
 		}
 		// quota_snapshots + provider_keys: cascade handles keys; snapshots
@@ -1227,6 +1264,51 @@ ON CONFLICT(name) DO UPDATE SET
 		return d.syncAutoFree(ctx, tx, id)
 	})
 	return id, err
+}
+
+// UpdateCombo saves combo id, renaming it when c.Name differs. UpsertCombo keys
+// on the name, so an edit that renamed a combo created a second one and left
+// the old one in place. A name another combo holds is a conflict (409).
+func (d *DB) UpdateCombo(ctx context.Context, id int64, c Combo) error {
+	if c.ContextSize == 0 {
+		c.ContextSize = 200000
+	}
+	if c.BlockSize == 0 {
+		c.BlockSize = 1
+	}
+	if err := ValidateCombo(c); err != nil {
+		return err
+	}
+	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		var other int64
+		err := tx.QueryRowContext(ctx, `SELECT id FROM combos WHERE name=? AND id<>?`, c.Name, id).Scan(&other)
+		if err == nil {
+			return &ErrConflict{What: "a combo named " + c.Name + " already exists"}
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		var cpid any
+		if c.CompressionProfileID != nil {
+			cpid = *c.CompressionProfileID
+		}
+		res, err := tx.ExecContext(ctx, `
+UPDATE combos SET name=?, strategy=?, sticky_idle_s=?, enabled=?, compression_profile_id=?,
+  context_size=?, block_size=?, notes=?, auto_free=?, auto_free_accounts=?, auto_free_include=?
+WHERE id=?`,
+			c.Name, c.Strategy, c.StickyIdleS, boolToInt(c.Enabled), cpid, c.ContextSize, c.BlockSize, c.Notes,
+			boolToInt(c.AutoFree), formatAccountIDs(c.AutoFreeAccounts), formatFreeIncludes(c.AutoFreeInclude), id)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrNotFound
+		}
+		if err := d.replaceHops(ctx, tx, id, c.Hops); err != nil {
+			return err
+		}
+		return d.syncAutoFree(ctx, tx, id)
+	})
 }
 
 // ReplaceHops rewrites a combo's ordered hop list (POST /admin/combos/{id}/hops).
@@ -1905,13 +1987,14 @@ func tokenHint(hash string) string {
 	return "…" + hash[len(hash)-4:]
 }
 
-// isUniqueViolation matches SQLite's UNIQUE/NOT NULL constraint text without
+// isUniqueViolation matches SQLite's UNIQUE constraint text without
 // depending on driver-specific error types.
 func isUniqueViolation(err error) bool {
 	if err == nil {
 		return false
 	}
 	msg := err.Error()
-	return strings.Contains(msg, "UNIQUE constraint failed") ||
-		strings.Contains(msg, "constraint failed")
+	// Only UNIQUE: a FOREIGN KEY, CHECK or NOT NULL failure is not "name in
+	// use", and reporting it as 409 hid the real error.
+	return strings.Contains(msg, "UNIQUE constraint failed")
 }

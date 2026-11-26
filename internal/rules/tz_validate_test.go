@@ -114,3 +114,35 @@ func TestLocStillFallsBackForRequestPath(t *testing.T) {
 		t.Fatalf("request-path loc() = %v, want the UTC fallback", got)
 	}
 }
+
+// At start-up there is no earlier set to keep: one row with a bad tz used to
+// leave every rule off. The valid rules install; the bad one is reported.
+func TestBootInstallsValidRulesDespiteABadOne(t *testing.T) {
+	now := time.Date(2026, 10, 11, 15, 0, 0, 0, time.UTC)
+	src := &fakeSource{rules: []Rule{
+		{AccountID: 1, ModelID: "good", Enabled: true, CapTokens: 100, CapWindow: "daily"},
+		{AccountID: 1, ModelID: "bad", Enabled: true, Window: Window{Start: "22:00", End: "06:00", TZ: "Asia/Kuala_Lumpyr"}},
+	}}
+	e, err := NewEngineRetrying(src, &fakeUsage{}, func() time.Time { return now }, time.Hour)
+	defer e.Close()
+	if err == nil || !strings.Contains(err.Error(), "Kuala_Lumpyr") {
+		t.Fatalf("boot error = %v, want the bad row named", err)
+	}
+	if e.Get(1, "good") == nil {
+		t.Fatal("a valid rule was left off because of another row's bad tz")
+	}
+	if e.Get(1, "bad") != nil {
+		t.Fatal("the bad rule was installed")
+	}
+}
+
+// A Mon-Fri window refused on Friday evening opens again on Monday, not
+// Saturday.
+func TestNextAllowedSkipsDisallowedDays(t *testing.T) {
+	fri := time.Date(2026, 11, 27, 18, 0, 0, 0, time.UTC) // a Friday
+	w := Window{Start: "09:00", End: "17:00", Days: []int{1, 2, 3, 4, 5}, TZ: "UTC"}
+	next := w.NextAllowed(fri)
+	if next.Weekday() != time.Monday || next.Hour() != 9 {
+		t.Fatalf("next allowed = %s (%s), want Monday 09:00", next, next.Weekday())
+	}
+}

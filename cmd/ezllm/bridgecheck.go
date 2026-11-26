@@ -137,6 +137,9 @@ func runBridgeCheck(args []string, stdout io.Writer) error {
 	if err := set.Parse(args[1:]); err != nil {
 		return err
 	}
+	if set.NArg() > 0 {
+		return fmt.Errorf("bridge-check %s: unexpected argument %q: put flags before anything else", name, set.Arg(0))
+	}
 
 	ctx := context.Background()
 	var v bridgeVerdict
@@ -252,7 +255,7 @@ func checkClaudeCLI(bin, dir string) bridgeVerdict {
 		v.Problems = append(v.Problems, "binary does not resolve: "+err.Error())
 		return v
 	}
-	raw, drift := claudeCLICheck(resolved)
+	raw, drift := claudeCLICheck(context.Background(), resolved)
 	if raw == "unavailable" {
 		v.Problems = append(v.Problems, drift)
 		return v
@@ -262,7 +265,7 @@ func checkClaudeCLI(bin, dir string) bridgeVerdict {
 	if drift != "" {
 		v.Problems = append(v.Problems, "flags the CLI no longer accepts: "+drift)
 	}
-	if state, plan := claudeLoginCheck(resolved, dir); state != "logged-in" {
+	if state, plan := claudeLoginCheck(context.Background(), resolved, dir); state != "logged-in" {
 		v.Problems = append(v.Problems, "login "+state+": "+plan)
 	}
 	return v

@@ -601,6 +601,9 @@ func parseClaudePrepaidCredits(body string) Quota {
 			return nil
 		}
 		v := *m.AmountMinor / math.Pow(10, m.Exponent)
+		if math.IsInf(v, 0) || math.IsNaN(v) {
+			return nil // a nonsense exponent; JSON cannot carry Inf
+		}
 		return &v
 	}
 	bal := units(raw.Balance)

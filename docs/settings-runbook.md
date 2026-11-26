@@ -73,7 +73,7 @@ can sign out one, or all with **Sign out all devices**.
 | **Total request attempt budget** | Attempts across all providers and retries, 0 to 64. `0` means no limit |
 | **Dispatch deadline** | The longest time spent choosing a provider and waiting to retry. Answers already streaming are not cut off |
 | **Rate-limit cooldown** | How long a provider rests after a `429` without `Retry-After` |
-| **Server-error cooldown** | How long a provider rests after server errors |
+| **Server-error cooldown** | How long a provider rests after server errors, and after `408` or `425` |
 | **Failures before cooldown** | How many failures start a cooldown |
 
 In `config.yaml`, `retry.retries: 0` means the default of 3. To turn retries off, save `0`

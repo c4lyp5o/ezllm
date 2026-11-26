@@ -193,11 +193,17 @@ func (b *claudeWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.R
 		return
 	}
 	// Typed refusal: the web protocol has no structured output (design scope
-	// fences). Tools DO exist on this wire (Anthropic-native) and pass
-	// through unchanged.
+	// fences). Tools pass through to claude.ai, but a tool call in the answer
+	// cannot be handed back: the turn then fails with chat_tools_unsupported
+	// (400), so a combo moves on to a hop that serves tools.
 	if req.ResponseFormat != nil {
 		writeErr(w, http.StatusBadRequest, "unsupported_feature",
 			"claude-web does not support structured output (response_format)")
+		return
+	}
+	if webBridgeHasImage(req.Messages) {
+		writeErr(w, http.StatusBadRequest, "unsupported_feature",
+			"claude-web does not support image input")
 		return
 	}
 	// Serialize generation per account: the cached client owns mutable
@@ -276,6 +282,8 @@ func claudeWebStatus(err error) int {
 		return http.StatusForbidden
 	case errors.Is(err, claudeweb.ErrRateLimited):
 		return http.StatusTooManyRequests
+	case errors.Is(err, claudeweb.ErrToolCall):
+		return http.StatusBadRequest
 	default:
 		return http.StatusBadGateway
 	}

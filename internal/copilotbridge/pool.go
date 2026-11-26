@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 )
 
 // A worker is exclusively leased under the existing admission slots. Its
@@ -50,7 +52,7 @@ func (b *lockedDetail) Reset() { b.mu.Lock(); defer b.mu.Unlock(); b.text.Reset(
 
 func (b *lockedDetail) String() string { b.mu.Lock(); defer b.mu.Unlock(); return b.text.String() }
 func (w *channelWorker) stop() {
-	w.once.Do(func() { _ = w.cmd.Process.Kill(); _ = w.stdin.Close(); _ = w.stdout.Close(); <-w.done })
+	w.once.Do(func() { bridgeutil.KillGroup(w.cmd); _ = w.stdin.Close(); _ = w.stdout.Close(); <-w.done })
 }
 func (r *Runner) accepting(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
@@ -150,6 +152,7 @@ func (r *Runner) takeWorkerLocked(turn *ChannelTurn) (_ *channelWorker, stale []
 	w.cmd.Dir = os.TempDir()
 	w.cmd.Env = childEnv(os.Environ(), r.Home)
 	w.cmd.WaitDelay = 5 * time.Second
+	bridgeutil.SetProcessGroup(w.cmd) // stop kills the whole group
 	w.cmd.Stderr = &w.stderr
 	w.stdin, err = w.cmd.StdinPipe()
 	if err != nil {

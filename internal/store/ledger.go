@@ -164,9 +164,11 @@ func NormalizeUsageWith(surface Surface, raw map[string]any, conv provider.Usage
 	if raw == nil {
 		return u
 	}
+	// A count below zero is never real (a sentinel or a broken upstream) and
+	// would subtract from caps and spend, so it reads as 0.
 	num := func(m map[string]any, k string) int64 {
 		if v, ok := m[k]; ok {
-			return toInt64(v)
+			return max(0, toInt64(v))
 		}
 		return 0
 	}

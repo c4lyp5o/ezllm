@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -63,16 +62,8 @@ func loadOrCreateMasterKey(path string) (string, bool, error) {
 		}
 		return "", false, fmt.Errorf("publish master key: %w", err)
 	}
-	if runtime.GOOS != "windows" {
-		d, err := os.Open(dir)
-		if err != nil {
-			return "", true, err
-		}
-		err = d.Sync()
-		d.Close()
-		if err != nil {
-			return "", true, err
-		}
+	if err := syncDir(dir); err != nil {
+		return "", false, err
 	}
 	return secret, true, nil
 }

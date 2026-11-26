@@ -50,6 +50,11 @@ func ErrorCause(status int, body []byte) string {
 		strings.Contains(s, "unsupported_api_for_model") ||
 		strings.Contains(s, "does not allow"):
 		return "protocol_unsupported" // surface capability gap (opencode-go, Copilot /responses, group-403s)
+	case strings.Contains(s, "per minute") && !strings.Contains(s, "insufficient_quota"):
+		// Gemini's per-minute limit says "Quota exceeded for quota metric
+		// '… requests per minute'": a limit that clears in a minute, not a
+		// spent balance. Checked before the bare "quota" below.
+		return "rate_limited"
 	case strings.Contains(s, "insufficient_quota") || strings.Contains(s, "credit_balance_exhausted") ||
 		strings.Contains(s, "billing") || strings.Contains(s, "quota"):
 		return "quota_exhausted"

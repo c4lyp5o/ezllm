@@ -23,7 +23,7 @@ export type ProfileDraft = {
 
 type EngineOption = { key: string; label: string; initial: string; values?: readonly string[]; words: (v: string) => string };
 export const ENGINE_INFO: Record<string, { label: string; note: string; option?: EngineOption }> = {
-  session_dedup: { label: 'Session dedup', note: 'Drops exact duplicate system, user and assistant turns.' },
+  session_dedup: { label: 'Session dedup', note: 'Drops a system prompt sent again word for word. User and assistant turns are never dropped.' },
   rtk: { label: 'RTK', note: 'Cuts noise from command and tool output. Errors and failures are kept.', option: { key: 'keep_lines', label: 'Keep lines', initial: '6', words: (v) => `keeps ${v} lines` } },
   headroom: { label: 'Headroom', note: 'Packs JSON tool results with repeated fields into a smaller table. Nothing is lost.', option: { key: 'min_rows', label: 'Minimum rows', initial: '4', words: (v) => `from ${v} rows` } },
   lite: { label: 'Lite', note: 'Only tidies whitespace. Words and code blocks don\'t change.', option: { key: 'blank_lines', label: 'Blank lines', initial: '1', words: (v) => `${v} blank ${v === '1' ? 'line' : 'lines'} kept` } },
@@ -115,7 +115,7 @@ export function validateDraft(d: ProfileDraft, others: string[]): DraftErrors {
   else if (others.some((n) => n.toLowerCase() === name.toLowerCase())) e.name = `A profile called "${others.find((n) => n.toLowerCase() === name.toLowerCase())}" already exists.`;
   else if (name.toLowerCase() === 'off') e.name = 'You can\'t use "off". It\'s how the x-ezllm-compression header turns compression off.';
   if (!Number.isInteger(d.auto_trigger_tokens) || d.auto_trigger_tokens < 0) e.trigger = 'A whole number of tokens, 0 or more.';
-  if (!(d.min_compress_ratio >= 0.05 && d.min_compress_ratio <= 0.95)) e.ratio = 'Between 5% and 95%.';
+  if (!(d.min_compress_ratio >= 0 && d.min_compress_ratio <= 0.95)) e.ratio = 'Between 0% and 95%.';
   if (d.stages.length === 0) e.stages = 'Add at least one stage.';
   for (const s of d.stages) {
     const info = ENGINE_INFO[s.engine];

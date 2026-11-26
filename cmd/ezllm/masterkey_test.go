@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 )
 
@@ -100,5 +101,24 @@ func TestDefaultMasterKeyPathRefusesALegacyKey(t *testing.T) {
 		}
 		os.Remove(want)
 		os.RemoveAll(filepath.Join(legacyRoot, ".hermes"))
+	}
+}
+
+// A file system that refuses fsync on a directory (FUSE, some VM shares) must
+// not fail the first start after the key is already written and published.
+func TestMasterKeyToleratesDirectorySyncRefusal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no directory fsync on Windows")
+	}
+	old := fsyncDir
+	fsyncDir = func(*os.File) error { return syscall.EINVAL }
+	defer func() { fsyncDir = old }()
+	path := filepath.Join(t.TempDir(), "ezllm-master.key")
+	secret, created, err := loadOrCreateMasterKey(path)
+	if err != nil || !created || secret == "" {
+		t.Fatalf("secret=%q created=%v err=%v, want a new key", secret, created, err)
+	}
+	if again, created, err := loadOrCreateMasterKey(path); err != nil || created || again != secret {
+		t.Fatalf("second start: created=%v err=%v same=%v", created, err, again == secret)
 	}
 }

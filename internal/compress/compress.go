@@ -222,7 +222,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 	// Work on a deep copy via round-trip so the original body bytes stay
 	// intact for every fail-open path.
 	msgs := rawMsgs
-	pre := EstimateTokens(string(mustMarshal(msgs)))
+	pre := estimateJSON(msgs)
 	res.Pre = pre
 
 	// auto_trigger_tokens: 0 = always, else only above N.
@@ -259,17 +259,18 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 	forms := make([]any, len(editable)) // committed forms for hit positions; nil = shipped as nothing
 	newWork := make([]any, 0, len(editable))
 	var ord []int
+	var hashes []string // messageHash of each message, computed once
 	if useMemo {
-		ord = occurrences(msgs)
-		for i, m := range editable {
-			if form, ok := memo.GetAt(session, profileVersion, m, ord[i]); ok {
+		ord, hashes = occurrences(msgs)
+		for i := range editable {
+			if form, ok := memo.getHashed(session, profileVersion, hashes[i], ord[i]); ok {
 				hit[i] = true
 				if _, dropped := form.(memoDropped); !dropped {
 					forms[i] = form
 				}
 				continue
 			}
-			newWork = append(newWork, m)
+			newWork = append(newWork, editable[i])
 		}
 	} else {
 		newWork = append(newWork, editable...)
@@ -295,7 +296,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 			break
 		}
 		stageStart := time.Now()
-		beforeStage := EstimateTokens(string(mustMarshal(present(cur))))
+		beforeStage := estimateJSON(present(cur))
 		var next []any
 		var fired int
 		var err error
@@ -319,7 +320,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 			res.Err = fmt.Sprintf("%s changed the message count (%d -> %d)", st.Engine, len(cur), len(next))
 			return body, res
 		}
-		postStage := EstimateTokens(string(mustMarshal(present(next))))
+		postStage := estimateJSON(present(next))
 		st := StageStat{Engine: st.Engine, Pre: beforeStage, Post: postStage, Fired: fired}
 		if beforeStage > postStage {
 			st.Saved = beforeStage - postStage
@@ -337,7 +338,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 	// be tuned with evidence instead of guesses. Bounded by the same CPU
 	// policy: a pipeline that already spent its budget skips the shadow.
 	if p.Shadow && len(editable) > 0 && (p.MaxPipelineMS == 0 || time.Since(start).Milliseconds() <= p.MaxPipelineMS) {
-		shadowPre := EstimateTokens(string(mustMarshal(editable)))
+		shadowPre := estimateJSON(editable)
 		shadow := editable
 		for _, st := range p.Stages {
 			next, _, err := runEngine(withProfileClasses(st, classes), shadow)
@@ -346,7 +347,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 			}
 			shadow = next
 		}
-		shadowPost := EstimateTokens(string(mustMarshal(present(shadow))))
+		shadowPost := estimateJSON(present(shadow))
 		if shadowPre > shadowPost {
 			res.ShadowSaved = shadowPre - shadowPost
 		}
@@ -355,7 +356,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 	// Integrity (contract rule 3): every modified text must still be
 	// structurally sound — balanced fences. JSON integrity holds by
 	// construction (rtk skips JSON whole; marshal can't produce imbalance).
-	if msg := integrityFailure(cur); msg != "" {
+	if msg := integrityFailure(newWork, cur); msg != "" {
 		res.Err = "integrity: " + msg
 		return body, res
 	}
@@ -366,8 +367,8 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 	// committed content is exactly the flip-flop this design removes.
 	floorNote := ""
 	if len(newWork) > 0 {
-		newPre := EstimateTokens(string(mustMarshal(newWork)))
-		newPost := EstimateTokens(string(mustMarshal(present(cur))))
+		newPre := estimateJSON(newWork)
+		newPost := estimateJSON(present(cur))
 		wouldSave := newPre - newPost
 		// Ratio floor first (cheapest check), then the ABSOLUTE floor
 		// (addendum #5): a ratio that passes on a tiny saving is still not
@@ -412,7 +413,7 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 		finalMsgs = append(append([]any{}, rebuilt...), msgs[last])
 	}
 
-	post := EstimateTokens(string(mustMarshal(finalMsgs)))
+	post := estimateJSON(finalMsgs)
 	saved := pre - post
 	if saved <= 0 {
 		saved = 0
@@ -425,14 +426,16 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 		// The engines RAN and this body is what ships: freeze it verbatim so
 		// the same bytes go upstream next request (the exempt tail commit
 		// lives here too — it went upstream untouched).
-		commitShipped(session, memo, profileVersion, exemptTail, editable, hit, ord, cur, last, msgs)
+		commitShipped(session, memo, profileVersion, exemptTail, editable, hit, ord, hashes, cur, last, msgs)
 		return body, res
 	}
 
 	// Ship the rewrite: round-trip the root map (model + every unknown
 	// field preserved — same invariant as SwapModel).
-	root[listKey] = finalMsgs
-	out, err := json.Marshal(root)
+	// withKey copies the root: it may be the request's shared decode
+	// (doc.Map), which every fail-open path must leave describing the
+	// original body.
+	out, err := json.Marshal(withKey(root, listKey, finalMsgs))
 	if err != nil {
 		res.Err = "re-marshal: " + err.Error()
 		return body, res
@@ -450,19 +453,19 @@ func applyPipeline(body []byte, p *Profile, doc *jsonbody.BodyDoc, session strin
 	// design protects. The two-directional crossing therefore happens only
 	// through an EXPLICIT transition (a profile change starts a fresh
 	// namespace), never through silent re-compression.
-	commitShipped(session, memo, profileVersion, exemptTail, editable, hit, ord, cur, last, msgs)
+	commitShipped(session, memo, profileVersion, exemptTail, editable, hit, ord, hashes, cur, last, msgs)
 	return out, res
 }
 
 // commitShipped freezes the shipped form of every processed message,
 // including "shipped as nothing" for a dropped repeat. It is a no-op in
 // legacy mode (no session/memo).
-func commitShipped(session string, memo *SessionMemo, profileVersion string, exemptTail bool, editable []any, hit []bool, ord []int, cur []any, last int, msgs []any) {
+func commitShipped(session string, memo *SessionMemo, profileVersion string, exemptTail bool, editable []any, hit []bool, ord []int, hashes []string, cur []any, last int, msgs []any) {
 	if profileVersion == "" {
 		return
 	}
 	ni := 0
-	for i, m := range editable {
+	for i := range editable {
 		if hit[i] {
 			continue
 		}
@@ -470,11 +473,11 @@ func commitShipped(session string, memo *SessionMemo, profileVersion string, exe
 		if form == nil {
 			form = memoDropped{}
 		}
-		memo.PutAt(session, profileVersion, m, ord[i], form)
+		memo.putHashed(session, profileVersion, hashes[i], ord[i], form)
 		ni++
 	}
 	if exemptTail {
-		memo.PutAt(session, profileVersion, msgs[last], ord[last], msgs[last])
+		memo.putHashed(session, profileVersion, hashes[last], ord[last], msgs[last])
 	}
 }
 
@@ -495,15 +498,20 @@ func pureToolOutput(msg any) bool {
 
 // occurrences numbers each message by how many identical messages precede it
 // (0 = first copy) — the position fact the memo key needs (SessionMemo.GetAt).
-func occurrences(msgs []any) []int {
+// It also returns each message's hash, so the memo lookup and commit reuse it
+// instead of marshalling and hashing every message twice more. Stages never
+// mutate the original messages (copy-on-write), so the hash stays valid.
+func occurrences(msgs []any) ([]int, []string) {
 	seen := make(map[string]int, len(msgs))
 	out := make([]int, len(msgs))
+	hashes := make([]string, len(msgs))
 	for i, m := range msgs {
 		h := messageHash(m)
+		hashes[i] = h
 		out[i] = seen[h]
 		seen[h]++
 	}
-	return out
+	return out, hashes
 }
 
 // present drops the nil placeholders of dropped messages.
@@ -632,22 +640,35 @@ func runEngine(st Stage, msgs []any) ([]any, int, error) {
 
 // integrityFailure returns a non-empty reason if any text inside msgs has an
 // unbalanced code fence (rule 3). Empty string = pass.
-func integrityFailure(msgs []any) string {
-	for i, m := range msgs {
+func integrityFailure(before, after []any) string {
+	for i, m := range after {
 		if m == nil {
 			continue // a dropped repeat ships as nothing
 		}
-		mm, ok := m.(map[string]any)
-		if !ok {
+		if _, ok := m.(map[string]any); !ok {
 			return fmt.Sprintf("message %d is not an object", i)
 		}
-		for _, s := range textPieces(mm["content"]) {
-			if fences(s)%2 != 0 {
-				return fmt.Sprintf("message %d has an unclosed code fence", i)
-			}
+		// A rewrite must not unbalance a message's fences. A message that
+		// arrived with an odd count (a ``` mentioned mid-sentence) is the
+		// client's text, not damage: refusing it turned compression off for
+		// the whole conversation.
+		balancedBefore := i >= len(before) || len(before) != len(after) || fenceCount(before[i])%2 == 0
+		if balancedBefore && fenceCount(m)%2 != 0 {
+			return fmt.Sprintf("message %d has an unclosed code fence", i)
 		}
 	}
 	return ""
+}
+
+// fenceCount counts fences across every text part the engines can edit:
+// content strings and text blocks, tool results and Responses items alike.
+func fenceCount(msg any) int {
+	n := 0
+	editParts(msg, nil, func(p textPart) (string, bool) {
+		n += fences(p.text)
+		return "", false
+	})
+	return n
 }
 
 func fences(s string) int { return strings.Count(s, "```") }
@@ -663,28 +684,29 @@ func isJSONPayload(text string) bool {
 	return json.Valid([]byte(trimmed))
 }
 
-// textPieces flattens a message content (string or text-block array) into its
-// text strings. Non-text content yields nothing.
-func textPieces(content any) []string {
-	switch c := content.(type) {
-	case string:
-		return []string{c}
-	case []any:
-		var out []string
-		for _, b := range c {
-			bm, ok := b.(map[string]any)
-			if !ok {
-				continue
-			}
-			if t, _ := bm["type"].(string); t == "text" {
-				if s, ok := bm["text"].(string); ok {
-					out = append(out, s)
-				}
-			}
-		}
-		return out
+// estimateJSON is EstimateTokens(string(mustMarshal(v))) without building the
+// JSON text: the encoder writes into a rune counter, so a pipeline that sizes
+// the conversation before and after every stage stops allocating a full copy
+// (plus its string conversion) each time.
+func estimateJSON(v any) int64 {
+	var c runeCounter
+	if err := json.NewEncoder(&c).Encode(v); err != nil {
+		panic("compress: marshal: " + err.Error())
 	}
-	return nil
+	return int64((c.n-1)/4) + 1 // Encode adds one newline that Marshal does not
+}
+
+// runeCounter counts the UTF-8 runes written to it. The encoder emits valid
+// UTF-8, so every byte that does not continue a rune starts one.
+type runeCounter struct{ n int }
+
+func (c *runeCounter) Write(p []byte) (int, error) {
+	for _, b := range p {
+		if b&0xC0 != 0x80 {
+			c.n++
+		}
+	}
+	return len(p), nil
 }
 
 func mustMarshal(v any) []byte {

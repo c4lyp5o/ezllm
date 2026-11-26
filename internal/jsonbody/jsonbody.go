@@ -33,6 +33,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"strings"
 )
 
@@ -131,11 +132,14 @@ func (d *BodyDoc) WithModel(newModel string) ([]byte, error) {
 		// rewrite — same refusal SwapModel gives today.
 		return nil, errors.New("proxy: body is not a JSON object")
 	}
-	d.m["model"] = newModel
 	if out, ok := SpliceModel(d.raw, newModel); ok {
 		return out, nil
 	}
-	out, err := json.Marshal(d.m)
+	// A copy: the document is shared across hops and readers, so a hop's model
+	// must not be written into it.
+	m := maps.Clone(d.m)
+	m["model"] = newModel
+	out, err := json.Marshal(m)
 	if err != nil {
 		return nil, fmt.Errorf("proxy: re-marshal: %w", err)
 	}

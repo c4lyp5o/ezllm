@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 )
 
 // RequiredFlags are asserted against `agy --help` at boot: a release that drops
@@ -63,10 +65,10 @@ func RunPreflight(ctx context.Context, bin, home string) (Preflight, error) {
 	if err != nil {
 		return p, fmt.Errorf("agy bridge: %s --help failed: %w", bin, err)
 	}
-	p.StructuredOutput = strings.Contains(help, "--json-schema ")
-	p.ConversationResume = strings.Contains(help, "--conversation ")
+	p.StructuredOutput = bridgeutil.HelpHasFlag(help, "--json-schema")
+	p.ConversationResume = bridgeutil.HelpHasFlag(help, "--conversation")
 	for _, f := range RequiredFlags {
-		if !strings.Contains(help, f+" ") {
+		if !bridgeutil.HelpHasFlag(help, f) {
 			return p, fmt.Errorf("agy bridge: agy %s does not offer required flag %s (docs/agy-bridge-runbook.md)", p.Version, f)
 		}
 	}

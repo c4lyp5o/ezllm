@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Failure modes — typed, matching omniroute's OrganizationResolution.
@@ -24,6 +25,10 @@ var (
 	ErrNoOrganization      = errors.New("claudeweb: no organization resolvable for this session")
 	ErrRateLimited         = errors.New("claudeweb: rate limited")
 	ErrStreamCut           = errors.New("claudeweb: stream ended before message_stop")
+	// ErrToolCall: claude.ai answered with a tool call. The web protocol's
+	// tool calls cannot be handed back to the client, so the turn fails
+	// instead of ending as an empty answer.
+	ErrToolCall = errors.New("claudeweb: claude.ai answered with a tool call, which claude-web cannot pass back (chat_tools_unsupported)")
 )
 
 const sessionCookieName = "sessionKey"
@@ -137,13 +142,23 @@ type Client struct {
 	parentUUID string // last committed assistant uuid
 }
 
+// hostTimezone names the host's zone for the payload. Go calls the zone read
+// from /etc/localtime "Local" when TZ is unset, which is not a zone name
+// claude.ai knows, so that case sends UTC.
+func hostTimezone(loc *time.Location) string {
+	if name := loc.String(); name != "" && name != "Local" {
+		return name
+	}
+	return "UTC"
+}
+
 // New builds a session client from a normalized cookie header.
 func New(fetcher Fetcher, cookieHeader, deviceID string) *Client {
 	return &Client{
 		fetcher:  fetcher,
 		cookie:   cookieHeader,
 		deviceID: deviceID,
-		timezone: time.Now().Location().String(),
+		timezone: hostTimezone(time.Local),
 		locale:   "en-US",
 	}
 }
@@ -173,7 +188,18 @@ func (c *Client) OrganizationID(ctx context.Context) (string, error) {
 	if err := json.Unmarshal(body, &orgs); err != nil || len(orgs) == 0 {
 		return "", ErrNoOrganization
 	}
-	id := firstNon(orgs[0].UUID, scalarString(orgs[0].ID))
+	// An account in several organizations lists them all; the browser keeps
+	// the one in use in the lastActiveOrg cookie. Use it when it is listed.
+	pick := orgs[0]
+	if active := CookieValue(c.cookie, "lastActiveOrg"); active != "" {
+		for _, o := range orgs {
+			if o.UUID == active {
+				pick = o
+				break
+			}
+		}
+	}
+	id := firstNon(pick.UUID, scalarString(pick.ID))
 	if id == "" {
 		return "", ErrNoOrganization
 	}
@@ -206,7 +232,11 @@ func classify(status int, header http.Header, body []byte) error {
 func snippet(body []byte) string {
 	s := strings.TrimSpace(string(body))
 	if len(s) > 300 {
-		s = s[:300] + "…"
+		n := 300
+		for n > 0 && !utf8.RuneStart(s[n]) {
+			n--
+		}
+		s = s[:n] + "…"
 	}
 	return s
 }
@@ -436,6 +466,10 @@ func consumeSSE(body io.Reader, onDelta func(string), snippet *[]byte, serverAss
 			continue
 		}
 		switch ev["type"] {
+		case "content_block_start":
+			if cb, ok := ev["content_block"].(map[string]any); ok && cb["type"] == "tool_use" {
+				return text.String(), false, ErrToolCall
+			}
 		case "content_block_delta":
 			delta, ok := ev["delta"].(map[string]any)
 			if !ok {

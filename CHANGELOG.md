@@ -15,6 +15,117 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   A temporary failure after the switch is tested once more before it is undone.
 - **Antigravity plan limits.** The provider card and Quota dialog show how much of each
   weekly limit is used, per group of models, read with `agy -p /usage` (no quota spent).
+- **Dashboard fixes.** Links in chat answers open only when they are `http`, `https`
+  or `mailto`. The chat model picker lists combos. Neighbourhood buildings take their
+  totals from their own account, so two keys with the same hint no longer double the
+  traffic, and "View requests" filters by namespace. Connect shows a capped key's use
+  in its current calendar bucket (the number the cap enforces) and counts the spend
+  cap; `GET /admin/tokens` now carries `cap_used` and `spent_usd` for capped keys. A
+  hand-set model verdict has a Release button. The Console cookie field appears for
+  Claude Platform, and credential fields follow the base URL. Savings read only
+  rewrites that shipped. Opening a link in a new tab no longer asks for the password
+  again, and the live feed stops retrying after the session ends. Other fixes: allowlist
+  globs match the server, feed rows no longer drop same-second calls, token tooltips say
+  whether cached tokens are inside, Stats links through by client and combo, every
+  notification opens its page, the model picker closes when you tab away, binary chat
+  attachments are refused, the ratio floor goes down to 0%, and undefined colours are
+  fixed.
+- **Compression, backup and logging fixes.** A caveman rule at standard intensity
+  wrote a literal `$1` into prompts in place of punctuation ("Hello.  World" became
+  "Hello$1 World"); the rule is removed, and the pack loader now refuses any
+  replacement with a capture reference. A message that mentions ``` mid-sentence no
+  longer turns compression off for the whole conversation: the fence check now asks
+  whether a rewrite unbalanced a message, across tool results and Responses items
+  too. The session memo keeps a conversation's opening messages when its cap is
+  reached. The rule-length gate measures the true shortest match. Progress bars
+  redrawn with an erase-line no longer leave the old bar's tail. Backups no longer
+  fail on filesystems that cannot flush a directory. Log messages escape newlines and
+  terminal escapes. Combo `sticky_idle_s: 0` ("never release on idle") can be saved
+  with PATCH. The Codex bridge logs readable lines, and a template folder it cannot
+  remove no longer costs a template slot.
+- **Faster compression and uploads.** Caveman's span protection skips patterns whose
+  characters are absent: 4.3 times faster on plain prose (10.6 to 2.45 ms on 18 KB).
+  Sizing the conversation between stages no longer builds a JSON copy each time, and
+  the session memo hashes each message once instead of three times: a four-stage run
+  on a 360 KB conversation is 14% faster and allocates 27% less. Swapping the model in
+  a 25 MiB multipart upload uses 32 MB instead of 87 MB. The database refreshes its
+  query statistics when ezllm stops. Caveman skips a rule when the words it needs are
+  absent: with the other changes, that four-stage run went from 642 to 205 ms.
+- **Audio and video stream through.** Speech, video and other binary answers reach
+  the client as they arrive instead of after the whole file is generated and held in
+  memory. A file cut off mid-way is recorded as truncated.
+- **Codex and Copilot bridge fixes.** The Copilot bridge starts its CLI in its own
+  process group and ends the whole group, so nothing the CLI started outlives a
+  cancelled turn or a stopped worker. Codex's `--help` check matches whole flags, so
+  `--sandbox` is no longer found inside `--sandbox-policy`. Copilot error details are
+  cut on a character boundary.
+- **Claude and Antigravity bridge fixes.** A Claude Code CLI that stops without an
+  answer is now a 502 with its own words, not a 200 with an empty message. Ending a CLI
+  no longer looks up its process group after the CLI is gone, so a recycled process id
+  cannot be killed by mistake. A Claude conversation keeps its session id when the client
+  moves its cache marker, so the cached prefix survives turn 2. The Claude and
+  Antigravity bridges log readable lines again. The bridges accept `bearer` in any case
+  and refuse a token sent without the scheme. Antigravity plan-usage reads run one at a
+  time and are reused for 30 seconds, instead of starting a CLI per refresh. An
+  Antigravity answer whose deltas stop short streams the rest. Output too large to read
+  is reported as such. The `--help` flag check tolerates small format changes.
+  A non-streaming Claude reply names the stop sequence that ended it.
+- **Provider fixes.** claude-web answers that stream longer than 60 seconds are no
+  longer cut off: the timeout now covers only the wait for the first response. A
+  claude-web answer that is a tool call fails with `chat_tools_unsupported`, so a combo
+  moves on, instead of ending as an empty answer. claude-web reads `deflate` answers,
+  releases its zstd decoders, uses the organization the browser marks active, and sends
+  `UTC` when the host has no named timezone. Probing an OpenAI reasoning model no longer
+  marks it as not speaking chat because it refused `max_tokens`. Gemini's per-minute limit
+  reads as `rate_limited`, not `quota_exhausted`. "reasoning_effort is not allowed" is no
+  longer learned as "reasoning required". A query string reaches the claude-web and
+  gemini-web bridges intact. A key test sends an account's custom headers exactly as
+  live requests do. gemini-web's request counter no longer goes negative after about
+  21,000 requests.
+- **Routing and rules fixes.** At start-up, one rule with a timezone that does not
+  resolve no longer leaves every rule off: the valid ones load and the bad one is
+  logged. When every combo hop is skipped and one was refused by a rule, the client
+  gets 429 with when to retry, not 502. `next_allowed` skips days a window does not
+  allow. Accounts without a rate limit no longer take a global lock on every request.
+- **Translation fixes.** A field sent as `null` is treated as left out: SDKs send unset
+  options that way, and `max_tokens`, `temperature` and `top_p` became 0, parallel tool
+  calls turned off, and `tool_choice: null` failed the request. A failed tool result
+  (`is_error`) keeps its failure, as `[tool error]`, instead of reading as empty success.
+  Images reach `responses_models` hops as `input_image` inside a user message. Text after
+  a tool call in a chat stream no longer aborts the answer. A tool-call-only assistant
+  turn sends `content: null`. Image data URIs without `;base64` are read correctly.
+- **Proxy fixes.** Client-address and browser headers (`X-Forwarded-For`, `X-Real-IP`,
+  `Forwarded`, `Cf-Connecting-IP`, `Referer`, `Sec-Fetch-*`) no longer reach providers.
+  An upstream error sent as a stream on a translated hop reaches the client as its own
+  error, not run through the stream translator, and an error after a broken stream
+  starts on its own line. `408`/`425` use the server-error cooldown. Gemini audio over
+  32 MiB is refused instead of cut. Model IDs are escaped in Cloudflare and Gemini URLs,
+  and Cloudflare is recognised by host. A later zero no longer wipes an output token
+  count. When every hop is too small for the request, the error says so instead of
+  "five-minute cooldown".
+- **Store fixes.** Turning an account off in the dashboard (or any partial account
+  `PATCH`) used to wipe its custom headers, token cap, context size, quota mode and cap
+  window; it keeps them now, and a `PATCH` is validated like a new account. A rule's
+  `+08:00` timezone works; it used to drop the rule or count in UTC. Changing a rule's
+  model moves the rule. Passwords over 72 bytes get a clear 400 instead of a 500. A new
+  account never reuses a deleted one's id, and deleting an account clears its usage
+  counters. Negative upstream token counts read as 0. A management key that cannot be
+  decrypted is dropped instead of sent upstream. The web providers drop `developer`
+  messages like `system` ones and refuse images instead of ignoring them.
+- **Admin API fixes.** A rule `PATCH` changes only the fields sent; `{"enabled":false}`
+  used to zero its cap and delete its allowed hours. Renaming a combo renames it instead
+  of creating a second one. A price import with one bad row writes nothing.
+  `count_tokens` now counts against the request limits. A sync body sent without a
+  length is read, and an unknown surface name answers 400.
+- **Start-up checks.** `=false`, `=0` or `=OFF` on `EZLLM_PRICE_REFRESH`,
+  `EZLLM_UPDATE_CHECK` or `EZLLM_COMBO_AUTOPROBE` used to turn the feature on; every
+  on/off switch now takes on/off, true/false or 1/0 in any case, and anything else
+  stops the start. Provider requests honour `HTTPS_PROXY`/`NO_PROXY` and time out
+  connecting and the TLS handshake. A bridge's token now defaults to the data folder,
+  is written whole, and a bridge port already in use stops the start. The Claude
+  bridge stops the start when its CLI does not run or `USER`/`LOGNAME` are missing,
+  and its checks time out. Unknown `config.yaml` keys are logged as warnings, and a
+  bad `listen` port is refused.
 - **Your prices stay yours.** The daily price refresh skips a model you priced by hand
   or by import. It used to write the snapshot's rate over yours. The refresh answer
   counts those models in `kept`.

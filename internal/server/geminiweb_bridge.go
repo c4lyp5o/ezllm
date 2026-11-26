@@ -315,6 +315,11 @@ func (b *geminiWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.R
 			"gemini-web does not support structured output (response_format)")
 		return
 	}
+	if webBridgeHasImage(req.Messages) {
+		writeErr(w, http.StatusBadRequest, "unsupported_feature",
+			"gemini-web does not support image input")
+		return
+	}
 	entry, unlock, err := b.lockClient(r.Context(), acctID, key)
 	if err != nil {
 		writeErr(w, http.StatusUnauthorized, "authentication_error", err.Error())

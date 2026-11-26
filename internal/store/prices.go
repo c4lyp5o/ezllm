@@ -55,15 +55,57 @@ func validPriceDate(s string) (string, bool) {
 // SetPrice upserts one rate row. Negative rates are refused: they would make
 // savings calculators produce fictional positive "savings" out of thin air.
 func (d *DB) SetPrice(ctx context.Context, p Price) error {
+	return d.SetPrices(ctx, []Price{p})
+}
+
+// SetPrices checks every row, then writes them all in one transaction: an
+// import with one bad row writes nothing, instead of the rows before it.
+func (d *DB) SetPrices(ctx context.Context, prices []Price) error {
+	rows := make([]Price, len(prices))
+	for i, p := range prices {
+		n, err := normalizePrice(p)
+		if err != nil {
+			if len(prices) > 1 {
+				return fmt.Errorf("prices[%d]: %w", i, err)
+			}
+			return err
+		}
+		rows[i] = n
+	}
+	// WithWriteTx takes the writer mutex: d.w is a single connection and a
+	// raw ExecContext would race with the ledger's own writes.
+	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		for _, p := range rows {
+			_, err := tx.ExecContext(ctx, `
+INSERT INTO model_prices (account_id, model_id, effective_from, currency,
+  price_in, price_out, price_cache_read, price_cache_write, note, source, fetched_at, updated_at)
+VALUES (?,?,?,?,?,?,?,?,?,?,?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+ON CONFLICT(account_id, model_id, effective_from) DO UPDATE SET
+  currency=excluded.currency, price_in=excluded.price_in, price_out=excluded.price_out,
+  price_cache_read=excluded.price_cache_read, price_cache_write=excluded.price_cache_write,
+  note=excluded.note, source=excluded.source, fetched_at=excluded.fetched_at,
+  updated_at=excluded.updated_at`,
+				p.AccountID, p.ModelID, p.EffectiveFrom, p.Currency,
+				p.PriceIn, p.PriceOut, p.PriceCacheRead, p.PriceCacheWrite, p.Note, p.Source, p.FetchedAt)
+			if err != nil {
+				return fmt.Errorf("store: set price: %w", err)
+			}
+		}
+		return nil
+	})
+}
+
+// normalizePrice validates one rate row and fills its defaults.
+func normalizePrice(p Price) (Price, error) {
 	if p.AccountID == 0 {
-		return fmt.Errorf("store: price needs account_id")
+		return p, fmt.Errorf("store: price needs account_id")
 	}
 	if strings.TrimSpace(p.ModelID) == "" {
-		return fmt.Errorf("store: price needs model_id")
+		return p, fmt.Errorf("store: price needs model_id")
 	}
 	day, ok := validPriceDate(p.EffectiveFrom)
 	if !ok {
-		return fmt.Errorf("store: price effective_from must be YYYY-MM-DD, got %q", p.EffectiveFrom)
+		return p, fmt.Errorf("store: price effective_from must be YYYY-MM-DD, got %q", p.EffectiveFrom)
 	}
 	p.EffectiveFrom = day
 	p.Currency = strings.ToUpper(strings.TrimSpace(p.Currency))
@@ -71,7 +113,7 @@ func (d *DB) SetPrice(ctx context.Context, p Price) error {
 		p.Currency = "USD"
 	}
 	if p.Currency != "USD" {
-		return fmt.Errorf("store: price currency must be USD")
+		return p, fmt.Errorf("store: price currency must be USD")
 	}
 	if p.Source == "" {
 		p.Source = "manual"
@@ -81,28 +123,10 @@ func (d *DB) SetPrice(ctx context.Context, p Price) error {
 	}
 	for name, v := range map[string]float64{"price_in": p.PriceIn, "price_out": p.PriceOut, "price_cache_read": p.PriceCacheRead, "price_cache_write": p.PriceCacheWrite} {
 		if v < 0 {
-			return fmt.Errorf("store: price %s is negative (%v)", name, v)
+			return p, fmt.Errorf("store: price %s is negative (%v)", name, v)
 		}
 	}
-	// WithWriteTx takes the writer mutex: d.w is a single connection and a
-	// raw ExecContext would race with the ledger's own writes.
-	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `
-INSERT INTO model_prices (account_id, model_id, effective_from, currency,
-  price_in, price_out, price_cache_read, price_cache_write, note, source, fetched_at, updated_at)
-VALUES (?,?,?,?,?,?,?,?,?,?,?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-ON CONFLICT(account_id, model_id, effective_from) DO UPDATE SET
-  currency=excluded.currency, price_in=excluded.price_in, price_out=excluded.price_out,
-  price_cache_read=excluded.price_cache_read, price_cache_write=excluded.price_cache_write,
-  note=excluded.note, source=excluded.source, fetched_at=excluded.fetched_at,
-  updated_at=excluded.updated_at`,
-			p.AccountID, p.ModelID, p.EffectiveFrom, p.Currency,
-			p.PriceIn, p.PriceOut, p.PriceCacheRead, p.PriceCacheWrite, p.Note, p.Source, p.FetchedAt)
-		if err != nil {
-			return fmt.Errorf("store: set price: %w", err)
-		}
-		return nil
-	})
+	return p, nil
 }
 
 // ListPrices returns every rate row, newest-effective first per model.

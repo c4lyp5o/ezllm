@@ -147,6 +147,15 @@ func (l *Limiter) Seed(accountID int64, hits []time.Time) {
 
 // Forget drops an account's window. Used when a limit is cleared, and by tests.
 func (l *Limiter) Forget(accountID int64) {
+	// Allow calls this on every request of an account with no limit, which is
+	// most of them: check under the read lock first, so the common case never
+	// takes the global write lock.
+	l.mu.RLock()
+	_, ok := l.acct[accountID]
+	l.mu.RUnlock()
+	if !ok {
+		return
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	delete(l.acct, accountID)
@@ -179,13 +188,17 @@ func (l *Limiter) Snapshot(accountID int64, window time.Duration) (used int64, n
 	defer a.mu.Unlock()
 	cutoff := l.now().Add(-window)
 	n := int64(0)
+	var oldest time.Time
 	for _, h := range a.hits {
 		if h.After(cutoff) {
+			if n == 0 {
+				oldest = h // the oldest hit still in the window, not an expired one
+			}
 			n++
 		}
 	}
 	if n > 0 && window > 0 {
-		nextFree = a.hits[0].Add(window)
+		nextFree = oldest.Add(window)
 	}
 	return n, nextFree
 }

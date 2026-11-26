@@ -4,7 +4,7 @@
 //
 // Returns a close() that stops the reader AND the reconnect loop.
 
-import { normalizeFeedRow, type FeedRow } from "./api";
+import { clearToken, normalizeFeedRow, type FeedRow } from "./api";
 
 export interface CallEvent {
   ts: string;
@@ -76,6 +76,15 @@ export function openCallStream(handlers: Handlers): () => void {
           cache: "no-store",
           signal: abort.signal,
         });
+        if (res.status === 401) {
+          // The session ended: retrying cannot help. Same path as the API
+          // helper — back to the login page.
+          closed = true;
+          clearToken();
+          try { sessionStorage.setItem("ezllm.admin.rejected", "1"); } catch { /* noop */ }
+          window.location.reload();
+          return;
+        }
         if (!res.ok || !res.body) throw new Error(`stream HTTP ${res.status}`);
         attempt = 0; // a good connection resets backoff
 

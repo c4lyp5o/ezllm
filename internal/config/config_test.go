@@ -21,13 +21,12 @@ func writeTemp(t *testing.T, body string) string {
 const validYAML = `
 listen: "127.0.0.1:20129"
 data_dir: ./data
-client_tokens:
 providers:
   demo-main:
     namespace: demo
     kind: opencode-go
     base_url: https://opencode.ai/zen/go/v1
-    keys: [{ env: P1_KEY, label: primary }]
+    keys: [{ label: primary }]
 ledger:
   batch_size: 16
   batch_wait: 100ms

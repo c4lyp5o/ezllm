@@ -131,8 +131,7 @@ func (c *Client) Generate(ctx context.Context, opts GenerateOptions, onDelta fun
 	q := c.queryParams("c")
 	// _reqid: the reference client seeds a random 5-digit value and adds
 	// 100000 per request (first call uses the seed itself).
-	curReqID := atomic.LoadInt32(&c.reqID)
-	atomic.AddInt32(&c.reqID, 100000)
+	curReqID := atomic.AddInt64(&c.reqID, 100000) - 100000
 	q.Set("_reqid", fmt.Sprint(curReqID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+endpointGenerate+"?"+q.Encode(), strings.NewReader(form.Encode()))
 	if err != nil {

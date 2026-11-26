@@ -329,8 +329,10 @@ Returns the `AccountSummary`.
 
 ### `GET|PATCH|DELETE /admin/accounts/{id}`
 `PATCH` accepts any subset of the create fields (namespace change allowed — it re-points routing).
-Absent fields keep their current values — including `usage_convention`; an invalid value is
-`422` naming the field and leaves the stored value untouched.
+Absent fields keep their current values — including `usage_convention`, `custom_headers`,
+`cap_tokens` and `max_context_tokens`; `{}` clears the headers and `0` a number. The merged
+account is checked like a new one: an invalid value is `422` naming the field and leaves the
+stored value untouched.
 `DELETE` → **`409`** when combos reference it, body lists the combos:
 ```jsonc
 {"error":{"type":"conflict","message":"account referenced by 2 combos",
@@ -468,7 +470,7 @@ returns `404` without changing it.
 ### `DELETE /admin/accounts/{id}/keys/{keyId}` → `204`
 
 ### `POST /admin/accounts/{id}/sync` → `200`
-Full catalog + protocol probe (all models, or `{"models":[…],"surfaces":["chat"]}` to scope).
+Full catalog + protocol probe (all models, or `{"models":[…],"surfaces":["chat"]}` to scope). Each surface must be `chat`, `anthropic` or `responses`; another name answers `400`.
 ```jsonc
 { "synced":36, "protocol_tested":36,
   "protocol_support":{"chat":36,"anthropic":12,"responses":5,"untested":0},
@@ -696,10 +698,14 @@ is the request's fault and keeps the hold. The hop's block tag renders pinned at
 `▮ 1/N` while it holds.
 ```
 `strategy` ∈ `failover|true_round_robin|sticky_last_good|least_used|block_round_robin`.
-`POST` upserts by name (idempotent). `hops` replace the whole ordered list (positions = array order).
+`sticky_idle_s` (sticky_last_good only) is how long a quiet combo keeps its last good hop;
+`0` keeps it until that hop fails. A `PATCH` without the field keeps the stored value.
+`POST` upserts by name (idempotent). `PATCH /admin/combos/{id}` updates that combo by id, so a
+new `name` renames it; a name another combo has answers `409`. `hops` replace the whole ordered
+list (positions = array order).
 `PATCH` is a partial update — only the fields you send change, `enabled` included, so the one-field
 toggle is `PATCH /admin/combos/{id}` `{"enabled":false}` (the `?enabled=true|false` query form is
-also accepted). A disabled combo refuses inference with `combo "x" is disabled` and drops out of
+also accepted; any other value answers `400`). A disabled combo refuses inference with `combo "x" is disabled` and drops out of
 `/v1/models`.
 
 `POST /admin/combos/{id}/test` probes every hop with one tiny real request. A body `{"surface":"chat|anthropic","hop":N}`
@@ -721,6 +727,7 @@ response shape is unchanged. `EZLLM_COMBO_AUTOPROBE=off` disables it.
 // POST  → 201 (token plaintext returned EXACTLY ONCE, never again)
 { "name":"my-app","roles":["infer"],"token":"ezllm_…" }   // token optional; generated if absent
 // GET   → [{"id":4,"name":"my-app","hint":"ezllm…a91f","roles":["infer"],"enabled":true,"cap_window":"monthly","cap_tokens":0,"cap_usd":0,"allowed_models":"","expires_at":"","last_used_at":"…"}]
+//         an enabled key with a cap also carries "cap_used" (tokens) and/or "spent_usd" for its current bucket
 // PATCH → {"enabled":false} | {"roles":["infer","admin"]} | {"cap_tokens":100000,"cap_window":"daily"} | {"cap_usd":25} | {"allowed_models":"deepseek/*,openai/gpt-5*"} | {"expires_at":"2026-11-01"}
 ```
 `roles` is a non-empty subset of `infer|metrics|admin`, each a separate permission:
@@ -797,6 +804,10 @@ One rule per `(account_id, model_id)`: a rolling **token cap** and/or an **allow
 - `win_days` — CSV of `0–6` (Sun=0), `""` = every day; `win_tz` — an explicit
   host-resolvable timezone or `instance` (the default for new rules).
 - `enabled`, `note` optional.
+
+`PATCH` changes only the fields you send, by id: a new `account_id` or `model_id` moves the
+rule, and a pair another rule has answers `409`. The window fields move together: sending any of
+`win_start`, `win_end`, `win_days` replaces the whole window, and `""` clears that part.
 
 Enforcement: inside a combo, a hop whose rule says "not now" is **skipped silently** (the next
 hop serves); a direct call returns `429` naming the rule and its window; a combo refused on
@@ -954,6 +965,12 @@ The non-chat surfaces (`/v1/embeddings`, `/v1/images/generations`,
 per-endpoint default models,
 backed by `service_bindings` + `service_probes`. The default applies **only when a
 request omits `model`** — an explicit `model` always wins.
+
+A successful answer whose type is `audio/*`, `video/*`, `image/*` or
+`application/octet-stream` is passed to the client as it arrives, with no size cap:
+speech starts playing before generation ends. If the upstream stops mid-file, the
+client keeps what it received and the ledger records `stream truncated`. JSON answers
+are read whole, up to 32 MiB.
 
 ### `GET /admin/services` → `200` → `{services: [ServiceCard, …]}`
 Always every card in fixed order, including a first run with no providers:

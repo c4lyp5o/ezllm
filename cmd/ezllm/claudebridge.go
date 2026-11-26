@@ -59,12 +59,14 @@ var claudeRequiredFlags = []string{
 // /admin/bridges call. Nil in tests that only exercise the boot checks.
 type bridgeReport func(id, addr, token, updateFile string, info map[string]any, runtime func() map[string]any)
 
-// startClaudeBridge brings up the loopback surface when enabled. Enabling it
-// without a usable CLI or login is a boot failure, not a silent no-op: this
-// process would otherwise look healthy while every subscription request 503s.
-func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeReport) (func(), error) {
-	if !strings.EqualFold(strings.TrimSpace(os.Getenv(envBridge)), "on") {
-		return func() {}, nil
+// startClaudeBridge brings up the loopback surface when enabled. A CLI that is
+// missing or cannot run, or a process without USER/LOGNAME, is a boot failure,
+// not a silent no-op: this process would otherwise look healthy while every
+// subscription request fails. A missing login is not: the operator may sign in
+// after starting, and the start line says login=logged-out.
+func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeReport, dataDir string) (func(), error) {
+	if on, err := bridgeEnabled(envBridge, os.Getenv); err != nil || !on {
+		return func() {}, err
 	}
 	bin := envOrDefault(envBridgeBin, defaultClaudeBin)
 	resolved, err := exec.LookPath(bin)
@@ -80,10 +82,16 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 		return nil, err
 	}
 
-	cliVersion, drift := claudeCLICheck(resolved)
+	cliVersion, drift := claudeCLICheck(ctx, resolved)
+	if cliVersion == "unavailable" {
+		return nil, fmt.Errorf("claude bridge: %s does not run (%s): copy the CLI for this computer again (docs/bridges/claude.md)", resolved, drift)
+	}
 	release := releaseState(bin, claudeVersion(cliVersion), claudeQualifiedVersion)
-	login, plan := claudeLoginCheck(resolved, dir)
-	token, err := bridgeTokenFromFile(strings.TrimSpace(os.Getenv(envBridgeToken)), "claude")
+	login, plan := claudeLoginCheck(ctx, resolved, dir)
+	if login == "misconfigured" {
+		return nil, fmt.Errorf("claude bridge: %s", plan)
+	}
+	token, err := bridgeTokenFromFile(strings.TrimSpace(os.Getenv(envBridgeToken)), dataDir, "claude")
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +110,7 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 		Timeout:       300 * time.Second,
 		MaxConcurrent: concurrency,
 		MaxQueue:      queue,
-		Logf:          log.Info,
+		Logf:          printfLogger(log),
 	}
 	srv := &claudebridge.Server{
 		Runner:  runner,
@@ -119,7 +127,7 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 			"subscription":      plan,
 			"tools":             "client tools pass through; never executed by the bridge (M2)",
 		},
-		Logf:   log.Info,
+		Logf:   printfLogger(log),
 		Limits: &claudebridge.Limits{},
 	}
 
@@ -127,7 +135,10 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 		report("claude-sub", addr, token, bridgeUpdateFile(bin), srv.Info, runner.AdmissionStats)
 	}
 	log.Info("claude bridge listening", "addr", addr, "cli", cliVersion, "release", release, "login", login, "plan", plan, "flags_drift", drift)
-	httpSrv := serveBridge(log, "claude", addr, srv.Handler())
+	httpSrv, err := serveBridge(log, "claude", addr, srv.Handler())
+	if err != nil {
+		return nil, err
+	}
 	return func() { shutdownBridgeHTTP(httpSrv) }, nil
 }
 
@@ -152,17 +163,22 @@ func assertLoopback(addr string) error {
 // and stdin at EOF fails before any network call, with "unknown option" only
 // when the flag is gone. Flag drift is reported, not fatal, at boot: the surface
 // can still serve, and the per-request behaviour is exercised by the live proof.
-func claudeCLICheck(bin string) (version, drift string) {
-	out, err := exec.Command(bin, "--version").CombinedOutput()
+func claudeCLICheck(ctx context.Context, bin string) (version, drift string) {
+	vctx, vcancel := context.WithTimeout(ctx, claudeCheckTimeout)
+	out, err := exec.CommandContext(vctx, bin, "--version").CombinedOutput()
+	vcancel()
 	if err != nil {
 		return "unavailable", "cannot run --version"
 	}
 	version = strings.TrimSpace(string(out))
 	var missing []string
 	for _, f := range claudeRequiredFlags {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		out, err := exec.CommandContext(ctx, bin, "-p", f).CombinedOutput()
-		timedOut := ctx.Err() != nil
+		if ctx.Err() != nil {
+			return version, "start cancelled"
+		}
+		fctx, cancel := context.WithTimeout(ctx, claudeCheckTimeout)
+		out, err := exec.CommandContext(fctx, bin, "-p", f).CombinedOutput()
+		timedOut := fctx.Err() != nil
 		cancel()
 		if err == nil || timedOut || strings.Contains(string(out), "unknown option '"+f+"'") {
 			missing = append(missing, f)
@@ -178,14 +194,18 @@ func claudeCLICheck(bin string) (version, drift string) {
 // "logged out" instantly (no upstream call) when its process identity is wrong,
 // so USER and LOGNAME must exist — checked here so a container misconfig fails
 // the boot instead of every request.
-func claudeLoginCheck(bin, dir string) (state, plan string) {
-	return claudeLoginCheckOn(runtime.GOOS, bin, dir)
+func claudeLoginCheck(ctx context.Context, bin, dir string) (state, plan string) {
+	return claudeLoginCheckOn(ctx, runtime.GOOS, bin, dir)
 }
+
+// claudeCheckTimeout bounds each CLI run during the start checks, and the
+// start's own context cancels them: a stuck CLI cannot hold the start forever.
+const claudeCheckTimeout = 20 * time.Second
 
 // claudeLoginCheckOn: on macOS the CLI keeps its login in the Keychain, so there
 // is no file to look for and the CLI's own answer decides. It exits non-zero
 // when it is logged out.
-func claudeLoginCheckOn(goos, bin, dir string) (state, plan string) {
+func claudeLoginCheckOn(ctx context.Context, goos, bin, dir string) (state, plan string) {
 	if os.Getenv("USER") == "" || os.Getenv("LOGNAME") == "" {
 		return "misconfigured", "USER and LOGNAME must be set (the CLI's login check reads process identity)"
 	}
@@ -193,7 +213,9 @@ func claudeLoginCheckOn(goos, bin, dir string) (state, plan string) {
 	if _, err := os.Stat(filepath.Join(dir, ".credentials.json")); err != nil && !mac {
 		return "logged-out", "no subscription login in " + dir
 	}
-	cmd := exec.Command(bin, "auth", "status")
+	actx, cancel := context.WithTimeout(ctx, claudeCheckTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(actx, bin, "auth", "status")
 	cmd.Env = append(os.Environ(), "CLAUDE_CONFIG_DIR="+dir)
 	out, err := cmd.CombinedOutput()
 	if err != nil && !(mac && strings.Contains(strings.ToLower(string(out)), `"loggedin": false`)) {

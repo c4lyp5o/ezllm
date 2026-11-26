@@ -129,12 +129,26 @@ func ClassifyProbeResult(status int, body string) (v ProbeVerdict, authFailure b
 	case status == http.StatusBadRequest || status == http.StatusUnprocessableEntity:
 		// A rejected request option says nothing about wire support, even when
 		// its message contains the otherwise useful "not supported" hint.
+		// OpenAI's reasoning models answer the probe's max_tokens with
+		// "Unsupported parameter: 'max_tokens' is not supported with this
+		// model" (code unsupported_parameter, param max_tokens): a refused
+		// option, not a missing wire. An error that names a parameter is
+		// about the request.
 		var envelope struct {
 			Error struct {
-				Code string `json:"code"`
+				Code  any    `json:"code"`
+				Param string `json:"param"`
 			} `json:"error"`
 		}
-		if json.Unmarshal([]byte(body), &envelope) == nil && envelope.Error.Code == "chat_parameter_unsupported" {
+		if json.Unmarshal([]byte(body), &envelope) == nil {
+			code, _ := envelope.Error.Code.(string)
+			switch {
+			case code == "chat_parameter_unsupported", code == "unsupported_parameter", code == "unsupported_value",
+				envelope.Error.Param != "":
+				return VerdictUnknown, false
+			}
+		}
+		if strings.Contains(strings.ToLower(body), "unsupported parameter") {
 			return VerdictUnknown, false
 		}
 		if bodyHasProtocolHint(body) {

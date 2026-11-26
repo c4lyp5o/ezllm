@@ -288,6 +288,16 @@ func ConversationSessionID(system string, req Request) string {
 	if len(req.Messages) > 0 {
 		var content any
 		_ = json.Unmarshal(req.Messages[0].Content, &content)
+		// Clients move their cache_control breakpoint to the newest message
+		// each turn, so the first message carries it on turn 1 only. It is
+		// not part of the conversation and must not change the id.
+		if blocks, ok := content.([]any); ok {
+			for _, b := range blocks {
+				if m, ok := b.(map[string]any); ok {
+					delete(m, "cache_control")
+				}
+			}
+		}
 		first = map[string]any{"role": req.Messages[0].Role, "content": content}
 	}
 	payload, _ := json.Marshal([]any{system, first})

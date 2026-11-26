@@ -130,16 +130,9 @@ func copilotLiveModels(bin string) ([]string, error) {
 	return parseHelpConfigModels(string(out)), nil
 }
 
-// printfLogger adapts a slog logger to the bridge's printf-style Logf. Passing
-// log.Info directly treats the format string as the message and every argument
-// as a key, which logged "session=%s ... !BADKEY=..." for every turn.
-func printfLogger(log *slog.Logger) func(string, ...any) {
-	return func(format string, args ...any) { log.Info(fmt.Sprintf(format, args...)) }
-}
-
-func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeReport) (func(), error) {
-	if !strings.EqualFold(strings.TrimSpace(os.Getenv(envCopilotBridge)), "on") {
-		return func() {}, nil
+func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeReport, dataDir string) (func(), error) {
+	if on, err := bridgeEnabled(envCopilotBridge, os.Getenv); err != nil || !on {
+		return func() {}, err
 	}
 	bin := envOrDefault(envCopilotBin, defaultCopilotBin)
 	resolved, err := exec.LookPath(bin)
@@ -174,7 +167,7 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 	}
 	cliVersion := copilotbridge.CLIVersion(resolved)
 	release := releaseState(bin, cliVersion, copilotQualifiedVersion)
-	token, err := bridgeTokenFromFile(strings.TrimSpace(os.Getenv(envCopilotBridgeToken)), "copilot")
+	token, err := bridgeTokenFromFile(strings.TrimSpace(os.Getenv(envCopilotBridgeToken)), dataDir, "copilot")
 	if err != nil {
 		return nil, err
 	}
@@ -242,7 +235,11 @@ func startCopilotBridge(ctx context.Context, log *slog.Logger, report bridgeRepo
 		report("copilot-sub", addr, token, bridgeUpdateFile(bin), info, runner.Stats)
 	}
 	log.Info("copilot bridge listening", "addr", addr, "cli", cliVersion, "release", release, "home", home)
-	httpSrv := serveBridge(log, "copilot", addr, srv.Handler())
+	httpSrv, err := serveBridge(log, "copilot", addr, srv.Handler())
+	if err != nil {
+		runner.Close()
+		return nil, err
+	}
 	return func() { shutdownBridgeHTTP(httpSrv); runner.Close() }, nil
 }
 

@@ -10,6 +10,9 @@ import type { TokenInfo } from './tokens';
  *  bare `*` is special-cased by the server and allows everything. */
 export function globMatch(pattern: string, name: string): boolean {
   if (pattern === '*' || pattern === name) return true;
+  // Same rule as the server (ClientAllowsModel): a trailing * is a prefix, so
+  // `openrouter/*` also covers `openrouter/google/gemini` across the slash.
+  if (pattern.endsWith('*') && name.startsWith(pattern.slice(0, -1))) return true;
   let re = '^';
   for (let i = 0; i < pattern.length; i++) {
     const c = pattern[i];
@@ -59,6 +62,7 @@ export function keyState(t: TokenInfo, used: number, now = Date.now()): KeyState
   const exp = expiryTime(t);
   if (exp != null && exp < now) return { key: 'expired', label: 'Expired', tone: 'bad', attention: true };
   if (t.cap_tokens > 0 && used >= t.cap_tokens) return { key: 'spent', label: 'Budget spent', tone: 'bad', attention: true };
+  if (t.cap_usd > 0 && (t.spent_usd ?? 0) >= t.cap_usd) return { key: 'spent', label: 'Spend cap reached', tone: 'bad', attention: true };
   if (exp != null) {
     const d = daysLeft(exp, now);
     if (d <= 7) return { key: 'expiring', label: d <= 1 ? 'Expires today' : `Expires in ${d} days`, tone: 'warn', attention: true };

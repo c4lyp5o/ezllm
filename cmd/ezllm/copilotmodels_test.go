@@ -89,7 +89,7 @@ func TestCopilotLiveModelsReportsLaunchFailure(t *testing.T) {
 func TestMissingBridgeCLINamesTheFix(t *testing.T) {
 	for _, tc := range []struct {
 		name, sw, bin string
-		start         func(context.Context, *slog.Logger, bridgeReport) (func(), error)
+		start         func(context.Context, *slog.Logger, bridgeReport, string) (func(), error)
 	}{
 		{"claude", envBridge, envBridgeBin, startClaudeBridge},
 		{"codex", envCodexBridge, envCodexBin, startCodexBridge},
@@ -99,7 +99,7 @@ func TestMissingBridgeCLINamesTheFix(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv(tc.sw, "on")
 			t.Setenv(tc.bin, filepath.Join(t.TempDir(), "current", tc.name))
-			_, err := tc.start(t.Context(), slog.Default(), nil)
+			_, err := tc.start(t.Context(), slog.Default(), nil, t.TempDir())
 			if !errors.Is(err, fs.ErrNotExist) {
 				t.Fatalf("want the missing file as the cause, got %v", err)
 			}

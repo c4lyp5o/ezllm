@@ -12,6 +12,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 )
 
 // The channel: `copilot --headless --stdio`, the JSON-RPC server the CLI's own
@@ -424,7 +427,11 @@ func classifySession(ev cliEvent) error {
 
 func clipDetail(s string) string {
 	if len(s) > maxErrorDetail {
-		return s[:maxErrorDetail] + "..."
+		n := maxErrorDetail
+		for n > 0 && !utf8.RuneStart(s[n]) {
+			n--
+		}
+		return s[:n] + "..."
 	}
 	return s
 }
@@ -713,6 +720,9 @@ func (r *Runner) withChannel(ctx context.Context, f func(*rpcConn) error) error 
 	cmd.Dir = os.TempDir() // no repository context: this is a completion call
 	cmd.Env = childEnv(os.Environ(), r.Home)
 	cmd.WaitDelay = 5 * time.Second
+	// Its own process group, killed whole: anything the CLI starts goes too.
+	bridgeutil.SetProcessGroup(cmd)
+	cmd.Cancel = func() error { bridgeutil.KillGroup(cmd); return nil }
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("copilot-bridge: stdin: %w", err)

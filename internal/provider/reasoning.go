@@ -151,7 +151,9 @@ var (
 	// any quoted word list, used on the expected-one-of tail. The quotes may
 	// arrive escaped (\"off\") when the refusal is read back out of a JSON
 	// body or a ledger row, so the backslash is optional on both sides.
-	reQuoted = regexp.MustCompile(`\\?"([a-zA-Z][a-zA-Z_-]{1,12})\\?"`)
+	// reOffNotAllowed: "reasoning effort none is not allowed", "'off' is not allowed".
+	reOffNotAllowed = regexp.MustCompile(`(?:reasoning|thinking|effort)[^.]*\b(?:none|off|disabled)\b['"\\]*\s+is not allowed`)
+	reQuoted        = regexp.MustCompile(`\\?"([a-zA-Z][a-zA-Z_-]{1,12})\\?"`)
 )
 
 // maxVocabulary bounds a parsed list. A provider naming more than this is not
@@ -199,7 +201,10 @@ func ParseReasoningRule(status int, body []byte) ReasoningRule {
 		strings.Contains(lower, "can turn thinking off"),
 		strings.Contains(lower, "reasoning is required"):
 		r.Required = true
-	case strings.Contains(lower, "is not allowed") && containsEffortWord(lower):
+	case reOffNotAllowed.MatchString(lower):
+		// Only a refusal of a level that turns reasoning OFF says reasoning is
+		// required. "reasoning_effort is not allowed for this model" says the
+		// opposite: the model takes no reasoning at all.
 		r.Required = true
 	}
 
@@ -229,15 +234,6 @@ func rankedCount(vs []string) int {
 		}
 	}
 	return n
-}
-
-func containsEffortWord(lower string) bool {
-	for _, w := range []string{"reasoning", "thinking", "effort"} {
-		if strings.Contains(lower, w) {
-			return true
-		}
-	}
-	return false
 }
 
 // splitVocab parses "minimal, low, medium" (and tolerates quotes/spaces).

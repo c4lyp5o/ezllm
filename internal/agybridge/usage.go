@@ -19,6 +19,10 @@ import (
 
 const usageTimeout = 45 * time.Second
 
+// usageFresh is how long a plan-usage reading is reused. Each read starts a
+// whole CLI process, so repeated quota refreshes share one.
+const usageFresh = 30 * time.Second
+
 // PlanBucket is one plan limit as the CLI reports it: a group of models that
 // share a limit, and how much of it is used.
 type PlanBucket struct {
@@ -55,7 +59,27 @@ func SupportsPlanUsage(version string) bool {
 
 // PlanUsage reads the plan limits with `agy -p /usage`. It starts the CLI once
 // and runs no turn: the reply must say it answered the usage command.
+//
+// Reads run one at a time and a success is reused for usageFresh: without
+// that, every quota refresh started its own CLI process (about 200 MB each)
+// next to the turns in flight.
 func (r *Runner) PlanUsage(ctx context.Context) ([]PlanBucket, error) {
+	r.usageMu.Lock()
+	defer r.usageMu.Unlock()
+	if r.usageLast != nil && time.Since(r.usageAt) < usageFresh {
+		return slices.Clone(r.usageLast), nil
+	}
+	out, err := r.readPlanUsage(ctx)
+	if err == nil {
+		r.usageLast, r.usageAt = slices.Clone(out), time.Now()
+		if r.usageLast == nil {
+			r.usageLast = []PlanBucket{}
+		}
+	}
+	return out, err
+}
+
+func (r *Runner) readPlanUsage(ctx context.Context) ([]PlanBucket, error) {
 	ctx, cancel := context.WithTimeout(ctx, usageTimeout)
 	defer cancel()
 	work, err := os.MkdirTemp("", "agy-bridge-")

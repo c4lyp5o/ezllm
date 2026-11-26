@@ -243,7 +243,7 @@ function ProfileModal({ target, profiles, onClose, onSaved }: {
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className={labelCls} htmlFor="cp-ratio">Keep a rewrite only if it saves at least (%)</label>
-              <input id="cp-ratio" type="number" min={5} max={95} step={1} className={cx(inputCls, '!w-28 font-mono tabular-nums', errors.ratio && 'border-bad/60')}
+              <input id="cp-ratio" type="number" min={0} max={95} step={1} className={cx(inputCls, '!w-28 font-mono tabular-nums', errors.ratio && 'border-bad/60')}
                 value={Math.round(d.min_compress_ratio * 100)} onChange={(e) => update('min_compress_ratio', (Number(e.target.value) || 0) / 100)} />
               {errors.ratio ? <p className="mt-1 text-[12px] text-bad">{errors.ratio}</p>
                 : <p className="mt-1 text-[12px] text-mute">If savings are below this threshold, ezllm sends the original request.</p>}
@@ -466,7 +466,7 @@ export default function Compression() {
   const showHitRate = declinedCalls > 0;
   const showHeld = heldNotional > 0;
   const hasSavings = rewritten > 0 || showHeld;
-  const rows = ((by === 'provider' ? byAccount : byCombo) ?? []).filter((r) => r.saved > 0 && r.k !== '(direct)');
+  const rows = ((by === 'provider' ? byAccount : byCombo) ?? []).filter((r) => (r.applied_saved ?? 0) > 0 && r.k !== '(direct)');
   const delta = priorSaved != null ? deltaNote(rewritten, priorSaved, rangeWords(range)) : undefined;
 
   const total = profiles?.length ?? 0;
@@ -638,8 +638,8 @@ export default function Compression() {
             </div>
             <BarList
               rows={rows.map((r) => ({
-                key: r.k, value: r.saved, color: VIZ.saved,
-                hint: `${nfmt(r.calls)} calls · ${formatTokens(r.saved)} rewritten`,
+                key: r.k, value: r.applied_saved ?? 0, color: VIZ.saved,
+                hint: `${nfmt(r.calls)} calls · ${formatTokens(r.applied_saved ?? 0)} rewritten`,
                 to: by === 'combo' ? `/requests?${new URLSearchParams({ alias: r.k, range })}` : undefined,
               }))}
               emptyLabel={`No savings recorded in the last ${rangeWords(range)}.`} />

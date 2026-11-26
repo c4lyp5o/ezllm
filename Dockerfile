@@ -36,7 +36,8 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -trimpath \
 # Confirm the binary really is static — a non-static build silently reintroduces
 # a libc dependency that distroless would then break at runtime.
 RUN apk add --no-cache file >/dev/null 2>&1 \
- && file /out/ezllm | grep -q "statically linked" \
+   || { echo "FATAL: could not install 'file' to check the binary (apk failed)"; exit 1; }; \
+ file /out/ezllm | grep -q "statically linked" \
  && echo "OK: statically linked -> distroless-safe" \
  || { echo "FATAL: binary is not static; distroless runtime will fail"; exit 1; }
 

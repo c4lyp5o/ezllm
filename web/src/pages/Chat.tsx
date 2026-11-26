@@ -19,7 +19,9 @@ import {
   EMPTY_PARAMS, clearSession, loadPresets, loadSession, newColumn, newId, parseParams, saveSession,
   savePresets, toJSON, toMarkdown, toMessage,
   type Column, type Params, type Preset, type Turn, type TurnMeta,
+  fenceFor, looksBinary,
 } from '../utils/chatlog';
+import { routableModels } from '../utils/tokens';
 import { fmtDuration, fmtMs, nfmt } from '../utils/lib';
 import { Markdown } from '../components/markdown';
 import { DUR, spring } from '../components/motion';
@@ -360,6 +362,14 @@ export default function Chat() {
           ...m, id: `${accounts[index].namespace}/${m.id}`,
           display: `${accounts[index].namespace} / ${m.display ?? m.id}`,
         })));
+        // Combos route too: list them first, from the same routable list
+        // clients see. A combo id has no namespace (no "/"). Best effort: the
+        // provider models still work when this read fails.
+        try {
+          const combos = (await routableModels()).filter(m => !m.id.includes('/'));
+          if (!live) return;
+          flat.unshift(...combos.map(m => ({ id: m.id, display: `combo / ${m.id}` })));
+        } catch { /* provider models only */ }
         const failed = accounts.filter((_, index) => results[index] === null);
         if (failed.length) setCatalogError(`Could not load models for ${failed.map(a => a.name).join(', ')}.${failed.length < accounts.length ? ' Other providers still work.' : ''}`);
         setCatalog(flat);
@@ -418,9 +428,16 @@ export default function Chat() {
         continue;
       }
       try {
-        next.push(IMAGE_TYPES.test(f.type)
-          ? { name: f.name, size: f.size, dataUrl: await readAsDataURL(f) }
-          : { name: f.name, size: f.size, text: await readAsText(f) });
+        if (IMAGE_TYPES.test(f.type)) {
+          next.push({ name: f.name, size: f.size, dataUrl: await readAsDataURL(f) });
+        } else {
+          const text = await readAsText(f);
+          if (looksBinary(text)) {
+            setError(`${f.name} isn't a text file. Attach text files or images.`);
+            continue;
+          }
+          next.push({ name: f.name, size: f.size, text });
+        }
         total += f.size;
       } catch {
         setError(`could not read ${f.name}`);
@@ -435,7 +452,10 @@ export default function Chat() {
     let textPart = text;
     for (const p of pending) {
       if (p.dataUrl) parts.push({ type: 'image_url', image_url: { url: p.dataUrl } });
-      else if (p.text != null) textPart += `\n\n--- ${p.name} ---\n\`\`\`\n${p.text}\n\`\`\`\n`;
+      else if (p.text != null) {
+        const fence = fenceFor(p.text);
+        textPart += `\n\n--- ${p.name} ---\n${fence}\n${p.text}\n${fence}\n`;
+      }
     }
     if (textPart.trim()) parts.unshift({ type: 'text', text: textPart.trim() });
     return parts.length === 1 && parts[0].type === 'text' ? parts[0].text : parts;

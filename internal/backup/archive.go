@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"filippo.io/age"
@@ -335,8 +336,17 @@ func syncDir(path string) error {
 		return err
 	}
 	defer f.Close()
-	return f.Sync()
+	// Some filesystems (NFS, SMB, FUSE, VirtioFS) cannot flush a directory and
+	// say so with EINVAL or ENOTSUP. The rename has already published the
+	// file, and the file itself was synced, so that is not a failed backup.
+	if err := fsyncDir(f); err != nil && !errors.Is(err, syscall.EINVAL) && !errors.Is(err, syscall.ENOTSUP) && !errors.Is(err, errors.ErrUnsupported) {
+		return err
+	}
+	return nil
 }
+
+// fsyncDir is replaced in tests to simulate a filesystem without directory sync.
+var fsyncDir = func(f *os.File) error { return f.Sync() }
 
 func sqliteURI(path string) string {
 	path = filepath.ToSlash(path)

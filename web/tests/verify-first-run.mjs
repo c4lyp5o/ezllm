@@ -109,6 +109,7 @@ try {
 
   await page.getByRole('button', { name: 'Create key' }).click();
   await page.getByRole('heading', { name: 'Send a test request' }).waitFor();
+  await page.locator('code', { hasText: APP_KEY }).first().waitFor();
   check('the new key is shown once, with a warning', await page.locator('code', { hasText: APP_KEY }).count() === 1 && await page.getByText('It is shown only once.', { exact: false }).count() === 1);
   await page.waitForFunction(() => document.querySelector('#start-model')?.value === 'openai/gpt-6-luna');
   check('the test model comes from the new provider', true);

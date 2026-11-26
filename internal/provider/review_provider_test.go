@@ -82,4 +82,3 @@ func TestTagQuotaRawKeepsUTF8(t *testing.T) {
 		t.Fatalf("raw = %q, split a rune", q.Raw)
 	}
 }
-

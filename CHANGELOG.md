@@ -15,6 +15,13 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   A temporary failure after the switch is tested once more before it is undone.
 - **Antigravity plan limits.** The provider card and Quota dialog show how much of each
   weekly limit is used, per group of models, read with `agy -p /usage` (no quota spent).
+- **Faster compression and uploads.** Caveman's span protection skips patterns whose
+  characters are absent: 4.3 times faster on plain prose (10.6 to 2.45 ms on 18 KB).
+  Sizing the conversation between stages no longer builds a JSON copy each time, and
+  the session memo hashes each message once instead of three times: a four-stage run
+  on a 360 KB conversation is 14% faster and allocates 27% less. Swapping the model in
+  a 25 MiB multipart upload uses 32 MB instead of 87 MB. The database refreshes its
+  query statistics when ezllm stops.
 - **Codex and Copilot bridge fixes.** The Copilot bridge starts its CLI in its own
   process group and ends the whole group, so nothing the CLI started outlives a
   cancelled turn or a stopped worker. Codex's `--help` check matches whole flags, so

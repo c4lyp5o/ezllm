@@ -1000,6 +1000,7 @@ func swapModelMultipart(body []byte, newModel string) ([]byte, error) {
 	// Use mime/multipart to read the parts, then rebuild with the model swapped.
 	mr := multipart.NewReader(bytes.NewReader(body), boundary)
 	var out bytes.Buffer
+	out.Grow(len(body) + len(newModel) + 256) // one allocation for the rebuilt body
 	mw := multipart.NewWriter(&out)
 	if err := mw.SetBoundary(boundary); err != nil {
 		return nil, fmt.Errorf("proxy: multipart boundary: %w", err)
@@ -1013,24 +1014,23 @@ func swapModelMultipart(body []byte, newModel string) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("proxy: read multipart part: %w", err)
 		}
-		value, err := io.ReadAll(part)
-		if err != nil {
-			return nil, fmt.Errorf("proxy: read multipart part body: %w", err)
-		}
-		fieldName := part.FormName()
-		// Swap the model field; pass everything else through untouched.
-		if fieldName == "model" {
-			value = []byte(newModel)
-			swapped = true
-		}
 		// Preserve the original part header (filename, content-type).
 		h := textproto.MIMEHeader(part.Header)
 		w, err := mw.CreatePart(h)
 		if err != nil {
 			return nil, fmt.Errorf("proxy: create multipart part: %w", err)
 		}
-		if _, err := w.Write(value); err != nil {
-			return nil, fmt.Errorf("proxy: write multipart part: %w", err)
+		// Swap the model field; copy everything else straight through, so a
+		// large upload is not held a second time as a separate part buffer.
+		if part.FormName() == "model" {
+			swapped = true
+			if _, err := io.WriteString(w, newModel); err != nil {
+				return nil, fmt.Errorf("proxy: write multipart part: %w", err)
+			}
+			continue
+		}
+		if _, err := io.Copy(w, part); err != nil {
+			return nil, fmt.Errorf("proxy: read multipart part body: %w", err)
 		}
 	}
 	if !swapped {

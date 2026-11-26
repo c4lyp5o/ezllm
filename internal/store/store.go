@@ -1225,6 +1225,12 @@ func (d *DB) Close() error {
 }
 
 func (d *DB) closeConns() error {
+	// SQLite's advice for long-lived connections: refresh the planner's
+	// statistics for tables whose queries this session ran, before closing.
+	// Bounded, and best effort: a slow or failed optimize never blocks Close.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	_, _ = d.w.ExecContext(ctx, "PRAGMA optimize")
+	cancel()
 	e1 := d.w.Close()
 	e2 := d.r.Close()
 	return errors.Join(e1, e2)

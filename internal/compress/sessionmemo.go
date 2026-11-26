@@ -325,8 +325,12 @@ func (m *SessionMemo) GetAt(session, profile string, msg any, ord int) (shipped 
 	if m == nil || session == "" || profile == "" {
 		return nil, false
 	}
-	h := messageHash(msg)
-	if h == "" {
+	return m.getHashed(session, profile, messageHash(msg), ord)
+}
+
+// getHashed is GetAt for a message whose messageHash is already known.
+func (m *SessionMemo) getHashed(session, profile, h string, ord int) (shipped any, ok bool) {
+	if m == nil || session == "" || profile == "" || h == "" {
 		return nil, false
 	}
 	key := memoKey(session, profile, h, ord)
@@ -355,8 +359,12 @@ func (m *SessionMemo) PutAt(session, profile string, msg any, ord int, shipped a
 	if m == nil || session == "" || profile == "" || shipped == nil {
 		return
 	}
-	h := messageHash(msg)
-	if h == "" {
+	m.putHashed(session, profile, messageHash(msg), ord, shipped)
+}
+
+// putHashed is PutAt for a message whose messageHash is already known.
+func (m *SessionMemo) putHashed(session, profile, h string, ord int, shipped any) {
+	if m == nil || session == "" || profile == "" || shipped == nil || h == "" {
 		return
 	}
 	key := memoKey(session, profile, h, ord)

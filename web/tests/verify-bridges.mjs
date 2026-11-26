@@ -76,7 +76,8 @@ await page.getByText("Bridge running at").waitFor();
 check("running bridge shows its boot facts", (await page.locator("text=2.1.306 (Claude Code)").count()) === 1);
 check("key field hidden for a bridge", !(await page.locator("#ap-key").isVisible()));
 await openAdvanced(page, "add-provider");
-check("name and provider ID prefilled", (await page.inputValue("#ap-name")) === "Claude Pro/Max" && (await page.inputValue("#ap-ns")) === "claude-sub");
+const prefilled = { name: await page.inputValue("#ap-name"), id: await page.inputValue("#ap-ns") };
+check("name and provider ID prefilled", prefilled.name === "Claude Pro/Max" && prefilled.id === "claude-sub", prefilled);
 // The bridge supplies the key, but a live balance read needs the operator's
 // claude.ai cookie — the field has to exist and reach management_key, which is
 // what internal/provider/claudesub_quota.go reads.

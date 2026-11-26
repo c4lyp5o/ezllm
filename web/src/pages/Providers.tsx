@@ -669,8 +669,10 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
     listBridges().then(setBridges).catch(() => setBridges([]));
   }, [open]);
 
+  // Reset on close, not on open: a reset that runs after the dialog shows can
+  // land after the first choice and wipe it (a bridge's prefilled name).
   useEffect(() => {
-    if (open) {
+    if (!open) {
       setD(emptyDraft); setBusy(false); setResult(null); setLiveSteps(null); setErr(null);
     }
   }, [open]);

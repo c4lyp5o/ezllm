@@ -13,6 +13,8 @@ import {
 } from '../utils/api';
 import { CauseChip, CopyButton, SectionLabel, Segmented, btn, cx, inputCls, labelCls } from '../components/ui';
 import { Stagger, StaggerItem } from '../components/motion';
+import { ExportButtons } from '../components/ExportButtons';
+import type { Column } from '../utils/export';
 
 const RANGES: RangeKey[] = ['24h', '7d', '30d', '365d'];
 const SORTS: { key: RequestSort; label: string }[] = [
@@ -103,6 +105,16 @@ function RowDetail({ r }: { r: FeedRow }) {
     </div>
   );
 }
+
+// Export columns: the ledger's own names, so a file reads like the API.
+const REQUEST_COLUMNS: Column<FeedRow>[] = [
+  { key: 'ts', get: (r) => r.ts }, { key: 'client', get: (r) => r.client }, { key: 'surface', get: (r) => r.surface },
+  { key: 'alias', get: (r) => r.alias }, { key: 'account', get: (r) => r.account }, { key: 'model', get: (r) => r.model },
+  { key: 'status', get: (r) => r.status }, { key: 'stream', get: (r) => r.stream }, { key: 'ttft_ms', get: (r) => r.ttft_ms },
+  { key: 'total_ms', get: (r) => r.total_ms }, { key: 'tokens_in', get: (r) => r.tin }, { key: 'tokens_out', get: (r) => r.tout },
+  { key: 'cached_read', get: (r) => r.cread }, { key: 'cached_write', get: (r) => r.cwrite }, { key: 'reasoning', get: (r) => r.reasoning },
+  { key: 'tokens_saved', get: (r) => r.saved }, { key: 'translated', get: (r) => r.translated }, { key: 'error', get: (r) => r.error },
+];
 
 export default function Requests() {
   // Every filter lives in the URL, so a view survives a refresh and can be
@@ -278,6 +290,7 @@ export default function Requests() {
               onChange={(e) => patch({ hide_empty: e.target.checked ? '1' : undefined })} />
             Hide zero-token steps
           </label>
+          <span className="ml-auto"><ExportButtons what="requests" rows={rows} cols={REQUEST_COLUMNS} note={`the ${rows.length} rows shown`} /></span>
         </div>
       </form>
 

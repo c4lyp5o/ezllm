@@ -18,9 +18,11 @@ try {
     export { looksBinary, fenceFor } from ${JSON.stringify(join(src, 'utils/chatlog.ts'))};
     export { effectiveText } from ${JSON.stringify(join(src, 'utils/settings.ts'))};
     export { parkedFor, secondsLeft } from ${JSON.stringify(join(src, 'utils/cooldowns.ts'))};
+    export { csvField, toCSV } from ${JSON.stringify(join(src, 'utils/export.ts'))};
+    export { filterPalette, PALETTE_ITEMS } from ${JSON.stringify(join(src, 'components/CommandPalette.tsx'))};
   `);
   const out = join(dir, 'bundle.mjs');
-  await build({ entryPoints: [entry], bundle: true, format: 'esm', platform: 'node', outfile: out, logLevel: 'error' });
+  await build({ entryPoints: [entry], bundle: true, format: 'esm', platform: 'node', outfile: out, logLevel: 'error', jsx: 'automatic' });
   globalThis.window = { location: { href: 'http://localhost/' } };
   const m = await import(pathToFileURL(out).href);
 
@@ -71,5 +73,19 @@ try {
   assert.equal(m.secondsLeft({ until: new Date(Date.now() + 30_500).toISOString() }), 31);
   assert.equal(m.secondsLeft({ until: new Date(Date.now() - 5_000).toISOString() }), 0);
 
-  console.log('Dashboard logic: links, globs, key state, buildings, attachments, settings text and countdowns hold.');
+  // CSV: quoting, and no formula injection from upstream text.
+  assert.equal(m.csvField('plain'), 'plain');
+  assert.equal(m.csvField('a,b'), '"a,b"');
+  assert.equal(m.csvField('say "hi"'), '"say ""hi"""');
+  assert.equal(m.csvField('=HYPERLINK("x")'), `"'=HYPERLINK(""x"")"`);
+  assert.equal(m.csvField(-5), '-5', 'a negative number is not a formula');
+  assert.equal(m.csvField(null), '');
+  assert.equal(m.toCSV([{ a: 1, b: 'x\ny' }], [{ key: 'a', get: (r) => r.a }, { key: 'b', get: (r) => r.b }]), 'a,b\r\n1,"x\ny"\r\n');
+
+  // Palette: every word must match, in label or hint.
+  assert.deepEqual(m.filterPalette(m.PALETTE_ITEMS, 'new combo').map((i) => i.to), ['/combos?new=1']);
+  assert.ok(m.filterPalette(m.PALETTE_ITEMS, 'cooldowns').some((i) => i.to === '/settings?tab=gateway'));
+  assert.equal(m.filterPalette(m.PALETTE_ITEMS, '').length, m.PALETTE_ITEMS.length);
+
+  console.log('Dashboard logic: links, globs, key state, buildings, attachments, settings text, countdowns, CSV and the palette hold.');
 } finally { await rm(dir, { recursive: true, force: true }); }

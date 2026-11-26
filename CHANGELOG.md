@@ -4,6 +4,9 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## Unreleased
 
+- **Export to CSV or JSON.** Requests downloads the rows it shows, and Token Economics
+  its spend by day, provider and model. Text that could run as a spreadsheet formula is
+  neutralised.
 - **Quick jump.** Ctrl+K (⌘K on a Mac), or **Jump to…** in the sidebar, opens a palette
   of every page, the Settings tabs and the common "new …" actions. Type to filter,
   Enter to go. `/providers?add=1` opens Add provider.

@@ -95,6 +95,26 @@ try {
   await page.waitForTimeout(400);
   check('turning off a rule group is one batch request', batches.length === 1 && batches[0].upsert?.length === 3 && batches[0].upsert.every((r) => r.enabled === false) && singles.length === 0, { batches, singles });
 
+  // Ctrl+K opens the palette; typing filters; Enter goes.
+  await page.goto(`${t.base}/`);
+  await page.keyboard.press('Control+k');
+  const jump = page.getByRole('combobox', { name: 'Jump to a page or action' });
+  await jump.waitFor();
+  await jump.fill('new combo');
+  if (shots) await page.screenshot({ path: `${shots}/palette.png`, fullPage: false });
+  await page.keyboard.press('Enter');
+  await page.waitForURL(/\/combos/);
+  check('the palette jumps to New combo', new URL(page.url()).pathname === '/combos');
+
+  // Requests downloads the rows it shows.
+  await page.goto(`${t.base}/requests`);
+  await page.getByRole('button', { name: 'CSV' }).waitFor();
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'CSV' }).click()]);
+  const path = await dl.path();
+  const { readFile } = await import('node:fs/promises');
+  const csv = await readFile(path, 'utf8');
+  check('requests CSV has the header and the shown row', dl.suggestedFilename().startsWith('ezllm-requests-') && csv.startsWith('ts,client,surface') && csv.includes('BASELINE'), csv.slice(0, 120));
+
   await page.goto(`${t.base}/connect?policy=7`);
   const picker = page.getByLabel('Compression profile');
   await picker.waitFor();

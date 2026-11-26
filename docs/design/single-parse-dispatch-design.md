@@ -10,8 +10,8 @@ which recommended exactly this work.
 A request body is fully JSON-decoded up to **5 times** before dispatch:
 
 1. `extractModel` (server.go) — struct decode for `model`
-2. `IsStream` (proxy.go, per attempt) — struct decode for `stream`
-3. `SwapModel` (proxy.go, per hop) — map decode + re-marshal
+2. `IsStream` (body.go, per attempt) — struct decode for `stream`
+3. `SwapModel` (body.go, per hop) — map decode + re-marshal
 4. `compress.Apply` (compress.go) — map decode
 5. `captureShape` (shape.go) — map decode
 

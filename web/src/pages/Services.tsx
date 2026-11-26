@@ -20,6 +20,9 @@ import { GENERATABLE, ServiceTryIt } from '../components/ServiceTryIt';
 
 type CatalogModel = ModelRow & { id: string; display: string };
 
+/** Provider catalogs read at once on this page. */
+const CATALOG_CONCURRENCY = 4;
+
 // Per-surface test-prompt defaults: what the operator sees pre-filled in the
 // card, matching the backend's serviceProbeBody defaults exactly (empty prompt
 // = default on the wire). audio_stt takes a file, not text — no prompt row.
@@ -411,22 +414,28 @@ export default function Services() {
       } catch (e) {
         if (live) setError(e instanceof Error ? e.message : 'Could not load services.');
       } finally { if (live) setLoading(false); }
-      // Every provider's catalog at once, merged as each answers: one slow or
-      // broken provider no longer holds the picker (or the whole list) back.
+      // Provider catalogs, four at a time, merged as each answers: one slow or
+      // broken provider never holds the picker back, and twenty providers no
+      // longer mean twenty requests at once.
       try {
-        const accounts = await get<Account[]>('/admin/accounts');
+        const accounts = (await get<Account[]>('/admin/accounts')).filter((a) => a.enabled);
         let gaps = 0;
-        await Promise.all(accounts.filter((a) => a.enabled).map(async (account) => {
-          try {
-            const rows = await accountModels(account.id);
-            if (!live) return;
-            setModels((prev) => [...prev, ...rows.map((model) => ({
-              ...model,
-              id: `${account.namespace}/${model.id}`,
-              display: `${account.namespace} / ${model.display ?? model.id}`,
-            }))]);
-          } catch { gaps++; }
-        }));
+        let next = 0;
+        const worker = async () => {
+          while (live && next < accounts.length) {
+            const account = accounts[next++];
+            try {
+              const rows = await accountModels(account.id);
+              if (!live) return;
+              setModels((prev) => [...prev, ...rows.map((model) => ({
+                ...model,
+                id: `${account.namespace}/${model.id}`,
+                display: `${account.namespace} / ${model.display ?? model.id}`,
+              }))]);
+            } catch { gaps++; }
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(CATALOG_CONCURRENCY, accounts.length) }, worker));
         if (live) setCatalogGaps(gaps);
       } catch (e) {
         if (live) setError(e instanceof Error ? e.message : 'Could not load provider models.');

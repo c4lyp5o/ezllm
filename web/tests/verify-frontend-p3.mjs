@@ -16,16 +16,17 @@ try {
 } finally { globalThis.fetch = originalFetch; }
 
 const t = await start();
-let queries = [], inFlight = 0, maxInFlight = 0, fail = true;
+let queries = [], inFlight = 0, maxInFlight = 0, fail = true, served = 0;
 const accounts = Array.from({ length: 6 }, (_, i) => ({ ...account, id: i + 1, name: `Provider ${i + 1}`, namespace: `p${i + 1}` }));
 const page = await t.page(async (route, url) => {
   if (url.pathname === '/admin/requests') { queries.push(url.searchParams.get('min_tin')); await json(route, requestsBody('test')); return true; }
   if (url.pathname === '/admin/accounts') { await json(route, accounts); return true; }
+  if (url.pathname === '/admin/services') { await json(route, { services: [] }); return true; }
   if (/^\/admin\/accounts\/\d+\/models$/.test(url.pathname)) {
     inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
     await new Promise(r => setTimeout(r, 120));
     const id = Number(url.pathname.split('/')[3]);
-    inFlight--;
+    inFlight--; served++;
     await json(route, fail && id === 2 ? { error: { message: 'unavailable' } } : models, fail && id === 2 ? 503 : 200);
     return true;
   }
@@ -58,5 +59,11 @@ try {
   await picker.fill('p2');
   await page.getByRole('option').filter({ hasText: 'p2 / Model A' }).waitFor();
   check('retry restores models from recovered provider', await page.getByRole('option').filter({ hasText: 'p2 / Model A' }).count() === 1);
+
+  // Services reads the same catalogs: four at a time, not all at once.
+  maxInFlight = 0; served = 0;
+  await page.goto(`${t.base}/services`);
+  for (let i = 0; i < 100 && served < accounts.length; i++) await page.waitForTimeout(50);
+  check('services catalog loads with a bound of 4', maxInFlight > 1 && maxInFlight <= 4, maxInFlight);
 } finally { await t.close(); }
 finish();

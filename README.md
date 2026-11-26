@@ -10,8 +10,8 @@ keeps track of tokens and cost. You set it up in a web dashboard.
 
 ## What it does
 
-- **One address for many providers.** Apps use Chat Completions, Anthropic Messages or
-  the Responses API. ezllm [translates](docs/translation-runbook.md) when a provider
+- **One address for many providers.** Apps use Chat Completions, Anthropic Messages,
+  the Responses API or Google's Gemini API. ezllm [translates](docs/translation-runbook.md) when a provider
   needs another format. Embeddings, images, audio and other services pass through too.
 - **Failover and load balancing.** Group models into a *combo*. A model that fails
   before it answers is retried or skipped, and your app sees only the answer.
@@ -141,6 +141,8 @@ EZLLM_MASTER_KEY_FILE=$PWD/data/ezllm-master.key make run
 
 No one at the keyboard? Set `EZLLM_DASHBOARD_PASSWORD` or
 `EZLLM_DASHBOARD_PASSWORD_FILE` before the first start, and there is no setup code.
+`ezllm token create --name my-app` makes an app key from the command line and prints it
+once.
 
 The `data` folder has your settings, history and the master key that unlocks your stored
 provider keys. Keep it private. To back it up, stop ezllm and copy the whole folder, or use

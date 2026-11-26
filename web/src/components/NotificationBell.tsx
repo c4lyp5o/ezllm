@@ -24,6 +24,9 @@ const ROUTE: Record<string, string> = {
   bridge_update_blocked: '/settings?tab=system',
   bridge_rolled_back: '/settings?tab=system',
   stream_truncation: '/requests?range=24h',
+  quota_warning: '/providers',
+  balance_low: '/providers',
+  cookie_expiring: '/providers',
 };
 
 // Status colour only where it means something (house rule): warn/error get

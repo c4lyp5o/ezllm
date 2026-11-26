@@ -254,6 +254,63 @@ ON CONFLICT(account_id, model_id) DO UPDATE SET
 	return id, nil
 }
 
+// ApplyModelRules writes many rules in one transaction: each upsert replaces
+// the rule for its (account, model) or creates it, and each id in deletes is
+// removed. Every upsert is validated before anything is written, and any
+// failure rolls the whole batch back, so a group edit never half-applies.
+// The error names the model that failed.
+func (d *DB) ApplyModelRules(ctx context.Context, upserts []ModelRule, deletes []int64) (saved, deleted int, err error) {
+	for i := range upserts {
+		if err := ValidateModelRule(&upserts[i]); err != nil {
+			return 0, 0, fmt.Errorf("%s: %w", upserts[i].ModelID, err)
+		}
+	}
+	err = d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		for _, in := range upserts {
+			var start, end, days any
+			if in.WinStart != "" {
+				start = in.WinStart
+			}
+			if in.WinEnd != "" {
+				end = in.WinEnd
+			}
+			if in.WinDays != "" {
+				days = in.WinDays
+			}
+			if _, err := tx.ExecContext(ctx, `
+INSERT INTO model_rules (account_id, model_id, cap_tokens, cap_window,
+                         win_start, win_end, win_days, win_tz, enabled, note, updated_at)
+VALUES (?,?,?,?,?,?,?,?,?,?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+ON CONFLICT(account_id, model_id) DO UPDATE SET
+  cap_tokens=excluded.cap_tokens, cap_window=excluded.cap_window,
+  win_start=excluded.win_start, win_end=excluded.win_end,
+  win_days=excluded.win_days, win_tz=excluded.win_tz,
+  enabled=excluded.enabled, note=excluded.note,
+  updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+				in.AccountID, in.ModelID, in.CapTokens, in.CapWindow,
+				start, end, days, in.WinTZ, boolInt(in.Enabled), in.Note); err != nil {
+				return fmt.Errorf("%s: %w", in.ModelID, err)
+			}
+			saved++
+		}
+		for _, id := range deletes {
+			res, err := tx.ExecContext(ctx, `DELETE FROM model_rules WHERE id = ?`, id)
+			if err != nil {
+				return err
+			}
+			if n, _ := res.RowsAffected(); n == 0 {
+				return fmt.Errorf("rule %d: %w", id, ErrNotFound)
+			}
+			deleted++
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+	return saved, deleted, nil
+}
+
 // DeleteModelRule removes a rule. Deleting a rule means "no longer restricted",
 // which is the natural way to lift a cap or a window.
 func (d *DB) DeleteModelRule(ctx context.Context, id int64) error {

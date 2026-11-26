@@ -4,6 +4,64 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## Unreleased
 
+- **Faster provider list.** The provider list and the overview read keys, quotas and
+  model counts for every provider in three queries, instead of three per provider.
+- **Gemini API surface.** Apps written for Google's Gemini API can point at ezllm:
+  `/v1beta/models/{model}:generateContent`, `:streamGenerateContent` (SSE or JSON array),
+  `:countTokens` and `/v1beta/models`, with function calling. Requests run through the
+  normal routing, rules and ledger. The key goes in `x-goog-api-key`; the `?key=` form
+  is off unless you turn it on in Settings, behind a warning, because URLs end up in logs.
+- **Ledger retention.** Settings → Backup & Recovery → **Keep every call for** caps how
+  long single calls are kept (off by default; 32 days or more). Older calls are added
+  into daily totals per provider, model, key and app, then deleted, so charts, costs and
+  token totals do not change. Database schema 39 adds the daily totals table.
+- **Import a configuration.** Settings → Backup & Recovery → **Import configuration**
+  reads an export from another ezllm, lists what it would create or change, and applies
+  it when you say so. Providers already here keep their keys; new ones arrive turned
+  off, ready for a key. Combos, compression profiles, rules and settings come along.
+  `POST /admin/import` (`?dry_run=true` for the plan).
+- **Early warnings.** The bell (and your push channels) now says when a provider has
+  used 80% of a quota window, when a prepaid balance drops under 2, and when a pasted
+  session cookie expires within 48 hours. Each is said once per window, day or cookie,
+  and each has a switch and a threshold in Settings → Notifications. An hourly check
+  reads every enabled provider's quota for this; readings older than 30 days are pruned.
+- **Every key of a provider is used.** A provider with several keys now takes turns:
+  each request starts on the next key. A `429` or a refused key (`401`, `403`) parks only
+  that key for that model, and the request moves straight on to the next key. A server
+  error is not retried on the other keys. The provider shows **parked** only when every
+  key is; until then its card reads "1 of 2 keys parked". `GET /admin/cooldowns` names
+  the key, and route explain reports `key_count`.
+- **Export to CSV or JSON.** Requests downloads the rows it shows, and Token Economics
+  its spend by day, provider and model. Text that could run as a spreadsheet formula is
+  neutralised.
+- **Quick jump.** Ctrl+K (⌘K on a Mac), or **Jump to…** in the sidebar, opens a palette
+  of every page, the Settings tabs and the common "new …" actions. Type to filter,
+  Enter to go. `/providers?add=1` opens Add provider.
+- **Rule groups save in one step.** Editing, turning off or deleting a rule group is one
+  transaction, however many models it holds: every rule changes or none does. It was
+  one request per model, so a failure halfway left some rules changed. New `POST
+  /admin/model-rules/batch`.
+- **Explain a route.** **Explain** on a combo shows what a request would do right now,
+  hop by hop: tried, skipped and why (turned off, disabled account, missing model, a
+  rule, a park, too little context, no tools), translated or native, and whether a
+  chosen key may call it at all. Nothing is sent to a provider. New `POST
+  /admin/route-explain`.
+- **Rotate the master key, create keys from the command line.** `ezllm
+  rotate-master-key` re-encrypts every stored secret under a new key in one step and
+  swaps the key file, keeping the old one until you delete it; any failure changes
+  nothing. `ezllm token create --name NAME` makes a client key and prints it once.
+- **Services page loads gently.** Provider catalogs load four at a time instead of
+  all at once; models still appear as each provider answers.
+- **Unpark now.** Parked providers show **parked** with a live countdown on their
+  Providers card and on the Combos hop. **Unpark** sends them traffic again at once,
+  after you fix the cause. New `GET|DELETE /admin/cooldowns`.
+- **Compression per key.** A key can carry its own compression profile (Connect → key
+  policy). It applies to that key's requests on every route, direct `namespace/model`
+  calls included; a request's `x-ezllm-compression` header still wins, and a combo's
+  profile applies when the key has none.
+- **One model by id.** `GET /v1/models/{model}` returns that model's entry, so SDKs
+  and IDE plugins that check a configured model at startup no longer get a 404.
+  Anthropic clients get Anthropic's shape.
 - **Release check.** ezllm asks GitHub once a day for its latest release and says
   when a newer one is out: the sidebar version becomes a pill, Settings → System
   names the release, and the bell rings once per version. On by default;

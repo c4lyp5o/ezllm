@@ -76,8 +76,43 @@ can sign out one, or all with **Sign out all devices**.
 | **Server-error cooldown** | How long a provider rests after server errors, and after `408` or `425` |
 | **Failures before cooldown** | How many failures start a cooldown |
 
+A provider that is cooling down shows **parked** with the time left, on its card in
+**Providers** and on the hop in **Combos**. After fixing the cause (a topped-up
+balance, a lifted limit), choose **Unpark** to send it traffic again at once. A real
+failure parks it again.
+
+A provider with several keys uses all of them. Each request starts on the next key in
+turn, so traffic is spread evenly. A rate limit (`429`) or a refused key (`401`, `403`)
+parks only that key for that model, and the request moves straight on to the provider's
+next key. A server error (`5xx`) is the provider's fault, not the key's, so the other keys
+are not tried for that model. The provider shows **parked** only when every key is.
+
 In `config.yaml`, `retry.retries: 0` means the default of 3. To turn retries off, save `0`
 in Settings.
+
+## Keys in the URL (Gemini)
+
+Apps written for Google's Gemini API send their ezllm key in the `x-goog-api-key`
+header, and that always works. Some also offer to put the key in the address
+(`?key=…`). ezllm refuses that unless you turn on **Accept keys in the URL** in
+Settings → Gateway.
+
+Leave it off if you can. An address is written to reverse-proxy access logs, browser
+history and error reports, and anyone who reads them can copy the key. If one app needs
+it, give that app its own key with a budget, and keep your proxy's logs private.
+
+## Early warnings
+
+Notifications also warns you before something runs out:
+
+- **Quota nearly used**: a provider has used 80% of a quota window. Said once per window.
+- **Balance running low**: a prepaid balance is under 2 in the provider's currency. Said once a day while it stays low.
+- **Session cookie expiring**: a pasted session cookie expires within 48 hours. Said once per cookie.
+
+Each has its switch and its threshold in Settings → Notifications. ezllm reads every
+enabled provider's quota once an hour for these, the same read as the **Quota**
+button, and the provider card shows the latest reading. A provider with no quota
+page is skipped. Quota readings older than 30 days are deleted; each key keeps its newest.
 
 ## Push channels
 

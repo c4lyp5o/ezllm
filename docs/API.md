@@ -41,10 +41,13 @@ Errors are OpenAI-shaped: `{"error":{"type":"...","message":"...","code":422}}`.
 | GET | `/healthz` | no auth; **liveness + release version** — `{"status":"ok","version":"2.2.0"}` after a DB ping (503 `{"status":"down","version":"…"}` if the ping fails). Version is the only extra field; no counts/paths/uptime. |
 | GET | `/metrics` | Prometheus text exposition. A token with the `metrics` role only; any other token → 403, the dashboard session → 401. Counters come from committed ledger rows, so a request does no metrics work. Names, labels and auth: [metrics.md](metrics.md). |
 | GET | `/v1/models?protocol=` | `openai` (default) / `anthropic` shape; ids are `<namespace>/<model>`, plus one bare id per **enabled** combo |
+| GET | `/v1/models/{model}` | One entry of that list (`/v1/models/acme/gpt-5` or a combo name), in the same shape; Anthropic's shape when the request carries `anthropic-version` or `?protocol=anthropic`. Unknown → `404 model_not_found` |
 | POST | `/v1/chat/completions` | OpenAI stream + non-stream |
 | POST | `/v1/messages` | Anthropic (`x-api-key` or Bearer) |
 | POST | `/v1/messages/count_tokens` | Anthropic token count → `{"input_tokens":N}`. The model resolves like `/v1/messages`; up to three candidate hops on the Anthropic wire are asked in order (parked hops skipped, failures never park a hop). When none answers (bridges, translated hops, gateways without the endpoint) the gateway estimates over `system`, `messages`, `tools` and `tool_choice` (2 characters per token over the JSON; Anthropic measured about 2.35 on Sonnet 5.5, so the estimate runs about 15–20% high on purpose). `X-Ezllm-Token-Count: upstream\|estimate` says which. Same auth and model allowlist as `/v1/messages`; no ledger row, no budget. |
 | POST | `/v1/responses` | OpenAI Responses |
+| GET | `/v1beta/models`, `/v1beta/models/{model}` | Gemini shape: `{models:[{name:"models/<id>",…}]}` ([Gemini surface](#gemini-surface)) |
+| POST | `/v1beta/models/{model}:generateContent`, `:streamGenerateContent`, `:countTokens` | Google Gemini API ([Gemini surface](#gemini-surface)) |
 | POST | `/v1/embeddings`, `/v1/images/generations`, `/v1/audio/speech`, `/v1/audio/transcriptions` | Service surfaces; transcriptions is multipart |
 | POST | `/v1/images/edits` | OpenAI image edit/inpaint — **multipart** (`model` form field swapped per hop) |
 | POST | `/v1/moderations` | OpenAI Moderations |
@@ -89,6 +92,40 @@ map. A combo row is bare (`owned_by: "ezllm"`) and adds a non-standard `combo` k
 `{"strategy":"failover","hops":[{"account_id":1,"model":"mimo-v2.6-flash","enabled":true}],"context_size":200000}` — so a
 picker can say what the name routes to; OpenAI clients that don't know the key ignore it. Combo names
 can never contain `/`, so a bare id is unambiguous. Disabled combos are never listed.
+
+### Gemini surface
+
+Clients written for Google's Gemini API (`generateContent`) can use ezllm by pointing
+their base URL at it. The model in the path is any routable id: `models/acme/gpt-5` or a
+combo name. Each request is converted to Chat Completions and runs through the normal
+chat path (routing, rules, compression, failover, ledger; the ledger's `surface` is
+`chat`), and the answer is converted back.
+
+- **Key:** `x-goog-api-key: <ezllm key>`, or `Authorization: Bearer`. The `?key=` query
+  form is refused (`401`) unless the `gemini_query_key` setting is on, because a URL is
+  written to proxy and browser logs. When it is on, the key is removed from the URL
+  before anything else reads it.
+- **Carried:** `contents` (text, inline images, `functionCall`, `functionResponse`),
+  `systemInstruction`, `tools[].functionDeclarations` (OpenAPI types are lower-cased
+  into JSON Schema; `parametersJsonSchema` passes as is), `toolConfig` (`AUTO`, `NONE`,
+  `ANY`), and `generationConfig` (`temperature`, `topP`, `maxOutputTokens`,
+  `stopSequences`, `seed`, penalties, `responseMimeType: application/json`,
+  `responseSchema`/`responseJsonSchema`, `thinkingConfig.includeThoughts`). A
+  `functionResponse` without an `id` answers the oldest open call of the same name.
+- **Refused (`400`, "not supported through ezllm"):** Google's own tools (`googleSearch`,
+  `codeExecution`, `urlContext`), inline data that is not an image, `fileData` that is not
+  an `https` image, `candidateCount` above 1. `safetySettings` and `topK` are ignored.
+- **Streaming:** `:streamGenerateContent?alt=sse` answers `text/event-stream` with one
+  `data:` line per chunk; without `alt=sse` it answers one JSON array, written as it
+  grows. Text is sent as it arrives; each function call is sent whole in the last chunk,
+  with `finishReason` and `usageMetadata`.
+- **Answers:** `candidates[0]` (`finishReason` `STOP`, `MAX_TOKENS`, `SAFETY` or `OTHER`),
+  `usageMetadata` (`promptTokenCount`, `candidatesTokenCount`, `totalTokenCount`,
+  `cachedContentTokenCount`, `thoughtsTokenCount`), `modelVersion`, `responseId`.
+  Errors are `{"error":{"code","message","status"}}` with Google's status names
+  (`RESOURCE_EXHAUSTED` for 429).
+- **`:countTokens`** answers `{"totalTokens":N}` from the same estimate as
+  `/v1/messages/count_tokens` (`X-Ezllm-Token-Count: estimate`).
 
 ### Copilot subscription image inputs
 
@@ -185,7 +222,7 @@ token budgets under-count by them. The live feed's `snapshot` event carries the 
 `dropped`, `lost` and `unmetered`.
 ```jsonc
 {
-  "health": { "status":"ok", "version":"2.2.0", "schema_version":38, "accounts":19, "provider_keys":19,
+  "health": { "status":"ok", "version":"2.2.0", "schema_version":39, "accounts":19, "provider_keys":19,
                "models":1551, "combos":12, "ledger_rows":22309, "dropped_rows":0, "lost_rows":0,
                "unmetered_rows":0, "ledger_span":{"oldest":"…","newest":"…"}, "uptime_s":4115,
                "db_path":"/data/ezllm.sqlite", "stream_window_s":86400, "hop_stream_health":[] },
@@ -728,7 +765,7 @@ response shape is unchanged. `EZLLM_COMBO_AUTOPROBE=off` disables it.
 { "name":"my-app","roles":["infer"],"token":"ezllm_…" }   // token optional; generated if absent
 // GET   → [{"id":4,"name":"my-app","hint":"ezllm…a91f","roles":["infer"],"enabled":true,"cap_window":"monthly","cap_tokens":0,"cap_usd":0,"allowed_models":"","expires_at":"","last_used_at":"…"}]
 //         an enabled key with a cap also carries "cap_used" (tokens) and/or "spent_usd" for its current bucket
-// PATCH → {"enabled":false} | {"roles":["infer","admin"]} | {"cap_tokens":100000,"cap_window":"daily"} | {"cap_usd":25} | {"allowed_models":"deepseek/*,openai/gpt-5*"} | {"expires_at":"2026-11-01"}
+// PATCH → {"enabled":false} | {"roles":["infer","admin"]} | {"cap_tokens":100000,"cap_window":"daily"} | {"cap_usd":25} | {"allowed_models":"deepseek/*,openai/gpt-5*"} | {"expires_at":"2026-11-01"} | {"compression_profile_id":3} (null clears; an unknown id is 400)
 ```
 `roles` is a non-empty subset of `infer|metrics|admin`, each a separate permission:
 `infer` calls models on `/v1/*`, `metrics` reads `GET /metrics`, `admin` reaches `/admin/*`. No role
@@ -784,6 +821,27 @@ state, accounting/reconciliation internals, and some ledger columns. Full
 recovery uses the SQLite database plus its active master key and deployment
 configuration; see [recovery-runbook.md](recovery-runbook.md).
 
+### `POST /admin/import` → `200`
+Reads a configuration export (the body is the file from `GET /admin/export`) and applies
+its accounts, compression profiles, combos, model rules and saved settings.
+`?dry_run=true` answers the plan and writes nothing. Answers
+`{dry_run, summary:{create,update,unchanged,skip}, items:[{section, name, action, changes?, note?}]}`,
+where `section` is `settings`, `accounts`, `compression_profiles`, `combos` or
+`model_rules` and `action` is `create`, `update`, `unchanged` or `skip`.
+
+Accounts match by namespace. An existing one is updated and keeps its keys; a new one
+is created with `enabled:false`, and an existing account with no enabled key is never
+turned on. Combos and profiles match by name, rules by account and model; account ids in
+the file are mapped through their namespaces. A hop on an account in neither instance
+is dropped and named in the combo's `note`. A setting this version does not know, or
+that the host sets, is skipped. Tokens, prices, catalogs, quotas and the ledger are
+ignored.
+
+A file that is not `kind:"configuration_export"`, `format_version:1` is `400`, and so is
+any account, combo, rule or setting this version would refuse, before anything is
+written. Over 32 MB is `413` (export without the ledger). A failure while writing is
+`409`: what was written stays, and importing the same file again finishes the job.
+
 ## Quota snapshots
 
 ### `GET /admin/quota?keys=1,2` → `200`
@@ -815,6 +873,13 @@ every hop returns `429`, not `502`.
 
 ## Compression profiles
 
+### `POST /admin/model-rules/batch` → `200`
+A group edit in one transaction: `{"upsert":[rule, …], "delete":[id, …]}` → `{"saved":N,"deleted":M}`.
+Each upsert is a full rule row (as `POST`, an omitted `enabled` means enabled) that replaces the
+rule for its `(account_id, model_id)` or creates it. Every rule saves or none does: a bad rule
+answers the usual `422` naming its model, and a missing delete id is `404`, with nothing
+changed. At most 2,000 rules per batch. The dashboard's Rules page sends its group edits here.
+
 ### `GET|POST /admin/compression-profiles` · `GET|PATCH|DELETE /admin/compression-profiles/{id}` → `200`
 `stages` is an ordered engine pipeline over `session_dedup`, `ansi`, `fold`, `rtk`, `blobs`,
 `jsonmin`, `headroom`, `tool_ref`, `lite` and `caveman`, validated against the engine registry on write (`budget` was deleted 2026-10-19 and is
@@ -831,8 +896,9 @@ table; any other value is a 400). Every engine applies to all three request shap
   tool output (a `role:"tool"` message, a user message of only `tool_result` blocks, or a
   `function_call_output` item) on its first send; it is then frozen like any shipped message. A
   last message with any prose stays exempt. `keep` leaves the newest tool result whole.
-- Selection: per-request `x-ezllm-compression` header → the combo's `compression_profile_id` →
-  off. Fail-open: an engine error passes the original request through untouched.
+- Selection: per-request `x-ezllm-compression` header → the calling key's
+  `compression_profile_id` (applies on direct `namespace/model` routes too) → the combo's
+  `compression_profile_id` → off. Fail-open: an engine error passes the original request through untouched.
 
 ### `POST /admin/compression-preview` → `200`
 Runs the real engines over a pasted sample; nothing is stored, sent upstream or ledgered. Body:
@@ -945,6 +1011,29 @@ and, when models were added and the price refresh is on, prices them right away.
 ### `GET /admin/stream` → SSE
 Two event types: `snapshot` (last 20 calls on connect, newest first) and `calls` (each committed
 ledger batch).
+
+### `POST /admin/route-explain` → `200`
+A dry run of one routing decision: nothing is sent to a provider, no strategy cursor moves,
+no rule or budget counts. Body: `model` (required), `surface` (`chat` default, `anthropic`,
+`responses`), `client` (a key name, optional), `est_tokens`, `has_tools`. Answers
+`{requested, kind ("combo"|"direct"), strategy, surface, usable, error, order_note?, hops:[…], key?}`.
+Each hop has `namespace`, `model`, `status` (`candidate` = would be tried, `skipped` = dropped
+and the combo carries on, `refused` = the request fails on it, as a pin does), `reason`, and for
+candidates `wire`, `translated`, `reasoning_allowed`, `key_count`, `parked_until`. A hop is also
+`skipped` when it is parked (on every key, for an account with several; until then `reason`
+says how many keys are parked), when `est_tokens` exceeds the account's `max_context_tokens`, or when tools
+are sent to gemini-web. Hops come in the combo's order; `order_note` says when the strategy
+reorders them per request. With `client`, `key` reports `model_allowed`, `budget_spent` and
+`spend_cap_reached`. `error` is what a real request would get when nothing can serve it.
+
+### `GET|DELETE /admin/cooldowns`
+`GET` → `{"cooldowns":[{"namespace","model","key_id","key_hint","until","strikes","probe_active","reason"}],"now":"…"}`:
+the endpoints parked right now (cooling, or holding a recovery probe). Each key parks on its
+own, so an account with several keys can list one model once per key. `DELETE` ends parks
+early and answers `{"cleared":N}`: all of them, `?namespace=acme` for one account, or
+`?namespace=acme&model=gpt-5` for one model, on every key. A `model` without a `namespace` is `400`, since
+model ids repeat across providers. The next request tries the endpoint; a real failure
+parks it again.
 
 ### `GET /admin/health` · `POST /admin/chat`
 `health` counts the same rows the dashboard headline uses; `chat` executes through the **normal
@@ -1116,6 +1205,12 @@ JSON object, with unknown envelope/setting fields rejected.
 | `backup_hour` | Integer 0–23, instance timezone; default 3. |
 | `backup_keep` | Integer 1–365, default 7; counts completed verified backups. |
 | `notify_free_models_added`, `notify_free_models_removed`, `notify_free_model_broken`, `notify_catalog_refresh_failed`, `notify_client_budget_reached`, `notify_price_refresh_failed`, `notify_backup_failed`, `notify_bridge_updated`, `notify_bridge_update_blocked`, `notify_bridge_rolled_back`, `notify_stream_truncation`, `notify_update_available` | Boolean, all default true. Apply to future dashboard bell events and so to push channels. |
+| `notify_quota_warning`, `notify_balance_low`, `notify_cookie_expiring` | Boolean, all default true. The early warnings: an hourly check reads each enabled provider's quota and cookie expiry. |
+| `alert_quota_percent` | Integer 1–100, default 80. A quota window at or over this warns, once per window. |
+| `alert_balance_below` | Number above 0, default 2, in the provider's currency. A lower balance warns, once a day. |
+| `alert_cookie_hours` | Integer 1–720, default 48. A session cookie expiring within this many hours warns, once per cookie. |
+| `gemini_query_key` | Boolean, default false. Accept an ezllm key in the `?key=` query string on the Gemini surface. Keys in URLs are written to proxy and browser logs. |
+| `ledger_retention_days` | Integer, default 0 (keep every call), else 32–3650. Calls older than this are rolled into `calls_daily` (one row per UTC day, account, key, client, alias, surface and model) and deleted, by the hourly job. Usage, cost and day reports read both, so their totals do not change; a rolled day counts at noon UTC. The median TTFT, `GET /admin/requests` and the ledger in `GET /admin/export` cover only the calls kept. Calls with a pending meter debit are kept until it is settled. |
 
 Duration settings retain the limits of their existing YAML counterparts.
 `apply` is `immediate` for operator values; changing a deployment override still

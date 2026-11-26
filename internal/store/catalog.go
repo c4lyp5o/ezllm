@@ -129,8 +129,27 @@ FROM accounts WHERE id = ?`, id)
 // ── keys ────────────────────────────────────────────────────────────────────
 
 // PickKey returns the first enabled, non-cooled-down key for an account.
-// M2 uses simple ordering; M4 replaces this with rotation + cooldown + quota exclusion.
 func (d *DB) PickKey(ctx context.Context, accountID int64) (KeyPick, error) {
+	keys, err := d.pickKeys(ctx, accountID, 1)
+	if err != nil {
+		return KeyPick{}, err
+	}
+	return keys[0], nil
+}
+
+// PickKeys returns every enabled, non-cooled-down key for an account, oldest
+// first (at most maxRotationKeys). The router rotates through them so one
+// account's traffic is spread over all its keys. ErrNotFound when none is usable.
+func (d *DB) PickKeys(ctx context.Context, accountID int64) ([]KeyPick, error) {
+	return d.pickKeys(ctx, accountID, maxRotationKeys)
+}
+
+// maxRotationKeys bounds how many keys one account contributes to a request's
+// candidate list: each key is a separate attempt, and the request's attempt
+// budget is shared by every hop.
+const maxRotationKeys = 8
+
+func (d *DB) pickKeys(ctx context.Context, accountID int64, limit int) ([]KeyPick, error) {
 	now := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 	rows, err := d.r.QueryContext(ctx, `
 SELECT k.id, k.key_hint, k.key_plain
@@ -139,30 +158,33 @@ LEFT JOIN key_cooldowns c ON c.provider_key_id = k.id
 WHERE k.account_id = ? AND k.enabled = 1
   AND (c.until_ts IS NULL OR c.until_ts <= ?)
 ORDER BY k.id
-LIMIT 8`, accountID, now)
+LIMIT ?`, accountID, now, limit)
 	if err != nil {
-		return KeyPick{}, err
+		return nil, err
 	}
 	defer rows.Close()
-
-	if rows.Next() {
+	var out []KeyPick
+	for rows.Next() {
 		var p KeyPick
 		if err := rows.Scan(&p.ID, &p.Hint, &p.Plaintext); err != nil {
-			return KeyPick{}, err
+			return nil, err
 		}
 		if d.crypto != nil && strings.HasPrefix(p.Plaintext, cryptoPrefix) {
 			dec, err := d.crypto.Decrypt(p.Plaintext)
 			if err != nil {
-				return KeyPick{}, err
+				return nil, err
 			}
 			p.Plaintext = dec
 		}
-		return p, nil
+		out = append(out, p)
 	}
 	if err := rows.Err(); err != nil {
-		return KeyPick{}, err
+		return nil, err
 	}
-	return KeyPick{}, ErrNotFound
+	if len(out) == 0 {
+		return nil, ErrNotFound
+	}
+	return out, nil
 }
 
 // UpdateKeyPlain replaces a provider_keys row's plaintext credential. The

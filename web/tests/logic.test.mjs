@@ -16,10 +16,14 @@ try {
     export { globMatch, keyState } from ${JSON.stringify(join(src, 'utils/connect.ts'))};
     export { buildBuildings } from ${JSON.stringify(join(src, 'utils/city.ts'))};
     export { looksBinary, fenceFor } from ${JSON.stringify(join(src, 'utils/chatlog.ts'))};
-    export { effectiveText } from ${JSON.stringify(join(src, 'utils/settings.ts'))};
+    export { effectiveText, settingError } from ${JSON.stringify(join(src, 'utils/settings.ts'))};
+    export { summarizeImport, importWrites } from ${JSON.stringify(join(src, 'utils/import.ts'))};
+    export { parkedFor, secondsLeft, splitParks } from ${JSON.stringify(join(src, 'utils/cooldowns.ts'))};
+    export { csvField, toCSV } from ${JSON.stringify(join(src, 'utils/export.ts'))};
+    export { filterPalette, PALETTE_ITEMS } from ${JSON.stringify(join(src, 'components/CommandPalette.tsx'))};
   `);
   const out = join(dir, 'bundle.mjs');
-  await build({ entryPoints: [entry], bundle: true, format: 'esm', platform: 'node', outfile: out, logLevel: 'error' });
+  await build({ entryPoints: [entry], bundle: true, format: 'esm', platform: 'node', outfile: out, logLevel: 'error', jsx: 'automatic' });
   globalThis.window = { location: { href: 'http://localhost/' } };
   const m = await import(pathToFileURL(out).href);
 
@@ -63,5 +67,50 @@ try {
   assert.equal(m.effectiveText('translation_enabled', false), 'Off');
   assert.equal(m.effectiveText('cooldown_429', '30s'), '30s');
 
-  console.log('Dashboard logic: links, globs, key state, buildings, attachments and settings text hold.');
+  // Parked countdowns.
+  assert.equal(m.parkedFor(42), '42s');
+  assert.equal(m.parkedFor(190), '3m 10s');
+  assert.equal(m.parkedFor(3720), '1h 2m');
+  assert.equal(m.secondsLeft({ until: new Date(Date.now() + 30_500).toISOString() }), 31);
+  assert.equal(m.secondsLeft({ until: new Date(Date.now() - 5_000).toISOString() }), 0);
+  // Import plan in one line; only creates and updates write anything.
+  assert.equal(m.summarizeImport({ create: 2, update: 1, unchanged: 5 }), '2 to create, 1 to update, 5 unchanged');
+  assert.equal(m.summarizeImport({ skip: 1 }), '1 skipped');
+  assert.equal(m.summarizeImport({}), 'Nothing to import');
+  assert.equal(m.importWrites({ unchanged: 4, skip: 1 }), false);
+  assert.equal(m.importWrites({ update: 1 }), true);
+  // Ledger retention: 0 or at least 32 days.
+  assert.equal(m.settingError('ledger_retention_days', 0), '');
+  assert.equal(m.settingError('ledger_retention_days', 90), '');
+  assert.notEqual(m.settingError('ledger_retention_days', 7), '');
+  assert.equal(m.effectiveText('ledger_retention_days', 0), '0 (keep every call)');
+  // Alert thresholds.
+  assert.equal(m.settingError('alert_quota_percent', 80), '');
+  assert.notEqual(m.settingError('alert_quota_percent', 0), '');
+  assert.equal(m.settingError('alert_balance_below', 2.5), '');
+  assert.notEqual(m.settingError('alert_balance_below', 0), '');
+  assert.notEqual(m.settingError('alert_cookie_hours', 721), '');
+  // A model is parked only when every key of its provider is.
+  const park = (model, key_id) => ({ namespace: 'acme', model, key_id, until: '', strikes: 0, probe_active: false, reason: '429' });
+  const split = m.splitParks([park('a', 1), park('b', 1), park('b', 2)], 2);
+  assert.deepEqual(split.full.map((c) => c.model), ['b', 'b']);
+  assert.deepEqual(split.partial.map((c) => c.model), ['a']);
+  assert.equal(m.splitParks([park('a', 1)], 1).full.length, 1);
+  assert.equal(m.splitParks([park('a', 1)], 0).full.length, 1);
+
+  // CSV: quoting, and no formula injection from upstream text.
+  assert.equal(m.csvField('plain'), 'plain');
+  assert.equal(m.csvField('a,b'), '"a,b"');
+  assert.equal(m.csvField('say "hi"'), '"say ""hi"""');
+  assert.equal(m.csvField('=HYPERLINK("x")'), `"'=HYPERLINK(""x"")"`);
+  assert.equal(m.csvField(-5), '-5', 'a negative number is not a formula');
+  assert.equal(m.csvField(null), '');
+  assert.equal(m.toCSV([{ a: 1, b: 'x\ny' }], [{ key: 'a', get: (r) => r.a }, { key: 'b', get: (r) => r.b }]), 'a,b\r\n1,"x\ny"\r\n');
+
+  // Palette: every word must match, in label or hint.
+  assert.deepEqual(m.filterPalette(m.PALETTE_ITEMS, 'new combo').map((i) => i.to), ['/combos?new=1']);
+  assert.ok(m.filterPalette(m.PALETTE_ITEMS, 'cooldowns').some((i) => i.to === '/settings?tab=gateway'));
+  assert.equal(m.filterPalette(m.PALETTE_ITEMS, '').length, m.PALETTE_ITEMS.length);
+
+  console.log('Dashboard logic: links, globs, key state, buildings, attachments, settings text, countdowns, CSV and the palette hold.');
 } finally { await rm(dir, { recursive: true, force: true }); }

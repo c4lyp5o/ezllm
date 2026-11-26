@@ -55,20 +55,20 @@ go run ./cmd/m2verify    # acceptance checker: prints PASS/FAIL per invariant
 ```
 
 **Expect:** `ttft_ms` noticeably smaller than `total_ms` (that gap = streaming working; if they're
-equal, something is buffering — go read `streamCopyTracked` in `internal/proxy/proxy.go` and find out why).
+equal, something is buffering — go read `streamCopyTracked` in `internal/proxy/stream.go` and find out why).
 
 ## 3. Reading order (per milestone)
 
 | # | Read first | Then | Ask yourself |
 |---|-----------|------|--------------|
 | M1 | `cmd/ezllm/main.go` → `internal/config` → `internal/server` | `config.example.yaml` | Where would I add a fourth account? (config seeds; the DB is runtime truth) |
-| M2 | `internal/proxy/proxy.go` (`Forward` → `streamCopyTracked` → `UsageTapper.Observe`) → `internal/store/ledger.go` (`NormalizeUsageWith`) | `git show` of M2 | How do native streaming and translated streaming differ? |
+| M2 | `internal/proxy/proxy.go` (`Forward`) → `stream.go` (`streamCopyTracked`) → `proxy.go` (`UsageTapper.Observe`) → `internal/store/ledger.go` (`NormalizeUsageWith`) | `git show` of M2 | How do native streaming and translated streaming differ? |
 | M3 | `internal/registration` + `internal/provider/adapters.go` + admin handlers in `internal/server` | `docs/API.md` | Can I trace an account from DB row → adapter → first upstream byte? |
 | M4 | `internal/router` (hops → strategies → key pick/cooldown) + `internal/rules` | `go test -short ./internal/router ./internal/rules` | What happens on 429 with 1 key left? (answer must be in a test) |
 | M5 | `internal/compress` (engines + stage pipeline) + `internal/server/compression.go` | `docs/design/compression-design.md` | Where is "never touch final turn / tool results" enforced, and where does fail-open live? |
 | M6 | `internal/store/ledger.go` (`UsageReport`) → `/admin/usage` · `/admin/requests` · `/admin/stream` + `web/src` | `docs/API.md` + a dashboard login | Can I kill -9 it and restart without corrupting the ledger? Does the dashboard render anything pre-auth? (it must not) |
 | M7 | `internal/compress/rtk.go`, `caveman.go` + `internal/rules` windows/caps | `tests/prove_*.py` (live proofs) | After compression, do ledger rows still carry faithful pre/saved token counts? |
-| M8 | `internal/router/router.go` `checkPin` + `internal/server/admin.go` `handleSetModelPin` | `internal/router/pin_test.go`, `internal/server/pinsurface_test.go` | Where does a refusal stop the request — before or after the upstream dial? Does every switch that renders a typed router error have a case for `ErrPinned`? |
+| M8 | `internal/router/router.go` `checkPin` + `internal/server/admin_models.go` `handleSetModelPin` | `internal/router/pin_test.go`, `internal/server/pinsurface_test.go` | Where does a refusal stop the request — before or after the upstream dial? Does every switch that renders a typed router error have a case for `ErrPinned`? |
 
 ## 4. Milestone landmarks
 
@@ -139,10 +139,10 @@ one function. Then `store.NormalizeUsageWith` (`ledger.go`) for the accounting r
 - `internal/provider/quota.go` `parsePercentQuota` / `parseMoneyQuota` / `ClassifyQuota`
   — quota shapes differ per provider, so the result is discriminated (`percent|money|tokens|none`)
   and the verbatim JSON is always kept.
-- `internal/proxy/proxy.go` `SwapModel` — `map[string]any` round-trip with `UseNumber()`;
+- `internal/proxy/body.go` `SwapModel` — `map[string]any` round-trip with `UseNumber()`;
   only `model` changes, all 16 observed provider fields survive, big ints don't become floats.
   Rejects `null` explicitly (assigning into a nil map panics — a client could have crashed us).
-- `internal/proxy/proxy.go` `streamCopyTracked` — scanner + `Flush()` per line, re-emitting the `\n`
+- `internal/proxy/stream.go` `streamCopyTracked` — scanner + `Flush()` per line, re-emitting the `\n`
   the scanner strips so forwarding stays byte-exact. Over-long lines fall back to a raw `io.Copy`.
 - `internal/proxy/proxy.go` `UsageTapper` (`Observe`) — **merges** usage across events
   rather than taking the first hit. Two live-only bugs hid here: Anthropic's `message_start` has
@@ -258,7 +258,7 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
   (`router.go`, called from `selectWire` for the responses override and the native path —
   **before any upstream dial**; lookup errors fail CLOSED; resync preserves pins via
   snapshot/restore in `UpsertModels`). Admin write `PUT /admin/accounts/{id}/model-pin`
-  (`admin.go` `handleSetModelPin` — model id in the body because ids contain `/`; `pin` is
+  (`admin_models.go` `handleSetModelPin` — model id in the body because ids contain `/`; `pin` is
   `json.RawMessage` so absent/""/value are three states; unconfirmed surface → 409 unless
   `force`). Client-facing refusal: `400 pinned_surface` (`resolveErrInfo` in `server.go`) —
   **never a reroute**: switching the path behind the client's back would be dishonest.
@@ -285,8 +285,9 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
 - `internal/router/router.go` — `selectWire` (wire-first), `universalOrder` (fixed fallback
   chains), `pinSurface`, `WithUniversal` (the `messagesConventionReason` gate was removed in
   `61a403c`: usage convention no longer gates a translated Messages hop).
-- `internal/proxy/proxy.go` — `prepareHopBody` (pair-aware codecs), the stream wrapper +
-  `streamOutcomeFrom`, `Result.StreamOutcome` / `StreamCompleted`, `universalCodecOptions`.
+- `internal/proxy/body.go` — `prepareHopBody` (pair-aware codecs), `universalCodecOptions`;
+  `internal/proxy/proxy.go` — the stream wrapper + `streamOutcomeFrom`,
+  `Result.StreamOutcome` / `StreamCompleted`.
 - `internal/store/{schema.sql,store.go,admin.go}` — `accounts.usage_convention` (schema v13),
   `alterAccountUsageConvention`; `internal/provider/provider.go` — the `UsageConvention`
   vocabulary; `internal/config/config.go` — `translation.universal_enabled` (deprecated 2026-10-22,
@@ -301,8 +302,8 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
 
 ### M10 — single-parse dispatch (OPT-1) ✅ (2026-10-15, measured; design `docs/design/single-parse-dispatch-design.md`)
 - **The problem was 5 full JSON decodes per request**: `extractModel`
-  (`server.go`), `IsStream` (`proxy.go`, per attempt), `SwapModel`
-  (`proxy.go`, per hop), `compress.Apply`, `captureShape` (`shape.go`). The fix: `internal/jsonbody/jsonbody.go`
+  (`server.go`), `IsStream` (`body.go`, per attempt), `SwapModel`
+  (`body.go`, per hop), `compress.Apply`, `captureShape` (`shape.go`). The fix: `internal/jsonbody/jsonbody.go`
   `BodyDoc` — one decode (map + `UseNumber` + trailing-garbage check),
   opened once in `inference()` and threaded as an **optional hint**:
   `ForwardCandidatesDoc`, `prepareHopBody(body, rt, doc)`,
@@ -442,7 +443,7 @@ corrections section.
   refusal, `ReasoningRule.Clamp` maps a value onto it, `models.reasoning_vocab` /
   `reasoning_required` (schema v29) keep it, and `proxy.prepareHopBody` applies it per hop
   without re-encoding an accepted value. Design: `docs/design/reasoning-effort-design.md`.
-- `deniesModelAccess` (`internal/proxy/proxy.go`) parks a hop on a 401/403 whose body names model
+- `deniesModelAccess` (`internal/proxy/classify.go`) parks a hop on a 401/403 whose body names model
   access — body-matched, `hasAlternate`-gated, so a bare 403 still changes no state.
 - Console logging has a written contract: `docs/design/logging-design.md` (levels, what is never logged, the
   measured cost of an argument built for a filtered line). `accessLog` carries `alias` and the
@@ -619,8 +620,8 @@ mode this codebase has now hit twice.
 
 ### v1.4.0 — account safety and dashboard reliability
 
-- `internal/server/admin.go` `handleRetest` checks the key's owning account;
-  `internal/store/admin.go` `EnableKey` scopes the update to the account.
+- `internal/server/admin_accounts.go` `handleRetest` checks the key's owning account;
+  `internal/store/admin_models.go` `EnableKey` scopes the update to the account.
   `internal/server/key_ownership_test.go` covers cross-account refusals.
 - `internal/server/dashboard_auth.go` `reserveLogin` bounds tracked sources
   and counts in-flight attempts. `internal/server/geminiweb_bridge.go`
@@ -666,7 +667,7 @@ can see the failure you are trying to prevent.**
   **stdin** (argv caps at 128 KB and real prompts are 250–600 KB).
 - `internal/copilotbridge/bridge.go` — `chat`: a gate refusal
   (`chat_tools_unsupported`) falls back to `-p` for plain chat and stands for a request
-  with tools, which the router fails over on (`proxy.go` `refusesTools`).
+  with tools, which the router fails over on (`classify.go` `refusesTools`).
 - `cmd/ezllm/copilotbridge.go` — boot wiring, the channel probe behind `/status`, and
   `copilotCatalog`: `auto` first (the key test probes the first candidate), then every
   id `copilot help config` documents. The plan decides per request with a typed 403.
@@ -804,7 +805,7 @@ while the SAME model on `opencode-go` was 0/754.
   `internal/agybridge/tools.go` `parseAdaptedRequest` — Antigravity caller tools
   through structured output (on whenever the CLI offers `--json-schema`).
 - `internal/server/admission.go` `newAdmission` — bounded inference admission and
-  body-memory reservations; `internal/proxy/proxy.go` `copyResponseHeaders` strips
+  body-memory reservations; `internal/proxy/headers.go` `copyResponseHeaders` strips
   provider `Set-Cookie`/`Set-Cookie2`/`Clear-Site-Data`.
 - `cmd/ezllm/bridgecheck.go` + `scripts/bridge_update.py` — CLI updater gates that
   qualify sandbox, cache and native-history modes before promoting a binary.

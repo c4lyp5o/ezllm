@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { ApiError, type UsageRow } from '../utils/api';
+import { ApiError, compressionProfiles, type UsageRow } from '../utils/api';
 import {
   Chip, Combobox, ConfirmModal, CopyButton, EmptyState, Modal, Mono, Segmented, SectionLabel, Spinner, Toggle,
   btn, cx, formatTokens, inputCls, labelCls, nfmt, relTime,
@@ -330,8 +330,17 @@ function PolicyModal({ target, ids, onClose, onSaved }: {
   const [models, setModels] = useState('');
   const [expiry, setExpiry] = useState('');
   const [roles, setRoles] = useState<Role[]>([]);
+  const [profile, setProfile] = useState<number | null>(null);
+  const [profiles, setProfiles] = useState<{ id: number; name: string; enabled: boolean }[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  useEffect(() => {
+    if (!target) return;
+    let live = true;
+    compressionProfiles().then((ps) => { if (live) setProfiles(ps); }).catch(() => { if (live) setProfiles([]); });
+    setProfile(target.compression_profile_id ?? null);
+    return () => { live = false; };
+  }, [target]);
   useEffect(() => {
     if (!target) return;
     setCap(target.cap_tokens); setUsd(target.cap_usd > 0 ? target.cap_usd.toFixed(2) : ''); setWindow(target.cap_window || 'monthly'); setModels(target.allowed_models || ''); setExpiry(expiryDate(target));
@@ -342,7 +351,8 @@ function PolicyModal({ target, ids, onClose, onSaved }: {
   // Empty means no spend cap (0). Anything else must be a dollar amount.
   const usdValue = usd.trim() === '' ? 0 : Number(usd);
   const usdError = !Number.isFinite(usdValue) || usdValue < 0 ? 'A dollar amount, 0 or more.' : undefined;
-  const dirty = !!target && (rolesChanged || cap !== target.cap_tokens || usdValue !== (target.cap_usd || 0) || window !== (target.cap_window || 'monthly') || models.trim() !== (target.allowed_models || '').trim() || expiry !== expiryDate(target));
+  const profileChanged = !!target && profile !== (target.compression_profile_id ?? null);
+  const dirty = !!target && (rolesChanged || profileChanged || cap !== target.cap_tokens || usdValue !== (target.cap_usd || 0) || window !== (target.cap_window || 'monthly') || models.trim() !== (target.allowed_models || '').trim() || expiry !== expiryDate(target));
   const infer = roles.includes('infer');
 
   const save = async () => {
@@ -357,6 +367,7 @@ function PolicyModal({ target, ids, onClose, onSaved }: {
         // The picker shows only the date; resending an untouched one would be
         // re-read as end of the server's local day and move the deadline.
         ...(expiry !== expiryDate(target) ? { expires_at: expiry } : {}),
+        ...(profileChanged ? { compression_profile_id: profile } : {}),
       });
       onSaved(updated);
     } catch (e) { setErr(errText(e, 'could not save the policy')); } finally { setBusy(false); }
@@ -388,6 +399,15 @@ function PolicyModal({ target, ids, onClose, onSaved }: {
           <div>
             <label className={labelCls} htmlFor="pol-models">Allowed models <span className="text-mute">(empty = all)</span></label>
             <AllowlistField id="pol-models" value={models} onChange={setModels} ids={ids} />
+          </div>
+          <div>
+            <label className={labelCls} htmlFor="pol-compression">Compression profile</label>
+            <select id="pol-compression" className={cx(inputCls, 'max-w-xs', profiles.length === 0 && 'opacity-60')} disabled={profiles.length === 0}
+              value={profile ?? ''} onChange={(e) => setProfile(e.target.value === '' ? null : Number(e.target.value))}>
+              <option value="">{profiles.length === 0 ? 'None defined yet' : 'None (use the combo\'s)'}</option>
+              {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}{p.enabled ? '' : ' (disabled)'}</option>)}
+            </select>
+            <p className="mt-1.5 text-[12px] leading-snug text-mute">Compresses this key's requests on every route, direct models included. A request's x-ezllm-compression header still wins.</p>
           </div>
         </>}
         <div>

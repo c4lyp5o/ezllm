@@ -13,6 +13,8 @@ import { Chip, ConfirmModal, CopyButton, Modal, SecretInput, SectionLabel, Segme
 import { Collapse, Stagger, StaggerItem } from '../components/motion';
 import { bridgeUpdateText, fmtMoney, nfmt, UPDATE_TONE } from '../utils/lib';
 import { accountIssues, type Issue } from '../utils/health';
+import { type Cooldown, useCooldowns } from '../utils/cooldowns';
+import { ParkedPill } from '../components/Parked';
 
 // ── helpers ─────────────────────────────────────────────────────────────
 
@@ -1814,8 +1816,10 @@ function QuotaModal({ account, onClose, onRead }: { account: Account; onClose: (
 
 // ── account card ────────────────────────────────────────────────────────
 
-function AccountCard({ a, open, onToggle, intent, onIntentDone, issues, onChanged, onReloadQuota, quotaBusy }: {
+function AccountCard({ a, open, onToggle, intent, onIntentDone, issues, onChanged, onReloadQuota, quotaBusy, parked, onUnpark }: {
   a: Account; open: boolean; onToggle: () => void;
+  /** This account's parked models, and Unpark for all of them. */
+  parked: Cooldown[]; onUnpark: () => Promise<void>;
   /** A deep link asked for this card's Edit or Pricing modal. */
   intent: 'edit' | 'keys' | 'pricing' | null; onIntentDone: () => void;
   issues: Issue[];
@@ -1942,6 +1946,11 @@ function AccountCard({ a, open, onToggle, intent, onIntentDone, issues, onChange
           <motion.span className="inline-block" animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.22 }}>⌄</motion.span>
         </button>
       </div>
+      {parked.length > 0 && (
+        <div className="-mt-1.5 px-5 pb-2.5 pl-10">
+          <ParkedPill items={parked} keyCount={a.keys.filter((k) => k.enabled).length} onUnpark={onUnpark} what={new Set(parked.map((c) => c.model)).size === 1 ? 'this model' : `these ${new Set(parked.map((c) => c.model)).size} models`} />
+        </div>
+      )}
 
       {/* The expandable body animates its HEIGHT, not just its opacity: the
           row below moves by a real, measurable amount, and a fade alone
@@ -2065,8 +2074,16 @@ type Intent = { id: number; kind: 'edit' | 'keys' | 'pricing' };
 
 export default function Providers() {
   const [accounts, setAccounts] = useState<Account[] | null>(null);
+  const cooldowns = useCooldowns();
   const [err, setErr] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  // /providers?add=1 (the quick-jump palette) opens the Add provider form.
+  const [addParams, setAddParams] = useSearchParams();
+  useEffect(() => {
+    if (addParams.get('add') !== '1') return;
+    setAddOpen(true);
+    setAddParams((p) => { const n = new URLSearchParams(p); n.delete('add'); return n; }, { replace: true });
+  }, [addParams, setAddParams]);
   const [quotaBusy, setQuotaBusy] = useState<number | null>(null);
   const [query, setQuery] = useState('');
   const [onlyIssues, setOnlyIssues] = useState(false);
@@ -2194,7 +2211,9 @@ export default function Providers() {
                   issues={issuesOf.get(a.id) ?? []}
                   onChanged={() => load(true)}
                   quotaBusy={quotaBusy === a.id}
-                  onReloadQuota={() => void reloadQuota(a.id)} />
+                  onReloadQuota={() => void reloadQuota(a.id)}
+                  parked={cooldowns.list.filter((c) => c.namespace === a.namespace)}
+                  onUnpark={() => cooldowns.unpark(a.namespace)} />
               </StaggerItem>
             ))}
           </Stagger>

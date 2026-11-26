@@ -41,7 +41,13 @@ Back up first: [recovery and upgrades](recovery-runbook.md).
   conversation cache.
 - **Rolling back** past the release check: Reset `update_check` and
   `notify_update_available` in Settings first; older builds refuse settings they do not
-  know.
+  know. The same goes for the early-warning settings (`notify_quota_warning`,
+  `alert_quota_percent`, `notify_balance_low`, `alert_balance_below`,
+  `notify_cookie_expiring`, `alert_cookie_hours`), `ledger_retention_days` and
+  `gemini_query_key`.
+- **Database schema 39** adds the daily totals that ledger retention writes. Back up
+  before you upgrade: an older ezllm refuses to open a schema 39 database, so going back
+  means starting the old version with that backup.
 
 ## Settings that no longer exist
 

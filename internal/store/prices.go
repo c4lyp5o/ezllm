@@ -227,7 +227,7 @@ type CostRow struct {
 // is tiny (tens of rows), so the plan is not a concern at ledger sizes here.
 const priceJoin = `
 WITH priced AS (
-  SELECT c.id, c.ts, COALESCE(c.account_id,0) AS account_id, c.account, c.model,
+  SELECT c.ts, c.n, COALESCE(c.account_id,0) AS account_id, c.account, c.model,
          c.tokens_in, c.tokens_out, c.tokens_cached_read, c.tokens_cached_write,
          (SELECT CASE WHEN UPPER(TRIM(p.currency)) = 'USD' THEN p.price_in END          FROM model_prices p
             WHERE p.account_id = c.account_id AND p.model_id = c.model
@@ -245,7 +245,7 @@ WITH priced AS (
             WHERE p.account_id = c.account_id AND p.model_id = c.model
               AND p.effective_from <= date(c.ts)
             ORDER BY p.effective_from DESC LIMIT 1) AS pcw
-  FROM calls c
+  FROM usage_all c
   WHERE c.ts >= ? AND c.ts < ?
 )`
 
@@ -253,8 +253,8 @@ WITH priced AS (
 func (d *DB) CostReport(ctx context.Context, from, to time.Time) ([]CostRow, error) {
 	q := priceJoin + `
 SELECT date(ts) AS day, account_id, account, model,
-       COUNT(*)                                            AS calls,
-       SUM(CASE WHEN pin IS NULL THEN 1 ELSE 0 END)        AS unpriced,
+       SUM(n)                                              AS calls,
+       SUM(CASE WHEN pin IS NULL THEN n ELSE 0 END)        AS unpriced,
        COALESCE(SUM(tokens_in),0), COALESCE(SUM(tokens_out),0),
        COALESCE(SUM(tokens_cached_read),0), COALESCE(SUM(tokens_cached_write),0),
        COALESCE(SUM(CASE WHEN pin IS NOT NULL THEN

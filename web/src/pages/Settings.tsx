@@ -8,6 +8,7 @@ import { ApiError, changeDashboardPassword, clearToken } from '../utils/api';
 import { Chip, ConfirmModal, CopyButton, SectionLabel, btn, cx, inputCls, relTime } from '../components/ui';
 import { bridgeUpdateText, fmtUptime, UPDATE_TONE } from '../utils/lib';
 import PushChannels from '../components/PushChannels';
+import ImportConfig from '../components/ImportConfig';
 import { effectiveText, settingError } from '../utils/settings';
 import PasswordStrength from '../components/PasswordStrength';
 import { MIN_PASSWORD } from '../utils/passwordStrength';
@@ -86,10 +87,12 @@ const DETAILS: Record<string, [string, string]> = {
   dispatch_deadline: ['Dispatch deadline', 'At least 1s, or leave empty for no limit. This limits the time spent picking a provider and waiting to retry. Streams already running aren\'t cut off.'],
   cooldown_429: ['Rate-limit cooldown', 'How long to wait when a provider doesn\'t send Retry-After.'],
   cooldown_5xx: ['Server-error cooldown', 'Duration before a failed endpoint is eligible again.'],
+  gemini_query_key: ['Accept keys in the URL (Gemini ?key=)', 'Off by default. Google\'s API lets a client put its key in the address (?key=…). Leave this off unless a client cannot send the x-goog-api-key header.'],
   cooldown_strikes: ['Failures before cooldown', 'Number of failures, 1 or more. Cooldowns already running keep their end times.'],
   backup_enabled: ['Scheduled backups', 'Needs a backup folder mounted on the host and a separate encryption secret.'],
   backup_hour: ['Daily backup hour', 'Hour of the day, from 0 to 23, in the instance timezone.'],
   backup_keep: ['Verified backups to keep', 'From 1 to 365. Old backups are only deleted after a new one has been checked.'],
+  ledger_retention_days: ['Keep every call for', 'Days, 0 to keep everything, or 32 to 3650. Older calls are added into daily totals per provider, model, key and app, then deleted, so charts and costs stay the same. Requests then shows only the calls kept.'],
   notify_free_models_added: ['Free models added', 'New free models discovered in a provider catalog.'],
   notify_free_models_removed: ['Free models removed', 'Free models removed from a provider catalog.'],
   notify_free_model_broken: ['Broken free models', 'Free models that fail every protocol probe.'],
@@ -102,12 +105,18 @@ const DETAILS: Record<string, [string, string]> = {
   notify_bridge_rolled_back: ['Bridge CLI rolled back', 'A new CLI version failed after it was installed, so the bridge went back to the previous one.'],
   notify_stream_truncation: ['Answers cut mid-stream', 'A provider cut off more than 1% of its streamed answers in the last 24 hours (out of at least 20).'],
   notify_update_available: ['New ezllm release', 'A newer ezllm release is available.'],
+  notify_quota_warning: ['Quota nearly used', 'A provider has used most of a quota window. ezllm reads each provider\'s quota once an hour and warns once per window.'],
+  alert_quota_percent: ['Warn at this much of a quota', 'Percent, from 1 to 100.'],
+  notify_balance_low: ['Balance running low', 'A prepaid provider balance is below the amount here. Said once a day while it stays low.'],
+  alert_balance_below: ['Warn below this balance', 'In the provider\'s own currency, for example 2.'],
+  notify_cookie_expiring: ['Session cookie expiring', 'A pasted session cookie, used to read quota, expires soon.'],
+  alert_cookie_hours: ['Warn this many hours ahead', 'From 1 to 720.'],
 };
 const GROUPS: Partial<Record<Tab, string[]>> = {
   General: ['usage_timezone', 'update_check'],
-  Gateway: ['translation_enabled', 'automatic_probing', 'catalog_interval', 'price_refresh', 'retries', 'attempt_budget', 'dispatch_deadline', 'cooldown_429', 'cooldown_5xx', 'cooldown_strikes'],
-  'Backup & Recovery': ['backup_enabled', 'backup_hour', 'backup_keep'],
-  Notifications: Object.keys(DETAILS).filter(k => k.startsWith('notify_')),
+  Gateway: ['translation_enabled', 'automatic_probing', 'catalog_interval', 'price_refresh', 'retries', 'attempt_budget', 'dispatch_deadline', 'cooldown_429', 'cooldown_5xx', 'cooldown_strikes', 'gemini_query_key'],
+  'Backup & Recovery': ['backup_enabled', 'backup_hour', 'backup_keep', 'ledger_retention_days'],
+  Notifications: Object.keys(DETAILS).filter(k => k.startsWith('notify_') || k.startsWith('alert_')),
 };
 const panel = 'rounded-xl border border-line bg-surface p-5 sm:p-6';
 const errorMessage = (e: unknown) => e instanceof Error ? e.message : 'The operation could not be completed.';
@@ -135,11 +144,13 @@ function SettingsGroup({ tab, view, updated, onDirty }: { tab: Tab; view: Settin
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
   const [acknowledged, acknowledge] = useState(false);
-  useEffect(() => { setDraft({}); acknowledge(false); }, [view.revision, tab]);
+  const [keyRisk, acceptKeyRisk] = useState(false);
+  useEffect(() => { setDraft({}); acknowledge(false); acceptKeyRisk(false); }, [view.revision, tab]);
   const dirty = Object.keys(draft).length > 0;
   useEffect(() => { onDirty(dirty); return () => onDirty(false); }, [dirty]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!keys.length) return null;
   const timezoneChanged = 'usage_timezone' in draft;
+  const queryKeyOn = draft.gemini_query_key === true;
   // A value reset to the deployment default (null) is always acceptable.
   const problems: Record<string, string> = {};
   for (const [k, v] of Object.entries(draft)) { if (v !== null) { const msg = settingError(k, v); if (msg) problems[k] = msg; } }
@@ -171,11 +182,17 @@ function SettingsGroup({ tab, view, updated, onDirty }: { tab: Tab; view: Settin
           {!field.editable && <p className="mt-1 text-xs text-mute">Managed by {field.source}; change the deployment override to unlock this control.</p>}
         </div>;
       })}
+      {queryKeyOn && <div role="alert" className="rounded-xl border-2 border-bad bg-bad-dim p-4 text-sm text-ink">
+        <p className="text-base font-semibold text-bad">Warning: keys in the URL leak.</p>
+        <p className="mt-2">With this on, an ezllm key can be sent as part of the address, like <code>…:generateContent?key=YOUR_KEY</code>. Addresses are written down in many places: reverse-proxy and load-balancer access logs, browser history, monitoring tools and error reports. Anyone who can read those can copy the key and spend your providers' quota.</p>
+        <p className="mt-2">Turn it on only for a client that cannot send the <code>x-goog-api-key</code> header. Give that client its own key with a budget, and keep your proxy's access logs private.</p>
+        <label className="mt-3 flex items-start gap-2 font-medium"><input type="checkbox" checked={keyRisk} onChange={e => acceptKeyRisk(e.target.checked)} />I understand that keys sent in the URL can be read from logs, and I accept the risk.</label>
+      </div>}
       {timezoneChanged && <label className="flex items-start gap-2 text-sm text-warn"><input type="checkbox" checked={acknowledged} onChange={e => acknowledge(e.target.checked)} />I understand this changes where report days and rule windows start and end, and can change today's remaining budgets.</label>}
       {error && <p role="alert" className="text-sm text-bad">{error} Reload Settings if another operator changed it.</p>}
       {saved && <p role="status" className="text-sm text-ok">Settings saved.</p>}
       <div className="flex flex-wrap items-center gap-3">
-        <button className={cx(btn.base, btn.primary)} disabled={busy || !dirty || (timezoneChanged && !acknowledged) || Object.keys(problems).length > 0}>{busy ? 'Saving…' : 'Save changes'}</button>
+        <button className={cx(btn.base, btn.primary)} disabled={busy || !dirty || (timezoneChanged && !acknowledged) || (queryKeyOn && !keyRisk) || Object.keys(problems).length > 0}>{busy ? 'Saving…' : 'Save changes'}</button>
         {dirty && <button type="button" className={cx(btn.base, btn.ghost)} onClick={() => { setDraft({}); acknowledge(false); setError(''); }}>Discard changes</button>}
         {dirty && <span className="text-xs text-warn">Unsaved changes</span>}
       </div>
@@ -227,6 +244,7 @@ function Backups() {
   }, []);
   const run = async () => { setBusy(true); setError(''); try { await runBackup(); await load(); } catch (e) { setError(errorMessage(e)); } finally { setBusy(false); } };
   return <><section className={panel}><SectionLabel>Exports</SectionLabel><p className="mt-2 text-sm text-mute">An export has your configuration and, if you choose, usage history. It doesn't include provider credentials, so a full restore also needs a database and master key backup.</p><div className="mt-4 flex flex-wrap gap-3"><a className={cx(btn.base, btn.ghost)} href="/admin/export" download>Export configuration</a><a className={cx(btn.base, btn.ghost)} href="/admin/export?include_ledger=true" download>Export with ledger</a></div></section>
+    <ImportConfig panel={panel} />
     <section className={panel}><SectionLabel>Encrypted backups</SectionLabel><p className="mt-2 text-sm text-mute">Each backup has a checked copy of the database and its master key, encrypted with a separate backup secret. Store that secret somewhere else. Set EZLLM_BACKUP_DIR and EZLLM_BACKUP_SECRET_FILE on the host. CLI logins and your deployment files need their own backups.</p>
       <p className="mt-4 text-sm">{status?.running ? 'Backup running…' : status?.ready ? 'Backup storage configured' : 'Backup storage is not configured'}</p>
       {status?.error && <p role="alert" className="mt-2 text-sm text-bad">{status.error}</p>}

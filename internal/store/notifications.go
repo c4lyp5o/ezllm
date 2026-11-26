@@ -23,6 +23,9 @@ const (
 	NoteBridgeRolledBack     = "bridge_rolled_back"
 	NoteStreamTruncation     = "stream_truncation"
 	NoteUpdateAvailable      = "update_available"
+	NoteQuotaWarning         = "quota_warning"
+	NoteBalanceLow           = "balance_low"
+	NoteCookieExpiring       = "cookie_expiring"
 )
 
 // Notification is one bell entry.

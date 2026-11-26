@@ -233,7 +233,7 @@ still *emit text*, so the bridge emulates function calling in the prompt layer.
   turn is unchanged. A wrong or missing format degrades to a plain-text answer.
 - **Router:** a hop that still refuses tools (`chat_tools_unsupported`, now
   only for non-function tool types) fails over without a cooldown instead of
-  ending the client run (`refusesTools`, proxy.go).
+  ending the client run (`refusesTools`, classify.go).
 
 ### §10 second addendum (2026-11-05): native tools over the headless channel
 

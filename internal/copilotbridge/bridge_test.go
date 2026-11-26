@@ -532,7 +532,7 @@ func (e failingExec) RunChannel(context.Context, ChannelTurn, func(string) error
 	return Result{}, e.err
 }
 
-// The router fails over on this exact shape (proxy.go refusesTools) without
+// The router fails over on this exact shape (proxy classify.go refusesTools) without
 // parking the hop, so the refusal costs the operator nothing.
 func TestToolRefusalIsThe400TheRouterFailsOverOn(t *testing.T) {
 	s := &Server{Runner: fakeExec{err: toolsRefused("protocol 4", nil)}, Token: "t", Models: []Model{{ID: "auto"}}}

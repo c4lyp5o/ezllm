@@ -151,13 +151,47 @@ Back up first, and keep the old image or binary. A newer version can change the 
 so that an older one cannot open it. To go back, start the old version with the backup
 you made before the upgrade. What to change for each version: [upgrading](upgrading.md).
 
+## Keep the ledger small
+
+Every request adds a row to the ledger, so the database grows over time. To cap it,
+open **Settings** → **Backup & Recovery** and set **Keep every call for** to a number
+of days, 32 or more.
+
+Once an hour, ezllm adds calls older than that into daily totals per provider, model,
+key and app, then deletes them. Charts, costs and token totals stay the same. **Requests**
+then lists only the calls kept, and a daily total cannot be split back into calls.
+
 ## Export your configuration
 
 **Settings** → **Backup & Recovery** → **Export configuration** downloads your accounts,
 combos, rules, prices and settings as a readable file, without any keys. It helps you
-check or rebuild a setup by hand. It is not a backup: it cannot be restored.
+check a setup or copy it to another ezllm. It is not a backup: it has no keys and no
+usage history to restore.
+
+## Import a configuration
+
+Use this to copy providers, combos, compression profiles, rules and settings from one
+ezllm to another.
+
+1. On the first ezllm, choose **Export configuration**.
+2. On the second, open **Settings** → **Backup & Recovery** → **Import configuration**.
+3. Choose **Choose an export file** and pick the file.
+4. Read the list of what would change. Nothing is written yet.
+5. Choose **Apply import**.
+
+You should see "Imported" with a count of what changed.
+
+- A provider that already exists (same namespace) is updated and keeps its keys.
+- A new provider is created turned off, because the file has no keys. Add a key, then
+  turn it on.
+- Combos, compression profiles and rules are matched by name. A combo hop whose provider
+  is in neither ezllm is left out, and the list names it.
+- Keys for apps, prices, model lists and usage history are not imported.
+
+If an import stops part way, what was written stays. Fix the cause and import the same
+file again: anything already imported shows as unchanged.
 
 ---
 
-**How it works:** [API.md](API.md) (`/admin/backups`, `/admin/export`) ·
+**How it works:** [API.md](API.md) (`/admin/backups`, `/admin/export`, `/admin/import`) ·
 **The master key:** [master key](master-key-runbook.md)

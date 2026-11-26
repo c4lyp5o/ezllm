@@ -15,6 +15,15 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   A temporary failure after the switch is tested once more before it is undone.
 - **Antigravity plan limits.** The provider card and Quota dialog show how much of each
   weekly limit is used, per group of models, read with `agy -p /usage` (no quota spent).
+- **Proxy fixes.** Client-address and browser headers (`X-Forwarded-For`, `X-Real-IP`,
+  `Forwarded`, `Cf-Connecting-IP`, `Referer`, `Sec-Fetch-*`) no longer reach providers.
+  An upstream error sent as a stream on a translated hop reaches the client as its own
+  error, not run through the stream translator, and an error after a broken stream
+  starts on its own line. `408`/`425` use the server-error cooldown. Gemini audio over
+  32 MiB is refused instead of cut. Model IDs are escaped in Cloudflare and Gemini URLs,
+  and Cloudflare is recognised by host. A later zero no longer wipes an output token
+  count. When every hop is too small for the request, the error says so instead of
+  "five-minute cooldown".
 - **Store fixes.** Turning an account off in the dashboard (or any partial account
   `PATCH`) used to wipe its custom headers, token cap, context size, quota mode and cap
   window; it keeps them now, and a `PATCH` is validated like a new account. A rule's

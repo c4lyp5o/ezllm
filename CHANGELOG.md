@@ -4,6 +4,8 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## Unreleased
 
+- **Services page loads gently.** Provider catalogs load four at a time instead of
+  all at once; models still appear as each provider answers.
 - **Unpark now.** Parked providers show **parked** with a live countdown on their
   Providers card and on the Combos hop. **Unpark** sends them traffic again at once,
   after you fix the cause. New `GET|DELETE /admin/cooldowns`.

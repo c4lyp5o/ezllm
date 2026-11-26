@@ -52,6 +52,10 @@ type Values struct {
 	// LedgerRetentionDays rolls calls older than this into daily totals and
 	// deletes them. 0 keeps every call.
 	LedgerRetentionDays int `json:"ledger_retention_days"`
+	// GeminiQueryKey accepts an ezllm key in the ?key= query string on the
+	// Gemini surface, as Google's own API does. Off: a URL lands in proxy and
+	// browser logs, and the key with it.
+	GeminiQueryKey bool `json:"gemini_query_key"`
 }
 
 func Defaults() Values {

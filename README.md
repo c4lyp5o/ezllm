@@ -10,8 +10,8 @@ keeps track of tokens and cost. You set it up in a web dashboard.
 
 ## What it does
 
-- **One address for many providers.** Apps use Chat Completions, Anthropic Messages or
-  the Responses API. ezllm [translates](docs/translation-runbook.md) when a provider
+- **One address for many providers.** Apps use Chat Completions, Anthropic Messages,
+  the Responses API or Google's Gemini API. ezllm [translates](docs/translation-runbook.md) when a provider
   needs another format. Embeddings, images, audio and other services pass through too.
 - **Failover and load balancing.** Group models into a *combo*. A model that fails
   before it answers is retried or skipped, and your app sees only the answer.

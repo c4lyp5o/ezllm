@@ -1,6 +1,6 @@
 // Exercises the shipped Settings UI without provider credentials.
 import { start, json, check, finish } from './mockdash.mjs';
-const defaults = { usage_timezone: 'UTC', translation_enabled: true, automatic_probing: true, catalog_interval: '12h', price_refresh: true, retries: 3, attempt_budget: 8, dispatch_deadline: '', cooldown_429: '60s', cooldown_5xx: '60s', cooldown_strikes: 3, backup_enabled: false, backup_hour: 3, backup_keep: 7, notify_free_models_added: true, notify_free_models_removed: true, notify_free_model_broken: true, notify_catalog_refresh_failed: true, notify_client_budget_reached: true, notify_price_refresh_failed: true, notify_backup_failed: true, notify_bridge_updated: true, notify_bridge_update_blocked: true, notify_bridge_rolled_back: true, notify_quota_warning: true, alert_quota_percent: 80, notify_balance_low: true, alert_balance_below: 2, notify_cookie_expiring: true, alert_cookie_hours: 48, ledger_retention_days: 0 };
+const defaults = { usage_timezone: 'UTC', translation_enabled: true, automatic_probing: true, catalog_interval: '12h', price_refresh: true, retries: 3, attempt_budget: 8, dispatch_deadline: '', cooldown_429: '60s', cooldown_5xx: '60s', cooldown_strikes: 3, backup_enabled: false, backup_hour: 3, backup_keep: 7, notify_free_models_added: true, notify_free_models_removed: true, notify_free_model_broken: true, notify_catalog_refresh_failed: true, notify_client_budget_reached: true, notify_price_refresh_failed: true, notify_backup_failed: true, notify_bridge_updated: true, notify_bridge_update_blocked: true, notify_bridge_rolled_back: true, notify_quota_warning: true, alert_quota_percent: 80, notify_balance_low: true, alert_balance_below: 2, notify_cookie_expiring: true, alert_cookie_hours: 48, ledger_retention_days: 0, gemini_query_key: false };
 let revision = 0, fields = Object.fromEntries(Object.entries(defaults).map(([k, value]) => [k, { value, source: k === 'price_refresh' ? 'environment' : 'default', editable: k !== 'price_refresh', saved: false, apply: 'immediate' }]));
 let sessions = [{ id: 'session-other', browser: 'Other browser', current: false, created_at: '2026-10-26T00:00:00Z', expires_at: '2026-10-27T00:00:00Z' }];
 let backups = { ready: true, running: false, last_outcome: '', backups: [] };
@@ -52,11 +52,19 @@ try {
   await page.getByRole('status').filter({ hasText: 'Settings saved.' }).waitFor();
   await page.getByRole('button', { name: 'Gateway', exact: true }).click();
   check('environment override locked', await page.getByLabel('Automatic price refresh', { exact: true }).isDisabled());
+  await page.getByLabel('Accept keys in the URL (Gemini ?key=)', { exact: true }).check();
+  check('turning on URL keys shows the warning', await page.getByText('Warning: keys in the URL leak.').count() === 1);
+  check('saving waits for the risk to be accepted', await page.getByRole('button', { name: 'Save changes', exact: true }).isDisabled());
+  if (process.env.SHOTS_DIR) await page.getByRole('alert').filter({ hasText: 'keys in the URL leak' }).screenshot({ path: `${process.env.SHOTS_DIR}/gemini-key-warning.png` });
+  await page.getByLabel('I understand that keys sent in the URL can be read from logs', { exact: false }).check();
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+  await page.getByRole('status').filter({ hasText: 'Settings saved.' }).waitFor();
+  check('URL keys save once accepted', fields.gemini_query_key.value === true);
   await page.getByLabel('Retries per hop', { exact: true }).fill('0');
   await page.getByRole('button', { name: 'Save changes', exact: true }).click();
   await page.getByRole('status').filter({ hasText: 'Settings saved.' }).waitFor();
   check('zero retries saved', fields.retries.value === 0);
-  await page.getByRole('button', { name: 'Reset to deployment default', exact: true }).click();
+  await page.getByRole('button', { name: 'Reset to deployment default', exact: true }).first().click();
   await page.getByRole('button', { name: 'Save changes', exact: true }).click();
   await page.getByRole('status').filter({ hasText: 'Settings saved.' }).waitFor();
   check('reset restores fallback', fields.retries.value === 3 && !fields.retries.saved);

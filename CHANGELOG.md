@@ -4,6 +4,11 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## Unreleased
 
+- **Gemini API surface.** Apps written for Google's Gemini API can point at ezllm:
+  `/v1beta/models/{model}:generateContent`, `:streamGenerateContent` (SSE or JSON array),
+  `:countTokens` and `/v1beta/models`, with function calling. Requests run through the
+  normal routing, rules and ledger. The key goes in `x-goog-api-key`; the `?key=` form
+  is off unless you turn it on in Settings, behind a warning, because URLs end up in logs.
 - **Ledger retention.** Settings → Backup & Recovery → **Keep every call for** caps how
   long single calls are kept (off by default; 32 days or more). Older calls are added
   into daily totals per provider, model, key and app, then deleted, so charts, costs and

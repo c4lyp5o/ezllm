@@ -46,6 +46,8 @@ Errors are OpenAI-shaped: `{"error":{"type":"...","message":"...","code":422}}`.
 | POST | `/v1/messages` | Anthropic (`x-api-key` or Bearer) |
 | POST | `/v1/messages/count_tokens` | Anthropic token count → `{"input_tokens":N}`. The model resolves like `/v1/messages`; up to three candidate hops on the Anthropic wire are asked in order (parked hops skipped, failures never park a hop). When none answers (bridges, translated hops, gateways without the endpoint) the gateway estimates over `system`, `messages`, `tools` and `tool_choice` (2 characters per token over the JSON; Anthropic measured about 2.35 on Sonnet 5.5, so the estimate runs about 15–20% high on purpose). `X-Ezllm-Token-Count: upstream\|estimate` says which. Same auth and model allowlist as `/v1/messages`; no ledger row, no budget. |
 | POST | `/v1/responses` | OpenAI Responses |
+| GET | `/v1beta/models`, `/v1beta/models/{model}` | Gemini shape: `{models:[{name:"models/<id>",…}]}` ([Gemini surface](#gemini-surface)) |
+| POST | `/v1beta/models/{model}:generateContent`, `:streamGenerateContent`, `:countTokens` | Google Gemini API ([Gemini surface](#gemini-surface)) |
 | POST | `/v1/embeddings`, `/v1/images/generations`, `/v1/audio/speech`, `/v1/audio/transcriptions` | Service surfaces; transcriptions is multipart |
 | POST | `/v1/images/edits` | OpenAI image edit/inpaint — **multipart** (`model` form field swapped per hop) |
 | POST | `/v1/moderations` | OpenAI Moderations |
@@ -90,6 +92,40 @@ map. A combo row is bare (`owned_by: "ezllm"`) and adds a non-standard `combo` k
 `{"strategy":"failover","hops":[{"account_id":1,"model":"mimo-v2.6-flash","enabled":true}],"context_size":200000}` — so a
 picker can say what the name routes to; OpenAI clients that don't know the key ignore it. Combo names
 can never contain `/`, so a bare id is unambiguous. Disabled combos are never listed.
+
+### Gemini surface
+
+Clients written for Google's Gemini API (`generateContent`) can use ezllm by pointing
+their base URL at it. The model in the path is any routable id: `models/acme/gpt-5` or a
+combo name. Each request is converted to Chat Completions and runs through the normal
+chat path (routing, rules, compression, failover, ledger; the ledger's `surface` is
+`chat`), and the answer is converted back.
+
+- **Key:** `x-goog-api-key: <ezllm key>`, or `Authorization: Bearer`. The `?key=` query
+  form is refused (`401`) unless the `gemini_query_key` setting is on, because a URL is
+  written to proxy and browser logs. When it is on, the key is removed from the URL
+  before anything else reads it.
+- **Carried:** `contents` (text, inline images, `functionCall`, `functionResponse`),
+  `systemInstruction`, `tools[].functionDeclarations` (OpenAPI types are lower-cased
+  into JSON Schema; `parametersJsonSchema` passes as is), `toolConfig` (`AUTO`, `NONE`,
+  `ANY`), and `generationConfig` (`temperature`, `topP`, `maxOutputTokens`,
+  `stopSequences`, `seed`, penalties, `responseMimeType: application/json`,
+  `responseSchema`/`responseJsonSchema`, `thinkingConfig.includeThoughts`). A
+  `functionResponse` without an `id` answers the oldest open call of the same name.
+- **Refused (`400`, "not supported through ezllm"):** Google's own tools (`googleSearch`,
+  `codeExecution`, `urlContext`), inline data that is not an image, `fileData` that is not
+  an `https` image, `candidateCount` above 1. `safetySettings` and `topK` are ignored.
+- **Streaming:** `:streamGenerateContent?alt=sse` answers `text/event-stream` with one
+  `data:` line per chunk; without `alt=sse` it answers one JSON array, written as it
+  grows. Text is sent as it arrives; each function call is sent whole in the last chunk,
+  with `finishReason` and `usageMetadata`.
+- **Answers:** `candidates[0]` (`finishReason` `STOP`, `MAX_TOKENS`, `SAFETY` or `OTHER`),
+  `usageMetadata` (`promptTokenCount`, `candidatesTokenCount`, `totalTokenCount`,
+  `cachedContentTokenCount`, `thoughtsTokenCount`), `modelVersion`, `responseId`.
+  Errors are `{"error":{"code","message","status"}}` with Google's status names
+  (`RESOURCE_EXHAUSTED` for 429).
+- **`:countTokens`** answers `{"totalTokens":N}` from the same estimate as
+  `/v1/messages/count_tokens` (`X-Ezllm-Token-Count: estimate`).
 
 ### Copilot subscription image inputs
 
@@ -1173,6 +1209,7 @@ JSON object, with unknown envelope/setting fields rejected.
 | `alert_quota_percent` | Integer 1–100, default 80. A quota window at or over this warns, once per window. |
 | `alert_balance_below` | Number above 0, default 2, in the provider's currency. A lower balance warns, once a day. |
 | `alert_cookie_hours` | Integer 1–720, default 48. A session cookie expiring within this many hours warns, once per cookie. |
+| `gemini_query_key` | Boolean, default false. Accept an ezllm key in the `?key=` query string on the Gemini surface. Keys in URLs are written to proxy and browser logs. |
 | `ledger_retention_days` | Integer, default 0 (keep every call), else 32–3650. Calls older than this are rolled into `calls_daily` (one row per UTC day, account, key, client, alias, surface and model) and deleted, by the hourly job. Usage, cost and day reports read both, so their totals do not change; a rolled day counts at noon UTC. The median TTFT, `GET /admin/requests` and the ledger in `GET /admin/export` cover only the calls kept. Calls with a pending meter debit are kept until it is settled. |
 
 Duration settings retain the limits of their existing YAML counterparts.

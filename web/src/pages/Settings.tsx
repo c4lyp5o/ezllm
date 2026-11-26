@@ -87,6 +87,7 @@ const DETAILS: Record<string, [string, string]> = {
   dispatch_deadline: ['Dispatch deadline', 'At least 1s, or leave empty for no limit. This limits the time spent picking a provider and waiting to retry. Streams already running aren\'t cut off.'],
   cooldown_429: ['Rate-limit cooldown', 'How long to wait when a provider doesn\'t send Retry-After.'],
   cooldown_5xx: ['Server-error cooldown', 'Duration before a failed endpoint is eligible again.'],
+  gemini_query_key: ['Accept keys in the URL (Gemini ?key=)', 'Off by default. Google\'s API lets a client put its key in the address (?key=…). Leave this off unless a client cannot send the x-goog-api-key header.'],
   cooldown_strikes: ['Failures before cooldown', 'Number of failures, 1 or more. Cooldowns already running keep their end times.'],
   backup_enabled: ['Scheduled backups', 'Needs a backup folder mounted on the host and a separate encryption secret.'],
   backup_hour: ['Daily backup hour', 'Hour of the day, from 0 to 23, in the instance timezone.'],
@@ -113,7 +114,7 @@ const DETAILS: Record<string, [string, string]> = {
 };
 const GROUPS: Partial<Record<Tab, string[]>> = {
   General: ['usage_timezone', 'update_check'],
-  Gateway: ['translation_enabled', 'automatic_probing', 'catalog_interval', 'price_refresh', 'retries', 'attempt_budget', 'dispatch_deadline', 'cooldown_429', 'cooldown_5xx', 'cooldown_strikes'],
+  Gateway: ['translation_enabled', 'automatic_probing', 'catalog_interval', 'price_refresh', 'retries', 'attempt_budget', 'dispatch_deadline', 'cooldown_429', 'cooldown_5xx', 'cooldown_strikes', 'gemini_query_key'],
   'Backup & Recovery': ['backup_enabled', 'backup_hour', 'backup_keep', 'ledger_retention_days'],
   Notifications: Object.keys(DETAILS).filter(k => k.startsWith('notify_') || k.startsWith('alert_')),
 };
@@ -143,11 +144,13 @@ function SettingsGroup({ tab, view, updated, onDirty }: { tab: Tab; view: Settin
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
   const [acknowledged, acknowledge] = useState(false);
-  useEffect(() => { setDraft({}); acknowledge(false); }, [view.revision, tab]);
+  const [keyRisk, acceptKeyRisk] = useState(false);
+  useEffect(() => { setDraft({}); acknowledge(false); acceptKeyRisk(false); }, [view.revision, tab]);
   const dirty = Object.keys(draft).length > 0;
   useEffect(() => { onDirty(dirty); return () => onDirty(false); }, [dirty]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!keys.length) return null;
   const timezoneChanged = 'usage_timezone' in draft;
+  const queryKeyOn = draft.gemini_query_key === true;
   // A value reset to the deployment default (null) is always acceptable.
   const problems: Record<string, string> = {};
   for (const [k, v] of Object.entries(draft)) { if (v !== null) { const msg = settingError(k, v); if (msg) problems[k] = msg; } }
@@ -179,11 +182,17 @@ function SettingsGroup({ tab, view, updated, onDirty }: { tab: Tab; view: Settin
           {!field.editable && <p className="mt-1 text-xs text-mute">Managed by {field.source}; change the deployment override to unlock this control.</p>}
         </div>;
       })}
+      {queryKeyOn && <div role="alert" className="rounded-xl border-2 border-bad bg-bad-dim p-4 text-sm text-ink">
+        <p className="text-base font-semibold text-bad">Warning: keys in the URL leak.</p>
+        <p className="mt-2">With this on, an ezllm key can be sent as part of the address, like <code>…:generateContent?key=YOUR_KEY</code>. Addresses are written down in many places: reverse-proxy and load-balancer access logs, browser history, monitoring tools and error reports. Anyone who can read those can copy the key and spend your providers' quota.</p>
+        <p className="mt-2">Turn it on only for a client that cannot send the <code>x-goog-api-key</code> header. Give that client its own key with a budget, and keep your proxy's access logs private.</p>
+        <label className="mt-3 flex items-start gap-2 font-medium"><input type="checkbox" checked={keyRisk} onChange={e => acceptKeyRisk(e.target.checked)} />I understand that keys sent in the URL can be read from logs, and I accept the risk.</label>
+      </div>}
       {timezoneChanged && <label className="flex items-start gap-2 text-sm text-warn"><input type="checkbox" checked={acknowledged} onChange={e => acknowledge(e.target.checked)} />I understand this changes where report days and rule windows start and end, and can change today's remaining budgets.</label>}
       {error && <p role="alert" className="text-sm text-bad">{error} Reload Settings if another operator changed it.</p>}
       {saved && <p role="status" className="text-sm text-ok">Settings saved.</p>}
       <div className="flex flex-wrap items-center gap-3">
-        <button className={cx(btn.base, btn.primary)} disabled={busy || !dirty || (timezoneChanged && !acknowledged) || Object.keys(problems).length > 0}>{busy ? 'Saving…' : 'Save changes'}</button>
+        <button className={cx(btn.base, btn.primary)} disabled={busy || !dirty || (timezoneChanged && !acknowledged) || (queryKeyOn && !keyRisk) || Object.keys(problems).length > 0}>{busy ? 'Saving…' : 'Save changes'}</button>
         {dirty && <button type="button" className={cx(btn.base, btn.ghost)} onClick={() => { setDraft({}); acknowledge(false); setError(''); }}>Discard changes</button>}
         {dirty && <span className="text-xs text-warn">Unsaved changes</span>}
       </div>

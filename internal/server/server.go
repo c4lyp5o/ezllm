@@ -324,6 +324,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/messages", s.inferAuthed(s.inference(provider.SurfaceAnthropic)))
 	s.mux.HandleFunc("POST /v1/messages/count_tokens", s.inferAuthed(s.countTokens))
 	s.mux.HandleFunc("POST /v1/responses", s.inferAuthed(s.inference(provider.SurfaceResponses)))
+	// Gemini surface: Google's generateContent shape over the chat path.
+	s.mux.HandleFunc("GET /v1beta/models", s.geminiAuthed(s.handleGeminiModels))
+	s.mux.HandleFunc("GET /v1beta/models/{model...}", s.geminiAuthed(s.handleGeminiModel))
+	s.mux.HandleFunc("POST /v1beta/models/{rest...}", s.geminiAuthed(s.handleGeminiAction))
 
 	// Phase 1: New inference endpoints
 	s.mux.HandleFunc("POST /v1/embeddings", s.inferAuthed(s.inference(provider.SurfaceEmbeddings)))

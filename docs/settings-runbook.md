@@ -90,6 +90,17 @@ are not tried for that model. The provider shows **parked** only when every key 
 In `config.yaml`, `retry.retries: 0` means the default of 3. To turn retries off, save `0`
 in Settings.
 
+## Keys in the URL (Gemini)
+
+Apps written for Google's Gemini API send their ezllm key in the `x-goog-api-key`
+header, and that always works. Some also offer to put the key in the address
+(`?key=…`). ezllm refuses that unless you turn on **Accept keys in the URL** in
+Settings → Gateway.
+
+Leave it off if you can. An address is written to reverse-proxy access logs, browser
+history and error reports, and anyone who reads them can copy the key. If one app needs
+it, give that app its own key with a budget, and keep your proxy's logs private.
+
 ## Early warnings
 
 Notifications also warns you before something runs out:

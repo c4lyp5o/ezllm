@@ -15,6 +15,11 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   A temporary failure after the switch is tested once more before it is undone.
 - **Antigravity plan limits.** The provider card and Quota dialog show how much of each
   weekly limit is used, per group of models, read with `agy -p /usage` (no quota spent).
+- **Codex and Copilot bridge fixes.** The Copilot bridge starts its CLI in its own
+  process group and ends the whole group, so nothing the CLI started outlives a
+  cancelled turn or a stopped worker. Codex's `--help` check matches whole flags, so
+  `--sandbox` is no longer found inside `--sandbox-policy`. Copilot error details are
+  cut on a character boundary.
 - **Claude and Antigravity bridge fixes.** A Claude Code CLI that stops without an
   answer is now a 502 with its own words, not a 200 with an empty message. Ending a CLI
   no longer looks up its process group after the CLI is gone, so a recycled process id

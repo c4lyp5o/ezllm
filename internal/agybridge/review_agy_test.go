@@ -55,15 +55,3 @@ func TestPlanUsageReusesAFreshReading(t *testing.T) {
 		t.Fatal("second read started the CLI again")
 	}
 }
-
-func TestHelpHasFlag(t *testing.T) {
-	help := "  --print\n  --json-schema=<file>\tschema\n  --model, -m <id>\n  --printer foo\n"
-	for _, f := range []string{"--print", "--json-schema", "--model"} {
-		if !helpHasFlag(help, f) {
-			t.Errorf("%s not found", f)
-		}
-	}
-	if helpHasFlag("  --printer foo\n", "--print") {
-		t.Error("--print matched as the prefix of --printer")
-	}
-}

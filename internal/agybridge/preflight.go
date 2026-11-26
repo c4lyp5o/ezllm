@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 )
 
 // RequiredFlags are asserted against `agy --help` at boot: a release that drops
@@ -63,10 +65,10 @@ func RunPreflight(ctx context.Context, bin, home string) (Preflight, error) {
 	if err != nil {
 		return p, fmt.Errorf("agy bridge: %s --help failed: %w", bin, err)
 	}
-	p.StructuredOutput = helpHasFlag(help, "--json-schema")
-	p.ConversationResume = helpHasFlag(help, "--conversation")
+	p.StructuredOutput = bridgeutil.HelpHasFlag(help, "--json-schema")
+	p.ConversationResume = bridgeutil.HelpHasFlag(help, "--conversation")
 	for _, f := range RequiredFlags {
-		if !helpHasFlag(help, f) {
+		if !bridgeutil.HelpHasFlag(help, f) {
 			return p, fmt.Errorf("agy bridge: agy %s does not offer required flag %s (docs/agy-bridge-runbook.md)", p.Version, f)
 		}
 	}
@@ -148,20 +150,4 @@ func CheckSettings(home string) error {
 		return fmt.Errorf("agy bridge: %s loosens the tool policy (%s); the agent runs on this host, so remove those keys (docs/agy-bridge-runbook.md#lockdown)", path, strings.Join(bad, ", "))
 	}
 	return nil
-}
-
-// helpHasFlag reports whether --help lists flag as a whole word: followed by
-// a space, tab, newline, "=" or ",", never as the prefix of a longer flag.
-func helpHasFlag(help, flag string) bool {
-	for i := 0; ; {
-		j := strings.Index(help[i:], flag)
-		if j < 0 {
-			return false
-		}
-		end := i + j + len(flag)
-		if end == len(help) || strings.ContainsRune(" \t\r\n=,", rune(help[end])) {
-			return true
-		}
-		i = end
-	}
 }

@@ -251,6 +251,10 @@ func (r *Runner) run(ctx context.Context, model, prompt string, delta func(strin
 	// A grandchild holding the stdout pipe must not pin Wait (and a concurrency
 	// slot) after the kill.
 	cmd.WaitDelay = 5 * time.Second
+	// Its own process group, killed whole on cancel: a grandchild must not
+	// outlive the turn.
+	bridgeutil.SetProcessGroup(cmd)
+	cmd.Cancel = func() error { bridgeutil.KillGroup(cmd); return nil }
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return Result{}, fmt.Errorf("copilot-bridge: stdout: %w", err)

@@ -49,3 +49,19 @@ func RandomHex(n int) string {
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
+
+// HelpHasFlag reports whether --help lists flag as a whole word: followed by
+// a space, tab, newline, "=" or ",", never as the prefix of a longer flag.
+func HelpHasFlag(help, flag string) bool {
+	for i := 0; ; {
+		j := strings.Index(help[i:], flag)
+		if j < 0 {
+			return false
+		}
+		end := i + j + len(flag)
+		if end == len(help) || strings.ContainsRune(" \t\r\n=,", rune(help[end])) {
+			return true
+		}
+		i = end
+	}
+}

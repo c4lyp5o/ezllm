@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -178,16 +179,24 @@ func claudeCLICheck(bin string) (version, drift string) {
 // so USER and LOGNAME must exist — checked here so a container misconfig fails
 // the boot instead of every request.
 func claudeLoginCheck(bin, dir string) (state, plan string) {
+	return claudeLoginCheckOn(runtime.GOOS, bin, dir)
+}
+
+// claudeLoginCheckOn: on macOS the CLI keeps its login in the Keychain, so there
+// is no file to look for and the CLI's own answer decides. It exits non-zero
+// when it is logged out.
+func claudeLoginCheckOn(goos, bin, dir string) (state, plan string) {
 	if os.Getenv("USER") == "" || os.Getenv("LOGNAME") == "" {
 		return "misconfigured", "USER and LOGNAME must be set (the CLI's login check reads process identity)"
 	}
-	if _, err := os.Stat(filepath.Join(dir, ".credentials.json")); err != nil {
+	mac := goos == "darwin"
+	if _, err := os.Stat(filepath.Join(dir, ".credentials.json")); err != nil && !mac {
 		return "logged-out", "no subscription login in " + dir
 	}
 	cmd := exec.Command(bin, "auth", "status")
 	cmd.Env = append(os.Environ(), "CLAUDE_CONFIG_DIR="+dir)
 	out, err := cmd.CombinedOutput()
-	if err != nil {
+	if err != nil && !(mac && strings.Contains(strings.ToLower(string(out)), `"loggedin": false`)) {
 		return "unverified", "claude auth status failed"
 	}
 	state, plan = "unknown", "unknown"

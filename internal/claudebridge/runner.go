@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -108,6 +109,9 @@ func (r *Runner) Run(ctx context.Context, req Request, alias string, sink func(F
 		return Result{}, fmt.Errorf("claude-bridge: cannot create work dir: %w", err)
 	}
 	defer os.RemoveAll(tmp)
+	if err := linkKeychains(runtime.GOOS, os.Getenv("HOME"), tmp); err != nil {
+		return Result{}, fmt.Errorf("claude-bridge: cannot link the keychain folder: %w", err)
+	}
 
 	settings := map[string]any{"env": map[string]any{"CLAUDE_CODE_EXTRA_BODY": extraBody}}
 	if err := writeJSON(filepath.Join(tmp, "settings.json"), settings); err != nil {

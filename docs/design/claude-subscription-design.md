@@ -197,7 +197,8 @@ agent harnesses stacked in the request path).
 
 ## 4. Bridge request contract
 
-Per request: a private temporary `HOME` (so nothing touches the operator's `~/.claude` state),
+Per request: a private temporary `HOME` (so nothing touches the operator's `~/.claude` state;
+on macOS it holds one link, to `~/Library/Keychains`, where the CLI keeps its login),
 `--settings` carrying `CLAUDE_CODE_EXTRA_BODY`, `--system-prompt-file` carrying the client's system
 prompt, `--setting-sources ''`, `--strict-mcp-config` with a bridge-owned empty MCP config,
 `--tools ''`, `--max-turns 1`, `--permission-mode dontAsk`, `--no-session-persistence`, a

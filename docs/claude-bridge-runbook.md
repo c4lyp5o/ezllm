@@ -113,6 +113,8 @@ shape the Providers page already draws — **rolling** = the 5-hour window,
 
 - **401** — no usable login where the CLI runs it. Check `USER`/`LOGNAME` are set
   and `/claude-sub/.credentials.json` exists and is readable by the container uid.
+  On macOS the login is in the Keychain instead of that file: run ezllm in the desktop
+  session of the user who signed in (SSH cannot open the Keychain).
 - **429 `rate_limit_error`** — the plan's window is exhausted (or overage is off and
   the window is full). Wait for the reset; the CLI's own words are in the body.
 - **400 `max_output_tokens`** — the request's `max_tokens` is smaller than the

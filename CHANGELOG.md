@@ -17,6 +17,8 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   weekly limit is used, per group of models, read with `agy -p /usage` (no quota spent).
 - **Bridges on Windows.** A guide for running ezllm in WSL (docs/wsl.md). The macOS script
   now makes its data folder private, and the macOS update steps fetch the script again.
+- **Claude on macOS.** The bridge reads the login that Claude Code keeps in the Keychain.
+  It used to answer "Not logged in".
 - **Antigravity reasoning level.** The model sets it (`gemini-4-hydrogen-high`). The
   bridge ignores a client's `reasoning_effort`; a level that differed from the model's
   used to fail the turn.

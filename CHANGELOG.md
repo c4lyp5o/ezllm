@@ -4,6 +4,8 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## Unreleased
 
+- **Faster provider list.** The provider list and the overview read keys, quotas and
+  model counts for every provider in three queries, instead of three per provider.
 - **Gemini API surface.** Apps written for Google's Gemini API can point at ezllm:
   `/v1beta/models/{model}:generateContent`, `:streamGenerateContent` (SSE or JSON array),
   `:countTokens` and `/v1beta/models`, with function calling. Requests run through the

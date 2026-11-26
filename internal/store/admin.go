@@ -135,10 +135,8 @@ FROM accounts ORDER BY namespace`)
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	for i := range out {
-		if err := d.hydrateAccount(ctx, &out[i]); err != nil {
-			return nil, err
-		}
+	if err := d.hydrateAccounts(ctx, out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -157,27 +155,41 @@ func (d *DB) GetAccount(ctx context.Context, id int64) (*AccountSummary, error) 
 	return nil, ErrNotFound
 }
 
-// hydrateAccount fills keys / quota / protocol counts for one account.
-func (d *DB) hydrateAccount(ctx context.Context, a *AccountSummary) error {
-	a.Keys = []KeySummary{} // API contract: collections are arrays, including when empty.
-	a.ProtocolSupport = map[string]int{"chat": 0, "anthropic": 0, "responses": 0, "untested": 0}
+// hydrateAccounts fills keys, the latest quota and protocol counts for every
+// account in three queries, however many accounts there are. (It was three
+// queries per account: the Providers page and the overview paid 3N+1.)
+func (d *DB) hydrateAccounts(ctx context.Context, accts []AccountSummary) error {
+	byID := make(map[int64]*AccountSummary, len(accts))
+	for i := range accts {
+		a := &accts[i]
+		a.Keys = []KeySummary{} // API contract: collections are arrays, including when empty.
+		a.ProtocolSupport = map[string]int{"chat": 0, "anthropic": 0, "responses": 0, "untested": 0}
+		byID[a.ID] = a
+	}
+	if len(accts) == 0 {
+		return nil
+	}
 
-	// keys
 	krows, err := d.r.QueryContext(ctx, `
-SELECT id, label, key_hint, enabled, last_test_at, last_test_ok,
+SELECT account_id, id, label, key_hint, enabled, last_test_at, last_test_ok,
        COALESCE(last_test_detail,''), added_at
-FROM provider_keys WHERE account_id=? ORDER BY id`, a.ID)
+FROM provider_keys ORDER BY account_id, id`)
 	if err != nil {
 		return err
 	}
 	defer krows.Close()
 	for krows.Next() {
+		var acct int64
 		var k KeySummary
 		var lastTest sql.NullString
 		var ok sql.NullBool
-		if err := krows.Scan(&k.ID, &k.Label, &k.Hint, &k.Enabled, &lastTest, &ok,
+		if err := krows.Scan(&acct, &k.ID, &k.Label, &k.Hint, &k.Enabled, &lastTest, &ok,
 			&k.LastTestDetail, &k.AddedAt); err != nil {
 			return err
+		}
+		a := byID[acct]
+		if a == nil {
+			continue
 		}
 		k.LastTestAt = lastTest.String
 		if ok.Valid {
@@ -189,25 +201,39 @@ FROM provider_keys WHERE account_id=? ORDER BY id`, a.ID)
 	if err := krows.Err(); err != nil {
 		return err
 	}
+	krows.Close()
 
-	// latest quota across this account's keys (most recent read wins)
-	var q QuotaSummary
-	var qReadAt, qRaw string
-	var tokToday, reqToday sql.NullInt64
-	err = d.r.QueryRowContext(ctx, `
-SELECT q.kind, q.percent_rolling, q.percent_weekly, q.percent_monthly,
-       q.balance, q.balance_unit, q.cost_total, q.cost_today,
-       q.tokens_today, q.requests_today,
-       q.resets_at, q.read_at, COALESCE(q.raw,'')
-FROM quota_snapshots q
-JOIN provider_keys k ON k.id = q.provider_key_id
-WHERE k.account_id = ?
-ORDER BY q.read_at DESC, q.id DESC LIMIT 1`, a.ID).
-		Scan(&q.Kind, &q.PercentRolling, &q.PercentWeekly, &q.PercentMonthly,
-			&q.Balance, &q.Unit, &q.CostTotal, &q.CostToday,
-			&tokToday, &reqToday,
-			&q.ResetsAt, &qReadAt, &qRaw)
-	if err == nil {
+	// The latest quota read across each account's keys (most recent wins).
+	qrows, err := d.r.QueryContext(ctx, `
+SELECT account_id, kind, percent_rolling, percent_weekly, percent_monthly,
+       balance, balance_unit, cost_total, cost_today, tokens_today, requests_today,
+       resets_at, read_at, raw
+FROM (
+  SELECT k.account_id, q.kind, q.percent_rolling, q.percent_weekly, q.percent_monthly,
+         q.balance, q.balance_unit, q.cost_total, q.cost_today,
+         q.tokens_today, q.requests_today, q.resets_at, q.read_at, COALESCE(q.raw,'') AS raw,
+         ROW_NUMBER() OVER (PARTITION BY k.account_id ORDER BY q.read_at DESC, q.id DESC) AS rn
+  FROM quota_snapshots q
+  JOIN provider_keys k ON k.id = q.provider_key_id
+) WHERE rn = 1`)
+	if err != nil {
+		return err
+	}
+	defer qrows.Close()
+	for qrows.Next() {
+		var acct int64
+		var q QuotaSummary
+		var qReadAt, qRaw string
+		var tokToday, reqToday sql.NullInt64
+		if err := qrows.Scan(&acct, &q.Kind, &q.PercentRolling, &q.PercentWeekly, &q.PercentMonthly,
+			&q.Balance, &q.Unit, &q.CostTotal, &q.CostToday, &tokToday, &reqToday,
+			&q.ResetsAt, &qReadAt, &qRaw); err != nil {
+			return err
+		}
+		a := byID[acct]
+		if a == nil {
+			continue
+		}
 		q.ReadAt = qReadAt
 		q.Groups = provider.QuotaGroups(qRaw)
 		if tokToday.Valid {
@@ -219,30 +245,41 @@ ORDER BY q.read_at DESC, q.id DESC LIMIT 1`, a.ID).
 			q.RequestsToday = &v
 		}
 		a.Quota = &q
-	} else if !errors.Is(err, sql.ErrNoRows) {
+	}
+	if err := qrows.Err(); err != nil {
 		return err
 	}
+	qrows.Close()
 
-	// model counts + protocol support (map values can't be addressed, so scan
-	// into locals and place them)
-	var chat, anthropic, responses, untested int
-	err = d.r.QueryRowContext(ctx, `
-SELECT COUNT(*),
+	mrows, err := d.r.QueryContext(ctx, `
+SELECT account_id, COUNT(*),
        COALESCE(SUM(CASE WHEN proto_chat=1 THEN 1 ELSE 0 END),0),
        COALESCE(SUM(CASE WHEN proto_anthropic=1 THEN 1 ELSE 0 END),0),
        COALESCE(SUM(CASE WHEN proto_responses=1 THEN 1 ELSE 0 END),0),
        COALESCE(SUM(CASE WHEN proto_chat IS NULL AND proto_anthropic IS NULL
                           AND proto_responses IS NULL THEN 1 ELSE 0 END),0)
-FROM models WHERE account_id=?`, a.ID).
-		Scan(&a.ModelsCount, &chat, &anthropic, &responses, &untested)
+FROM models GROUP BY account_id`)
 	if err != nil {
 		return err
 	}
-	a.ProtocolSupport["chat"] = chat
-	a.ProtocolSupport["anthropic"] = anthropic
-	a.ProtocolSupport["responses"] = responses
-	a.ProtocolSupport["untested"] = untested
-	return nil
+	defer mrows.Close()
+	for mrows.Next() {
+		var acct int64
+		var count, chat, anthropic, responses, untested int
+		if err := mrows.Scan(&acct, &count, &chat, &anthropic, &responses, &untested); err != nil {
+			return err
+		}
+		a := byID[acct]
+		if a == nil {
+			continue
+		}
+		a.ModelsCount = count
+		a.ProtocolSupport["chat"] = chat
+		a.ProtocolSupport["anthropic"] = anthropic
+		a.ProtocolSupport["responses"] = responses
+		a.ProtocolSupport["untested"] = untested
+	}
+	return mrows.Err()
 }
 
 // AccountInput is the create/update payload from the admin API.

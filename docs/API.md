@@ -963,6 +963,12 @@ per-endpoint default models,
 backed by `service_bindings` + `service_probes`. The default applies **only when a
 request omits `model`** — an explicit `model` always wins.
 
+A successful answer whose type is `audio/*`, `video/*`, `image/*` or
+`application/octet-stream` is passed to the client as it arrives, with no size cap:
+speech starts playing before generation ends. If the upstream stops mid-file, the
+client keeps what it received and the ledger records `stream truncated`. JSON answers
+are read whole, up to 32 MiB.
+
 ### `GET /admin/services` → `200` → `{services: [ServiceCard, …]}`
 Always every card in fixed order, including a first run with no providers:
 `surface` (`embeddings|images_gen|audio_tts|audio_stt|images_edit|moderations|rerank|videos_gen|music_gen`), `endpoint`, `label`,

@@ -21,7 +21,8 @@ func alive(pid int) bool {
 	}
 	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
 	if err != nil {
-		return true
+		// Reaped between the two checks (or no /proc): ask the kernel again.
+		return syscall.Kill(pid, 0) == nil && !os.IsNotExist(err)
 	}
 	f := strings.Fields(string(b))
 	return len(f) < 3 || f[2] != "Z"

@@ -21,7 +21,11 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   the session memo hashes each message once instead of three times: a four-stage run
   on a 360 KB conversation is 14% faster and allocates 27% less. Swapping the model in
   a 25 MiB multipart upload uses 32 MB instead of 87 MB. The database refreshes its
-  query statistics when ezllm stops.
+  query statistics when ezllm stops. Caveman skips a rule when the words it needs are
+  absent: with the other changes, that four-stage run went from 642 to 205 ms.
+- **Audio and video stream through.** Speech, video and other binary answers reach
+  the client as they arrive instead of after the whole file is generated and held in
+  memory. A file cut off mid-way is recorded as truncated.
 - **Codex and Copilot bridge fixes.** The Copilot bridge starts its CLI in its own
   process group and ends the whole group, so nothing the CLI started outlives a
   cancelled turn or a stopped worker. Codex's `--help` check matches whole flags, so

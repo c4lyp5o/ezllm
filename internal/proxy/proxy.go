@@ -1510,6 +1510,12 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 				res.Err = "translated stream " + res.StreamOutcome
 			}
 		}
+	} else if resp.StatusCode < 400 && !cross && isBinaryMedia(resp.Header.Get("Content-Type")) {
+		// Audio, video and other binary answers pass straight through as they
+		// arrive: speech starts playing before generation ends, and a large
+		// file is never held whole in memory. They carry no JSON usage to tap
+		// and nothing to translate.
+		streamBinary(w, resp, &res)
 	} else {
 		// Non-streamed: read the body once, tap usage, then write it out.
 		// The extra byte detects a body that outgrew maxBodyBytes: a
@@ -1595,6 +1601,58 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 	}
 	res.Totalms = msPtr(time.Since(start))
 	return res, nil
+}
+
+// isBinaryMedia reports a response body that is media, not JSON: it can be
+// passed through as it arrives.
+func isBinaryMedia(contentType string) bool {
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+	if i := strings.IndexByte(ct, ';'); i >= 0 {
+		ct = strings.TrimSpace(ct[:i])
+	}
+	return strings.HasPrefix(ct, "audio/") || strings.HasPrefix(ct, "video/") ||
+		strings.HasPrefix(ct, "image/") || ct == "application/octet-stream"
+}
+
+// binaryChunk is the pass-through read size for binary media.
+const binaryChunk = 32 << 10
+
+// streamBinary copies a successful media body to the client chunk by chunk,
+// flushing each one. The status is committed before the first byte, so a
+// failure after that is recorded in the ledger instead of changing the status.
+// TTFT stays unset: the dashboard's TTFT medians are for text answers.
+func streamBinary(w http.ResponseWriter, resp *http.Response, res *Result) {
+	res.Committed = true
+	w.WriteHeader(resp.StatusCode)
+	fl, _ := w.(http.Flusher)
+	buf := make([]byte, binaryChunk)
+	var total int64
+	for {
+		n, rerr := resp.Body.Read(buf)
+		if n > 0 {
+			total += int64(n)
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				res.Err = "client write: " + werr.Error()
+				return
+			}
+			if fl != nil {
+				fl.Flush()
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			// The client already has a 200 and part of the file.
+			res.Err = "stream truncated: " + rerr.Error()
+			res.StreamOutcome = StreamOutcomeTruncated
+			return
+		}
+	}
+	if total == 0 && resp.StatusCode == http.StatusOK {
+		res.Err = "upstream returned an empty body"
+		res.StreamOutcome = StreamOutcomeTruncated
+	}
 }
 
 // Forward sends the (already model-swapped) body upstream and copies the

@@ -4,6 +4,10 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## Unreleased
 
+- **Get started.** A new ezllm opens a three-step page after the password is set: pick a
+  provider and paste its key, create a key for your app, send a test request with that
+  key. It ends with the settings to paste into your app. The Dashboard shows "Finish
+  setting up" until all three are done. The setup screen now shows where to find the code.
 - **Faster provider list.** The provider list and the overview read keys, quotas and
   model counts for every provider in three queries, instead of three per provider.
 - **Gemini API surface.** Apps written for Google's Gemini API can point at ezllm:

@@ -35,13 +35,21 @@ const handler = async (route, url) => {
 
 const t = await start();
 const page = await t.page(handler);
+// Closing a dialog with edits in it asks first (a bridge preset fills in the
+// name): confirm the discard so the next dialog starts fresh.
+const closeDialog = async () => {
+  await page.keyboard.press("Escape");
+  const discard = page.getByRole("alertdialog", { name: "Discard unsaved changes?" });
+  if (await discard.isVisible().catch(() => false)) await discard.getByRole("button", { name: "Discard" }).click();
+  await page.locator(".fixed.inset-0.z-50").waitFor({ state: "detached" });
+};
 await page.goto(`${t.base}/providers`);
 await page.getByRole("button", { name: /Add provider/ }).click();
 const options = await page.$$eval("#ap-kind option", (os) => os.map((o) => o.value));
 check("every bridge preset offered", ["claude-sub", "chatgpt-sub", "antigravity-sub"].every((o) => options.includes(o)), options);
 
 const labels = await page.$$eval("#ap-kind option", (os) => Object.fromEntries(os.map((o) => [o.value, o.textContent])));
-check("provider labels use the requested names", labels["claude-sub"] === "Claude Pro/Max" && labels["chatgpt-sub"] === "ChatGPT Plus/Pro" && labels["antigravity-sub"] === "Google Antigravity" && labels.openai === "OpenAI Platform", labels);
+check("provider labels use the requested names", labels["claude-sub"] === "Claude Pro/Max (bridge)" && labels["chatgpt-sub"] === "ChatGPT Plus/Pro (bridge)" && labels["antigravity-sub"] === "Google Antigravity (bridge)" && labels.openai === "OpenAI Platform", labels);
 
 await page.selectOption("#ap-kind", "antigravity-sub");
 await page.getByText("Bridge running at").waitFor();
@@ -49,7 +57,7 @@ check("antigravity bridge lists its plan's models", (await page.locator("text=ge
 check("disabled client tools have actionable guidance", (await page.getByText(/Client tool calls are unavailable/).count()) === 1);
 check("running bridge links its runbook", (await page.locator('a[href$="docs/agy-bridge-runbook.md"]').count()) >= 1);
 check("antigravity login is not misread as logged out", (await page.locator("text=isn't logged in").count()) === 0);
-await page.keyboard.press("Escape");
+await closeDialog();
 await page.getByRole("button", { name: /Add provider/ }).click();
 
 await page.selectOption("#ap-kind", "chatgpt-sub");
@@ -61,7 +69,7 @@ check("off bridge links its setup page for this version", (await page.locator('a
 check("save disabled while the bridge is off", await page.getByRole("button", { name: /Save & validate/ }).isDisabled());
 
 // Fresh dialog for the running bridge so the name prefill applies.
-await page.keyboard.press("Escape");
+await closeDialog();
 await page.getByRole("button", { name: /Add provider/ }).click();
 await page.selectOption("#ap-kind", "claude-sub");
 await page.getByText("Bridge running at").waitFor();
@@ -71,9 +79,9 @@ check("name and namespace prefilled", (await page.inputValue("#ap-name")) === "C
 // The bridge supplies the key, but a live balance read needs the operator's
 // claude.ai cookie — the field has to exist and reach management_key, which is
 // what internal/provider/claudesub_quota.go reads.
-check("claude.ai session cookie field is offered", await page.locator("#ap-cs").isVisible());
-check("cookie field explains what to paste", (await page.getByText(/5-hour and weekly windows/).count()) === 1);
-await page.fill("#ap-cs", "sessionKey=sk-ant-test; lastActiveOrg=org-1");
+check("claude.ai session cookie field is offered", await page.locator("#ap-extra").isVisible());
+check("cookie field explains what to paste", (await page.getByText(/5-hour and weekly limits/).count()) === 1);
+await page.fill("#ap-extra", "sessionKey=sk-ant-test; lastActiveOrg=org-1");
 await page.screenshot({ path: process.env.SHOT ?? "/tmp/bridges.png" });
 await page.getByRole("button", { name: /Save & validate/ }).click();
 await page.waitForTimeout(800);

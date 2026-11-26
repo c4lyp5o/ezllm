@@ -14,7 +14,7 @@ import PasswordStrength from './components/PasswordStrength';
 import NotificationBell from './components/NotificationBell';
 import { MIN_PASSWORD } from './utils/passwordStrength';
 import { readTheme, setTheme, type Theme } from './utils/theme';
-import { Spinner, btn, cx } from './components/ui';
+import { CopyButton, Spinner, btn, cx } from './components/ui';
 import ThemeToggle from './components/ThemeToggle';
 import { CommandPalette, OPEN_PALETTE } from './components/CommandPalette';
 import { PageBoundary, PageLoading } from './components/PageBoundary';
@@ -35,6 +35,7 @@ const Requests = lazy(() => import('./pages/Requests'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Chat = lazy(() => import('./pages/Chat'));
 const Neighbourhood = lazy(() => import('./pages/Neighbourhood'));
+const Start = lazy(() => import('./pages/Start'));
 
 // One sidebar entry per destination — Stats / Token Economics / Requests live
 // together under Analytics (same data family, tabbed).
@@ -237,6 +238,9 @@ function SignInForm({ onDone, onSetupRequired }: { onDone: () => void; onSetupRe
   );
 }
 
+// Where the setup code is, for the usual Docker install.
+const SETUP_CODE_CMD = 'docker logs ezllm | grep setup';
+
 function SetupForm({ onDone, onAlreadySet }: { onDone: () => void; onAlreadySet: () => void }) {
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
@@ -251,7 +255,8 @@ function SetupForm({ onDone, onAlreadySet }: { onDone: () => void; onAlreadySet:
     if (password !== confirm) { setErr('the passwords do not match'); return; }
     setBusy(true);
     completeSetup(code, password)
-      .then(onDone)
+      // A new instance goes straight to Get started.
+      .then(() => { window.history.replaceState(null, '', '/start'); onDone(); })
       .catch((error: unknown) => {
         if (error instanceof GateError && error.type === 'setup_complete') { onAlreadySet(); return; }
         setErr(error instanceof Error ? error.message : 'setup failed');
@@ -267,6 +272,10 @@ function SetupForm({ onDone, onAlreadySet }: { onDone: () => void; onAlreadySet:
       <p className="mt-2 text-[13px] text-mute">
         This is the first start. Enter the setup code from the ezllm server log, then pick a password.
       </p>
+      <div className="mt-3 flex items-center gap-2">
+        <code className="min-w-0 flex-1 truncate rounded-md border border-line bg-bg px-2.5 py-1.5 font-mono text-[12px]">{SETUP_CODE_CMD}</code>
+        <CopyButton text={SETUP_CODE_CMD} label="Copy" />
+      </div>
       <form onSubmit={submit} className="mt-6">
         <Field id="setup-code" label="Setup code" autoFocus autoComplete="one-time-code" placeholder="XXXX-XXXX"
           value={code} onChange={edit(setCode)} className={cx(fieldClass(false), 'font-mono uppercase tracking-widest')} />
@@ -373,6 +382,7 @@ const PAGE_HEADERS: Record<string, { title: string; sub: string }> = {
   '/connect': { title: 'Connect', sub: 'API keys, and how to point your apps at ezllm.' },
   '/neighbourhood': { title: 'Neighbourhood', sub: 'Each provider is a building. Busier providers glow brighter.' },
   '/settings': { title: 'Settings', sub: 'Preferences, security, backups and request limits.' },
+  '/start': { title: 'Get started', sub: 'Three steps to your first request.' },
 };
 
 export default function App() {
@@ -526,6 +536,7 @@ export default function App() {
               <Route path="/connect" element={<Connect />} />
               <Route path="/neighbourhood" element={<Neighbourhood />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/start" element={<Start />} />
               <Route path="*" element={<Dashboard />} />
             </Routes>
             </Suspense>

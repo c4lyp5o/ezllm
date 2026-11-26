@@ -19,6 +19,7 @@ export const PALETTE_ITEMS: PaletteItem[] = [
   { group: 'Pages', label: 'Compression', to: '/compression', hint: 'profiles and engines' },
   { group: 'Pages', label: 'Connect', to: '/connect', hint: 'API keys, client setup' },
   { group: 'Pages', label: 'Neighbourhood', to: '/neighbourhood', hint: 'providers as a city' },
+  { group: 'Pages', label: 'Get started', to: '/start', hint: 'first provider, app key, test request' },
   { group: 'Actions', label: 'Add provider', to: '/providers?add=1' },
   { group: 'Actions', label: 'New combo', to: '/combos?new=1' },
   { group: 'Actions', label: 'Create API key', to: '/connect?new=1' },

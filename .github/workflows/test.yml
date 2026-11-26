@@ -96,6 +96,8 @@ jobs:
           node tests/verify-update.mjs
           node tests/verify-qol-pass.mjs
           node tests/verify-settings.mjs
+          node tests/verify-first-run.mjs
+          SHOT="$RUNNER_TEMP/bridges.png" node tests/verify-bridges.mjs
 
   docker:
     name: Docker image (build, boot, healthy)

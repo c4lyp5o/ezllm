@@ -36,6 +36,7 @@ import {
   axisProps, chartGrid, cursorFill,
 } from '../components/charts';
 import { CountUp, Stagger, StaggerItem } from '../components/motion';
+import { StartBanner } from '../components/StartBanner';
 import {
   Chip, CauseChip, EmptyState, HeaderAside, SectionLabel, Segmented, Skeleton, SkeletonRows, Spinner,
   CopyButton, btn, clockTime, cx, inputCls, relTime, fmtDuration, fmtMs, fmtUptime, formatTokens, nfmt, pct,
@@ -713,7 +714,18 @@ function RecentCalls({ o }: { o: Overview }) {
 // Quota presentation moved to pages/Providers.tsx — quota data is slotted
 // under the provider it describes; the stale pill became a reload action.
 // ── the dashboard ────────────────────────────────────────────────────────
+// The Get started nudge sits above everything, so it shows even while (or
+// when) the overview cannot load.
 export default function Dashboard() {
+  return (
+    <div className="space-y-6">
+      <StartBanner />
+      <DashboardBody />
+    </div>
+  );
+}
+
+function DashboardBody() {
   const [o, setO] = useState<Overview | null>(null);
   const [byAccount, setByAccount] = useState<UsageRow[]>([]);
   const [byModel, setByModel] = useState<UsageRow[]>([]);

@@ -15,6 +15,15 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   A temporary failure after the switch is tested once more before it is undone.
 - **Antigravity plan limits.** The provider card and Quota dialog show how much of each
   weekly limit is used, per group of models, read with `agy -p /usage` (no quota spent).
+- **Start-up checks.** `=false`, `=0` or `=OFF` on `EZLLM_PRICE_REFRESH`,
+  `EZLLM_UPDATE_CHECK` or `EZLLM_COMBO_AUTOPROBE` used to turn the feature on; every
+  on/off switch now takes on/off, true/false or 1/0 in any case, and anything else
+  stops the start. Provider requests honour `HTTPS_PROXY`/`NO_PROXY` and time out
+  connecting and the TLS handshake. A bridge's token now defaults to the data folder,
+  is written whole, and a bridge port already in use stops the start. The Claude
+  bridge stops the start when its CLI does not run or `USER`/`LOGNAME` are missing,
+  and its checks time out. Unknown `config.yaml` keys are logged as warnings, and a
+  bad `listen` port is refused.
 - **Your prices stay yours.** The daily price refresh skips a model you priced by hand
   or by import. It used to write the snapshot's rate over yours. The refresh answer
   counts those models in `kept`.

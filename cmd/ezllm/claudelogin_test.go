@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -33,7 +34,7 @@ func TestClaudeLoginCheckPerSystem(t *testing.T) {
 		{"linux, file", "linux", in, withFile, "logged-in"},
 		{"linux, the CLI refuses", "linux", out, withFile, "unverified"},
 	} {
-		if got, _ := claudeLoginCheckOn(c.goos, c.bin, c.dir); got != c.want {
+		if got, _ := claudeLoginCheckOn(context.Background(), c.goos, c.bin, c.dir); got != c.want {
 			t.Errorf("%s: state = %q, want %q", c.name, got, c.want)
 		}
 	}

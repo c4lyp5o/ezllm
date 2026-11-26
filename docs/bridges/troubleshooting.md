@@ -47,6 +47,10 @@ this first: starting ezllm again clears the log.
 | `no such file or directory` | Run the [checker](#the-checker) |
 | `no ChatGPT login` or `no Antigravity login` | Redo **Sign in** |
 | `login=logged-out` (Claude) | Redo **Sign in** |
+| `does not run` (Claude) | The copied CLI is for another computer or is damaged. Redo **Install** and **Copy** |
+| `USER and LOGNAME must be set` | Add `USER` and `LOGNAME` as [Turn on Claude](claude.md#with-docker-compose) shows |
+| `listen on 127.0.0.1:879…: address already in use` | Another program uses the bridge's port. Stop it, or set that bridge's `EZLLM_*_BRIDGE_ADDR` to a free port |
+| `want on or off` | A switch has a value ezllm does not know. Set it to `on` or `off` |
 | `is not a directory — mount the CLI's login home there` | Add the second `volumes:` line (`docker run`: the second `-v`) |
 | `mapping key … already defined` | That line is in `compose.yml` twice. Keep one |
 | `token dir: mkdir /data: permission denied` | ezllm binary: the `…_BRIDGE_TOKEN_FILE` line is missing |

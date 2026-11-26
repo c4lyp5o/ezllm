@@ -19,6 +19,9 @@ func runBackupCommand(command string, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	if flags.NArg() > 0 {
+		return fmt.Errorf("%s: unexpected argument %q (flags only)", command, flags.Arg(0))
+	}
 	if *archive == "" || *secretFile == "" {
 		return fmt.Errorf("--archive and --secret-file are required")
 	}
@@ -27,6 +30,9 @@ func runBackupCommand(command string, args []string) error {
 		return err
 	}
 	secret := strings.TrimSpace(string(raw))
+	if secret == "" {
+		return fmt.Errorf("%s is empty: it must hold the backup secret", *secretFile)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	if command == "backup-verify" {

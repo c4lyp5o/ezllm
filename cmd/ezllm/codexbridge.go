@@ -72,9 +72,9 @@ func fileExists(path string) bool {
 // startCodexBridge brings up the loopback surface when enabled. A missing
 // binary or login, a lockdown flag the CLI refuses, or a protocol method it
 // dropped is a boot failure, never a silent degrade.
-func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport) (func(), error) {
-	if !strings.EqualFold(strings.TrimSpace(os.Getenv(envCodexBridge)), "on") {
-		return func() {}, nil
+func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport, dataDir string) (func(), error) {
+	if on, err := bridgeEnabled(envCodexBridge, os.Getenv); err != nil || !on {
+		return func() {}, err
 	}
 	if runtime.GOOS != "linux" {
 		return nil, fmt.Errorf("codex bridge: %s=on is a Linux feature (this build is %s); run ezllm in a Linux container — docs/codex-bridge-runbook.md", envCodexBridge, runtime.GOOS)
@@ -106,7 +106,7 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 		return nil, err
 	}
 	cache := pre.Cache.Enabled
-	token, err := bridgeTokenFromFile(strings.TrimSpace(os.Getenv(envCodexToken)), "codex")
+	token, err := bridgeTokenFromFile(strings.TrimSpace(os.Getenv(envCodexToken)), dataDir, "codex")
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +167,11 @@ func startCodexBridge(ctx context.Context, log *slog.Logger, report bridgeReport
 	}
 	log.Info("codex bridge listening", "addr", addr, "cli", pre.Version, "release", qualified, "login", pre.Login,
 		"channel", pre.Channel, "landlock", tools.landlock, "client_tools", tools.status)
-	httpSrv := serveBridge(log, "codex", addr, srv.Handler())
+	httpSrv, err := serveBridge(log, "codex", addr, srv.Handler())
+	if err != nil {
+		runner.Shutdown()
+		return nil, err
+	}
 	// main calls stop after the gateway drain (its handlers proxy here):
 	// drain this surface, then reap the parked tool turns that outlive any
 	// HTTP request by design.

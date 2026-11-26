@@ -13,8 +13,9 @@ nothing else ever holds the subscription credential. One container, no sidecar.
 
 ## Boot and CLI releases
 
-With the bridge on, a missing CLI **stops ezllm from starting**: it would otherwise look
-healthy while every subscription request fails. A missing login does not stop it: the
+With the bridge on, a CLI that is missing or does not run, or a process without `USER` and
+`LOGNAME`, **stops ezllm from starting**: it would otherwise look healthy while every
+subscription request fails. Each check of the CLI gives up after 20 seconds. A missing login does not stop it: the
 start line says `login=logged-out` and requests answer 401. The bind is loopback-enforced. The account's shared secret generates itself into
 `data/claude-bridge.token` (0600) on first boot.
 

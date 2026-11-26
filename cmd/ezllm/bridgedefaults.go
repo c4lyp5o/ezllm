@@ -3,7 +3,9 @@ package main
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -63,33 +65,62 @@ func bridgeQueue(get func(string) string, label string) (int, error) {
 // bridgeTokenFromFile mints (once) and reads a bridge's loopback shared secret,
 // 0600. Every bridge uses it; label names the default file.
 // The account key ezllm stores is this value; nothing else authenticates the
-// bridge surface.
-func bridgeTokenFromFile(path, label string) (string, error) {
-	path = bridgeTokenPath(path, label)
-	if b, err := os.ReadFile(path); err == nil {
+// bridge surface, so only a missing or empty file mints a new one: any other
+// read error stops the start instead of quietly breaking the stored key.
+func bridgeTokenFromFile(path, dataDir, label string) (string, error) {
+	path = bridgeTokenPath(path, dataDir, label)
+	b, err := os.ReadFile(path)
+	if err == nil {
 		if t := strings.TrimSpace(string(b)); t != "" {
 			return t, nil
 		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("%s bridge: read token: %w", label, err)
 	}
 	buf := make([]byte, 24)
 	if _, err := rand.Read(buf); err != nil {
 		return "", fmt.Errorf("%s bridge: mint token: %w", label, err)
 	}
 	token := hex.EncodeToString(buf)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("%s bridge: token dir: %w", label, err)
 	}
-	if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
+	// Written whole to a private temp file, then renamed over the path: a
+	// crash never leaves a half-written token, and the file is always 0600.
+	f, err := os.CreateTemp(dir, ".bridge-token-*")
+	if err != nil {
+		return "", fmt.Errorf("%s bridge: write token: %w", label, err)
+	}
+	defer os.Remove(f.Name())
+	_, err = f.WriteString(token + "\n")
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(f.Name(), path)
+	}
+	if err == nil {
+		err = syncDir(dir)
+	}
+	if err != nil {
 		return "", fmt.Errorf("%s bridge: write token: %w", label, err)
 	}
 	return token, nil
 }
 
-// bridgeTokenPath defaults an unset path to /data/<label>-bridge.token, on the
-// data volume like the other bridges' tokens, so it is backed up with the ledger.
-func bridgeTokenPath(path, label string) string {
-	if path == "" {
-		return "/data/" + label + "-bridge.token"
+// bridgeTokenPath defaults an unset path to <data dir>/<label>-bridge.token,
+// next to the ledger, so it is backed up with it. /data (the image's data
+// folder) when no data dir is known.
+func bridgeTokenPath(path, dataDir, label string) string {
+	if path != "" {
+		return path
 	}
-	return path
+	if dataDir == "" {
+		dataDir = "/data"
+	}
+	return filepath.Join(dataDir, label+"-bridge.token")
 }

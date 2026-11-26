@@ -7,6 +7,9 @@ When the same setting is set in several places, the first one wins: command-line
 environment variable, value saved in **Settings**, `config.yaml`, default. A setting fixed
 here is locked in the dashboard. Details: [Settings](settings-runbook.md#which-value-wins).
 
+Every on/off switch takes `on` or `off`, in any case; `true`/`false` and `1`/`0` work too.
+Anything else stops ezllm from starting, with a message naming the variable.
+
 "Image" means the Docker image; its paths (`/data`, `/opt/…`) differ from a binary
 install. `compose.example.yml` lists every variable below.
 
@@ -76,7 +79,7 @@ Each bridge also has these. A wrong value stops the start.
 |---|---|---|
 | `EZLLM_<BRIDGE>_BRIDGE_CONCURRENCY` | `1` | How many CLI processes run at once |
 | `EZLLM_<BRIDGE>_BRIDGE_ADDR` | see below | The bridge's own address. It must be on this computer (loopback) |
-| `EZLLM_<BRIDGE>_BRIDGE_TOKEN_FILE` | `/data/<bridge>-bridge.token` | The key between ezllm and the bridge. Made when missing |
+| `EZLLM_<BRIDGE>_BRIDGE_TOKEN_FILE` | `<bridge>-bridge.token` in the data folder | The key between ezllm and the bridge. Made when missing |
 
 ## Claude bridge
 
@@ -84,7 +87,7 @@ Each bridge also has these. A wrong value stops the start.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `EZLLM_CLAUDE_BRIDGE` | off | `on` starts the bridge. Without the CLI, ezllm does not start. Its start line says `login=logged-in` or why not |
+| `EZLLM_CLAUDE_BRIDGE` | off | `on` starts the bridge. Without a CLI that runs, or without `USER` and `LOGNAME`, ezllm does not start. A missing login does not stop it: the start line says `login=logged-in` or why not |
 | `EZLLM_CLAUDE_BIN` | `/opt/claude-bridge/current/claude` | The Claude Code CLI |
 | `EZLLM_CLAUDE_HOME` | `/claude-sub` | The bridge's login folder |
 | `EZLLM_CLAUDE_BRIDGE_ADDR` | `127.0.0.1:8790` | |

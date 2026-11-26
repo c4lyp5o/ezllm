@@ -33,9 +33,9 @@ const (
 
 // startAgyBridge brings up the loopback surface when enabled. A missing binary
 // or login, or a CLI that dropped a flag this bridge needs, is a boot failure.
-func startAgyBridge(ctx context.Context, log *slog.Logger, report bridgeReport) (func(), error) {
-	if !strings.EqualFold(strings.TrimSpace(os.Getenv(envAgyBridge)), "on") {
-		return func() {}, nil
+func startAgyBridge(ctx context.Context, log *slog.Logger, report bridgeReport, dataDir string) (func(), error) {
+	if on, err := bridgeEnabled(envAgyBridge, os.Getenv); err != nil || !on {
+		return func() {}, err
 	}
 	if runtime.GOOS != "linux" {
 		return nil, fmt.Errorf("agy bridge: %s=on is a Linux feature (this build is %s); run ezllm in a Linux container — docs/agy-bridge-runbook.md", envAgyBridge, runtime.GOOS)
@@ -79,7 +79,7 @@ func startAgyBridge(ctx context.Context, log *slog.Logger, report bridgeReport) 
 		clientTools = "off (CLI lacks --json-schema; text chat only)"
 		log.Warn("agy bridge: CLI lacks --json-schema; client tools are off (text chat only)", "cli", pre.Version)
 	}
-	token, err := bridgeTokenFromFile(strings.TrimSpace(os.Getenv(envAgyToken)), "agy")
+	token, err := bridgeTokenFromFile(strings.TrimSpace(os.Getenv(envAgyToken)), dataDir, "agy")
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +118,11 @@ func startAgyBridge(ctx context.Context, log *slog.Logger, report bridgeReport) 
 		report("antigravity-sub", addr, token, bridgeUpdateFile(bin), srv.Info, runner.AdmissionStats)
 	}
 	log.Info("agy bridge listening", "addr", addr, "cli", pre.Version, "release", qualified, "models", len(pre.Models))
-	httpSrv := serveBridge(log, "agy", addr, srv.Handler())
+	httpSrv, err := serveBridge(log, "agy", addr, srv.Handler())
+	if err != nil {
+		runner.Close()
+		return nil, err
+	}
 	return func() { shutdownBridgeHTTP(httpSrv); runner.Close() }, nil
 }
 

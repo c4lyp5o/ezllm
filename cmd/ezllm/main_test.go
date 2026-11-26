@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -69,5 +72,45 @@ func TestUpstreamClientRefusesCrossOriginRedirects(t *testing.T) {
 	}
 	if err == nil || leaked {
 		t.Fatalf("redirect to another origin followed: err=%v leaked=%v", err, leaked)
+	}
+}
+
+// Provider traffic must honour the proxy settings and bound connecting and
+// the TLS handshake, like Go's default transport.
+func TestUpstreamClientKeepsProxyAndTimeouts(t *testing.T) {
+	tr, ok := upstreamClient(&config.Config{}).Transport.(*http.Transport)
+	if !ok {
+		t.Fatal("not an *http.Transport")
+	}
+	if tr.Proxy == nil {
+		t.Error("Proxy is nil: HTTPS_PROXY and NO_PROXY are ignored")
+	}
+	if tr.TLSHandshakeTimeout <= 0 {
+		t.Error("no TLS handshake timeout")
+	}
+	if tr.DialContext == nil {
+		t.Error("no dialer: connecting has no timeout")
+	}
+	if tr.MaxIdleConnsPerHost != 20 {
+		t.Errorf("MaxIdleConnsPerHost = %d, want 20", tr.MaxIdleConnsPerHost)
+	}
+}
+
+// Stray positional arguments are refused instead of silently dropping the
+// flags after them; an empty backup secret is named before decrypting.
+func TestSubcommandsRefuseStrayArgumentsAndEmptySecret(t *testing.T) {
+	if err := runBackupCommand("backup-verify", []string{"extra", "--archive", "a"}); err == nil || !strings.Contains(err.Error(), "unexpected argument") {
+		t.Fatalf("backup stray arg: %v", err)
+	}
+	empty := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(empty, []byte("  \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runBackupCommand("backup-verify", []string{"--archive", "a", "--secret-file", empty}); err == nil || !strings.Contains(err.Error(), "is empty") {
+		t.Fatalf("empty secret: %v", err)
+	}
+	var out bytes.Buffer
+	if err := runBridgeCheck([]string{"claude", "--json", "stray"}, &out); err == nil || !strings.Contains(err.Error(), "unexpected argument") {
+		t.Fatalf("bridge-check stray arg: %v", err)
 	}
 }

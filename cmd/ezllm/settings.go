@@ -49,16 +49,22 @@ func operatorSettings(ctx context.Context, db *store.DB, c *config.Config) (*set
 	if os.Getenv("EZLLM_TRANSLATION_ENABLED") != "" {
 		sources["translation_enabled"] = "environment"
 	}
-	if raw := os.Getenv("EZLLM_PRICE_REFRESH"); raw != "" {
-		v.PriceRefresh = raw != "off"
+	if on, set, err := envSwitch("EZLLM_PRICE_REFRESH", os.Getenv("EZLLM_PRICE_REFRESH")); err != nil {
+		return nil, err
+	} else if set {
+		v.PriceRefresh = on
 		sources["price_refresh"] = "environment"
 	}
-	if raw := os.Getenv("EZLLM_UPDATE_CHECK"); raw != "" {
-		v.UpdateCheck = raw != "off"
+	if on, set, err := envSwitch("EZLLM_UPDATE_CHECK", os.Getenv("EZLLM_UPDATE_CHECK")); err != nil {
+		return nil, err
+	} else if set {
+		v.UpdateCheck = on
 		sources["update_check"] = "environment"
 	}
-	if raw := os.Getenv("EZLLM_COMBO_AUTOPROBE"); raw != "" {
-		v.AutoProbe = raw != "off"
+	if on, set, err := envSwitch("EZLLM_COMBO_AUTOPROBE", os.Getenv("EZLLM_COMBO_AUTOPROBE")); err != nil {
+		return nil, err
+	} else if set {
+		v.AutoProbe = on
 		sources["automatic_probing"] = "environment"
 	}
 	return settings.New(ctx, db, v, sources)

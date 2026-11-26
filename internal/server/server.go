@@ -449,6 +449,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /admin/quota", s.admin(s.handleQuotas))
 	s.mux.HandleFunc("POST /admin/keys/{keyId}/quota", s.admin(s.handleKeyQuota))
 	s.mux.HandleFunc("GET /admin/export", s.admin(s.handleExport))
+	s.mux.HandleFunc("POST /admin/import", s.admin(s.handleImport))
 
 	// Catch-all: the dashboard. Registered last, but Go's mux resolves by
 	// specificity, so every route above wins over this — the SPA and the API

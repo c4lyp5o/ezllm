@@ -253,23 +253,31 @@ func (m *Manager) view() View {
 	}
 	return result
 }
-func (m *Manager) Patch(ctx context.Context, revision int64, changes map[string]json.RawMessage) (View, error) {
+
+// Validate reports whether changes would be accepted by Patch, without
+// saving anything: configuration import checks a file's settings this way
+// before it writes the rest.
+func (m *Manager) Validate(changes map[string]json.RawMessage) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if revision != m.state.Revision {
-		return View{}, ErrConflict
-	}
-	next := State{Revision: revision + 1, Values: map[string]json.RawMessage{}}
+	_, _, err := m.apply(changes)
+	return err
+}
+
+// apply works out the state and values changes would produce. The caller
+// holds m.mu.
+func (m *Manager) apply(changes map[string]json.RawMessage) (State, Values, error) {
+	next := State{Values: map[string]json.RawMessage{}}
 	for k, v := range m.state.Values {
 		next.Values[k] = v
 	}
 	allowed := keys(m.base)
 	for k, v := range changes {
 		if _, ok := allowed[k]; !ok {
-			return View{}, fmt.Errorf("unknown setting %s", k)
+			return State{}, Values{}, fmt.Errorf("unknown setting %s", k)
 		}
 		if m.sources[k] == "environment" || m.sources[k] == "flag" {
-			return View{}, fmt.Errorf("%s is managed by %s", k, m.sources[k])
+			return State{}, Values{}, fmt.Errorf("%s is managed by %s", k, m.sources[k])
 		}
 		if string(v) == "null" {
 			delete(next.Values, k)
@@ -279,13 +287,27 @@ func (m *Manager) Patch(ctx context.Context, revision int64, changes map[string]
 	}
 	v, err := m.resolve(next.Values)
 	if err != nil {
-		return View{}, err
+		return State{}, Values{}, err
 	}
 	if m.Check != nil {
 		if err := m.Check(v); err != nil {
-			return View{}, err
+			return State{}, Values{}, err
 		}
 	}
+	return next, v, nil
+}
+
+func (m *Manager) Patch(ctx context.Context, revision int64, changes map[string]json.RawMessage) (View, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if revision != m.state.Revision {
+		return View{}, ErrConflict
+	}
+	next, v, err := m.apply(changes)
+	if err != nil {
+		return View{}, err
+	}
+	next.Revision = revision + 1
 	if err := m.store.SaveSettings(ctx, next, revision); err != nil {
 		if errors.Is(err, ErrConflict) {
 			return View{}, err

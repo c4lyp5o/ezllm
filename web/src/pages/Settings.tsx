@@ -8,6 +8,7 @@ import { ApiError, changeDashboardPassword, clearToken } from '../utils/api';
 import { Chip, ConfirmModal, CopyButton, SectionLabel, btn, cx, inputCls, relTime } from '../components/ui';
 import { bridgeUpdateText, fmtUptime, UPDATE_TONE } from '../utils/lib';
 import PushChannels from '../components/PushChannels';
+import ImportConfig from '../components/ImportConfig';
 import { effectiveText, settingError } from '../utils/settings';
 import PasswordStrength from '../components/PasswordStrength';
 import { MIN_PASSWORD } from '../utils/passwordStrength';
@@ -233,6 +234,7 @@ function Backups() {
   }, []);
   const run = async () => { setBusy(true); setError(''); try { await runBackup(); await load(); } catch (e) { setError(errorMessage(e)); } finally { setBusy(false); } };
   return <><section className={panel}><SectionLabel>Exports</SectionLabel><p className="mt-2 text-sm text-mute">An export has your configuration and, if you choose, usage history. It doesn't include provider credentials, so a full restore also needs a database and master key backup.</p><div className="mt-4 flex flex-wrap gap-3"><a className={cx(btn.base, btn.ghost)} href="/admin/export" download>Export configuration</a><a className={cx(btn.base, btn.ghost)} href="/admin/export?include_ledger=true" download>Export with ledger</a></div></section>
+    <ImportConfig panel={panel} />
     <section className={panel}><SectionLabel>Encrypted backups</SectionLabel><p className="mt-2 text-sm text-mute">Each backup has a checked copy of the database and its master key, encrypted with a separate backup secret. Store that secret somewhere else. Set EZLLM_BACKUP_DIR and EZLLM_BACKUP_SECRET_FILE on the host. CLI logins and your deployment files need their own backups.</p>
       <p className="mt-4 text-sm">{status?.running ? 'Backup running…' : status?.ready ? 'Backup storage configured' : 'Backup storage is not configured'}</p>
       {status?.error && <p role="alert" className="mt-2 text-sm text-bad">{status.error}</p>}

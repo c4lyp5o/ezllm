@@ -5,6 +5,7 @@ let revision = 0, fields = Object.fromEntries(Object.entries(defaults).map(([k, 
 let sessions = [{ id: 'session-other', browser: 'Other browser', current: false, created_at: '2026-10-26T00:00:00Z', expires_at: '2026-10-27T00:00:00Z' }];
 let backups = { ready: true, running: false, last_outcome: '', backups: [] };
 let rejectNext = false;
+const imports = [];
 const dash = await start();
 try {
   const page = await dash.page(async (route, url) => {
@@ -20,6 +21,16 @@ try {
       await json(route, { revision, fields }); return true;
     }
     if (url.pathname === '/admin/backups') { if (method === 'POST') backups.running = true; await json(route, method === 'POST' ? { status: 'running' } : backups, method === 'POST' ? 202 : 200); return true; }
+    if (url.pathname === '/admin/import') {
+      const dry = url.searchParams.get('dry_run') === 'true';
+      imports.push({ dry, kind: JSON.parse(route.request().postData() || '{}').kind });
+      await json(route, { dry_run: dry, summary: { create: 1, update: 1, unchanged: 1 }, items: [
+        { section: 'accounts', name: 'acme', action: 'create', note: 'created turned off: add a key, then turn it on' },
+        { section: 'combos', name: 'daily', action: 'update', changes: ['hops'] },
+        { section: 'settings', name: 'retries', action: 'unchanged' },
+      ] });
+      return true;
+    }
     if (url.pathname === '/admin/settings/sessions') { await json(route, sessions); return true; }
     if (url.pathname === '/admin/settings/sessions/session-other') { sessions = []; await route.fulfill({ status: 204 }); return true; }
     if (url.pathname === '/admin/settings/diagnostics') { await json(route, { version: 'test', uptime_seconds: 120, database_bytes: 1024, bridges: [{ id: 'chatgpt-sub', enabled: false }], jobs: { catalog: { running: false, last_success: '2026-10-26T00:00:00Z' } } }); return true; }
@@ -68,6 +79,16 @@ try {
   await page.getByRole('button', { name: 'Back up now', exact: true }).click();
   await page.getByText('Backup running…', { exact: true }).waitFor();
   check('backup overlap disabled', await page.getByRole('button', { name: 'Backing up…', exact: true }).isDisabled());
+  await page.getByLabel('Export file to import').setInputFiles({ name: 'ezllm-export.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ kind: 'configuration_export', format_version: 1 })) });
+  await page.getByText('1 to create, 1 to update, 1 unchanged').waitFor();
+  check('import shows the plan first, without unchanged rows', imports.length === 1 && imports[0].dry && await page.getByText('created turned off: add a key, then turn it on').count() === 1 && await page.getByText('retries', { exact: true }).count() === 0, imports);
+  if (process.env.SHOTS_DIR) { await page.waitForTimeout(800); await page.getByText('Import configuration', { exact: true }).locator('xpath=ancestor::section').screenshot({ path: `${process.env.SHOTS_DIR}/import-plan.png` }); }
+  await page.getByLabel('Show unchanged').check();
+  check('unchanged rows on request', await page.getByText('retries', { exact: true }).count() === 1);
+  await page.getByRole('button', { name: 'Apply import', exact: true }).click();
+  await page.getByText(/Imported ezllm-export.json/).waitFor();
+  check('apply sends the same file without dry run', imports.length === 2 && !imports[1].dry && imports[1].kind === 'configuration_export', imports);
+  check('the result says new providers are off', await page.getByText(/New providers are turned off/).count() === 1);
   await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Notifications', exact: true }).click();
   check('backup notification preference exposed', await page.getByLabel('Backup failures', { exact: true }).count() === 1);
   check('early warnings have their switches', await page.getByLabel('Quota nearly used', { exact: true }).count() === 1 && await page.getByLabel('Balance running low', { exact: true }).count() === 1 && await page.getByLabel('Session cookie expiring', { exact: true }).count() === 1);

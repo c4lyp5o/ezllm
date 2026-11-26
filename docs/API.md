@@ -785,6 +785,27 @@ state, accounting/reconciliation internals, and some ledger columns. Full
 recovery uses the SQLite database plus its active master key and deployment
 configuration; see [recovery-runbook.md](recovery-runbook.md).
 
+### `POST /admin/import` → `200`
+Reads a configuration export (the body is the file from `GET /admin/export`) and applies
+its accounts, compression profiles, combos, model rules and saved settings.
+`?dry_run=true` answers the plan and writes nothing. Answers
+`{dry_run, summary:{create,update,unchanged,skip}, items:[{section, name, action, changes?, note?}]}`,
+where `section` is `settings`, `accounts`, `compression_profiles`, `combos` or
+`model_rules` and `action` is `create`, `update`, `unchanged` or `skip`.
+
+Accounts match by namespace. An existing one is updated and keeps its keys; a new one
+is created with `enabled:false`, and an existing account with no enabled key is never
+turned on. Combos and profiles match by name, rules by account and model; account ids in
+the file are mapped through their namespaces. A hop on an account in neither instance
+is dropped and named in the combo's `note`. A setting this version does not know, or
+that the host sets, is skipped. Tokens, prices, catalogs, quotas and the ledger are
+ignored.
+
+A file that is not `kind:"configuration_export"`, `format_version:1` is `400`, and so is
+any account, combo, rule or setting this version would refuse, before anything is
+written. Over 32 MB is `413` (export without the ledger). A failure while writing is
+`409`: what was written stays, and importing the same file again finishes the job.
+
 ## Quota snapshots
 
 ### `GET /admin/quota?keys=1,2` → `200`

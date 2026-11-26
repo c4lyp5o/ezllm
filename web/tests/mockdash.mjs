@@ -42,6 +42,7 @@ function defaults(path) {
     case "/admin/tokens": return [];
     case "/admin/usage": return { groups: [], totals: {} };
     case "/admin/requests": return requestsBody("BASELINE");
+    case "/admin/turns": return { rows: [], long_turn: 20 };
     case "/admin/cost": return { rows: [], totals: { usd: 0, calls: 0, unpriced_calls: 0, pricing_complete: true } };
     case "/v1/models": return { data: models.map((m) => ({ id: "mock/" + m.id })) };
     default: return [];

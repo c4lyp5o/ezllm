@@ -4,6 +4,11 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## Unreleased
 
+- **Import a configuration.** Settings → Backup & Recovery → **Import configuration**
+  reads an export from another ezllm, lists what it would create or change, and applies
+  it when you say so. Providers already here keep their keys; new ones arrive turned
+  off, ready for a key. Combos, compression profiles, rules and settings come along.
+  `POST /admin/import` (`?dry_run=true` for the plan).
 - **Early warnings.** The bell (and your push channels) now says when a provider has
   used 80% of a quota window, when a prepaid balance drops under 2, and when a pasted
   session cookie expires within 48 hours. Each is said once per window, day or cookie,

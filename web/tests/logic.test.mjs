@@ -16,7 +16,8 @@ try {
     export { globMatch, keyState } from ${JSON.stringify(join(src, 'utils/connect.ts'))};
     export { buildBuildings } from ${JSON.stringify(join(src, 'utils/city.ts'))};
     export { looksBinary, fenceFor } from ${JSON.stringify(join(src, 'utils/chatlog.ts'))};
-    export { effectiveText } from ${JSON.stringify(join(src, 'utils/settings.ts'))};
+    export { effectiveText, settingError } from ${JSON.stringify(join(src, 'utils/settings.ts'))};
+    export { summarizeImport, importWrites } from ${JSON.stringify(join(src, 'utils/import.ts'))};
     export { parkedFor, secondsLeft, splitParks } from ${JSON.stringify(join(src, 'utils/cooldowns.ts'))};
     export { csvField, toCSV } from ${JSON.stringify(join(src, 'utils/export.ts'))};
     export { filterPalette, PALETTE_ITEMS } from ${JSON.stringify(join(src, 'components/CommandPalette.tsx'))};
@@ -72,6 +73,18 @@ try {
   assert.equal(m.parkedFor(3720), '1h 2m');
   assert.equal(m.secondsLeft({ until: new Date(Date.now() + 30_500).toISOString() }), 31);
   assert.equal(m.secondsLeft({ until: new Date(Date.now() - 5_000).toISOString() }), 0);
+  // Import plan in one line; only creates and updates write anything.
+  assert.equal(m.summarizeImport({ create: 2, update: 1, unchanged: 5 }), '2 to create, 1 to update, 5 unchanged');
+  assert.equal(m.summarizeImport({ skip: 1 }), '1 skipped');
+  assert.equal(m.summarizeImport({}), 'Nothing to import');
+  assert.equal(m.importWrites({ unchanged: 4, skip: 1 }), false);
+  assert.equal(m.importWrites({ update: 1 }), true);
+  // Alert thresholds.
+  assert.equal(m.settingError('alert_quota_percent', 80), '');
+  assert.notEqual(m.settingError('alert_quota_percent', 0), '');
+  assert.equal(m.settingError('alert_balance_below', 2.5), '');
+  assert.notEqual(m.settingError('alert_balance_below', 0), '');
+  assert.notEqual(m.settingError('alert_cookie_hours', 721), '');
   // A model is parked only when every key of its provider is.
   const park = (model, key_id) => ({ namespace: 'acme', model, key_id, until: '', strikes: 0, probe_active: false, reason: '429' });
   const split = m.splitParks([park('a', 1), park('b', 1), park('b', 2)], 2);

@@ -3,7 +3,7 @@
 // changes, validation, Enter), presets, hop reorder/duplicate, plan preview,
 // deep links, and the Requests page's combo filter. Runs against the built
 // web/dist with fixtures (see mockdash.mjs).
-import { start, json, check, finish } from './mockdash.mjs';
+import { start, json, check, finish, openAdvanced } from './mockdash.mjs';
 
 const t = await start();
 const acct = (id, name, host, o = {}) => ({
@@ -61,9 +61,9 @@ try {
   check('summary counts combos and the ones that cannot serve', (await page.getByText(/4 combos · 3 enabled/).count()) === 1 && (await page.getByText(/1 cannot serve/).count()) === 1);
   const order = await page.getByRole('button', { name: /^Copy name/ }).allTextContents();
   check('a combo that cannot serve is listed first', /broken/.test(order[0]), order);
-  check('cannot-serve chip on the dead combo', (await card('broken').getByText('Cannot serve: no usable hop').count()) === 1);
-  check('partial health shows usable of total', (await card('daily').getByText('2 of 3 hops usable').count()) === 1);
-  check('a hop problem is spelled out', (await card('daily').getByText(/Hop 2: Groq-2 is disabled/).count()) === 1);
+  check('cannot-serve chip on the dead combo', (await card('broken').getByText('Cannot serve: no usable model').count()) === 1);
+  check('partial health shows usable of total', (await card('daily').getByText('2 of 3 models usable').count()) === 1);
+  check('a model problem is spelled out', (await card('daily').getByText(/Model 2: Groq-2 is disabled/).count()) === 1);
   check('traffic and error rate shown', (await card('daily').getByText('3.0% errors').count()) === 1);
   check('a combo with no traffic says so', (await card('broken').getByText(/No requests in 24h/).count()) === 1);
   check('View requests links to the combo filter', (await card('daily').getByRole('link', { name: 'View requests' }).getAttribute('href')).includes('alias=daily'));
@@ -92,20 +92,20 @@ try {
 
   // testing
   calls.length = 0;
-  await card('daily').getByTitle(/^Test hop 1/).click();
-  await dialog().getByText(/1 of 1 hop answered/).waitFor();
+  await card('daily').getByTitle(/^Test model 1/).click();
+  await dialog().getByText(/1 of 1 model answered/).waitFor();
   check('a hop chip tests only that hop', last(/combos\/1\/test/).length === 1 && /"hop":0/.test(calls[0]), calls);
   await dialog().getByText('Close', { exact: true }).click();
   await card('daily').getByText(/Tested .* 1 of 1 answered/).waitFor();
   check('the card remembers the probe', (await card('daily').getByText('✓').count()) === 1);
   calls.length = 0;
   await card('daily').getByRole('button', { name: 'Test', exact: true }).click();
-  await dialog().getByText(/2 of 3 hops answered/).waitFor();
+  await dialog().getByText(/2 of 3 models answered/).waitFor();
   check('Test probes the whole chain', last(/combos\/1\/test/).length === 1 && !/"hop"/.test(calls[0]), calls);
   check('a failed hop shows its cause', (await dialog().getByText(/429 · quota exhausted/).count()) === 1);
   calls.length = 0;
-  await dialog().getByRole('button', { name: 'Test hop 2 again' }).click();
-  await dialog().getByRole('button', { name: 'Test hop 2 again' }).waitFor();
+  await dialog().getByRole('button', { name: 'Test model 2 again' }).click();
+  await dialog().getByRole('button', { name: 'Test model 2 again' }).waitFor();
   check('Test again re-probes one hop', /"hop":1/.test(calls[0] ?? ''), calls);
   await page.keyboard.press('Escape');
   await card('daily').getByText(/Tested .* 2 of 3 answered/).waitFor();
@@ -133,8 +133,11 @@ try {
   await page.waitForTimeout(250);
   check('Enter on an invalid draft saves nothing', last(/^POST/).length === 0, calls);
   check('invalid draft says what to fix', (await dialog().getByText('Fix the fields marked in red to save.').count()) === 1);
+  check('order settings start folded away', (await dialog().getByRole('button', { name: 'In order' }).count()) === 0);
   await dialog().getByRole('button', { name: /Cache-warm rotation/ }).click();
-  check('a preset sets the strategy', (await dialog().getByRole('button', { name: 'Block round robin' }).getAttribute('aria-pressed')) === 'true' && (await dialog().getByLabel('Block size').inputValue()) === '5');
+  check('the folded Advanced names a non-default order', (await dialog().locator('details[data-advanced="combo-editor"] summary').innerText()).includes('order: Rotate in blocks'));
+  await openAdvanced(page, 'combo-editor');
+  check('a preset sets the order', (await dialog().getByRole('button', { name: 'Rotate in blocks' }).getAttribute('aria-pressed')) === 'true' && (await dialog().getByLabel('Block size').inputValue()) === '5');
   await page.keyboard.press('Escape');
   await dialog().getByText('Discard unsaved changes?').waitFor();
   check('Escape with unsaved edits asks first', true);
@@ -142,15 +145,15 @@ try {
 
   // build a valid one by Enter, with hops
   await dialog().getByLabel('Name', { exact: true }).fill('fresh');
-  await dialog().getByRole('button', { name: /Add hop/ }).click();
-  await dialog().getByLabel('Hop 1 model').waitFor();
-  check('an empty hop is flagged', (await dialog().getByText('Pick or type a model.').count()) === 1);
-  await dialog().getByLabel('Hop 1 model').click();
+  await dialog().getByRole('button', { name: /Add model/ }).click();
+  await dialog().getByLabel('Model 1', { exact: true }).waitFor();
+  check('an empty model row is flagged', (await dialog().getByText('Pick or type a model.').count()) === 1);
+  await dialog().getByLabel('Model 1', { exact: true }).click();
   await dialog().getByRole('option', { name: 'b', exact: true }).click();
   await dialog().getByRole('button', { name: 'Duplicate', exact: true }).first().click();
   await page.waitForTimeout(150);
-  check('duplicate hop is flagged as a repeat', (await dialog().getByText(/Same provider and model as hop 1/).count()) === 1);
-  await dialog().getByRole('button', { name: 'Remove hop 2' }).click();
+  check('a repeated model is flagged', (await dialog().getByText(/Same as model 1\./).count()) === 1);
+  await dialog().getByRole('button', { name: 'Remove model 2' }).click();
   check('plan preview describes the strategy', (await dialog().getByText(/serves the next 5 requests/).count()) === 1);
   calls.length = 0;
   await dialog().getByLabel('Name', { exact: true }).press('Enter');
@@ -163,11 +166,11 @@ try {
   await card('daily').getByRole('button', { name: 'Edit', exact: true }).click();
   const save = dialog().getByRole('button', { name: 'Save changes' });
   check('Save is disabled until something changes', await save.isDisabled());
-  check('plan preview skips an unusable hop and says why', (await dialog().getByText(/Groq-2 \/ b is skipped: Groq-2 is disabled/).count()) === 1);
-  await dialog().getByRole('button', { name: 'Move hop 3 up' }).click();
-  await dialog().getByRole('button', { name: 'Move hop 2 up' }).click();
+  check('plan preview skips an unusable model and says why', (await dialog().getByText(/Groq-2 \/ b is skipped: Groq-2 is disabled/).count()) === 1);
+  await dialog().getByRole('button', { name: 'Move model 3 up' }).click();
+  await dialog().getByRole('button', { name: 'Move model 2 up' }).click();
   await page.waitForTimeout(200);
-  check('moving a hop reorders the rows', (await dialog().getByLabel('Hop 1 provider').inputValue()) === '3');
+  check('moving a model reorders the rows', (await dialog().getByLabel('Model 1 provider').inputValue()) === '3');
   check('Save enables once dirty', await save.isEnabled());
   calls.length = 0;
   await save.click();
@@ -179,7 +182,7 @@ try {
   // delete confirm
   await card('daily').getByRole('button', { name: 'Delete' }).click();
   await page.getByText(/served 1,204 requests/).waitFor();
-  check('delete confirm names the traffic it would cut off', (await page.getByText(/Its 3 hops will be removed/).count()) === 1);
+  check('delete confirm names the traffic it would cut off', (await page.getByText(/Its 3 models will be removed/).count()) === 1);
   await page.keyboard.press('Escape');
 
   // switch

@@ -432,7 +432,7 @@ function RescuedCalls({ o }: { o: Overview }) {
   const rescued = (o.recent_calls ?? []).filter((r) => failoverNote(r.err));
   if (rescued.length === 0) return null;
   return (
-    <Panel label={<SectionLabel>Routing rescue · failover hops</SectionLabel>}
+    <Panel label={<SectionLabel>Routing rescue · fallbacks</SectionLabel>}
       aside={<span className="text-[12px] text-mute">{rescued.length} rescued</span>}>
       <ul className="space-y-1.5">
         {rescued.slice(0, 8).map((r, i) => (
@@ -511,7 +511,7 @@ function RecentCalls({ o }: { o: Overview }) {
                 { key: 'all', label: `All ${count('all')}` },
                 { key: 'errors', label: `Errors ${count('errors')}`, title: 'status 400 and above' },
                 { key: 'failover', label: `Failed over ${count('failover')}`, title: 'answered after one or more providers were skipped or failed' },
-                { key: 'translated', label: `Translated ${count('translated')}`, title: 'the hop spoke a different wire than the client' },
+                { key: 'translated', label: `Converted ${count('translated')}`, title: 'the provider uses a different API from the client, so ezllm converted it' },
               ]}
               value={filter} onChange={setFilter} />
             <input type="search" value={q} onChange={(e) => setQ(e.target.value)}
@@ -594,8 +594,8 @@ function RecentCalls({ o }: { o: Overview }) {
                           in-tokens are the vendor's INCLUSIVE total. */}
                       {r.translated && (
                         <div className="mt-0.5 text-[11px] text-accent"
-                          title="translated: the provider uses a different API from the client (for example an Anthropic client sent to a chat-only provider), so ezllm converted the request and the answer. Tokens are counted the same way as any other request.">
-                          ⇄ translated
+                          title="converted: the provider uses a different API from the client (for example an Anthropic client sent to a chat-only provider), so ezllm converted the request and the answer. Tokens are counted the same way as any other request.">
+                          ⇄ converted
                         </div>
                       )}
                     </td>
@@ -997,8 +997,8 @@ function DashboardBody() {
             emptyHint={`No model traffic in the last ${win}.`} />
         </StaggerItem>
         <StaggerItem>
-          <Breakdown label="Tokens by API key" rows={byKey}
-            emptyHint={`No calls with an API key in the last ${win}. Calls without one show as "(none)".`} />
+          <Breakdown label="Tokens by app key" rows={byKey}
+            emptyHint={`No calls with an app key in the last ${win}. Calls without one show as "(none)".`} />
         </StaggerItem>
       </Stagger>
 

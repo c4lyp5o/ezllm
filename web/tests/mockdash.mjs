@@ -92,3 +92,10 @@ export function check(name, ok, detail) {
   if (!ok) failures.push(name);
 }
 export function finish() { process.exit(failures.length ? 1 : 0); }
+
+/** Opens an Advanced fold by its id (data-advanced), if it is closed. */
+export async function openAdvanced(page, id) {
+  const fold = page.locator(`details[data-advanced="${id}"]`);
+  if (!(await fold.evaluate((d) => d.open))) await fold.locator("summary").click();
+  await fold.locator("summary + div").waitFor();
+}

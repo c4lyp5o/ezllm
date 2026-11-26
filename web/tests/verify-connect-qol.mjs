@@ -111,11 +111,11 @@ try {
   check('a budget quick value sets the cap', (await dialog().getByLabel('Token cap').inputValue()) === '1000000');
   calls.length = 0;
   await dialog().getByLabel('Name', { exact: true }).press('Enter');
-  await page.getByRole('dialog', { name: 'New API key' }).waitFor();
+  await page.getByRole('dialog', { name: 'New app key' }).waitFor();
   const posted = last(/^POST \/admin\/tokens /)[0] ?? '';
   check('create sends name, role, allowlist and expiry', /"name":"laptop"/.test(posted) && /"roles":\["infer"\]/.test(posted) && /"allowed_models":"deepseek\/\*"/.test(posted) && /"expires_at":"\d{4}-\d\d-\d\d"/.test(posted), posted);
   check('the budget is saved with a second call', last(/^PATCH \/admin\/tokens\/9 .*"cap_tokens":1000000.*"cap_window":"monthly"|^PATCH \/admin\/tokens\/9 .*"cap_window":"monthly".*"cap_tokens":1000000/).length === 1, calls);
-  const panel = page.getByRole('dialog', { name: 'New API key' });
+  const panel = page.getByRole('dialog', { name: 'New app key' });
   check('the plaintext is shown', (await panel.getByText('ez-secret-123', { exact: true }).count()) === 1);
   check('the snippet already has the real key in it', (await panel.getByText(/OPENAI_API_KEY=ez-secret-123/).count()) === 1);
   await panel.getByRole('button', { name: 'curl' }).click();
@@ -162,7 +162,7 @@ try {
 
   // deep links
   await page.goto(`${t.base}/connect?new=1`);
-  await dialog().getByText('Create an API key').waitFor();
+  await dialog().getByText('Create an app key').waitFor();
   check('?new=1 opens the create form', true);
   await page.keyboard.press('Escape');
   await page.goto(`${t.base}/connect?policy=4`);

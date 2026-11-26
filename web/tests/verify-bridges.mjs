@@ -3,7 +3,7 @@
 // names `bridge`, never an api_key, and declares the usage convention), and
 // that a bridge that is off says how to turn it on.
 // Build first (`npm run build`), then: node tests/verify-bridges.mjs
-import { start, json, check, finish } from "./mockdash.mjs";
+import { start, json, check, finish, openAdvanced } from "./mockdash.mjs";
 
 const bridges = [
   { id: "claude-sub", label: "Claude Pro/Max", kind: "anthropic-compatible", base_url: "http://127.0.0.1:8790/v1",
@@ -75,7 +75,8 @@ await page.selectOption("#ap-kind", "claude-sub");
 await page.getByText("Bridge running at").waitFor();
 check("running bridge shows its boot facts", (await page.locator("text=2.1.306 (Claude Code)").count()) === 1);
 check("key field hidden for a bridge", !(await page.locator("#ap-key").isVisible()));
-check("name and namespace prefilled", (await page.inputValue("#ap-name")) === "Claude Pro/Max" && (await page.inputValue("#ap-ns")) === "claude-sub");
+await openAdvanced(page, "add-provider");
+check("name and provider ID prefilled", (await page.inputValue("#ap-name")) === "Claude Pro/Max" && (await page.inputValue("#ap-ns")) === "claude-sub");
 // The bridge supplies the key, but a live balance read needs the operator's
 // claude.ai cookie — the field has to exist and reach management_key, which is
 // what internal/provider/claudesub_quota.go reads.

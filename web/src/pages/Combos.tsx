@@ -8,7 +8,7 @@ import {
   type Account, type BlockCursor, type Combo, type FreeInclude, type Hop, type RangeKey, type UsageRow,
 } from '../utils/api';
 import {
-  CAUSE_TONES, Chip, Combobox, ConfirmModal, EmptyState, Modal, Mono, Segmented, SectionLabel, SkeletonCards, Spinner, Toggle,
+  Advanced, CAUSE_TONES, Chip, Combobox, ConfirmModal, EmptyState, Modal, Mono, Segmented, SectionLabel, SkeletonCards, Spinner, Toggle,
   btn, cx, inputCls, labelCls, relTime,
 } from '../components/ui';
 import { Collapse, ReorderItem, Stagger, StaggerItem } from '../components/motion';
@@ -21,12 +21,13 @@ import {
 import { type Cooldown, useCooldowns } from '../utils/cooldowns';
 import { ParkedPill } from '../components/Parked';
 import { RouteExplainModal } from '../components/RouteExplain';
+import { plainReason } from '../utils/words';
 
 // Strategies offered by the combo form — every one the backend implements.
 const STRATEGIES = ['failover', 'block_round_robin', 'true_round_robin', 'sticky_last_good', 'least_used'] as const;
 const STRATEGY_LABEL: Record<string, string> = {
-  failover: 'Failover', block_round_robin: 'Block round robin', true_round_robin: 'Round robin',
-  sticky_last_good: 'Sticky', least_used: 'Least used',
+  failover: 'In order', block_round_robin: 'Rotate in blocks', true_round_robin: 'Random',
+  sticky_last_good: 'Stay on last good', least_used: 'Least used',
 };
 const RANGES: RangeKey[] = ['24h', '7d', '30d', '365d'];
 
@@ -137,15 +138,15 @@ function HopsEditor({ hops, setHops, accounts, strategy, catalogs, ensure, error
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-3">
-        <SectionLabel>Hops <span className="font-normal text-mute">· tried top to bottom</span></SectionLabel>
+        <SectionLabel>Models <span className="font-normal text-mute">· tried top to bottom</span></SectionLabel>
         <button type="button" className={cx(btn.base, btn.ghost, 'px-2.5 py-1 text-[12px]')}
           onClick={() => setHops([...hops, emptyHop(accounts[0]?.id ?? 0)])}>
-          ＋ Add hop
+          ＋ Add model
         </button>
       </div>
       {hops.length === 0 && (
         <p className="rounded-lg border border-dashed border-line px-4 py-5 text-center text-[13px] text-mute">
-          No hops yet. Add the first one.
+          No models yet. Add the first one.
         </p>
       )}
       {hops.map((h, i) => {
@@ -163,10 +164,10 @@ function HopsEditor({ hops, setHops, accounts, strategy, catalogs, ensure, error
           <ReorderItem key={h.uid} className={cx('rounded-lg border bg-raised/60 px-3 py-2.5', problem ? 'border-bad/50' : 'border-line')}>
             <div className="flex flex-wrap items-center gap-2">
               <span className="w-5 text-center font-mono text-[12px] text-mute">{i + 1}</span>
-              <select aria-label={`Hop ${i + 1} provider`} className={cx(inputCls, 'w-auto min-w-40 flex-1 py-1.5 text-[13px]')} value={h.account_id}
+              <select aria-label={`Model ${i + 1} provider`} className={cx(inputCls, 'w-auto min-w-40 flex-1 py-1.5 text-[13px]')} value={h.account_id}
                 onChange={(e) => set(i, { account_id: Number(e.target.value), custom: undefined })}>
                 {groups.map((g) => (
-                  <optgroup key={g.key} label={g.accounts.length > 1 ? `${g.label} · ${g.accounts.length} accounts` : g.label}>
+                  <optgroup key={g.key} label={g.accounts.length > 1 ? `${g.label} · ${g.accounts.length} providers` : g.label}>
                     {g.accounts.map((a) => <option key={a.id} value={a.id}>{a.name}{a.enabled ? '' : ' (disabled)'}</option>)}
                   </optgroup>
                 ))}
@@ -174,10 +175,10 @@ function HopsEditor({ hops, setHops, accounts, strategy, catalogs, ensure, error
               </select>
               <div className="min-w-48 flex-[2]">
                 {custom || !models ? (
-                  <input aria-label={`Hop ${i + 1} model`} className={cx(inputCls, 'py-1.5 font-mono text-[13px]')} placeholder="Model id, e.g. gpt-6-luna"
+                  <input aria-label={`Model ${i + 1}`} className={cx(inputCls, 'py-1.5 font-mono text-[13px]')} placeholder="Model id, e.g. gpt-6-luna"
                     value={h.model_id} onChange={(e) => set(i, { model_id: e.target.value.trim() })} spellCheck={false} />
                 ) : (
-                  <Combobox label={`Hop ${i + 1} model`} idPrefix={`hop-${h.uid}`} loadingText="Loading models…" placeholder="Search models…"
+                  <Combobox label={`Model ${i + 1}`} idPrefix={`hop-${h.uid}`} loadingText="Loading models…" placeholder="Search models…"
                     value={h.model_id}
                     options={[
                       ...(h.model_id && !models.includes(h.model_id) ? [{ value: h.model_id, label: `${h.model_id} · not in catalog` }] : []),
@@ -187,17 +188,17 @@ function HopsEditor({ hops, setHops, accounts, strategy, catalogs, ensure, error
                 )}
               </div>
               <div className="flex items-center gap-0.5">
-                <button type="button" aria-label={`Move hop ${i + 1} up`} title="Move up" disabled={i === 0}
+                <button type="button" aria-label={`Move model ${i + 1} up`} title="Move up" disabled={i === 0}
                   className="rounded p-1 text-mute hover:bg-hover hover:text-ink disabled:opacity-30" onClick={() => move(i, i - 1)}>↑</button>
-                <button type="button" aria-label={`Move hop ${i + 1} down`} title="Move down" disabled={i === hops.length - 1}
+                <button type="button" aria-label={`Move model ${i + 1} down`} title="Move down" disabled={i === hops.length - 1}
                   className="rounded p-1 text-mute hover:bg-hover hover:text-ink disabled:opacity-30" onClick={() => move(i, i + 1)}>↓</button>
-                <button type="button" aria-label={`Remove hop ${i + 1}`} title="Remove"
+                <button type="button" aria-label={`Remove model ${i + 1}`} title="Remove"
                   className="rounded p-1 text-mute hover:bg-hover hover:text-bad" onClick={() => setHops(hops.filter((_, k) => k !== i))}>✕</button>
               </div>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 pl-7 text-[12px] text-mute">
               <label className="flex items-center gap-2">
-                <Toggle checked={h.enabled} onChange={(v) => set(i, { enabled: v })} label={`Hop ${i + 1} enabled`} />
+                <Toggle checked={h.enabled} onChange={(v) => set(i, { enabled: v })} label={`Model ${i + 1} enabled`} />
                 {h.enabled ? 'On' : 'Off'}
               </label>
               {models && (
@@ -208,7 +209,7 @@ function HopsEditor({ hops, setHops, accounts, strategy, catalogs, ensure, error
               )}
               {strategy === 'block_round_robin' && (
                 <label className="flex items-center gap-1.5"
-                  title="Keep sending requests to this hop while it succeeds. Move on when it fails because of the provider (429, 5xx, connection error or a broken stream). Other 4xx errors are the request's fault, so it stays.">
+                  title="Keep sending requests to this model while it succeeds. Move on when it fails because of the provider (429, 5xx, connection error or a broken stream). Other 4xx errors are the request's fault, so it stays.">
                   <input type="checkbox" checked={h.hold_until_failure === true}
                     onChange={(e) => set(i, { hold_until_failure: e.target.checked })} />
                   Hold until it fails
@@ -464,85 +465,19 @@ function ComboModal({ target, accounts, profiles, combos, catalogs, ensure, onCl
           </div>
         )}
 
-        <div className="grid gap-4 sm:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1fr)]">
-          <div>
-            <label className={labelCls} htmlFor="cb-name">Name</label>
-            <input id="cb-name" className={cx(inputCls, nameShown && 'border-bad/60')} placeholder="daily" value={d.name} spellCheck={false}
-              aria-invalid={!!nameShown} onChange={(e) => setD((p) => ({ ...p, name: e.target.value }))} />
-            {nameShown && <p className="mt-1 text-[12px] text-bad">{errors.name}</p>}
-          </div>
-          <div>
-            <label className={labelCls} htmlFor="cb-cp">Compression profile</label>
-            <select id="cb-cp" className={cx(inputCls, profiles.length === 0 && 'opacity-60')} disabled={profiles.length === 0}
-              value={d.compression_profile_id ?? ''}
-              onChange={(e) => setD((p) => ({ ...p, compression_profile_id: e.target.value === '' ? null : Number(e.target.value) }))}>
-              <option value="">{profiles.length === 0 ? 'None defined yet' : 'None'}</option>
-              {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className={labelCls} htmlFor="cb-context-size">Context size (tokens)</label>
-            <input id="cb-context-size" className={cx(inputCls, 'font-mono tabular-nums', errors.context && 'border-bad/60')} type="number" min={1} max={10000000} step={1000}
-              value={d.context_size} onChange={(e) => setD((p) => ({ ...p, context_size: Number(e.target.value) }))} />
-            {errors.context
-              ? <p className="mt-1 text-[12px] text-bad">{errors.context}</p>
-              : <p className="mt-1 text-[12px] text-mute">Advertised to clients such as Hermes. Not enforced.</p>}
-          </div>
+        <div className="sm:w-1/2">
+          <label className={labelCls} htmlFor="cb-name">Name</label>
+          <input id="cb-name" className={cx(inputCls, nameShown && 'border-bad/60')} placeholder="daily" value={d.name} spellCheck={false}
+            aria-invalid={!!nameShown} onChange={(e) => setD((p) => ({ ...p, name: e.target.value }))} />
+          {nameShown && <p className="mt-1 text-[12px] text-bad">{errors.name}</p>}
         </div>
 
-        <div>
-          <SectionLabel className="mb-2">Strategy</SectionLabel>
-          <Segmented<string> label="Strategy" value={d.strategy} onChange={(s) => setD((p) => ({ ...p, strategy: s }))}
-            options={STRATEGIES.map((s) => ({ key: s, label: STRATEGY_LABEL[s], title: s }))} />
-          <p className="mt-2 text-[13px] leading-snug text-mute">
-            <Mono>{d.strategy}</Mono>: {STRATEGY_HINTS[d.strategy]}
-          </p>
-          {/* The strategy's own fields COLLAPSE in: picking a strategy changes
-              how much the form asks for, and a height animation shows the new
-              fields arriving instead of the dialog resizing under the hand. */}
-          <Collapse open={d.strategy === 'sticky_last_good'}>
-            <div className="mt-3 flex flex-wrap items-center gap-3">
-              <label className="text-[13px] font-medium" htmlFor="cb-idle">Sticky idle</label>
-              <input id="cb-idle" type="number" min={0} className={cx(inputCls, '!w-28 py-1.5 font-mono text-[13px] tabular-nums', errors.idle && 'border-bad/60')}
-                value={d.sticky_idle_s} onChange={(e) => setD((p) => ({ ...p, sticky_idle_s: Number(e.target.value) || 0 }))} />
-              <span className="text-[12px] text-mute">seconds of quiet before it moves on</span>
-              {errors.idle && <span className="text-[12px] text-bad">{errors.idle}</span>}
-            </div>
-          </Collapse>
-          <Collapse open={d.strategy === 'block_round_robin'}>
-            <div className="mt-3 rounded-lg border border-line bg-raised/60 p-3.5">
-              <div className="flex flex-wrap items-center gap-3">
-                <label className="text-[13px] font-medium" htmlFor="cb-block">Block size</label>
-                <input id="cb-block" type="number" min={1} max={1000} className={cx(inputCls, '!w-28 py-1.5 font-mono text-[13px] tabular-nums', errors.block && 'border-bad/60')}
-                  value={d.block_size} onChange={(e) => setD((p) => ({ ...p, block_size: Number(e.target.value) || 1 }))} />
-                <span className="text-[12px] text-mute">requests go to each hop before moving to the next. Every hop uses the same number.</span>
-                {errors.block && <span className="text-[12px] text-bad">{errors.block}</span>}
-              </div>
-              {tight.length > 0 && (
-                <p className="mt-2 text-[12px] leading-snug text-warn">
-                  A block of {d.block_size} is more than the request limit of{' '}
-                  {tight.map((a) => `${a.name} (${a.rate_limit} per ${a.rate_window})`).join(', ')}. Those hops will run out partway
-                  through a block and the rotation will move on early. Set the block size to the smallest limit, or raise the limit.
-                </p>
-              )}
-              <details className="mt-2 text-[12px] text-mute">
-                <summary className="cursor-pointer select-none text-dim hover:text-ink">Why blocks?</summary>
-                <p className="mt-1.5 leading-snug">
-                  Providers cache the start of your prompt. When several requests in a row go to the same account, each one
-                  can reuse what the one before it cached (call <Mono>k</Mono> reads what call <Mono>k-1</Mono> sent), which costs
-                  much less. Switching account on every request loses that, because the next account hasn't seen the prompt
-                  and charges full price for it. The load is still shared evenly, just in blocks.
-                </p>
-              </details>
-            </div>
-          </Collapse>
-        </div>
 
         <div className="flex items-center gap-4 rounded-lg border border-line bg-raised/40 px-4 py-3">
           <div className="min-w-0 flex-1">
             <div className="text-[13px] font-semibold">Fill with free models</div>
             <p className="mt-0.5 text-[12px] leading-snug text-mute">
-              Hops come from every free model your providers offer, and update when their model lists change.
+              Models come from every free model your providers offer, and update when their model lists change.
             </p>
           </div>
           <Toggle checked={d.auto_free} onChange={(v) => setD((p) => ({ ...p, auto_free: v }))} label="fill with free models" />
@@ -555,6 +490,76 @@ function ComboModal({ target, accounts, profiles, combos, catalogs, ensure, onCl
               errors={showAll || d.hops.length > 0 ? errors.hop : {}} />
             {errors.hops && showAll && <p className="text-[12px] text-bad">{errors.hops}</p>}
           </>}
+
+        <Advanced id="combo-editor" forceOpen={showAll && !!(errors.idle || errors.block || errors.context)} hint={[d.strategy !== 'failover' ? `order: ${STRATEGY_LABEL[d.strategy] ?? d.strategy}` : '', d.compression_profile_id != null ? 'compression on' : ''].filter(Boolean).join(' · ') || undefined}>
+          <div>
+            <SectionLabel className="mb-2">Order</SectionLabel>
+            <Segmented<string> label="Order" value={d.strategy} onChange={(s) => setD((p) => ({ ...p, strategy: s }))}
+              options={STRATEGIES.map((s) => ({ key: s, label: STRATEGY_LABEL[s], title: STRATEGY_HINTS[s] }))} />
+            <p className="mt-2 text-[13px] leading-snug text-mute">
+              {STRATEGY_LABEL[d.strategy] ?? d.strategy}: {STRATEGY_HINTS[d.strategy]}
+            </p>
+            {/* The strategy's own fields COLLAPSE in: picking a strategy changes
+                how much the form asks for, and a height animation shows the new
+                fields arriving instead of the dialog resizing under the hand. */}
+            <Collapse open={d.strategy === 'sticky_last_good'}>
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <label className="text-[13px] font-medium" htmlFor="cb-idle">Reset after</label>
+                <input id="cb-idle" type="number" min={0} className={cx(inputCls, '!w-28 py-1.5 font-mono text-[13px] tabular-nums', errors.idle && 'border-bad/60')}
+                  value={d.sticky_idle_s} onChange={(e) => setD((p) => ({ ...p, sticky_idle_s: Number(e.target.value) || 0 }))} />
+                <span className="text-[12px] text-mute">seconds with no requests, back to the first model</span>
+                {errors.idle && <span className="text-[12px] text-bad">{errors.idle}</span>}
+              </div>
+            </Collapse>
+            <Collapse open={d.strategy === 'block_round_robin'}>
+              <div className="mt-3 rounded-lg border border-line bg-raised/60 p-3.5">
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className="text-[13px] font-medium" htmlFor="cb-block">Block size</label>
+                  <input id="cb-block" type="number" min={1} max={1000} className={cx(inputCls, '!w-28 py-1.5 font-mono text-[13px] tabular-nums', errors.block && 'border-bad/60')}
+                    value={d.block_size} onChange={(e) => setD((p) => ({ ...p, block_size: Number(e.target.value) || 1 }))} />
+                  <span className="text-[12px] text-mute">requests go to each model before moving to the next. Every model uses the same number.</span>
+                  {errors.block && <span className="text-[12px] text-bad">{errors.block}</span>}
+                </div>
+                {tight.length > 0 && (
+                  <p className="mt-2 text-[12px] leading-snug text-warn">
+                    A block of {d.block_size} is more than the request limit of{' '}
+                    {tight.map((a) => `${a.name} (${a.rate_limit} per ${a.rate_window})`).join(', ')}. Those providers will run out partway
+                    through a block and the rotation will move on early. Set the block size to the smallest limit, or raise the limit.
+                  </p>
+                )}
+                <details className="mt-2 text-[12px] text-mute">
+                  <summary className="cursor-pointer select-none text-dim hover:text-ink">Why blocks?</summary>
+                  <p className="mt-1.5 leading-snug">
+                    Providers cache the start of your prompt. When several requests in a row go to the same provider, each one
+                    can reuse what the one before it cached (call <Mono>k</Mono> reads what call <Mono>k-1</Mono> sent), which costs
+                    much less. Switching provider on every request loses that, because the next provider hasn't seen the prompt
+                    and charges full price for it. The load is still shared evenly, just in blocks.
+                  </p>
+                </details>
+              </div>
+            </Collapse>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className={labelCls} htmlFor="cb-cp">Compression profile</label>
+              <select id="cb-cp" className={cx(inputCls, profiles.length === 0 && 'opacity-60')} disabled={profiles.length === 0}
+                value={d.compression_profile_id ?? ''}
+                onChange={(e) => setD((p) => ({ ...p, compression_profile_id: e.target.value === '' ? null : Number(e.target.value) }))}>
+                <option value="">{profiles.length === 0 ? 'None defined yet' : 'None'}</option>
+                {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="cb-context-size">Context size (tokens)</label>
+              <input id="cb-context-size" className={cx(inputCls, 'font-mono tabular-nums', errors.context && 'border-bad/60')} type="number" min={1} max={10000000} step={1000}
+                value={d.context_size} onChange={(e) => setD((p) => ({ ...p, context_size: Number(e.target.value) }))} />
+              {errors.context
+                ? <p className="mt-1 text-[12px] text-bad">{errors.context}</p>
+                : <p className="mt-1 text-[12px] text-mute">Advertised to clients such as Hermes. Not enforced.</p>}
+            </div>
+          </div>
+        </Advanced>
 
         <PlanPreview d={d} accounts={accounts} catalogs={catalogs} />
 
@@ -625,39 +630,39 @@ function TestComboModal({ target, onClose, onResult }: {
   return (
     <Modal open={target != null} onClose={onClose} wide busy={running}
       title={combo ? `Test ${combo.name}` : 'Test combo'}
-      subtitle="Sends one request to each hop. These requests aren't added to your usage."
+      subtitle="Sends one request to each model. These requests aren't added to your usage."
       footer={(close) => <>
         <span className="mr-auto flex items-center gap-2 text-[13px] text-mute">
-          Surface
-          <select aria-label="Surface" className={cx(inputCls, 'w-auto py-1 text-[13px]')} value={surface}
+          API
+          <select aria-label="API" className={cx(inputCls, 'w-auto py-1 text-[13px]')} value={surface}
             onChange={(e) => setSurface(e.target.value as 'chat' | 'anthropic')}>
-            <option value="chat">chat</option>
-            <option value="anthropic">anthropic</option>
+            <option value="chat">Chat Completions</option>
+            <option value="anthropic">Anthropic Messages</option>
           </select>
         </span>
         <button type="button" className={cx(btn.base, btn.ghost)} onClick={close}>Close</button>
         <button type="button" disabled={running || !combo} className={cx(btn.base, btn.primary)}
           onClick={() => { if (combo) void run(combo, surface); }}>
-          {running && pending === 'all' ? <Spinner /> : null} Test all hops
+          {running && pending === 'all' ? <Spinner /> : null} Test all models
         </button>
       </>}>
       {err && <div className="mb-3 rounded-lg border border-bad/30 bg-bad-dim px-4 py-3 text-[13px] text-bad">{err}</div>}
       {running && shown.length === 0 && (
         <div className="flex items-center gap-2 px-2 py-6 text-[13px] text-mute">
-          <Spinner /> Probing {target?.hop === undefined ? `${combo?.hops.length ?? 0} hop${combo?.hops.length === 1 ? '' : 's'}` : `hop ${target.hop + 1}`}…
+          <Spinner /> Testing {target?.hop === undefined ? `${combo?.hops.length ?? 0} model${combo?.hops.length === 1 ? '' : 's'}` : `model ${target.hop + 1}`}…
         </div>
       )}
       {shown.length > 0 && (
         <div className="space-y-2">
           <p className="text-[13px] text-dim">
-            {ok} of {shown.length} {shown.length === 1 ? 'hop' : 'hops'} answered{target?.hop !== undefined && shown.length === 1 ? ' (one hop tested)' : ''}.
+            {ok} of {shown.length} {shown.length === 1 ? 'model' : 'models'} answered{target?.hop !== undefined && shown.length === 1 ? ' (one model tested)' : ''}.
           </p>
           {shown.map((h) => (
             <div key={h.index} className="rounded-lg border border-line bg-raised/40 px-4 py-3">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                 <span className="font-mono text-[12px] text-mute">{(h.index ?? 0) + 1}</span>
                 <span className="font-mono text-[13px] text-ink">{h.namespace ?? `#${h.account_id}`}/{h.model}</span>
-                {!h.enabled && <Chip tone="neutral">hop disabled</Chip>}
+                {!h.enabled && <Chip tone="neutral">model off</Chip>}
                 {h.status === 200 && <Chip tone="ok">200</Chip>}
                 {h.status >= 400 && (
                   <Chip tone={CAUSE_TONES[h.cause ?? ''] ?? 'bad'} title={h.err}>
@@ -665,11 +670,11 @@ function TestComboModal({ target, onClose, onResult }: {
                   </Chip>
                 )}
                 {h.status === 0 && <Chip tone="bad">not dialed</Chip>}
-                {h.parked && <Chip tone="warn" title="the test paused this hop, the same as a real 429 would">parked {h.cooldown_s}s</Chip>}
+                {h.parked && <Chip tone="warn" title="the test paused this model, the same as a real 429 would">paused {h.cooldown_s}s</Chip>}
                 <span className="ml-auto flex items-center gap-3">
                   <span className="font-mono text-[12px] text-mute">{h.ms} ms</span>
                   <button type="button" disabled={running} className="text-[12px] text-mute hover:text-ink disabled:opacity-50"
-                    aria-label={`Test hop ${(h.index ?? 0) + 1} again`}
+                    aria-label={`Test model ${(h.index ?? 0) + 1} again`}
                     onClick={() => { if (combo) void run(combo, surface, h.index); }}>
                     {running && pending === h.index ? 'Testing…' : 'Test again'}
                   </button>
@@ -677,15 +682,15 @@ function TestComboModal({ target, onClose, onResult }: {
               </div>
               {h.err && (
                 <div className="mt-1.5 break-words font-mono text-[12px] leading-relaxed text-mute" title={h.err}>
-                  {h.err.length > 220 ? h.err.slice(0, 220) + '…' : h.err}
+                  {(() => { const t = plainReason(h.err); return t.length > 220 ? t.slice(0, 220) + '…' : t; })()}
                 </div>
               )}
             </div>
           ))}
           <p className="pt-1 text-[12px] leading-relaxed text-mute">
-            Tests go through the normal request path, so a hop that fails for real stays paused. Rules,
-            capabilities and pins are ignored here, and disabled or skipped hops are tested too, so you can
-            see why requests avoid them.
+            Tests go through the normal request path, so a model that fails for real stays paused. Rules,
+            capabilities and forced APIs are ignored here, and models that are off or skipped are tested too,
+            so you can see why requests avoid them.
           </p>
         </div>
       )}
@@ -771,8 +776,8 @@ function ComboCard({ c, accounts, health, stat, statsReady, range, cursor, test,
     <div className={cx('rounded-xl border bg-surface px-5 py-4', dead ? 'border-bad/40' : 'border-line', !c.enabled && 'opacity-90')}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <CopyName name={c.name} />
-        <Chip title={STRATEGY_HINTS[c.strategy]}><span className="font-mono">{c.strategy}</span></Chip>
-        {c.auto_free && <Chip tone="accent" title="hops come from your providers' free models and update by themselves">Auto</Chip>}
+        {c.strategy !== 'failover' && <Chip title={STRATEGY_HINTS[c.strategy]}>{STRATEGY_LABEL[c.strategy] ?? c.strategy}</Chip>}
+        {c.auto_free && <Chip tone="accent" title="models come from your providers' free models and update by themselves">Auto</Chip>}
         {!!c.compression_profile_id && (
           <Link to={`/compression?edit=${c.compression_profile_id}`} title="compression profile used for requests through this combo. Click to edit it.">
             <Chip tone="accent"><span className="font-mono">{profileName ?? `profile #${c.compression_profile_id}`}</span></Chip>
@@ -787,7 +792,7 @@ function ComboCard({ c, accounts, health, stat, statsReady, range, cursor, test,
           </label>
           <span className="flex items-center gap-2">
             <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px]')}
-              title="probe every hop with one tiny real request" onClick={() => onTest()}>Test</button>
+              title="test every model with one tiny real request" onClick={() => onTest()}>Test</button>
             <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px]')}
               title="what a request would do right now, without sending one" onClick={() => setExplaining(true)}>Explain</button>
             <button type="button" className={cx(btn.base, btn.ghost, 'px-3 py-1.5 text-[13px]')} onClick={onEdit}>Edit</button>
@@ -801,10 +806,10 @@ function ComboCard({ c, accounts, health, stat, statsReady, range, cursor, test,
           is what the operator opened the page to find out. */}
       <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12px] text-mute">
         {dead
-          ? <Chip tone="bad">Cannot serve: no usable hop</Chip>
+          ? <Chip tone="bad">Cannot serve: no usable model</Chip>
           : health.total > 0 && health.usable < health.total
-            ? <Chip tone={health.issues > 0 ? 'warn' : 'neutral'}>{health.usable} of {health.total} hops usable</Chip>
-            : health.total > 0 && <Chip tone="ok">{health.total === 1 ? '1 hop usable' : `All ${health.total} hops usable`}</Chip>}
+            ? <Chip tone={health.issues > 0 ? 'warn' : 'neutral'}>{health.usable} of {health.total} models usable</Chip>
+            : health.total > 0 && <Chip tone="ok">{health.total === 1 ? '1 model usable' : `All ${health.total} models usable`}</Chip>}
         <span>
           {!statsReady ? 'Loading traffic…'
             : calls === 0 ? `No requests in ${RANGE_LABEL[range]}`
@@ -819,7 +824,7 @@ function ComboCard({ c, accounts, health, stat, statsReady, range, cursor, test,
           <Link to={`/requests?${new URLSearchParams({ alias: c.name, range })}`} className="text-accent hover:underline">View requests</Link>
         )}
         {test && tested.length > 0 && (
-          <span title="from this session's probes">
+          <span title="from this session's tests">
             Tested {relTime(new Date(test.at).toISOString())} · {testedOk} of {tested.length} answered
           </span>
         )}
@@ -828,7 +833,7 @@ function ComboCard({ c, accounts, health, stat, statsReady, range, cursor, test,
       {c.auto_free && <FreeSummary combo={c} accounts={accounts} />}
       {!c.auto_free && <div className="mt-3 flex flex-wrap items-center gap-2 font-mono text-[12px]">
         {hops.length === 0
-          ? <span className="font-sans text-[13px] text-mute">No hops configured</span>
+          ? <span className="font-sans text-[13px] text-mute">No models yet</span>
           : hops.map((h, i) => {
             const st = health.hops[i];
             const worst = st?.issues.some((x) => x.tone === 'bad') ? 'bad' : st?.issues.length ? 'warn' : null;
@@ -838,7 +843,7 @@ function ComboCard({ c, accounts, health, stat, statsReady, range, cursor, test,
               <span key={i} className="flex items-center gap-2">
                 {i > 0 && <HopArrow />}
                 <button type="button" onClick={() => onTest(i)}
-                  title={[`Test hop ${i + 1}`, ...(st?.issues.map((x) => x.text) ?? [])].join(' · ')}
+                  title={[`Test model ${i + 1}`, ...(st?.issues.map((x) => x.text) ?? [])].join(' · ')}
                   className={cx('rounded-md border px-2 py-1 text-left transition-colors hover:border-line-strong',
                     h.enabled ? 'bg-raised' : 'bg-transparent opacity-45',
                     here ? 'border-accent' : worst === 'bad' ? 'border-bad/50' : worst === 'warn' ? 'border-warn/50' : 'border-line')}>
@@ -847,7 +852,7 @@ function ComboCard({ c, accounts, health, stat, statsReady, range, cursor, test,
                   <span className={h.enabled ? 'text-ink' : 'text-mute'}>{h.model_id}</span>
                   {h.hold_until_failure && (
                     <span className="ml-1.5 rounded border border-accent/40 px-1 text-[11px] text-accent"
-                      title="stays on this hop while it succeeds and moves on when the provider fails">hold</span>
+                      title="stays on this model while it succeeds and moves on when the provider fails">hold</span>
                   )}
                   {here && cursor && (
                     <span className="ml-1.5 rounded border border-accent/40 px-1 text-[11px] text-accent"
@@ -856,7 +861,7 @@ function ComboCard({ c, accounts, health, stat, statsReady, range, cursor, test,
                     </span>
                   )}
                   {t && <span className={cx('ml-1.5 text-[11px]', hopOk(t) ? 'text-ok' : 'text-bad')}
-                    title={hopOk(t) ? 'answered the last probe' : `last probe: ${t.status}${t.cause ? ` ${t.cause.replace(/_/g, ' ')}` : ''}`}>
+                    title={hopOk(t) ? 'answered the last test' : `last test: ${t.status}${t.cause ? ` ${t.cause.replace(/_/g, ' ')}` : ''}`}>
                     {hopOk(t) ? '✓' : '✕'}
                   </span>}
                 </button>
@@ -864,7 +869,7 @@ function ComboCard({ c, accounts, health, stat, statsReady, range, cursor, test,
                   const acct = accounts.find((a) => a.id === h.account_id);
                   const ns = acct?.namespace;
                   const mine = ns ? parked.filter((k) => k.namespace === ns && k.model === h.model_id) : [];
-                  return ns && <ParkedPill items={mine} keyCount={acct?.keys?.filter((k) => k.enabled).length ?? 1} onUnpark={() => onUnpark(ns, h.model_id)} what="this hop" />;
+                  return ns && <ParkedPill items={mine} keyCount={acct?.keys?.filter((k) => k.enabled).length ?? 1} onUnpark={() => onUnpark(ns, h.model_id)} what="this model" />;
                 })()}
               </span>
             );
@@ -876,17 +881,17 @@ function ComboCard({ c, accounts, health, stat, statsReady, range, cursor, test,
       {problems.length > 0 && (
         <ul className="mt-2.5 space-y-0.5 text-[12px]">
           {problems.slice(0, 3).flatMap((p) => p.st.issues.map((x) => (
-            <li key={`${p.i}-${x.text}`} className={x.tone === 'bad' ? 'text-bad' : 'text-warn'}>Hop {p.i + 1}: {x.text}</li>
+            <li key={`${p.i}-${x.text}`} className={x.tone === 'bad' ? 'text-bad' : 'text-warn'}>Model {p.i + 1}: {x.text}</li>
           ))).slice(0, 4)}
-          {problems.length > 3 && <li className="text-mute">and {problems.length - 3} more hop{problems.length - 3 === 1 ? '' : 's'} with problems</li>}
+          {problems.length > 3 && <li className="text-mute">and {problems.length - 3} more model{problems.length - 3 === 1 ? '' : 's'} with problems</li>}
         </ul>
       )}
       {c.strategy === 'sticky_last_good' && (
-        <div className="mt-2 text-[12px] text-mute">Sticky idle <Mono>{c.sticky_idle_s ?? '–'}s</Mono></div>
+        <div className="mt-2 text-[12px] text-mute">Resets after <Mono>{c.sticky_idle_s ?? '–'}s</Mono> idle</div>
       )}
       {c.strategy === 'block_round_robin' && (
         <div className="mt-2 text-[12px] text-mute">
-          Block size <Mono>{c.block_size ?? 1}</Mono>: one hop serves {c.block_size ?? 1} request
+          Block size <Mono>{c.block_size ?? 1}</Mono>: one model serves {c.block_size ?? 1} request
           {(c.block_size ?? 1) === 1 ? '' : 's'} in a row before rotating
         </div>
       )}
@@ -1112,7 +1117,7 @@ export default function Combos() {
           const calls = usageRows?.[pendingDelete.name]?.calls ?? 0;
           return (
             <>
-              {pendingDelete.auto_free ? 'Its free-model pool' : `Its ${nfmt((pendingDelete.hops ?? []).length)} hop${(pendingDelete.hops ?? []).length === 1 ? '' : 's'}`} will be removed with it.
+              {pendingDelete.auto_free ? 'Its free-model pool' : `Its ${nfmt((pendingDelete.hops ?? []).length)} model${(pendingDelete.hops ?? []).length === 1 ? '' : 's'}`} will be removed with it.
               {calls > 0 && <> It served {nfmt(calls)} request{calls === 1 ? '' : 's'} in the last {RANGE_LABEL[range]}, so clients are using it.</>}
               {' '}Clients pointing at it get errors until you recreate it or change their model.
             </>

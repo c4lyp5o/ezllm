@@ -24,13 +24,13 @@ const save = () => page.getByRole('button', { name: 'Save changes', exact: true 
 
 try {
   await page.goto(`${t.base}/settings?tab=gateway`);
-  await page.getByLabel('Retries per hop', { exact: true }).waitFor();
+  await page.getByLabel('Retries per model', { exact: true }).waitFor();
   check('?tab= opens that section', (await page.getByRole('button', { name: 'Gateway', exact: true }).getAttribute('aria-current')) === 'page');
   check('Save is disabled until something changes', await save().isDisabled());
-  await page.getByLabel('Retries per hop', { exact: true }).fill('12');
+  await page.getByLabel('Retries per model', { exact: true }).fill('12');
   check('an out-of-range number is explained', (await page.getByText('Retries must be a whole number from 0 to 9.').count()) === 1);
   check('and cannot be saved', await save().isDisabled());
-  await page.getByLabel('Retries per hop', { exact: true }).fill('4');
+  await page.getByLabel('Retries per model', { exact: true }).fill('4');
   check('a valid number clears the message', (await page.getByText('Retries must be a whole number').count()) === 0 && await save().isEnabled());
   await page.getByLabel('Catalog refresh interval', { exact: true }).fill('30s');
   check('a too-short duration is explained', (await page.getByText('Use a duration of at least 1m, for example 12h.').count()) === 1 && await save().isDisabled());
@@ -42,14 +42,14 @@ try {
   check('an empty deadline (no limit) is fine', (await page.getByText(/Use a duration of at least 1s/).count()) === 0);
   check('unsaved changes are flagged', (await page.getByText('Unsaved changes').count()) === 1);
   await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
-  check('Discard changes puts the saved values back', (await page.getByLabel('Retries per hop', { exact: true }).inputValue()) === '3' && await save().isDisabled());
+  check('Discard changes puts the saved values back', (await page.getByLabel('Retries per model', { exact: true }).inputValue()) === '3' && await save().isDisabled());
 
   // tab guard
-  await page.getByLabel('Retries per hop', { exact: true }).fill('5');
+  await page.getByLabel('Retries per model', { exact: true }).fill('5');
   await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Notifications', exact: true }).click();
   await page.getByRole('dialog').getByText('Discard unsaved changes?').waitFor();
   await page.keyboard.press('Escape');
-  check('declining the guard stays on the tab with the edit', (await page.getByLabel('Retries per hop', { exact: true }).inputValue()) === '5');
+  check('declining the guard stays on the tab with the edit', (await page.getByLabel('Retries per model', { exact: true }).inputValue()) === '5');
   await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Notifications', exact: true }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Discard changes', exact: true }).click();
   await page.getByLabel('Backup failures', { exact: true }).waitFor();

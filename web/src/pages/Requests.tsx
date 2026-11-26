@@ -260,7 +260,7 @@ export default function Requests() {
             </select>
           </label>
           <label className="block">
-            <span className={labelCls}>API key</span>
+            <span className={labelCls}>App key</span>
             <select className={cx(inputCls, 'w-48')} value={client} onChange={(e) => patch({ client: e.target.value })}>
               <option value="">All keys</option>
               {withCurrent(names.clients, client).map((n) => <option key={n} value={n}>{n}</option>)}
@@ -374,8 +374,8 @@ export default function Requests() {
                         INCLUSIVE total — read before comparing tin. */}
                     {r.translated && (
                       <div className="text-[11px] text-accent"
-                        title="This request was translated to the provider's protocol. Input tokens include cached tokens, as reported by the provider.">
-                        ⇄ translated
+                        title="This request was converted to the provider's API. Input tokens include cached tokens, as reported by the provider.">
+                        ⇄ converted
                       </div>
                     )}
                   </td>

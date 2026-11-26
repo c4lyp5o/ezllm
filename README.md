@@ -21,7 +21,7 @@ keeps track of tokens and cost. You set it up in a web dashboard.
   they are sent.
 - **Subscriptions as providers.** Optional bridges use your Claude, ChatGPT, GitHub
   Copilot or Google Antigravity plan through each vendor's own CLI.
-- **Dashboard included.** Providers, API keys, live requests, analytics, rules, backups
+- **Dashboard included.** Providers, app keys, live requests, analytics, rules, backups
   and notifications. It also tells you when a new release is out.
 
 ## Quick start
@@ -130,7 +130,7 @@ EZLLM_MASTER_KEY_FILE=$PWD/data/ezllm-master.key make run
    password. The code changes each time ezllm starts, so use the latest one:
    `docker logs ezllm | grep setup` with Docker, `~/ezllm/logs/ezllm.log` on macOS, or the
    terminal you started it in.
-2. **Get started** opens. Pick your provider, paste its API key and choose **Connect**.
+2. **Get started** opens. Pick your provider, paste its key and choose **Connect**.
    ezllm tests the key with small real requests, which your provider may bill.
 3. Choose **Create key**. Copy the key now: you see it once. Your apps use this key, not
    your provider's.
@@ -217,28 +217,29 @@ charge the wrong one.
 ### Combos
 
 A combo has a name, such as `fallback`, that your apps use as the model. It has a list of
-models, called hops, and a strategy:
+models and an order. **In order** is the default; the others are under **Advanced** in the
+combo editor. The API calls the models hops and the order a strategy.
 
-| Strategy | Behaviour |
-|---|---|
-| `failover` (default) | Use the first hop. On a temporary failure (429, 5xx, timeout, connection error), try again, then move to the next. Other 4xx errors go straight back to your app. |
-| `true_round_robin` | Pick a hop at random for each request. |
-| `block_round_robin` | Send a run of requests to one hop, then move on. Optionally stay on a hop until it fails. |
-| `sticky_last_good` | Keep using the hop that last succeeded until it fails. |
-| `least_used` | Send each request to the hop with the least recent traffic. |
+| Order | `strategy` | Behaviour |
+|---|---|---|
+| **In order** (default) | `failover` | Use the first model. On a temporary failure (429, 5xx, timeout, connection error), try again, then move to the next. Other 4xx errors go straight back to your app. |
+| **Random** | `true_round_robin` | Pick a model at random for each request. |
+| **Rotate in blocks** | `block_round_robin` | Send a run of requests to one model, then move on. Optionally stay on a model until it fails. |
+| **Stay on last good** | `sticky_last_good` | Keep using the model that last succeeded until it fails. |
+| **Least used** | `least_used` | Send each request to the model with the least recent traffic. |
 
-### Rules, pins and translation
+### Rules, forced APIs and translation
 
-- **Rules** set token caps and allowed hours per account and model. A request
+- **Rules** set token caps and allowed hours per provider and model. A request
   that breaks a rule gets a `429` naming the rule, before anything is sent
   upstream, so it costs nothing ([rules design](docs/design/rules-engine-design.md)).
-- **Surface pins** tie a model to one API: `chat` (Chat Completions),
+- **Force an API** ties a model to one API (the API calls it a pin): `chat` (Chat Completions),
   `anthropic` (Messages), `responses`, or a service such as `embeddings`. With
   translation on, a call through another of the first three is translated to the
   pinned API. With it off, or between these and a service, the call returns
   `400 pinned_surface`.
-- **Translation** lets any client API reach any provider format once a probe
-  has verified that hop. It is on by default; set
+- **Translation** lets any client API reach any provider format once a test
+  has verified that model. It is on by default; set
   `EZLLM_TRANSLATION_ENABLED=false` to turn it off
   ([design](docs/design/universal-wire-design.md), [runbook](docs/translation-runbook.md)).
 
@@ -285,7 +286,7 @@ The dashboard is at `/` and shows nothing until you sign in.
 | **Combos** | Groups of models and their strategy |
 | **Rules** | Token caps and allowed hours |
 | **Compression** | Profiles and a preview |
-| **Connect** | API keys, model IDs and app setup |
+| **Connect** | App keys, model IDs and app setup |
 | **Neighbourhood** | Your providers drawn as a city |
 | **Settings** | General, security, backups, gateway, notifications (ntfy, Discord, Telegram, webhook) and system |
 
@@ -305,7 +306,7 @@ only from the environment or `config.yaml`.
   `EZLLM_USAGE_TZ`; remove that line to choose it in Settings.
 - Provider keys are managed in the dashboard or admin API, never in `config.yaml`.
 - `request_limits` in [config.example.yaml](config.example.yaml) caps concurrent
-  work: by default 32 active requests in total, 8 per API key and a 256 MiB
+  work: by default 32 active requests in total, 8 per app key and a 256 MiB
   input buffer. Extra requests get a retryable `429`.
 - Behind a reverse proxy, set `EZLLM_TRUSTED_PROXIES` and rate-limit
   `/admin/login` and `/admin/setup` at the proxy.
@@ -321,7 +322,7 @@ only from the environment or `config.yaml`.
   gateway. Each role opens only its own endpoints, and none implies another.
 - The dashboard cookie is `HttpOnly` and `SameSite=Strict`, and cookie-based
   writes from another origin are refused.
-- API keys are stored as SHA-256 hashes and dashboard passwords with bcrypt.
+- App keys are stored as SHA-256 hashes and dashboard passwords with bcrypt.
   A key is shown once when created; afterwards only a masked hint is visible.
 - Your client's credentials and ezllm's own headers are removed before a request
   is forwarded, and requests with your provider keys never follow a redirect to another
@@ -362,6 +363,7 @@ example [v2.2.0](https://github.com/c4lyp5o/ezllm/tree/v2.2.0), or see
 
 | Document | Contents |
 |---|---|
+| [docs/glossary.md](docs/glossary.md) | The words the dashboard uses, and their names in the API |
 | [docs/install-binary.md](docs/install-binary.md) | Installing the released binary on Linux, macOS or Windows: start, service, update, go back |
 | [docs/wsl.md](docs/wsl.md) | Bridges on Windows: ezllm in WSL |
 | [docs/API.md](docs/API.md) | Public and admin API reference |

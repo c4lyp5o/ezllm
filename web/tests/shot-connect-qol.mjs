@@ -27,7 +27,7 @@ await page.getByRole('button', { name: '1,000,000', exact: true }).click();
 await page.waitForTimeout(400);
 await page.screenshot({ path: `${out}/connect-create.png` });
 await page.getByRole('button', { name: 'Create key', exact: true }).click();
-await page.getByRole('dialog', { name: 'New API key' }).waitFor();
+await page.getByRole('dialog', { name: 'New app key' }).waitFor();
 await page.waitForTimeout(500);
 await page.screenshot({ path: `${out}/connect-fresh.png` });
 await page.getByRole('button', { name: 'I saved it' }).click();

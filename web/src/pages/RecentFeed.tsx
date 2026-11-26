@@ -179,10 +179,10 @@ export default function RecentFeed() {
                             INCLUSIVE total. */}
                         {c.translated && (
                           <span
-                            title="This request was translated to the provider's protocol. Input tokens include cached tokens, as reported by the provider."
+                            title="This request was converted to the provider's API. Input tokens include cached tokens, as reported by the provider."
                             className="ml-1.5 rounded px-1 py-0.5 font-mono text-[11px] align-middle text-accent"
                           >
-                            ⇄ translated
+                            ⇄ converted
                           </span>
                         )}
                       </span>

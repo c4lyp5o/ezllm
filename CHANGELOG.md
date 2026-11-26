@@ -4,6 +4,14 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## Unreleased
 
+- **Plain words, and Advanced.** The dashboard uses one word per idea: provider, provider
+  ID, provider key, app key, API, converted, test, paused (with **Resume**). Combos list
+  models in an order, **In order** by default. A provider's models show one status each
+  (Works, Not tested, Doesn't work); results per API, **Force API** and **Test all
+  models** sit behind an **Advanced** switch. Add provider asks for a name, a type and a
+  key; the provider ID and the rest fold under **Advanced**, as do a combo's order,
+  compression and context size. The API keeps its field names. The words are listed in
+  [docs/glossary.md](docs/glossary.md).
 - **Get started.** A new ezllm opens a three-step page after the password is set: pick a
   provider and paste its key, create a key for your app, send a test request with that
   key. It ends with the settings to paste into your app. The Dashboard shows "Finish

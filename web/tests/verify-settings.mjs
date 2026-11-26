@@ -60,7 +60,7 @@ try {
   await page.getByRole('button', { name: 'Save changes', exact: true }).click();
   await page.getByRole('status').filter({ hasText: 'Settings saved.' }).waitFor();
   check('URL keys save once accepted', fields.gemini_query_key.value === true);
-  await page.getByLabel('Retries per hop', { exact: true }).fill('0');
+  await page.getByLabel('Retries per model', { exact: true }).fill('0');
   await page.getByRole('button', { name: 'Save changes', exact: true }).click();
   await page.getByRole('status').filter({ hasText: 'Settings saved.' }).waitFor();
   check('zero retries saved', fields.retries.value === 0);
@@ -69,10 +69,10 @@ try {
   await page.getByRole('status').filter({ hasText: 'Settings saved.' }).waitFor();
   check('reset restores fallback', fields.retries.value === 3 && !fields.retries.saved);
   rejectNext = true;
-  await page.getByLabel('Retries per hop', { exact: true }).fill('2');
+  await page.getByLabel('Retries per model', { exact: true }).fill('2');
   await page.getByRole('button', { name: 'Save changes', exact: true }).click();
   await page.getByRole('alert').filter({ hasText: 'settings changed' }).waitFor();
-  check('conflict keeps draft', await page.getByLabel('Retries per hop', { exact: true }).inputValue() === '2');
+  check('conflict keeps draft', await page.getByLabel('Retries per model', { exact: true }).inputValue() === '2');
   await page.getByRole('button', { name: 'Security', exact: true }).click();
   await page.getByRole('dialog').getByText('Discard unsaved changes?').waitFor();
   check('leaving a tab with unsaved edits asks first', true);

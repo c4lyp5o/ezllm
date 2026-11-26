@@ -64,7 +64,7 @@ function PasswordSettings() {
       </section>
       <div className="flex items-start gap-3 rounded-xl border border-warn/30 bg-warn-dim p-4">
         <Chip tone="warn">Security</Chip>
-        <p className="text-xs leading-relaxed text-mute">This password protects your provider keys and API keys, and there's no second factor. Make it long and unique, aiming for Good or Strong on the bar, especially if the dashboard can be reached from outside your own network.</p>
+        <p className="text-xs leading-relaxed text-mute">This password protects your provider keys and app keys, and there's no second factor. Make it long and unique, aiming for Good or Strong on the bar, especially if the dashboard can be reached from outside your own network.</p>
       </div>
     </div>
   );
@@ -77,27 +77,27 @@ const TAB_SLUG: Record<Tab, string> = { General: 'general', Security: 'security'
 const tabFromSlug = (slug: string | null): Tab => TABS.find((t) => TAB_SLUG[t] === slug) ?? 'General';
 const DETAILS: Record<string, [string, string]> = {
   usage_timezone: ['Usage timezone', 'An IANA name, for example Europe/Berlin. Reports, and rules set to "Instance timezone", use this. Rules with their own timezone keep it.'],
-  translation_enabled: ['Protocol translation', 'Let requests go to a model on a different API when testing showed it works. Pins still apply.'],
-  automatic_probing: ['Automatic probing', 'Test new combo hops and newly found free models automatically.'],
+  translation_enabled: ['API conversion', 'Let requests go to a model on a different API when testing showed it works. Forced APIs still apply.'],
+  automatic_probing: ['Automatic testing', 'Test new combo models and newly found free models automatically.'],
   catalog_interval: ['Catalog refresh interval', 'Duration of at least 1m, for example 12h.'],
   update_check: ['Check for new ezllm releases', 'Ask GitHub once a day for the latest release and say when there is a newer one. Nothing is sent about this instance and nothing is installed.'],
   price_refresh: ['Automatic price refresh', 'Refresh after startup and daily at 03:00 in the instance timezone.'],
-  retries: ['Retries per hop', 'How many times to retry a temporary failure on the same provider, from 0 to 9. Set 0 to turn retries off.'],
+  retries: ['Retries per model', 'How many times to retry a temporary failure on the same provider, from 0 to 9. Set 0 to turn retries off.'],
   attempt_budget: ['Total request attempt budget', 'Total attempts across all providers and retries, from 0 to 64. Set 0 for no limit.'],
   dispatch_deadline: ['Dispatch deadline', 'At least 1s, or leave empty for no limit. This limits the time spent picking a provider and waiting to retry. Streams already running aren\'t cut off.'],
-  cooldown_429: ['Rate-limit cooldown', 'How long to wait when a provider doesn\'t send Retry-After.'],
-  cooldown_5xx: ['Server-error cooldown', 'Duration before a failed endpoint is eligible again.'],
+  cooldown_429: ['Rate-limit pause', 'How long to wait when a provider doesn\'t send Retry-After.'],
+  cooldown_5xx: ['Server-error pause', 'How long a model that failed is paused before it gets traffic again.'],
   gemini_query_key: ['Accept keys in the URL (Gemini ?key=)', 'Off by default. Google\'s API lets a client put its key in the address (?key=…). Leave this off unless a client cannot send the x-goog-api-key header.'],
-  cooldown_strikes: ['Failures before cooldown', 'Number of failures, 1 or more. Cooldowns already running keep their end times.'],
+  cooldown_strikes: ['Failures before a pause', 'Number of failures, 1 or more. Pauses already running keep their end times.'],
   backup_enabled: ['Scheduled backups', 'Needs a backup folder mounted on the host and a separate encryption secret.'],
   backup_hour: ['Daily backup hour', 'Hour of the day, from 0 to 23, in the instance timezone.'],
   backup_keep: ['Verified backups to keep', 'From 1 to 365. Old backups are only deleted after a new one has been checked.'],
   ledger_retention_days: ['Keep every call for', 'Days, 0 to keep everything, or 32 to 3650. Older calls are added into daily totals per provider, model, key and app, then deleted, so charts and costs stay the same. Requests then shows only the calls kept.'],
   notify_free_models_added: ['Free models added', 'New free models discovered in a provider catalog.'],
   notify_free_models_removed: ['Free models removed', 'Free models removed from a provider catalog.'],
-  notify_free_model_broken: ['Broken free models', 'Free models that fail every protocol probe.'],
+  notify_free_model_broken: ['Broken free models', 'Free models that fail the test on every API.'],
   notify_catalog_refresh_failed: ['Catalog refresh failures', 'A provider catalog could not be refreshed.'],
-  notify_client_budget_reached: ['Client budget reached', 'A client token has exhausted its budget.'],
+  notify_client_budget_reached: ['App key budget reached', 'An app key has used up its budget.'],
   notify_price_refresh_failed: ['Price refresh failures', 'The price catalog could not be refreshed.'],
   notify_backup_failed: ['Backup failures', 'A backup did not complete or verification failed.'],
   notify_bridge_updated: ['Bridge CLI updated', 'The bridge updater installed a new CLI version and it passed its checks.'],

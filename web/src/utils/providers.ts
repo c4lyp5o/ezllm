@@ -115,3 +115,12 @@ export async function addProviderWithKey(
     throw e;
   }
 }
+
+/** One plain answer per model: does it work on any API, or not tested yet. */
+export function modelStatus(m: { chat?: unknown; anthropic?: unknown; responses?: unknown }): 'works' | 'untested' | 'fails' {
+  const v = [m.chat, m.anthropic, m.responses];
+  if (v.some((x) => x === true)) return 'works';
+  if (v.every((x) => x == null)) return 'untested';
+  return 'fails';
+}
+

@@ -1,6 +1,6 @@
 # Settings
 
-**Settings** in the dashboard has six tabs. Providers, combos, API keys and compression
+**Settings** in the dashboard has six tabs. Providers, combos, app keys and compression
 profiles have their own pages.
 
 | Tab | What you set there |
@@ -43,7 +43,7 @@ their change. Choose **Reload Settings** and make your change again.
 
 - where a day starts and ends in reports,
 - the windows of rules set to **Instance timezone**,
-- the days and months of API key budgets,
+- the days and months of app key budgets,
 - the time of daily price refreshes and backups.
 
 Changing it moves those boundaries at once, so a rule can have more or less left for
@@ -65,27 +65,27 @@ Turn it off in **General**, or with `EZLLM_UPDATE_CHECK=off`.
 Changing the password signs out every browser. **Security** lists signed-in browsers; you
 can sign out one, or all with **Sign out all devices**.
 
-## Retries and cooldowns
+## Retries and pauses
 
 | Setting | What it does |
 |---|---|
-| **Retries per hop** | Retries of a temporary failure on the same provider, 0 to 9. `0` turns them off |
+| **Retries per model** | Retries of a temporary failure on the same provider, 0 to 9. `0` turns them off |
 | **Total request attempt budget** | Attempts across all providers and retries, 0 to 64. `0` means no limit |
 | **Dispatch deadline** | The longest time spent choosing a provider and waiting to retry. Answers already streaming are not cut off |
-| **Rate-limit cooldown** | How long a provider rests after a `429` without `Retry-After` |
-| **Server-error cooldown** | How long a provider rests after server errors, and after `408` or `425` |
-| **Failures before cooldown** | How many failures start a cooldown |
+| **Rate-limit pause** | How long a provider rests after a `429` without `Retry-After` |
+| **Server-error pause** | How long a provider rests after server errors, and after `408` or `425` |
+| **Failures before a pause** | How many failures start a pause |
 
-A provider that is cooling down shows **parked** with the time left, on its card in
-**Providers** and on the hop in **Combos**. After fixing the cause (a topped-up
-balance, a lifted limit), choose **Unpark** to send it traffic again at once. A real
-failure parks it again.
+A provider that is resting shows **paused** with the time left, on its card in
+**Providers** and on the model in **Combos**. After fixing the cause (a topped-up
+balance, a lifted limit), choose **Resume** to send it traffic again at once. A real
+failure pauses it again.
 
 A provider with several keys uses all of them. Each request starts on the next key in
 turn, so traffic is spread evenly. A rate limit (`429`) or a refused key (`401`, `403`)
-parks only that key for that model, and the request moves straight on to the provider's
+pauses only that key for that model, and the request moves straight on to the provider's
 next key. A server error (`5xx`) is the provider's fault, not the key's, so the other keys
-are not tried for that model. The provider shows **parked** only when every key is.
+are not tried for that model. The provider shows **paused** only when every key is.
 
 In `config.yaml`, `retry.retries: 0` means the default of 3. To turn retries off, save `0`
 in Settings.

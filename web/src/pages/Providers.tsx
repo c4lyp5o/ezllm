@@ -9,13 +9,14 @@ import {
   type Account, type ApiErrorDetail, type Bridge, type KeyRow, type ModelRule, type ModelRow, type Price, type SweepStatus, type TestResult, type TestStep,
 } from '../utils/api';
 import { useSearchParams } from 'react-router-dom';
-import { Chip, ConfirmModal, CopyButton, Modal, SecretInput, SectionLabel, Segmented, Skeleton, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls, relTime, untilTime, Mono } from '../components/ui';
+import { ADVANCED_KEY, Advanced, Chip, ConfirmModal, CopyButton, Modal, SecretInput, SectionLabel, Segmented, Skeleton, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls, relTime, untilTime, Mono } from '../components/ui';
 import { Collapse, Stagger, StaggerItem } from '../components/motion';
 import { bridgeUpdateText, fmtMoney, nfmt, UPDATE_TONE } from '../utils/lib';
 import { accountIssues, type Issue } from '../utils/health';
 import { type Cooldown, useCooldowns } from '../utils/cooldowns';
 import { ParkedPill } from '../components/Parked';
-import { PROVIDER_PRESETS, addProviderWithKey, slugify } from '../utils/providers';
+import { PROVIDER_PRESETS, addProviderWithKey, modelStatus, slugify } from '../utils/providers';
+import { apiLabel as apiName } from '../utils/words';
 
 // ── helpers ─────────────────────────────────────────────────────────────
 
@@ -294,7 +295,7 @@ function KeyManager({ account, onChanged, onBusy, onDirty }: {
   return (
     <div className="rounded-lg border border-line bg-raised/60 p-4">
       <div className="flex items-center justify-between gap-3">
-        <SectionLabel>API keys</SectionLabel>
+        <SectionLabel>Provider keys</SectionLabel>
         {!form && <button type="button" className={cx(btn.base, btn.ghost, '!h-7 !px-3 !text-[12px]')} onClick={() => begin(null)}>Add key</button>}
       </div>
       {account.keys.length === 0 ? (
@@ -336,16 +337,16 @@ function KeyManager({ account, onChanged, onBusy, onDirty }: {
             </p>
           ) : (
             <div>
-              <label className={labelCls} htmlFor="km-secret">{multiline ? 'Session cookies' : 'API key'}</label>
+              <label className={labelCls} htmlFor="km-secret">{multiline ? 'Session cookies' : 'Provider key'}</label>
               <SecretInput id="km-secret" value={secret} onChange={setSecret} multiline={multiline} disabled={busy}
-                placeholder={preset?.keyHint ?? 'Paste the new provider API key'}
+                placeholder={preset?.keyHint ?? 'Paste the new key from your provider'}
                 onEnter={() => void submit()} />
               {preset?.keyHint && <p className="mt-1 text-[12px] text-mute">{preset.keyHint}</p>}
             </div>
           )}
           <div className="flex items-center gap-3">
-            <Toggle checked={skip} onChange={setSkip} label="skip inference probe" disabled={busy} />
-            <span className="text-[13px] text-dim">Skip inference probe <span className="text-mute">(saves a token spend)</span></span>
+            <Toggle checked={skip} onChange={setSkip} label="skip the test request" disabled={busy} />
+            <span className="text-[13px] text-dim">Skip the test request <span className="text-mute">(saves a few tokens)</span></span>
           </div>
           {(steps != null) && (
             <div className="rounded-lg border border-line bg-surface px-4 py-3">
@@ -733,7 +734,7 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
 
   return (
     <Modal open={open} onClose={onClose} wide title="Add provider"
-      subtitle="Adds the provider and tests its API key before saving it."
+      subtitle="Adds the provider and tests its key before saving it."
       busy={busy} dirty={dirty} onSubmit={() => { if (valid) void saveAndValidate(); }}
       footer={(close) => (
         <>
@@ -754,14 +755,6 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
               }} />
           </div>
           <div>
-            <label className={labelCls} htmlFor="ap-ns">Namespace</label>
-            <input id="ap-ns" className={cx(inputCls, 'font-mono')} value={d.namespace} placeholder="opencode" spellCheck={false}
-              onChange={(e) => setD((p) => ({ ...p, namespace: slugify(e.target.value), nsTouched: true }))} />
-            <p className="mt-1 text-[12px] text-mute">lowercase slug used in model ids</p>
-          </div>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
             <label className={labelCls} htmlFor="ap-kind">Provider type</label>
             <select id="ap-kind" className={inputCls} value={d.preset} onChange={(e) => {
               const presetID = e.target.value;
@@ -777,11 +770,6 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
             }}>
               {sortedPresetIDs().map((presetID) => <option key={presetID} value={presetID}>{PROVIDER_PRESETS[presetID].label}</option>)}
             </select>
-          </div>
-          <div>
-            <label className={labelCls} htmlFor="ap-delay">Probe delay (ms)</label>
-            <input id="ap-delay" type="number" min={0} className={cx(inputCls, 'font-mono tabular-nums')} value={d.probe_delay_ms}
-              onChange={(e) => set('probe_delay_ms', Number(e.target.value) || 0)} />
           </div>
         </div>
         {presetAccountID ? (
@@ -822,30 +810,54 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
           </div>
         )}
         {bridgeID && <BridgePanel bridge={bridge} loading={bridges === null} />}
-        <div className={cx('grid gap-4 sm:grid-cols-2', bridgeID && 'hidden')}>
-          <div className="sm:col-span-1">
-            <label className={labelCls} htmlFor="ap-key">API key</label>
-            <SecretInput id="ap-key" value={d.apiKey} onChange={(v) => set('apiKey', v)}
-              multiline={!!PROVIDER_PRESETS[d.preset]?.multilineKey}
-              placeholder={PROVIDER_PRESETS[d.preset]?.keyHint ?? 'Paste provider API key'} />
-            {PROVIDER_PRESETS[d.preset]?.keyHint && (
-              <p className="mt-1 text-[12px] text-mute">{PROVIDER_PRESETS[d.preset].keyHint}</p>
-            )}
-          </div>
-          <div>
-            <label className={labelCls} htmlFor="ap-kl">Key label</label>
-            <input id="ap-kl" className={inputCls} value={d.keyLabel} onChange={(e) => set('keyLabel', e.target.value)} placeholder="primary" />
-          </div>
+        <div className={cx(bridgeID && 'hidden')}>
+          <label className={labelCls} htmlFor="ap-key">Provider key</label>
+          <SecretInput id="ap-key" value={d.apiKey} onChange={(v) => set('apiKey', v)}
+            multiline={!!PROVIDER_PRESETS[d.preset]?.multilineKey}
+            placeholder={PROVIDER_PRESETS[d.preset]?.keyHint ?? 'Paste the key from your provider'} />
+          {PROVIDER_PRESETS[d.preset]?.keyHint && (
+            <p className="mt-1 text-[12px] text-mute">{PROVIDER_PRESETS[d.preset].keyHint}</p>
+          )}
         </div>
         {extra && <ExtraCredentialField extra={extra} id="ap-extra" value={d.managementKey} onChange={(v) => set('managementKey', v)} />}
-        <div>
-          <label className={labelCls} htmlFor="ap-notes">Notes</label>
-          <input id="ap-notes" className={inputCls} value={d.notes} onChange={(e) => set('notes', e.target.value)} placeholder="optional" />
-        </div>
-        <div className="flex items-center gap-3">
-          <Toggle checked={d.skipInference} onChange={(v) => set('skipInference', v)} label="skip inference probe" />
-          <span className="text-[13px] text-dim">Skip inference probe <span className="text-mute">(saves a token spend)</span></span>
-        </div>
+        <Advanced id="add-provider" forceOpen={d.name.trim() !== '' && !/^[a-z0-9][a-z0-9._-]{0,62}$/.test(d.namespace.trim())} hint={d.namespace ? `provider ID ${d.namespace}` : undefined}>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className={labelCls} htmlFor="ap-ns">Provider ID</label>
+              <input id="ap-ns" className={cx(inputCls, 'font-mono')} value={d.namespace} placeholder="opencode" spellCheck={false}
+                onChange={(e) => setD((p) => ({ ...p, namespace: slugify(e.target.value), nsTouched: true }))} />
+              <p className="mt-1 text-[12px] text-mute">The start of this provider's model IDs, as in <Mono>{d.namespace || 'acme'}/model</Mono>. Fixed once saved.</p>
+            </div>
+            <div className={cx(bridgeID && 'hidden')}>
+              <label className={labelCls} htmlFor="ap-kl">Key label</label>
+              <input id="ap-kl" className={inputCls} value={d.keyLabel} onChange={(e) => set('keyLabel', e.target.value)} placeholder="primary" />
+            </div>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className={labelCls} htmlFor="ap-delay">Pause between tests (ms)</label>
+              <input id="ap-delay" type="number" min={0} className={cx(inputCls, 'font-mono tabular-nums')} value={d.probe_delay_ms}
+                onChange={(e) => set('probe_delay_ms', Number(e.target.value) || 0)} />
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="ap-notes">Notes</label>
+              <input id="ap-notes" className={inputCls} value={d.notes} onChange={(e) => set('notes', e.target.value)} placeholder="optional" />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <Toggle checked={d.skipInference} onChange={(v) => set('skipInference', v)} label="skip the test request" />
+            <span className="text-[13px] text-dim">Skip the test request <span className="text-mute">(saves a few tokens)</span></span>
+          </div>
+          <div className="flex items-center gap-3">
+            <Toggle checked={d.requiresSessionHeader} onChange={(v) => set('requiresSessionHeader', v)} label="requires_session_header" />
+            <span className="text-[13px] text-dim">Send a session header upstream</span>
+          </div>
+          <div>
+            <label className={labelCls} htmlFor="ap-cH">Custom headers (JSON)</label>
+            <textarea id="ap-cH" rows={3} spellCheck={false} className={cx(inputCls, 'font-mono text-[13px]')}
+              placeholder={'{"x-team":"ops"}'} value={d.customHeaders} onChange={(e) => set('customHeaders', e.target.value)} />
+          </div>
+        </Advanced>
         <div ref={validationRef} className="space-y-3">
           <div className="rounded-lg border border-line bg-raised/60 px-4 py-3">
             <SectionLabel className="mb-2">Validation</SectionLabel>
@@ -854,20 +866,6 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
           </div>
           <ErrBox e={err} onDismiss={() => setErr(null)} />
         </div>
-        <details className="rounded-lg border border-line bg-raised/40 px-4 py-3">
-          <summary className="cursor-pointer text-[13px] font-medium text-dim">Advanced settings</summary>
-          <div className="mt-4 space-y-4">
-            <div className="flex items-center gap-3">
-              <Toggle checked={d.requiresSessionHeader} onChange={(v) => set('requiresSessionHeader', v)} label="requires_session_header" />
-              <span className="text-[13px] text-dim">requires session header upstream</span>
-            </div>
-            <div>
-              <label className={labelCls} htmlFor="ap-cH">Custom headers (JSON)</label>
-              <textarea id="ap-cH" rows={3} spellCheck={false} className={cx(inputCls, 'font-mono text-[13px]')}
-                placeholder={'{"x-team":"ops"}'} value={d.customHeaders} onChange={(e) => set('customHeaders', e.target.value)} />
-            </div>
-          </div>
-        </details>
       </div>
     </Modal>
   );
@@ -955,7 +953,7 @@ function EditAccountModal({ account, initialTab = 'settings', onClose, onSaved }
         <Segmented<'settings' | 'keys'> label="Edit section"
           options={[
             { key: 'settings', label: 'Settings' },
-            { key: 'keys', label: `Keys · ${account.keys.length}`, title: 'Add, replace or review API keys' },
+            { key: 'keys', label: `Keys · ${account.keys.length}`, title: 'Add, replace or review provider keys' },
           ]}
           value={tab} onChange={setTab} />
       </div>
@@ -969,26 +967,20 @@ function EditAccountModal({ account, initialTab = 'settings', onClose, onSaved }
             <input id="ea-name" className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div>
-            <label className={labelCls} htmlFor="ea-ns">Namespace</label>
+            <label className={labelCls} htmlFor="ea-ns">Provider ID</label>
             <input id="ea-ns" className={cx(inputCls, 'font-mono')} value={account.namespace} readOnly disabled />
-            <p className="mt-1 text-[12px] text-mute">the prefix in model ids; fixed once created</p>
+            <p className="mt-1 text-[12px] text-mute">the start of this provider's model IDs; fixed once saved</p>
           </div>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <label className={labelCls} htmlFor="ea-kind">Kind</label>
+            <label className={labelCls} htmlFor="ea-kind">Provider type</label>
             <select id="ea-kind" className={inputCls} value={kind} disabled={kindLocked} onChange={(e) => setKind(e.target.value)}>
               {/* A kind outside the list (gemini-web, github-copilot, …) must still
                   show as itself, not as whichever option sorts first. */}
               {((KINDS as readonly string[]).includes(kind) ? [...KINDS] : [kind, ...KINDS]).map((k) => <option key={k} value={k}>{k}</option>)}
             </select>
             {kindLocked && <p className="mt-1 text-[12px] text-mute">fixed while the provider has keys or models</p>}
-          </div>
-          <div>
-            <label className={labelCls} htmlFor="ea-delay">Probe delay (ms)</label>
-            <input id="ea-delay" inputMode="numeric" className={cx(inputCls, 'font-mono tabular-nums', !delayOk && 'border-bad')}
-              value={probeDelay} onChange={(e) => setProbeDelay(e.target.value)} />
-            {!delayOk && <p className="mt-1 text-[12px] text-bad">a whole number, 0 or more</p>}
           </div>
         </div>
         <div>
@@ -1034,11 +1026,19 @@ function EditAccountModal({ account, initialTab = 'settings', onClose, onSaved }
           </div>
           {rateN > 0 ? (
             <p className="mt-2 text-[12px] text-accent">
-              {rateN} request{rateN === 1 ? '' : 's'} per {rateWindow}. A combo with another hop
+              {rateN} request{rateN === 1 ? '' : 's'} per {rateWindow}. A combo with another model
               will move on to it instead of failing.
             </p>
           ) : null}
         </div>
+        <Advanced id="edit-provider">
+          <div className="sm:w-1/2">
+            <label className={labelCls} htmlFor="ea-delay">Pause between tests (ms)</label>
+            <input id="ea-delay" inputMode="numeric" className={cx(inputCls, 'font-mono tabular-nums', !delayOk && 'border-bad')}
+              value={probeDelay} onChange={(e) => setProbeDelay(e.target.value)} />
+            {!delayOk && <p className="mt-1 text-[12px] text-bad">a whole number, 0 or more</p>}
+          </div>
+        </Advanced>
         <ErrBox e={err} onDismiss={() => setErr(null)} />
       </div>
     </Modal>
@@ -1065,6 +1065,9 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
   const [sweep, setSweep] = useState<SweepStatus | null>(null);
   const [sweepBusy, setSweepBusy] = useState(false);
   const [sweepNote, setSweepNote] = useState<string | null>(null);
+  // Per-API results, Force API and Test all live behind this switch.
+  const [advanced, setAdvanced] = useState(() => { try { return localStorage.getItem(ADVANCED_KEY('models')) === '1'; } catch { return false; } });
+  const showAdvanced = (v: boolean) => { setAdvanced(v); try { localStorage.setItem(ADVANCED_KEY('models'), v ? '1' : '0'); } catch { /* private mode */ } };
   // The row whose per-model Test was clicked. Its button keeps the spinner
   // while that single-model sweep runs (the header line carries the clock).
   const [testingId, setTestingId] = useState<string | null>(null);
@@ -1112,8 +1115,8 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
       .then((res) => {
         setSweep({ running: res.probing > 0, probing: res.probing, elapsed_s: 0 });
         setSweepNote(res.probing > 0
-          ? `testing ${res.probing} model${res.probing === 1 ? '' : 's'} on ${(res.surfaces ?? []).join(' + ')}`
-          : res.note ?? 'nothing to probe');
+          ? `testing ${res.probing} model${res.probing === 1 ? '' : 's'} on ${(res.surfaces ?? []).map(apiName).join(' + ')}`
+          : res.note ?? 'nothing to test');
         loadModels();
       })
       .catch((e: unknown) => setSweepNote(e instanceof Error ? e.message : 'test all failed'))
@@ -1152,7 +1155,7 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
       .then((res) => {
         setSweep({ running: res.probing > 0, probing: res.probing, elapsed_s: 0 });
         if (res.probing > 0) {
-          setSweepNote(`testing ${m.id} · ${(res.surfaces ?? []).join(' + ')}`);
+          setSweepNote(`testing ${m.id} · ${(res.surfaces ?? []).map(apiName).join(' + ')}`);
         } else {
           setTestingId(null);
           // probing=0 with only_untested:false means the id is NOT in the
@@ -1185,7 +1188,7 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
           setPendingForce({ model, pin });
           return;
         }
-        setPinErr(e instanceof Error ? e.message : 'pin failed');
+        setPinErr(e instanceof Error ? e.message : 'could not set the API');
       });
   };
 
@@ -1202,7 +1205,7 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
     applyPin(m.id, pin, false);
   };
 
-  const untested = models.filter((m) => m.chat == null && m.anthropic == null && m.responses == null).length;
+  const untested = models.filter((m) => modelStatus(m) === 'untested').length;
 
   return (
     // No CSS fade here: the drawer is rendered inside a <Collapse>, which
@@ -1220,10 +1223,14 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
             </span>
           )}
         </span>
-        <span className="flex items-center gap-2">
+        <span className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-[12px] text-mute">
+            <Toggle checked={advanced} onChange={showAdvanced} label="Advanced" />
+            Advanced
+          </label>
           {running ? (
             <BusyButton busy={sweepBusy} className="w-[132px]" onClick={stopTestAll}>Stop</BusyButton>
-          ) : (
+          ) : !advanced ? null : (
             <span title="Tests every model again, including ones that already passed, on all three APIs. Each test is one tiny request. Stop cancels the ones that haven't run yet.">
               <BusyButton busy={sweepBusy} disabled={models.length === 0} className="w-[132px]" onClick={startTestAll}>Test all models</BusyButton>
             </span>
@@ -1239,23 +1246,41 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
         <table className="w-full table-fixed text-[13px]">
           <colgroup>
             <col />
-            <col className="hidden w-[236px] md:table-column" />
-            <col className="w-[128px]" />
+            <col className={advanced ? 'hidden w-[236px] md:table-column' : 'w-[230px]'} />
+            {advanced && <col className="w-[128px]" />}
             <col className="w-[76px]" />
           </colgroup>
           <thead className="sticky top-0 z-10 bg-surface">
             <tr className="text-left text-[12px] text-mute">
               <th className="py-2 font-normal">Model</th>
-              <th className="hidden py-2 font-normal md:table-cell">Protocols</th>
-              <th className="py-2 font-normal">Surface</th>
+              <th className={cx('py-2 font-normal', advanced && 'hidden md:table-cell')}>{advanced ? 'APIs' : 'Status'}</th>
+              {advanced && <th className="py-2 font-normal">Force API</th>}
               <th className="py-2"><span className="sr-only">Test</span></th>
             </tr>
           </thead>
           <tbody>
             {models.map((m) => {
               const testing = testingId === m.id;
-              const unprobed = m.chat == null && m.anthropic == null && m.responses == null;
-              const queued = running && !testing && unprobed;
+              const status = modelStatus(m);
+              const queued = running && !testing && status === 'untested';
+              const testedLine = (
+                <div className="mt-0.5 text-[11px]" title={m.note ?? undefined}>
+                  {testing ? <span className="text-accent">Testing…</span>
+                    : queued ? <span className="text-accent">Queued</span>
+                    : <span className="text-mute">{m.source === 'curated' ? 'Set by hand' : m.tested_at ? `Tested ${relTime(m.tested_at)}` : 'Not tested yet'}{m.pin ? ` · always ${apiName(m.pin)}` : ''}</span>}
+                </div>
+              );
+              const simple = (
+                <>
+                  <div className={cx('flex items-center gap-1.5 text-[12px] transition-opacity', (testing || queued) && 'opacity-40')}>
+                    <span className={cx('h-1.5 w-1.5 rounded-full', status === 'works' ? 'bg-ok' : status === 'untested' ? 'bg-line-strong' : 'bg-bad')} />
+                    <span className={status === 'works' ? 'text-dim' : status === 'untested' ? 'text-mute' : 'text-bad'}>
+                      {status === 'works' ? 'Works' : status === 'untested' ? 'Not tested' : "Doesn't work"}
+                    </span>
+                  </div>
+                  {testedLine}
+                </>
+              );
               const verdicts = (
                 <>
                   <div className={cx('flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[12px] transition-opacity', (testing || queued) && 'opacity-40')}>
@@ -1265,7 +1290,7 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
                         ['Responses', m.responses],
                       ] as const).map(([label, v]) => (
                         <span key={label} className="flex items-center gap-1"
-                          title={v == null ? `${label}: no probe` : `${label}: ${v === true ? 'ok' : v === false ? 'failed' : `HTTP ${v}`}`}>
+                          title={v == null ? `${label}: not tested` : `${label}: ${v === true ? 'works' : v === false ? "doesn't work" : `HTTP ${v}`}`}>
                           <span className={cx('h-1.5 w-1.5 rounded-full', v === true ? 'bg-ok' : v == null ? 'bg-line-strong' : 'bg-bad')} />
                           <span className={v === true ? 'text-dim' : v == null ? 'text-mute' : 'text-bad'}>
                             {label}{typeof v === 'number' ? ` ${v}` : ''}
@@ -1273,11 +1298,7 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
                         </span>
                       ))}
                     </div>
-                    <div className="mt-0.5 text-[11px]" title={m.note ?? undefined}>
-                      {testing ? <span className="text-accent">Testing…</span>
-                        : queued ? <span className="text-accent">Queued</span>
-                        : <span className="text-mute">{m.source === 'curated' ? 'Curated' : m.tested_at ? `Probed ${relTime(m.tested_at)}` : 'Not probed'}</span>}
-                    </div>
+                    {testedLine}
                 </>
               );
               return (
@@ -1286,15 +1307,15 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
                   {/* Wraps on a phone (no hover there, and ids often share a
                       long prefix); one truncated line on desktop, full id on hover. */}
                   <div title={m.id} className="break-all font-code text-[12px] text-ink md:truncate md:break-normal">{m.id}</div>
-                  {/* On a phone the protocols column folds under the name. */}
-                  <div className="mt-1 md:hidden">{verdicts}</div>
+                  {/* On a phone the APIs column folds under the name. */}
+                  {advanced && <div className="mt-1 md:hidden">{verdicts}</div>}
                 </td>
-                <td className="hidden md:table-cell">
-                  {verdicts}
+                <td className={cx(advanced && 'hidden md:table-cell')}>
+                  {advanced ? verdicts : simple}
                 </td>
-                <td>
+                {advanced && <td>
                   <select
-                    aria-label={`surface for ${m.id}`}
+                    aria-label={`API for ${m.id}`}
                     value={m.pin ?? ''}
                     onChange={(e) => onPinChange(m, e.target.value)}
                     className={cx('h-7 w-[112px] rounded-md border bg-transparent px-1.5 text-[12px] transition-colors hover:border-line-strong focus:border-accent focus:outline-none',
@@ -1303,7 +1324,7 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
                     <option value="">Auto</option>
                     {PIN_SURFACES.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
-                </td>
+                </td>}
                 <td className="text-right">
                   {m.source === 'curated' ? (
                     <BusyButton busy={releasingId === m.id}
@@ -1331,9 +1352,9 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
       {pendingForce && (
         <ConfirmModal
           open
-          title={`Pin ${pendingForce.model} to ${pendingForce.pin}?`}
-          body={`Testing hasn't confirmed ${pendingForce.model} works on ${pendingForce.pin}. If the provider doesn't support it, every request will fail with a 400.`}
-          confirmLabel="Pin anyway"
+          title={`Always send ${pendingForce.model} as ${apiName(pendingForce.pin)}?`}
+          body={`Testing hasn't confirmed ${pendingForce.model} works on ${apiName(pendingForce.pin)}. If the provider doesn't support it, every request will fail with a 400.`}
+          confirmLabel="Force anyway"
           onConfirm={() => applyPin(pendingForce.model, pendingForce.pin, true)}
           onClose={() => setPendingForce(null)}
         />
@@ -1663,7 +1684,7 @@ function QuotaModal({ account, onClose, onRead }: { account: Account; onClose: (
           )}
         </div>
         <div className="rounded-lg border border-line bg-raised/60 p-4">
-          <SectionLabel>Request budget · account-wide</SectionLabel>
+          <SectionLabel>Request budget · provider-wide</SectionLabel>
           {(account.rate_limit ?? 0) > 0 ? (
             <p className="mt-2 text-[13px] text-dim">
               <span className="font-mono tabular-nums text-ink">{account.rate_limit}</span> requests per{' '}
@@ -1864,7 +1885,7 @@ function AccountCard({ a, open, onToggle, intent, onIntentDone, issues, onChange
             <span title="Set per-model USD rates for cost analysis">
               <BusyButton onClick={() => setPricingOpen(true)}>Pricing</BusyButton>
             </span>
-            <span title="Provider settings and API keys">
+            <span title="Provider settings and keys">
               <BusyButton onClick={() => { setEditTab('settings'); setEditing(true); }}>Edit &amp; keys</BusyButton>
             </span>
             <label className="flex items-center gap-2 text-[13px] text-dim" title={a.enabled ? 'Routing may use this provider' : 'Disabled: routing skips this provider'}>
@@ -1939,7 +1960,7 @@ function AccountCard({ a, open, onToggle, intent, onIntentDone, issues, onChange
             title={confirm?.kind === 'key' ? `Delete key ${confirm.label}?` : `Delete provider ${a.name}?`}
             body={confirm?.kind === 'key'
               ? 'The key is removed right away. The provider stays, but requests to it will fail until you add another key.'
-              : 'This removes the provider and all its keys. Any combo that uses it will lose that hop.'}
+              : 'This removes the provider and all its keys. Any combo that uses it will lose that model.'}
             busy={menuBusy != null}
             onClose={() => setConfirm(null)}
             onConfirm={() => {
@@ -2081,7 +2102,7 @@ export default function Providers() {
       ) : accounts.length === 0 ? (
         <div className="rounded-xl border border-line bg-surface px-6 py-14 text-center">
           <p className="text-[14px] font-medium">No providers yet</p>
-          <p className="mt-1 text-[13px] text-mute">Add your first one. Give it a name and an API key, and ezllm tests it for you.</p>
+          <p className="mt-1 text-[13px] text-mute">Add your first one. Give it a name and its key, and ezllm tests it for you.</p>
           <button type="button" className={cx(btn.base, btn.primary, 'mt-5')} onClick={() => setAddOpen(true)}>＋ Add your first provider</button>
         </div>
       ) : shown.length === 0 ? (

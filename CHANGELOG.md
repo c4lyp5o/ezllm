@@ -15,6 +15,17 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   A temporary failure after the switch is tested once more before it is undone.
 - **Antigravity plan limits.** The provider card and Quota dialog show how much of each
   weekly limit is used, per group of models, read with `agy -p /usage` (no quota spent).
+- **Claude and Antigravity bridge fixes.** A Claude Code CLI that stops without an
+  answer is now a 502 with its own words, not a 200 with an empty message. Ending a CLI
+  no longer looks up its process group after the CLI is gone, so a recycled process id
+  cannot be killed by mistake. A Claude conversation keeps its session id when the client
+  moves its cache marker, so the cached prefix survives turn 2. The Claude and
+  Antigravity bridges log readable lines again. The bridges accept `bearer` in any case
+  and refuse a token sent without the scheme. Antigravity plan-usage reads run one at a
+  time and are reused for 30 seconds, instead of starting a CLI per refresh. An
+  Antigravity answer whose deltas stop short streams the rest. Output too large to read
+  is reported as such. The `--help` flag check tolerates small format changes.
+  A non-streaming Claude reply names the stop sequence that ended it.
 - **Provider fixes.** claude-web answers that stream longer than 60 seconds are no
   longer cut off: the timeout now covers only the wait for the first response. A
   claude-web answer that is a tool call fails with `chat_tools_unsupported`, so a combo

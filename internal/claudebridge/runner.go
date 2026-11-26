@@ -255,6 +255,7 @@ func (r *Runner) Run(ctx context.Context, req Request, alias string, sink func(F
 	_ = stdin.Close()
 
 	res := Result{}
+	sawResult := false
 	for {
 		line, err := next()
 		if err == io.EOF {
@@ -273,6 +274,7 @@ func (r *Runner) Run(ctx context.Context, req Request, alias string, sink func(F
 				res.NativeError, res.ErrorCode = firstText(f.Message), f.Error
 			}
 		case "result":
+			sawResult = true
 			res.Usage = parseUsage(f.Usage)
 			res.CostUSD = f.TotalCostUSD
 			res.StopReason = f.StopReason
@@ -301,8 +303,24 @@ func (r *Runner) Run(ctx context.Context, req Request, alias string, sink func(F
 			}
 		}
 	}
-	_ = cmd.Wait()
+	waitErr := cmd.Wait()
 	waited = true
+	if !sawResult && res.NativeError == "" {
+		// The CLI always ends a turn with a result frame. Without one it
+		// crashed or its output was unreadable: answering 200 with an empty
+		// message would hide that.
+		why := "exited without a result"
+		if rerr := <-readErr; rerr != nil {
+			why = "output unreadable: " + rerr.Error()
+		} else if waitErr != nil {
+			why = "exited without a result: " + waitErr.Error()
+		}
+		msg := "claude-bridge: the Claude Code CLI " + why
+		if tail := stderrTail.Tail(); tail != "" {
+			msg += " — " + tail
+		}
+		return res, &NativeError{Status: 502, Type: "api_error", Code: "native_error", Message: msg}
+	}
 	if res.NativeError != "" {
 		status, errType := MapNativeError(res.ErrorCode, res.NativeError)
 		return res, &NativeError{Status: status, Type: errType, Code: res.ErrorCode,

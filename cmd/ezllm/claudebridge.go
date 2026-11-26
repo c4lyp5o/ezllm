@@ -110,7 +110,7 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 		Timeout:       300 * time.Second,
 		MaxConcurrent: concurrency,
 		MaxQueue:      queue,
-		Logf:          log.Info,
+		Logf:          printfLogger(log),
 	}
 	srv := &claudebridge.Server{
 		Runner:  runner,
@@ -127,7 +127,7 @@ func startClaudeBridge(ctx context.Context, log *slog.Logger, report bridgeRepor
 			"subscription":      plan,
 			"tools":             "client tools pass through; never executed by the bridge (M2)",
 		},
-		Logf:   log.Info,
+		Logf:   printfLogger(log),
 		Limits: &claudebridge.Limits{},
 	}
 

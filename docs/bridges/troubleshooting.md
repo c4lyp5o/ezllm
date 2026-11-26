@@ -48,6 +48,7 @@ this first: starting ezllm again clears the log.
 | `no ChatGPT login` or `no Antigravity login` | Redo **Sign in** |
 | `login=logged-out` (Claude) | Redo **Sign in** |
 | `does not run` (Claude) | The copied CLI is for another computer or is damaged. Redo **Install** and **Copy** |
+| `the Claude Code CLI exited without a result` | The CLI stopped before answering. The words after `—` are its own; run the [checker](#the-checker) |
 | `USER and LOGNAME must be set` | Add `USER` and `LOGNAME` as [Turn on Claude](claude.md#with-docker-compose) shows |
 | `listen on 127.0.0.1:879…: address already in use` | Another program uses the bridge's port. Stop it, or set that bridge's `EZLLM_*_BRIDGE_ADDR` to a free port |
 | `want on or off` | A switch has a value ezllm does not know. Set it to `on` or `off` |

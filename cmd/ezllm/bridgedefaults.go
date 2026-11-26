@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -123,4 +124,13 @@ func bridgeTokenPath(path, dataDir, label string) string {
 		dataDir = "/data"
 	}
 	return filepath.Join(dataDir, label+"-bridge.token")
+}
+
+// printfLogger adapts a slog logger to the bridge's printf-style Logf. Passing
+// log.Info directly treats the format string as the message and every argument
+// as a key, which logged "session=%s ... !BADKEY=..." for every turn.
+// The Claude, Antigravity and Copilot bridges log printf-style; the Codex
+// bridge logs key/value pairs and takes log.Info as is.
+func printfLogger(log *slog.Logger) func(string, ...any) {
+	return func(format string, args ...any) { log.Info(fmt.Sprintf(format, args...)) }
 }

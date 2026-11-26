@@ -89,7 +89,7 @@ func startAgyBridge(ctx context.Context, log *slog.Logger, report bridgeReport, 
 		ids = append(ids, m.ID)
 	}
 
-	runner := &agybridge.Runner{Bin: resolved, Home: home, Timeout: 300 * time.Second, MaxConcurrent: concurrency, MaxQueue: queue, Logf: log.Info, SessionCache: sessionCache}
+	runner := &agybridge.Runner{Bin: resolved, Home: home, Timeout: 300 * time.Second, MaxConcurrent: concurrency, MaxQueue: queue, Logf: printfLogger(log), SessionCache: sessionCache}
 	srv := &agybridge.Server{
 		CallerTools: callerTools,
 		PlanUsage:   agybridge.SupportsPlanUsage(pre.Version),
@@ -111,7 +111,7 @@ func startAgyBridge(ctx context.Context, log *slog.Logger, report bridgeReport, 
 			"client_tools":  clientTools,
 			"session_cache": sessionCache,
 		},
-		Logf: log.Info,
+		Logf: printfLogger(log),
 	}
 
 	if report != nil {

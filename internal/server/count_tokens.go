@@ -26,6 +26,13 @@ const countTokensSourceHeader = "X-Ezllm-Token-Count"
 // over the prompt — the same one compression uses — so the client never
 // sees a 404. Counting costs nothing upstream: no ledger row, no budget.
 func (s *Server) countTokens(w http.ResponseWriter, r *http.Request) {
+	// Same admission as inference: a count reads a whole body and parses it,
+	// so it must not bypass request_limits (concurrency and body memory).
+	lease := s.admit(w, r)
+	if lease == nil {
+		return
+	}
+	defer lease.release()
 	liftDeadline := limitBodyRead(w, inferenceBodyTimeout)
 	body, tooLarge, err := readBody(r, s.maxBody)
 	if err != nil {
@@ -38,6 +45,7 @@ func (s *Server) countTokens(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	liftDeadline()
+	lease.shrink(int64(len(body)))
 	doc := jsonbody.Open(body)
 	if doc.Err() != nil || doc.Map() == nil {
 		writeErr(w, http.StatusBadRequest, "invalid_request_error", "body must be a JSON object")

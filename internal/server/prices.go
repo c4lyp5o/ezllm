@@ -101,6 +101,7 @@ func (s *Server) handleImportPrices(w http.ResponseWriter, r *http.Request) {
 	}
 	fetched := time.Now().UTC().Format(time.RFC3339)
 	modelsByAccount := map[int64]map[string]bool{}
+	rows := make([]store.Price, 0, len(body.Prices))
 	for i := range body.Prices {
 		p := &body.Prices[i]
 		if p.AccountID == 0 || strings.TrimSpace(p.ModelID) == "" || strings.TrimSpace(p.EffectiveFrom) == "" {
@@ -138,16 +139,18 @@ func (s *Server) handleImportPrices(w http.ResponseWriter, r *http.Request) {
 		if p.FetchedAt == "" {
 			p.FetchedAt = fetched
 		}
-		if err := s.db.SetPrice(r.Context(), store.Price{
+		rows = append(rows, store.Price{
 			AccountID: p.AccountID, ModelID: p.ModelID,
 			EffectiveFrom: p.EffectiveFrom, Currency: p.Currency,
 			PriceIn: *p.PriceIn, PriceOut: *p.PriceOut,
 			PriceCacheRead: *p.PriceCacheRead, PriceCacheWrite: *p.PriceCacheWrite,
 			Note: p.Note, Source: p.Source, FetchedAt: p.FetchedAt,
-		}); err != nil {
-			writeErr(w, http.StatusBadRequest, "bad_request", err.Error())
-			return
-		}
+		})
+	}
+	// All rows are checked above and written together: one bad row writes none.
+	if err := s.db.SetPrices(r.Context(), rows); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"imported": len(body.Prices), "source": source})
 }

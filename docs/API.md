@@ -468,7 +468,7 @@ returns `404` without changing it.
 ### `DELETE /admin/accounts/{id}/keys/{keyId}` → `204`
 
 ### `POST /admin/accounts/{id}/sync` → `200`
-Full catalog + protocol probe (all models, or `{"models":[…],"surfaces":["chat"]}` to scope).
+Full catalog + protocol probe (all models, or `{"models":[…],"surfaces":["chat"]}` to scope). Each surface must be `chat`, `anthropic` or `responses`; another name answers `400`.
 ```jsonc
 { "synced":36, "protocol_tested":36,
   "protocol_support":{"chat":36,"anthropic":12,"responses":5,"untested":0},
@@ -696,10 +696,12 @@ is the request's fault and keeps the hold. The hop's block tag renders pinned at
 `▮ 1/N` while it holds.
 ```
 `strategy` ∈ `failover|true_round_robin|sticky_last_good|least_used|block_round_robin`.
-`POST` upserts by name (idempotent). `hops` replace the whole ordered list (positions = array order).
+`POST` upserts by name (idempotent). `PATCH /admin/combos/{id}` updates that combo by id, so a
+new `name` renames it; a name another combo has answers `409`. `hops` replace the whole ordered
+list (positions = array order).
 `PATCH` is a partial update — only the fields you send change, `enabled` included, so the one-field
 toggle is `PATCH /admin/combos/{id}` `{"enabled":false}` (the `?enabled=true|false` query form is
-also accepted). A disabled combo refuses inference with `combo "x" is disabled` and drops out of
+also accepted; any other value answers `400`). A disabled combo refuses inference with `combo "x" is disabled` and drops out of
 `/v1/models`.
 
 `POST /admin/combos/{id}/test` probes every hop with one tiny real request. A body `{"surface":"chat|anthropic","hop":N}`
@@ -797,6 +799,9 @@ One rule per `(account_id, model_id)`: a rolling **token cap** and/or an **allow
 - `win_days` — CSV of `0–6` (Sun=0), `""` = every day; `win_tz` — an explicit
   host-resolvable timezone or `instance` (the default for new rules).
 - `enabled`, `note` optional.
+
+`PATCH` changes only the fields you send. The window fields move together: sending any of
+`win_start`, `win_end`, `win_days` replaces the whole window, and `""` clears that part.
 
 Enforcement: inside a combo, a hop whose rule says "not now" is **skipped silently** (the next
 hop serves); a direct call returns `429` naming the rule and its window; a combo refused on

@@ -102,6 +102,44 @@ func decodeBodyLimit(w http.ResponseWriter, r *http.Request, dst any, max int64)
 			fmt.Sprintf("request body exceeds %d bytes", max))
 		return false
 	}
+	if !decodeJSONBytes(w, body, dst) {
+		return false
+	}
+	lift()
+	return true
+}
+
+// decodeOptionalBody is decodeBody for a route whose body may be left out.
+// It reads to find out, so a body sent without Content-Length (chunked) is
+// decoded too: a ContentLength > 0 guard skipped those and ran the defaults.
+func decodeOptionalBody(w http.ResponseWriter, r *http.Request, dst any) bool {
+	if r.ContentLength == 0 {
+		return true
+	}
+	lift := limitBodyRead(w, adminBodyTimeout)
+	body, tooLarge, err := readBody(r, adminBodyMax)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_request_error", "could not read body: "+err.Error())
+		return false
+	}
+	if tooLarge {
+		writeErr(w, http.StatusBadRequest, "invalid_request_error",
+			fmt.Sprintf("request body exceeds %d bytes", adminBodyMax))
+		return false
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		lift()
+		return true
+	}
+	if !decodeJSONBytes(w, body, dst) {
+		return false
+	}
+	lift()
+	return true
+}
+
+// decodeJSONBytes decodes exactly one JSON object with no unknown fields.
+func decodeJSONBytes(w http.ResponseWriter, body []byte, dst any) bool {
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
@@ -116,7 +154,6 @@ func decodeBodyLimit(w http.ResponseWriter, r *http.Request, dst any, max int64)
 			"body must contain a single JSON object")
 		return false
 	}
-	lift()
 	return true
 }
 
@@ -1093,10 +1130,8 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		// nil = true when probe_all, false otherwise.
 		OnlyUntested *bool `json:"only_untested"`
 	}
-	if r.ContentLength > 0 {
-		if !decodeBody(w, r, &body) {
-			return
-		}
+	if !decodeOptionalBody(w, r, &body) {
+		return
 	}
 	_ = keyID
 
@@ -1144,6 +1179,10 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		onlyUntested = *body.OnlyUntested
 	}
 	surfaces := parseSurfaces(body.Surfaces)
+	if len(surfaces) < len(body.Surfaces) {
+		writeErr(w, http.StatusBadRequest, "invalid_request_error", "surfaces: each must be chat, anthropic or responses")
+		return
+	}
 	if len(surfaces) == 0 {
 		surfaces = []provider.Surface{
 			provider.SurfaceChat, provider.SurfaceAnthropic, provider.SurfaceResponses,
@@ -1691,7 +1730,8 @@ func (s *Server) handleComboTest(w http.ResponseWriter, r *http.Request) {
 
 	surface := provider.SurfaceChat
 	only := -1 // >= 0: probe just that hop
-	if r.ContentLength > 0 {
+	// -1 is a body sent without a length (chunked): read it too.
+	if r.ContentLength != 0 {
 		var in struct {
 			Surface string `json:"surface"`
 			Hop     *int   `json:"hop"`
@@ -1911,14 +1951,20 @@ func (s *Server) handleCombo(w http.ResponseWriter, r *http.Request) {
 		if body.Enabled != nil {
 			c.Enabled = *body.Enabled
 		}
-		if r.URL.Query().Get("enabled") != "" {
-			c.Enabled = r.URL.Query().Get("enabled") == "true"
+		switch q := r.URL.Query().Get("enabled"); q {
+		case "":
+		case "true", "false":
+			c.Enabled = q == "true"
+		default:
+			writeErr(w, http.StatusBadRequest, "invalid_request_error", "enabled must be true or false")
+			return
 		}
-		newID, err := s.db.UpsertCombo(r.Context(), c)
-		if err != nil {
+		// By id, so a new name renames this combo instead of creating another.
+		if err := s.db.UpdateCombo(r.Context(), id, c); err != nil {
 			s.writeStoreErr(w, err)
 			return
 		}
+		newID := id
 		s.probeComboHops(newID)
 		combos, _ = s.db.ListCombos(r.Context())
 		for _, x := range combos {
@@ -2422,9 +2468,17 @@ func (s *Server) handleModelRule(w http.ResponseWriter, r *http.Request) {
 		// Merge onto the existing row so a partial PATCH does not zero the
 		// fields it omitted (Go's zero-value would silently clear win_start,
 		// cap_tokens, etc.).
+		// Pointers tell "sent" from "left out": a field the PATCH omits keeps
+		// its stored value. {"enabled":false} used to zero cap_tokens and wipe
+		// the allowed-hours window.
 		var raw struct {
 			store.ModelRule
-			Enabled *bool `json:"enabled"`
+			Enabled   *bool   `json:"enabled"`
+			CapTokens *int64  `json:"cap_tokens"`
+			WinStart  *string `json:"win_start"`
+			WinEnd    *string `json:"win_end"`
+			WinDays   *string `json:"win_days"`
+			Note      *string `json:"note"`
 		}
 		if !decodeBody(w, r, &raw) {
 			return
@@ -2437,27 +2491,32 @@ func (s *Server) handleModelRule(w http.ResponseWriter, r *http.Request) {
 		if in.AccountID != 0 {
 			merged.AccountID = in.AccountID
 		}
-		merged.CapTokens = in.CapTokens
+		if raw.CapTokens != nil {
+			merged.CapTokens = *raw.CapTokens
+		}
 		if in.CapWindow != "" {
 			merged.CapWindow = in.CapWindow
 		}
-		// Window fields: a PATCH that omits them ("" everywhere) means "clear
-		// the window"; one that sets any of them replaces the window. This is
-		// deliberately explicit — partial window updates would produce a
-		// half-specified window that validation (correctly) rejects.
-		if in.WinStart != "" || in.WinEnd != "" || in.WinDays != "" {
-			merged.WinStart, merged.WinEnd, merged.WinDays = in.WinStart, in.WinEnd, in.WinDays
-			if in.WinTZ != "" {
-				merged.WinTZ = in.WinTZ
+		// Window fields move together: sending any of them replaces the whole
+		// window ("" clears that part), because a half-updated window would be
+		// half-specified, which validation (correctly) rejects.
+		if raw.WinStart != nil || raw.WinEnd != nil || raw.WinDays != nil {
+			deref := func(p *string) string {
+				if p == nil {
+					return ""
+				}
+				return *p
 			}
-		} else {
-			merged.WinStart, merged.WinEnd, merged.WinDays = "", "", ""
+			merged.WinStart, merged.WinEnd, merged.WinDays = deref(raw.WinStart), deref(raw.WinEnd), deref(raw.WinDays)
+		}
+		if in.WinTZ != "" {
+			merged.WinTZ = in.WinTZ
 		}
 		if raw.Enabled != nil {
 			merged.Enabled = *raw.Enabled
 		}
-		if in.Note != "" {
-			merged.Note = in.Note
+		if raw.Note != nil {
+			merged.Note = *raw.Note
 		}
 		newID, err := s.db.UpsertModelRule(r.Context(), merged)
 		if err != nil {

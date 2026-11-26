@@ -15,6 +15,11 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
   A temporary failure after the switch is tested once more before it is undone.
 - **Antigravity plan limits.** The provider card and Quota dialog show how much of each
   weekly limit is used, per group of models, read with `agy -p /usage` (no quota spent).
+- **Admin API fixes.** A rule `PATCH` changes only the fields sent; `{"enabled":false}`
+  used to zero its cap and delete its allowed hours. Renaming a combo renames it instead
+  of creating a second one. A price import with one bad row writes nothing.
+  `count_tokens` now counts against the request limits. A sync body sent without a
+  length is read, and an unknown surface name answers 400.
 - **Start-up checks.** `=false`, `=0` or `=OFF` on `EZLLM_PRICE_REFRESH`,
   `EZLLM_UPDATE_CHECK` or `EZLLM_COMBO_AUTOPROBE` used to turn the feature on; every
   on/off switch now takes on/off, true/false or 1/0 in any case, and anything else

@@ -1229,6 +1229,51 @@ ON CONFLICT(name) DO UPDATE SET
 	return id, err
 }
 
+// UpdateCombo saves combo id, renaming it when c.Name differs. UpsertCombo keys
+// on the name, so an edit that renamed a combo created a second one and left
+// the old one in place. A name another combo holds is a conflict (409).
+func (d *DB) UpdateCombo(ctx context.Context, id int64, c Combo) error {
+	if c.ContextSize == 0 {
+		c.ContextSize = 200000
+	}
+	if c.BlockSize == 0 {
+		c.BlockSize = 1
+	}
+	if err := ValidateCombo(c); err != nil {
+		return err
+	}
+	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		var other int64
+		err := tx.QueryRowContext(ctx, `SELECT id FROM combos WHERE name=? AND id<>?`, c.Name, id).Scan(&other)
+		if err == nil {
+			return &ErrConflict{What: "a combo named " + c.Name + " already exists"}
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		var cpid any
+		if c.CompressionProfileID != nil {
+			cpid = *c.CompressionProfileID
+		}
+		res, err := tx.ExecContext(ctx, `
+UPDATE combos SET name=?, strategy=?, sticky_idle_s=?, enabled=?, compression_profile_id=?,
+  context_size=?, block_size=?, notes=?, auto_free=?, auto_free_accounts=?, auto_free_include=?
+WHERE id=?`,
+			c.Name, c.Strategy, c.StickyIdleS, boolToInt(c.Enabled), cpid, c.ContextSize, c.BlockSize, c.Notes,
+			boolToInt(c.AutoFree), formatAccountIDs(c.AutoFreeAccounts), formatFreeIncludes(c.AutoFreeInclude), id)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrNotFound
+		}
+		if err := d.replaceHops(ctx, tx, id, c.Hops); err != nil {
+			return err
+		}
+		return d.syncAutoFree(ctx, tx, id)
+	})
+}
+
 // ReplaceHops rewrites a combo's ordered hop list (POST /admin/combos/{id}/hops).
 func (d *DB) ReplaceHops(ctx context.Context, comboID int64, hops []ComboHop) error {
 	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {

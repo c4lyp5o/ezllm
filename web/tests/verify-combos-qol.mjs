@@ -105,7 +105,9 @@ try {
   check('a failed hop shows its cause', (await dialog().getByText(/429 · quota exhausted/).count()) === 1);
   calls.length = 0;
   await dialog().getByRole('button', { name: 'Test model 2 again' }).click();
-  await dialog().getByRole('button', { name: 'Test model 2 again' }).waitFor();
+  // The button never leaves, so wait for the re-test itself to finish: a busy
+  // dialog ignores Escape by design, and pressing it early left the dialog open.
+  await page.locator('[role="dialog"]:not([aria-busy="true"])').getByRole('button', { name: 'Test model 2 again' }).waitFor();
   check('Test again re-probes one hop', /"hop":1/.test(calls[0] ?? ''), calls);
   await page.keyboard.press('Escape');
   await dialog().waitFor({ state: 'detached' });
@@ -116,7 +118,8 @@ try {
   calls.length = 0;
   await card('cache-warm').getByRole('button', { name: 'Duplicate' }).click();
   await dialog().getByText('Duplicate cache-warm').waitFor();
-  check('duplicate pre-fills a non-colliding name', (await dialog().getByLabel('Name', { exact: true }).inputValue()) === 'cache-warm-copy');
+  const copyNameShown = await dialog().getByLabel('Name', { exact: true }).inputValue();
+  check('duplicate pre-fills a non-colliding name', copyNameShown === 'cache-warm-copy', copyNameShown);
   await dialog().getByRole('button', { name: 'Create combo' }).click();
   await page.waitForTimeout(300);
   const dup = last(/^POST \/admin\/combos /)[0] ?? '';
@@ -194,9 +197,23 @@ try {
 
   // deep links
   calls.length = 0;
+  // A deep link opens the editor from a fetch, not a click: watch every DOM
+  // change so Save is never enabled, not even for the first frame before the
+  // combo's values load.
+  await page.addInitScript(() => {
+    window.__saveEverEnabled = false;
+    const look = () => {
+      for (const b of document.querySelectorAll('[role="dialog"] button[type="submit"]')) {
+        if (b.textContent.trim() === 'Save changes' && !b.disabled) window.__saveEverEnabled = true;
+      }
+    };
+    document.addEventListener('DOMContentLoaded', () => new MutationObserver(look).observe(document.body, { subtree: true, childList: true, attributes: true }));
+  });
   await page.goto(`${t.base}/combos?edit=2`);
   await dialog().getByText('Edit cache-warm').waitFor();
   check('?edit= opens that combo', true);
+  await page.waitForTimeout(300);
+  check('?edit= opens with Save disabled from the first frame', !(await page.evaluate(() => window.__saveEverEnabled)));
   await page.keyboard.press('Escape');
   await page.goto(`${t.base}/combos?test=3`);
   await dialog().getByText('Test broken').waitFor();

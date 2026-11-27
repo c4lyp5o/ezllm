@@ -56,8 +56,21 @@ try {
   // ── shared range ──
   await page.goto(`${t.base}/stats`);
   await page.getByRole('button', { name: '30d', exact: true }).first().click();
+  // Count how many times the new page's heading is put on screen: the leaving
+  // page used to render the new route during its exit, so it mounted twice.
+  await page.evaluate(() => {
+    window.__mounts = 0; const seen = new WeakSet();
+    new MutationObserver(() => {
+      for (const e of document.querySelectorAll('body *')) {
+        if (e.childElementCount === 0 && e.textContent === 'Large-request filter' && !seen.has(e)) { seen.add(e); window.__mounts++; }
+      }
+    }).observe(document.body, { subtree: true, childList: true });
+  });
   await tab('Token Economics').click();
   await page.getByText('Large-request filter').waitFor();
+  await page.waitForTimeout(1000);
+  const mounts = await page.evaluate(() => window.__mounts);
+  check('a tab switch mounts the new page once', mounts === 1, mounts);
   check('range survives a tab switch (Economics)', (await pressed('30d')) === 'true');
   await tab('Requests').click();
   await page.getByText('Filter request history').waitFor();
@@ -93,8 +106,10 @@ try {
   check('economics: run-rate shown', (await page.getByText(/over 30 days at this rate/).count()) > 0);
   seen.requests.length = 0;
   await page.getByText(/top \d+ of 120/).waitFor();
-  const minReq = page.waitForRequest((r) => /min_tin=5000/.test(r.url()), { timeout: 5000 }).catch(() => null);
-  // Pages remount once shortly after navigation (pre-existing); let it settle before typing.
+  // Wait for the reply, not the request: the request event can arrive before
+  // the route handler has recorded it in `seen` (it raced on the CI runner).
+  const minReq = page.waitForResponse((r) => /min_tin=5000/.test(r.url()), { timeout: 5000 }).catch(() => null);
+  // Let the page finish its first load before typing.
   await page.waitForTimeout(700);
   await page.getByPlaceholder('all').fill('5000');
   await page.getByPlaceholder('all').press('Enter');
@@ -111,7 +126,7 @@ try {
   await page.getByText(/showing 100 of 120/).waitFor();
   check('requests: show more raises the limit', seen.requests.some((u) => /limit=100/.test(u)), seen.requests);
   check('requests: limit lives in the URL', /limit=100/.test(page.url()), page.url());
-  const filtered = page.waitForRequest((r) => /\/admin\/requests\?.*account=Alpha/.test(r.url()), { timeout: 15000 }).catch(() => null);
+  const filtered = page.waitForResponse((r) => /\/admin\/requests\?.*account=Alpha/.test(r.url()), { timeout: 15000 }).catch(() => null);
   await page.getByLabel('provider').selectOption('Alpha');
   await filtered;
   check('requests: provider dropdown filters server-side', seen.requests.some((u) => /account=Alpha/.test(u)) && /account=Alpha/.test(page.url()), page.url());

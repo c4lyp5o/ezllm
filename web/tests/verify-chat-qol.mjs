@@ -54,6 +54,22 @@ try {
   const near = await page.getByRole('log', { name: 'Conversation 1' }).evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight < 60);
   check('the column follows the stream to the bottom', near);
   check('no "Jump to latest" while at the bottom', (await page.getByRole('button', { name: /Jump to latest/ }).count()) === 0);
+  // The scroll area itself gets shorter (as when a row appears below it) and
+  // the content then settles a few pixels: it must stay at the bottom with no chip.
+  await page.getByRole('log', { name: 'Conversation 1' }).evaluate((el) => {
+    const box = el.parentElement;
+    const h = box.clientHeight;
+    box.style.flex = 'none';
+    box.style.height = `${h - 80}px`;
+  });
+  await page.waitForTimeout(200);
+  await page.getByRole('log', { name: 'Conversation 1' }).evaluate((el) => { el.firstElementChild.style.marginBottom = '-6px'; });
+  await page.waitForTimeout(200);
+  const shrunk = await page.getByRole('log', { name: 'Conversation 1' }).evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
+  check('a shorter column keeps following the bottom', shrunk < 48, shrunk);
+  check('a shorter column shows no "Jump to latest"', (await page.getByRole('button', { name: /Jump to latest/ }).count()) === 0);
+  await page.getByRole('log', { name: 'Conversation 1' }).evaluate((el) => { el.parentElement.style.flex = ''; el.parentElement.style.height = ''; el.firstElementChild.style.marginBottom = ''; });
+  await page.waitForTimeout(200);
   await page.getByRole('log', { name: 'Conversation 1' }).evaluate((el) => { el.scrollTop = 0; });
   await page.getByRole('button', { name: /Jump to latest/ }).waitFor();
   check('scrolling up offers "Jump to latest"', true);

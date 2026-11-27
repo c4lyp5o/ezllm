@@ -6,7 +6,7 @@
 // The open/closed status chip stays off this page on purpose: the window
 // column's times are the same data, and what the router decides right now is
 // behaviour that belongs inside ezllm.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ExtraIntro } from '../components/ExtraIntro';
 import {
@@ -96,7 +96,9 @@ function RuleModal({ target, accounts, rules, onClose, onSave }: {
   const [err, setErr] = useState('');
   const [showAll, setShowAll] = useState(false);
 
-  useEffect(() => {
+  // Load the draft before the first paint: with a plain effect the dialog
+  // showed one frame of an empty draft (Save enabled, Escape asked to discard).
+  useLayoutEffect(() => {
     if (!open) return;
     setErr(''); setSaving(false); setShowAll(false); setModelQuery('');
     const first = target.account ?? accounts[0]?.id ?? 1;

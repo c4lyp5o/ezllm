@@ -1,6 +1,6 @@
 // COMPRESSION — profiles (ordered, fail-open pipelines), what they actually
 // saved, and a way to try a pipeline on a pasted sample before attaching it.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ExtraIntro } from '../components/ExtraIntro';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
@@ -152,7 +152,10 @@ function ProfileModal({ target, profiles, onClose, onSaved }: {
   const [showAll, setShowAll] = useState(false);
   const [preset, setPreset] = useState<string | null>(null);
 
-  useEffect(() => {
+  // Load the draft before the first paint: with a plain effect the dialog
+  // showed one frame of an empty draft, so a copy had no name yet and the form
+  // counted as edited (Escape asked to discard instead of closing).
+  useLayoutEffect(() => {
     if (!open) return;
     setErr(''); setBusy(false); setShowAll(false); setPreset(null);
     const next = editing ? fromProfile(editing)

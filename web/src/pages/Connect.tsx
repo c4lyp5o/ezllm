@@ -9,7 +9,7 @@
 //     no way to dismiss until "I saved it".
 //  3. A key's name is its identity: usage is counted by name, and creating a
 //     key under an existing name re-keys that one. The create form refuses it.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { ApiError, compressionProfiles, type UsageRow } from '../utils/api';
@@ -340,11 +340,14 @@ function PolicyModal({ target, ids, onClose, onSaved }: {
     if (!target) return;
     let live = true;
     compressionProfiles().then((ps) => { if (live) setProfiles(ps); }).catch(() => { if (live) setProfiles([]); });
-    setProfile(target.compression_profile_id ?? null);
     return () => { live = false; };
   }, [target]);
-  useEffect(() => {
+  // Load the key's values before the first paint: with a plain effect the
+  // dialog showed one frame of empty defaults, so Save was enabled and the
+  // form counted as edited before anyone touched it.
+  useLayoutEffect(() => {
     if (!target) return;
+    setProfile(target.compression_profile_id ?? null);
     setCap(target.cap_tokens); setUsd(target.cap_usd > 0 ? target.cap_usd.toFixed(2) : ''); setWindow(target.cap_window || 'monthly'); setModels(target.allowed_models || ''); setExpiry(expiryDate(target));
     setRoles(sortRoles(target.roles));
     setBusy(false); setErr('');

@@ -139,16 +139,20 @@ function Scroller({ follow, label, children }: { follow: string; label: string; 
   }, [follow]);
   // Some growth never re-renders React (a code block laying out, a late
   // paint): watch the content's own size so following does not depend on it.
+  // Watch the scroll area too: when it gets shorter (a row appears below it
+  // as a stream ends) the bottom moves away with no scroll event, and the
+  // next small upward clamp would read as the reader leaving.
   const inner = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const node = inner.current;
-    if (!node || typeof ResizeObserver === 'undefined') return;
+    if (!node || !ref.current || typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(() => {
       const el = ref.current;
       if (el && stuck.current) el.scrollTop = el.scrollHeight;
       measure();
     });
     ro.observe(node);
+    ro.observe(ref.current);
     return () => ro.disconnect();
   }, []);
   return (

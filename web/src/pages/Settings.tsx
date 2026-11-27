@@ -107,7 +107,7 @@ const DETAILS: Record<string, [string, string]> = {
   notify_update_available: ['New ezllm release', 'A newer ezllm release is available.'],
   notify_quota_warning: ['Quota nearly used', 'A provider has used most of a quota window. ezllm reads each provider\'s quota once an hour and warns once per window.'],
   alert_quota_percent: ['Warn at this much of a quota', 'Percent, from 1 to 100.'],
-  notify_balance_low: ['Balance running low', 'A prepaid provider balance is below the amount here. Said once a day while it stays low.'],
+  notify_balance_low: ['Balance running low', 'A prepaid provider balance is below the amount here. Said once each time it drops below; a top-up re-arms it.'],
   alert_balance_below: ['Warn below this balance', 'In the provider\'s own currency, for example 2.'],
   notify_cookie_expiring: ['Session cookie expiring', 'A pasted session cookie, used to read quota, expires soon.'],
   alert_cookie_hours: ['Warn this many hours ahead', 'From 1 to 720.'],

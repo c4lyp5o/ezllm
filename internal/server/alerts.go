@@ -14,8 +14,8 @@ import (
 
 // Early warnings: a quota window nearly used, a prepaid balance running low,
 // a session cookie about to expire. Each is said once per window (quota),
-// once a day (balance) or once per cookie, and each has its switch and its
-// threshold in Settings → Notifications.
+// once each time the balance drops under the threshold, or once per cookie,
+// and each has its switch and its threshold in Settings → Notifications.
 const (
 	alertFirst = 2 * time.Minute
 	alertEvery = time.Hour
@@ -23,8 +23,10 @@ const (
 	quotaKeep = 30 * 24 * time.Hour
 )
 
-// quotaAlerts turns one quota read into the warnings it calls for.
-func quotaAlerts(acctID int64, ns string, q provider.Quota, v settings.Values, now time.Time) []store.NotificationInput {
+// quotaAlerts turns one quota read into the warnings it calls for. lastAbove
+// is when a read last saw the balance at or over the threshold ("" if never):
+// a balance stays one warning until it climbs back over and drops again.
+func quotaAlerts(acctID int64, ns string, q provider.Quota, v settings.Values, now time.Time, lastAbove string) []store.NotificationInput {
 	id := strconv.FormatInt(acctID, 10)
 	data := map[string]any{"account_id": acctID, "account": ns}
 	var out []store.NotificationInput
@@ -64,12 +66,16 @@ func quotaAlerts(acctID int64, ns string, q provider.Quota, v settings.Values, n
 		if unit == "" {
 			unit = "USD"
 		}
+		since := lastAbove
+		if since == "" {
+			since = "never"
+		}
 		out = append(out, store.NotificationInput{
 			Kind: store.NoteBalanceLow, Severity: "warn",
-			Title:    fmt.Sprintf("%s balance is down to %.2f %s", ns, *q.Balance, unit),
+			Title:    fmt.Sprintf("%s balance is down to %s %s", ns, money(*q.Balance), unit),
 			Body:     fmt.Sprintf("Top it up before it runs out. You are warned below %.2f.", v.AlertBalance),
 			Data:     data,
-			DedupKey: "balance_low:" + id + ":" + now.UTC().Format("2006-01-02"),
+			DedupKey: "balance_low:" + id + ":above:" + since,
 			Once:     true,
 		})
 	}
@@ -98,6 +104,32 @@ func cookieAlert(acctID int64, ns string, expires time.Time, v settings.Values, 
 	return in, true
 }
 
+// money prints an amount to the cent, with no "-0.00" for a tiny overdraft.
+func money(v float64) string {
+	s := fmt.Sprintf("%.2f", v)
+	if s == "-0.00" {
+		return "0.00"
+	}
+	return s
+}
+
+// quotaRefusal is a usage page that refused the provider's sign-in: it stays
+// refused until the cookie, the key or the provider's settings change.
+func quotaRefusal(err error) (int, bool) {
+	var h interface{ StatusCode() int }
+	if errors.As(err, &h) && (h.StatusCode() == 401 || h.StatusCode() == 403) {
+		return h.StatusCode(), true
+	}
+	return 0, false
+}
+
+// credentialMark names the credentials a quota read used, without their
+// value: an edit to the provider (a pasted cookie bumps it) or a new key
+// changes it.
+func credentialMark(updatedAt string, keyID int64, hint string) string {
+	return updatedAt + "|" + strconv.FormatInt(keyID, 10) + "|" + hint
+}
+
 func roundHours(d time.Duration) string {
 	h := int(d.Round(time.Hour) / time.Hour)
 	if h <= 1 {
@@ -120,7 +152,20 @@ func (s *Server) alertQuota(acctID int64, ns string, q provider.Quota) {
 	if s.settings == nil {
 		return
 	}
-	for _, in := range quotaAlerts(acctID, ns, q, s.settings.Current(), time.Now()) {
+	s.quotaRefused.Delete(acctID)
+	v := s.settings.Current()
+	lastAbove := ""
+	if v.NotifyBalance && q.Kind == provider.QuotaMoney && q.Balance != nil && *q.Balance < v.AlertBalance {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		at, err := s.db.BalanceLastAtOrAbove(ctx, acctID, v.AlertBalance)
+		if err != nil {
+			s.log.Warn("alert check failed", "step", "read balance history", "account", ns, "err", err)
+			return
+		}
+		lastAbove = at
+	}
+	for _, in := range quotaAlerts(acctID, ns, q, v, time.Now(), lastAbove) {
 		s.notify(in)
 	}
 }
@@ -201,9 +246,10 @@ func (s *Server) applyRetention(ctx context.Context, now time.Time) {
 
 func (s *Server) readQuotaForAlerts(ctx context.Context, a store.AccountSummary) {
 	var keyID int64
+	var hint string
 	for _, k := range a.Keys {
 		if k.Enabled {
-			keyID = k.ID
+			keyID, hint = k.ID, k.Hint
 			break
 		}
 	}
@@ -222,8 +268,27 @@ func (s *Server) readQuotaForAlerts(ctx context.Context, a store.AccountSummary)
 	if err != nil {
 		return
 	}
+	mark := credentialMark(a.UpdatedAt, keyID, hint)
+	if was, ok := s.quotaRefused.Load(a.ID); ok && was == mark {
+		return
+	}
 	q, err := adapter.ReadQuota(ctx, *acct, plaintext)
 	if errors.Is(err, provider.ErrQuotaUnsupported) {
+		return
+	}
+	if status, refused := quotaRefusal(err); refused {
+		// Said once, then not read again until the sign-in changes: a
+		// refused cookie or key does not heal by itself.
+		s.quotaRefused.Store(a.ID, mark)
+		s.log.Info("alert check: quota sign-in refused, reads stopped until it changes", "account", a.Namespace, "status", status)
+		s.notify(store.NotificationInput{
+			Kind: store.NoteQuotaReadRefused, Severity: "warn",
+			Title:    "Can't read " + a.Namespace + "'s usage: its sign-in was refused",
+			Body:     "Its usage page answered HTTP " + strconv.Itoa(status) + ". Paste a fresh cookie or key in the provider's settings.",
+			Data:     map[string]any{"account_id": a.ID, "account": a.Namespace, "status": status},
+			DedupKey: "quota_read_refused:" + strconv.FormatInt(a.ID, 10) + ":" + mark,
+			Once:     true,
+		})
 		return
 	}
 	if err != nil {

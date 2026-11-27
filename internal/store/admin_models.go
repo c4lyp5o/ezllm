@@ -319,6 +319,18 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 // PruneQuotaSnapshots removes quota reads older than keep, but never a key's
 // newest read: the provider card shows it however old it is. The hourly
 // alert check reads quotas, so without this the table only grows.
+// BalanceLastAtOrAbove is when a successful read last saw any of the
+// account's keys at or over threshold, or "" if none on record. The low-
+// balance warning is keyed on it, so it is said once per drop.
+func (d *DB) BalanceLastAtOrAbove(ctx context.Context, accountID int64, threshold float64) (string, error) {
+	var at string
+	err := d.r.QueryRowContext(ctx, `
+SELECT COALESCE(MAX(q.read_at),'') FROM quota_snapshots q
+JOIN provider_keys k ON k.id = q.provider_key_id
+WHERE k.account_id = ? AND q.kind = 'money' AND q.ok = 1 AND q.balance >= ?`, accountID, threshold).Scan(&at)
+	return at, err
+}
+
 func (d *DB) PruneQuotaSnapshots(ctx context.Context, keep time.Duration) (int64, error) {
 	cutoff := time.Now().Add(-keep).UTC().Format("2006-01-02T15:04:05.000Z")
 	var n int64

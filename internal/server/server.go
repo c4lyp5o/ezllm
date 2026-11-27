@@ -74,6 +74,7 @@ type DeploymentInfo struct {
 type Server struct {
 	turnChain    turnChain // response id -> turn, for stateful Responses loops
 	spendCache   sync.Map  // client name -> spendEntry (spend_cap.go)
+	quotaRefused sync.Map  // account id -> credential mark whose usage page refused it (alerts.go)
 	deployment   DeploymentInfo
 	settings     *settings.Manager
 	settingsWake chan struct{}

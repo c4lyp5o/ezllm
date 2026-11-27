@@ -150,6 +150,8 @@ func (v Values) Notify(kind string) bool {
 		return v.NotifyBalance
 	case "cookie_expiring":
 		return v.NotifyCookie
+	case "quota_read_refused":
+		return v.NotifyQuota || v.NotifyBalance
 	}
 	return true
 }

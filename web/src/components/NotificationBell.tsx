@@ -27,6 +27,7 @@ const ROUTE: Record<string, string> = {
   quota_warning: '/providers',
   balance_low: '/providers',
   cookie_expiring: '/providers',
+  quota_read_refused: '/providers',
 };
 
 // Status colour only where it means something (house rule): warn/error get

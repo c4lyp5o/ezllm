@@ -36,6 +36,11 @@ func (s *Server) compressionFor(r *http.Request, requested string) (*store.Compr
 		}
 		return p, ""
 	}
+	// No profiles at all: nothing a key or combo points at can apply, so the
+	// request skips both lookups and goes out as the app wrote it.
+	if !s.db.HasCompressionProfiles(ctx) {
+		return nil, ""
+	}
 	if id := s.db.TokenCompressionProfileID(ctx, clientName(r)); id > 0 {
 		p, err := s.db.GetCompressionProfile(ctx, id)
 		if err != nil {

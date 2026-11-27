@@ -4,22 +4,22 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { cx } from './ui';
 
-export type PaletteItem = { label: string; to: string; hint?: string; group: 'Pages' | 'Actions' | 'Settings' };
+export type PaletteItem = { label: string; to: string; hint?: string; group: 'Pages' | 'More' | 'Actions' | 'Settings' };
 
 export const PALETTE_ITEMS: PaletteItem[] = [
   { group: 'Pages', label: 'Dashboard', to: '/', hint: 'overview, health, recent calls' },
+  { group: 'Pages', label: 'Providers', to: '/providers', hint: 'keys, models, quota' },
+  { group: 'Pages', label: 'Combos', to: '/combos', hint: 'routing chains' },
+  { group: 'Pages', label: 'Connect', to: '/connect', hint: 'address, app keys, client setup' },
   { group: 'Pages', label: 'Analytics: Stats', to: '/stats', hint: 'usage by provider, model, key' },
   { group: 'Pages', label: 'Analytics: Token Economics', to: '/economics', hint: 'cost and savings' },
   { group: 'Pages', label: 'Analytics: Requests', to: '/requests', hint: 'every call, filterable' },
-  { group: 'Pages', label: 'Providers', to: '/providers', hint: 'keys, models, quota' },
-  { group: 'Pages', label: 'Services', to: '/services', hint: 'embeddings, images, audio' },
-  { group: 'Pages', label: 'Chat', to: '/chat', hint: 'test a model' },
-  { group: 'Pages', label: 'Combos', to: '/combos', hint: 'routing chains' },
-  { group: 'Pages', label: 'Rules', to: '/rules', hint: 'caps and windows' },
-  { group: 'Pages', label: 'Compression', to: '/compression', hint: 'profiles and engines' },
-  { group: 'Pages', label: 'Connect', to: '/connect', hint: 'app keys, client setup' },
-  { group: 'Pages', label: 'Neighbourhood', to: '/neighbourhood', hint: 'providers as a city' },
   { group: 'Pages', label: 'Get started', to: '/start', hint: 'first provider, app key, test request' },
+  { group: 'More', label: 'Compression', to: '/compression', hint: 'fewer tokens on long chats' },
+  { group: 'More', label: 'Rules', to: '/rules', hint: 'token limits and allowed hours' },
+  { group: 'More', label: 'Services', to: '/services', hint: 'embeddings, images, audio' },
+  { group: 'More', label: 'Chat', to: '/chat', hint: 'try your models' },
+  { group: 'More', label: 'Neighbourhood', to: '/neighbourhood', hint: 'providers as a city' },
   { group: 'Actions', label: 'Add provider', to: '/providers?add=1' },
   { group: 'Actions', label: 'New combo', to: '/combos?new=1' },
   { group: 'Actions', label: 'Create app key', to: '/connect?new=1' },

@@ -8,6 +8,7 @@
 // carries how it was made (first-token and total time) and, once the ledger has
 // written the row, which provider served it and the real token counts — found
 // by tagging each request with an X-Ezllm-Session id.
+import { ExtraIntro, useIntroHidden } from '../components/ExtraIntro';
 import {
   useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode,
 } from 'react';
@@ -637,6 +638,7 @@ export default function Chat() {
     const next = [...presets.filter((p) => p.name !== name), { name, text: system.trim() }].sort((a, b) => a.name.localeCompare(b.name));
     setPresets(next); savePresets(next); setPresetName('');
   };
+  const [introHidden, hideIntro] = useIntroHidden('chat');
   const headBtn = cx(btn.base, btn.ghost, '!h-8 !px-3 !text-[13px] disabled:opacity-45');
 
   return (
@@ -741,6 +743,12 @@ export default function Chat() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {!hasMessages && !introHidden && (
+        <ExtraIntro title="Chat" onClose={hideIntro}>
+          <p>Talk to any of your models here, side by side, to compare answers before you put one in a combo. Uses your providers like any other request.</p>
+        </ExtraIntro>
+      )}
 
       {catalogError && <div role="alert" className="shrink-0 rounded-xl border border-warn/30 bg-warn-dim px-4 py-3 text-[13px] text-ink">{catalogError} <button type="button" className="underline" onClick={() => setCatalogAttempt(n => n + 1)}>Retry models</button></div>}
       {error && <div role="alert" className="shrink-0 rounded-xl border border-bad/30 bg-bad-dim px-4 py-3 text-[13px] text-bad">{error}</div>}

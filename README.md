@@ -276,19 +276,29 @@ limit.
 
 The dashboard is at `/` and shows nothing until you sign in.
 
+These pages route your requests:
+
 | Page | What it is for |
 |---|---|
 | **Dashboard** | Overview, health and recent calls |
+| **Providers** | Providers, their keys, models, tests and quota |
+| **Combos** | Lists of models your apps call by one name |
+| **Connect** | The address, app keys and app setup |
 | **Analytics** | Stats, token economics and every request |
-| **Providers** | Accounts, keys, models, tests and quota |
-| **Services** | Embeddings, images, audio and other services |
-| **Chat** | Try a model |
-| **Combos** | Groups of models and their strategy |
-| **Rules** | Token caps and allowed hours |
-| **Compression** | Profiles and a preview |
-| **Connect** | App keys, model IDs and app setup |
-| **Neighbourhood** | Your providers drawn as a city |
 | **Settings** | General, security, backups, gateway, notifications (ntfy, Discord, Telegram, webhook) and system |
+
+### What else ezllm does
+
+These are under **More**. Each one explains itself on its page until you set it up, and
+does nothing to your requests until then.
+
+| Page | What it does |
+|---|---|
+| **Compression** | Trims what the model doesn't need from long chats, so you pay for fewer tokens. |
+| **Rules** | Token limits and allowed hours per model, checked before anything is sent. |
+| **Services** | Embeddings, images, speech and transcription through the same address and keys. |
+| **Chat** | Talk to your models side by side to compare their answers. |
+| **Neighbourhood** | Your providers drawn as a small city, busy ones lit up. |
 
 Scheduled encrypted backups are off until you set them up:
 [recovery](docs/recovery-runbook.md).

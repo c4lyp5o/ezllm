@@ -6,6 +6,7 @@
 // do I change (one settings row per card). Test outcomes live at page level so
 // a result stays on its card after the list refetches, and so "Test all
 // configured" can fill every card in one pass.
+import { ExtraIntro } from '../components/ExtraIntro';
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
@@ -519,6 +520,12 @@ export default function Services() {
   const configured = counts.failing + counts.pending + counts.working;
   return (
     <div className="mx-auto max-w-6xl space-y-5">
+      {configured === 0 && (
+        <ExtraIntro title="Services" action="Choose models"
+          onAction={() => { setFilter('all'); requestAnimationFrame(() => document.getElementById('services-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' })); }}>
+          <p>Beyond chat, ezllm can serve embeddings, images, speech and transcription through the same address and app keys. Pick a model for each and your apps can use them right away.</p>
+        </ExtraIntro>
+      )}
       <div className="rounded-xl border border-line bg-surface px-5 py-4">
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
           <div>
@@ -558,7 +565,7 @@ export default function Services() {
         </details>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div id="services-list" className="flex scroll-mt-4 flex-wrap items-center justify-between gap-3">
         <Segmented<Filter> label="Filter services"
           options={[
             { key: 'all', label: `All ${cards.length}` },

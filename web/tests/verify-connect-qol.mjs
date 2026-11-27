@@ -45,7 +45,7 @@ const page = await t.page(async (route, url) => {
 });
 const dialog = () => page.getByRole('dialog');
 const last = (re) => calls.filter((c) => re.test(c));
-const card = (name) => page.locator('div.rounded-xl', { has: page.getByRole('switch', { name: new RegExp(`key ${name}$`) }) }).last();
+const card = (name) => page.locator(`[data-key-row="${name}"]`);
 
 try {
   await page.goto(`${t.base}/connect`);
@@ -55,7 +55,7 @@ try {
     (await card('my-app').getByText('Active', { exact: true }).count()) === 1 && (await card('old').getByText('Expired', { exact: true }).count()) === 1
     && (await card('soon').getByText(/Expires in 3 days/).count()) === 1 && (await card('spent').getByText('Budget spent').count()) === 1 && (await card('off').getByText('Disabled', { exact: true }).count()) === 1);
   check('last use is relative', (await card('my-app').getByText('used 2h ago').count()) === 1 && (await card('off').getByText('never used').count()) === 1);
-  check('usage reads in plain numbers', (await card('my-app').getByText(/1,204 calls · 2,000,000 in · 500,000 out/).count()) === 1);
+  check('usage reads in plain numbers', (await card('my-app').getByText(/1,204 calls/).count()) === 1 && (await card('my-app').getByText(/2,000,000 in · 500,000 out/).count()) === 1);
   check('the budget meter shows spend against the cap', (await card('spent').getByText('2,100 / 1,000').count()) === 1);
   check('each key links to its requests', (await card('my-app').getByRole('link', { name: 'View requests' }).getAttribute('href')).includes('client=my-app'));
 

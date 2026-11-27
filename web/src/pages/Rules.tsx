@@ -8,6 +8,7 @@
 // behaviour that belongs inside ezllm.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { ExtraIntro } from '../components/ExtraIntro';
 import {
   ApiError, accountModels, applyModelRules, get, modelRules,
   type Account, type ModelRow, type ModelRule,
@@ -479,17 +480,17 @@ export default function Rules() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      {!(rules && rules.length === 0) && <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <SectionLabel>Model rules</SectionLabel>
           <p className="mt-1 max-w-2xl text-[13px] text-mute">
             Limit how much a model can be used, or when. You can cap its tokens or only allow it at certain hours.
-            If a combo hop is outside its rule, ezllm skips it and tries the next one. If nothing is allowed,
+            If a model in a combo is outside its rule, ezllm skips it and tries the next one. If nothing is allowed,
             the request is refused with <span className="font-mono text-dim">429 rule_refusal</span>.
           </p>
         </div>
         <button type="button" className={cx(btn.base, btn.primary)} onClick={openNew}>+ New rule</button>
-      </div>
+      </div>}
 
       {err && <div className="rounded-lg border border-bad/40 bg-bad-dim px-4 py-2.5 text-[13px] text-bad">{err}</div>}
       {notice && !err && (
@@ -528,11 +529,10 @@ export default function Rules() {
       {!rules || !accounts ? (
         <SkeletonRows rows={4} cols={6} />
       ) : rules.length === 0 ? (
-        <div className="rounded-xl border border-line bg-surface px-6 py-12 text-center">
-          <p className="text-[14px] font-medium">No rules yet</p>
-          <p className="mx-auto mt-1 max-w-md text-[13px] text-mute">Add one to cap a model's tokens, or to only allow it during the day or at night.</p>
-          <button type="button" className={cx(btn.base, btn.primary, 'mt-5')} onClick={openNew}>+ Create your first rule</button>
-        </div>
+        <ExtraIntro title="Rules" action="Add a rule" onAction={openNew}
+          worth="Worth it if a provider has a free allowance you don't want to go over, or a model that's cheap only at night.">
+          <p>Set limits on a model: how many tokens it may use per day, week or month, or which hours it may be used. When a limit is reached, ezllm says so and moves on to the next model in the combo, before anything is sent or billed.</p>
+        </ExtraIntro>
       ) : shown.length === 0 ? (
         <EmptyState title="No rule matches" hint="Try a different search or change the filters."
           action={<button type="button" className={cx(btn.base, btn.ghost)} onClick={() => { setQuery(''); setFilter('all'); setProviderFilter(0); }}>Clear search and filters</button>} />

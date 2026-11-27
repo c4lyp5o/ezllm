@@ -5,7 +5,8 @@ let usageFail = true, summaryFail = false;
 const page = await t.page(async (route, url) => {
   if (url.pathname === '/admin/usage' && usageFail) { await json(route, { error: { message: 'unavailable' } }, 503); return true; }
   if (url.pathname === '/admin/requests' && summaryFail) { await json(route, { error: { message: 'unavailable' } }, 503); return true; }
-  if (url.pathname === '/admin/compression-profiles') { await json(route, []); return true; }
+  // One profile: the savings panel shows only once compression is set up.
+  if (url.pathname === '/admin/compression-profiles') { await json(route, [{ id: 1, name: 'trim', enabled: true, stages: [], exempt_last_turn: true, min_compress_ratio: 0.05, fail_open: true, auto_trigger_tokens: 0, fresh_tool_output: 'keep', notes: '' }]); return true; }
   return false;
 });
 await page.addInitScript(() => {

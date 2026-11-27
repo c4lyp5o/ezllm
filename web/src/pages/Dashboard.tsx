@@ -37,6 +37,7 @@ import {
 } from '../components/charts';
 import { CountUp, Stagger, StaggerItem } from '../components/motion';
 import { StartBanner } from '../components/StartBanner';
+import { MoreCard } from '../components/MoreCard';
 import {
   Chip, CauseChip, EmptyState, HeaderAside, SectionLabel, Segmented, Skeleton, SkeletonRows, Spinner,
   CopyButton, btn, clockTime, cx, inputCls, relTime, fmtDuration, fmtMs, fmtUptime, formatTokens, nfmt, pct,
@@ -720,6 +721,7 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       <StartBanner />
+      <MoreCard />
       <DashboardBody />
     </div>
   );

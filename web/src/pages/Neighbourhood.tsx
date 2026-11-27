@@ -8,6 +8,7 @@
 //   traffic density        how busy the last minute was
 // Roof plant, antennas, trees, parks, lamps and people are scenery, not
 // metrics. Missing usage is `unknown` — never a quiet zero.
+import { ExtraIntro, useIntroHidden } from '../components/ExtraIntro';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useReducedMotion } from '../utils/preferences';
@@ -104,6 +105,7 @@ export default function Neighbourhood() {
   const [win, setWin] = useState(readWindow);
   const { buildings, accounts, usageWin, stale, loading, at, retry } = useNeighbourhood(win);
   const { perMinute, connected } = useLiveCalls();
+  const [introHidden, hideIntro] = useIntroHidden('neighbourhood');
   const reduce = useReducedMotion();
   const [paused, setPaused] = useState(() => readPref(PREF.paused) === '1');
   const [sky, setSky] = useState<'auto' | 'rain' | 'clear'>(readSky);
@@ -237,6 +239,11 @@ export default function Neighbourhood() {
   const attentionN = stormy;
 
   return <div className="nbhd space-y-4">
+    {!introHidden && (
+      <ExtraIntro title="Neighbourhood" onClose={hideIntro}>
+        <p>Your providers drawn as a small city. Busy providers light up, failing ones get weather. It's a way to see at a glance what's happening.</p>
+      </ExtraIntro>
+    )}
     <div className="nbhd-toolbar flex flex-wrap items-center justify-between gap-4">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-dim" aria-label="Neighbourhood summary">
         <span><strong className="tnum font-medium text-ink">{buildings.length}</strong> buildings</span>

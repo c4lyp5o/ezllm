@@ -4,6 +4,15 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## Unreleased
 
+- **More.** The sidebar puts what you need to route a request first (Dashboard,
+  Providers, Combos, Connect, Analytics) and the extras under **More** (Compression,
+  Rules, Services, Chat, Neighbourhood), each marked "in use" once it is. An extra that
+  isn't set up opens with a short note on what it does, when it's worth it and one way
+  to start. Once Get started is done, the Dashboard shows **What else ezllm does** until
+  you close it. With no compression profiles, requests skip the compression lookups
+  entirely and go out exactly as your app sent them.
+- **Connect.** The address and client setup come first. Keys are one row each, and a
+  long list shows the first ten with **Show all**; search still looks through every key.
 - **Plain words, and Advanced.** The dashboard uses one word per idea: provider, provider
   ID, provider key, app key, API, converted, test, paused (with **Resume**). Combos list
   models in an order, **In order** by default. A provider's models show one status each

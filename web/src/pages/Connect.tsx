@@ -31,6 +31,8 @@ import {
 const WINDOWS = ['5h', 'daily', 'weekly', 'monthly'] as const;
 const WINDOW_LABEL: Record<string, string> = { '5h': '5 hours', daily: 'Day', weekly: 'Week', monthly: 'Month' };
 const CAP_QUICK = [100_000, 1_000_000, 10_000_000];
+// How many keys the list shows before "Show all".
+const KEYS_SHOWN = 10;
 
 // Browser clients send a preflight. ezllm answers it for /v1/* out of the box
 // (unset = any Origin echoed back), so the honest note is how to RESTRICT it —
@@ -468,6 +470,7 @@ export default function Connect() {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [pendingRevoke, setPendingRevoke] = useState<TokenInfo | null>(null);
   const [policy, setPolicy] = useState<TokenInfo | null>(null);
+  const [showAllKeys, setShowAllKeys] = useState(false);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [recipeKey, setRecipeKey] = useState<RecipeKey>('env-openai');
@@ -559,6 +562,11 @@ export default function Connect() {
       const s = states.get(t.id)!;
       return filter === 'all' || (filter === 'active' ? s.key === 'active' || s.key === 'expiring' : filter === 'disabled' ? s.key === 'disabled' : s.attention);
     });
+  // A long list shows its first keys and a way to see the rest. Searching or
+  // filtering always shows every match.
+  const narrowed = query.trim() !== '' || filter !== 'all';
+  const visible = showAllKeys || narrowed ? shown : shown.slice(0, KEYS_SHOWN);
+  const hiddenN = shown.length - visible.length;
   const activeN = list.filter((t) => ['active', 'expiring'].includes(states.get(t.id)!.key)).length;
   const attentionN = list.filter((t) => states.get(t.id)!.attention).length;
   const expiringN = list.filter((t) => states.get(t.id)!.key === 'expiring').length;
@@ -600,100 +608,6 @@ export default function Connect() {
         </div>
       )}
 
-      {/* ── Your keys ──────────────────────────────────────────────── */}
-      <section>
-        <SectionLabel>Your keys</SectionLabel>
-        {tokens === null ? (
-          <div className="mt-3 space-y-2">{[0, 1].map((i) => <div key={i} className="h-14 animate-pulse rounded-xl border border-line bg-surface" />)}</div>
-        ) : list.length === 0 ? (
-          <div className="mt-3 rounded-xl border border-line bg-surface px-6 py-10 text-center">
-            <p className="text-[14px] font-medium">No keys yet</p>
-            <p className="mx-auto mt-1 max-w-md text-[13px] text-mute">Each app or machine gets its own key, so you can see its usage and set its budget separately.</p>
-            <button type="button" className={cx(btn.base, btn.primary, 'mt-5')} onClick={() => setCreating(true)}>＋ Create your first key</button>
-          </div>
-        ) : (
-          <div className="mt-3 space-y-3">
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-              <input aria-label="Search keys" type="search" placeholder="Search by name or model" value={query}
-                onChange={(e) => setQuery(e.target.value)} className={cx(inputCls, 'w-full py-1.5 sm:!w-64')} />
-              <Segmented<Filter> size="sm" label="Show" value={filter} onChange={setFilter}
-                options={[
-                  { key: 'all', label: 'All' }, { key: 'active', label: 'Active' }, { key: 'disabled', label: 'Disabled' },
-                  { key: 'attention', label: attentionN > 0 ? `Needs attention (${attentionN})` : 'Needs attention' },
-                ]} />
-            </div>
-            {shown.length === 0 ? (
-              <EmptyState title="No key matches" hint="Try a different search or change the filter."
-                action={<button type="button" className={cx(btn.base, btn.ghost)} onClick={() => { setQuery(''); setFilter('all'); }}>Clear search and filter</button>} />
-            ) : (
-              <Stagger className="space-y-2">
-                {shown.map((t) => {
-                  const u = usageFor(t.name);
-                  const used = spentOf(t);
-                  const capPct = t.cap_tokens > 0 ? Math.min(100, (used / t.cap_tokens) * 100) : 0;
-                  const st = states.get(t.id)!;
-                  const exp = expiryTime(t);
-                  return (
-                    <StaggerItem key={t.id}>
-                      <div className={cx('rounded-xl border bg-surface px-4 py-3', st.attention ? (st.tone === 'bad' ? 'border-bad/40' : 'border-warn/40') : 'border-line')}>
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="truncate text-[13px] font-semibold">{t.name}</span>
-                              <Chip tone={t.roles.includes('admin') ? 'accent' : 'neutral'}>{t.roles.join(' · ')}</Chip>
-                              <Chip tone={st.tone} title={exp ? `expires ${t.expires_at.slice(0, 10)}` : undefined}>{st.label}</Chip>
-                            </div>
-                            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[12px] text-mute">
-                              <Mono>{t.hint}</Mono>
-                              <span title={t.last_used_at ? new Date(t.last_used_at).toLocaleString() : undefined}>
-                                {t.last_used_at ? `used ${relTime(t.last_used_at)}` : 'never used'}
-                              </span>
-                              {exp != null && st.key !== 'expired' && st.key !== 'expiring' && <span>expires {t.expires_at.slice(0, 10)}</span>}
-                              {t.allowed_models && <span className="truncate" title={t.allowed_models}>models: {t.allowed_models}</span>}
-                            </div>
-                          </div>
-                          <span className="flex shrink-0 items-center gap-2">
-                            <Link to={`/requests?${new URLSearchParams({ client: t.name, range: '30d' })}`}
-                              className={cx(btn.base, btn.ghost, 'px-2.5 py-1.5 text-[12px]')} title={`The last 30 days of requests made with ${t.name}`}>View requests</Link>
-                            <button type="button" className={cx(btn.base, btn.ghost, 'px-2.5 py-1.5 text-[12px]')} onClick={() => setPolicy(t)}>Policy</button>
-                            <Toggle checked={t.enabled} onChange={(v) => void toggle(t, v)} disabled={busyId === t.id} label={`${t.enabled ? 'Disable' : 'Enable'} key ${t.name}`} />
-                            <button type="button" className={cx(btn.base, btn.danger, 'px-2.5 py-1.5 text-[12px]')} onClick={() => setPendingRevoke(t)} disabled={busyId === t.id}>Revoke</button>
-                          </span>
-                        </div>
-                        <div className="mt-2.5 flex flex-wrap items-end gap-x-6 gap-y-2 text-[12px] text-dim">
-                          <span title="in the last 30 days">
-                            {nfmt(u?.calls ?? 0)} call{(u?.calls ?? 0) === 1 ? '' : 's'} · {formatTokens(u?.tin ?? 0)} in · {formatTokens(u?.tout ?? 0)} out <span className="text-mute">· 30 days</span>
-                          </span>
-                          <span className="min-w-[160px] flex-1 sm:max-w-xs">
-                            {t.cap_tokens > 0 ? (
-                              <>
-                                <span className="flex items-center justify-between gap-2">
-                                  <span className="text-mute">Budget · {t.cap_window || 'monthly'}</span>
-                                  <span className="font-mono text-[11px]">{nfmt(used)} / {nfmt(t.cap_tokens)}</span>
-                                </span>
-                                {/* The budget meter FILLS: a key that has burned a
-                                    tenth of its cap should read as a tenth full the
-                                    moment it loads. The colour changes with the fill,
-                                    so a key near its cap is obvious at a glance. */}
-                                <span className="mt-1 block h-1 overflow-hidden rounded-full bg-shade">
-                                  <motion.span className={cx('block h-full rounded-full', capPct >= 90 ? 'bg-bad' : capPct >= 70 ? 'bg-warn' : 'bg-accent')}
-                                    initial={{ width: 0 }} animate={{ width: `${capPct}%` }} transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }} />
-                                </span>
-                              </>
-                            ) : <span className="text-mute">Budget unlimited</span>}
-                            {t.cap_usd > 0 && <span className="mt-1 block text-mute">Spend cap ${t.cap_usd.toFixed(2)} · {t.cap_window || 'monthly'}</span>}
-                          </span>
-                        </div>
-                      </div>
-                    </StaggerItem>
-                  );
-                })}
-              </Stagger>
-            )}
-          </div>
-        )}
-      </section>
-
       {/* ── Connect a client ───────────────────────────────────────── */}
       <section>
         <SectionLabel>Connect a client</SectionLabel>
@@ -724,11 +638,107 @@ export default function Connect() {
 {recipe(recipeKey, base, '<your-key>', sampleModel ?? '<model-id>')}
           </pre>
           <div className="mt-2 flex items-center justify-between gap-3">
-            <span className="text-[12px] text-mute">{RECIPES.find((r) => r.key === recipeKey)?.hint} Replace <span className="font-mono">&lt;your-key&gt;</span> with a key from above.</span>
+            <span className="text-[12px] text-mute">{RECIPES.find((r) => r.key === recipeKey)?.hint} Replace <span className="font-mono">&lt;your-key&gt;</span> with one of your keys below.</span>
             <CopyButton text={recipe(recipeKey, base, '<your-key>', sampleModel ?? '<model-id>')} label="Copy snippet" />
           </div>
         </div>
         <p className="mt-2 text-[12px] text-mute">{CORS_NOTE}</p>
+      </section>
+
+      {/* ── Your keys ──────────────────────────────────────────────── */}
+      <section>
+        <SectionLabel>Your keys</SectionLabel>
+        {tokens === null ? (
+          <div className="mt-3 space-y-2">{[0, 1].map((i) => <div key={i} className="h-14 animate-pulse rounded-xl border border-line bg-surface" />)}</div>
+        ) : list.length === 0 ? (
+          <div className="mt-3 rounded-xl border border-line bg-surface px-6 py-10 text-center">
+            <p className="text-[14px] font-medium">No keys yet</p>
+            <p className="mx-auto mt-1 max-w-md text-[13px] text-mute">Each app or machine gets its own key, so you can see its usage and set its budget separately.</p>
+            <button type="button" className={cx(btn.base, btn.primary, 'mt-5')} onClick={() => setCreating(true)}>＋ Create your first key</button>
+          </div>
+        ) : (
+          <div className="mt-3 space-y-3">
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+              <input aria-label="Search keys" type="search" placeholder="Search by name or model" value={query}
+                onChange={(e) => setQuery(e.target.value)} className={cx(inputCls, 'w-full py-1.5 sm:!w-64')} />
+              <Segmented<Filter> size="sm" label="Show" value={filter} onChange={setFilter}
+                options={[
+                  { key: 'all', label: 'All' }, { key: 'active', label: 'Active' }, { key: 'disabled', label: 'Disabled' },
+                  { key: 'attention', label: attentionN > 0 ? `Needs attention (${attentionN})` : 'Needs attention' },
+                ]} />
+            </div>
+            {shown.length === 0 ? (
+              <EmptyState title="No key matches" hint="Try a different search or change the filter."
+                action={<button type="button" className={cx(btn.base, btn.ghost)} onClick={() => { setQuery(''); setFilter('all'); }}>Clear search and filter</button>} />
+            ) : (
+              <>
+              <Stagger className="divide-y divide-line/60 overflow-hidden rounded-xl border border-line bg-surface">
+                {visible.map((t) => {
+                  const u = usageFor(t.name);
+                  const used = spentOf(t);
+                  const capPct = t.cap_tokens > 0 ? Math.min(100, (used / t.cap_tokens) * 100) : 0;
+                  const st = states.get(t.id)!;
+                  const exp = expiryTime(t);
+                  return (
+                    <StaggerItem key={t.id}>
+                      <div data-key-row={t.name} className={cx('flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-2.5', st.attention && (st.tone === 'bad' ? 'bg-bad-dim/40' : 'bg-warn-dim/40'))}>
+                        <div className="min-w-[200px] flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="truncate text-[13px] font-semibold">{t.name}</span>
+                            <Chip tone={t.roles.includes('admin') ? 'accent' : 'neutral'}>{t.roles.join(' · ')}</Chip>
+                            <Chip tone={st.tone} title={exp ? `expires ${t.expires_at.slice(0, 10)}` : undefined}>{st.label}</Chip>
+                          </div>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-[12px] text-mute">
+                            <Mono>{t.hint}</Mono>
+                            <span title={t.last_used_at ? new Date(t.last_used_at).toLocaleString() : undefined}>
+                              {t.last_used_at ? `used ${relTime(t.last_used_at)}` : 'never used'}
+                            </span>
+                            {exp != null && st.key !== 'expired' && st.key !== 'expiring' && <span>expires {t.expires_at.slice(0, 10)}</span>}
+                            {t.allowed_models && <span className="max-w-[16rem] truncate" title={t.allowed_models}>models: {t.allowed_models}</span>}
+                          </div>
+                        </div>
+                        <div className="w-52 text-[12px] text-dim" title="in the last 30 days">
+                          <span className="tnum">{nfmt(u?.calls ?? 0)}</span> call{(u?.calls ?? 0) === 1 ? '' : 's'} <span className="text-mute">· 30 days</span>
+                          <div className="text-mute">{formatTokens(u?.tin ?? 0)} in · {formatTokens(u?.tout ?? 0)} out</div>
+                        </div>
+                        <div className="w-56 text-[12px]">
+                          {t.cap_tokens > 0 ? (
+                            <>
+                              <span className="flex items-center justify-between gap-2">
+                                <span className="text-mute">Budget · {t.cap_window || 'monthly'}</span>
+                                <span className="font-mono text-[11px] text-dim">{nfmt(used)} / {nfmt(t.cap_tokens)}</span>
+                              </span>
+                              {/* The budget meter FILLS, and its colour changes
+                                  with the fill, so a key near its cap is obvious. */}
+                              <span className="mt-1 block h-1 overflow-hidden rounded-full bg-shade">
+                                <motion.span className={cx('block h-full rounded-full', capPct >= 90 ? 'bg-bad' : capPct >= 70 ? 'bg-warn' : 'bg-accent')}
+                                  initial={{ width: 0 }} animate={{ width: `${capPct}%` }} transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }} />
+                              </span>
+                            </>
+                          ) : <span className="text-mute">Budget unlimited</span>}
+                          {t.cap_usd > 0 && <span className="mt-0.5 block text-mute">Spend cap ${t.cap_usd.toFixed(2)} · {t.cap_window || 'monthly'}</span>}
+                        </div>
+                        <span className="flex shrink-0 items-center gap-2">
+                          <Link to={`/requests?${new URLSearchParams({ client: t.name, range: '30d' })}`}
+                            className={cx(btn.base, btn.ghost, 'px-2.5 py-1.5 text-[12px]')} title={`The last 30 days of requests made with ${t.name}`}>View requests</Link>
+                          <button type="button" className={cx(btn.base, btn.ghost, 'px-2.5 py-1.5 text-[12px]')} onClick={() => setPolicy(t)}>Policy</button>
+                          <Toggle checked={t.enabled} onChange={(v) => void toggle(t, v)} disabled={busyId === t.id} label={`${t.enabled ? 'Disable' : 'Enable'} key ${t.name}`} />
+                          <button type="button" className={cx(btn.base, btn.danger, 'px-2.5 py-1.5 text-[12px]')} onClick={() => setPendingRevoke(t)} disabled={busyId === t.id}>Revoke</button>
+                        </span>
+                      </div>
+                    </StaggerItem>
+                  );
+                })}
+              </Stagger>
+              {hiddenN > 0 && (
+                <button type="button" className="text-[13px] text-mute underline underline-offset-2 hover:text-ink" onClick={() => setShowAllKeys(true)}>
+                  Show all {nfmt(shown.length)} keys
+                </button>
+              )}
+              </>
+            )}
+          </div>
+        )}
       </section>
 
       {/* ── Monitor ────────────────────────────────────────────────── */}

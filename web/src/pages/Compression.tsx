@@ -1,6 +1,7 @@
 // COMPRESSION — profiles (ordered, fail-open pipelines), what they actually
 // saved, and a way to try a pipeline on a pasted sample before attaching it.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ExtraIntro } from '../components/ExtraIntro';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   ApiError, RANGE_HOURS, RANGE_LABEL, compressionProfiles, del, get, patch, post, previewCompression, requests, usage,
@@ -474,11 +475,13 @@ export default function Compression() {
   const unattachedN = (profiles ?? []).filter((p) => !(attached.get(p.id)?.length)).length;
   const openNew = () => setEditor({ open: true, editing: null, template: null });
 
+  // With no profiles the introduction says everything; header and savings wait.
+  const noProfiles = profiles !== null && profiles.length === 0;
   return (
     // No page-root fade: the route transition in App.tsx already owns the
     // page entrance. A second entrance stacked on it reads as a stutter.
     <div className="mx-auto max-w-4xl space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      {!noProfiles && <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <SectionLabel>Compression profiles</SectionLabel>
           <p className="mt-1 text-[13px] text-mute" aria-live="polite">
@@ -491,7 +494,7 @@ export default function Compression() {
           </p>
         </div>
         <button type="button" className={cx(btn.base, btn.primary)} onClick={openNew}>＋ New profile</button>
-      </div>
+      </div>}
 
       {err && (
         <div role="alert" className="flex items-start justify-between gap-3 rounded-lg border border-bad/30 bg-bad-dim px-4 py-3 text-[13px] text-bad">
@@ -515,11 +518,10 @@ export default function Compression() {
       )}
 
       {profiles === null ? null : profiles.length === 0 ? (
-        <div className="rounded-xl border border-line bg-surface px-6 py-12 text-center">
-          <p className="text-[14px] font-medium">No profiles yet</p>
-          <p className="mx-auto mt-1 max-w-md text-[13px] text-mute">A profile is a list of stages that shorten requests before they go to the provider. Create one, then add it to a combo.</p>
-          <button type="button" className={cx(btn.base, btn.primary, 'mt-5')} onClick={openNew}>＋ Create your first profile</button>
-        </div>
+        <ExtraIntro title="Compression" action="Make a profile" onAction={openNew}
+          worth="Worth it if you use coding agents or long conversations. It adds a few milliseconds to each request.">
+          <p>Long chats resend the same text over and over. Compression trims what the model doesn't need, like repeated tool output, old file contents and extra whitespace, before the request leaves ezllm. You pay for fewer tokens and the answer stays the same.</p>
+        </ExtraIntro>
       ) : (
         <Stagger className="space-y-3">
           {profiles.map((p) => {
@@ -578,7 +580,7 @@ export default function Compression() {
           the correctly-DECLINED rewrites would have saved; the acceptance rate
           appears only when a decline exists to compare against. No meaningful
           data → the empty state alone, never filler. */}
-      <Panel
+      {!noProfiles && <Panel
         label={<SectionLabel>Actual savings · last {rangeWords(range)}</SectionLabel>}
         aside={<span className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1">
           <span className="text-[12px] text-mute">
@@ -652,7 +654,7 @@ export default function Compression() {
             )}
           </div>
         )}
-      </Panel>
+      </Panel>}
 
       <details className="rounded-xl border border-line bg-surface px-5 py-4 sm:px-6">
         <summary className="cursor-pointer select-none text-[13px] font-semibold">Engines <span className="font-normal text-mute">· the {ENGINE_IDS.length} stages a profile can use</span></summary>

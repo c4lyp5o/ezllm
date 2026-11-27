@@ -716,6 +716,34 @@ while the SAME model on `opencode-go` was 0/754.
 - No routing action yet, deliberately: the park rule is justified by THIS
   measurement, not by a plausible number (the M2 lesson).
 
+### v2.3.0 — Get started, the Gemini API, ledger retention, early warnings, a new Neighbourhood
+
+- `server/gemini.go` serves the Gemini API: `handleGeminiAction` takes
+  `generateContent`, `streamGenerateContent` and `countTokens`, `handleGeminiModels` /
+  `handleGeminiModel` the model list; `geminiAuthed` accepts the key the Gemini SDKs
+  send. `gemini_convert.go` maps the body onto the shared request.
+- `store/retention.go` `RollUpLedger` rolls calls older than `ledger_retention_days`
+  into `calls_daily` (schema v39), so usage totals survive after the rows go.
+- `server/import.go` `handleImport` plans (`planImport`, the dry run) and then applies
+  (`applyImport`) a configuration export.
+- `server/alerts.go` builds the early warnings: `quotaAlerts` (quota and low balance,
+  deduplicated per drop via `store.BalanceLastAtOrAbove`), `cookieAlert`, and
+  `readQuotaForAlerts`, which stops reading a usage page that refused its sign-in
+  (`quotaRefusal`) until `credentialMark` changes.
+- `router/keys.go` `expandKeys` / `nextKeyTurn` turn one provider into one hop per key,
+  taking turns, so a parked key leaves the others serving.
+- `server/admin.go` `handleRouteExplain` answers what a request would do now, without
+  sending one; `hopParks` names the cooldowns in the way.
+- `server/update_check.go` `checkForUpdate` asks GitHub once a day (`fetchLatestRelease`,
+  `newerRelease`) when `update_check` is on.
+- `cmd/ezllm/keycmds.go` `runRotateMasterKey` and `runTokenCreate` are the
+  `rotate-master-key` and `token create` commands.
+- Dashboard: `web/src/components/CommandPalette.tsx` is Ctrl+K;
+  `web/src/components/CityScene.tsx` and `web/src/utils/city.ts` are the redesigned
+  Neighbourhood (`docs/design/neighbourhood-design.md`). In `web/src/App.tsx` a page
+  change is entrance-only and mounts the new page once; the leaving page's exit used to
+  render the new route and mount it twice.
+
 ### v2.2.0 — shared bridge admission, requests per turn, shared bridge helpers
 
 - `server/count_tokens.go` `countTokens` serves `POST /v1/messages/count_tokens`:

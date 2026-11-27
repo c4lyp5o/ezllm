@@ -11,7 +11,26 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v2.2.0**
+**Current: v2.3.0**
+
+## v2.3.0 — 2026-11-27
+
+Get started (three steps from a fresh install to a working request, with a
+subscription path), plain words with Advanced folded away, the Gemini API surface,
+ledger retention into daily totals, configuration import with a dry run, early
+warnings for quota, balance and expiring cookies, key rotation across every key of a
+provider, CSV/JSON export, the Ctrl+K palette, route explain, `rotate-master-key` and
+`token create`, a compression profile per key, `GET /v1/models/{model}`, a daily
+release check, and the Neighbourhood redesign. Schema v39.
+
+- **Breaking (env):** `EZLLM_AGY_EXPERIMENTAL_TOOLS` is retired and fails the boot;
+  Antigravity caller tools are on whenever the CLI supports `--json-schema`.
+- **Schema v39:** `calls_daily` holds the daily totals ledger retention writes. An
+  older ezllm refuses a v39 database; back up before upgrading.
+- **Alerts:** a low balance is said once per drop below the threshold; a usage page
+  that refuses its sign-in (401/403) is said once and not read again until the
+  credentials change.
+- **Copilot CLI 1.0.113+:** the bridge speaks headless protocol 4 as well as 3.
 
 ## v2.2.0 — 2026-11-20
 

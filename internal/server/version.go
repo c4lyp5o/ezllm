@@ -9,7 +9,7 @@ package server
 //
 // Versioning scheme (see VERSION.md): semantic versioning from 1.0.0; a
 // release tag vX.Y.Z must match this constant (the release workflows check).
-const Version = "2.2.0"
+const Version = "2.3.0"
 
 // DocsRef is the git ref whose docs match this build: the dashboard links there.
 // publish.yml and release-assets.sh set it (-ldflags -X) to the release tag, or to

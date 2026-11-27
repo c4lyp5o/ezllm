@@ -198,13 +198,13 @@ the release then refuses to open: try it on its own data directory, or back up f
 
 ## Shared CLI bridge transport
 
-Claude and Antigravity use `internal/bridgeutil.Stream` for byte writes, flushing,
-stall deadlines and cancellation cleanup. **Codex and Copilot transport migration
-remains outstanding.** The [shared transport design](docs/design/shared-bridge-transport-design.md)
-tracks each adapter's status and acceptance checks.
+All four bridges (Claude, Codex, Copilot, Antigravity) use
+`internal/bridgeutil.Stream` for byte writes, flushing, stall deadlines and
+cancellation cleanup. The [shared transport design](docs/design/shared-bridge-transport-design.md)
+records each adapter's migration and acceptance checks.
 
 Keep event encoding, header timing, auth/error contracts, usage, CLI isolation
 and process lifecycles in their provider packages. When changing shared transport,
-run the short gate and targeted race checks for the shared package and migrated
+run the short gate and targeted race checks for the shared package and all four
 bridges; preserve both Anthropic and OpenAI event tests. Live subscription checks
-spend quota and require authorization. Migrate each remaining bridge separately.
+spend quota and require authorization.

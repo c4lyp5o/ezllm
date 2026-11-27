@@ -132,6 +132,8 @@ EZLLM_MASTER_KEY_FILE=$PWD/data/ezllm-master.key make run
    terminal you started it in.
 2. **Get started** opens. Pick your provider, paste its key and choose **Connect**.
    ezllm tests the key with small real requests, which your provider may bill.
+   With a subscription instead (Claude, ChatGPT, Copilot or Antigravity), choose
+   **I have a subscription** and follow the steps for your plan ([bridges](docs/bridge-setup.md)).
 3. Choose **Create key**. Copy the key now: you see it once. Your apps use this key, not
    your provider's.
 4. Choose **Send a test request**.

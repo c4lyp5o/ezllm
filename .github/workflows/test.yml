@@ -99,6 +99,7 @@ jobs:
           node tests/verify-first-run.mjs
           node tests/verify-plain-words.mjs
           node tests/verify-more.mjs
+          node tests/verify-start-subs.mjs
           SHOT="$RUNNER_TEMP/bridges.png" node tests/verify-bridges.mjs
 
   docker:

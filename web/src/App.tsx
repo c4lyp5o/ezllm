@@ -516,22 +516,15 @@ export default function App() {
             Dashboard). */}
         {/* Each screen arrives with a short rise; keyed on the path so a
             tab switch inside Analytics replays it, a poll never does.
-            AnimatePresence plays the OUTGOING screen's exit too — without
-            it the old screen is unmounted in the same frame the new one
-            starts, and the swap reads as a blink rather than a move.
-            mode="wait" keeps them from overlapping (both are in normal flow,
-            so a crossfade would push the page down); the exit is deliberately
-            FAST (DUR.fast) so navigation never feels like it waits.
-
-            Do NOT put initial={false} on this AnimatePresence. That flag is
-            inherited by EVERY motion descendant, not just the direct child:
-            it overrides each descendant's own `initial`, so the panels'
-            staggered entrances were silently skipped and the whole screen
-            appeared at its final state on the first paint. */}
-        <AnimatePresence mode="wait">
+            Entrance only, on purpose: an AnimatePresence exit kept the leaving
+            screen, and its <Routes> read the NEW location from context, so the
+            new page rendered inside the leaving wrapper and then mounted a
+            second time (two loads, a blink of lost state). Freezing the old
+            location fixed that but made every swap wait for the whole old
+            tree's exit animations (over a second). The old screen now goes in
+            the same frame and the new one rises in, mounted once. */}
           <motion.div key={location.pathname} className="mt-5"
             initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6, transition: { duration: DUR.fast, ease: [0.22, 1, 0.36, 1] } }}
             transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}>
             <PageBoundary key={location.pathname}>
             <Suspense fallback={<PageLoading />}>
@@ -555,7 +548,6 @@ export default function App() {
             </Suspense>
             </PageBoundary>
           </motion.div>
-        </AnimatePresence>
       </main>
     </div>
   );

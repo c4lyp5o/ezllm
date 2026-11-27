@@ -105,7 +105,9 @@ try {
   check('a failed hop shows its cause', (await dialog().getByText(/429 · quota exhausted/).count()) === 1);
   calls.length = 0;
   await dialog().getByRole('button', { name: 'Test model 2 again' }).click();
-  await dialog().getByRole('button', { name: 'Test model 2 again' }).waitFor();
+  // The button never leaves, so wait for the re-test itself to finish: a busy
+  // dialog ignores Escape by design, and pressing it early left the dialog open.
+  await page.locator('[role="dialog"]:not([aria-busy="true"])').getByRole('button', { name: 'Test model 2 again' }).waitFor();
   check('Test again re-probes one hop', /"hop":1/.test(calls[0] ?? ''), calls);
   await page.keyboard.press('Escape');
   await dialog().waitFor({ state: 'detached' });

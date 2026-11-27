@@ -133,10 +133,24 @@ try {
   await panel.waitFor({ state: 'detached' });
 
   // policy
+  // Watch every DOM change while the dialog opens: Save must never be
+  // enabled, not even for the first frame before the key's values load.
+  await page.evaluate(() => {
+    window.__saveEverEnabled = false;
+    const look = () => {
+      for (const b of document.querySelectorAll('[role="dialog"] button[type="submit"]')) {
+        if (b.textContent.trim() === 'Save' && !b.disabled) window.__saveEverEnabled = true;
+      }
+    };
+    window.__saveWatch = new MutationObserver(look);
+    window.__saveWatch.observe(document.body, { subtree: true, childList: true, attributes: true });
+  });
   await card('spent').getByRole('button', { name: 'Policy' }).click();
   const save = dialog().getByRole('button', { name: 'Save', exact: true });
   await save.waitFor();
-  check('Save is disabled until something changes', await save.isDisabled());
+  await page.waitForTimeout(300);
+  const everEnabled = await page.evaluate(() => { window.__saveWatch.disconnect(); return window.__saveEverEnabled; });
+  check('Save is disabled until something changes', await save.isDisabled() && !everEnabled, { everEnabled });
   await dialog().getByRole('button', { name: '10,000,000', exact: true }).click();
   check('the cap reads back in words', (await dialog().getByText('10,000,000 tokens per month').count()) === 1);
   await page.keyboard.press('Escape');

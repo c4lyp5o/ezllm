@@ -1,7 +1,8 @@
 // Rules QoL: the readable table (provider names, window phrases, day strip,
 // collapsed model chips), search and filters, stale-rule flags, the sectioned
 // editor (guards, validation, presets, live readouts, sentence), duplicate,
-// the large fan-out confirm, notices and deep links. Runs against the built
+// notices and deep links. Every group action is one POST
+// /admin/model-rules/batch (one transaction), however many rules it holds. Runs against the built
 // web/dist with fixtures (see mockdash.mjs).
 import { start, json, check, finish } from './mockdash.mjs';
 
@@ -31,6 +32,9 @@ const page = await t.page(async (route, url) => {
 });
 const dialog = () => page.getByRole('dialog');
 const last = (re) => calls.filter((c) => re.test(c));
+// The batch bodies sent since calls was last cleared.
+const batches = () => calls.filter((c) => c.startsWith('POST /admin/model-rules/batch ')).map((c) => JSON.parse(c.slice('POST /admin/model-rules/batch '.length)));
+const writes = () => calls.filter((c) => !c.startsWith('POST /admin/model-rules/batch '));
 const row = (model) => page.locator('div.border-t', { has: page.getByRole('switch', { name: new RegExp(`^enable .*\\b${model}\\b`) }) });
 
 try {
@@ -76,7 +80,11 @@ try {
   calls.length = 0;
   await page.getByRole('switch', { name: 'enable gone-model' }).click();
   await page.getByText('Disabled the rule for gone-model.').waitFor();
-  check('a toggle PATCHes the full row and says so', last(/^PATCH \/admin\/model-rules\/30 (?=.*"enabled":false)(?=.*"cap_tokens":100000)/).length === 1, calls);
+  {
+    const b = batches(), u = b[0]?.upsert ?? [];
+    check('a toggle sends the full row in one batch and says so', b.length === 1 && writes().length === 0 && u.length === 1
+      && u[0].model_id === 'gone-model' && u[0].enabled === false && u[0].cap_tokens === 100000 && u[0].cap_window === 'daily', calls);
+  }
 
   // editor guards + readouts
   await page.getByRole('button', { name: 'Edit', exact: true }).first().click();
@@ -98,7 +106,11 @@ try {
   calls.length = 0;
   await dialog().getByLabel('Cap tokens').press('Enter');
   await page.waitForTimeout(400);
-  check('Enter saves every rule in the group', last(/^PATCH \/admin\/model-rules\/1\d .*"cap_tokens":2000000/).length === 7, calls.length);
+  {
+    const b = batches(), u = b[0]?.upsert ?? [];
+    check('Enter saves every rule in the group in one batch', b.length === 1 && writes().length === 0 && u.length === 7
+      && u.every((r) => r.cap_tokens === 2000000) && many.every((m) => u.some((r) => r.model_id === m)), calls);
+  }
   await page.getByText('Saved 7 rules.').waitFor();
   check('save shows a notice', true);
 
@@ -117,17 +129,13 @@ try {
   check('the weekday shortcut sets days', (await dialog().getByRole('button', { name: 'Sat' }).getAttribute('aria-pressed')) === 'true' && (await dialog().getByRole('button', { name: 'Mon' }).getAttribute('aria-pressed')) === 'false');
   await dialog().getByLabel('Search models').fill('bulk-');
   await dialog().getByRole('button', { name: /Select all 25 matches/ }).click();
-  await dialog().getByRole('button', { name: 'Save rule' }).click();
-  await page.getByText('Change 25 rules?').waitFor();
-  check('a big fan-out asks in a styled confirm', true);
   calls.length = 0;
-  await page.getByRole('dialog').last().getByRole('button', { name: 'Cancel' }).click();
-  await page.waitForTimeout(200);
-  check('declining the fan-out writes nothing', calls.length === 0, calls);
   await dialog().getByRole('button', { name: 'Save rule' }).click();
-  await page.getByRole('dialog').last().getByRole('button', { name: 'Continue' }).click();
   await page.getByText('Saved 25 rules.').waitFor();
-  check('accepting the fan-out writes one rule per model', last(/^POST \/admin\/model-rules .*bulk-/).length === 25, calls.length);
+  {
+    const b = batches(), u = b[0]?.upsert ?? [];
+    check('25 models save in one batch, no confirm needed', b.length === 1 && writes().length === 0 && u.length === 25 && u.every((r) => r.model_id.startsWith('bulk-')), calls.length);
+  }
 
   // duplicate
   await row('m1').getByRole('button', { name: 'Duplicate' }).click();
@@ -140,7 +148,11 @@ try {
   calls.length = 0;
   await dialog().getByRole('button', { name: 'Save rule' }).click();
   await page.waitForTimeout(400);
-  check('duplicate creates new rules and updates existing ones', last(/^POST .*"model_id":"b"/).length === 1 && last(/^PATCH \/admin\/model-rules\/32 /).length === 1, calls);
+  {
+    const b = batches(), u = b[0]?.upsert ?? [];
+    check('duplicate saves new and existing models in one batch', b.length === 1 && writes().length === 0 && u.length === 2
+      && u.some((r) => r.model_id === 'b') && u.some((r) => r.model_id === 'a'), calls);
+  }
 
   // delete confirm
   await row('m1').getByRole('button', { name: 'Delete' }).click();
@@ -148,7 +160,10 @@ try {
   calls.length = 0;
   await page.getByRole('dialog').getByRole('button', { name: 'Delete', exact: true }).click();
   await page.getByText('Deleted 7 rules.').waitFor();
-  check('delete removes each rule and says so', last(/^DELETE/).length === 7, calls.length);
+  {
+    const b = batches(), d = b[0]?.delete ?? [];
+    check('delete removes every rule in one batch and says so', b.length === 1 && writes().length === 0 && d.length === 7 && many.every((_, i) => d.includes(10 + i)), calls);
+  }
 
   // deep links
   await page.goto(`${t.base}/rules?edit=31`);

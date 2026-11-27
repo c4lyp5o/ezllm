@@ -22,11 +22,11 @@ await page.getByText(/Some usage reports didn.t refresh/).waitFor({ state: 'deta
 check('dashboard clears warning on recovery', await page.getByText(/Some usage reports didn.t refresh/).count() === 0);
 fail = true;
 await page.goto(`${t.base}/connect`);
-await page.getByText(/Some key usage could not be loaded/).waitFor();
-check('connect shows unavailable usage', await page.getByText(/Some key usage could not be loaded/).count() === 1);
+await page.getByText(/Some usage numbers didn.t load/).waitFor();
+check('connect shows unavailable usage', await page.getByText(/Some usage numbers didn.t load/).count() === 1);
 fail = false;
 await page.getByRole('button', { name: 'Retry' }).click();
-await page.getByText(/Some key usage could not be loaded/).waitFor({ state: 'detached' });
-check('connect clears warning on recovery', await page.getByText(/Some key usage could not be loaded/).count() === 0);
+await page.getByText(/Some usage numbers didn.t load/).waitFor({ state: 'detached' });
+check('connect clears warning on recovery', await page.getByText(/Some usage numbers didn.t load/).count() === 0);
 await t.close();
 finish();

@@ -60,7 +60,7 @@ try {
   await page.getByText('Large-request filter').waitFor();
   check('range survives a tab switch (Economics)', (await pressed('30d')) === 'true');
   await tab('Requests').click();
-  await page.getByText('dissect').waitFor();
+  await page.getByText('Filter request history').waitFor();
   check('range survives a tab switch (Requests)', (await pressed('30d')) === 'true');
 
   // ── Stats ──
